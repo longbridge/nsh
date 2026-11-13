@@ -2486,9 +2486,12 @@ pub(crate) fn left(view: &NshView) {
 fn place(view: &NshView, input: &InputState) {
     let bounds = bounds_of(view.state().frame);
     let content = input.content.get().unwrap_or(bounds);
-    let hidden = hidden(view, bounds, content);
-    set_hidden(input, hidden);
-    if hidden {
+    set_hidden(input, hidden(view, bounds, content));
+    // Only zero area skips hosting (a `display: none` subtree lays its
+    // views out at a zero frame). A view that only hides keeps its editor
+    // hosted, so showing it again needs no new frame or content.
+    let empty = |r: Bounds<Points>| r.size.width.0 <= 0.0 || r.size.height.0 <= 0.0;
+    if empty(bounds) || empty(content) {
         return;
     }
     place_pad(view, input, bounds);
@@ -2617,6 +2620,12 @@ fn lifted(view: &NshView) -> Option<Lifted> {
             break;
         }
         if v != *view && v.state().clips() {
+            return None;
+        }
+        // Picking a pad above the input would skip what gates it where it
+        // was: `pointerEvents: none`, `visibility: hidden`, an animating-out
+        // view or a screen under the top one.
+        if !v.can_target() {
             return None;
         }
         alpha *= v.state().opacity();

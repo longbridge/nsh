@@ -172,25 +172,6 @@ fn click(window: &NSWindow, x: f64, y: f64) {
     pump(120);
 }
 
-/// A click at `(x, y)` of the window's content, delivered to `editor` as the
-/// window's press there does: a click on the field editor itself, which an
-/// app in the background (a test run from a terminal) would otherwise lose
-/// while it activates.
-fn click_editor(window: &NSWindow, editor: &NSTextView, x: f64, y: f64) {
-    let app = NSApplication::sharedApplication(MainThreadMarker::new().unwrap());
-    let at = to_window(window, x, y);
-    let now = objc2_foundation::NSProcessInfo::processInfo().systemUptime();
-    let event = |kind, t| {
-        NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
-            kind, at, NSEventModifierFlags::empty(), t, window.windowNumber(), None, 0, 1, 1.0,
-        )
-        .unwrap()
-    };
-    app.postEvent_atStart(&event(NSEventType::LeftMouseUp, now + 0.05), false);
-    editor.mouseDown(&event(NSEventType::LeftMouseDown, now));
-    pump(120);
-}
-
 /// Types `text` into the field that has the focus, as the keyboard does.
 fn type_text(window: &NSWindow, text: &str) {
     let responder = window.firstResponder().expect("a focused editor");
@@ -301,14 +282,20 @@ pub(super) fn run() {
     let caret = |field: &NSTextField| {
         field
             .currentEditor()
-            .map(|e| e.selectedRange().location)
+            .map(|e| {
+                let range = e.selectedRange();
+                if range.length == 0 {
+                    range.location
+                } else {
+                    usize::MAX
+                }
+            })
             .unwrap_or(usize::MAX)
     };
-    let left = (
-        box_rect.origin.x + 3.0,
-        box_rect.origin.y + box_rect.size.height / 2.0,
-    );
-    click(&window, left.0, left.1);
+    // A press in the box's padding, above the editor: the pad sends it to
+    // the editor at the clicked x, as a press on an input's padding does.
+    let padding = box_rect.origin.y + 4.0;
+    click(&window, box_rect.origin.x + 3.0, padding);
     until("the field's focus", || field.currentEditor().is_some());
     let start = caret(&field);
     if start != 0 {
@@ -325,30 +312,32 @@ pub(super) fn run() {
         ));
     }
 
+    // A press elsewhere in the drawn box reaches the editor at the text
+    // position drawn there: AppKit maps the window point through the pad's
+    // scaled geometry, so the insertion index follows the scaled box. (The
+    // window's field editor only moves its caret for presses while the test
+    // app, started from a terminal, has the key; this asks the same text
+    // view where a press would put it.)
     let editor = field
         .currentEditor()
         .and_then(|e| e.downcast::<NSTextView>().ok())
         .expect("the focused editor");
-    click_editor(
-        &window,
-        &editor,
-        box_rect.origin.x + box_rect.size.width - 3.0,
-        left.1,
-    );
-    let end = caret(&field);
+    let middle_y = box_rect.origin.y + box_rect.size.height / 2.0;
+    let insertion = |x: f64| {
+        let at = to_window(&window, x, middle_y);
+        let local = editor.convertPoint_fromView(at, None);
+        editor.characterIndexForInsertionAtPoint(local)
+    };
+    let end = insertion(box_rect.origin.x + box_rect.size.width - 3.0);
     if end != "XHello world".len() {
         fail(format!(
-            "a click at the box's right put the caret at {end}, not {}",
+            "a press at the box's right maps to {end}, not {}",
             "XHello world".len()
         ));
     }
-
-    click_editor(&window, &editor, box_rect.origin.x + 80.0, left.1);
-    let middle = caret(&field);
+    let middle = insertion(box_rect.origin.x + 80.0);
     if !(3..="XHello world".len() - 2).contains(&middle) {
-        fail(format!(
-            "a click in the text put the caret at {middle}, not in it"
-        ));
+        fail(format!("a press in the text maps to {middle}, not in it"));
     }
 
     surface.stop();
