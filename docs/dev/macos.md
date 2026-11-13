@@ -135,9 +135,10 @@ belong to the app, which owns retention and its storage budget.
   the frames the layout gave, `view::Planned`: left in place, a view leaving the screen would stay over what took its place) and
   the resize's end places the rest (`viewDidEndLiveResize`). Moving a view costs the main thread and Core Animation's
   commit whether it shows or not.
-  A text's content layer keeps its picture through another width of the same lines (`text::draws_the_same`,
-  `kCAGravityTopLeft`); a picture drawn in a layer narrower than its box, a view still waiting to be placed
-  (`DrawnText::cut`), draws again once placed.
+  A text's content layer keeps its picture through another size that still covers it (`text::draws_the_same`,
+  `kCAGravityBottomLeft`, the visual top left under the flipped host layer); a picture drawn in a layer smaller than its
+  box (`DrawnText::cut`), whether still waiting to be placed or at the start of a `LayoutAnimation`, draws again as it
+  grows.
   Where the app has not drawn yet, the surface's background shows: the app's top view's opaque background when it
   fills the root (`system.rs`), else white / neutral-950 by the scheme.
 - **Text is typeset on the engine thread** by CoreText (`text.rs`, the iOS engine with `NSFont`); the main thread
