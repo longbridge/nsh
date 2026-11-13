@@ -1632,6 +1632,8 @@ class Player {
   reset() {
     this.stop();
     this.audioDispose();
+    this.askBeforeLeaving(false);
+    this.watchPageEnd(false);
     this.resetHistory();
     // The next app sets its own (its first commit comes before the write).
     if (this.windowTitle) {
@@ -1667,6 +1669,8 @@ class Player {
     this.hostEvents ??= [];
     // Fonts registered while it starts hold its first frame back (`fontLoading`).
     this.starting = true;
+    // The page's end is the app's (`watchPageEnd`).
+    this.watchPageEnd(true);
     // The app's address starts as its first entry's, which the core has
     // before the app's code runs (`nsh_set_page_url`).
     if (this.history) this.withStrings([this.firstUrl], (p, l) => this.wasm.nsh_set_page_url?.(p, l));
@@ -2045,6 +2049,10 @@ class Player {
     this.trapped = true;
     this.deferred = [];
     clearTimeout(this.timer);
+    // Nothing of the app's can run any more (save, quit): the page leaves
+    // as any other.
+    this.askBeforeLeaving(false);
+    this.watchPageEnd(false);
   }
 
   showError(message, { overlay = !this.trapped } = {}) {
@@ -5231,11 +5239,16 @@ class Player {
       field.enterKeyHint = { done: "done", go: "go", next: "next", search: "search", send: "send" }[config.returnKey] ?? "enter";
     } else field.removeAttribute("enterkeyhint");
     field.readOnly = !config.editable;
-    field.autocapitalize = config.autoCapitalize === "none" ? "off" : config.autoCapitalize;
-    field.spellcheck = config.autoCorrect;
+    // A password shown as plain text (a password field that is not secure)
+    // is never capitalized or checked (the closest the browser has to
+    // Android's visible password keyboard).
+    const password = !config.secure && (config.autoComplete === "current-password" || config.autoComplete === "new-password");
+    const correct = config.autoCorrect && !password;
+    field.autocapitalize = password || config.autoCapitalize === "none" ? "off" : config.autoCapitalize;
+    field.spellcheck = correct;
     // `spellcheck` alone only stops suggestions: Chrome on Android still asks
     // the keyboard to autocorrect unless this attribute is off.
-    field.setAttribute("autocorrect", config.autoCorrect ? "on" : "off");
+    field.setAttribute("autocorrect", correct ? "on" : "off");
     if (config.autoComplete != null) field.setAttribute("autocomplete", config.autoComplete);
     else field.removeAttribute("autocomplete");
     if (config.maxLength != null) field.maxLength = config.maxLength;
@@ -6649,6 +6662,11 @@ class Player {
       case "back": this.defaultBack(); break;
       case "setAppUrl": this.setPageUrl(args[0]); break;
       case "pushAppUrl": this.setPageUrl(args[0], true); break;
+      case "quitOnRequest": this.askBeforeLeaving(!args[0]); break;
+      // The app's `quit()`: its answer while it is asked about leaving the
+      // page (the page may go); a page cannot close its own tab, so at
+      // other times the page stays as it is.
+      case "quit": if (this.quitAsked) this.quitAsked.granted = true; break;
       case "setTitle": this.setWindowTitle(args[0]); break;
       case "exitApp": {
         const app = this.app;
@@ -6685,6 +6703,78 @@ class Player {
   }
 
 
+
+  /** Whether leaving the page (closing its tab, reloading, going to
+   * another site) asks the app first: on while the app listens to quit
+   * requests (`quitOnRequest` false). A `beforeunload` listener can keep a
+   * page out of the back / forward cache in some browsers, so it is there
+   * only while it is needed. */
+  askBeforeLeaving(ask) {
+    if (typeof window === "undefined" || !ask === !this.leaveGuard) return;
+    if (ask) {
+      this.leaveGuard = (event) => {
+        if (this.deliverQuitRequest()) return;
+        event.preventDefault();
+        // Browsers before `preventDefault` was enough.
+        event.returnValue = "";
+      };
+      window.addEventListener("beforeunload", this.leaveGuard);
+    } else {
+      window.removeEventListener("beforeunload", this.leaveGuard);
+      this.leaveGuard = null;
+    }
+  }
+
+  /** The user is leaving the page: the app hears the quit request as the
+   * desktops' quit key reports it, its listeners running before this
+   * returns. Whether the app quit meanwhile: the page then leaves without
+   * asking. Otherwise the browser asks the user, and what the listeners
+   * started (their own question, a save) is on the page should the user
+   * stay. A request the engine cannot take now (it is running: the page
+   * left from inside an engine call) or that fails leaves the question to
+   * the browser. This only decides: `beforeunload` comes before the
+   * browser commits to leaving, and the page may still stay (the user
+   * cancels another listener's question, the navigation is a download),
+   * so the app's quit listeners start only once the page is really gone
+   * (`watchPageEnd`). */
+  deliverQuitRequest() {
+    if (this.depth > 0 || this.trapped) return false;
+    const asked = { granted: false };
+    this.quitAsked = asked;
+    try {
+      this.call((w) => w.nsh_quit_request());
+    } catch (err) {
+      console.error("[nsh]", err);
+      return false;
+    } finally {
+      this.quitAsked = null;
+    }
+    return asked.granted;
+  }
+
+  /** While an app runs: the page being discarded ends it, as the process
+   * ending ends a desktop app, whichever way the user left (the app let
+   * the page go, the user chose to leave in the browser's question,
+   * nothing listened to quit requests). Its quit listeners start then,
+   * once (`nsh_quit`): what they do synchronously completes, work they
+   * await runs for as long as the page remains. A `pagehide` that keeps
+   * the page in the back / forward cache (`persisted`) ends nothing: the
+   * app runs on when the page comes back. A `pagehide` listener keeps no
+   * page out of that cache. */
+  watchPageEnd(watch) {
+    if (typeof window === "undefined" || !watch === !this.pageEnd) return;
+    if (watch) {
+      this.pageEnd = (event) => {
+        if (event.persisted) return;
+        this.watchPageEnd(false);
+        this.call((w) => w.nsh_quit());
+      };
+      window.addEventListener("pagehide", this.pageEnd);
+    } else {
+      window.removeEventListener("pagehide", this.pageEnd);
+      this.pageEnd = null;
+    }
+  }
 
   /** Has screen readers read `text` (`announce`), through the live region. */
   announce(text) {

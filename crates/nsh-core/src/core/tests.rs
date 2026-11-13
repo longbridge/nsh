@@ -2244,6 +2244,104 @@ fn image_uses_natural_size_and_aspect_ratio() {
     );
 }
 
+mod rgba_image_sizes {
+    use super::*;
+    use crate::{
+        element::{ImageSrc, Root},
+        prelude::*,
+    };
+
+    #[component]
+    fn Images() -> impl IntoElement {
+        let src = ImageSrc::rgba(200, 100, vec![7u8; 200 * 100 * 4]);
+        let sized = src.clone().size(size_pt(100.0, 50.0));
+        view()
+            .items_start()
+            .child(image(src))
+            .child(image(sized.clone()))
+            .child(image(sized.clone()).w(px(60.0)))
+            .child(image(sized.clone()).h(px(20.0)))
+            .child(image(sized).w(px(60.0)).h(px(20.0)))
+    }
+
+    #[test]
+    fn declared_size_lays_out_in_points_at_each_pixel_ratio() {
+        for ratio in [1.0, 2.0] {
+            let mut c = core();
+            at_ratio(&mut c, ratio);
+            c.mount_root(&Root::new::<Images>(|| ()));
+            let batch = c.commit().unwrap();
+            let sizes: Vec<_> = batch
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    MountItem::Image {
+                        id,
+                        source: Some(source),
+                        ..
+                    } => Some((source.size.unwrap(), frame_of(&batch, *id).unwrap().size)),
+                    _ => None,
+                })
+                .collect();
+            let natural = size_pt(100.0, 50.0);
+            assert_eq!(
+                sizes,
+                [
+                    (size_pt(200.0, 100.0), size_pt(200.0, 100.0)),
+                    (natural, natural),
+                    (natural, size_pt(60.0, 30.0)),
+                    (natural, size_pt(40.0, 20.0)),
+                    (natural, size_pt(60.0, 20.0)),
+                ],
+                "at pixel ratio {ratio}"
+            );
+        }
+    }
+
+    #[component]
+    fn ResizableImage() -> impl IntoElement {
+        let natural = signal(size_pt(100.0, 50.0));
+        let src = ImageSrc::rgba(200, 100, vec![7u8; 200 * 100 * 4]);
+        view().items_start().child(
+            image(move || src.clone().size(natural.get()))
+                .on_press(move || natural.set(size_pt(80.0, 20.0))),
+        )
+    }
+
+    #[test]
+    fn changing_only_the_size_relayouts_the_same_source() {
+        let shown = |batch: &MountBatch| {
+            batch
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    MountItem::Image {
+                        id,
+                        source: Some(source),
+                        ..
+                    } => Some((*id, source.clone())),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let mut c = core();
+        at_ratio(&mut c, 2.0);
+        c.mount_root(&Root::new::<ResizableImage>(|| ()));
+        let first = c.commit().unwrap();
+        let (id, before) = shown(&first);
+        assert_eq!(frame_of(&first, id).unwrap().size, size_pt(100.0, 50.0));
+
+        assert!(c.component_event(id, EventKind::Press, &EventPayload::None));
+        let next = c.commit().unwrap();
+        let (next_id, after) = shown(&next);
+        assert_eq!(next_id, id);
+        assert_eq!(after.uri, before.uri);
+        assert_eq!(after.data, before.data);
+        assert_eq!(after.size, Some(size_pt(80.0, 20.0)));
+        assert_eq!(frame_of(&next, id).unwrap().size, size_pt(80.0, 20.0));
+    }
+}
+
 #[test]
 fn object_position_reaches_the_image_item_only() {
     let mut c = core();
@@ -22997,6 +23095,63 @@ mod views {
         );
     }
 
+    /// Logs the focus coming into and leaving one ref's element, which
+    /// shows (with a focusable view inside) while `shown`: a press on
+    /// "toggle" removes it, and the next brings a new one with the ref.
+    #[component]
+    fn FocusRemount() -> impl IntoElement {
+        let log = signal(Vec::<&'static str>::new());
+        let shown = signal(true);
+        let area = element_ref();
+        area.on_focus_in(move || log.update(|l| l.push("in")));
+        area.on_focus_out(move || log.update(|l| l.push("out")));
+        view()
+            .child(text(move || format!("log {}", log.get().join(" "))))
+            .child(when(shown, move || {
+                view()
+                    .element_ref(&area)
+                    .child(view().focusable(true).child(text("field")))
+            }))
+            .child(
+                view()
+                    .on_press(move || shown.update(|s| *s = !*s))
+                    .child(text("toggle")),
+            )
+    }
+
+    /// An element removed with the focus inside it is left (the focus goes
+    /// to none), and the ref's next element hears the focus come in again.
+    #[test]
+    fn an_element_removed_with_the_focus_in_it_is_left() {
+        use crate::tailwind::state::FOCUSED;
+        let mut c = core();
+        c.mount_root(&Root::new::<FocusRemount>(|| ()));
+        let batch = c.commit().unwrap();
+        let field = native_parent(&c, text_node(&batch, "field")).unwrap();
+        let toggle = native_parent(&c, text_node(&batch, "toggle")).unwrap();
+        c.set_states(field, FOCUSED);
+        let shown = texts(&c.commit().unwrap());
+        assert!(shown.contains(&"log in".into()), "{shown:?}");
+        // Removed while the focus is in it.
+        assert!(c.component_event(toggle, EventKind::Press, &EventPayload::None));
+        let shown = texts(&c.commit().unwrap());
+        assert!(c.key(field).is_err(), "released");
+        assert!(shown.contains(&"log in out".into()), "{shown:?}");
+        // A new element with the same ref; the focus comes into it.
+        assert!(c.component_event(toggle, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let field = native_parent(&c, text_node(&batch, "field")).unwrap();
+        c.set_states(field, FOCUSED);
+        let shown = texts(&c.commit().unwrap());
+        assert!(shown.contains(&"log in out in".into()), "{shown:?}");
+        // And out to none (a blur lets go at the frame).
+        c.set_states(field, 0);
+        assert!(c.commit().is_none());
+        c.run_frame(crate::time::now());
+        let shown = texts(&c.commit().unwrap());
+        assert!(shown.contains(&"log in out in out".into()), "{shown:?}");
+    }
+
     #[derive(Clone, PartialEq, Props)]
     struct AnchoredCornerProps {
         corner: crate::element::Prop<Option<Slot>>,
@@ -24968,6 +25123,49 @@ mod rust_windows {
             [DesktopCommand::SetQuitOnRequest(true)],
             "without a listener quit requests quit again"
         );
+    }
+
+    /// A listener that quits at once answers within the request's delivery:
+    /// the quit is in the commit that follows it, so a platform that must
+    /// decide on the spot (a web page leaving) knows the answer before it
+    /// returns.
+    #[test]
+    fn a_quit_request_answered_at_once_quits_in_the_same_commit() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::Linux,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Empty>());
+        c.commit();
+        let dirty = Rc::new(std::cell::Cell::new(true));
+        let _root = {
+            let _entered = c.components.runtime.enter();
+            let dirty = dirty.clone();
+            crate::element::create_root(move || {
+                crate::element::desktop::on_quit_request(move || {
+                    if !dirty.get() {
+                        crate::element::desktop::quit();
+                    }
+                });
+            })
+        };
+        c.commit();
+        let request = |c: &mut Core<FakeEngine>| {
+            c.component_event(
+                crate::ROOT_ID,
+                EventKind::Window,
+                &EventPayload::Window(Box::new(WindowEvent::QuitRequest)),
+            );
+            c.commit().map(|b| app_commands(&b)).unwrap_or_default()
+        };
+        assert_eq!(
+            request(&mut c),
+            [],
+            "something to lose: the app keeps running"
+        );
+        dirty.set(false);
+        assert_eq!(request(&mut c), [DesktopCommand::Quit]);
     }
 
     thread_local! {
@@ -28541,6 +28739,160 @@ fn anchored_overlays_go_beside_their_anchor_and_follow_it() {
     );
     let batch = c.commit().unwrap();
     assert_eq!(frame_of(&batch, 10), Some(rect(192.0, 74.0, 120.0, 60.0)));
+}
+
+#[test]
+fn an_anchored_overlay_wider_than_its_room_wraps_within_the_margin() {
+    use StyleValue::Number;
+    let mut c = core();
+    add(
+        &mut c,
+        2,
+        Tag::View,
+        ROOT_ID,
+        &[
+            ("width", Number(80.0)),
+            ("height", Number(40.0)),
+            ("marginLeft", Number(120.0)),
+        ],
+    );
+    // A popup of a long paragraph: as wide as its root view (320) would
+    // let it be, and wider than the room it keeps from the edges.
+    add(&mut c, 10, Tag::Overlay, 2, &[]);
+    add(&mut c, 12, Tag::Text, 10, &[]);
+    apply(
+        &mut c,
+        vec![
+            Op::CreateText {
+                id: 13,
+                text: "x".repeat(80),
+            },
+            Op::Insert {
+                parent: 12,
+                child: 13,
+                before: None,
+            },
+            overlay_prop(
+                10,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+            ),
+            overlay_prop(10, crate::OverlayProp::Margin(px(8.0))),
+            Op::Listen {
+                id: 10,
+                event: EventKind::Position,
+                enabled: true,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    // Laid out in the room it is placed in: 8 from either edge, its text
+    // wrapped to that width (640 wide: three lines of 304).
+    assert_eq!(frame_of(&batch, 10), Some(rect(8.0, 40.0, 304.0, 48.0)));
+
+    // The safe area narrows that room: laid out again in it.
+    c.set_safe_area(EdgeInsets {
+        left: px(30.0),
+        right: px(10.0),
+        ..EdgeInsets::default()
+    });
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(38.0, 40.0, 264.0, 48.0)));
+
+    // So does a larger margin.
+    c.set_safe_area(EdgeInsets::default());
+    apply(
+        &mut c,
+        vec![overlay_prop(10, crate::OverlayProp::Margin(px(20.0)))],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(20.0, 40.0, 280.0, 48.0)));
+
+    // Without an anchor it is a `position: fixed` box of the whole root
+    // view, margin or not.
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                10,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::None),
+            ),
+            style_op(
+                10,
+                &[
+                    ("left", Number(0.0)),
+                    ("right", Number(0.0)),
+                    ("bottom", Number(0.0)),
+                ],
+            ),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(0.0, 448.0, 320.0, 32.0)));
+}
+
+#[test]
+fn a_framed_terminal_popup_keeps_its_frame_within_the_margin() {
+    use StyleValue::{Number, Str};
+    let mut c = core();
+    c.set_environment(crate::element::Environment {
+        cell: Some(crate::geometry::size_pt(8.0, 16.0)),
+        dark: true,
+        ..Default::default()
+    });
+    add(
+        &mut c,
+        2,
+        Tag::View,
+        ROOT_ID,
+        &[
+            ("width", Number(80.0)),
+            ("height", Number(32.0)),
+            ("marginLeft", Number(120.0)),
+        ],
+    );
+    // A popup with a fill and no border, which a terminal frames one Cell
+    // outside its box, holding a paragraph wider than the room it keeps
+    // from the edges (8…312).
+    add(
+        &mut c,
+        10,
+        Tag::Overlay,
+        2,
+        &[("backgroundColor", Str("#25262a"))],
+    );
+    add(&mut c, 12, Tag::Text, 10, &[]);
+    apply(
+        &mut c,
+        vec![
+            Op::CreateText {
+                id: 13,
+                text: "x".repeat(80),
+            },
+            Op::Insert {
+                parent: 12,
+                child: 13,
+                before: None,
+            },
+            overlay_prop(
+                10,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+            ),
+            overlay_prop(10, crate::OverlayProp::Margin(px(8.0))),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let f = frame_of(&batch, 10).expect("the popup's frame");
+    // Its text wraps within the frame's room (36 of the area's 38 Cells),
+    // and the frame, a Cell each side of the box, stays within the area.
+    assert!(f.size.width.0 <= 288.0, "wrapped within its frame: {f:?}");
+    assert!(
+        f.origin.x.0 - 8.0 >= 8.0,
+        "the frame starts at the margin: {f:?}"
+    );
+    assert!(
+        f.origin.x.0 + f.size.width.0 + 8.0 <= 312.0,
+        "the frame ends at the margin: {f:?}"
+    );
 }
 
 #[test]

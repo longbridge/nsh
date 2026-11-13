@@ -649,6 +649,7 @@ impl Surface {
                 if applied {
                     self.write_animations();
                     self.revisit();
+                    crate::text_input::sync(self);
                 }
             })
         });
@@ -720,6 +721,9 @@ impl Surface {
                 crate::fps::drained(cost);
             }
         }
+        // The frames may carry no animation, but a pad hosted above its
+        // input's transforms follows what the batch moved or scaled.
+        crate::text_input::sync(self);
         self.ensure_ticking();
     }
 
@@ -1258,6 +1262,9 @@ impl Surface {
         if applied || crate::sight::moves() != self.revisited.get() {
             self.revisit();
         }
+        // A pad hosted above its input's transforms takes the place those
+        // transforms show, so it follows them this frame.
+        crate::text_input::sync(self);
     }
 
     /// Applies the batches that waited for this frame, in order, until
