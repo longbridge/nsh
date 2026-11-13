@@ -5,7 +5,7 @@
 //!
 //! A scroll view moves along its main axis; a zoomable one
 //! (`maximumZoomScale` above `minimumZoomScale`) along both, zoomed by
-//! pinches and Control + wheel around the pointer ([`pinch`]) and by
+//! touchpad and touch pinches around the pointer ([`pinch`]) and by
 //! `zoomTo` ([`command`]), on the backends that draw zoomed content
 //! ([`ScrollState::can_zoom`]; elsewhere `zoomTo` and the zoom props are
 //! ignored). Its offset lives in [`ScrollState`] (`x` / `y`, 0 showing the
@@ -189,8 +189,7 @@ pub struct Live {
     /// [`ScrollHost::dark`] when the indicator was last shown, for
     /// backends that pick its colors then.
     pub dark: bool,
-    /// The zoom a pinch began at (a Control + wheel one's moves on at the
-    /// limits, [`pinch`]).
+    /// The zoom a pinch began at ([`pinch`]).
     pinch_from: f32,
     /// The zoom last reported to the engine (0: none yet).
     reported_zoom: f32,
@@ -1602,7 +1601,7 @@ pub fn pinches(host: &impl ScrollHost) -> bool {
         .unwrap_or(false)
 }
 
-/// A pinch (a touchpad's, or Control + wheel steps) over the view
+/// A pinch (a touchpad's or two fingers') over the view
 /// ([`pinches`]) began: what moves stops.
 pub fn pinch_begin(host: &impl ScrollHost) {
     interrupt(host);
@@ -1611,17 +1610,12 @@ pub fn pinch_begin(host: &impl ScrollHost) {
 
 /// The pinch is at `scale` times the zoom it began at, around point `at`
 /// of the viewport, which stays on the same content point. Past the limits
-/// it rubber-bands when `rubber` (fingers) and `bouncesZoom`; otherwise it
-/// stops there, and moves on from there (wheel steps back zoom out at
-/// once).
-pub fn pinch(host: &impl ScrollHost, scale: f32, at: Point<Points>, rubber: bool) {
+/// it rubber-bands when `bouncesZoom`, and stops at them otherwise.
+pub fn pinch(host: &impl ScrollHost, scale: f32, at: Point<Points>) {
     let at = Offset::new(at.x.0, at.y.0);
     let Some((to, c)) = host.scroll_mut(|s, size| {
         let raw = s.live.pinch_from * scale;
-        let to = limit_zoom(&s.behavior, raw, rubber);
-        if !rubber && to != raw {
-            s.live.pinch_from = to / scale;
-        }
+        let to = limit_zoom(&s.behavior, raw, true);
         (to, s.content_at(size, at))
     }) else {
         return;
@@ -2700,7 +2694,7 @@ mod tests {
         let size = sz(300.0, 500.0);
         let at = pt(100.0, 120.0);
         pinch_begin(&host);
-        pinch(&host, 2.0, at, true);
+        pinch(&host, 2.0, at);
         assert_eq!(zoom_and_offset(&host), (2.0, 100.0, 120.0));
         {
             let s = host.state.borrow();
@@ -2708,7 +2702,7 @@ mod tests {
             assert_eq!(s.to_content(size, at), at);
         }
         // Past the limit with fingers: a rubber band, then back to 4.
-        pinch(&host, 6.0, at, true);
+        pinch(&host, 6.0, at);
         let banded = host.state.borrow().zoom;
         assert!(banded > 4.0 && banded < 6.0, "{banded}");
         pinch_end(&host, at);
@@ -2716,18 +2710,6 @@ mod tests {
         // Content point (100, 120) stays at the pointer.
         assert_eq!(zoom_and_offset(&host), (4.0, 300.0, 360.0));
         assert!(matches!(host.state.borrow().live.phase, Phase::Idle));
-    }
-
-    #[test]
-    fn wheel_steps_stop_at_the_limit_and_zoom_back_at_once() {
-        let host = zooming((300.0, 500.0));
-        let at = pt(0.0, 0.0);
-        pinch_begin(&host);
-        pinch(&host, 5.0, at, false);
-        assert_eq!(host.state.borrow().zoom, 4.0);
-        // A step back from 5 zooms out from 4, not from 5.
-        pinch(&host, 4.0, at, false);
-        assert_eq!(host.state.borrow().zoom, 3.2);
     }
 
     #[test]

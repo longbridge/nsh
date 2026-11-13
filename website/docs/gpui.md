@@ -32,7 +32,7 @@ says how.
   which notifies the view.
 - **Input** comes from GPUI's mouse, scroll, key and input method events; hit testing, presses, the responder system,
   scrolling and text editing are the same logic as the Windows backend's. A zoomable scroll view zooms with a touchpad
-  pinch or Ctrl + wheel around the pointer, and scrolls both ways while zoomed.
+  pinch around the pointer, and scrolls both ways while zoomed.
 
 ## Requirements
 

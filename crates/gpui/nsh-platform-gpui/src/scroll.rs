@@ -339,25 +339,17 @@ pub(crate) fn pinches(surface: &Rc<Surface>, view: &NshView) -> bool {
     view.kind() == ViewKind::Scroll && shared::pinches(&Host::new(surface, view))
 }
 
-/// A pinch (a touchpad's, or Ctrl + wheel steps) over `view`
+/// A pinch (a touchpad's or two fingers') over `view`
 /// ([`pinches`]) began.
 pub(crate) fn pinch_begin(surface: &Rc<Surface>, view: &NshView) {
     shared::pinch_begin(&Host::new(surface, view));
 }
 
 /// The pinch is at `scale` times the zoom it began at, around `(x, y)`
-/// (`view`'s coordinates); past the limits it rubber-bands when `rubber`
-/// (fingers).
-pub(crate) fn pinch(
-    surface: &Rc<Surface>,
-    view: &NshView,
-    scale: f32,
-    x: f32,
-    y: f32,
-    rubber: bool,
-) {
+/// (`view`'s coordinates); past the limits it rubber-bands.
+pub(crate) fn pinch(surface: &Rc<Surface>, view: &NshView, scale: f32, x: f32, y: f32) {
     let at = point(Points(x), Points(y));
-    shared::pinch(&Host::new(surface, view), scale, at, rubber);
+    shared::pinch(&Host::new(surface, view), scale, at);
 }
 
 /// The pinch around `(x, y)` ended: past the limits it springs back.

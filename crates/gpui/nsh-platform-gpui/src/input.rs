@@ -53,8 +53,9 @@
 //! backends do. Without phases (Wayland; X11 reports touchpads as wheel
 //! lines) a precise scroll ends once its deltas pause. Touchpad pinches
 //! (GPUI's `PinchEvent`, [`touchpad_pinch`]) and Ctrl + wheel pinch the
-//! view under the pointer; over a zoomable scroll view nearer than a view
-//! that pinches, both zoom it around the pointer ([`crate::scroll::pinch`]).
+//! view under the pointer; a touchpad pinch over a zoomable scroll view
+//! nearer than a view that pinches zooms it around the pointer
+//! ([`crate::scroll::pinch`]). Ctrl + wheel never zooms a scroll view.
 //!
 //! The decisions over plain data (what a pointer going down may start, a
 //! press's events, hover changes, hit areas, pinches, wheel latching) are
@@ -2361,11 +2362,10 @@ fn transform_begin(surface: &Rc<Surface>, t: &Transform) {
     }
 }
 
-/// `t` moved; a zoom past the limits rubber-bands when `rubber` (fingers).
-fn transform_move(surface: &Rc<Surface>, t: &Transform, rubber: bool) {
+fn transform_move(surface: &Rc<Surface>, t: &Transform) {
     if t.zoom {
         let (x, y) = local(&t.view, t.at.0, t.at.1);
-        return crate::scroll::pinch(surface, &t.view, t.scale, x, y, rubber);
+        return crate::scroll::pinch(surface, &t.view, t.scale, x, y);
     }
     let id = t.view.state().id;
     {
@@ -2459,7 +2459,7 @@ fn two_finger_moved(surface: &Rc<Surface>) {
         t.transform.degrees = rotation.0.to_degrees();
         t.transform.clone()
     };
-    transform_move(surface, &transform, true);
+    transform_move(surface, &transform);
 }
 
 /// A finger of the pair lifted: the gesture ends, the other finger does
@@ -2490,16 +2490,21 @@ fn wheel_zoom(surface: &Rc<Surface>, x: f32, y: f32, dy: f32) -> bool {
             let Some(hit) = pick(&surface.input_root(), x, y, true) else {
                 return false;
             };
-            let view = chain(&hit.view).into_iter().find(|v| pinches(surface, v));
+            // Only views with pinch values: Ctrl + wheel never zooms a
+            // scroll view, it scrolls it.
+            let view = chain(&hit.view).into_iter().find(|v| {
+                let s = v.state();
+                transforms(&gesture_values(surface, v, s.id), s.events).0
+            });
             let Some(view) = view else { return false };
-            let t = pinch_view(surface, &view, x, y);
+            let mut t = transform_view(surface, &view);
+            t.rotation = false;
             transform_begin(surface, &t);
             t
         }
     };
     t.scale *= zoom_factor(dy);
-    t.at = (x, y);
-    transform_move(surface, &t, false);
+    transform_move(surface, &t);
     *input.zoom.borrow_mut() = Some((t, generation));
     let weak = Rc::downgrade(surface);
     after_ms(ZOOM_IDLE, move || {
@@ -3091,7 +3096,7 @@ pub(crate) fn touchpad_pinch(
             t.at = (x, y);
             t.clone()
         };
-        transform_move(surface, &t, true);
+        transform_move(surface, &t);
     }
     if matches!(phase, GesturePhase::Ended | GesturePhase::Cancelled)
         && let Some((t, _)) = input.pinch.borrow_mut().take()
@@ -3768,46 +3773,30 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_wheel_and_touchpad_pinches_zoom_around_the_pointer() {
+    fn touchpad_pinches_zoom_around_the_pointer_and_ctrl_wheel_does_not() {
         let (surface, scroll, _) = zooming_surface();
         let ctrl = Modifiers {
             ctrl: true,
             ..Default::default()
         };
-        let step = |dy: f32| {
+        for _ in 0..5 {
             wheel(
                 &surface,
                 WheelEvent {
                     x: 100.0,
                     y: 100.0,
                     dx: 0.0,
-                    dy,
+                    dy: -ZOOM_NOTCH.0,
                     precise: false,
                     modifiers: ctrl,
                     time: 0.0,
                 },
-            )
-        };
-        // Scrolling up zooms in, the content point under the pointer
-        // staying there.
-        step(-ZOOM_NOTCH.0);
-        let (z, x, y) = zoom(&scroll);
-        assert!(z > 1.0, "{z}");
-        assert!(
-            (x - 100.0 * (z - 1.0)).abs() < 1e-3 && (y - x).abs() < 1e-3,
-            "{x} {y}"
-        );
-        for _ in 0..40 {
-            step(-ZOOM_NOTCH.0);
+            );
         }
-        assert_eq!(zoom(&scroll).0, 4.0);
-        // One notch back zooms out from the limit at once.
-        step(ZOOM_NOTCH.0);
-        assert!(zoom(&scroll).0 < 4.0);
-        surface.input.zoom.borrow_mut().take();
+        assert_eq!(zoom(&scroll), (1.0, 0.0, 0.0));
+        assert!(surface.input.zoom.borrow().is_none());
 
         // A touchpad pinch at (300, 200).
-        let (surface, scroll, _) = zooming_surface();
         touchpad_pinch(&surface, 300.0, 200.0, 0.0, GesturePhase::Began);
         touchpad_pinch(&surface, 300.0, 200.0, 1.0, GesturePhase::Moved);
         let (z, x, y) = zoom(&scroll);
