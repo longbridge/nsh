@@ -1232,7 +1232,8 @@ class Player {
    * the main module was published without) in parallel, each after the
    * side modules it imports from, and calls each gate once. `table` is the
    * page's `sides`: by name, `{ url, gate?, needs, onDemand? }` (`onDemand`:
-   * only `loadData` asks for it, nothing fetches it ahead). A page awaits it
+   * only a load that needs it, a chunk's or `loadData`'s, fetches it;
+   * `nsh package` marks every side module it writes so). A page awaits it
    * before a chunk that needs them runs (its `prepareChunk`).
    */
   loadSides(names, table) {
@@ -1250,7 +1251,9 @@ class Player {
     for (const name of names) {
       if (this.sideModules.has(name) || this.sideLoads.has(name)) continue;
       const compiled = this.compileSide(table[name].url, { priority: "low" });
-      compiled.catch(() => this.sideModules.delete(name));
+      compiled.catch(() => {
+        if (this.sideModules.get(name) === compiled) this.sideModules.delete(name);
+      });
       this.sideModules.set(name, compiled);
     }
   }
@@ -1279,14 +1282,24 @@ class Player {
     }
   }
 
-  /** The exports of side module `name`, once it and what it needs loaded. */
+  /**
+   * The exports of side module `name`, once it and what it needs loaded.
+   * Callers share one load; a failed one (the network, a server error) is
+   * forgotten, so the next load that needs the module tries again, while
+   * the side modules it needs that did load stay loaded.
+   */
   loadSide(name, table) {
-    if (!this.sideLoads.has(name)) {
+    let load = this.sideLoads.get(name);
+    if (!load) {
       const side = table?.[name];
       if (!side) return Promise.reject(new Error(`no side module ${name}`));
-      this.sideLoads.set(name, this.instantiateSide(name, side, table));
+      load = this.instantiateSide(name, side, table);
+      this.sideLoads.set(name, load);
+      load.catch(() => {
+        if (this.sideLoads.get(name) === load) this.sideLoads.delete(name);
+      });
     }
-    return this.sideLoads.get(name);
+    return load;
   }
 
   async instantiateSide(name, { url, gate, needs }, table) {
