@@ -451,7 +451,8 @@ touchscreens, a long press opens menus: handle `onLongPress` with the same funct
 
 Every component takes `onContextMenu` too (`<Button onContextMenu>`, `button().on_context_menu(..)`), with the same
 `ContextMenuEvent` for its root. A component that shows a menu of its own there (a `ContextMenu` trigger) keeps the
-event.
+event. `DataTable` and `Editor` have an `onContextMenu` of their own, which reports the row and column, or the
+position in the text.
 
 ### Keyboard focus
 

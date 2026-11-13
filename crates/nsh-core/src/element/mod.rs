@@ -135,9 +135,9 @@ pub use self::{
         MemberCall, MemberKind, MemberSpec, Ret, Thrown,
     },
     component::{
-        Api, BuiltInScrollbar, Component, ComponentError, ComponentSpec, Event, EventSpec, Method,
-        MethodSpec, Methods, NoEvent, Param, PropDecode, PropKind, PropSpec, Props, Registry, Root,
-        ScrollbarSource, declarations,
+        Api, BuiltInScrollbar, Component, ComponentError, ComponentSpec, Event, EventSpec,
+        HOST_PROPS, Method, MethodSpec, Methods, NoEvent, Param, PropDecode, PropKind, PropSpec,
+        Props, Registry, Root, ScrollbarSource, declarations,
     },
     element_ref::{
         ComponentRef, ElementRef, ElementTarget, EvaluateOptions, Evaluation, FollowTarget,
