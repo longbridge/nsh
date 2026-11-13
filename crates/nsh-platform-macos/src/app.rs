@@ -19,9 +19,8 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
-    NSApplicationTerminateReply, NSAutoresizingMaskOptions, NSEvent, NSEventModifierFlags,
-    NSEventType, NSMenu, NSMenuItem, NSScreen, NSView, NSWindow, NSWindowDelegate,
-    NSWindowStyleMask,
+    NSApplicationTerminateReply, NSAutoresizingMaskOptions, NSEventModifierFlags, NSMenu,
+    NSMenuItem, NSScreen, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_foundation::{
     NSArray, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL,
@@ -920,23 +919,32 @@ fn finish_running(app: &NSApplication) {
         window.close();
     }
     stop_running();
-    app.stop(None);
-    // stop: takes effect after the next event. A close can arrive through a
-    // dispatch block rather than an AppKit event, so wake nextEventMatchingMask
-    // explicitly instead of waiting for the user to move the mouse.
-    if let Some(event) = NSEvent::otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2(
-        NSEventType::ApplicationDefined,
-        NSPoint::new(0.0, 0.0),
-        NSEventModifierFlags::empty(),
-        0.0,
-        0,
-        None,
-        0,
-        0,
-        0,
-    ) {
-        app.postEvent_atStart(&event, true);
+    // `stop:` in a modal loop ends that loop, not the app's. With an alert
+    // shown on its own (`system::run_alone`; the app stopping told it to
+    // stop), the app's loop is stopped once that one is over: from the
+    // default mode, which a modal loop does not run.
+    if app.modalWindow().is_some() {
+        let block = block2::RcBlock::new(|| {
+            if let Some(mtm) = MainThreadMarker::new() {
+                stop_event_loop(&NSApplication::sharedApplication(mtm));
+            }
+        });
+        // SAFETY: an immutable constant of Foundation.
+        let modes = NSArray::from_slice(&[unsafe { objc2_foundation::NSDefaultRunLoopMode }]);
+        // SAFETY: the block runs on the main thread, where it was made.
+        unsafe { objc2_foundation::NSRunLoop::mainRunLoop().performInModes_block(&modes, &block) };
+        return;
     }
+    stop_event_loop(app);
+}
+
+/// Stops the app's event loop ([`run_app`]'s `run`). `stop:` takes effect
+/// after the next event. A close can arrive through a dispatch block rather
+/// than an AppKit event, so nextEventMatchingMask is woken explicitly
+/// instead of waiting for the user to move the mouse.
+fn stop_event_loop(app: &NSApplication) {
+    app.stop(None);
+    crate::system::wake(app);
 }
 
 /// Stops the standalone app's engine (its window closes).

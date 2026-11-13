@@ -1309,6 +1309,11 @@ impl Drop for Surface {
         }
         crate::tray::release(key);
         crate::global_shortcut::release(key);
+        // A surface dropped without stopping takes its alerts with it: a
+        // sheet left on an embedding app's window, or an alert shown on
+        // its own (an app-modal loop), would wait for an answer no one
+        // hears.
+        crate::system::clear(self);
         let _ = SURFACES.try_with(|s| s.borrow_mut().remove(&key));
     }
 }
