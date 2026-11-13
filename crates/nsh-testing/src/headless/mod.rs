@@ -1289,15 +1289,36 @@ impl Headless {
 
     /// Applies batches until the app is done with a step, or for 2 s at
     /// most (an app updating all the time never is): false if the limit
-    /// ended it. On the system's clock it is done when no batch came for
-    /// 100 ms and no native animation that ends by itself runs; on a
-    /// manual clock, as soon as the engine says it is idle
+    /// ended it. On the system's clock it is done once the engine has
+    /// handled what the step sent ([`Headless::caught_up`]) and then no
+    /// batch came for 100 ms and no native animation that ends by itself
+    /// runs; on a manual clock, as soon as the engine says it is idle
     /// ([`EngineControl::flush`]), without waiting.
     pub fn settle(&mut self) -> bool {
         if self.clock.is_manual() {
             self.idle_on_manual_clock(SETTLE)
         } else {
-            self.quiet(QUIET, SETTLE)
+            let end = Instant::now() + SETTLE;
+            self.caught_up(end);
+            self.quiet(QUIET, end.saturating_duration_since(Instant::now()))
+        }
+    }
+
+    /// On the system's clock: has the engine run what was sent to it
+    /// ([`EngineControl::flush`]) and applies the batches that brought,
+    /// again while they bring more (what applying them sends back: a
+    /// scroll reported, a focus moved), until `end` at most. The quiet
+    /// that ends a step is then counted from there, so an engine taking
+    /// longer than [`QUIET`] over a step does not end it early, with the
+    /// next step acting on the screen as it was before.
+    fn caught_up(&mut self, end: Instant) {
+        while !self.exited && self.errors.is_empty() && Instant::now() < end {
+            let applied = self.applied;
+            self.flush(end);
+            self.drain();
+            if self.applied == applied {
+                return;
+            }
         }
     }
 
