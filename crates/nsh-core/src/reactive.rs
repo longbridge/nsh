@@ -163,7 +163,7 @@ struct Node<H: Host> {
     /// The owner's generation when the node was made under it. A root
     /// outlives the owner it was made under (that owner does not own it):
     /// once the owner is freed its slot may name another node, which the
-    /// root must not take for its owner ([`Graph::owner_of`]).
+    /// root must not take for its owner in `runTop` ([`Graph::owner_of`]).
     owner_generation: u32,
     owned: Vec<u32>,
     cleanups: Vec<H::Cleanup>,
@@ -425,15 +425,17 @@ impl<H: Host> Graph<H> {
         self.nodes[id as usize].generation
     }
 
-    /// The owner of node `id` (for a root, the one it was made under).
+    /// The owner of node `id` (for a root, the slot it was made under: an
+    /// owner that re-makes its root in place, as a region does, is found
+    /// through it again).
     pub fn parent(&self, id: u32) -> u32 {
-        self.owner_of(id)
+        self.nodes[id as usize].owner
     }
 
-    /// Node `id`'s owner, or [`NONE`] once the slot it named was freed (a
-    /// root whose owner went: the slot may name another node now, maybe
-    /// one under the root itself, which would close the walk up the owners
-    /// into a loop).
+    /// Node `id`'s owner for `runTop`, or [`NONE`] once the slot it named
+    /// was freed (a root whose owner went: the slot may name another node
+    /// now, maybe one under the root itself, which would close the walk up
+    /// the owners into a loop).
     fn owner_of(&self, id: u32) -> u32 {
         let n = &self.nodes[id as usize];
         let owner = n.owner;

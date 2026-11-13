@@ -556,9 +556,9 @@ fn a_root_whose_owner_went_does_not_loop_through_its_reused_slot() {
         });
         assert_eq!(effect, owner, "the freed slot is reused");
         assert_eq!(
-            graph().parent(root),
-            NONE,
-            "the root's owner went; its slot names another node"
+            graph().parent(effect),
+            root,
+            "the slot's new node is under the root"
         );
         set(tick, 1);
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
