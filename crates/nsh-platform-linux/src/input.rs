@@ -819,7 +819,7 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
 /// around the one under it that listens to `onContextMenu` hears it (true:
 /// the click is taken). Text fields are GTK's widgets, which show their
 /// own menu.
-fn context_menu(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) -> bool {
+fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, state: gdk::ModifierType) -> bool {
     let Some(hit) = pick(&event_root(surface), x, y) else {
         return false;
     };
@@ -944,7 +944,7 @@ fn wheel_event(
 /// Select All, GTK's own labels), at `(x, y)` (root coordinates). Its
 /// items run the `clipboard.copy` / `selection.select-all` actions the
 /// target installs.
-fn edit_menu(surface: &Surface, target: &NshView, x: f32, y: f32) -> bool {
+fn edit_menu(surface: &Rc<Surface>, target: &NshView, x: f32, y: f32) -> bool {
     let selected = if target.state().props.selectable_view {
         crate::selectable_view::has_selection(surface, target)
     } else {
@@ -955,6 +955,7 @@ fn edit_menu(surface: &Surface, target: &NshView, x: f32, y: f32) -> bool {
         .unwrap_or_else(|| graphene::Point::new(x, y));
     let popover = gtk::PopoverMenu::from_model(Some(&edit_menu_model(selected)));
     popover.set_parent(target);
+    crate::key_focus::observe_popovers(surface, popover.upcast_ref());
     popover.set_has_arrow(false);
     popover.set_halign(gtk::Align::Start);
     popover.set_position(gtk::PositionType::Bottom);
@@ -2406,6 +2407,37 @@ fn set_hovered(surface: &Surface, views: Vec<NshView>, x: f32, y: f32) {
     }
 }
 
+/// `view` is removed or deleted: it and the views inside it leave the hover
+/// without an `onMouseLeave`, as a removed DOM element does. A removed view
+/// can outlive its component (a JS cycle through its ref), whose handlers
+/// must not run.
+pub(crate) fn removed(surface: &Surface, view: &NshView) {
+    let input = &surface.input;
+    let inside = |v: &NshView| v == view || v.is_ancestor(view);
+    if input
+        .link_hovered
+        .borrow()
+        .as_ref()
+        .is_some_and(|(v, _)| inside(v))
+    {
+        input.link_hovered.borrow_mut().take();
+    }
+    if input.hovered.borrow().is_empty() {
+        return;
+    }
+    let mut gone = Vec::new();
+    input.hovered.borrow_mut().retain(|v| {
+        if inside(v) {
+            gone.push(v.clone());
+            return false;
+        }
+        true
+    });
+    for v in &gone {
+        set_state(surface, v, HOVERED, false);
+    }
+}
+
 /// `onMouseMove` of the views under the mouse at `(x, y)` (root
 /// coordinates) and the views they are inside, inside out, each with the
 /// mouse in its own coordinates; `state` holds the modifiers and the
@@ -2908,6 +2940,63 @@ mod tests {
         for button in [MouseButton::Left, MouseButton::Middle, MouseButton::Right] {
             assert_eq!(held_button(button_mask(button)), Some(button));
         }
+    }
+
+    #[test]
+    fn a_removed_subtree_leaves_the_hover_without_a_word() {
+        use nsh_core::MountItem;
+
+        use crate::gtk_test::{apply, run, surface, view};
+
+        run(|| {
+            let surface = surface();
+            let create = |id| MountItem::Create {
+                id,
+                kind: ViewKind::View,
+            };
+            let insert = |parent, child| MountItem::Insert {
+                parent,
+                child,
+                before: None,
+            };
+            let track = |id| MountItem::TrackStates {
+                id,
+                states: HOVERED,
+            };
+            apply(
+                &surface,
+                &[
+                    create(2),
+                    create(4),
+                    create(6),
+                    track(2),
+                    track(4),
+                    track(6),
+                    insert(ROOT_ID, 2),
+                    insert(2, 4),
+                    insert(4, 6),
+                ],
+            );
+            let [outer, removed, inner] = [2, 4, 6].map(|id| view(&surface, id));
+            set_hovered(
+                &surface,
+                vec![inner.clone(), removed.clone(), outer.clone()],
+                0.0,
+                0.0,
+            );
+            assert_ne!(inner.state().states & HOVERED, 0);
+            // Kept alive (a JS cycle holds it): it and what it holds leave
+            // the hover, their states cleared.
+            apply(&surface, &[MountItem::Remove { id: 4 }]);
+            assert_eq!(
+                *surface.input.hovered.borrow(),
+                std::slice::from_ref(&outer)
+            );
+            for v in [&removed, &inner] {
+                assert_eq!(v.state().states & HOVERED, 0);
+            }
+            assert_ne!(outer.state().states & HOVERED, 0);
+        });
     }
 
     #[test]

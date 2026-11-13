@@ -54,6 +54,13 @@ VM 会继续运行：下一个事件、定时器或帧照常执行。
 不再运行任何 JS，视图保持原样。之所以有节点和操作配额，是因为原生视图和排队的变更位于原生内存中，不受 JS 堆限制约束：
 如果没有这些配额，应用就可能通过 UI 耗尽设备内存。
 
+**NSH 在原生代码中读取的数组最多 2^20（1 048 576）项，所有应用都是如此。** 子节点（嵌套的数组合计）、`<Each>` 的
+项、菜单（子菜单合计）、托盘的标题、`Animated.sequence` / `parallel` / `stagger`、`split` 的键、导航栈的路由、原生组件的
+`props` 和 `events`、平移手势的 `touches` 以及画布调用的参数（合计）都在原生代码中读取，调用预算管不到那里；而数组的长度
+就是它声称的长度，不论是否为空（`new Array(2 ** 32 - 1)`）。更长的数组会抛出应用可以捕获的错误：`RangeError`，菜单和托盘
+则是 `TypeError`；画布调用会忽略它并给出警告。导航栈最多容纳同样多的页面：超出后 `push` 会抛出 `RangeError`。子节点和
+子菜单嵌套超过 64 层会抛出 `TypeError`。`<List>` 的 `each` 行数不受此限。
+
 > [!TIP]
 > 对普通应用来说，这些限制相当宽松。如果你触到了 2 s 的调用预算，说明这项工作本来就不该放在一个事件里：它会让应用的
 > 更新冻结那么久。可以用 `setTimeout` 把它拆开，或者把它移出事件处理函数。
@@ -110,6 +117,8 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
     "speech": true,
     "notifications": true,
     "audio": true,
+    "application": true,
+    "homeDir": true,
     "host": ["getUserInfo", "bridge.*"],
     "openUrl": { "schemes": ["https", "mailto"] },
     "windows": { "kinds": ["normal", "dialog", "panel"], "max": 4 }
@@ -223,6 +232,14 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 ### `notifications`
 
 `"notifications": true` 允许应用显示系统通知并设置应用图标的角标（[`Notifications`](../modules/nsh.md#notifications)）。需要询问的系统仍会向用户请求一次权限。
+
+### `application`
+
+`"application": true` 允许应用在桌面上作用于整个应用（[`nsh/desktop`](../modules/nsh-desktop.md)）：主窗口（任何 `<Window>` 之外的 `currentWindow()`、`Window.get("main")`：它的标题、标题栏、模式、位置与大小、层级、置于最前、关闭）、应用菜单（`Menu.setApplicationMenu`）、托盘、全局快捷键、`Application.quit()`、`Application.restart()` 和 `Application.setLaunchAtLogin()`。没有这项能力时它们什么也不做，`Application.launchAtLogin()` 返回 `false`，`setLaunchAtLogin` 以 `ERR_ACCESS_DENIED`（`permission` 为 `"application"`）拒绝。右键菜单（`Menu.popup`）显示在应用自己的视图中，应用打开的窗口由 [`windows`](#windows) 授权，两者都不需要这项能力。
+
+### `homeDir`
+
+`"homeDir": true` 允许 [`os.homedir()`](../modules/standard-modules.md) 返回用户的主目录；没有这项能力时调用会抛出 `code` 为 `ERR_ACCESS_DENIED` 的错误。这个路径只是名称：在那里读写文件仍需要 `fs` 授权。
 
 ### `openUrl`
 

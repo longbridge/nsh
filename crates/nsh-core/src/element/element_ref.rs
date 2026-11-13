@@ -105,7 +105,8 @@ impl FollowTarget {
 
 /// An element another one names for assistive technologies
 /// ([`crate::AccessibilityProp::ActiveDescendant`],
-/// [`crate::AccessibilityProp::Controls`]): a node JS passes (a `ref`),
+/// [`crate::AccessibilityProp::Controls`],
+/// [`crate::AccessibilityProp::DescribedBy`]): a node JS passes (a `ref`),
 /// or whatever element carries a Rust [`ElementRef`], looked up as the
 /// core commits, so the element may be rendered after the one naming it
 /// (a list's row made as the list lays out).

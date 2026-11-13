@@ -1,9 +1,9 @@
 //! Typed native events: what the `on_*` methods of elements hand their
 //! listeners, decoded from the platform's [`EventPayload`].
 
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, cell::RefCell, rc::Weak, sync::Arc};
 
-use super::builder::Listener;
+use super::{builder::Listener, task::Executor};
 use crate::{
     Bounds, ContextMenuEvent, EventPayload, JsonValue, MouseEvent, PayloadValue, PinchEvent, Point,
     Points, PressEvent, Size, TouchEvent, WheelEvent,
@@ -199,6 +199,88 @@ pub struct ImageProgress {
     pub loaded: f64,
     /// Bytes in all, 0 when unknown.
     pub total: f64,
+}
+
+/// An accepted web view download started, finished or failed
+/// (`WebView::on_download`, the platform's `onDownload` payload).
+pub(crate) fn web_download(p: &EventPayload) -> Option<Cow<'_, crate::webview::WebDownload>> {
+    let EventPayload::Map(entries) = p else {
+        return None;
+    };
+    let text = |key: &str| match entries.iter().find(|(k, _)| *k == key) {
+        Some((_, PayloadValue::Str(value))) => Some(value.clone()),
+        _ => None,
+    };
+    let number = |key: &str| match entries.iter().find(|(k, _)| *k == key) {
+        Some((_, PayloadValue::Number(n))) => Some(*n),
+        _ => None,
+    };
+    Some(Cow::Owned(crate::webview::WebDownload {
+        state: crate::webview::WebDownloadState::parse(text("state")?.as_str())?,
+        id: text("id")?,
+        url: text("url")?,
+        filename: text("filename")?,
+        path: std::path::PathBuf::from(text("path")?),
+        bytes: number("bytes").map(|n| n.max(0.0) as u64),
+        message: text("message"),
+    }))
+}
+
+thread_local! {
+    /// The web view a `DownloadPending` event is being dispatched to: its
+    /// node and the executor that reaches it. Set only while its listener
+    /// runs, so the event's handle cannot be made anywhere else.
+    static DOWNLOAD_TARGET: RefCell<Option<(crate::NodeId, Weak<Executor>)>> =
+        const { RefCell::new(None) };
+}
+
+/// Makes `node` the target of the `DownloadPending` events dispatched
+/// while it lives (the previous target is restored when it drops).
+pub(crate) struct DownloadTarget {
+    previous: Option<(crate::NodeId, Weak<Executor>)>,
+}
+
+impl Drop for DownloadTarget {
+    fn drop(&mut self) {
+        DOWNLOAD_TARGET.with(|target| {
+            *target.borrow_mut() = self.previous.take();
+        });
+    }
+}
+
+/// Sets the web view a `DownloadPending` event dispatched now belongs to.
+pub(crate) fn download_target(node: crate::NodeId, executor: Weak<Executor>) -> DownloadTarget {
+    let previous = DOWNLOAD_TARGET.with(|target| target.borrow_mut().replace((node, executor)));
+    DownloadTarget { previous }
+}
+
+/// The handle of download `id` of the web view being dispatched to, or
+/// `None` outside a pending event's dispatch.
+fn download_handle(id: String) -> Option<crate::webview::DownloadHandle> {
+    DOWNLOAD_TARGET.with(|target| {
+        target
+            .borrow()
+            .clone()
+            .map(|(node, executor)| crate::webview::DownloadHandle::new(node, executor, id))
+    })
+}
+
+/// A web view's page asked to download a file
+/// (`WebView::on_download_pending`).
+pub(crate) fn web_download_pending(
+    p: &EventPayload,
+) -> Option<Cow<'_, crate::webview::WebDownloadPending>> {
+    let EventPayload::Json(value) = p else {
+        return None;
+    };
+    let id = value.get("id")?.as_str()?.to_owned();
+    let handle = download_handle(id.clone())?;
+    Some(Cow::Owned(crate::webview::WebDownloadPending {
+        id,
+        url: value.get("url")?.as_str()?.to_owned(),
+        filename: value.get("filename")?.as_str()?.to_owned(),
+        handle: Some(handle),
+    }))
 }
 
 /// An event of a registered native component (`on_native_event`).
@@ -617,6 +699,12 @@ pub(crate) fn touchpad_pinch(p: &EventPayload) -> Option<Cow<'_, PinchEvent>> {
     }
 }
 
+pub(crate) fn key_event(p: &EventPayload) -> Option<Cow<'_, crate::KeyEvent>> {
+    match p {
+        EventPayload::Key(event) => Some(Cow::Borrowed(event)),
+        _ => None,
+    }
+}
 pub(crate) fn wheel(p: &EventPayload) -> Option<Cow<'_, WheelEvent>> {
     match p {
         EventPayload::Wheel(e) => Some(Cow::Borrowed(e)),

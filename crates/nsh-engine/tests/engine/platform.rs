@@ -80,6 +80,7 @@ fn first_frame_of(app: &str, tag: &str, os: Os, idiom: Idiom) -> Vec<MountItem> 
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     rx.recv_timeout(Duration::from_secs(5))
@@ -368,6 +369,73 @@ fn js_turns_the_performance_monitor_on_and_follows_it() {
     read("fps true");
     engine.control().set_perf_monitor(None);
     read("fps false");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_performance_monitor_reports_its_stats_once_a_second() {
+    let dir = std::env::temp_dir().join(format!("nsh-perf-stats-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("App.tsx");
+    std::fs::write(
+        &entry,
+        r#"import { mount, perfStats, Text } from "nsh";
+mount(() => <Text>{`reading ${perfStats()?.fps ?? "none"}`}</Text>);
+"#,
+    )
+    .unwrap();
+    let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry,
+        minify: false,
+        split: false,
+        ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
+    })
+    .unwrap();
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let config = EngineConfig::new(nsh_engine::App::Js(Bundle::source(bundle.code)));
+    let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
+    // The text it shows, until `done` holds of it.
+    let read = |done: &dyn Fn(&str) -> bool| -> String {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while let Ok(batch) = rx.recv_deadline(deadline) {
+            for item in batch.items {
+                if let MountItem::Text { text, .. } = item
+                    && done(&text.text)
+                {
+                    return text.text.to_string();
+                }
+            }
+        }
+        panic!("the reading never showed");
+    };
+    read(&|t| t == "reading none");
+    // The platform installs a monitor and shows frames, one a refresh,
+    // until the reading has them.
+    let monitor = std::sync::Arc::new(nsh_engine::perf::PerfMonitor::new());
+    engine.control().set_perf_monitor(Some(monitor.clone()));
+    let showing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let frames = {
+        let (monitor, showing) = (monitor.clone(), showing.clone());
+        std::thread::spawn(move || {
+            while showing.load(std::sync::atomic::Ordering::SeqCst) {
+                monitor.record_work(Duration::from_millis(1), true);
+                monitor.vsync(std::time::Instant::now(), Duration::from_millis(16));
+                std::thread::sleep(Duration::from_millis(16));
+            }
+        })
+    };
+    let shown = read(&|t| {
+        t.strip_prefix("reading ")
+            .and_then(|n| n.parse::<f32>().ok())
+            .is_some_and(|fps| fps > 0.0)
+    });
+    showing.store(false, std::sync::atomic::Ordering::SeqCst);
+    frames.join().unwrap();
+    assert!(shown.starts_with("reading "), "{shown}");
+    // Removed, it reads none again.
+    engine.control().set_perf_monitor(None);
+    read(&|t| t == "reading none");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -855,4 +923,108 @@ fn platform_classes_follow_the_os() {
     assert_eq!(background(Os::Ios), Some(Color(0xff00_00ff)));
     assert_eq!(background(Os::Android), Some(Color(0x00ff_00ff)));
     assert_eq!(background(Os::Web), Some(Color(0x0000_ffff)));
+}
+
+const SELECT_NAME_APP: &str = r##"import { mount, platform, Text } from "nsh";
+
+let reads = 0;
+const once = platform.select({
+  get ios() {
+    reads += 1;
+    return undefined;
+  },
+  default: "fallback",
+});
+
+const exact = platform.select({
+  harmonyos: "h",
+  miniprogram: "mp",
+  android: "a",
+  ios: "i",
+  mobile: "m",
+  native: "n",
+  default: "d",
+});
+const osFallback = platform.select({
+  harmonyos: undefined,
+  android: "a",
+  ios: "i",
+  mobile: "m",
+  default: "d",
+});
+const kindFallback = platform.select({
+  web: "w",
+  mobile: "m",
+  desktop: "d",
+  default: "-",
+});
+const nativeFallback = platform.select({
+  web: "w",
+  native: "n",
+  default: "-",
+});
+
+mount(() => (
+  <Text>{`${platform.name} ${platform.os} ${exact} ${osFallback} ${kindFallback} ${nativeFallback} ${once}:${reads}`}</Text>
+));
+"##;
+
+#[test]
+fn platform_select_matches_the_platform_name_before_the_os() {
+    let dir = std::env::temp_dir().join(format!("nsh-select-name-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("App.tsx");
+    std::fs::write(&entry, SELECT_NAME_APP).unwrap();
+    let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry,
+        minify: false,
+        split: false,
+        ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
+    })
+    .unwrap();
+    let run = |environment: Environment| {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let config = EngineConfig {
+            environment,
+            ..EngineConfig::new(nsh_engine::App::Js(Bundle::source(bundle.code.clone())))
+        };
+        let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("first frame")
+            .items
+            .into_iter()
+            .filter_map(|item| match item {
+                MountItem::Text { text, .. } => Some(text.text.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        run(Environment {
+            os: Os::Android,
+            platform: Some("harmonyos"),
+            idiom: Idiom::Phone,
+            ..Environment::default()
+        }),
+        vec!["harmonyos android h a m n fallback:0"]
+    );
+    assert_eq!(
+        run(Environment {
+            os: Os::Ios,
+            platform: Some("miniprogram"),
+            idiom: Idiom::Phone,
+            ..Environment::default()
+        }),
+        vec!["miniprogram ios mp i m n fallback:1"]
+    );
+    // Built-in platforms have `name == os`, so the OS key is read once.
+    assert_eq!(
+        run(Environment {
+            os: Os::Ios,
+            idiom: Idiom::Phone,
+            ..Environment::default()
+        }),
+        vec!["ios ios i i m n fallback:1"]
+    );
 }

@@ -178,7 +178,7 @@ view()
 |---|---|---|
 | `.hit_slop(EdgeInsets)` | `hitSlop: number \| { top?, right?, bottom?, left? }` | Points added around the bounds. `EdgeInsets::all(..)` and a TSX number apply to all four sides. |
 
-Keep the extended area inside the parent's bounds (give the small view some margin or padding around it): hit testing reaches a child through its parent, so a touch outside the parent never gets to the child's slop.
+The extended area takes touches even where it reaches outside the parent and the views above it, as a child placed outside its parent does (below): a 24-point button in a row of the same height with a slop of 10 takes touches 10 points above and below the row. Where views overlap, the one on top still wins, slop or not. A view that clips its overflow (`overflow: hidden`, a scroll view, a list) also clips the slop of what it holds: a touch outside it, where nothing shows, does not reach in.
 
 ## Children outside their parent
 
@@ -305,6 +305,8 @@ What the native side does for you:
 - **One axis only lets the other scroll.** With only a horizontal value bound the drag begins only when the finger moves more horizontally than vertically, so a horizontal swipe row inside a vertical scroll view still scrolls vertically. This decision is made natively when the system asks whether the gesture may begin.
 - **Pan, pinch and rotation run together** on the same view: one card can be dragged, pinched and rotated at once.
 - **Release velocity for physics.** The pan end's velocity feeds a spring's or a decay's velocity directly; the values let you pick a snap point.
+
+A view pans while it has a pan handler or `pan` values, so a condition in the expression turns its pan off and on: with `onPanEnd={zoomed() ? undefined : close}` the drags go to the content inside while `zoomed()` is true. The condition goes in the expression itself: a plain name (`onPanEnd={handler}`) is set once ([What runs again](./jsx-and-components.md#what-runs-again)).
 
 ```rust tabs
 // A card that snaps to the left or right edge.
@@ -439,7 +441,7 @@ While responding:
 
 | Rust | TSX | Description |
 |---|---|---|
-| `.on_responder_grant(..)` | `onResponderGrant` | This view is now the responder. Rust keeps native scroll views from taking the touches by default (`TouchClaim::block_native(false)` lets them); in TSX, return `true` for that. |
+| `.on_responder_grant(..)` | `onResponderGrant` | This view is now the responder. Rust keeps native scroll views, and on iOS the swipe back of the navigation stacks around it, from taking the touches by default (`TouchClaim::block_native(false)` lets them); in TSX, return `true` for that. |
 | `.on_responder_reject(..)` | `onResponderReject` | Another view is the responder and would not let go. |
 | `.on_responder_start(..)` | `onResponderStart` | Another finger went down. |
 | `.on_responder_move(..)` | `onResponderMove` | A finger moved. |

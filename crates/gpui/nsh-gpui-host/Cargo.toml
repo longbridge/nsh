@@ -19,6 +19,7 @@ runtime-shaders = ["nsh-platform-gpui/runtime-shaders"]
 log.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
+nsh-base.workspace = true
 nsh-platform-gpui = { workspace = true, features = ["dev", "webview"] }
 nsh-dev.workspace = true
 nsh-engine = { workspace = true, features = ["js"] }

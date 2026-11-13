@@ -53,28 +53,51 @@
 //!   still may, as a `UIScrollView` with scrolling disabled.
 //! - `desktop={{ allowsBackForwardNavigationGestures }}`: WebView2's swipe navigation
 //!   (`IsSwipeNavigationEnabled`, touch swipes).
+//!
+//! # Downloads
+//!
+//! An `onDownload` listener makes Automatic downloads save into the app's
+//! data directory, `downloads/<id>/<sanitized filename>`, and reports
+//! [`EventKind::Download`], as macOS does. Without a listener WebView2's own
+//! download UI is left alone. An `onDownloadPending` listener instead asks
+//! for Manual downloads: `DownloadStarting` holds the download open with a
+//! deferral and reports [`EventKind::DownloadPending`] (`id`, `url`,
+//! `filename`); nothing is written until the app accepts a destination
+//! (`AcceptDownload`) or cancels (`CancelDownload`). The destination is
+//! written through an owned sibling staging file and published only when
+//! the transfer finishes (replacing an existing file only when the app
+//! asked). A pending download the app never answers is cancelled after
+//! [`PENDING_DOWNLOAD_TIMEOUT`]. A WebView2 runtime that cannot report
+//! downloads is not allowed to fall back to its own UI when the app asked
+//! to choose destinations.
 
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
+    path::{Path, PathBuf},
     rc::{Rc, Weak},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
 
 use nsh_core::{
-    Color, Command, EventKind, EventPayload, NodeId, PayloadValue, ROOT_ID, WebProps, WebSource,
+    Color, Command, EventKind, EventPayload, JsonValue, NodeId, PayloadValue, ROOT_ID, WebProps,
+    WebSource,
     access::WebMedia,
+    webview::{self, WebViewOperation, WebViewRequest},
 };
 use webview2_com::{
     AddScriptToExecuteOnDocumentCreatedCompletedHandler,
     CreateCoreWebView2CompositionControllerCompletedHandler,
     CreateCoreWebView2EnvironmentCompletedHandler, CursorChangedEventHandler,
-    FocusChangedEventHandler,
+    DownloadStartingEventHandler, FocusChangedEventHandler,
     Microsoft::Web::WebView2::Win32::{
-        COREWEBVIEW2_COLOR, COREWEBVIEW2_MOUSE_EVENT_KIND,
+        COREWEBVIEW2_COLOR, COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON, COREWEBVIEW2_DOWNLOAD_STATE,
+        COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED, COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS,
+        COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED, COREWEBVIEW2_MOUSE_EVENT_KIND,
         COREWEBVIEW2_MOUSE_EVENT_KIND_HORIZONTAL_WHEEL, COREWEBVIEW2_MOUSE_EVENT_KIND_LEAVE,
         COREWEBVIEW2_MOUSE_EVENT_KIND_LEFT_BUTTON_DOUBLE_CLICK,
         COREWEBVIEW2_MOUSE_EVENT_KIND_LEFT_BUTTON_DOWN,
@@ -92,13 +115,15 @@ use webview2_com::{
         COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_STATE_ALLOW,
         COREWEBVIEW2_PERMISSION_STATE_DENY, COREWEBVIEW2_POINTER_EVENT_KIND,
         COREWEBVIEW2_WEB_ERROR_STATUS, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT, ICoreWebView2,
-        ICoreWebView2_2, ICoreWebView2CompositionController, ICoreWebView2Controller,
-        ICoreWebView2Controller2, ICoreWebView2Controller3, ICoreWebView2Environment,
+        ICoreWebView2_2, ICoreWebView2_4, ICoreWebView2CompositionController,
+        ICoreWebView2Controller, ICoreWebView2Controller2, ICoreWebView2Controller3,
+        ICoreWebView2Deferral, ICoreWebView2DownloadOperation,
+        ICoreWebView2DownloadStartingEventArgs, ICoreWebView2Environment,
         ICoreWebView2Environment2, ICoreWebView2Environment3, ICoreWebView2Environment10,
         ICoreWebView2ExecuteScriptCompletedHandler, ICoreWebView2Settings2, ICoreWebView2Settings6,
     },
     MoveFocusRequestedEventHandler, NavigationCompletedEventHandler,
-    NavigationStartingEventHandler, PermissionRequestedEventHandler,
+    NavigationStartingEventHandler, PermissionRequestedEventHandler, StateChangedEventHandler,
     WebMessageReceivedEventHandler, WebResourceRequestedEventHandler, take_pwstr,
 };
 use windows::{
@@ -114,6 +139,7 @@ use windows::{
             },
             Gdi::ScreenToClient,
         },
+        System::Com::CoCreateGuid,
         UI::{
             Input::{
                 KeyboardAndMouse::{GetFocus, SetFocus},
@@ -138,6 +164,10 @@ use crate::{
     surface::Surface,
     view::{Hosted, ItemPointer, NshView},
 };
+
+/// How long a manual download waits for the app to accept or cancel it
+/// before it is cancelled and reported failed (nothing is written).
+const PENDING_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Lets pages talk to the app: `window.nsh.postMessage(data)`.
 const BRIDGE: &str = "window.nsh = window.nsh || { postMessage: function (data) { window.chrome.webview.postMessage(String(data)); } };";
@@ -197,10 +227,117 @@ unsafe fn create_environment(
     }
 }
 
+/// A download WebView2 started and the app must decide on: its event stays
+/// open through a deferral until the app accepts or cancels, and nothing is
+/// written until then.
+struct PendingDownload {
+    args: ICoreWebView2DownloadStartingEventArgs,
+    deferral: ICoreWebView2Deferral,
+    url: String,
+    filename: String,
+}
+
+impl PendingDownload {
+    /// Cancels the download and answers its event (nothing is written).
+    fn cancel(&self) {
+        // SAFETY: WebView2 calls on the live event and its deferral; the
+        // deferral is completed once, which ends the event.
+        unsafe {
+            let _ = self.args.SetCancel(true);
+            let _ = self.deferral.Complete();
+        }
+    }
+
+    /// The operation it downloads, while its event is still open.
+    fn operation(&self) -> Option<ICoreWebView2DownloadOperation> {
+        // SAFETY: a WebView2 getter on the live event.
+        unsafe { self.args.DownloadOperation() }.ok()
+    }
+}
+
+/// A download under way (Automatic, or a Manual one the app accepted):
+/// what it reports and what to remove if it does not complete.
+struct ActiveDownload {
+    operation: ICoreWebView2DownloadOperation,
+    id: String,
+    url: String,
+    filename: String,
+    /// The file the app hears about.
+    path: PathBuf,
+    /// Where WebView2 writes a Manual download until it completes (a
+    /// unique sibling of `path`, so a failure never touches an existing
+    /// file there).
+    staging: Option<PathBuf>,
+    /// A Manual download replaces an existing `path` only when the app
+    /// asked for it.
+    overwrite: bool,
+    /// The directory this backend made for an automatic download (only
+    /// that is removed whole; an app-chosen destination is not).
+    owned_directory: Option<PathBuf>,
+    /// The request id waiting for this transfer to stop before its
+    /// cancellation is answered.
+    cancel_request: Cell<Option<u64>>,
+    /// The one terminal lifecycle event was reported.
+    terminal: Cell<bool>,
+}
+
+impl ActiveDownload {
+    /// Its state, when WebView2 reports one.
+    fn state(&self) -> Option<COREWEBVIEW2_DOWNLOAD_STATE> {
+        let mut state = COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS;
+        // SAFETY: a WebView2 getter on the live operation.
+        unsafe { self.operation.State(&mut state) }
+            .ok()
+            .map(|()| state)
+    }
+
+    /// Stops the transfer (teardown) and removes its partial output. A
+    /// transfer that already completed is published instead, so its file
+    /// is kept. The app's destination is never deleted.
+    fn cancel(&self) {
+        if self.state() == Some(COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED) {
+            if self.publish().is_err() {
+                self.cleanup();
+            }
+            return;
+        }
+        // SAFETY: a WebView2 call on the live operation.
+        let _ = unsafe { self.operation.Cancel() };
+        self.cleanup();
+    }
+
+    /// Moves a completed Manual download from its staging file to the
+    /// app's destination: without replacement when the app did not ask for
+    /// it, atomically replacing otherwise. The old destination is never
+    /// removed before the new file is ready.
+    fn publish(&self) -> Result<(), String> {
+        let Some(staging) = &self.staging else {
+            return Ok(()); // an automatic download wrote its final path
+        };
+        publish_staged(staging, &self.path, self.overwrite)
+    }
+
+    /// Removes the partial output this backend wrote, never the app's
+    /// existing destination.
+    fn cleanup(&self) {
+        remove_owned(self.owned_directory.as_ref(), self.staging.as_ref(), false);
+    }
+
+    /// Removes the partial output after WebView2 reported that writing
+    /// stopped: synchronously when possible (the cancellation answer
+    /// follows the deletion), with a retry only for the owned staging file.
+    fn cleanup_after_stop(&self) {
+        remove_owned(self.owned_directory.as_ref(), self.staging.as_ref(), true);
+    }
+}
+
 /// A web view: its visuals and, once made, its controller.
 pub(crate) struct WebItem {
     emitter: Emitter,
     surface: Weak<Surface>,
+    /// A weak self, for event handlers that outlive the call that made
+    /// them.
+    me: RefCell<Weak<WebItem>>,
     /// Its view.
     id: NodeId,
     /// The window it is in (`ROOT_ID`: the main one) and its native window,
@@ -255,13 +392,24 @@ pub(crate) struct WebItem {
     focused: Cell<bool>,
     /// Mouse buttons held on the page (bits by button).
     buttons: Cell<u8>,
+    /// Where automatic downloads are saved (the app's data directory's
+    /// `downloads`); `None` without one.
+    downloads_root: Option<PathBuf>,
+    /// Downloads waiting for the app's answer, by their id (their event
+    /// stays open through a deferral until it does).
+    downloads: RefCell<HashMap<String, PendingDownload>>,
+    /// Downloads under way (Automatic, or accepted Manual), by their id.
+    active_downloads: RefCell<HashMap<String, ActiveDownload>>,
+    /// This runtime reports downloads (`DownloadStarting`).
+    downloads_supported: Cell<bool>,
 }
 
 impl WebItem {
     pub(crate) fn new(surface: &Rc<Surface>, view: &NshView) -> Rc<Self> {
-        Rc::new(WebItem {
+        let item = Rc::new(WebItem {
             emitter: Emitter::new(surface, view.id()),
             surface: Rc::downgrade(surface),
+            me: RefCell::default(),
             id: view.id(),
             host: Cell::new(None),
             portal: RefCell::new(None),
@@ -289,7 +437,13 @@ impl WebItem {
             hovered: Cell::new(false),
             focused: Cell::new(false),
             buttons: Cell::new(0),
-        })
+            downloads_root: surface.native.downloads(),
+            downloads: RefCell::default(),
+            active_downloads: RefCell::default(),
+            downloads_supported: Cell::new(false),
+        });
+        *item.me.borrow_mut() = Rc::downgrade(&item);
+        item
     }
 
     /// The native window its page is in, once bound.
@@ -493,6 +647,7 @@ impl WebItem {
                 None::<&webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>,
             );
         }
+        self.listen_downloads(&webview);
         self.listen(&webview);
         self.listen_input(&composition, &controller);
         *self.composition.borrow_mut() = Some(composition);
@@ -522,6 +677,17 @@ impl WebItem {
             let mut uri = PWSTR::null();
             // SAFETY: WebView2 calls on the event's live objects.
             let url = unsafe { args.Uri(&mut uri).map(|()| take_pwstr(uri)) }.unwrap_or_default();
+            if item.manual_downloads_unavailable() {
+                // SAFETY: a WebView2 call on the live event.
+                let _ = unsafe { args.SetCancel(true) };
+                item.emitter.emit(EventKind::Error, || {
+                    error(
+                        "manual downloads need a WebView2 runtime that reports downloads"
+                            .to_owned(),
+                    )
+                });
+                return Ok(());
+            }
             if !item.allows(&url) {
                 // SAFETY: as above.
                 let _ = unsafe { args.SetCancel(true) };
@@ -627,6 +793,610 @@ impl WebItem {
     }
 
     /// Follows the page's cursor and keyboard focus.
+    /// Whether the app asked to choose every download's destination but
+    /// this runtime cannot report downloads: its page must not navigate,
+    /// so WebView2's own download UI cannot run behind the app's back.
+    fn manual_downloads_unavailable(&self) -> bool {
+        self.emitter.listens(EventKind::DownloadPending) && !self.downloads_supported.get()
+    }
+
+    /// `DownloadStarting`: saves into the app's data directory when the app
+    /// listens for downloads, holds a Manual download for the app's
+    /// decision, or leaves WebView2's own UI alone.
+    fn listen_downloads(self: &Rc<Self>, webview: &ICoreWebView2) {
+        let Ok(webview) = webview.cast::<ICoreWebView2_4>() else {
+            log::debug!("web view: this WebView2 runtime does not report downloads");
+            return;
+        };
+        let weak = Rc::downgrade(self);
+        let started = DownloadStartingEventHandler::create(Box::new(move |_, args| {
+            if let (Some(item), Some(args)) = (weak.upgrade(), args) {
+                item.download_started(args);
+            }
+            Ok(())
+        }));
+        let mut token = 0i64;
+        // SAFETY: WebView2 calls on the live web view; the handler holds
+        // the item weakly and goes with the web view.
+        let added = unsafe { webview.add_DownloadStarting(&started, &mut token) };
+        self.downloads_supported.set(added.is_ok());
+        if let Err(error) = added {
+            log::debug!("web view: cannot report downloads: {error}");
+        }
+    }
+
+    /// WebView2 started a download: Automatic (with a listener) writes it
+    /// into the app's downloads directory; Manual holds its event open
+    /// until the app accepts a destination or cancels it.
+    fn download_started(self: &Rc<Self>, args: ICoreWebView2DownloadStartingEventArgs) {
+        if self.closed.get() {
+            // SAFETY: a WebView2 call on the live event.
+            let _ = unsafe { args.SetCancel(true) };
+            return;
+        }
+        let manual = self.emitter.listens(EventKind::DownloadPending);
+        if !manual && !self.emitter.listens(EventKind::Download) {
+            // No listener: WebView2's own download UI is intact.
+            return;
+        }
+        let operation = {
+            // SAFETY: a WebView2 getter on the live event.
+            unsafe { args.DownloadOperation() }.ok()
+        };
+        let (mut url, mut suggested) = (String::new(), String::new());
+        if let Some(operation) = &operation {
+            // SAFETY: WebView2 getters on the live operation; the strings
+            // are freed by `take_pwstr`.
+            unsafe {
+                let mut uri = PWSTR::null();
+                if operation.Uri(&mut uri).is_ok() {
+                    url = take_pwstr(uri);
+                }
+                let mut path = PWSTR::null();
+                if operation.ResultFilePath(&mut path).is_ok() {
+                    suggested = take_pwstr(path);
+                }
+            }
+        }
+        if suggested.is_empty() {
+            // SAFETY: a WebView2 getter on the live event.
+            unsafe {
+                let mut path = PWSTR::null();
+                if args.ResultFilePath(&mut path).is_ok() {
+                    suggested = take_pwstr(path);
+                }
+            }
+        }
+        let filename = download_name(&suggested, &url);
+        if manual {
+            let id = next_download_id();
+            // SAFETY: WebView2 calls on the live event: the default dialog
+            // stays away (the app decides), and its deferral keeps it open
+            // until the app answers.
+            let pending = unsafe {
+                match args.GetDeferral() {
+                    Ok(deferral) => {
+                        let _ = args.SetHandled(true);
+                        Some(PendingDownload {
+                            args: args.clone(),
+                            deferral,
+                            url: url.clone(),
+                            filename: filename.clone(),
+                        })
+                    }
+                    Err(why) => {
+                        log::warn!("web view: cannot hold a download for the app: {why}");
+                        self.emitter.emit(EventKind::Error, || {
+                            error(format!("cannot hold a download for the app: {why}"))
+                        });
+                        let _ = args.SetCancel(true);
+                        None
+                    }
+                }
+            };
+            let Some(pending) = pending else { return };
+            self.downloads.borrow_mut().insert(id.clone(), pending);
+            self.arm_download_deadline(&id);
+            self.emitter.emit(EventKind::DownloadPending, || {
+                webview::download_pending_payload(&id, &url, &filename)
+            });
+            return;
+        }
+        // Automatic: an app that listens for downloads opts into the app's
+        // data directory.
+        let Some(root) = self.downloads_root.as_ref() else {
+            // SAFETY: a WebView2 call on the live event.
+            let _ = unsafe { args.SetCancel(true) };
+            let id = next_download_id();
+            self.emit_download(
+                "failed",
+                &id,
+                &url,
+                &filename,
+                Path::new(""),
+                None,
+                Some("the app has no data directory to download into".to_owned()),
+            );
+            return;
+        };
+        let Some(operation) = operation else {
+            // SAFETY: a WebView2 call on the live event.
+            let _ = unsafe { args.SetCancel(true) };
+            let id = next_download_id();
+            self.emit_download(
+                "failed",
+                &id,
+                &url,
+                &filename,
+                Path::new(""),
+                None,
+                Some("the download has no operation".to_owned()),
+            );
+            return;
+        };
+        let id = next_download_id();
+        let directory = root.join(&id);
+        let path = directory.join(&filename);
+        if let Err(error) = std::fs::create_dir_all(&directory) {
+            // SAFETY: a WebView2 call on the live event.
+            let _ = unsafe { args.SetCancel(true) };
+            self.emit_download(
+                "failed",
+                &id,
+                &url,
+                &filename,
+                &path,
+                None,
+                Some(format!(
+                    "cannot make the download directory {}: {error}",
+                    directory.display()
+                )),
+            );
+            remove_later(directory, true);
+            return;
+        }
+        if path.exists() {
+            // SAFETY: a WebView2 call on the live event.
+            let _ = unsafe { args.SetCancel(true) };
+            self.emit_download(
+                "failed",
+                &id,
+                &url,
+                &filename,
+                &path,
+                None,
+                Some(format!(
+                    "the download path already exists: {}",
+                    path.display()
+                )),
+            );
+            remove_later(directory, true);
+            return;
+        }
+        // SAFETY: WebView2 calls on the live event: the file goes to the
+        // app's directory (the default dialog stays away).
+        let result = unsafe {
+            let mut result = args.SetResultFilePath(&HSTRING::from(&*path.to_string_lossy()));
+            if result.is_ok() {
+                result = args.SetCancel(false);
+            }
+            if result.is_ok() {
+                result = args.SetHandled(true);
+            }
+            result
+        };
+        if let Err(error) = result {
+            // SAFETY: a WebView2 call on the live event.
+            let _ = unsafe { args.SetCancel(true) };
+            self.emit_download(
+                "failed",
+                &id,
+                &url,
+                &filename,
+                &path,
+                None,
+                Some(format!("cannot save the download: {}", error.message())),
+            );
+            remove_later(directory, true);
+            return;
+        }
+        self.track_download(
+            operation,
+            &id,
+            &url,
+            &filename,
+            &path,
+            None,
+            false,
+            Some(directory),
+        );
+        self.emit_download("started", &id, &url, &filename, &path, None, None);
+    }
+
+    /// Keeps a manual download's decision bounded: after the timeout its
+    /// event is answered (cancelled) and the app hears it failed.
+    fn arm_download_deadline(&self, id: &str) {
+        let Some(surface) = self.surface.upgrade() else {
+            return;
+        };
+        let surface_key = surface.key();
+        let node = self.emitter.id;
+        let id = id.to_owned();
+        let ui = crate::window::UiThread::current();
+        std::thread::spawn(move || {
+            std::thread::sleep(PENDING_DOWNLOAD_TIMEOUT);
+            ui.invoke(move || {
+                if let Some(surface) = Surface::by_key(surface_key)
+                    && let Some(item) = super::web_item(&surface, node)
+                {
+                    item.expire_download(&id);
+                }
+            });
+        });
+    }
+
+    /// A manual download waited too long for the app: cancel it (nothing
+    /// is written) and report why.
+    fn expire_download(&self, id: &str) {
+        let Some(pending) = self.downloads.borrow_mut().remove(id) else {
+            return;
+        };
+        let (url, filename) = (pending.url.clone(), pending.filename.clone());
+        pending.cancel();
+        self.emit_download(
+            "failed",
+            id,
+            &url,
+            &filename,
+            Path::new(""),
+            None,
+            Some(format!(
+                "the download was not accepted within {} seconds",
+                PENDING_DOWNLOAD_TIMEOUT.as_secs()
+            )),
+        );
+    }
+
+    /// Follows a running download to its completed or interrupted end.
+    #[allow(clippy::too_many_arguments)]
+    fn track_download(
+        &self,
+        operation: ICoreWebView2DownloadOperation,
+        id: &str,
+        url: &str,
+        filename: &str,
+        path: &Path,
+        staging: Option<PathBuf>,
+        overwrite: bool,
+        owned_directory: Option<PathBuf>,
+    ) {
+        let weak = self.me.borrow().clone();
+        let key = id.to_owned();
+        let handler = StateChangedEventHandler::create(Box::new(move |sender, _| {
+            if let (Some(item), Some(operation)) = (weak.upgrade(), sender) {
+                item.download_state(&key, &operation);
+            }
+            Ok(())
+        }));
+        let mut token = 0i64;
+        // SAFETY: a WebView2 call on the live operation; the handler holds
+        // the item weakly and goes with the operation.
+        unsafe {
+            let _ = operation.add_StateChanged(&handler, &mut token);
+        }
+        self.active_downloads.borrow_mut().insert(
+            id.to_owned(),
+            ActiveDownload {
+                operation,
+                id: id.to_owned(),
+                url: url.to_owned(),
+                filename: filename.to_owned(),
+                path: path.to_path_buf(),
+                staging,
+                overwrite,
+                owned_directory,
+                cancel_request: Cell::new(None),
+                terminal: Cell::new(false),
+            },
+        );
+    }
+
+    /// A tracked download changed state: report its completion or failure.
+    fn download_state(&self, id: &str, operation: &ICoreWebView2DownloadOperation) {
+        let mut state = COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS;
+        // SAFETY: a WebView2 getter on the live operation.
+        if unsafe { operation.State(&mut state) }.is_err() {
+            return;
+        }
+        if state == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED {
+            let Some(entry) = self.active_downloads.borrow_mut().remove(id) else {
+                return;
+            };
+            // A cancel that raced the completion wins: the staged bytes are
+            // discarded and the app hears `failed`, never a later `finished`.
+            if let Some(request) = entry.cancel_request.take() {
+                entry.cleanup();
+                if take_terminal(&entry.terminal) {
+                    self.emit_download(
+                        "failed",
+                        &entry.id,
+                        &entry.url,
+                        &entry.filename,
+                        &entry.path,
+                        None,
+                        Some("the download was cancelled".to_owned()),
+                    );
+                }
+                self.reply(request, Ok(JsonValue::Null));
+                return;
+            }
+            let published = entry.publish();
+            let bytes = std::fs::metadata(&entry.path).map(|m| m.len()).ok();
+            match published {
+                Ok(()) if take_terminal(&entry.terminal) => self.emit_download(
+                    "finished",
+                    &entry.id,
+                    &entry.url,
+                    &entry.filename,
+                    &entry.path,
+                    bytes,
+                    None,
+                ),
+                Ok(()) => {}
+                Err(message) => {
+                    // The app's destination was not replaced: it was never
+                    // touched before the publish.
+                    entry.cleanup();
+                    if !take_terminal(&entry.terminal) {
+                        return;
+                    }
+                    self.emit_download(
+                        "failed",
+                        &entry.id,
+                        &entry.url,
+                        &entry.filename,
+                        &entry.path,
+                        None,
+                        Some(message),
+                    );
+                }
+            }
+        } else if state == COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED {
+            let Some(entry) = self.active_downloads.borrow_mut().remove(id) else {
+                return;
+            };
+            let mut reason = COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON(0);
+            // SAFETY: a WebView2 getter on the live operation.
+            let _ = unsafe { operation.InterruptReason(&mut reason) };
+            // Writing has stopped: only this backend's staging file (or
+            // its automatic directory) goes.
+            entry.cleanup_after_stop();
+            if !take_terminal(&entry.terminal) {
+                return;
+            }
+            self.emit_download(
+                "failed",
+                &entry.id,
+                &entry.url,
+                &entry.filename,
+                &entry.path,
+                None,
+                Some(interrupt_message(reason.0)),
+            );
+            if let Some(request) = entry.cancel_request.take() {
+                self.reply(request, Ok(JsonValue::Null));
+            }
+        }
+    }
+
+    /// Reports a download through the app's existing `onDownload`
+    /// lifecycle.
+    #[allow(clippy::too_many_arguments)]
+    fn emit_download(
+        &self,
+        state: &str,
+        id: &str,
+        url: &str,
+        filename: &str,
+        path: &Path,
+        bytes: Option<u64>,
+        message: Option<String>,
+    ) {
+        self.emitter.emit(EventKind::Download, || {
+            download_payload(state, id, url, filename, path, bytes, message)
+        });
+    }
+
+    /// Answers web view request `request` (an internal reply event, not a
+    /// listener's).
+    fn reply(&self, request: u64, result: Result<JsonValue, String>) {
+        let Some(surface) = self.surface.upgrade() else {
+            return;
+        };
+        reply(&surface, self.id, request, result);
+    }
+
+    /// Handles a [`WebViewOperation`] on this web view.
+    fn web_request(&self, request: &WebViewRequest) {
+        match &request.operation {
+            WebViewOperation::AcceptDownload { id, destination } => {
+                let result = self.accept_download(id, &destination.path, destination.overwrite);
+                self.reply(request.id, result);
+            }
+            WebViewOperation::CancelDownload { id } => {
+                self.cancel_download(request.id, id);
+            }
+            // A newer core's operation: answer it rather than leave it
+            // pending.
+            _ => self.reply(
+                request.id,
+                Err("this Windows backend does not know the web view operation".into()),
+            ),
+        }
+    }
+
+    /// Writes the waiting download `id` to the app's `path`.
+    fn accept_download(&self, id: &str, path: &Path, overwrite: bool) -> Result<JsonValue, String> {
+        if !self.downloads.borrow().contains_key(id) {
+            return Err(self.no_download(id));
+        }
+        self.check_destination(path, overwrite)?;
+        let staging = staging_path(path, id)?;
+        if staging.exists() {
+            return Err(format!(
+                "the temporary download path already exists: {}",
+                staging.display()
+            ));
+        }
+        let Some(pending) = self.downloads.borrow_mut().remove(id) else {
+            return Err(self.no_download(id));
+        };
+        let Some(operation) = pending.operation() else {
+            pending.cancel();
+            return Err("the download has no operation".to_owned());
+        };
+        let filename = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| pending.filename.clone());
+        // SAFETY: WebView2 calls on the live event and its deferral: the
+        // staged file goes next to the app's path (the default dialog stays
+        // away) and completing the deferral ends the event.
+        let applied = unsafe {
+            let mut applied = pending
+                .args
+                .SetResultFilePath(&HSTRING::from(&*staging.to_string_lossy()));
+            if applied.is_ok() {
+                applied = pending.args.SetCancel(false);
+            }
+            if applied.is_ok() {
+                applied = pending.args.SetHandled(true);
+            }
+            if applied.is_ok() {
+                applied = pending.deferral.Complete();
+            }
+            applied
+        };
+        if let Err(error) = applied {
+            // Not left open: a download the app cannot take is no
+            // download.
+            pending.cancel();
+            remove_later(staging, false);
+            return Err(format!("cannot take the download: {}", error.message()));
+        }
+        self.track_download(
+            operation,
+            id,
+            &pending.url,
+            &filename,
+            path,
+            Some(staging),
+            overwrite,
+            None,
+        );
+        self.emit_download("started", id, &pending.url, &filename, path, None, None);
+        Ok(JsonValue::Null)
+    }
+
+    /// Cancels the waiting or running download `id`: nothing is written
+    /// (or what was written is removed). A running transfer's answer waits
+    /// for WebView2's state-changed callback, which confirms writing
+    /// stopped.
+    fn cancel_download(&self, request: u64, id: &str) {
+        let mut waiting = false;
+        let result = (|| -> Result<JsonValue, String> {
+            let pending = self.downloads.borrow_mut().remove(id);
+            if let Some(pending) = pending {
+                pending.cancel();
+                return Ok(JsonValue::Null);
+            }
+            let completed;
+            let operation;
+            {
+                let active = self.active_downloads.borrow();
+                let Some(entry) = active.get(id) else {
+                    return Err(self.no_download(id));
+                };
+                if entry.cancel_request.get().is_some() {
+                    return Err(format!("a cancellation is already in progress for {id}"));
+                }
+                completed = entry.state() == Some(COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED);
+                operation = entry.operation.clone();
+                if !completed {
+                    entry.cancel_request.set(Some(request));
+                }
+            }
+            if completed {
+                let entry = self.active_downloads.borrow_mut().remove(id);
+                let Some(entry) = entry else {
+                    return Err(self.no_download(id));
+                };
+                // The app's cancel wins even if the bytes all arrived: the
+                // staged output is discarded and the one terminal event is
+                // `failed`.
+                entry.cleanup();
+                if take_terminal(&entry.terminal) {
+                    self.emit_download(
+                        "failed",
+                        &entry.id,
+                        &entry.url,
+                        &entry.filename,
+                        &entry.path,
+                        None,
+                        Some("the download was cancelled".to_owned()),
+                    );
+                }
+                return Ok(JsonValue::Null);
+            }
+            // SAFETY: a WebView2 call on the live operation.
+            if let Err(error) = unsafe { operation.Cancel() } {
+                let entry = self.active_downloads.borrow_mut().remove(id);
+                if let Some(entry) = entry {
+                    entry.cleanup();
+                    self.emit_download(
+                        "failed",
+                        &entry.id,
+                        &entry.url,
+                        &entry.filename,
+                        &entry.path,
+                        None,
+                        Some(format!("cannot cancel the download: {}", error.message())),
+                    );
+                }
+                return Err(format!("cannot cancel the download: {}", error.message()));
+            }
+            // The state-changed callback completes this request after the
+            // transfer stopped and its staging file is gone.
+            waiting = true;
+            Ok(JsonValue::Null)
+        })();
+        if !waiting {
+            self.reply(request, result);
+        }
+    }
+
+    /// Why download `id` is not waiting or running.
+    fn no_download(&self, id: &str) -> String {
+        if self.downloads_supported.get() {
+            format!("no download is waiting with id {id}")
+        } else {
+            "this WebView2 runtime does not report downloads".to_owned()
+        }
+    }
+
+    /// Whether `path` is a destination this app can accept: absolute, in an
+    /// existing directory, not a directory, not taken (unless `overwrite`),
+    /// and not another running download's.
+    fn check_destination(&self, path: &Path, overwrite: bool) -> Result<(), String> {
+        let active: Vec<PathBuf> = self
+            .active_downloads
+            .borrow()
+            .values()
+            .map(|active| active.path.clone())
+            .collect();
+        destination_error(path, overwrite, &active)
+    }
+
     fn listen_input(
         self: &Rc<Self>,
         composition: &ICoreWebView2CompositionController,
@@ -660,6 +1430,11 @@ impl WebItem {
                 // responder.
                 if let Some(surface) = item.surface.upgrade() {
                     crate::text_input::blur_all(&surface);
+                    // A custom view of the page's window gives it its keys
+                    // too.
+                    if let Some((window, _)) = item.host.get() {
+                        crate::keyboard::blur_window(&surface, window);
+                    }
                 }
             }
             Ok(())
@@ -912,6 +1687,16 @@ impl WebItem {
     /// `reload()`, `goBack()`, `goForward()`, `stopLoading()`,
     /// `injectJavaScript()`, `postMessage()` and `load()`.
     pub(crate) fn command(&self, command: &Command) {
+        if self.manual_downloads_unavailable() && inert_refuses(command) {
+            self.emitter.emit(EventKind::Error, || {
+                error("manual downloads need a WebView2 runtime that reports downloads".to_owned())
+            });
+            return;
+        }
+        if let Command::WebViewRequest(request) = command {
+            self.web_request(request);
+            return;
+        }
         let Some(webview) = self.webview.borrow().clone() else {
             if !self.failed.get() {
                 self.queued.borrow_mut().push(command.clone());
@@ -1045,6 +1830,16 @@ impl WebItem {
     pub(crate) fn close(&self) {
         if self.closed.replace(true) {
             return;
+        }
+        // Pending decisions are released (nothing is written); running
+        // transfers stop, removing only what this backend wrote.
+        let pending = std::mem::take(&mut *self.downloads.borrow_mut());
+        for (_, pending) in pending {
+            pending.cancel();
+        }
+        let active = std::mem::take(&mut *self.active_downloads.borrow_mut());
+        for entry in active.into_values() {
+            entry.cancel();
         }
         if self.focused.get() {
             self.focus_window();
@@ -1725,6 +2520,446 @@ fn placeholder_format() -> Option<IDWriteTextFormat> {
     FORMAT.with(Clone::clone)
 }
 
+/// The [`EventKind::WebViewReply`] envelope of request `request`:
+/// `{id, ok: true, value}` or `{id, ok: false, error}`.
+fn reply_value(request: u64, result: Result<JsonValue, String>) -> JsonValue {
+    match result {
+        Ok(value) => serde_json::json!({"id": request, "ok": true, "value": value}),
+        Err(error) => serde_json::json!({"id": request, "ok": false, "error": error}),
+    }
+}
+
+/// Answers request `request` of `node` (an internal reply event, not a
+/// listener's).
+fn reply(surface: &Surface, node: NodeId, request: u64, result: Result<JsonValue, String>) {
+    surface.event(
+        node,
+        EventKind::WebViewReply,
+        EventPayload::Json(reply_value(request, result)),
+    );
+}
+
+/// `onDownload`'s payload: `state`, `id`, `url`, `filename`, `path` and,
+/// once finished, `bytes`; `message` when it failed.
+fn download_payload(
+    state: &str,
+    id: &str,
+    url: &str,
+    filename: &str,
+    path: &Path,
+    bytes: Option<u64>,
+    message: Option<String>,
+) -> EventPayload {
+    let mut fields = vec![
+        ("state", PayloadValue::Str(state.to_owned())),
+        ("id", PayloadValue::Str(id.to_owned())),
+        ("url", PayloadValue::Str(url.to_owned())),
+        ("filename", PayloadValue::Str(filename.to_owned())),
+        (
+            "path",
+            PayloadValue::Str(path.to_string_lossy().into_owned()),
+        ),
+    ];
+    if let Some(bytes) = bytes {
+        fields.push(("bytes", PayloadValue::Number(bytes as f64)));
+    }
+    if let Some(message) = message {
+        fields.push(("message", PayloadValue::Str(message)));
+    }
+    EventPayload::Map(fields)
+}
+
+/// A safe file name for a download: the server's suggestion, or the URL's
+/// last segment when it has none.
+fn download_name(suggested: &str, url: &str) -> String {
+    let name = Path::new(suggested)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let name = if name.is_empty() {
+        url_file_name(url).to_owned()
+    } else {
+        name
+    };
+    sanitize_file_name(&name)
+}
+
+/// A file name Windows accepts: its last path component without a
+/// separator, control character or reserved character, no leading or
+/// trailing dot/space, no reserved device name (with or without an
+/// extension, and however the stem ends), at most 200 bytes; `download`
+/// when nothing is left.
+fn sanitize_file_name(suggested: &str) -> String {
+    let last = suggested.rsplit(['/', '\\']).next().unwrap_or_default();
+    let mut name: String = last
+        .chars()
+        .filter(|c| {
+            !c.is_control()
+                && !matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')
+                && !matches!(
+                    c,
+                    '\u{061c}'
+                        | '\u{200e}'..='\u{200f}'
+                        | '\u{202a}'..='\u{202e}'
+                        | '\u{2066}'..='\u{206f}'
+                )
+        })
+        .collect::<String>()
+        .trim()
+        .trim_end_matches(['.', ' '])
+        .to_owned();
+    name = name.trim_start_matches('.').to_owned();
+    if name.is_empty() {
+        return "download".to_owned();
+    }
+    if is_reserved_name(&name) {
+        name.insert(0, '_');
+    }
+    if name.len() > 200 {
+        // Preserve a normal extension while shortening the stem on UTF-8
+        // boundaries.
+        let extension = name
+            .rsplit_once('.')
+            .map(|(_, ext)| format!(".{ext}"))
+            .filter(|ext| ext.len() < 200);
+        if let Some(extension) = &extension {
+            name.truncate(name.len() - extension.len());
+        }
+        let limit = 200 - extension.as_ref().map_or(0, String::len);
+        while name.len() > limit {
+            name.pop();
+        }
+        name = name.trim_end_matches(['.', ' ']).to_owned();
+        if let Some(extension) = extension {
+            name.push_str(&extension);
+        }
+    }
+    if name.is_empty() {
+        "download".to_owned()
+    } else {
+        name
+    }
+}
+
+/// Whether `name` is a Windows device name, which no file (with or without
+/// an extension) may be called: `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`,
+/// `CONOUT$`, the `COM`/`LPT` families (0 through 9, and the superscript
+/// forms Windows also reserves). Win32 ignores trailing dots and spaces in
+/// a name component, so `CON .txt` is `CON` too.
+fn is_reserved_name(name: &str) -> bool {
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or(name)
+        .trim_end_matches([' ', '.'])
+        .to_ascii_uppercase();
+    let family = |prefix: &str| {
+        let digits = stem.strip_prefix(prefix).unwrap_or_default();
+        matches!(
+            digits,
+            "0" | "1"
+                | "2"
+                | "3"
+                | "4"
+                | "5"
+                | "6"
+                | "7"
+                | "8"
+                | "9"
+                | "\u{b9}"
+                | "\u{b2}"
+                | "\u{b3}"
+        )
+    };
+    matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || family("COM")
+        || family("LPT")
+}
+
+/// The last path segment of `url`, without its query or fragment.
+fn url_file_name(url: &str) -> &str {
+    let end = url.find(['?', '#']).unwrap_or(url.len());
+    url[..end].rsplit('/').next().unwrap_or_default()
+}
+
+/// An id for a download: a random GUID in lowercase hex, so the directory
+/// it names (`downloads/<id>`) cannot collide with another transfer's or
+/// leave the directory (it has no separators).
+fn next_download_id() -> String {
+    static FALLBACK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    // SAFETY: `CoCreateGuid` writes into a local GUID.
+    match unsafe { CoCreateGuid() } {
+        Ok(guid) => format!(
+            "{:08x}-{:04x}-{:04x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            guid.data1,
+            guid.data2,
+            guid.data3,
+            guid.data4[0],
+            guid.data4[1],
+            guid.data4[2],
+            guid.data4[3],
+            guid.data4[4],
+            guid.data4[5],
+            guid.data4[6],
+            guid.data4[7]
+        ),
+        Err(_) => {
+            // OLE is unavailable (it is not on this thread): a time and a
+            // counter are still unique enough, and contain no separator.
+            let n = FALLBACK.fetch_add(1, Ordering::Relaxed);
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos());
+            format!("{nanos:x}-{n:x}")
+        }
+    }
+}
+
+/// Takes a transfer's one terminal lifecycle event: a cancel racing a
+/// completion reports `failed` once, and a later callback reports nothing.
+fn take_terminal(terminal: &Cell<bool>) -> bool {
+    !terminal.replace(true)
+}
+
+/// Publishes a finished Manual download's staging file at `path`:
+/// `overwrite` replaces a file there atomically; otherwise a create-new
+/// link publishes only when nothing is there (a file that appeared
+/// meanwhile is left untouched and the publish fails).
+fn publish_staged(staging: &Path, path: &Path, overwrite: bool) -> Result<(), String> {
+    if overwrite {
+        return std::fs::rename(staging, path)
+            .map_err(|error| format!("cannot move the download to {}: {error}", path.display()));
+    }
+    match std::fs::hard_link(staging, path) {
+        Ok(()) => {
+            if std::fs::remove_file(staging).is_err() {
+                remove_later(staging.to_path_buf(), false);
+            }
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(format!(
+            "the download path already exists: {}",
+            path.display()
+        )),
+        Err(error) => Err(format!(
+            "cannot publish {} without replacing an existing file: {error}",
+            path.display()
+        )),
+    }
+}
+
+/// Removes the output this backend owns (an automatic download's
+/// directory, or a Manual download's staging file), never the app's
+/// destination. `now`: try synchronously first (a cancellation answer
+/// follows the deletion); otherwise retry while WebView2 releases its
+/// handle.
+fn remove_owned(directory: Option<&PathBuf>, staging: Option<&PathBuf>, now: bool) {
+    if let Some(directory) = directory {
+        if now && std::fs::remove_dir_all(directory).is_ok() {
+            return;
+        }
+        remove_later(directory.clone(), true);
+    } else if let Some(staging) = staging {
+        if now {
+            match std::fs::remove_file(staging) {
+                Ok(()) => return,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+                Err(_) => {}
+            }
+        }
+        remove_later(staging.clone(), false);
+    }
+}
+
+/// Whether a view whose requested manual downloads this runtime cannot
+/// honor must refuse `command`: a navigation, or anything that executes
+/// app script.
+fn inert_refuses(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Reload
+            | Command::GoBack
+            | Command::GoForward
+            | Command::Load(_)
+            | Command::InjectJavaScript(_)
+            | Command::PostMessage(_)
+    )
+}
+
+/// The unique sibling a Manual download writes into until it finishes:
+/// beside the app's destination (same volume, so publishing is a link or
+/// rename), named only by the transfer's id so nothing about the final
+/// name can collide with another transfer.
+fn staging_path(final_path: &Path, id: &str) -> Result<PathBuf, String> {
+    let parent = final_path.parent().ok_or_else(|| {
+        format!(
+            "the download path has no directory: {}",
+            final_path.display()
+        )
+    })?;
+    let name = final_path
+        .file_name()
+        .ok_or_else(|| {
+            format!(
+                "the download path has no file name: {}",
+                final_path.display()
+            )
+        })?
+        .to_string_lossy();
+    let first = format!(".nsh-download-{id}.part");
+    let first_path = parent.join(&first);
+    if !name.eq_ignore_ascii_case(&first) && !first_path.exists() {
+        return Ok(first_path);
+    }
+    // The destination itself is the first candidate, or it is occupied: a
+    // second sibling must be free and distinct (Windows compares fixed
+    // names without regard to ASCII case).
+    let second = format!(".nsh-download-{id}.part.1");
+    if name.eq_ignore_ascii_case(&second) {
+        return Err(format!(
+            "cannot choose a temporary download path distinct from {}",
+            final_path.display()
+        ));
+    }
+    let second_path = parent.join(second);
+    if second_path.exists() {
+        return Err(format!(
+            "the temporary download path already exists: {}",
+            second_path.display()
+        ));
+    }
+    Ok(second_path)
+}
+
+/// Why `path` is not a destination an accepted download can use: it must
+/// be absolute, in an existing directory, not a directory, not taken
+/// (unless `overwrite`), and not another running download's.
+fn destination_error(path: &Path, overwrite: bool, active: &[PathBuf]) -> Result<(), String> {
+    if path.as_os_str().is_empty() {
+        return Err("the download path is empty".to_owned());
+    }
+    if !path.is_absolute() {
+        return Err(format!(
+            "the download path is not absolute: {}",
+            path.display()
+        ));
+    }
+    if path.to_string_lossy().contains('\0') {
+        return Err("the download path has a NUL".to_owned());
+    }
+    let Some(name) = path.file_name() else {
+        return Err(format!(
+            "the download path has no file name: {}",
+            path.display()
+        ));
+    };
+    if name.is_empty() {
+        return Err("the download path has no file name".to_owned());
+    }
+    let Some(parent) = path.parent() else {
+        return Err(format!(
+            "the download directory does not exist: {}",
+            path.display()
+        ));
+    };
+    if !parent.is_dir() {
+        return Err(format!(
+            "the download directory does not exist: {}",
+            parent.display()
+        ));
+    }
+    if path.is_dir() {
+        return Err(format!(
+            "the download path is a directory: {}",
+            path.display()
+        ));
+    }
+    if !overwrite && path.exists() {
+        return Err(format!(
+            "the download path already exists: {}",
+            path.display()
+        ));
+    }
+    if active.iter().any(|active| same_path(active, path)) {
+        return Err(format!("another download is writing to {}", path.display()));
+    }
+    Ok(())
+}
+
+/// Removes a file or directory this backend wrote, retrying briefly while
+/// WebView2 closes its handle after a cancellation.
+fn remove_later(path: PathBuf, directory: bool) {
+    std::thread::spawn(move || {
+        for attempt in 0..100 {
+            let result = if directory {
+                std::fs::remove_dir_all(&path)
+            } else {
+                std::fs::remove_file(&path)
+            };
+            match result {
+                Ok(()) => return,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+                Err(error) if attempt == 99 => {
+                    log::warn!(
+                        "web view: cannot remove a cancelled download's output {}: {error}",
+                        path.display()
+                    );
+                    return;
+                }
+                Err(_) => std::thread::sleep(Duration::from_millis(50)),
+            }
+        }
+    });
+}
+
+/// Whether two paths name the same file (Windows treats `/` and `\` alike
+/// and compares without regard to ASCII case).
+fn same_path(a: &Path, b: &Path) -> bool {
+    let normal = |path: &Path| {
+        path.to_string_lossy()
+            .replace('/', "\\")
+            .to_ascii_lowercase()
+    };
+    normal(a) == normal(b)
+}
+
+/// Why a download was interrupted, for `onDownload`'s message.
+fn interrupt_message(reason: i32) -> String {
+    let message = match reason {
+        1 => "the file could not be written",
+        2 => "access to the file was denied",
+        3 => "the disk is full",
+        4 => "the file name is too long",
+        5 => "the file is too large",
+        6 => "the file was found to be malicious",
+        7 => "the file had a transient error",
+        8 => "the file was blocked by policy",
+        9 => "the file failed a security check",
+        10 => "the file was too short",
+        11 => "the file's hash did not match",
+        12 => "the network request failed",
+        13 => "the network request timed out",
+        14 => "the network connection was lost",
+        15 => "the server is down",
+        16 => "the network request was invalid",
+        17 => "the server failed",
+        18 => "the server does not support ranges",
+        19 => "the server returned bad content",
+        20 => "the server requires authentication",
+        21 => "the server's certificate has a problem",
+        22 => "the server forbade the download",
+        23 => "the server sent an unexpected response",
+        24 => "the content length did not match",
+        25 => "the server redirected across origins",
+        26 => "the download was cancelled",
+        27 => "the app is shutting down",
+        _ => "the download was interrupted",
+    };
+    message.to_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1826,5 +3061,230 @@ mod tests {
         assert!(scroll_style(false).contains("var on = false"));
         assert!(scroll_style(true).contains("var on = true"));
         assert!(scroll_style(false).contains("overflow: hidden !important"));
+    }
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("nsh-webview-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a temporary directory");
+        dir
+    }
+
+    #[test]
+    fn sanitizes_download_file_names() {
+        assert_eq!(sanitize_file_name(r"..\..\evil.txt"), "evil.txt");
+        assert_eq!(sanitize_file_name(r"C:\dir\a:b?.txt"), "ab.txt");
+        assert_eq!(sanitize_file_name("  ..  "), "download");
+        assert_eq!(sanitize_file_name(""), "download");
+        assert_eq!(sanitize_file_name("...hidden"), "hidden");
+        assert_eq!(sanitize_file_name("trailing. "), "trailing");
+        assert_eq!(sanitize_file_name("a. . . "), "a");
+        assert_eq!(sanitize_file_name("报告.pdf"), "报告.pdf");
+        assert_eq!(
+            sanitize_file_name("invoice\u{202e}fdp.exe"),
+            "invoicefdp.exe"
+        );
+        assert_eq!(sanitize_file_name("a\u{0}b\u{7}.txt"), "ab.txt");
+    }
+
+    #[test]
+    fn sanitizes_reserved_device_names_but_not_ordinary_stems() {
+        for reserved in [
+            "CON",
+            "con",
+            "CON.txt",
+            "PRN",
+            "AUX",
+            "NUL",
+            "NUL.tar.gz",
+            "COM0",
+            "COM1",
+            "COM9",
+            "LPT0",
+            "LPT9",
+            "COM\u{b9}",
+            "LPT\u{b3}",
+            "CONIN$",
+            "CONOUT$",
+        ] {
+            let name = sanitize_file_name(reserved);
+            assert!(
+                name.starts_with('_'),
+                "{reserved:?} must be made distinct, got {name:?}"
+            );
+            assert!(!is_reserved_name(&name), "{name:?}");
+        }
+        // Trailing dots and spaces are ignored by Win32 in a name component.
+        for disguised in ["CON .txt", "NUL. .txt", "PRN...", "AUX . ."] {
+            let name = sanitize_file_name(disguised);
+            assert!(name.starts_with('_'), "{disguised:?} -> {name:?}");
+        }
+        // Ordinary names that merely contain or resemble one stay as they are.
+        for ordinary in ["console.txt", "connection", "COM10", "LPT10", "my-CON.txt"] {
+            assert_eq!(sanitize_file_name(ordinary), ordinary);
+            assert!(!is_reserved_name(ordinary));
+        }
+        // A long name keeps a fitting extension on UTF-8 boundaries.
+        let long = format!("{}.txt", "é".repeat(300));
+        let name = sanitize_file_name(&long);
+        assert!(name.len() <= 200, "{}", name.len());
+        assert!(name.ends_with(".txt"), "{name}");
+    }
+
+    #[test]
+    fn names_downloads_from_the_url_when_the_server_suggests_nothing() {
+        assert_eq!(
+            download_name("", "https://example.test/files/report.pdf?token=1#page"),
+            "report.pdf"
+        );
+        assert_eq!(download_name("", "https://example.test/"), "download");
+        assert_eq!(
+            download_name(r"C:\Users\a\Downloads\photo.webp", "https://example.test/"),
+            "photo.webp"
+        );
+        assert_eq!(
+            download_name("CON.txt", "https://example.test/"),
+            "_CON.txt"
+        );
+    }
+
+    #[test]
+    fn validates_download_destinations() {
+        let dir = scratch("destinations");
+        let target = dir.join("report.pdf");
+        assert!(destination_error(&target, false, &[]).is_ok());
+        std::fs::write(&target, b"old").unwrap();
+        assert!(destination_error(&target, false, &[]).is_err());
+        assert!(destination_error(&target, true, &[]).is_ok());
+        assert_eq!(std::fs::read(&target).unwrap(), b"old");
+        assert!(destination_error(Path::new("relative.pdf"), true, &[]).is_err());
+        assert!(destination_error(Path::new(""), true, &[]).is_err());
+        assert!(destination_error(&dir.join("missing/report.pdf"), true, &[]).is_err());
+        assert!(destination_error(&dir, true, &[]).is_err());
+        assert!(destination_error(&target, true, std::slice::from_ref(&target)).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn publishes_staged_downloads_without_clobbering() {
+        let dir = scratch("publish");
+        let destination = dir.join("report.pdf");
+        let staging = staging_path(&destination, "abc-123").unwrap();
+        assert_eq!(staging.parent(), Some(dir.as_path()));
+        assert_ne!(staging, destination);
+
+        // A fresh destination takes the staged bytes.
+        std::fs::write(&staging, b"new").unwrap();
+        publish_staged(&staging, &destination, false).unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), b"new");
+        assert!(!staging.exists());
+
+        // A file that appeared meanwhile is never replaced without
+        // `overwrite`; the staging file stays for cleanup.
+        std::fs::write(&staging, b"newer").unwrap();
+        assert!(publish_staged(&staging, &destination, false).is_err());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"new");
+        assert_eq!(std::fs::read(&staging).unwrap(), b"newer");
+        remove_owned(None, Some(&staging), true);
+        assert!(!staging.exists());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"new");
+
+        // With overwrite, the staged file replaces the destination.
+        std::fs::write(&staging, b"replacement").unwrap();
+        publish_staged(&staging, &destination, true).unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), b"replacement");
+        assert!(!staging.exists());
+
+        // The destination may itself use the first staging name.
+        let collision = dir.join(".nsh-download-collision.part");
+        let separate = staging_path(&collision, "collision").unwrap();
+        assert_ne!(separate, collision);
+        std::fs::write(&separate, b"complete").unwrap();
+        publish_staged(&separate, &collision, false).unwrap();
+        assert_eq!(std::fs::read(&collision).unwrap(), b"complete");
+        assert!(!separate.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cleans_only_owned_output_never_an_existing_destination() {
+        let dir = scratch("cleanup");
+        let keep = dir.join("report.pdf");
+        std::fs::write(&keep, b"completed").unwrap();
+        let staging = dir.join(".nsh-download-id.part");
+        std::fs::write(&staging, b"partial").unwrap();
+        remove_owned(None, Some(&staging), true);
+        assert!(!staging.exists());
+        assert_eq!(std::fs::read(&keep).unwrap(), b"completed");
+
+        // An automatic download owns its directory alone.
+        let owned = dir.join("uuid");
+        std::fs::create_dir_all(&owned).unwrap();
+        std::fs::write(owned.join("report.pdf"), b"partial").unwrap();
+        remove_owned(Some(&owned), None, true);
+        assert!(!owned.exists());
+        assert_eq!(std::fs::read(&keep).unwrap(), b"completed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn describes_download_interruptions() {
+        assert_eq!(interrupt_message(26), "the download was cancelled");
+        assert_eq!(interrupt_message(999), "the download was interrupted");
+    }
+
+    #[test]
+    fn makes_download_payloads() {
+        let payload = download_payload(
+            "started",
+            "id-1",
+            "https://example.test/a.zip",
+            "a.zip",
+            Path::new(r"C:\temp\a.zip"),
+            None,
+            None,
+        );
+        let EventPayload::Map(fields) = payload else {
+            panic!("a download event is a map");
+        };
+        let field = |name: &str| {
+            fields
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| value.clone())
+        };
+        assert_eq!(field("state"), Some(PayloadValue::Str("started".into())));
+        assert_eq!(field("id"), Some(PayloadValue::Str("id-1".into())));
+        assert_eq!(
+            field("path"),
+            Some(PayloadValue::Str(r"C:\temp\a.zip".into()))
+        );
+        assert_eq!(field("bytes"), None);
+
+        let failed = download_payload(
+            "failed",
+            "id-1",
+            "https://example.test/a.zip",
+            "a.zip",
+            Path::new(""),
+            None,
+            Some("no room".into()),
+        );
+        let EventPayload::Map(fields) = failed else {
+            panic!("a download event is a map");
+        };
+        assert_eq!(
+            fields
+                .iter()
+                .find(|(key, _)| *key == "message")
+                .map(|(_, value)| value.clone()),
+            Some(PayloadValue::Str("no room".into()))
+        );
+    }
+
+    #[test]
+    fn cancellation_terminal_is_reported_once() {
+        let terminal = Cell::new(false);
+        assert!(take_terminal(&terminal));
+        assert!(!take_terminal(&terminal));
     }
 }

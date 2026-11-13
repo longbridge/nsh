@@ -18,6 +18,8 @@ export function createWebPage(reactive, player) {
   const heads = [];
   const initial = { title: document.title, lang: document.documentElement.lang };
   let scheduled = false;
+  /** The title last handed to the player. */
+  let shownTitle = null;
 
   const apply = () => {
     scheduled = false;
@@ -30,7 +32,14 @@ export function createWebPage(reactive, player) {
         if (m && m.content != null) meta.set(m.property ? `property:${m.property}` : `name:${m.name}`, m);
       }
     }
-    document.title = head.title ?? initial.title;
+    // The player writes the title: under a head's, the main window's
+    // (`WindowRef.set({ title })`), after the history entries of the turn.
+    if (player.setHeadTitle) {
+      const title = head.title ?? null;
+      if (title !== shownTitle) player.setHeadTitle((shownTitle = title));
+    } else {
+      document.title = head.title ?? initial.title;
+    }
     document.documentElement.lang = head.lang ?? initial.lang;
     const d = document.head;
     d.querySelectorAll(`[${MARK}]`).forEach(el => el.remove());

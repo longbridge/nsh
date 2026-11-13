@@ -34,6 +34,7 @@ pub mod id_table;
 pub mod image;
 pub mod input;
 pub mod js;
+pub mod keyboard;
 pub mod keymap;
 pub mod log_file;
 pub mod main_thread;
@@ -64,6 +65,10 @@ pub mod storage;
 mod style;
 #[cfg(feature = "svg")]
 pub mod svg;
+/// SVG without the renderer: recognized, never drawn.
+#[cfg(not(feature = "svg"))]
+#[path = "svg_off.rs"]
+pub mod svg;
 pub mod tailwind;
 mod text;
 pub mod text_edit;
@@ -73,6 +78,7 @@ pub mod transition;
 pub mod url_scheme;
 pub mod web_resource;
 pub mod websocket;
+pub mod webview;
 
 // The derive macros name `::nsh_core`, also in this crate's own tests.
 extern crate self as nsh_core;
@@ -92,6 +98,7 @@ pub use crate::{
     },
     geometry::{Bounds, Corners, Edges, Point, Points, Size},
     image::ImageData,
+    keyboard::{KeyCapture, KeyEvent},
     mount::{
         AudioSession, ImageOptions, InputConfig, ModalConfig, MountBatch, MountItem,
         NO_NATIVE_HEADER, NativeProps, NavShader, ScreenConfig, ScrollBehavior, StickyCell,
@@ -99,17 +106,17 @@ pub use crate::{
     },
     ops::{
         AutoCapitalize, AutoFill, CellSlot, Command, ContextMenuEvent, Dialog, DialogButton,
-        DialogButtonStyle, EditAction, EventKind, EventMask, EventPayload, Haptic, HapticImpact,
-        HapticNotification, HeaderSlot, HeaderSystemItem, IMAGE_SCALES, ImageProp, ImageScales,
-        ImageSource, KeyboardAppearance, KeyboardDismissMode, KeyboardTaps, KeyboardType,
-        ListAlignment, ListContentStyle, ListViewport, ModalAnimation, ModalPresentation,
-        ModalProp, MouseButton, MouseEvent, NativeProp, NodeId, Op, OverlayProp, PasteBehavior,
-        PasteEvent, PastedFile, PayloadValue, PinchEvent, PinchPhase, PointerType, PressEvent,
-        Prop, ROOT_ID, ResizeMode, ReturnKeyType, RevealOptions, ScreenAnimation, ScreenProp,
-        ScrollAlignment, ScrollProp, ScrollbarSetting, SnapAlignment, StatusBarConfig,
-        StatusBarSetting, StatusBarStyle, SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint,
-        TransitionFallback, Viewability, WebElement, WebInput, WebKey, WebLoad, WebSource,
-        WheelDelta, WheelEvent,
+        DialogButtonStyle, EditAction, EventKind, EventMask, EventPayload, FpsMode, Haptic,
+        HapticImpact, HapticNotification, HeaderItem, HeaderItemContent, HeaderSlot,
+        HeaderSystemItem, IMAGE_SCALES, ImageProp, ImageScales, ImageSource, KeyboardAppearance,
+        KeyboardDismissMode, KeyboardTaps, KeyboardType, ListAlignment, ListContentStyle,
+        ListViewport, ModalAnimation, ModalPresentation, ModalProp, MouseButton, MouseEvent,
+        NativeProp, NodeId, Op, OverlayProp, PasteBehavior, PasteEvent, PastedFile, PayloadValue,
+        PinchEvent, PinchPhase, PointerType, PressEvent, Prop, ROOT_ID, ResizeMode, ReturnKeyType,
+        RevealOptions, ScreenAnimation, ScreenProp, ScrollAlignment, ScrollProp, ScrollbarSetting,
+        SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, Tag,
+        TouchEvent, TouchPhase, TouchPoint, TransitionFallback, Viewability, WebElement, WebInput,
+        WebKey, WebLoad, WebSource, WheelDelta, WheelEvent,
     },
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityCurrent, AccessibilityProp,

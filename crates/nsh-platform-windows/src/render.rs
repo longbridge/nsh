@@ -160,9 +160,9 @@ pub(crate) struct DrawCx<'a> {
     /// The clip of the passes around this one (DIPs of the window), for
     /// a pass drawn offscreen in window coordinates.
     clip_base: Option<D2D_RECT_F>,
-    /// The window's bounds (DIPs) in the window's pass: the children of a
-    /// clipping view that fall outside what is visible are not drawn
-    /// ([`hidden_by_clips`]). `None` in passes drawn offscreen, which
+    /// The window's bounds (DIPs) in the window's pass: views that fall
+    /// outside what the window and the clips around them leave visible are
+    /// not drawn ([`draw_view`]). `None` in passes drawn offscreen, which
     /// draw everything.
     pub(crate) window: Option<D2D_RECT_F>,
     /// The areas (window DIPs) a partial frame draws: views wholly outside
@@ -686,10 +686,10 @@ pub(crate) fn rounded_geometry(
 pub(crate) fn draw_view(cx: &mut DrawCx<'_>, view: &NshView, parent: Mat4, origin: (f32, f32)) {
     let state = view.state();
     let opacity = state.opacity();
-    if state.style.hidden || state.concealed || opacity <= 0.0 {
+    if state.style.hidden || state.concealed || opacity <= 0.0 || draws_nothing(view, &state) {
         drop(state);
         if cx.records {
-            view.set_painted(None);
+            view.forget_painted();
         }
         return;
     }
@@ -701,7 +701,7 @@ pub(crate) fn draw_view(cx: &mut DrawCx<'_>, view: &NshView, parent: Mat4, origi
     if crate::decor::backface_away(&state, &world) {
         drop(state);
         if cx.records {
-            view.set_painted(None);
+            view.forget_painted();
         }
         return;
     }
@@ -730,6 +730,29 @@ pub(crate) fn draw_view(cx: &mut DrawCx<'_>, view: &NshView, parent: Mat4, origi
     };
     if cx.records {
         view.set_painted(painted);
+    }
+    // Out of sight in the window's pass (outside the window or the clips
+    // of the views around it, whichever of them clip): what it paints
+    // itself would be clipped away. A subtree that stays inside its box
+    // is left out whole; otherwise only the children are drawn, each
+    // culled the same way, so a long list in a box that does not clip
+    // draws only its rows in sight.
+    if cx.window.is_some() && painted.is_none() && state.natives.is_empty() {
+        if state.clips()
+            || crate::shader::effect(&state)
+            || view.with_children(<[NshView]>::is_empty)
+        {
+            drop(state);
+            if cx.records {
+                view.forget_painted();
+            }
+            return;
+        }
+        if opacity >= 1.0 && !crate::decor::layered(&state) {
+            drop(state);
+            draw_children(cx, view, world);
+            return;
+        }
     }
     // Outside a partial frame's area: a view whose subtree stays inside
     // it (it clips, or has no children) draws nothing there.
@@ -807,6 +830,31 @@ fn own_paint_needed(cx: &DrawCx<'_>, own: &D2D_RECT_F, state: &ViewState, layere
         || state.shader.is_some()
 }
 
+/// True if `view` (its `state`) and its subtree draw nothing: it has no
+/// area, draws nothing outside it (no shadow, outline, filter, shader
+/// overflow or hosted item), and its children draw nothing either unless
+/// it clips them away. A `display: none` subtree, which the core lays out
+/// with no size, is one: it is left out without visiting its views.
+fn draws_nothing(view: &NshView, state: &ViewState) -> bool {
+    let size = state.frame.size;
+    if size.width.0 > 0.0 && size.height.0 > 0.0 {
+        return false;
+    }
+    if !state.natives.is_empty()
+        || crate::decor::outset(state) > 0.0
+        || crate::shader::overflow(state) > 0.0
+    {
+        return false;
+    }
+    state.clips()
+        || view.with_children(|children| {
+            children.iter().all(|child| {
+                let s = child.state();
+                s.style.hidden || s.concealed || s.opacity() <= 0.0 || draws_nothing(child, &s)
+            })
+        })
+}
+
 /// True if `view` (its `state`) paints at most one shape, its background
 /// color, and nothing else: no children, content, hosted items, border,
 /// outline, shadow or effects. Its opacity is then its color's alpha.
@@ -869,33 +917,6 @@ pub(crate) fn overlap(a: &RECT, b: &RECT) -> bool {
     a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
 }
 
-/// True if `view`, placed at `origin` in its parent drawn at `world`,
-/// draws nothing inside `visible` (window DIPs): what its subtree covers
-/// ([`drawn_area`], with its shadows, outlines and transforms) lies
-/// outside. False when that area is not known.
-fn hidden_by_clips(view: &NshView, world: Mat4, origin: (f32, f32), visible: &D2D_RECT_F) -> bool {
-    let local = {
-        let s = view.state();
-        let mut local = Mat4::new().translate(origin.0, origin.1);
-        if let Some(t) = s.transform() {
-            local = Mat4::mul(&t, &local);
-        }
-        local
-    };
-    let world = Mat4::mul(&local, &world);
-    if !world.is_affine() {
-        return false;
-    }
-    let Some(area) = drawn_area(view) else {
-        return false;
-    };
-    let b = crate::compose::map_bounds(&world.to_3x2(), &area);
-    b.right <= visible.left
-        || b.left >= visible.right
-        || b.bottom <= visible.top
-        || b.top >= visible.bottom
-}
-
 /// The area `view` and its subtree draw in, in its coordinates: its
 /// bounds, out by its shadows and outline, with what its children draw
 /// unless it clips them. `None` when that is not known: an item it hosts
@@ -922,7 +943,7 @@ pub(crate) fn drawn_area(view: &NshView) -> Option<D2D_RECT_F> {
         for child in children {
             let local = {
                 let s = child.state();
-                if s.style.hidden || s.concealed || s.opacity() <= 0.0 {
+                if s.style.hidden || s.concealed || s.opacity() <= 0.0 || draws_nothing(child, &s) {
                     continue;
                 }
                 let origin = state.child_origin(s.frame, s.shift);
@@ -954,6 +975,8 @@ pub(crate) fn drawn_area(view: &NshView) -> Option<D2D_RECT_F> {
 /// border and outline. `paint_own` false ([`own_paint_needed`]) skips
 /// everything but the backdrop read and the children.
 pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4, paint_own: bool) {
+    #[cfg(test)]
+    tests::DRAWN.with(|d| d.set(d.get() + 1));
     // Before anything of the view draws, and before its children: the
     // pixels behind it are what its shader reads as its backdrop.
     crate::shader::take_backdrop(cx, view);
@@ -995,26 +1018,7 @@ pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4, pai
     drop(state);
     // An effect's children are its shader's content.
     if !effect || !crate::shader::draw_effect(cx, view, world) {
-        // Inside a clip (a scroll view's content), children out of sight
-        // are left out: drawing them would issue their commands for nothing.
-        let visible = if clip { cx.visible() } else { None };
-        view.with_children(|children| {
-            for child in children {
-                let origin = {
-                    let s = child.state();
-                    view.state().child_origin(s.frame, s.shift)
-                };
-                if let Some(visible) = &visible
-                    && hidden_by_clips(child, world, origin, visible)
-                {
-                    if cx.records {
-                        child.set_painted(None);
-                    }
-                    continue;
-                }
-                draw_view(cx, child, world, origin);
-            }
-        });
+        draw_children(cx, view, world);
     }
     cx.set_transform(world);
     for native in &natives {
@@ -1063,6 +1067,20 @@ pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4, pai
     if paint_own {
         crate::decor::draw_border(cx, &state);
     }
+}
+
+/// Draws the children of `view` (drawn at `world`); each leaves itself
+/// out when it is out of sight ([`draw_view`]).
+fn draw_children(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
+    view.with_children(|children| {
+        for child in children {
+            let origin = {
+                let s = child.state();
+                view.state().child_origin(s.frame, s.shift)
+            };
+            draw_view(cx, child, world, origin);
+        }
+    });
 }
 
 /// Most pixels along a side of a 3D-transformed view's bitmap.
@@ -1969,6 +1987,19 @@ mod tests {
 
     use super::*;
     use crate::geom::rect;
+
+    thread_local! {
+        /// How many views the passes on this thread drew ([`draw_content`]).
+        pub(super) static DRAWN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// How many views a whole frame of `surface` draws.
+    fn views_drawn(surface: &Rc<Surface>, gfx: &Gfx, size: (u32, u32)) -> usize {
+        let back = target(gfx, size);
+        DRAWN.with(|d| d.set(0));
+        draw_into(surface, gfx, &back, 1.0, false, None, None, None).unwrap();
+        DRAWN.with(std::cell::Cell::get)
+    }
 
     fn view(
         parent: Option<&NshView>,
@@ -2918,6 +2949,106 @@ mod tests {
         assert!(read(&gfx, &back, size) == read(&gfx, &fresh, size));
     }
 
+    /// Where a subtree left out of a frame was painted is forgotten with
+    /// it: the views it holds would otherwise add where they were last
+    /// drawn to every later change of a view around them.
+    #[test]
+    fn a_subtree_left_out_forgets_where_it_was_painted() {
+        let Ok(gfx) = gfx::get() else {
+            return;
+        };
+        let size = (240, 240);
+        let surface = Surface::new(Default::default());
+        surface.resized(size, 1.0);
+        let panel = view(
+            Some(&surface.root),
+            2,
+            ViewKind::View,
+            rect(0.0, 0.0, 200.0, 200.0),
+        );
+        panel.state_mut().style.overflow_hidden = true;
+        let row = view(
+            Some(&panel),
+            4,
+            ViewKind::View,
+            rect(0.0, 100.0, 200.0, 40.0),
+        );
+        let cell = view(Some(&row), 6, ViewKind::View, rect(10.0, 10.0, 50.0, 20.0));
+        cell.state_mut().style.background_color = Color(0x3366_ccff);
+        let back = target(&gfx, size);
+        let partial = || {
+            let damage = surface.take_damage();
+            draw_into(
+                &surface,
+                &gfx,
+                &back,
+                1.0,
+                false,
+                None,
+                damage.as_deref(),
+                None,
+            )
+            .unwrap();
+        };
+        partial();
+        assert!(cell.painted_subtree().is_some());
+
+        // The panel shrinks: the row is out of its sight.
+        panel.state_mut().frame = rect(0.0, 0.0, 200.0, 50.0);
+        panel.moved();
+        partial();
+        let bottom = panel.painted_subtree().map(|a| a.bottom);
+        assert!(bottom.is_some_and(|b| b <= 52.0), "{bottom:?}");
+
+        // Shown again, then hidden: the same.
+        panel.state_mut().frame = rect(0.0, 0.0, 200.0, 200.0);
+        panel.moved();
+        partial();
+        assert!(cell.painted_subtree().is_some());
+        row.state_mut().style.hidden = true;
+        row.changed();
+        partial();
+        assert!(cell.painted_subtree().is_none());
+    }
+
+    /// A `display: none` subtree (no size anywhere in it) is left out
+    /// without visiting its views; a box of no size still draws its
+    /// children that have one.
+    #[test]
+    fn a_subtree_of_no_size_is_left_out() {
+        let Ok(gfx) = gfx::get() else {
+            return;
+        };
+        let size = (200, 200);
+        let surface = Surface::new(Default::default());
+        surface.resized(size, 1.0);
+        let none = Bounds::default();
+        let hidden = view(Some(&surface.root), 2, ViewKind::View, none);
+        let mut id = 4;
+        for _ in 0..5 {
+            let row = view(Some(&hidden), id, ViewKind::View, none);
+            row.state_mut().style.background_color = Color(0x3366_ccff);
+            view(Some(&row), id + 2, ViewKind::Text, none);
+            id += 4;
+        }
+        // The root alone.
+        assert_eq!(views_drawn(&surface, &gfx, size), 1);
+        assert!(hidden.painted_subtree().is_none());
+
+        // An absolutely placed child of a box of no size.
+        let child = view(
+            Some(&hidden),
+            100,
+            ViewKind::View,
+            rect(10.0, 10.0, 40.0, 40.0),
+        );
+        child.state_mut().style.background_color = Color(0x3366_ccff);
+        assert_eq!(views_drawn(&surface, &gfx, size), 3);
+        // Unless the box clips it away.
+        hidden.state_mut().style.overflow_hidden = true;
+        assert_eq!(views_drawn(&surface, &gfx, size), 1);
+    }
+
     /// A change wholly outside the window leaves nothing to draw, which
     /// `frame` tells apart from `None`, the whole window.
     #[test]
@@ -3001,16 +3132,46 @@ mod tests {
         assert!(covered(&panel) && covered(&strip), "{drawn:?}");
     }
 
+    /// Views out of sight are not drawn, whether or not the views around
+    /// them clip: only the window and the clips there are leave them
+    /// visible. What reaches into sight is drawn: a shadow, a child
+    /// placed outside its parent, a transform.
     #[test]
-    fn children_outside_the_visible_area_are_hidden() {
-        let visible = rect_f(0.0, 0.0, 100.0, 100.0);
-        let hidden = |v: &NshView, y: f32| hidden_by_clips(v, Mat4::new(), (0.0, y), &visible);
-        let row = view(None, 2, ViewKind::View, rect(0.0, 0.0, 100.0, 40.0));
-        assert!(!hidden(&row, 0.0));
-        assert!(!hidden(&row, 80.0));
-        // Below the visible area, and above it.
-        assert!(hidden(&row, 120.0));
-        assert!(hidden(&row, -60.0));
+    fn views_out_of_sight_are_not_drawn() {
+        let Ok(gfx) = gfx::get() else {
+            return;
+        };
+        let size = (200, 200);
+        let surface = Surface::new(Default::default());
+        surface.resized(size, 1.0);
+        // A column that does not clip, far taller than the window.
+        let column = view(
+            Some(&surface.root),
+            2,
+            ViewKind::View,
+            rect(0.0, 0.0, 200.0, 2000.0),
+        );
+        let mut rows = Vec::new();
+        for i in 0..50 {
+            let row = view(
+                Some(&column),
+                4 + 4 * i,
+                ViewKind::View,
+                rect(0.0, 40.0 * i as f32, 200.0, 40.0),
+            );
+            row.state_mut().style.background_color = Color(0x3366_ccff);
+            view(
+                Some(&row),
+                6 + 4 * i,
+                ViewKind::View,
+                rect(10.0, 10.0, 50.0, 20.0),
+            );
+            rows.push(row);
+        }
+        // The root, the column, rows 0 to 5 (row 5's antialiased edge is
+        // in sight) and the cells of rows 0 to 4.
+        assert_eq!(views_drawn(&surface, &gfx, size), 2 + 6 + 5);
+
         // Its shadow reaches in.
         let effects = Effects {
             box_shadows: vec![BoxShadow {
@@ -3020,21 +3181,32 @@ mod tests {
             }],
             ..Effects::default()
         };
-        row.state_mut().style.effects = Some(std::sync::Arc::new(effects));
-        assert!(!hidden(&row, 120.0));
-        row.state_mut().style.effects = None;
-        // A child sticking out of it reaches in.
-        view(Some(&row), 4, ViewKind::View, rect(0.0, -50.0, 10.0, 10.0));
-        assert!(!hidden(&row, 120.0));
-        assert!(hidden(&row, 200.0));
-        // A transform moves it in.
-        let moved = view(None, 6, ViewKind::View, rect(0.0, 0.0, 100.0, 40.0));
-        moved
+        rows[6].state_mut().style.effects = Some(std::sync::Arc::new(effects));
+        assert_eq!(views_drawn(&surface, &gfx, size), 2 + 7 + 5);
+        rows[6].state_mut().style.effects = None;
+
+        // A child placed outside its row reaches in, the row does not.
+        view(
+            Some(&rows[20]),
+            1000,
+            ViewKind::View,
+            rect(0.0, -750.0, 10.0, 10.0),
+        );
+        assert_eq!(views_drawn(&surface, &gfx, size), 2 + 6 + 5 + 1);
+
+        // A transform moves a row in.
+        rows[30]
             .state_mut()
             .style
             .transform
-            .push(TransformKind::TranslateY, -150.0);
-        assert!(!hidden(&moved, 200.0));
+            .push(TransformKind::TranslateY, -1150.0);
+        assert_eq!(views_drawn(&surface, &gfx, size), 2 + 6 + 5 + 1 + 2);
+
+        // The column clips: rows 0 to 2 are in sight, and what the
+        // transform and the child placed outside their rows bring in.
+        column.state_mut().frame = rect(0.0, 0.0, 200.0, 100.0);
+        column.state_mut().style.overflow_hidden = true;
+        assert_eq!(views_drawn(&surface, &gfx, size), 2 + 3 + 3 + 1 + 2);
     }
 
     #[test]

@@ -106,7 +106,12 @@ define_class!(
 
         #[unsafe(method(touchesEnded:withEvent:))]
         fn touches_ended(&self, touches: &NSSet<UITouch>, _event: &UIEvent) {
-            self.lift(touches, TouchPhase::End);
+            // A tap that only dismisses the keyboard reaches no responder.
+            let dismissing = touches.count() == 1
+                && touches
+                    .anyObject()
+                    .is_some_and(|t| self.ivars().target.dismissing_tap(&t));
+            self.lift(touches, if dismissing { TouchPhase::Cancel } else { TouchPhase::End });
         }
 
         #[unsafe(method(touchesCancelled:withEvent:))]

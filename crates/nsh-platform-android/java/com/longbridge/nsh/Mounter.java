@@ -233,9 +233,9 @@ final class Mounter {
             }
 
             @Override
-            public byte[] complete(String url, int status, String[] headers, byte[] body) {
+            public byte[] complete(String url, int status, String[] headers, byte[] body, String[] redirects) {
                 long handle = handle();
-                return handle == 0 ? null : Native.imageCacheComplete(handle, url, status, headers, body);
+                return handle == 0 ? null : Native.imageCacheComplete(handle, url, status, headers, body, redirects);
             }
         };
         root = new Box(context, this, 1);
@@ -418,6 +418,7 @@ final class Mounter {
                         if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof TabBarComponent) {
                             ((TabBarComponent) ((ComponentBox) v).component).appearanceChanged();
                         }
+                        if (v instanceof StackBox.ScreenBox) ((StackBox.ScreenBox) v).appearanceChanged();
                     }
                     if (barStyle == 0) {
                         SystemUi.statusBar(context, barStyle, barHidden, night());
@@ -1911,6 +1912,14 @@ final class Mounter {
         updateBack();
     }
 
+    /** Reports every mounted screen's insets again, after the view's safe area changed. */
+    void reportAllScreenInsets() {
+        for (int i = 0; i < screenOptions.size(); i++) {
+            int id = screenOptions.keyAt(i);
+            if (views.get(id) instanceof StackBox.ScreenBox) reportScreenInsets(id, screenOptions.valueAt(i));
+        }
+    }
+
     /** A screen's insets below its header, for `safeAreaInsets()`. */
     private void reportScreenInsets(int id, ScreenOptions o) {
         float top = o.shown && !o.transparent ? 0 : host.safeTop();
@@ -2391,6 +2400,12 @@ final class Mounter {
                 SystemUi.setClipboard(context, (String) objects[b.getInt()]);
                 break;
             }
+            case 56: {
+                String text = (String) objects[b.getInt()];
+                String html = (String) objects[b.getInt()];
+                SystemUi.setClipboardHtml(context, text, html);
+                break;
+            }
             case 25: {
                 Picker.Request request = new Picker.Request();
                 request.id = b.getInt();
@@ -2436,6 +2451,18 @@ final class Mounter {
                 int request = b.getInt();
                 eventMap(1, Native.FILE_REQUEST, new String[] {"id", "error"},
                         new Object[] {(double) request, "not supported on Android"});
+                break;
+            }
+            case 55: {
+                // `encode.rs` `Command::RenderCanvas`: the request, the size in pixels, the scale, the format,
+                // then the drawing as `CANVAS` carries it.
+                int request = b.getInt(), width = b.getInt(), height = b.getInt();
+                float scale = b.getFloat();
+                int format = b.getInt(), words = b.getInt();
+                int[] code = new int[words];
+                b.asIntBuffer().get(code);
+                b.position(b.position() + words * 4);
+                CanvasRender.render(this, request, width, height, scale, format, code, objects);
                 break;
             }
             case 44: {
@@ -2619,6 +2646,44 @@ final class Mounter {
 
     // --- Events --------------------------------------------------------------
 
+    /**
+     * The scroll view whose `keyboardShouldPersistTaps` "never" holds the current touch: if the touch is a tap, it
+     * only dismisses the keyboard; meanwhile it presses nothing.
+     */
+    private ScrollBox tapScroll;
+    /** A view of the touch reported a long press: it is no tap. */
+    private boolean longPressed;
+
+    void startTapOnly(ScrollBox s) {
+        tapScroll = s;
+    }
+
+    void endTapOnly(ScrollBox s) {
+        if (tapScroll == s) tapScroll = null;
+    }
+
+    /**
+     * At a root (the surface, a modal), before it dispatches {@code e}: a tap that only dismisses the keyboard
+     * reaches the views and JS responders as a cancel, so nothing inside (a responder, a web view) acts on it.
+     * Returns the event to dispatch, a new one to recycle when it is not {@code e}.
+     */
+    android.view.MotionEvent keyboardTap(android.view.MotionEvent e) {
+        int action = e.getActionMasked();
+        if (action == android.view.MotionEvent.ACTION_DOWN) {
+            // Set by the scroll view as the down goes through it; nothing of an earlier touch lingers.
+            tapScroll = null;
+            longPressed = false;
+            return e;
+        }
+        if (action != android.view.MotionEvent.ACTION_UP || tapScroll == null || longPressed || !tapScroll.stillTap(e)) return e;
+        ScrollBox s = tapScroll;
+        tapScroll = null;
+        s.hideKeyboard();
+        android.view.MotionEvent cancel = android.view.MotionEvent.obtain(e);
+        cancel.setAction(android.view.MotionEvent.ACTION_CANCEL);
+        return cancel;
+    }
+
     boolean wants(int id, int kind) {
         if (kind >= 64) return (eventsHigh.get(id) & (1L << (kind - 64))) != 0;
         return (events.get(id) & (1L << kind)) != 0;
@@ -2638,6 +2703,7 @@ final class Mounter {
     private final android.util.SparseArray<float[]> panActivations = new android.util.SparseArray<>();
     /** Scroll views an activated pan gate blocks. */
     private final java.util.ArrayList<ScrollBox> gatedScrolls = new java.util.ArrayList<>();
+    private View activeGate;
 
     private void clearJsResponder() {
         for (ScrollBox s : blockedScrolls) s.jsBlocked = false;
@@ -2662,6 +2728,7 @@ final class Mounter {
     /** The pan gate of {@code v} activated: the scroll views around it stop taking the touches. */
     void gateBlock(View v) {
         gateRelease();
+        activeGate = v;
         for (ViewParent p = v.getParent(); p != null; p = p.getParent()) {
             if (p instanceof ScrollBox) {
                 ((ScrollBox) p).gateBlocked = true;
@@ -2673,8 +2740,14 @@ final class Mounter {
 
     /** The touches of an activated pan gate ended. */
     void gateRelease() {
+        activeGate = null;
         for (ScrollBox s : gatedScrolls) s.gateBlocked = false;
         gatedScrolls.clear();
+    }
+
+    /** The view whose pan gate activated for the touches down now, or null. */
+    View activeGate() {
+        return activeGate;
     }
 
     void event(int id, int kind) {
@@ -2701,6 +2774,8 @@ final class Mounter {
      * where the touch is in {@code v} and in its root view.
      */
     void press(int id, int kind, View v, PressAt at) {
+        if (kind == Native.LONG_PRESS) longPressed = true;
+        if (kind == Native.PRESS && tapScroll != null) return;
         // The surface, or the window of the modal the view is in.
         View root = v.getRootView() == host.getRootView() ? host : v.getRootView();
         int[] rootAt = new int[2];
@@ -2728,6 +2803,17 @@ final class Mounter {
     /** An event with an object payload. */
     void paste(int id, String text, byte[][] images, String[] uris) {
         Native.paste(handle(), id, text, images, uris);
+    }
+
+    /**
+     * Answers `OffscreenCanvas` render {@code request} ({@link CanvasRender}): the encoded image, or why it failed
+     * ({@code failure}: {@link CanvasRender#RENDER_FAILED} or {@link CanvasRender#RENDER_TOO_LARGE}, and {@code error}).
+     * Once the view is destroyed there is no app to tell.
+     */
+    void canvasImage(int request, byte[] bytes, int failure, String error) {
+        long handle = handle();
+        if (handle == 0) return;
+        Native.canvasImage(handle, request, bytes, failure, error);
     }
 
     void eventMap(int id, int kind, String[] keys, Object[] values) {
