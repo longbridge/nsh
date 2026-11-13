@@ -1045,6 +1045,7 @@ word (`readonly`, `multiline`).
 | Any other event | `on<Event>`, present tense, one object | `onPress()`, `onSubmit({ text })` |
 | A phase | `<act>Start`, `<act>End` | `onPanStart`, `onLoadStart` |
 | The mouse over a view | `Enter` / `Move` / `Leave`, the DOM's | `onMouseEnter`, `onMouseMove`, `onMouseLeave` |
+| A mouse button's release | `Up`, the DOM's | `onMouseUp` |
 | Starting to listen | `on(event, listener)`, returns `() => void` | `host.on(name, l)`, `BackHandler.on("press", l)` |
 | A value of the environment | An accessor, `set<Value>` beside it | `colorScheme()`, `setColorScheme` |
 | A read-only boolean | `is<Adjective>`, `has<Noun>` | `isAvailable` |

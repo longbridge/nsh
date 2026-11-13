@@ -309,7 +309,7 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
         state: Cell::new(None),
     });
     let weak = Rc::downgrade(&window);
-    view.set_invalidate(Rc::new(move |_| {
+    view.set_invalidate(Rc::new(move |_, _| {
         if let Some(window) = weak.upgrade() {
             invalidate(&window);
         }
@@ -628,8 +628,10 @@ pub(crate) fn escape(surface: &Surface, event: &KeyEvent) -> bool {
 /// popup of its own) or nowhere of the system's (a menu of its own).
 fn blur(surface: &Surface, window: &AppWindow) {
     let hwnd = window.hwnd;
-    // SAFETY: plain queries.
-    let (visible, mut active) = unsafe { (IsWindowVisible(hwnd).as_bool(), GetForegroundWindow()) };
+    // SAFETY: a plain query.
+    let visible = unsafe { IsWindowVisible(hwnd).as_bool() };
+    // In a background app: the window that would have the keyboard.
+    let mut active = crate::window::foreground();
     if !visible || window.closed.get() {
         return;
     }
@@ -871,6 +873,9 @@ pub(crate) fn close_all(surface: &Surface) {
 
 fn destroy(surface: &Surface, window: &AppWindow) {
     release_owner(window);
+    // Its views keep their trees, but the window that showed them is gone:
+    // no view of it holds the keyboard focus any more.
+    crate::keyboard::forget_window(surface, window.id);
     window.view.clear_invalidate();
     // What it hosts does not go with its native window: web views close,
     // components' windows go back to the main window, hidden.

@@ -21,7 +21,7 @@ import tapSound from "./sounds/tap.wav";
 import toggleSound from "./sounds/toggle.wav";
 import warningSound from "./sounds/warning.wav";
 import { type DemoEntry, nav, shownDemo } from "./nav";
-import { field } from "../nsh-gallery-ui/demo";
+import { field, fieldLook, fieldSize, fieldText } from "../nsh-gallery-ui/demo";
 import { alpha, Appear, Banner, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, isDark, lazy, Logo, menuItemLabel, menuItemLook, radius, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, SoundToggle, ThemeToggle, ToolButton, DirectionToggle, demoDirection, rtl, appearance, setAppearance, type Appearance, segmentedLook, menuPopup } from "./ui";
 
 // Loaded once, ahead of the first press: a sound plays within a frame then.
@@ -126,6 +126,7 @@ const allGroups: { title: string; demos: DemoEntry[] }[] = [
       { name: "Stocks", detail: "A live watchlist and a stock: candles, depth, the tape, a tick every 50 ms", icon: "stocks", screen: lazy(() => import("./demos/Stocks").then((m) => m.Stocks)) },
       { name: "AI Chat", detail: "Local Claude / Codex, streaming replies, web simulation", icon: "chat", screen: lazy(() => import("./demos/Chat").then((m) => m.Chat)) },
       { name: "Photos", detail: "A long recycled list: images, pull to refresh, paging", icon: "photos", screen: lazy(() => import("./demos/Photos").then((m) => m.Photos)) },
+      { name: "Block editor", detail: "A Notion-style document: a / menu of blocks, a handle on each block to add, drag and turn it into another, a toolbar over the selection", icon: "richtext", screen: lazy(() => import("./demos/BlockEditorDemo").then((m) => m.BlockEditorDemo)) },
     ],
   },
   {
@@ -161,16 +162,20 @@ const allGroups: { title: string; demos: DemoEntry[] }[] = [
       { name: "Windows", detail: "A writing app's windows: a floating inspector, preferences, a command palette, the document on its own", icon: "layers", screen: lazy(() => import("./demos/WindowsDemo").then((m) => m.WindowsDemo)) },
       { name: "Tray", detail: "nsh/desktop: an icon in the system tray with its tooltip, click and menu", icon: "system", screen: lazy(() => import("./demos/TrayDemo").then((m) => m.TrayDemo)) },
       { name: "Global shortcut", detail: "nsh/desktop: a keystroke heard whichever app has the keyboard", icon: "system", screen: lazy(() => import("./demos/ShortcutDemo").then((m) => m.ShortcutDemo)) },
+      { name: "Keyboard", detail: "Held arrows, modifier chords, capture bubbling and native Input ownership", icon: "button", screen: lazy(() => import("./demos/KeyboardDemo").then((m) => m.KeyboardDemo)) },
       { name: "Standard APIs", detail: "Files, processes, TCP, WebSockets, buffers, crypto and utilities", icon: "terminal", screen: lazy(() => import("./demos/Standard").then((m) => m.StandardDemo)) },
     ],
   },
 ];
 
-/** The demos a terminal has nothing to show for (pictures, GPU shaders, web
- * views and video), left out of its index. */
-const TERMINAL_HIDDEN = new Set(["Image", "Shader", "WebView", "Video", "Photos"]);
-
-const groups = terminal ? allGroups.map((g) => ({ ...g, demos: g.demos.filter((demo) => !TERMINAL_HIDDEN.has(demo.name)) })) : allGroups;
+/** The demos a terminal has nothing to show for, left out of its index. */
+const TERMINAL_HIDDEN: Record<string, true> = { Image: true, Shader: true, WebView: true, Video: true, Photos: true };
+const keyboardAvailable = !terminal && (platform.desktop || platform.os === "web");
+const groups = allGroups.map((g) => ({
+  ...g,
+  demos: g.demos.filter((demo) =>
+    (!terminal || !TERMINAL_HIDDEN[demo.name]) && (demo.name !== "Keyboard" || keyboardAvailable)),
+}));
 
 /** A group's demos (all of them, or those the search found) in runs under
  * their subheadings: one run without a subheading outside Elements. */
@@ -385,22 +390,35 @@ function SidebarToggle() {
 function Search() {
   let input: InputRef | undefined;
   keymap.bind("mod+k", () => input?.focus());
+  // The terminal's field is a lone input; elsewhere the input sits in the field's well beside the icon (below).
+  const look = terminal
+    ? field()
+    : {
+        get style() {
+          return { ...fieldText({ inWell: true }), paddingStart: 8 };
+        },
+      };
+  const box = (
+    <Input
+      ref={(node) => (input = node)}
+      {...look}
+      value={query()}
+      onChange={({ value }) => query.set(value)}
+      onKeyPress={(e) => e.key === "Escape" && query.set("")}
+      placeholder={`Search demos  ${keymap.label("mod+k")}`}
+      accessibilityLabel="Search demos"
+    />
+  );
+  if (terminal) return <View style={{ paddingHorizontal: TERMINAL_COLUMN, paddingBottom: TERMINAL_ROW }}>{box}</View>;
+  // The row centers the icon on the field, whatever its height; a press on the icon focuses the input.
   return (
-    <View style={terminal ? { paddingHorizontal: TERMINAL_COLUMN, paddingBottom: TERMINAL_ROW } : { paddingHorizontal: 12, paddingBottom: 8 }}>
-      <Input
-        ref={(node) => (input = node)}
-        {...field({ style: terminal ? undefined : { paddingStart: 26 } })}
-        value={query()}
-        onChange={({ value }) => query.set(value)}
-        onKeyPress={(e) => e.key === "Escape" && query.set("")}
-        placeholder={`Search demos  ${keymap.label("mod+k")}`}
-        accessibilityLabel="Search demos"
-      />
-      <If when={!terminal}>
-        <View style={{ position: "absolute", start: 20, top: 7, pointerEvents: "none" }}>
+    <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
+      <View {...fieldLook()} onPress={() => input?.focus()} focusable={false}>
+        <View style={{ paddingStart: fieldSize.pad, pointerEvents: "none" }}>
           <Icon name="search" size={14} tint={colors.faint} />
         </View>
-      </If>
+        {box}
+      </View>
     </View>
   );
 }

@@ -16,6 +16,7 @@ mod date_picker;
 mod dialog;
 mod diff;
 mod dock;
+mod dropdown_presence;
 mod editor;
 mod editor_completion;
 mod editor_definition;
@@ -45,6 +46,12 @@ mod slider;
 mod submenu;
 mod switch;
 mod tabs;
+#[cfg(feature = "term")]
+mod term;
+#[cfg(feature = "term")]
+mod term_cells;
+#[cfg(feature = "term")]
+mod term_input;
 mod terminal;
 mod text_view;
 mod time_field;

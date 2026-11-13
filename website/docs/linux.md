@@ -27,7 +27,10 @@ from `nsh_core::element::desktop` in Rust ([Desktop title bars](./rust.md#deskto
 - **GStreamer** 1.14 or later, which GTK plays video through and NSH plays sound with: to build the runtime its
   development packages, `libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev` on Debian and Ubuntu, `gstreamer
   gst-plugins-base` on Arch, `gstreamer1-devel gstreamer1-plugins-base-devel` on Fedora. Where apps run, GStreamer and
-  its base plug-ins (desktops have them), and the plug-ins for the video and audio formats your app plays.
+  its base plug-ins (desktops have them), and the plug-ins for the video and audio formats your app plays. The
+  development packages are for `Sound`, the runtime's Cargo feature `sound`: a Rust app that plays no sounds builds
+  without them by leaving that feature out (`default-features = false` on `nsh-platform-linux`), and video and
+  `AudioPlayer` still play through GTK.
 
 ## Running an app
 
@@ -132,6 +135,10 @@ view.load(Bundle::source(code).into());
 (`AssetBase::Directory` or `AssetBase::Http`). Bytecode bundles (`bundle.nshc`) load with `unsafe { Bundle::bytecode(bytes) }`:
 QuickJS bytecode is trusted input, so only load it from your own app's files. A standalone window is
 `nsh_platform_linux::run_app(source, options)`, with `AppSource::Rust(root)` or `AppSource::Bundle(bundle)`.
+
+`AppOptions::login_item` gives the app `run_app` runs its [login item](../modules/nsh-desktop.md#opening-at-login): an
+XDG autostart entry, `~/.config/autostart/<app_id>.desktop`, starting this executable. It is off by default and read
+by `run_app` alone, so an embedded app never launches at login; the runner of the apps `nsh package` builds sets it.
 
 `AppOptions::cache` (or `AppView::set_cache`, for the apps loaded next) sets where the apps keep their caches, the
 [images they download](./images-and-assets.md#kept-on-disk), and how much each keeps (`CacheOptions`: the system's

@@ -174,6 +174,12 @@ Things that were found the hard way. Read the section of the area you change bef
   container, so its superview's tag is 0. The control carries its scroll view's id as its own tag (`refresh_control`), and a
   pull only refreshes when that scroll view still holds this very control (`Mounter::refresh_pulled`), so a control of a
   deleted or replaced view reports nothing, even where a new view took its id.
+- **A large title collapses over a scroll view at the top of a lower header** (verified on the iOS 27 simulator):
+  UIKit reads that content as scrolled. It keeps a scroll view at its top only when the scroll view's safe area
+  changes. A stack laid out in the frame its first screen arrives leaves the bar at an inline title's height
+  (`sizeThatFits` gives the large one). `fit_large_title` sizes the bar when a stack shows a screen whose content is
+  at its top. A scroll view on screen that starts to adjust its insets (`contentInsetAdjustmentBehavior` automatic)
+  keeps its offset under the header. The mounter moves it to its top when it switches.
 - **Mac idiom custom pull to refresh**: on release, the system's bounce already targets the old inset (back to 0), so changing only
   `contentInset` hides the spinner; once refreshing starts, the offset is animated to the top inset plus the refresh room on the next main-queue turn. Synthetic
   tests need continuous scroll events with phases (began / changed / ended); plain wheel events never overscroll.
@@ -205,6 +211,11 @@ Things that were found the hard way. Read the section of the area you change bef
   (`UIScreen.mainScreen` and `UIWindow initWithFrame` are deprecated). The window size is fixed to 390×844 through `sizeRestrictions`.
 - Methods in `define_class!` that return `Retained<T>` need `#[unsafe(method_id(...))]`. Classes UIKit instantiates by name (AppDelegate,
   SceneDelegate) cannot have ivars; keep their state in statics or thread locals.
+- **A paste the input's delegate refuses crashes the app at the next undo** (iOS 26, `UITextField` and `UITextView`):
+  UIKit's `paste:` asks the delegate later, after it registered the paste's undo step, and undoing it replaces a
+  range the text never had (`NSMutableRLEArray` out of bounds). Inserting other text from the delegate during that
+  paste crashes the same way. An input with `maxLength` therefore pastes by itself (`input::paste_text`): it clips the
+  text, asks the delegate and calls `insertText:`, whose undo is right.
 - **UIKit implements the `UITextInputTraits` setters of `UITextField` by message forwarding**: objc2's debug-build signature
   check cannot find them on the class and panics, so `input.rs` sends them with a raw `objc_msgSend`.
 - **objc2 crates are used with `default-features = false`** and an explicit feature list in the root `Cargo.toml` (one feature per
@@ -218,6 +229,12 @@ Things that were found the hard way. Read the section of the area you change bef
   presented or dismissed over the stack sets the coordinator too and never reaches `didShow`) and are applied on the next
   main-queue turn (the coordinator outlives those callbacks); only pages the controller actually had count as popped by
   the user.
+- **A navigation bar shown again by a pop rests too high in a stack below the top of the window**: in a stack whose
+  view starts under the status bar (the app pads its root by the safe area), UIKit keeps the bar a few points down
+  (10 pt on an iPad). Popping a screen that hid the header slides the bar back in at the stack's very top, with the
+  screen's safe area to match, and UIKit moves neither until the screen's view is laid out again, which no pass during
+  the transition does (in `willShow`, alongside the transition, or of the navigation view). `didShow` asks for that
+  layout of the shown screen's view; `tests/header` checks it (`nsh test --target ios`).
 - **UIKit installs its own interactive-pop delegate while loading a navigation controller's view**: assigning NSH's
   delegate when the stack is created can be overwritten. Bind the current recognizer in `didShow`, after UIKit has
   configured the screen, so hidden headers use NSH's mounted `popOnSwipe` / `popOnBack` policy too. Verify the gesture
@@ -310,6 +327,11 @@ Things that were found the hard way. Read the section of the area you change bef
   measures again. A layout of precomputed text does not draw `UnderlineSpan` / `StrikethroughSpan` (even ones set after
   `create`): runs carry a `TextLayouts.Decoration` marker and `TextBox` draws the lines. `Layout.Alignment` is relative to each
   paragraph's direction: absolute left / right alignment sets an `AlignmentSpan` per paragraph from its resolved direction.
+  `StaticLayout.Builder.obtain` hands out pooled builders and, on Android 15, does not reset `useBoundsForWidth` or
+  `shiftDrawingOffsetForStartOverhang`; a `TextView` (an `Input`'s `EditText`) of an app targeting 35 or later turns them
+  on, and a layout from such a builder breaks lines by the glyphs' ink, wider than the advances text is measured by
+  ("Wor" / "k"): `TextLayouts` sets both to false on every builder (`examples/gallery/tests/text-bounds.test.tsx`, on a
+  device with `--target android`).
 - **Android, text hit testing**: `Layout.getOffsetForHorizontal` stops before the last cluster of a wrapped (non-last)
   line, so a hit past its end is snapped to the line's end (`TextLayouts.hitTest`, upstream); `getSelectionPath` adds
   margin rectangles when a range ends at a wrapped line's end, so range boxes come from the run's carets
@@ -359,6 +381,12 @@ Things that were found the hard way. Read the section of the area you change bef
   iOS's `handled_deeper` checks the link at the touch), so a card around plain text still shows its pressed style.
   While feedback shows, the root claims the gesture as a clickable view would: Android sends the release only to
   the view that took the down, and the release is what ends the feedback.
+- **Android, a pan view over a scroll view**: a `Box` that handles nothing leaves the down untaken, and Android then
+  offers it to the views under it: a scroll view the box lies over (a chat's composer over its messages) took the
+  drag and scrolled, and the box's pan never activated. A `Box` with a `panActivation` takes the down, as UIKit's hit
+  test gives the touch to the topmost view. Having taken the down from the views around it, the box hands its touch to
+  the nearest pressable `Box` around it (`Box.forwardTap`, in that box's coordinates) until its gate activates or the
+  finger passes the touch slop, so a tap presses that box as UIKit's press recognizers around a view do.
 - **Android, drags that start on a child**: a pannable `Box` intercepts the move that exceeds the slop and starts its pan right
   there; that intercepted move never reaches its `onTouchEvent`, so starting the pan there is what makes a quick flick (few moves)
   pan and end at all.
@@ -367,6 +395,10 @@ Things that were found the hard way. Read the section of the area you change bef
   copies the activity's bar appearance (light / dark icons).
 - **Android, nested scrolling**: scroll views enable nested scrolling, or an outer vertical ScrollView intercepts every vertical
   drag meant for an inner one.
+- **Android, a zoomed scroll view in a pager**: `HorizontalScrollView` intercepts a move past the touch slop before the
+  child sees it, with the same slop as `ZScroll`, so the pager took every horizontal drag of a zoomed image. `ZScroll`
+  asks its parents not to intercept from the down (`requestDisallowInterceptTouchEvent`) while it has content to pan and
+  gives that back when the drag has nothing to move or pushes past an edge a scroll view around can go on from.
 - **Android, safe area**: `NshView` reports only the parts of the system bars / keyboard that overlap it (like UIKit's
   `safeAreaInsets`), so embedded views below a toolbar get no top inset. Overlays use the same overlap (`topInset()`).
 - **Android, dev assets come over plain HTTP**, which apps block by default (API 28+): the dev host APK and `nsh-dev.aar` set
@@ -470,7 +502,8 @@ Things that were found the hard way. Read the section of the area you change bef
 
 - **Touches made in process do not move the first responder**: a made-up tap on a text field leaves the keyboard's
   focus where it was, so the agent focuses the input a tap lands in itself (as KIF does).
-- **`UITextField.insertText:` skips the field's delegate** (no `shouldChangeCharactersInRange`, so no `maxLength`):
+- **`insertText:` skips the delegate of `UITextField` and `UITextView`** (no `shouldChangeCharactersInRange`, so no
+  `maxLength`; `input::paste_text`, the agent's paste too, asks it first):
   typing goes through `UIKeyboardImpl`, which asks it, as the software keyboard does. Keys typed faster than a
   controlled input's value comes back lose characters, so keys come at a typist's pace.
 - **A finger at rest still reports its position**: a drag that stops sending events before it lifts keeps its last
@@ -486,6 +519,11 @@ Things that were found the hard way. Read the section of the area you change bef
   transition guards allow the gesture. `didShowViewController:` restores that editor if its page returns after
   cancellation and no other control took focus. Rejected gestures keep focus. The regression observes `onBlur` while the
   root's system-delivered touch is still down, rather than checking only after the page has detached.
+- **Interactive back and responders**: both pop recognizers sit on the navigation view, around every page, and
+  on iOS 26 the content one begins from a rightward drag anywhere in the page, so a drawing canvas's stroke would pop
+  its page while the responder still got the moves. A responder that blocks native gestures (`SetJsResponder`'s
+  `block`) turns them off until it lets go, as it does the pans of the scroll views around it
+  (`mount.rs` `set_js_responder`); turning a recognizer off also cancels a pop that began before the grant arrived.
 - **A hardware keyboard's keys are IOHID keyboard events** (`IOHIDEventCreateKeyboardEvent`, usage page 7) handed to
   UIKit the way touches are: they become presses, key commands and typing as a real keyboard's do. Modifiers are
   keys of their own (left Control, Shift, Option, Command), down before the key and up after it.
@@ -535,6 +573,12 @@ Things that were found the hard way. Read the section of the area you change bef
   built-in screen and a 60 Hz external one). `Surface::follow_screen` asks for the range again when the screen's
   `maximumFramesPerSecond` differs from the one it was made for.
 
+- **The unified log stores about 1 KB of an entry's text** (iOS too): a `%{public}s` message of 1010 bytes came back
+  whole from `log show` and one of 1016 bytes cut (measured, macOS 26.6), so `nsh_platform_apple::unified_log` logs
+  in entries of at most 960 bytes, split between lines. A packaged app opened from Finder, the Dock or the Home screen
+  has stderr on `/dev/null`, which is why its lines go there. In a non-interactive zsh (scripts, agents' shells) `log`
+  is zsh's builtin, which `/etc/zshrc` disables only for interactive shells: call `/usr/bin/log`.
+
 - **From macOS 27 AppKit decides whether a menu item shows its image, and typically hides it**: `setImage:` alone
   shows nothing, SF Symbols included. `NSMenuItem.preferredImageVisibility` `.visible` asks for it (the SDK's
   `NSMenuItem.h`); `chrome::set_icon` sets it, by `msg_send!` behind `respondsToSelector:` as objc2-app-kit has no
@@ -566,7 +610,9 @@ Things that were found the hard way. Read the section of the area you change bef
   still laid out for the old frame, so the frame's height minus its top is the bar plus the change in height (a
   400-pt bar after growing a window, none after shrinking it), and it stays so until something measures again.
   `chrome::update_area` reads a toolbar's height from the title bar view around the window's buttons, which has
-  the bar's height whatever the window's, and uses `contentLayoutRect` only without one.
+  the bar's height whatever the window's, and uses `contentLayoutRect` only without one; a measure from it runs
+  again on the next main-queue turn, once AppKit has laid the window out, since the root view's size may not change
+  again to trigger one.
 
 - A layer-backed `NSView`'s layer belongs to AppKit: moving or resizing the view sets its layer's anchor point,
   position and transform again. `NshView::place` sets the frame first, then anchor (top left), position, transform and
@@ -583,9 +629,15 @@ Things that were found the hard way. Read the section of the area you change bef
   hand them to the view under the pointer.
 - Clipping a layer (`masksToBounds`, a mask) clips its shadow too: a view that clips its children and casts a shadow
   moves the children into a container that clips, and keeps the shadow on its own layer.
-- `NSView`'s display link does not fire while the window is occluded or minimized, or the screen is locked. What ends
-  an animation must not wait for frames, or transitions never end there: the surface keeps their deadlines with a
-  one-shot timer (`Surface::keep_deadline`, docs/dev/animation.md "Deadlines"), never by ticking at a fixed rate,
+- `NSView`'s display link fires only while some of the view's window shows on a screen: not while the window is
+  hidden (ordered out, or never shown), minimized, wholly covered or off every screen, or the screen is locked. A
+  surface's one link drives all of its windows, so a link made from the root of a hidden main window (a tray app's,
+  `window.defaultVisible: false`) gave the app's other windows no frames at all: made from the hidden window's view
+  it fired 0 times in a second, from a shown window's 126, and in a `Window.open` window a trackpad scroll froze
+  under the fingers and jumped into place when the gesture ended (`settle`), and animations did not run. The link is
+  made from a window that shows and made again when that one hides (`window::link_root`, `macos.md` "Frames"). What
+  ends an animation must not wait for frames, or transitions never end there: the surface keeps their deadlines with
+  a one-shot timer (`Surface::keep_deadline`, docs/dev/animation.md "Deadlines"), never by ticking at a fixed rate,
   which would add a second clock beside the link's while the window shows.
 - **A window that is not key gives a left press only to a view that accepts the first mouse**; any other press just
   makes the window key. A hidden title bar's empty toolbar lies over the content's top, and on macOS 15 its

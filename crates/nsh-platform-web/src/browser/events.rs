@@ -117,6 +117,28 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
                     None => Value(1),
                 },
             ),
+            (
+                "button",
+                match m.button {
+                    Some(button) => Value::string(button.name())?,
+                    // `null`, as `PayloadValue::Null`.
+                    None => Value(1),
+                },
+            ),
+        ])?,
+        EventPayload::Pinch(p) => object([
+            ("position", point(p.position)?),
+            ("pagePosition", point(p.page_position)?),
+            ("delta", number(p.delta.0)),
+            ("phase", Value::string(p.phase.name())?),
+            ("modifiers", modifiers(&p.modifiers)?),
+        ])?,
+        EventPayload::Key(event) => object([
+            ("key", Value::string(event.key.as_str())?),
+            ("code", Value::string(event.code.as_str())?),
+            ("modifiers", modifiers(&event.modifiers)?),
+            ("repeat", boolean(event.repeat)),
+            ("defaultPrevented", boolean(event.default_prevented)),
         ])?,
         EventPayload::Wheel(w) => {
             let (dx, dy) = w.delta.xy();
@@ -170,6 +192,7 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
         }
         EventPayload::Picked { id, .. }
         | EventPayload::FileRequest { id, .. }
+        | EventPayload::CanvasImage { id, .. }
         | EventPayload::Speech { id, .. }
         | EventPayload::Audio { id, .. } => object([("id", number(*id))])?,
         EventPayload::Native { name, data } => object([

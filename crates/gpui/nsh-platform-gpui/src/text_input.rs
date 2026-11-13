@@ -640,7 +640,9 @@ fn xalign(config: &InputConfig) -> f32 {
 /// What waits for the next field.
 enum Held {
     Text(String),
-    Key(KeyEvent),
+    /// A key, with the key as the source reported it (when the focus
+    /// hears raw keys).
+    Key(KeyEvent, Option<crate::keys::RawKey>),
 }
 
 /// A surface's focused field, and whether the surface has the window's
@@ -840,7 +842,11 @@ pub(crate) fn engine_caught_up(surface: &Rc<Surface>) {
 /// there. The key comes after that text. True when kept. A key that types
 /// a character is not kept. Its text comes through the input method, and
 /// waits as text.
-pub(crate) fn hold_key(surface: &Surface, event: &KeyEvent) -> bool {
+pub(crate) fn hold_key(
+    surface: &Surface,
+    event: &KeyEvent,
+    raw: Option<&crate::keys::RawKey>,
+) -> bool {
     let m = event.modifiers;
     let edits = matches!(
         event.vk,
@@ -869,23 +875,41 @@ pub(crate) fn hold_key(surface: &Surface, event: &KeyEvent) -> bool {
         if focus.pending.is_empty() {
             return false;
         }
-        focus.pending.push_back(Held::Key(*event));
+        focus.pending.push_back(Held::Key(*event, raw.cloned()));
         true
     })
 }
 
 /// The app is taking `view` out. When the field with the keyboard is in
 /// it, text typed before the next field takes the keyboard waits for that
-/// field, as after an action that can move focus.
+/// field, as after an action that can move focus. The field lets go of the
+/// keyboard at once, with no `onBlur`, as a removed DOM element: a removal
+/// animation or a departing screen keeps it attached a while, when keys
+/// must not reach the gone component.
 pub(crate) fn removing(surface: &Surface, view: &NshView) {
     let Some(field) = FOCUS.with(|f| f.borrow().get(&surface.key()).and_then(|f| f.view.clone()))
     else {
         return;
     };
-    let mut at = Some(field);
+    let mut at = Some(field.clone());
     while let Some(node) = at {
         if node == *view {
             arm(surface);
+            if let Some(input) = input_of(&field) {
+                input.focused.set(false);
+                input.drag.set(None);
+                input.model.borrow_mut().composition = None;
+                input.relayout();
+            }
+            FOCUS.with(|f| {
+                if let Some(f) = f.borrow_mut().get_mut(&surface.key()) {
+                    f.view = None;
+                }
+            });
+            crate::input::set_state(surface, &field, state::FOCUSED, false);
+            field.changed();
+            blink::update();
+            surface.invalidate();
             return;
         }
         at = node.parent_view();
@@ -1003,8 +1027,8 @@ fn flush_pending(surface: &Rc<Surface>) {
                 };
                 insert(surface, &view, &input, &text, true);
             }
-            Held::Key(event) => {
-                crate::input::key_now(surface, event);
+            Held::Key(event, raw) => {
+                crate::input::key_now_raw(surface, event, raw);
             }
         }
         taken = true;

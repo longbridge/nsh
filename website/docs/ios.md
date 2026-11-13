@@ -15,7 +15,8 @@ or TSX it loads, including signed packages it downloads, under limits and capabi
 
 - **Xcode** on a Mac, with an iOS simulator runtime (`xcodebuild -downloadPlatform iOS` installs one). See
   [Installation](./installation.md#ios-and-mac-catalyst).
-- Apps need **iOS 15.0** or later, on iPhone and iPad.
+- Apps need **iOS 15.0** or later, or the later version an app names
+  ([Minimum system version](./packaging.md#minimum-system-version)), on iPhone and iPad.
 
 ## Running an app
 
@@ -46,6 +47,11 @@ From a Rust app's directory, the app is the iOS runner built with your crate; a 
 
 `--target ios` writes a signed `.ipa` for devices, TestFlight or the App Store. Signing identities, provisioning
 profiles and icons: [Packaging](./packaging.md#ios-devices).
+
+The app logs its warnings, its errors and its `console.log` and `console.info` lines to the unified log, with its id
+as the subsystem: Console shows a connected iPhone's, and
+`xcrun simctl spawn booted log stream --predicate 'subsystem == "com.example.notes"'` the simulator's
+([A packaged app's logs](./dev-server-and-debugging.md#a-packaged-apps-logs)).
 
 ## Embedding in an iOS app
 
@@ -185,6 +191,11 @@ final class EmbedController: UIViewController {
     override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation {
         NshAppView.preferredStatusBarUpdateAnimation
     }
+
+    // Let the page shown decide the orientations (`supportedOrientations`).
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        NshAppView.supportedInterfaceOrientations ?? super.supportedInterfaceOrientations
+    }
 }
 ```
 
@@ -220,6 +231,7 @@ The complete sample, a UIKit app that shows an NSH app below its own native head
 | `handle(_ name: String, _ handler:)` | Handles the app's calls (`host.call`) and posts (`host.post`) of `name` on the main thread: `{ data, reply in … }`, or an `async throws` function `{ data in … }` whose result answers the call. |
 | `removeHandler(_ name: String)` | Removes the handler of `name`: the app's calls of it fail at once. |
 | `static preferredStatusBarStyle`, `prefersStatusBarHidden`, `preferredStatusBarUpdateAnimation` | What the running apps asked for (their pages' and dialogs' `statusBar`, `nsh.json`'s default): return them from the hosting view controller's overrides. |
+| `static supportedInterfaceOrientations` | The orientations the page shown asked for (`NavPage`'s `supportedOrientations`): return it from the hosting view controller's override, its own when `nil`. |
 
 > [!IMPORTANT]
 > `bundle.nshc` (bytecode) loads only from inside the app bundle. QuickJS does not validate bytecode, so bytecode from
@@ -451,9 +463,15 @@ updates the app in place, logs appear in the `nsh dev` terminal, and errors show
   The JS engine runs on its own thread; the main thread never waits for it.
 - **Status bar.** The embedded app's pages and dialogs (`statusBar`) change what `NshAppView.preferredStatusBarStyle` and friends return;
   the hosting view controller must forward them, as in the example above.
+- **Orientations.** A page's `supportedOrientations` changes what `NshAppView.supportedInterfaceOrientations` returns;
+  the hosting view controller forwards it, as in the example above, and the screen turns as its controllers allow.
 - **Safe area.** Apps use `safe_area()` in Rust, and `env(safe-area-inset-*)` in padding or
   `safeAreaInsets()` from [`nsh`](../modules/nsh.md#safe-area-and-keyboard) in TSX, as usual. An `NshAppView` placed below your own header gets the insets that apply to it, not the window's.
 - **Mac Catalyst.** The same framework works in Catalyst apps.
+- **Logs.** The apps' warnings, errors and `console.log` and `console.info` lines go to the unified log, under your
+  app's bundle identifier, with the line's target as the category (`js` for `console.*`): Xcode's console shows them
+  while Xcode runs the app, and so do Console and `log stream`
+  ([A packaged app's logs](./dev-server-and-debugging.md#a-packaged-apps-logs)).
 
 ## See also
 

@@ -80,7 +80,19 @@ function Filters() {
 面板按内容高度布局，适合矮菜单；业务通过 `popupStyle` 或子元素高度约束较长内容，并自行绘制拖动条。
 iOS 中，内部竖向 `Scroll` 或 `List` 先消费滚动，到顶部后把同一次手势剩余的下拉位移交给面板。
 Android、桌面和 Web 使用已有的原生 pan 支持拖动条及滚动区域外的内容拖动，内部滚动沿用各平台的手势仲裁。
+面板开始跟手时结束编辑：其中获得焦点的输入框失焦，软键盘收起；只滚动内部列表不会收起键盘。
 将 `closeOnSwipe` 改为 false 后面板保持原位，内容和滚动位置保留。其他 `side` 保持现有行为。
+
+<a id="the-software-keyboard"></a>
+
+## 软键盘
+
+软键盘弹起时，贴着屏幕底边的面板（底部 sheet、左右两侧的抽屉）改为贴在键盘上沿，并随键盘的弹起和收起按键盘自己的曲线移动。
+面板底部照常按安全区留白（`pb-[env(safe-area-inset-bottom)]`，Rust 用 `.pb_safe_area()`），与没有键盘时一样：
+这段留白此时落在键盘后面，面板内容正好停在键盘上方，即安全区与键盘取较大者。被键盘抬起时，底部 sheet 内容再高也不会越过状态栏。
+`popupStyle` 中的 `maxHeight` 会取代这一上限，因此更矮的上限要自行扣除键盘超出安全区的高度（`keyboardFrame().height - safeArea().bottom`），
+例如 `windowSize().height - safeArea().top - Math.max(0, keyboardFrame().height - safeArea().bottom) - 24`。
+手机上以 sheet 呈现的菜单、选择器和日期选择器也是如此，它们的 `popupStyle` 或 `popupClass` 中的 `maxHeight` 同样取代其上限。
 
 <a id="native-sheets"></a>
 

@@ -85,9 +85,9 @@ apps (ratatui's, gitui, MS Edit) do is the reference; the desktop look and motio
 components branch on `terminal::is_terminal()` for this, so the desktops and mobile keep their own behavior.
 
 The viewport's bottom row is the status line (`crates/nsh-base/src/status_line.rs`): a toast's message and the
-tooltip of what the focus or the pointer is on show there, one at a time. The components claim it (`claim`) and draw
-it (`line`) through that module, so they share its place and its rule: a toast wins over a hint, and of two claims of a
-kind the newer shows.
+tooltip of what the pointer or the focus the keyboard moved is on show there, one at a time. The components claim it
+(`claim`) and draw it (`line`) through that module, so they share its place and its rule: a toast wins over a hint,
+and of two claims of a kind the newer shows.
 
 A pressable mark of one Cell (a trigger's `▾`, a field's clear `×`, a mask toggle, a stepper's `−` / `+`) takes a slot
 of three Cells, ` ▾ `, and the whole slot takes the press, so a pointer need not land on the glyph itself. Slots
@@ -369,7 +369,9 @@ Their child views draw and receive input in the reserved space, and attachments 
 Wrapping prefers spaces after content, then breaks inside a word. Leading indentation stays with the first part
 of the word instead of becoming a separate whitespace-only row. Explicit newlines
 preserve empty rows. A grapheme wider than the available line remains whole and is clipped by drawing.
-`numberOfLines` limits the rows; tail, head and middle ellipses reserve one Cell, while clip adds no marker.
+`numberOfLines` limits the rows; tail, head and middle ellipses reserve one Cell, while clip adds no marker. The
+last row a tail ellipsis cuts holds the rest of its paragraph and is cut at the box, spaces before the ellipsis
+dropped, as the other backends cut it.
 Alignment becomes a whole-Cell indent. Line geometry reports UTF-16 offsets and point dimensions, as the core's
 `TextEngine` contract requires. Custom font registration succeeds with the terminal font remaining in use.
 

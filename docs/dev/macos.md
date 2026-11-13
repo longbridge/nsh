@@ -61,7 +61,8 @@ belong to the app, which owns retention and its storage budget.
   container layer's `sublayerTransform`, so a scroll frame is one layer write; the container's bounds origin takes
   it, as `NSClipView` scrolls, once the view and the display link rest, as `setBoundsOrigin:` walks the subtree;
   a press and anything that asks AppKit where a view is commit first). Scroll views containing inputs update the
-  bounds origin on each move so AppKit draws newly visible fields at their current positions. `view.rs` tracks
+  bounds origin on each move so AppKit draws newly visible fields at their current positions; zoomable ones update
+  the bounds (their size is the frame's over the zoom scale) on each move and zoom. `view.rs` tracks
   inputs as subtrees are inserted and removed, without searching descendants on scroll frames. Views that clip
   their children and cast a shadow also use containers (clipping a layer clips its shadow). Hosted AppKit views
   (text fields, videos, web views) are `ViewState::natives`, above the children; hit testing follows the AppKit order
@@ -135,33 +136,50 @@ belong to the app, which owns retention and its storage budget.
   the frames the layout gave, `view::Planned`: left in place, a view leaving the screen would stay over what took its place) and
   the resize's end places the rest (`viewDidEndLiveResize`). Moving a view costs the main thread and Core Animation's
   commit whether it shows or not.
-  A text's content layer keeps its picture through another width of the same lines (`text::draws_the_same`,
-  `kCAGravityTopLeft`); a picture drawn in a layer narrower than its box, a view still waiting to be placed
-  (`DrawnText::cut`), draws again once placed.
+  A text's content layer keeps its picture through another size that still covers it (`text::draws_the_same`,
+  `kCAGravityBottomLeft`, the visual top left under the flipped host layer); a picture drawn in a layer smaller than its
+  box (`DrawnText::cut`), whether still waiting to be placed or at the start of a `LayoutAnimation`, draws again as it
+  grows. A text that only changed colors or hidden runs in the same layout redraws only the lines of what changed,
+  across the view (`text::damage`, through `NshView::redraw_rect`).
   Where the app has not drawn yet, the surface's background shows: the app's top view's opaque background when it
   fills the root (`system.rs`), else white / neutral-950 by the scheme.
 - **Text is typeset on the engine thread** by CoreText (`text.rs`, the iOS engine with `NSFont`); the main thread
   draws the finished `CTLine`s. A final layout is made when first read (`CoreTextLayout`), so text nothing shows is
   not typeset twice; when that read is the main thread's, it holds the text's lock for the time of one layout. Texts
   with attachments are made at once on the engine.
-- **Frames**: native animations, JS frame requests, scroll glides and transitions run on the root view's display
-  link (`NSView::displayLinkWithTarget_selector`) while something animates. Its `preferredFrameRateRange` asks for the
-  screen's `maximumFramesPerSecond`, or less while everything that wants frames asked for a lower rate (`frameRate`,
-  `animationFrameRate`: `animation.md` "Frame rate"): `Surface::frame_rate` folds the graph's rate with the frame
-  callbacks that report one (`Surface::cap_frame`, a view's keyframes alone); anything else (a JS frame request, a
-  batch waiting, a transition, a scroll glide) wants the screen's highest. The range (`frame_rate_range`) is set when
-  the link starts or resumes, whenever the folded rate changes, and when the window's screen refreshes at another
-  highest rate than the range was made for (`Surface::follow_screen`, checked each frame). The link does not fire while the window is
-  occluded or minimized or the screen is locked. Frame callbacks report what they have left (`Next`: done, drawing
-  only, or a deadline), and `Surface::keep_deadline` keeps the earliest deadline (the graph's, a callback's, a batch
-  waiting for a frame) with one main-queue timer 50 ms past it: if no frame ran since it came due, it runs one, so
-  animations end and report it on time without frames ("Deadlines" in docs/dev/animation.md). Drawing-only work (an
-  endless animation, a shader, a JS frame request) waits for the link.
+- **Frames**: native animations, JS frame requests, scroll glides and transitions run on one display link per surface
+  (`NSView::displayLinkWithTarget_selector`) while something animates, which drives every window of the surface, the
+  app's own (`Window.open`) too. AppKit fires a view's link only while some of the view's window shows on a screen
+  (`pitfalls.md`), so the link is made from the root view of a window that shows (`window::link_root`; the choice is
+  `window::link_window`): the main window's root (the surface's, an embedded `AppView`'s in its host's window) while
+  that window shows, as always; else, the main window hidden (a tray app's, `defaultVisible: false`), minimized or
+  covered, the root of a window of the app's own that shows, the key one first, then the one the link follows now,
+  then any. While none shows, the link stays where it is. A window shows (`window::Sight::seen`) while it is ordered
+  in, its app not hidden, not minimized, on a screen and its `occlusionState` `Visible` (not wholly covered, the
+  screen not locked; the window server sets it a moment after the window is ordered in or out). The choice is checked
+  where the link starts, resumes or keeps running (`Surface::ensure_ticking`), on each window's notifications of being
+  shown, hidden, minimized, covered or uncovered, moved to another screen or made key (`window_state.rs`), and when a
+  window of the app's own closes (`Surface::follow_windows`): a link made from a window that is no longer the one is
+  made again from the right one while it runs (a paused one goes, and the next start makes it there). Its
+  `preferredFrameRateRange` asks for the `maximumFramesPerSecond` of the screen of the window it follows, or less
+  while everything that wants frames asked for a lower rate (`frameRate`, `animationFrameRate`: `animation.md` "Frame
+  rate"): `Surface::frame_rate` folds the graph's rate with the frame callbacks that report one (`Surface::cap_frame`,
+  a view's keyframes alone); anything else (a JS frame request, a batch waiting, a transition, a scroll glide) wants
+  the screen's highest. The range (`frame_rate_range`) is set when the link is made, starts or resumes, whenever the
+  folded rate changes, and when that screen refreshes at another highest rate than the range was made for
+  (`Surface::follow_screen`, checked each frame). No link fires while none of the surface's windows shows or the
+  screen is locked. Frame callbacks report what they have left (`Next`: done, drawing only, or a deadline), and
+  `Surface::keep_deadline` keeps the earliest deadline (the graph's, a callback's, a batch waiting for a frame) with
+  one main-queue timer 50 ms past it: if no frame ran since it came due, it runs one, so animations end and report it
+  on time without frames ("Deadlines" in docs/dev/animation.md). Drawing-only work (an endless animation, a shader, a
+  JS frame request, a trackpad gesture's resampled offsets) waits for the link.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a view. One placed in another view's content (not its
   window's content view) passes a scroll that begins where none of its scroll views can move up the responder chain,
   so the host scrolls (`input::forwards_scroll`). `run_app` opens one in a window with a standard menu
   (About, Hide, Quit; Edit's undo / redo / cut / copy / paste / select all, which fields answer; Minimize, Zoom, Enter
-  Full Screen, Close), titled with `AppOptions::title`: `name_app` sets the main bundle's `CFBundleName` to it, as the
+  Full Screen, Close: items of those roles, `chrome::role_item`, labelled in the language the app
+  shows, as its role-only menu items are; the core sends `DesktopCommand::SetMenuLabels` when that language changes
+  (`nsh/i18n`), rebuilding both and the tray menu (`chrome::relabel`)), titled with `AppOptions::title`: `name_app` sets the main bundle's `CFBundleName` to it, as the
   menu bar shows that (the development host has no bundle; `nsh run` passes it the app's name with `--name`). The window
   opens centered where AppKit centers a new one, or on `AppOptions::display`: a `WindowDisplay::Index` of
   `NSScreen.screens` (the host's one-based `--display <n>`) or `WindowDisplay::Secondary` (`--display secondary`,
@@ -197,8 +215,9 @@ belong to the app, which owns retention and its storage budget.
 | Decoration | `decor.rs`, `visual.rs` | The view's layer for one radius (circular or continuous), shape layers for differing radii and borders whose sides differ or are dashed / dotted; box and inset shadows, gradients, outlines, filters (iOS's `visual.rs`), `mixBlendMode` as the layer's compositing filter; a backdrop as a subview: an `NSVisualEffectView` with `macos={{ backdrop }}`'s material, blending and state or the blur's popover material, or glass with `glassTintColor`, with the background moved to a fill layer above it; `apply` caches what it set, so per-frame calls are cheap |
 | Images | `image.rs`, `blur.rs` | Loaded through the core's shared loader and decoded images (`docs/dev/images.md` "Loading and memory"): ImageIO thumbnails at the view's size bucket, in the process's image budget, downloaded with `NSURLSession` (the core loader's transport hook, so the system's proxies, authentication and ATS apply), leased by the views showing them; blur and color filters baked into variants in the same budget; `asset:/`, http(s), `file:`, `data:`; tint as a colored layer masked by the image; animated GIF / APNG / WebP as a keyframe animation of `contents` |
 | Canvas | `canvas.rs` | The recorded drawing replayed with Core Graphics (iOS); drawings that clear or composite go into a transparency layer, so they only touch the canvas's own pixels |
-| Scroll views | `scroll.rs` | Offsets of their own (the rubber band, deceleration, snap durations, the indicator's geometry and reveal distances are `nsh_core::scroll`'s, the other desktops'), shown by the container's bounds origin when it contains inputs, otherwise by its layer's `sublayerTransform` and committed to its bounds origin at rest; trackpad scrolls follow the system's phases and momentum (rubber banding while the fingers are down, a spring back after; a mouse press anywhere stops the momentum), notched wheels move 10 points per line and stay on their view for 200 ms; mouse drags never scroll (they are the app's: pans, responders, text selection); snapping and paging glide from where the fingers lift; sticky cells; the indicator and refresh spinner in an overlay view that lets the mouse through (the root still lets the mouse drag the indicator as a scroll bar, and the indicator shows and is kept as on Linux); the keyboard scrolls as on Linux; a field that gets the focus is scrolled into view |
+| Scroll views | `scroll.rs` | Offsets of their own (the rubber band, deceleration, snap durations, the indicator's geometry and reveal distances are `nsh_core::scroll`'s, the other desktops'), shown by the container's bounds origin when it contains inputs, otherwise by its layer's `sublayerTransform` and committed to its bounds origin at rest; trackpad scrolls follow the system's phases and momentum (rubber banding while the fingers are down, a spring back after; a mouse press anywhere stops the momentum), notched wheels move 10 points per line and stay on their view for 200 ms; mouse drags never scroll (they are the app's: pans, responders, text selection); snapping and paging glide from where the fingers lift; sticky cells; the indicator and refresh spinner in an overlay view that lets the mouse through (the root still lets the mouse drag the indicator as a scroll bar, and the indicator shows and is kept as on Linux); the keyboard scrolls as on Linux; a field that gets the focus is scrolled into view; zoomable views (`maximumZoomScale` above `minimumZoomScale`) scroll both ways, zoom with trackpad pinches and Control + wheel around the pointer and with `zoomTo` (eased, as the web's), center content smaller than the viewport (`centerContent`) and show no indicator |
 | Input | `input.rs`, `nsh_core::input` | The root's `hitTest:` takes every mouse event inside it, and NSH picks the view itself (transforms inverted, `overflow`, `pointerEvents`, hit slop, hidden screens, views animating out); a hosted view gets the event from AppKit only where NSH's picking lands on it, even below `pointerEvents: none` overlays (`native_at`): AppKit's own picking would give a web view the clicks on what NSH draws over it (a menu outside its parent's frame, transformed views) and on web views that are hidden, animating out or under `pointerEvents: none`. Touches for the responder system, `panActivation` gates, presses, long presses, pressed and hovered states, `onMouseEnter` / `onMouseLeave` / `onMouseMove`, cursors (`NSCursor`), native pans, trackpad pinch and rotation (Control + wheel pinches), the mouse's back button goes back; the decisions over plain data (a press's events, `panActivation` gates, hover changes, hit areas, wheel latching) are `nsh_core::input`'s, shared with the other desktop backends |
+| Keyboard | `keyboard.rs`, `keymap.rs`, `input.rs` | One local monitor per surface (`addLocalMonitorForEventsMatchingMask:`) sees `KeyDown`, `KeyUp` and `FlagsChanged` before AppKit dispatches them: the app's keymap match first, then the focused custom view's raw event and its mounted capture rules, then the menus and the responder's defaults (see "Keyboard"); interest and capture follow the logical keyboard ancestry (`ViewProps::key_parent` for a portaled `Overlay`), not the native insert parent; the first responder's `keyDown:` / `keyUp:` / `flagsChanged:` report raw events too when AppKit or a host hands a key to a view directly (the same event is not reported twice); a left press focuses the innermost `focusable={true}` view |
 | Text inputs | `text_input.rs` | `NSTextField` / `NSSecureTextField`, multiline `NSTextView` in an `NSScrollView`, hosted at the content box in a view that fills the input (`InputPad`: a click on the padding, or beside a field's line, goes to the editor at the nearest point; hidden while the input or its content box has no area, as in a `display: none` subtree, since it does not clip), borderless (the view draws the decoration); edit counts drop stale JS values; offsets are `NSString`'s UTF-16; a click outside a field that edits leaves the focus in it (the root refuses first responder during a mouse press), `blur()` and Escape hand it over; return does what `submitBehavior` says (see "Keyboard") |
 | Navigation | `navigation.rs` | The decisions shared with the other desktops (`nsh_core::navigation`: the screens a stack shows and the user popped, transitions' timing, easing and offsets, what going back acts on); pages are child views, only the top one (and the one below during a transition) visible; NSH draws no header: a page's `header` (the app's view) is a child of the page that the core places at its top, as wide as the page, with the content below it and kept above it (the system header's items of iOS and Android stay hidden); each page has an opaque backdrop in the window's color under the app's content; a page the app removes leaves as an image (`renderInContext`), since the core empties it in the next batches, and so does a dialog; the rendering has no web page or video in it (other processes draw them), so their live views are lent to the image where they were, clipped to a rectangle (`native::lend`), and given back or let go when it is gone; Escape (unless a field or a web view has the focus: then it hands the keyboard to the root), Option+Left, Cmd+[ and the mouse's back button send `onBackPress` to the top page when the app listens and pop natively unless its `popOnBack` is false (a stack inside the newest dialog first, else that dialog gets the close attempt, `"cancel"`, and closes when `closeOnEscape`; without a dialog, the app's back listeners hear it before the stacks, and `Command::Back` goes on when none takes it); a focused page sees these keys first, and they reach the root only when it does not use them (WebKit sends unused keys up the responder chain) |
 | Dialogs (`Dialog`) | `navigation.rs` | Children of the root above the app's views, at the size of the surface, sliding up or fading in: transparent layers with no look of their own, showing only the app's popup and backdrop (`presentation` is ignored) |
@@ -209,16 +228,29 @@ belong to the app, which owns retention and its storage budget.
 | Video | `native.rs` | AVFoundation (loaded at run time, as on iOS): an `AVPlayerLayer` in a view that lets the mouse through, or AVKit's `AVPlayerView` with `controls` |
 | Web views | `native.rs` | `WKWebView` (iOS's bridge: `window.nsh.postMessage`, injected JS, the `webview` capability's navigation policy, every prop, event and command iOS has; the URL schemes the app serves, `url_scheme`, through `nsh-platform-apple`'s `web_scheme`, one `WKURLSchemeHandler` per web view set on its configuration before it is made, shared with iOS); a `file://` `src` loads with `loadFileURL`, reading the file's own folder and nothing above it (`file_read_scope`: `file://localhost/` is the same local path as `file:///`; none for another host, a file at the root or a path with a `.` or `..` segment, which load as plain requests), and the navigation policy lets that web view open any file in that folder or below it, so a local multi-page HTML document can link between its pages; any file URL outside it is refused (`navigation_allowed`); a web view is transparent by default (`drawsBackground = false`), a page without a background showing the view behind it; macOS's web view has no scroll view to turn off, so with `scrollable={false}` the root's `hitTest:` keeps wheel and trackpad scrolls from it (`passes_wheel`) and they scroll the app's scroll views around it (the page's own keys and scripts still scroll it; swipes between pages, `allowsBackForwardNavigationGestures`, are scrolls too) |
 | Native components | `native.rs` | `AppView::register_component(name, factory)`; a `NativeComponent`'s `NSView` fills the node's view; `ComponentContext::emit` / `set_size` from any thread |
-| Accessibility | `access.rs` | `NSAccessibility` setters on the views: roles and subroles, labels, values, states, `testID` as the identifier; a scroll view is an `AXScrollArea` whose scroll bar on its axis (`access/scroll_bar.rs`, an `NSAccessibilityElement` made when a client first asks) has where it is scrolled to as its value, 0 to 1, and posts its value's changes as it scrolls; `accessible={true}` hides the children, `accessibilityElementsHidden` and `visibility: hidden` the view and its subtree (as in a browser), the view answering `accessibilityChildren` itself: a scroll view's and a page list's (`ViewProps::screen_order`) as they are on screen (`nsh_core::scroll::reading_order`, by the frame of the child each element is in), every other view's in tree order; live regions announced; `AXShowMenu` (VoiceOver's VO-Shift-M) on a view that listens to `onContextMenu` raises it with no pointer (`input::accessibility_show_menu`), which is how the keyboard reaches context menus on a Mac (AppKit has no Shift+F10) |
-| Environment | `system.rs` | Color scheme: the app's appearance when it forces one, else the root's effective appearance (the root's appearance is set to the app's, so hosted controls follow); locale and RTL from `NSLocale`, reduce motion and VoiceOver from `NSWorkspace` (live), the backing scale factor (again when the window moves to another screen: `pixelRatio()`), the OS version; whether the app is in use (`lifecycle()`: `background` while none of it shows, hidden or `NSApplication.occlusionState` without `visible` (its windows minimized or covered), `active` while it is the active app, else `inactive`; live, from `NSApplication`'s activation, hiding and occlusion notifications, the embedding app's for an embedded surface); the preferred languages (`localeSettings()`'s `languages`: `NSLocale.preferredLanguages`, read again with the other settings); the regional preferences (`localeSettings()`'s `hourCycle` and the like: the hours of `NSDateFormatter`'s `j` format, `NSCalendar.firstWeekday`, `NSLocale`'s measurement system and the `AppleTemperatureUnit` default, over `LocaleSettings::parse` of the locale's identifier; read again with the other settings); the time zone (`localeSettings()`'s `timeZone`: `NSTimeZone.systemTimeZone`'s name, live from `NSSystemTimeZoneDidChangeNotification`, Foundation's cached zone reset first); `platform.os` `"macos"`, idiom `desktop`, font scale 1, safe area and keyboard height 0 |
-| Window chrome (`nsh/desktop`) | `chrome.rs` | The `title` attribute; a hidden title bar is `FullSizeContentView` with a transparent, untitled title bar (the traffic lights stay), its area (native frame geometry, including `contentLayoutRect` for a toolbar, and the zoom button's right edge + 8) reported as the environment's `title_bar`, 0 in full screen; a left drag on a `windowDrag` view calls `performWindowDragWithEvent:`, while a click reaches the app (including ancestor press handlers) only if its original view remains under the pointer and draggable; replacing the app cancels the pending press; a double click does what `AppleActionOnDoubleClick` says (zoom by default); `setBounds` merges the fields given with the window's frame and calls `setFrame:display:animate:` (`x`/`y` are the top left corner, down from the primary screen's top as on the other platforms: `appkit_frame` flips `y` at the height of `NSScreen.screens[0]`, whose bottom is the origin of Cocoa's screen coordinates on every display arrangement, and a `height` without a `y` keeps the top edge), the `level` attribute maps to an `NSWindowLevel` (`desktopIcon` is `kCGDesktopIconWindowLevel`, and it also makes the window stationary on every space, out of Mission Control and Cmd+`); `focus()` deminiaturizes, activates the app (`activateIgnoringOtherApps:`, as other toolkits' focus calls do: `activate()` only asks since macOS 14 and is turned down after a click on the app's tray icon; `show()` and a new window ask: `pitfalls.md`) and makes the window key; the application menu replaces the main menu (its first submenu is the app menu; the replaced one comes back with `null`), context menus are `popUpMenuPositioningItem:atLocation:inView:` from the main queue (they track the mouse in a loop of their own; one the app opens without a place opens where the root's last pointer event was (a move, or a press or release of any button: a right click's menu opens at that click), else at the cursor: the test agent's input leaves the cursor where it is); a menu item's `icon` (`MenuAction::icon`, `MenuItem::Submenu`'s, but not the bar's titles) goes through the images' pipeline (`image::load_menu_icon`, off the main thread, at the largest scale of the screens, since a menu opens on any of them) and arrives as `NSMenuItem.setImage` of an `NSImage` of up to 16pt, with `preferredImageVisibility` `.visible` (from macOS 27 AppKit hides items' images otherwise: `pitfalls.md`); an SVG is a template (`setTemplate`), which AppKit paints in the text's color (dark mode, selection, disabled), and a bitmap keeps its colors; a load is given up with its menu, a failed one warns and leaves the item as it is; role items send AppKit's standard actions down the responder chain and are not reported, the others target an `NshMenuTarget` that reports their tag; AppKit validates the items (roles are enabled and titled by the responder chain: `Undo Typing`, `Exit Full Screen`), a disabled item's action is one nothing answers; with an app's bar height NSH attaches no toolbar (from macOS 26 a toolbar enlarges the window's corners: `pitfalls.md`) and centers the traffic lights itself (`TrafficLights`, per window, the main one and the app's own): the title bar's container (the close button's superview's superview) as tall as the bar at the window's top, the three buttons moved down to its middle with AppKit's `x` (or to the app's `controlsOffset`), placed again from the frame-change notifications of the buttons and the container, inside the layout that moved them (every live-resize frame, another screen, leaving full screen), and given back their frames with the system's bar, in another window or when the window goes; nothing is placed in full screen; `titleBar().height` is the app's height; a host's existing toolbar stays untouched and reports its obscured height, the title bar view's around the traffic lights and the toolbar (`contentLayoutRect` lags the frame during a resize: `pitfalls.md`), refreshed after deferred layout |
-| Window state (`nsh/desktop`'s `WindowRef.state()`, `displays`, `setPlacement`) | `window_state.rs` | The window's move, resize, (de)miniaturize, full screen and screen notifications read its state again into the environment, which the engine holds back until a move stops; the displays are `NSScreen.screens`, in NSH's screen coordinates (the primary screen's top left, `y` down), sent before the app starts and again when the screens change, each with an id that stays from one launch to the next; `setPlacement` restores the frame, then zooms or enters full screen |
+| Accessibility | `access.rs` | `NSAccessibility` setters on the views: roles and subroles, labels, values, states, `testID` as the identifier; a scroll view is an `AXScrollArea` whose scroll bar on its axis (`access/scroll_bar.rs`, an `NSAccessibilityElement` made when a client first asks) has where it is scrolled to as its value, 0 to 1, and posts its value's changes as it scrolls; `accessible={true}` hides the children, `accessibilityElementsHidden` and `visibility: hidden` the view and its subtree (as in a browser), the view answering `accessibilityChildren` itself: a scroll view's and a page list's (`ViewProps::screen_order`) as they are on screen (`nsh_core::scroll::reading_order`, by the frame of the child each element is in), every other view's in tree order; live regions announced, and an alert (`role="alert"`) read whole as it appears and as its content changes, once the batch is in; `AXShowMenu` (VoiceOver's VO-Shift-M) on a view that listens to `onContextMenu` raises it with no pointer (`input::accessibility_show_menu`), which is how the keyboard reaches context menus on a Mac (AppKit has no Shift+F10) |
+| Environment | `system.rs` | Color scheme: the app's appearance when it forces one, else the root's effective appearance (the root's appearance is set to the app's, so hosted controls follow); locale and RTL from `NSLocale`, reduce motion and VoiceOver from `NSWorkspace` (live), the backing scale factor (again when the window moves to another screen: `pixelRatio()`), the OS version; whether the app is in use (`lifecycle()`: `background` while none of it shows, hidden or `NSApplication.occlusionState` without `visible` (its windows minimized or covered), `active` while it is the active app, else `inactive`; live, from `NSApplication`'s activation, hiding and occlusion notifications, the embedding app's for an embedded surface); the preferred languages (`localeSettings()`'s `languages`: `NSLocale.preferredLanguages`, read again with the other settings); the regional preferences (`localeSettings()`'s `hourCycle` and the like: the hours of `NSDateFormatter`'s `j` format, `NSCalendar.firstWeekday`, `NSLocale`'s measurement system and the `AppleTemperatureUnit` default, over `LocaleSettings::parse` of the locale's identifier; read again with the other settings); the time zone (`localeSettings()`'s `timeZone`: `NSTimeZone.systemTimeZone`'s name, live from `NSSystemTimeZoneDidChangeNotification`, Foundation's cached zone reset first); `platform.os` `"macos"`, idiom `desktop`, font scale 1, safe area and keyboard height 0; the wake count (`wakeCount()`: one more on every `NSWorkspaceDidWakeNotification`) |
+| Window chrome (`nsh/desktop`) | `chrome.rs` | The `title` attribute; a hidden title bar is `FullSizeContentView` with a transparent, untitled title bar (the traffic lights stay), its area (native frame geometry, including `contentLayoutRect` for a toolbar, and the zoom button's right edge + 8) reported as the environment's `title_bar`, 0 in full screen; a left drag on a `windowDrag` view calls `performWindowDragWithEvent:`, while a click reaches the app (including ancestor press handlers) only if its original view remains under the pointer and draggable; replacing the app cancels the pending press; a double click does what `AppleActionOnDoubleClick` says (zoom by default); `setBounds` merges the fields given with the window's frame and calls `setFrame:display:animate:` (`x`/`y` are the top left corner, down from the primary screen's top as on the other platforms: `appkit_frame` flips `y` at the height of `NSScreen.screens[0]`, whose bottom is the origin of Cocoa's screen coordinates on every display arrangement, and a `height` without a `y` keeps the top edge), the `level` attribute maps to an `NSWindowLevel` (`desktopIcon` is `kCGDesktopIconWindowLevel`, and it also makes the window stationary on every space, out of Mission Control and Cmd+`); `focus()` deminiaturizes, activates the app (`activateIgnoringOtherApps:`, as other toolkits' focus calls do: `activate()` only asks since macOS 14 and is turned down after a click on the app's tray icon; `show()` and a new window ask: `pitfalls.md`) and makes the window key; the application menu replaces the main menu (its first submenu is the app menu; the replaced one comes back with `null`), context menus are `popUpMenuPositioningItem:atLocation:inView:` from the main queue (they track the mouse in a loop of their own; one the app opens without a place opens where the root's last pointer event was (a move, or a press or release of any button: a right click's menu opens at that click), else at the cursor: the test agent's input leaves the cursor where it is); a menu item's `icon` (`MenuAction::icon`, `MenuItem::Submenu`'s, but not the bar's titles) goes through the images' pipeline (`image::load_menu_icon`, off the main thread, at the largest scale of the screens, since a menu opens on any of them) and arrives as `NSMenuItem.setImage` of an `NSImage` of up to 16pt, with `preferredImageVisibility` `.visible` (from macOS 27 AppKit hides items' images otherwise: `pitfalls.md`); an SVG is a template (`setTemplate`), which AppKit paints in the text's color (dark mode, selection, disabled), and a bitmap keeps its colors; a load is given up with its menu, a failed one warns and leaves the item as it is; role items send AppKit's standard actions down the responder chain and are not reported, the others target an `NshMenuTarget` that reports their tag; AppKit validates the items (roles are enabled and titled by the responder chain: `Undo Typing`, `Exit Full Screen`), a disabled item's action is one nothing answers; with an app's bar height NSH attaches no toolbar (from macOS 26 a toolbar enlarges the window's corners: `pitfalls.md`) and centers the traffic lights itself (`TrafficLights`, per window, the main one and the app's own): the title bar's container (the close button's superview's superview) as tall as the bar at the window's top, the three buttons moved down to its middle with AppKit's `x` (or to the app's `controlsOffset`), placed again from the frame-change notifications of the buttons and the container, inside the layout that moved them for centering, or on the next main-queue turn for `controlsOffset`, using saved AppKit spacing (every live-resize frame, another screen, leaving full screen), and given back their frames with the system's bar, in another window or when the window goes; nothing is placed in full screen; `titleBar().height` is the app's height; a host's existing toolbar stays untouched and reports its obscured height, the title bar view's around the traffic lights and the toolbar (`contentLayoutRect` lags the frame during a resize: `pitfalls.md`), refreshed after deferred layout |
+| Window state (`nsh/desktop`'s `WindowRef.state()`, `displays`, `setPlacement`) | `window_state.rs` | The window's move, resize, (de)miniaturize, full screen and screen notifications read its state again into the environment, which the engine holds back until a move stops; the displays are `NSScreen.screens`, in NSH's screen coordinates (the primary screen's top left, `y` down), sent before the app starts and again when the screens change, each with an id that stays from one launch to the next; `setPlacement` restores the frame, then zooms or enters full screen; `hide()` (and a main window kept alive on close) takes a full screen window out of full screen first and orders it out once it is back on its desktop, so its space goes with it |
 | Windows (`nsh/desktop`'s `<Window>`, `Window.open`, `WindowRef`) | `window.rs` | Every window renders from the surface's one engine. A window of the app's own is a dialog root the core sends `OpenWindow` for: it leaves the main window's modals and becomes the content of a window of its own, its size the root's, its input routed to the surface with that root as the one events are picked in, shown once its first frame is in (focused, when the app called `focus()` meanwhile: `Window.open(..).focus()`). Kinds pick the class: `normal` and `dialog` are `NshWindow`s (a dialog is a child window of its parent; a modal one holds its parent's input), `panel` an `NSPanel` with the small title bar, `popup` and `overlay` borderless panels (an overlay ignores the mouse); a panel whose `activate` attribute is false (the default of `panel` and `overlay`, not of `popup`) is non-activating (`NonactivatingPanel`) and never activates the app. `SetAttributes` maps each attribute onto the window (style mask, content size limits, level, collection behavior, `NSVisualEffectView` backdrops, sharing type, document edited, represented URL, tabbing), the same code for the main window; requests are intents (`setMode` zooms or enters full screen, `requestAttention` asks the app's Dock icon). Each window reports its state (moves and resizes once they settle) and its hidden title bar's area on its root; `SetContentSize` (`sizeToContent`) sizes the content area, keeping the top left corner. Popups the core places in a window's root, and dialogs presented in a window (`ModalConfig.window`), show in that window (those of its first render, presented in the batch that opens it before it is a window, move to it when it opens): their sizing, focus, Escape and back follow the window the key is in, and so do the app's shortcuts, sheets (alerts, open and save panels) and context menus. The close, Escape and blur policies are held natively and answered on the main thread; the app hears of them afterwards (the main window's close press waits briefly for the app's turn). `windowControl` views act as the window's buttons (and read as them to VoiceOver), `windowResize` views resize the window by their edge. AppKit's Dock lists apps, not windows: `taskbar` is the Window menu and Cmd+`, `progress` the app's Dock tile (the last window that set one), and `requestAttention` bounces the app's icon |
 
 | Clipboard | `system.rs` | `NSPasteboard` |
 | Networking | `net.rs` | `NSURLSession` (the iOS backend's) |
 | Dev | `dev.rs` | The dev server client on its own thread; a status line and the error overlay above the surface (opaque; code frames keep their lines and scroll sideways; a click that selects no text dismisses it, in an inactive window too; its Copy button copies the error); Cmd+R reloads the latest build |
-| Performance monitor | `fps.rs`, `gpu.rs` | `--fps` / `AppOptions::fps` / `NSH_FPS=1` / `AppView::set_fps_monitor` / the app's `setFpsEnabled` (`Command::PerfMonitor`, through `Surface::perf_toggle`): a panel above the surface that lets the mouse through, redrawn twice a second from the surface's `nsh_engine::perf::PerfMonitor` (see below); GPU time from the IO registry (`accumulatedGPUTime` of the process' accelerator clients) |
+| Performance monitor | `fps.rs`, `gpu.rs` | `--fps` / `AppOptions::fps` / `NSH_FPS=1` / `AppView::set_fps_monitor` / the app's `setFpsEnabled` (`Command::PerfMonitor`, through `Surface::perf_toggle`): a panel above the surface that takes the clicks on it and lets the rest of the mouse through (a click collapses it to a pill with the frame rate, colored by the frame budget, and expands it again; `AppView::set_fps_mode` / `setFpsMode` / `NSH_FPS=collapsed|hidden` set how it shows: `Command::PerfMonitorMode`, through `Surface::perf_mode`, kept in the view's `fps_mode` across hiding), redrawn twice a second from the surface's `nsh_engine::perf::PerfMonitor` (see below); GPU time from the IO registry (`accumulatedGPUTime` of the process' accelerator clients) |
+
+Inline pressable text spans have native link elements (`access/text_spans.rs`),
+interleaved with static text in UTF-16 document order. Their names omit hidden
+runs and attachment placeholders; their bounds follow the current text layout
+and layer transforms. A retained element resolves its logical span against the
+current attributed text, so streaming and recoloring keep it usable; a removed
+link cannot be activated. `AXPress` uses the current event listeners and modal
+scope, as keyboard input does. Secondary clicks target the innermost inline
+span listening to `onContextMenu`, preserving selection and surrounding listeners.
+Clicking an input ends a drawn-text selection; programmatic focus keeps it. Headings and app-labelled text keep their name
+and expose only link children. Selectable drawn text whose accessibility value
+is its text, and its link elements, expose `AXSelectedTextRange` and
+`AXSelectedText` through the same enclosing selection.
 
 ## Keyboard
 
@@ -227,9 +259,91 @@ the same natural line height as the field editor, including when `text-base` sup
 layout. Multiline text views use the configured paragraph line height.
 
 A key goes to the window's first responder: a field's editor (the window's shared field editor, an `NSTextView`), a
-multiline input's `NshTextView`, a hosted view, or the surface's root. Menus' key equivalents (`app.rs`: Cmd+Q / H /
-Opt+Cmd+H, the Edit menu's Z / Shift+Z / X / C / V / A, Cmd+M, Ctrl+Cmd+F, Cmd+W) come first, matched by AppKit on
-any layout; the dev host's Cmd+R is a local key monitor (`dev.rs`).
+multiline input's `NshTextView`, a hosted view, or the surface's root. Four steps decide it, in order:
+
+1. the app's keymap (`keymap.rs`) matches it in the surface's one local key monitor (`keyboard.rs`), before AppKit
+   dispatches anything, and consumes a binding (the dev host's Cmd+R is left to `dev.rs`'s monitor);
+2. a focused custom view hears it as a raw `KeyDown` / `KeyUp` (`keyboard.rs`), and the capture rules mounted on it and
+   its enabled ancestors (`capture_keys`) decide whether the platform keeps it;
+3. menus' key equivalents (`app.rs`: Cmd+Q / H / Opt+Cmd+H, the Edit menu's Z / Shift+Z / X / C / V / A, Cmd+M,
+   Ctrl+Cmd+F, Cmd+W) run, matched by AppKit on any layout;
+4. the responder's own defaults (Tab's traversal, Return and Space pressing, scrolling, going back) run.
+
+A captured key stops after step 2: no menu item and no default follows. A key that only has a listener is reported and
+goes on to the menus and defaults. Fields, hosted views, menus and OS-reserved shortcuts own their keys, as before.
+`default_prevented` is the monitor's decision for that transition; the listener runs on the app's frame afterwards,
+so it reports the decision and cannot veto it (or stop the beep a key with no responder makes).
+
+### Raw keys and capture
+
+`keyboard.rs` installs one local monitor per surface for `KeyDown`, `KeyUp` and `FlagsChanged`. It sees a key before
+AppKit dispatches it, which is what puts keymap bindings, then the raw notification and capture, ahead of menu key
+equivalents and the responder's defaults. The monitor finds the focused view through the event's window and its first
+responder: an NSH view that is not the root and is a focus stop (`ViewProps::focus_stop`). A native field editor, a
+hosted view, the root, a window under a modal and another surface's views get no raw event.
+
+Interest and capture walk the logical keyboard ancestry, not the native view tree. An `Overlay` is moved under a root
+view's host natively (`Core::sync_overlays` inserts it there) while its logical parent stays the view that contains it,
+so the core marks the moved view's logical parent in `ViewProps::key_parent`: an internal routing field, not an
+app-settable TS or Rust prop. The walk resolves that id through the surface's mounted views (`keyboard::key_ancestor`),
+so a rule on the logical ancestor applies to the focused view inside the portal and a sibling portal's rule does not.
+Native focus, hit testing, layout and Tab keep the native parent; an override that does not resolve ends the walk
+rather than falling back to the host, which is not a logical ancestor. The engine still receives one event, at the
+focused view, and bubbles it along the logical ancestry.
+
+The event's values are the source's, never invented:
+
+| `KeyEvent` field | AppKit source |
+|---|---|
+| `key` | virtual key code for named keys, in DOM spellings (`Enter`, `Tab`, `Backspace`, `Escape`, `Delete`, `Help`, `Home`, `End`, `PageUp`, `PageDown`, `ArrowLeft`…`ArrowDown`, `F1`…`F20`, `Shift`, `Control`, `Alt`, `Meta`, `CapsLock`, `Fn`); space is `" "`; otherwise the characters the key types with the modifiers held (`NSEvent.characters`), case and layout kept (`A` for Shift+A, `å` for Option+A), `"Unidentified"` when it types none |
+| `code` | AppKit's virtual key code mapped to the DOM `KeyboardEvent.code` of the key's physical place (`KeyA` for code `0`, `ArrowLeft`, `NumpadEnter`, `Numpad1`, `ShiftLeft`/`ShiftRight`, `ControlLeft`/`ControlRight`, …), so it does not change with the layout's character; `""` for a virtual key code with no DOM code |
+| `modifiers` | `modifierFlags`: Control, Option (`alt`), Shift, Command (`cmd`), after the transition |
+| `repeat` | `isARepeat`, on a press |
+| `default_prevented` | the mounted capture rule's decision for this transition (below) |
+
+The capture rules are read from the mounted `ViewProps` of the focused view and its ancestors when the key arrives;
+nothing waits for JS and no per-key string is parsed on the platform. `KeyCapture::All` takes every key, modifier keys
+included. `KeyCapture::Keys` matches the key and its exact modifiers through the existing shortcut vocabulary
+(`keymap::keystroke`: virtual key codes for named and function keys, the layout's character for the others, the US
+layout's only where the layout types no ASCII), so a rule written as `shift+a` captures Shift+A whatever the case
+`KeyEvent::key` reports. A disabled view captures nothing and a view no longer on the focused view's ancestry captures
+nothing; a rule mounted on an ancestor applies to a focused descendant. A captured key still reaches the focused view
+and, through the engine, its enabled listening ancestors; the native default does not run. One event per transition is
+sent to the focused view; the engine bubbles `KeyDown` and `KeyUp` to the ancestors, so the platform never sends to each
+of them. Built with `dev`, Cmd+R is never captured: as the keymap leaves it, the raw keys let the dev host's reload
+monitor have it.
+
+Modifier keys do not produce `keyDown`/`keyUp`: AppKit sends `flagsChanged` with the modifier's virtual key code and the
+flags after the transition. Each change is reported as a named `KeyDown`/`KeyUp` (`Shift`, `Control`, `Alt`, `Meta`,
+`CapsLock`, `Fn`), with the side's code (`ShiftLeft`, `ShiftRight`, …) and the same capture decision. `keyboard.rs`
+keeps the modifier codes held, so releasing one Shift while the other is held reports that release, and a press is
+never reported twice. Caps Lock toggles rather than
+holding: each `flagsChanged` that changes its flag is its press, one that does not is its release. A modifier transition
+without its own flag is a release even when its press was never tracked (after losing the app's focus, or a press made
+in another app); a press always carries its flag, so a reported key-down never says the modifier is off. A focus move
+inside the app keeps the tracked modifiers (AppKit still reports their releases to the new first responder); only losing
+the app's focus (`NSApplicationDidResignActive`) drops them, and no release is made up. A release AppKit delivers is
+reported on whichever focused view has it by then. Keys pressed before the app launched, or released while another
+app was in front, have no transition to report.
+
+A press on a view the app made `focusable={true}` moves the keyboard focus there (innermost such view under the point,
+as the other desktops' widgets do on a press); a field that edits keeps the focus, as clicking outside it does. `focus()`
+and `blur()` on a view's ref, Tab / Shift+Tab and accessibility focus take the existing paths (`input::focus_control`,
+`text_input::tab`). A focused custom view's `resignFirstResponder` reports `onBlur` and clears the `focus:` state as
+before.
+
+What a custom view hears is a preview of the hardware, not input method text: IME composition stays `text_input.rs`'s,
+and its marked text and commits are not raw key events. A dead key reports what AppKit's `characters` says before the
+composition (`Unidentified` when it says nothing). Menus, fields, hosted views and OS-reserved shortcuts keep their
+own keys: a capture rule can take a key before an app menu item's key equivalent (the menu's action then does not run),
+while an app keymap binding is matched first and a shortcut the system reserves is never delivered. Events a host app
+delivers by calling `-[NSResponder keyDown:]` directly (outside `-[NSApplication sendEvent:]`) still notify through the
+same responder override; events posted through the application's queue also run the monitor, and are not reported twice.
+AppKit does not call local monitors while a native menu, an open or save panel or a window drag owns the events, so keys
+pressed there are not raw events; a modifier released in such a loop is reconciled from the flags on the next event
+that carries them.
+
+The paths below keep their existing behavior:
 
 - **In a field** (`text_input.rs`), AppKit's key bindings edit: Option / Cmd + arrows, their Shift variants,
   Option+Delete, Cmd+Delete, Ctrl+A / E / K, undo and the Edit menu's commands (a secure field refuses Copy and
@@ -255,18 +369,19 @@ any layout; the dev host's Cmd+R is a local key monitor (`dev.rs`).
   Cmd+[), Tab / Shift+Tab into fields and pressable views, and scrolling the scroll view around the focused view or under the mouse:
   arrows by a line, Page Up / Down, Option+Up / Down and Space / Shift+Space by a page, Home / End and Cmd+Up / Down
   to the edges. The mouse's back button goes back from `input::event`.
-- **The app's shortcuts** (`nsh`'s `keymap`, `keymap.rs`): while the surface has bindings, a local key-down monitor
-  matches every key of its window against the mounted table (`Keymap::find`) before AppKit dispatches it, so they
-  come before menus' key equivalents, the field editor's key bindings and the root's keys (Escape going back,
-  Tab, scrolling); a match is consumed and reported as the root's `KeyCommand`. Quit, Hide, Hide Others, Minimize
-  and Full Screen cannot be bound (`Keystroke::reserved`), so the app menu keeps them; Cmd+W, the Edit menu's keys
-  give way to a binding (monitors run newest first); built with `dev`, Cmd+R is never matched
+- **The app's shortcuts** (`nsh`'s `keymap`, `keymap.rs`): the surface's key monitor (`keyboard.rs`) matches every key
+  of its window against the mounted table (`Keymap::find`) before AppKit dispatches it, so they
+  come before raw keys and capture rules, menus' key equivalents, the field editor's key bindings and the root's keys
+  (Escape going back, Tab, scrolling); a match is consumed and reported as the root's `KeyCommand`. Quit, Hide, Hide
+  Others, Minimize and Full Screen cannot be bound (`Keystroke::reserved`), so the app menu keeps them; Cmd+W, the
+  Edit menu's keys give way to a binding; built with `dev`, Cmd+R is never matched
   (`Keystroke::reloads`), so the dev host's reload monitor gets it. An auto-repeat (`isARepeat`) of a binding without
   `repeat` is consumed silently. A surface takes the key while the
   window's first responder is inside its root (a field or hosted view there counts as editing: `when`), or is the
   window itself. The key is read as `Keystroke`: virtual key codes for named and function keys, else the character
   without modifiers (`charactersByApplyingModifiers:` with none when Shift is held, so Shift+/ is `shift+/`), the US
-  layout's (`input::us_key`) when that is not ASCII. The monitor is removed when the table empties or the app stops.
+  layout's (`input::us_key`) when that is not ASCII. The monitor lives as long as the surface: an empty table costs a
+  map lookup per key, and the app stopping removes it.
 - Shortcuts NSH matches itself (Cmd+A / C / [ / R) read `input::shortcut_key`: the character without modifiers, or on
   a layout that types none in ASCII the US layout's key, as menus do.
 
@@ -369,7 +484,6 @@ password required right after sleep) to run tests that way.
 
 ## Not implemented, or different
 
-- **Zooming scroll views**: `zoomTo` and the zoom props are ignored (as on Linux).
 - **`brightness()` above 1** is not drawn. **Blend modes** are the layer's `compositingFilter`
   (`multiplyBlendMode` … `plusD` / `plusL`), set on the view's own layer — its content, fill and clipped-child layers
   are its sublayers — and cleared for `normal`; a change never moves it between layers (`visual.rs`).
@@ -444,6 +558,45 @@ host app. Only Prohibited changes how windows take the keyboard (`window.rs` `in
 attention bounce, reopening a retained window from the Dock) have no icon to show on in an accessory app, which
 shows its window itself (`focus()` from its tray).
 
+## Login item
+
+`Application.launchAtLogin()` / `setLaunchAtLogin` (`nsh_core::desktop::LoginItemBackend`) is `login_item.rs`:
+`SMAppService.mainApp`, the app bundle's login item, through `msg_send!` on ServiceManagement, which it loads with
+`dlopen` when first used (it is not linked, as UserNotifications is not). `AppView::load` gives the engine the backend
+(`EngineConfig::login_item`) only for `run_app`'s view (`surface.standalone`) with `AppOptions::login_item`, which
+`nsh-macos-app` sets unless `NSH_APP_DIR` says `nsh run` runs it in place; the core calls it on its login item thread,
+which ServiceManagement allows. On macOS 27 (checked with an ad hoc signed bundle) a bundle never registered reads
+`notFound`, mapped to disabled; registering what is registered and unregistering what is not return no error; copies of
+the app with one bundle id share the item. A call that fails is judged by the status it leaves, as a code alone does not
+say which error it is (ServiceManagement declares four error domains, and an `NSError` may come from another still): a
+registration that leaves the item registered (also `requiresApproval`, waiting for the user) is done, which covers
+`kSMErrorAlreadyRegistered` and `kSMErrorLaunchDeniedByUser`; a removal is done when it leaves the item `notRegistered`,
+or `notFound` (an error status) with `kSMErrorJobNotFound` in `SMAppServiceErrorDomain` (exported from macOS 15, so
+compared by its value, which an `SMAppService` error reported from macOS 14.2.1 carries too), so a failed removal is not
+taken as done on an error status alone. Of the rest, `SMAppServiceErrorDomain`'s refusals are `PermissionDenied`
+(`EACCES`): of the signature, of authorization, of the user, and its "Operation not permitted", code 1, which
+`SMErrors.h` does not list; the others are `EIO`. The error's message names its domain and code, and a refused call is
+logged as a warning with the status after it (the release runner prints warnings).
+
+## Packaged apps' logs
+
+An app opened from Finder or the Dock has its stderr on `/dev/null`, so its lines go to the unified log through
+`nsh_platform_apple::unified_log`, a `log` logger: `nsh-ios-app` and the iOS SDK's C ABI without `dev` install it,
+and `nsh-macos-app` installs the desktop runners' logger (`nsh_engine::logging`: `RUST_LOG`, the rolling file in the
+app's data directory) with it as the output (`unified_log::logger`, `Options::filtered`). The subsystem is the main bundle's identifier (the executable's name outside a bundle), the category the
+record's target, with each category's `os_log_t` made once. Errors are `OS_LOG_TYPE_ERROR`; warnings (their text
+after `WARN`) and info are `OS_LOG_TYPE_DEFAULT`, which the log stores and Console shows without "Include Info
+Messages"; debug and trace are `OS_LOG_TYPE_DEBUG`. The text is logged `%{public}s`, a NUL in it written `\0`, in
+entries of at most 960 bytes split between lines (the store keeps about 1 KB of an entry). What is logged is the
+runners' rule: warnings, errors and target `js`, everything from info in development (`NSH_APP_DIR`, iOS's
+`NSH_DEVELOPMENT`). Lines also go to stderr in development, and wherever else stderr goes but `/dev/null` (`fstat`
+against `/dev/null`'s device: a terminal, a file, a pipe, launchd's `StandardErrorPath`) unless Xcode's console shows
+the log already (`IDE_DISABLED_OS_ACTIVITY_DT_MODE`, `OS_ACTIVITY_DT_MODE`); a scheme with `OS_ACTIVITY_MODE=disable`
+turns the process's log off, so they go to stderr under Xcode then. `os_log_with_type` is a C
+macro: `src/os_log.c` wraps it in `platform_apple_os_log` (hidden, and outside the iOS SDK's exported `_nsh_*`),
+which the crate's `build.rs` compiles with `cc` for Apple targets. The development host logs through `dev.rs` (to
+the dev server while connected, to stderr otherwise).
+
 ## Keyboard focus for views
 
 A mounted non-input view that is a focus stop participates in AppKit's key
@@ -453,7 +606,13 @@ view loop alongside native text inputs (`input::is_key_stop`, from
 card). Disabled accessibility state, removed press listeners (of a view not
 `focusable={true}`), `focusable={false}` (a backdrop that closes an overlay),
 hidden views and views leaving the tree exclude a stop (a focused one gives
-the focus to the root).
+the focus to the root). Hidden includes what the core hides without hiding an
+NSView, which AppKit's key view loop would still stop at: a view with no area
+(each view of a `display: none` subtree gets an empty frame) or inside a
+`visibility: hidden` one (`NshView::seen_by_keys`, as the headless driver's
+stops are shown views). Inputs' fields and hosted views follow the view of
+ours holding them, and the focus leaves one a batch hid for the root
+(`input::release_hidden_focus`), so no key acts on what cannot be seen.
 Tab/Shift+Tab stay within the newest modal and advance from the currently
 focused stop. The root and passive layout views stay outside that loop. A
 modal remembers the input or Tab stop that had the focus when it was
@@ -469,15 +628,25 @@ newest modal is focused. When a lower modal closes under a newer one, the
 newer one that remembered a view of it remembers the lower one's instead, so
 closing it later returns to the view that opened the stack.
 
+A left press moves the keyboard focus to the innermost `focusable={true}` view
+under it (`input::down`, `explicitly_focusable`), as the other desktops'
+widgets are focused on a press. A press on a view that is not `focusable` leaves
+the focus where it is, and one while a field edits leaves it in the field (the
+root refuses the first responder during a press, as a click outside a field
+does).
+
 Focused stops update the existing `focus:` interaction state and report
 `onFocus` / `onBlur`. On a stop that takes presses (`input::is_key_control`),
 unmodified Return, keypad Enter and Space emit PressIn/PressOut/Press once on
-key-down; auto-repeat and key-up are consumed without another activation. App
+key-down after the raw key and its capture rule, if the key was not captured;
+auto-repeat and key-up are consumed without another activation. App
 keymap monitors let those activation keys reach the control instead of
-triggering a global Enter/Space binding. A stop that takes no presses is not
+triggering a global Enter/Space binding; only the focus' own bindings
+(`KeyOptions::for_focus`, `Keymap::find_at`) take them first. A stop that takes no presses is not
 activated: its keys, Return and Space too, go to the app's keymap (the
 component binds them while focused), then to keyboard scrolling. Modifier
-shortcuts keep their existing priority. Accessibility focus also moves
+shortcuts keep their existing priority, and a captured key never activates the
+control. Accessibility focus also moves
 keyboard focus to Tab stops.
 
 Only root views retain a surface reference. A focused child's keyboard callbacks
@@ -492,9 +661,77 @@ Escape or a click outside; a single-line and a secure field getting it back
 with the caret at the end (a character typed after Escape is appended); a
 trigger disabled meanwhile staying unfocused; a lower modal closing under a
 newer one leaving the focus alone, and the newer one's Escape returning it to
-the stack's trigger. Still to check natively: Shift+Tab, mixed inputs and
-buttons, disabling or deleting a focused control, repeat suppression, modifier
-shortcuts, screen-reader focus and window deactivation.
+the stack's trigger. `tests/native/keyboard.rs` adds a real `AppView` check of
+the raw path (below). Still to check natively: Shift+Tab, mixed inputs and
+buttons, disabling or deleting a focused control, screen-reader focus and
+window deactivation.
+
+### Checking raw keys
+
+The native checks run without a window server for the converters' unit tests, and in a desktop session for the
+`AppView` ones:
+
+```sh
+cargo test -p nsh-platform-macos --features dev
+cargo test -p nsh-platform-macos --features dev --test native -- --ignored
+# Only the raw-key checks (launches the application first, as the other checks do):
+NSH_KEYBOARD_CHECK_ONLY=1 cargo test -p nsh-platform-macos --features dev --test native -- --ignored
+```
+
+`tests/native/keyboard.rs` mounts two focusable pads in a real window and sends `NSEvent`s to it. It checks the
+mapping a listener receives (a plain `a` with physical code 0, Shift+A keeping its case, Option+A keeping the layout's
+`å`, Enter / ArrowLeft / F5 by virtual key code, `isARepeat`), that the press reaches the focused view and its
+enclosing listener once, Shift's `flagsChanged` down/up with two Shift keys, a release whose press was never tracked
+classified from its cleared flag, `captureKeys: "all"` taking Tab and leaving the focus, an uncaptured Tab moving it,
+and a named capture matching `shift+a` through the shortcut vocabulary. The portal check then mounts two sibling overlays
+and verifies that the focused portal's logical ancestor (`ViewProps::key_parent`) hears its keys and captures `x`,
+while the other portal's `tab` rule neither hears nor captures (Tab is reported uncaptured). Menus' key equivalents under
+a capture and the input method are not in it.
+
+For a real surface, with a window server and a keyboard:
+
+```sh
+cargo build -p nsh-cli        # ./target/debug/nsh
+cat > /tmp/raw-keys.tsx <<'EOF'
+import { mount, signal, Text, View } from "nsh";
+
+function App() {
+  const log = signal("none");
+  const note = (e: any) =>
+    log.set(`${e.key} text=${e.text ?? "-"} physical=${e.physical ?? "-"} shift=${e.modifiers.shift} captured=${e.captured}`);
+  return (
+    <View style={{ flex: 1, padding: 40, gap: 12 }} onKeyDown={note}>
+      <View testID="pad" focusable captureKeys={["Tab", "shift+a"]} onKeyDown={note} onKeyUp={note}
+        style={{ height: 80, backgroundColor: "#333" }} />
+      <View testID="second" focusable style={{ height: 80, backgroundColor: "#666" }} />
+      <Text>{log()}</Text>
+    </View>
+  );
+}
+
+mount(App);
+EOF
+./target/debug/nsh run /tmp/raw-keys.tsx --target macos
+```
+
+1. Click the dark pad (the press focuses the `focusable` view; its `focus` ring shows), or Tab to it. The status line
+   shows `none` until a key arrives.
+2. Press `a`: the line shows `a text=a physical=0 … captured=false`; release shows the same key with `text=-`.
+3. Press Shift+A: `A text=A … shift=true captured=true` (the `shift+a` rule). Press Option+A on a US layout:
+   `å text=- … captured=false` (Option types a layout character, and the text preview is withheld), or the character
+   the active layout types.
+4. Press Tab: the focus stays on the pad (`captured=true`); with `Tab` removed from `captureKeys` it moves to the
+   second pad.
+5. Press Return and Escape: they are reported, and their defaults still run (activating a focused control, going
+   back), because the pad's rule does not name them. Add them to `captureKeys` to see the defaults suppressed.
+6. Press Cmd+Q: the pad's capture list does not name it, so the app menu still quits. Press Cmd+R in a `nsh run`
+   (dev) session: it still reloads. With `captureKeys="all"` the pad takes Cmd+Q as well (the menu gives way to a
+   capture, as app shortcuts do), but Cmd+R still reloads, because the dev host's reload is never captured.
+7. Hold Shift: a `Shift` key-down is reported; release it: `Shift` key-up. Switch to another app while holding Shift,
+   then release it there and come back: no release is reported (the transition happened where NSH could not see it),
+   and the next Shift press reports a press.
+8. Focus a text field elsewhere in the app and type: the field edits as before, and the raw listeners do not hear it.
+   Compose with an input method: the composition and its commit are the input's, not raw key events.
 
 ## Shader pictures
 

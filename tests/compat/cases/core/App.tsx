@@ -11,8 +11,10 @@ import CoreErrorBoundary from "./core-error-boundary";
 import CoreFrameRate from "./core-frame-rate";
 import CoreList from "./core-list";
 import CoreListAnchor from "./core-list-anchor";
+import CoreListInitialEnd from "./core-list-initial-end";
 import CoreListPosition from "./core-list-position";
 import CoreMotion from "./core-motion";
+import CoreOffscreenCanvas from "./core-offscreen-canvas";
 import CoreOverlay from "./core-overlay";
 import CorePrimitives from "./core-primitives";
 import CoreReactive from "./core-reactive";
@@ -40,7 +42,9 @@ const cases: Record<string, () => JSX.Element> = {
   "core-list": CoreList,
   "core-list-anchor": CoreListAnchor,
   "core-list-position": CoreListPosition,
+  "core-list-initial-end": CoreListInitialEnd,
   "core-motion": CoreMotion,
+  "core-offscreen-canvas": CoreOffscreenCanvas,
   "core-overlay": CoreOverlay,
   "core-primitives": CorePrimitives,
   "core-reactive": CoreReactive,

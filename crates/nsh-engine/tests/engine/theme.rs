@@ -63,6 +63,7 @@ fn start(app_theme: Option<Theme>, host_theme: Option<Theme>) -> (Engine, Receiv
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     };
     let engine = Engine::start_with(
         config,
@@ -169,6 +170,7 @@ fn a_tsx_apps_token_classes_follow_the_host_theme() {
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(backgrounds(&rx), vec![default_primary()]);
@@ -258,6 +260,7 @@ fn a_hosts_theme_overrides_win_over_the_apps_tokens_they_set_and_keep_the_rest()
         audio: None,
         cache: Default::default(),
         windows: None,
+        login_item: None,
     };
     // A brand's primary, light and dark, set before the app runs.
     let overrides = nsh_base::theme_overrides(
@@ -378,6 +381,7 @@ fn start_branded(
         audio: None,
         cache: Default::default(),
         windows: None,
+        login_item: None,
     };
     let engine = Engine::start_with(
         config,
@@ -539,6 +543,10 @@ setTimeout(() => {
     { cssVars: { light: { brand: "oklch(0.7 0.1" } } },
     { cssVars: { light: { brand: "var(--nothing" } } },
     { cssVars: { light: { brand: "#zz" }, dark: { brand: "12px" } } },
+    { cssVars: { light: { brand: "rgb(255 0 0)garbage" } } },
+    { cssVars: { light: { brand: "rgb(255 0 0)inset-x" } } },
+    { cssVars: { light: { brand: "color-mix(in srgb, rgb(255 0 0) 50%, blue)garbage" } } },
+    { cssVars: { light: { brand: "var(--primary)garbage" } } },
   ];
   const results = invalid.map(theme => {
     setTheme({ cssVars: { light: { brand: "#00ff00" } } });
@@ -552,7 +560,7 @@ mount(() => <View><View class="h-4 bg-brand" /><Text>{status()}</Text></View>);
     let config = r##"{ "theme": { "cssVars": { "light": { "brand": "#123456" } } } }"##;
     let (_engine, rx) =
         crate::components::start_with(source, Environment::default(), None, Some(config));
-    let expected = ["TypeError kept #00ff00ff"; 9].join("; ");
+    let expected = ["TypeError kept #00ff00ff"; 13].join("; ");
     let batches = crate::components::until(&rx, |b| crate::components::shows(b, &expected));
     let texts: Vec<&str> = batches
         .iter()
@@ -563,15 +571,26 @@ mount(() => <View><View class="h-4 bg-brand" /><Text>{status()}</Text></View>);
         })
         .collect();
     assert_eq!(texts.last().copied(), Some(expected.as_str()));
-    let backgrounds: Vec<Color> = batches
+    let themed = batches
         .iter()
         .flat_map(|b| &b.items)
-        .filter_map(|item| match item {
-            MountItem::ViewStyle { style, .. } if style.background_color.0 & 0xff != 0 => {
-                Some(style.background_color)
+        .find_map(|item| match item {
+            MountItem::ViewStyle { id, style } if style.background_color == Color(0x123456ff) => {
+                Some(*id)
             }
             _ => None,
         })
+        .expect("the built theme paints the themed view before the timer runs");
+    let mut backgrounds: Vec<Color> = batches
+        .iter()
+        .flat_map(|b| &b.items)
+        .filter_map(|item| match item {
+            // Keep transparent changes too: dropping the token must not
+            // leave the preceding opaque color as the last value seen.
+            MountItem::ViewStyle { id, style } if *id == themed => Some(style.background_color),
+            _ => None,
+        })
         .collect();
-    assert_eq!(backgrounds.last(), Some(&Color(0x00ff00ff)));
+    backgrounds.dedup();
+    assert_eq!(backgrounds, [Color(0x123456ff), Color(0x00ff00ff)]);
 }

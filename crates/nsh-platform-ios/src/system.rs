@@ -1,6 +1,11 @@
 //! System UI driven from JS: the status bar and alerts / action sheets.
 
-use std::{cell::Cell, rc::Rc};
+use std::{
+    cell::Cell,
+    ptr::NonNull,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use block2::RcBlock;
 use nsh_core::{
@@ -10,21 +15,23 @@ use nsh_core::{
 };
 use nsh_engine::EngineControl;
 use objc2::{
-    AllocAnyThread, MainThreadMarker, MainThreadOnly,
+    AllocAnyThread, ClassType, MainThreadMarker, MainThreadOnly,
     rc::Retained,
     runtime::{AnyObject, Bool},
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
-    NSAttributedString, NSData, NSDictionary, NSPropertyListReadOptions,
+    NSAttributedString, NSData, NSDictionary, NSError, NSObjectProtocol, NSPropertyListReadOptions,
     NSPropertyListSerialization, NSRange, NSString, NSURL,
 };
 use objc2_ui_kit::{
     NSAttributedStringDocumentFormats, NSDocumentTypeDocumentAttribute,
     NSDocumentTypeDocumentOption, NSHTMLTextDocumentType, NSRTFDTextDocumentType,
     NSRTFTextDocumentType, UIAlertAction, UIAlertActionStyle, UIAlertController,
-    UIAlertControllerStyle, UIApplication, UIDevice, UIPopoverArrowDirection, UIStatusBarAnimation,
-    UIStatusBarStyle, UIUserInterfaceIdiom, UIUserInterfaceStyle, UIView, UIViewController,
+    UIAlertControllerStyle, UIApplication, UIDevice, UIDeviceOrientation, UIInterfaceOrientation,
+    UIInterfaceOrientationMask, UIPopoverArrowDirection, UIStatusBarAnimation, UIStatusBarStyle,
+    UIUserInterfaceIdiom, UIUserInterfaceStyle, UIView, UIViewController,
+    UIWindowSceneGeometryPreferencesIOS,
 };
 
 thread_local! {
@@ -33,7 +40,26 @@ thread_local! {
     /// The appearance the app asked for last (`setColorScheme`), for what
     /// is not a subview of a surface: the status bar, alerts, modals.
     static APPEARANCE: Cell<UIUserInterfaceStyle> = const { Cell::new(UIUserInterfaceStyle::Unspecified) };
+    /// The orientations the page shown asked for (`supportedOrientations`;
+    /// empty: the app's), one per process like the status bar.
+    static ORIENTATIONS: Cell<UIInterfaceOrientationMask> = const { Cell::new(UIInterfaceOrientationMask(0)) };
+    /// How the app's own pages (no page's setting) showed the screen when
+    /// a page's setting came, to turn back to when it goes and the device
+    /// says nothing (lying flat). Like `ORIENTATIONS` and `TURNING`, one
+    /// per process, not per scene: right for a phone's single window; on
+    /// an iPad with several scenes, one scene's turn can be recorded for
+    /// another.
+    static APP_ORIENTATION: Cell<UIInterfaceOrientation> = const { Cell::new(UIInterfaceOrientation::Unknown) };
+    /// A turn asked for on the app's own pages, and when: the scene shows
+    /// the old orientation until it is done.
+    static TURNING: Cell<Option<(UIInterfaceOrientation, Instant)>> = const { Cell::new(None) };
+    /// Whether NSH has the device report its orientation: from a page's
+    /// setting until the app's own orientations apply again.
+    static WATCHING: Cell<bool> = const { Cell::new(false) };
 }
+
+/// How long a turn asked for may take before the scene shows it.
+const TURN_TIME: Duration = Duration::from_secs(2);
 
 /// The tint of a surface's alerts and action sheets for its design tokens
 /// ([`nsh_core::Command::Tokens`]): the theme's `primary` when the app has
@@ -124,6 +150,135 @@ pub(crate) fn set_status_bar(config: StatusBarConfig, view: &UIView) {
     } else {
         update();
     }
+}
+
+/// The orientations of [`nsh_core::ModalConfig::PORTRAIT`] bits.
+pub(crate) fn orientation_mask(bits: u8) -> UIInterfaceOrientationMask {
+    use nsh_core::ModalConfig as M;
+    let mut mask = UIInterfaceOrientationMask::empty();
+    for (bit, m) in [
+        (M::PORTRAIT, UIInterfaceOrientationMask::Portrait),
+        (
+            M::PORTRAIT_UPSIDE_DOWN,
+            UIInterfaceOrientationMask::PortraitUpsideDown,
+        ),
+        (M::LANDSCAPE_LEFT, UIInterfaceOrientationMask::LandscapeLeft),
+        (
+            M::LANDSCAPE_RIGHT,
+            UIInterfaceOrientationMask::LandscapeRight,
+        ),
+    ] {
+        if bits & bit != 0 {
+            mask |= m;
+        }
+    }
+    mask
+}
+
+/// The orientations the page shown asked for, for view controllers'
+/// `supportedInterfaceOrientations` (`None`: the controller's own).
+pub(crate) fn page_orientations() -> Option<UIInterfaceOrientationMask> {
+    let mask = ORIENTATIONS.get();
+    (!mask.is_empty()).then_some(mask)
+}
+
+/// Applies the page's `supportedOrientations` ([`nsh_core::Command::Orientations`]):
+/// asks the controllers of `view`'s window to rotate to them.
+pub(crate) fn set_orientations(bits: u8, view: &UIView) {
+    let mask = orientation_mask(bits);
+    let was_own = ORIENTATIONS.get().is_empty();
+    ORIENTATIONS.set(mask);
+    // How the device is held, to turn back to when the orientations widen
+    // again: reported while a page's setting applies, read before the
+    // reports stop.
+    let device = UIDevice::currentDevice(view.mtm());
+    if !mask.is_empty() && !WATCHING.replace(true) {
+        device.beginGeneratingDeviceOrientationNotifications();
+    }
+    let held = device.orientation();
+    if mask.is_empty() && WATCHING.replace(false) {
+        device.endGeneratingDeviceOrientationNotifications();
+    }
+    let Some(window) = view.window() else { return };
+    let mut controller = window.rootViewController();
+    // iOS 16 asks each controller again; before, one call for the window.
+    if !controller.as_ref().is_some_and(|c| {
+        c.respondsToSelector(objc2::sel!(setNeedsUpdateOfSupportedInterfaceOrientations))
+    }) {
+        #[allow(deprecated)]
+        UIViewController::attemptRotationToDeviceOrientation(view.mtm());
+        return;
+    }
+    // iOS 16 only turns the screen when its orientation is no longer
+    // allowed: when the orientations widen again (back from a landscape
+    // page), the screen would stay as the page turned it. NSH turns it
+    // itself, only in its own window (a host app's turns as its
+    // controllers say).
+    let own = controller
+        .as_ref()
+        .is_some_and(|c| c.isKindOfClass(crate::app::RootController::class()));
+    let scene = window.windowScene().filter(|_| own);
+    if let Some(scene) = &scene
+        && was_own
+        && !mask.is_empty()
+    {
+        // A page's setting comes: remember how the app's pages show the
+        // screen, unless a turn back to it is not done yet.
+        let shown = scene.effectiveGeometry().interfaceOrientation();
+        let turning = TURNING
+            .take()
+            .is_some_and(|(to, at)| shown != to && at.elapsed() < TURN_TIME);
+        if !turning {
+            APP_ORIENTATION.set(shown);
+        }
+    }
+    let mut top = None;
+    while let Some(c) = controller {
+        c.setNeedsUpdateOfSupportedInterfaceOrientations();
+        controller = c.presentedViewController();
+        top = Some(c);
+    }
+    let (Some(top), Some(scene)) = (top, scene) else {
+        return;
+    };
+    // The way the device is held, as iOS did before 16 (a device turned
+    // left shows the interface turned right, and back); a device lying
+    // flat says nothing, so back on the app's own pages the screen turns
+    // as they showed it.
+    let wanted = match held {
+        UIDeviceOrientation::Portrait => UIInterfaceOrientation::Portrait,
+        UIDeviceOrientation::PortraitUpsideDown => UIInterfaceOrientation::PortraitUpsideDown,
+        UIDeviceOrientation::LandscapeLeft => UIInterfaceOrientation::LandscapeRight,
+        UIDeviceOrientation::LandscapeRight => UIInterfaceOrientation::LandscapeLeft,
+        _ if mask.is_empty() => APP_ORIENTATION.get(),
+        _ => return,
+    };
+    if wanted == UIInterfaceOrientation::Unknown {
+        return;
+    }
+    let wanted_mask = UIInterfaceOrientationMask(1 << wanted.0);
+    if scene.effectiveGeometry().interfaceOrientation() == wanted
+        || !top.supportedInterfaceOrientations().contains(wanted_mask)
+    {
+        return;
+    }
+    if mask.is_empty() {
+        APP_ORIENTATION.set(wanted);
+        TURNING.set(Some((wanted, Instant::now())));
+    }
+    let preferences = UIWindowSceneGeometryPreferencesIOS::initWithInterfaceOrientations(
+        UIWindowSceneGeometryPreferencesIOS::alloc(),
+        wanted_mask,
+    );
+    let failed = RcBlock::new(|error: NonNull<NSError>| {
+        // SAFETY: UIKit passes a valid NSError for the call.
+        let error = unsafe { error.as_ref() };
+        log::warn!(
+            "the screen did not turn back: {}",
+            error.localizedDescription()
+        );
+    });
+    scene.requestGeometryUpdateWithPreferences_errorHandler(&preferences, Some(&failed));
 }
 
 /// The controller to present over: the top one of `view`'s window.
@@ -341,6 +496,24 @@ pub(crate) fn set_clipboard(text: &str) {
     // SAFETY: a plain setter of the general pasteboard.
     unsafe {
         objc2_ui_kit::UIPasteboard::generalPasteboard().setString(Some(&NSString::from_str(text)))
+    };
+}
+
+/// `Clipboard.write`: puts `text` and `html` on the general pasteboard as
+/// one item (plain text and `public.html`), as a browser copies them.
+pub(crate) fn set_clipboard_html(text: &str, html: &str) {
+    let kinds = [
+        NSString::from_str("public.utf8-plain-text"),
+        NSString::from_str("public.html"),
+    ];
+    let values = [NSString::from_str(text), NSString::from_str(html)];
+    let kinds: Vec<&NSString> = kinds.iter().map(|k| &**k).collect();
+    let values: Vec<&AnyObject> = values.iter().map(|v| v.as_ref()).collect();
+    let item = NSDictionary::from_slices(&kinds, &values);
+    let board = objc2_ui_kit::UIPasteboard::generalPasteboard();
+    // SAFETY: UIPasteboard's setter of items (type to value).
+    let _: () = unsafe {
+        objc2::msg_send![&board, setItems: &*objc2_foundation::NSArray::from_retained_slice(&[item])]
     };
 }
 

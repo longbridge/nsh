@@ -136,7 +136,7 @@ fn context(surface: &Surface, uri: &str) -> Context {
         asset_base: surface.asset_base.borrow().clone(),
         read_asset: None,
         access: surface.native.access(),
-        media_files: Arc::default(),
+        media_files: surface.media_files.borrow().clone(),
         disk: remote
             .then(|| surface.image_cache.borrow().clone())
             .flatten(),
@@ -161,9 +161,9 @@ enum Heard {
 
 struct DownloadIvars {
     heard: Mutex<mpsc::Sender<Heard>>,
-    /// The URL of the hop it is at, the redirects so far, and why one was
-    /// refused.
-    hop: Mutex<(String, usize, Option<String>)>,
+    /// The URL of the hop it is at, the redirects followed so far, and why
+    /// one was refused.
+    hop: Mutex<(String, Vec<String>, Option<String>)>,
     access: Access,
 }
 
@@ -206,16 +206,15 @@ define_class!(
                 .map(|u| u.to_string())
                 .unwrap_or_default();
             let mut hop = self.ivars().hop.lock().unwrap_or_else(|e| e.into_inner());
-            let granted = match hop.1 {
-                n if n >= nsh_core::image::loader::MAX_REDIRECTS => {
-                    Err("too many redirects".to_owned())
-                }
-                _ => nsh_core::image::loader::redirect(&self.ivars().access, &hop.0, &next),
+            let granted = if hop.1.len() >= nsh_core::image::loader::MAX_REDIRECTS {
+                Err("too many redirects".to_owned())
+            } else {
+                nsh_core::image::loader::redirect(&self.ivars().access, &hop.0, &next)
             };
             match granted {
                 Ok(url) => {
-                    hop.0 = url;
-                    hop.1 += 1;
+                    hop.0.clone_from(&url);
+                    hop.1.push(url);
                     drop(hop);
                     completion.call((request as *const NSURLRequest as *mut NSURLRequest,));
                 }
@@ -298,7 +297,7 @@ impl Transport for UrlSession {
         let (tx, rx) = mpsc::channel();
         let delegate = ImageDownload::alloc().set_ivars(DownloadIvars {
             heard: Mutex::new(tx),
-            hop: Mutex::new((get.url.to_owned(), 0, None)),
+            hop: Mutex::new((get.url.to_owned(), Vec::new(), None)),
             access: get.access.clone(),
         });
         // SAFETY: NSObject's designated initializer.
@@ -350,19 +349,25 @@ impl Transport for UrlSession {
                     (get.progress)(bytes.len() as u64, total);
                 }
                 Ok(Heard::Done(error)) => {
-                    let refused = delegate
-                        .ivars()
-                        .hop
-                        .lock()
-                        .ok()
-                        .and_then(|mut h| h.2.take());
+                    let (redirects, refused) = {
+                        let mut hop = delegate
+                            .ivars()
+                            .hop
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
+                        (std::mem::take(&mut hop.1), hop.2.take())
+                    };
+                    // The redirect not followed is the response (`status`):
+                    // the disk cache drops its copy of the URL.
                     if let Some(refused) = refused {
-                        return Err(refused);
+                        return Ok(Fetched::refused(status, refused));
                     }
                     if let Some(error) = error {
                         return Err(error);
                     }
-                    return Ok(Fetched::new(status, headers, bytes));
+                    // The disk cache keeps the redirects with the copy and
+                    // checks them again before it serves it.
+                    return Ok(Fetched::new(status, headers, bytes).redirected(redirects));
                 }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return Err("download lost".into()),

@@ -170,6 +170,25 @@ prop id:sides hitSlop {}
 tap text:Widen
 prop id:sides hitSlop top=4 left=2
 prop id:plain hitSlop {}
+# The mouse comes over, moves with Shift held, drags with the left button
+# down, and leaves from where it was: a view's `MouseEvent`, on the host
+# of a component.
+listens id:hover onMouseEnter
+listens id:hover onMouseMove
+listens id:hover onMouseLeave
+expect Mouse: none
+event id:hover onMouseEnter position.x=4 position.y=3
+expect Mouse: in 4,3
+event id:hover onMouseMove position.x=5 position.y=7 modifiers.shift=true
+expect Mouse: move 5,7 page 294 shift
+event id:hover onMouseMove position.x=6.5 position.y=1 pressedButton=left
+expect Mouse: move 6.5,1 page 288 left down
+event id:hover onMouseLeave position.x=-2 position.y=0
+expect Mouse: move 6.5,1 page 288 left down out -2,0
+# A context menu asked for over it, where the page puts a menu.
+listens id:hover onContextMenu
+event id:hover onContextMenu position.x=5 position.y=7 pointerType=mouse
+expect Mouse: menu at 5,294
 covers [nsh/base] Button
 covers [props] hitSlop
 covers [props] role
@@ -242,6 +261,7 @@ noprop id:plain supportedOrientations
 # A dialog for screen readers, with no name of its own.
 prop id:plain role dialog
 noprop id:plain accessibilityLabel
+noprop id:plain accessibilityDescription
 # Closed while `open` is false.
 absent Synced dialog
 absent Guarded dialog
@@ -291,9 +311,10 @@ expect Guarded dialog
 prop id:guarded closeOnEscape false
 prop id:guarded closeOnBackdropPress false
 prop id:guarded closeOnSwipe false
-# An alert dialog named by its label.
+# An alert dialog named by its label and described by its message.
 prop id:guarded role alertdialog
 prop id:guarded accessibilityLabel Guarded
+prop id:guarded accessibilityDescription Only the app closes it.
 event text:"Guarded dialog" onCancel reason=cancel
 expect Log: guarded cancel
 event text:"Guarded dialog" onCancel reason=swipe
@@ -320,6 +341,7 @@ covers [props] ios.supportedOrientations
 covers [props] Dialog.open
 covers [props] role
 covers [props] accessibilityLabel
+covers [props] accessibilityDescription
 covers [events] Dialog.onOpen
 covers [events] Dialog.onClose
 covers [events] Dialog.onCancel
@@ -341,6 +363,13 @@ covers [nsh/base] Dialog
 covers [props] Dialog.backdropStyle
 covers [props] Dialog.backdropClass
 covers [props] Dialog.backdropTestID
+# base-menu-button
+tap id:case-base-menu-button
+# The app's content shows in the frame its style gives the button.
+expect Account trigger
+expect Chosen: none
+frame id:menu-button 0 20 390 44
+covers [nsh/base] MenuButton
 # base-nav-page
 tap id:case-base-nav-page
 # pop and header are events and props here: the headless runtime has no
@@ -431,6 +460,17 @@ covers [props] NavPage.headerStyle
 covers [props] NavPage.headerClass
 covers [events] NavPage.onBackPress
 covers [events] NavPage.onDismiss
+# base-nav-header-items
+tap id:case-base-nav-header-items
+# Trailing iOS bar buttons (`ios.headerRightItems`) with a menu; other
+# platforms keep showing `headerRight`. The steps check the page's own texts
+# and the fallback `headerRight`. nsh-compat does not report a screen's header
+# buttons yet (as for `headerRightSymbol`), so `ios.headerRightItems` is not
+# claimed here; the core and engine tests cover the items and their handlers.
+expect Log: none
+expect Filter: all
+expect Fallback right
+prop id:home title Header items
 # base-nav-stack-change
 tap id:case-base-nav-stack-change
 # onChange: not for the first routes, then once per change with the routes after it.
@@ -1013,6 +1053,14 @@ prop id:mute hitSlop top=12 right=12 bottom=12 left=12
 tap label:Mute
 prop id:mute hitSlop top=4 left=2
 prop id:wifi hitSlop {}
+# The mouse over it, as over any component's host.
+listens id:mute onMouseEnter
+listens id:mute onMouseLeave
+expect Mute: out
+event id:mute onMouseEnter position.x=3 position.y=2
+expect Mute: over 3
+event id:mute onMouseLeave position.x=-1 position.y=2
+expect Mute: out
 covers [nsh/base] Switch
 covers [props] Switch.checked
 covers [props] disabled
@@ -1091,13 +1139,14 @@ covers [props] role
 covers [events] onChange
 # base-radio
 tap id:case-base-radio
-# The group is a radio group for screen readers; each radio is a radio
-# of its own, checked and selected while checked: `checkedStyle`, and
+# The group is a radio group for screen readers, named by the app; each
+# radio is a radio of its own, checked and selected while checked: `checkedStyle`, and
 # `group-checked:` of the app's dot (30 wide, a margin of 8) puts the
 # label at 38.
 expect Plan: basic
 expect Changes: 0
 prop id:plans role radiogroup
+prop id:plans accessibilityLabel Plan
 prop id:basic role radio
 prop id:basic accessibilityState selected=true checked=true
 style id:basic backgroundColor #00ff00ff
@@ -1161,6 +1210,8 @@ tap id:case-base-tabs
 expect Showing: overview
 expect Presses: 0
 prop id:sections role tablist
+# The list's name, said as screen readers enter it.
+prop id:sections accessibilityLabel Sections
 prop id:overview role tab
 prop id:overview accessibilityState selected=true
 style id:overview backgroundColor #00ff00ff
@@ -2559,6 +2610,9 @@ covers [props] Select.clearButtonAccessibilityLabel
 # `disabled`: dimmed for screen readers.
 prop label:Locked accessibilityState disabled=true expanded=false hasPopup=true
 covers [props] disabled
+# The states the app gives its trigger element (`busy`; `invalid` alike)
+# stay, beside the ones the select sets.
+prop label:Checked accessibilityState busy=true expanded=false hasPopup=true
 # `searchable`: a field above the items (its placeholder, name for screen
 # readers and look the app's; on a phone the keyboard comes when it is
 # pressed) filters them by title, ignoring case, and a section without a
@@ -3569,6 +3623,7 @@ expect token primary #171717ff
 expect token radius-card 14
 style id:up backgroundColor #138a5aff
 style id:primary backgroundColor #17171780
+style id:faded color #138a5a80
 covers [nsh] token
 
 # base-set-theme
@@ -3578,6 +3633,7 @@ tap id:case-base-set-theme
 expect theme up #138a5aff
 expect theme radius-card 14
 style id:themed backgroundColor #138a5aff
+prop id:page headerStyle backgroundColor=#138a5aff
 # `token()` reads it at once and classes follow. nsh.json's theme is not
 # under it (`radius-card` is gone), the default is (`primary`).
 tap id:set
@@ -3586,10 +3642,12 @@ expect theme up #2563ebff
 expect theme radius-card undefined
 expect theme primary #171717ff
 style id:themed backgroundColor #2563ebff
+prop id:page headerStyle backgroundColor=#2563ebff
 # Its dark value in the dark appearance.
 tap id:dark
 expect theme up #93c5fdff
 style id:themed backgroundColor #93c5fdff
+prop id:page headerStyle backgroundColor=#93c5fdff
 tap id:system
 expect theme up #2563ebff
 # A theme with a value NSH cannot read (no color in the dark appearance):
@@ -3609,6 +3667,10 @@ expect theme up #2563ebff
 style id:themed backgroundColor #2563ebff
 tap id:bad-length
 expect theme result bad-length refused TypeError
+expect theme up #2563ebff
+style id:themed backgroundColor #2563ebff
+tap id:bad-suffix
+expect theme result bad-suffix refused TypeError
 expect theme up #2563ebff
 style id:themed backgroundColor #2563ebff
 tap id:built
@@ -4305,6 +4367,7 @@ expect Suggest: true jo @jo 4-7 false
 expect Mention: Hi @Joan false
 expect Replace: true Hi @Joan done
 expect Exit: true false true
+expect Open: true true false true false false
 covers [nsh/base] link
 covers [nsh/base] characterCount
 covers [nsh/base] suggestion
@@ -4315,6 +4378,7 @@ covers [nsh/base] unsetLink
 covers [nsh/base] setCharacterLimit
 covers [nsh/base] replaceSuggestion
 covers [nsh/base] exitSuggestion
+covers [nsh/base] setSuggestionOpen
 covers [nsh/base] insertMention
 
 # base-rich-editor-kit
@@ -4325,6 +4389,7 @@ expect Configure: false true unknown
 expect Extension: bold mark 100 true
 expect Extend: 200 underline true
 expect Define: HEY extension xHI
+expect Suggest: true true
 expect Named: text threw
 expect Editable: false
 expect Both: threw
@@ -4372,8 +4437,31 @@ absent BubbleMenu
 tap text:ToggleMenu
 expect BubbleMenu
 covers [props] RichEditor.bubbleMenu
+# Files dragged over the editor, away and dropped reach the app; the
+# document stays as it was.
+expect RichDrop: none
+event id:rich-drop onFileDragEnter uris=file:///tmp/shot%201.png
+expect RichDrop: enter file:///tmp/shot%201.png [image/png]
+event id:rich-drop onFileDragLeave
+expect RichDrop: enter file:///tmp/shot%201.png [image/png] leave
+event id:rich-drop onFileDrop uris=file:///tmp/shot%201.png uris=file:///tmp/notes.pdf
+expect RichDrop: dropped file:///tmp/shot%201.png file:///tmp/notes.pdf [image/png application/pdf]
+expect Some text
+covers [events] onFileDragEnter
+covers [events] onFileDragLeave
+covers [events] onFileDrop
+# The app's layer over the document takes presses and `nodeRect` answers in its points.
+expect LayerMark
+tap text:LayerMark
+expect LayerBox true 0 0
+covers [props] RichEditor.contentLayer
 expect CellA
 expect CellD
+# An editor without a height is as tall as its two lines; one with a
+# `maxHeight` stops there.
+expect AutoTwo
+frame id:rich-auto 20 329 370 34
+frame id:rich-capped 20 367 370 40
 # base-transition-shader
 tap id:case-base-transition-shader
 # Pages and a dialog with a `transitionShader` come and go as without one:

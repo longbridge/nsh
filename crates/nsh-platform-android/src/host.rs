@@ -19,6 +19,7 @@ use jni::{
 };
 use nsh_core::{
     EventKind, EventPayload, MountBatch, MountItem, NodeId, PayloadValue, Points, Size,
+    canvas::render::RenderFailure,
     geometry::{DevicePixels, point, px, size},
 };
 use nsh_engine::{
@@ -246,6 +247,7 @@ impl Host {
             speech: None,
             audio: None,
             windows: None,
+            login_item: None,
         };
         let density = self.density.clone();
         let sink = Sink(self.clone(), web_generation);
@@ -638,6 +640,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
             // the system's viewer reads it through the FilesProvider. The
             // dialogs have no answer here.
             file_requests: true,
+            // `OffscreenCanvas`: `CanvasRender.java` replays drawings into
+            // bitmaps with the on-screen canvas's painter.
+            canvas_render: true,
             web_evaluate: true,
             // wgpu on Vulkan or GLES, in builds with it, until it finds no
             // GPU.
@@ -801,7 +806,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_setCache(
 /// What the running app's disk cache holds for `url`: its bytes (`byte[]`)
 /// when they are fresh, the conditional request headers to revalidate a
 /// stale copy with (`String[]`, names and values; empty: none), or null (a
-/// miss, or no disk cache). Called on the image threads.
+/// miss, or no disk cache). A copy that came through a redirect the app may
+/// no longer follow is dropped, and a miss. Called on the image threads.
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_imageCacheLookup<'local>(
     mut env: JNIEnv<'local>,
@@ -818,7 +824,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheLookup<'local>(
     let Ok(url) = env.get_string(&url).map(String::from) else {
         return JObject::null();
     };
-    match cache.lookup(&url) {
+    let access = host.access.lock().expect("access").clone();
+    match cache.lookup(&url, &access) {
         Lookup::Fresh(bytes) => env
             .byte_array_from_slice(&bytes)
             .map(JObject::from)
@@ -835,6 +842,23 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheLookup<'local>(
     }
 }
 
+/// The strings of a Java `String[]` (null: none; a null element: empty).
+fn read_strings(env: &mut JNIEnv<'_>, array: &JObjectArray<'_>) -> Vec<String> {
+    if array.is_null() {
+        return Vec::new();
+    }
+    let len = env.get_array_length(array).unwrap_or(0);
+    (0..len)
+        .map(|i| {
+            env.get_object_array_element(array, i)
+                .ok()
+                .filter(|o| !o.is_null())
+                .and_then(|o| env.get_string(&JString::from(o)).ok().map(String::from))
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
 /// `strings` as a Java `String[]`.
 fn string_array<'local>(env: &mut JNIEnv<'local>, strings: &[&str]) -> Option<JObject<'local>> {
     let array = env
@@ -849,7 +873,8 @@ fn string_array<'local>(env: &mut JNIEnv<'local>, strings: &[&str]) -> Option<JO
 
 /// Ends the download of `url` that `imageCacheLookup` started: `status` 0
 /// when the request failed, else the response's status, `headers` (names
-/// and values) and body (null without one). Stores, updates or drops the
+/// and values), body (null without one) and `redirects`, the URLs the
+/// download was redirected to (null: none). Stores, updates or drops the
 /// cached copy, and returns the cached bytes when they are what to show
 /// (a `304`; a stale copy when the request failed or the server erred), or
 /// null: the response's own body (a `2xx`), or an error. Called on the
@@ -863,6 +888,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheComplete<'local>(
     status: jint,
     headers: JObjectArray<'local>,
     body: JByteArray<'local>,
+    redirects: JObjectArray<'local>,
 ) -> JByteArray<'local> {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
@@ -875,18 +901,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheComplete<'local>(
     let response = if status <= 0 {
         Err("the request failed".to_owned())
     } else {
-        let mut strings = Vec::new();
-        if !headers.is_null() {
-            let len = env.get_array_length(&headers).unwrap_or(0);
-            for i in 0..len {
-                let value = env
-                    .get_object_array_element(&headers, i)
-                    .ok()
-                    .filter(|o| !o.is_null())
-                    .and_then(|o| env.get_string(&JString::from(o)).ok().map(String::from));
-                strings.push(value.unwrap_or_default());
-            }
-        }
+        let strings = read_strings(&mut env, &headers);
         let pairs = strings
             .as_chunks::<2>()
             .0
@@ -897,15 +912,17 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheComplete<'local>(
         } else {
             env.convert_byte_array(&body).unwrap_or_default()
         };
-        Ok(nsh_core::image::Fetched::new(
+        let fetched = nsh_core::image::Fetched::new(
             status as u16,
             nsh_core::image::CacheHeaders::from_pairs(pairs),
             body,
-        ))
+        );
+        Ok(fetched.redirected(read_strings(&mut env, &redirects)))
     };
     // A 2xx's bytes are the body Java has.
     let own = (200..300).contains(&status);
-    match cache.complete(&url, response) {
+    let access = host.access.lock().expect("access").clone();
+    match cache.complete(&url, &access, response) {
         Ok(bytes) if !own => env
             .byte_array_from_slice(&bytes)
             .unwrap_or_else(|_| JByteArray::default()),
@@ -1593,6 +1610,64 @@ extern "system" fn Java_com_longbridge_nsh_Native_paste(
             id as NodeId,
             EventKind::Paste,
             EventPayload::Paste(Box::new(paste)),
+        );
+    }
+}
+
+/// `Native.canvasImage`'s `failure`: the image could not be drawn or
+/// encoded. `CanvasRender.java`'s `RENDER_FAILED`.
+const RENDER_FAILED: jint = 0;
+/// `Native.canvasImage`'s `failure`: the system could not make a bitmap
+/// this large. `CanvasRender.java`'s `RENDER_TOO_LARGE`.
+const RENDER_TOO_LARGE: jint = 1;
+
+/// The failure `Native.canvasImage` reports: its `failure` kind
+/// ([`RENDER_FAILED`], [`RENDER_TOO_LARGE`]; an unknown one is a plain
+/// failure) and message.
+fn render_failure(failure: jint, message: String) -> RenderFailure {
+    match failure {
+        RENDER_TOO_LARGE => RenderFailure::TooLarge(message),
+        RENDER_FAILED => RenderFailure::Failed(message),
+        _ => RenderFailure::Failed(message),
+    }
+}
+
+/// The answer to an offscreen canvas render (`CanvasRender.java`): the
+/// encoded image's bytes, or when they are null why not, `failure`
+/// ([`RENDER_FAILED`], [`RENDER_TOO_LARGE`]) and `error`. The bytes cross
+/// as a `byte[]`, never through the event map's boxed values.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_canvasImage(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    request: jint,
+    bytes: JByteArray<'_>,
+    failure: jint,
+    error: JString<'_>,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let result = if bytes.is_null() {
+        let error = (!error.is_null())
+            .then(|| env.get_string(&error).ok().map(String::from))
+            .flatten();
+        Err(render_failure(
+            failure,
+            error.unwrap_or_else(|| "the canvas could not be drawn".into()),
+        ))
+    } else {
+        env.convert_byte_array(&bytes)
+            .map_err(|e| format!("the image could not be read: {e}").into())
+    };
+    if let Some(control) = host.control() {
+        control.dispatch_event(
+            nsh_core::ROOT_ID,
+            EventKind::CanvasImage,
+            EventPayload::CanvasImage {
+                id: request as u32,
+                result,
+            },
         );
     }
 }
@@ -2418,7 +2493,7 @@ fn floats(env: &JNIEnv<'_>, values: &[f32]) -> jfloatArray {
     array.into_raw()
 }
 
-/// A registered native component emitted `name` (JSON data or `null`).
+/// The files picked for a pick (`Picker.java`'s answer).
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_picked(
     mut env: JNIEnv<'_>,
@@ -2429,12 +2504,15 @@ extern "system" fn Java_com_longbridge_nsh_Native_picked(
     types: jni::objects::JObjectArray<'_>,
     data: jni::objects::JObjectArray<'_>,
     sizes: jni::objects::JIntArray<'_>,
+    lengths: jni::objects::JLongArray<'_>,
 ) {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
     let count = env.get_array_length(&data).unwrap_or(0).max(0);
     let mut dims = vec![0; count as usize * 2];
     let _ = env.get_int_array_region(&sizes, 0, &mut dims);
+    let mut lens = vec![0; count as usize];
+    let _ = env.get_long_array_region(&lengths, 0, &mut lens);
     let string = |env: &mut JNIEnv<'_>, array: &jni::objects::JObjectArray<'_>, i: i32| {
         env.get_object_array_element(array, i)
             .ok()
@@ -2449,6 +2527,12 @@ extern "system" fn Java_com_longbridge_nsh_Native_picked(
         let Ok(bytes) = env.get_object_array_element(&data, i) else {
             continue;
         };
+        // No bytes: a file larger than the pick reads, its size alone.
+        if bytes.is_null() {
+            let len = u64::try_from(lens[i as usize]).unwrap_or(0);
+            files.push(nsh_core::picker::PickedFile::too_large(name, mime, len));
+            continue;
+        }
         let Ok(bytes) = env.convert_byte_array(JByteArray::from(bytes)) else {
             continue;
         };

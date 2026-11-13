@@ -310,7 +310,10 @@ impl AppView {
         config.environment = self.environment;
         config.header_heights = nsh_core::NO_NATIVE_HEADER;
         config.ui_sets = self.options.ui_sets.clone();
-        config.network = Some(nsh_engine::net::network());
+        #[cfg(feature = "net")]
+        {
+            config.network = Some(nsh_engine::net::network());
+        }
         config.limits = self.options.limits;
         config.cache = self.options.cache.clone();
         config.data_dir = self.options.data_dir.clone();
@@ -685,6 +688,17 @@ impl AppView {
                 if matches!(mouse.kind, crate::MouseKind::Down(crate::MouseButton::Left)) {
                     self.surface.wake.notify();
                 }
+                self.pointer.mouse_up(
+                    mouse,
+                    &crate::input::PointerContext {
+                        area: self.area,
+                        cells: self.options.cells,
+                        hits: &self.hits,
+                        geometry: &self.geometry,
+                        tree: &mut self.tree,
+                        control: &engine.control(),
+                    },
+                );
                 let handled = if matches!(
                     mouse.kind,
                     crate::MouseKind::Down(crate::MouseButton::Right)

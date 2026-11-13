@@ -283,7 +283,8 @@ interface Theme {
 它立即生效：调用之后 `token()` 马上读到新的令牌，引用令牌的类名、`nsh/base` 和 Rust 组件的 `theme()` 在下一帧跟上，两种外观都是。
 嵌入方应用的[主题覆盖](../docs/tailwind.md#主题-token)仍然优先于它。传 `null` 恢复应用构建时的主题。
 
-主题要整个读得懂：有值读不懂时（NSH 不认识的颜色，如 `#zz` 或 `lab()`；指不到颜色的 `var()`；或一种外观下是颜色、另一种外观下却不是颜色的值），
+主题要整个读得懂：有值读不懂时（NSH 不认识的颜色，如 `#zz`、`lab()` 或 `rgb(255 0 0)garbage`；
+指不到颜色的 `var()`；或一种外观下是颜色、另一种外观下却不是颜色的值），
 `setTheme` 抛出 `TypeError`，逐一列出这些值，正在显示的主题保持不变。阴影这类不属于任何令牌类型的值会被略过，和 `nsh.json`
 的主题一样。新主题请从应用自己的主题出发，只改不同的部分，这样类名引用的令牌都还有值（`up` 在 `nsh.json` 的主题里时的 `bg-up`）。
 Rust：对 `nsh_base::Theme` 调用 `set_tokens(theme.into())`（[主题 token](../docs/tailwind.md#主题-token)）。
@@ -1032,6 +1033,28 @@ effect(() => {
 });
 ```
 
+### wakeCount
+
+```ts
+const wakeCount: Accessor<number>;
+```
+
+应用运行期间系统从睡眠中唤醒的次数：启动时为 0，每次唤醒后加一。睡眠可能让 `lifecycle()` 保持不变（笔记本合上再打开、应用一直在前台），但网络连接和定时器并没有挺过这次睡眠。响应式：读取它的 effect 会在每次唤醒后重新运行，应用就在这里检查连接或重新建立连接。macOS、Windows 和 Linux 统计唤醒；在 iOS 和 Android 上，设备睡眠会把应用移到后台，由 `lifecycle()` 报告。Rust：`wake_count() -> u32`。
+
+```rust tabs
+effect(move || {
+    if wake_count() > 0 {
+        feed.reconnect();
+    }
+});
+```
+
+```tsx tabs
+effect(() => {
+  if (wakeCount() > 0) feed.reconnect();
+});
+```
+
 ### setColorScheme
 
 ```ts
@@ -1051,6 +1074,34 @@ function setFpsEnabled(enabled: boolean): void;
 
 ```tsx
 <Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
+```
+
+### setFpsMode
+
+```ts
+function setFpsMode(mode: "expanded" | "collapsed" | "hidden"): void;
+```
+
+性能监视器的显示方式，立即生效，之后再显示时也照此显示：`"expanded"`，完整的面板（默认）；`"collapsed"`，只显示帧率的小药丸，颜色按帧预算区分；`"hidden"`，屏幕上不显示任何东西，但照常测量并记录日志。点击面板会在前两种之间切换。macOS 的面板支持它（见 [macOS](../docs/macos.md#性能监视器)）；没有面板的平台忽略它，Linux 的面板点击可以收起，但暂不支持这个设置。`NSH_FPS=collapsed` 或 `NSH_FPS=hidden` 让监视器以这种方式启动。Rust：`set_fps_mode(FpsMode::Collapsed)`。
+
+### perfStats
+
+```ts
+const perfStats: Accessor<PerfStats | null>;
+
+interface PerfStats {
+  readonly fps: number;
+  readonly refreshRate: number | null;
+  readonly dropped: number;
+}
+```
+
+监视器最近一秒测得的数据：监视器测量时（`fpsEnabled()`）每秒读一次，不测量时以及测满第一秒之前为 `null`，应用可以按自己的样式显示它。`fps` 是每秒显示的帧数：空闲的应用读数偏低，这不代表慢（只有应用有变化的屏幕刷新才计数）。`refreshRate` 是屏幕的刷新率（Hz），监视器见到刷新之前为 `null`；`dropped` 是最近的帧里耗时超过一次刷新的比例，0 到 1（`0.05` 即 5%；Rust 中是 `Percentage`，同样是这个比例）。无头测试也会测量，但不绘制帧，读数为 0 fps。Rust：`perf_stats() -> Option<PerfStats>`。
+
+```tsx
+<If when={perfStats()}>
+  <Text>{`${Math.round(perfStats()!.fps)} FPS`}</Text>
+</If>
 ```
 
 ### shadersAvailable
@@ -1115,10 +1166,11 @@ interface PlatformSelectSpec<T> {
   desktop?: T;  // platform.desktop 为 true：macOS、Windows、Linux、桌面浏览器，以及终端
   native?: T;   // 除 Web 外的所有平台
   default?: T;
+  [platform: string]: T | undefined; // 在 NSH 之外构建的平台，按其 platform.name 匹配
 }
 ```
 
-依次返回当前操作系统（`ios`、`android`、`web` 等）对应的值，否则按 `platform.desktop` 取 `desktop` 或 `mobile`，否则 `native`（除 Web 外的所有平台），否则 `default`，都没有则返回 `undefined`。Rust 代码对 `os()` 做 `match`（`mobile` / `desktop` 用 `is_desktop()`）。
+依次返回 `platform.name`（在 NSH 之外构建的平台）对应的值，否则当前操作系统（`ios`、`android`、`web` 等）对应的值，否则按 `platform.desktop` 取 `desktop` 或 `mobile`，否则 `native`（除 Web 外的所有平台），否则 `default`，都没有则返回 `undefined`。Rust 代码对 `os()` 做 `match`（配合 `platform_name()` 和 `is_desktop()`）。
 
 ```rust tabs
 use nsh_core::platform::Os;
@@ -1427,6 +1479,7 @@ import { Clipboard } from "nsh";
 ```ts
 const Clipboard: {
   writeText(text: string): Promise<void>;
+  write(item: ClipboardItem): Promise<void>;
   readText(): Promise<string>;
   hasText(): Promise<boolean>;
   writeImage(src: string): Promise<void>;
@@ -1434,6 +1487,11 @@ const Clipboard: {
   hasImage(): Promise<boolean>;
   readFiles(): Promise<string[]>;
 };
+
+interface ClipboardItem {
+  text: string; // 纯文本形式的内容
+  html?: string; // 同一内容的 HTML 形式
+}
 
 interface ClipboardImage {
   url: string; // Image 能显示、fetch 能读取的 URL
@@ -1444,6 +1502,7 @@ interface ClipboardImage {
 | TS | Rust（`nsh_core::prelude`） |
 |---|---|
 | `await Clipboard.writeText(text)` | `set_clipboard(text)` |
+| `await Clipboard.write({ text, html })` | `set_clipboard_item(item)`（一个 `ClipboardItem`） |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
 | `await Clipboard.hasText()` | `clipboard_has_string().await -> bool` |
 | `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` |
@@ -1496,6 +1555,39 @@ const copied = signal(false);
 >
   <Text>{copied() ? "已复制" : "复制"}</Text>
 </View>;
+```
+
+### Clipboard.write
+
+```ts
+write(item: ClipboardItem): Promise<void>;
+```
+
+把同一内容的纯文本和 HTML 一起放到剪贴板上，替换原有内容，和浏览器复制选区的做法一样：能读格式的应用（邮件、文档、富文本编辑器）
+粘贴 HTML，其他应用粘贴文本。`html` 是一个片段（`<p>Hello <b>world</b></p>`），不是整个页面。不给 `html` 时等同于
+`writeText(text)`。Rust：`set_clipboard_item(item)`，参数是一个 `ClipboardItem`。
+
+`ClipboardItem` 是剪贴板上的一项内容，带有几种格式，和 GPUI 的 `ClipboardItem` 一样；在 NSH 中它是一个列出各格式的普通对象
+`{ text, html? }`，只是一个类型（浏览器的 `ClipboardItem` 类仍归页面所用）。一项内容的所有格式在一次写入中放上剪贴板，剪贴板以后支持的格式也加入同一项。
+
+HTML 以各平台的 HTML 类型和文本在同一次写入中放上剪贴板：Web 和 Linux 是 `text/html`，macOS 和 iOS 是 `public.html`，
+Android 是 HTML 剪贴项，Windows 是 `HTML Format`。GPUI 和终端写入文本。在 Web 上，处理用户按键或按下时发起的写入（例如
+`RichEditor` 的复制）经由页面的 copy 事件完成，和浏览器复制选区一样。`Clipboard.readText` 读回的是文本；HTML 由粘贴读取
+（`onPaste` 的 `html`）。
+
+```rust tabs
+use nsh_core::prelude::*;
+
+let mut item = ClipboardItem::default();
+item.text = "Hello world".into();
+item.html = Some("<p>Hello <b>world</b></p>".into());
+set_clipboard_item(item);
+```
+
+```tsx tabs
+import { Clipboard } from "nsh";
+
+await Clipboard.write({ text: "Hello world", html: "<p>Hello <b>world</b></p>" });
 ```
 
 ### Clipboard.readText
@@ -1713,10 +1805,15 @@ interface PickFilesOptions {
   multiple?: boolean; // 允许选择多个（false：一个）
   limit?: number; // multiple 时最多选几个（最多 100）
   filters?: { name: string; extensions: string[] }[]; // 提供的文件类型（不给：任意文件）
+  maxSize?: number; // 读入的最大文件，单位字节（不给时 512 MiB，也是上限）
 }
 
 interface PickedFile {
-  file: File; // 名称、类型、字节大小和内容，都保持原样
+  file: File | null; // 名称、类型、字节大小和内容，都保持原样；没读入时为 null
+  name: string;
+  type: string;
+  size: number; // 字节数，读没读都有
+  status: "read" | "tooLarge"; // "tooLarge"：超过 maxSize，内容没有读入
 }
 
 interface PickImagesOptions {
@@ -1737,6 +1834,8 @@ interface PickedImage {
 |---|---|
 | `await Picker.pickImages(options)` | `pick_images(request).await -> Vec<PickedFile>` |
 | `await Picker.pickFiles(options)` | `pick_files(request).await -> Vec<PickedFile>` |
+| `maxSize` | `FilePickRequest::new(multiple, limit).max_size(10 << 20)` |
+| `picked.status`、`.size` | `file.status`（`PickedStatus::TooLarge`）、`file.len` |
 | `multiple`、`limit` | `PickRequest::new(multiple, limit)`（`limit` 为 0 表示最多 100） |
 | `maxDimension` | `request.max_dimension = Some(DevicePixels(2048))` |
 | `quality` | `request.quality = Some(Percentage(0.8))` |
@@ -1859,8 +1958,13 @@ pickFiles(options?: PickFilesOptions): Promise<PickedFile[]>;
 const picked = await Picker.pickFiles({
   multiple: true,
   filters: [{ name: "文档", extensions: ["pdf", "md"] }],
+  maxSize: 10 * 1024 * 1024,
 });
-for (const { file } of picked) {
+for (const { file, name } of picked) {
+  if (!file) {
+    showError(`${name} 超过 10 MB`);
+    continue;
+  }
   const form = new FormData();
   form.append("document", file);
   await fetch("https://api.example.com/documents", { method: "POST", body: form });
@@ -1877,8 +1981,9 @@ for (const { file } of picked) {
 | Web | `<input type=file>` | 所有扩展名合为一组 |
 | GPUI | GPUI 的打开对话框，可选任意文件 | 不符合的文件在选择后被剔除 |
 
-所有平台都不需要权限。文件保持原样：不做转换，文件名不变。文件内容会全部读入内存，因此超过 512 MiB 的文件不会出现在
-结果中，并记录到日志。过滤器只决定选择器提供什么，并不保证结果：请检查拿到的文件。
+所有平台都不需要权限。文件保持原样：不做转换，文件名不变。文件内容会全部读入内存，最多读到 `maxSize`（不给时 512 MiB，
+给了也不超过它）：更大的文件不读入，只带回名称、类型和大小（`file` 为 null，`status` 为 `"tooLarge"`），应用可以据此提示
+用户。过滤器只决定选择器提供什么，并不保证结果：请检查拿到的文件。
 
 ### 嵌入 NSH 的应用
 
@@ -1913,7 +2018,7 @@ async function notifyMe() {
 }
 ```
 
-Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`show_notification`、`close_notification`、`set_badge` 和 `next_notification_press`。
+Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`show_notification`、`close_notification`、`close_all_notifications`、`set_badge` 和 `next_notification_press`。
 
 | 平台 | 通知 | 角标 |
 | --- | --- | --- |
@@ -1933,6 +2038,17 @@ Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`s
 
 ```tsx
 await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
+```
+
+### Notifications.closeAll
+
+`closeAll()` 移除应用显示的全部通知，包括已显示的和等待显示的。在用户退出登录时调用，让通知里的内容随账号一起清掉。Apple 平台、Windows 和 Android 的系统通知中心会跨运行保留通知，`closeAll()` 在这些平台上移除 NSH 显示的通知，包括应用上一次运行留下的，嵌入方自己的通知保留。Linux 和 Web 上它移除当前运行的应用显示的通知。
+
+```tsx
+async function signOut() {
+  await Notifications.closeAll();
+  Notifications.setBadge(0);
+}
 ```
 
 ### Notifications.on
@@ -2680,13 +2796,14 @@ interface KeyBindingOptions {
   when?: "always" | "notEditing";
   repeat?: boolean;
   passThrough?: boolean;
+  forFocus?: boolean;
 }
 ```
 
 | TS | Rust |
 |---|---|
 | `keymap.bind(keystroke, handler)` | `on_key(keystroke, handler)` |
-| `keymap.bind(keystroke, handler, { when, repeat, passThrough })` | `on_key_with(keystroke, KeyOptions { when, repeat, pass_through }, handler)`；`when` 是 `nsh_core::keymap::When`（`Auto`、`Always`、`NotEditing`） |
+| `keymap.bind(keystroke, handler, { when, repeat, passThrough, forFocus })` | `on_key_with(keystroke, KeyOptions { when, repeat, pass_through, for_focus }, handler)`；`when` 是 `nsh_core::keymap::When`（`Auto`、`Always`、`NotEditing`） |
 | `keymap.bind({ … })` | 每个按键组合一次 `on_key` |
 | `keymap.label(keystroke)` | `key_label(keystroke)` |
 
@@ -2858,6 +2975,20 @@ on_key_with("tab", KeyOptions { pass_through: true, ..KeyOptions::default() }, m
 
 ```tsx tabs
 keymap.bind("tab", close, { passThrough: true });
+```
+
+键盘焦点在能按下的视图（有 `onPress`）上时，不带修饰键的回车或空格（可以带 Shift）会按下这个视图，应用里这两个键的其他绑定都让给它：对话框里代表主操作的回车，不会抢在用户移过去焦点的按钮之前执行。视图自己的回车或空格用 `forFocus: true` 绑定：在视图有焦点时绑上，它就在按下之前拿到这两个键。下面这个卡片按空格翻开关，按回车打开：
+
+```rust tabs
+on_key_with("space", KeyOptions { for_focus: true, ..KeyOptions::default() }, move |_| flip());
+```
+
+```tsx tabs
+<View
+  onPress={open}
+  onFocus={() => (unbind = keymap.bind("space", flip, { forFocus: true }))}
+  onBlur={() => unbind?.()}
+/>
 ```
 
 菜单快捷键会让位给相同按键组合的绑定：所有桌面平台上的应用菜单（[`nsh/desktop`](./nsh-desktop)），以及 macOS 上的内置菜单（Cmd+W、Cmd+C 等）。使用 `nsh run` 开发时，即使应用绑定了 `mod+r`，Cmd+R / Ctrl+R 也总是重新加载应用；打包后的应用可以绑定它。

@@ -945,6 +945,10 @@ pub struct PickRequest {
     pub format: String,
     /// The file types offered (`pickFiles`); empty: any.
     pub filters: Vec<PickFilter>,
+    /// The largest file read, in bytes (`pickFiles`' `maxSize`, at most
+    /// 512 MiB); `null` for images. A larger file the handler gives answers
+    /// with its name and size only.
+    pub max_size: Option<f64>,
 }
 
 /// A group of file types a pick offers, as a test reads it.
@@ -972,6 +976,7 @@ impl From<&nsh_core::picker::Pick> for PickRequest {
                 }
                 .into(),
                 filters: Vec::new(),
+                max_size: None,
             },
             Pick::Files(request) => PickRequest {
                 kind: "files".into(),
@@ -988,6 +993,7 @@ impl From<&nsh_core::picker::Pick> for PickRequest {
                         extensions: filter.extensions.clone(),
                     })
                     .collect(),
+                max_size: Some(request.size_limit() as f64),
             },
         }
     }
@@ -1972,7 +1978,8 @@ impl App {
 
     /// Drops local files (`file:` URLs, as a file manager drags them) on
     /// the middle of what `selector` names: it, or the nearest view around
-    /// it listening, hears `onFileDrop`. Desktops, headless and on Linux for now.
+    /// it listening, hears `onFileDrop`. Desktops, headless, on Linux and
+    /// on macOS for now.
     pub async fn drop_files(
         this: Instance<Self>,
         selector: String,
@@ -1992,6 +1999,21 @@ impl App {
     /// with `menu()`). Desktops and the web only: a phone has no mouse.
     pub async fn right_click(this: Instance<Self>, selector: String) -> Result<(), JsError> {
         step(&this, move |app| app.right_click(&selector)).await
+    }
+
+    /// An input method composes `text` in the input `selector` names (or
+    /// the first input in it), as a user typing pinyin or kana sees it: the
+    /// input takes the focus and `text` shows marked at the caret, in
+    /// place of what it composed, without changing its value
+    /// (`onCompositionChange`); the input is laid out with it. An empty
+    /// `text` ends the composition with nothing committed: end it so before
+    /// the next step on the input. Headless and on macOS for now.
+    pub async fn compose(
+        this: Instance<Self>,
+        selector: String,
+        text: String,
+    ) -> Result<(), JsError> {
+        step(&this, move |app| app.compose(&selector, &text)).await
     }
 
     /// Pastes `content` into the input `selector` names (or the first input
@@ -2399,11 +2421,40 @@ impl App {
         step(&this, move |app| app.open_with_url(&url)).await
     }
 
+    /// The images whose source is `url` fail to load from now on, those
+    /// loading now included: each reports the failure as on a device
+    /// (`onError`), so a test checks what the app shows instead (an
+    /// avatar's initials, a placeholder). `url` is matched whole and `*`
+    /// in it matches anything (`"https://cdn.example.com/avatars/*"`), as
+    /// `open`'s `network` routes are; a bundled image's is
+    /// `asset:/<path>`. Then waits until the app is quiet. Headless only.
+    pub async fn fail_images(this: Instance<Self>, url: String) -> Result<(), JsError> {
+        step(&this, move |app| app.fail_images(&url)).await
+    }
+
+    /// The URLs the app opens that match `url` fail to open from now on:
+    /// `openUrl` resolves `{ opened: false }`, as on a device with no app
+    /// for the URL, so a test checks what the app shows then. `url` is
+    /// matched whole and `*` in it matches anything
+    /// (`"https://example.com/*"`), as `open`'s `network` routes are. They
+    /// are still listed by `openedUrls`. Then waits until the app is
+    /// quiet. Headless only.
+    pub async fn fail_open_urls(this: Instance<Self>, url: String) -> Result<(), JsError> {
+        step(&this, move |app| app.fail_open_urls(&url)).await
+    }
+
     /// Moves the app to `state`, as the system does when the user leaves it
     /// (`"background"`), switches to another app or window (`"inactive"`)
     /// and comes back (`"active"`); `lifecycle()` follows. Headless only.
     pub async fn set_lifecycle(this: Instance<Self>, state: Lifecycle) -> Result<(), JsError> {
         step(&this, move |app| app.set_lifecycle(state.into())).await
+    }
+
+    /// Wakes the system from sleep, as when the user opens a laptop's lid:
+    /// `wakeCount()` counts one more, and `lifecycle()` stays as it was.
+    /// Headless only.
+    pub async fn wake(this: Instance<Self>) -> Result<(), JsError> {
+        step(&this, |app| app.wake()).await
     }
 
     /// Gives the user the locale settings `settings` names
@@ -2422,6 +2473,13 @@ impl App {
     /// The text on the clipboard now, `null` when it holds none.
     pub fn clipboard(&self) -> Result<Option<String>, JsError> {
         self.with(|app| app.clipboard())
+    }
+
+    /// The item on the clipboard now, `{ text, html? }` (`Clipboard.write`;
+    /// text alone has no `html`), `null` when it holds none. Headless tests
+    /// only.
+    pub fn clipboard_item(&self) -> Result<Option<ClipboardItem>, JsError> {
+        self.with(|app| app.clipboard_item())
     }
 
     /// `f` with the app as it is now (the batches that came applied); a

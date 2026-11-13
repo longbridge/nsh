@@ -41,6 +41,11 @@
 //!   unmapped, the window minimized, or suspended: on another workspace or
 //!   covered, where the compositor says so), active while one of the
 //!   app's windows has the focus, inactive otherwise;
+//! - the wake count (`wakeCount()`): one more for every surface when
+//!   systemd's `logind` reports the end of a sleep
+//!   (`org.freedesktop.login1.Manager`'s `PrepareForSleep` with `false`,
+//!   on the system bus); without it (a container, a CI's virtual display)
+//!   nothing counts;
 //! - the time zone (`localeSettings()`'s): the process's own (the zone `TZ` names,
 //!   `GMT` or `Europe/Berlin`, as the C library reads it:
 //!   `TimeZone::posix`; its local times follow it), else the system's as
@@ -57,7 +62,7 @@
 //! theme's), as the root view has none of its own.
 //!
 //! The status bar has no desktop equivalent. (`AccessibilityFocus`, which
-//! moves keyboard focus when the view can take it, is the mounter's.)
+//! moves the screen reader's focus, is the mounter's: `access::focus`.)
 //!
 //! The clipboard is the display's (`GdkClipboard`, the "CLIPBOARD"
 //! selection): `Clipboard.writeText` sets its text, reads are answered as
@@ -288,6 +293,7 @@ fn install() {
     watch_screen_reader();
     watch_time_zone();
     watch_clock_format();
+    watch_sleep();
 }
 
 /// Whether the system is in dark mode (the portal's answer, or GTK's
@@ -333,6 +339,15 @@ fn system_changed() {
     let appearance = appearance();
     for surface in surfaces() {
         update(&surface, appearance);
+    }
+}
+
+/// The system woke from sleep: every surface counts it (`wakeCount()`).
+fn woke() {
+    for surface in surfaces() {
+        let mut env: Environment = surface.environment.get();
+        env.wake_count = env.wake_count.wrapping_add(1);
+        surface.set_environment(env);
     }
 }
 
@@ -657,6 +672,33 @@ fn watch_time_zone() {
     );
 }
 
+/// Follows the system's sleeps as `logind` reports them: `PrepareForSleep`
+/// comes with `true` before a sleep and with `false` once the system woke
+/// ([`woke`]).
+fn watch_sleep() {
+    gio::DBusProxy::for_bus(
+        gio::BusType::System,
+        gio::DBusProxyFlags::DO_NOT_LOAD_PROPERTIES,
+        None,
+        "org.freedesktop.login1",
+        "/org/freedesktop/login1",
+        "org.freedesktop.login1.Manager",
+        gio::Cancellable::NONE,
+        |proxy| {
+            let proxy = match proxy {
+                Ok(proxy) => proxy,
+                Err(err) => return log::debug!("no logind: {err}"),
+            };
+            proxy.connect_g_signal(|_, _, signal, params| {
+                if signal == "PrepareForSleep" && params.get::<(bool,)>() == Some((false,)) {
+                    woke();
+                }
+            });
+            SYSTEM.with(|s| s.borrow_mut().proxies.push(proxy));
+        },
+    );
+}
+
 /// `timedated`'s `Timezone` as the proxy has it now: every surface follows a
 /// change.
 fn timedated_zone(proxy: &gio::DBusProxy) {
@@ -741,6 +783,14 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 display.clipboard().set_text(text);
             }
         }
+        Command::SetClipboardItem(item) => match &item.html {
+            Some(html) => set_clipboard_html(&item.text, html),
+            None => {
+                if let Some(display) = gdk::Display::default() {
+                    display.clipboard().set_text(&item.text);
+                }
+            }
+        },
         Command::ReadClipboard { id, has_only } => read_clipboard(surface, *id, *has_only),
         Command::SetClipboardImage(uri) => set_clipboard_image(uri),
         Command::ReadClipboardImage { id, has_only } => {
@@ -755,6 +805,21 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::FileRequest { id, request } => {
             crate::file_requests::request(surface, *id, request)
         }
+        Command::RenderCanvas {
+            id,
+            drawing,
+            width,
+            height,
+            scale,
+            format,
+        } => crate::canvas::render_offscreen(
+            surface,
+            *id,
+            drawing.clone(),
+            (*width, *height),
+            *scale,
+            *format,
+        ),
         Command::Audio(command) => surface.control(|c| {
             let base = surface.asset_base.borrow().clone();
             crate::audio::command(&surface.audio, c, command, base.as_ref())
@@ -1349,6 +1414,22 @@ fn read_clipboard(surface: &Rc<Surface>, id: u32, has_only: bool) {
             answer(&surface, text.is_some(), text);
         }
     });
+}
+
+/// `Clipboard.write`: `text` and `html` offered together, the HTML as
+/// `text/html` and the text in GDK's text formats.
+fn set_clipboard_html(text: &str, html: &str) {
+    let Some(display) = gdk::Display::default() else {
+        return;
+    };
+    let providers = [
+        gdk::ContentProvider::for_bytes("text/html", &glib::Bytes::from(html.as_bytes())),
+        gdk::ContentProvider::for_value(&glib::Value::from(text)),
+    ];
+    let provider = gdk::ContentProvider::new_union(&providers);
+    if let Err(err) = display.clipboard().set_content(Some(&provider)) {
+        log::warn!("Clipboard.write: {err}");
+    }
 }
 
 /// `Clipboard.writeImage`: the image of a `data:` URI as a GDK texture,
