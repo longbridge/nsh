@@ -792,6 +792,33 @@ pub enum MenuItem {
 }
 
 impl MenuItem {
+    /// The index in `items` (a menu bar's top-level items) of its Window
+    /// menu: the first submenu holding a window role (`Minimize`, `Zoom`,
+    /// `ToggleFullScreen` or `Close`), at any depth. macOS lists the app's
+    /// open windows at its end.
+    #[doc(hidden)]
+    pub fn window_menu(items: &[MenuItem]) -> Option<usize> {
+        fn has_window_role(items: &[MenuItem]) -> bool {
+            items.iter().any(|item| match item {
+                MenuItem::Action(action) => matches!(
+                    action.role,
+                    Some(
+                        MenuRole::Minimize
+                            | MenuRole::Zoom
+                            | MenuRole::ToggleFullScreen
+                            | MenuRole::Close
+                    )
+                ),
+                MenuItem::Submenu { items, .. } => has_window_role(items),
+                MenuItem::Separator => false,
+            })
+        }
+        items.iter().position(|item| match item {
+            MenuItem::Submenu { items, .. } => has_window_role(items),
+            _ => false,
+        })
+    }
+
     /// Calls `f` with the icon of every item of `items`, submenus' too.
     pub fn each_icon<'a>(items: &'a [MenuItem], f: &mut impl FnMut(&'a ImageSource)) {
         for item in items {
@@ -1043,6 +1070,41 @@ mod tests {
 
     use super::*;
     use crate::geometry::px;
+
+    #[test]
+    fn window_menu_is_the_submenu_with_a_window_role() {
+        let action = |role: Option<MenuRole>| {
+            MenuItem::Action(MenuAction {
+                id: 0,
+                label: String::new(),
+                shortcut: None,
+                enabled: true,
+                checked: None,
+                role,
+                when: When::default(),
+                icon: None,
+            })
+        };
+        let sub = |items: Vec<MenuItem>| MenuItem::Submenu {
+            label: String::new(),
+            enabled: true,
+            items,
+            icon: None,
+        };
+        let bar = vec![
+            sub(vec![action(Some(MenuRole::Quit))]),
+            sub(vec![action(Some(MenuRole::Copy))]),
+            sub(vec![action(None), sub(vec![action(Some(MenuRole::Zoom))])]),
+            sub(vec![action(Some(MenuRole::Minimize))]),
+        ];
+        assert_eq!(MenuItem::window_menu(&bar), Some(2));
+        assert_eq!(MenuItem::window_menu(&bar[..2]), None);
+        // A top-level role item is not a submenu of the bar.
+        assert_eq!(
+            MenuItem::window_menu(&[action(Some(MenuRole::Close))]),
+            None
+        );
+    }
 
     #[test]
     fn custom_title_bar_height_is_finite_positive_and_bounded() {

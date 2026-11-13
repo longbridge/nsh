@@ -74,6 +74,10 @@ use objc2_foundation::{
 
 use crate::surface::Surface;
 
+/// The main menu and the Windows menu that were installed before an app
+/// replaced them.
+type OriginalMenu = (Option<Retained<NSMenu>>, Option<Retained<NSMenu>>);
+
 /// The title bar's height when AppKit cannot tell (macOS 11 and later).
 const TITLE_BAR_HEIGHT: f32 = 28.0;
 /// The traffic lights' width when AppKit cannot tell.
@@ -85,7 +89,7 @@ thread_local! {
     static APP_NAME: RefCell<Option<String>> = const { RefCell::new(None) };
     /// The main menu before an app set its own: `setApplicationMenu(null)`
     /// brings it back.
-    static ORIGINAL_MENU: RefCell<Option<Option<Retained<NSMenu>>>> = const { RefCell::new(None) };
+    static ORIGINAL_MENU: RefCell<Option<OriginalMenu>> = const { RefCell::new(None) };
 }
 
 /// Names the app for the app menu's roles.
@@ -956,11 +960,18 @@ fn standard_menu(mtm: MainThreadMarker, labels: &MenuLabels) -> Retained<NSMenu>
     bar
 }
 
+/// The Window menu of the standard menu bar ([`standard_menu`]): its last.
+fn standard_windows_menu(bar: &NSMenu) -> Option<Retained<NSMenu>> {
+    bar.itemArray().lastObject().and_then(|item| item.submenu())
+}
+
 /// Shows the standard menu bar ([`standard_menu`]) as the app's main menu:
 /// the standalone runner's, which [`relabel`] makes again.
 pub(crate) fn show_standard_menu(surface: &Surface) {
     let menu = standard_menu(surface.mtm, &surface.chrome.labels.borrow());
-    NSApplication::sharedApplication(surface.mtm).setMainMenu(Some(&menu));
+    let app = NSApplication::sharedApplication(surface.mtm);
+    app.setMainMenu(Some(&menu));
+    app.setWindowsMenu(standard_windows_menu(&menu).as_deref());
     surface.chrome.standard_menu.replace(Some(menu));
 }
 
@@ -978,12 +989,14 @@ fn relabel(surface: &Surface, labels: &MenuLabels) {
         let menu = standard_menu(mtm, labels);
         if app.mainMenu().is_some_and(|m| m == old) {
             app.setMainMenu(Some(&menu));
+            app.setWindowsMenu(standard_windows_menu(&menu).as_deref());
         }
         ORIGINAL_MENU.with_borrow_mut(|o| {
-            if let Some(original) = o
-                && original.as_ref().is_some_and(|m| *m == old)
+            if let Some((main, windows)) = o
+                && main.as_ref().is_some_and(|m| *m == old)
             {
-                *original = Some(menu.clone());
+                *windows = standard_windows_menu(&menu);
+                *main = Some(menu.clone());
             }
         });
         surface.chrome.standard_menu.replace(Some(menu));
@@ -995,9 +1008,10 @@ fn relabel(surface: &Surface, labels: &MenuLabels) {
             app.mainMenu()
                 .is_some_and(|m| own.as_ref().is_some_and(|own| *own == m))
         };
-        let (bar, loads) = menu_bar(surface, &items);
+        let (bar, windows, loads) = menu_bar(surface, &items);
         if shown {
             app.setMainMenu(Some(&bar));
+            app.setWindowsMenu(windows.as_deref());
         }
         *surface.chrome.menu.borrow_mut() = Some(bar);
         *surface.chrome.menu_icons.borrow_mut() = loads;
@@ -1204,7 +1218,7 @@ fn set_menu(surface: &Surface, items: Option<Arc<[MenuItem]>>) {
     ORIGINAL_MENU.with(|o| {
         let mut o = o.borrow_mut();
         if o.is_none() {
-            *o = Some(app.mainMenu());
+            *o = Some((app.mainMenu(), app.windowsMenu()));
         }
     });
     *surface.chrome.menu_items.borrow_mut() = items.clone();
@@ -1214,17 +1228,29 @@ fn set_menu(surface: &Surface, items: Option<Arc<[MenuItem]>>) {
         restore_menu(&app);
         return;
     };
-    let (bar, loads) = menu_bar(surface, &items);
+    let (bar, windows, loads) = menu_bar(surface, &items);
     app.setMainMenu(Some(&bar));
+    // AppKit lists the open windows at the end of the Window menu.
+    app.setWindowsMenu(windows.as_deref());
     *surface.chrome.menu.borrow_mut() = Some(bar);
     *surface.chrome.menu_icons.borrow_mut() = loads;
 }
 
-/// The app's menu bar of `items`, and the loads of their icons.
-fn menu_bar(surface: &Surface, items: &[MenuItem]) -> (Retained<NSMenu>, Vec<crate::image::Load>) {
+/// The app's menu bar of `items`, its Window menu, and the loads of their
+/// icons.
+fn menu_bar(
+    surface: &Surface,
+    items: &[MenuItem],
+) -> (
+    Retained<NSMenu>,
+    Option<Retained<NSMenu>>,
+    Vec<crate::image::Load>,
+) {
     let bar = NSMenu::new(surface.mtm);
     let mut loads = Vec::new();
-    for item in items {
+    let window_menu = MenuItem::window_menu(items);
+    let mut windows_menu = None;
+    for (index, item) in items.iter().enumerate() {
         // A top-level item that is not a submenu gets one of its own.
         let (label, enabled, sub_items) = match item {
             MenuItem::Submenu {
@@ -1240,9 +1266,13 @@ fn menu_bar(surface: &Surface, items: &[MenuItem]) -> (Retained<NSMenu>, Vec<cra
             ),
             MenuItem::Separator => continue,
         };
-        bar.addItem(&holder(surface, &label, enabled, &sub_items, &mut loads));
+        let ns = holder(surface, &label, enabled, &sub_items, &mut loads);
+        if window_menu == Some(index) {
+            windows_menu = ns.submenu();
+        }
+        bar.addItem(&ns);
     }
-    (bar, loads)
+    (bar, windows_menu, loads)
 }
 
 /// Brings back the main menu the app replaced.
@@ -1251,8 +1281,9 @@ fn restore_menu(app: &NSApplication) {
         .try_with(|o| o.borrow_mut().take())
         .ok()
         .flatten();
-    if let Some(original) = original {
-        app.setMainMenu(original.as_deref());
+    if let Some((main, windows)) = original {
+        app.setMainMenu(main.as_deref());
+        app.setWindowsMenu(windows.as_deref());
     }
 }
 
