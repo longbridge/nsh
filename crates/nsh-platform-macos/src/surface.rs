@@ -336,6 +336,8 @@ pub(crate) struct Surface {
     pub(crate) native: crate::native::NativeState,
     /// The app's keyboard shortcuts ([`crate::keymap`]).
     pub(crate) keymap: crate::keymap::KeymapState,
+    /// Raw keys of focused custom views ([`crate::keyboard`]).
+    pub(crate) keyboard: crate::keyboard::KeyboardState,
     pub(crate) file_drop: crate::file_drop::State,
     /// The GPU device and the shader views rendering ([`crate::shader`]).
     pub(crate) shaders: crate::shader::Shaders,
@@ -423,6 +425,7 @@ impl Surface {
             media_files: RefCell::default(),
             native: Default::default(),
             keymap: Default::default(),
+            keyboard: Default::default(),
             file_drop: Default::default(),
             chrome: Default::default(),
             main_window: Default::default(),
@@ -438,6 +441,7 @@ impl Surface {
             std::thread::spawn(crate::text::prewarm);
         });
         root.set_surface(Rc::downgrade(&surface));
+        crate::keyboard::install(&surface);
         surface
     }
 
@@ -530,6 +534,7 @@ impl Surface {
         crate::window::close_all(self);
         crate::input::reset(self);
         crate::keymap::clear(self);
+        crate::keyboard::reset(self);
         crate::tray::release(self.key);
         crate::global_shortcut::release(self.key);
         self.js_frame.set(false);
@@ -1314,6 +1319,11 @@ impl Drop for Surface {
         }
         crate::tray::release(key);
         crate::global_shortcut::release(key);
+        // A surface dropped without stopping takes its alerts with it: a
+        // sheet left on an embedding app's window, or an alert shown on
+        // its own (an app-modal loop), would wait for an answer no one
+        // hears.
+        crate::system::clear(self);
         let _ = SURFACES.try_with(|s| s.borrow_mut().remove(&key));
     }
 }

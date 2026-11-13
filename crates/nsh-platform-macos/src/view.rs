@@ -58,7 +58,7 @@ use objc2_app_kit::{
 use objc2_core_foundation::{CGAffineTransform, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGContext;
 use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSPoint, NSRange, NSRect, NSString};
-use objc2_quartz_core::{CALayer, CALayerDelegate, CATransform3D, kCAGravityTopLeft};
+use objc2_quartz_core::{CALayer, CALayerDelegate, CATransform3D, kCAGravityBottomLeft};
 
 use crate::surface::{Surface, quiet};
 
@@ -188,7 +188,7 @@ pub(crate) struct ViewState {
 }
 
 impl ViewState {
-    fn new(id: NodeId, kind: ViewKind) -> Self {
+    pub(crate) fn new(id: NodeId, kind: ViewKind) -> Self {
         ViewState {
             id,
             kind,
@@ -482,7 +482,7 @@ define_class!(
                 let origin = layer.frame().origin;
                 CGContext::translate_ctm(c, -origin.x, -origin.y);
             } else {
-                crate::text::draw(cx, &state);
+                crate::text::draw(cx, &state, layer.bounds().size);
             }
             // What Core Animation redraws (all of it, or a canvas's part
             // that animated values changed), top down.
@@ -916,7 +916,12 @@ define_class!(
         fn key_down(&self, event: &NSEvent) {
             let handled = self.keyboard_surface().is_some_and(|surface| {
                 surface.measure(false, || {
-                    let handled = crate::input::key(&surface, event, true);
+                    // The raw key first, with the capture rules of the
+                    // focused view: a captured key runs no default. The
+                    // monitor reports a key it already saw this way once
+                    // ([`crate::keyboard`]).
+                    let handled = crate::keyboard::key_down(&surface, event)
+                        || crate::input::key(&surface, event, true);
                     // Keys scroll too.
                     quiet(|| surface.revisit());
                     handled
@@ -974,13 +979,27 @@ define_class!(
 
         #[unsafe(method(keyUp:))]
         fn key_up(&self, event: &NSEvent) {
-            let handled = self
-                .keyboard_surface()
-                .is_some_and(|surface| crate::input::key(&surface, event, false));
+            let handled = self.keyboard_surface().is_some_and(|surface| {
+                // A release reports its `KeyUp` once (the monitor's, or
+                // here when the event did not come through it).
+                crate::keyboard::key_up(&surface, event)
+                    || crate::input::key(&surface, event, false)
+            });
             if !handled {
                 // SAFETY: NSResponder's own handling.
                 unsafe { msg_send![super(self), keyUp: event] }
             }
+        }
+
+        // Modifier keys change flags instead of going down: AppKit sends
+        // them to the first responder this way ([`crate::keyboard`]).
+        #[unsafe(method(flagsChanged:))]
+        fn flags_changed(&self, event: &NSEvent) {
+            if let Some(surface) = self.keyboard_surface() {
+                crate::keyboard::flags_changed(&surface, event);
+            }
+            // SAFETY: NSResponder's own handling.
+            unsafe { msg_send![super(self), flagsChanged: event] }
         }
 
         #[unsafe(method(setFrameSize:))]
@@ -1858,9 +1877,10 @@ impl NshView {
         let Some(layer) = self.container_view().and_then(|c| c.layer()) else {
             return;
         };
+        let scale = self.backing_scale().max(1.0);
         let mut t = IDENTITY;
-        t.m41 = dx as CGFloat;
-        t.m42 = dy as CGFloat;
+        t.m41 = snap_to_scale(dx, scale);
+        t.m42 = snap_to_scale(dy, scale);
         layer.setSublayerTransform(t);
     }
 
@@ -1868,14 +1888,17 @@ impl NshView {
     /// zoom to its size) and drops the layer transform: a no-op visually
     /// (the transform carried exactly the committed-to-live difference),
     /// one subtree walk for AppKit to learn where things are; none when
-    /// they are there.
+    /// they are there. The origin is snapped to the backing pixels, as the
+    /// live transform is ([`NshView::set_layer_scroll`]): a content point
+    /// is `zoom` points on screen.
     pub(crate) fn commit_bounds(&self, x: f32, y: f32) {
         let c = self.ensure_container();
         // In AppKit's floats: unzoomed, the bounds' size is the frame's.
         let zoom = CGFloat::from(crate::scroll::zoom(self));
+        let grid = self.backing_scale().max(1.0) * zoom;
         let size = c.frame().size;
         let bounds = NSRect::new(
-            NSPoint::new(x as CGFloat, y as CGFloat),
+            NSPoint::new(snap_to_scale(x, grid), snap_to_scale(y, grid)),
             CGSize::new(size.width / zoom, size.height / zoom),
         );
         if c.bounds() != bounds {
@@ -2029,10 +2052,13 @@ impl NshView {
         // costly: on the Stocks demo main-thread time per frame went from
         // 3.5 to 1.8 ms).
         layer.setDrawsAsynchronously(false);
-        // A text keeps its picture through another width of the same lines:
-        // never stretched. The rest draw again at their new size.
+        // A text keeps its picture through another size that still covers
+        // it: never stretched, pinned to the visual top left (under the
+        // flipped host layer Core Animation's vertical gravities are
+        // inverted, so `kCAGravityBottomLeft` is the top left). The rest
+        // draw again at their new size.
         if self.state().text.is_some() {
-            layer.setContentsGravity(unsafe { kCAGravityTopLeft });
+            layer.setContentsGravity(unsafe { kCAGravityBottomLeft });
         }
         // The same density a sharpening walk would give it, capped by its
         // size: views that mount while an ancestor is scaled (cards while
@@ -2571,9 +2597,28 @@ impl crate::sight::Tree for Planned {
     }
 }
 
+/// Rounds a scroll offset in points to the display's physical backing grid so
+/// stacked cell fills stay pixel-aligned while scrolling and once committed.
+fn snap_to_scale(offset: f32, scale: CGFloat) -> CGFloat {
+    let scale = scale.max(1.0);
+    (offset as CGFloat * scale).round() / scale
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scroll_offsets_snap_to_backing_pixels_consistently_across_commit() {
+        assert_eq!(snap_to_scale(-14.37, 2.0), -14.5);
+        assert_eq!(snap_to_scale(14.37, 2.0), 14.5);
+        // Live delta (`committed - origin`) plus committed origin stays identical
+        // to the snapped target when `commit_bounds` drops the transform.
+        let committed = snap_to_scale(10.12, 2.0);
+        let target: f32 = 24.37;
+        let live_dx = snap_to_scale(committed as f32 - target, 2.0);
+        assert_eq!(committed - live_dx, snap_to_scale(target, 2.0));
+    }
 
     #[test]
     fn content_rasters_step_with_the_scale() {

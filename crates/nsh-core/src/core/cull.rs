@@ -40,6 +40,13 @@ impl<M: TextEngine> Core<M> {
             if node.list.is_some() || node.kind == Kind::Cell || node.is_layout_root() {
                 return None;
             }
+            // A view inside a text (an attachment) is laid out on its own
+            // and placed by its text, which makes it with its view:
+            // culling's walk never reaches into it, so what it holds
+            // would wait for good.
+            if node.inline && node.kind != Kind::Text && node.layout.is_some() {
+                return None;
+            }
             if node.kind == Kind::Scroll {
                 return node
                     .scroll
@@ -416,6 +423,13 @@ impl<M: TextEngine> Core<M> {
         if let Some((key, _)) = self.focus {
             holders.push(key);
         }
+        // A reveal is resolved after layout; its target must survive the
+        // culling pass until that command has its text attachment's position.
+        holders.extend(self.commands.iter().filter_map(|(id, command)| {
+            matches!(command, crate::Command::Reveal(_))
+                .then(|| self.key(*id).ok())
+                .flatten()
+        }));
         holders.extend(
             self.overlays
                 .iter()

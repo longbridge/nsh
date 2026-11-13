@@ -95,6 +95,7 @@ TSX 的这些对象和其他属性一样是响应式的；从对象中移除的�
 | `.header_left_system_item(..)` | `ios={{ headerLeftSystemItem }}` | `NavPage` | 标题栏开头显示 UIKit 自带的按钮，按下即按下 `headerLeft`。 |
 | `.header_right_symbol(..)` | `ios={{ headerRightSymbol }}` | `NavPage` | 标题栏末尾显示 UIKit 自带的 SF Symbol 按钮，按下即按下 `headerRight`。 |
 | `.header_left_symbol(..)` | `ios={{ headerLeftSymbol }}` | `NavPage` | 标题栏开头显示 UIKit 自带的 SF Symbol 按钮，按下即按下 `headerLeft`。 |
+| `.header_right_items(..)` | `ios={{ headerRightItems }}` | `NavPage` | 标题栏末尾的多个 UIKit 按钮；每个可有 `onPress` / `nsh/desktop` 的 `MenuItem` 菜单；见[导航](./navigation.md)。 |
 | `.back_forward_gestures(..)` | `desktop={{ allowsBackForwardNavigationGestures }}` | `WebView` | macOS：双指在触控板上轻扫，在页面历史中前进后退；Windows：在触摸屏上轻扫；Linux：在触控板上轻扫。 |
 | `.window_drag(..)` | `desktop={{ windowDrag }}` | 所有元素 | 按住它拖动窗口，像系统标题栏一样（见 [nsh/desktop](../modules/nsh-desktop.md#自定义标题栏)）。 |
 | `.window_control(..)` | `desktop={{ windowControl }}` | 所有元素 | 这个视图就是窗口的最小化、最大化或关闭按钮，由应用绘制。 |
@@ -243,7 +244,7 @@ if (platform.os === "android") {
 
 ### platform.select
 
-在 Rust 中用 `match os()` 选择值，桌面用 `is_desktop()`。在 TSX 中，`platform.select(spec)` 返回当前平台对应的值。它依次查找该操作系统自己的键，然后按[上面的规则](#桌面与移动端)（`platform.desktop`）查找 `desktop` 或 `mobile`，再是 `native`（除 Web 外的所有平台），最后是 `default`：
+在 Rust 中用 `match os()` 选择值，桌面用 `is_desktop()`（在 NSH 之外构建的平台可用 `platform_name()`）。在 TSX 中，`platform.select(spec)` 返回当前平台对应的值。它先查找 `platform.name`（在 NSH 之外构建的平台，如 `"miniprogram"`），再查找该操作系统自己的键（`platform.os`），然后按[上面的规则](#桌面与移动端)（`platform.desktop`）查找 `desktop` 或 `mobile`，再是 `native`（除 Web 外的所有平台），最后是 `default`：
 
 ```rust tabs
 use nsh_core::{element::Os, prelude::*};

@@ -718,6 +718,17 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                         e.int(22);
                         e.string(text);
                     }
+                    Command::SetClipboardItem(item) => match item.html {
+                        Some(html) => {
+                            e.int(56);
+                            e.string(item.text);
+                            e.string(html);
+                        }
+                        None => {
+                            e.int(22);
+                            e.string(item.text);
+                        }
+                    },
                     Command::ReadClipboard { id, has_only } => {
                         e.int(23);
                         e.int(id as i32);
@@ -771,6 +782,9 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     // the core rejects the calls first.
                     | Command::HostCall { .. }
                     | Command::HostPost { .. }
+                    // No desktop web view controls (`Environment::webview_requests`):
+                    // the core answers these first.
+                    | Command::WebViewRequest(_)
                     // No eyedropper (`Environment::screen_color`): the core
                     // answers no color first.
                     | Command::PickScreenColor { .. } => e.int(-1),

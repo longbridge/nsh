@@ -1125,6 +1125,18 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
     crate::scroll::key_scroll(surface, &hit.view, horizontal, m)
 }
 
+/// A view the app made `focusable` (and not disabled, nor an input, which
+/// focuses its editor): a press on it moves the keyboard focus there, as
+/// the other desktops' widgets do on a press.
+fn explicitly_focusable(view: &NshView) -> bool {
+    let state = view.state();
+    view.id() != ROOT_ID
+        && state.kind != ViewKind::Input
+        && !state.props.accessibility.state.disabled
+        && state.props.focusable == Some(true)
+        && view.can_target()
+}
+
 /// A mounted ordinary view the keyboard focus stops at (Tab): one that
 /// takes presses, or any `focusable` one ([`nsh_core::ViewProps::focus_stop`]),
 /// shown ([`NshView::seen_by_keys`]) and reachable by the pointer.
@@ -1726,6 +1738,17 @@ fn down(
         crate::text::selection_down(surface, None, 0.0, 0.0, clicks, shift, false);
         return;
     };
+    // A press moves the keyboard focus to an explicitly `focusable` view
+    // under it, as the other desktops' widgets and browsers do. A field
+    // that edits keeps the focus (the root refuses the first responder
+    // during a press, `NshView::acceptsFirstResponder`), and a press on a
+    // view that is not focusable leaves it where it is.
+    if !hit.native
+        && let Some(window) = hit.view.ns().window()
+        && let Some(target) = chain(&hit.view).into_iter().find(explicitly_focusable)
+    {
+        window.makeFirstResponder(Some(target.ns()));
+    }
     let input = &surface.input;
     input.js_block.set(false);
     // A press stops the momentum a trackpad flick left running, wherever
@@ -2376,7 +2399,7 @@ fn cancel_press(surface: &Rc<Surface>, p: &mut Pointer) {
 }
 
 /// The modifier keys of AppKit's `flags`.
-fn modifiers(flags: NSEventModifierFlags) -> nsh_core::keymap::Modifiers {
+pub(crate) fn modifiers(flags: NSEventModifierFlags) -> nsh_core::keymap::Modifiers {
     nsh_core::keymap::Modifiers {
         ctrl: flags.contains(NSEventModifierFlags::Control),
         alt: flags.contains(NSEventModifierFlags::Option),

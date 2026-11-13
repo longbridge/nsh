@@ -21,9 +21,21 @@ Off Windows the crates are empty (like the other platform crates off their targe
 
 ```sh
 cargo clippy -p nsh-platform-windows -p nsh-windows-host -p nsh-windows-app --all-targets
-cargo test -p nsh-platform-windows          # needs no window: tests do not open one
+cargo test -p nsh-platform-windows          # needs no visible window: tests do not show one
 cargo build -p nsh-windows-host             # target\debug\nsh-windows-host.exe
 ```
+
+The keyboard tests process real messages (`TranslateMessage` / `DispatchMessageW` and
+`PeekMessageW`) through a window's procedure without showing it; they run in the crate's one test binary:
+
+```sh
+cargo test -p nsh-platform-windows keyboard
+cargo test -p nsh-platform-windows a_captured_key_is_never_translated
+cargo test -p nsh-platform-windows a_binding_consuming_an_untranslated_key_keeps_an_unrelated_character
+```
+
+CI runs the crate's whole test binary on windows-latest (`.github/workflows/windows.yml`), which includes both;
+no extra test binary or Windows-only workflow step is needed.
 
 The stationary-cursor regression opens a window on an interactive desktop. It positions the mouse once and
 temporarily captures mouse input on the test thread; a timer then applies cursor style batches and checks
@@ -65,9 +77,13 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   indicator, then the border, all inside an opacity layer when translucent (bounded by the area the subtree draws in:
   an unbounded layer is a surface as large as the clip around it, often the window; a view that paints only its
   background color fades the color instead, with no layer). A view's content clip is pushed only when it has content
-  (text, an image, a canvas). The children of a clipping view (a scroll view's content) whose drawn area
-  (`drawn_area`: bounds, shadows, outlines, transformed children) lies outside what the window and the clips leave
-  visible are not drawn (`hidden_by_clips`, in the window's pass only). Transforms are CSS-like 4x4 matrices
+  (text, an image, a canvas). A subtree that draws nothing (no area and nothing outside it, with children that draw
+  nothing or are clipped away: a `display: none` subtree, which the core lays out with no size) is left out at its top
+  without visiting its views (`draws_nothing`). In the window's pass, a view whose own area (bounds, shadows, outlines,
+  hosted items, through its transforms) lies outside what the window and the clips of the views around it leave
+  visible, whichever ancestors those are, draws nothing of its own: with its subtree when that stays inside its box
+  (it clips, or has no children), else only its children, each culled the same way, so a long list in a box that does
+  not clip draws only its rows in sight. Transforms are CSS-like 4x4 matrices
   (`geom.rs`); affine ones are Direct2D's 3x2 world transform, projective ones (perspective) draw the subtree into an
   offscreen bitmap mapped with `DrawBitmap`'s perspective transform. Units are points: the device context's DPI is
   the window's (the process is per-monitor DPI aware, v2).
@@ -148,6 +164,7 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
 | Scroll views | `scroll.rs`, `nsh_core::scroll` | Offsets of their own (`ScrollState`, with the physics and gestures in `nsh_core::scroll`, shared with GPUI and Linux; `scroll.rs` draws the indicator and spinner and walks the view tree), reported as UIKit's `contentOffset`; wheel / touchpad / touch and pen scrolling with UIKit-like deceleration, snapping, paging, sticky cells, rubber banding for touch drags (wheels stop at the edges; mouse drags never scroll: they are the app's, for pans, responders and text selection; pull to refresh needs a touchscreen); the keyboard (arrows by 40 pt, Page Up / Page Down and Space / Shift+Space by 87.5% of a page, Home / End and Ctrl+Home / Ctrl+End, animated); mirrored horizontal lists for right to left; an indicator that fades and that the mouse drags as a scroll bar, shown and kept as on Linux; it runs along the part of the view the scroll views and clips around it leave in sight (`NshView::visible_bounds`, `ScrollState::thumb_within`), so a horizontal scroll view taller than the vertical one it is in (a `DiffView`'s or `Editor`'s side) keeps its bar at the bottom of the viewport |
 | Input | `input.rs`, `window.rs`, `nsh_core::input` | Its own hit testing over the views (frames, scroll offsets, 3D transforms inverted, `pointerEvents`, `hitSlop`, `overflow: hidden`, `Overflow` areas); mouse from the `WM_*BUTTON*` messages, touch and pen from `WM_POINTER*`; touches for the responder system with `panActivation` gates; presses, long presses, hover and pressed states, `onMouseEnter` / `onMouseLeave` / `onMouseMove` (picked at each mouse move, with or without a button down: `pressedButton` is the first of the message's `MK_*` buttons held; heard again where the mouse rests when a modifier key changes with no button down), `onContextMenu` (the right button; a field or selectable text nearer opens its edit menu, but where the selectable view around the text, or a view between them, listens: that hears it, as on macOS, and its app's menu takes `copy` / `selectAll` role items, which act on the selection), cursors (a batch that changes `cursor` reapplies it under a resting mouse once the batch is complete; the window under the pointer and its client hit test keep other windows and non-client cursors intact); pan / pinch / rotate animated values (Ctrl + wheel, and precision touchpads' pinch, which Windows sends as Ctrl + wheel, pinch the view under the pointer); wheel and precision touchpad scrolling routed to scroll views, staying on the view it began in, and offered first to a web view under the pointer, then to the native components of the view under it (`NativeComponent::wheel`, before the scroll views and Ctrl + wheel's pinch); keys go to the window's shortcuts, the system (dialogs), the focused field, selectable text, navigation, scroll views, then Tab between text fields (see "Keyboard"); the decisions over plain data (what a pointer may start, a press's events, hover changes, hit areas, pinches, wheel latching) are `nsh_core::input`'s, shared with the GPUI, Linux and macOS backends |
 | Text inputs | `text_input.rs`, `richedit.rs` | Windows' own text box: a windowless RichEdit (msftedit.dll's `ITextServices2` on our `ITextHost2`, no child window) per field, drawn with `TxDrawD2D` into the view's Direct2D target at the content box; the view draws the decoration. Editing, word moves, undo, selection, spell checking (`IMF_SPELLCHECKING` while `autoCorrect` is on, never on masked fields), password masking and IME through TSF (`SES_USECTF`; `TXTBIT_ADVANCEDINPUT` aborts msftedit) are the system's; `EN_CHANGE` / `EN_SELCHANGE` / composition notifications become `onChangeText`, selection and `onCompositionChange` events; the host draws RichEdit's caret itself on the blink timer; formatting shortcuts and Tab are not forwarded; paste goes through `onPaste` and `EM_REPLACESEL`; offsets converted between UTF-16 and UTF-8; return does what `submitBehavior` says (see "Keyboard"); a right click opens the edit menu (`chrome::popup_actions`), labelled in the language the app shows (`nsh/i18n`), as the role items with no label of the app's menus are; the core sends `DesktopCommand::SetMenuLabels` when that language changes |
+| Keyboard focus and hardware keys | `input.rs`, `keyboard.rs`, `window.rs` | A focusable custom view (one that takes presses, or `focusable`) takes the keyboard focus with Tab / Shift+Tab among the window's stops, a click, `ref.focus()` or UI Automation; while it has it, `WM_KEYDOWN` / `WM_KEYUP` become `KeyDown` / `KeyUp` events (the current layout's logical key, the scan code's DOM `code`, repeats from the message) that the engine bubbles within the window. Mounted `capture_keys` rules take a key before the menu's shortcuts and the native defaults, removing the `WM_CHAR` it would have typed; the app's keymap, window shortcuts and dialogs keep their precedence, and text fields, web views and native component windows own their o…
 | Navigation | `navigation.rs` | The decisions shared with the other desktops (`nsh_core::navigation`: the screens a stack shows and the user popped, transitions' timing, easing and offsets, what going back acts on); pages are child views, only the top one (and the one below during a transition) drawn; NSH draws no header: a page's `header` (the app's view) is a child of the page that the core places at its top, as wide as the page, with the content below it and kept above it (the system header's items of iOS and Android stay hidden); each page has an opaque backdrop in the window's color under the app's content; leaving pages and dialogs slide out as images recorded into command lists; Escape (unless a text field has the focus: Escape leaves the field), Alt+Left, the Browser Back key and the mouse's back button send `onBackPress` to the top page when the app listens and pop natively unless its `popOnBack` is false (a stack inside the newest dialog first, else that dialog gets the close attempt, `"cancel"`, and closes when `closeOnEscape`; without a dialog, the app's back listeners hear it before the stacks, and `Command::Back` goes on when none takes it) |
 | Dialogs (`Dialog`) | `navigation.rs` | Children of the root above the app's views, at the size of the surface, sliding up or fading in: transparent layers with no look of their own, showing only the app's popup and backdrop (`presentation` is ignored); Tab stays inside the newest dialog, and the field that had the focus when a dialog opened leaves it and gets it back when the dialog closes |
 | Alerts (`AlertDialog`) | `system.rs` | Drawn in the surface as items the root hosts, in Windows 11's content dialog style (a rounded card, the default button in the system's accent color), not `MessageBox` / `TaskDialog`: they stay with an embedded surface and never run a modal loop of their own |
@@ -172,8 +189,12 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   screen on the window's monitor, `window::toggle_full_screen`; an embedded `AppView` has none) and the dev host's
   Ctrl+R and F5 (`dev.rs`). Alt+F4 is `DefWindowProc`'s.
 - **Dialogs** (`system.rs`): Tab and the arrows between their buttons, Return / Space, Escape.
-- **The app's shortcuts** (`nsh`'s `keymap`, `keymap.rs`; see "App shortcuts" below), then **the application menu's**
-  (`chrome::shortcut`, the editing roles excepted).
+- **The app's shortcuts** (`nsh`'s `keymap`, `keymap.rs`; see "App shortcuts" below), then **the focused custom
+  view's raw keys** (`keyboard.rs`; see "Hardware keys on custom views" below): its `KeyDown` is dispatched whatever
+  its capture rules say, and a `capture_keys` rule of the view or its enabled ancestors consumes the key before
+  everything after this. A consumed key was taken out of `TranslateMessage` before the loop translated it, so it
+  made no characters.
+- **The application menu's** shortcuts (`chrome::shortcut`, the editing roles excepted).
 - **The focused field** (`text_input.rs`): arrows (Ctrl: by word; Alt+Left / Right are left for navigation), Home /
   End (Ctrl: the text's edges), Up / Down and Page Up / Down in a multiline field, Backspace / Delete (Ctrl: a word),
   Ctrl+A / C / X / V / Z / Y, Ctrl+Shift+Z, Ctrl+Insert / Shift+Insert / Shift+Delete. Return does what
@@ -186,9 +207,11 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
 - **Selectable text** (`text.rs`) with a selection: Ctrl+A, Ctrl+C / Ctrl+Insert, Escape.
 - **Navigation** (`navigation::key_pressed`): Escape (which leaves a focused field instead), Alt+Left and the Browser
   Back key (also from a field) go back.
-- **Scrolling** (`scroll.rs`), then **Tab / Shift+Tab** (`input::tab`): the next field in tree order (a scroll view's
-  content as it is on screen, `nsh_core::scroll::reading_order`: a list's recycled cells are not in their rows' order) within
-  `navigation::focus_scope` (the newest dialog, else the surface), its text selected as in Windows' dialogs.
+- **Scrolling** (`scroll.rs`), then **Tab / Shift+Tab** (`input::tab`): the next focus stop in tree order — a text
+  field or a focusable custom view (`keyboard::is_stop`) — (a scroll view's content as it is on screen,
+  `nsh_core::scroll::reading_order`: a list's recycled cells are not in their rows' order) within
+  `navigation::focus_scope` (the newest dialog of the window the input is in, else the surface); a field's text is
+  selected as in Windows' dialogs, a custom view reports its focus and scrolls into view.
 
 A handled Alt combination swallows its `WM_SYSCHAR` (Alt+Return makes one, which `DefWindowProc` would beep at) and
 the Alt release (which would open the window menu). Shortcuts read virtual keys, which follow the key's US letter
@@ -201,10 +224,64 @@ under non-Latin layouts (Cyrillic, Greek), so Ctrl+C is the same key on all of t
 **App shortcuts** (`nsh`'s `keymap`, `keymap.rs`): `input::key` matches every key down against the mounted table
 (`Keymap::find`) right after the window's shortcuts (`Surface::shortcuts`: full screen, the dev host's reload) and
 the dialogs (`system::key`), and before the application menu's shortcuts (`chrome::shortcut`), the focused field,
-selectable text, navigation and scroll views. A match is consumed, its queued `WM_CHAR` / `WM_SYSCHAR` removed (`PeekMessageW`), and reported as
-the root's `KeyCommand`; an auto-repeat (`KeyEvent::repeat`) of a binding without `repeat` is consumed silently.
+selectable text, navigation and scroll views. A match is consumed and reported as the root's `KeyCommand`; its
+queued `WM_CHAR` / `WM_SYSCHAR` (`PeekMessageW`) are removed only when the message was translated at all
+(`KeyEvent::translated`): an untranslated key — a captured private `WM_NSH_KEYDOWN`, or input synthesized in the
+backend — queued none, and none are taken for it. An auto-repeat (`KeyEvent::repeat`) of a binding without `repeat`
+is consumed silently.
 Keys are matched by virtual key code (letters and digits on every layout, punctuation by the US `VK_OEM_*` keys); a
 focused text field counts as editing (`when`). With feature `dev`, Ctrl+R is never matched (the dev host reloads).
+
+**Hardware keys on custom views** (`keyboard.rs`): a view that is a focus stop (`focusable`, or one that takes
+presses, `ViewProps::focus_stop`) takes the keyboard focus with Tab / Shift+Tab — the same traversal as fields, in
+the newest dialog of the window the input is in — a click (the view or its nearest focusable ancestor), `ref.focus()`
+/ `blur()`, or UI Automation's `SetFocus`. While it has it, every `WM_KEYDOWN` / `WM_KEYUP` becomes a
+`nsh_core::KeyEvent` (`KeyDown` / `KeyUp`) dispatched at that view, which the engine bubbles to enabled listening
+ancestors within the same window:
+
+- `key` is the current layout's logical key as DOM's `KeyboardEvent.key` names it: DOM spellings for named keys
+  (`Enter`, `Escape`, `Tab`, `Backspace`, `Delete`, `ArrowLeft`, `F5`, `Shift`, `Control`, `Alt`, `Meta`, ...), the
+  character a printable key types in its actual case, with Shift and Caps Lock (a reported `é` stays `é`, never
+  forced onto a US key), and `"Unidentified"` for a dead key or a key the layout cannot name. The source's own
+  translation is used as it is: AltGr (Windows reports it as Control+Alt) keeps the character the layout provides
+  (`@` for AltGr+Q); only a Control/Alt combination that makes a control character (Ctrl+A's 0x01) falls back to the
+  key's own character (`a`). A keypad key with Num Lock off is the navigation key it is (or `Clear`, `Delete` for
+  `5` and the decimal point).
+- `code` is the DOM `KeyboardEvent.code` of the message's scan code with its extended bit: the key's physical place
+  on any layout (`KeyA`, `ArrowLeft`, `NumpadEnter`, `Numpad1`, `ShiftLeft`/`ShiftRight`,
+  `ControlLeft`/`ControlRight`, …), never derived from the layout's character or the virtual key; `""` when the
+  message carries no scan code, as input injected as text does. `modifiers` are the keys held after the
+  transition, `repeat` is the message's previous-key-state bit, and `default_prevented` says whether a capture rule
+  took this press.
+- `capture_keys` is read from the mounted props of the focused view and its enabled ancestors, with the app
+  keymap's own keystrokes (`crate::keymap`: virtual keys, so Ctrl+C is the same key under a Cyrillic layout):
+  `KeyCapture::All` takes every key, `KeyCapture::keys([...])` the listed shortcuts, and a key without a shortcut
+  (a modifier key, an unidentified one) only `All`. A captured key is consumed before the application menu's
+  shortcuts and every native default (Tab's traversal, Return/Space pressing, a context menu, scrolling); the
+  app's keymap, the window's shortcuts (F11, the dev host's Ctrl+R) and the dialogs over the app keep their
+  precedence. The event is still dispatched, with `default_prevented` set; the listener runs on the app's frame
+  afterwards, so it reports the decision made before `TranslateMessage` rather than vetoing it synchronously.
+- A captured key is not translated into characters at all: the thread's `WH_GETMESSAGE` hook (and the standalone
+  loop, should the hook be unavailable) asks `keyboard::suppress_translation` before `TranslateMessage`, and a
+  consumed key down becomes the private `WM_NSH_KEYDOWN` / `WM_NSH_SYSKEYDOWN`, which `TranslateMessage` ignores and
+  the window procedure handles as the key down it was. No `WM_CHAR` / `WM_SYSCHAR` is made, and the message queue is
+  never inspected, moved or restamped: a character queued before, around or after the key keeps its place and its
+  delivery. The hook is thread-scoped, so an embedding host's own message loop is covered without a DLL.
+- Keyboard ancestry for interest and capture follows `ViewProps::key_parent` when core sets it (a view a native
+  surface portals at a root it does not logically live under, such as an `Overlay`): the walk uses the logical parent
+  instead of the mounted `Insert` parent, and still stops at a window of the app's own. The override is read from
+  the cached `ViewProps` (core updates it on portal creation/reparent), so no extra mount item is sent. Focus, hit
+  testing and layout keep the mounted parent; the notification is still dispatched once to the focused view and the
+  engine bubbles it to the logical ancestors.
+- A modal presented over a window saves the custom view with the focus, as it saves a text field, and gives it back
+  when it closes if that view is still attached, enabled and shown in a window no modal covers.
+- The raw path is only for a focused custom view: a text field (`Input`, the system's RichEdit and IME) and a hosted
+  web view or native component own their keys and text, and a capture on their ancestors does not intercept them. A
+  view that is removed, concealed or disabled loses the focus (a `Blur`) without a synthetic key release; a real
+  release the window gets is reported on whichever view has the focus then. `ToUnicodeEx` supplies the logical key
+  from the current layout (never a US guess), always with its keyboard-state-not-changed flag (0x4), so a
+  dead key read for an event (also an AltGr-layer one) is never stored and the layout's pending composition is left
+  alone; a dead key's composition is committed through `WM_CHAR` (and the IME), never as the event's key.
 
 ## Checking a change: `nsh test --target windows`
 
@@ -265,6 +342,10 @@ frame: changed views queue their old and new painted areas on their surface (`Su
 and the one before (`SwapChain::to_draw`), widened to the whole box and overflow of each shader view reading what is
 behind it that the damage meets (`with_backdrops`: the back buffer holds its own earlier output), and `Present1`
 presents only the changed rectangles.
+A subtree a frame leaves out (hidden, concealed, turned away, out of sight) forgets where it was painted
+(`NshView::forget_painted`): its old area was drawn by the change that left it out, and a record kept would add it to
+every later change of a view around it (a moved or shrunk panel's rows repainting their old area on each scroll
+frame). Each view knows whether its subtree holds a record at all, so these walks stop at subtrees that hold none.
 `Surface::invalidate` (theme, size, scale, device loss, composition) and changes it cannot bound draw the whole
 window. Changes wholly outside the window (an animation scrolled out of it) draw and present nothing.
 
@@ -306,8 +387,8 @@ What a frame costs then follows what changed: the gallery's Stocks page (~690 vi
 display) changes ~34 views a frame (pulsing sparklines, prices, the chart's live point), drawn in ~1.4 ms of
 `paint`. Canvases record their animated tail only (see the table above), omit paints whose current values cannot
 change a pixel, and ask for the cached damage of the slots that changed when the drawing lets them bound it (the full
-`DamageScan` scans otherwise); views without content of their own push no clip, and the children of a clipping view
-out of sight are not drawn.
+`DamageScan` scans otherwise); views without content of their own push no clip, and views out of sight are not drawn,
+under any clipping ancestor.
 
 ### Frame pacing
 
@@ -361,9 +442,14 @@ measured and are not used: they bring back that latency (48 ms) for the same fra
 - **Text**: head and middle ellipses apply to a single line only (more lines fall back to a tail ellipsis); the
   paragraph direction is set per text, not per paragraph; color emoji come from COLR fonts only (Segoe UI Emoji is
   one); small caps are not synthesized (only fonts with the `smcp` feature have them).
-- **Text inputs**: Tab moves between text fields only; keyboard types and autofill do not
-  apply; the IME's composition is drawn inline at the caret. Clicking outside a field leaves the focus where it is (as
-  on Linux and Mac Catalyst; a click on another field moves it).
+- **Text inputs**: Tab moves between the focus stops of the window (text fields and focusable custom views);
+  keyboard types and autofill do not apply; the IME's composition is drawn inline at the caret. Clicking outside a
+  field leaves the focus where it is (as on Linux and Mac Catalyst; a click on another field or on a focusable view
+  moves it).
+- **Hardware keys on custom views**: a focused custom view hears key downs, repeats and ups with the layout's
+  logical key and the scan code's DOM `code`; a dead key's composition is not in the event (the
+  committed text goes to the field/IME), and a key the system sends to a hosted web view or a native component's
+  window never reaches these events.
 - **Accessibility** (UI Automation): items NSH draws itself (alerts) are not in the
   tree; there is no Text pattern; headings report level 1; live regions raise UIA notifications.
 - **No desktop equivalent**: the status bar, input accessory views, `keyboardShouldPersistTaps` (there is no software

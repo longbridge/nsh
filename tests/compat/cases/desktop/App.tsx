@@ -13,6 +13,7 @@ import WindowOpen from "./window-open";
 import WindowProps from "./window-props";
 import WindowRef from "./window-ref";
 import LinkHover from "./link-hover";
+import HomeDirAccess from "./home-dir-access";
 import LaunchAtLogin from "./launch-at-login";
 
 const cases: Record<string, () => JSX.Element> = {
@@ -23,6 +24,7 @@ const cases: Record<string, () => JSX.Element> = {
   "window-access": WindowAccess,
   "window-props": WindowProps,
   "tray-click": TrayClick,
+  "home-dir-access": HomeDirAccess,
   "launch-at-login": LaunchAtLogin,
 };
 const shown = signal("");

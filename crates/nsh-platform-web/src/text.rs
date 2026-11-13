@@ -513,6 +513,14 @@ struct Part {
     ellipsis: bool,
 }
 
+/// The end of the paragraph atom `from` is in: its break, or the end.
+fn paragraph_end(atoms: &[Atom], from: usize) -> usize {
+    atoms[from..]
+        .iter()
+        .position(|a| a.kind == AtomKind::Newline)
+        .map_or(atoms.len(), |i| from + i)
+}
+
 /// How many UTF-16 units `old` and `new` share at their start and, of the
 /// rest, at their end, never splitting a surrogate pair.
 fn common_ends(old: &[u16], new: &[u16]) -> (usize, usize) {
@@ -1145,7 +1153,19 @@ impl TextEngine for WebTextEngine {
             n => lines.len().min(n as usize),
         };
         let lines = &lines[..shown];
-        let width = lines.iter().fold(0.0f32, |w, l| w.max(l.width));
+        let mut width = lines.iter().fold(0.0f32, |w, l| w.max(l.width));
+        // A clamp's last line inside its paragraph holds the rest of it,
+        // cut at the box (`layout`).
+        if shown < broken.lines.len()
+            && prepared.ellipsize != EllipsizeMode::Clip
+            && let (Some(max), Some(last)) = (max_width, lines.last())
+            && broken
+                .atoms(prepared)
+                .get(last.end)
+                .is_some_and(|a| a.kind != AtomKind::Newline)
+        {
+            width = max;
+        }
         let height: f32 = lines.iter().map(|l| l.height).sum();
         let width = match max_width {
             Some(max) => width.min(max),
@@ -1190,6 +1210,19 @@ impl TextEngine for WebTextEngine {
         let count = lines.len();
         for (n, line) in lines.iter().enumerate() {
             let last = n + 1 == count;
+            let clamped = last && truncated && prepared.ellipsize != EllipsizeMode::Clip;
+            // The last line a clamp shows holds the rest of its paragraph
+            // and is cut at the box, as CoreText, Pango and StaticLayout
+            // cut it: ending it where it broke would leave the ellipsis
+            // after a word that fit and the box empty past it.
+            let line = &if clamped {
+                LineBox {
+                    end: paragraph_end(atoms, line.end),
+                    ..*line
+                }
+            } else {
+                *line
+            };
             // Atoms of the line, without trailing spaces.
             let mut end = line.end;
             while end > line.start && atoms[end - 1].kind == AtomKind::Space {
@@ -1206,26 +1239,39 @@ impl TextEngine for WebTextEngine {
                     ellipsis: false,
                 })
                 .collect();
-            let mut width = line.width;
+            let mut width = if clamped {
+                pieces.iter().map(|p| p.width).sum()
+            } else {
+                line.width
+            };
             // Not drawn, but a caret after them stands past them: the line
             // reports them in its width, as CoreText's lines do.
             let mut hanging: f32 = atoms[end..line.end].iter().map(|a| a.width).sum();
-            if last && truncated && prepared.ellipsize != EllipsizeMode::Clip {
+            if clamped {
                 hanging = 0.0;
                 let style = pieces.last().map_or(0, |p| p.style);
                 let ellipsis = self.run_width(&styles[style as usize], "…");
-                // Drop characters from the end until the ellipsis fits.
-                while width + ellipsis > size.width.0 + 0.01
+                let fits = |width: f32| width + ellipsis <= size.width.0 + 0.01;
+                // Pieces wholly past the box go at once (the line can hold
+                // a long paragraph); the one the box ends in loses
+                // characters from its end until the ellipsis fits.
+                while !fits(width)
                     && let Some(mut piece) = pieces.pop()
                 {
                     width -= piece.width;
-                    if piece.kind == AtomKind::Text && piece.text.chars().count() > 1 {
+                    if fits(width) && piece.kind == AtomKind::Text {
                         let mut shorter = piece.text.to_string();
-                        shorter.pop();
-                        piece.text = shorter.into();
-                        piece.width = self.run_width(&styles[piece.style as usize], &piece.text);
-                        width += piece.width;
-                        pieces.push(piece);
+                        while shorter.chars().count() > 1 {
+                            shorter.pop();
+                            let w = self.run_width(&styles[piece.style as usize], &shorter);
+                            if fits(width + w) {
+                                piece.text = shorter.into();
+                                piece.width = w;
+                                width += w;
+                                pieces.push(piece);
+                                break;
+                            }
+                        }
                     }
                 }
                 // Trailing spaces before the ellipsis go.

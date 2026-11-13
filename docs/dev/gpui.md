@@ -178,7 +178,22 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
   listeners: the surface listens in the bubble phase), and only the window's shortcuts, the app's bindings and the
   menu's shortcuts see what it lets through, as from a text field (`input::component_key`). Positions become root coordinates and go to `input.rs` (hit testing, presses, the responder
   system, gestures) as on Windows. Keys become Windows virtual key codes (`keys.rs`), which the shared input,
-  scrolling, keymap and editing code reads.
+  scrolling, keymap and editing code reads; and, for the view with the keyboard focus (and its ancestors), a raw
+  key event (`onKeyDown` / `onKeyUp`) before any native default, as on Linux: `nsh_core::KeyEvent`'s `key` is the
+  logical key GPUI reported, in the web's spelling for the named keys it names alike (`Enter`, `ArrowLeft`, `F5`)
+  or the character the key types as the platform reported it (`A` for Shift+A, the layout's own `é`, `?` for
+  Shift+/), and its `code` is always empty: GPUI's public API exposes no scan code or key position, and no DOM
+  code is ever inferred from the logical key. The app's shortcuts and the window's take the key first
+  (`keymap::key_stroke`), by the source's own key: a key with a virtual code by the code, and one without (`?`) by
+  its canonical stroke (`shift+/`), so `nsh/keymap` bindings fire for those keys too. A mount's `capture_keys`
+  (on the focus or around it) then decides whether the platform keeps it — a binding that consumes the key runs
+  before any capture notification, a taken key runs no default, and a text field or native component owns its
+  keys (the views around them never see them). `defaultPrevented` reports the mounted policy's decision for that
+  transition, decided anew for each from the rules matched by the same canonical stroke of the source's key,
+  never by rewriting the event: its key, code and modifiers stay exactly as the source reported them. GPUI
+  dispatches the key on the window's thread before its own default (and before the app's key engine hands the
+  notification to JS and Rust callbacks), so the value is observable state for that transition, never a
+  synchronous veto the UI thread waits for.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a GPUI view: `cx.new(|cx| AppView::new(options, window,
   cx))`, then `load(App::Js(bundle))` or `load(App::Rust(root))`; it renders a `SurfaceElement` and is `Focusable`.
   `open_app_window` opens one in a window of a running GPUI app; `run_app` runs one app on its own, as the development
@@ -213,6 +228,8 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
 | Shaders | `shader.rs` | `nsh_engine::shader`'s frames as GPUI images under the children (`docs/dev/shaders.md`); fills only (below) |
 | Scroll views | `scroll.rs` | The Windows backend's, on `nsh_core::scroll` (the state, physics and gestures; `scroll.rs` draws the indicator and finds the views keys move): offsets of their own, UIKit-like deceleration, snapping, paging, sticky cells, rubber banding for touch drags (mouse drags never scroll: they are the app's), the keyboard, mirrored horizontal lists, the indicator dragged as a scroll bar, shown while the mouse moves over the view, run along the part of the view the scroll views and clips around it leave in sight (`NshView::visible_bounds`); touchpad scrolls carry GPUI's phases, touchpad pinches go to pinch gestures; zoomable views (`maximumZoomScale` above `minimumZoomScale`; the zoom is `nsh_core::scroll`'s, which only this backend turns on, `ScrollState::can_zoom`) scroll both ways, zoom with touchpad pinches around the pointer (`scroll.rs`'s `pinch`; Ctrl + wheel scrolls them) and with `zoomTo` (eased), center content smaller than the viewport (`centerContent`) and show no indicator; their children are drawn, hit tested and converted through the zoom (`ViewState::child_matrix`), text shaped at the zoomed size every frame |
 | Input | `input.rs`, `events.rs`, `nsh_core::input` | The Windows backend's hit testing, presses, responder and gestures, fed by GPUI's mouse, wheel and pinch events; hover and pressed states and `onMouseEnter` / `onMouseLeave` / `onMouseMove` (hover picked again after every batch for a still mouse), `onContextMenu` (the secondary button, which GPUI's macOS window also makes of a Control-click; a field or selectable text nearer opens its edit menu); the cursor is set from the frame (`set_cursor_style`); the decisions over plain data (what a pointer may start, a press's events, hover changes, hit areas, pinches, wheel latching) are `nsh_core::input`'s, shared with the other desktop backends |
+| Keyboard | `keys.rs`, `input.rs`, `key_focus.rs` | The shared keymap, scrolling, navigation, editing and key-focus code on GPUI's keystrokes as Windows virtual key codes (`keys.rs`), and the raw logical keys of a focused view (`onKeyDown` / `onKeyUp`, `capture_keys`): GPUI's `Keystroke` (its `key` and `key_char`), its `is_held` repeat mark and its modifier state, reported as `nsh_core::KeyEvent` with an empty `code` (GPUI's public API has no scan code, key position or modifier side, so no DOM code is inferred from the logical key). A key GPUI has no virtual code for matches the shared table by its canonical stroke instead (`shift+/` for `?`, `keymap::key_stroke`), for the app's bindings and for capture, with the same window, yielding, repeat and pass-through rules; the event keeps what the source reported. Raw keys go to the focused view only, after the app's and the window's shortcuts and before the menu's and every other default; a text field or native component keeps its own keys. A portaled overlay's content follows its logical ancestors for keyboard interest and capture (`ViewProps::key_parent`, an internal routing override), while focus, hit testing and layout keep its mounted parent. Focus is the surface's (`key_focus`), so no key crosses between application windows |
+| Focus traversal | `input.rs`, `key_focus.rs` | Tab visits enabled custom view stops as well as fields and embedded native components; the current custom stop participates in forward and reverse traversal. A captured Tab stays put; past the edge, Tab returns to the embedding window. A pointer press focuses an explicitly `focusable` custom view or ancestor, while fields and native components retain their input ownership |
 | Text inputs | `text_input.rs` | The editor shared with the Windows backend (`nsh_core::text_edit`), laid out with GPUI's text system and hosted in the input's view; text arrives through GPUI's input handler (`Window::handle_input`, the `AppView` as `EntityInputHandler`), IME compositions underlined at the caret and the candidate window placed with `bounds_for_range`; the composition stays out of the text until it is committed (`onChangeText` then), `onCompositionChange` reports its start, changes and end (after the committed text's `onChangeText`), and a `value` JS sets while it is in progress is held and applied when it ends, unless the user's commit made it stale; the caret blinks on a timer while its field has the focus of an active window that is presented (a minimized or suspended window keeps the field, its caret still), and on Linux stays shown after 18 blinks (GTK's `gtk-cursor-blink-timeout` of 10 s) until the next edit, caret move or focus change; Cmd on macOS where Ctrl is used elsewhere |
 | Navigation, dialogs | `navigation.rs` | As on Windows (the decisions in `nsh_core::navigation`): pages slide in and out; NSH draws no header, a page's `header` (the app's view) is placed at its top by the core, full width, with the content below; back natively (Escape, Alt+Left, Cmd+[ on macOS, Browser Back, the mouse's back button: `onBackPress` when the app listens, then a pop unless `popOnBack` is false); dialogs are transparent layers over the window showing only the app's popup and backdrop (`presentation` is ignored). GPUI has no offscreen pictures, so a departing page or dialog keeps its views (their detaching deferred) in a layer drawn moving out |
 | Alerts (`AlertDialog`) | `system.rs` | Drawn in the surface as items the root hosts (the Windows backend's content dialogs), so they stay with an embedded surface and never block the main loop |
@@ -270,7 +287,11 @@ app), finds the window whose `AppView` shows the surface, and acts through the h
 (`synth.rs`): a press is a mouse down and up at the view's middle (the window's view focused first), a scroll precise
 touchpad events a frame apart, typing `text_input::char_input`, select all the platform's command key with A, back
 the mouse's back button (it goes back from wherever the focus is), a dialog's answer a click at its button's laid-out
-middle (`system::dialog_point`), a screenshot `synth::frame` as a PNG. A view's bounds are its frame's corners through
+middle (`system::dialog_point`), a screenshot `synth::frame` as a PNG. A key step (`app.press("mod+k")`,
+`app.press("shift+/")`) is a source key as GPUI's own are (`synth::press_keys`): the requested keystroke builds the
+raw key (`code` is empty) and the press and release go through the window's key router
+(`input::window_key`), so `onKeyDown`/`onKeyUp` and `captureKeys` are exercised; the agent's programmatic keys
+(select all, a typed line's Return, clear) are the platform's action and send no raw event. A view's bounds are its frame's corners through
 `NshView::to_root`. `dev.rs` hands the test session's model to the surface through the session's own messages, so it
 comes before the first bundle.
 
@@ -321,6 +342,28 @@ and Windows.
   `SetValue` and `ScrollIntoView` everywhere, `Increment` / `Decrement` on macOS and `Expand` / `Collapse` on
   Windows; custom actions, `ShowContextMenu` and scroll actions are in the nodes but not called yet.
 - **Text inputs**: input accessory views are never shown (no software keyboard).
+- **Keyboard metadata**: raw key events report GPUI's logical key only. There is no physical identity (no scan
+  code, key position or modifier side), so `code` is always the empty string, never inferred from the logical
+  key; auto-repeats are only the ones a platform
+  marks (`is_held`: not on X11), and releases are only the ones a platform sends (GPUI's X11 backend drops some,
+  and it never delivers a modifier key's own down or up, so Shift, Control, Alt and Command never reach a view,
+  even with `captureKeys: "all"`). Typed text and input methods stay with the focused field's input handler
+  (`EntityInputHandler`), never with these events; a text field or native component with the focus keeps its
+  keys, and the views around it hear none of them. No raw down target or synthetic release is kept between
+  transitions; the keymap's held key (by virtual code, or by stroke for a key without one) is what a repeat is
+  judged against, and a blur or window deactivation forgets it, as for every key. GPUI reports some
+  platforms' keys already shift-resolved (`?` for Shift+/) and lower-cases letters on others: the reported key
+  keeps that spelling in the event, while `capture_keys` matches the canonical keystroke of the source's own key
+  for matching only. A letter keeps the source's Shift (`["shift+a"]` captures Shift+A), and a shifted symbol
+  matches the US key it is typed with (`["shift+/"]` captures `?`, `["shift+8"]` captures `*`); the payload is
+  never rewritten, and a capital the source reports without Shift (Caps Lock) matches the lower-case key alone.
+  A non-ASCII character, and a key the keymap does not name, has no canonical stroke and is captured only by
+  `captureKeys: "all"`. `defaultPrevented` is the mounted policy's decision for that transition, decided before
+  GPUI's own default and reported with the event; the app's callbacks run afterwards, so they observe it rather
+  than vetoing the key synchronously. App bindings follow the same rule: a key with a virtual key code matches by it (main's
+  semantics), and a key without one (`?`) matches the shared table by its canonical stroke — with the same
+  window, focused-control yielding, repeat and pass-through rules — before the raw notification and the
+  defaults, so `shift+/` bindings fire from it.
 - **No desktop equivalent**: the status bar; the safe area and the keyboard height are 0.
 - **Not yet tried** on macOS and Windows: the backend was built and checked on Linux (X11 / Xwayland); CI builds
   and tests it on macOS and Windows (the text tests need the main thread on macOS and are skipped there), but the offscreen

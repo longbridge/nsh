@@ -640,7 +640,9 @@ fn xalign(config: &InputConfig) -> f32 {
 /// What waits for the next field.
 enum Held {
     Text(String),
-    Key(KeyEvent),
+    /// A key, with the key as the source reported it (when the focus
+    /// hears raw keys).
+    Key(KeyEvent, Option<crate::keys::RawKey>),
 }
 
 /// A surface's focused field, and whether the surface has the window's
@@ -840,7 +842,11 @@ pub(crate) fn engine_caught_up(surface: &Rc<Surface>) {
 /// there. The key comes after that text. True when kept. A key that types
 /// a character is not kept. Its text comes through the input method, and
 /// waits as text.
-pub(crate) fn hold_key(surface: &Surface, event: &KeyEvent) -> bool {
+pub(crate) fn hold_key(
+    surface: &Surface,
+    event: &KeyEvent,
+    raw: Option<&crate::keys::RawKey>,
+) -> bool {
     let m = event.modifiers;
     let edits = matches!(
         event.vk,
@@ -869,7 +875,7 @@ pub(crate) fn hold_key(surface: &Surface, event: &KeyEvent) -> bool {
         if focus.pending.is_empty() {
             return false;
         }
-        focus.pending.push_back(Held::Key(*event));
+        focus.pending.push_back(Held::Key(*event, raw.cloned()));
         true
     })
 }
@@ -1021,8 +1027,8 @@ fn flush_pending(surface: &Rc<Surface>) {
                 };
                 insert(surface, &view, &input, &text, true);
             }
-            Held::Key(event) => {
-                crate::input::key_now(surface, event);
+            Held::Key(event, raw) => {
+                crate::input::key_now_raw(surface, event, raw);
             }
         }
         taken = true;
@@ -1797,6 +1803,13 @@ pub(crate) fn blur(view: &NshView) {
     }
 }
 
+/// Sets `view` up as an input and focuses it, for tests of the pointer.
+#[cfg(test)]
+pub(crate) fn focus_for_test(surface: &Rc<Surface>, view: &NshView) {
+    create(surface, view);
+    set_focus(surface, Some(view));
+}
+
 /// Blurs whatever field has the focus.
 pub(crate) fn blur_all(surface: &Rc<Surface>) {
     set_focus(surface, None);
@@ -2017,13 +2030,17 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
         if let Some(surface) = Surface::by_key(key)
             && let Some(input) = input_of(&view)
         {
-            crate::chrome::popup_actions(&surface, menu_items(&input, has_text));
+            crate::chrome::popup_actions(&surface, menu_items(&input, has_text, &surface));
         }
     });
 }
 
 /// The edit menu of a field (`has_text`: the clipboard holds text).
-fn menu_items(input: &InputState, has_text: bool) -> Vec<crate::chrome::LocalItem> {
+fn menu_items(
+    input: &InputState,
+    has_text: bool,
+    surface: &Surface,
+) -> Vec<crate::chrome::LocalItem> {
     use nsh_core::desktop::MenuRole;
 
     use crate::chrome::LocalItem;
@@ -2041,7 +2058,11 @@ fn menu_items(input: &InputState, has_text: bool) -> Vec<crate::chrome::LocalIte
             s == 0 && e == m.text().len(),
         )
     };
-    let item = |role: Option<MenuRole>, label: &'static str, enabled: bool, vk: u16, cmd: bool| {
+    let item = |role: Option<MenuRole>,
+                label: std::borrow::Cow<'static, str>,
+                enabled: bool,
+                vk: u16,
+                cmd: bool| {
         LocalItem::Item {
             role,
             label,
@@ -2058,20 +2079,50 @@ fn menu_items(input: &InputState, has_text: bool) -> Vec<crate::chrome::LocalIte
         }
     };
     vec![
-        item(Some(MenuRole::Undo), "", editable && can_undo, 0x5A, true),
+        item(
+            Some(MenuRole::Undo),
+            "".into(),
+            editable && can_undo,
+            0x5A,
+            true,
+        ),
         LocalItem::Separator,
         item(
             Some(MenuRole::Cut),
-            "",
+            "".into(),
             editable && selected && !secure,
             0x58,
             true,
         ),
-        item(Some(MenuRole::Copy), "", selected && !secure, 0x43, true),
-        item(Some(MenuRole::Paste), "", editable && has_text, 0x56, true),
-        item(None, "Delete", editable && selected, VK_DELETE, false),
+        item(
+            Some(MenuRole::Copy),
+            "".into(),
+            selected && !secure,
+            0x43,
+            true,
+        ),
+        item(
+            Some(MenuRole::Paste),
+            "".into(),
+            editable && has_text,
+            0x56,
+            true,
+        ),
+        item(
+            None,
+            crate::chrome::delete_label(surface).into(),
+            editable && selected,
+            VK_DELETE,
+            false,
+        ),
         LocalItem::Separator,
-        item(Some(MenuRole::SelectAll), "", !empty && !all, 0x41, true),
+        item(
+            Some(MenuRole::SelectAll),
+            "".into(),
+            !empty && !all,
+            0x41,
+            true,
+        ),
     ]
 }
 
