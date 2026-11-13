@@ -75,7 +75,6 @@ pub(crate) struct Track {
 enum CommandKind {
     Start,
     Cancel,
-    Delegate,
 }
 
 /// One download's identity: the view it belongs to and the platform's id
@@ -114,8 +113,6 @@ enum Phase {
     Cancelling,
     /// The writer stopped; the private directory is being cleaned.
     Cleaning,
-    /// `DelegateDownload` sent, waiting for its reply.
-    Delegating,
 }
 
 struct Session {
@@ -127,7 +124,6 @@ struct Session {
     declared: Option<u64>,
     method: Option<String>,
     source: WebDownloadSource,
-    can_delegate: bool,
     destination: Option<PathBuf>,
     overwrite: bool,
     staging: Option<files::Staging>,
@@ -142,7 +138,6 @@ struct Session {
     reply_deadline: Option<crate::time::Instant>,
     accept: Option<AnswerSlot<Result<(), String>>>,
     cancel_answer: Option<AnswerSlot<Result<(), String>>>,
-    delegate_answer: Option<AnswerSlot<Result<(), String>>>,
 }
 
 #[derive(Clone)]
@@ -461,7 +456,6 @@ impl Downloads {
             declared: offer.bytes,
             method: offer.method,
             source: offer.source,
-            can_delegate: offer.can_delegate,
             destination: None,
             overwrite: false,
             staging: None,
@@ -473,7 +467,6 @@ impl Downloads {
             reply_deadline: None,
             accept: None,
             cancel_answer: None,
-            delegate_answer: None,
         };
         let mut effects = Vec::new();
         match mode {
@@ -556,7 +549,7 @@ impl Downloads {
             Decision::Accept(destination) => {
                 // A response the platform cannot reproduce (Android's
                 // DownloadListener) has no bytes NSH can write, even when
-                // the app accepts; only delegating can hand it over.
+                // the app accepts: it can only be cancelled.
                 if self
                     .sessions
                     .get(&key)
@@ -601,7 +594,6 @@ impl Downloads {
                 }
             }
             Decision::Cancel => self.cancel(key, answer, CancelReason::App),
-            Decision::Delegate => self.delegate(key, answer),
         }
     }
 
@@ -623,7 +615,7 @@ impl Downloads {
             Phase::Offered | Phase::Staging | Phase::Starting | Phase::Running => {}
             // A finished or publishing download has its file (or is writing
             // it): a late cancel must not touch the destination.
-            Phase::Publishing | Phase::Cancelling | Phase::Cleaning | Phase::Delegating => {
+            Phase::Publishing | Phase::Cancelling | Phase::Cleaning => {
                 return vec![Effect::Answer {
                     slot: answer,
                     result: Err(crate::element::codes::DOWNLOAD_STATE.into()),
@@ -645,45 +637,6 @@ impl Downloads {
         session.offer_deadline = None;
         session.reply_deadline = None;
         effects
-    }
-
-    fn delegate(&mut self, key: Key, answer: AnswerSlot<Result<(), String>>) -> Vec<Effect> {
-        let Some(session) = self.sessions.get_mut(&key) else {
-            return vec![Effect::Answer {
-                slot: answer,
-                result: Err(crate::element::codes::DOWNLOAD_STATE.into()),
-            }];
-        };
-        if session.phase != Phase::Offered {
-            return vec![Effect::Answer {
-                slot: answer,
-                result: Err(crate::element::codes::DOWNLOAD_STATE.into()),
-            }];
-        }
-        if !session.can_delegate {
-            let code = if session.source == WebDownloadSource::None {
-                crate::element::codes::DOWNLOAD_DISCARDED
-            } else {
-                crate::element::codes::UNAVAILABLE
-            };
-            return vec![Effect::Answer {
-                slot: answer,
-                result: Err(code.into()),
-            }];
-        }
-        session.offer_deadline = None;
-        session.phase = Phase::Delegating;
-        session.delegate_answer = Some(answer);
-        vec![Effect::Command {
-            node: key.node,
-            operation: crate::webview::WebViewOperation::DelegateDownload {
-                id: session.id.clone(),
-            },
-            track: Track {
-                key,
-                kind: CommandKind::Delegate,
-            },
-        }]
     }
 
     /// A `WebViewReply` from the platform.
@@ -800,35 +753,6 @@ impl Downloads {
                     cleanup.stop(&key);
                 }
                 stop_confirmed_effects(self, &key)
-            }
-            CommandKind::Delegate => {
-                if session.phase != Phase::Delegating
-                    && !(session.phase == Phase::Cancelling && result.is_ok())
-                {
-                    return Vec::new();
-                }
-                match result {
-                    Ok(()) => {
-                        let end = DownloadEnd {
-                            id: session.id.clone(),
-                            outcome: DownloadOutcome::Delegated,
-                        };
-                        self.end(node, end)
-                    }
-                    Err(message) => {
-                        let mut effects = Vec::new();
-                        if let Some(slot) = session.delegate_answer.take() {
-                            effects.push(Effect::Answer {
-                                slot,
-                                result: Err(message.clone()),
-                            });
-                        }
-                        effects.push(failed(session, crate::element::codes::UNAVAILABLE, message));
-                        effects.push(cancel_command(session));
-                        session.phase = Phase::Cancelling;
-                        effects
-                    }
-                }
             }
         }
     }
@@ -949,45 +873,6 @@ impl Downloads {
                 }
                 effects
             }
-            DownloadOutcome::Delegated => {
-                let Some(session) = self.sessions.get_mut(&key) else {
-                    return Vec::new();
-                };
-                if !matches!(session.phase, Phase::Delegating | Phase::Cancelling) {
-                    return Vec::new();
-                }
-                let mut effects = Vec::new();
-                // A completed handover cannot truthfully be reported cancelled.
-                if let Some(slot) = session.cancel_answer.take() {
-                    effects.push(Effect::Answer {
-                        slot,
-                        result: Err(crate::element::codes::DOWNLOAD_STATE.into()),
-                    });
-                }
-                if let Some(slot) = session.delegate_answer.take() {
-                    effects.push(Effect::Answer {
-                        slot,
-                        result: Ok(()),
-                    });
-                }
-                if !session.reported {
-                    session.reported = true;
-                    effects.push(Effect::Event {
-                        node: session.node,
-                        kind: crate::EventKind::Download,
-                        payload: download_payload(
-                            session,
-                            WebDownloadState::Delegated,
-                            None,
-                            None,
-                            None,
-                            None,
-                        ),
-                    });
-                }
-                self.remove_session(&key);
-                effects
-            }
         }
     }
 
@@ -1020,11 +905,7 @@ impl Downloads {
                 !listens(session.node)
                     && matches!(
                         session.phase,
-                        Phase::Offered
-                            | Phase::Staging
-                            | Phase::Starting
-                            | Phase::Running
-                            | Phase::Delegating
+                        Phase::Offered | Phase::Staging | Phase::Starting | Phase::Running
                     )
             })
             .map(|session| session.node)
@@ -1051,20 +932,10 @@ impl Downloads {
             };
             match session.phase {
                 Phase::Publishing | Phase::Cancelling | Phase::Cleaning => continue,
-                Phase::Offered
-                | Phase::Staging
-                | Phase::Starting
-                | Phase::Running
-                | Phase::Delegating => {}
+                Phase::Offered | Phase::Staging | Phase::Starting | Phase::Running => {}
             }
             session.terminal_reason = Some(reason);
             if let Some(slot) = session.accept.take() {
-                effects.push(Effect::Answer {
-                    slot,
-                    result: Err(message.to_owned()),
-                });
-            }
-            if let Some(slot) = session.delegate_answer.take() {
                 effects.push(Effect::Answer {
                     slot,
                     result: Err(message.to_owned()),
@@ -1346,25 +1217,6 @@ impl Downloads {
                         });
                     }
                 }
-                CommandKind::Delegate => {
-                    if session.phase != Phase::Delegating {
-                        continue;
-                    }
-                    self.commands.remove(&request);
-                    if let Some(slot) = session.delegate_answer.take() {
-                        effects.push(Effect::Answer {
-                            slot,
-                            result: Err(crate::element::codes::TIMED_OUT.into()),
-                        });
-                    }
-                    effects.push(failed(
-                        session,
-                        crate::element::codes::TIMED_OUT,
-                        "the platform did not hand the download over".into(),
-                    ));
-                    effects.push(cancel_command(session));
-                    session.phase = Phase::Cancelling;
-                }
             }
         }
         effects
@@ -1479,7 +1331,6 @@ fn pending_payload(session: &Session) -> EventPayload {
         "mime_type": session.mime_type,
         "bytes": session.declared,
         "method": session.method,
-        "can_delegate": session.can_delegate,
     }))
 }
 
@@ -1568,7 +1419,6 @@ mod tests {
             bytes: None,
             method: None,
             source: WebDownloadSource::Transfer,
-            can_delegate: false,
         };
         assert_eq!(downloads.offer(node, offer, Mode::Manual, None).len(), 1);
         let (answer, slot) = Answer::new();

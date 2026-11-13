@@ -10,10 +10,9 @@
 //! directory, where it is staged, when it is published, what is cleaned up
 //! and when it is time to give up.
 //!
-//! Platforms implement three operations ([`WebViewOperation`]): start
-//! writing into a staging file the core made a private directory for, stop
-//! writing, and hand the download to the platform's own downloader. Every
-//! one is answered with `EventKind::WebViewReply`.
+//! Platforms implement two operations ([`crate::webview::WebViewOperation`]): start
+//! writing into a staging file the core made a private directory for, and
+//! stop writing. Every one is answered with `EventKind::WebViewReply`.
 //!
 //! The file work happens on a thread of its own ([`files`]): the engine
 //! thread never waits for a disk. A staging file is removed only after the
@@ -99,8 +98,7 @@ pub enum WebDownloadSource {
     Request,
     /// The page hands the bytes over itself (later; every engine).
     Page,
-    /// The response is gone: only [`WebDownloadControl::delegate`] (where
-    /// `can_delegate`) or [`WebDownloadControl::cancel`] remain (Android's
+    /// The response is gone: the download can only be cancelled (Android's
     /// system WebView, the browser).
     None,
 }
@@ -176,21 +174,17 @@ pub enum WebDownloadState {
     /// The app, the offer timeout, the teardown or the loss of every
     /// listener ended it ([`WebDownload::reason`]).
     Cancelled,
-    /// It was handed to the platform's own downloader; NSH knows no more
-    /// about it.
-    Delegated,
 }
 
 impl WebDownloadState {
     /// The state named `name` in an app's payload (`"started"`,
-    /// `"finished"`, `"failed"`, `"cancelled"`, `"delegated"`).
+    /// `"finished"`, `"failed"`, `"cancelled"`).
     pub(crate) fn parse(name: &str) -> Option<Self> {
         match name {
             "started" => Some(WebDownloadState::Started),
             "finished" => Some(WebDownloadState::Finished),
             "failed" => Some(WebDownloadState::Failed),
             "cancelled" => Some(WebDownloadState::Cancelled),
-            "delegated" => Some(WebDownloadState::Delegated),
             _ => None,
         }
     }
@@ -203,7 +197,6 @@ impl fmt::Display for WebDownloadState {
             WebDownloadState::Finished => "finished",
             WebDownloadState::Failed => "failed",
             WebDownloadState::Cancelled => "cancelled",
-            WebDownloadState::Delegated => "delegated",
         })
     }
 }
@@ -212,11 +205,11 @@ impl fmt::Display for WebDownloadState {
 /// where it goes ([`crate::EventKind::DownloadPending`], the Rust
 /// `WebView::on_download_pending`).
 ///
-/// The event is the same download to every clone: [`accept`](Self::accept),
-/// [`cancel`](Self::cancel) and [`delegate`](Self::delegate) act on the
-/// download it was reported for, and never on another view's or another
-/// download's. An app can make only the empty [`Default`] value, which
-/// names no download: its decisions resolve with an error.
+/// The event is the same download to every clone: [`accept`](Self::accept)
+/// and [`cancel`](Self::cancel) act on the download it was reported for,
+/// and never on another view's or another download's. An app can make only
+/// the empty [`Default`] value, which names no download: its decisions
+/// resolve with an error.
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 pub struct WebDownloadPending {
@@ -236,9 +229,6 @@ pub struct WebDownloadPending {
     /// The request's method (`"GET"` / `"POST"`) when the engine actually
     /// told it; never guessed from the URL.
     pub method: Option<String>,
-    /// Whether [`delegate`](Self::delegate) can hand this download to the
-    /// platform's own downloader.
-    pub can_delegate: bool,
     /// The view, node and download the decision belongs to; `None` for a
     /// value the app made itself ([`Default`]), whose every decision fails.
     pub(crate) handle: Option<DownloadHandle>,
@@ -256,66 +246,18 @@ impl WebDownloadPending {
         &self,
         destination: impl Into<DownloadDestination>,
     ) -> Answer<Result<(), String>> {
-        WebDownloadControl::accept(self, destination)
-    }
-
-    /// Cancels the download: a pending one writes nothing; an accepted one
-    /// stops, and the core removes only the staging file it wrote.
-    /// Await the answer in a task.
-    pub fn cancel(&self) -> Answer<Result<(), String>> {
-        WebDownloadControl::cancel(self)
-    }
-
-    /// Hands the download to the platform's own downloader (`Android`'s
-    /// `DownloadManager`, WebView2's UI, the browser's):
-    /// [`WebDownloadState::Delegated`] follows and NSH knows no more about
-    /// it. Fails with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where no
-    /// mechanism exists ([`Self::can_delegate`] is false), and with
-    /// `ERR_NSH_DOWNLOAD_DISCARDED` for a [`WebDownloadSource::None`] the
-    /// platform cannot reproduce.
-    pub fn delegate(&self) -> Answer<Result<(), String>> {
-        WebDownloadControl::delegate(self)
-    }
-}
-
-/// What an app can do with a download: the common control surface of the
-/// two download events.
-///
-/// [`WebDownloadPending`] implements every decision.
-/// [`WebDownload`] implements [`cancel`](Self::cancel) while it is
-/// [`WebDownloadState::Started`]; accepting or delegating an accepted
-/// download fails with `ERR_NSH_DOWNLOAD_STATE`.
-pub trait WebDownloadControl {
-    /// Writes the download at `destination`; answers when the destination
-    /// is accepted (not when it finishes).
-    fn accept(&self, destination: impl Into<DownloadDestination>) -> Answer<Result<(), String>>;
-
-    /// Cancels the download: a held one is declined, a running one stops,
-    /// the staging file goes.
-    fn cancel(&self) -> Answer<Result<(), String>>;
-
-    /// Hands the download to the platform's own downloader.
-    fn delegate(&self) -> Answer<Result<(), String>>;
-}
-
-impl WebDownloadControl for WebDownloadPending {
-    fn accept(&self, destination: impl Into<DownloadDestination>) -> Answer<Result<(), String>> {
         match &self.handle {
             Some(handle) => handle.decide(Decision::Accept(destination.into())),
             None => unbound(),
         }
     }
 
-    fn cancel(&self) -> Answer<Result<(), String>> {
+    /// Cancels the download: a pending one writes nothing; an accepted one
+    /// stops, and the core removes only the staging file it wrote.
+    /// Await the answer in a task.
+    pub fn cancel(&self) -> Answer<Result<(), String>> {
         match &self.handle {
             Some(handle) => handle.decide(Decision::Cancel),
-            None => unbound(),
-        }
-    }
-
-    fn delegate(&self) -> Answer<Result<(), String>> {
-        match &self.handle {
-            Some(handle) => handle.decide(Decision::Delegate),
             None => unbound(),
         }
     }
@@ -330,7 +272,6 @@ impl PartialEq for WebDownloadPending {
             && self.mime_type == other.mime_type
             && self.bytes == other.bytes
             && self.method == other.method
-            && self.can_delegate == other.can_delegate
             && match (&self.handle, &other.handle) {
                 (Some(a), Some(b)) => a.same_as(b),
                 (None, None) => true,
@@ -346,7 +287,6 @@ impl Eq for WebDownloadPending {}
 pub(crate) enum Decision {
     Accept(DownloadDestination),
     Cancel,
-    Delegate,
 }
 
 /// The decision handle of a download event: the view's node, the executor
@@ -450,23 +390,19 @@ impl PartialEq for WebDownload {
 
 impl Eq for WebDownload {}
 
-impl WebDownloadControl for WebDownload {
-    fn accept(&self, _: impl Into<DownloadDestination>) -> Answer<Result<(), String>> {
-        failed(crate::element::codes::DOWNLOAD_STATE)
-    }
-
-    fn cancel(&self) -> Answer<Result<(), String>> {
+impl WebDownload {
+    /// Cancels the download while it is [`WebDownloadState::Started`]: the
+    /// core stops it and removes only the staging file it wrote. Await the
+    /// answer in a task. Fails with `ERR_NSH_DOWNLOAD_STATE` once it has
+    /// finished, failed or been cancelled.
+    pub fn cancel(&self) -> Answer<Result<(), String>> {
         match (&self.handle, self.state) {
             (Some(handle), WebDownloadState::Started) => handle.decide(Decision::Cancel),
-            (Some(_), _) => failed(crate::element::codes::DOWNLOAD_STATE),
-            (None, _) => unbound(),
-        }
-    }
-
-    fn delegate(&self) -> Answer<Result<(), String>> {
-        match (&self.handle, self.state) {
-            (Some(_), WebDownloadState::Started) => failed(crate::element::codes::DOWNLOAD_STATE),
-            (Some(_), _) => failed(crate::element::codes::DOWNLOAD_STATE),
+            (Some(_), _) => {
+                let (answer, slot) = Answer::new();
+                deliver(slot, Err(crate::element::codes::DOWNLOAD_STATE.to_owned()));
+                answer
+            }
             (None, _) => unbound(),
         }
     }
@@ -475,12 +411,6 @@ impl WebDownloadControl for WebDownload {
 /// Delivers `result` to a request's answer.
 fn deliver(slot: AnswerSlot<Result<(), String>>, result: Result<(), String>) {
     slot.borrow_mut().deliver(result);
-}
-
-fn failed(code: &str) -> Answer<Result<(), String>> {
-    let (answer, slot) = Answer::new();
-    deliver(slot, Err(code.to_owned()));
-    answer
 }
 
 /// A decision from a [`WebDownloadPending`] no event made ([`Default`]):
@@ -528,8 +458,6 @@ pub struct DownloadOffer {
     pub method: Option<String>,
     /// Who owns the bytes.
     pub source: WebDownloadSource,
-    /// Whether the platform has a mechanism of its own for this download.
-    pub can_delegate: bool,
 }
 
 /// The bytes a transfer received ([`crate::EventKind::DownloadProgress`]).
@@ -569,8 +497,6 @@ pub enum DownloadOutcome {
         /// Why it failed.
         message: String,
     },
-    /// It was handed to the platform's own downloader.
-    Delegated,
 }
 
 /// The payload reporting an offer ([`EventKind::DownloadOffer`]).
@@ -584,7 +510,6 @@ pub fn download_offer(offer: &DownloadOffer) -> EventPayload {
         "bytes": offer.bytes,
         "method": offer.method,
         "source": offer.source.as_str(),
-        "can_delegate": offer.can_delegate,
     }))
 }
 
@@ -611,10 +536,6 @@ pub fn download_end(end: &DownloadEnd) -> EventPayload {
             "outcome": "failed",
             "code": code,
             "message": message,
-        }),
-        DownloadOutcome::Delegated => serde_json::json!({
-            "id": end.id,
-            "outcome": "delegated",
         }),
     };
     EventPayload::Json(value)
@@ -648,10 +569,6 @@ pub(crate) fn parse_offer(value: &JsonValue) -> Option<DownloadOffer> {
             .and_then(JsonValue::as_str)
             .and_then(WebDownloadSource::parse)
             .unwrap_or_default(),
-        can_delegate: value
-            .get("can_delegate")
-            .and_then(JsonValue::as_bool)
-            .unwrap_or(false),
     })
 }
 
@@ -672,7 +589,6 @@ pub(crate) fn parse_end(value: &JsonValue) -> Option<DownloadEnd> {
                 .unwrap_or_default()
                 .to_owned(),
         },
-        "delegated" => DownloadOutcome::Delegated,
         _ => return None,
     };
     Some(DownloadEnd { id, outcome })
@@ -1029,4 +945,5 @@ mod coordinator;
 mod shutdown;
 
 pub(crate) use coordinator::{Downloads, Effect, Mode};
+#[doc(hidden)]
 pub use shutdown::DownloadCleanup;

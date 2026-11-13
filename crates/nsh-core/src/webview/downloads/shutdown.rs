@@ -22,6 +22,7 @@ use super::{DownloadEnd, coordinator::Key, files, parse_end};
 use crate::{EventKind, EventPayload, JsonValue, NodeId};
 
 /// The staging directories and cancel requests a dead core still owns.
+#[doc(hidden)]
 #[derive(Clone, Default)]
 pub struct DownloadCleanup {
     state: Arc<Mutex<CleanupState>>,

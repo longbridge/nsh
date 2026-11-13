@@ -75,7 +75,7 @@ mount(Browser);
 | `onError` | `{ message: string }` | 页面加载失败。 |
 | `onNavigationStateChange` | `WebViewNavigation` | URL、标题、加载状态或历史记录发生变化。 |
 | `onMessage` | `{ data: string }` | 页面调用了 `window.nsh.postMessage(data)`。 |
-| `onDownload` | `WebViewDownload` | 下载开始、完成、失败、取消或委托。来源、目的地规则和诊断信息见[下载事件](../elements/web-view.md#事件)。 |
+| `onDownload` | `WebViewDownload` | 下载开始、完成、失败或取消。来源、目的地规则和诊断信息见[下载事件](../elements/web-view.md#事件)。 |
 
 ```ts
 interface WebViewNavigation {

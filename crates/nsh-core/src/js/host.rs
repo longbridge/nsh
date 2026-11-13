@@ -692,7 +692,7 @@ export interface WebViewNavigation {
 
 /** A web view's download (`onDownload`): where it is saved, in the app's data directory's `downloads`. */
 export interface WebViewDownload {
-  state: "started" | "finished" | "failed" | "cancelled" | "delegated";
+  state: "started" | "finished" | "failed" | "cancelled";
   id: string;
   url: string;
   filename: string;

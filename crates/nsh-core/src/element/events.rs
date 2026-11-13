@@ -201,8 +201,8 @@ pub struct ImageProgress {
     pub total: f64,
 }
 
-/// A web view download started, finished, failed, was cancelled or was
-/// delegated (`WebView::on_download`, the core's `onDownload` payload).
+/// A web view download started, finished, failed or was cancelled
+/// (`WebView::on_download`, the core's `onDownload` payload).
 pub(crate) fn web_download(p: &EventPayload) -> Option<Cow<'_, crate::webview::WebDownload>> {
     let EventPayload::Map(entries) = p else {
         return None;
@@ -323,10 +323,6 @@ pub(crate) fn web_download_pending(
             .get("method")
             .and_then(|v| v.as_str())
             .map(str::to_owned),
-        can_delegate: value
-            .get("can_delegate")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false),
         handle: Some(handle),
     }))
 }

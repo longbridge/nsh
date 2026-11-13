@@ -2031,10 +2031,6 @@ fn web_request(
                 reply(surface, node, request.id, Err(error));
             }
         }
-        WebViewOperation::DelegateDownload { id } => match download.delegate(id) {
-            Ok(()) => reply(surface, node, request.id, Ok(JsonValue::Null)),
-            Err(error) => reply(surface, node, request.id, Err(error)),
-        },
         // A newer core's operation: answer it rather than leave it pending.
         _ => reply(
             surface,

@@ -83,7 +83,7 @@ A web view takes the props of a [view](./view.md) (it has no children) plus:
 | `onError` | `.on_error` | `{ message, code? }` (`&str`, the message) | Loading failed; `code` is `"ERR_ACCESS_DENIED"` for a page, `html` or `baseUrl` the app's capabilities do not grant, `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"` where the platform shows no web view (Rust: also `.on_unavailable`, the message), and `"ERR_NSH_WEBVIEW_TERMINATED"` when the page's process ended, until `reload()`, `load()` or a new source (Rust: also `.on_process_terminated`). |
 | `onNavigationStateChange` | `.on_navigation_state_change` | `WebViewNavigation` | The URL, title, loading state or history changed. |
 | `onMessage` | `.on_message` | `{ data: string }` (`&str`) | The page called `window.nsh.postMessage(data)`. |
-| `onDownload` | `.on_download` | `WebViewDownload` (`WebDownload`) | A download started, finished, failed, was cancelled, or was handed to a system downloader. |
+| `onDownload` | `.on_download` | `WebViewDownload` (`WebDownload`) | A download started, finished, failed, or was cancelled. |
 
 `WebViewNavigation` is `{ url, title, loading, canGoBack, canGoForward }`; in Rust `WebNavigation` with `url`, `title`,
 `loading`, `can_go_back` and `can_go_forward`.
@@ -95,11 +95,10 @@ engine](../docs/web-view-and-video.md#when-there-is-no-web-engine)).
 Native download decisions and app-data destinations are available on iOS, macOS, Linux and Windows.
 
 `WebViewDownload` is `{ state, id, url, filename, path, bytes?, message?, source, code?, reason? }`.
-Its `state` is `"started"`, `"finished"`, `"failed"`, `"cancelled"` or `"delegated"`.
+Its `state` is `"started"`, `"finished"`, `"failed"` or `"cancelled"`.
 `"finished"` means the file has been published at `path`; `bytes` is its size. A failure carries a diagnostic
 `message` and, when available, a stable `code`. A cancellation reports its `reason`: `"app"`, `"timeout"`,
-`"teardown"` or `"noListener"`. `"delegated"` means a system downloader accepted responsibility, rather than that
-the file has finished downloading.
+`"teardown"` or `"noListener"`.
 Removing both download listeners cancels in-flight downloads with `reason: "noListener"`; the WebView stays mounted.
 
 `source` describes the available data: `"transfer"` for a live browser download, `"request"` for a request owned by
@@ -117,12 +116,12 @@ destination platform's reserved names. Download outcomes use `onDownload`; navig
 
 A Rust host chooses where a download goes by registering `.on_download_pending(..)`. Registration selects manual
 decisions; otherwise the automatic behavior above applies. The `WebDownloadPending` event contains `id`, `url`,
-`filename`, `source`, optional `mime_type`, `bytes` and `method`, and `can_delegate`. Metadata can be unknown; in
-particular, a URL alone does not establish the method of the request that produced it.
+`filename`, `source`, and optional `mime_type`, `bytes` and `method`. Metadata can be unknown; in particular,
+a URL alone does not establish the method of the request that produced it.
 
 The event carries a private decision handle. Clones refer to the same download, and changing public metadata does
-not retarget the handle. `accept(destination)`, `cancel()` and `delegate()` return an awaitable decision result.
-The common `WebDownloadControl` trait exposes those decisions across platforms.
+not retarget the handle. Its inherent `accept(destination)` and `cancel()` methods return an awaitable decision
+result. A `WebDownload` event has an inherent `cancel()` method for an active transfer.
 
 ```rust
 use nsh_core::prelude::*;
@@ -150,10 +149,7 @@ An unanswered pending decision expires after 60 seconds; a command's reply has a
 Late, duplicate, foreign and unbound decisions cannot affect another transfer. `WebDownloadPending::default()`
 has no bound download and its decisions return an error.
 
-`delegate()` explicitly hands a pending download to the system downloader when `can_delegate` is true.
-WebView2 releases the download to the engine's own UI. The terminal outcome is `"delegated"`, and the system owns
-subsequent progress and completion. An unavailable response is reported with `ERR_NSH_DOWNLOAD_DISCARDED`,
-rather than being fetched again automatically.
+An unavailable response is reported with `ERR_NSH_DOWNLOAD_DISCARDED`, rather than being fetched again automatically.
 
 Saving to arbitrary host paths and pending decisions are Rust-host APIs. TSX observes the shared `onDownload`
 lifecycle. Applications can compose a save-path picker with `accept` where the platform provides that picker.

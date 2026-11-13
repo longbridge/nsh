@@ -30,8 +30,7 @@
 //!
 //! A download is a transport: WebKit holds it without a destination and
 //! the core hears its offer (`DownloadOffer`), chooses the staging path
-//! (`StartDownload`), cancels it, or learns that this backend has no
-//! downloader to delegate it to. This backend never picks a destination,
+//! (`StartDownload`) or cancels it. This backend never picks a destination,
 //! publishes a file or removes one; it only writes where the core says
 //! and reports the writer's end.
 //!
@@ -184,7 +183,7 @@ impl Shared {
 }
 
 /// A download WebKit holds for a page: reported to the core, which
-/// chooses its staging path, cancels it or (where possible) delegates it.
+/// chooses its staging path or cancels it.
 ///
 /// WebKit creates the destination file itself; nothing is written before
 /// the core's `StartDownload`. This backend keeps no file policy of its
@@ -703,12 +702,6 @@ pub(super) fn web_request(web: &WebView, shared: &Rc<Shared>, request: &WebViewR
         WebViewOperation::CancelDownload { id: download } => {
             cancel_download(shared, download, id);
         }
-        WebViewOperation::DelegateDownload { id: download } => {
-            // WebKitGTK hands NSH the live transfer; it has no downloader
-            // of its own to hand it to.
-            let _ = (web, download);
-            shared.reply(id, Err("this platform cannot delegate a download".into()));
-        }
         // A newer core's operation: answered, never left waiting.
         _ => {
             let _ = web;
@@ -719,7 +712,7 @@ pub(super) fn web_request(web: &WebView, shared: &Rc<Shared>, request: &WebViewR
 
 /// WebKit reported a download of this page: held without a destination
 /// (nothing is written) and reported to the core, which chooses the
-/// staging path, cancels it or (where possible) delegates it.
+/// staging path or cancels it.
 fn started_download(shared: &Rc<Shared>, download: &Download) {
     let n = shared.next_download.get();
     shared.next_download.set(n + 1);
@@ -967,7 +960,7 @@ fn cancel_download(shared: &Rc<Shared>, id: &str, request: u64) {
 /// What the core hears about a download WebKit holds: the final URL, the
 /// server's file name (made safe), the type and declared size, and the
 /// method WebKit actually used. WebKit owns the bytes, so its source is
-/// `Transfer` and there is no separate downloader to delegate to.
+/// `Transfer`.
 fn offer_of(state: &DownloadState, download: &Download) -> DownloadOffer {
     let response = download.response();
     let request = download.request();
@@ -994,7 +987,6 @@ fn offer_of(state: &DownloadState, download: &Download) -> DownloadOffer {
             .map(|method| method.to_string()),
         url,
         source: WebDownloadSource::Transfer,
-        can_delegate: false,
     }
 }
 

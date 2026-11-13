@@ -65,22 +65,22 @@ in place, a component is imported (`import { Chart } from "app/native"`) or loca
 `nsh_core::webview::downloads` owns download sessions, exposed through `nsh_core::webview`. A Rust host registers
 `WebView::on_download_pending` for manual decisions, or `on_download` alone for automatic app-data downloads.
 Without either listener the platform retains its normal behavior. There is no separate public behavior prop.
-`WebDownloadControl` is the common decision trait: `accept(impl Into<DownloadDestination>)`, `cancel()` and
-`delegate()` return `Answer<Result<(), String>>`. The private handle binds the original executor, node and
-download identity; public metadata, clones and unbound defaults cannot retarget it.
+`WebDownloadPending` has inherent `accept(impl Into<DownloadDestination>)` and `cancel()` methods;
+`WebDownload` has an inherent `cancel()` for an active transfer. Each returns `Answer<Result<(), String>>`.
+The private handle binds the original executor, node and download identity; public metadata, clones and unbound
+defaults cannot retarget it.
 
 Backends offer a held transfer with internal `DownloadOffer` metadata, report `DownloadProgress`, and report
-`DownloadEnd` after their writer stops. They receive `StartDownload { id, staging }`, `CancelDownload { id }`
-and `DelegateDownload { id }` through `Command::WebViewRequest`. `WebViewReply` acknowledges that command; its
-request id is separate from the download id. Backends hold native objects and streams; the common coordinator
+`DownloadEnd` after their writer stops. They receive `StartDownload { id, staging }` and `CancelDownload { id }`
+through `Command::WebViewRequest`. `WebViewReply` acknowledges that command; its request id is separate from the
+download id. Backends hold native objects and streams; the common coordinator
 decides app-facing `DownloadPending` and `Download` events, destinations, publication and terminal outcomes.
 
 `source` records where the bytes come from: `Transfer` is a held browser response, `Request` a request NSH owns,
 `None` metadata after the engine released the response, and `Page` the reserved page-data source. Optional
 `method`, `mime_type` and expected `bytes` are observations, not guesses. In particular, a URL-to-method cache
-cannot correlate concurrent requests or redirected POSTs to Android's `DownloadListener`. `can_delegate` is true
-only when the adapter can honor an explicit handover for that download. `Delegated` records transfer of ownership,
-not successful file delivery; NSH does not silently re-request a released response.
+cannot correlate concurrent requests or redirected POSTs to Android's `DownloadListener`.
+NSH does not silently re-request a released response.
 
 The start acknowledgement settles acceptance, while `Finished` is emitted only after successful publication.
 `Cancelled` carries `CancelReason::{App, Timeout, Teardown, NoListener}`; network and file failures remain

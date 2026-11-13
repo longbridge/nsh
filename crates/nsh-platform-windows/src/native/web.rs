@@ -60,8 +60,7 @@
 //! `onDownload` / `onDownloadPending` listener), `DownloadStarting` holds
 //! the download open with a deferral and reports its offer
 //! (`DownloadOffer`); nothing is written until the core sends
-//! `StartDownload` with a staging path (`ResultFilePath`), cancels it, or
-//! asks for `DelegateDownload` (`Handled = false` opens WebView2's own UI).
+//! `StartDownload` with a staging path (`ResultFilePath`) or cancels it.
 //! Each deferral is completed exactly once. The end is reported to the core
 //! once the writer stopped (`DownloadEnd`); staging, publishing, timeouts
 //! and cleanup are the core's. Without a listener WebView2's own UI is left
@@ -239,7 +238,7 @@ unsafe fn create_environment(
 }
 
 /// A download WebView2 started and the core must decide on: its event stays
-/// open through a deferral until the core starts, cancels or delegates it,
+/// open through a deferral until the core starts or cancels it,
 /// and nothing is written until then.
 struct PendingDownload {
     args: ICoreWebView2DownloadStartingEventArgs,
@@ -284,19 +283,6 @@ impl PendingDownload {
         self.complete()
     }
 
-    /// Hands it to WebView2's own download UI. A failure is returned with
-    /// the event still open: completing it without `Handled = false` would
-    /// start nothing anywhere.
-    fn delegate(&self) -> windows::core::Result<()> {
-        // SAFETY: WebView2 calls on the live event: its own UI takes the
-        // transfer.
-        unsafe {
-            self.args.SetCancel(false)?;
-            self.args.SetHandled(false)?;
-        }
-        self.complete()
-    }
-
     /// The operation it downloads, while its event is still open.
     fn operation(&self) -> Option<ICoreWebView2DownloadOperation> {
         self.operation.clone()
@@ -314,7 +300,6 @@ impl PendingDownload {
             // WebView2 exposes no method for this transfer.
             method: None,
             source: WebDownloadSource::Transfer,
-            can_delegate: true,
         }
     }
 }
@@ -1322,10 +1307,6 @@ impl WebItem {
             WebViewOperation::CancelDownload { id } => {
                 self.cancel_download(request.id, id);
             }
-            WebViewOperation::DelegateDownload { id } => {
-                let result = self.delegate_download(id);
-                self.reply(request.id, result);
-            }
             // A newer core's operation: answer it rather than leave it
             // pending.
             _ => self.reply(
@@ -1472,30 +1453,6 @@ impl WebItem {
         if !watch.cancel() && !watch.terminal.get() && watch.cancel_request.get() == Some(request) {
             watch.cancel_request.set(None);
             self.reply(request, Err(format!("cannot cancel the download {id}")));
-        }
-    }
-
-    /// Hands the pending download `id` to WebView2's own download UI; a
-    /// transfer that already started has no such hand-over.
-    fn delegate_download(&self, id: &str) -> Result<JsonValue, String> {
-        let pending = self.downloads.borrow_mut().remove(id);
-        let Some(pending) = pending else {
-            if self.active_downloads.borrow().contains_key(id) {
-                return Err(format!("download {id} has already started"));
-            }
-            return Err(self.no_download(id));
-        };
-        match pending.delegate() {
-            Ok(()) => Ok(JsonValue::Null),
-            Err(error) => {
-                // The event is still held: the hand-over did not happen, and
-                // the core can cancel the offer instead.
-                self.downloads.borrow_mut().insert(id.to_owned(), pending);
-                Err(format!(
-                    "cannot hand the download over: {}",
-                    error.message()
-                ))
-            }
         }
     }
 

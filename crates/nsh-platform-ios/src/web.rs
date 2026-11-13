@@ -316,10 +316,6 @@ impl WebHandler {
                     self.reply(request.id, Err(error));
                 }
             }
-            WebViewOperation::DelegateDownload { id } => match download.delegate(id) {
-                Ok(()) => self.reply(request.id, Ok(JsonValue::Null)),
-                Err(error) => self.reply(request.id, Err(error)),
-            },
             // A newer core's operation: answer it rather than leave it
             // pending.
             _ => self.reply(

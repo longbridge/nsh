@@ -1254,6 +1254,7 @@ impl<M: TextEngine> Core<M> {
     /// Where a platform's last stop acknowledgement goes after this core's
     /// engine is gone: the engine's control handle keeps it, and the core
     /// registers its staging directories and cancel requests with it.
+    #[doc(hidden)]
     pub fn set_download_cleanup(&mut self, cleanup: crate::webview::downloads::DownloadCleanup) {
         self.components.downloads.set_cleanup(cleanup);
     }

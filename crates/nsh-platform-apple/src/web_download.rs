@@ -199,16 +199,6 @@ impl Transport {
         Ok(())
     }
 
-    /// Hands download `id` to the system's own downloader. WebKit has no
-    /// such mechanism: a transfer it already started cannot be resumed
-    /// elsewhere, so this is always refused. The offer's `can_delegate` is
-    /// false, so a conforming core never asks.
-    pub fn delegate(&self, id: &str) -> Result<(), String> {
-        Err(format!(
-            "this platform cannot hand download `{id}` to another downloader"
-        ))
-    }
-
     /// The web view is going: stops every writer. A transfer whose writer
     /// had begun is reported failed only when WebKit says writing stopped,
     /// so the core never removes a directory that is still being written;
@@ -413,10 +403,7 @@ define_class!(
                     mime_type: response.MIMEType().map(|mime| mime.to_string()),
                     bytes: declared,
                     method: entry.method.clone(),
-                    // WebKit holds the bytes, and a transfer it already
-                    // started cannot be resumed in another downloader.
                     source: WebDownloadSource::Transfer,
-                    can_delegate: false,
                 }
             };
             // Reported outside the borrow: a sink dispatches an event whose

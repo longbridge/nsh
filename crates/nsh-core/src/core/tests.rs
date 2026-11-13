@@ -43020,9 +43020,8 @@ mod download_decisions {
         prelude::*,
         webview::{
             CancelReason, DownloadDestination, DownloadEnd, DownloadOffer, DownloadOutcome,
-            DownloadProgress, WebDownload, WebDownloadControl, WebDownloadPending,
-            WebDownloadSource, WebDownloadState, download_end, download_offer, download_progress,
-            reply,
+            DownloadProgress, WebDownload, WebDownloadPending, WebDownloadSource, WebDownloadState,
+            download_end, download_offer, download_progress, reply,
         },
     };
 
@@ -43197,7 +43196,6 @@ mod download_decisions {
             bytes,
             method: Some("GET".into()),
             source: WebDownloadSource::Transfer,
-            can_delegate: false,
         })
     }
 
@@ -43309,7 +43307,6 @@ mod download_decisions {
         assert_eq!(held.source, WebDownloadSource::Transfer);
         assert_eq!(held.bytes, Some(3));
         assert_eq!(held.method.as_deref(), Some("GET"));
-        assert!(!held.can_delegate);
         assert!(!destination.exists());
         assert!(staging_in(&dir).is_none());
 
@@ -43657,14 +43654,8 @@ mod download_decisions {
             settled(WebDownloadPending::default().cancel()),
             Some(Err(crate::webview::downloads::UNBOUND.into()))
         );
-        let delegate = held.delegate();
-        c.apply_actions();
-        assert_eq!(
-            settled(delegate),
-            Some(Err(crate::element::codes::UNAVAILABLE.into()))
-        );
 
-        let mut first = WebDownloadControl::accept(&held, destination.clone());
+        let mut first = held.accept(destination.clone());
         let second = held.accept(destination.clone());
         c.apply_actions();
         let (_, request, _) = wait_request(&mut c);
@@ -44101,45 +44092,5 @@ mod download_decisions {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_completed_handover_is_not_reported_cancelled_on_teardown() {
-        for reply in [false, true] {
-            reset();
-            let mut c = core();
-            c.mount_root(&crate::element::Root::new::<ManualDownloads>(|| ()));
-            let web = web_node(&c.commit().unwrap());
-            let mut payload = offer("handover", "out.bin", None);
-            if let EventPayload::Json(value) = &mut payload {
-                value["can_delegate"] = true.into();
-            }
-            assert!(c.component_event(web, EventKind::DownloadOffer, &payload));
-            pump(&mut c);
-            let held = pending().unwrap();
-            let answer = held.delegate();
-            c.apply_actions();
-            let (_, request, operation) = wait_request(&mut c);
-            assert!(matches!(
-                operation,
-                crate::webview::WebViewOperation::DelegateDownload { .. }
-            ));
-            c.webview_released(web);
-            if reply {
-                reply_ok(&mut c, web, request);
-            } else {
-                assert!(c.component_event(
-                    web,
-                    EventKind::DownloadEnd,
-                    &end("handover", DownloadOutcome::Delegated)
-                ));
-            }
-            let events = wait_downloads(&mut c, 1);
-            assert_eq!(events[0].state, WebDownloadState::Delegated);
-            assert!(matches!(settled(answer), Some(Err(_))));
-            reply_ok(&mut c, web, request);
-            pump(&mut c);
-            assert_eq!(downloads().len(), 1);
-        }
     }
 }

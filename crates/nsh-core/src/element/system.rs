@@ -594,7 +594,7 @@ pub mod codes {
     /// size.
     pub const DOWNLOAD_SIZE: &str = "ERR_NSH_DOWNLOAD_SIZE";
     /// A download decision is not valid now: it was already decided,
-    /// finished, cancelled or delegated, or names no download.
+    /// finished or cancelled, or names no download.
     pub const DOWNLOAD_STATE: &str = "ERR_NSH_DOWNLOAD_STATE";
 }
 

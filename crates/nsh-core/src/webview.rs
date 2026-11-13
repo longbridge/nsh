@@ -4,9 +4,9 @@
 //! An app that listens for [`crate::EventKind::DownloadPending`]
 //! ([`crate::element::WebView::on_download_pending`]) chooses every
 //! download's destination itself: the platform holds the transfer and
-//! reports it as a [`WebDownloadPending`], whose [`accept`](WebDownloadPending::accept),
-//! [`cancel`](WebDownloadPending::cancel) and
-//! [`delegate`](WebDownloadPending::delegate) decide it. An app that listens
+//! reports it as a [`WebDownloadPending`], whose
+//! [`accept`](WebDownloadPending::accept) and
+//! [`cancel`](WebDownloadPending::cancel) decide it. An app that listens
 //! for [`crate::EventKind::Download`] alone ([`crate::element::WebView::on_download`])
 //! has its downloads written into the app's data directory
 //! (`downloads/<id>/<filename>`). With neither listener the platform keeps
@@ -30,10 +30,10 @@
 //! app-facing events live in [`downloads`], on the engine thread; the disk
 //! work runs on a thread of its own.
 //!
-//! [`WebDownload`] reports an automatic or accepted download's life
-//! ([`WebDownloadControl`] cancels one that is under way). A download a
-//! platform cannot own and the app did not delegate is reported as failed
-//! with `ERR_NSH_DOWNLOAD_DISCARDED`.
+//! [`WebDownload`] reports an automatic or accepted download's life and
+//! [`WebDownload::cancel`] cancels one that is under way. A download a
+//! platform cannot own is reported as failed with
+//! `ERR_NSH_DOWNLOAD_DISCARDED`.
 
 use std::path::PathBuf;
 
@@ -43,22 +43,20 @@ pub mod downloads;
 
 pub(crate) use downloads::DownloadHandle;
 pub use downloads::{
-    CancelReason, DownloadCleanup, DownloadDestination, WebDownload, WebDownloadControl,
-    WebDownloadPending, WebDownloadSource, WebDownloadState,
+    CancelReason, DownloadDestination, WebDownload, WebDownloadPending, WebDownloadSource,
+    WebDownloadState,
 };
 #[doc(hidden)]
 pub use downloads::{
-    DownloadEnd, DownloadOffer, DownloadOutcome, DownloadProgress, download_end, download_offer,
-    download_progress,
+    DownloadCleanup, DownloadEnd, DownloadOffer, DownloadOutcome, DownloadProgress, download_end,
+    download_offer, download_progress,
 };
 
 /// What a web view is asked to do ([`crate::Command::WebViewRequest`]).
 ///
 /// A platform answers each with [`crate::EventKind::WebViewReply`]:
 /// `StartDownload` once it accepted the staging path and its transfer
-/// continued, `CancelDownload` only after its writer stopped,
-/// `DelegateDownload` once the hand-over to the platform's own downloader
-/// was accepted.
+/// continued, `CancelDownload` only after its writer stopped.
 #[doc(hidden)]
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,11 +73,6 @@ pub enum WebViewOperation {
     /// Stops the download `id`: a held transfer is discarded, a running
     /// one stops writing. The answer comes when writing stopped.
     CancelDownload {
-        /// The download.
-        id: String,
-    },
-    /// Hands the download `id` to the platform's own downloader.
-    DelegateDownload {
         /// The download.
         id: String,
     },

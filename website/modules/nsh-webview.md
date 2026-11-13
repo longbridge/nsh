@@ -75,7 +75,7 @@ mount(Browser);
 | `onError` | `{ message: string }` | A page failed to load. |
 | `onNavigationStateChange` | `WebViewNavigation` | The URL, title, loading state or history changed. |
 | `onMessage` | `{ data: string }` | The page called `window.nsh.postMessage(data)`. |
-| `onDownload` | `WebViewDownload` | Download lifecycle: started, finished, failed, cancelled, or delegated. See [downloads](../elements/web-view.md#events) for sources, destination rules and diagnostics. |
+| `onDownload` | `WebViewDownload` | Download lifecycle: started, finished, failed, or cancelled. See [downloads](../elements/web-view.md#events) for sources, destination rules and diagnostics. |
 
 ```ts
 interface WebViewNavigation {
