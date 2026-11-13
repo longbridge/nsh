@@ -103,6 +103,11 @@ pub(crate) struct TextGeo {
     /// The box the frame is in (the block's own, else a node view's
     /// content slot).
     pub(crate) owner: Option<u64>,
+    /// The width of each inline view and image in its text, by its offset
+    /// in the textblock's content: what its attachment character stands
+    /// for on a line. Relative to the block, so an edit in another block
+    /// leaves them in place.
+    pub(crate) widths: HashMap<usize, Points>,
 }
 
 /// Measures a text in a font (the platform's measurer, captured).
@@ -123,9 +128,6 @@ pub(crate) struct Geometry {
     /// The atoms and node views edited as units, by block id: their
     /// position.
     pub(crate) atoms: HashMap<u64, usize>,
-    /// The width of each inline view and image in a textblock's text, by
-    /// its position: what its attachment character stands for on a line.
-    pub(crate) inline_widths: HashMap<usize, Points>,
     /// The font measuring within a line (relative widths only).
     pub(crate) font: String,
     /// Captured on the view's engine thread, independent of runtime entry.
@@ -366,17 +368,16 @@ impl Geometry {
     /// The attachments of a line (its inline views and images) whose width
     /// is known: their offset in the line's text and their width.
     fn line_attachments(&self, geo: &TextGeo, line: &TextLine) -> Vec<(u32, Points)> {
-        if self.inline_widths.is_empty() {
+        if geo.widths.is_empty() {
             return Vec::new();
         }
         let mut out = Vec::new();
         let mut k = 0u32;
         for c in line.text.chars() {
-            if c == nsh_core::ATTACHMENT_CHAR {
-                let pos = geo.start + geo.map.to_doc(line.start + k);
-                if let Some(w) = self.inline_widths.get(&pos) {
-                    out.push((k, *w));
-                }
+            if c == nsh_core::ATTACHMENT_CHAR
+                && let Some(w) = geo.widths.get(&geo.map.to_doc(line.start + k))
+            {
+                out.push((k, *w));
             }
             k += c.len_utf16() as u32;
         }
@@ -631,10 +632,10 @@ mod tests {
                 }],
                 frame: Bounds::new(Point::default(), Size::new(px(400.0), px(20.0))),
                 owner: None,
+                // The view is at position 3 (content offset 2).
+                widths: HashMap::from([(2, px(80.0))]),
             },
         );
-        // The view is at position 3 (content offset 2).
-        geo.inline_widths.insert(3, px(80.0));
         let x = |pos| {
             geo.caret_rect(pos, Affinity::Downstream)
                 .map(|b| b.origin.x.0)

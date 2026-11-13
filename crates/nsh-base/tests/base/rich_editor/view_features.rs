@@ -485,14 +485,15 @@ struct InlineImageProps {
     session: Option<EditorSession>,
 }
 
-/// An editor, and a press that shows how far apart the session puts the
-/// caret before and after an inline image, and the position it finds just
-/// after the image.
+/// An editor, a press that types at the start of the document, and a
+/// press that shows how far apart the session puts the caret before and
+/// after its inline image, and the position it finds just after the
+/// image.
 #[component]
 fn InlineImage(props: InlineImageProps) -> impl IntoElement {
     let session = props.session.clone().expect("a session");
     let shown = signal(String::new());
-    let asked = session.clone();
+    let (asked, typed) = (session.clone(), session.clone());
     view()
         .child(
             view()
@@ -504,11 +505,31 @@ fn InlineImage(props: InlineImageProps) -> impl IntoElement {
         .child(
             view()
                 .on_press(move || {
+                    let mut tr = typed.state().tr();
+                    tr.insert_text("x", Some(1), Some(1));
+                    typed.dispatch(tr).unwrap();
+                })
+                .child(text("Type")),
+        )
+        .child(
+            view()
+                .on_press(move || {
+                    let mut image = 0;
+                    asked.state().doc().descendants(&mut |n, pos, _, _| {
+                        if n.ty().name() == "image" {
+                            image = pos;
+                        }
+                        true
+                    });
                     let x = |pos| asked.coords_at_pos(pos).map_or(-1.0, |b| b.origin.x.0);
-                    let back = asked.coords_at_pos(4).and_then(|b| {
+                    let back = asked.coords_at_pos(image + 1).and_then(|b| {
                         asked.pos_at_coords(b.origin + nsh_core::geometry::point(px(1.0), px(1.0)))
                     });
-                    shown.set(format!("Gap {} {:?}", (x(4) - x(3)).round(), back));
+                    shown.set(format!(
+                        "Image {image} gap {} {:?}",
+                        (x(image + 1) - x(image)).round(),
+                        back.map(|p| p - image)
+                    ));
                 })
                 .child(text("Measure")),
         )
@@ -516,21 +537,11 @@ fn InlineImage(props: InlineImageProps) -> impl IntoElement {
         .child(text("Ready"))
 }
 
-/// The caret on either side of an inline image is as far apart as the
-/// image is wide: the image's attachment character stands for its view,
-/// not for a character of the font.
-#[test]
-fn the_caret_steps_over_an_inline_images_width() {
+/// An app over `doc`, with the editor and the presses of `InlineImage`.
+fn inline_image_app(doc: serde_json::Value) -> Headless {
     let schema = feature_schema();
     let plugins = starter::plugins(&schema);
-    // `ab` is 1..3, the image 3..4, `cd` 4..6.
-    let doc = schema
-        .node_from_json(&json!({"type": "doc", "content": [{"type": "paragraph", "content": [
-            {"type": "text", "text": "ab"},
-            {"type": "image", "attrs": {"src": "data:image/png;base64,", "width": 80, "height": 16}},
-            {"type": "text", "text": "cd"},
-        ]}]}))
-        .unwrap();
+    let doc = schema.node_from_json(&doc).unwrap();
     let state =
         EditorState::create(EditorStateConfig::new(schema).doc(doc).plugins(plugins)).unwrap();
     let session = EditorSession::new(state, NodeViews::new());
@@ -544,7 +555,50 @@ fn the_caret_steps_over_an_inline_images_width() {
     config.environment.idiom = Idiom::Desktop;
     let mut app = Headless::start(config).expect("the engine starts");
     app.wait_for("text:Ready").unwrap();
+    app
+}
+
+fn image_80() -> serde_json::Value {
+    json!({"type": "image", "attrs": {"src": "data:image/png;base64,", "width": 80, "height": 16}})
+}
+
+/// The caret on either side of an inline image is as far apart as the
+/// image is wide: the image's attachment character stands for its view,
+/// not for a character of the font.
+#[test]
+fn the_caret_steps_over_an_inline_images_width() {
+    // `ab` is 1..3, the image 3..4, `cd` 4..6.
+    let mut app = inline_image_app(
+        json!({"type": "doc", "content": [{"type": "paragraph", "content": [
+            {"type": "text", "text": "ab"},
+            image_80(),
+            {"type": "text", "text": "cd"},
+        ]}]}),
+    );
     app.press("text:Measure").unwrap();
-    // 80 apart, and a point just after the image is after it (4).
-    see(&mut app, "Gap 80 Some(4)");
+    // 80 apart, and a point just after the image is after it.
+    see(&mut app, "Image 3 gap 80 Some(1)");
+    // Typing before it in its block moves it within the block.
+    app.press("text:Type").unwrap();
+    app.press("text:Measure").unwrap();
+    see(&mut app, "Image 4 gap 80 Some(1)");
+}
+
+/// An edit in an earlier block moves an inline image's position; the
+/// caret still steps over its width.
+#[test]
+fn the_caret_steps_over_an_inline_image_moved_by_an_edit_above() {
+    let mut app = inline_image_app(json!({"type": "doc", "content": [
+        {"type": "paragraph", "content": [{"type": "text", "text": "xy"}]},
+        {"type": "paragraph", "content": [
+            {"type": "text", "text": "ab"},
+            image_80(),
+            {"type": "text", "text": "cd"},
+        ]},
+    ]}));
+    app.press("text:Measure").unwrap();
+    see(&mut app, "Image 7 gap 80 Some(1)");
+    app.press("text:Type").unwrap();
+    app.press("text:Measure").unwrap();
+    see(&mut app, "Image 8 gap 80 Some(1)");
 }
