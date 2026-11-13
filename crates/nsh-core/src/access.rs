@@ -16,7 +16,7 @@
 //!   },
 //!   "webview": { "hosts": ["*.example.com"], "input": true },
 //!   "statusBar": true,
-//!   "window": true,
+//!   "application": true,
 //!   "homeDir": true,
 //!   "host": ["getUserInfo", "bridge.*"],
 //!   "openUrl": { "schemes": ["https", "mailto"] }
@@ -41,14 +41,15 @@
 //! the functions of the embedding app `nsh/host` may call: names (1 to 128
 //! of `[A-Za-z0-9_.:-]`, without `..`; the core refuses calls of any other
 //! name), or prefixes of them ending in `*` (`true`: all of them); the
-//! host's events need no grant, the host sends them. `window` lets the app
-//! control its window and set the application menu (`nsh/desktop`'s
-//! `Window` and `Menu.setApplicationMenu`; context menus, shown in the
-//! app's own view, need none); `homeDir` lets `os.homedir()` tell the
+//! host's events need no grant, the host sends them. `application` lets
+//! the app act on the application as a whole (`nsh/desktop`'s main window,
+//! application menu, tray, global shortcuts, `Application.quit`, `restart`
+//! and `setLaunchAtLogin`; context menus, shown in the app's own view, and
+//! the windows `windows` grants need none); `homeDir` lets `os.homedir()` tell the
 //! user's home directory. An app without `"capabilities"` (a standalone
 //! app, its developer's own) retains unrestricted HTTP, web views, the
 //! status bar, the clipboard, the picker, speech recognition, opening URLs,
-//! the window and the home directory; raw sockets, processes, the
+//! the application and the home directory; raw sockets, processes, the
 //! filesystem and the host's functions always require an explicit
 //! declaration.
 
@@ -655,9 +656,10 @@ pub struct Capabilities {
     pub notifications: bool,
     /// The app may play sound (`Sound` and `AudioPlayer` of `nsh`).
     pub audio: bool,
-    /// The app may control its window and set the application menu
-    /// (`nsh/desktop`'s `Window`, `Menu.setApplicationMenu`).
-    pub window: bool,
+    /// The app may act on the application as a whole (`nsh/desktop`): the
+    /// main window, the application menu, the tray, global shortcuts,
+    /// quitting, restarting and launching at login.
+    pub application: bool,
     /// `os.homedir()` may tell the user's home directory.
     pub home_dir: bool,
     /// The functions of the embedding app `nsh/host` may call: names, or
@@ -1078,7 +1080,7 @@ impl Capabilities {
             speech: true,
             notifications: true,
             audio: true,
-            window: true,
+            application: true,
             home_dir: true,
             open_url: Some(OpenUrlGrant::default()),
             // Every kind and level, but no overlays or capture protection.
@@ -1144,7 +1146,7 @@ impl Capabilities {
             "speech",
             "notifications",
             "audio",
-            "window",
+            "application",
             "homeDir",
             "openUrl",
             "process",
@@ -1297,10 +1299,10 @@ impl Capabilities {
                 .as_bool()
                 .ok_or("capabilities.audio must be a boolean")?;
         }
-        if let Some(window) = obj.get("window") {
-            caps.window = window
+        if let Some(application) = obj.get("application") {
+            caps.application = application
                 .as_bool()
-                .ok_or("capabilities.window must be a boolean")?;
+                .ok_or("capabilities.application must be a boolean")?;
         }
         if let Some(home_dir) = obj.get("homeDir") {
             caps.home_dir = home_dir
@@ -1559,8 +1561,8 @@ impl Capabilities {
         if self.audio {
             obj.insert("audio".into(), true.into());
         }
-        if self.window {
-            obj.insert("window".into(), true.into());
+        if self.application {
+            obj.insert("application".into(), true.into());
         }
         if self.home_dir {
             obj.insert("homeDir".into(), true.into());
@@ -2443,10 +2445,11 @@ impl Access {
         self.each(|c| c.audio)
     }
 
-    /// Whether the app may control its window and set the application
-    /// menu (`nsh/desktop`).
-    pub fn allows_window(&self) -> bool {
-        self.each(|c| c.window)
+    /// Whether the app may act on the application as a whole: the main
+    /// window, the application menu, the tray, global shortcuts, quitting,
+    /// restarting and launching at login (`nsh/desktop`).
+    pub fn allows_application(&self) -> bool {
+        self.each(|c| c.application)
     }
 
     /// Whether `os.homedir()` may tell the user's home directory.
@@ -3039,39 +3042,39 @@ mod tests {
         assert!(!access.allows_picker());
         assert!(!access.allows_speech());
         assert!(!access.allows_audio());
-        assert!(!access.allows_window());
+        assert!(!access.allows_application());
         assert!(!access.allows_home_dir());
         assert!(!access.allows_host("getUserInfo"));
         assert!(Access::all().is_unrestricted());
     }
 
     #[test]
-    fn the_window_and_the_home_directory_are_capabilities() {
+    fn the_application_and_the_home_directory_are_capabilities() {
         // Undeclared: granted, as they always were.
         let all = Access::all();
-        assert!(all.allows_window() && all.allows_home_dir());
+        assert!(all.allows_application() && all.allows_home_dir());
         // Declared: only when listed, and the embedder may take them away.
         let access = |declared: &str, granted: Option<&str>| Access {
             declared: caps(declared),
             granted: granted.map(caps),
         };
-        let listed = access(r#"{ "window": true, "homeDir": true }"#, None);
-        assert!(listed.allows_window() && listed.allows_home_dir());
-        let window = access(r#"{ "window": true }"#, None);
-        assert!(window.allows_window() && !window.allows_home_dir());
+        let listed = access(r#"{ "application": true, "homeDir": true }"#, None);
+        assert!(listed.allows_application() && listed.allows_home_dir());
+        let application = access(r#"{ "application": true }"#, None);
+        assert!(application.allows_application() && !application.allows_home_dir());
         let narrowed = access(
-            r#"{ "window": true, "homeDir": true }"#,
+            r#"{ "application": true, "homeDir": true }"#,
             Some(r#"{ "homeDir": true }"#),
         );
-        assert!(!narrowed.allows_window() && narrowed.allows_home_dir());
-        assert!(!access(r#"{ "window": false }"#, None).allows_window());
-        assert!(Capabilities::from_json(&serde_json::json!({ "window": "yes" })).is_err());
+        assert!(!narrowed.allows_application() && narrowed.allows_home_dir());
+        assert!(!access(r#"{ "application": false }"#, None).allows_application());
+        assert!(Capabilities::from_json(&serde_json::json!({ "application": "yes" })).is_err());
         assert!(Capabilities::from_json(&serde_json::json!({ "homeDir": 1 })).is_err());
         // Written only when granted, read back the same.
-        let both = caps(r#"{ "window": true, "homeDir": true }"#);
+        let both = caps(r#"{ "application": true, "homeDir": true }"#);
         assert_eq!(Capabilities::from_json(&both.to_json()).unwrap(), both);
         let none = Capabilities::default().to_json();
-        assert!(none.get("window").is_none() && none.get("homeDir").is_none());
+        assert!(none.get("application").is_none() && none.get("homeDir").is_none());
     }
 
     #[test]

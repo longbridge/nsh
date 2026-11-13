@@ -60,9 +60,11 @@ trusted: every limit and check is enforced in Rust, never in JS.
   never granted without it, also in apps without a declaration (`Capabilities::all` leaves it empty), and the bundler
   warns of an app importing `host` from `nsh` without it (`bundle.rs` `ungranted_host`); the host's events need none, the
   host sends them), `openUrl`
-  (`openUrl` of `nsh`: `true`, or `{ "schemes": [...] }` for the schemes listed), `window` (the main window, the application menu, the
-  tray, global shortcuts and quitting, `nsh/desktop`'s `Window` and `Menu`; context menus show in the app's own view
-  and windows the app opens are `windows`', so they need none), `homeDir` (`os.homedir()`, which fails with
+  (`openUrl` of `nsh`: `true`, or `{ "schemes": [...] }` for the schemes listed), `application` (what acts on the application as a whole:
+  the main window, the application menu, the tray, global shortcuts, quitting, restarting and launching at login,
+  `nsh/desktop`'s; refused commands are dropped in the core with a warning, `setLaunchAtLogin` rejects with
+  `ERR_ACCESS_DENIED`; context menus show in the app's own view and windows the app opens are `windows`', so they need
+  none), `homeDir` (`os.homedir()`, which fails with
   `ERR_ACCESS_DENIED` without it). `nsh`'s `Storage`
   is no capability: an app's storage holds only its own data, and the host decides where it is kept. Everything not listed is denied. `nsh.json`, bundles' `capabilities.json`, packages and embedders' grants are all
   read with `from_json_lenient` (the bundler warns of what it dropped, `nsh_engine::parse_capabilities` logs it), as a newer NSH may have written them: an unknown capability is not granted, an unknown key inside one drops that

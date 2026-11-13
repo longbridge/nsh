@@ -3402,11 +3402,11 @@ impl<M: TextEngine> Core<M> {
                 }
                 // A context menu shows in the app's own view, and the
                 // windows the app opens are `capabilities.windows`'
-                // (`Access::check_window`): neither needs `window`. The main
+                // (`Access::check_window`): neither needs `application`. The main
                 // window, the application menu, the tray, global shortcuts
                 // and quitting reach past the app's view and do.
                 Command::Desktop(desktop)
-                    if !self.access.allows_window()
+                    if !self.access.allows_application()
                         && !matches!(
                             **desktop,
                             crate::desktop::DesktopCommand::PopupMenu { .. }
@@ -3414,7 +3414,7 @@ impl<M: TextEngine> Core<M> {
                         )
                         && (id == crate::ROOT_ID || !desktop.is_window_command()) =>
                 {
-                    self.deny("the window and the application menu are not granted: add `\"window\": true` to capabilities in nsh.json".into());
+                    self.deny("the application (its main window, menu, tray, global shortcuts, quitting and restarting) is not granted: add `\"application\": true` to capabilities in nsh.json".into());
                     continue;
                 }
                 _ => {}

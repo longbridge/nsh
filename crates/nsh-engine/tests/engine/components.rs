@@ -2893,10 +2893,10 @@ mount(() => <App />);
 "#;
 
 /// The main window, the application menu and `os.homedir()` are granted by
-/// `window` and `homeDir`, which apps without a declaration keep; context
-/// menus, in the app's own view, need neither.
+/// `application` and `homeDir`, which apps without a declaration keep;
+/// context menus, in the app's own view, need neither.
 #[test]
-fn the_window_and_the_home_directory_are_capabilities() {
+fn the_application_and_the_home_directory_are_capabilities() {
     use nsh_core::desktop::{DesktopCommand, WindowRequest};
 
     let run = |capabilities: Option<&str>, home: &str| {
@@ -2917,13 +2917,13 @@ fn the_window_and_the_home_directory_are_capabilities() {
                 MountItem::Command {
                     id: ROOT_ID,
                     command: Command::Desktop(command),
-                } => Some(match *command {
-                    DesktopCommand::SetAttributes(_) => "title",
-                    DesktopCommand::Request(WindowRequest::Minimize) => "minimize",
-                    DesktopCommand::SetMenu(_) => "menu",
-                    DesktopCommand::PopupMenu { .. } => "popup",
-                    _ => "other",
-                }),
+                } => match *command {
+                    DesktopCommand::SetAttributes(_) => Some("title"),
+                    DesktopCommand::Request(WindowRequest::Minimize) => Some("minimize"),
+                    DesktopCommand::SetMenu(_) => Some("menu"),
+                    DesktopCommand::PopupMenu { .. } => Some("popup"),
+                    _ => None,
+                },
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -2937,7 +2937,7 @@ fn the_window_and_the_home_directory_are_capabilities() {
     // Declared with them.
     assert_eq!(
         run(
-            Some(r#"{ "window": true, "homeDir": true }"#),
+            Some(r#"{ "application": true, "homeDir": true }"#),
             "home string"
         ),
         all

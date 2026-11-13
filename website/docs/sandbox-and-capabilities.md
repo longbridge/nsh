@@ -129,7 +129,7 @@ An app declares what it may reach outside its VM in `nsh.json`:
     "speech": true,
     "notifications": true,
     "audio": true,
-    "window": true,
+    "application": true,
     "homeDir": true,
     "host": ["getUserInfo", "bridge.*"],
     "openUrl": { "schemes": ["https", "mailto"] },
@@ -259,12 +259,14 @@ needs a `network` grant for its host.
 `"notifications": true` lets the app show system notifications and set its icon's badge
 ([`Notifications`](../modules/nsh.md#notifications)). The system still asks the user once, where it asks.
 
-### `window`
+### `application`
 
-`"window": true` lets the app reach past its own view on the desktop ([`nsh/desktop`](../modules/nsh-desktop.md)): the
-main window (`currentWindow()` outside any `<Window>`, `Window.get("main")`: its title, title bar, mode, frame and
-level, bringing it to the front, closing it), the application menu (`Menu.setApplicationMenu`), the tray, global
-shortcuts, `quit` and `restart`. Without it they do nothing. Context menus (`Menu.popup`) show in the app's own view,
+`"application": true` lets the app act on the application as a whole on the desktop
+([`nsh/desktop`](../modules/nsh-desktop.md)): the main window (`currentWindow()` outside any `<Window>`,
+`Window.get("main")`: its title, title bar, mode, frame and level, bringing it to the front, closing it), the
+application menu (`Menu.setApplicationMenu`), the tray, global shortcuts, `Application.quit()`, `Application.restart()`
+and `Application.setLaunchAtLogin()`. Without it they do nothing, `Application.launchAtLogin()` resolves `false` and
+`setLaunchAtLogin` rejects with `ERR_ACCESS_DENIED` (`permission` `"application"`). Context menus (`Menu.popup`) show in the app's own view,
 and windows the app opens are granted by [`windows`](#windows), so neither needs it.
 
 ### `homeDir`

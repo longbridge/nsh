@@ -13,7 +13,7 @@ import ModStandardSystem from "./mod-standard-system";
 import ModStandardFiles from "./mod-standard-files";
 import WebSendInput from "./web-send-input";
 import MaterialComposition from "./material-composition";
-import WindowRefused from "./window-refused";
+import ApplicationRefused from "./application-refused";
 
 const cases: Record<string, () => JSX.Element> = {
   "base-dock": BaseDock,
@@ -26,7 +26,7 @@ const cases: Record<string, () => JSX.Element> = {
   "mod-keymap-for-focus": ModKeymapForFocus,
   "web-send-input": WebSendInput,
   "material-composition": MaterialComposition,
-  "window-refused": WindowRefused,
+  "application-refused": ApplicationRefused,
 };
 const shown = signal("");
 

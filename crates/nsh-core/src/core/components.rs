@@ -5510,6 +5510,16 @@ impl<M: TextEngine> Core<M> {
         answer: crate::element::AnswerSlot<Result<bool, crate::desktop::LaunchAtLoginError>>,
     ) {
         use crate::desktop::{LaunchAtLoginError, LoginItemStatus};
+        // Launching at login acts on the application as a whole: an app
+        // declaring capabilities needs `application` to change it, and is
+        // told it does not launch at login otherwise.
+        if !self.access.allows_application() {
+            answer.borrow_mut().deliver(match enabled {
+                None => Ok(false),
+                Some(_) => Err(LaunchAtLoginError::Denied),
+            });
+            return;
+        }
         let Some(items) = self.login_item.as_mut() else {
             answer.borrow_mut().deliver(match enabled {
                 None => Ok(false),

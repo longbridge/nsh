@@ -6,7 +6,7 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` holds what only desktops have: the app's windows and their title bars, the displays, the application menu and context menus, the tray and global shortcuts. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: windows of the app's own (`window()`), the window a component renders in (`current_window()`, a `WindowRef`), the displays (`displays`), `quit`, `restart`, opening at login (`launch_at_login`, `set_launch_at_login`), the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), the tray (`set_tray`) and global shortcuts (`register_global_shortcut`), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its windows and menus are there. An app that declares capabilities needs `"window": true` for the main window, the application menu, the tray, global shortcuts, `quit` and `restart` ([capabilities](../docs/sandbox-and-capabilities.md#window)); without it they do nothing. Context menus and the windows the app opens (granted by `windows`) need no `window`.
+`nsh/desktop` holds what only desktops have: the app's windows and their title bars, the displays, the application menu and context menus, the tray and global shortcuts. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: windows of the app's own (`window()`), the window a component renders in (`current_window()`, a `WindowRef`), the displays (`displays`), `quit`, `restart`, opening at login (`launch_at_login`, `set_launch_at_login`), the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), the tray (`set_tray`) and global shortcuts (`register_global_shortcut`), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its windows and menus are there. An app that declares capabilities needs `"application": true` for the main window, the application menu, the tray, global shortcuts, `quit`, `restart` and launching at login ([capabilities](../docs/sandbox-and-capabilities.md#application)); without it they do nothing. Context menus and the windows the app opens (granted by `windows`) need no `application`.
 
 ```rust tabs
 use nsh_core::{
@@ -559,7 +559,9 @@ The release runners of `nsh package` read the setting; `nsh run` starts its deve
 
 `Application.launchAtLogin()` says whether the system opens the app when the user logs in, as the system has it now,
 and `Application.setLaunchAtLogin(enabled)` turns it on or off. Rust code awaits `launch_at_login()` and
-`set_launch_at_login(enabled)` in a task. Like `quit` and `restart`, they need no capability.
+`set_launch_at_login(enabled)` in a task. Like `quit` and `restart`, an app that declares capabilities needs
+`"application": true` for them: without it `launchAtLogin()` resolves `false` and `setLaunchAtLogin` rejects with
+`ERR_ACCESS_DENIED`.
 
 ```tsx
 import { signal } from "nsh";

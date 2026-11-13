@@ -75,7 +75,7 @@
         "popup"
       ]
     },
-    "window": true,
+    "application": true,
     "homeDir": true
   }
 }
