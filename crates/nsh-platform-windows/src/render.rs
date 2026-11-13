@@ -686,7 +686,7 @@ pub(crate) fn rounded_geometry(
 pub(crate) fn draw_view(cx: &mut DrawCx<'_>, view: &NshView, parent: Mat4, origin: (f32, f32)) {
     let state = view.state();
     let opacity = state.opacity();
-    if state.style.hidden || state.concealed || opacity <= 0.0 {
+    if state.style.hidden || state.concealed || opacity <= 0.0 || draws_nothing(view, &state) {
         drop(state);
         if cx.records {
             view.forget_painted();
@@ -807,6 +807,31 @@ fn own_paint_needed(cx: &DrawCx<'_>, own: &D2D_RECT_F, state: &ViewState, layere
         || state.shader.is_some()
 }
 
+/// True if `view` (its `state`) and its subtree draw nothing: it has no
+/// area, draws nothing outside it (no shadow, outline, filter, shader
+/// overflow or hosted item), and its children draw nothing either unless
+/// it clips them away. A `display: none` subtree, which the core lays out
+/// with no size, is one: it is left out without visiting its views.
+fn draws_nothing(view: &NshView, state: &ViewState) -> bool {
+    let size = state.frame.size;
+    if size.width.0 > 0.0 && size.height.0 > 0.0 {
+        return false;
+    }
+    if !state.natives.is_empty()
+        || crate::decor::outset(state) > 0.0
+        || crate::shader::overflow(state) > 0.0
+    {
+        return false;
+    }
+    state.clips()
+        || view.with_children(|children| {
+            children.iter().all(|child| {
+                let s = child.state();
+                s.style.hidden || s.concealed || s.opacity() <= 0.0 || draws_nothing(child, &s)
+            })
+        })
+}
+
 /// True if `view` (its `state`) paints at most one shape, its background
 /// color, and nothing else: no children, content, hosted items, border,
 /// outline, shadow or effects. Its opacity is then its color's alpha.
@@ -922,7 +947,7 @@ pub(crate) fn drawn_area(view: &NshView) -> Option<D2D_RECT_F> {
         for child in children {
             let local = {
                 let s = child.state();
-                if s.style.hidden || s.concealed || s.opacity() <= 0.0 {
+                if s.style.hidden || s.concealed || s.opacity() <= 0.0 || draws_nothing(child, &s) {
                     continue;
                 }
                 let origin = state.child_origin(s.frame, s.shift);
@@ -954,6 +979,8 @@ pub(crate) fn drawn_area(view: &NshView) -> Option<D2D_RECT_F> {
 /// border and outline. `paint_own` false ([`own_paint_needed`]) skips
 /// everything but the backdrop read and the children.
 pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4, paint_own: bool) {
+    #[cfg(test)]
+    tests::DRAWN.with(|d| d.set(d.get() + 1));
     // Before anything of the view draws, and before its children: the
     // pixels behind it are what its shader reads as its backdrop.
     crate::shader::take_backdrop(cx, view);
@@ -1970,6 +1997,19 @@ mod tests {
     use super::*;
     use crate::geom::rect;
 
+    thread_local! {
+        /// How many views the passes on this thread drew ([`draw_content`]).
+        pub(super) static DRAWN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// How many views a whole frame of `surface` draws.
+    fn views_drawn(surface: &Rc<Surface>, gfx: &Gfx, size: (u32, u32)) -> usize {
+        let back = target(gfx, size);
+        DRAWN.with(|d| d.set(0));
+        draw_into(surface, gfx, &back, 1.0, false, None, None, None).unwrap();
+        DRAWN.with(std::cell::Cell::get)
+    }
+
     fn view(
         parent: Option<&NshView>,
         id: NodeId,
@@ -2978,6 +3018,44 @@ mod tests {
         row.changed();
         partial();
         assert!(cell.painted_subtree().is_none());
+    }
+
+    /// A `display: none` subtree (no size anywhere in it) is left out
+    /// without visiting its views; a box of no size still draws its
+    /// children that have one.
+    #[test]
+    fn a_subtree_of_no_size_is_left_out() {
+        let Ok(gfx) = gfx::get() else {
+            return;
+        };
+        let size = (200, 200);
+        let surface = Surface::new(Default::default());
+        surface.resized(size, 1.0);
+        let none = Bounds::default();
+        let hidden = view(Some(&surface.root), 2, ViewKind::View, none);
+        let mut id = 4;
+        for _ in 0..5 {
+            let row = view(Some(&hidden), id, ViewKind::View, none);
+            row.state_mut().style.background_color = Color(0x3366_ccff);
+            view(Some(&row), id + 2, ViewKind::Text, none);
+            id += 4;
+        }
+        // The root alone.
+        assert_eq!(views_drawn(&surface, &gfx, size), 1);
+        assert!(hidden.painted_subtree().is_none());
+
+        // An absolutely placed child of a box of no size.
+        let child = view(
+            Some(&hidden),
+            100,
+            ViewKind::View,
+            rect(10.0, 10.0, 40.0, 40.0),
+        );
+        child.state_mut().style.background_color = Color(0x3366_ccff);
+        assert_eq!(views_drawn(&surface, &gfx, size), 3);
+        // Unless the box clips it away.
+        hidden.state_mut().style.overflow_hidden = true;
+        assert_eq!(views_drawn(&surface, &gfx, size), 1);
     }
 
     /// A change wholly outside the window leaves nothing to draw, which
