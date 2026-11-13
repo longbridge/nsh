@@ -162,7 +162,9 @@ Presses: a node view's `handle_event`, the plugins' click hooks (`handle_click_o
 a drag extends through `create_selection_between`, and past the viewport's top or bottom it scrolls the view on a timer (the code `Editor`'s `AutoScroll` and `edge_speed`) and extends again at each step. Paste: `transform_pasted_text`, `clipboard_text_parser` (else
 `slice_from_text`), `transform_pasted`, `handle_paste`, else a replace of the selection (origin `Paste`). Files
 (images with their bytes, `file:` URLs from a file manager) go to the app as `onPasteFiles` and insert nothing,
-as Tiptap's file handler leaves them to its `onPaste`. Copy:
+as Tiptap's file handler leaves them to its `onPaste`. Files dropped on the desktops are the host's `onFileDrop`
+(a component's host takes a view's file drop events, `ComponentHostProps`): the root listens only when the app
+does, the sink belongs to that destination as any input does, and the document and selection stay. Copy:
 `clipboard_text_serializer`, else `slice_to_text`.
 
 Touch screens (`view/touch.rs`, after the code `Editor`'s `touch.rs`): a tap places the caret as a press does, a

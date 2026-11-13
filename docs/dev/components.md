@@ -809,7 +809,10 @@ intercepts the ops on the host (`intercept`): the host is the root of the compon
 root become nodes the core creates itself. Apps without components pay one check per op. The root can be any
 element: at the view's first mount, before the host's native view is sent, the core gives the host the root's kind
 (`Core::retag`: a text, a screen, a modal, a list), so the root's props and children apply to it; a root that is a
-region goes in the host view.
+region goes in the host view. Besides the component's own props, JS sets a view's props on the host
+(`nsh-js` `components.rs`' `HOST_PROPS`, declared as `ComponentHostProps`): classes, styles, `testID`, `tooltip`,
+`onLayout` and the desktop file drops (`onFileDragEnter`, `onFileDragLeave`, `onFileDrop`), so a component is a drop
+destination only where the app listens.
 
 A root that is a component (a view that is `press()`) is made on the same host, as a TSX function component returning
 another is that one: the nested instance's host is an alias of the host's node (`Core::alias`: another id naming the
