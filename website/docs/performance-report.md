@@ -458,7 +458,7 @@ the zip is the `.zip` written beside its directory:
 
 | App | Written in | Executable | Zip |
 |---|---|---|---|
-| Hello world (`--template rust`) | Rust | 15.0 MB | 6.7 MB |
+| Hello world (`--template rust`) | Rust | 25.3 MB | 10.7 MB |
 | Hello world (`--template ts`) | TSX, on QuickJS | 28.6 MB | 12.4 MB |
 | Hello world (`--template mixed`) | TSX and a Rust crate | 26.3 MB | 11.5 MB |
 
