@@ -245,6 +245,11 @@ inside it, so the views around the one under the mouse hear `onMouseEnter` too (
 from the inside out). The events come after the fact and never on touches. A view removed from under the mouse hears
 `onMouseLeave`, on Linux and Windows at the next mouse move.
 
+Every component takes these events, those of `nsh/base` and of an app's own crate alike: `<Button onMouseEnter>`,
+`<Switch onMouseMove>`, `<Avatar onMouseUp>`, `button().on_mouse_enter(..)` in Rust. They report the mouse over the
+component's root with the same `MouseEvent`, after the component's own handling, and the component listens only while
+the app does.
+
 `MouseEvent` says where the mouse is, as GPUI's `MouseMoveEvent` does: `position` in the view (a `Point` in points, its
 transforms undone), `pagePosition` in the root view it is in, as touches give it, the `modifiers` held (`control`,
 `alt`, `shift`, `platform`: Command on Apple platforms, the Windows key elsewhere), `pressedButton`, the button held
@@ -444,6 +449,11 @@ instead. The platform decides this as the button goes down, from what is mounted
 and nothing has to be cancelled. A `disabled` view leaves the click to the nearest enabled listener around it. On
 touchscreens, a long press opens menus: handle `onLongPress` with the same function.
 
+Every component takes `onContextMenu` too (`<Button onContextMenu>`, `button().on_context_menu(..)`), with the same
+`ContextMenuEvent` for its root. A component that shows a menu of its own there (a `ContextMenu` trigger) keeps the
+event. `DataTable` and `Editor` have an `onContextMenu` of their own, which reports the row and column, or the
+position in the text.
+
 ### Keyboard focus
 
 On macOS and the web, Tab moves the keyboard focus between its stops in tree order: the inputs, the views that take
@@ -474,6 +484,8 @@ its ref's `on_focus_in(..)` and `on_focus_out(..)`: moving between views inside 
 | `focusable` | `.focusable(..)` | `boolean` | `true` for views that take presses | Whether the view is a stop of Tab. `true` makes any view one, whether it takes presses or leaves them to the views around it; `false` leaves a pressable to the pointer (a backdrop that closes a popover, rows the arrow keys move between). |
 | `onFocus` | `.on_focus(..)` | `() => void` | | Tab (or `focus()`) gave the view the keyboard focus. |
 | `onBlur` | `.on_blur(..)` | `() => void` | | The keyboard focus left the view. |
+| `onKeyDown` / `onKeyUp` | `.on_key_down(..)` / `.on_key_up(..)` | `(e: KeyEvent) => void` | | A hardware key went down on the focused view or inside it / came up on it. `KeyEvent` is `{ key, code, modifiers, repeat, defaultPrevented }`; one event bubbles to the enabled listening ancestors within the native window ([hardware keys](./keyboard.md#hardware-keys-on-custom-views)). |
+| `captureKeys` | `.capture_keys(..)` | `"none" \| "all" \| readonly string[]` | `"none"` | Keys the view, or a focused descendant, consumes before native defaults: canonical keystrokes such as `["mod+k", "escape"]`. `defaultPrevented` reports the decision; app shortcuts take precedence and native inputs keep their editing keys ([hardware keys](./keyboard.md#hardware-keys-on-custom-views)). |
 
 ```rust tabs
 view()
@@ -614,6 +626,7 @@ activates its pan, so drags inside scroll views leave the other axis to them
 | `accessibilityLevel` | `.accessibility_level(..)` | `number` | The level of a heading (1 the top), the depth of a tree item (1 at the top). |
 | `accessibilityActiveDescendant` | `.accessibility_active_descendant(..)` | `ViewRef \| null` | The item that is active inside the focused element: a combo box's highlighted option, a list's cursor row ([Accessibility](../docs/accessibility.md#the-active-item-of-a-focused-element)). |
 | `accessibilityControls` | `.accessibility_controls(..)` | `ViewRef \| null` | The element whose content this one controls: a combo box's list. |
+| `accessibilityDescribedBy` | `.accessibility_described_by(..)` | `ViewRef \| null` | The element whose text describes this one: a field's error line ([Accessibility](../docs/accessibility.md#an-element-that-describes-another)). |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | The value of a range or textual element. |
 | `accessibilityElementsHidden` | | `boolean` | Hides the view and its subtree from assistive technologies. |
 | `importantForAccessibility` | | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | Whether the view is exposed. |

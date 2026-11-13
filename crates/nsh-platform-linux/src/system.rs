@@ -783,6 +783,14 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 display.clipboard().set_text(text);
             }
         }
+        Command::SetClipboardItem(item) => match &item.html {
+            Some(html) => set_clipboard_html(&item.text, html),
+            None => {
+                if let Some(display) = gdk::Display::default() {
+                    display.clipboard().set_text(&item.text);
+                }
+            }
+        },
         Command::ReadClipboard { id, has_only } => read_clipboard(surface, *id, *has_only),
         Command::SetClipboardImage(uri) => set_clipboard_image(uri),
         Command::ReadClipboardImage { id, has_only } => {
@@ -797,6 +805,21 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::FileRequest { id, request } => {
             crate::file_requests::request(surface, *id, request)
         }
+        Command::RenderCanvas {
+            id,
+            drawing,
+            width,
+            height,
+            scale,
+            format,
+        } => crate::canvas::render_offscreen(
+            surface,
+            *id,
+            drawing.clone(),
+            (*width, *height),
+            *scale,
+            *format,
+        ),
         Command::Audio(command) => surface.control(|c| {
             let base = surface.asset_base.borrow().clone();
             crate::audio::command(&surface.audio, c, command, base.as_ref())
@@ -1391,6 +1414,22 @@ fn read_clipboard(surface: &Rc<Surface>, id: u32, has_only: bool) {
             answer(&surface, text.is_some(), text);
         }
     });
+}
+
+/// `Clipboard.write`: `text` and `html` offered together, the HTML as
+/// `text/html` and the text in GDK's text formats.
+fn set_clipboard_html(text: &str, html: &str) {
+    let Some(display) = gdk::Display::default() else {
+        return;
+    };
+    let providers = [
+        gdk::ContentProvider::for_bytes("text/html", &glib::Bytes::from(html.as_bytes())),
+        gdk::ContentProvider::for_value(&glib::Value::from(text)),
+    ];
+    let provider = gdk::ContentProvider::new_union(&providers);
+    if let Err(err) = display.clipboard().set_content(Some(&provider)) {
+        log::warn!("Clipboard.write: {err}");
+    }
 }
 
 /// `Clipboard.writeImage`: the image of a `data:` URI as a GDK texture,

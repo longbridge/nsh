@@ -1114,6 +1114,34 @@ function setFpsEnabled(enabled: boolean): void;
 <Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
 ```
 
+### setFpsMode
+
+```ts
+function setFpsMode(mode: "expanded" | "collapsed" | "hidden"): void;
+```
+
+How the performance monitor shows, now and whenever it shows later: `"expanded"`, its whole panel (the default); `"collapsed"`, a pill with the frame rate alone, colored by the frame budget; `"hidden"`, nothing on screen while it still measures and logs. A click on the panel switches between the first two. macOS's panel takes it ([macOS](../docs/macos.md#performance-monitor)); platforms without a panel ignore it, and Linux's panel collapses on a click but doesn't take it yet. `NSH_FPS=collapsed` or `NSH_FPS=hidden` start the monitor so. Rust: `set_fps_mode(FpsMode::Collapsed)`.
+
+### perfStats
+
+```ts
+const perfStats: Accessor<PerfStats | null>;
+
+interface PerfStats {
+  readonly fps: number;
+  readonly refreshRate: number | null;
+  readonly dropped: number;
+}
+```
+
+What the monitor measured over the last second, read once a second while it measures (`fpsEnabled()`), and `null` while it does not and until its first second, so an app can show it its own way. `fps` is the frames shown per second: an idle app reads low, which is not slowness (only display refreshes in which the app changed count). `refreshRate` is the rate the display refreshes at (Hz), `null` until the monitor saw it refresh; `dropped` is the share of recent frames that took longer than one refresh, from 0 to 1 (`0.05` is 5%; in Rust a `Percentage`, the same fraction). Headless test runs measure too and draw no frames: they read 0 fps. Rust: `perf_stats() -> Option<PerfStats>`.
+
+```tsx
+<If when={perfStats()}>
+  <Text>{`${Math.round(perfStats()!.fps)} FPS`}</Text>
+</If>
+```
+
 ### shadersAvailable
 
 ```ts
@@ -1181,10 +1209,11 @@ interface PlatformSelectSpec<T> {
   desktop?: T;  // platform.desktop true: macOS, Windows, Linux, desktop browsers, terminals
   native?: T;   // every platform but the web
   default?: T;
+  [platform: string]: T | undefined; // a platform built outside NSH, by its platform.name
 }
 ```
 
-Returns the value for the current OS (`ios`, `android`, `web`, ...), else `desktop` or `mobile` (by `platform.desktop`), else `native` (every platform but the web), else `default`, else `undefined`. Rust code matches on `os()` (and `is_desktop()` for `mobile` / `desktop`).
+Returns the value for `platform.name` (on a platform built outside NSH), else the current OS (`ios`, `android`, `web`, ...), else `desktop` or `mobile` (by `platform.desktop`), else `native` (every platform but the web), else `default`, else `undefined`. Rust code matches on `os()` (with `platform_name()` and `is_desktop()`).
 
 ```rust tabs
 use nsh_core::platform::Os;
@@ -1493,6 +1522,7 @@ import { Clipboard } from "nsh";
 ```ts
 const Clipboard: {
   writeText(text: string): Promise<void>;
+  write(item: ClipboardItem): Promise<void>;
   readText(): Promise<string>;
   hasText(): Promise<boolean>;
   writeImage(src: string): Promise<void>;
@@ -1500,6 +1530,11 @@ const Clipboard: {
   hasImage(): Promise<boolean>;
   readFiles(): Promise<string[]>;
 };
+
+interface ClipboardItem {
+  text: string; // the content as plain text
+  html?: string; // the same content as HTML
+}
 
 interface ClipboardImage {
   url: string; // a URL that Image shows and fetch reads
@@ -1510,6 +1545,7 @@ interface ClipboardImage {
 | TS | Rust (`nsh_core::prelude`) |
 |---|---|
 | `await Clipboard.writeText(text)` | `set_clipboard(text)` |
+| `await Clipboard.write({ text, html })` | `set_clipboard_item(item)` (a `ClipboardItem`) |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
 | `await Clipboard.hasText()` | `clipboard_has_string().await -> bool` |
 | `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` |
@@ -1562,6 +1598,42 @@ const copied = signal(false);
 >
   <Text>{copied() ? "Copied" : "Copy"}</Text>
 </View>;
+```
+
+### Clipboard.write
+
+```ts
+write(item: ClipboardItem): Promise<void>;
+```
+
+Puts the same content as plain text and as HTML on the clipboard, replacing what was there, as a browser copies a
+selection: apps that read formatting (mail, documents, rich text editors) paste the HTML, others the text. `html` is
+a fragment (`<p>Hello <b>world</b></p>`), not a whole page. Without `html` it is `writeText(text)`. Rust:
+`set_clipboard_item(item)` with a `ClipboardItem`.
+
+A `ClipboardItem` is one item on the clipboard in several formats, as GPUI's `ClipboardItem` is; here it is a plain
+object of its formats, `{ text, html? }`, a type only (the browser's `ClipboardItem` class stays the page's). Every
+format of an item goes on in one write, and formats the clipboard learns later join the same item.
+
+The HTML goes on as each platform's HTML type, in one write with the text: `text/html` on the web and Linux,
+`public.html` on macOS and iOS, an HTML clip on Android and `HTML Format` on Windows. GPUI and terminals put the text.
+On the web, a write made while the user's key or press is handled (a `RichEditor`'s copy) goes through the page's copy
+event, as a browser copies a selection. `Clipboard.readText` reads the text back; a paste reads the HTML (`onPaste`'s
+`html`).
+
+```rust tabs
+use nsh_core::prelude::*;
+
+let mut item = ClipboardItem::default();
+item.text = "Hello world".into();
+item.html = Some("<p>Hello <b>world</b></p>".into());
+set_clipboard_item(item);
+```
+
+```tsx tabs
+import { Clipboard } from "nsh";
+
+await Clipboard.write({ text: "Hello world", html: "<p>Hello <b>world</b></p>" });
 ```
 
 ### Clipboard.readText

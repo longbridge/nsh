@@ -44,25 +44,6 @@ type JsContext = qjs::JSContext;
 
 const UNDEFINED: JsValue = qjs::JS_UNDEFINED;
 
-/// What the props a component's host takes as a view are called.
-const HOST_PROPS: &[&str] = &[
-    "class",
-    "classList",
-    "style",
-    "activeStyle",
-    "hoverStyle",
-    "focusStyle",
-    "focusWithinStyle",
-    "focusVisibleStyle",
-    "disabledStyle",
-    "testID",
-    "tooltip",
-    "onLayout",
-    "onFileDragEnter",
-    "onFileDragLeave",
-    "onFileDrop",
-];
-
 /// The components' part of a context's state.
 #[derive(Default)]
 pub(crate) struct Components {
@@ -994,7 +975,7 @@ unsafe extern "C" fn props_run(
         .iter()
         .filter(|p| matches!(p.kind, PropKind::Value | PropKind::Renderer))
         .map(|p| (p.name, p.decode))
-        .chain(HOST_PROPS.iter().map(|&h| (h, None)));
+        .chain(spec.host_props().map(|h| (h, None)));
     // Every prop is read and set whatever another one did, so each stays
     // tracked and the good ones reach the view; the first error is thrown
     // at the end (an uncatchable one, an interrupt, at once).

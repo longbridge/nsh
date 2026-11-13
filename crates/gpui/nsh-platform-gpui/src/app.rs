@@ -61,7 +61,9 @@ fn bind_keys(cx: &mut GpuiApp) {
 
 static UI_SETS: RwLock<Option<Vec<nsh_core::element::Registry>>> = RwLock::new(None);
 
-/// Sets the UI sets every engine serves (default: `nsh/base`); an app
+/// Sets the UI sets every engine serves (default: `nsh/base`'s core part,
+/// enough for a Rust app; hosts that run JS pass all of `nsh/base`,
+/// `nsh_base::registry()`); an app
 /// with Rust components of its own calls this before [`run_app`].
 pub fn set_ui_sets(sets: Vec<nsh_core::element::Registry>) {
     *UI_SETS.write().unwrap_or_else(|e| e.into_inner()) = Some(sets);
@@ -87,13 +89,20 @@ pub(crate) fn root() -> Option<Root> {
     root.map(|root| root())
 }
 
-/// The UI sets engines serve.
+/// The UI sets engines serve: [`set_ui_sets`]'s, else `nsh/base`'s core
+/// part only. A Rust app makes `nsh/base`'s components by type, so
+/// registering every part would link every component into its binary;
+/// hosts that run JS register the sets their code imports.
 pub(crate) fn ui_sets() -> Vec<nsh_core::element::Registry> {
     UI_SETS
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
-        .unwrap_or_else(|| vec![nsh_base::registry()])
+        .unwrap_or_else(|| {
+            vec![nsh_base::registry_of([
+                nsh_base::parts::core as nsh_base::parts::Part
+            ])]
+        })
 }
 
 /// What [`run_app`] runs.
@@ -954,6 +963,8 @@ fn initial_environment() -> Environment {
         },
         idiom: Idiom::Desktop,
         file_requests: true,
+        // Replayed with tiny-skia, as canvas views are.
+        canvas_render: true,
         // wry, in builds with it.
         web_views: cfg!(feature = "webview"),
         // wgpu, until it finds no GPU.
@@ -1078,7 +1089,11 @@ fn engine_config(options: &AppOptions, app: App) -> EngineConfig {
         viewport: nsh_core::Size::default(),
         trace: options.trace,
         content_culling: true,
-        network: Some(nsh_engine::net::network()),
+        // Without `net`, `fetch` rejects and remote images fail.
+            #[cfg(feature = "net")]
+            network: Some(nsh_engine::net::network()),
+            #[cfg(not(feature = "net"))]
+            network: None,
         websocket: None,
         refuse_connections: None,
         filesystem: None,
@@ -1101,6 +1116,7 @@ fn engine_config(options: &AppOptions, app: App) -> EngineConfig {
         speech: None,
         audio: None,
         windows: options.windows.clone(),
+        login_item: None,
     }
 }
 

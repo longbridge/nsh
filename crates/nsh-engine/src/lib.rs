@@ -94,6 +94,9 @@ pub use crate::{
 /// threads on Apple platforms.
 const ENGINE_STACK_SIZE: usize = 8 * 1024 * 1024;
 
+/// How often the performance monitor is read for `perfStats()` while it
+/// measures.
+const PERF_STATS_INTERVAL: Duration = Duration::from_secs(1);
 /// Minimum time between idle cycle collections. QuickJS frees acyclic
 /// garbage immediately; only cycles (such as detached node subtrees, whose
 /// parent/child links reference each other) wait for the collector.
@@ -1016,6 +1019,11 @@ pub struct EngineConfig {
     /// built-in backend, which every desktop backend has, embedded or
     /// standalone. The main window's commands always go to the platform.
     pub windows: Option<Arc<dyn nsh_core::desktop::WindowBackend>>,
+    /// The app's login item (`Application.launchAtLogin`): the platform's,
+    /// which a standalone app's runner gives (`run_app` with the backend's
+    /// `login_item` option), or a test's fake. `None` (the default): the
+    /// app does not launch at login.
+    pub login_item: Option<Arc<dyn nsh_core::desktop::LoginItemBackend>>,
 }
 
 /// Values of the environment an engine keeps whatever its platform reports
@@ -1152,6 +1160,7 @@ impl EngineConfig {
             speech: None,
             audio: None,
             windows: None,
+            login_item: None,
         }
     }
 
@@ -1226,6 +1235,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("picker", &self.picker.is_some())
             .field("speech", &self.speech.is_some())
             .field("audio", &self.audio.is_some())
+            .field("login_item", &self.login_item.is_some())
             .field("windows", &self.windows.is_some())
             .finish()
     }
@@ -1794,6 +1804,7 @@ fn drive<M: TextEngine + 'static>(driver: &mut Driver<M>, rx: &Receiver<Message>
         }
         driver.turn();
         driver.state.record_perf(started);
+        driver.read_perf_stats();
         if rx.is_empty() {
             driver.collect_if_idle();
         }
@@ -1897,6 +1908,52 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
             .extend_components(nsh_core::element::Registry::merged(&sets));
     }
 
+    /// Hands one key transition of the focused view `id` to the engine now,
+    /// without waiting for a pump: sets
+    /// [`nsh_core::KeyEvent::default_prevented`] from the mounted
+    /// `captureKeys` rule of `id` or an enabled ancestor within its window
+    /// (computed anew for this transition) and routes it as the engine's
+    /// own input does, bubbling KeyDown and KeyUp to the enabled ancestors.
+    /// It returns that decision, so an in-process host (a browser page) can
+    /// consume the key before its default runs.
+    ///
+    /// `stroke` is the adapter's own canonical shortcut stroke for this
+    /// transition (what its existing shortcut matcher uses); capture
+    /// matching uses it as is, never the event's `key` or `code`. `None`: a
+    /// key no shortcut names, which only `KeyCapture::All` captures.
+    /// `payload` should be [`EventPayload::Key`]; any other payload is
+    /// routed unchanged and the answer is false.
+    #[doc(hidden)]
+    pub fn key_event(
+        &mut self,
+        id: NodeId,
+        kind: EventKind,
+        mut payload: EventPayload,
+        stroke: Option<nsh_core::keymap::Keystroke>,
+    ) -> bool {
+        let _clock = self.driver.clock.enter();
+        let _context = self.driver.context.enter();
+        let prevented = match &mut payload {
+            EventPayload::Key(event) => {
+                event.default_prevented = self.driver.state.core.key_captured(id, stroke.as_ref());
+                event.default_prevented
+            }
+            _ => false,
+        };
+        self.driver
+            .handle(Message::Event(id, kind, payload), &self.rx);
+        prevented
+    }
+
+    /// Whether `id` has a key listener or a capture rule on itself or an
+    /// enabled logical ancestor up to its window root: an in-process host
+    /// calls it before building a key payload, so a portaled overlay's
+    /// logical ancestors are not missed. Heap free (one walk).
+    #[doc(hidden)]
+    pub fn key_interest(&self, id: NodeId) -> bool {
+        self.driver.state.core.key_interest(id)
+    }
+
     /// Handles the input sent since the last call, runs what is due
     /// (timers, tasks) and commits. Returns when to call again at the
     /// latest (sooner if input arrives); `None`: only for input.
@@ -1918,6 +1975,7 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
                 break;
             }
         }
+        self.driver.read_perf_stats();
         self.driver.collect_if_idle();
         self.pumping
             .store(false, std::sync::atomic::Ordering::SeqCst);
@@ -2064,6 +2122,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         let app_url = core.app_url_cell();
         core.set_audio(config.audio.clone());
         core.set_window_backend(config.windows.clone());
+        core.set_login_item(config.login_item.clone());
         if let Some(window) = config.app.main_window() {
             core.set_main_window(window);
         }
@@ -2168,6 +2227,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             events: Vec::new(),
             trace: config.trace,
             perf: None,
+            perf_stats_at: None,
             perf_commit: perf::CommitTiming::default(),
             committed_since_gc: false,
             hot: Vec::new(),
@@ -2175,6 +2235,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             touch_move: None,
             mouse_moves: Vec::new(),
             mouse_moved: None,
+            key_path: Vec::new(),
             sets_seen: FxHashMap::default(),
             resized: None,
             resize_burst_ends: None,
@@ -2351,7 +2412,34 @@ impl<M: TextEngine + 'static> Driver<M> {
         } else {
             self.due()
         };
-        [due, gc_deadline].into_iter().flatten().min()
+        [due, gc_deadline, self.state.perf_stats_at]
+            .into_iter()
+            .flatten()
+            .min()
+    }
+
+    /// Reads the performance monitor for `perfStats()` when a reading is
+    /// due, once a second while it measures.
+    fn read_perf_stats(&mut self) {
+        let Some(at) = self.state.perf_stats_at else {
+            return;
+        };
+        let now = Instant::now();
+        if now < at {
+            return;
+        }
+        self.state.perf_stats_at = Some(now + PERF_STATS_INTERVAL);
+        let Some(stats) = self.state.perf.as_ref().map(|m| m.snapshot().stats()) else {
+            return;
+        };
+        self.state.core.set_perf_stats(Some(stats));
+        if let Some(script) = &self.script {
+            script.set_perf_stats(Some(&stats));
+        }
+        if let Some(batch) = self.state.commit(self.script.as_ref()) {
+            self.sink.submit(batch);
+        }
+        self.state.run_on_main_thread(&*self.sink);
     }
 
     /// When the next timer, task timer or throttled scroll or mouse move
@@ -2723,6 +2811,9 @@ struct State<M: TextEngine> {
     trace: bool,
     /// Where commit timings go ([`EngineControl::set_perf_monitor`]).
     perf: Option<Arc<perf::PerfMonitor>>,
+    /// When the monitor is read next for `perfStats()` (while there is a
+    /// monitor), on the system's time.
+    perf_stats_at: Option<Instant>,
     /// The core's share of the wake-up being measured (`layout`, `ops`,
     /// `items`; `js` is the rest of the wake-up).
     perf_commit: perf::CommitTiming,
@@ -2746,6 +2837,9 @@ struct State<M: TextEngine> {
     mouse_moves: Vec<(NodeId, EventPayload)>,
     /// When `mouse_moves` were last delivered.
     mouse_moved: Option<Instant>,
+    /// The views a key transition reaches: the core fills it, and the
+    /// engine notifies each (a buffer reused between events).
+    key_path: Vec<NodeId>,
     /// [`keep_last_sets`]'s buffer, reused.
     sets_seen: FxHashMap<(u8, NodeId, u32), usize>,
     /// The viewport size a resize set this turn ([`MountSink::resized`]).
@@ -3390,7 +3484,16 @@ impl<M: TextEngine> State<M> {
             for event in self.events.drain(..) {
                 match event {
                     JsEvent::Event(id, event, payload) => {
-                        if !self.core.component_event(id, event, &payload)
+                        if matches!(event, EventKind::KeyDown | EventKind::KeyUp) {
+                            dispatch_key(
+                                script,
+                                &mut self.core,
+                                &mut self.key_path,
+                                id,
+                                event,
+                                &payload,
+                            );
+                        } else if !self.core.component_event(id, event, &payload)
                             && let Some(script) = script
                         {
                             script.dispatch_event(id, event, &payload);
@@ -3549,6 +3652,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         lifecycle: env.lifecycle,
         wake_count: env.wake_count,
         screen_color: env.screen_color,
+        canvas_render: env.canvas_render,
         file_requests: env.file_requests,
         speech: env.speech,
         notifications: env.notifications,
@@ -3557,6 +3661,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         web_input: env.web_input,
         web_evaluate: env.web_evaluate,
         web_views: env.web_views,
+        webview_requests: env.webview_requests,
         shaders: env.shaders,
     }
 }
@@ -3672,6 +3777,32 @@ fn apply_environment<M: TextEngine>(
     }
 }
 
+/// Notifies every view a key transition reaches, from one platform event:
+/// `id` and its enabled ancestors within its window (the core decides the
+/// path). Rust component listeners and JS listeners each hear it once; a
+/// listener's answer cannot change handling.
+fn dispatch_key<M: TextEngine>(
+    script: Option<&Script>,
+    core: &mut nsh_core::Core<M>,
+    path: &mut Vec<NodeId>,
+    id: NodeId,
+    event: EventKind,
+    payload: &EventPayload,
+) {
+    core.key_path(id, path);
+    for node in path.iter().copied() {
+        core.component_event(node, event, payload);
+        // A node with no listener (Rust or JS) hears nothing: no event
+        // object is built for it.
+        if core.listens(node, event)
+            && let Some(script) = script
+        {
+            script.dispatch_event(node, event, payload);
+        }
+    }
+    path.clear();
+}
+
 /// Returns false on shutdown.
 fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message: Message) -> bool {
     match message {
@@ -3726,6 +3857,20 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                         script.dispatch_event(overlay, EventKind::PressOutside, &pressed);
                     }
                 }
+            }
+            // Key transitions bubble to the focused view's enabled
+            // ancestors within its window, for Rust and JS listeners
+            // alike, from this one platform event.
+            if matches!(event, EventKind::KeyDown | EventKind::KeyUp) {
+                dispatch_key(
+                    script,
+                    &mut state.core,
+                    &mut state.key_path,
+                    id,
+                    event,
+                    &payload,
+                );
+                return true;
             }
             // Events on a Rust component's parts are the component's.
             if state.core.component_event(id, event, &payload) {
@@ -3878,6 +4023,16 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             state.core.set_perf_monitor(monitor.is_some());
             if let Some(script) = script {
                 script.set_fps_enabled(monitor.is_some());
+            }
+            // A reading a second after the monitor starts; none without it.
+            state.perf_stats_at = monitor
+                .as_ref()
+                .map(|_| Instant::now() + PERF_STATS_INTERVAL);
+            if monitor.is_none() {
+                state.core.set_perf_stats(None);
+                if let Some(script) = script {
+                    script.set_perf_stats(None);
+                }
             }
             state.perf = monitor;
             state.perf_commit = perf::CommitTiming::default();

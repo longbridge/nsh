@@ -109,23 +109,37 @@ impl GpuiNative {
         .flatten()
     }
 
-    /// Presses key `vk` in the focused window; Escape nothing took closes
-    /// a window of the app's own that says so, as a real one does.
-    fn keystroke(&self, vk: u16, modifiers: Modifiers) -> Option<()> {
+    /// Runs `press` in the focused window (the main one, or the app's own
+    /// one entered for it); `escape`: Escape nothing took closes a window
+    /// of the app's own that says so, as a real one does.
+    fn press_in_focus(
+        &self,
+        press: impl FnOnce(&Rc<Surface>) -> bool + Send + 'static,
+        escape: bool,
+    ) -> Option<()> {
         self.in_focused(move |surface, own, cx| {
             if let Some((id, _)) = &own
                 && crate::window::blocked(surface, Some(*id), cx)
             {
                 return;
             }
-            let taken = synth::press(surface, vk, modifiers);
+            let taken = press(surface);
             if let Some((id, window)) = own
                 && !taken
-                && vk == crate::keys::VK_ESCAPE
+                && escape
             {
                 crate::window::escape(surface, Some(id), window, cx);
             }
         })
+    }
+
+    /// Presses key `vk` in the focused window; Escape nothing took closes
+    /// a window of the app's own that says so, as a real one does.
+    fn keystroke(&self, vk: u16, modifiers: Modifiers) -> Option<()> {
+        self.press_in_focus(
+            move |surface| synth::press(surface, vk, modifiers),
+            vk == crate::keys::VK_ESCAPE,
+        )
     }
 
     /// `f` with the window's view on the main thread, waited for (what it
@@ -395,20 +409,15 @@ impl Native for GpuiNative {
         } else {
             Os::Linux
         };
+        // The step's keystroke is the source of the key (its raw event
+        // carries it; `physical` is `None`), so the press and release take
+        // the same router real keys do.
         let stroke = nsh_core::keymap::Keystroke::parse(keys, os).map_err(|e| e.to_string())?;
-        let vk = stroke
-            .key
-            .virtual_key()
-            .ok_or_else(|| format!("{keys:?} has no key on this keyboard"))?;
-        let m = stroke.modifiers;
-        let modifiers = Modifiers {
-            shift: m.shift,
-            ctrl: m.ctrl,
-            alt: m.alt,
-            meta: m.cmd,
-        };
-        self.keystroke(vk, modifiers)
-            .ok_or_else(|| "the window is gone".to_owned())
+        self.press_in_focus(
+            move |surface| synth::press_keys(surface, &stroke),
+            stroke.key == nsh_core::keymap::Key::Escape,
+        )
+        .ok_or_else(|| "the window is gone".to_owned())
     }
 
     fn target_window(&self, window: NodeId) -> Result<(), String> {

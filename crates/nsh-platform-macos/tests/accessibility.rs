@@ -31,7 +31,8 @@ mod macos {
             sel,
         },
         objc2_app_kit::{
-            NSAccessibility, NSApplication, NSBackingStoreType, NSView, NSWindow, NSWindowStyleMask,
+            NSAccessibility, NSApplication, NSBackingStoreType, NSTextField, NSView, NSWindow,
+            NSWindowStyleMask,
         },
         objc2_foundation::{
             NSDate, NSNumber, NSPoint, NSRange, NSRect, NSRunLoop, NSSize, NSString,
@@ -365,6 +366,106 @@ mod macos {
         }
     }
 
+    #[component]
+    fn InputRoles() -> impl IntoElement {
+        let list = element_ref();
+        let option = element_ref();
+        let field = |id| {
+            nsh_base::input()
+                .test_id(id)
+                .default_value("Sample value")
+                .w(px(200.0))
+                .h(px(30.0))
+        };
+        view()
+            .child(field("plain-field"))
+            .child(field("secure-field").masked(true))
+            .child(
+                field("closed-combo")
+                    .role(AccessibilityRole::Combobox)
+                    .label("Closed choices")
+                    .accessibility_state(AccessibilityState {
+                        expanded: Some(false),
+                        ..Default::default()
+                    }),
+            )
+            .child(
+                field("open-combo")
+                    .role(AccessibilityRole::Combobox)
+                    .label("Open choices")
+                    .accessibility_state(AccessibilityState {
+                        expanded: Some(true),
+                        ..Default::default()
+                    })
+                    .accessibility_controls(Some(list))
+                    .accessibility_active_descendant(Some(option)),
+            )
+            .child(
+                view()
+                    .element_ref(&list)
+                    .test_id("choices")
+                    .role(AccessibilityRole::Listbox)
+                    .child(
+                        view()
+                            .element_ref(&option)
+                            .test_id("choice")
+                            .role(AccessibilityRole::Option)
+                            .child(text("First choice")),
+                    ),
+            )
+    }
+
+    fn check_input_roles(app: &AppView, root: &NSView) {
+        fn native_field(view: &NSView) -> Option<Retained<NSTextField>> {
+            view.retain().downcast::<NSTextField>().ok().or_else(|| {
+                view.subviews()
+                    .iter()
+                    .find_map(|child| native_field(&child))
+            })
+        }
+        app.load(Root::of::<InputRoles>().into());
+        until("input roles mount", || find(root, "choice").is_some());
+        for (id, role) in [
+            ("plain-field", "AXTextField"),
+            ("secure-field", "AXTextField"),
+            ("closed-combo", "AXComboBox"),
+            ("open-combo", "AXComboBox"),
+        ] {
+            let input = view_with_id(root, id).unwrap();
+            let field = native_field(&input).expect("the input's native text field");
+            assert_eq!(field.accessibilityRole().unwrap().to_string(), role, "{id}");
+            assert_eq!(field.stringValue().to_string(), "Sample value");
+            if id.ends_with("combo") {
+                let open = id == "open-combo";
+                assert_eq!(field.isAccessibilityExpanded(), open);
+                assert_eq!(
+                    field.accessibilityLabel().unwrap().to_string(),
+                    if open {
+                        "Open choices"
+                    } else {
+                        "Closed choices"
+                    }
+                );
+                for (children, target) in [
+                    (field.accessibilitySelectedChildren(), "choice"),
+                    (field.accessibilityLinkedUIElements(), "choices"),
+                ] {
+                    if open {
+                        let children = children.unwrap();
+                        assert_eq!(children.count(), 1);
+                        assert!(std::ptr::eq(
+                            &*children.objectAtIndex(0),
+                            &*find(root, target).unwrap() as *const NSView as *const AnyObject
+                        ));
+                    } else {
+                        assert!(children.is_none_or(|c| c.is_empty()));
+                    }
+                }
+            }
+        }
+        println!("input accessibility: text fields and editable combobox relations ok");
+    }
+
     /// Runs the main run loop until `done` holds, for at most 5 s.
     fn until(what: &str, mut done: impl FnMut() -> bool) {
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -599,6 +700,8 @@ mod macos {
             Some("Other apps see the new name too.")
         );
         assert_eq!(read(&dialog, "save"), (Some("Save".into()), None, 0));
+
+        check_input_roles(&app, &root);
 
         app.stop();
         window.close();

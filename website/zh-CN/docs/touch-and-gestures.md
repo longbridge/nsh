@@ -306,6 +306,8 @@ mount(App);
 - **拖动、捏合和旋转可以同时进行**：同一张卡片可以同时被拖动、缩放和旋转。
 - **用松手速度做物理效果。** 拖动结束时的速度可以直接作为弹簧或衰减的速度；绑定的值用来挑选吸附点。
 
+视图挂着拖动回调或 `pan` 值时就可以拖动，所以在表达式里写条件就能开关它的拖动：`onPanEnd={zoomed() ? undefined : close}` 在 `zoomed()` 为真时把拖动交给里面的内容。条件要写在表达式里：只写一个名字（`onPanEnd={handler}`）只设置一次（[哪些会重新运行](./jsx-and-components.md#哪些会重新运行)）。
+
 ```rust tabs
 // 吸附到左边或右边的卡片。
 view()
@@ -439,7 +441,7 @@ let origin = 0;
 
 | Rust | TSX | 说明 |
 |---|---|---|
-| `.on_responder_grant(..)` | `onResponderGrant` | 该视图现在是响应者。Rust 默认阻止原生滚动视图接管触摸（`TouchClaim::block_native(false)` 则允许）；TSX 中返回 `true` 达到同样效果。 |
+| `.on_responder_grant(..)` | `onResponderGrant` | 该视图现在是响应者。Rust 默认阻止原生滚动视图接管触摸，在 iOS 上也阻止其外层导航栈的滑动返回（`TouchClaim::block_native(false)` 则允许）；TSX 中返回 `true` 达到同样效果。 |
 | `.on_responder_reject(..)` | `onResponderReject` | 另一个视图是响应者且不肯放手。 |
 | `.on_responder_start(..)` | `onResponderStart` | 又有一根手指按下。 |
 | `.on_responder_move(..)` | `onResponderMove` | 手指移动。 |

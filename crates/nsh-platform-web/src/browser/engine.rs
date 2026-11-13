@@ -212,6 +212,7 @@ impl Host for Runtime {
         self.bindings.posts.borrow().has_calls()
     }
     fn set_environment(&self, e: &Environment) {
+        super::set_apple_keyboard(e.apple_keyboard);
         let data = serde_json::json!({
             "window":{"width":e.window.width.0,"height":e.window.height.0},
             "safeArea":{"top":e.safe_area.top.0,"right":e.safe_area.right.0,"bottom":e.safe_area.bottom.0,"left":e.safe_area.left.0},
@@ -227,7 +228,7 @@ impl Host for Runtime {
                 "hourCycle":e.locale_settings.hour_cycle.name(),"firstDayOfWeek":e.locale_settings.first_day_of_week.number(),
                 "measurementSystem":e.locale_settings.measurement_system.name(),"temperatureUnit":e.locale_settings.temperature_unit.name()
             },
-            "platform":{"os":"web","version":e.os_version.0,"idiom":format!("{:?}",e.reported_idiom()).to_lowercase(),"desktop":e.desktop(),"appleKeyboard":e.apple_keyboard}
+            "platform":{"name":e.platform_name(),"os":"web","version":e.os_version.0,"idiom":format!("{:?}",e.reported_idiom()).to_lowercase(),"desktop":e.desktop(),"appleKeyboard":e.apple_keyboard}
         });
         self.event(
             "environment",

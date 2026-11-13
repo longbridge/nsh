@@ -379,6 +379,9 @@ final class StackBox extends FrameLayout implements Node {
         private final Mounter mounter;
         /** The header's title view and right items (-1: none), and the room last reported for the title (px). */
         private int titleId = -1, rightId = -1, titleRoom = -1;
+        /** The header's colors as configured (0: the theme's), kept for an appearance change. */
+        private int tint, background, titleColor;
+        private boolean transparent;
 
         ScreenBox(Context context, Mounter mounter, int id) {
             super(context);
@@ -392,7 +395,35 @@ final class StackBox extends FrameLayout implements Node {
                 if (getParent() instanceof StackBox) ((StackBox) getParent()).back();
             });
             addView(toolbar, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0));
-            setBackgroundColor(themeColor(context, android.R.attr.colorBackground, 0xffffffff));
+            colors();
+        }
+
+        /**
+         * The theme's colors in the appearance shown: the app's own
+         * (`setColorScheme`) in the system's default theme of that
+         * appearance, as `SystemUi`'s dialogs take, else the activity's theme.
+         */
+        private Context themed() {
+            if (mounter.appearance == 0) return getContext();
+            return new android.view.ContextThemeWrapper(getContext(), mounter.night()
+                    ? android.R.style.Theme_DeviceDefault
+                    : android.R.style.Theme_DeviceDefault_Light);
+        }
+
+        /** Colors the screen and its header: what the page set, else the theme's. */
+        private void colors() {
+            Context theme = themed();
+            setBackgroundColor(themeColor(theme, android.R.attr.colorBackground, 0xffffffff));
+            int primary = themeColor(theme, android.R.attr.textColorPrimary, 0xff1f2328);
+            toolbar.setTitleTextColor(titleColor != 0 ? titleColor : primary);
+            if (transparent) toolbar.setBackgroundColor(0);
+            else toolbar.setBackgroundColor(background != 0 ? background : themeColor(theme, android.R.attr.colorBackground, 0xffffffff));
+            arrow.setColor(tint != 0 ? tint : primary);
+        }
+
+        /** The app's appearance changed (`setColorScheme`): the theme's colors follow it. */
+        void appearanceChanged() {
+            colors();
         }
 
         @Override
@@ -469,11 +500,11 @@ final class StackBox extends FrameLayout implements Node {
             ViewGroup.LayoutParams p = toolbar.getLayoutParams();
             p.height = height;
             toolbar.setLayoutParams(p);
-            int foreground = tint != 0 ? tint : themeColor(getContext(), android.R.attr.textColorPrimary, 0xff1f2328);
-            toolbar.setTitleTextColor(titleColor != 0 ? titleColor : themeColor(getContext(), android.R.attr.textColorPrimary, 0xff1f2328));
-            if (transparent) toolbar.setBackgroundColor(0);
-            else toolbar.setBackgroundColor(background != 0 ? background : themeColor(getContext(), android.R.attr.colorBackground, 0xffffffff));
-            arrow.setColor(foreground);
+            this.tint = tint;
+            this.background = background;
+            this.titleColor = titleColor;
+            this.transparent = transparent;
+            colors();
             toolbar.setNavigationIcon(backVisible && canGoBack ? arrow : null);
             toolbar.setNavigationContentDescription(backVisible && canGoBack ? upDescription(backTitle) : null);
             // Header items: the core sized them; the toolbar places them. A `header`
