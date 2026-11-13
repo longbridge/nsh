@@ -76,7 +76,8 @@ GStreamer 的 base、good 插件（Debian / Ubuntu：`libwebkit2gtk-4.1-0`、`li
 ## 嵌入 GPUI 应用
 
 `nsh-platform-gpui` crate（来自 NSH 仓库）为 Rust GPUI 应用提供 `AppView`：一个以 GPUI 视图（`Entity<AppView>`）形式存在的
-NSH 引擎，填满父元素给它的空间。每个 `AppView` 相互独立，可以同时运行多个。它运行一个 Rust 根组件，即你的 crate 的根组件：
+NSH 引擎，填满父元素给它的空间。每个 `AppView` 相互独立，可以同时运行多个。和其他平台 crate 一样，它默认开启运行时的全部可选功能；只嵌入部分应用的
+GPUI 应用可以[从二进制中去掉部分功能](./project-structure.md#从二进制中去掉部分功能)。它运行一个 Rust 根组件，即你的 crate 的根组件：
 
 ```rust
 use gpui::{AppContext, WindowOptions};
@@ -134,7 +135,8 @@ view.load(App::Js(Bundle::source(code)));
 
 与原生桌面后端在绘制或行为上的不同之处：
 
-- **变换**：旋转、斜切和透视的视图，其背景、边框和阴影会随之变换，但文字保持直立，图片、视频和画布按其边界绘制。
+- **变换**：旋转、斜切和透视的视图，其背景、边框、阴影和图片会随之变换（转动中的照片在每个新角度重新绘制，单色 SVG 图标由 GPU
+  旋转），画布跟随旋转和斜切；文字保持直立，视频按其边界绘制。
 - **不透明度**作用于每种颜色而不是整组，因此半透明视图中相互重叠的子视图会彼此透出；图片的不透明度（淡入、半透明视图）以
   十六分之一为级变化。
 - **圆角裁剪**（带圆角的 `overflow: "hidden"`）会让子视图的背景和图片跟随圆角，但文字、边框、视频和原生组件按矩形裁剪。

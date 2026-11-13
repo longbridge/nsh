@@ -6,7 +6,7 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` 包含只有桌面才有的东西：应用的窗口和它们的标题栏、显示器、应用菜单和右键菜单、托盘和全局快捷键。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：应用自己的窗口（`window()`）、组件所在的窗口（`current_window()`，一个 `WindowRef`）、显示器（`displays`）、`quit`、`restart`、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成）、托盘（`set_tray`）和全局快捷键（`register_global_shortcut`），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。
+`nsh/desktop` 包含只有桌面才有的东西：应用的窗口和它们的标题栏、显示器、应用菜单和右键菜单、托盘和全局快捷键。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：应用自己的窗口（`window()`）、组件所在的窗口（`current_window()`，一个 `WindowRef`）、显示器（`displays`）、`quit`、`restart`、登录时打开（`launch_at_login`、`set_launch_at_login`）、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成）、托盘（`set_tray`）和全局快捷键（`register_global_shortcut`），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。
 
 ```rust tabs
 use nsh_core::{
@@ -195,7 +195,7 @@ let Some(doc) = open_window(
 
 | 分组 | 属性 | 说明 |
 |---|---|---|
-| 窗口外框 | `title` | 显示在标题栏、任务栏、窗口切换器中，也提供给辅助技术。 |
+| 窗口外框 | `title` | 显示在标题栏、任务栏、窗口切换器中，也提供给辅助技术。在浏览器中，主窗口的标题就是页面的标题，显示在标签页上（[`Head`](./nsh-web.md#head) 的标题优先）。 |
 | | `titleBar` | `{ style: "default" \| "hidden"; height?; controlsOffset? }`：系统标题栏，或应用自己的标题栏（[见下](#自定义标题栏)）。`controlsOffset`（`{ x, y }`）设置隐藏标题栏中 macOS 红绿灯的位置。 |
 | | `frame` | `"default"`，或 `"none"`：没有标题栏和边框，由应用绘制全部内容。 |
 | 尺寸 | `minSize`、`maxSize` | 用户能调整到的最小和最大内容尺寸，`{ width, height }`，单位为点；`null` 清除。 |
@@ -274,7 +274,7 @@ Rust 列给出 `WindowRef` 的方法。
 | `state()` | `state()` | 平台报告的它的状态（响应式；[见下](#窗口状态与显示器)）。在非桌面平台上、显示之前和关闭之后为 `null`。 |
 | `titleBar()` | `title_bar()` | 它隐藏的标题栏的区域（[见下](#titlebar)）。 |
 | `set(attributes)` | `set(WindowAttributes)` | 修改给出的[属性](#属性)；其他保持原值。应用的权限不允许的属性保持不变，并给出警告。 |
-| `show()`、`hide()` | `show()`、`hide()` | 显示它（最小化时还原），或隐藏它。 |
+| `show()`、`hide()` | `show()`、`hide()` | 显示它（最小化时还原），或隐藏它。macOS 上全屏窗口会先退出全屏再隐藏（与 macOS 应用的窗口一致），再次显示时是普通窗口。 |
 | `focus()` | `focus()` | 显示它，提到所在层级的最前并给它键盘焦点；应用随之激活。窗口保持原有层级。 |
 | `close()` | `close()` | 关闭它，不论 `closeOnPress` 如何。应用自己的窗口卸载其内容（`<Window>`：`reason` 为 `"close"` 的 `onOpenChange`）；主窗口像用户关闭它那样关闭，最后一个窗口关闭时应用结束。 |
 | `minimize()`、`restore()` | `minimize()`、`restore()` | 最小化它，或按原来的模式还原：最大化的窗口最小化后还原时仍是最大化。 |
@@ -377,6 +377,8 @@ nsh.json 中没有 `"capabilities"` 的应用可以打开除浮层（overlay）�
 const Application: {
   quit(): void;
   restart(): void;
+  launchAtLogin(): Promise<boolean>;
+  setLaunchAtLogin(enabled: boolean): Promise<void>;
   on(event: "secondInstance", listener: (launch: { args: string[]; cwd: string }) => void): () => void;
   on(event: "openFiles", listener: (files: { paths: string[] }) => void): () => void;
   on(event: "quit", listener: () => void): () => void;
@@ -388,6 +390,8 @@ const Application: {
 |---|---|---|
 | `quit()` | `quit()` | 退出应用，与应用菜单的「退出」项（`{ role: "quit" }`）和平台的退出快捷键相同。 |
 | `restart()` | `restart()` | 像 `quit()` 一样退出应用，然后用相同的参数重新启动它。 |
+| `launchAtLogin()` | `launch_at_login()` | 系统是否在用户登录时打开应用（见[登录时打开](#登录时打开)）。 |
+| `setLaunchAtLogin(enabled)` | `set_launch_at_login(enabled)` | 打开或关闭登录时打开应用。 |
 | `on("secondInstance", listener)` | `next_second_instance()` | 应用运行时再次被启动（[单实例](#单实例)）。 |
 | `on("openFiles", listener)` | `next_open_files()` | 系统用应用声明的类型的文件打开了它（[打开文件](#打开文件)）。 |
 | `on("quit", listener)` | `on_app_quit(f)` | 应用正在退出：运行它的清理（[退出](#退出)）。 |
@@ -535,6 +539,55 @@ Rust 代码 await `nsh_core::prelude` 的 `next_second_instance()`，得到带 `
 | iOS、Android、Web | 系统只运行一份应用；不报告 `secondInstance` |
 
 `nsh package` 构建的发布运行器读取这个设置；`nsh run` 仍按原样启动开发宿主。
+
+### 登录时打开
+
+`Application.launchAtLogin()` 返回系统此刻是否会在用户登录时打开应用，`Application.setLaunchAtLogin(enabled)` 打开或关闭它。Rust
+代码在任务中等待 `launch_at_login()` 和 `set_launch_at_login(enabled)`。和 `quit`、`restart` 一样，它们不需要任何能力。
+
+```tsx
+import { signal } from "nsh";
+import { Application } from "nsh/desktop";
+
+const openAtLogin = signal(false);
+// 应用显示自己的设置时读取：用户可能在系统设置中改过。
+Application.launchAtLogin().then(openAtLogin.set);
+
+async function setOpenAtLogin(enabled: boolean) {
+  await Application.setLaunchAtLogin(enabled);
+  openAtLogin.set(await Application.launchAtLogin());
+}
+```
+
+```rust
+use nsh_core::element::desktop::{launch_at_login, set_launch_at_login};
+use nsh_core::prelude::*;
+
+let open_at_login = signal(false);
+spawn(async move { open_at_login.set(launch_at_login().await) });
+// 用户打开或关闭应用自己的设置时：
+let turn = move |enabled: bool| {
+    spawn(async move {
+        if let Err(error) = set_launch_at_login(enabled).await {
+            log::warn!("{error}");
+        }
+        open_at_login.set(launch_at_login().await);
+    });
+};
+```
+
+在用户打开或关闭应用自己的设置时调用 `setLaunchAtLogin`，不要由应用自行调用（比如每次启动时）：以用户在系统设置中的选择为准。打开已打开的、关闭已关闭的都会成功，修改按应用发出的顺序执行。
+应用无法登录时打开的地方（嵌入在其他应用中的视图、`nsh run`、iOS、Android 和 Web），以及 macOS 上系统还在“登录项”中等待用户批准时，`launchAtLogin()` 为 `false`。
+应用无法登录时打开的地方，`setLaunchAtLogin` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` reject；系统出错时以它的错误码 reject，其中系统不允许修改时为 `EACCES`，应用加引号后的路径超出
+Windows 登录项能容纳的长度（260 个字符）时为 `ENAMETOOLONG`，应用 id 或路径无法命名登录项时为 `EINVAL`，错误没有自己的错误码时为 `EIO`。
+
+| 平台 | 设置的内容 | 显示在 |
+|---|---|---|
+| macOS | 应用包的登录项（`SMAppService.mainApp`），按 bundle id 保存：应用的每个副本共用一个。 | 系统设置的“登录项” |
+| Windows | 当前用户 `Run` 键下以应用 id 命名、内容为本可执行文件路径的值。指向其他副本的值读作 `false`；`nsh package` 构建的安装程序卸载时，会删除指向所卸载副本的值。 | 设置中的启动应用、任务管理器的“启动应用” |
+| Linux | XDG 自启动条目 `~/.config/autostart/<app id>.desktop`，启动本可执行文件。在桌面设置中关闭的条目读作 `false`，再次打开会重新写入。Flatpak 或 Snap 沙箱中不可用。 | 桌面的自启动设置 |
+
+它在独立应用中生效，包括 `nsh package` 构建的应用；`nsh run` 下读到 `false`，请在打包后的应用中检查。[`examples/tray`](https://github.com/longbridge/nsh/tree/main/examples/tray) 在托盘菜单中提供了这个选项。
 
 ## 自定义标题栏
 

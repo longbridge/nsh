@@ -685,6 +685,12 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                             _ => -1,
                         });
                     }
+                    // `Mounter.orientations` reads the `ModalConfig`
+                    // bits (0: the app's own).
+                    Command::Orientations(bits) => {
+                        e.int(54);
+                        e.int(i32::from(bits));
+                    }
                     Command::ImageInfo { id, uri } => {
                         e.int(19);
                         e.int(id as i32);
@@ -739,13 +745,13 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     }
                     // `Picker.java`: the request, the limit, the extensions
                     // offered (comma-separated; empty: any file) and the
-                    // largest file read.
+                    // largest file read (at most 512 MiB: an `int`).
                     Command::PickFiles { id, request } => {
                         e.int(45);
                         e.int(id as i32);
                         e.int(request.limit as i32);
                         e.string(nsh_core::file_dialog::extensions(&request.filters).join(","));
-                        e.int(nsh_core::picker::MAX_PICKED_FILE_BYTES as i32);
+                        e.int(i32::try_from(request.size_limit()).unwrap_or(i32::MAX));
                     }
                     // Turned into a mount item / `ScrollTo` by the core.
                     Command::LayoutAnimation(_)
@@ -832,6 +838,7 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                                 e.int(4);
                                 e.int(count as i32);
                             }
+                            N::CloseAll => e.int(5),
                             _ => e.int(-1),
                         }
                     }

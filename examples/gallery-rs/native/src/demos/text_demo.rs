@@ -118,10 +118,11 @@ fn inline(likes: Signal<u32>) -> Card {
             body("Made with ")
                 .text_size(px(16.0))
                 .line_height(px(28.0))
-                .child(image(LOGO).size(px(18.0)).rounded(px(5.0)))
+                .child(image(LOGO).size(px(18.0)).rounded(px(5.0)).align_middle())
                 .child(" nsh. Status ")
                 .child(
                     view()
+                        .align_middle()
                         .bg(tints::UP)
                         .rounded(px(9.0))
                         .px_2()
@@ -141,6 +142,7 @@ fn inline(likes: Signal<u32>) -> Card {
                 .child(" and a button inside the sentence ")
                 .child(
                     press()
+                        .align_middle()
                         .scale(0.9)
                         .label("Like")
                         .hit_slop(10.0)

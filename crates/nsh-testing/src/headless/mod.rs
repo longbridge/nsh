@@ -37,6 +37,7 @@
 
 mod animation;
 mod audio;
+mod browser;
 mod keyboard;
 #[cfg(feature = "live")]
 mod live;
@@ -47,6 +48,7 @@ mod speech;
 mod windows;
 
 pub use audio::AudioCall;
+pub use browser::{Browser, HistoryEntry};
 mod stub;
 
 use std::{
@@ -154,25 +156,27 @@ struct Launched {
 
 /// Reports `url` as a link the system handed the app.
 fn send_url_scheme(control: &nsh_engine::EngineControl, url: &str) {
-    control.dispatch_event(
-        ROOT_ID,
-        EventKind::UrlScheme,
-        EventPayload::Map(vec![(
-            nsh_core::url_scheme::URL,
-            PayloadValue::Str(url.to_owned()),
-        )]),
-    );
+    control.dispatch_event(ROOT_ID, EventKind::UrlScheme, link_payload(url));
+}
+
+/// The root's `UrlScheme` payload of `url`, a link the system handed the
+/// app.
+fn link_payload(url: &str) -> EventPayload {
+    EventPayload::Map(vec![(
+        nsh_core::url_scheme::URL,
+        PayloadValue::Str(url.to_owned()),
+    )])
 }
 
 /// [`start`], the platform reporting `displays` before the app first
 /// renders, laying text out with the engine `text_engine` makes; `link`:
-/// the link that launched it, there before the app's code runs (as a
-/// platform sends it).
+/// the root's `UrlScheme` event that launched it (a link, a page's
+/// address), there before the app's code runs (as a platform sends it).
 fn launch<M, F>(
     mut config: EngineConfig,
     displays: Vec<nsh_core::desktop::Display>,
     text_engine: F,
-    link: Option<&str>,
+    link: Option<EventPayload>,
 ) -> std::io::Result<Launched>
 where
     M: TextEngine + 'static,
@@ -200,8 +204,8 @@ where
         if !displays.is_empty() {
             control.set_displays(displays);
         }
-        if let Some(url) = link {
-            send_url_scheme(control, url);
+        if let Some(payload) = link {
+            control.dispatch_event(ROOT_ID, EventKind::UrlScheme, payload);
         }
     })?;
     let _ = control.set(engine.control());
@@ -301,8 +305,10 @@ const CLICK_INTERVAL: Duration = Duration::from_millis(500);
 /// It plays the platform's part the NSH protocol defines and nothing
 /// else: the native animation graph runs frame by frame (nsh-core's `animation`),
 /// a back pops screens and closes modals, dialogs are answered (by the
-/// test, else [`default_answer`]), the clipboard holds text, and `nsh
-/// test`'s web page host answers `nsh/host` calls. Images are
+/// test, else [`default_answer`]), the clipboard holds text, a page's
+/// browser history is kept as the web keeps it
+/// ([`Headless::start_at_page`], [`Headless::browser`]), and `nsh test`'s
+/// web page host answers `nsh/host` calls. Images are
 /// not loaded: no `onLoad` comes, nor an error unless the test fails the
 /// image ([`Headless::fail_images`]), and `Image.getSize` /
 /// `Image.prefetch` fail.
@@ -337,6 +343,8 @@ pub struct Headless {
     save_path: Option<std::path::PathBuf>,
     /// The URLs whose images fail to load ([`Headless::fail_images`]).
     failing_images: Vec<stub::Url>,
+    /// The URLs that fail to open ([`Headless::fail_open_urls`]).
+    failing_url_opens: Vec<stub::Url>,
     /// The recognizer the test speaks into; `None` when the config gave
     /// its own (`EngineConfig::speech`).
     speech: Option<speech::FakeSpeech>,
@@ -370,6 +378,9 @@ pub struct Headless {
     /// The app's windows, on a desktop ([`windows`]); `None` elsewhere, and
     /// when the config gives its own windows (`EngineConfig::windows`).
     windows: Option<windows::Windows>,
+    /// The page's history, for an app started at a page's address
+    /// ([`Headless::start_at_page`]).
+    history: Option<browser::History>,
 }
 
 impl Headless {
@@ -382,7 +393,7 @@ impl Headless {
     /// first `UrlScheme.url()` reads it, and its first `open` listener
     /// gets it.
     pub fn start_with_link(config: EngineConfig, url: &str) -> std::io::Result<Headless> {
-        Self::launched_with(config, || ApproxTextEngine, Some(url))
+        Self::launched_with(config, || ApproxTextEngine, Some(link_payload(url)))
     }
 
     /// Starts `config`'s app laying text out with the engine
@@ -402,7 +413,7 @@ impl Headless {
     fn launched_with<M, F>(
         mut config: EngineConfig,
         text_engine: F,
-        link: Option<&str>,
+        link: Option<EventPayload>,
     ) -> std::io::Result<Headless>
     where
         M: TextEngine + 'static,
@@ -471,6 +482,7 @@ impl Headless {
             picked_paths: Vec::new(),
             save_path: None,
             failing_images: Vec::new(),
+            failing_url_opens: Vec::new(),
             speech,
             audio,
             step: "open".to_owned(),
@@ -488,6 +500,7 @@ impl Headless {
             #[cfg(feature = "js")]
             host_posts: None,
             windows,
+            history: None,
         })
     }
 
@@ -653,6 +666,20 @@ impl Headless {
         self.done()
     }
 
+    /// The URLs the app opens that match `url` fail to open from now on:
+    /// the app's `openUrl` resolves to not opened, as on a device with no
+    /// app for the URL or a browser that refused it, so a test checks what
+    /// the app shows then. Other URLs go on opening. `url` is matched
+    /// whole and `*` in it matches anything (`"https://example.com/*"`),
+    /// as [`StubNetwork`]'s routes are. The URLs are still recorded
+    /// ([`Screen::opened_urls`]): the app asked for them. Then waits until
+    /// the app is quiet.
+    pub fn fail_open_urls(&mut self, url: &str) -> Result<(), String> {
+        self.step(format!("failOpenUrls({url})"));
+        self.failing_url_opens.push(stub::Url::of(url));
+        self.done()
+    }
+
     /// Fails the loads of the images [`Headless::fail_images`] named.
     fn fail_matching_images(&mut self) {
         if self.failing_images.is_empty() {
@@ -713,6 +740,12 @@ impl Headless {
     /// What is on screen, from the batches applied so far.
     pub fn screen(&self) -> &Screen {
         &self.screen
+    }
+
+    /// Forgets the commands the app sent so far ([`Screen::clear_commands`]),
+    /// for a long test that checks only the commands of its later steps.
+    pub fn clear_commands(&mut self) {
+        self.screen.clear_commands();
     }
 
     /// The engine and the batches not applied yet, for a model of the
@@ -936,6 +969,9 @@ impl Headless {
         let focused = self.screen.focused();
         let before = focused.or(self.screen.key_focus());
         self.screen.apply(batch);
+        for (id, states) in self.screen.take_restated() {
+            self.engine.control().set_states(id, states);
+        }
         self.focus_calls(batch, focused);
         self.modals_presented(before);
         self.modals_closed();
@@ -952,12 +988,20 @@ impl Headless {
             self.animator.apply(item);
         }
         for item in &batch.items {
-            if let MountItem::Command {
-                id,
-                command: Command::InsertText(text),
-            } = item
-            {
-                self.insert_text(*id, text);
+            match item {
+                MountItem::Command {
+                    id,
+                    command: Command::InsertText(text),
+                } => self.insert_text(*id, text),
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::SetAppUrl(url),
+                } => self.set_page_url(url, false),
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::PushAppUrl(url),
+                } => self.set_page_url(url, true),
+                _ => {}
             }
         }
         if let Some(windows) = &mut self.windows {
@@ -1042,11 +1086,13 @@ impl Headless {
         }
         self.fail_matching_images();
         // URLs are recorded (`Screen::opened_urls`) and reported opened, as
-        // a device with an app for every scheme would.
-        for id in self.screen.take_url_opens() {
+        // a device with an app for every scheme would, but for those the
+        // test fails (`fail_open_urls`).
+        for (id, url) in self.screen.take_url_opens() {
+            let opened = !self.failing_url_opens.iter().any(|u| u.matches(&url));
             let fields = vec![
                 ("id", PayloadValue::Number(f64::from(id))),
-                ("opened", PayloadValue::Bool(true)),
+                ("opened", PayloadValue::Bool(opened)),
             ];
             control.dispatch_event(ROOT_ID, EventKind::OpenUrl, EventPayload::Map(fields));
         }
@@ -1074,6 +1120,8 @@ impl Headless {
         if self.screen.take_back_asked() {
             self.go_back(false);
         }
+        // A page's history follows its pages, dialogs and address.
+        self.sync_history();
         self.report_windows();
         self.report_finished();
     }
@@ -1324,15 +1372,36 @@ impl Headless {
 
     /// Applies batches until the app is done with a step, or for 2 s at
     /// most (an app updating all the time never is): false if the limit
-    /// ended it. On the system's clock it is done when no batch came for
-    /// 100 ms and no native animation that ends by itself runs; on a
-    /// manual clock, as soon as the engine says it is idle
+    /// ended it. On the system's clock it is done once the engine has
+    /// handled what the step sent ([`Headless::caught_up`]) and then no
+    /// batch came for 100 ms and no native animation that ends by itself
+    /// runs; on a manual clock, as soon as the engine says it is idle
     /// ([`EngineControl::flush`]), without waiting.
     pub fn settle(&mut self) -> bool {
         if self.clock.is_manual() {
             self.idle_on_manual_clock(SETTLE)
         } else {
-            self.quiet(QUIET, SETTLE)
+            let end = Instant::now() + SETTLE;
+            self.caught_up(end);
+            self.quiet(QUIET, end.saturating_duration_since(Instant::now()))
+        }
+    }
+
+    /// On the system's clock: has the engine run what was sent to it
+    /// ([`EngineControl::flush`]) and applies the batches that brought,
+    /// again while they bring more (what applying them sends back: a
+    /// scroll reported, a focus moved), until `end` at most. The quiet
+    /// that ends a step is then counted from there, so an engine taking
+    /// longer than [`QUIET`] over a step does not end it early, with the
+    /// next step acting on the screen as it was before.
+    fn caught_up(&mut self, end: Instant) {
+        while !self.exited && self.errors.is_empty() && Instant::now() < end {
+            let applied = self.applied;
+            self.flush(end);
+            self.drain();
+            if self.applied == applied {
+                return;
+            }
         }
     }
 
@@ -2424,6 +2493,43 @@ mod tests {
             )
     }
 
+    /// A button that copies how many times it was pressed.
+    #[component]
+    fn Copier() -> impl IntoElement {
+        let count = signal(0_u32);
+        view()
+            .on_press(move || {
+                count.update(|c| *c += 1);
+                set_clipboard(format!("copied {}", count.get_untracked()));
+            })
+            .child(text("Copy"))
+    }
+
+    #[test]
+    fn cleared_commands_are_forgotten_but_their_effects_stay() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Copier>())).unwrap();
+        app.first_render().unwrap();
+        let copies = |app: &Headless| {
+            app.screen()
+                .commands()
+                .iter()
+                .filter(|(_, c)| matches!(c, Command::SetClipboard(_)))
+                .count()
+        };
+        for _ in 0..3 {
+            app.press("Copy").unwrap();
+        }
+        assert_eq!(copies(&app), 3);
+        app.clear_commands();
+        assert!(app.screen().commands().is_empty());
+        assert!(!app.screen().sent(&Command::SetClipboard("copied 3".into())));
+        // What the commands did stays on screen.
+        assert_eq!(app.screen().clipboard(), Some("copied 3"));
+        app.press("Copy").unwrap();
+        assert_eq!(copies(&app), 1);
+        assert!(app.screen().sent(&Command::SetClipboard("copied 4".into())));
+    }
+
     /// A pad under a 10-point strip. A press reports where it was in the
     /// pad and in the root.
     #[component]
@@ -2680,6 +2786,48 @@ mod tests {
         assert!(app.shows("logo failed: false"));
         app.press("Switch").unwrap();
         app.wait_for("text:logo failed: true").unwrap();
+    }
+
+    /// Opens a page or a help address and shows whether it opened.
+    #[component]
+    fn Links() -> impl IntoElement {
+        let result = signal(String::from("nothing"));
+        let open = move |url: &'static str| {
+            move |_: &()| {
+                let opened = open_url(url);
+                spawn(async move { result.set(format!("{url} {}", opened.await)) });
+            }
+        };
+        view()
+            .child(text(move || result.get()))
+            .child(text("Page").on_press(open("https://example.com/docs/a")))
+            .child(text("Mail").on_press(open("mailto:help@example.com")))
+    }
+
+    #[test]
+    fn a_test_fails_the_urls_it_names_to_open() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Links>())).unwrap();
+        app.first_render().unwrap();
+        app.press("Page").unwrap();
+        app.wait_for("text:https://example.com/docs/a true")
+            .unwrap();
+
+        app.fail_open_urls("https://example.com/docs/*").unwrap();
+        app.press("Page").unwrap();
+        app.wait_for("text:https://example.com/docs/a false")
+            .unwrap();
+        // Only the URLs named.
+        app.press("Mail").unwrap();
+        app.wait_for("text:mailto:help@example.com true").unwrap();
+        // The app asked for each of them.
+        assert_eq!(
+            app.screen().opened_urls(),
+            [
+                "https://example.com/docs/a",
+                "https://example.com/docs/a",
+                "mailto:help@example.com"
+            ]
+        );
     }
 
     #[test]

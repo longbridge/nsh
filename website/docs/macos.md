@@ -172,6 +172,9 @@ function App() {
 mount(App);
 ```
 
+A menu bar app often offers to open at login: when the user turns that on, `Application.setLaunchAtLogin(true)` registers the app
+bundle as a login item ([Opening at login](../modules/nsh-desktop.md#opening-at-login)).
+
 An app embedded with `AppView` takes part in the system's UI as its host app does (the host's `LSUIElement`, or
 `NSApplication.setActivationPolicy`).
 
@@ -248,6 +251,10 @@ An embedded `AppView` does not change the window it is put in: make your own `NS
 its banners, presses and badge. It is off by default, so an embedded app's notifications are `unavailable` and your
 app's stay yours; `run_app` sets it.
 
+`AppOptions::login_item` gives the app `run_app` runs its [login item](../modules/nsh-desktop.md#opening-at-login): the
+app bundle's (`SMAppService.mainApp`). It is off by default and read by `run_app` alone, so an embedded app
+never launches at login; the runner of the apps `nsh package` builds sets it.
+
 `AppOptions::cache` (or `AppView::set_cache`, for the apps loaded next) sets where the apps keep their caches, the
 [images they download](./images-and-assets.md#kept-on-disk), and how much each keeps (`CacheOptions`: the system's
 cache directory and 256 MiB of images by default).
@@ -273,6 +280,8 @@ The environment is a desktop's: the safe area and the keyboard height are 0, `id
 [Device and environment](./device-and-environment.md).
 
 Input is a desktop's: the mouse, the trackpad (scrolling with momentum, pinch and rotation) and the keyboard.
+A zoomable scroll view zooms with a trackpad pinch or Control + wheel around the pointer, and scrolls both ways while
+zoomed.
 Selectable text is selected by dragging, double- and triple-clicking, and copied with Cmd+C. Escape, Option+Left,
 Cmd+[ and the mouse's back button close the newest dialog or go back in a stack (Escape in a focused field or web page
 only leaves it; a page gets these keys first, and keeps those it uses); a `Dialog` is a layer over the whole window
@@ -314,7 +323,6 @@ what React Native reports: the typed text, `"Enter"`, `"Backspace"`, and `"Escap
 
 Not supported, or different:
 
-- **Zooming scroll views** (`zoomTo`, the zoom props).
 - **`brightness()`** above 1 is not drawn. **`mixBlendMode`** and **backdrops** are drawn by Core Animation:
   `mixBlendMode` as the view layer's compositing filter, `macos={{ backdrop: { material, blending, state } }}` as an
   `NSVisualEffectView` below the view (any AppKit material and state, whether or not a `backdropFilter` is set), and

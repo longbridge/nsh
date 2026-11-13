@@ -986,6 +986,16 @@ impl TextEngine for CoreTextEngine {
         Size::new(Points(size.width as f32), Points(size.height as f32))
     }
 
+    fn first_baseline(&self, prepared: &Prepared, width: Points) -> Option<Points> {
+        // Typeset at the size it measures `width` wide, as the text is laid
+        // out: its first line's origin is its baseline, from the box's
+        // bottom.
+        let layout = self.layout(prepared, self.measure(prepared, Some(width)));
+        let layout = layout.downcast::<CoreTextLayout>()?;
+        let first = layout.lines.first()?;
+        Some(Points((layout.height - first.origin.y) as f32))
+    }
+
     fn breaks_lines_greedily(&self) -> bool {
         true
     }
@@ -2527,6 +2537,17 @@ pub(crate) fn select_all(surface: &crate::surface::Surface) -> bool {
     true
 }
 
+/// The text's part of the surface selection, as UTF-16 offsets.
+pub(crate) fn selected_range(view: &crate::view::NshView) -> Option<std::ops::Range<u32>> {
+    let state = view.try_state()?;
+    let text = state.text.as_ref()?;
+    let (start, end) = text
+        .area_range
+        .get()
+        .or_else(|| text.selection.as_ref()?.range.get())?;
+    Some(start..end)
+}
+
 /// The selected text, without attachments' placeholders and hidden runs.
 fn selected_text(view: &crate::view::NshView) -> Option<String> {
     let state = view.state();
@@ -3701,5 +3722,41 @@ mod hit_regressions {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod first_baseline {
+    use super::*;
+
+    fn baseline(size: f32) -> (f32, nsh_core::TextLine) {
+        let engine = CoreTextEngine::default();
+        let mut text = AttributedText::default();
+        text.push(
+            "Chat",
+            ResolvedTextStyle {
+                font_size: Points(size),
+                ..Default::default()
+            },
+        );
+        let prepared = engine.prepare(&text);
+        let width = engine.measure(&prepared, None).width;
+        let baseline = engine
+            .first_baseline(&prepared, width)
+            .expect("a first line");
+        let laid = engine.layout(&prepared, engine.measure(&prepared, Some(width)));
+        (baseline.0, engine.lines(&laid).remove(0))
+    }
+
+    #[test]
+    fn is_where_the_first_line_is_drawn_and_grows_with_the_font() {
+        let (small, line) = baseline(12.0);
+        // The line is drawn its ascender above its baseline.
+        assert!(
+            (small - (line.y.0 + line.ascender.0)).abs() < 0.01,
+            "{small} {line:?}"
+        );
+        let (large, _) = baseline(24.0);
+        assert!(large > small * 1.5, "{small} {large}");
     }
 }

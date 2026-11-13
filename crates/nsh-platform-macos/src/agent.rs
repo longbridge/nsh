@@ -314,12 +314,13 @@ fn mapped(view: &crate::view::NshView, rect: NSRect) -> Option<Bounds<Points>> {
     let (x0, y0) = (rect.origin.x as f32, rect.origin.y as f32);
     let (w, h) = (rect.size.width as f32, rect.size.height as f32);
     let (mut min_x, mut min_y, mut max_x, mut max_y) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    // Each corner from the plain box's top left, as the frames, scroll
+    // offsets and zooms place it, then moved by the transforms.
+    let base = crate::input::to_top(view, (x0, y0), false)?;
     for (dx, dy) in [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)] {
-        let corner = (x0 + dx, y0 + dy);
-        let moved = crate::input::to_top(view, corner, true)?;
-        let still = crate::input::to_top(view, corner, false)?;
-        let x = plain.origin.x.0 + dx + moved.0 - still.0;
-        let y = plain.origin.y.0 + dy + moved.1 - still.1;
+        let moved = crate::input::to_top(view, (x0 + dx, y0 + dy), true)?;
+        let x = plain.origin.x.0 + moved.0 - base.0;
+        let y = plain.origin.y.0 + moved.1 - base.1;
         (min_x, min_y) = (min_x.min(x), min_y.min(y));
         (max_x, max_y) = (max_x.max(x), max_y.max(y));
     }
@@ -530,6 +531,25 @@ impl Native for MacNative {
             }
         })
         .ok_or_else(|| "the window is gone".to_owned())
+    }
+
+    fn drop_files(&self, at: Point<Points>, uris: Vec<String>) -> Result<(), String> {
+        let (x, y) = (at.x.0, at.y.0);
+        let target = self.target();
+        let dropped = self.on_target(move |surface, _| {
+            let root = (target != ROOT_ID)
+                .then(|| crate::window::root_view(surface, target))
+                .flatten();
+            crate::input::enter(surface, root);
+            let dropped = crate::file_drop::drop_uris(surface, x, y, uris);
+            crate::input::enter(surface, None);
+            dropped
+        });
+        match dropped {
+            Some(true) => Ok(()),
+            Some(false) => Err("no view there listens to `onFileDrop`".into()),
+            None => Err("the window is gone".into()),
+        }
     }
 
     fn press_keys(&self, keys: &str) -> Result<(), String> {

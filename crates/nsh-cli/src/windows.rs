@@ -123,6 +123,9 @@ pub(crate) fn package(
 /// app's id, so a newer version installs over the older one: the upgrade
 /// closes the running app, replaces the files and keeps the app's data
 /// (`%APPDATA%`, `%LOCALAPPDATA%\<id>`), which the uninstaller leaves too.
+/// The uninstaller removes the app's login item (`Application.setLoginItem`:
+/// the value of the user's `Run` key named by the app's id) when it starts
+/// this installation's executable.
 fn installer(
     out: &Path,
     name: &str,
@@ -289,6 +292,71 @@ fn inno_script(app: &InnoApp<'_>) -> String {
             .replace('{', "%7b")
             .replace('}', "%7d")
             .replace('"', "\"\"")
+    ));
+    // The login item goes with the app (`nsh-platform-windows`'
+    // `login_item.rs` writes it): only when it starts this installation's
+    // executable, a copy elsewhere keeping its own. Its program is read as
+    // the app's `names` reads it: quoted or up to the first space or tab, `/`
+    // a `\`, a verbatim `\\?\` or `\\?\UNC\` prefix dropped, case aside.
+    // Pascal strings double `'`; the executable's name is outside
+    // `ExpandConstant`, where `{` would start a constant.
+    fn pascal(value: &str) -> String {
+        value.replace('\'', "''")
+    }
+    let run = r"Software\Microsoft\Windows\CurrentVersion\Run";
+    let (id, exe) = (pascal(app.id), pascal(app.exe));
+    s.push_str("\n[Code]\n");
+    s.push_str(concat!(
+        "function NshExpandEnvironmentStrings(Source: String; Target: String; Size: DWORD): DWORD;\n",
+        "  external 'ExpandEnvironmentStringsW@kernel32.dll stdcall';\n\n",
+        "function NshExpand(const Value: String): String;\n",
+        "var\n  Buffer: String;\n  Size: DWORD;\nbegin\n",
+        "  Result := Value;\n",
+        "  Size := NshExpandEnvironmentStrings(Value, #0, 0);\n",
+        "  if Size = 0 then\n    Exit;\n",
+        "  SetLength(Buffer, Size);\n",
+        "  if NshExpandEnvironmentStrings(Value, Buffer, Size) > 0 then\n",
+        "    Result := Copy(Buffer, 1, Size - 1);\n",
+        "end;\n\n",
+    ));
+    s.push_str(concat!(
+        "function NshProgram(Command: String): String;\n",
+        "var\n  Quote: Integer;\nbegin\n",
+        "  StringChangeEx(Command, #9, ' ', True);\n",
+        "  Result := TrimLeft(Command);\n",
+        "  if Copy(Result, 1, 1) = '\"' then\n  begin\n",
+        "    Delete(Result, 1, 1);\n",
+        "    Quote := Pos('\"', Result);\n",
+        "    if Quote > 0 then\n      Result := Copy(Result, 1, Quote - 1);\n",
+        "  end\n  else if Pos(' ', Result) > 0 then\n",
+        "    Result := Copy(Result, 1, Pos(' ', Result) - 1);\n",
+        "  StringChangeEx(Result, '/', '\\', True);\n",
+        "  if CompareText(Copy(Result, 1, 8), '\\\\?\\UNC\\') = 0 then\n",
+        "    Result := '\\' + Copy(Result, 8, Length(Result))\n",
+        "  else if Copy(Result, 1, 4) = '\\\\?\\' then\n",
+        "    Delete(Result, 1, 4);\n",
+        "end;\n\n",
+    ));
+    s.push_str("procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);\n");
+    s.push_str("var\n  Command, Exe: String;\nbegin\n");
+    s.push_str("  if CurUninstallStep <> usUninstall then\n    Exit;\n");
+    s.push_str(&format!(
+        "  if not RegQueryStringValue(HKEY_CURRENT_USER, '{run}', '{id}', Command) then\n    Exit;\n"
+    ));
+    s.push_str(&format!(
+        "  Exe := ExpandConstant('{{app}}') + '\\{exe}';\n"
+    ));
+    // The value as written or expanded names it: `RegQueryStringValue` does
+    // not say whether it read a `REG_SZ` value, which the app reads as
+    // written (and writes), or a `REG_EXPAND_SZ` one, which the app expands.
+    // So a value of either type is removed when either reading names this
+    // installation; the app itself tells the two apart.
+    s.push_str(concat!(
+        "  if (CompareText(NshProgram(Command), Exe) = 0)\n",
+        "    or (CompareText(NshProgram(NshExpand(Command)), Exe) = 0) then\n",
+    ));
+    s.push_str(&format!(
+        "    RegDeleteValue(HKEY_CURRENT_USER, '{run}', '{id}');\nend;\n"
     ));
     s
 }
@@ -571,6 +639,49 @@ mod tests {
         assert!(script.contains(r#"Type: filesandordirs; Name: "{app}\nsh""#));
         assert!(script.contains("{cm:LaunchProgram,Hopper %7bLab%7d}"));
         assert!(!script.contains("SetupIconFile"));
+    }
+
+    #[test]
+    fn uninstalling_removes_the_login_item_that_starts_this_installation() {
+        let script = inno_script(&InnoApp {
+            name: "O'Hare {Lab}",
+            id: "com.example.o'hare",
+            version: "1.0.0",
+            source: "O'Hare {Lab}",
+            exe: "O'Hare {Lab}.exe",
+            setup: "O'Hare {Lab}-setup",
+            icon: None,
+        });
+        let code = &script[script.find("\n[Code]\n").expect("a [Code] section")..];
+        let run = r"Software\Microsoft\Windows\CurrentVersion\Run";
+        assert!(code.contains("CurUninstallStep <> usUninstall"));
+        // The value the app's id names, its `'` doubled.
+        assert!(code.contains(&format!(
+            "RegQueryStringValue(HKEY_CURRENT_USER, '{run}', 'com.example.o''hare', Command)"
+        )));
+        // The command's program, read as the app reads it (as written or
+        // with its environment variables expanded, quoted or up to a space or
+        // tab, `/` a `\`, a verbatim prefix dropped), compared without case;
+        // the name outside `ExpandConstant`, its `'` doubled.
+        assert!(code.contains("external 'ExpandEnvironmentStringsW@kernel32.dll stdcall';"));
+        for line in [
+            "  StringChangeEx(Command, #9, ' ', True);",
+            r#"  if Copy(Result, 1, 1) = '"' then"#,
+            r#"    Quote := Pos('"', Result);"#,
+            r"    Result := Copy(Result, 1, Pos(' ', Result) - 1);",
+            r"  StringChangeEx(Result, '/', '\', True);",
+            r"  if CompareText(Copy(Result, 1, 8), '\\?\UNC\') = 0 then",
+            r"    Result := '\' + Copy(Result, 8, Length(Result))",
+            r"  else if Copy(Result, 1, 4) = '\\?\' then",
+            r"  Exe := ExpandConstant('{app}') + '\O''Hare {Lab}.exe';",
+            "  if (CompareText(NshProgram(Command), Exe) = 0)",
+            "    or (CompareText(NshProgram(NshExpand(Command)), Exe) = 0) then",
+        ] {
+            assert!(code.contains(line), "{line}\n{code}");
+        }
+        assert!(code.contains(&format!(
+            "RegDeleteValue(HKEY_CURRENT_USER, '{run}', 'com.example.o''hare');"
+        )));
     }
 
     #[test]

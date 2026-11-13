@@ -945,6 +945,10 @@ pub struct PickRequest {
     pub format: String,
     /// The file types offered (`pickFiles`); empty: any.
     pub filters: Vec<PickFilter>,
+    /// The largest file read, in bytes (`pickFiles`' `maxSize`, at most
+    /// 512 MiB); `null` for images. A larger file the handler gives answers
+    /// with its name and size only.
+    pub max_size: Option<f64>,
 }
 
 /// A group of file types a pick offers, as a test reads it.
@@ -972,6 +976,7 @@ impl From<&nsh_core::picker::Pick> for PickRequest {
                 }
                 .into(),
                 filters: Vec::new(),
+                max_size: None,
             },
             Pick::Files(request) => PickRequest {
                 kind: "files".into(),
@@ -988,6 +993,7 @@ impl From<&nsh_core::picker::Pick> for PickRequest {
                         extensions: filter.extensions.clone(),
                     })
                     .collect(),
+                max_size: Some(request.size_limit() as f64),
             },
         }
     }
@@ -1972,7 +1978,8 @@ impl App {
 
     /// Drops local files (`file:` URLs, as a file manager drags them) on
     /// the middle of what `selector` names: it, or the nearest view around
-    /// it listening, hears `onFileDrop`. Desktops, headless and on Linux for now.
+    /// it listening, hears `onFileDrop`. Desktops, headless, on Linux and
+    /// on macOS for now.
     pub async fn drop_files(
         this: Instance<Self>,
         selector: String,
@@ -2423,6 +2430,17 @@ impl App {
     /// `asset:/<path>`. Then waits until the app is quiet. Headless only.
     pub async fn fail_images(this: Instance<Self>, url: String) -> Result<(), JsError> {
         step(&this, move |app| app.fail_images(&url)).await
+    }
+
+    /// The URLs the app opens that match `url` fail to open from now on:
+    /// `openUrl` resolves `{ opened: false }`, as on a device with no app
+    /// for the URL, so a test checks what the app shows then. `url` is
+    /// matched whole and `*` in it matches anything
+    /// (`"https://example.com/*"`), as `open`'s `network` routes are. They
+    /// are still listed by `openedUrls`. Then waits until the app is
+    /// quiet. Headless only.
+    pub async fn fail_open_urls(this: Instance<Self>, url: String) -> Result<(), JsError> {
+        step(&this, move |app| app.fail_open_urls(&url)).await
     }
 
     /// Moves the app to `state`, as the system does when the user leaves it

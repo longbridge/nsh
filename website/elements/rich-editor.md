@@ -120,6 +120,38 @@ const inLink = () => (revision(), editor.isActive("link"));
 A link menu edits the link under the caret with `chain([extendMarkRange("link"), command("setLink", { href })])`
 and removes it with `command("unsetLink")` after the same `extendMarkRange`.
 
+`contentLayer` is the app's own layer over the document, inside the box that scrolls: what it holds moves with
+the text in the same frame. Place its children in the content box's points, where `editor.nodeRect(pos)` (the box
+of the block starting at `pos`) and `editor.coordsAtPos(pos)` answer: a handle in a block's margin, a marker beside
+a node. The layer itself takes no press; its children do.
+
+```tsx
+const box = editor.nodeRect(blockStart);
+
+<RichEditor
+  editor={editor}
+  contentLayer={box ? <Handle style={{ position: "absolute", left: box.x - 28, top: box.y }} /> : undefined}
+/>
+```
+
+### Pasted and dropped files
+
+Files reach the app, which decides what they become (an image node, an attachment, a link to an uploaded copy); the
+editor inserts nothing for them and keeps its selection, where the app inserts what it makes of them. A paste of
+images or of files copied in a file manager calls `onPasteFiles` with `{ files, uris }`: `files` the images with
+their bytes, `uris` the copied files' `file:` URLs. On the desktops, files dragged from another application onto
+the editor call its `onFileDrop` with `{ uris, mimeTypes }`, as a [view's file drops](./view.md#desktop-file-drops)
+do, and `onFileDragEnter` / `onFileDragLeave` follow the drag, for a hint such as "Release to attach". Without
+`onFileDrop` the editor leaves dropped files to the view around it that listens.
+
+```tsx
+<RichEditor
+  editor={editor}
+  onPasteFiles={({ files }) => attach(files)}
+  onFileDrop={({ uris, mimeTypes }) => attachFiles(uris, mimeTypes)}
+/>
+```
+
 ## Schemas
 
 `defineSchema(spec)` reads a schema in ProseMirror's shape and throws with what is wrong in it. Node types name their

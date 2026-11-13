@@ -5,7 +5,8 @@
 //! [`crate::EventKind::Menu`]; mobile platforms ignore them. The platforms
 //! report the main window's state in the environment ([`WindowState`]),
 //! the other windows' as [`WindowEvent`]s, and the displays with their own
-//! message ([`Display`]).
+//! message ([`Display`]). The app's login item is a backend the runner
+//! gives the core ([`LoginItemBackend`]).
 
 use std::sync::Arc;
 
@@ -17,11 +18,14 @@ use crate::{
     keymap::{self, Keystroke, Modifiers, When},
 };
 
+mod login_item;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod menu_icon;
 pub mod window;
 mod window_state;
 
+pub(crate) use login_item::LoginItems;
+pub use login_item::{LaunchAtLoginError, LoginItemBackend, LoginItemStatus};
 pub use window::{
     Backdrop, CloseReason, MainWindowOptions, OpenWindow, ProgressState, ResizeEdge, SizeToContent,
     TitleBarOptions, WindowAttributes, WindowBackend, WindowCloseCause, WindowControl, WindowEvent,

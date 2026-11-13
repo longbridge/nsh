@@ -200,6 +200,12 @@ pub struct AppOptions {
     /// notification center delegate of its own keeps it. Without it the
     /// permission is `unavailable` and nothing shows. [`run_app`] sets it.
     pub notifications: bool,
+    /// The app [`run_app`] runs reads and changes the app bundle's login
+    /// item (`Application.loginItem()`: `SMAppService.mainApp`, which System
+    /// Settings lists under Login Items). False by default, and read by
+    /// [`run_app`]'s view only: a view embedded in another app has no login
+    /// item. The release runner sets it, except under `nsh run`.
+    pub login_item: bool,
     /// The embedding app's channel with the apps the view runs
     /// (`nsh/host`): their launch parameters, events to them and handlers of
     /// their calls and posts ([`AppView::host`]). One for every app the view
@@ -245,6 +251,7 @@ impl Default for AppOptions {
             cache: Default::default(),
             storage: None,
             notifications: false,
+            login_item: false,
             host: nsh_engine::HostChannel::default(),
             transparent: false,
         }
@@ -438,6 +445,11 @@ impl AppView {
             audio: None,
             // The app's windows of its own are this backend's.
             windows: None,
+            // The standalone app's alone (`run_app`), when its runner says.
+            login_item: (options.login_item && self.surface.standalone.get()).then(|| {
+                Arc::new(crate::login_item::LoginItem)
+                    as Arc<dyn nsh_core::desktop::LoginItemBackend>
+            }),
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         *self.surface.chunks.borrow_mut() = options.chunks.clone();
@@ -863,13 +875,20 @@ pub(crate) fn close_main_window(key: u64) -> bool {
             .borrow()
             .as_ref()
             .filter(|running| running.view.surface().key() == key)
-            .map(|running| (running.window.clone(), running.keep_alive_on_close))
+            .map(|running| {
+                (
+                    running.window.clone(),
+                    running.keep_alive_on_close,
+                    running.view.surface().clone(),
+                )
+            })
     });
-    let Some((window, keep_alive)) = target else {
+    let Some((window, keep_alive, surface)) = target else {
         return false;
     };
     if keep_alive {
-        window.orderOut(None);
+        // Hidden, in full screen once it has left full screen.
+        crate::window::hide(&surface, nsh_core::ROOT_ID, &window);
     } else {
         window.close();
     }

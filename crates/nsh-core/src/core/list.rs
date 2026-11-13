@@ -113,6 +113,10 @@ pub(super) struct Slot {
     /// Item the runtime was last asked to show in this slot (its cell's
     /// index); `None` before the first request or when that item is gone.
     pub(super) requested: Option<u32>,
+    /// Item the cell's frame was last placed for: a cell placed for
+    /// another one appears there rather than moving from that row's place
+    /// under a layout animation (`core/list_motion.rs`).
+    pub(super) placed: Option<u32>,
 }
 
 impl Slot {
@@ -598,6 +602,7 @@ impl ListState {
         self.kept = self.kept.iter().filter_map(|&i| shift(i)).collect();
         self.by_index.clear();
         for (slot, s) in self.slots.iter_mut().enumerate() {
+            s.placed = s.placed.and_then(shift);
             let index = s.index.and_then(shift);
             let Some(new) = index else {
                 if s.index.take().is_some() {
@@ -1131,6 +1136,9 @@ impl ListState {
                 s.requested = None;
                 s.rendered = None;
             }
+            if s.placed.is_some_and(|p| p >= count) {
+                s.placed = None;
+            }
         }
         let old = self.sizes.len() as u32;
         self.sizes.resize(count as usize, f32::NAN);
@@ -1509,6 +1517,7 @@ impl ListState {
                     index: None,
                     rendered: None,
                     requested: None,
+                    placed: None,
                 },
             );
         }
@@ -1535,6 +1544,7 @@ impl ListState {
                 slot.cell = u32::MAX;
                 slot.rendered = None;
                 slot.requested = None;
+                slot.placed = None;
                 self.dirty = true;
             }
         }
@@ -1543,6 +1553,23 @@ impl ListState {
                 *extra = Extra::NONE;
                 self.dirty = true;
             }
+        }
+    }
+
+    /// Item `index`'s cell is placed for it. True when it was placed for
+    /// another item before, or never: it shows a new row there.
+    pub(super) fn place(&mut self, index: u32) -> bool {
+        let Some(&slot) = self.by_index.get(&index) else {
+            return true;
+        };
+        let s = &mut self.slots[slot as usize];
+        s.placed.replace(index) != Some(index)
+    }
+
+    /// Cell `cell` was moved out of sight: it shows no row's place.
+    pub(super) fn unplace(&mut self, cell: u32) {
+        if let Some(s) = self.slots.iter_mut().find(|s| s.cell == cell) {
+            s.placed = None;
         }
     }
 
@@ -1710,6 +1737,7 @@ impl ListState {
                             index: None,
                             rendered: None,
                             requested: None,
+                            placed: None,
                         });
                         this.slots.len() as u32 - 1
                     }
