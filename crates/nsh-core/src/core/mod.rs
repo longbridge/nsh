@@ -3065,6 +3065,7 @@ impl<M: TextEngine> Core<M> {
         }
         // The views' patches and the views to make first.
         self.render_components();
+        self.prepare_reveals();
         // The focus reported since, after the components made and released
         // what they did: one change of the chain, the views both chains
         // share untouched.
