@@ -671,6 +671,15 @@ pub struct CanvasImage {
     pub uri: Arc<str>,
 }
 
+impl CanvasImage {
+    /// The pixels per point its file name declares (`logo@3x.png` → 3; 1
+    /// without), as an `Image`'s: `drawImage` without a destination size
+    /// draws it at its pixels over this many points, on every screen.
+    pub fn density(&self) -> f32 {
+        crate::image::density(&self.uri)
+    }
+}
+
 /// One recorded operation. The methods and properties without `method` /
 /// `property` are written in `canvas.ts` (overloads, the state stack,
 /// gradients, images).
@@ -1534,6 +1543,14 @@ fn arc_to_cubics(
 mod tests {
     use super::*;
     use crate::text::{AttributedText, TextEngine, TextLayout};
+
+    #[test]
+    fn an_image_density_is_its_file_name_s() {
+        let density = |uri: &str| CanvasImage { uri: uri.into() }.density();
+        assert_eq!(density("asset:/logo@3x.png"), 3.0);
+        assert_eq!(density("https://example.com/a/b@2x.jpg"), 2.0);
+        assert_eq!(density("asset:/logo.png"), 1.0);
+    }
 
     /// A CSS gradient as the background of a box: the line through the
     /// box's center at the gradient's angle, as long as CSS makes it, and

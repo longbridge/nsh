@@ -919,6 +919,7 @@ impl Replay<'_> {
                 dest,
             } => self.image(
                 &image.uri,
+                image.density(),
                 source.map(|s| [s.origin.x.0, s.origin.y.0, s.size.width.0, s.size.height.0]),
                 dest,
             ),
@@ -1374,7 +1375,7 @@ impl Replay<'_> {
         });
     }
 
-    fn image(&mut self, uri: &str, source: Option<[f32; 4]>, dest: &[Num; 4]) {
+    fn image(&mut self, uri: &str, density: f32, source: Option<[f32; 4]>, dest: &[Num; 4]) {
         if self.state.singular {
             return;
         }
@@ -1387,9 +1388,11 @@ impl Replay<'_> {
             return;
         }
         let [dx, dy, dw, dh] = dest.map(|v| self.n(v));
-        // Missing sizes are the source's.
-        let dw = if dw.is_nan() { sw } else { dw };
-        let dh = if dh.is_nan() { sh } else { dh };
+        // Missing sizes are the source's pixels over the file name's
+        // density (`@3x`), as an `Image`'s: never the screen's.
+        let density = f64::from(density);
+        let dw = if dw.is_nan() { sw / density } else { dw };
+        let dh = if dh.is_nan() { sh / density } else { dh };
         if dw == 0.0 || dh == 0.0 {
             return;
         }
@@ -1832,6 +1835,49 @@ mod tests {
         // translated; nothing elsewhere.
         assert_eq!((alpha(5, 5), alpha(45, 5), alpha(22, 2)), (255, 255, 255));
         assert_eq!((alpha(15, 5), alpha(35, 5), alpha(27, 7)), (0, 0, 0));
+    }
+
+    #[test]
+    fn an_image_draws_its_pixels_over_its_file_density() {
+        // 60 × 30 pixels at (0, 0) without a destination size: 60 × 30
+        // points as `dot.png`, 20 × 10 as `dot@3x.png`, at scale 1 and 2.
+        let nan = Num::Const(f32::NAN);
+        let c = Num::Const;
+        let image = cairo::ImageSurface::create(cairo::Format::ARgb32, 60, 30).unwrap();
+        {
+            let cr = cairo::Context::new(&image).unwrap();
+            cr.set_source_rgb(1.0, 0.0, 0.0);
+            cr.paint().unwrap();
+        }
+        for (uri, (w, h)) in [
+            ("asset:/dot.png", (60, 30)),
+            ("asset:/dot@3x.png", (20, 10)),
+        ] {
+            let drawing = Drawing {
+                ops: vec![CanvasOp::DrawImage {
+                    image: nsh_core::canvas::CanvasImage { uri: uri.into() },
+                    source: None,
+                    dest: [c(0.0), c(0.0), nan, nan],
+                }],
+                ..Drawing::default()
+            };
+            let mut canvas = CanvasState::default();
+            canvas.images.insert(uri.into(), Some(image.clone()));
+            for scale in [1, 2] {
+                let size = (100 * scale, 40 * scale);
+                let raster =
+                    rasterize(&canvas, &drawing, None, Damage::All, size, scale as f64).unwrap();
+                let mut surface = copy(&raster.surface, None, size, scale as f64).unwrap();
+                let stride = surface.stride() as usize;
+                let data = surface.data().map(|d| d.to_vec()).unwrap();
+                let alpha = |x: i32, y: i32| {
+                    data[(y * scale) as usize * stride + (x * scale) as usize * 4 + 3]
+                };
+                let what = format!("{uri} at scale {scale}");
+                assert_eq!(alpha(w - 1, h - 1), 255, "{what}");
+                assert_eq!((alpha(w, 0), alpha(0, h)), (0, 0), "{what}");
+            }
+        }
     }
 
     /// A chart's pattern: a long line, then a run of bars drawn with

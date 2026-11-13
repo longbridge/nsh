@@ -442,6 +442,7 @@ impl<'a> Replay<'a> {
                 dest,
             } => self.image(
                 &image.uri,
+                image.density(),
                 source.map(|b| [b.origin.x, b.origin.y, b.size.width, b.size.height].map(|v| v.0)),
                 dest,
             ),
@@ -887,7 +888,7 @@ impl<'a> Replay<'a> {
         CGContext::restore_g_state(c);
     }
 
-    fn image(&self, uri: &str, source: Option<[f32; 4]>, dest: &[Num; 4]) {
+    fn image(&self, uri: &str, density: f32, source: Option<[f32; 4]>, dest: &[Num; 4]) {
         let Some(image) = self.images.get(uri) else {
             return;
         };
@@ -903,8 +904,12 @@ impl<'a> Replay<'a> {
         };
         let Some(cg) = cg else { return };
         let mut part: Option<CFRetained<CGImage>> = None;
-        // SAFETY: plain getters.
-        let (size, scale) = unsafe { (image.size(), image.scale()) };
+        // Its pixels over its file name's density (`@3x`), as an `Image`'s,
+        // never over the `UIImage`'s scale: that is the screen's the image
+        // was loaded for, so the same image would draw at another size on a
+        // 2x and a 3x device.
+        let density = f64::from(density);
+        let size = natural_size(&cg, density);
         let [dx, dy, mut dw, mut dh] = dest.map(|v| self.n(v));
         if let Some([sx, sy, sw, sh]) = source {
             let rect = CGRect::new(
@@ -916,10 +921,10 @@ impl<'a> Replay<'a> {
                 return;
             }
             if dw.is_nan() {
-                dw = sw as f64 / scale;
+                dw = sw as f64 / density;
             }
             if dh.is_nan() {
-                dh = sh as f64 / scale;
+                dh = sh as f64 / density;
             }
         }
         if dw.is_nan() {
@@ -943,6 +948,15 @@ impl<'a> Replay<'a> {
         );
         CGContext::restore_g_state(c);
     }
+}
+
+/// An image's natural size in a canvas, in points: its pixels over
+/// `density`.
+fn natural_size(image: &CGImage, density: CGFloat) -> CGSize {
+    CGSize::new(
+        CGImage::width(Some(image)) as CGFloat / density,
+        CGImage::height(Some(image)) as CGFloat / density,
+    )
 }
 
 fn blend(c: Composite) -> CGBlendMode {
@@ -1080,4 +1094,109 @@ fn fit_corners(w: f64, h: f64, radii: [f64; 4]) -> [f64; 4] {
         fit.bottom_left,
     ]
     .map(|r| f64::from(r.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use nsh_core::{
+        canvas::{CanvasImage, CanvasOp, Drawing, Num},
+        geometry::{Bounds, Point, ScaledPixels, Size},
+    };
+    use nsh_platform_apple::canvas_image::bitmap_context;
+    use objc2_core_graphics::{CGBitmapContextCreateImage, CGBitmapContextGetData};
+    use objc2_ui_kit::UIImageOrientation;
+
+    use super::*;
+
+    /// A `w` × `h` pixel opaque image, as a `UIImage` loaded for a screen of
+    /// `scale` pixels per point.
+    fn image(w: usize, h: usize, scale: CGFloat) -> Retained<UIImage> {
+        let cx = bitmap_context(w, h).unwrap();
+        CGContext::set_rgb_fill_color(Some(&cx), 1.0, 0.0, 0.0, 1.0);
+        CGContext::fill_rect(
+            Some(&cx),
+            CGRect::new(CGPoint::ZERO, CGSize::new(w as CGFloat, h as CGFloat)),
+        );
+        let cg = CGBitmapContextCreateImage(Some(&cx)).unwrap();
+        UIImage::imageWithCGImage_scale_orientation(&cg, scale, UIImageOrientation::Up)
+    }
+
+    /// The extent in points, from the top left, of what `ops` cover when
+    /// painted at `scale` pixels per point into a 200 × 200 point bitmap.
+    fn covered(ops: Vec<CanvasOp>, images: &Images, scale: usize) -> (usize, usize) {
+        let side = 200 * scale;
+        let cx = bitmap_context(side, side).unwrap();
+        CGContext::translate_ctm(Some(&cx), 0.0, side as CGFloat);
+        CGContext::scale_ctm(Some(&cx), scale as CGFloat, -(scale as CGFloat));
+        let base = CGContext::ctm(Some(&cx));
+        let drawing = Drawing {
+            ops,
+            ..Drawing::default()
+        };
+        paint(&cx, &drawing, &[], images, base);
+        let image = CGBitmapContextCreateImage(Some(&cx)).unwrap();
+        let cx = bitmap_context(side, side).unwrap();
+        // SAFETY: the bitmap Core Graphics allocated holds `side * side * 4`
+        // bytes while the context lives; read after drawing the image in.
+        let pixels = unsafe {
+            CGContext::draw_image(
+                Some(&cx),
+                CGRect::new(CGPoint::ZERO, CGSize::new(side as CGFloat, side as CGFloat)),
+                Some(&image),
+            );
+            let data = CGBitmapContextGetData(Some(&cx)).cast::<u8>();
+            std::slice::from_raw_parts(data, side * side * 4).to_vec()
+        };
+        // Rows run top down in memory (the bitmap's y up, drawn upright).
+        let alpha = |x: usize, y: usize| pixels[(y * side + x) * 4 + 3];
+        let w = (0..side).take_while(|&x| alpha(x, 0) > 0).count();
+        let h = (0..side).take_while(|&y| alpha(0, y) > 0).count();
+        (w / scale, h / scale)
+    }
+
+    fn draw(uri: &str, source: Option<[f32; 4]>) -> CanvasOp {
+        let nan = Num::Const(f32::NAN);
+        CanvasOp::DrawImage {
+            image: CanvasImage { uri: uri.into() },
+            source: source.map(|[x, y, w, h]| Bounds {
+                origin: Point::new(ScaledPixels(x), ScaledPixels(y)),
+                size: Size {
+                    width: ScaledPixels(w),
+                    height: ScaledPixels(h),
+                },
+            }),
+            dest: [Num::Const(0.0), Num::Const(0.0), nan, nan],
+        }
+    }
+
+    #[test]
+    fn an_image_draws_its_pixels_over_its_file_density_on_every_screen() {
+        // 120 × 60 pixels, as `dot.png` and `dot@3x.png`, loaded for a 1x,
+        // 2x and 3x screen, painted at 1, 2 and 3 pixels per point (a canvas
+        // view, an offscreen render): 120 × 60 and 40 × 20 points always.
+        for (uri, size, part) in [
+            ("asset:/dot.png", (120, 60), (90, 36)),
+            ("asset:/dot@3x.png", (40, 20), (30, 12)),
+        ] {
+            for loaded in [1.0, 2.0, 3.0] {
+                let images: Images = [(Arc::from(uri), image(120, 60, loaded))]
+                    .into_iter()
+                    .collect();
+                for scale in [1, 2, 3] {
+                    assert_eq!(
+                        covered(vec![draw(uri, None)], &images, scale),
+                        size,
+                        "{uri} loaded at {loaded}x, painted at {scale}x"
+                    );
+                    // A part of it, its source in the image's pixels.
+                    let source = Some([30.0, 0.0, 90.0, 36.0]);
+                    assert_eq!(
+                        covered(vec![draw(uri, source)], &images, scale),
+                        part,
+                        "a part of {uri}, loaded at {loaded}x, painted at {scale}x"
+                    );
+                }
+            }
+        }
+    }
 }

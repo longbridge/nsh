@@ -85,6 +85,7 @@ audio::check_rate ->                                             # a playback ra
 audio::check_rate(rate)                                          # a playback rate multiplier
 audio::check_volume ->                                           # audio volume, 0..1
 audio::check_volume(volume)                                      # audio volume, 0..1
+canvas::CanvasImage::density ->                                  # a pixel density (a file name's @2x)
 canvas::CanvasOp::MiterLimit.0                                   # a ratio of the stroke width
 canvas::Num::Const.0                                             # a generic number (a JS value, a recorded slot)
 canvas::Num::get ->                                              # a generic number (a JS value, a recorded slot)
