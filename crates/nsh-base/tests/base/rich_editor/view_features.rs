@@ -479,3 +479,72 @@ fn selection_boxes_are_drawn_in_task_items_and_code_blocks() {
         assert!(b.size.width >= text_box.size.width, "{text}");
     }
 }
+
+#[derive(Clone, PartialEq, Props)]
+struct InlineImageProps {
+    session: Option<EditorSession>,
+}
+
+/// An editor, and a press that shows how far apart the session puts the
+/// caret before and after an inline image, and the position it finds just
+/// after the image.
+#[component]
+fn InlineImage(props: InlineImageProps) -> impl IntoElement {
+    let session = props.session.clone().expect("a session");
+    let shown = signal(String::new());
+    let asked = session.clone();
+    view()
+        .child(
+            view()
+                .test_id("editor")
+                .w(px(600.0))
+                .h(px(200.0))
+                .child(rich_editor().editor(session)),
+        )
+        .child(
+            view()
+                .on_press(move || {
+                    let x = |pos| asked.coords_at_pos(pos).map_or(-1.0, |b| b.origin.x.0);
+                    let back = asked.coords_at_pos(4).and_then(|b| {
+                        asked.pos_at_coords(b.origin + nsh_core::geometry::point(px(1.0), px(1.0)))
+                    });
+                    shown.set(format!("Gap {} {:?}", (x(4) - x(3)).round(), back));
+                })
+                .child(text("Measure")),
+        )
+        .child(text(move || shown.get()))
+        .child(text("Ready"))
+}
+
+/// The caret on either side of an inline image is as far apart as the
+/// image is wide: the image's attachment character stands for its view,
+/// not for a character of the font.
+#[test]
+fn the_caret_steps_over_an_inline_images_width() {
+    let schema = feature_schema();
+    let plugins = starter::plugins(&schema);
+    // `ab` is 1..3, the image 3..4, `cd` 4..6.
+    let doc = schema
+        .node_from_json(&json!({"type": "doc", "content": [{"type": "paragraph", "content": [
+            {"type": "text", "text": "ab"},
+            {"type": "image", "attrs": {"src": "data:image/png;base64,", "width": 80, "height": 16}},
+            {"type": "text", "text": "cd"},
+        ]}]}))
+        .unwrap();
+    let state =
+        EditorState::create(EditorStateConfig::new(schema).doc(doc).plugins(plugins)).unwrap();
+    let session = EditorSession::new(state, NodeViews::new());
+    let mut config = EngineConfig {
+        viewport: Size::new(px(800.0), px(900.0)),
+        ..EngineConfig::new(Root::new::<InlineImage>(move || InlineImageProps {
+            session: Some(session.clone()),
+        }))
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    app.wait_for("text:Ready").unwrap();
+    app.press("text:Measure").unwrap();
+    // 80 apart, and a point just after the image is after it (4).
+    see(&mut app, "Gap 80 Some(4)");
+}

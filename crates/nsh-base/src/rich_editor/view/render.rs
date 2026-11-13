@@ -1207,6 +1207,14 @@ fn link_destination(marks: &[Mark]) -> Option<(SharedString, Option<SharedString
 /// An inline leaf: its one-character text (a line break), its node view,
 /// the text it is drawn as (`drawn`, [`Rv::leaf_text`]), else a box of its
 /// part.
+/// The box of an inline view or image at `pos`: it reports its width, which
+/// its attachment character stands for when the geometry places the caret
+/// and finds the position at a point.
+fn inline_box(rv: &Rv, el: View, pos: usize) -> View {
+    let width_rv = rv.clone();
+    el.on_layout(move |b: &Bounds<Points>| width_rv.set_inline_width(pos, b.size.width))
+}
+
 fn leaf(rv: &Rv, node: Node, pos: usize, drawn: Option<String>) -> AnyElement {
     let props = rv.props;
     let classes_node = node.clone();
@@ -1236,10 +1244,14 @@ fn leaf(rv: &Rv, node: Node, pos: usize, drawn: Option<String>) -> AnyElement {
         );
         let el = view.create(&cx, &node);
         cleanup(move || view.destroy());
-        return styled(view_box()).child(el).into_element();
+        return inline_box(rv, styled(view_box()), pos)
+            .child(el)
+            .into_element();
     }
     if render_kind(&node) == Some("image") {
-        return styled(view_box()).child(image_of(&node)).into_element();
+        return inline_box(rv, styled(view_box()), pos)
+            .child(image_of(&node))
+            .into_element();
     }
     if let Some(drawn) = drawn {
         let (class_node, style_node) = (node.clone(), node);
@@ -1620,6 +1632,18 @@ impl Rv {
             return;
         }
         geo.frames.insert(id, (parent, frame));
+        drop(geo);
+        self.layout_rev.update(|r| *r += 1);
+    }
+
+    /// The width of the inline view or image at `pos` (see
+    /// `Geometry::inline_widths`).
+    fn set_inline_width(&self, pos: usize, width: Points) {
+        let mut geo = self.geo.borrow_mut();
+        if geo.inline_widths.get(&pos) == Some(&width) {
+            return;
+        }
+        geo.inline_widths.insert(pos, width);
         drop(geo);
         self.layout_rev.update(|r| *r += 1);
     }
