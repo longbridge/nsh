@@ -1227,6 +1227,16 @@ impl TextEngine for CoreTextEngine {
         Size::new(Points(size.width as f32), Points(size.height as f32))
     }
 
+    fn first_baseline(&self, prepared: &Prepared, width: Points) -> Option<Points> {
+        // Typeset at the size it measures `width` wide, as the text is laid
+        // out: its first line's origin is its baseline, from the box's
+        // bottom.
+        let layout = self.layout(prepared, self.measure(prepared, Some(width)));
+        let layout = layout.downcast::<CoreTextLayout>()?;
+        let first = layout.lines.first()?;
+        Some(Points((layout.height - first.origin.y) as f32))
+    }
+
     fn layout(&self, prepared: &Prepared, size: Size<Points>) -> TextLayout {
         let (width, height) = (size.width.0 as CGFloat, size.height.0 as CGFloat);
         let rect = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(width, height));
@@ -1732,5 +1742,42 @@ mod hit_regressions {
             rects.is_empty(),
             "the token has no source character: {rects:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod first_baseline {
+    use super::*;
+
+    fn baseline(size: f32) -> (f32, nsh_core::TextLine) {
+        let engine = CoreTextEngine::default();
+        let mut text = AttributedText::default();
+        text.push(
+            "Chat",
+            ResolvedTextStyle {
+                font_size: Points(size),
+                ..Default::default()
+            },
+        );
+        let prepared = engine.prepare(&text);
+        let width = engine.measure(&prepared, None).width;
+        let baseline = engine
+            .first_baseline(&prepared, width)
+            .expect("a first line");
+        let laid = engine.layout(&prepared, engine.measure(&prepared, Some(width)));
+        (baseline.0, engine.lines(&laid).remove(0))
+    }
+
+    /// What `align-items: baseline` lines a text up by, as on macOS.
+    #[test]
+    fn is_where_the_first_line_is_drawn_and_grows_with_the_font() {
+        let (small, line) = baseline(12.0);
+        // The line is drawn its ascender above its baseline.
+        assert!(
+            (small - (line.y.0 + line.ascender.0)).abs() < 0.01,
+            "{small} {line:?}"
+        );
+        let (large, _) = baseline(24.0);
+        assert!(large > small * 1.5, "{small} {large}");
     }
 }

@@ -111,7 +111,7 @@ impl Runtime {
             900..=906 => self.standard.call(op, args),
             700..=702 => self.gestures.call(&self.bindings, op, args),
             313..=315 => self.dom.call(op, args),
-            600..=603 => canvas::call(&self.bindings, op, args),
+            600..=604 => canvas::call(&self.bindings, op, args),
             500..=507 => self.animation.call(&self.bindings, op, args),
             450..=451 => keymap::call(&self.bindings, op, args),
             310..=312 => self.rows.call(op, args),

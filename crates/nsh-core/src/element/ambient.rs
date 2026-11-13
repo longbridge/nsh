@@ -696,6 +696,16 @@ pub fn clipboard_has_image() -> Answer<bool> {
     answer
 }
 
+/// Renders `request`'s drawing offscreen into an image
+/// ([`super::Painter::render`]).
+pub(crate) fn render_canvas(
+    request: crate::canvas::render::RenderRequest,
+) -> Answer<Result<Vec<u8>, super::JsError>> {
+    let (answer, action) = super::services::render_canvas(request);
+    act(action);
+    answer
+}
+
 /// Whether the platform lets the user pick a color on the screen
 /// ([`pick_screen_color`]): macOS and browsers with an `EyeDropper`.
 pub fn can_pick_screen_color() -> bool {
@@ -1847,6 +1857,15 @@ pub fn set_fps_enabled(enabled: bool) {
     act(super::services::perf_monitor(enabled));
 }
 
+/// How the performance monitor shows (TS: `setFpsMode`), now and whenever it
+/// shows later: its whole panel ([`crate::FpsMode::Expanded`], the
+/// default), collapsed to its frame rate, or nothing while it still
+/// measures. A click on the panel switches between the first two. macOS's
+/// panel takes it; platforms without a panel ignore it.
+pub fn set_fps_mode(mode: crate::FpsMode) {
+    act(super::services::perf_monitor_mode(mode));
+}
+
 /// The performance monitor's signal, off until the platform reports it.
 fn perf_monitor_signal() -> Signal<bool> {
     if let Some(signal) = with_data(|d| d.ambient.perf_monitor) {
@@ -1878,6 +1897,16 @@ pub(crate) fn desktop_command(command: crate::desktop::DesktopCommand) {
         crate::ROOT_ID,
         Command::Desktop(Box::new(command)),
     ));
+}
+
+/// Asks the core whether the app launches at login (`enabled` `None`) or
+/// to change it ([`Action::LoginItem`]).
+pub(crate) fn login_item_request(
+    enabled: Option<bool>,
+) -> Answer<Result<bool, crate::desktop::LaunchAtLoginError>> {
+    let (answer, slot) = Answer::new();
+    act(Action::LoginItem(enabled, slot));
+    answer
 }
 
 #[cfg(test)]

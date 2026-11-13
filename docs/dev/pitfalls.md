@@ -229,6 +229,12 @@ Things that were found the hard way. Read the section of the area you change bef
   presented or dismissed over the stack sets the coordinator too and never reaches `didShow`) and are applied on the next
   main-queue turn (the coordinator outlives those callbacks); only pages the controller actually had count as popped by
   the user.
+- **A navigation bar shown again by a pop rests too high in a stack below the top of the window**: in a stack whose
+  view starts under the status bar (the app pads its root by the safe area), UIKit keeps the bar a few points down
+  (10 pt on an iPad). Popping a screen that hid the header slides the bar back in at the stack's very top, with the
+  screen's safe area to match, and UIKit moves neither until the screen's view is laid out again, which no pass during
+  the transition does (in `willShow`, alongside the transition, or of the navigation view). `didShow` asks for that
+  layout of the shown screen's view; `tests/header` checks it (`nsh test --target ios`).
 - **UIKit installs its own interactive-pop delegate while loading a navigation controller's view**: assigning NSH's
   delegate when the stack is created can be overwritten. Bind the current recognizer in `didShow`, after UIKit has
   configured the screen, so hidden headers use NSH's mounted `popOnSwipe` / `popOnBack` policy too. Verify the gesture
@@ -321,6 +327,11 @@ Things that were found the hard way. Read the section of the area you change bef
   measures again. A layout of precomputed text does not draw `UnderlineSpan` / `StrikethroughSpan` (even ones set after
   `create`): runs carry a `TextLayouts.Decoration` marker and `TextBox` draws the lines. `Layout.Alignment` is relative to each
   paragraph's direction: absolute left / right alignment sets an `AlignmentSpan` per paragraph from its resolved direction.
+  `StaticLayout.Builder.obtain` hands out pooled builders and, on Android 15, does not reset `useBoundsForWidth` or
+  `shiftDrawingOffsetForStartOverhang`; a `TextView` (an `Input`'s `EditText`) of an app targeting 35 or later turns them
+  on, and a layout from such a builder breaks lines by the glyphs' ink, wider than the advances text is measured by
+  ("Wor" / "k"): `TextLayouts` sets both to false on every builder (`examples/gallery/tests/text-bounds.test.tsx`, on a
+  device with `--target android`).
 - **Android, text hit testing**: `Layout.getOffsetForHorizontal` stops before the last cluster of a wrapped (non-last)
   line, so a hit past its end is snapped to the line's end (`TextLayouts.hitTest`, upstream); `getSelectionPath` adds
   margin rectangles when a range ends at a wrapped line's end, so range boxes come from the run's carets
