@@ -5,6 +5,7 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Rect;
+import android.os.Build;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.VelocityTracker;
@@ -12,6 +13,7 @@ import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.ViewParent;
+import android.view.WindowInsets;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
@@ -1195,15 +1197,27 @@ final class ScrollBox extends FrameLayout implements Node {
 
     /**
      * How a touch treats the keyboard ({@code keyboardShouldPersistTaps}):
-     * -1 when no input is focused or the touch is on an input, else the
-     * mode of the outermost scroll view that does not let taps through.
+     * -1 when no input is focused, the keyboard is down (the back button
+     * hides it and leaves the input focused) or the touch is on an input,
+     * else the mode of the outermost scroll view that does not let taps
+     * through.
      */
     private int tapMode(MotionEvent e) {
-        if (mounter.focusedInput() == null || inputAt(this, e.getX(), e.getY())) return -1;
+        if (mounter.focusedInput() == null || !keyboardShown() || inputAt(this, e.getX(), e.getY())) return -1;
         for (ViewParent p = getParent(); p != null; p = p.getParent()) {
             if (p instanceof ScrollBox && ((ScrollBox) p).keyboardTaps != 1) return -1;
         }
         return keyboardTaps == 1 ? -1 : keyboardTaps;
+    }
+
+    /**
+     * Whether the soft keyboard shows. Before Android 11 the window does not
+     * say: a focused input is taken to have it up.
+     */
+    private boolean keyboardShown() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return true;
+        WindowInsets insets = getRootWindowInsets();
+        return insets == null || insets.isVisible(WindowInsets.Type.ime());
     }
 
     /**
