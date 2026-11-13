@@ -3862,6 +3862,40 @@ mod tests {
         }
     }
 
+    #[test]
+    fn tab_stops_at_fields_and_controls_on_windows() {
+        let mut config = EngineConfig::new(Root::of::<ReturnAllows>());
+        config.environment.os = Os::Windows;
+        config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+        let mut app = Headless::start(config).unwrap();
+        app.first_render().unwrap();
+        let id = |app: &Headless, s: &str| match app.screen().view(&Selector::parse(s).unwrap()) {
+            crate::screen::Pick::One(id) => id,
+            _ => panic!("{s} is shown"),
+        };
+        let (note, deny, cancel) = (
+            id(&app, "id:note"),
+            id(&app, "id:deny"),
+            id(&app, "id:cancel"),
+        );
+        // The field, then the views that take presses, in tree order, as
+        // the Windows backend's traversal (`keyboard::is_stop`) runs it.
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().focused(), Some(note));
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().focused(), None);
+        assert_eq!(app.screen().key_focus(), Some(deny));
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(cancel));
+        app.press_key("shift+tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(deny));
+        // Around from the last stop to the field.
+        app.press_key("tab").unwrap();
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().focused(), Some(note));
+        assert_eq!(app.screen().key_focus(), None);
+    }
+
     /// A list of 200 rows of its own, each a button showing its row.
     #[component]
     fn LongList() -> impl IntoElement {
