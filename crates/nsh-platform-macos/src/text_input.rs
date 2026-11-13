@@ -2093,8 +2093,7 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
             text.setEditable(config.editable);
             text.setSelectable(true);
             // Never in a password shown as plain text.
-            let correct =
-                config.auto_correct && config.keyboard != nsh_core::KeyboardType::VisiblePassword;
+            let correct = config.auto_correct && !config.visible_password();
             text.setContinuousSpellCheckingEnabled(correct);
             text.setAutomaticSpellingCorrectionEnabled(correct);
             let line = LineBox::new(config.style.line_height.0 as CGFloat, natural_height(&font));

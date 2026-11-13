@@ -163,6 +163,12 @@ let composing = false;
 > [!NOTE]
 > 受控输入框不会丢失按键。每次原生编辑都带有一个编辑计数，JS 传回的 `value` 只有对应最新一次编辑时才会被应用。如果 JS 较慢，而用户在这期间又输入了更多内容，过期的值会被丢弃，不会覆盖更新的文本。
 
+### 硬件按键与输入框
+
+`Input` 拥有用于编辑它的按键。平台会原生地应用这些按键，以及负责组字的输入法；祖先上的 `onKeyDown` / `onKeyUp` 监听或 `captureKeys` 规则都不会改变这一点：它不会拦截输入、光标移动、选区或编辑命令，也拿不走系统交给该输入框的按键。原始硬件按键（`onKeyDown` / `onKeyUp`、`captureKeys`）用于自行绘制的交互界面，而不是扩展文本输入框；输入框自身的文本请使用 `onKeyPress`、`onChange` 和 `onSubmit`（[键盘](../elements/keyboard.md#自定义视图的硬件按键)）。
+
+位于捕获视图中的表单控件同样保持这一边界：只有该控件本身不拥有的按键（例如功能键，或控件不接收的 Tab）会到达捕获规则，并以 `defaultPrevented` 报告策略对本次转换的决定。
+
 ## 属性
 
 在 Rust 中，每个属性都是 `input()` 上同名的蛇形命名方法（`.placeholder(..)`、`.masked(true)`、`.max_length(6)`、`.return_key_type(ReturnKeyType::Next)`、`.selected_range((0, 4))`），以下几个有自己的名字：`.keyboard_type(KeyboardType::Email)` 及 `KeyboardType` 的其他变体，`autoComplete` 对应 `.auto_fill(AutoFill::Email)`，`ios={{ … }}` 中的属性对应 `.keyboard_appearance(..)` 和 `.input_accessory(..)`。每个事件都是一个 `on_` 方法：`.on_change(|text: &str| ..)`、`.on_submit(|text: &str| ..)`、`.on_focus(..)`、`.on_blur(..)`、`.on_selection_change(|s: &Selection| ..)`、`.on_key_press(|key: &str| ..)`、`.on_content_size_change(|size: &Size<Points>| ..)`。
@@ -243,11 +249,12 @@ input()
 | `KeyboardType::Numeric` | `"numeric"` | 与 React Native 相同：iOS 上是小数键盘；Android 上是带正负号和小数点的数字键盘。 |
 | `KeyboardType::NumbersAndPunctuation` | `"numbers-and-punctuation"` | 数字、负号和标点（iOS 的数字与标点键盘；Android 上是带正负号和小数点的数字键盘）。在 iOS 上输入负数时使用它。 |
 | `KeyboardType::Phone` | `"phone-pad"` | 电话拨号盘。 |
-| `KeyboardType::VisiblePassword` | `"visible-password"` | 以明文显示的密码（“显示密码”开关、令牌）：Android 的可见密码键盘、iOS 的 ASCII 键盘，无论 `autoCapitalize` 和 `autoCorrect` 如何都不自动大写、不提供建议或自动更正。在 Web 上是关闭了自动大写和拼写检查的文本框。`secure` 仍会隐藏文本。 |
 
 在 iOS 上，`.keyboard_appearance(KeyboardAppearance::Dark)`（TSX 的 `ios={{ keyboardAppearance: "dark" }}`；或浅色、默认）让键盘使用浅色或深色外观而不随系统外观变化，适合在浅色模式下运行的深色应用。Android 的键盘始终跟随系统主题。
 
 自动填充（`.auto_fill(AutoFill::Email)`，TSX 的 `autoComplete`）告诉系统字段里装的是什么，系统就能提供已保存的姓名、地址、密码以及短信中的验证码。Rust 的 `AutoFill` 每种内容一个变体（`Name`、`GivenName`、`FamilyName`、`Email`、`Tel`、`Username`、`Password`、`NewPassword`、`OneTimeCode`、`StreetAddress`、`PostalCode`、`Country`、`CreditCardNumber`、`Url`、`Birthdate` 等，以及 `Off`）。TSX 接受以下取值：`"name"`、`"given-name"`、`"family-name"`、`"email"`、`"tel"`、`"username"`、`"current-password"`、`"new-password"`、`"one-time-code"`、`"street-address"`、`"postal-code"`、`"country"`、`"cc-number"`、`"cc-exp"`、`"cc-csc"`、`"url"`、`"birthdate-full"` 等，或 `"off"`。iOS 自己的名字（`"emailAddress"`、`"oneTimeCode"` 等）也可以用在 `autoComplete` 或 `ios={{ textContentType }}` 中。
+
+未开启 `masked` 的密码框（例如点了“显示密码”之后）就是以明文显示的密码：`autoComplete` 为 `"current-password"` 或 `"new-password"`（`AutoFill::Password`、`AutoFill::NewPassword`）且 `masked` 关闭时，Android 使用可见密码键盘，iOS 使用 ASCII 键盘，各平台都不会自动大写、提供建议或自动更正，无论 `autoCapitalize` 和 `autoCorrect` 如何设置。显示/隐藏按钮只需切换 `masked`。
 
 ```rust tabs
 use nsh_core::element::AutoFill;
@@ -717,6 +724,8 @@ function ChatScreen() {
 内边距（`.pb_keyboard()`）让上方内容缩小，背景仍延伸到屏幕底部；底部外边距（`marginBottom: "env(keyboard-inset-height)"`、`.mb_keyboard()`）让整个视图止于键盘顶部。`calc(env(keyboard-inset-height) + <length>)`（Rust `.pb_keyboard_plus(..)`、`.mb_keyboard_plus(..)`）再加一段长度，例如减去视图下方标签栏的高度。
 
 完整的键盘高度适合延伸到 surface 底部的视图，页面内容通常如此。在会为键盘缩小窗口的 Android 宿主上，窗口本身已经变小，该变量为 0。见[键盘](../elements/keyboard.md)。
+
+浮层自己会避开键盘：底部的 [Sheet](../elements/sheet.md#the-software-keyboard)、抽屉，以及手机上以 sheet 呈现的菜单、选择器和日期选择器都贴在键盘上沿，并随键盘移动。
 
 ### 键盘访问器
 

@@ -1,7 +1,7 @@
 // A case of the API's test suite (docs/dev/compatibility.md): the props of
 // `<Input>` as the platform receives them on iOS (the scripts' default
-// platform): the keyboard (`keyboardType`, `visible-password` among them,
-// `returnKeyType`, `autoCapitalize`, `autoCorrect`), `autoComplete` and iOS's
+// platform): the keyboard (`keyboardType`, `returnKeyType`,
+// `autoCapitalize`, `autoCorrect`), `autoComplete` and iOS's
 // `textContentType` for it, `maxLength`, `submitBehavior`, `autoFocus`,
 // `caret`, `defaultValue` (the initial text, then the user's) and
 // `value` (the text, controlled: what the app sets it to). Its script checks
@@ -20,7 +20,6 @@ function App() {
         autoCapitalize="none"
         autoCorrect={false}
       />
-      <Input testID="token" keyboardType="visible-password" />
       <Input testID="complete" autoComplete="one-time-code" />
       <Input testID="content-type" ios={{ textContentType: "emailAddress" }} />
       <Input testID="short" maxLength={4} />

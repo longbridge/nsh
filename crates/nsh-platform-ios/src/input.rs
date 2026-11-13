@@ -1321,6 +1321,7 @@ unsafe fn send<A: Copy>(view: &AnyObject, sel: Sel, value: A) {
 
 fn traits(view: &AnyObject, config: &InputConfig) {
     let keyboard = match config.keyboard {
+        KeyboardType::Default if config.visible_password() => UIKeyboardType::ASCIICapable,
         KeyboardType::Default => UIKeyboardType::Default,
         KeyboardType::Number => UIKeyboardType::NumberPad,
         // React Native's `numeric`: digits and a decimal separator.
@@ -1329,7 +1330,6 @@ fn traits(view: &AnyObject, config: &InputConfig) {
         KeyboardType::Email => UIKeyboardType::EmailAddress,
         KeyboardType::Phone => UIKeyboardType::PhonePad,
         KeyboardType::Url => UIKeyboardType::URL,
-        KeyboardType::VisiblePassword => UIKeyboardType::ASCIICapable,
     };
     let return_key = match config.return_key {
         ReturnKeyType::Default => UIReturnKeyType::Default,
@@ -1340,7 +1340,7 @@ fn traits(view: &AnyObject, config: &InputConfig) {
         ReturnKeyType::Send => UIReturnKeyType::Send,
     };
     // A visible password is typed as it is: never capitalized or corrected.
-    let password = config.keyboard == KeyboardType::VisiblePassword;
+    let password = config.visible_password();
     let capitalize = match config.auto_capitalize {
         _ if password => UITextAutocapitalizationType::None,
         AutoCapitalize::None => UITextAutocapitalizationType::None,

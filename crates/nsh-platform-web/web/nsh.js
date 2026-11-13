@@ -5036,16 +5036,17 @@ class Player {
         : config.keyboard === "email-address" ? "email"
           : config.keyboard === "url" ? "url"
             : config.keyboard === "phone-pad" ? "tel" : "text";
-      field.inputMode = { "number-pad": "numeric", numeric: "decimal", "decimal-pad": "decimal", "numbers-and-punctuation": "text", "phone-pad": "tel", "email-address": "email", url: "url", "visible-password": "text" }[config.keyboard] ?? "text";
+      field.inputMode = { "number-pad": "numeric", numeric: "decimal", "decimal-pad": "decimal", "numbers-and-punctuation": "text", "phone-pad": "tel", "email-address": "email", url: "url" }[config.keyboard] ?? "text";
     }
     // A textarea that submits shows the return key's action too.
     if (!config.multiline || config.submit !== "newline") {
       field.enterKeyHint = { done: "done", go: "go", next: "next", search: "search", send: "send" }[config.returnKey] ?? "enter";
     } else field.removeAttribute("enterkeyhint");
     field.readOnly = !config.editable;
-    // A visible password is never capitalized or checked (the closest the
-    // browser has to Android's visible password keyboard).
-    const password = config.keyboard === "visible-password";
+    // A password shown as plain text (a password field that is not secure)
+    // is never capitalized or checked (the closest the browser has to
+    // Android's visible password keyboard).
+    const password = !config.secure && (config.autoComplete === "current-password" || config.autoComplete === "new-password");
     const correct = config.autoCorrect && !password;
     field.autocapitalize = password || config.autoCapitalize === "none" ? "off" : config.autoCapitalize;
     field.spellcheck = correct;

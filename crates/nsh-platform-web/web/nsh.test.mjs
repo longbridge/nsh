@@ -176,8 +176,8 @@ test("input autoCorrect sets spellcheck and the autocorrect attribute on both fi
       assert.equal(field.spellcheck, autoCorrect);
       assert.equal(attrs.get("autocorrect"), autoCorrect ? "on" : "off");
     }
-    // A visible password is never corrected, whatever autoCorrect says.
-    player.op_in(["in", 1, { multiline, autoCorrect: true, keyboard: "visible-password" }, null]);
+    // A password shown as plain text is never corrected, whatever autoCorrect says.
+    player.op_in(["in", 1, { multiline, autoCorrect: true, autoComplete: "current-password" }, null]);
     assert.equal(field.spellcheck, false);
     assert.equal(attrs.get("autocorrect"), "off");
   }

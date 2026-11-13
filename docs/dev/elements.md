@@ -13,12 +13,12 @@ Every tag is a component in scope (`native-pipeline.md`): the primitives `View`,
 | `<Canvas draw>` | `CanvasView` (drawRect replay) | see [canvas.md](canvas.md) |
 | `<Shader source>` | `NshView` + a sublayer with the rendered frame | a WGSL `shade(uv)` drawn under the children; `uniforms`, `paused`; see [shaders.md](shaders.md) |
 | `<List each>` | UIScrollView + recycled cells | see [scrolling-and-lists.md](scrolling-and-lists.md) |
-| `<Input>` | UITextField / UITextView in a container | `value` / `defaultValue` / `onChange` (`{ value }`) / `onSubmit` / `onFocus` / `onBlur`, `placeholder` (its color: the `placeholderColor` style key, `placeholder:text-*`), `masked`, `keyboardType` (React Native's values: `number-pad` digits only, `decimal-pad`, `numeric` = iOS's decimal pad / Android's signed decimal, `numbers-and-punctuation` = iOS's numbers and punctuation / Android's signed decimal, `email-address`, `phone-pad`, `url`, `visible-password` = Android's visible password / iOS's ASCII keyboard, never capitalized or corrected), `ios={{ keyboardAppearance }}` (`default` / `light` / `dark`; Android's keyboards follow the system theme), `returnKeyType`, `autoCapitalize`, `autoCorrect`, `multiline`, `maxLength`, `readonly`, `autoFocus`, the `selectionColor` style key (`selection:text-*`), `submitBehavior` (`submit` / `blurAndSubmit` / `newline`, resolved with `multiline` by `InputConfig::submit()`, which is all platforms read; a multiline input that submits takes no line break from return, but does from Shift / Option / Alt+Return on hardware keyboards, and a return that commits an IME composition never submits), `selectedRange` + `onSelectionChange` (UTF-16 `start` / `end`), `onCaretMove` (where the caret is: `bounds` in the input, `pageBounds` in the root view; "Caret" below), `onPaste` + `pasteBehavior` (what was pasted, and whether the input inserts its text; "Paste" below), `onKeyPress` (`key`: the text, `Backspace`, `Enter`), `onCompositionChange` (`composing`, `text`: an input method's composition as it starts, changes and ends, its end after the `onChange` of the committed text; each platform tracks the composition natively and holds a `value` the app sets during one until it ends, since setting the text would end it and commit the text being composed), `autoComplete` (autofill; `ios={{ textContentType }}` for iOS's names), `caret` (`false` hides the caret), `onContentSizeChange` (the value's size, for growing inputs: reported by the core after any layout that follows a change of the text or the content width, one empty line's for an empty input though it is sized by its placeholder); ref `setSelection(start, end)`, `insertText(text)` |
+| `<Input>` | UITextField / UITextView in a container | `value` / `defaultValue` / `onChange` (`{ value }`) / `onSubmit` / `onFocus` / `onBlur`, `placeholder` (its color: the `placeholderColor` style key, `placeholder:text-*`), `masked`, `keyboardType` (React Native's values: `number-pad` digits only, `decimal-pad`, `numeric` = iOS's decimal pad / Android's signed decimal, `numbers-and-punctuation` = iOS's numbers and punctuation / Android's signed decimal, `email-address`, `phone-pad`, `url`), `ios={{ keyboardAppearance }}` (`default` / `light` / `dark`; Android's keyboards follow the system theme), `returnKeyType`, `autoCapitalize`, `autoCorrect`, `multiline`, `maxLength`, `readonly`, `autoFocus`, the `selectionColor` style key (`selection:text-*`), `submitBehavior` (`submit` / `blurAndSubmit` / `newline`, resolved with `multiline` by `InputConfig::submit()`, which is all platforms read; a multiline input that submits takes no line break from return, but does from Shift / Option / Alt+Return on hardware keyboards, and a return that commits an IME composition never submits), `selectedRange` + `onSelectionChange` (UTF-16 `start` / `end`), `onCaretMove` (where the caret is: `bounds` in the input, `pageBounds` in the root view; "Caret" below), `onPaste` + `pasteBehavior` (what was pasted, and whether the input inserts its text; "Paste" below), `onKeyPress` (`key`: the text, `Backspace`, `Enter`), `onCompositionChange` (`composing`, `text`: an input method's composition as it starts, changes and ends, its end after the `onChange` of the committed text; each platform tracks the composition natively and holds a `value` the app sets during one until it ends, since setting the text would end it and commit the text being composed), `autoComplete` (autofill; `ios={{ textContentType }}` for iOS's names), `caret` (`false` hides the caret), `onContentSizeChange` (the value's size, for growing inputs: reported by the core after any layout that follows a change of the text or the content width, one empty line's for an empty input though it is sized by its placeholder); ref `setSelection(start, end)`, `insertText(text)` |
 | `<NavStack>` / `<NavPage>` | UINavigationController | `createNavStack(routes)`: `push` / `pop` / `popToRoot` / `replace` / `setRoutes` / `remove`; pages keep their state while stacked; on iOS and Android the system header (content below the header UIKit shows: the platform measures it, `Core::set_screen_header`; `title`, `headerLeft` / `headerRight` / `headerTitle` elements, `headerTransparent`, `headerVisible`, `headerBackVisible`, `headerLargeTitle`, `headerBackTitle`, colors from `headerStyle` / `headerClass`, in Rust `header_style_with(|s| ..)`: typed styles in `headerClass`'s place); on the desktops and the web the page's `header` slot (the app's element, which the core places at the top of the page, full width, with the content below it; NSH draws nothing else there); swipe back (`popOnSwipe`: the interactive gesture only); `statusBar` (below); `popOnBack={false}` keeps the user on a page (no swipe; the back buttons and keys send `onBackPress` instead of popping); `onBackPress` is sent on every back press while the app listens; `onDismiss` after the user popped it |
 | `<Dialog>` | presented UIViewController | `open` (default true), `animation`, `onOpen`, `onClose`, `onCancel` (every close attempt), `onOpenChange({ open, reason })` (`"cancel"` / `"backdropPress"` / `"swipe"`); `closeOnEscape` / `closeOnBackdropPress` / `closeOnSwipe` (default true; iOS sheets swipe away, Escape and Android back close natively, then `onCancel` + `onOpenChange({ open: false, reason })` + `onClose`; the renderer keeps a removed dialog's `onClose` until the platform reports it, `dom.rs` `dismissed`); `class` / `style` style the popup (the view holding the children), `backdropClass` / `backdropStyle` add a backdrop part behind it (none otherwise) whose presses are close attempts; `presentation` (iOS: `fullScreen` over a clear background, `pageSheet` / `formSheet` keep the system's sheet background; ignored on Android, the desktops and the web, where a dialog is a transparent layer over the whole window); `statusBar` (below); `ios={{ supportedOrientations }}`, `android={{ statusBarTranslucent }}` (otherwise the content starts below the status bar) |
 | `<Overlay>` | a `NshView` in the root view (the surface's, or the dialog's around it) | its children on top of that root view, outside the parent's layout and clipping; `anchor` (a ref, `{ x, y }` or `{ origin, size }`), `placement`, `align`, `offset`, `margin`, `onPosition`, `onPressOutside`, `onCancel` ("Overlays" below) |
 | `<InputAccessoryView>` | a NshView set as `inputAccessoryView` | `nativeID`; inputs name it with `ios={{ inputAccessoryViewID }}`. A layout root as wide as the window and as tall as its content; the core resolves the id (`InputConfig::accessory`). Renders nothing on Android |
-| `<WebView>` | WKWebView (WebKit loaded on first use) | `src` (a URL) or `html` (inline HTML, shown instead of `src`) + `baseUrl`, `injectedJavaScript(BeforeContentLoaded)`, `onMessage` (pages call `window.nsh.postMessage`), `onLoad*`, `onNavigationStateChange`, `onDownload` (macOS: `WKDownload` into the app's data directory's `downloads/<id>/`, only with a listener), `incognito` (website data of its own, in memory: each platform makes the web view from its first props, and the core keeps the prop from changing afterwards), Rust's `url_scheme(scheme, handler)` (URL schemes the page loads from the app, `nsh_core::web_resource`: the handler is called on the main thread with a request answered once, from any thread; read when the web view is made, as `incognito`; iOS and macOS `WKURLSchemeHandler` in `nsh-platform-apple`, Linux `webkit_web_context_register_uri_scheme`); ref: `reload()`, `goBack()`, `goForward()`, `postMessage(data)`, `injectJavaScript(js)`, `load({ src, headers })` (headers on the document request only: `NSMutableURLRequest` + `loadRequest`) |
+| `<WebView>` | WKWebView (WebKit loaded on first use) | `src` (a URL) or `html` (inline HTML, shown instead of `src`) + `baseUrl`, `injectedJavaScript(BeforeContentLoaded)`, `onMessage` (pages call `window.nsh.postMessage`), `onLoad*`, `onNavigationStateChange`, `onDownload` (macOS's `WKDownload`, WebKitGTK's session downloads or WebView2's `DownloadStarting` into the app's data directory's `downloads/<id>/`, only with a listener; a Rust `onDownloadPending` listener chooses destinations instead), `incognito` (website data of its own, in memory: each platform makes the web view from its first props, and the core keeps the prop from changing afterwards), Rust's `url_scheme(scheme, handler)` (URL schemes the page loads from the app, `nsh_core::web_resource`: the handler is called on the main thread with a request answered once, from any thread; read when the web view is made, as `incognito`; iOS and macOS `WKURLSchemeHandler` in `nsh-platform-apple`, Linux `webkit_web_context_register_uri_scheme`); ref: `reload()`, `goBack()`, `goForward()`, `postMessage(data)`, `injectJavaScript(js)`, `load({ src, headers })` (headers on the document request only: `NSMutableURLRequest` + `loadRequest`) |
 | `nativeComponent` (`nsh`'s `nativeComponent`) | a `NshView` box filled by the registered component's view; own props may be bound to animated values | see [embedding.md](embedding.md) |
 | `<Video>` | AVPlayerLayer / AVPlayerViewController (AVFoundation loaded on first use) | `src` (a URL), `paused`, `muted`, `volume`, `rate`, `repeat`, the `objectFit` style (`object-*`), `controls`, `onLoad` / `onProgress` / `onEnd` / `onBuffer` / `onError`; ref: `seek(seconds)` |
 
@@ -59,6 +59,40 @@ exist, not an API to be compatible with. Components that need core or native sup
 of what is in scope: a host element's primitive is imported from its home (`import { View } from "nsh"`) and compiled
 in place, a component is imported (`import { Chart } from "app/native"`) or local; lowercase tags are errors
 (`native-pipeline.md`).
+
+## Desktop WebView downloads
+
+`nsh_core::webview` defines the download decision protocol. A Rust host registers `WebView::on_download_pending`;
+that registration alone opts into manual destinations, so there is no separate behavior prop. The platform emits
+`DownloadPending` with the download's `id`, `url` and `filename`; the core's typed listener wraps it in
+`WebDownloadPending`, whose private handle binds the original web view's node, executor and download id. The app
+calls `accept(impl Into<DownloadDestination>)` or `cancel()` and awaits `Answer<Result<(), String>>`: it settles
+the decision, not the transfer. Clones share the decision; a handle cannot be forged for another view or download.
+
+The core assigns a request id, keeps its target node and answer, and sends `Command::WebViewRequest` with the mount
+batch. The platform answers with `WebViewReply` on that node. Only a matching pending request is settled; replies
+from another node, duplicates and late replies are dropped, and unmount, unsupported hosts and `REPLY_TIMEOUT`
+settle with an error.
+
+A `DownloadDestination` is absolute, names a file, and its parent must exist. A `PathBuf` refuses an existing file;
+`DownloadDestination::default().path(..).overwrite(true)` replaces one. Platforms write an owned staging file beside
+the destination and publish atomically only on completion: failure, cancellation and teardown remove only that
+output, never the app's existing or completed file. Native deferrals are bounded; a pending decision the app never
+answers is cancelled. An unknown, duplicate or already-finished decision errors without touching another download.
+
+The handler registration alone sets the internal `WebProps::defer_downloads` flag (Rust-only, hidden, reset when the
+handler goes). On a platform where `Environment::webview_requests` is false, that request cannot be honored: the
+core mounts an inert empty document with JavaScript, injected scripts, source/base URL and back/forward gestures
+disabled, reports `onError`, and refuses app-driven `load`, `reload`, back, forward, `injectJavaScript` and
+`Evaluate` (the evaluation answer settles with an error). Removing the handler resets the flag and restores the
+app's page and automatic downloads. No public behavior enum or config exists for this.
+
+Without an `onDownloadPending` listener the platform keeps its automatic behavior: an `onDownload` listener saves
+into `<data dir>/<app id>/downloads/<id>/<sanitized filename>` (macOS, Windows and Linux). Every platform removes
+path separators, control characters, bidi controls and leading dots, and caps names at 200 bytes; Windows also
+refuses reserved device names (including `CONIN$`/`CONOUT$`, `COM`/`LPT` 0-9 and superscripts) and trailing dots or
+spaces. Downloads are Rust-only; TSX keeps the existing `onDownload` lifecycle and gains no path-writing API.
+Host authority stays with the app: it chooses the path, and capabilities continue to govern which pages load.
 
 ## The main thread never waits for JS
 
@@ -349,7 +383,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   field), macOS answers them as `AXSelectedChildren` / `AXLinkedUIElements` and tells VoiceOver when the active item
   changes (an input that is a combo box is its field's `AXComboBox`). `Environment::reads_active_descendants` says
   the platform reads them; elsewhere `nsh-base`'s `Select`, `Combobox` and `Command` announce the highlighted item
-  themselves. Views without a label read their texts. The props go as one `MountItem::ViewProps`, except
+  themselves. `accessibilityDescribedBy` (`aria-describedby`) names the element whose text describes this one (a
+  field's error line), looked up the same way into `Accessibility::described_by`; while that element is there, its
+  text (its labels and texts, the hidden ones left out) is also `Accessibility::description`, in the place of the
+  element's own `accessibilityDescription`, so every platform reads it where it reads a description; the web also
+  sets `aria-describedby` on the focused element. Views without a label read their texts. The props go as one `MountItem::ViewProps`, except
   a label changing alone on mounted props (one that follows app state: a count, a price), which goes as
   `MountItem::AccessibilityLabel`. The `increment` / `decrement` actions make an element adjustable whatever its
   role: iOS adds the adjustable trait to the traits of its role (`native_view.rs` `traits`), so VoiceOver's swipe up /
@@ -372,6 +410,37 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   view, after the input method) through `Native.keyDown` / `keyUp`, the table kept in Rust (`keymap.rs`), never
   encoded for Java. Both leave a composing input method its keys and consume a taken key's release too. Rust views' bindings (`on_key`) join JS's in that one table, and the core runs
   their handlers (`docs/dev/components.md`).
+- **Raw key notifications** (`onKeyDown` / `onKeyUp`, Rust `Interactive::on_key_down` / `on_key_up`): a platform
+  sends ONE `EventPayload::Key` at the focused view. The engine's common routing takes the core's window-bounded,
+  enabled path (`Core::key_path`) and notifies Rust component listeners and JS listeners once each per view, for
+  both transitions; no backend sends an event per ancestor. `KeyEvent` carries the source's raw logical `key`
+  (`SharedString`: the DOM's spelling for named keys, else the character the layout reports, its case kept), the
+  physical `code` in the DOM's spelling (`"KeyA"`, `"ArrowLeft"`, `"NumpadEnter"`, `"ShiftLeft"`; `""` when the
+  source has no genuine physical identity — GPUI's logical events, synthetic input — and never inferred from
+  `key`), modifiers, repeat and `default_prevented`. `default_prevented` is DOM-shaped observable state: the
+  mounted capture rule's decision for that one transition, computed before the platform runs a default. It is not
+  a veto a listener can cast: the UI thread never waits for JS or Rust callbacks, which are told afterwards, so
+  GTK's propagation loop, AppKit's default handling and beep, Win32's `TranslateMessage` and `DefWindowProc`, and
+  GPUI's `on_key_event` Bubble pass (it reads the window's `prevent_default` after the pass that notifies the
+  listener) all run on the decision the backend already made.
+  `KeyCapture` (JS `captureKeys`) stores canonical `Keystroke`s, decoded once by the shared host decoder with the
+  platform's `mod`; the backend matches them against the transition's canonical shortcut stroke from its own
+  matcher (`KeyCapture::captures_key`), never against `key` or `code`. A backend whose keymap
+  vocabulary is richer than the physical identity (Win32's virtual key, GTK's layout groups) builds that stroke
+  itself. A native adapter walks interest and capture along `ViewProps::key_parent` when it is set: an overlay's
+  native view is inserted in its root view while its logical parent is the view the app put it in, and only the
+  logical ancestry may hear the key. That forwarding only engages for a logical ancestry that has a key listener
+  or capture rule: an ordinary overlay (a menu, a popover, a dialog with no raw-key interest above it) gets no
+  override and keeps its upstream routing. The override is internal routing data (never an app prop), set by the
+  core from what is mounted; native focus, hit testing and layout keep the platform parent. Native backends decide
+  the capture before defaults and set `default_prevented` on the event they send; an in-process host (the browser)
+  calls `LocalEngine::key_event`, which computes the same decision and returns it for the host's own
+  `preventDefault`. A focused native text input keeps the keys that edit it (nothing an ancestor captures
+  intercepts its typing, caret or editing, and input methods own their composition). A legacy terminal reports
+  only strokes: no invented releases, repeats or codes. Losing the window's focus clears held state and synthesizes
+  nothing; a real release is reported where the focus is, as the DOM does.
+  The generated props are common host props, as `focusable` is: a `Scroll`, `List` or `Overlay` can listen or
+  capture for a focused descendant with the same typed Rust and TSX interface as `View`.
 - **System UI**: the status bar follows UIKit, where the topmost view controller's `preferredStatusBarStyle` decides
   and Info.plist holds the default: a page's or dialog's `statusBar` (`{ foreground, hidden, animated }`, a host prop
   of screens and modals, `ScreenProp::StatusBar`, decoded to a `StatusBarSetting`; `Screen::status_bar` /
@@ -382,7 +451,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   (`nsh/base`: a promise of `{ action }`, the chosen action's `id` (required: the app's name for it, never its label), `null` when closed without an action;
   `presentation: "actionSheet"` is a list dialog on Android; every label is the app's: NSH adds no strings of its
   own, and an iPad / Mac action sheet gets an untitled cancel action). Answers come back as the
-  root's `Dialog` event, which the core resolves. Embedding apps forward their controller's status bar to `nsh_status_bar_style()` / `_hidden()` / `_animation()`.
+  root's `Dialog` event, which the core resolves. Embedding apps forward their controller's status bar to `nsh_status_bar_style()` / `_hidden()` / `_animation()`,
+  and its `supportedInterfaceOrientations` to `NshAppView.supportedInterfaceOrientations` (a page's `supportedOrientations`; `nil`: the controller's own).
 - **Right to left**: the user's language sets the root's direction (again at once when it changes);
   `direction` (`inherit` / `ltr` / `rtl`) overrides it per view. The core resolves each node's direction (inherited, also for
   subtrees built detached), sets taffy's `direction` (rows run from the right), keeps the left and right properties

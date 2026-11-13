@@ -611,7 +611,7 @@ impl InputState {
         // wants corrections: never in a password, shown or not.
         let spell = config.auto_correct
             && !config.secure
-            && config.keyboard != nsh_core::KeyboardType::VisiblePassword
+            && !config.visible_password()
             && config.editable;
         drop(config);
         let (options, _) = self.send(EM_GETLANGOPTIONS, 0, 0);

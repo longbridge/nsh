@@ -1406,7 +1406,7 @@ fn configuration_of(c: &InputConfig) -> gpui::TextInputConfiguration {
     use gpui::{Autocapitalize, TextInputAction};
     // A password shown as plain text is never capitalized or corrected,
     // as a secure one is.
-    let plain = !c.secure && c.keyboard != nsh_core::KeyboardType::VisiblePassword;
+    let plain = !c.secure && !c.visible_password();
     gpui::TextInputConfiguration {
         autocorrect: c.auto_correct && plain,
         autocapitalize: match c.auto_capitalize {
@@ -2568,7 +2568,7 @@ mod tests {
         assert!(!g.autocorrect && !g.suggestions);
         assert_eq!(g.autocapitalize, Autocapitalize::None);
         c.secure = false;
-        c.keyboard = nsh_core::KeyboardType::VisiblePassword;
+        c.auto_fill = nsh_core::AutoFill::Password;
         let g = configuration_of(&c);
         assert!(!g.autocorrect && !g.suggestions);
         assert_eq!(g.autocapitalize, Autocapitalize::None);

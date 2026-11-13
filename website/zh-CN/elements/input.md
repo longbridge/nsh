@@ -80,7 +80,7 @@ function NameField() {
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
-| `keyboardType` | `.keyboard_type(KeyboardType::Email)` | `"default" \| "number-pad" \| "decimal-pad" \| "numeric" \| "numbers-and-punctuation" \| "email-address" \| "phone-pad" \| "url" \| "visible-password"` | `"default"` | 键盘布局（[各取值](../docs/forms-and-keyboard.md#键盘与自动填充)；`numbers-and-punctuation` 在 iOS 上有负号）。 |
+| `keyboardType` | `.keyboard_type(KeyboardType::Email)` | `"default" \| "number-pad" \| "decimal-pad" \| "numeric" \| "numbers-and-punctuation" \| "email-address" \| "phone-pad" \| "url"` | `"default"` | 键盘布局（[各取值](../docs/forms-and-keyboard.md#键盘与自动填充)；`numbers-and-punctuation` 在 iOS 上有负号）。 |
 | `returnKeyType` | `.return_key_type(ReturnKeyType::Next)` | `"default" \| "done" \| "go" \| "next" \| "search" \| "send"` | `"default"` | 回车键的标签。 |
 | `autoCapitalize` | `.auto_capitalize(AutoCapitalize::None)` | `"none" \| "sentences" \| "words" \| "characters"` | `"sentences"` | 自动大写。 |
 | `autoCorrect` | `.auto_correct(..)` | `boolean` | `true` | 系统自动更正。 |

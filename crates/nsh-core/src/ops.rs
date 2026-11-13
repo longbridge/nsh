@@ -1381,12 +1381,6 @@ pub enum KeyboardType {
     Phone,
     /// URLs (`url`).
     Url,
-    /// A password shown as plain text (`visible-password`): Android's
-    /// visible password keyboard, iOS's ASCII keyboard, with no
-    /// capitalization, suggestions or autocorrection. `secure` still hides
-    /// the text.
-    #[prop(rename = "visible-password")]
-    VisiblePassword,
 }
 
 /// The keyboard's look (`keyboardAppearance`, iOS).

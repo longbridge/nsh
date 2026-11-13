@@ -3,6 +3,7 @@
 // `id:case-<case>` (a one-point view over the corner, out of the layout);
 // the steps after it are that case's.
 import { type JSX, View, mount, signal } from "nsh";
+import BaseDropdownLooks from "./base-dropdown-looks";
 import BaseHoverCardDesktop from "./base-hover-card-desktop";
 import BasePopupAnchorsDesktop from "./base-popup-anchors-desktop";
 import BasePopupLooks from "./base-popup-looks";
@@ -25,6 +26,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-popups-desktop": BasePopupsDesktop,
   "base-popup-looks": BasePopupLooks,
   "base-select-desktop": BaseSelectDesktop,
+  "base-dropdown-looks": BaseDropdownLooks,
   "base-hover-card-desktop": BaseHoverCardDesktop,
   "base-popup-anchors-desktop": BasePopupAnchorsDesktop,
   "base-tooltip-grace-period-desktop": BaseTooltipGracePeriodDesktop,

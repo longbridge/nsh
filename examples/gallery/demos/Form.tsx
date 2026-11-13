@@ -637,7 +637,6 @@ export function Form() {
               <Strength password={password()} />
             </View>
             <Field ref={ref(3)} next={next(3)} label="Phone" api="phone-pad" keyboardType="phone-pad" autoComplete="tel" placeholder="+1 555 0100" />
-            <Field label="API key" api="visible-password" keyboardType="visible-password" placeholder="sk-live-4f9a…" />
           </Section>
         ),
         () => (
@@ -649,7 +648,7 @@ export function Form() {
               api="url"
               testID="site"
               prefix="https://"
-              suffix=".nsh.app"
+              suffix=".nsh.dev"
               addon
               keyboardType="url"
               autoCapitalize="none"

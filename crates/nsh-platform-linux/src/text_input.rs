@@ -1399,11 +1399,10 @@ fn purpose(config: &InputConfig) -> (gtk::InputPurpose, gtk::InputHints) {
         (false, KeyboardType::Email) => gtk::InputPurpose::Email,
         (false, KeyboardType::Phone) => gtk::InputPurpose::Phone,
         (false, KeyboardType::Url) => gtk::InputPurpose::Url,
-        (false, KeyboardType::VisiblePassword) => gtk::InputPurpose::FreeForm,
     };
     // A visible password is typed as it is: never capitalized, checked,
     // completed or learned.
-    let password = config.keyboard == KeyboardType::VisiblePassword;
+    let password = config.visible_password();
     let mut hints = match config.auto_capitalize {
         _ if password => gtk::InputHints::NONE,
         AutoCapitalize::None => gtk::InputHints::NONE,

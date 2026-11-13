@@ -54,6 +54,10 @@ tap id:copy
 expect Calls: 5 promises
 wait 300
 expect Failed: none
+# text with its HTML (`Clipboard.write`) goes through as a write does.
+expect Write: not written
+tap id:copy-html
+expect Write: written
 covers [nsh] Clipboard
 # mod-i18n
 tap id:case-mod-i18n
@@ -209,6 +213,7 @@ expect Desktop: false
 expect Catalyst: false
 expect Version: 0.0
 expect Select: ios
+expect Select named: ios
 expect Select mobile: mobile
 expect Ratio: 1
 expect Font scale: 1
@@ -341,3 +346,14 @@ expect Calls: done
 expect Fps enabled: false
 covers [nsh] fpsEnabled
 covers [nsh] setFpsEnabled
+# mod-fps-mode
+tap id:case-mod-fps-mode
+expect Modes: not called
+tap id:modes
+expect Modes: done
+covers [nsh] setFpsMode
+# mod-perf-stats
+tap id:case-mod-perf-stats
+# no stats until the monitor measured a second.
+expect Fps: none
+covers [nsh] perfStats
