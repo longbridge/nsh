@@ -12,6 +12,15 @@ use crate::geometry::{Edges, Points, Size};
 /// the same name).
 pub const TAB_BAR_COMPONENT: &str = "nsh/tab-bar";
 
+/// The native component of `nsh/mobile`'s `SegmentedControl`, which the iOS
+/// backend registers itself (`UISegmentedControl`).
+pub const SEGMENTED_CONTROL_COMPONENT: &str = "nsh/segmented-control";
+
+/// The native component of `nsh/base`'s `MenuButton`, which the iOS backend
+/// registers itself (a `UIButton` showing its `UIMenu` as its primary
+/// action).
+pub const MENU_BUTTON_COMPONENT: &str = "nsh/menu-button";
+
 /// Whether native component `name` is NSH's own: names under `nsh/` are, and
 /// an embedding app's registration of one is refused, so it can never
 /// replace what NSH's exports render.
