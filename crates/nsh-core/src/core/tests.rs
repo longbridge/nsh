@@ -32311,6 +32311,136 @@ mod built_in_scrollbars {
         assert_eq!(before, Some(Some(bar)), "the bar draws above it");
     }
 
+    /// The views of list 2, bottom to top, as the platforms stack them:
+    /// in the order inserted, then the sticky cells raised on every
+    /// `StickyCells` and insert. `in_order` raises them in the order the
+    /// item lists them (iOS, Android), otherwise in the order they are
+    /// among the children (the desktops), when not all of them are last.
+    struct Stack {
+        views: Vec<NodeId>,
+        sticky: Vec<NodeId>,
+        in_order: bool,
+    }
+
+    impl Stack {
+        fn apply(&mut self, batch: &MountBatch) {
+            for item in &batch.items {
+                match item {
+                    MountItem::Insert {
+                        parent: 2,
+                        child,
+                        before,
+                    } => {
+                        self.views.retain(|v| v != child);
+                        let at = before
+                            .and_then(|b| self.views.iter().position(|&v| v == b))
+                            .unwrap_or(self.views.len());
+                        self.views.insert(at, *child);
+                        self.raise();
+                    }
+                    MountItem::Remove { id } => self.views.retain(|v| v != id),
+                    MountItem::StickyCells { id: 2, cells } => {
+                        self.sticky = cells.iter().map(|c| c.cell).collect();
+                        self.raise();
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        fn raise(&mut self) {
+            let sticky = |v: &NodeId| self.sticky.contains(v);
+            let cells: Vec<NodeId> = if self.in_order {
+                self.sticky.clone()
+            } else {
+                let at_end = self.views.iter().rev().take_while(|v| sticky(v)).count();
+                let cells: Vec<NodeId> = self.views.iter().copied().filter(sticky).collect();
+                if at_end == cells.len() {
+                    return;
+                }
+                cells
+            };
+            for cell in cells {
+                if self.views.contains(&cell) {
+                    self.views.retain(|&v| v != cell);
+                    self.views.push(cell);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_lists_sticky_rows_go_below_its_bar() {
+        for in_order in [false, true] {
+            let mut c = core();
+            let mut registry = Registry::new();
+            registry.scrollbars_from(bars);
+            c.set_components(registry);
+            c.set_builtin_scrollbars(Some(app_theme()));
+            apply(
+                &mut c,
+                vec![
+                    Op::Create {
+                        id: 2,
+                        tag: Tag::List,
+                    },
+                    style_op(2, &[("height", StyleValue::Number(400.0))]),
+                    Op::SetProp {
+                        id: 2,
+                        prop: Prop::EstimatedItemSize(px(50.0)),
+                    },
+                    Op::SetProp {
+                        id: 2,
+                        prop: Prop::Count(100),
+                    },
+                    Op::SetProp {
+                        id: 2,
+                        prop: Prop::StickyIndices(vec![0, 10]),
+                    },
+                    Op::Insert {
+                        parent: ROOT_ID,
+                        child: 2,
+                        before: None,
+                    },
+                ],
+            );
+            let mut stack = Stack {
+                views: Vec::new(),
+                sticky: Vec::new(),
+                in_order,
+            };
+            let batch = c.commit().unwrap();
+            stack.apply(&batch);
+            let [bar] = bars_in(&batch)[..] else {
+                panic!("one bar: {:?}", batch.items)
+            };
+            let (mut next_id, mut cells) = (100, Vec::new());
+            for offset in [0.0, 300.0, 600.0, 2000.0, 0.0] {
+                c.set_scroll_offset(2, point(px(0.0), px(offset)), u32::MAX);
+                if let Some(batch) = c.commit() {
+                    stack.apply(&batch);
+                }
+                render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+                let batch = c.commit().unwrap();
+                // Every set the list pins keeps its bar, last (on top).
+                for item in &batch.items {
+                    if let MountItem::StickyCells { id: 2, cells } = item {
+                        assert_eq!(cells.last().map(|c| c.cell), Some(bar), "{cells:?}");
+                    }
+                }
+                stack.apply(&batch);
+                assert_eq!(
+                    stack.views.last(),
+                    Some(&bar),
+                    "at {offset}, raised in order: {in_order}: {:?} (sticky {:?})",
+                    stack.views,
+                    stack.sticky
+                );
+                assert!(stack.sticky.len() > 1, "a row sticks: {:?}", stack.sticky);
+            }
+        }
+    }
+
     /// A core drawing every bar with `bars`: in a view 2, a multiline (or
     /// single-line) input 6 of 300 by 100, 50 down, and a view 8 10 high
     /// after it.
