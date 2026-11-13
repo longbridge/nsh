@@ -39,7 +39,9 @@
 //! two-circle radial and conic gradients are all exact.
 //! Shadows are the shape's alpha blurred by three box blurs (close to
 //! canvas' Gaussian of standard deviation blur / 2), offset in the view's
-//! coordinates. Composite operations other than `source-over` draw the
+//! coordinates, from all of the shape within three deviations of where
+//! the shadow shows (a shape past the pixmap's edge casts its shadow in
+//! too). Composite operations other than `source-over` draw the
 //! shape into a layer of its own, combined with the pixmap over the clip,
 //! so they act where the shape is transparent too.
 //!
@@ -883,34 +885,7 @@ fn record(
     region: IRect,
     frac: (f32, f32),
 ) -> Recorded {
-    let [a, b, c, d] = key.linear.map(f64::from);
-    // The view's coordinates to the pixmap's.
-    let base = Affine {
-        a,
-        b,
-        c,
-        d,
-        e: (frac.0 - region.x0 as f32) as f64,
-        f: (frac.1 - region.y0 as f32) as f64,
-    };
-    let size = (region.width() as u32, region.height() as u32);
-    let mut replay = Replay {
-        args,
-        images,
-        text,
-        system,
-        size,
-        base,
-        scale: key.scale as f64,
-        state: State::new(base),
-        stack: Vec::new(),
-        path: PathBuf::default(),
-        layers: Vec::new(),
-        pixmap: sk::Pixmap::new(size.0, size.1),
-        drawn: false,
-        pending: Vec::new(),
-        pending_bounds: None,
-    };
+    let mut replay = Replay::new(args, images, (text, system), key, region, frac, true);
     for op in &drawing.ops {
         replay.op(op);
     }
@@ -1181,9 +1156,56 @@ struct Replay<'a> {
     pending: Vec<GlyphRun>,
     /// The bounds of `pending` (pixmap coordinates).
     pending_bounds: Option<sk::Rect>,
+    /// Glyphs without outlines are kept as GPUI glyphs above the pixmap
+    /// (on screen); without them (offscreen), they are left out and
+    /// everything paints into the one pixmap.
+    glyphs: bool,
 }
 
 impl<'a> Replay<'a> {
+    /// A replay of a drawing for `key` over `region` (device pixels, the
+    /// view's origin `frac` into the pixel it falls in), into a pixmap of
+    /// that size.
+    fn new(
+        args: &'a [Option<AnimationValue>],
+        images: &'a FxHashMap<Arc<str>, Option<Arc<sk::Pixmap>>>,
+        (text, system): (&'a WindowTextSystem, &'a Arc<gpui::TextSystem>),
+        key: Key,
+        region: IRect,
+        frac: (f32, f32),
+        glyphs: bool,
+    ) -> Self {
+        let [a, b, c, d] = key.linear.map(f64::from);
+        // The view's coordinates to the pixmap's.
+        let base = Affine {
+            a,
+            b,
+            c,
+            d,
+            e: (frac.0 - region.x0 as f32) as f64,
+            f: (frac.1 - region.y0 as f32) as f64,
+        };
+        let size = (region.width() as u32, region.height() as u32);
+        Replay {
+            args,
+            images,
+            text,
+            system,
+            size,
+            base,
+            scale: key.scale as f64,
+            state: State::new(base),
+            stack: Vec::new(),
+            path: PathBuf::default(),
+            layers: Vec::new(),
+            pixmap: sk::Pixmap::new(size.0, size.1),
+            drawn: false,
+            pending: Vec::new(),
+            pending_bounds: None,
+            glyphs,
+        }
+    }
+
     fn n(&self, n: Num) -> f64 {
         n.get(|s| {
             self.args
@@ -1715,7 +1737,9 @@ impl<'a> Replay<'a> {
         };
         let mut extent = bounds;
         if let Some((_, sigma, (dx, dy))) = shadow {
-            let grow = (3.0 * sigma) as f32;
+            // The blur's full spread, and a pixel for a shadow moved by a
+            // fraction of one.
+            let grow = (3.0 * sigma).ceil() as f32 + 1.0;
             let (dx, dy) = (dx as f32, dy as f32);
             if let Some(r) = sk::Rect::from_ltrb(
                 bounds.left() + dx.min(0.0) - grow,
@@ -1754,7 +1778,11 @@ impl<'a> Replay<'a> {
             y1: h as i32,
         };
         let rect = if destructive(composite) {
-            Some(all)
+            // The clip bounds what changes (the mask is empty past it).
+            match &clip {
+                Some((_, b)) => pixels_within(*b, (w, h)),
+                None => Some(all),
+            }
         } else {
             let r = [extent.left(), extent.top(), extent.right(), extent.bottom()];
             pixels_within(r, (w, h))
@@ -1768,8 +1796,28 @@ impl<'a> Replay<'a> {
         let to_layer = sk::Transform::from_translate(-rect.x0 as f32, -rect.y0 as f32);
         draw(&mut layer, to_layer, None, sk::BlendMode::SourceOver);
         if let Some((color, sigma, offset)) = shadow {
-            let area = shadow_area(bounds, rect, sigma);
-            let shadow = area.and_then(|area| shadow_pixels(&layer, area, sigma, color));
+            let shadow = match shadow_source(bounds, rect, sigma, offset, (w, h)) {
+                // All of the shape the shadow needs is in the layer.
+                Some(source) if rect.contains(&source) => {
+                    let area = shadow_area(bounds, rect, sigma, shadow_limit((w, h)));
+                    area.and_then(|area| shadow_pixels(&layer, area, sigma, color))
+                }
+                // Part of it is outside the pixmap (its shadow is cast
+                // in, or blurred in): that part is drawn on its own.
+                Some(source) => {
+                    let shape = sk::Pixmap::new(source.width() as u32, source.height() as u32);
+                    shape.and_then(|mut shape| {
+                        let to =
+                            sk::Transform::from_translate(-source.x0 as f32, -source.y0 as f32);
+                        draw(&mut shape, to, None, sk::BlendMode::SourceOver);
+                        let area = shadow_area(bounds, source, sigma, shadow_limit((w, h)))?;
+                        let (pixels, x, y) = shadow_pixels(&shape, area, sigma, color)?;
+                        // In the layer's coordinates.
+                        Some((pixels, x + source.x0 - rect.x0, y + source.y0 - rect.y0))
+                    })
+                }
+                None => None,
+            };
             if let Some((shadow, x, y)) = shadow {
                 layer.draw_pixmap(
                     0,
@@ -1889,7 +1937,7 @@ impl<'a> Replay<'a> {
             };
             self.paint_path(path, mode);
         }
-        if glyphs.is_empty() {
+        if glyphs.is_empty() || !self.glyphs {
             return;
         }
         let color = match self.paint(mode) {
@@ -2482,12 +2530,54 @@ fn blend_mode(c: Composite) -> sk::BlendMode {
 
 // --- Shadows -----------------------------------------------------------------
 
+/// The pixels of a shape within `bounds` (pixmap pixels) whose shadow,
+/// blurred with standard deviation `sigma` and moved by `offset`, falls
+/// on `layer`: the layer moved back by the offset and grown by the blur's
+/// full spread (three deviations), within the shape's bounds. It may
+/// reach past the pixmap (`size`), whose shapes cast shadows into it, but
+/// never more than the spread past what the layer can show; `None` when
+/// the shadow misses the layer or is too large to blur.
+fn shadow_source(
+    bounds: sk::Rect,
+    layer: IRect,
+    sigma: f64,
+    (dx, dy): (f64, f64),
+    size: (u32, u32),
+) -> Option<IRect> {
+    let grow = (3.0 * sigma).ceil() as f32;
+    let (dx, dy) = (dx as f32, dy as f32);
+    let reach = IRect::round_out(
+        layer.x0 as f32 - dx - grow,
+        layer.y0 as f32 - dy - grow,
+        layer.x1 as f32 - dx + grow,
+        layer.y1 as f32 - dy + grow,
+    )?;
+    // Clamped before rounding: a shape may be far larger than any pixmap.
+    let source = IRect::round_out(
+        bounds.left().max(reach.x0 as f32),
+        bounds.top().max(reach.y0 as f32),
+        bounds.right().min(reach.x1 as f32),
+        bounds.bottom().min(reach.y1 as f32),
+    )?;
+    if source.width() as i64 * source.height() as i64 > shadow_limit(size) {
+        log::debug!("canvas: a shadow too large to blur is left out");
+        return None;
+    }
+    Some(source)
+}
+
+/// The most pixels a shadow is blurred over, for a pixmap of `size`: a
+/// shadow as large as the pixmap is always drawn.
+fn shadow_limit(size: (u32, u32)) -> i64 {
+    (2 * MAX_AREA).max(i64::from(size.0) * i64::from(size.1))
+}
+
 /// The pixels whose shadow (blurred with standard deviation `sigma`) the
 /// layer `layer` (pixmap pixels) needs, of a shape within `bounds`, in the
 /// layer's coordinates: the shape grown by the blur's spread, inside the
 /// layer grown likewise (the shape is drawn only in the layer); `None`
 /// when that is nothing or too much to blur.
-fn shadow_area(bounds: sk::Rect, layer: IRect, sigma: f64) -> Option<IRect> {
+fn shadow_area(bounds: sk::Rect, layer: IRect, sigma: f64, limit: i64) -> Option<IRect> {
     let grow = (3.0 * sigma).ceil() as i32;
     let around = IRect {
         x0: -grow,
@@ -2503,7 +2593,7 @@ fn shadow_area(bounds: sk::Rect, layer: IRect, sigma: f64) -> Option<IRect> {
         (bounds.bottom() - y).min(around.y1 as f32) + grow as f32,
     ];
     let area = IRect::round_out(shape[0], shape[1], shape[2], shape[3])?.intersect(&around)?;
-    if area.width() as i64 * area.height() as i64 > 2 * MAX_AREA {
+    if area.width() as i64 * area.height() as i64 > limit {
         log::debug!("canvas: a shadow too large to blur is left out");
         return None;
     }
@@ -3682,7 +3772,7 @@ mod tests {
             y1: 100,
         };
         let far = sk::Rect::from_ltrb(-1.0e9, -1.0e9, 1.0e9, 1.0e9).unwrap();
-        let area = shadow_area(far, layer, 10.0).unwrap();
+        let area = shadow_area(far, layer, 10.0, 2 * MAX_AREA).unwrap();
         assert_eq!(
             area,
             IRect {
@@ -3746,6 +3836,7 @@ mod tests {
             drawn: false,
             pending: Vec::new(),
             pending_bounds: None,
+            glyphs: true,
         };
         replay.op(&CanvasOp::FillRect(rect(0.0, 0.0, 10.0, 10.0)));
         // Text at (20, 20)–(30, 30).
