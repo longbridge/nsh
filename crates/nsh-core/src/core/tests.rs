@@ -32724,6 +32724,203 @@ fn a_culled_scroll_view_gets_its_extent_when_it_is_made() {
 }
 
 #[test]
+fn the_content_of_an_attachment_in_a_scroll_view_is_made_with_it() {
+    // A view inside a text is placed by the text, not where the scroll
+    // view's culling looks for views: what it holds is made with it (a
+    // `RichEditor`'s image in its paragraph), on the first layout or on a
+    // later one, and never waits as culled content.
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(400.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    let attached = |text: NodeId, view: NodeId, image: NodeId| {
+        vec![
+            Op::Create {
+                id: text,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: text + 1,
+                text: "ab".into(),
+            },
+            Op::Insert {
+                parent: text,
+                child: text + 1,
+                before: None,
+            },
+            Op::Create {
+                id: view,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: image,
+                tag: Tag::Image,
+            },
+            style_op(
+                image,
+                &[
+                    ("width", StyleValue::Number(40.0)),
+                    ("height", StyleValue::Number(20.0)),
+                ],
+            ),
+            Op::Insert {
+                parent: view,
+                child: image,
+                before: None,
+            },
+            Op::Insert {
+                parent: text,
+                child: view,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: text,
+                before: None,
+            },
+        ]
+    };
+    ops.extend(attached(4, 6, 8));
+    apply(&mut c, ops);
+    let mut items = Vec::new();
+    while let Some(batch) = c.commit() {
+        items.extend(batch.items);
+    }
+    let inserted = |items: &[MountItem], parent: NodeId, child: NodeId| {
+        items.iter().any(|i| {
+            matches!(i, MountItem::Insert { parent: p, child: ch, .. } if *p == parent && *ch == child)
+        })
+    };
+    let created = |items: &[MountItem], id: NodeId| {
+        items
+            .iter()
+            .any(|i| matches!(i, MountItem::Create { id: c, .. } if *c == id))
+    };
+    assert!(inserted(&items, 4, 6), "the attachment is in its text");
+    assert!(created(&items, 8), "the image in the attachment is made");
+    assert!(inserted(&items, 6, 8), "and inside the attachment");
+    // A text added to the placed scroll view later, as an editor's
+    // paragraphs are.
+    apply(&mut c, attached(10, 12, 14));
+    let mut items = Vec::new();
+    while let Some(batch) = c.commit() {
+        items.extend(batch.items);
+    }
+    assert!(inserted(&items, 10, 12));
+    assert!(created(&items, 14));
+    assert!(inserted(&items, 12, 14));
+}
+
+#[test]
+fn the_content_of_attachments_made_past_the_pace_comes_too() {
+    // A long document of paragraphs, each with a view holding an image:
+    // past the views a turn makes at once, what attachments hold waits for
+    // later turns, and comes, in sight and as the content scrolls.
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(400.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    let paragraphs = 120u32;
+    let ids = |i: u32| (10 + 4 * i, 11 + 4 * i, 12 + 4 * i, 13 + 4 * i);
+    for i in 0..paragraphs {
+        let (text, raw, view, image) = ids(i);
+        ops.extend([
+            Op::Create {
+                id: text,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: raw,
+                text: "ab".into(),
+            },
+            Op::Insert {
+                parent: text,
+                child: raw,
+                before: None,
+            },
+            Op::Create {
+                id: view,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: image,
+                tag: Tag::Image,
+            },
+            style_op(
+                image,
+                &[
+                    ("width", StyleValue::Number(40.0)),
+                    ("height", StyleValue::Number(20.0)),
+                ],
+            ),
+            Op::Insert {
+                parent: view,
+                child: image,
+                before: None,
+            },
+            Op::Insert {
+                parent: text,
+                child: view,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: text,
+                before: None,
+            },
+        ]);
+    }
+    apply(&mut c, ops);
+    let mut items = Vec::new();
+    let mut drain = |c: &mut Core<FakeEngine>| {
+        for _ in 0..200 {
+            let Some(batch) = c.commit() else { break };
+            items.extend(batch.items);
+        }
+    };
+    drain(&mut c);
+    for y in [1000.0, 2000.0, 3000.0, 100_000.0] {
+        c.set_scroll_offset(2, point(Points::ZERO, Points(y)), 0);
+        drain(&mut c);
+    }
+    let inserted = |parent: NodeId, child: NodeId| {
+        items.iter().any(|i| {
+            matches!(i, MountItem::Insert { parent: p, child: ch, .. } if *p == parent && *ch == child)
+        })
+    };
+    let attached: Vec<u32> = (0..paragraphs)
+        .filter(|&i| inserted(ids(i).0, ids(i).2))
+        .collect();
+    assert!(
+        attached.len() > super::pace::PACE_AFTER,
+        "{}",
+        attached.len()
+    );
+    for i in attached {
+        let (_, _, view, image) = ids(i);
+        assert!(inserted(view, image), "paragraph {i}'s image");
+    }
+}
+
+#[test]
 fn culled_text_is_estimated_and_measured_once_it_comes_near() {
     let mut c = core();
     let mut ops = vec![
