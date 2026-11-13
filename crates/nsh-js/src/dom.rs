@@ -80,14 +80,14 @@ pub(crate) struct Dom {
     desktop: Cell<bool>,
     /// The layout direction sent to the root (`None`: nothing mounted yet).
     rtl: Cell<Option<bool>>,
-    /// The `onDismiss` handlers of modals the app removed, kept until the
+    /// The `onDismiss` handlers of dialogs the app removed, kept until the
     /// platform reports their dismissal, oldest first (owned): an app
     /// removes a dialog in `onOpenChange` or `onCancel`, and the platform reports
     /// `onDismiss` once it has gone (after its animation).
     dismissed: RefCell<Vec<(NodeId, JsValue)>>,
-    /// How many modal nodes are alive: a removal looks for their
+    /// How many dialog nodes are alive: a removal looks for their
     /// `onDismiss` handlers only when some are.
-    modals: Cell<usize>,
+    dialogs: Cell<usize>,
     /// Whether the user's language is written right to left.
     env_rtl: Cell<bool>,
     /// The tags (bits by `Tag as u32`; 63: the root) text was put in
@@ -306,7 +306,7 @@ impl Dom {
             env_rtl: Cell::new(false),
             unshown_text: Cell::new(0),
             dismissed: RefCell::new(Vec::new()),
-            modals: Cell::new(0),
+            dialogs: Cell::new(0),
             lazy_rows: Cell::new(false),
             pending_rows: RefCell::new(FxHashMap::default()),
         }
@@ -672,7 +672,7 @@ pub(crate) fn init(raw: *mut JsContext) {
 fn new_node(cx: *mut JsContext, id: NodeId, text: bool, tag: Option<Tag>) -> JsValue {
     let d = dom(cx);
     if tag == Some(Tag::Modal) {
-        d.modals.set(d.modals.get() + 1);
+        d.dialogs.set(d.dialogs.get() + 1);
     }
     let data = Box::into_raw(Box::new(NodeData {
         id,
@@ -939,8 +939,8 @@ pub(crate) fn insert_node(
     insert_before(cx, parent, child, before)
 }
 
-/// How many removed modals' `onDismiss` handlers wait for their dismissal
-/// at most (a modal removed before it was presented never gets one).
+/// How many removed dialogs' `onDismiss` handlers wait for their dismissal
+/// at most (a dialog removed before it was presented never gets one).
 const MAX_DISMISSED: usize = 16;
 
 fn next_id(cx: *mut JsContext) -> NodeId {
@@ -975,7 +975,7 @@ unsafe extern "C" fn node_finalize(rt: *mut qjs::JSRuntime, obj: JsValue) {
             crate::desktop::clear_header_rt(rt, data.id);
         }
         if data.tag == Some(Tag::Modal) {
-            d.modals.set(d.modals.get().saturating_sub(1));
+            d.dialogs.set(d.dialogs.get().saturating_sub(1));
         }
     }
     for v in data.children {
@@ -1255,7 +1255,7 @@ fn remove_child(cx: *mut JsContext, parent: JsValue, child: JsValue) -> Result<(
     };
     let owned = children.remove(i);
     unsafe { (*c).parent = DETACHED };
-    if dom(cx).modals.get() > 0 {
+    if dom(cx).dialogs.get() > 0 {
         keep_dismissals(cx, child);
     }
     let pushed = dom(cx).push(
@@ -1270,8 +1270,8 @@ fn remove_child(cx: *mut JsContext, parent: JsValue, child: JsValue) -> Result<(
     pushed
 }
 
-/// Hands the `onDismiss` handlers of the modals in detached subtree
-/// `node` (borrowed) to the renderer, so a removed modal still hears its
+/// Hands the `onDismiss` handlers of the dialogs in detached subtree
+/// `node` (borrowed) to the renderer, so a removed dialog still hears its
 /// dismissal (after its animation). Done here, while no collection runs,
 /// not in the node's finalizer: a finalizer run by QuickJS's cycle
 /// collection must not keep a value of the cycle it frees (#1643).
@@ -1320,7 +1320,7 @@ fn keep_dismissals(cx: *mut JsContext, node: JsValue) {
     free_values(cx, children);
 }
 
-/// Drops what [`keep_dismissals`] kept for the modals in subtree `node`
+/// Drops what [`keep_dismissals`] kept for the dialogs in subtree `node`
 /// (borrowed), inserted again.
 fn forget_dismissals(cx: *mut JsContext, node: JsValue) {
     let d = dom(cx);
@@ -3674,7 +3674,7 @@ pub(crate) fn handler(cx: *mut JsContext, id: NodeId, event: EventKind) -> Optio
     let d = dom(cx);
     let p = d.by_id(id);
     if p.is_null() {
-        // A removed modal's dismissal: its handler, given away (owned).
+        // A removed dialog's dismissal: its handler, given away (owned).
         if event != EventKind::Dismiss {
             return None;
         }
@@ -3683,7 +3683,7 @@ pub(crate) fn handler(cx: *mut JsContext, id: NodeId, event: EventKind) -> Optio
         return Some(dismissed.remove(i).1);
     }
     if event == EventKind::Dismiss {
-        // A removed modal still alive: what was kept for it goes.
+        // A removed dialog still alive: what was kept for it goes.
         let kept = {
             let mut dismissed = d.dismissed.borrow_mut();
             dismissed
