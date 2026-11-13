@@ -45,9 +45,6 @@ final class CanvasPainter {
     private boolean needsLayer;
     /** The drawing sets a shadow (see {@link CanvasBox}). */
     boolean hasShadow;
-    /** Pixels per point of the screen: an image drawn at its natural size is its pixels over this many points. */
-    private float imageDensity = 1;
-
     boolean isEmpty() {
         return code.length == 0;
     }
@@ -106,7 +103,7 @@ final class CanvasPainter {
                 case 37: i += 5; return true;
                 case 43: i += 1; return true;
                 case 40: case 41: i += 4; return true;
-                case 42: i += 1 + 1 + 4 + 4; return true;
+                case 42: i += 1 + 1 + 4 + 1 + 4; return true;
                 default: return false;
             }
         }
@@ -190,13 +187,9 @@ final class CanvasPainter {
         return Float.intBitsToFloat(code[i++]);
     }
 
-    /**
-     * Replays the drawing onto `canvas`, clipped to `width` × `height` pixels, at `scale` pixels per point;
-     * `imageDensity` is the screen's pixels per point (an image's natural size).
-     */
-    void paint(Canvas canvas, int width, int height, float scale, float imageDensity) {
+    /** Replays the drawing onto `canvas`, clipped to `width` × `height` pixels, at `scale` pixels per point. */
+    void paint(Canvas canvas, int width, int height, float scale) {
         if (code.length == 0) return;
-        this.imageDensity = imageDensity;
         s = new State();
         stack.clear();
         path = new Path();
@@ -308,8 +301,9 @@ final class CanvasPainter {
                 String uri = (String) objects[code[i++]];
                 boolean hasSource = code[i++] != 0;
                 float sx = flt(), sy = flt(), sw = flt(), sh = flt();
+                float density = flt();
                 float dx = num(), dy = num(), dw = num(), dh = num();
-                image(canvas, uri, hasSource, sx, sy, sw, sh, dx, dy, dw, dh);
+                image(canvas, uri, hasSource, sx, sy, sw, sh, density, dx, dy, dw, dh);
                 return true;
             }
             default: return false;
@@ -707,15 +701,18 @@ final class CanvasPainter {
         canvas.restore();
     }
 
+    /**
+     * `drawImage`: the source in the image's pixels; a missing destination size is the source's pixels over
+     * `density`, the file name's (`@3x`, as an `Image`'s), never the screen's.
+     */
     private void image(Canvas canvas, String uri, boolean hasSource, float sx, float sy, float sw, float sh,
-            float dx, float dy, float dw, float dh) {
+            float density, float dx, float dy, float dw, float dh) {
         Images.Image image = images.get(uri);
         if (image == null) return;
         Rect source = null;
         if (hasSource) source = new Rect(Math.round(sx), Math.round(sy), Math.round(sx + sw), Math.round(sy + sh));
-        float scale = imageDensity;
-        if (Float.isNaN(dw)) dw = (hasSource ? sw : image.width) / scale;
-        if (Float.isNaN(dh)) dh = (hasSource ? sh : image.height) / scale;
+        if (Float.isNaN(dw)) dw = (hasSource ? sw : image.width) / density;
+        if (Float.isNaN(dh)) dh = (hasSource ? sh : image.height) / density;
         paint.reset();
         paint.setFilterBitmap(true);
         paint.setAlpha(Math.round(s.alpha * 255));

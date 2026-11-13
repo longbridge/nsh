@@ -290,9 +290,10 @@ final class Native {
 
     /**
      * {@link #CANVAS_IMAGE} on the root: the answer to `OffscreenCanvas` render {@code request}, the encoded image
-     * {@code bytes}, or {@code error} when they are null.
+     * {@code bytes}, or when they are null why not: {@code failure} ({@link CanvasRender#RENDER_FAILED},
+     * {@link CanvasRender#RENDER_TOO_LARGE}) and the message {@code error}.
      */
-    static native void canvasImage(long handle, int request, byte[] bytes, String error);
+    static native void canvasImage(long handle, int request, byte[] bytes, int failure, String error);
 
     /** Applies the animation items of batches up to {@code seq}; returns bound values. */
     static native float[] afterBatch(long handle, long seq);

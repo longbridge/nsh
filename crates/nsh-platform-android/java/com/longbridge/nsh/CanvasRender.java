@@ -14,6 +14,14 @@ import java.util.concurrent.Executors;
  * its animated values at 0, and encoded; the answer is {@link Native#canvasImage} on the UI thread.
  */
 final class CanvasRender {
+    /** {@link Native#canvasImage}'s {@code failure}: the image could not be drawn or encoded (a plain `Error`). */
+    static final int RENDER_FAILED = 0;
+    /**
+     * {@link Native#canvasImage}'s {@code failure}: the system could not make a bitmap this large (its size or the memory
+     * for it; `ERR_NSH_QUOTA_EXCEEDED`). Both numbers are `host.rs`'s `RENDER_*`.
+     */
+    static final int RENDER_TOO_LARGE = 1;
+
     private CanvasRender() {}
 
     /** One thread: renders run one after another, so at most one large bitmap is alive at a time. */
@@ -34,19 +42,37 @@ final class CanvasRender {
             Object[] objects) {
         CanvasPainter painter = new CanvasPainter();
         List<String> uris = painter.setDrawing(code, objects);
-        float density = mounter.density;
         Runnable job = () -> RENDERS.execute(() -> {
             byte[] bytes = null;
+            int failure = RENDER_FAILED;
             String error = null;
+            Bitmap bitmap = null;
             try {
-                bytes = encode(paint(painter, width, height, scale, density), format);
-                if (bytes == null) error = "the image could not be encoded";
-            } catch (OutOfMemoryError | RuntimeException e) {
-                error = "the canvas could not be drawn: " + e;
+                bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            } catch (OutOfMemoryError | IllegalArgumentException e) {
+                // The memory for it, or a size past what the system takes.
+                failure = RENDER_TOO_LARGE;
+                error = "the system could not allocate a " + width + "×" + height + " bitmap: " + e;
+            }
+            if (bitmap != null) {
+                try {
+                    paint(painter, bitmap, width, height, scale);
+                    bytes = encode(bitmap, format);
+                    if (bytes == null) error = "the image could not be encoded";
+                } catch (OutOfMemoryError e) {
+                    // A layer of the drawing, or the encoded image, past the memory there is.
+                    failure = RENDER_TOO_LARGE;
+                    error = "the system ran out of memory for a " + width + "×" + height + " image: " + e;
+                } catch (RuntimeException e) {
+                    error = "the canvas could not be drawn: " + e;
+                } finally {
+                    bitmap.recycle();
+                }
             }
             byte[] result = bytes;
-            String failure = error;
-            mounter.host.post(() -> mounter.canvasImage(id, result, failure));
+            int kind = failure;
+            String message = error;
+            mounter.host.post(() -> mounter.canvasImage(id, result, kind, message));
         });
         // Each image once, failed ones left out (the drawing skips them, as a canvas skips images not loaded).
         java.util.LinkedHashSet<String> wanted = new java.util.LinkedHashSet<>(uris);
@@ -72,22 +98,16 @@ final class CanvasRender {
         }
     }
 
-    /** The drawing replayed into a transparent `width` × `height` bitmap, y down, `scale` pixels per point. */
-    static Bitmap paint(CanvasPainter painter, int width, int height, float scale, float density) {
-        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-        painter.paint(new Canvas(bitmap), width, height, scale, density);
-        return bitmap;
+    /** The drawing replayed into transparent `width` × `height` {@code bitmap}, y down, `scale` pixels per point. */
+    static void paint(CanvasPainter painter, Bitmap bitmap, int width, int height, float scale) {
+        painter.paint(new Canvas(bitmap), width, height, scale);
     }
 
-    /** `bitmap` encoded as `format`, or null; the bitmap is recycled. */
+    /** `bitmap` encoded as `format`, or null. */
     private static byte[] encode(Bitmap bitmap, int format) {
-        try {
-            if (format != PNG) return null;
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            // PNG is lossless: the quality is ignored.
-            return bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) ? out.toByteArray() : null;
-        } finally {
-            bitmap.recycle();
-        }
+        if (format != PNG) return null;
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        // PNG is lossless: the quality is ignored.
+        return bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) ? out.toByteArray() : null;
     }
 }

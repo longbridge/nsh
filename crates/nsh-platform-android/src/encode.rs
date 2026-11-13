@@ -1830,6 +1830,9 @@ fn canvas(e: &mut Encoded, d: &nsh_core::canvas::Drawing) {
                 for v in source {
                     e.float(v);
                 }
+                // A missing size is the source's pixels over this many
+                // points, never the screen's density.
+                e.float(image.density());
                 e.nums(dest);
             }
         }
@@ -1968,6 +1971,38 @@ mod tests {
     use nsh_core::file_dialog::{self, FileRequest};
 
     use super::*;
+
+    /// `drawImage(uri, 1, 2)` encoded for `CanvasPainter.java`: the URI,
+    /// no source, the source's four floats, the file name's density, then
+    /// the destination with its missing size NaN.
+    #[test]
+    fn a_canvas_image_carries_its_file_name_s_density() {
+        use nsh_core::canvas::{CanvasImage, CanvasOp, Drawing, Num};
+        let nan = Num::Const(f32::NAN);
+        for (uri, density) in [("asset:/dot.png", 1.0), ("asset:/dot@3x.png", 3.0)] {
+            let drawing = Drawing {
+                ops: vec![CanvasOp::DrawImage {
+                    image: CanvasImage { uri: uri.into() },
+                    source: None,
+                    dest: [Num::Const(1.0), Num::Const(2.0), nan, nan],
+                }],
+                ..Drawing::default()
+            };
+            let mut e = Encoded::default();
+            canvas(&mut e, &drawing);
+            let words: Vec<u32> = e
+                .bytes
+                .chunks_exact(4)
+                .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+                .collect();
+            // The word count, the code, the URI's object, no source.
+            assert_eq!(&words[..4], &[12, 42, 0, 0]);
+            let floats: Vec<f32> = words[4..].iter().map(|w| f32::from_bits(*w)).collect();
+            assert_eq!(&floats[..7], &[0.0, 0.0, 0.0, 0.0, density, 1.0, 2.0]);
+            assert!(floats[7].is_nan() && floats[8].is_nan());
+            assert_eq!(floats.len(), 9);
+        }
+    }
 
     /// The ints a batch of one file request is encoded as.
     fn ints(request: FileRequest) -> Vec<i32> {

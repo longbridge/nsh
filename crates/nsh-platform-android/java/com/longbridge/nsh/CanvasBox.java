@@ -52,11 +52,11 @@ final class CanvasBox extends Box {
             } else {
                 software.eraseColor(0);
             }
-            painter.paint(new Canvas(software), w, h, density, density);
+            painter.paint(new Canvas(software), w, h, density);
             canvas.drawBitmap(software, 0, 0, null);
             return;
         }
-        painter.paint(canvas, w, h, density, density);
+        painter.paint(canvas, w, h, density);
     }
 
     @Override

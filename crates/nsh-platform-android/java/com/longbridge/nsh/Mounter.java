@@ -2799,13 +2799,14 @@ final class Mounter {
     }
 
     /**
-     * Answers `OffscreenCanvas` render {@code request} ({@link CanvasRender}): the encoded image, or why it failed.
+     * Answers `OffscreenCanvas` render {@code request} ({@link CanvasRender}): the encoded image, or why it failed
+     * ({@code failure}: {@link CanvasRender#RENDER_FAILED} or {@link CanvasRender#RENDER_TOO_LARGE}, and {@code error}).
      * Once the view is destroyed there is no app to tell.
      */
-    void canvasImage(int request, byte[] bytes, String error) {
+    void canvasImage(int request, byte[] bytes, int failure, String error) {
         long handle = handle();
         if (handle == 0) return;
-        Native.canvasImage(handle, request, bytes, error);
+        Native.canvasImage(handle, request, bytes, failure, error);
     }
 
     void eventMap(int id, int kind, String[] keys, Object[] values) {
