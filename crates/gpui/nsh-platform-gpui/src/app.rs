@@ -954,6 +954,8 @@ fn initial_environment() -> Environment {
         },
         idiom: Idiom::Desktop,
         file_requests: true,
+        // Replayed with tiny-skia, as canvas views are.
+        canvas_render: true,
         // wry, in builds with it.
         web_views: cfg!(feature = "webview"),
         // wgpu, until it finds no GPU.

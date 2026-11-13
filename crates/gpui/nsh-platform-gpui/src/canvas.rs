@@ -90,6 +90,10 @@ use crate::{
     view::{NshView, ViewState},
 };
 
+mod offscreen;
+
+pub(crate) use offscreen::render as render_offscreen;
+
 /// The largest side of a pixmap, in device pixels.
 const MAX_SIDE: i32 = 4096;
 /// The most pixels a pixmap covers; a larger canvas is rasterized only
@@ -2166,7 +2170,14 @@ fn load_fonts(fonts: &mut Fonts) {
                 db.len(),
                 started.elapsed().as_secs_f64() * 1000.0
             );
-            crate::rt::invoke(move || fonts_loaded(db));
+            {
+                // Set here, so workers waiting for the fonts
+                // ([`wait_for_fonts_here`]) need no main thread.
+                let mut fonts = self::fonts();
+                fonts.db = Some(Arc::new(db));
+                fonts.loading = false;
+            }
+            crate::rt::invoke(fonts_loaded);
         });
     if let Err(e) = spawned {
         log::warn!("canvas: cannot find the system's fonts: {e}");
@@ -2174,14 +2185,9 @@ fn load_fonts(fonts: &mut Fonts) {
     }
 }
 
-/// The system's fonts were found: canvases that drew text without them
-/// draw again.
-fn fonts_loaded(db: fontdb::Database) {
-    {
-        let mut fonts = fonts();
-        fonts.db = Some(Arc::new(db));
-        fonts.loading = false;
-    }
+/// The system's fonts were found (main thread): canvases that drew text
+/// without them draw again.
+fn fonts_loaded() {
     let waiting = WAITING.with_borrow_mut(std::mem::take);
     for (surface, id) in waiting {
         let Some(view) = surface.upgrade().and_then(|s| s.view(id)) else {
@@ -2201,6 +2207,27 @@ fn wait_for_fonts(surface: &Rc<Surface>, view: &NshView) {
     if fonts.db.is_none() {
         WAITING.with_borrow_mut(|w| w.push((Rc::downgrade(surface), view.id())));
         load_fonts(&mut fonts);
+    }
+}
+
+/// Waits on this thread (a worker, never the main thread) until the
+/// system's fonts are found, starting the search if needed; gives up after
+/// `limit`, drawing text as before they are found.
+fn wait_for_fonts_here(limit: std::time::Duration) {
+    let started = std::time::Instant::now();
+    loop {
+        {
+            let mut fonts = fonts();
+            if fonts.db.is_some() {
+                return;
+            }
+            load_fonts(&mut fonts);
+        }
+        if started.elapsed() >= limit {
+            log::warn!("canvas: the system's fonts were not found in time");
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 
