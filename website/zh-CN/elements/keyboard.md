@@ -245,6 +245,10 @@ Linux 桌面模式的无界面驱动也会执行这一 Rust API；Rust UI 集可
 不同输入源的能力不同：只报告击键的旧式终端不会产生释放、重复或物理键码，GPUI 的逻辑事件也没有物理键码（`code` 为 `""`）。
 各平台输入源报告的字段见 `docs/dev/tooling.md` 及各平台的开发文档。
 
+iOS 上，硬件键盘以 `UIKey.characters` 作为 `key`（保留大小写与布局），并把 `UIKey.keyCode` 的 USB HID 用途码映射为 DOM 的 `code`。
+UIKit 对按住的键只发送一次按下，因此 `repeat` 为 `false`。被 `captureKeys` 捕获或由 `keymap` 绑定的 Tab 以键命令形式到达：
+其 `code` 为 `""`，也不会合成释放事件。
+
 ## 平台说明
 
 - **iOS**：让位以键盘自身的时长和 ease-in-ease-out 曲线动画。

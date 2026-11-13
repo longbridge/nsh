@@ -17,7 +17,8 @@ use nsh_core::{
 };
 use nsh_engine::EngineControl;
 use objc2::{
-    MainThreadMarker, MainThreadOnly, Message, rc::Retained, runtime::ProtocolObject, sel,
+    ClassType, MainThreadMarker, MainThreadOnly, Message, rc::Retained, runtime::ProtocolObject,
+    sel,
 };
 use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize, CGVector};
 use objc2_quartz_core::{CAAnimation, CALayer, CAMediaTiming, CATransform3D};
@@ -107,6 +108,21 @@ impl Native {
             Native::Modal(m) => Some(&m.view),
             Native::Web(w) => Some(&w.view),
             Native::Video(v) => Some(&v.view),
+            _ => None,
+        }
+    }
+
+    /// The view `ref.focus()` / `ref.blur()` move the keyboard focus to, if
+    /// it is one of the app's own views: inputs, embedded native views,
+    /// screens, stacks and modals keep their own keys.
+    fn focus_view(&self) -> Option<&NshView> {
+        match self {
+            Native::View(v)
+            | Native::Image(v)
+            | Native::HeaderItem(v)
+            | Native::InputAccessory(v) => Some(v),
+            Native::Text(v) => Some(v.as_super()),
+            Native::Canvas(v) => Some(v.as_super()),
             _ => None,
         }
     }
@@ -482,6 +498,19 @@ struct Slot {
     style: ViewStyle,
     decor: Decor,
     events: EventMask,
+    /// The logical parent the core inserted this node in, for hardware-key
+    /// ancestry even when the native view is hosted elsewhere (a screen, a
+    /// modal, a header item).
+    parent: Option<NodeId>,
+    /// `ViewProps::key_capture`: the rule this node mounts for its focused
+    /// descendants (not only `NshView`: a scroll view has one too).
+    key_capture: nsh_core::KeyCapture,
+    /// `ViewProps::accessibility.state.disabled`, for capture rules.
+    disabled: bool,
+    /// `ViewProps::key_parent`: the logical parent of a portaled view (an
+    /// overlay's native Insert is at the root, not under its app parent).
+    /// `None` uses the Insert parent.
+    key_parent: Option<NodeId>,
     gestures: Gestures,
     bindings: Vec<(AnimationProp, nsh_core::animation::NodeId)>,
     values: GestureValues,
@@ -548,6 +577,10 @@ impl Slot {
             native,
             style: ViewStyle::default(),
             events: EventMask::default(),
+            parent: None,
+            key_capture: nsh_core::KeyCapture::None,
+            disabled: false,
+            key_parent: None,
             gestures: Gestures::default(),
             bindings: Vec::new(),
             values: GestureValues::default(),
@@ -1115,6 +1148,9 @@ impl Mounter {
                 child,
                 before,
             } => {
+                if let Some(s) = self.slot_mut(child) {
+                    s.parent = Some(parent);
+                }
                 if self.insert_hosted(parent, child, before) {
                     return false;
                 }
@@ -1144,6 +1180,9 @@ impl Mounter {
                 }
             }
             MountItem::Remove { id } => {
+                if let Some(s) = self.slot_mut(id) {
+                    s.parent = None;
+                }
                 if self.remove_hosted(id) {
                     return false;
                 }
@@ -1158,6 +1197,20 @@ impl Mounter {
                 }
             }
             MountItem::Delete { id } => {
+                // A focused view removed with its node leaves no first
+                // responder; the root takes the keys back once the removal
+                // is done and no other view took the focus.
+                let restore = self
+                    .views
+                    .get(id as usize)
+                    .and_then(Option::as_ref)
+                    .and_then(|s| {
+                        let view = s.native.view();
+                        if !view.isFirstResponder() {
+                            return None;
+                        }
+                        Some((self.root_view_of(view)?, view.window()?))
+                    });
                 self.remove_hosted(id);
                 self.sticky.remove(&id);
                 // A removal animation it was running ends with it: its end
@@ -1194,6 +1247,9 @@ impl Mounter {
                     self.release_root_effect();
                 }
                 self.nav_shaders.remove(&id);
+                if let Some((root, window)) = restore {
+                    self.target.restore_root_focus(root, window);
+                }
             }
             MountItem::Frame { id, frame } => {
                 self.frames_applied = true;
@@ -1750,9 +1806,24 @@ impl Mounter {
             (Command::Seek(seconds), Native::Video(video)) => video.seek(seconds),
             (Command::Focus, Native::Input(input)) => {
                 input.editor_view().becomeFirstResponder();
+                crate::keyboard::request_focus(input.editor_view());
             }
             (Command::Blur, Native::Input(input)) => {
                 input.editor_view().resignFirstResponder();
+            }
+            // `ref.focus()` / `ref.blur()` on a view that is not an input:
+            // the keyboard focus moves to it as Tab does, if it is a stop.
+            (Command::Focus, native) if id != nsh_core::ROOT_ID => {
+                if let Some(view) = native.focus_view()
+                    && view.becomeFirstResponder()
+                {
+                    crate::keyboard::request_focus(view);
+                }
+            }
+            (Command::Blur, native) if id != nsh_core::ROOT_ID => {
+                if let Some(view) = native.focus_view() {
+                    view.resignFirstResponder();
+                }
             }
             // On the root: whatever is focused, also in the modals this
             // surface presents (UIKit hosts them outside the root view). Not
@@ -2047,6 +2118,93 @@ impl Mounter {
         } else if self.focused == Some(id) {
             self.focused = None;
         }
+        if !focused
+            && let Some(view) = self.slot(id).map(|s| s.native.view().retain())
+            && let Some(window) = view.window()
+            && let Some(root) = self.root_view_of(&view)
+        {
+            // Another view or input may take the focus in this turn: the
+            // target checks the window again then, and restores the root
+            // only where no responder is left.
+            self.target.restore_root_focus(root, window);
+        }
+    }
+
+    /// The keyboard focus entered or left custom view `id`: its `focus:`
+    /// styles follow (`onFocus` / `onBlur` are dispatched by the target).
+    pub(crate) fn view_focused(&mut self, id: NodeId, focused: bool) {
+        self.report_state(id, nsh_core::tailwind::state::FOCUSED, focused);
+    }
+
+    /// Whether `id` or a logical ancestor listens to raw key events or
+    /// mounts a capture rule. Walks the core's ancestry, preferring a
+    /// portaled node's `key_parent` over the native Insert parent, so a
+    /// scroll view or any other managed node counts and an Overlay keeps
+    /// its app parent. Stops at the modal's own window boundary as the
+    /// core's bubbling does.
+    pub(crate) fn listens_keys(&self, id: NodeId) -> bool {
+        let mut current = Some(id);
+        let mut seen = rustc_hash::FxHashSet::default();
+        while let Some(id) = current {
+            if !seen.insert(id) {
+                break;
+            }
+            let Some(slot) = self.slot(id) else { break };
+            if slot.events.contains(EventKind::KeyDown)
+                || slot.events.contains(EventKind::KeyUp)
+                || !slot.key_capture.is_none()
+            {
+                return true;
+            }
+            if matches!(&slot.native, Native::Modal(_)) {
+                break;
+            }
+            current = slot.key_parent.or(slot.parent);
+        }
+        false
+    }
+
+    /// Whether the enabled `id` or a logical ancestor captures `stroke`
+    /// (the keymap's canonical keystroke) with its mounted `capture_keys`.
+    pub(crate) fn captures_stroke(
+        &self,
+        id: NodeId,
+        stroke: Option<&nsh_core::keymap::Keystroke>,
+    ) -> bool {
+        let mut current = Some(id);
+        let mut seen = rustc_hash::FxHashSet::default();
+        while let Some(id) = current {
+            if !seen.insert(id) {
+                break;
+            }
+            let Some(slot) = self.slot(id) else { break };
+            if !slot.disabled && slot.key_capture.captures_key(stroke) {
+                return true;
+            }
+            if matches!(&slot.native, Native::Modal(_)) {
+                break;
+            }
+            current = slot.key_parent.or(slot.parent);
+        }
+        false
+    }
+
+    /// The native view whose subtree Tab walks from `view`: the modal view
+    /// it is in, else the surface's root, so Tab never enters the stops a
+    /// presented modal covers. `None` when the view is in neither.
+    pub(crate) fn focus_scope(&self, view: &UIView) -> Option<Retained<UIView>> {
+        let mut current: Option<Retained<UIView>> = Some(view.retain());
+        while let Some(v) = current {
+            let tag = v.tag();
+            if tag > 0
+                && let Some(slot) = self.slot(tag as NodeId)
+                && matches!(&slot.native, Native::Modal(_) | Native::Root(_))
+            {
+                return Some(v);
+            }
+            current = v.superview();
+        }
+        None
     }
 
     /// Return pressed in an input that submits (`submitBehavior`): reports
@@ -2737,7 +2895,7 @@ impl Mounter {
 
     /// The root view `view` is in: the surface's, or its modal's (touches'
     /// page coordinates are in it).
-    fn root_view_of(&self, view: &UIView) -> Option<Retained<UIView>> {
+    pub(crate) fn root_view_of(&self, view: &UIView) -> Option<Retained<UIView>> {
         let mut current = Some(view.retain());
         while let Some(v) = current {
             let tag = v.tag() as NodeId;
@@ -3253,7 +3411,10 @@ impl Mounter {
             view.setUserInteractionEnabled(true);
         }
         if let Some(nsh) = slot.native.nsh() {
+            nsh.set_target(&target);
+            nsh.set_events(events);
             nsh.set_pressable(events.contains(EventKind::Press), &control);
+            nsh.update_focus_tap(&target);
         }
         self.sync_refresh(id);
     }
@@ -3902,9 +4063,12 @@ impl Mounter {
 
     /// Touch, accessibility and test properties.
     fn set_view_props(&mut self, id: NodeId, props: ViewProps) {
-        let (control, mtm) = (self.control.clone(), self.mtm);
+        let (control, mtm, target) = (self.control.clone(), self.mtm, self.target.clone());
         let native_id = props.native_id.clone();
         let Some(s) = self.slot_mut(id) else { return };
+        s.key_capture = props.key_capture.clone();
+        s.disabled = props.accessibility.state.disabled;
+        s.key_parent = props.key_parent;
         s.long_press_delay = props.long_press_delay;
         s.pan_scroll_handoff = props.pan_scroll_handoff;
         if let Some(pan) = &s.gestures.pan {
@@ -3933,7 +4097,11 @@ impl Mounter {
         let was_area = self.areas.iter().any(|(a, _)| *a == id);
         let Some(s) = self.slot_mut(id) else { return };
         match s.native.nsh() {
-            Some(view) => view.set_props(props, &control),
+            Some(view) => {
+                view.set_props(props, &control);
+                view.set_target(&target);
+                view.update_focus_tap(&target);
+            }
             None => {
                 // Scroll views and inputs: only what UIKit offers directly.
                 use objc2_ui_kit::{NSObjectUIAccessibility, UIAccessibilityIdentification};
@@ -4010,8 +4178,30 @@ impl Mounter {
         }
     }
 
+    /// A tap on a `focusable` view that takes no presses: it takes the
+    /// keyboard focus without claiming the touch. The pressable path
+    /// ([`Mounter::press_changed`]) focuses those with press handlers.
+    pub(crate) fn focus_node(&mut self, id: NodeId) {
+        if let Some(view) = self.slot(id).and_then(|s| s.native.focus_view())
+            && view.is_focus_stop()
+            && view.becomeFirstResponder()
+        {
+            crate::keyboard::request_focus(view);
+        }
+    }
+
     /// A finger went down on (or left) a pressable view.
     pub(crate) fn press_changed(&mut self, id: NodeId, pressed: bool, at: PressAt) {
+        // A press on a focusable view gives it the keyboard focus, as a
+        // click does on the desktops (and a tap on an iPad with a hardware
+        // keyboard should).
+        if pressed
+            && let Some(view) = self.slot(id).and_then(|s| s.native.focus_view())
+            && view.is_focus_stop()
+            && view.becomeFirstResponder()
+        {
+            crate::keyboard::request_focus(view);
+        }
         self.report_state(id, nsh_core::tailwind::state::PRESSED, pressed);
         let Some(s) = self.slot(id) else { return };
         let event = if pressed {
@@ -5103,6 +5293,12 @@ fn disappear(
     );
 }
 
+/// The user asked for less motion: pages and dialogs come and go with
+/// UIKit's own motion, not through their `transitionShader`.
+fn reduce_motion() -> bool {
+    objc2_ui_kit::UIAccessibilityIsReduceMotionEnabled()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5222,10 +5418,4 @@ mod tests {
         };
         assert!(!holds_refresh(Some(&custom), &new));
     }
-}
-
-/// The user asked for less motion: pages and dialogs come and go with
-/// UIKit's own motion, not through their `transitionShader`.
-fn reduce_motion() -> bool {
-    objc2_ui_kit::UIAccessibilityIsReduceMotionEnabled()
 }

@@ -403,10 +403,12 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `KeyCommand` (the binding's id), so the main thread never waits for JS (`docs/dev/js-modules.md`, the macOS and
   Linux pages' "Keyboard"). A binding that passes its key through (`passThrough`, Rust's
   `KeyOptions::pass_through`; `KeyMatch::Notify`) is reported and the key goes on as if nothing were bound: Tab
-  still moves the focus, which is how `Select` and `Combobox` close an open list on Tab. iOS and Android match a hardware keyboard's keys: iOS in `pressesBegan:` of its text
-  inputs (before UIKit's text system) and of the root view (presses nothing inside handled), keys named by their HID
-  usage (`Key::from_hid_usage`) and the character they type, a `repeat` binding firing on a timer of its own while
-  the key is held (UIKit sends a held key's press once); Android in `NshView.dispatchKeyEvent` (before the focused
+  still moves the focus, which is how `Select` and `Combobox` close an open list on Tab. iOS and Android match a hardware keyboard's keys: iOS in `pressesBegan:` of a focused
+  focusable view (before its raw keys), of its text inputs (before UIKit's text system) and of the root view
+  (presses nothing inside handled), keys named by their HID usage (`Key::from_hid_usage`) and the character they
+  type, a `repeat` binding firing on a timer of its own while the key is held (UIKit sends a held key's press once);
+  a Tab the table binds, or a mounted capture takes, becomes a prioritized `UIKeyCommand` so UIKit's focus traversal
+  does not take it first (Command+Tab stays the system's); Android in `NshView.dispatchKeyEvent` (before the focused
   view, after the input method) through `Native.keyDown` / `keyUp`, the table kept in Rust (`keymap.rs`), never
   encoded for Java. Both leave a composing input method its keys and consume a taken key's release too. Rust views' bindings (`on_key`) join JS's in that one table, and the core runs
   their handlers (`docs/dev/components.md`).
@@ -435,7 +437,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   core from what is mounted; native focus, hit testing and layout keep the platform parent. Native backends decide
   the capture before defaults and set `default_prevented` on the event they send; an in-process host (the browser)
   calls `LocalEngine::key_event`, which computes the same decision and returns it for the host's own
-  `preventDefault`. A focused native text input keeps the keys that edit it (nothing an ancestor captures
+  `preventDefault`. iOS reports `UIKey.keyCode`'s USB HID usage as the DOM `code` and `UIKey.characters` as `key`
+  (case and layout kept, the unmodified character only for a nonprinting control chord); UIKit sends a held key's
+  press once, so `repeat` is false, and a Tab delivered as a prioritized `UIKeyCommand` has no `code` and no invented
+  release. A focused native text input keeps the keys that edit it (nothing an ancestor captures
   intercepts its typing, caret or editing, and input methods own their composition). A legacy terminal reports
   only strokes: no invented releases, repeats or codes. Losing the window's focus clears held state and synthesizes
   nothing; a real release is reported where the focus is, as the DOM does.

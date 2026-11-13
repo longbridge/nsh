@@ -270,6 +270,10 @@ components and events to TSX. Input sources differ: a terminal that reports only
 no synthetic releases, repeats or codes, and GPUI's logical events have no physical code (`code` is `""`). See
 `docs/dev/tooling.md` and each platform's development page for what its source reports.
 
+On iOS, a hardware keyboard reports `UIKey.characters` as `key` (its case and layout kept) and maps
+`UIKey.keyCode`'s USB HID usage to the DOM `code`. UIKit sends a held key's press once, so `repeat` is false. A Tab
+captured by `captureKeys` or bound in `keymap` arrives as a key command: its `code` is `""` and no release is invented.
+
 ## Platform notes
 
 - **iOS**: the room animates with the keyboard's own duration and an ease-in-ease-out curve.

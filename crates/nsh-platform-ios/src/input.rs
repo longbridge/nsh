@@ -23,13 +23,15 @@ use objc2::{
 };
 use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
 use objc2_foundation::{
-    NSArray, NSAttributedString, NSAttributedStringKey, NSDictionary, NSObject, NSRange, NSString,
+    NSArray, NSAttributedString, NSAttributedStringKey, NSDictionary, NSObject, NSRange, NSSet,
+    NSString,
 };
 use objc2_ui_kit::{
     NSFontAttributeName, NSForegroundColorAttributeName, NSTextAlignment, UIColor, UIControl,
-    UIControlEvents, UIEdgeInsets, UIKeyboardAppearance, UIKeyboardType, UILabel, UIResponder,
-    UIReturnKeyType, UITextAutocapitalizationType, UITextAutocorrectionType, UITextField,
-    UITextSmartDashesType, UITextSmartQuotesType, UITextView, UIView, UIViewAutoresizing,
+    UIControlEvents, UIEdgeInsets, UIKeyboardAppearance, UIKeyboardType, UILabel, UIPress,
+    UIPressesEvent, UIResponder, UIReturnKeyType, UITextAutocapitalizationType,
+    UITextAutocorrectionType, UITextField, UITextSmartDashesType, UITextSmartQuotesType,
+    UITextView, UIView, UIViewAutoresizing,
 };
 
 use crate::{target::EventTarget, text};
@@ -216,7 +218,7 @@ define_class!(
         /// A hardware keyboard's keys go to the app's shortcuts first
         /// (`nsh/keymap`): a key a binding takes never reaches the input.
         #[unsafe(method(pressesBegan:withEvent:))]
-        fn presses_began(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+        fn presses_began(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
             if !crate::keymap::input_began(self.as_ref(), presses) {
                 // SAFETY: calling the superclass implementation.
                 let _: () = unsafe { msg_send![super(self), pressesBegan: presses, withEvent: event] };
@@ -224,7 +226,7 @@ define_class!(
         }
 
         #[unsafe(method(pressesEnded:withEvent:))]
-        fn presses_ended(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+        fn presses_ended(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
             if !crate::keymap::input_ended(self.as_ref(), presses) {
                 // SAFETY: calling the superclass implementation.
                 let _: () = unsafe { msg_send![super(self), pressesEnded: presses, withEvent: event] };
@@ -232,7 +234,7 @@ define_class!(
         }
 
         #[unsafe(method(pressesCancelled:withEvent:))]
-        fn presses_cancelled(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+        fn presses_cancelled(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
             if !crate::keymap::input_ended(self.as_ref(), presses) {
                 // SAFETY: calling the superclass implementation.
                 let _: () = unsafe { msg_send![super(self), pressesCancelled: presses, withEvent: event] };
@@ -439,7 +441,7 @@ define_class!(
         /// A hardware keyboard's keys go to the app's shortcuts first
         /// (`nsh/keymap`): a key a binding takes never reaches the input.
         #[unsafe(method(pressesBegan:withEvent:))]
-        fn presses_began(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+        fn presses_began(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
             if !crate::keymap::input_began(self.as_ref(), presses) {
                 // SAFETY: calling the superclass implementation.
                 let _: () = unsafe { msg_send![super(self), pressesBegan: presses, withEvent: event] };
@@ -447,7 +449,7 @@ define_class!(
         }
 
         #[unsafe(method(pressesEnded:withEvent:))]
-        fn presses_ended(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+        fn presses_ended(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
             if !crate::keymap::input_ended(self.as_ref(), presses) {
                 // SAFETY: calling the superclass implementation.
                 let _: () = unsafe { msg_send![super(self), pressesEnded: presses, withEvent: event] };
@@ -455,7 +457,7 @@ define_class!(
         }
 
         #[unsafe(method(pressesCancelled:withEvent:))]
-        fn presses_cancelled(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+        fn presses_cancelled(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
             if !crate::keymap::input_ended(self.as_ref(), presses) {
                 // SAFETY: calling the superclass implementation.
                 let _: () = unsafe { msg_send![super(self), pressesCancelled: presses, withEvent: event] };

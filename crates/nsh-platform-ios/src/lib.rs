@@ -8,10 +8,50 @@
 //!   one main-queue hop per commit.
 //! - Text is measured on the engine thread with the same attributed strings
 //!   the labels render, so layout and rendering agree.
+//! - Hardware keys: a `focusable` view becomes the first responder
+//!   (`canBecomeFirstResponder`) and a UIKit focus item
+//!   (`canBecomeFocused`), reports one `on_key_down` / `on_key_up` per
+//!   `UIPress` transition with the DOM `key` UIKit reports for the press
+//!   (case and layout included; the unmodified character only for
+//!   nonprinting control chords), the DOM `code` mapped from
+//!   `UIKey.keyCode`'s USB HID usage, the modifier flags, `repeat` false
+//!   (UIKit sends a held key's press once) and the mounted `capture_keys`
+//!   decision in `default_prevented`. Tab and Shift+Tab move the focus
+//!   between inputs and focusable views: app shortcuts and mounted Tab
+//!   captures become prioritized `UIKeyCommand`s (a `KeyDown` with no
+//!   `code` and no invented release), an unbound, uncaptured Tab on a
+//!   focused view follows normal traversal, and the surface root, the first
+//!   responder until a view or input takes the focus, moves to the first
+//!   or last stop from no focus. A focused view that blurs or is deleted
+//!   gives the keyboard back to the root on the next turn when the window
+//!   has no responder left, never taking it from an input, a hosted view or
+//!   another custom view. Return
+//!   and Space press a focused view that takes presses. App shortcuts
+//!   (`nsh/keymap`) keep their precedence, and focused native inputs, web
+//!   views and native components keep their own keys and input methods.
+//!   Blur, cancellation and deactivation forget held keys without
+//!   synthesizing a release (`keyboard.rs`).
 //! - [`embed`] (feature `embed`) is the C ABI of the `NativeShell` Swift
 //!   module (`swift/`) that iOS apps embed nsh with.
 //!
 //! On non-UIKit targets this crate is empty.
+//!
+//! # Hardware keyboard tests
+//!
+//! With Xcode's simulator, the regression app presses real IOHID keys:
+//!
+//! ```sh
+//! nsh test crates/nsh-platform-ios/tests/keyboard --target ios
+//! nsh test crates/nsh-platform-ios/tests/keyboard --target catalyst
+//! ```
+//!
+//! It checks the reported key, DOM code, modifiers, single press and
+//! release of a focusable view, a mounted capture taking a key before its
+//! default, Tab / Shift+Tab traversal (a captured or app-bound Tab stays),
+//! a scroll ancestor and an overlay's logical ancestors, and that a tap
+//! focuses a view without press handlers. UIKit sends a held key's press
+//! once and reports no auto-repeat, so `repeat` is false; an app that
+//! wants repeats starts its own timer from the press.
 
 #![cfg(target_os = "ios")]
 
@@ -32,6 +72,7 @@ mod fps;
 mod image;
 mod input;
 mod interaction;
+mod keyboard;
 mod keymap;
 mod mount;
 mod native_view;
