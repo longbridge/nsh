@@ -1016,6 +1016,11 @@ pub struct EngineConfig {
     /// built-in backend, which every desktop backend has, embedded or
     /// standalone. The main window's commands always go to the platform.
     pub windows: Option<Arc<dyn nsh_core::desktop::WindowBackend>>,
+    /// The app's login item (`Application.launchAtLogin`): the platform's,
+    /// which a standalone app's runner gives (`run_app` with the backend's
+    /// `login_item` option), or a test's fake. `None` (the default): the
+    /// app does not launch at login.
+    pub login_item: Option<Arc<dyn nsh_core::desktop::LoginItemBackend>>,
 }
 
 /// Values of the environment an engine keeps whatever its platform reports
@@ -1152,6 +1157,7 @@ impl EngineConfig {
             speech: None,
             audio: None,
             windows: None,
+            login_item: None,
         }
     }
 
@@ -1226,6 +1232,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("picker", &self.picker.is_some())
             .field("speech", &self.speech.is_some())
             .field("audio", &self.audio.is_some())
+            .field("login_item", &self.login_item.is_some())
             .field("windows", &self.windows.is_some())
             .finish()
     }
@@ -2064,6 +2071,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         let app_url = core.app_url_cell();
         core.set_audio(config.audio.clone());
         core.set_window_backend(config.windows.clone());
+        core.set_login_item(config.login_item.clone());
         if let Some(window) = config.app.main_window() {
             core.set_main_window(window);
         }
@@ -3352,12 +3360,19 @@ impl<M: TextEngine> State<M> {
             // the core).
             let binds = self.binds.drain(..);
             if let Some(script) = script {
+                // What JS queued before this round (a timer, a handler) may
+                // change a list's items, and the core works out the overscan
+                // left to bind from the items it has: it applies those ops
+                // first, and the overscan waits for the next round, or a
+                // cell would be bound to an item that is gone.
+                script.take_ops(&mut self.ops);
+                let unapplied = !self.ops.is_empty();
                 for bind in binds {
                     script.bind_list(bind.list, &bind.binds);
                 }
                 script.take_ops(&mut self.ops);
                 let mut binds = Vec::new();
-                while paced.left() && self.core.has_paced_list_binds() {
+                while !unapplied && paced.left() && self.core.has_paced_list_binds() {
                     let start = Instant::now();
                     let ops = self.ops.len();
                     self.core.take_paced_list_binds(1, &mut binds);
@@ -3542,6 +3557,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         lifecycle: env.lifecycle,
         wake_count: env.wake_count,
         screen_color: env.screen_color,
+        canvas_render: env.canvas_render,
         file_requests: env.file_requests,
         speech: env.speech,
         notifications: env.notifications,

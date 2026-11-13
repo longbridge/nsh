@@ -151,6 +151,13 @@ style id:spinner animationName spin
 style id:spinner animationFrameRate 30
 nostyle id:uncapped animationFrameRate
 covers [styles] animationFrameRate
+# core-offscreen-canvas
+tap id:case-core-offscreen-canvas
+expect Offscreen 120x80
+expect Context kept true, other kinds null true
+expect Measured true
+expect Render failed ERR_FEATURE_UNAVAILABLE_ON_PLATFORM
+covers [nsh] OffscreenCanvas
 # core-list
 tap id:case-core-list
 expect Fruits

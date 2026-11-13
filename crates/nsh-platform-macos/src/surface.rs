@@ -203,6 +203,7 @@ pub(crate) type ErrorHandler = Box<dyn Fn(&str)>;
 
 /// Turns the performance monitor on or off.
 type PerfToggle = Box<dyn Fn(bool)>;
+type PerfMode = Box<dyn Fn(nsh_core::FpsMode)>;
 
 /// One engine and its views.
 pub(crate) struct Surface {
@@ -284,6 +285,9 @@ pub(crate) struct Surface {
     /// (`setFpsEnabled`): set by its [`crate::AppView`],
     /// which owns the panel.
     pub(crate) perf_toggle: RefCell<Option<PerfToggle>>,
+    /// How the view's performance monitor shows (`setFpsMode`): set by its
+    /// [`crate::AppView`].
+    pub(crate) perf_mode: RefCell<Option<PerfMode>>,
     /// When the last frame ran (`CACurrentMediaTime`).
     last_tick: Cell<f64>,
     /// The deadline the timer scheduled waits for
@@ -402,6 +406,7 @@ impl Surface {
             perf: RefCell::new(None),
             perf_on: Arc::new(AtomicBool::new(false)),
             perf_toggle: RefCell::new(None),
+            perf_mode: RefCell::new(None),
             last_tick: Cell::new(0.0),
             keeper: Cell::new(None),
             resize_late: Cell::new(false),

@@ -1,6 +1,6 @@
 ---
 title: nsh/mobile
-description: "What iOS and Android have: TabBar, the system's tab bar, Haptics, InputAccessoryView on iOS, BackHandler on Android, and isAvailable."
+description: "What iOS and Android have: TabBar, the system's tab bar, SegmentedControl, the system's segmented control on iOS, Haptics, InputAccessoryView on iOS, BackHandler on Android, and isAvailable."
 order: 12.2
 ---
 
@@ -8,6 +8,7 @@ order: 12.2
 
 `nsh/mobile` holds the capabilities specific to iOS and Android: the system's tab bar, `TabBar`, and
 [`Haptics`](#haptics), the device's haptic feedback, on both;
+[`SegmentedControl`](#segmentedcontrol), the system's segmented control, and
 [`InputAccessoryView`](#inputaccessoryview), a bar over the keyboard, on iOS; and [`BackHandler`](#backhandler), the
 back button, on Android. Rust code uses `nsh_core::mobile` and `nsh_core::prelude`; TSX imports `nsh/mobile`. The
 module can be imported on every platform, so one bundle runs everywhere: on the other platforms its components take no
@@ -15,17 +16,17 @@ room and its calls return at once, and `isAvailable` tells you whether you are o
 `nsh` tells which). What desktops have is in [nsh/desktop](./nsh-desktop.md).
 
 ```rust tabs
-use nsh_core::mobile::{TabBarItem, tab_bar};
+use nsh_core::mobile::{SegmentedControlItem, TabBarItem, segmented_control, tab_bar};
 ```
 
 ```tsx tabs
-import { BackHandler, Haptics, InputAccessoryView, isAvailable, TabBar } from "nsh/mobile";
-import type { TabBarItem, TabBarProps } from "nsh/mobile";
+import { BackHandler, Haptics, InputAccessoryView, isAvailable, SegmentedControl, TabBar } from "nsh/mobile";
+import type { SegmentedControlItem, SegmentedControlProps, TabBarItem, TabBarProps } from "nsh/mobile";
 ```
 
 ## Scope
 
-This module exposes capabilities specific to mobile platforms, such as the system tab bar for top-level app navigation. Common controls belong to [`nsh/base`](./nsh-base.md): its [Switch](../elements/switch.md), for example, shares behavior and API across phones, desktops and the web, with the track, thumb and state styles supplied by the app. `TabBar` serves mobile app navigation; `Tabs` serves tabbed content across platforms. Only capabilities with mobile-specific interaction semantics belong here. A system appearance, size or animation alone does not change a common control’s shared role. This distinction guides which capabilities belong here ([Goals and design principles](../docs/goals.md)).
+This module exposes capabilities specific to mobile platforms, such as the system tab bar for top-level app navigation. Common controls belong to [`nsh/base`](./nsh-base.md): its [Switch](../elements/switch.md), for example, shares behavior and API across phones, desktops and the web, with the track, thumb and state styles supplied by the app. `TabBar` serves mobile app navigation; `Tabs` serves tabbed content across platforms. Only capabilities with mobile-specific interaction semantics belong here. A system appearance, size or animation alone does not change a common control’s shared role. This distinction guides which capabilities belong here ([Goals and design principles](../docs/goals.md)). `SegmentedControl` is the system's own control for an app that needs exactly the iOS one; a choice in the app's look, on every platform, is `nsh/base`'s [ToggleGroup](../elements/toggle.md) or [RadioGroup](../elements/radio.md).
 
 ## isAvailable
 
@@ -149,6 +150,65 @@ In Rust, `tab_bar()` makes one, with a setter per prop (`.items(..)`, `.selected
 - **Desktops (macOS, Windows, Linux, GPUI) and the web**: the sections show with [Tabs](../elements/tabs.md), in the app's
   look. `TabBar` takes no room there, so one layout holds both, picked by `platform.os`
   ([`nsh`'s device API](./nsh.md#device)).
+
+## SegmentedControl
+
+A segmented control picks one of a few options in place: light or dark, day, week or month. `SegmentedControl` is
+the system's own `UISegmentedControl` on iOS and iPadOS, so it has the system's look (Liquid Glass on iOS 26 and
+later), its motion, VoiceOver ("Light, button, selected, 1 of 2") and its keyboard focus.
+
+```tsx
+import { signal } from "nsh";
+import { SegmentedControl } from "nsh/mobile";
+
+const appearance = signal(0);
+
+<SegmentedControl
+  items={[{ title: "Light", icon: "sun.max" }, { title: "Dark", icon: "moon" }]}
+  selectedIndex={appearance()}
+  onChange={({ index }) => appearance.set(index)}
+  style={{ alignSelf: "stretch" }}
+/>;
+```
+
+The selection is the app's: a tap reports `onChange` with the segment's index (`{ index }`), the control shows the
+choice at once, as the system's does, and the app passes the index back as `selectedIndex`. New `items` change the
+segments in place (the same number of segments keeps the control as it is, so a renamed or disabled segment does not
+flash). Its size is the system's where the style leaves it open; a width the style gives is shared by the segments. In
+Rust, `segmented_control()` makes one, with a setter per prop and `.on_change(..)`;
+`SegmentedControlItem::new(title).icon(name).disabled(true)` makes a segment.
+
+### Props
+
+| Prop | Rust | Type | Default | Description |
+|---|---|---|---|---|
+| `items` | `.items(..)` | `SegmentedControlItem[]` | `[]` | The segments, in order. |
+| `selectedIndex` | `.selected_index(..)` | `number` | `0` | The selected segment, by index; an index past the segments selects none. |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | No segment can be chosen: the system dims the control. |
+| `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | Where the control is: its position and size. Its look is the system's. |
+| `testID` | `.test_id(..)` | `string` | none | Finds the control in tests and `nsh test --trace`. |
+
+#### SegmentedControlItem
+
+| Field | Rust | Type | Description |
+|---|---|---|---|
+| `title` | `SegmentedControlItem::new(title)` | `string` | The segment's title: what it shows, and what VoiceOver says. |
+| `icon` | `.icon(name)` | `string` | An [SF Symbol](https://developer.apple.com/sf-symbols/) shown in place of the title, which VoiceOver still says. |
+| `disabled` | `.disabled(..)` | `boolean` | The segment cannot be chosen. |
+
+### Events
+
+| Event | Rust | Description |
+|---|---|---|
+| `onChange` | `.on_change(\|index: &u32\| ..)` | The user chose another segment: `{ index }`. The control shows the choice at once; the app sets `selectedIndex`. |
+
+### Platform notes
+
+- **iOS and Mac Catalyst**: `UISegmentedControl` in the system's appearance for the iOS version and the SDK the app
+  is linked with: Liquid Glass on iOS 26 and later.
+- **Android, the desktops and the web**: `SegmentedControl` takes no room and shows nothing, so one layout holds both:
+  show the choice with [ToggleGroup](../elements/toggle.md) or [RadioGroup](../elements/radio.md) there, picked by
+  `platform.os`.
 
 ## InputAccessoryView
 

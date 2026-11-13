@@ -744,6 +744,9 @@ Padding (`.pb_keyboard()`) shrinks the content above while the background reache
 
 The full height suits a view that reaches the bottom of the surface, as a screen's content does. On an Android host whose window resizes for the keyboard, the window itself shrinks and the variable is 0. See [Keyboard](../elements/keyboard.md).
 
+Overlays keep clear of the keyboard on their own: a [Sheet](../elements/sheet.md#the-software-keyboard) at the bottom,
+a drawer, and the menus, selects and date pickers a phone shows as sheets end at the keyboard's top and move with it.
+
 ### The keyboard accessor
 
 `keyboard_height()` and `keyboard_duration()` in Rust, and `keyboardFrame()` from `nsh` in TSX (a `{ height, duration }`), are reactive: how far the keyboard reaches into the surface (0 when hidden; the bottom safe area under it included) and its animation's duration in milliseconds. Read them for anything custom: hide a floating button while typing, or size a panel. What changes with them in the update the keyboard's move starts moves with the keyboard, on its curve and timed from when it started to move (`LayoutCurve::Keyboard`), as `env(keyboard-inset-height)` does; an animation the app configures for that update (`LayoutAnimation.configureNext`) wins.

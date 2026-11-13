@@ -366,7 +366,7 @@ effect(() => {
 });
 ```
 
-用 `background` 暂停工作，并在用户做出更改时就保存它：系统可能在应用进入后台几秒后就将其挂起，早于读取这一变化的副作用运行。显示在原生应用中的应用跟随该应用的状态；应用有多个窗口时（iPad、桌面），视图跟随它所在的窗口。在 Windows 上，用户注销、Windows 关机或重启、安装程序关闭应用时，应用会进入 `background`，它的处理函数在会话结束前运行；随后应用退出（[`Application.on("quit")`](../modules/nsh-desktop.md#退出)）。在测试中，`nsh/test` 的 `app.setLifecycle("background")` 会把应用移到后台（[测试](./testing-and-trace.md#操作步骤)）。
+用 `background` 暂停工作，并在用户做出更改时就保存它：系统可能在应用进入后台几秒后就将其挂起，早于读取这一变化的副作用运行。显示在原生应用中的应用跟随该应用的状态；应用有多个窗口时（iPad、桌面），视图跟随它所在的窗口。在 macOS 和 Windows 上，屏幕锁定或关闭时、窗口在另一个桌面（Space、虚拟桌面）上时，独立应用以及嵌入 AppKit 和 Win32 应用中的视图也处于 `background`。在 Windows 上，用户注销、Windows 关机或重启、安装程序关闭应用时，应用会进入 `background`，它的处理函数在会话结束前运行；随后应用退出（[`Application.on("quit")`](../modules/nsh-desktop.md#退出)）。在测试中，`nsh/test` 的 `app.setLifecycle("background")` 会把应用移到后台（[测试](./testing-and-trace.md#操作步骤)）。
 
 ## 睡眠之后
 

@@ -258,6 +258,15 @@ await app.press("Contact us");
 expect(app.openedUrls()).toEqual(["mailto:help@example.com"]);
 ```
 
+`app.failOpenUrls(url)` makes the URLs that match it fail to open, as on a device with no app for them, so a test
+checks what the app shows when a link does not open:
+
+```tsx
+await app.failOpenUrls("https://example.com/*");
+await app.press("Read the guide");
+expect(app.shows("Could not open the link")).toBe(true);
+```
+
 ### Stubbing the network
 
 `network` lists routes by `"<METHOD> <URL>"` (a bare URL is a `GET`; `*` matches any text). A request no route
@@ -425,7 +434,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.keyboard.press(keys)` | Presses a key with its modifiers, as `keymap` names it (`"mod+k"`, `"shift+/"`, `"escape"`; `mod` is the platform's command key), on a hardware keyboard, on every platform (phones and tablets have one too): the app's shortcut of it hears it (`keymap.bind`, `onKeyCommand`), else on a desktop the application menu's item with that shortcut is chosen (`Menu.setApplicationMenu`, its `when` kept while an input has the focus), else on macOS and the web Tab and Shift+Tab move the keyboard focus between the inputs and the views that take presses (`onFocus`, `onBlur`, `focus:` styles), inside the newest dialog while one is open (it gives the focus back to what had it when it closes), and Return or Space presses the view it is on, and on the web (`platform: "web"`) Shift+F10 asks it for its context menu (`onContextMenu` with `pointerType: null`), else the focused input takes a character, Backspace or the return key, else Escape goes back. |
 | `await app.keyboard.down(keys)` / `up(keys)` | Holds modifier keys (`"mod"`, `"shift"`, `"alt"`, `"ctrl"`, `"meta"`, joined by `+`) down until `up`: the presses, drags and hovers meanwhile carry them, as a Mod-click or a Shift-drag does. Headless and on Linux for now. |
 | `await app.dragAndHold(selector, by)` / `app.drop()` | Drags as `drag` does and keeps the finger down until `drop()`, which lifts it where it is: the steps between look at the screen mid-drag (a drag preview, a drop line). Headless and on Linux for now. |
-| `await app.dropFiles(selector, uris)` | Drops local files (`file:` URLs, as a file manager drags them) on the middle of the view: it, or the nearest view around it listening, hears `onFileDrop`. Desktops, headless and on Linux for now. |
+| `await app.dropFiles(selector, uris)` | Drops local files (`file:` URLs, as a file manager drags them) on the middle of the view: it, or the nearest view around it listening, hears `onFileDrop`. Desktops, headless, on Linux and on macOS for now. |
 | `await app.drag(selector, { x, y })` | A finger lands on the middle of the view, rests for 100 ms, moves by `x`, `y` points, 10 per frame, and lifts, as the platform's input takes it: a pan follows it (`pan={{ x, y }}`, `onPanStart`, `onPanEnd` with the release velocity), the views listening to touches hear it (`onTouchStart`, `PanResponder`), a scroll view scrolls with it and, pulled far enough past its top, refreshes (`onRefresh`), and a press under it is cancelled once it moves away. On the desktops and the web it is the mouse. |
 | `await app.wait(ms)` | Lets the app run for `ms` milliseconds: timers, animations, requests. On a manual clock, moves it by `ms` (`app.clock.runFor`). |
 | `await app.waitFor(selector, options?)` | Resolves once a view matches, or with `{ state: "gone" }` once none does; rejects after `timeout` ms (5000). On a manual clock, moves it a display frame at a time while it waits, by `timeout` at most. |
@@ -455,6 +464,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.openedUrls()` | The URLs the app opened (`openUrl`), in order: recorded, never opened. |
 | `await app.openWithUrl(url)` | The system hands the app a link that opens it, as when the user opens one while it runs (`UrlScheme.on("open")`; a link of a scheme the app does not claim is dropped, as on a device), then waits until it is quiet. Headless runs only. |
 | `await app.failImages(url)` | The images whose source is `url` fail to load from now on, those loading now included: each reports the failure with `onError`, as on a device, so a test checks what the app shows instead (an avatar's initials, a placeholder). `url` is matched whole and `*` in it matches anything (`"https://cdn.example.com/avatars/*"`), as `network` routes are; a bundled image's is `asset:/<path>`. Then waits until the app is quiet. Headless runs only. |
+| `await app.failOpenUrls(url)` | The URLs the app opens that match `url` fail to open from now on: `openUrl` resolves `{ opened: false }`, as on a device with no app for them, so a test checks what the app shows then. `url` is matched whole and `*` in it matches anything (`"https://example.com/*"`), as `network` routes are; `app.openedUrls()` still lists them. Then waits until the app is quiet. Headless runs only. |
 | `await app.setViewport(width, height)` | Resizes the viewport, as rotating the device or resizing a window does (`windowSize()`). |
 | `await app.setColorScheme(scheme)` | Switches the system's appearance to `"light"` or `"dark"`, as the user does. |
 | `await app.setLifecycle(state)` | Moves the app to `"background"`, `"inactive"` or `"active"`, as the system does when the user leaves it, switches to another app or window and comes back (`lifecycle()`). Headless runs only. |
@@ -514,7 +524,7 @@ that only a real platform can do:
   host](#the-pages-host)).
 - **The app runs under its capabilities**: what its `nsh.json` declares in `capabilities` is enforced as on a device,
   so what it does not declare is refused.
-- **URLs are recorded**: what the app opens is reported opened, and `app.openedUrls()` lists it.
+- **URLs are recorded**: what the app opens is reported opened unless the test fails it (`app.failOpenUrls`), and `app.openedUrls()` lists it.
 - **Picks are answered**: with the test's files (`onPick`), else cancelled, so `Picker.pickImages` and `Picker.pickFiles` resolve `[]`.
 - **Speech is the test's**: `Speech.available()` resolves `true`, a session starts at once and hears what `hear` says.
 - **Sound plays to a fake speaker**: sounds decode as WAV (their length from the header; other bytes fail with `decode`), players play a minute of their source at once and end at `endAudio()`.

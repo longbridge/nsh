@@ -1,7 +1,8 @@
 # Cargo features of the runtimes
 
 The large optional parts of a native runtime are Cargo features of the platform crates (`nsh-platform-linux`,
-`-macos`, `-windows`, `-ios`, `-android`) and the app runners (`nsh-*-app`). All are on by default, and `dev` turns all on.
+`-macos`, `-windows`, `-ios`, `-android`, `-gpui`) and the app runners (`nsh-*-app`). All are on by default, and `dev` turns
+all on.
 
 | Feature | What it links | Off |
 | --- | --- | --- |
