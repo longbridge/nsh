@@ -1,6 +1,6 @@
 // Drawings are decoded and replayed by Rust. JavaScript records the public
 // Canvas 2D facade; method/property metadata comes from the core's enums.
-export function createCanvas(invoke, reactive, dom, live, wake) {
+export function createCanvas(invoke, reactive, dom, live, wake, request = () => Promise.reject(new Error("offscreen canvases are not available here"))) {
   const recordings = new WeakMap(), retained = new WeakMap();
   const call = (op,args) => { if(!live())throw new Error("the app was disposed");const result=invoke(op,args);wake();return result; };
   const specs = call(600,[]);
@@ -79,5 +79,31 @@ export function createCanvas(invoke, reactive, dom, live, wake) {
     });
     return node;
   }
-  return {Canvas,Path2D,CanvasRenderingContext2D,CanvasGradient};
+  // `nsh`'s `OffscreenCanvas` (the realm's global of that name stays the
+  // browser's): a context recording as `<Canvas draw>`'s does, rendered by
+  // the engine as on every platform (`Op::RenderCanvas`, `nsh.js`
+  // `renderCanvas`), so it draws exactly what a canvas view would.
+  const offscreens = new WeakMap();
+  const offscreen = object => {const o=offscreens.get(object);if(!o)throw new TypeError("Illegal invocation");return o;};
+  // WebIDL's `[EnforceRange] unsigned long long`, as `nsh-js` reads it.
+  const dimension = (value,name) => {const n=Number(value);if(!Number.isFinite(n)||n<0)throw new TypeError(`OffscreenCanvas: ${name} must be a finite number not below 0`);return Math.trunc(n);};
+  class OffscreenCanvas {
+    constructor(width,height){offscreens.set(this,{width:dimension(width,"width"),height:dimension(height,"height"),context:null});}
+    get width(){return offscreens.get(this)?.width;}
+    get height(){return offscreens.get(this)?.height;}
+    getContext(kind){
+      const o=offscreen(this);
+      if(String(kind)!=="2d")return null;
+      return o.context??=make(CanvasRenderingContext2D.prototype,"context",{width:o.width,height:o.height});
+    }
+    convertToBlob(options){
+      try{
+        const o=offscreen(this);
+        const type=options?.type===undefined?"":String(options.type);
+        const scale=options?.scale===undefined?null:Number(options.scale);
+        return request(604,o.context?data(o.context).out:[],[o.width,o.height,type,scale]);
+      }catch(error){return Promise.reject(error);}
+    }
+  }
+  return {Canvas,Path2D,CanvasRenderingContext2D,CanvasGradient,OffscreenCanvas};
 }

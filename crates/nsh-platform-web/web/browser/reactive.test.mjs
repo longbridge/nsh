@@ -409,6 +409,27 @@ test("canvas records paths and gradients through the shared Rust decoder", { ski
   dispose();f.close();
 });
 
+test("nsh's OffscreenCanvas records as a canvas view does and asks the engine to render", { skip: !path }, async () => {
+  const f = await fixture();
+  const requests=[];
+  const canvas = createCanvas(f.invoke,f.api,f.dom,()=>!f.values.closed,()=>{},(op,receiver,args)=>{requests.push([op,receiver,args]);return Promise.resolve(f.invoke(op,[receiver,args,0]));});
+  const offscreen=new canvas.OffscreenCanvas(20.7,10);
+  assert.equal(offscreen.width,20);assert.equal(offscreen.height,10);
+  assert.notEqual(canvas.OffscreenCanvas,globalThis.OffscreenCanvas);
+  assert.throws(()=>new canvas.OffscreenCanvas(-1,1),TypeError);
+  assert.equal(offscreen.getContext("webgl"),null);
+  const cx=offscreen.getContext("2d");assert.equal(offscreen.getContext("2d"),cx);
+  assert.ok(cx instanceof canvas.CanvasRenderingContext2D);assert.equal(cx.canvas.width,20);
+  cx.fillStyle="red";cx.fillRect(0,0,5,5);
+  await offscreen.convertToBlob({type:"image/png",scale:2});
+  assert.equal(requests.length,1);
+  const [op,ops,args]=requests[0];
+  assert.equal(op,604);assert.ok(ops.length>0);assert.deepEqual(args,[20,10,"image/png",2]);
+  await offscreen.convertToBlob();assert.deepEqual(requests[1][2],[20,10,"",null]);
+  await assert.rejects(canvas.OffscreenCanvas.prototype.convertToBlob.call({}),TypeError);
+  f.close();
+});
+
 test("navigation keeps duplicate route entries and keymaps validate atomically", { skip: !path }, async () => {
   const f=await fixture();const env=createEnvironment(f.api,f.invoke,f.dom);
   const {createNavStack}=createNavigation(f.api,f.dom,env);

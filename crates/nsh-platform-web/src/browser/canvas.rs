@@ -1,7 +1,10 @@
 //! Recorded browser drawings use the shared Rust canvas decoder.
 use nsh_core::{
     Op, Points,
-    canvas::{CanvasOp, FillRule, PathOp, point_in_path, point_in_stroke},
+    canvas::{
+        CanvasOp, FillRule, PathOp, point_in_path, point_in_stroke,
+        render::{ImageFormat, RenderRequest},
+    },
     element::{JsHost, PropError, TsTypes},
     js::{host::HostInput, ops::JsOps},
 };
@@ -90,6 +93,35 @@ pub(super) fn call(host: &Bindings, op: u32, args: &Value) -> Result<Value, Prop
             Ok(Value::number(
                 crate::text::canvas_width(&font.with_numeric(numeric), &text).into(),
             ))
+        }
+        // `OffscreenCanvas.convertToBlob`: the recorded operations, then
+        // `[width, height, type, scale]` and the promise's call: rendered
+        // as `nsh-js`'s (`Op::RenderCanvas`), settled by the core's reply.
+        604 => {
+            let drawing = drawing(&args.index(0)?)?;
+            let options = args.index(1)?;
+            let number = |i: usize| -> Result<f32, PropError> {
+                Ok(options.index(i)?.as_number().unwrap_or(f64::NAN) as f32)
+            };
+            let (width, height) = (number(0)?, number(1)?);
+            let format = options
+                .index(2)?
+                .as_string()
+                .and_then(|mime| ImageFormat::from_mime(&mime))
+                .unwrap_or_default();
+            let scale = options.index(3)?;
+            let scale = (!scale.is_nullish()).then(|| scale.as_number().unwrap_or(f64::NAN) as f32);
+            let call = args.index(2)?.as_number().unwrap_or(0.0) as u32;
+            host.ops.borrow_mut().push(Op::RenderCanvas {
+                call,
+                request: Box::new(RenderRequest {
+                    drawing,
+                    size: nsh_core::Size::new(Points(width), Points(height)),
+                    scale,
+                    format,
+                }),
+            });
+            Ok(Value(0))
         }
         _ => Err(PropError("unknown canvas operation".into())),
     }

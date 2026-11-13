@@ -2567,6 +2567,77 @@ test("a key event without `key` falls back to its physical key instead of throwi
   assert.equal(keyCode({ key: "a", code: "KeyA" }), 97);
 });
 
+/** A browser `OffscreenCanvas` whose 2D context records its calls into
+ * `log.calls`; `fail` makes `convertToBlob` reject with it. */
+function fakeOffscreen(t, { fail } = {}) {
+  const log = { calls: [], sizes: [] };
+  const saved = globalThis.OffscreenCanvas;
+  t.after(() => {
+    globalThis.OffscreenCanvas = saved;
+  });
+  globalThis.OffscreenCanvas = class {
+    constructor(width, height) {
+      log.sizes.push([width, height]);
+    }
+    getContext() {
+      return new Proxy({}, {
+        get: (_, name) => (...args) => log.calls.push([name, ...args]),
+        set: (_, name, value) => (log.calls.push([`=${String(name)}`, value]), true),
+      });
+    }
+    async convertToBlob({ type }) {
+      if (fail) throw new Error(fail);
+      return new Blob(["png"], { type });
+    }
+  };
+  return log;
+}
+
+/** A player whose engine records `nsh_canvas_image`'s answers. */
+function renderingPlayer() {
+  const answers = [];
+  const { player } = fakePlayer();
+  player.images = new Map();
+  player.wasm.nsh_canvas_image = (request, ok, ptr, len) => {
+    const bytes = new Uint8Array(player.wasm.memory.buffer, ptr, len).slice();
+    answers.push([request, ok, ok ? [...bytes] : new TextDecoder().decode(bytes)]);
+    return -1;
+  };
+  return { player, answers };
+}
+
+test("an offscreen canvas replays its drawing at its scale and answers with the PNG's bytes", async (t) => {
+  const log = fakeOffscreen(t);
+  const { player, answers } = renderingPlayer();
+  await player.renderCanvas(7, [["=fillStyle", "#f00"], ["fillRect", 1, 2, 3, ["$", 0]]], 8, 6, 2, "image/png");
+  assert.deepEqual(log.sizes, [[8, 6]]);
+  assert.deepEqual(log.calls, [
+    ["setTransform", 2, 0, 0, 2, 0, 0],
+    ["save"],
+    ["=fillStyle", "#f00"],
+    // Animated values draw at 0.
+    ["fillRect", 1, 2, 3, 0],
+    ["restore"],
+  ]);
+  assert.deepEqual(answers, [[7, 1, [..."png"].map((c) => c.charCodeAt(0))]]);
+});
+
+test("an offscreen canvas that fails to encode answers with why", async (t) => {
+  fakeOffscreen(t, { fail: "too big" });
+  const { player, answers } = renderingPlayer();
+  await player.renderCanvas(3, [], 1, 1, 1, "image/png");
+  assert.deepEqual(answers, [[3, 0, "too big"]]);
+});
+
+test("an offscreen render for an app that was replaced meanwhile is dropped", async (t) => {
+  fakeOffscreen(t);
+  const { player, answers } = renderingPlayer();
+  const done = player.renderCanvas(3, [], 1, 1, 1, "image/png");
+  player.app = (player.app ?? 0) + 1;
+  await done;
+  assert.deepEqual(answers, []);
+});
+
 /** A browser clipboard that keeps what is written and image codecs that
  * record their work; `failWrite` makes `navigator.clipboard.write` reject. */
 function fakeClipboard(t, { failWrite } = {}) {

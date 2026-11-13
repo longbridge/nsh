@@ -4914,11 +4914,27 @@ class Player {
     const cx = canvas.getContext("2d");
     cx.setTransform(ratio, 0, 0, ratio, 0, 0);
     cx.clearRect(0, 0, w, h);
+    this.replayCanvas(cx, el._ops, el._slots, (uri) => {
+      const img = this.canvasImage(uri, el);
+      // A cross-origin image without CORS taints the canvas for good
+      // (the browser never clears the flag): shaders' pictures leave
+      // it out (`paintTree`).
+      if (img && !this.paintable(img)) canvas._tainted = true;
+      return img;
+    });
+  }
+
+  /**
+   * Replays a drawing (`cv`'s operations, `src/canvas.rs`) onto 2D context
+   * `cx`, whose transform maps points: `slots` are its animated values
+   * (missing ones read 0), `image(uri)` the loaded image a `drawImage`
+   * names, or none (it draws nothing).
+   */
+  replayCanvas(cx, ops, slots, image) {
     cx.save();
-    const slots = el._slots;
-    const v = (n) => (Array.isArray(n) && n[0] === "$" ? (slots[n[1]] ?? 0) : n);
+    const v = (n) => (Array.isArray(n) && n[0] === "$" ? (slots?.[n[1]] ?? 0) : n);
     const paint = (p) => {
-      if (Array.isArray(p) && p[0] === "$") return slots[p[1]] ?? "transparent";
+      if (Array.isArray(p) && p[0] === "$") return slots?.[p[1]] ?? "transparent";
       if (p && typeof p === "object" && p.g) {
         const a = p.args;
         const g = p.g === "linear" ? cx.createLinearGradient(a[0], a[1], a[2], a[3])
@@ -4937,7 +4953,7 @@ class Player {
       }
       return p;
     };
-    for (const [name, ...args] of el._ops) {
+    for (const [name, ...args] of ops) {
       try {
         if (name.startsWith("=")) {
           const prop = name.slice(1);
@@ -4954,12 +4970,8 @@ class Player {
         } else if (name === "roundRect") {
           cx.roundRect(...args.slice(0, 4).map(v), args[4].map(v));
         } else if (name === "drawImage") {
-          const img = this.canvasImage(args[0], el);
+          const img = image(args[0]);
           if (!img) continue;
-          // A cross-origin image without CORS taints the canvas for good
-          // (the browser never clears the flag): shaders' pictures leave
-          // it out (`paintTree`).
-          if (!this.paintable(img)) canvas._tainted = true;
           const dest = args.slice(2).map(v);
           if (args[1]) cx.drawImage(img, ...args[1], ...dest);
           else cx.drawImage(img, ...dest);
@@ -4975,6 +4987,60 @@ class Player {
       }
     }
     cx.restore();
+  }
+
+  /**
+   * `OffscreenCanvas.convertToBlob` (`Command::RenderCanvas`): the drawing
+   * replayed as `draw` replays a canvas view's, into a transparent
+   * `width` × `height` pixel canvas of its own at `scale` pixels per point,
+   * its animated values at 0, once the images it names have loaded (a
+   * failed one draws nothing), and encoded as `type`. The bytes or why
+   * there are none go to the engine (`nsh_canvas_image`).
+   */
+  async renderCanvas(request, ops, width, height, scale, type) {
+    const app = this.app;
+    let result;
+    try {
+      const uris = [...new Set(ops.filter(([name]) => name === "drawImage").map(([, uri]) => uri))];
+      const images = new Map(await Promise.all(uris.map(async (uri) => [uri, await this.offscreenImage(uri)])));
+      const canvas = typeof OffscreenCanvas !== "undefined"
+        ? new OffscreenCanvas(width, height)
+        : Object.assign(document.createElement("canvas"), { width, height });
+      const cx = canvas.getContext("2d");
+      if (!cx) throw new Error("the browser made no 2D context");
+      cx.setTransform(scale, 0, 0, scale, 0, 0);
+      this.replayCanvas(cx, ops, null, (uri) => images.get(uri));
+      const blob = canvas.convertToBlob
+        ? await canvas.convertToBlob({ type })
+        : await new Promise((resolve) => canvas.toBlob(resolve, type));
+      if (!blob) throw new Error("the image could not be encoded");
+      result = { ok: true, bytes: new Uint8Array(await blob.arrayBuffer()) };
+    } catch (err) {
+      result = { ok: false, bytes: String(err?.message ?? err) };
+    }
+    if (app !== this.app) return;
+    this.call((w) => this.withStrings([result.bytes], (p, l) => w.nsh_canvas_image(request, result.ok ? 1 : 0, p, l)));
+  }
+
+  /**
+   * The image at `uri` for an offscreen render, loaded (null when it fails):
+   * one that would taint the canvas (another origin's without CORS) is
+   * asked for again with CORS, so the image can still be read back.
+   */
+  offscreenImage(uri) {
+    const src = this.asset(uri);
+    const cached = this.images.get(src);
+    if (cached?.ready && this.paintable(cached.img)) return Promise.resolve(cached.img);
+    return new Promise((resolve) => {
+      const img = new Image();
+      if (!/^(data|blob):/.test(src)) img.crossOrigin = "anonymous";
+      img.onload = () => resolve(img);
+      img.onerror = () => {
+        console.warn(`[nsh] offscreen canvas: ${uri} could not be loaded`);
+        resolve(null);
+      };
+      img.src = src;
+    });
   }
 
   canvasImage(uri, el) {
@@ -6403,6 +6469,7 @@ class Player {
       // Pages see no local paths: never any files.
       case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
       case "pickScreenColor": this.pickScreenColor(args[0]); break;
+      case "renderCanvas": this.renderCanvas(...args); break;
       case "pickImages": this.pickImages(args[0], args[1], args[2], args[3], args[4]); break;
       case "pickFiles": this.pickFiles(args[0], args[1], args[2], args[3]); break;
       case "hostCall": this.hostCall(args[0], args[1], args[2]); break;

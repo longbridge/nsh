@@ -478,6 +478,8 @@ fn page() -> Environment {
         os: Os::Web,
         // Browsers' screen readers follow `aria-activedescendant`.
         reads_active_descendants: true,
+        // `nsh.js` `renderCanvas`: a 2D canvas of the page's own.
+        canvas_render: true,
         ..Environment::default()
     })
 }
@@ -1358,6 +1360,39 @@ pub extern "C" fn nsh_picked(request: u32) -> f64 {
             ROOT_ID,
             EventKind::Pick,
             EventPayload::Picked { id: request, files },
+        )
+    })
+}
+
+/// Answers offscreen canvas render `request` ([`nsh_core::Command::RenderCanvas`],
+/// `nsh.js` `renderCanvas`): with `ok` the encoded image's bytes, otherwise
+/// why there is none (UTF-8).
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory from [`nsh_alloc`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_canvas_image(
+    request: u32,
+    ok: u32,
+    ptr: *const u8,
+    len: usize,
+) -> f64 {
+    // SAFETY: guaranteed by the caller.
+    let data = unsafe { bytes(ptr, len) };
+    let result = if ok != 0 {
+        Ok(data.to_vec())
+    } else {
+        Err(String::from_utf8_lossy(data).into_owned())
+    };
+    send(|app| {
+        app.control.dispatch_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            EventPayload::CanvasImage {
+                id: request,
+                result,
+            },
         )
     })
 }
