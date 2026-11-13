@@ -164,8 +164,12 @@
   straight RGBA buffer (no copy) and reports it through `ImageData::rgba()`. The source goes by a fresh
   `data:image/png;nsh-key=<random>` key per buffer (no digest of megabytes of pixels per frame; the key's form is one
   `ImageSource::inline` turns into `data:,` when an app writes it, as for digests), and its natural size is the
-  buffer's (`Images::decode` reads it from `rgba()`, not a header). Windows, macOS, Linux and GPUI take the pixels in
-  their decoder closures (`from_rgba`: a copy into their own format, no decode, no downsampling); every other path
+  buffer's (`Images::decode` reads it from `rgba()`, not a header). `ImageSrc::size(Size<Points>)` declares the
+  natural layout size of `image()` independently: a 200×100 buffer drawn at 2× can lay out at 100×50 points.
+  Without it, `rgba` lays out at its pixel width and height in points. The builder sets the source's existing
+  size metadata, as `ImageAsset::size` does; the key, pixel data and reported pixel dimensions stay the same.
+  Windows, macOS, Linux and GPUI take the pixels in their decoder closures (`from_rgba`: a copy into their own
+  format, no decode, no downsampling); every other path
   reading `ImageData::bytes()` (iOS's `NSData`, Android's `Native.imageBytes`, the web's `image_bytes`, `getSize`)
   gets an uncompressed PNG (stored deflate blocks) built once on first use. Old frames leave the caches as any
   unshown source does (L3 never keeps in-memory bytes; L4 entries without a lease are evicted).

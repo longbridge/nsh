@@ -2244,6 +2244,104 @@ fn image_uses_natural_size_and_aspect_ratio() {
     );
 }
 
+mod rgba_image_sizes {
+    use super::*;
+    use crate::{
+        element::{ImageSrc, Root},
+        prelude::*,
+    };
+
+    #[component]
+    fn Images() -> impl IntoElement {
+        let src = ImageSrc::rgba(200, 100, vec![7u8; 200 * 100 * 4]);
+        let sized = src.clone().size(size_pt(100.0, 50.0));
+        view()
+            .items_start()
+            .child(image(src))
+            .child(image(sized.clone()))
+            .child(image(sized.clone()).w(px(60.0)))
+            .child(image(sized.clone()).h(px(20.0)))
+            .child(image(sized).w(px(60.0)).h(px(20.0)))
+    }
+
+    #[test]
+    fn declared_size_lays_out_in_points_at_each_pixel_ratio() {
+        for ratio in [1.0, 2.0] {
+            let mut c = core();
+            at_ratio(&mut c, ratio);
+            c.mount_root(&Root::new::<Images>(|| ()));
+            let batch = c.commit().unwrap();
+            let sizes: Vec<_> = batch
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    MountItem::Image {
+                        id,
+                        source: Some(source),
+                        ..
+                    } => Some((source.size.unwrap(), frame_of(&batch, *id).unwrap().size)),
+                    _ => None,
+                })
+                .collect();
+            let natural = size_pt(100.0, 50.0);
+            assert_eq!(
+                sizes,
+                [
+                    (size_pt(200.0, 100.0), size_pt(200.0, 100.0)),
+                    (natural, natural),
+                    (natural, size_pt(60.0, 30.0)),
+                    (natural, size_pt(40.0, 20.0)),
+                    (natural, size_pt(60.0, 20.0)),
+                ],
+                "at pixel ratio {ratio}"
+            );
+        }
+    }
+
+    #[component]
+    fn ResizableImage() -> impl IntoElement {
+        let natural = signal(size_pt(100.0, 50.0));
+        let src = ImageSrc::rgba(200, 100, vec![7u8; 200 * 100 * 4]);
+        view().items_start().child(
+            image(move || src.clone().size(natural.get()))
+                .on_press(move || natural.set(size_pt(80.0, 20.0))),
+        )
+    }
+
+    #[test]
+    fn changing_only_the_size_relayouts_the_same_source() {
+        let shown = |batch: &MountBatch| {
+            batch
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    MountItem::Image {
+                        id,
+                        source: Some(source),
+                        ..
+                    } => Some((*id, source.clone())),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let mut c = core();
+        at_ratio(&mut c, 2.0);
+        c.mount_root(&Root::new::<ResizableImage>(|| ()));
+        let first = c.commit().unwrap();
+        let (id, before) = shown(&first);
+        assert_eq!(frame_of(&first, id).unwrap().size, size_pt(100.0, 50.0));
+
+        assert!(c.component_event(id, EventKind::Press, &EventPayload::None));
+        let next = c.commit().unwrap();
+        let (next_id, after) = shown(&next);
+        assert_eq!(next_id, id);
+        assert_eq!(after.uri, before.uri);
+        assert_eq!(after.data, before.data);
+        assert_eq!(after.size, Some(size_pt(80.0, 20.0)));
+        assert_eq!(frame_of(&next, id).unwrap().size, size_pt(80.0, 20.0));
+    }
+}
+
 #[test]
 fn object_position_reaches_the_image_item_only() {
     let mut c = core();
