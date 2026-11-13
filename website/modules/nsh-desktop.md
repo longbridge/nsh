@@ -195,7 +195,7 @@ Each platform shows a kind as its own windows of that role: an `NSPanel` on macO
 
 | Group | Attribute | Description |
 |---|---|---|
-| Chrome | `title` | Shown in the title bar, the taskbar, the window switcher and to assistive technologies. |
+| Chrome | `title` | Shown in the title bar, the taskbar, the window switcher and to assistive technologies. In a browser, the main window's title is the page's title, shown on its tab (under a [`Head`](./nsh-web.md#head)'s title). |
 | | `titleBar` | `{ style: "default" \| "hidden"; height?; controlsOffset? }`: the system's title bar, or a title bar of the app's own ([below](#a-title-bar-of-your-own)). `controlsOffset` (`{ x, y }`) places macOS's traffic lights in a hidden title bar. |
 | | `frame` | `"default"`, or `"none"`: no title bar or border, the app draws everything. |
 | Size | `minSize`, `maxSize` | The least and largest content size the user may give it, `{ width, height }` in points; `null` clears it. |
