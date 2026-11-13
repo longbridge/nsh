@@ -17,12 +17,21 @@
 //!   are kept. A file that cannot be made or written is left alone, tried
 //!   again after [`RETRY_AFTER`]: the app and the platform's output carry
 //!   on without it.
+//! - Panics: written to the file whatever the filter, as `ERROR panic:`
+//!   lines in the words Rust prints them in (with a backtrace when
+//!   `RUST_BACKTRACE` asks for one), and then handed to the hook the
+//!   process had, which prints them to stderr as before. A packaged app's
+//!   stderr is often nowhere (a Windows GUI program, a Mac app opened from
+//!   Finder), so the file is where a crash can be read.
 
 use std::{
+    any::Any,
+    backtrace::{Backtrace, BacktraceStatus},
     fs::{File, OpenOptions},
     io::Write as _,
+    panic::{Location, PanicHookInfo},
     path::{Path, PathBuf},
-    sync::{Mutex, OnceLock, PoisonError},
+    sync::{Mutex, OnceLock, PoisonError, TryLockError},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -83,6 +92,7 @@ pub fn install(options: LogOptions) -> bool {
     log::set_max_level(logger.filter.max_level());
     if let Some(file) = &logger.file {
         nsh_core::log_file::set(file.lock().unwrap_or_else(PoisonError::into_inner).path());
+        std::panic::set_hook(log_panics(logger, std::panic::take_hook()));
     }
     if let Some(error) = &logger.filter_error {
         log::warn!("{FILTER_VARIABLE} is not a filter ({error}); the default levels apply");
@@ -110,6 +120,77 @@ impl Logger {
                 .map(|dir| Mutex::new(RollingFile::new(dir))),
             output: options.output,
         }
+    }
+}
+
+impl Logger {
+    /// Writes a panic's description to the file, whatever the filter: a
+    /// crash is what the file is read for, and a packaged app's stderr,
+    /// where Rust prints it, is often nowhere (a Windows GUI program, a Mac
+    /// app opened from Finder).
+    fn write_panic(&self, text: &str) {
+        let Some(file) = &self.file else {
+            return;
+        };
+        let line = format!("{} ERROR panic: {text}\n", Timestamp(SystemTime::now()));
+        // The panic may come from this thread while it writes a line: wait
+        // a little for the file, never forever.
+        for _ in 0..PANIC_LOCK_TRIES {
+            match file.try_lock() {
+                Ok(mut file) => return file.write(line.as_bytes(), Instant::now()),
+                Err(TryLockError::Poisoned(poisoned)) => {
+                    return poisoned.into_inner().write(line.as_bytes(), Instant::now());
+                }
+                Err(TryLockError::WouldBlock) => std::thread::sleep(Duration::from_millis(1)),
+            }
+        }
+    }
+}
+
+/// A panic hook, as `std::panic::set_hook` takes it.
+type PanicHook = dyn Fn(&PanicHookInfo<'_>) + Send + Sync + 'static;
+
+/// How many times a panic tries the file, a millisecond apart, before its
+/// line is given up.
+const PANIC_LOCK_TRIES: usize = 100;
+
+/// The panic hook that writes each panic to `logger`'s file (with a
+/// backtrace when `RUST_BACKTRACE` asks for one) and then runs `previous`,
+/// which prints it to stderr as before.
+fn log_panics(logger: &'static Logger, previous: Box<PanicHook>) -> Box<PanicHook> {
+    Box::new(move |info| {
+        let thread = std::thread::current();
+        let mut text = panic_text(thread.name(), info.location(), info.payload());
+        let backtrace = Backtrace::capture();
+        if backtrace.status() == BacktraceStatus::Captured {
+            text.push_str(&format!("\nstack backtrace:\n{backtrace}"));
+        }
+        logger.write_panic(text.trim_end());
+        previous(info);
+    })
+}
+
+/// A panic described as Rust's own hook prints it: `thread '<name>'
+/// panicked at <file>:<line>:<column>:` and the message on the next line.
+fn panic_text(
+    thread: Option<&str>,
+    location: Option<&Location<'_>>,
+    payload: &(dyn Any + Send),
+) -> String {
+    let message = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("Box<dyn Any>");
+    let thread = thread.unwrap_or("<unnamed>");
+    match location {
+        Some(at) => format!(
+            "thread '{thread}' panicked at {}:{}:{}:\n{message}",
+            at.file(),
+            at.line(),
+            at.column()
+        ),
+        None => format!("thread '{thread}' panicked:\n{message}"),
     }
 }
 
@@ -461,6 +542,80 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(dir.join("logs/app.log")).unwrap(),
             "back\n"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn panics_are_described_as_rust_prints_them() {
+        let location = std::panic::Location::caller();
+        let at = format!(
+            "{}:{}:{}",
+            location.file(),
+            location.line(),
+            location.column()
+        );
+        let payload: Box<dyn std::any::Any + Send> = Box::new("index out of bounds");
+        assert_eq!(
+            panic_text(Some("nsh-engine"), Some(location), payload.as_ref()),
+            format!("thread 'nsh-engine' panicked at {at}:\nindex out of bounds")
+        );
+        let payload: Box<dyn std::any::Any + Send> = Box::new(String::from("no window"));
+        assert_eq!(
+            panic_text(None, None, payload.as_ref()),
+            "thread '<unnamed>' panicked:\nno window"
+        );
+        let payload: Box<dyn std::any::Any + Send> = Box::new(7_u8);
+        assert_eq!(
+            panic_text(Some("main"), None, payload.as_ref()),
+            "thread 'main' panicked:\nBox<dyn Any>"
+        );
+    }
+
+    #[test]
+    fn panics_reach_the_file_whatever_the_filter() {
+        let dir = temp_dir("panic");
+        // A filter that logs only another crate's lines.
+        let logger: &'static Logger = Box::leak(Box::new(Logger::new(
+            LogOptions {
+                directory: Some(dir.clone()),
+                ..LogOptions::default()
+            },
+            Some("my_app=debug"),
+        )));
+        let previous: Arc<PanicHook> = Arc::from(std::panic::take_hook());
+        let chained = Arc::new(Mutex::new(0));
+        let hook = {
+            let (previous, chained) = (previous.clone(), chained.clone());
+            Box::new(move |info: &std::panic::PanicHookInfo<'_>| {
+                if info.payload().downcast_ref::<&str>() == Some(&"the logged panic") {
+                    *chained.lock().unwrap() += 1;
+                }
+                previous(info);
+            })
+        };
+        std::panic::set_hook(log_panics(logger, hook));
+        let caught = std::panic::catch_unwind(|| panic!("the logged panic"));
+        // Other tests' panics keep the hook they had.
+        std::panic::set_hook(Box::new(move |info| previous(info)));
+        assert!(caught.is_err());
+        assert_eq!(*chained.lock().unwrap(), 1, "the previous hook runs too");
+        let text = std::fs::read_to_string(dir.join("app.log")).unwrap();
+        // Other tests panicking meanwhile may add their lines too.
+        let lines: Vec<&str> = text.lines().collect();
+        let at = lines
+            .iter()
+            .position(|line| *line == "the logged panic")
+            .expect(&text);
+        let head = lines[at - 1];
+        assert!(head.contains(" ERROR panic: thread '"), "{text}");
+        assert!(
+            head.contains("panics_reach_the_file_whatever_the_filter"),
+            "{text}"
+        );
+        assert!(
+            head.contains("' panicked at ") && head.contains("logging.rs:"),
+            "{text}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

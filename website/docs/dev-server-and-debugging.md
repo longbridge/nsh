@@ -279,6 +279,11 @@ RUST_LOG=warn,notes=debug,js=info ./notes              # the app's crate in deta
 On Windows set it for one run in PowerShell (`$env:RUST_LOG="info"; .\Notes.exe`), or for the user in the system's
 environment variables.
 
+When Rust code panics, the file records it whatever the levels: an `ERROR panic:` line with the words Rust prints (the
+thread, the place and the message), and the backtrace when `RUST_BACKTRACE=1` is set. A packaged app's standard error
+is often out of sight (a Windows GUI program, a Mac app opened from Finder), so this file is where a crash's cause can
+be read.
+
 ## The error overlay
 
 These errors show a red overlay over the app on the host, with the message and stack:
