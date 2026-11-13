@@ -1158,7 +1158,9 @@ for one with no looks. The state's classes are important (`!`) over the part's `
 style comes after the part's (`Style::then`), applied with `Element::state_inline_style`, which follows the typed
 styles a Rust app's state style has even when the part's has none. Closing a desktop menu closes its submenus, and
 closing a submenu its own, each with its exit. A sheet (`Sheet`, menus on touch screens, the dropdowns' sheets) keeps
-`SheetMotion`.
+`SheetMotion`; a dropdown's sheet on its way out takes no attempt to close it either (its backdrop or back pressed
+again sends no second `onCancel`). A searchable list (`Select`'s, `Combobox`'s) keeps its query and rows until its popup
+or sheet is gone, and each opening starts from the default query again.
 
 How a popup presents itself follows the device (`is_desktop()`; one presentation, `auto`, for now), by what the popup
 is for, never by replacing one popup with another everywhere:

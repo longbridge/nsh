@@ -729,9 +729,9 @@ pub(crate) struct Presence {
     pub(crate) dismiss: Rc<dyn Fn(OpenChangeReason)>,
     /// It is all there (`true`) or all gone (`false`).
     pub(crate) shown: Rc<dyn Fn(bool)>,
-    /// The desktops: it closed and starts to go; the keyboard focus goes
-    /// where the component puts it (its trigger, unless what closed it
-    /// took the focus elsewhere).
+    /// The desktops: it closed and starts to go (a popup that was made);
+    /// the keyboard focus goes where the component puts it (its trigger,
+    /// unless what closed it took the focus elsewhere).
     pub(crate) back: Rc<dyn Fn()>,
 }
 
@@ -788,14 +788,19 @@ pub(crate) fn dropdown(
         );
     }
     // The keyboard focus goes back as the popup closes, not once it is
-    // gone: on its way out it takes no presses, nor keys.
+    // gone: on its way out it takes no presses, nor keys. Only a popup
+    // that was made: one closed before the trigger's first layout never
+    // took the focus, so it has none to give back.
     if !sheet {
         let open = presence.open.clone();
         let back = presence.back.clone();
-        let was = stored(false);
+        let made = stored(false);
         effect(move || {
-            let now = open();
-            if was.replace(now) && !now {
+            if open() {
+                if popup.mounted() {
+                    made.replace(true);
+                }
+            } else if made.replace(false) {
                 untracked(|| back());
             }
         });

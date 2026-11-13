@@ -492,6 +492,9 @@ pub(crate) struct Listbox {
     /// The list is open (between [`Listbox::opened`] and
     /// [`Listbox::closed`]).
     open: Stored<bool>,
+    /// Its popup or sheet is there (between [`Listbox::arrived`] and
+    /// [`Listbox::gone`]), on its way out too.
+    there: Stored<bool>,
     /// The rows wholly in view, as the list last said.
     visible: Stored<Option<(usize, usize)>>,
     /// A row to reveal once the list says what is in view.
@@ -556,6 +559,7 @@ impl Listbox {
             lit: stored(std::array::from_fn(|_| signal(None))),
             highlighted: stored(None),
             open: stored(false),
+            there: stored(false),
             visible: stored(None),
             reveal: stored(None),
             list: element_ref(),
@@ -709,12 +713,31 @@ impl Listbox {
         self.set_highlight(item, Via::Keyboard);
     }
 
-    /// The list closed: the query goes back to its default.
+    /// The list closed. Its query stays until the list is gone
+    /// ([`Listbox::gone`]): on its way out (the app's ending look, a
+    /// sheet sliding down) it shows the rows it showed, not every item
+    /// again.
     pub(crate) fn closed(self) {
         self.open.replace(false);
-        self.own_query.set(self.default_query());
+        if !self.there.get() {
+            self.own_query.set(self.default_query());
+        }
         self.a11y.set(None);
         self.typeahead.with(Typeahead::clear);
+    }
+
+    /// Its popup or sheet is all there.
+    fn arrived(self) {
+        self.there.replace(true);
+    }
+
+    /// Its popup or sheet is gone: unless it opened again, the query goes
+    /// back to its default (what a combobox's input shows while closed).
+    fn gone(self) {
+        self.there.replace(false);
+        if !self.open.get() {
+            self.own_query.set(self.default_query());
+        }
     }
 
     /// The user typed `query` in the search field: while the app sets no
@@ -1049,7 +1072,17 @@ pub(crate) fn present(
     let presence = Presence {
         open: hooks.open.clone(),
         dismiss: hooks.dismiss.clone(),
-        shown: hooks.shown.clone(),
+        shown: {
+            let shown = hooks.shown.clone();
+            Rc::new(move |there| {
+                if there {
+                    lb.arrived();
+                } else {
+                    lb.gone();
+                }
+                shown(there);
+            })
+        },
         back: hooks.back.clone(),
     };
     popup::dropdown(

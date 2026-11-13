@@ -5,9 +5,9 @@
 //! then run, taking no presses, and `onClose` comes after; the keyboard
 //! focus is the trigger's again as it starts to go; a press outside it on
 //! its way out is no attempt to close it; opened again on its way out, it
-//! is taken back. Without looks, or with reduced motion, it goes at once
-//! and nothing more is sent. On a manual clock: time moves only as the test
-//! says.
+//! is taken back; a searchable list keeps its rows and query until it is
+//! gone. Without looks, or with reduced motion, it goes at once and nothing
+//! more is sent. On a manual clock: time moves only as the test says.
 
 use std::{
     collections::HashMap,
@@ -97,13 +97,18 @@ impl App {
 /// `root` on a Mac on a manual clock; `reduce_motion`: the user asked for
 /// less motion.
 fn start(root: Root, reduce_motion: bool) -> App {
+    start_on(root, Os::MacOs, Idiom::Desktop, reduce_motion)
+}
+
+/// [`start`] on `os` in `idiom`.
+fn start_on(root: Root, os: Os, idiom: Idiom, reduce_motion: bool) -> App {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
         ..EngineConfig::new(root)
     };
-    config.environment.os = Os::MacOs;
-    config.environment.idiom = Idiom::Desktop;
+    config.environment.os = os;
+    config.environment.idiom = idiom;
     config.environment.reduce_motion = reduce_motion;
     let mut app = Headless::start(config).expect("the engine starts");
     let seen = Arc::new(Mutex::new(Seen::default()));
@@ -308,6 +313,81 @@ fn a_select_list_without_looks_goes_at_once_and_sends_nothing_more() {
         styled,
         "no style sent to the popup as it closes"
     );
+}
+
+/// A searchable select whose popup fades out for 200 ms (its ending look).
+#[component]
+fn SearchScreen(_props: ScreenProps) -> impl IntoElement {
+    view().pt(px(40.0)).pl(px(20.0)).child(
+        select()
+            .items(vec![
+                SelectItem::new("apple", "Apple"),
+                SelectItem::new("pear", "Pear"),
+            ])
+            .searchable(true)
+            .search_placeholder("Search")
+            .accessibility_label("Fruit")
+            .popup_class("bg-black transition-opacity duration-200")
+            .popup_ending_style(|s| s.opacity(0.0))
+            .render_item(|e: &SelectEntry| text(e.title.clone()))
+            .trigger(view().w(px(160.0)).h(px(30.0)).child(text("Pick")))
+            .w(px(200.0)),
+    )
+}
+
+/// [`SearchScreen`] with its list open and "pe" typed in its search
+/// field: only Pear shows.
+fn searched() -> App {
+    let mut app = start(
+        Root::new::<SearchScreen>(|| ScreenProps { looks: true }),
+        false,
+    );
+    app.app.press("role:combobox").unwrap();
+    app.app.run_for(Duration::from_millis(50)).unwrap();
+    app.app.type_text("Search", "pe").unwrap();
+    app.app.run_for(Duration::from_millis(16)).unwrap();
+    assert!(app.has("role:option[Pear]"));
+    assert!(!app.has("role:option[Apple]"), "filtered while open");
+    app
+}
+
+#[test]
+fn a_searchable_list_keeps_its_rows_while_it_goes() {
+    let mut app = searched();
+    app.app.press_key("escape").unwrap();
+    app.app.run_for(Duration::from_millis(100)).unwrap();
+    assert!(app.has("role:listbox"), "still going");
+    assert_eq!(app.popup_opacity(), 0.0, "with its ending look");
+    assert!(app.has("role:option[Pear]"));
+    assert!(
+        !app.has("role:option[Apple]"),
+        "the rows it showed stay while it fades"
+    );
+    app.app.run_for(Duration::from_millis(150)).unwrap();
+    assert!(!app.has("role:listbox"), "gone once its 200 ms ran");
+}
+
+#[test]
+fn a_searchable_list_opened_again_shows_every_row() {
+    // Once it is gone.
+    let mut app = searched();
+    app.app.press_key("escape").unwrap();
+    app.app.run_for(Duration::from_millis(500)).unwrap();
+    assert!(!app.has("role:listbox"));
+    app.app.press("role:combobox").unwrap();
+    app.app.run_for(Duration::from_millis(50)).unwrap();
+    assert!(app.has("role:option[Apple]"), "the query starts again");
+    assert!(app.has("role:option[Pear]"));
+    // On its way out: taken back, with the query started again too.
+    let mut app = searched();
+    app.app.press_key("escape").unwrap();
+    app.app.run_for(Duration::from_millis(50)).unwrap();
+    assert!(app.has("role:listbox"), "still going");
+    app.app.press("role:combobox").unwrap();
+    app.app.run_for(Duration::from_millis(500)).unwrap();
+    assert!(app.has("role:listbox"), "taken back");
+    assert!(app.has("role:option[Apple]"), "the query starts again");
+    assert!(app.has("role:option[Pear]"));
 }
 
 /// A combobox whose popup fades for 200 ms between its look and its
