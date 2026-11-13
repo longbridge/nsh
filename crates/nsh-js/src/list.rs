@@ -133,8 +133,11 @@ struct ListData {
     owner: u32,
     /// Cells by slot.
     cells: Vec<Option<Cell>>,
-    /// Owners of the header, footer and empty cells.
+    /// Owners of the header and footer cells.
     extras: Vec<u32>,
+    /// The owner of the empty cell while it shows: disposed with the list
+    /// (its root is not owned by the list's owner).
+    empty: Option<u32>,
     /// The viewable range reported last, and the latest.
     reported: (i64, i64),
     latest: (i64, i64),
@@ -264,6 +267,7 @@ pub(crate) fn render(cx: *mut JsContext, props: JsValue) -> Result<JsValue, JsVa
         owner: reactive::current_owner(cx),
         cells: Vec::new(),
         extras: Vec::new(),
+        empty: None,
         reported: (-1, -1),
         latest: (-1, -1),
         timer: None,
@@ -397,7 +401,7 @@ unsafe extern "C" fn dispose(
     for cell in data.cells.iter().flatten() {
         reactive::dispose_owner(cx, cell.owner);
     }
-    for &owner in &data.extras {
+    for &owner in data.extras.iter().chain(&data.empty) {
         reactive::dispose_owner(cx, owner);
     }
     free_data(cx, *data);
@@ -808,6 +812,9 @@ unsafe extern "C" fn empty_run(
                     r
                 })
             });
+            if let Some(d) = lists(cx).map.borrow_mut().get_mut(&id) {
+                d.empty = Some(root);
+            }
             qjs::JS_SetPropertyUint32(cx, state, 0, qjs::JS_NewFloat64(root as f64));
             qjs::JS_SetPropertyUint32(cx, state, 1, cell_node);
             if let Err(e) = r {
@@ -818,6 +825,11 @@ unsafe extern "C" fn empty_run(
             let cell = qjs::JS_GetPropertyUint32(cx, state, 1);
             let mut root = 0f64;
             qjs::JS_ToFloat64(cx, &mut root, owner);
+            if let Some(id) = dom::node_id(cx, list)
+                && let Some(d) = lists(cx).map.borrow_mut().get_mut(&id)
+            {
+                d.empty = None;
+            }
             reactive::dispose_owner(cx, root as u32);
             let r = dom::remove_node(cx, list, cell);
             qjs::JS_FreeValue(cx, cell);
