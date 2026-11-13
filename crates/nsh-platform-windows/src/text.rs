@@ -1793,11 +1793,13 @@ impl TextEngine for DWriteTextEngine {
 
     fn first_baseline(&self, p: &Prepared, width: Points) -> Option<Points> {
         // Typeset at the size it measures `width` wide, as the text is laid
-        // out: the baseline its first line's runs are drawn on.
+        // out: the baseline of its first line (a run's is the same `top +
+        // ascent`; the line, as a line of only a break or an attachment has
+        // no runs).
         let layout = self.layout(p, self.measure(p, Some(width)));
         let layout = layout.downcast::<WinLayout>()?;
-        let first = layout.lines.first()?;
-        Some(Points(layout.runs.get(first.runs.start)?.baseline))
+        let first = &layout.lines.first()?.info;
+        Some(first.y + first.ascender)
     }
 
     fn layout(&self, p: &Prepared, size: Size<Points>) -> TextLayout {
@@ -3636,8 +3638,8 @@ mod tests {
     #[test]
     fn the_first_baseline_is_the_first_lines() {
         let engine = engine();
-        let at = |size: f32, width: Option<f32>| {
-            let t = text(&[("Chat with the world", plain(size))]);
+        let at_of = |content: &str, size: f32, width: Option<f32>| {
+            let t = text(&[(content, plain(size))]);
             let (measured, layout) = layout_of(&engine, &t, width);
             let prepared = engine.prepare(&t);
             let baseline = engine
@@ -3646,6 +3648,7 @@ mod tests {
             let line = engine.lines(&layout).remove(0);
             (baseline.0, line.y.0 + line.ascender.0)
         };
+        let at = |size, width| at_of("Chat with the world", size, width);
         let near = |a: f32, b: f32| (a - b).abs() < 0.5;
         let (small, drawn) = at(12.0, None);
         assert!(near(small, drawn), "{small} {drawn}");
@@ -3656,6 +3659,13 @@ mod tests {
         );
         let (large, _) = at(24.0, None);
         assert!(large > small, "{large} {small}");
+        // A first line of only a break has no runs: its own baseline, not
+        // the next line's.
+        let (broken, drawn) = at_of("\nChat", 12.0, None);
+        assert!(
+            near(broken, drawn) && near(broken, small),
+            "{broken} {drawn}"
+        );
     }
 
     #[test]

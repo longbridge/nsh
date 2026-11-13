@@ -295,6 +295,9 @@ struct Line {
     info: TextLine,
     /// Its runs in [`LinuxLayout::runs`].
     runs: std::ops::Range<usize>,
+    /// Its baseline: where its runs are drawn (`info.ascender` is from its
+    /// logical top, which a `lineHeight` moves off the line's top).
+    baseline: f32,
 }
 
 /// A final layout: plain data, drawn on the main thread.
@@ -882,11 +885,11 @@ impl TextEngine for PangoTextEngine {
 
     fn first_baseline(&self, prepared: &Prepared, width: Points) -> Option<Points> {
         // Typeset at the size it measures `width` wide, as the text is laid
-        // out: the baseline its first line's runs are drawn on.
+        // out: the baseline of its first line (the line's, as a line of
+        // only a break or an inline view has no runs).
         let layout = self.layout(prepared, self.measure(prepared, Some(width)));
         let layout = layout.downcast::<LinuxLayout>()?;
-        let first = layout.lines.first()?;
-        Some(Points(layout.runs.get(first.runs.start)?.baseline))
+        Some(Points(layout.lines.first()?.baseline))
     }
 
     fn layout(&self, prepared: &Prepared, size: Size<Points>) -> TextLayout {
@@ -1019,6 +1022,7 @@ impl TextEngine for PangoTextEngine {
                     x_height: Points(x_height),
                 },
                 runs: first..out.runs.len(),
+                baseline,
             });
         }
         TextLayout(Arc::new(out))
@@ -2453,8 +2457,8 @@ mod tests {
     #[test]
     fn the_first_baseline_is_the_first_lines() {
         let engine = PangoTextEngine::new("sans-serif".into());
-        let at = |style: ResolvedTextStyle, width: Option<f32>| {
-            let t = text(&[("Chat with the world", style)]);
+        let at_of = |content: &str, style: ResolvedTextStyle, width: Option<f32>| {
+            let t = text(&[(content, style)]);
             let prepared = engine.prepare(&t);
             let measured = engine.measure(&prepared, width.map(Points));
             let baseline = engine
@@ -2463,6 +2467,7 @@ mod tests {
             let line = engine.lines(&engine.layout(&prepared, measured)).remove(0);
             (baseline.0, (line.y + line.ascender).0)
         };
+        let at = |style, width| at_of("Chat with the world", style, width);
         let near = |a: f32, b: f32| (a - b).abs() < 0.5;
         let sized = |size: f32| ResolvedTextStyle {
             font_size: Points(size),
@@ -2483,6 +2488,13 @@ mod tests {
         assert!(near(baseline, drawn), "{baseline} {drawn}");
         let (large, _) = at(sized(24.0), None);
         assert!(large > small, "{large} {small}");
+        // A first line of only a break has no runs: its own baseline, not
+        // the next line's.
+        let (broken, drawn) = at_of("\nChat", sized(12.0), None);
+        assert!(
+            near(broken, drawn) && near(broken, small),
+            "{broken} {drawn}"
+        );
     }
 
     /// With a fixed `lineHeight`, an attachment taller than the line grows
