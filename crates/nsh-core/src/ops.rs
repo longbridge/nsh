@@ -2564,7 +2564,7 @@ pub enum FpsMode {
     Expanded,
     /// A small pill with the frame rate only, colored by the frame budget.
     Collapsed,
-    /// Nothing on screen; it still measures (`fpsReading()`, the log).
+    /// Nothing on screen; it still measures (`perfStats()`, the log).
     Hidden,
 }
 

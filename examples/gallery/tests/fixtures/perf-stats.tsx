@@ -5,10 +5,10 @@ import { fpsEnabled, mount, perfStats, setFpsEnabled, Text, View } from "nsh";
 function App() {
   return (
     <View class="flex-1 bg-background" style={{ padding: 12, gap: 8 }}>
-      <View role="button" testID="on" onPress={() => setFpsEnabled(true)}>
+      <View role="button" testID="on" style={{ alignSelf: "flex-start" }} onPress={() => setFpsEnabled(true)}>
         <Text class="text-foreground">Measure</Text>
       </View>
-      <View role="button" testID="off" onPress={() => setFpsEnabled(false)}>
+      <View role="button" testID="off" style={{ alignSelf: "flex-start" }} onPress={() => setFpsEnabled(false)}>
         <Text class="text-foreground">Stop</Text>
       </View>
       <Text class="text-foreground">{`Enabled ${fpsEnabled()}`}</Text>
