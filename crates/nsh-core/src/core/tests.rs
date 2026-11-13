@@ -2630,6 +2630,50 @@ fn scroll_reports_content_size() {
     )));
 }
 
+/// `scrollsToTop` reaches the scroll view's mounted behavior (iOS sets
+/// `UIScrollView.scrollsToTop` from it): on by default, off when the app
+/// says so, and on again.
+#[test]
+fn scrolls_to_top_reaches_the_scroll_behavior() {
+    fn behavior(batch: &MountBatch) -> Option<ScrollBehavior> {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ScrollBehavior { id: 2, behavior } => Some((**behavior).clone()),
+            _ => None,
+        })
+    }
+    assert!(ScrollBehavior::default().scrolls_to_top);
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Scroll(ScrollProp::ScrollsToTop(false)),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(behavior(&batch).map(|b| b.scrolls_to_top), Some(false));
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Scroll(ScrollProp::ScrollsToTop(true)),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(behavior(&batch).map(|b| b.scrolls_to_top), Some(true));
+}
+
 /// `overflow: "hidden"` clips in layout as well as in paint: what a box
 /// clips away must not grow an ancestor scroll view's content size. A
 /// preview laid out at its design width and scaled down by a transform
