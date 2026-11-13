@@ -74,7 +74,8 @@
   `odd:` / `even:` / `only:`, `placeholder:` / `selection:` (a color only, the pseudo-element's: `placeholder:text-*` / `selection:bg-*`, the
   `placeholderColor` / `selectionColor` style keys; other utilities under them are unknown), `!` (important). The state classes have style props of their own (`activeStyle`, `hoverStyle`,
   `focusStyle`, `focusVisibleStyle`, `focusWithinStyle`, `disabledStyle`, `checkedStyle`, `indeterminateStyle`, `expandedStyle`,
-  `pressedStyle`, a `Button`'s `selectedStyle`), resolved the same way: later states win, `disabled` over all. `selected`, `checked`, `indeterminate`,
+  `pressedStyle`, a `Button`'s `selectedStyle`), resolved the same way: later states win, `disabled` over all. A nested `<Text>` takes `hover:` and `active:` from the pointer over its characters (`text.md`
+  "Span states"). `selected`, `checked`, `indeterminate`,
   `expanded`, `pressed` (`state::ARIA_PRESSED`), `busy` and `invalid` are value states (`state::ACCESSIBILITY`, set by
   `Core::set_accessibility_states` from `classes::accessibility_states`) the core sets from the accessibility state (never reported by the platform). The first three are
   below the interaction states: `checked`, then `indeterminate` (Tailwind's order), then `selected`, then `hover`,
@@ -95,7 +96,8 @@
   view taking it (AppKit's first responder when no view has it) is no focus. A view whose classes read only
   `focus-within:` tracks nothing natively. Rust components hear the focus come into an element and leave it with
   `ElementRef::on_focus_in` / `on_focus_out` (GPUI's names, a focus handle's), watches the core runs at the end of
-  the commit round the focus moved in (`core/watch.rs`). `dark:` follows the appearance
+  the commit round the focus moved in (`core/watch.rs`); an element removed with the focus inside it, or that stops
+  carrying the ref, is left, and the ref's next element hears the focus come in. `dark:` follows the appearance
   shown: the app's own when it set one (`nsh.json` `"appearance"`, `setColorScheme`; `Core::set_appearance`), else the
   system's. The theme is Tailwind 4's
   extended by `nsh.json` `"tailwind"` (`colors`, `spacing`, `breakpoints`, `fontSize`, `radius`, `shadow`, ...; unknown

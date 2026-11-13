@@ -59,6 +59,7 @@ fn config(bundle: Bundle, limits: nsh_engine::Limits) -> EngineConfig {
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     }
 }
 
@@ -148,6 +149,7 @@ fn first_error(bundle: Bundle) -> String {
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, sink).unwrap();
     rx.recv_timeout(Duration::from_secs(5))

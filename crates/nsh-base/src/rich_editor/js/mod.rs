@@ -679,6 +679,16 @@ impl RichEditorSession {
         Ok(self.session.page_coords_at_pos(pos).map(|b| rect_json(&b)))
     }
 
+    /// The box `{ x, y, width, height }` of the block starting at `pos`, in
+    /// points of the content box of the view showing the editor (where
+    /// `contentLayer` places its children, scrolling with the text), or
+    /// `null` when none does. Throws a `RangeError` for a position outside
+    /// the document.
+    pub(crate) fn node_rect(&self, pos: usize) -> Result<Option<JsonValue>, JsError> {
+        self.check_pos("nodeRect", pos)?;
+        Ok(self.session.node_rect(pos).map(|b| rect_json(&b)))
+    }
+
     /// The box `{ x, y, width, height }` of the block starting at `pos` in
     /// page coordinates (ProseMirror's `nodeDOM(pos)` measured in the
     /// window's), or `null` before the pointer has been over the editor.
@@ -1660,6 +1670,17 @@ impl RichEditorApi {
     /// Escape does).
     pub(crate) fn exit_suggestion(key: Option<String>) -> RichCommand {
         named("exitSuggestion", serde_json::json!({ "key": key }))
+    }
+
+    /// Tells the plugin keyed `key` whether the app's list shows for the
+    /// active query: closed, its `captureKeys` go on to the editor (Enter
+    /// sends or splits the line), Escape still dismisses. Say it again when
+    /// the query changes; until then the list is open and takes the keys.
+    pub(crate) fn set_suggestion_open(open: bool, key: Option<String>) -> RichCommand {
+        named(
+            "setSuggestionOpen",
+            serde_json::json!({ "open": open, "key": key }),
+        )
     }
 
     /// Replaces `range` (a suggestion's) with a mention of `id` labeled

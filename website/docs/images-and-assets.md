@@ -172,6 +172,9 @@ The cache follows the server's HTTP caching headers:
   said `must-revalidate` or `no-cache`.
 - When a request for the image is redirected to an address the app's `network` capability does not allow, the image
   fails and the kept copy is dropped.
+- A kept copy remembers the addresses its download was redirected to. When the app is opened again and the copy is
+  read from disk, they are checked against the app's current `network` capability; when one is no longer allowed, the
+  copy is dropped and the image is requested again, as an image requested for the first time.
 
 Each app has its own cache of 256 MiB; past that, the images used least recently are dropped first. Several views,
 surfaces and processes of one app share it safely. Embedding apps choose where it is and how large, or turn it off:

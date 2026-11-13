@@ -115,6 +115,15 @@ order and their styles merged, later parts winning. The full list is `parts.rs`;
 Rust views also style parts with typed styles: `provide_context(TextViewParts::new().part(TextViewPart::Code, |s| ..))`
 refines a part's `StyleRefinement` (theme colors stay adaptive) before the app's `classes` and `styles` apply.
 
+## Annotated code
+
+A document's `CodeBlock` can carry `id` (the app's, handed back with its actions in `onCodeBlockAction`), `content`
+(the code as inline content: the app's annotations) and `wrap` (fit the code to the view instead of scrolling it
+sideways; default false). `content` shows in place of the highlighted code only when its plain text is `code`, so
+what shows, what is selected and what copying takes stay the same text; other content is ignored with a warning
+(`view.rs` `annotated`). Annotations are ordinary inlines: emphasis, highlights, or custom nodes without
+`renderCustom`, shown as their content in the `custom` part, so they wrap and select with the code.
+
 ## Syntax highlighting
 
 Code blocks are highlighted by a `CodeHighlighter`: a function from a `CodeBlock` to `(Range<usize>, StyleRefinement)`

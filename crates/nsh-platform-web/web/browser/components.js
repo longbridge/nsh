@@ -2,7 +2,6 @@ import { itemsProps } from "./list.js";
 // Rust component descriptors supply the public props, slots and ref API.
 export function createComponents(invoke, values, reactive, dom) {
   const states = new WeakMap();
-  const hostProps = ["class", "classList", "style", "activeStyle", "hoverStyle", "focusStyle", "focusWithinStyle", "focusVisibleStyle", "disabledStyle", "testID", "tooltip", "onLayout"];
   const handler = name => "on" + name[0].toUpperCase() + name.slice(1);
   const make = (spec, call) => function (props = {}) {
     const rt = dom.rt;
@@ -45,7 +44,7 @@ export function createComponents(invoke, values, reactive, dom) {
       for (const prop of spec.props) {
         if (prop.kind === "value" || prop.kind === "renderer") update(prop.name, value => invoke(206, [spec.id, node, prop.name, value]));
       }
-      for (const name of hostProps) update(name, value => rt.prop(node, name, value));
+      for (const name of spec.hostProps) update(name, value => rt.prop(node, name, value));
       if (failed) throw failed;
     });
     if (typeof props.ref === "function") {

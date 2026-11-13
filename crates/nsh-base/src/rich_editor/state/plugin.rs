@@ -372,6 +372,13 @@ pub trait PluginSpec: Send + Sync {
         None
     }
 
+    /// Changes copied or cut content before it is put on the clipboard
+    /// (each plugin's in turn; ProseMirror's `transformCopied`).
+    fn transform_copied(&self, state: &EditorState, slice: Slice) -> Slice {
+        let _ = state;
+        slice
+    }
+
     /// The plain text a copy of `slice` puts on the clipboard; the first
     /// plugin with one wins.
     fn clipboard_text_serializer(&self, state: &EditorState, slice: &Slice) -> Option<String> {

@@ -395,6 +395,9 @@ impl Pointer {
         let changed = !changes.is_empty();
         for (id, active, event) in changes {
             let payload = self.mouse_event(id, cx);
+            // A removed view hears no leave, as a removed DOM element: a JS
+            // cycle may keep it alive after its component is gone.
+            let heard = active || crate::keyboard::contains(cx.tree, nsh_core::ROOT_ID, id);
             if let Some(view) = cx.tree.get_mut(id) {
                 let bit = nsh_core::tailwind::state::HOVERED;
                 if active {
@@ -405,7 +408,7 @@ impl Pointer {
                 if view.tracked & bit != 0 {
                     cx.control.set_states(id, view.states);
                 }
-                if view.events.contains(event) {
+                if heard && view.events.contains(event) {
                     cx.control.dispatch_event(id, event, payload);
                 }
             }

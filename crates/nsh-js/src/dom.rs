@@ -46,8 +46,21 @@ const UNDEFINED: JsValue = qjs::JS_UNDEFINED;
 const DETACHED: NodeId = 0;
 /// The surface's root view.
 const ROOT: NodeId = 1;
-/// How deep nested arrays and accessors are unwrapped.
-const MAX_DEPTH: u32 = 64;
+/// How deep nested arrays and accessors are unwrapped (and menus nested).
+pub(crate) const MAX_DEPTH: u32 = 64;
+/// Most array items the runtime reads natively from one value of the app's,
+/// nested arrays counted together: one place's children, an `<Each>` list,
+/// a menu with its submenus, a tray's title, `Animated.sequence` /
+/// `parallel` / `stagger`'s animations, `split`'s keys, a navigation
+/// stack's routes (and screens), a native component's names, a pan's
+/// touches, a canvas call's arguments. Arrays the renderer makes itself
+/// ([`own_items`]) are not the app's. Each index is read natively, where
+/// the time budget cannot interrupt, and a sparse array is as long as it
+/// says: without a
+/// bound `new Array(2 ** 32 - 1)` held the engine thread for billions of
+/// reads, and an array holding itself (`a.fill(a)`) multiplies its length
+/// at each level of nesting.
+pub(crate) const MAX_ARRAY_ITEMS: u32 = 1 << 20;
 
 /// The renderer's part of a context's state.
 pub(crate) struct Dom {
@@ -67,11 +80,14 @@ pub(crate) struct Dom {
     desktop: Cell<bool>,
     /// The layout direction sent to the root (`None`: nothing mounted yet).
     rtl: Cell<Option<bool>>,
-    /// The `onDismiss` handlers of modals the app removed, kept until the
+    /// The `onDismiss` handlers of dialogs the app removed, kept until the
     /// platform reports their dismissal, oldest first (owned): an app
     /// removes a dialog in `onOpenChange` or `onCancel`, and the platform reports
     /// `onDismiss` once it has gone (after its animation).
     dismissed: RefCell<Vec<(NodeId, JsValue)>>,
+    /// How many dialog nodes are alive: a removal looks for their
+    /// `onDismiss` handlers only when some are.
+    dialogs: Cell<usize>,
     /// Whether the user's language is written right to left.
     env_rtl: Cell<bool>,
     /// The tags (bits by `Tag as u32`; 63: the root) text was put in
@@ -168,6 +184,39 @@ fn throw_type(cx: *mut JsContext, message: &str) -> JsValue {
     unsafe { qjs::JS_ThrowTypeError(cx, c"%s".as_ptr(), message.as_ptr()) }
 }
 
+/// The length of the app's array `array` (borrowed, checked to be one),
+/// read once, for a native loop over its items: `None` (an exception
+/// pending) when reading it threw or it is longer than [`MAX_ARRAY_ITEMS`].
+pub(crate) fn checked_len(cx: *mut JsContext, array: JsValue) -> Option<u32> {
+    take_len(cx, array, &mut { MAX_ARRAY_ITEMS })
+}
+
+/// The length of array `array` (borrowed, checked to be one), read once
+/// and taken from `budget` (the items left of [`MAX_ARRAY_ITEMS`] for the
+/// value being read); `None` when reading it threw or it is longer than
+/// what is left (an exception is pending either way).
+pub(crate) fn take_len(cx: *mut JsContext, array: JsValue, budget: &mut u32) -> Option<u32> {
+    let mut len: i64 = 0;
+    // SAFETY: a length read of a live value.
+    if unsafe { qjs::JS_GetLength(cx, array, &mut len) } != 0 {
+        return None;
+    }
+    let len = len.max(0);
+    if len > i64::from(*budget) {
+        let message = std::ffi::CString::new(format!(
+            "nsh: arrays of more than {MAX_ARRAY_ITEMS} items in all cannot be read \
+             (one says it has {len})"
+        ))
+        .unwrap_or_default();
+        // SAFETY: throws on a live context; `%s` keeps the message literal.
+        unsafe { qjs::JS_ThrowRangeError(cx, c"%s".as_ptr(), message.as_ptr()) };
+        return None;
+    }
+    let len = len as u32;
+    *budget -= len;
+    Some(len)
+}
+
 /// A JS value's string (`ToString`), or `None` when that throws.
 pub(crate) fn string_arg(cx: *mut JsContext, v: JsValue) -> Option<String> {
     to_string(cx, v)
@@ -257,6 +306,7 @@ impl Dom {
             env_rtl: Cell::new(false),
             unshown_text: Cell::new(0),
             dismissed: RefCell::new(Vec::new()),
+            dialogs: Cell::new(0),
             lazy_rows: Cell::new(false),
             pending_rows: RefCell::new(FxHashMap::default()),
         }
@@ -621,6 +671,9 @@ pub(crate) fn init(raw: *mut JsContext) {
 /// A new node object for id `id` (owned).
 fn new_node(cx: *mut JsContext, id: NodeId, text: bool, tag: Option<Tag>) -> JsValue {
     let d = dom(cx);
+    if tag == Some(Tag::Modal) {
+        d.dialogs.set(d.dialogs.get() + 1);
+    }
     let data = Box::into_raw(Box::new(NodeData {
         id,
         text,
@@ -886,8 +939,8 @@ pub(crate) fn insert_node(
     insert_before(cx, parent, child, before)
 }
 
-/// How many removed modals' `onDismiss` handlers wait for their dismissal
-/// at most (a modal removed before it was presented never gets one).
+/// How many removed dialogs' `onDismiss` handlers wait for their dismissal
+/// at most (a dialog removed before it was presented never gets one).
 const MAX_DISMISSED: usize = 16;
 
 fn next_id(cx: *mut JsContext) -> NodeId {
@@ -903,7 +956,7 @@ unsafe extern "C" fn node_finalize(rt: *mut qjs::JSRuntime, obj: JsValue) {
     if p.is_null() {
         return;
     }
-    let mut data = unsafe { Box::from_raw(p) };
+    let data = unsafe { Box::from_raw(p) };
     if let Some(state) = crate::state::of_runtime(rt) {
         // SAFETY: a projection of the live state's renderer.
         let d = unsafe { &(*state).dom };
@@ -917,23 +970,12 @@ unsafe extern "C" fn node_finalize(rt: *mut qjs::JSRuntime, obj: JsValue) {
             // Not the op queue: a finalizer may run while it is borrowed.
             d.shared.releases.borrow_mut().push(data.id);
         }
-        // A removed modal still hears its dismissal.
-        if data.tag == Some(Tag::Modal)
-            && let Some(i) = data
-                .handlers
-                .iter()
-                .position(|&(e, _)| e == EventKind::Dismiss)
-        {
-            let (_, handler) = data.handlers.swap_remove(i);
-            let oldest = {
-                let mut dismissed = d.dismissed.borrow_mut();
-                dismissed.push((data.id, handler));
-                (dismissed.len() > MAX_DISMISSED).then(|| dismissed.remove(0).1)
-            };
-            if let Some(v) = oldest {
-                // SAFETY: a value the renderer owned, freed after the borrow.
-                unsafe { qjs::JS_FreeValueRT(rt, v) };
-            }
+        // Trailing header bar handlers live as long as the page.
+        if data.tag == Some(Tag::Screen) {
+            crate::desktop::clear_header_rt(rt, data.id);
+        }
+        if data.tag == Some(Tag::Modal) {
+            d.dialogs.set(d.dialogs.get().saturating_sub(1));
         }
     }
     for v in data.children {
@@ -1105,6 +1147,9 @@ fn insert_before(
     let owned = held.unwrap_or_else(|| unsafe { qjs::JS_DupValue(cx, child) });
     children.insert(pos, owned);
     unsafe { (*c).parent = parent_id };
+    if old == DETACHED {
+        forget_dismissals(cx, child);
+    }
     d.push(
         cx,
         Op::Insert {
@@ -1210,6 +1255,9 @@ fn remove_child(cx: *mut JsContext, parent: JsValue, child: JsValue) -> Result<(
     };
     let owned = children.remove(i);
     unsafe { (*c).parent = DETACHED };
+    if dom(cx).dialogs.get() > 0 {
+        keep_dismissals(cx, child);
+    }
     let pushed = dom(cx).push(
         cx,
         Op::Remove {
@@ -1220,6 +1268,89 @@ fn remove_child(cx: *mut JsContext, parent: JsValue, child: JsValue) -> Result<(
     // Last: this may finalize the child.
     unsafe { qjs::JS_FreeValue(cx, owned) };
     pushed
+}
+
+/// Hands the `onDismiss` handlers of the dialogs in detached subtree
+/// `node` (borrowed) to the renderer, so a removed dialog still hears its
+/// dismissal (after its animation). Done here, while no collection runs,
+/// not in the node's finalizer: a finalizer run by QuickJS's cycle
+/// collection must not keep a value of the cycle it frees (#1643).
+fn keep_dismissals(cx: *mut JsContext, node: JsValue) {
+    let p = node_ptr(cx, node);
+    if p.is_null() {
+        return;
+    }
+    // SAFETY: live node data, read briefly; the handler is dup'd.
+    let (id, kept) = unsafe {
+        let handler = ((*p).tag == Some(Tag::Modal))
+            .then(|| {
+                (*p).handlers
+                    .iter()
+                    .find(|&&(e, _)| e == EventKind::Dismiss)
+            })
+            .flatten()
+            .map(|&(_, h)| qjs::JS_DupValue(cx, h));
+        ((*p).id, handler)
+    };
+    let d = dom(cx);
+    if let Some(handler) = kept {
+        let freed = {
+            let mut dismissed = d.dismissed.borrow_mut();
+            let mut freed: Vec<JsValue> = Vec::new();
+            if let Some(i) = dismissed.iter().position(|&(n, _)| n == id) {
+                freed.push(dismissed.remove(i).1);
+            }
+            dismissed.push((id, handler));
+            if dismissed.len() > MAX_DISMISSED {
+                freed.push(dismissed.remove(0).1);
+            }
+            freed
+        };
+        // After the borrow: freeing may finalize nodes.
+        free_values(cx, freed);
+    }
+    // SAFETY: live node data; dups held while walking.
+    let children: Vec<JsValue> = unsafe { &(*p).children }
+        .iter()
+        .map(|&v| unsafe { qjs::JS_DupValue(cx, v) })
+        .collect();
+    for &child in &children {
+        keep_dismissals(cx, child);
+    }
+    free_values(cx, children);
+}
+
+/// Drops what [`keep_dismissals`] kept for the dialogs in subtree `node`
+/// (borrowed), inserted again.
+fn forget_dismissals(cx: *mut JsContext, node: JsValue) {
+    let d = dom(cx);
+    if d.dismissed.borrow().is_empty() {
+        return;
+    }
+    let mut ids = Vec::new();
+    collect_ids(cx, node, &mut ids);
+    let freed: Vec<JsValue> = {
+        let mut dismissed = d.dismissed.borrow_mut();
+        let (gone, kept): (Vec<_>, Vec<_>) =
+            dismissed.drain(..).partition(|(n, _)| ids.contains(n));
+        *dismissed = kept;
+        gone.into_iter().map(|(_, v)| v).collect()
+    };
+    free_values(cx, freed);
+}
+
+fn collect_ids(cx: *mut JsContext, node: JsValue, ids: &mut Vec<NodeId>) {
+    let p = node_ptr(cx, node);
+    if p.is_null() {
+        return;
+    }
+    // SAFETY: live node data, read only (no JS runs).
+    unsafe {
+        ids.push((*p).id);
+        for &child in &(*p).children {
+            collect_ids(cx, child, ids);
+        }
+    }
 }
 
 // --- Elements, text, props -----------------------------------------------------
@@ -1322,6 +1453,9 @@ fn set_prop(
         }
         "tooltip" if followed(cx, name, value) => return bind_prop_with(cx, node, name, value),
         _ => {}
+    }
+    if name == "headerRightItems" {
+        return crate::desktop::set_header_right_items(cx, id, value);
     }
     if let Some(prop) = nsh_core::js::host::style_patch_prop(name) {
         let prop = prop(part_style(cx, name, value)?);
@@ -1748,7 +1882,7 @@ unsafe extern "C" fn spread_run(
         let (node, props) = (*data, *data.add(1));
         // A third value: keys to leave out (`spread_except`).
         let skip: Vec<String> = if magic == 1 {
-            array_items(cx, *data.add(2))
+            own_items(cx, *data.add(2))
                 .into_iter()
                 .map(|k| {
                     let s = to_string(cx, k).unwrap_or_default();
@@ -1841,6 +1975,18 @@ fn resolve(
     keep: &mut Vec<JsValue>,
     depth: u32,
 ) -> Result<(), JsValue> {
+    resolve_within(cx, value, out, keep, depth, &mut { MAX_ARRAY_ITEMS })
+}
+
+/// [`resolve`] with `budget` array items left to read.
+fn resolve_within(
+    cx: *mut JsContext,
+    value: JsValue,
+    out: &mut Vec<Item>,
+    keep: &mut Vec<JsValue>,
+    depth: u32,
+    budget: &mut u32,
+) -> Result<(), JsValue> {
     if depth > MAX_DEPTH {
         return Err(throw_type(cx, "nsh: children nested too deeply"));
     }
@@ -1868,20 +2014,19 @@ fn resolve(
                 return Err(r);
             }
             keep.push(r);
-            return resolve(cx, r, out, keep, depth + 1);
+            return resolve_within(cx, r, out, keep, depth + 1, budget);
         }
         if qjs::JS_IsArray(value) {
-            let mut len: i64 = 0;
-            if qjs::JS_GetLength(cx, value, &mut len) != 0 {
+            let Some(len) = take_len(cx, value, budget) else {
                 return Err(qjs::JS_EXCEPTION);
-            }
-            for i in 0..len.max(0) as u32 {
+            };
+            for i in 0..len {
                 let item = qjs::JS_GetPropertyUint32(cx, value, i);
                 if qjs::JS_IsException(item) {
                     return Err(item);
                 }
                 keep.push(item);
-                resolve(cx, item, out, keep, depth + 1)?;
+                resolve_within(cx, item, out, keep, depth + 1, budget)?;
             }
             return Ok(());
         }
@@ -1942,6 +2087,11 @@ fn free_values(cx: *mut JsContext, values: Vec<JsValue>) {
 /// Whether `value` holds a function (directly or in nested arrays): its
 /// children change over time.
 fn is_dynamic(cx: *mut JsContext, value: JsValue, depth: u32) -> bool {
+    is_dynamic_within(cx, value, depth, &mut { MAX_ARRAY_ITEMS })
+}
+
+/// [`is_dynamic`] with `budget` array items left to read.
+fn is_dynamic_within(cx: *mut JsContext, value: JsValue, depth: u32, budget: &mut u32) -> bool {
     // SAFETY: inline checks and reads of live values, each freed.
     unsafe {
         if qjs::JS_IsFunction(cx, value) {
@@ -1950,14 +2100,15 @@ fn is_dynamic(cx: *mut JsContext, value: JsValue, depth: u32) -> bool {
         if depth > MAX_DEPTH || !qjs::JS_IsArray(value) {
             return false;
         }
-        let mut len: i64 = 0;
-        if qjs::JS_GetLength(cx, value, &mut len) != 0 {
+        // Too long (or a throwing length): not dynamic; rendering it
+        // reports the error.
+        let Some(len) = take_len(cx, value, budget) else {
             qjs::JS_FreeValue(cx, qjs::JS_GetException(cx));
             return false;
-        }
-        for i in 0..len.max(0) as u32 {
+        };
+        for i in 0..len {
             let item = qjs::JS_GetPropertyUint32(cx, value, i);
-            let dynamic = is_dynamic(cx, item, depth + 1);
+            let dynamic = is_dynamic_within(cx, item, depth + 1, budget);
             qjs::JS_FreeValue(cx, item);
             if dynamic {
                 return true;
@@ -2070,7 +2221,12 @@ fn memoize_run(cx: *mut JsContext, value: JsValue) -> Option<JsValue> {
     if unsafe { !qjs::JS_IsArray(value) } {
         return None;
     }
-    let items = array_items(cx, value);
+    let Some(items) = array_items(cx, value) else {
+        // Too long: left as it is, and rendering it reports the error.
+        // SAFETY: frees the pending exception.
+        unsafe { qjs::JS_FreeValue(cx, qjs::JS_GetException(cx)) };
+        return None;
+    };
     // SAFETY: borrowed values checked.
     let functions = items
         .iter()
@@ -2148,8 +2304,28 @@ unsafe extern "C" fn insert(
         .unwrap_or(UNDEFINED)
 }
 
-/// The values of array `array` (owned), empty for other values.
-fn array_items(cx: *mut JsContext, array: JsValue) -> Vec<JsValue> {
+/// The values of the app's array `array` (owned), empty for other values;
+/// `None` (an exception pending) when its length throws or is longer than
+/// [`MAX_ARRAY_ITEMS`].
+fn array_items(cx: *mut JsContext, array: JsValue) -> Option<Vec<JsValue>> {
+    // SAFETY: a type check of a live value.
+    if unsafe { !qjs::JS_IsArray(array) } {
+        return Some(Vec::new());
+    }
+    // The length is read once: a proxy's could change between reads.
+    let len = take_len(cx, array, &mut { MAX_ARRAY_ITEMS })?;
+    // SAFETY: reads of a live array.
+    Some(
+        (0..len)
+            .map(|i| unsafe { qjs::JS_GetPropertyUint32(cx, array, i) })
+            .collect(),
+    )
+}
+
+/// The values of array `array` (owned), empty for other values: for arrays
+/// the renderer made itself (what a place shows), as long as what they
+/// hold.
+fn own_items(cx: *mut JsContext, array: JsValue) -> Vec<JsValue> {
     let mut out = Vec::new();
     // SAFETY: reads of a live array.
     unsafe {
@@ -2256,7 +2432,7 @@ fn show(
         free_values(cx, keep);
         return Err(e);
     }
-    let old = array_items(cx, shown);
+    let old = own_items(cx, shown);
     // A lone text node shown again as text is updated in place.
     let reuse = match old.as_slice() {
         [only] => Some(*only),
@@ -2505,15 +2681,20 @@ pub(crate) unsafe extern "C" fn split(
     unsafe {
         let mut names = Vec::new();
         if qjs::JS_IsArray(keys) {
-            let mut n: i64 = 0;
-            qjs::JS_GetLength(cx, keys, &mut n);
-            for i in 0..n.max(0) {
-                let k = qjs::JS_GetPropertyInt64(cx, keys, i);
+            // Read natively: a sparse array is as long as it says.
+            let Some(n) = checked_len(cx, keys) else {
+                return qjs::JS_EXCEPTION;
+            };
+            for i in 0..n {
+                let k = qjs::JS_GetPropertyUint32(cx, keys, i);
                 let atom = qjs::JS_ValueToAtom(cx, k);
                 qjs::JS_FreeValue(cx, k);
                 names.push(atom);
             }
         }
+        // Looked up once per property of `source`: sorted, so neither count
+        // multiplies the other.
+        names.sort_unstable();
         let picked = qjs::JS_NewObject(cx);
         let rest = qjs::JS_NewObject(cx);
         if qjs::JS_IsObject(source) {
@@ -2524,7 +2705,11 @@ pub(crate) unsafe extern "C" fn split(
             if qjs::JS_GetOwnPropertyNames(cx, &mut tab, &mut len, source, flags) == 0 {
                 for j in 0..len as usize {
                     let atom = (*tab.add(j)).atom;
-                    let target = if names.contains(&atom) { picked } else { rest };
+                    let target = if names.binary_search(&atom).is_ok() {
+                        picked
+                    } else {
+                        rest
+                    };
                     copy_property(cx, target, source, atom);
                 }
                 qjs::JS_FreePropertyEnum(cx, tab, len);
@@ -2855,6 +3040,9 @@ unsafe extern "C" fn each_run(
     }
     let items_v = array_items(cx, items);
     unsafe { qjs::JS_FreeValue(cx, items) };
+    let Some(items_v) = items_v else {
+        return qjs::JS_EXCEPTION;
+    };
     let keyed = unsafe { qjs::JS_IsFunction(cx, key_fn) };
     // SAFETY: a borrowed value, read when it is a string.
     let by_index = !keyed
@@ -3399,7 +3587,7 @@ unsafe extern "C" fn unmount(
     let mut id = 0f64;
     unsafe { qjs::JS_ToFloat64(cx, &mut id, owner) };
     reactive::dispose_owner(cx, id as u32);
-    let before = array_items(cx, before);
+    let before = own_items(cx, before);
     let root = dom(cx).root.get();
     let current: Vec<JsValue> = unsafe { &(*node_ptr(cx, root)).children }
         .iter()
@@ -3486,13 +3674,27 @@ pub(crate) fn handler(cx: *mut JsContext, id: NodeId, event: EventKind) -> Optio
     let d = dom(cx);
     let p = d.by_id(id);
     if p.is_null() {
-        // A removed modal's dismissal: its handler, given away (owned).
+        // A removed dialog's dismissal: its handler, given away (owned).
         if event != EventKind::Dismiss {
             return None;
         }
         let mut dismissed = d.dismissed.borrow_mut();
         let i = dismissed.iter().position(|&(n, _)| n == id)?;
         return Some(dismissed.remove(i).1);
+    }
+    if event == EventKind::Dismiss {
+        // A removed dialog still alive: what was kept for it goes.
+        let kept = {
+            let mut dismissed = d.dismissed.borrow_mut();
+            dismissed
+                .iter()
+                .position(|&(n, _)| n == id)
+                .map(|i| dismissed.remove(i).1)
+        };
+        if let Some(v) = kept {
+            // SAFETY: a value the renderer owned, freed after the borrow.
+            unsafe { qjs::JS_FreeValue(cx, v) };
+        }
     }
     // SAFETY: live node data; a dup of the handler.
     unsafe { &(*p).handlers }
@@ -4954,9 +5156,7 @@ mod tests {
             first.iter().any(|o| matches!(
                 o,
                 Op::SetProp {
-                    prop: nsh_core::Prop::ComponentPropBinding(name, Some(_)),
-                    ..
-                } if &**name == "progress"
+                    prop: nsh_core::Prop::ComponentPropBinding(name, Some(_)), .. } if &**name == "progress"
             )),
             "{first:?}"
         );

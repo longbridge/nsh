@@ -1,6 +1,7 @@
 //! What the popups of `nsh/base` share (`Popover`, `HoverCard`, `Menu`,
-//! `ContextMenu`, `Tooltip`, `Sheet`): their open state, controlled or not, and why it
-//! changed. They show their content in the core's overlays
+//! `ContextMenu`, `Tooltip`, `Sheet`, and the dropdowns of `Select`,
+//! `Combobox` and `DatePicker`): their open state, controlled or not, and
+//! why it changed. They show their content in the core's overlays
 //! (`nsh_core::element::overlay`), which place it and report presses outside,
 //! Escape and the back button; deciding to close is theirs. A sheet comes
 //! and goes with its own motion ([`SheetMotion`]); a popup's entrance and
@@ -40,8 +41,8 @@ pub enum OpenChangeReason {
     /// The pointer rested on its trigger, or left or pressed it (a
     /// tooltip's); left its trigger and itself (a hover card's).
     Hover,
-    /// The keyboard focus came to its trigger, or left it (a hover
-    /// card's); moved to another item of its menu (a submenu's); Tab or
+    /// The keyboard focus moved to another item of its menu (a
+    /// submenu's); Tab or
     /// Shift+Tab moved it on from a select or combobox whose list was open
     /// (the focus goes where Tab takes it).
     Focus,
@@ -253,7 +254,7 @@ impl StateLooks {
 }
 
 /// A popup's presence (`Popover`'s, `HoverCard`'s, a desktop menu's and
-/// its submenus', `Tooltip`'s), as a toast's `transitionStatus` and Base UI's
+/// its submenus', `Tooltip`'s, a desktop dropdown's), as a toast's `transitionStatus` and Base UI's
 /// `data-starting-style` / `data-ending-style`: opened, it is mounted with
 /// its starting look until its first display frame, so the app's
 /// `transition-*` classes run its entrance; closed, it stays mounted with
@@ -409,7 +410,7 @@ impl PopupPresence {
         effect(move || {
             let now = open();
             // Not cleared here: the focus watch says when the focus leaves,
-            // and keeps its own record of where it is across openings.
+            // the popup part's removal on close included.
             if was.replace(now) && !now && inside.get() {
                 untracked(&back);
             }
@@ -446,6 +447,24 @@ impl PopupPresence {
             Status::Ending => own.then(&self.looks.ending_style.get()),
         }
     }
+}
+
+/// How far a panel docked to the bottom of the screen (a sheet, a drawer,
+/// a menu or a list shown as a sheet) stands above it while the software
+/// keyboard is up: as far as the keyboard reaches past the bottom safe
+/// area, which its height includes. The panel pads its bottom by the safe
+/// area with or without a keyboard, so its content ends right above the
+/// keyboard, as a page padded by the larger of `env(safe-area-inset-bottom)`
+/// and `env(keyboard-inset-height)` does. Read in a style: a change of the
+/// keyboard's height moves the panel with the keyboard's own motion.
+pub(crate) fn keyboard_lift() -> Points {
+    (keyboard_height() - safe_area().bottom).max(Points::ZERO)
+}
+
+/// The tallest a panel docked to the bottom of the screen gets: below the
+/// status bar, above the keyboard ([`keyboard_lift`]).
+pub(crate) fn bottom_panel_max_height() -> Length {
+    Length::from(window().height - safe_area().top - keyboard_lift())
 }
 
 /// How long a sheet takes to come in and to go, in milliseconds.
@@ -677,8 +696,27 @@ pub(crate) struct DropdownFrame {
     pub(crate) margin: Prop<Points>,
     pub(crate) popup_class: Prop<Option<SharedString>>,
     pub(crate) popup_style: Prop<Style>,
+    /// The desktop popup's states' looks (a sheet keeps its motion).
+    pub(crate) popup_starting_class: Prop<Option<SharedString>>,
+    pub(crate) popup_starting_style: Prop<Style>,
+    pub(crate) popup_ending_class: Prop<Option<SharedString>>,
+    pub(crate) popup_ending_style: Prop<Style>,
     pub(crate) backdrop_class: Prop<Option<SharedString>>,
     pub(crate) backdrop_style: Prop<Style>,
+}
+
+impl DropdownFrame {
+    /// The desktop popup's looks.
+    fn looks(self) -> StateLooks {
+        StateLooks {
+            class: Some(self.popup_class),
+            style: Some(self.popup_style),
+            starting_class: self.popup_starting_class,
+            starting_style: self.popup_starting_style,
+            ending_class: self.popup_ending_class,
+            ending_style: self.popup_ending_style,
+        }
+    }
 }
 
 /// A view inside a dropdown laid over its trigger (`Select`'s selected
@@ -709,6 +747,10 @@ pub(crate) struct Presence {
     pub(crate) dismiss: Rc<dyn Fn(OpenChangeReason)>,
     /// It is all there (`true`) or all gone (`false`).
     pub(crate) shown: Rc<dyn Fn(bool)>,
+    /// The desktops: it closed and starts to go (a popup that was made);
+    /// the keyboard focus goes where the component puts it (its trigger,
+    /// unless what closed it took the focus elsewhere).
+    pub(crate) back: Rc<dyn Fn()>,
 }
 
 /// A dropdown while it is open (`Select`'s list, `DatePicker`'s calendar):
@@ -717,7 +759,9 @@ pub(crate) struct Presence {
 /// `gpui-component`'s, unless the app's popup style sets a width) or at
 /// least that wide (`fit`: a calendar, as wide as it needs), never past the
 /// room on its side; on touch screens a sheet at the bottom over a
-/// backdrop. It holds what `content` makes (`true` in a sheet).
+/// backdrop. It holds what `content` makes (`true` in a sheet). The popup
+/// comes in and goes with the app's transitions between its look and its
+/// states' looks ([`PopupPresence`]), the sheet with its motion.
 pub(crate) fn dropdown(
     anchor: ElementRef,
     width: Signal<Option<Points>>,
@@ -733,31 +777,64 @@ pub(crate) fn dropdown(
     // The popup waits for the trigger's first layout: open at first
     // (`defaultOpen`), it would be made before the trigger is (a slot is
     // filled after the first render) and placed against nothing.
-    let shown = {
+    let popup = {
         let open = presence.open.clone();
-        move || {
-            if sheet {
-                motion.shown.get()
-            } else {
-                open() && width.with(Option::is_some)
-            }
+        PopupPresence::new(
+            move || !sheet && open() && width.with(Option::is_some),
+            frame.looks(),
+        )
+    };
+    let shown = move || {
+        if sheet {
+            motion.shown.get()
+        } else {
+            popup.mounted()
         }
     };
     {
-        let open = presence.open.clone();
         let (opened, closed) = (presence.shown.clone(), presence.shown.clone());
         lifecycle(
             move || {
                 if sheet {
                     motion.there()
                 } else {
-                    open() && width.with(Option::is_some)
+                    popup.mounted()
                 }
             },
             move || opened(true),
             move || closed(false),
         );
     }
+    // The keyboard focus goes back as the popup closes, not once it is
+    // gone: on its way out it takes no presses, nor keys. Only a popup
+    // that was made: one closed before the trigger's first layout never
+    // took the focus, so it has none to give back.
+    if !sheet {
+        let open = presence.open.clone();
+        let back = presence.back.clone();
+        let made = stored(false);
+        effect(move || {
+            if open() {
+                if popup.mounted() {
+                    made.replace(true);
+                }
+            } else if made.replace(false) {
+                untracked(|| back());
+            }
+        });
+    }
+    // An attempt to close it: none while it goes.
+    let presence = Presence {
+        dismiss: {
+            let (open, dismiss) = (presence.open.clone(), presence.dismiss.clone());
+            Rc::new(move |reason| {
+                if untracked(|| open()) {
+                    dismiss(reason);
+                }
+            })
+        },
+        ..presence
+    };
     when(shown, move || {
         // The trigger may be a toolbar's item; the content is not.
         leave_bar();
@@ -782,9 +859,10 @@ pub(crate) fn dropdown(
             let panel = overlay()
                 .left_0()
                 .right_0()
-                .bottom_0()
-                // Below the status bar, whatever the rows.
-                .max_h(move || Length::from(window().height - safe_area().top))
+                // Above the keyboard, below the status bar, whatever the
+                // rows.
+                .bottom(move || Length::from(keyboard_lift()))
+                .max_h(bottom_panel_max_height)
                 .app_class(frame.popup_class)
                 .inline_style(frame.popup_style)
                 .bind_translate_y(&motion.y)
@@ -845,8 +923,9 @@ pub(crate) fn dropdown(
             // virtualize against (unbounded, a list of thousands would
             // make every row).
             .max_h(move || Length::from(room.get().unwrap_or_else(|| window().height)))
-            .app_class(frame.popup_class)
-            .inline_style(frame.popup_style)
+            .element_ref(&popup.popup())
+            .app_class(move || popup.class())
+            .state_inline_style(move || popup.style())
             .on_position(move |p: &OverlayPosition| room.set(Some(p.available.height)))
             .on_press_outside(move |_: &Point<Points>| dismiss(OpenChangeReason::PressOutside))
             .on_cancel(cancel)
