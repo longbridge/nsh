@@ -689,6 +689,12 @@ expect CJK URL: https://example.com,text
 expect Math off: Math $x$
 expect From HTML: Hi there
 expect Unknown tag: <US tech> up
+# A code block's annotations show in place of its code; its actions get
+# the block, its id too.
+expect Annotated code
+style span:"Annotated code" fontWeight 600
+tap label:Export annotated
+expect Code action: export annotated: Annotated code
 covers [nsh/base] TextView
 covers [props] TextView.markdown
 covers [props] TextView.document
@@ -2610,6 +2616,9 @@ covers [props] Select.clearButtonAccessibilityLabel
 # `disabled`: dimmed for screen readers.
 prop label:Locked accessibilityState disabled=true expanded=false hasPopup=true
 covers [props] disabled
+# The states the app gives its trigger element (`busy`; `invalid` alike)
+# stay, beside the ones the select sets.
+prop label:Checked accessibilityState busy=true expanded=false hasPopup=true
 # `searchable`: a field above the items (its placeholder, name for screen
 # readers and look the app's; on a phone the keyboard comes when it is
 # pressed) filters them by title, ignoring case, and a section without a

@@ -3661,6 +3661,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         web_input: env.web_input,
         web_evaluate: env.web_evaluate,
         web_views: env.web_views,
+        webview_requests: env.webview_requests,
         shaders: env.shaders,
     }
 }

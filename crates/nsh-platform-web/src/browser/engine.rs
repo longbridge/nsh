@@ -228,7 +228,7 @@ impl Host for Runtime {
                 "hourCycle":e.locale_settings.hour_cycle.name(),"firstDayOfWeek":e.locale_settings.first_day_of_week.number(),
                 "measurementSystem":e.locale_settings.measurement_system.name(),"temperatureUnit":e.locale_settings.temperature_unit.name()
             },
-            "platform":{"os":"web","version":e.os_version.0,"idiom":format!("{:?}",e.reported_idiom()).to_lowercase(),"desktop":e.desktop(),"appleKeyboard":e.apple_keyboard}
+            "platform":{"name":e.platform_name(),"os":"web","version":e.os_version.0,"idiom":format!("{:?}",e.reported_idiom()).to_lowercase(),"desktop":e.desktop(),"appleKeyboard":e.apple_keyboard}
         });
         self.event(
             "environment",

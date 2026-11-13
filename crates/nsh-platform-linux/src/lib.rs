@@ -47,6 +47,9 @@ mod notifications;
 mod scroll;
 mod selectable_view;
 mod shader;
+// Without GStreamer (the feature `sound`), a stand-in whose loads fail
+// as not supported.
+#[cfg_attr(not(feature = "sound"), path = "sound_off.rs")]
 mod sound;
 mod surface;
 #[cfg(feature = "dev")]

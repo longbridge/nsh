@@ -55,6 +55,11 @@ mod split;
 
 /// The packaged page; `{{…}}` are filled in by [`page`].
 const PAGE: &str = include_str!("web/index.html");
+/// The page's scripts: files of their own, so a strict `script-src` allows
+/// them ('self'), the first one a classic script the page runs as it is
+/// parsed.
+const PAGE_PREFETCH: &str = include_str!("web/prefetch.js");
+const PAGE_START: &str = include_str!("web/start.js");
 /// The development host's page, which the dev server serves at `/`.
 const DEV_PAGE: &str = include_str!("web/dev.html");
 
@@ -261,6 +266,17 @@ pub(crate) fn package(
     if let Some(glue) = &glue {
         app["glue"] = glue.as_str().into();
     }
+    app["runtime"] = site.module(&js).into();
+    let import_map = if built.rust_root {
+        None
+    } else {
+        static_imports(&site, &code, &chunks, built.native_use.as_ref())?
+    };
+    if let Some(map) = &import_map {
+        app["importMap"] = map.as_str().into();
+    }
+    let prefetch = site.add("nsh-prefetch.js", PAGE_PREFETCH.as_bytes())?;
+    let start = site.add("nsh-start.js", PAGE_START.as_bytes())?;
     if let Some(history) = config.web.history {
         app["history"] = history.into();
     }
@@ -288,6 +304,8 @@ pub(crate) fn package(
             None => sources,
         })
         .as_deref(),
+        prefetch: &prefetch,
+        start: &start,
     });
     fs::write(dir.join("index.html"), html)?;
     // What static hosts send browsers that accept it (`.br`, `.gz`).
@@ -296,6 +314,20 @@ pub(crate) fn package(
         "packaged {}{}",
         ui::path(&dir),
         ui::dim(format!(", {}", ui::bytes(dir_size(&dir))))
+    ));
+    // What a server with a strict policy adds for the app's realm: the
+    // page's own scripts are files ('self').
+    let hash = match &import_map {
+        Some(map) => format!(" '{}'", script_hash(map)),
+        None => String::new(),
+    };
+    ui::detail(format!(
+        "under a Content-Security-Policy it needs script-src 'self' 'wasm-unsafe-eval'{hash}{}",
+        if import_map.is_some() || built.rust_root {
+            ""
+        } else {
+            " blob: 'unsafe-inline' (it loads a native module whole)"
+        }
     ));
     if options.run {
         serve(&dir, base.as_deref().unwrap_or("/"))?;
@@ -431,6 +463,94 @@ fn native_exports(uses: Option<&nsh_bundler::NativeUse>) -> serde_json::Value {
         }
     }
     out.into()
+}
+
+/// The import map of the app's realm, as the JSON its `<script
+/// type="importmap">` holds (`browser/runtime.js`, `importMap`), with the
+/// facade module of each native module it imports (what the runtime
+/// otherwise makes as `blob:` URLs, `facadeURL`) written as a file: the
+/// same text on every start, so a strict `script-src` allows it by its
+/// hash ([`script_hash`]) and needs no `blob:`. None when the app imports
+/// a native module whole (a namespace, `import()`), whose names only the
+/// runtime knows: the runtime makes the map then.
+fn static_imports(
+    site: &Site,
+    code: &str,
+    chunks: &serde_json::Map<String, serde_json::Value>,
+    uses: Option<&nsh_bundler::NativeUse>,
+) -> anyhow::Result<Option<String>> {
+    let Some(uses) = uses else {
+        return Ok(None);
+    };
+    if uses.computed_import {
+        return Ok(None);
+    }
+    // Keys and values as the realm resolves them: against the page's base,
+    // or the files' own (`--asset-url`).
+    // A file's URL ([`Site::add`]) as a specifier, and a path of the site's.
+    let at = |url: &str| site.module(url);
+    let path = |path: &str| {
+        site.module(&format!(
+            "{}{path}",
+            site.base.as_deref().unwrap_or_default()
+        ))
+    };
+    let mut imports = BTreeMap::new();
+    // A chunk imports the entry as `bundle.js`; chunk ids are relative to
+    // the entry.
+    imports.insert(path("bundle.js"), at(code));
+    for (id, url) in chunks {
+        imports.insert(path(id), at(url.as_str().unwrap_or_default()));
+    }
+    for (specifier, imported) in &uses.imports {
+        let nsh_bundler::Imported::Names(names) = imported else {
+            return Ok(None);
+        };
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let slug: String = specifier
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        let url = site.add(
+            &format!("facades/{slug}.js"),
+            facade(specifier, &names).as_bytes(),
+        )?;
+        imports.insert(specifier.clone(), at(&url));
+    }
+    Ok(Some(serde_json::json!({ "imports": imports }).to_string()))
+}
+
+/// The module that stands for native module `specifier`, exporting `names`
+/// as live bindings, read from the realm's namespace when it runs and again
+/// when a later gate registers them (`browser/runtime.js`, `facadeURL`).
+fn facade(specifier: &str, names: &[&str]) -> String {
+    let key = serde_json::Value::from(specifier).to_string();
+    let mut out = String::from("const host=globalThis.__nsh_browser_realm.modules;\n");
+    let mut updates = String::new();
+    for (index, name) in names.iter().enumerate() {
+        let name = serde_json::Value::from(*name).to_string();
+        let value = format!("host.get({key})[{name}]");
+        let _ = writeln!(out, "let e{index}={value};export{{e{index} as {name}}};");
+        let _ = write!(updates, "e{index}={value};");
+    }
+    if !updates.is_empty() {
+        let _ = writeln!(
+            out,
+            "globalThis.__nsh_browser_realm.watch(()=>{{{updates}}});"
+        );
+    }
+    out
+}
+
+/// The CSP source that allows an inline script of `text`.
+fn script_hash(text: &str) -> String {
+    use base64::Engine as _;
+    use sha2::Digest as _;
+    let digest = sha2::Sha256::digest(text.as_bytes());
+    format!(
+        "sha256-{}",
+        base64::engine::general_purpose::STANDARD.encode(digest)
+    )
 }
 
 /// Which gates ([`is_gate`]) a runtime published for an app links into its
@@ -1388,6 +1508,9 @@ struct PageParts<'a> {
     app: &'a serde_json::Value,
     /// The page's `connect-src` ([`connect_src`]).
     connect: Option<&'a str>,
+    /// URLs of the page's scripts ([`PAGE_PREFETCH`], [`PAGE_START`]).
+    prefetch: &'a str,
+    start: &'a str,
 }
 
 /// The app's `index.html`.
@@ -1443,12 +1566,14 @@ fn page(parts: &PageParts<'_>) -> String {
     if let Some(glue) = parts.glue {
         let _ = writeln!(head, "<link rel=\"modulepreload\" href=\"{glue}\">");
     }
-    // Requested while the page is parsed, before the runtime has loaded, and
-    // once: the page's script takes these responses (`fetches`) and reports
-    // their errors (the empty `catch` only keeps a failure that happens
-    // before then from being logged as unhandled). Not `<link rel=preload>`:
-    // WebKit does not hand a preload still in flight to the `fetch` of the
-    // same URL, which downloads the file again.
+    // The runtime, imported by the page's script once it has run.
+    let _ = writeln!(
+        head,
+        "<link rel=\"modulepreload\" href=\"{}\">",
+        parts.runtime
+    );
+    // Requested while the page is parsed, before the runtime has loaded
+    // ([`PAGE_PREFETCH`]).
     let urls: Vec<&str> = [parts.wasm, parts.code]
         .into_iter()
         .filter(|url| !url.is_empty())
@@ -1457,7 +1582,8 @@ fn page(parts: &PageParts<'_>) -> String {
     let urls = serde_json::json!(urls).to_string().replace("</", "<\\/");
     let _ = writeln!(
         head,
-        "<script>const fetches = new Map({urls}.map((path) => {{ const url = new URL(path, document.baseURI).href; const response = fetch(url); response.catch(() => {{}}); return [url, response]; }}));</script>"
+        "<script type=\"application/json\" id=\"nsh-fetch\">{urls}</script>\n<script src=\"{}\"></script>",
+        parts.prefetch
     );
     // JSON in a script: `</script>` in a string must not end it.
     let app = parts.app.to_string().replace("</", "<\\/");
@@ -1481,7 +1607,7 @@ fn page(parts: &PageParts<'_>) -> String {
     PAGE.replace("{{title}}", &escape_html(parts.name))
         .replace("{{head}}", head.trim_end())
         .replace("{{colors}}", &colors)
-        .replace("{{runtime}}", parts.runtime)
+        .replace("{{start}}", parts.start)
         .replace("{{app}}", &app)
 }
 
@@ -1635,6 +1761,82 @@ mod tests {
         );
         app.computed_import = true;
         assert_eq!(native_exports(Some(&app)), serde_json::json!({}));
+    }
+
+    /// A strict `script-src` runs an app whose native imports are all by
+    /// name: its realm's import map is fixed text (allowed by its hash) and
+    /// names its facades as files, not `blob:` URLs; one importing a module
+    /// whole leaves the map to the runtime.
+    #[test]
+    fn the_import_map_is_fixed_when_every_native_import_is_by_name() {
+        let dir = std::env::temp_dir().join(format!("nsh-web-imports-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let site = Site::new(&dir, None).unwrap();
+        let mut chunks = serde_json::Map::new();
+        chunks.insert("Later.js".into(), "Later.1.js".into());
+        let mut app = uses(&[
+            ("nsh", Some(&["View", "default"])),
+            ("nsh/effects", Some(&[])),
+        ]);
+        let map = static_imports(&site, "app.1.js", &chunks, Some(&app))
+            .unwrap()
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_str(&map).unwrap();
+        let imports = json["imports"].as_object().unwrap();
+        assert_eq!(imports["./bundle.js"], "./app.1.js");
+        assert_eq!(imports["./Later.js"], "./Later.1.js");
+        let facade = imports["nsh"].as_str().unwrap();
+        assert!(facade.starts_with("./facades/nsh."), "{facade}");
+        let code = fs::read_to_string(dir.join(&facade[2..])).unwrap();
+        assert!(
+            code.contains("let e0=host.get(\"nsh\")[\"View\"];export{e0 as \"View\"};"),
+            "{code}"
+        );
+        assert!(code.contains("export{e1 as \"default\"}"), "{code}");
+        assert!(code.contains(".watch(()=>{e0="), "{code}");
+        assert!(
+            imports["nsh/effects"]
+                .as_str()
+                .unwrap()
+                .starts_with("./facades/nsh-effects.")
+        );
+        // The same app, the same text.
+        assert_eq!(
+            static_imports(&site, "app.1.js", &chunks, Some(&app))
+                .unwrap()
+                .unwrap(),
+            map
+        );
+        assert!(script_hash(&map).starts_with("sha256-"));
+        // Files of another origin (`--asset-url`) are named by their URLs.
+        let cdn = Site::new(&dir, Some("https://cdn.example.com/a/".into())).unwrap();
+        let map = static_imports(
+            &cdn,
+            "https://cdn.example.com/a/app.1.js",
+            &serde_json::Map::new(),
+            Some(&app),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(
+            map.contains(
+                "\"https://cdn.example.com/a/bundle.js\":\"https://cdn.example.com/a/app.1.js\""
+            ),
+            "{map}"
+        );
+        app.imports
+            .insert("nsh/base".into(), nsh_bundler::Imported::All);
+        assert_eq!(
+            static_imports(&site, "app.1.js", &chunks, Some(&app)).unwrap(),
+            None
+        );
+        app.imports.remove("nsh/base");
+        app.computed_import = true;
+        assert_eq!(
+            static_imports(&site, "app.1.js", &chunks, Some(&app)).unwrap(),
+            None
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// A namespace read by name (`base.EmojiPicker`, so that shells without
@@ -2208,16 +2410,21 @@ mod tests {
             fonts: &[],
             app: &app,
             connect: None,
+            prefetch: "nsh-prefetch.1.js",
+            start: "nsh-start.1.js",
         };
         let with = page(&parts(Some("nsh-bindgen.0123456789.js")));
         assert!(
             with.contains("<link rel=\"modulepreload\" href=\"nsh-bindgen.0123456789.js\">"),
             "{with}"
         );
-        assert!(with.contains("glue: app.glue"), "{with}");
+        assert!(PAGE_START.contains("glue: app.glue"));
         // Without wasm-bindgen the page names no glue.
         let without = page(&parts(None));
-        assert!(!without.contains("modulepreload"), "{without}");
+        assert!(
+            !without.contains("modulepreload\" href=\"nsh-bindgen"),
+            "{without}"
+        );
         assert!(!without.contains("bindgen"), "{without}");
     }
 
@@ -2353,6 +2560,8 @@ mod tests {
             fonts: &[],
             app: &serde_json::json!({}),
             connect: None,
+            prefetch: "nsh-prefetch.1.js",
+            start: "nsh-start.1.js",
         });
         // Before the first relative URL (the manifest's).
         let base = html.find("<base href=\"/apps/counter/\">").unwrap();
@@ -2374,17 +2583,31 @@ mod tests {
             fonts: &["assets/f.1.ttf".to_owned()],
             app: &app,
             connect: Some("'self' api.example.com:*"),
+            prefetch: "nsh-prefetch.1.js",
+            start: "nsh-start.1.js",
         });
         assert!(html.contains("<title>A &lt;b&gt; &amp; &quot;c&quot;</title>"));
-        assert!(html.contains("from \"./nsh.0123456789.js\""));
+        assert!(html.contains("<link rel=\"modulepreload\" href=\"./nsh.0123456789.js\">"));
         let fetches = html
             .lines()
-            .find(|line| line.starts_with("<script>const fetches = "))
+            .find(|line| line.starts_with("<script type=\"application/json\" id=\"nsh-fetch\">"))
             .unwrap_or_default();
         for url in ["nsh.0123456789.wasm", "app.1.js", "assets/f.1.ttf"] {
             assert!(fetches.contains(&format!("\"{url}\"")), "{fetches}");
         }
-        assert!(html.contains("wasm: take(app.wasm)"));
+        // No inline code: a strict `script-src` ('self') runs the page.
+        for script in html.split("<script").skip(1) {
+            let tag = &script[..script.find('>').unwrap()];
+            let body = &script[tag.len() + 1..script.find("</script>").unwrap()];
+            assert!(
+                tag.contains(" src=\"") || tag.contains("type=\"application/json\""),
+                "{tag}"
+            );
+            assert!(!tag.contains(" src=\"") || body.is_empty(), "{tag}");
+        }
+        assert!(html.contains("<script src=\"nsh-prefetch.1.js\"></script>"));
+        assert!(html.contains("<script type=\"module\" src=\"nsh-start.1.js\"></script>"));
+        assert!(PAGE_START.contains("wasm: take(app.wasm)"));
         assert!(!html.contains("rel=\"preload\""));
         assert!(html.contains("media=\"(prefers-color-scheme: dark)\""));
         assert!(!html.contains("</script><b>"));
@@ -2562,34 +2785,43 @@ mod tests {
             }
         }
         for script in html.split("<script").skip(1) {
-            let script = &script[script.find('>').unwrap() + 1..script.find("</script>").unwrap()];
-            // The packaged app's files, read by their keys: its chunk ids
+            let tag = &script[..script.find('>').unwrap()];
+            let body = &script[tag.len() + 1..script.find("</script>").unwrap()];
+            // The files the head requests (`nsh-fetch`) and the packaged
+            // app's, read by their keys (`nsh-app`): its chunk ids
             // (`"./chunk.js"`) are not URLs.
-            let (code, app) = match script.split_once("const app = ") {
-                Some((before, rest)) => {
-                    let end = rest.find(";\n").unwrap();
-                    (
-                        format!("{before}{}", &rest[end..]),
-                        Some(serde_json::from_str::<serde_json::Value>(&rest[..end]).unwrap()),
-                    )
-                }
-                None => (script.to_owned(), None),
-            };
-            urls.extend(module_imports(&code));
-            urls.extend(
-                quoted_after(&code, "\"./")
-                    .into_iter()
-                    .filter(|s| !s.ends_with('/'))
-                    .map(|s| format!("./{s}")),
-            );
-            if let Some((_, list)) = code.split_once("const fetches = new Map(") {
-                let list = &list[..list.find("].map(").unwrap() + 1];
-                urls.extend(serde_json::from_str::<Vec<String>>(list).unwrap());
+            if tag.contains("id=\"nsh-fetch\"") {
+                urls.extend(serde_json::from_str::<Vec<String>>(body).unwrap());
+                continue;
+            }
+            let app = tag
+                .contains("id=\"nsh-app\"")
+                .then(|| serde_json::from_str::<serde_json::Value>(body).unwrap());
+            if app.is_none() {
+                urls.extend(module_imports(body));
+                urls.extend(
+                    quoted_after(body, "\"./")
+                        .into_iter()
+                        .filter(|s| !s.ends_with('/'))
+                        .map(|s| format!("./{s}")),
+                );
             }
             if let Some(app) = app {
                 let strings = |value: &serde_json::Value| value.as_str().map(str::to_owned);
-                for key in ["wasm", "glue", "code", "host"] {
+                for key in ["runtime", "wasm", "glue", "code", "host"] {
                     urls.extend(strings(&app[key]).filter(|url| !url.is_empty()));
+                }
+                // The realm's import map: its facade modules.
+                if let Some(map) = app["importMap"].as_str() {
+                    let map: serde_json::Value = serde_json::from_str(map).unwrap();
+                    urls.extend(
+                        map["imports"]
+                            .as_object()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|(_, url)| strings(url))
+                            .filter(|url| url.contains("facades/")),
+                    );
                 }
                 for key in ["assets", "data", "chunks"] {
                     urls.extend(
@@ -2758,8 +2990,11 @@ mod tests {
             ("icons/32.5555555555.png", "png"),
             ("icons/180.6666666666.png", "png"),
             ("manifest.webmanifest", "{}"),
+            ("nsh-prefetch.1.js", ""),
+            ("nsh-start.1.js", ""),
         ];
         let app = serde_json::json!({
+            "runtime": "./nsh.0123456789.js",
             "wasm": "nsh.1111111111.wasm",
             "glue": "nsh-bindgen.2222222222.js",
             "code": "app.3333333333.js",
@@ -2798,6 +3033,8 @@ mod tests {
                 fonts: &["assets/fonts/Inter.4444444444.ttf".to_owned()],
                 app: &app,
                 connect: None,
+                prefetch: "nsh-prefetch.1.js",
+                start: "nsh-start.1.js",
             });
             fs::write(dir.join("index.html"), page).unwrap();
         };

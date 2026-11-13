@@ -13,7 +13,7 @@
 //! with `ERR_NSH_QUOTA_EXCEEDED`.
 
 use crate::{
-    element::{ClipboardImage, JsError, System, codes, module},
+    element::{ClipboardImage, ClipboardItem, JsError, System, codes, module},
     platform::{Os, clipboard::MAX_IMAGE_BYTES},
 };
 
@@ -68,6 +68,17 @@ impl Clipboard {
     pub(crate) async fn write_text(text: String, sys: System) -> Result<(), JsError> {
         granted(&sys)?;
         crate::prelude::set_clipboard(text);
+        Ok(())
+    }
+
+    /// Puts `item` on the clipboard, replacing what it holds: its
+    /// `text` as plain text and its `html`, when given, as the platform's
+    /// HTML type, which apps that read formatting (mail, documents, rich
+    /// text editors) paste. Where the platform has no HTML on the clipboard
+    /// (a terminal) the text only.
+    pub(crate) async fn write(item: ClipboardItem, sys: System) -> Result<(), JsError> {
+        granted(&sys)?;
+        crate::prelude::set_clipboard_item(item);
         Ok(())
     }
 

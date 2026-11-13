@@ -10,8 +10,8 @@
 //! very replay a canvas view plays on screen.
 //!
 //! The UI thread never waits for the GPU: after the drawing and its copy
-//! into a CPU-readable bitmap are submitted (the copy inside the draw, so
-//! `EndDraw` flushes both), a Direct3D event query marks
+//! into a CPU-readable bitmap are submitted (the copy once `EndDraw` has
+//! submitted the drawing), a Direct3D event query marks
 //! their end ([`Pending`]), and a thread timer polls it without flushing
 //! ([`Pending::when_done`]); only once the GPU has passed it is the bitmap
 //! mapped, which then returns at once, and its rows copied out (one copy
@@ -203,7 +203,7 @@ fn encode(
 
 /// Premultiplied BGRA to straight BGRA (what PNG holds), in place.
 fn unpremultiply(pixels: &mut [u8]) {
-    for p in pixels.chunks_exact_mut(4) {
+    for p in pixels.as_chunks_mut::<4>().0 {
         let a = u32::from(p[3]);
         if a == 0 || a == 255 {
             continue;
@@ -368,12 +368,6 @@ impl Job {
                 D2D1_INTERPOLATION_MODE_LINEAR,
                 D2D1_COMPOSITE_MODE_SOURCE_OVER,
             );
-            // Direct2D batches commands: the copy is issued inside the
-            // draw (the target as its source flushes the drawing first),
-            // so `EndDraw` submits both to Direct3D's immediate context
-            // and the event query ended after it passes once both are
-            // done.
-            let copied = read.CopyFromBitmap(None, &target, None);
             let drawn = dc.EndDraw(None, None);
             dc.SetTarget(None);
             if let Err(e) = drawn {
@@ -382,7 +376,13 @@ impl Job {
                 }
                 return Err(fail(e));
             }
-            copied.map_err(fail)?;
+            // Only now: Direct2D batches the drawing until `EndDraw`, but
+            // issues a bitmap copy at once, and a copy inside the draw went
+            // to Direct3D ahead of the drawing (it read the bitmap empty).
+            // `EndDraw` has submitted the drawing to Direct3D's immediate
+            // context, so the copy follows it there, and the event query
+            // ended after the copy passes once both are done.
+            read.CopyFromBitmap(None, &target, None).map_err(fail)?;
             let context = gfx.d3d.GetImmediateContext().map_err(fail)?;
             let mut query = None;
             gfx.d3d
@@ -532,6 +532,44 @@ mod tests {
         [data[at], data[at + 1], data[at + 2], data[at + 3]]
     }
 
+    /// Asserts that the pixel at (x, y) is opaque red; on failure, says
+    /// which device drew and how many pixels were drawn at all (none: the
+    /// drawing never reached the bitmap that was read).
+    #[track_caller]
+    fn assert_red(data: &[u8], width: u32, (x, y): (usize, usize)) {
+        let drawn = data.as_chunks::<4>().0.iter().filter(|p| p[3] != 0).count();
+        assert_eq!(
+            pixel(data, width, x, y),
+            [0, 0, 255, 255],
+            "pixel ({x}, {y}); {drawn} of {} pixels drawn; device: {}",
+            data.len() / 4,
+            device(),
+        );
+    }
+
+    /// The thread's Direct3D adapter and feature level (on a machine
+    /// without a GPU, "Microsoft Basic Render Driver": WARP).
+    fn device() -> String {
+        let describe = || -> windows::core::Result<String> {
+            let gfx = gfx::get()?;
+            // SAFETY: COM calls on the thread's live device.
+            unsafe {
+                let dxgi: windows::Win32::Graphics::Dxgi::IDXGIDevice =
+                    windows::core::Interface::cast(&gfx.d3d)?;
+                let desc = dxgi.GetAdapter()?.GetDesc()?;
+                let len = desc.Description.iter().position(|&c| c == 0);
+                let name = String::from_utf16_lossy(&desc.Description[..len.unwrap_or(128)]);
+                Ok(format!(
+                    "{name} (vendor {:#06x}, device {:#06x}), feature level {:#x}",
+                    desc.VendorId,
+                    desc.DeviceId,
+                    gfx.d3d.GetFeatureLevel().0
+                ))
+            }
+        };
+        describe().unwrap_or_else(|e| format!("unknown ({e})"))
+    }
+
     #[test]
     fn a_drawing_paints_y_down_at_its_scale() {
         if gfx::get().is_err() {
@@ -550,8 +588,8 @@ mod tests {
         ];
         let data = job(ops, (60, 40), 2.0).paint().unwrap().read().unwrap();
         assert_eq!(data.len(), 60 * 40 * 4);
-        assert_eq!(pixel(&data, 60, 5, 5), [0, 0, 255, 255]);
-        assert_eq!(pixel(&data, 60, 59, 19), [0, 0, 255, 255]);
+        assert_red(&data, 60, (5, 5));
+        assert_red(&data, 60, (59, 19));
         assert_eq!(pixel(&data, 60, 5, 25)[3], 0);
     }
 
@@ -572,7 +610,7 @@ mod tests {
             ]),
         ];
         let data = job(ops, (20, 10), 1.0).paint().unwrap().read().unwrap();
-        assert_eq!(pixel(&data, 20, 2, 2), [0, 0, 255, 255]);
+        assert_red(&data, 20, (2, 2));
         assert_eq!(pixel(&data, 20, 15, 2)[3], 0);
     }
 
@@ -625,7 +663,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
         let data = pending.read().unwrap();
-        assert_eq!(pixel(&data, 8, 4, 4), [0, 0, 255, 255]);
+        assert_red(&data, 8, (4, 4));
     }
 
     #[test]

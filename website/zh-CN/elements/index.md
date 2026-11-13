@@ -521,6 +521,7 @@ stopPropagation() }`）；`…ShouldSetResponder` 回调还会收到 `gestureSta
 | `accessibilityLevel` | `.accessibility_level(..)` | `number` | 标题的级别（1 为最高），树节点的深度（顶层为 1）。 |
 | `accessibilityActiveDescendant` | `.accessibility_active_descendant(..)` | `ViewRef \| null` | 获得焦点的元素里当前活动的那一项：组合框高亮的选项、列表的光标行（[无障碍](../docs/accessibility.md#获得焦点的元素里的活动项)）。 |
 | `accessibilityControls` | `.accessibility_controls(..)` | `ViewRef \| null` | 内容由这个元素控制的元素：组合框的列表。 |
+| `accessibilityDescribedBy` | `.accessibility_described_by(..)` | `ViewRef \| null` | 文字用来说明这个元素的元素：输入框的错误提示行（[无障碍](../docs/accessibility.md#说明另一个元素的元素)）。 |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | 范围类或文本类元素的值。 |
 | `accessibilityElementsHidden` | | `boolean` | 对辅助技术隐藏该视图及其子树。 |
 | `importantForAccessibility` | | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | 是否暴露该视图。 |

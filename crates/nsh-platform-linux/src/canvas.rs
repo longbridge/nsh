@@ -1403,7 +1403,15 @@ impl Replay<'_> {
             c.clip();
             c.translate(dx, dy);
             c.scale(dw / sw, dh / sh);
-            c.set_source_surface(&image, -sx, -sy).is_ok()
+            if c.set_source_surface(&image, -sx, -sy).is_err() {
+                return false;
+            }
+            // Scaled, the pixels at the image's edges are filtered with what
+            // lies beyond it: padding with the edges keeps them as opaque as
+            // the image is, as browsers' `drawImage` does, instead of fading
+            // them into the transparency around it.
+            c.source().set_extend(cairo::Extend::Pad);
+            true
         };
         self.aside(|r| {
             r.with_shadow(false, &|c| {
