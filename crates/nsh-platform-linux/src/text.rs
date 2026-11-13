@@ -880,6 +880,15 @@ impl TextEngine for PangoTextEngine {
         true
     }
 
+    fn first_baseline(&self, prepared: &Prepared, width: Points) -> Option<Points> {
+        // Typeset at the size it measures `width` wide, as the text is laid
+        // out: the baseline its first line's runs are drawn on.
+        let layout = self.layout(prepared, self.measure(prepared, Some(width)));
+        let layout = layout.downcast::<LinuxLayout>()?;
+        let first = layout.lines.first()?;
+        Some(Points(layout.runs.get(first.runs.start)?.baseline))
+    }
+
     fn layout(&self, prepared: &Prepared, size: Size<Points>) -> TextLayout {
         let shown = self.configure(prepared, Some(size.width.0));
         let layout = &prepared.layout;
@@ -2436,6 +2445,44 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A text's first baseline (what `align-items: baseline` lines it up
+    /// by) is where its first line is drawn, wrapped or not, also with a
+    /// line height, and grows with the font.
+    #[test]
+    fn the_first_baseline_is_the_first_lines() {
+        let engine = PangoTextEngine::new("sans-serif".into());
+        let at = |style: ResolvedTextStyle, width: Option<f32>| {
+            let t = text(&[("Chat with the world", style)]);
+            let prepared = engine.prepare(&t);
+            let measured = engine.measure(&prepared, width.map(Points));
+            let baseline = engine
+                .first_baseline(&prepared, measured.width)
+                .expect("a first line");
+            let line = engine.lines(&engine.layout(&prepared, measured)).remove(0);
+            (baseline.0, (line.y + line.ascender).0)
+        };
+        let near = |a: f32, b: f32| (a - b).abs() < 0.5;
+        let sized = |size: f32| ResolvedTextStyle {
+            font_size: Points(size),
+            ..Default::default()
+        };
+        let (small, drawn) = at(sized(12.0), None);
+        assert!(near(small, drawn), "{small} {drawn}");
+        let (wrapped, drawn) = at(sized(12.0), Some(30.0));
+        assert!(
+            near(wrapped, drawn) && near(wrapped, small),
+            "{wrapped} {drawn}"
+        );
+        let spaced = ResolvedTextStyle {
+            line_height: Points(26.0),
+            ..sized(17.0)
+        };
+        let (baseline, drawn) = at(spaced, None);
+        assert!(near(baseline, drawn), "{baseline} {drawn}");
+        let (large, _) = at(sized(24.0), None);
+        assert!(large > small, "{large} {small}");
     }
 
     /// With a fixed `lineHeight`, an attachment taller than the line grows

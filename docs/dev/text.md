@@ -25,10 +25,12 @@
   Test-id-only span updates remount the text metadata with its cached final layout (`LaidText`), retaining fitted
   font sizes. They preserve prepared state and measurement caches and raise no `onTextLayout`.
 - A text laid out gives Taffy its first line's baseline, below its top through its padding and border
-  (`TextEngine::first_baseline`: web, macOS; `measure_leaf`, cached per width in `TextContext::baseline`), so a flex row
-  with `items-baseline` lines its texts up by their baselines, as CSS does. An engine that does not report one gives
-  `None` and the text is aligned by its bottom edge, Taffy's fallback for a box without a baseline: texts of different
-  sizes in a row then sit off each other's baseline by the difference of what is below their baselines. Only a text
+  (`TextEngine::first_baseline`: every built-in engine, CoreText on macOS and iOS, Android, Pango, DirectWrite, GPUI,
+  the web, Cells and the headless one; `measure_leaf`, cached per width in `TextContext::baseline`), so a flex row
+  with `items-baseline` lines its texts up by their first baselines on every platform, as CSS does. An engine that does
+  not report one (the trait's default, for a custom engine) gives `None` and the text is aligned by its bottom edge,
+  Taffy's fallback for a box without a baseline: texts of different sizes in a row then sit off each other's baseline
+  by the difference of what is below their baselines. Only a text
   aligned by baseline is asked (`layout_tree::Aligned`, from its `align-self` or its container's `align-items`), and
   only when it is laid out, not measured (Taffy's baseline pass lays its items out); a text measured by an estimate has
   none.

@@ -1791,6 +1791,15 @@ impl TextEngine for DWriteTextEngine {
         Size::new(Points(width.ceil()), Points(height.ceil()))
     }
 
+    fn first_baseline(&self, p: &Prepared, width: Points) -> Option<Points> {
+        // Typeset at the size it measures `width` wide, as the text is laid
+        // out: the baseline its first line's runs are drawn on.
+        let layout = self.layout(p, self.measure(p, Some(width)));
+        let layout = layout.downcast::<WinLayout>()?;
+        let first = layout.lines.first()?;
+        Some(Points(layout.runs.get(first.runs.start)?.baseline))
+    }
+
     fn layout(&self, p: &Prepared, size: Size<Points>) -> TextLayout {
         let shown = self.configure(p, Some(size.width.0));
         let Some(layout) = &p.layout else {
@@ -3619,6 +3628,34 @@ mod tests {
         // Its middle above the baseline.
         let (top, up, _) = place(nsh_core::VerticalAlign::Middle);
         assert!(top + 15.0 < up, "{top} {up}");
+    }
+
+    /// A text's first baseline (what `align-items: baseline` lines it up
+    /// by) is where its first line is drawn, wrapped or not, and grows
+    /// with the font.
+    #[test]
+    fn the_first_baseline_is_the_first_lines() {
+        let engine = engine();
+        let at = |size: f32, width: Option<f32>| {
+            let t = text(&[("Chat with the world", plain(size))]);
+            let (measured, layout) = layout_of(&engine, &t, width);
+            let prepared = engine.prepare(&t);
+            let baseline = engine
+                .first_baseline(&prepared, measured.width)
+                .expect("a first line");
+            let line = engine.lines(&layout).remove(0);
+            (baseline.0, line.y.0 + line.ascender.0)
+        };
+        let near = |a: f32, b: f32| (a - b).abs() < 0.5;
+        let (small, drawn) = at(12.0, None);
+        assert!(near(small, drawn), "{small} {drawn}");
+        let (wrapped, drawn) = at(12.0, Some(30.0));
+        assert!(
+            near(wrapped, drawn) && near(wrapped, small),
+            "{wrapped} {drawn}"
+        );
+        let (large, _) = at(24.0, None);
+        assert!(large > small, "{large} {small}");
     }
 
     #[test]
