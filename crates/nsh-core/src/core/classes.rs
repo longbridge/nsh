@@ -249,6 +249,38 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// A span of a text heard the pointer come or go, or a press go in or
+    /// out (`kind`): its hover and press states, which no view reports
+    /// for it.
+    pub(super) fn span_state(&mut self, id: NodeId, kind: crate::ops::EventKind) {
+        use crate::ops::EventKind;
+        let (bit, on) = match kind {
+            EventKind::MouseEnter => (state::HOVERED, true),
+            EventKind::MouseLeave => (state::HOVERED, false),
+            EventKind::PressDown => (state::PRESSED, true),
+            EventKind::PressUp => (state::PRESSED, false),
+            _ => return,
+        };
+        let Ok(key) = self.key(id) else { return };
+        let tracked = self.nodes[key as usize]
+            .classes
+            .as_ref()
+            .map_or(0, |c| c.tracked_states());
+        if tracked & bit == 0 || !self.is_text_span(key) {
+            return;
+        }
+        let node = &mut self.nodes[key as usize];
+        let new = if on {
+            node.states | bit
+        } else {
+            node.states & !bit
+        };
+        if new != node.states {
+            node.states = new;
+            self.states_changed(key);
+        }
+    }
+
     /// View `key` took (or lost) the keyboard focus. A surface has one: a
     /// view taking it is the focus whether or not the one before reported
     /// losing it yet, and a view losing it that is not the focus changes

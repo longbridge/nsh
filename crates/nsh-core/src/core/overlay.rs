@@ -642,7 +642,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Whether `key` is a nested span of a text, with no frame of its own.
-    fn is_text_span(&self, key: Key) -> bool {
+    pub(super) fn is_text_span(&self, key: Key) -> bool {
         let n = &self.nodes[key as usize];
         n.kind == Kind::Text && n.inline && n.layout.is_none()
     }

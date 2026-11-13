@@ -107,6 +107,14 @@
   (`TextEngine::draws_colors_from_text`: macOS, Windows, Linux and GPUI, which also read `hidden` there): only the new
   text is mounted with the layout, so a word fading in, or shown after waiting hidden, costs one draw, not a new layout
   of its paragraph. The other backends typeset it again.
+- **Span states**: a nested `<Text>` has no view to report its interaction states, so the core takes them from the
+  events of its link. A span whose classes or state styles read `hover:` is a link hearing `MouseEnter` /
+  `MouseLeave` (as a hinted one: no press, no stop of Tab, none inside a span taking presses), and a link reading
+  `active:` also hears `PressDown` / `PressUp` (`Core::collect_text`); `Core::span_state` turns those events into the
+  span's `HOVERED` / `PRESSED` before anything else handles them (a cancelled press's dropped release too), and the
+  restyled span merges into its text again. The platforms only hit-test their links as they already do for hints
+  and presses. A color change takes the path above; a decoration line typesets the paragraph again without laying
+  out the views around it (`layout_eq`).
 - **Span backgrounds**: `backgroundColor` / `borderRadius` on a nested `<Text>` (its view style, which spans otherwise
   ignore) become `ResolvedTextStyle::background` (`TextBackground`: color, radius and the span's node, so neighboring
   spans that look the same stay apart), inherited by the spans inside it; the block's own background stays its view's.

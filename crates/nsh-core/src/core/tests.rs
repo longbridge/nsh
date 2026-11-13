@@ -16236,6 +16236,107 @@ mod components {
             batch.items
         );
     }
+
+    /// A sentence whose spans style their hover and press, a link and a
+    /// span that takes no presses, and one inside the link.
+    #[component]
+    fn StatefulSpans() -> impl IntoElement {
+        view().child(
+            text("Read ")
+                .child(
+                    text("the docs")
+                        .on_press(|_: &()| {})
+                        .hover(|s| s.underline())
+                        .active(|s| s.text_color(rgb(0xff0000))),
+                )
+                .child(" or ")
+                .child(text("this").hover(|s| s.underline()))
+                .child(" and ")
+                .child(
+                    text("pressed ")
+                        .on_press(|_: &()| {})
+                        .child(text("inner").hover(|s| s.underline())),
+                ),
+        )
+    }
+
+    #[test]
+    fn a_span_takes_its_hover_and_press_styles_where_the_pointer_is() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            idiom: crate::platform::Idiom::Desktop,
+            ..crate::element::Environment::default()
+        });
+        c.mount_root(&crate::element::Root::new::<StatefulSpans>(|| ()));
+        let paragraph = |c: &mut Core<_>| {
+            let batch = c.commit()?;
+            batch.items.iter().find_map(|i| match i {
+                MountItem::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+        };
+        let style_at = |t: &crate::AttributedText, at: u32| {
+            t.spans
+                .iter()
+                .find(|s| s.start <= at && at < s.end)
+                .expect("a run there")
+                .style
+        };
+        let t = paragraph(&mut c).expect("the paragraph");
+        assert_eq!(t.text, "Read the docs or this and pressed inner");
+        let docs = *t.link_at(5).expect("the link");
+        let this = *t
+            .link_at(17)
+            .expect("a span with hover styles hears the pointer");
+        // The platforms tell a span when the pointer comes over its
+        // characters and leaves them, and when a press goes in and out.
+        for link in [docs, this] {
+            assert!(link.events.contains(EventKind::MouseEnter), "{link:?}");
+            assert!(link.events.contains(EventKind::MouseLeave), "{link:?}");
+        }
+        assert!(docs.events.contains(EventKind::PressDown));
+        assert!(docs.events.contains(EventKind::PressUp));
+        // A span that only hovers takes no press and no stop of Tab.
+        assert!(!this.events.contains(EventKind::Press));
+        assert!(!this.events.contains(EventKind::PressDown));
+        assert!(!this.focus_stop);
+        // Inside a span taking presses, the pressable one stays the link.
+        let inner = t.link_at(34).expect("a link there");
+        assert_eq!((inner.start, inner.end), (26, 39));
+        assert!(!style_at(&t, 5).decoration.underline);
+        let color = style_at(&t, 5).color;
+
+        let mouse = EventPayload::Mouse(crate::MouseEvent::new(
+            crate::geometry::point(px(20.0), px(8.0)),
+            crate::geometry::point(px(60.0), px(8.0)),
+            crate::keymap::Modifiers::default(),
+            None,
+        ));
+        c.component_event(docs.node, EventKind::MouseEnter, &mouse);
+        let t = paragraph(&mut c).expect("the span hovered");
+        assert!(style_at(&t, 5).decoration.underline);
+        assert!(!style_at(&t, 4).decoration.underline, "only the span's run");
+        assert!(!style_at(&t, 17).decoration.underline);
+
+        let press = EventPayload::Press(crate::PressEvent::default());
+        c.component_event(docs.node, EventKind::PressDown, &press);
+        let t = paragraph(&mut c).expect("the span pressed");
+        assert_ne!(style_at(&t, 5).color, color);
+        assert!(style_at(&t, 5).decoration.underline);
+        c.component_event(docs.node, EventKind::PressUp, &press);
+        let t = paragraph(&mut c).expect("the press ended");
+        assert_eq!(style_at(&t, 5).color, color);
+
+        c.component_event(docs.node, EventKind::MouseLeave, &mouse);
+        c.component_event(this.node, EventKind::MouseEnter, &mouse);
+        let t = paragraph(&mut c).expect("the pointer moved on");
+        assert!(!style_at(&t, 5).decoration.underline);
+        assert!(style_at(&t, 17).decoration.underline);
+        c.component_event(this.node, EventKind::MouseLeave, &mouse);
+        let t = paragraph(&mut c).expect("the pointer left");
+        assert!(!style_at(&t, 17).decoration.underline);
+    }
 }
 
 /// Rust components' touches and responder (`touch.rs`).
