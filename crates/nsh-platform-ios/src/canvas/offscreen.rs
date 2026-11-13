@@ -14,11 +14,9 @@ use nsh_core::{
     canvas::{Drawing, render::ImageFormat},
 };
 use nsh_engine::EngineControl;
-use objc2_core_foundation::{CFMutableData, CFRetained, CFString, CGFloat};
-use objc2_core_graphics::{
-    CGBitmapContextCreate, CGBitmapContextCreateImage, CGColorSpace, CGContext, CGImage,
-    CGImageAlphaInfo, CGImageByteOrderInfo,
-};
+use nsh_platform_apple::canvas_image::{bitmap_context, encode};
+use objc2_core_foundation::{CFRetained, CGFloat};
+use objc2_core_graphics::{CGBitmapContextCreateImage, CGContext, CGImage};
 
 use super::Images;
 use crate::image::{DecodedImage, ImageLoader, Look, Request};
@@ -161,7 +159,7 @@ impl Job {
     fn encode(self) -> Result<Vec<u8>, String> {
         let format = self.format;
         let image = self.paint().ok_or("the canvas could not be drawn")?;
-        encode(&image, format).ok_or_else(|| "the image could not be encoded".into())
+        encode(&image, format)
     }
 
     /// The drawing replayed into a transparent bitmap, y down, `scale`
@@ -169,42 +167,15 @@ impl Job {
     fn paint(&self) -> Option<CFRetained<CGImage>> {
         let (pw, ph) = (self.width as usize, self.height as usize);
         let scale = CGFloat::from(self.scale);
-        let space = CGColorSpace::new_device_rgb()?;
-        // SAFETY: a null data pointer makes Core Graphics allocate the
-        // bitmap; 8 bits per component and 4 bytes per pixel match the
-        // premultiplied 32-bit layout asked for.
-        let cx = unsafe {
-            CGBitmapContextCreate(
-                std::ptr::null_mut(),
-                pw,
-                ph,
-                8,
-                pw * 4,
-                Some(&space),
-                CGImageAlphaInfo::PremultipliedFirst.0 | CGImageByteOrderInfo::Order32Little.0,
-            )
-        }?;
+        let cx = bitmap_context(pw, ph)?;
         // Core Graphics bitmaps are y up: flip to the canvas's space.
         CGContext::translate_ctm(Some(&cx), 0.0, ph as CGFloat);
         CGContext::scale_ctm(Some(&cx), scale, -scale);
-        super::paint(&cx, &self.drawing, &[], &self.images);
+        // The bitmap's base space (its pixels, y up) from the canvas's,
+        // where shadows are cast.
+        let base = CGContext::ctm(Some(&cx));
+        super::paint(&cx, &self.drawing, &[], &self.images, base);
         CGBitmapContextCreateImage(Some(&cx))
-    }
-}
-
-/// `image` encoded as `format`.
-fn encode(image: &CGImage, format: ImageFormat) -> Option<Vec<u8>> {
-    use objc2_image_io::CGImageDestination;
-    let uti = match format {
-        ImageFormat::Png => "public.png",
-    };
-    let out = CFMutableData::new(None, 0)?;
-    // SAFETY: a valid mutable data and type identifier; no options; one
-    // image added before `finalize`.
-    unsafe {
-        let destination = CGImageDestination::with_data(&out, &CFString::from_str(uti), 1, None)?;
-        destination.add_image(image, None);
-        destination.finalize().then(|| out.to_vec())
     }
 }
 
@@ -213,6 +184,7 @@ mod tests {
     use nsh_core::{
         Color,
         canvas::{CanvasOp, Num, Paint},
+        geometry::{Point, Points},
     };
     use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 
@@ -236,20 +208,10 @@ mod tests {
     /// The pixel at (x, y), y down, as `[b, g, r, a]` (premultiplied).
     fn pixel(image: &CGImage, x: usize, y: usize) -> [u8; 4] {
         let (w, h) = (CGImage::width(Some(image)), CGImage::height(Some(image)));
-        let space = CGColorSpace::new_device_rgb().unwrap();
-        // SAFETY: as in `Job::paint`; the bitmap Core Graphics allocated
-        // holds `w * h * 4` bytes while the context lives.
+        let cx = bitmap_context(w, h).unwrap();
+        // SAFETY: the bitmap Core Graphics allocated holds `w * h * 4`
+        // bytes while the context lives; read after drawing the image in.
         unsafe {
-            let cx = CGBitmapContextCreate(
-                std::ptr::null_mut(),
-                w,
-                h,
-                8,
-                w * 4,
-                Some(&space),
-                CGImageAlphaInfo::PremultipliedFirst.0 | CGImageByteOrderInfo::Order32Little.0,
-            )
-            .unwrap();
             CGContext::draw_image(
                 Some(&cx),
                 CGRect::new(CGPoint::ZERO, CGSize::new(w as CGFloat, h as CGFloat)),
@@ -282,6 +244,28 @@ mod tests {
         assert_eq!(pixel(&image, 5, 5), [0, 0, 255, 255]);
         assert_eq!(pixel(&image, 59, 19), [0, 0, 255, 255]);
         assert_eq!(pixel(&image, 5, 25)[3], 0);
+    }
+
+    #[test]
+    fn a_shadow_falls_by_its_offset_in_the_canvas_points() {
+        // A black square at (10, 10), 10 points wide, casting a hard red
+        // shadow 20 points right and 15 down, at 2 pixels per point: the
+        // shadow's middle is at (35, 30) points, (70, 60) pixels.
+        let c = Num::Const;
+        let ops = vec![
+            CanvasOp::ShadowColor(Color(0xff0000ff)),
+            CanvasOp::ShadowBlur(Points(0.0)),
+            CanvasOp::ShadowOffset(Point::new(Points(20.0), Points(15.0))),
+            CanvasOp::FillStyle(Paint::Color(Color(0x000000ff))),
+            CanvasOp::FillRect([c(10.0), c(10.0), c(10.0), c(10.0)]),
+        ];
+        let image = job(ops, (200, 80), 2.0).paint().unwrap();
+        assert_eq!(pixel(&image, 30, 30), [0, 0, 0, 255], "the square");
+        assert_eq!(pixel(&image, 70, 60), [0, 0, 255, 255], "its shadow");
+        // Not cast upward (a y up base space), nor half as far (offsets
+        // taken as pixels).
+        assert_eq!(pixel(&image, 70, 1)[3], 0);
+        assert_eq!(pixel(&image, 50, 45)[3], 0);
     }
 
     #[test]

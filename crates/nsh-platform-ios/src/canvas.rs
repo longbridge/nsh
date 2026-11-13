@@ -75,7 +75,9 @@ define_class!(
             let Some(cx) = UIGraphicsGetCurrentContext() else { return };
             let values = self.ivars().values.borrow();
             let images = self.ivars().images.borrow();
-            paint(&cx, drawing, &values, &images);
+            // UIKit's drawing contexts take shadows in the view's own
+            // space (points, y down): no transform to the base space.
+            paint(&cx, drawing, &values, &images, Affine::IDENTITY.cg());
         }
     }
 );
@@ -85,11 +87,20 @@ type Images = FxHashMap<Arc<str>, Retained<UIImage>>;
 
 /// Replays `drawing` into `cx`, whose space is the canvas's (points, y
 /// down), its animated slots read from `values` (0 when missing): what a
-/// canvas view draws, and an offscreen render ([`offscreen`]) too. Any
-/// thread: Core Graphics, Core Text and `UIImage` are thread-safe.
-fn paint(cx: &CGContext, drawing: &Drawing, values: &[AnimationValue], images: &Images) {
+/// canvas view draws, and an offscreen render ([`offscreen`]) too. `base`
+/// takes the canvas's space to the context's base space, in which Core
+/// Graphics takes shadow offsets and blurs (no transform reaches them).
+/// Any thread: Core Graphics, Core Text and `UIImage` are thread-safe.
+fn paint(
+    cx: &CGContext,
+    drawing: &Drawing,
+    values: &[AnimationValue],
+    images: &Images,
+    base: CGAffineTransform,
+) {
     let mut replay = Replay {
         c: cx,
+        base,
         values,
         images,
         state: State::default(),
@@ -275,6 +286,8 @@ impl Default for State {
 
 struct Replay<'a> {
     c: &'a CGContext,
+    /// The canvas's space in the context's base space ([`paint`]).
+    base: CGAffineTransform,
     values: &'a [AnimationValue],
     images: &'a Images,
     state: State,
@@ -602,8 +615,12 @@ impl<'a> Replay<'a> {
         let (color, blur, x, y) = s.shadow;
         if self.shadowed() {
             let color = crate::text::cg_color(color);
-            // UIKit contexts are y down, so are the offsets.
-            CGContext::set_shadow_with_color(c, CGSize::new(x, y), blur, Some(&color));
+            // Shadow offsets and blurs are in the context's base space, which
+            // no transform reaches: taken there from the canvas's space.
+            let m = self.base;
+            let offset = CGSize::new(m.a * x + m.c * y, m.b * x + m.d * y);
+            let scale = (m.a * m.d - m.b * m.c).abs().sqrt();
+            CGContext::set_shadow_with_color(c, offset, blur * scale, Some(&color));
         }
     }
 

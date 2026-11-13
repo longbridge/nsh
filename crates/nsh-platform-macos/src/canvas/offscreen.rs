@@ -12,13 +12,9 @@ use nsh_core::{
     EventKind, EventPayload, ROOT_ID,
     canvas::{Drawing, render::ImageFormat},
 };
-use objc2_core_foundation::{
-    CFMutableData, CFRetained, CFString, CGFloat, CGPoint, CGRect, CGSize,
-};
-use objc2_core_graphics::{
-    CGBitmapContextCreate, CGBitmapContextCreateImage, CGColorSpace, CGContext, CGImage,
-    CGImageAlphaInfo, CGImageByteOrderInfo,
-};
+use nsh_platform_apple::canvas_image::{bitmap_context, encode};
+use objc2_core_foundation::{CFRetained, CGFloat, CGPoint, CGRect, CGSize};
+use objc2_core_graphics::{CGBitmapContextCreateImage, CGContext, CGImage};
 use rustc_hash::FxHashMap;
 
 use super::CanvasState;
@@ -111,7 +107,7 @@ impl Job {
     fn encode(self) -> Result<Vec<u8>, String> {
         let format = self.format;
         let image = self.paint().ok_or("the canvas could not be drawn")?;
-        encode(&image, format).ok_or_else(|| "the image could not be encoded".into())
+        encode(&image, format)
     }
 
     /// The drawing replayed into a transparent bitmap, y down, `scale`
@@ -124,49 +120,22 @@ impl Job {
             images: self.images,
             ..CanvasState::default()
         };
-        let space = CGColorSpace::new_device_rgb()?;
-        // SAFETY: a context with pixels of its own, drawn into on this
-        // thread only, then made an image of.
-        unsafe {
-            let cx = CGBitmapContextCreate(
-                std::ptr::null_mut(),
-                pw,
-                ph,
-                8,
-                pw * 4,
-                Some(&space),
-                CGImageAlphaInfo::PremultipliedFirst.0 | CGImageByteOrderInfo::Order32Little.0,
-            )?;
-            // As a flipped view over a window's: y down, points.
-            CGContext::translate_ctm(Some(&cx), 0.0, ph as CGFloat);
-            CGContext::scale_ctm(Some(&cx), scale, -scale);
-            let base = CGContext::ctm(Some(&cx));
-            let size = CGSize::new(pw as CGFloat / scale, ph as CGFloat / scale);
-            canvas.paint(
-                &cx,
-                CGRect::new(CGPoint::ZERO, size),
-                size,
-                scale,
-                false,
-                base,
-            );
-            CGBitmapContextCreateImage(Some(&cx))
-        }
-    }
-}
-
-/// `image` encoded as `format`.
-fn encode(image: &CGImage, format: ImageFormat) -> Option<Vec<u8>> {
-    use objc2_image_io::CGImageDestination;
-    let uti = match format {
-        ImageFormat::Png => "public.png",
-    };
-    // SAFETY: ImageIO's documented API, with no options.
-    unsafe {
-        let out = CFMutableData::new(None, 0)?;
-        let destination = CGImageDestination::with_data(&out, &CFString::from_str(uti), 1, None)?;
-        destination.add_image(image, None);
-        destination.finalize().then(|| out.to_vec())
+        let cx = bitmap_context(pw, ph)?;
+        // As a flipped view over a window's: y down, points.
+        CGContext::translate_ctm(Some(&cx), 0.0, ph as CGFloat);
+        CGContext::scale_ctm(Some(&cx), scale, -scale);
+        // The bitmap's base space (its pixels, y up) from the view's.
+        let base = CGContext::ctm(Some(&cx));
+        let size = CGSize::new(pw as CGFloat / scale, ph as CGFloat / scale);
+        canvas.paint(
+            &cx,
+            CGRect::new(CGPoint::ZERO, size),
+            size,
+            scale,
+            false,
+            base,
+        );
+        CGBitmapContextCreateImage(Some(&cx))
     }
 }
 
@@ -196,19 +165,10 @@ mod tests {
     /// The pixel at (x, y), y down, as `[b, g, r, a]` (premultiplied).
     fn pixel(image: &CGImage, x: usize, y: usize) -> [u8; 4] {
         let (w, h) = (CGImage::width(Some(image)), CGImage::height(Some(image)));
-        let space = CGColorSpace::new_device_rgb().unwrap();
-        // SAFETY: a bitmap of its own, read after drawing the image in.
+        let cx = bitmap_context(w, h).unwrap();
+        // SAFETY: the bitmap Core Graphics allocated holds `w * h * 4`
+        // bytes while the context lives; read after drawing the image in.
         unsafe {
-            let cx = CGBitmapContextCreate(
-                std::ptr::null_mut(),
-                w,
-                h,
-                8,
-                w * 4,
-                Some(&space),
-                CGImageAlphaInfo::PremultipliedFirst.0 | CGImageByteOrderInfo::Order32Little.0,
-            )
-            .unwrap();
             CGContext::draw_image(
                 Some(&cx),
                 CGRect::new(CGPoint::ZERO, CGSize::new(w as CGFloat, h as CGFloat)),
