@@ -606,6 +606,15 @@ fn hack_spec(package: &serde_json::Value, node: Option<&serde_json::Value>) -> O
 /// What a generated crate names of a platform crate's features: all but `js`
 /// and the standard JS modules, which a Rust app does not run.
 pub(crate) const RUST_APP_PLATFORM: &str = ", default-features = false, features = [\"shader\", \"editor\", \"emoji-picker\", \"highlight\", \"math\", \"plot\", \"rich-editor\", \"term\", \"websocket\", \"updater\", \"svg\", \"net\"]";
+
+/// [`RUST_APP_PLATFORM`] for the platform crate `platform`, with the
+/// features only it has: Linux's `sound` (GStreamer).
+pub(crate) fn rust_app_platform(platform: &str) -> String {
+    match platform {
+        "nsh-platform-linux" => RUST_APP_PLATFORM.replacen(']', ", \"sound\"]", 1),
+        _ => RUST_APP_PLATFORM.to_owned(),
+    }
+}
 /// `nsh-base`'s features the hosts and runners name: they show TextView's
 /// code blocks highlighted, whatever `nsh-base`'s defaults are.
 const HIGHLIGHT: &str = ", features = [\"highlight\"]";
@@ -2057,7 +2066,7 @@ panic = \"abort\"
                 self.nsh.dep(lib, ", default-features = false"),
                 self.nsh.dep("nsh-core", ""),
                 self.nsh.dep("nsh-base", HIGHLIGHT),
-                self.nsh.dep(platform, RUST_APP_PLATFORM),
+                self.nsh.dep(platform, &rust_app_platform(platform)),
             ),
         )?;
         let lib = lib.replace('-', "_");

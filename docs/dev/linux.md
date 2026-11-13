@@ -12,7 +12,7 @@ packages (`libgtk-4-dev` on Debian / Ubuntu, `gtk4` on Arch, `gtk4-devel` on Fed
 (2.40 or later: `libwebkitgtk-6.0-dev` on Debian / Ubuntu, `webkitgtk-6.0` on Arch, `webkitgtk6.0-devel` on Fedora),
 GStreamer's core and base plug-ins (`libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev` on Debian / Ubuntu,
 `gstreamer gst-plugins-base` on Arch, `gstreamer1-devel gstreamer1-plugins-base-devel` on Fedora; sounds decode and mix
-with them, `sound.rs`) and, for QuickJS, clang. Off Linux the crates are empty (like the other platform crates off their targets), so check them on
+with them, `sound.rs`, the feature `sound`; without it `sound_off.rs` fails every load as `not-supported`) and, for QuickJS, clang. Off Linux the crates are empty (like the other platform crates off their targets), so check them on
 Linux:
 
 ```sh

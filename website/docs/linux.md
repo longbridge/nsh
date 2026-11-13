@@ -27,7 +27,10 @@ from `nsh_core::element::desktop` in Rust ([Desktop title bars](./rust.md#deskto
 - **GStreamer** 1.14 or later, which GTK plays video through and NSH plays sound with: to build the runtime its
   development packages, `libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev` on Debian and Ubuntu, `gstreamer
   gst-plugins-base` on Arch, `gstreamer1-devel gstreamer1-plugins-base-devel` on Fedora. Where apps run, GStreamer and
-  its base plug-ins (desktops have them), and the plug-ins for the video and audio formats your app plays.
+  its base plug-ins (desktops have them), and the plug-ins for the video and audio formats your app plays. The
+  development packages are for `Sound`, the runtime's Cargo feature `sound`: a Rust app that plays no sounds builds
+  without them by leaving that feature out (`default-features = false` on `nsh-platform-linux`), and video and
+  `AudioPlayer` still play through GTK.
 
 ## Running an app
 
