@@ -588,20 +588,24 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   where, and moves their views (`Insert` / `Remove`), so the platforms need nothing of their own: they draw and
   hit-test it as any view of the root, with the views' own z order.
 - **Layout**: a layout root of its own, laid out in a box the size of its root view (`position: fixed`: its insets,
-  size and margins are against that box; `inset-0` covers the root view). With `anchor` (a ref of a view,
-  `{ x, y }` in the root view's coordinates, touches' `pageX` / `pageY`, or a `Bounds` there, an input's
-  caret, `onCaretMove`'s `pageBounds`: `OverlayAnchor::Bounds`) the core places it on a side of the anchor's
-  frame (`nsh_core::overlay::place`): `placement` (`"top"`, `"bottom"` (default), `"left"`, `"right"`), on the other
+  size and margins are against that box; `inset-0` covers the root view), or with an anchor in the root view's safe
+  area less `margin` (below), which its insets, percentage sizes and margins are against then. With `anchor` (a ref
+  of a view, `{ x, y }` in the root view's coordinates, touches' `pageX` / `pageY`, or a `Bounds` there, an input's
+  caret, `onCaretMove`'s `pageBounds`: `OverlayAnchor::Bounds`) the core places it on a side of the anchor's frame
+  (`nsh_core::overlay::place`): `placement` (`"top"`, `"bottom"` (default), `"left"`, `"right"`), on the other
   side when only that one has room, the side with more room when neither has; `align` along it (`"start"`,
   `"center"` (default), `"end"`; start and end follow the direction above and below); `offset` from the anchor; then
-  moved along the side to stay inside the root view's safe area less `margin`. Rust's `anchor_beside(row, menu)`
-  (`OverlayAnchor::Beside`, a submenu's) lines its content (inside its own padding and border) up with the row along
-  its side, so a submenu's first item is level with its trigger, and places it outside the menu
-  around the row across it, so `offset` is a gap from the menu's edge, not from the row inside its padding. Rust's
-  `anchor_content(r)` (`OverlayAnchor::Content`, `Popover`'s, `HoverCard`'s and a desktop `Menu`'s) places it against
-  what the view draws: the box around its children with its padding and border, along an axis its style leaves `auto`
-  (a wrapper its parent stretches); the element that takes a component's slot goes by its own box, whether a TSX or a
-  Rust app passed it (`Core::content_anchor`: the slot's holder is that wrapper). The anchor's frame is
+  moved along the side to stay inside the root view's safe area less `margin`. An anchored overlay is laid out in
+  that area rather than the whole root view, so content wider than it (a paragraph) wraps within it; in a terminal,
+  within that area less the frame drawn a Cell outside its box. A side placement (`"left"`, `"right"`) is laid out in
+  the whole area too: the side's room is the `available` of `onPosition`, which an overlay follows to fit it. Rust's
+  `anchor_beside(row, menu)` (`OverlayAnchor::Beside`, a submenu's) lines its content (inside its own padding and
+  border) up with the row along its side, so a submenu's first item is level with its trigger, and places it outside
+  the menu around the row across it, so `offset` is a gap from the menu's edge, not from the row inside its padding.
+  Rust's `anchor_content(r)` (`OverlayAnchor::Content`, `Popover`'s, `HoverCard`'s and a desktop `Menu`'s) places it
+  against what the view draws: the box around its children with its padding and border, along an axis its style leaves
+  `auto` (a wrapper its parent stretches); the element that takes a component's slot goes by its own box, whether a
+  TSX or a Rust app passed it (`Core::content_anchor`: the slot's holder is that wrapper). The anchor's frame is
   `Core::measure`'s (scroll offsets and zoom applied, transforms not), so the overlay follows it as it scrolls and moves:
   `place_overlays` places anchored overlays again at the end of every commit (after the lists and the scroll offsets
   the platform reported). `onPosition` reports where it went (`placement`, the frame as `bounds`, `available`:
