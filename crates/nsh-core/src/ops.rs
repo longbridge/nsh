@@ -2413,6 +2413,13 @@ pub enum Command {
     },
     /// Put `text` on the system clipboard (on the root; `Clipboard.writeText`).
     SetClipboard(String),
+    /// Put one item on the system clipboard, each of its formats in one
+    /// write: the text as plain text, the HTML (when it has some) as the
+    /// platform's HTML type, which apps that read formatting paste (on the
+    /// root; `Clipboard.write`). A platform without an HTML type puts the
+    /// text only. New formats of [`crate::element::ClipboardItem`] come in
+    /// the same command.
+    SetClipboardItem(crate::element::ClipboardItem),
     /// Read the system clipboard and report it as [`EventKind::Clipboard`]
     /// `id` (on the root): `has` and, unless `has_only`, `text`. Asking
     /// only whether it holds text does not read it (no iOS paste notice).

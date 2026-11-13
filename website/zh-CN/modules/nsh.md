@@ -1479,6 +1479,7 @@ import { Clipboard } from "nsh";
 ```ts
 const Clipboard: {
   writeText(text: string): Promise<void>;
+  write(item: ClipboardItem): Promise<void>;
   readText(): Promise<string>;
   hasText(): Promise<boolean>;
   writeImage(src: string): Promise<void>;
@@ -1486,6 +1487,11 @@ const Clipboard: {
   hasImage(): Promise<boolean>;
   readFiles(): Promise<string[]>;
 };
+
+interface ClipboardItem {
+  text: string; // 纯文本形式的内容
+  html?: string; // 同一内容的 HTML 形式
+}
 
 interface ClipboardImage {
   url: string; // Image 能显示、fetch 能读取的 URL
@@ -1496,6 +1502,7 @@ interface ClipboardImage {
 | TS | Rust（`nsh_core::prelude`） |
 |---|---|
 | `await Clipboard.writeText(text)` | `set_clipboard(text)` |
+| `await Clipboard.write({ text, html })` | `set_clipboard_item(item)`（一个 `ClipboardItem`） |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
 | `await Clipboard.hasText()` | `clipboard_has_string().await -> bool` |
 | `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` |
@@ -1548,6 +1555,39 @@ const copied = signal(false);
 >
   <Text>{copied() ? "已复制" : "复制"}</Text>
 </View>;
+```
+
+### Clipboard.write
+
+```ts
+write(item: ClipboardItem): Promise<void>;
+```
+
+把同一内容的纯文本和 HTML 一起放到剪贴板上，替换原有内容，和浏览器复制选区的做法一样：能读格式的应用（邮件、文档、富文本编辑器）
+粘贴 HTML，其他应用粘贴文本。`html` 是一个片段（`<p>Hello <b>world</b></p>`），不是整个页面。不给 `html` 时等同于
+`writeText(text)`。Rust：`set_clipboard_item(item)`，参数是一个 `ClipboardItem`。
+
+`ClipboardItem` 是剪贴板上的一项内容，带有几种格式，和 GPUI 的 `ClipboardItem` 一样；在 NSH 中它是一个列出各格式的普通对象
+`{ text, html? }`，只是一个类型（浏览器的 `ClipboardItem` 类仍归页面所用）。一项内容的所有格式在一次写入中放上剪贴板，剪贴板以后支持的格式也加入同一项。
+
+HTML 以各平台的 HTML 类型和文本在同一次写入中放上剪贴板：Web 和 Linux 是 `text/html`，macOS 和 iOS 是 `public.html`，
+Android 是 HTML 剪贴项，Windows 是 `HTML Format`。GPUI 和终端写入文本。在 Web 上，处理用户按键或按下时发起的写入（例如
+`RichEditor` 的复制）经由页面的 copy 事件完成，和浏览器复制选区一样。`Clipboard.readText` 读回的是文本；HTML 由粘贴读取
+（`onPaste` 的 `html`）。
+
+```rust tabs
+use nsh_core::prelude::*;
+
+let mut item = ClipboardItem::default();
+item.text = "Hello world".into();
+item.html = Some("<p>Hello <b>world</b></p>".into());
+set_clipboard_item(item);
+```
+
+```tsx tabs
+import { Clipboard } from "nsh";
+
+await Clipboard.write({ text: "Hello world", html: "<p>Hello <b>world</b></p>" });
 ```
 
 ### Clipboard.readText

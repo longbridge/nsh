@@ -2656,6 +2656,50 @@ mod tests {
         assert!(app.screen().sent(&Command::SetClipboard("copied 4".into())));
     }
 
+    /// A button that copies text with its HTML, one that copies text only.
+    #[component]
+    fn HtmlCopier() -> impl IntoElement {
+        view()
+            .child(
+                view()
+                    .on_press(|| {
+                        let mut item = ClipboardItem::default();
+                        item.text = "a b".into();
+                        item.html = Some("<p>a <b>b</b></p>".into());
+                        set_clipboard_item(item)
+                    })
+                    .child(text("Rich")),
+            )
+            .child(
+                view()
+                    .on_press(|| set_clipboard("plain"))
+                    .child(text("Plain")),
+            )
+    }
+
+    #[test]
+    fn the_clipboard_keeps_the_html_written_with_its_text() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<HtmlCopier>())).unwrap();
+        app.first_render().unwrap();
+        app.press("Rich").unwrap();
+        assert_eq!(app.screen().clipboard(), Some("a b"));
+        assert_eq!(
+            app.screen()
+                .clipboard_item()
+                .and_then(|item| item.html.as_deref()),
+            Some("<p>a <b>b</b></p>")
+        );
+        // Text alone replaces both.
+        app.press("Plain").unwrap();
+        assert_eq!(app.screen().clipboard(), Some("plain"));
+        assert_eq!(
+            app.screen()
+                .clipboard_item()
+                .and_then(|item| item.html.as_deref()),
+            None
+        );
+    }
+
     /// A pad under a 10-point strip. A press reports where it was in the
     /// pad and in the root.
     #[component]

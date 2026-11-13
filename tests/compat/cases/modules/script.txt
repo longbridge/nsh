@@ -54,6 +54,10 @@ tap id:copy
 expect Calls: 5 promises
 wait 300
 expect Failed: none
+# text with its HTML (`Clipboard.write`) goes through as a write does.
+expect Write: not written
+tap id:copy-html
+expect Write: written
 covers [nsh] Clipboard
 # mod-i18n
 tap id:case-mod-i18n

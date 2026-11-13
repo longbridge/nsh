@@ -1896,6 +1896,10 @@ impl Mounter {
             (Command::Tokens(tokens), _) => self.alert_tint = crate::system::alert_tint(&tokens),
             (Command::ImageInfo { id, uri }, _) => self.images.info(id, &uri),
             (Command::SetClipboard(text), _) => crate::system::set_clipboard(&text),
+            (Command::SetClipboardItem(item), _) => match &item.html {
+                Some(html) => crate::system::set_clipboard_html(&item.text, html),
+                None => crate::system::set_clipboard(&item.text),
+            },
             (Command::OpenUrl { id, url }, _) => crate::system::open_url(id, &url, &self.control),
             (Command::ReadClipboard { id, has_only }, _) => {
                 let (has, text) = crate::system::read_clipboard(has_only);
