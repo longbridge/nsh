@@ -2487,9 +2487,27 @@ fn scroll_target(surface: &Surface, x: f32, y: f32, dx: f32, dy: f32) -> Option<
         chain(&hit.view),
         Points(dx),
         Points(dy),
-        |v| v.state().scroll.as_ref().map(|s| s.horizontal),
-        |v| v.kind() == ViewKind::Scroll && crate::scroll::can_scroll(v, dx, dy),
+        // A multiline input scrolls its text vertically, before the
+        // scroll views around it (a textarea in browsers).
+        |v| match v.state().scroll.as_ref() {
+            Some(s) => Some(s.horizontal),
+            None => crate::text_input::scrolls_text(v).then_some(false),
+        },
+        |v| {
+            (v.kind() == ViewKind::Scroll && crate::scroll::can_scroll(v, dx, dy))
+                || (dx.abs() <= dy.abs() && crate::text_input::can_wheel(v, dy))
+        },
     )
+}
+
+/// Scrolls `view` (a scroll view, or a multiline input scrolling its own
+/// text) by a wheel's `(dx, dy)`.
+fn scroll_wheel(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32) {
+    if view.kind() == ViewKind::Scroll {
+        crate::scroll::wheel(surface, view, dx, dy);
+    } else {
+        crate::text_input::wheel(view, dy);
+    }
 }
 
 /// Whether `view` is still shown in its surface.
@@ -2546,7 +2564,7 @@ fn wheel_input(
             *input.latch.borrow_mut() = Some((view.clone(), horizontal, time));
             // Without a begin, the scroll module takes it as a mouse wheel:
             // it settles (and snaps) by itself once the notches stop.
-            crate::scroll::wheel(surface, &view, dx, dy);
+            scroll_wheel(surface, &view, dx, dy);
             true
         }
         WheelInput::Touchpad => {
@@ -2561,7 +2579,9 @@ fn wheel_input(
                     view: view.clone(),
                     last: time,
                 });
-                crate::scroll::wheel_begin(surface, &view);
+                if view.kind() == ViewKind::Scroll {
+                    crate::scroll::wheel_begin(surface, &view);
+                }
                 watch_touchpad(surface);
             }
             let view = {
@@ -2572,7 +2592,7 @@ fn wheel_input(
                 w.last = time;
                 w.view.clone()
             };
-            crate::scroll::wheel(surface, &view, dx, dy);
+            scroll_wheel(surface, &view, dx, dy);
             true
         }
         WheelInput::Stop => {
@@ -2581,7 +2601,9 @@ fn wheel_input(
             };
             // The system glides on by itself (its inertia comes as more
             // deltas, which this scroll took): no velocity to add.
-            crate::scroll::wheel_end(surface, &w.view, 0.0, 0.0);
+            if w.view.kind() == ViewKind::Scroll {
+                crate::scroll::wheel_end(surface, &w.view, 0.0, 0.0);
+            }
             true
         }
     }
