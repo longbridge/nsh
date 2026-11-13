@@ -11998,6 +11998,284 @@ mod components {
         assert_eq!(child_ids(&c, 2).len(), 2, "and shows again");
     }
 
+    /// Counts the mouse coming over its root, which hears it itself.
+    #[component]
+    fn OwnHover() -> impl IntoElement {
+        let n = signal(0_u32);
+        view()
+            .on_mouse_enter(move |_: &MouseEvent| n.update(|n| *n += 1))
+            .child(text(move || format!("own {}", n.get())))
+    }
+
+    /// Places an `OwnHover` and counts the mouse coming over it too.
+    #[component]
+    fn GivenHover() -> impl IntoElement {
+        let n = signal(0_u32);
+        view()
+            .child(own_hover().on_mouse_enter(move |e: &MouseEvent| {
+                assert_eq!(e.position.x, px(3.0));
+                n.update(|n| *n += 1)
+            }))
+            .child(text(move || format!("given {}", n.get())))
+    }
+
+    fn mouse_at(x: f32) -> EventPayload {
+        EventPayload::Mouse(crate::MouseEvent::new(
+            crate::geometry::point(px(x), px(1.0)),
+            crate::geometry::point(px(x), px(1.0)),
+            crate::keymap::Modifiers::default(),
+            None,
+        ))
+    }
+
+    #[test]
+    fn js_on_a_host_hears_the_mouse_its_root_hears_as_well() {
+        let mut c = mount_host::<OwnHover>();
+        // Only the root listens: the component handles it.
+        assert!(c.component_event(2, EventKind::MouseEnter, &mouse_at(3.0)));
+        apply(
+            &mut c,
+            vec![Op::Listen {
+                id: 2,
+                event: EventKind::MouseEnter,
+                enabled: true,
+            }],
+        );
+        // JS listens too: the root hears it, then JS.
+        assert!(!c.component_event(2, EventKind::MouseEnter, &mouse_at(3.0)));
+        let batch = c.commit().unwrap();
+        assert!(
+            texts(&batch).iter().any(|t| t == "own 2"),
+            "{:?}",
+            texts(&batch)
+        );
+        // JS stops: the root still listens.
+        apply(
+            &mut c,
+            vec![Op::Listen {
+                id: 2,
+                event: EventKind::MouseEnter,
+                enabled: false,
+            }],
+        );
+        c.commit();
+        assert!(events_of(&c, 2).contains(EventKind::MouseEnter));
+    }
+
+    #[test]
+    fn a_view_hears_the_mouse_over_a_component_it_places() {
+        let mut c = mount_host::<GivenHover>();
+        let nested = child_ids(&c, 2)[0];
+        assert!(events_of(&c, nested).contains(EventKind::MouseEnter));
+        // Its root hears it, then the view that placed it; JS does not.
+        assert!(c.component_event(nested, EventKind::MouseEnter, &mouse_at(3.0)));
+        let batch = c.commit().unwrap();
+        let shown = texts(&batch);
+        assert!(shown.iter().any(|t| t == "own 1"), "{shown:?}");
+        assert!(shown.iter().any(|t| t == "given 1"), "{shown:?}");
+    }
+
+    /// Places an `OwnHover` and hears the mouse moving over it until its
+    /// button is pressed.
+    #[component]
+    fn MaybeGiven() -> impl IntoElement {
+        let listen = signal(true);
+        let n = signal(0_u32);
+        view()
+            .child(dynamic(move || {
+                let el = own_hover();
+                if listen.get() {
+                    el.on_mouse_move(move |_: &MouseEvent| n.update(|n| *n += 1))
+                } else {
+                    el
+                }
+            }))
+            .child(
+                view()
+                    .on_press(move || listen.set(false))
+                    .child(text(move || format!("moves {}", n.get()))),
+            )
+    }
+
+    #[test]
+    fn a_component_stops_listening_when_the_view_stops_giving_a_listener() {
+        let mut c = mount_host::<MaybeGiven>();
+        let nested = child_ids(&c, 2)[0];
+        assert!(events_of(&c, nested).contains(EventKind::MouseMove));
+        assert!(c.component_event(nested, EventKind::MouseMove, &mouse_at(3.0)));
+        let batch = c.commit().unwrap();
+        assert!(texts(&batch).iter().any(|t| t == "moves 1"));
+        let button = child_ids(&c, 2)[1];
+        c.component_event(button, EventKind::Press, &EventPayload::None);
+        c.commit();
+        let nested = child_ids(&c, 2)[0];
+        assert!(!events_of(&c, nested).contains(EventKind::MouseMove));
+        // Its root's own stay.
+        assert!(events_of(&c, nested).contains(EventKind::MouseEnter));
+    }
+
+    /// Shows a menu of its own on a context menu when `own` is set.
+    #[derive(Clone, PartialEq, Props)]
+    struct MenuOwnerProps {
+        #[prop(default)]
+        own: crate::element::Prop<bool>,
+    }
+
+    #[component]
+    fn MenuOwner(props: MenuOwnerProps) -> impl IntoElement {
+        let n = signal(0_u32);
+        let el = view()
+            .h(px(20.0))
+            .child(text(move || format!("own menus {}", n.get())));
+        if props.own.get() {
+            el.on_context_menu(move |_: &crate::ContextMenuEvent| n.update(|n| *n += 1))
+        } else {
+            el
+        }
+    }
+
+    /// Places two `MenuOwner`s, one with a menu of its own, and listens to
+    /// both: their context menus, frames, and the mouse released.
+    #[component]
+    fn GivenMenus() -> impl IntoElement {
+        let menus = signal(Vec::<&'static str>::new());
+        let width = signal(0.0_f32);
+        let ups = signal(0_u32);
+        let given = move |name: &'static str| {
+            move |_: &crate::ContextMenuEvent| menus.update(|m| m.push(name))
+        };
+        view()
+            .child(
+                menu_owner()
+                    .own(true)
+                    .test_id("mine")
+                    .on_context_menu(given("mine")),
+            )
+            .child(
+                menu_owner()
+                    .on_context_menu(given("plain"))
+                    .on_layout(move |b: &Bounds<Points>| width.set(b.size.width.0))
+                    .on_mouse_up(move |e: &MouseEvent| {
+                        assert_eq!(e.button, Some(crate::MouseButton::Right));
+                        ups.update(|n| *n += 1)
+                    }),
+            )
+            .child(text(move || {
+                format!(
+                    "menus {} width {} ups {}",
+                    menus.with(|m| m.join(",")),
+                    width.get(),
+                    ups.get()
+                )
+            }))
+    }
+
+    #[test]
+    fn a_view_hears_a_components_context_menu_unless_it_shows_its_own() {
+        let mut c = mount_host::<GivenMenus>();
+        let [mine, plain, ..] = child_ids(&c, 2)[..] else {
+            panic!("two components")
+        };
+        assert!(events_of(&c, mine).contains(EventKind::ContextMenu));
+        assert!(events_of(&c, plain).contains(EventKind::ContextMenu));
+        let menu = EventPayload::ContextMenu(crate::ContextMenuEvent::default());
+        // The component's own menu keeps it.
+        assert!(c.component_event(mine, EventKind::ContextMenu, &menu));
+        // One with none: the view placing it hears it.
+        assert!(c.component_event(plain, EventKind::ContextMenu, &menu));
+        let mut up = crate::MouseEvent::new(
+            crate::geometry::point(px(1.0), px(1.0)),
+            crate::geometry::point(px(1.0), px(1.0)),
+            crate::keymap::Modifiers::default(),
+            None,
+        );
+        up.button = Some(crate::MouseButton::Right);
+        assert!(c.component_event(plain, EventKind::MouseUp, &EventPayload::Mouse(up)));
+        let mut shown = Vec::new();
+        for _ in 0..4 {
+            for (id, kind, payload) in js_events(&mut c) {
+                c.component_event(id, kind, &payload);
+            }
+            if let Some(batch) = c.commit() {
+                shown.extend(texts(&batch));
+            }
+        }
+        assert!(shown.iter().any(|t| t == "own menus 1"), "{shown:?}");
+        assert_eq!(
+            shown
+                .iter()
+                .rev()
+                .find(|t| t.starts_with("menus"))
+                .map(String::as_str),
+            Some("menus plain width 320 ups 1"),
+        );
+        // The test id given it names its root.
+        let key = c.key(mine).unwrap() as usize;
+        assert_eq!(
+            c.nodes[key]
+                .props
+                .as_ref()
+                .and_then(|p| p.test_id.as_deref()),
+            Some("mine")
+        );
+    }
+
+    /// Measures its own root.
+    #[component]
+    fn Measured() -> impl IntoElement {
+        let w = signal(0.0_f32);
+        view()
+            .h(px(10.0))
+            .on_layout(move |b: &Bounds<Points>| w.set(b.size.width.0))
+            .child(text(move || format!("own width {}", w.get())))
+    }
+
+    /// Places a `Measured` and measures it too once its button is pressed.
+    #[component]
+    fn LateMeasure() -> impl IntoElement {
+        let on = signal(false);
+        let w = signal(0.0_f32);
+        view()
+            .child(dynamic(move || {
+                let el = measured();
+                if on.get() {
+                    el.on_layout(move |b: &Bounds<Points>| w.set(b.size.width.0))
+                } else {
+                    el
+                }
+            }))
+            .child(
+                view()
+                    .on_press(move || on.set(true))
+                    .child(text(move || format!("given width {}", w.get()))),
+            )
+    }
+
+    /// The listener comes with the element made again, whose node reports
+    /// its frame on listening, after its root's own listener.
+    #[test]
+    fn a_layout_listener_given_later_gets_the_frame_at_once() {
+        let mut c = mount_host::<LateMeasure>();
+        let settle = |c: &mut Core<FakeEngine>| {
+            let mut shown = Vec::new();
+            for _ in 0..4 {
+                for (id, kind, payload) in js_events(c) {
+                    c.component_event(id, kind, &payload);
+                }
+                if let Some(batch) = c.commit() {
+                    shown.extend(texts(&batch));
+                }
+            }
+            shown
+        };
+        let shown = settle(&mut c);
+        assert!(shown.iter().any(|t| t == "own width 320"), "{shown:?}");
+        let button = child_ids(&c, 2)[1];
+        c.component_event(button, EventKind::Press, &EventPayload::None);
+        let shown = settle(&mut c);
+        assert!(shown.iter().any(|t| t == "given width 320"), "{shown:?}");
+    }
+
     #[component]
     fn SlotLayoutRerun(props: PanelProps) -> impl IntoElement {
         let count = signal(0_u32);

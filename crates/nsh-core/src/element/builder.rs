@@ -2891,6 +2891,89 @@ pub trait ComponentBuilder: Element {
         self
     }
 
+    /// A listener of its root's node, after the component's own: what
+    /// the methods below give it.
+    #[doc(hidden)]
+    fn __listen(mut self, kind: EventKind, listener: Listener<EventPayload>) -> Self {
+        self.node().handlers.push((kind, listener));
+        self
+    }
+
+    /// The id UI tests find its root by (TS: `testID` given the
+    /// component), as [`Interactive::test_id`] names a view.
+    fn test_id(mut self, id: &str) -> Self {
+        super::host::set(self.node(), Prop::TestId(Some(id.into())));
+        self
+    }
+
+    /// Its root's frame, relative to its parent, after each layout that
+    /// changes it (TS: `onLayout` given the component), as
+    /// [`Interactive::on_layout`].
+    fn on_layout<M>(self, listener: impl IntoListener<Bounds<Points>, M>) -> Self {
+        let listener = events::typed(listener.into_listener(), events::layout);
+        self.__listen(EventKind::Layout, listener)
+    }
+
+    /// The mouse came over its root or an element inside it (never on
+    /// touches): where, as [`Interactive::on_mouse_enter`] (TS:
+    /// `onMouseEnter` given the component).
+    fn on_mouse_enter<M>(self, listener: impl IntoListener<MouseEvent, M>) -> Self {
+        let listener = events::typed(listener.into_listener(), events::mouse);
+        self.__listen(EventKind::MouseEnter, listener)
+    }
+
+    /// The mouse left its root and the elements inside it, or the window:
+    /// where it was last, as [`Interactive::on_mouse_leave`].
+    fn on_mouse_leave<M>(self, listener: impl IntoListener<MouseEvent, M>) -> Self {
+        let listener = events::typed(listener.into_listener(), events::mouse);
+        self.__listen(EventKind::MouseLeave, listener)
+    }
+
+    /// The mouse moved over its root (or an element inside it), with or
+    /// without a button down, at most once per frame, as
+    /// [`Interactive::on_mouse_move`].
+    fn on_mouse_move<M>(self, listener: impl IntoListener<MouseEvent, M>) -> Self {
+        let listener = events::typed(listener.into_listener(), events::mouse);
+        self.__listen(EventKind::MouseMove, listener)
+    }
+
+    /// A mouse button was released over its root or an element inside
+    /// it: which, where, as [`Interactive::on_mouse_up`].
+    fn on_mouse_up<M>(self, listener: impl IntoListener<MouseEvent, M>) -> Self {
+        let listener = events::typed(listener.into_listener(), events::mouse);
+        self.__listen(EventKind::MouseUp, listener)
+    }
+
+    /// A context menu was asked for over its root, as
+    /// [`Interactive::on_context_menu`]: where, to open a menu at. A
+    /// component that shows a menu of its own there keeps it, and this
+    /// listener is not called.
+    fn on_context_menu<M>(self, listener: impl IntoListener<ContextMenuEvent, M>) -> Self {
+        let listener = events::typed(listener.into_listener(), events::context_menu);
+        self.__listen(EventKind::ContextMenu, listener)
+    }
+
+    /// A local file drag entered its root, a desktop drop destination
+    /// while this listens, as [`Interactive::on_file_drag_enter`].
+    fn on_file_drag_enter<M>(self, listener: impl IntoListener<events::FileDragEvent, M>) -> Self {
+        let listener = events::typed(listener.into_listener(), events::file_drag);
+        self.__listen(EventKind::FileDragEnter, listener)
+    }
+
+    /// A local file drag left its root, as
+    /// [`Interactive::on_file_drag_leave`].
+    fn on_file_drag_leave<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        let listener = events::typed(listener.into_listener(), events::unit);
+        self.__listen(EventKind::FileDragLeave, listener)
+    }
+
+    /// Local files or directories were dropped on its root, as
+    /// [`Interactive::on_file_drop`].
+    fn on_file_drop<M>(self, listener: impl IntoListener<events::FileDropEvent, M>) -> Self {
+        let listener = events::typed(listener.into_listener(), events::file_drop);
+        self.__listen(EventKind::FileDrop, listener)
+    }
+
     /// Puts `handle` on this component: its updates go to it.
     fn component_ref(mut self, handle: &super::ComponentRef<Self::Component>) -> Self {
         self.__element().node.attrs.element_ref = handle.element().target();

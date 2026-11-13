@@ -61,6 +61,11 @@ const HOST_PROPS: &[&str] = &[
     "onFileDragEnter",
     "onFileDragLeave",
     "onFileDrop",
+    "onMouseEnter",
+    "onMouseMove",
+    "onMouseLeave",
+    "onMouseUp",
+    "onContextMenu",
 ];
 
 /// The components' part of a context's state.

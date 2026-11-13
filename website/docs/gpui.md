@@ -91,7 +91,9 @@ on need them installed, with GTK 3 and GStreamer's base and good plug-ins (Debia
 
 The `nsh-platform-gpui` crate (from the NSH repository) gives a Rust GPUI app `AppView`: one NSH engine as a GPUI
 view (`Entity<AppView>`), which fills the space its parent element gives it. Each `AppView` is independent; several
-can run at once. It runs a Rust root, the root component of your crate:
+can run at once. Like the other platform crates it has every optional part of the runtime on by default; a GPUI app
+that embeds only some apps can [leave parts out of its binary](./project-structure.md#leaving-parts-out-of-the-binary).
+It runs a Rust root, the root component of your crate:
 
 ```rust
 use gpui::{AppContext, WindowOptions};
