@@ -118,6 +118,13 @@ pub(crate) enum Action {
     /// Lets the user pick a color on the screen; the color (none when
     /// cancelled or not supported) resolves the slot.
     PickScreenColor(AnswerSlot<Option<crate::Hsla>>),
+    /// Renders a drawing offscreen into an image
+    /// ([`crate::canvas::render`]); the image's bytes, or why not, resolve
+    /// the slot.
+    RenderCanvas(
+        Box<crate::canvas::render::RenderRequest>,
+        AnswerSlot<Result<Vec<u8>, super::JsError>>,
+    ),
     /// A speech recognition session's request ([`crate::speech`]).
     Speech(SpeechAction),
     /// A notification's request ([`crate::notifications`]).
@@ -212,6 +219,8 @@ pub(crate) enum Action {
     ),
     /// Rejects a request that exceeded its deadline.
     WebEvaluationTimeout(u32),
+    /// An offscreen canvas render's deadline passed.
+    CanvasRenderTimeout(u32),
     /// How long the node's transitions run with the styles of the commit
     /// the action goes out with; the time resolves the slot.
     TransitionTime(NodeId, AnswerSlot<std::time::Duration>),

@@ -53,8 +53,11 @@
   zoom scale (AppKit shows it as the container layer's scale, and hit tests and converts the zoomed children), committed
   on every move; the offset is UIKit's zoomed `contentOffset`, along both axes; trackpad pinches and Control + wheel zoom
   the innermost zoomable view around the pointer (`scroll.rs`'s `pinch`), wheels and trackpads scroll it both ways, and
-  texts and canvases are drawn again at the zoomed resolution when a zoom ends. Zoom reports go to the core
-  (`EngineControl::zoom`).
+  texts and canvases are drawn again at the zoomed resolution when a zoom ends. GPUI: the zoom is `nsh_core::scroll`'s
+  (`ScrollState::zoom`, offsets along both axes, `pinch`, `zoomTo`), on for the backends that set
+  `ScrollState::can_zoom` (GPUI; Windows and Linux leave it off and ignore the zoom props); the children are drawn
+  scaled by the zoom (`ViewState::child_matrix`, which hit tests follow), glyphs at the zoomed size every frame. Zoom
+  reports go to the core (`EngineControl::zoom`).
 - **List** props: `each`, `estimatedItemSize`, `numColumns` (both may change while the list shows: the first visible item keeps its place, `ListState::visible_anchor`; a change of columns remembers it in `columns_anchor`, so resizing back and forth does not drift), `inverted` (chat: item 0 at the bottom, starts at the end and keeps its
   distance from the end as content changes; with `onLoadMoreAtStart`, only while at it, the visible rows when scrolled away), `maintainVisibleContentPosition` (`autoscrollToBottomThreshold`: a list
   that is not inverted follows its end while within that distance of it, `ListState::anchor_end`; scrolled up, growth

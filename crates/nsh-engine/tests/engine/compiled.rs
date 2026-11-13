@@ -1283,6 +1283,187 @@ fn pages_keep_or_pop_by_their_flags() {
     );
 }
 
+const PAGE_HEADER_ITEMS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { NavPage, NavStack, createNavStack } from "nsh/base";
+
+const nav = createNavStack(["home"]);
+const log = signal<string[]>([]);
+const filter = signal("all");
+const suspended = signal(false);
+
+mount(() => (
+  <View style={{ flex: 1 }}>
+    <Text>{`log ${log().join(",")}`}</Text>
+    <NavStack state={nav} style={{ flex: 1 }}>
+      {(route) => (
+        <NavPage
+          title={route}
+          headerRight={<Text>fallback</Text>}
+          ios={{
+            headerRightItems: [
+              {
+                key: "edit",
+                systemItem: "edit",
+                onPress: () => log.update((l) => [...l, "press edit"]),
+              },
+              {
+                key: "more",
+                symbol: "ellipsis.circle",
+                menu: [
+                  {
+                    label: suspended() ? "Reinstate" : "Suspend",
+                    onSelect: () => {
+                      suspended.set(!suspended());
+                      log.update((l) => [...l, suspended() ? "menu suspend" : "menu reinstate"]);
+                    },
+                  },
+                  {
+                    label: "Open",
+                    checked: filter() === "open",
+                    onSelect: () => {
+                      filter.set("open");
+                      log.update((l) => [...l, "menu open"]);
+                    },
+                  },
+                ],
+              },
+              { key: "add", systemItem: "add", onPress: () => log.update((l) => [...l, "press add"]) },
+            ],
+          }}
+        >
+          <Text>{`filter ${filter()}`}</Text>
+          <Text>{`suspended ${suspended()}`}</Text>
+        </NavPage>
+      )}
+    </NavStack>
+  </View>
+));
+"##;
+
+/// Trailing `ios.headerRightItems` reach the platform in the screen's
+/// config; presses and menu selections report the root's `Menu` event
+/// with the items' ids. Re-binding (same keys) assigns new ids; stale
+/// ones no longer run.
+#[test]
+fn pages_report_trailing_header_item_presses_and_menu_selections() {
+    let (engine, rx) = start_app(PAGE_HEADER_ITEMS);
+    let control = engine.control();
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let config = first
+        .items
+        .iter()
+        .rev()
+        .find_map(|i| match i {
+            MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+            _ => None,
+        })
+        .expect("a page");
+    assert_eq!(config.right_items.len(), 3);
+    assert_eq!(
+        config.right_items[0].content,
+        nsh_core::HeaderItemContent::SystemItem(nsh_core::HeaderSystemItem::Edit)
+    );
+    assert!(config.right_items[0].press_id != 0);
+    assert_eq!(
+        config.right_items[1].content,
+        nsh_core::HeaderItemContent::Symbol("ellipsis.circle".into())
+    );
+    let menu = config.right_items[1].menu.as_ref().expect("more menu");
+    assert_eq!(menu.len(), 2);
+    let suspend_id = match &menu[0] {
+        nsh_core::desktop::MenuItem::Action(action) => {
+            assert_eq!(action.label, "Suspend");
+            assert!(action.id != 0);
+            action.id
+        }
+        other => panic!("expected an action, got {other:?}"),
+    };
+    let edit_id = config.right_items[0].press_id;
+    control.dispatch_event(
+        nsh_core::ROOT_ID,
+        EventKind::Menu,
+        EventPayload::Map(vec![("id", nsh_core::PayloadValue::Number(edit_id as f64))]),
+    );
+    next(&rx, |b| log_of(b).as_deref() == Some("log press edit"));
+    control.dispatch_event(
+        nsh_core::ROOT_ID,
+        EventKind::Menu,
+        EventPayload::Map(vec![(
+            "id",
+            nsh_core::PayloadValue::Number(suspend_id as f64),
+        )]),
+    );
+    let batch = next(&rx, |b| {
+        log_of(b).as_deref() == Some("log press edit,menu suspend")
+    });
+    assert!(
+        texts(&batch).contains(&"suspended true".to_owned()),
+        "{:?}",
+        texts(&batch)
+    );
+    let updated = batch
+        .items
+        .iter()
+        .rev()
+        .find_map(|i| match i {
+            MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+            _ => None,
+        })
+        .expect("updated page");
+    assert!(
+        nsh_core::element::header::same_right_buttons(&config.right_items, &updated.right_items),
+        "same keys keep the UIBarButtonItems"
+    );
+    let new_edit_id = updated.right_items[0].press_id;
+    let reinstate_id = match &updated.right_items[1].menu.as_ref().unwrap()[0] {
+        nsh_core::desktop::MenuItem::Action(action) => {
+            assert_eq!(action.label, "Reinstate");
+            action.id
+        }
+        other => panic!("expected an action, got {other:?}"),
+    };
+    assert_ne!(new_edit_id, edit_id);
+    assert_ne!(reinstate_id, suspend_id);
+    // Stale ids from the previous binding do nothing.
+    control.dispatch_event(
+        nsh_core::ROOT_ID,
+        EventKind::Menu,
+        EventPayload::Map(vec![("id", nsh_core::PayloadValue::Number(edit_id as f64))]),
+    );
+    assert!(rx.try_recv().is_err(), "stale edit id must not run");
+    // The current binding's press id still runs (what a kept UIKit target
+    // must report after update_right_item refreshes press_id).
+    control.dispatch_event(
+        nsh_core::ROOT_ID,
+        EventKind::Menu,
+        EventPayload::Map(vec![(
+            "id",
+            nsh_core::PayloadValue::Number(new_edit_id as f64),
+        )]),
+    );
+    next(&rx, |b| {
+        log_of(b).as_deref() == Some("log press edit,menu suspend,press edit")
+    });
+    control.dispatch_event(
+        nsh_core::ROOT_ID,
+        EventKind::Menu,
+        EventPayload::Map(vec![(
+            "id",
+            nsh_core::PayloadValue::Number(reinstate_id as f64),
+        )]),
+    );
+    let batch = next(&rx, |b| {
+        log_of(b).as_deref() == Some("log press edit,menu suspend,press edit,menu reinstate")
+    });
+    assert!(
+        texts(&batch).contains(&"suspended false".to_owned()),
+        "{:?}",
+        texts(&batch)
+    );
+}
+
 const PAGE_HEADER: &str = r#"import { mount, Text, View } from "nsh";
 import { NavPage, NavStack, createNavStack } from "nsh/base";
 

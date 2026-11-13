@@ -810,10 +810,13 @@ root become nodes the core creates itself. Apps without components pay one check
 element: at the view's first mount, before the host's native view is sent, the core gives the host the root's kind
 (`Core::retag`: a text, a screen, a modal, a list), so the root's props and children apply to it; a root that is a
 region goes in the host view. Besides the component's own props, JS sets a view's props on the host
-(`nsh-js` `components.rs`' `HOST_PROPS`, declared as `ComponentHostProps`): classes, styles, `testID`, `tooltip`,
+(`nsh_core::element::HOST_PROPS`, declared as `ComponentHostProps`): classes, styles, `testID`, `tooltip`,
 `onLayout`, the desktop file drops (`onFileDragEnter`, `onFileDragLeave`, `onFileDrop`), the mouse over it
 (`onMouseEnter`, `onMouseMove`, `onMouseLeave`, `onMouseUp`) and `onContextMenu`, so a component is a drop
-destination, and hears the mouse, only where the app listens. A Rust view gives a nested component's element the
+destination, and hears the mouse, only where the app listens. A component's own prop or event of one of these names
+takes its place (`ComponentSpec::host_props`: JS sets the rest on the host, in QuickJS and in the browser, and its
+declaration omits it from `ComponentHostProps`): `DataTable`'s and `Editor`'s `onContextMenu` report a row and column
+or a text position. A Rust view gives a nested component's element the
 same through `ComponentBuilder` (`test_id`, `on_layout`, `on_mouse_*`, `on_context_menu`, `on_file_*`; the
 listeners kept as the instance's `given_handlers` and run by the view that gave them). The host's node listens to the
 union of its root's events, JS's and those given (`Core::host_listen`); an event on it reaches the root's listeners,
@@ -1171,7 +1174,10 @@ styles a Rust app's state style has even when the part's has none. Closing a des
 closing a submenu its own, each with its exit. A sheet (`Sheet`, menus on touch screens, the dropdowns' sheets) keeps
 `SheetMotion`; a dropdown's sheet on its way out takes no attempt to close it either (its backdrop or back pressed
 again sends no second `onCancel`). A searchable list (`Select`'s, `Combobox`'s) keeps its query and rows until its popup
-or sheet is gone, and each opening starts from the default query again.
+or sheet is gone, and each opening starts from the default query again. A panel that reaches the bottom of the screen
+(those sheets, `Sheet`'s side drawers, `DockArea`'s compact panels) ends above the software keyboard
+(`popup::keyboard_lift`: the keyboard's height past the bottom safe area, which the app's panel pads as without a
+keyboard), a reactive style the core animates with the keyboard.
 
 How a popup presents itself follows the device (`is_desktop()`; one presentation, `auto`, for now), by what the popup
 is for, never by replacing one popup with another everywhere:
@@ -1420,7 +1426,9 @@ its own, a child of the view marked `decoration`: last among the children, so it
 appends goes before it; out of what counts as the view's children (`first:`, `last:`, `space-*`); a layout root of
 its own, sized to the view's frame after the views' and the lists' layout; and pinned over the viewport by a sticky
 range across all of the content, which the platforms apply on the main thread as they pin sticky cells, so it never
-waits for the engine while the content scrolls. The view's `ScrollConfig` turns the indicator off and says the bar
+waits for the engine while the content scrolls. A view sends its sticky cells in one set (its list's rows, its
+`position: sticky` views and its bar), the bar last: the platforms raise the cells in that order, so a list's sticky
+headers stay below the bar. The view's `ScrollConfig` turns the indicator off and says the bar
 `replaced` it. A new theme makes every bar
 made for `true` again. A component's given class (`app_class`) now reaches its root, which the bar's size relies on.
 A multiline input scrolls its text natively, so its bar is a sibling instead (`Node::beside`): inserted just after the

@@ -2234,7 +2234,8 @@ impl Element for WindowElement {
             crate::canvas::begin_pass(surface.key());
             let mut dcx = crate::render::DrawCx::new(window, cx, bounds, dark);
             let origin = (f32::from(bounds.origin.x), f32::from(bounds.origin.y));
-            crate::render::draw_view(&mut dcx, &w.view, Mat4::new(), origin);
+            let local = crate::render::root_matrix(&w.view, origin);
+            crate::render::draw_view(&mut dcx, &w.view, Mat4::new(), local);
             std::mem::take(&mut dcx.drawn)
         };
         crate::surface::place_items(&w.placed, drawn);

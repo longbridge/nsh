@@ -162,16 +162,20 @@ const allGroups: { title: string; demos: DemoEntry[] }[] = [
       { name: "Windows", detail: "A writing app's windows: a floating inspector, preferences, a command palette, the document on its own", icon: "layers", screen: lazy(() => import("./demos/WindowsDemo").then((m) => m.WindowsDemo)) },
       { name: "Tray", detail: "nsh/desktop: an icon in the system tray with its tooltip, click and menu", icon: "system", screen: lazy(() => import("./demos/TrayDemo").then((m) => m.TrayDemo)) },
       { name: "Global shortcut", detail: "nsh/desktop: a keystroke heard whichever app has the keyboard", icon: "system", screen: lazy(() => import("./demos/ShortcutDemo").then((m) => m.ShortcutDemo)) },
+      { name: "Keyboard", detail: "Held arrows, modifier chords, capture bubbling and native Input ownership", icon: "button", screen: lazy(() => import("./demos/KeyboardDemo").then((m) => m.KeyboardDemo)) },
       { name: "Standard APIs", detail: "Files, processes, TCP, WebSockets, buffers, crypto and utilities", icon: "terminal", screen: lazy(() => import("./demos/Standard").then((m) => m.StandardDemo)) },
     ],
   },
 ];
 
-/** The demos a terminal has nothing to show for (pictures, GPU shaders, web
- * views and video), left out of its index. */
-const TERMINAL_HIDDEN = new Set(["Image", "Shader", "WebView", "Video", "Photos"]);
-
-const groups = terminal ? allGroups.map((g) => ({ ...g, demos: g.demos.filter((demo) => !TERMINAL_HIDDEN.has(demo.name)) })) : allGroups;
+/** The demos a terminal has nothing to show for, left out of its index. */
+const TERMINAL_HIDDEN: Record<string, true> = { Image: true, Shader: true, WebView: true, Video: true, Photos: true };
+const keyboardAvailable = !terminal && (platform.desktop || platform.os === "web");
+const groups = allGroups.map((g) => ({
+  ...g,
+  demos: g.demos.filter((demo) =>
+    (!terminal || !TERMINAL_HIDDEN[demo.name]) && (demo.name !== "Keyboard" || keyboardAvailable)),
+}));
 
 /** A group's demos (all of them, or those the search found) in runs under
  * their subheadings: one run without a subheading outside Elements. */

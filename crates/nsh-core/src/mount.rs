@@ -437,6 +437,10 @@ pub struct ScreenConfig {
     pub left_system_item: Option<crate::HeaderSystemItem>,
     /// As `right_symbol`, in the leading slot, pressing `left`.
     pub left_symbol: Option<Arc<str>>,
+    /// Trailing UIKit bar buttons (`ios={{ headerRightItems }}`); a
+    /// non-empty list wins over `right_system_item` / `right_symbol` and
+    /// leaves `right`'s view out of the iOS bar. Empty is unset.
+    pub right_items: Vec<crate::HeaderItem>,
     /// Custom title view.
     pub title_view: Option<NodeId>,
     /// The app's header (`header`): on a platform without a native header
@@ -472,6 +476,7 @@ impl Default for ScreenConfig {
             right_symbol: None,
             left_system_item: None,
             left_symbol: None,
+            right_items: Vec::new(),
             title_view: None,
             header_view: None,
             header_height: Points::ZERO,
@@ -854,7 +859,8 @@ pub enum MountItem {
     Keymap(std::sync::Arc<crate::keymap::Keymap>),
     /// The sticky cells of a list (replaces the previous set): each one
     /// is translated along the main axis by `clamp(offset - start, 0,
-    /// end - start)` on every scroll, natively.
+    /// end - start)` on every scroll, natively. The set is in the order
+    /// the cells stack, bottom to top (a built-in scroll bar last).
     StickyCells {
         /// The list.
         id: NodeId,

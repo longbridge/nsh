@@ -212,6 +212,7 @@ impl Host for Runtime {
         self.bindings.posts.borrow().has_calls()
     }
     fn set_environment(&self, e: &Environment) {
+        super::set_apple_keyboard(e.apple_keyboard);
         let data = serde_json::json!({
             "window":{"width":e.window.width.0,"height":e.window.height.0},
             "safeArea":{"top":e.safe_area.top.0,"right":e.safe_area.right.0,"bottom":e.safe_area.bottom.0,"left":e.safe_area.left.0},

@@ -73,6 +73,8 @@ dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1
 下方的柱状图是最近 120 帧的主线程耗时，与一次刷新的时长（横线）对比：在一半以内为绿色，在其以内为琥珀色，超过为红色。
 面板显示时，读数也会每秒记录到日志一次（target `nsh::fps`，格式与 Linux 后端相同，帧阶段为 macOS 的 `tick`、`drain` 和 `canvas`；毫秒，依次为 mean/p50/p95/max），`nsh test --fps -v` 会显示这些日志，`examples/gallery/tools/perf.py` 会读取它们。请测量 release 构建；监视器关闭时没有任何开销。
 
+点一下面板，它会收成一个只显示帧率的小药丸：帧的主线程耗时 95 分位数在一次刷新时长的一半以内为绿色，在其以内为琥珀色，超过为红色（与柱状图的颜色相同）；再点一下展开。VoiceOver 把它读成一个带这个数值的按钮，按下的效果相同。面板只接收落在它上面的点击，应用的其他区域照常收到鼠标，与没有面板时一样。应用用 `setFpsMode` 设置它的显示方式（`"expanded"`、`"collapsed"`，或 `"hidden"`：不显示任何东西，但照常测量并记录日志；Rust：`set_fps_mode(FpsMode::Collapsed)`，嵌入时用 `AppView::set_fps_mode`），立即生效，之后再显示时也照此显示；`NSH_FPS=collapsed` 或 `NSH_FPS=hidden` 让它以这种方式启动。
+
 ## 打包
 
 ```sh

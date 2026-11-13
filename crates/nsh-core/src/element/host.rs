@@ -63,6 +63,10 @@ crate::static_reactive!(crate::AccessibilityRole: crate::AccessibilityRole);
 crate::static_reactive!(AutoCapitalize: AutoCapitalize);
 crate::static_reactive!(AutoFill: AutoFill);
 crate::static_reactive!(crate::HeaderSystemItem: crate::HeaderSystemItem);
+crate::static_reactive!(crate::HeaderItem: crate::HeaderItem);
+crate::static_reactive!(Vec<crate::HeaderItem>: Vec<crate::HeaderItem>);
+crate::static_reactive!(super::header::HeaderItem: super::header::HeaderItem);
+crate::static_reactive!(Vec<super::header::HeaderItem>: Vec<super::header::HeaderItem>);
 crate::static_reactive!(KeyboardAppearance: KeyboardAppearance);
 crate::static_reactive!(KeyboardType: KeyboardType);
 crate::static_reactive!(ModalAnimation: ModalAnimation);
@@ -1075,6 +1079,22 @@ impl Screen {
         })
     }
 
+    /// The trailing header buttons are UIKit's own (`ios={{
+    /// headerRightItems }}`): a non-empty list wins over
+    /// [`Self::header_right_system_item`] / [`Self::header_right_symbol`]
+    /// and leaves the `header_right` view out of the iOS bar. Empty is
+    /// unset. Each item's [`super::header::HeaderItem::on_press`] and its
+    /// menu items' [`super::desktop::MenuItem::on_select`] run when the
+    /// platform reports their ids as the root's [`EventKind::Menu`].
+    pub fn header_right_items(
+        self,
+        items: impl IntoReactive<Vec<super::header::HeaderItem>>,
+    ) -> Self {
+        self.bind_prop(items, |items| {
+            Prop::Screen(ScreenProp::HeaderRightItems(super::header::register(items)))
+        })
+    }
+
     /// Whether the back button shows (default true).
     pub fn header_back_visible(self, visible: impl IntoReactive<bool>) -> Self {
         self.bind_prop(visible, |v| Prop::Screen(ScreenProp::HeaderBackVisible(v)))
@@ -1870,6 +1890,29 @@ impl Painter {
     /// The drawing.
     pub fn finish(self) -> Drawing {
         self.drawing
+    }
+
+    /// Renders the drawing offscreen into an image of `size` points, as a
+    /// canvas of that size draws it on screen (TS: `OffscreenCanvas`'s
+    /// `convertToBlob`), with `options`' scale (default: the screen's) and
+    /// format (default: PNG). To await in a task: the encoded bytes, or why
+    /// not: `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the platform renders
+    /// none (`nsh test`'s headless runs among them), a `RangeError` for a
+    /// size or scale that is not a positive number, `ERR_NSH_QUOTA_EXCEEDED`
+    /// for an image over 16384 pixels a side or 64 megapixels or past 16
+    /// renders at once, `ETIMEDOUT` when the platform has not answered in
+    /// 30 seconds.
+    pub fn render(
+        self,
+        size: Size<Points>,
+        options: crate::canvas::render::RenderOptions,
+    ) -> crate::element::Answer<Result<Vec<u8>, crate::element::JsError>> {
+        crate::element::ambient::render_canvas(crate::canvas::render::RenderRequest {
+            drawing: self.drawing,
+            size,
+            scale: options.scale,
+            format: options.format,
+        })
     }
 
     /// `value` as a number of this drawing, for an operation built by hand

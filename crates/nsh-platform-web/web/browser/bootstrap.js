@@ -2946,6 +2946,7 @@
 							type: this.get(c),
 							lastModified: Number.isNaN(number) ? Date.now() : number
 						}));
+						case 51: return this.put(new Blob([this.get(a)], { type: this.get(b) }));
 						case 43: return this.put(String(this.get(a)));
 						case 45: return Number(this.hasError);
 						case 46:
@@ -3330,6 +3331,14 @@
 			measure(node, what) {
 				return call(315, [], node, what ? [what] : [], true, false);
 			},
+			/** Runtime op `op` on `receiver` and `args` answered by a reply: its promise, which rejects for what the op refuses. */
+			request(op, receiver, args) {
+				try {
+					return call(op, [], receiver, args, true);
+				} catch (error) {
+					return Promise.reject(error);
+				}
+			},
 			reply(id, ok, value) {
 				const waiter = pending.get(id);
 				if (!waiter) return;
@@ -3710,28 +3719,6 @@
 //#region ../nsh-platform-web/web/browser/components.js
 	function createComponents(invoke, values, reactive, dom) {
 		const states = /* @__PURE__ */ new WeakMap();
-		const hostProps = [
-			"class",
-			"classList",
-			"style",
-			"activeStyle",
-			"hoverStyle",
-			"focusStyle",
-			"focusWithinStyle",
-			"focusVisibleStyle",
-			"disabledStyle",
-			"testID",
-			"tooltip",
-			"onLayout",
-			"onFileDragEnter",
-			"onFileDragLeave",
-			"onFileDrop",
-			"onMouseEnter",
-			"onMouseMove",
-			"onMouseLeave",
-			"onMouseUp",
-			"onContextMenu"
-		];
 		const handler = (name) => "on" + name[0].toUpperCase() + name.slice(1);
 		const make = (spec, call) => function(props = {}) {
 			const rt = dom.rt;
@@ -3797,7 +3784,7 @@
 					prop.name,
 					value
 				]));
-				for (const name of hostProps) update(name, (value) => rt.prop(node, name, value));
+				for (const name of spec.hostProps) update(name, (value) => rt.prop(node, name, value));
 				if (failed) throw failed;
 			});
 			if (typeof props.ref === "function") {
@@ -4113,7 +4100,7 @@
 
 //#endregion
 //#region ../nsh-platform-web/web/browser/canvas.js
-	function createCanvas(invoke, reactive, dom, live, wake) {
+	function createCanvas(invoke, reactive, dom, live, wake, request = () => Promise.reject(/* @__PURE__ */ new Error("offscreen canvases are not available here"))) {
 		const recordings = /* @__PURE__ */ new WeakMap(), retained = /* @__PURE__ */ new WeakMap();
 		const call = (op, args) => {
 			if (!live()) throw new Error("the app was disposed");
@@ -4141,7 +4128,72 @@
 		};
 		const record = (object, code, args) => {
 			const r = data(object);
-			if (!r.closed) r.out.push(code, ...args.map((v) => snapshot(v)));
+			if (r.closed) return;
+			const values = args.map((v) => snapshot(v));
+			r.out.push(code, ...values);
+			if (r.reuse) track(r, code, values);
+		};
+		const IDENTITY = [
+			1,
+			0,
+			0,
+			1,
+			0,
+			0
+		];
+		const same = (values, expected) => values.length === expected.length && values.every((v, i) => v === expected[i]);
+		const animated = (v) => Array.isArray(v) ? v.some(animated) : v !== null && typeof v === "object";
+		const reuse = (width, height) => ({
+			width,
+			height,
+			identity: true,
+			clipped: false,
+			saved: [],
+			path: [],
+			pathExact: true,
+			properties: /* @__PURE__ */ new Map()
+		});
+		const track = (r, code, values) => {
+			const t = r.reuse;
+			if (code === 0) t.saved.push([t.identity, t.clipped]);
+			else if (code === 1) {
+				const s = t.saved.pop();
+				if (s) [t.identity, t.clipped] = s;
+			} else if (code === 2) t.identity &&= same(values, [0, 0]);
+			else if (code === 3) t.identity &&= same(values, [1, 1]);
+			else if (code === 4) t.identity &&= same(values, [0]);
+			else if (code === 5) t.identity &&= same(values, IDENTITY);
+			else if (code === 6) t.identity = same(values, IDENTITY);
+			else if (code === 20) t.clipped = true;
+			else if (code === 7) {
+				t.path = [];
+				t.pathExact = true;
+			} else if (code >= 8 && code <= 17) {
+				t.path.push(code, ...values);
+				t.pathExact &&= t.identity;
+			} else if (code >= 24 && code <= 39 || code === 43) {
+				let h = t.properties.get(code);
+				if (!h) t.properties.set(code, h = []);
+				h.push([code, ...values]);
+			} else if (code === 23) {
+				const [x, y, w, h] = values;
+				if (!values.every((n) => typeof n === "number" && Number.isFinite(n))) return;
+				if (!(Math.min(x, x + w) <= 0 && Math.min(y, y + h) <= 0 && Math.max(x, x + w) >= t.width && Math.max(y, y + h) >= t.height) || !t.identity || t.clipped || t.saved.length || t.path.length && !t.pathExact) return;
+				const candidates = [...t.properties.values()].flat();
+				const effective = candidates.length ? call(605, [candidates]) : [];
+				let i = 0;
+				const kept = [];
+				for (const [property, history] of [...t.properties]) {
+					let last = null;
+					for (const op of history) if (effective[i++]) last = op;
+					if (last) {
+						t.properties.set(property, [last]);
+						kept.push(...last);
+					} else t.properties.delete(property);
+				}
+				if (animated(kept) || animated(t.path)) return;
+				r.out = [...kept, ...t.path];
+			}
 		};
 		const make = (prototype, kind, size) => {
 			const object = Object.create(prototype);
@@ -4417,11 +4469,65 @@
 			});
 			return node;
 		}
+		const offscreens = /* @__PURE__ */ new WeakMap();
+		const offscreen = (object) => {
+			const o = offscreens.get(object);
+			if (!o) throw new TypeError("Illegal invocation");
+			return o;
+		};
+		const dimension = (value, name) => {
+			const n = Number(value);
+			if (!Number.isFinite(n) || n < 0) throw new TypeError(`OffscreenCanvas: ${name} must be a finite number not below 0`);
+			return Math.trunc(n);
+		};
+		class OffscreenCanvas {
+			constructor(width, height) {
+				offscreens.set(this, {
+					width: dimension(width, "width"),
+					height: dimension(height, "height"),
+					context: null
+				});
+			}
+			get width() {
+				return offscreens.get(this)?.width;
+			}
+			get height() {
+				return offscreens.get(this)?.height;
+			}
+			getContext(kind) {
+				const o = offscreen(this);
+				if (String(kind) !== "2d") return null;
+				if (!o.context) {
+					o.context = make(CanvasRenderingContext2D.prototype, "context", {
+						width: o.width,
+						height: o.height
+					});
+					data(o.context).reuse = reuse(o.width, o.height);
+				}
+				return o.context;
+			}
+			convertToBlob(options) {
+				try {
+					const o = offscreen(this);
+					const type = options?.type === void 0 ? "" : String(options.type);
+					const scale = options?.scale === void 0 ? null : Number(options.scale);
+					return request(604, o.context ? data(o.context).out : [], [
+						o.width,
+						o.height,
+						type,
+						scale
+					]);
+				} catch (error) {
+					return Promise.reject(error);
+				}
+			}
+		}
 		return {
 			Canvas,
 			Path2D,
 			CanvasRenderingContext2D,
-			CanvasGradient
+			CanvasGradient,
+			OffscreenCanvas
 		};
 	}
 
@@ -5287,7 +5393,8 @@
 			platform,
 			shadersAvailable: () => fields.shaders(),
 			wakeCount: () => fields.wakeCount(),
-			fpsEnabled: () => false
+			fpsEnabled: () => false,
+			perfStats: () => null
 		};
 		const accessibility = {
 			reduceMotion: () => fields.reduceMotion(),

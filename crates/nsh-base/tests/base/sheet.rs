@@ -1,6 +1,7 @@
 //! `Sheet`: it comes in when opened and goes once its slide-out ends, also
 //! on a manual clock that only the test moves (its end is the motion's,
-//! not a timer of the app's clock).
+//! not a timer of the app's clock). A bottom sheet, and a menu a phone
+//! shows as one, stays above the software keyboard.
 
 use nsh_base::sheet;
 use nsh_core::{Size, element::Root, prelude::*};
@@ -611,4 +612,174 @@ fn a_web_sheet_uses_the_presented_surface_size_and_keeps_its_close_lifecycle() {
     app.wait_for_gone("Sheet body", Duration::from_secs(2))
         .unwrap();
     app.wait_for("text:requests:1").unwrap();
+}
+
+/// A phone's surface (390 × 844, 47 points of safe area at the top and 34
+/// at the bottom) on a manual clock showing `C`.
+fn start_on_a_phone<C: Component<Props = ()>>() -> Headless {
+    use nsh_core::platform::{Idiom, Os};
+
+    let mut config = EngineConfig {
+        viewport: Size::new(px(390.0), px(844.0)),
+        clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
+        ..EngineConfig::new(Root::of::<C>())
+    };
+    config.environment.os = Os::Ios;
+    config.environment.idiom = Idiom::Phone;
+    config.environment.safe_area.top = px(47.0);
+    config.environment.safe_area.bottom = px(34.0);
+    let mut app = Headless::start(config).unwrap();
+    app.first_render().unwrap();
+    app
+}
+
+/// The bounds of the view with `test_id`, in the surface.
+fn bounds_of(app: &Headless, test_id: &str) -> nsh_core::Bounds<Points> {
+    app.screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|n| n.test_id.as_deref() == Some(test_id))
+        .unwrap_or_else(|| panic!("a view {test_id}"))
+        .bounds
+}
+
+/// The software keyboard comes up `height` points high (the bottom safe
+/// area under it included), moving for 250 ms, and the frames settle.
+fn keyboard(app: &mut Headless, height: f32) {
+    app.set_environment("keyboard", |e| {
+        e.keyboard_height = px(height);
+        e.keyboard_duration = 250.0;
+    })
+    .unwrap();
+    app.run_for(std::time::Duration::from_millis(400)).unwrap();
+}
+
+/// A bottom sheet padded by the safe area, open at first.
+#[component]
+fn KeyboardSheet() -> impl IntoElement {
+    sheet().default_open(true).child(
+        view()
+            .pb_safe_area()
+            .child(view().test_id("first").h(px(44.0)).child(text("First")))
+            .child(view().test_id("last").h(px(44.0)).child(text("Last"))),
+    )
+}
+
+#[test]
+fn a_bottom_sheet_stays_above_the_keyboard() {
+    use std::sync::{Arc, Mutex};
+
+    use nsh_core::{LayoutAnimation, LayoutCurve, MountItem};
+
+    let mut app = start_on_a_phone::<KeyboardSheet>();
+    app.run_for(std::time::Duration::from_millis(400)).unwrap();
+    app.wait_for("Last").unwrap();
+    assert_eq!(
+        bounds_of(&app, "last").bottom(),
+        px(844.0 - 34.0),
+        "above the home indicator"
+    );
+    // Whether the batches that move views lead with the keyboard's motion.
+    let moves = Arc::new(Mutex::new(Vec::new()));
+    let seen = moves.clone();
+    app.observe(move |_, batch| {
+        if batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Frame { .. }))
+        {
+            seen.lock().unwrap().push(matches!(
+                batch.items.first(),
+                Some(MountItem::LayoutAnimation(LayoutAnimation { update: Some(t), .. }))
+                    if t.curve == LayoutCurve::Keyboard
+            ));
+        }
+    });
+    keyboard(&mut app, 336.0);
+    assert_eq!(
+        bounds_of(&app, "last").bottom(),
+        px(844.0 - 336.0),
+        "right above the keyboard, the safe area's padding behind it"
+    );
+    assert_eq!(
+        *moves.lock().unwrap(),
+        [true],
+        "moved once, with the keyboard"
+    );
+    keyboard(&mut app, 0.0);
+    assert_eq!(
+        bounds_of(&app, "last").bottom(),
+        px(844.0 - 34.0),
+        "back down with the keyboard gone"
+    );
+}
+
+/// A sheet taller than the room above the keyboard.
+#[component]
+fn TallKeyboardSheet() -> impl IntoElement {
+    sheet().default_open(true).child(
+        view()
+            .test_id("panel")
+            .h(px(700.0))
+            .pb_safe_area()
+            .child(text("Tall")),
+    )
+}
+
+#[test]
+fn a_bottom_sheet_above_the_keyboard_stays_below_the_status_bar() {
+    let mut app = start_on_a_phone::<TallKeyboardSheet>();
+    app.run_for(std::time::Duration::from_millis(400)).unwrap();
+    app.wait_for("Tall").unwrap();
+    keyboard(&mut app, 336.0);
+    // The sheet's panel: the view around the app's content.
+    let nodes = app.screen().layout_nodes();
+    let content = nodes
+        .iter()
+        .find(|n| n.test_id.as_deref() == Some("panel"))
+        .expect("the content");
+    let panel = nodes
+        .iter()
+        .find(|n| n.id == content.parent)
+        .expect("the panel")
+        .bounds;
+    assert_eq!(
+        panel.bottom(),
+        px(844.0 - (336.0 - 34.0)),
+        "above the keyboard, past the home indicator: {panel:?}"
+    );
+    assert_eq!(
+        panel.origin.y,
+        px(47.0),
+        "held below the status bar: {panel:?}"
+    );
+}
+
+/// A menu, which a phone shows as a sheet at the bottom, padded by the
+/// safe area.
+#[component]
+fn KeyboardMenu() -> impl IntoElement {
+    use nsh_base::{menu, menu_item};
+
+    view().pt(px(100.0)).child(
+        menu()
+            .popup_class("pb-[env(safe-area-inset-bottom)]")
+            .trigger(view().test_id("plus").h(px(44.0)).child(text("Plus")))
+            .child(menu_item().child(view().h(px(44.0)).child(text("Photo"))))
+            .child(menu_item().child(view().test_id("file").h(px(44.0)).child(text("File")))),
+    )
+}
+
+#[test]
+fn a_menu_sheet_opened_with_the_keyboard_up_is_above_it() {
+    let mut app = start_on_a_phone::<KeyboardMenu>();
+    keyboard(&mut app, 336.0);
+    app.press("id:plus").unwrap();
+    app.run_for(std::time::Duration::from_millis(400)).unwrap();
+    app.wait_for("File").unwrap();
+    assert_eq!(
+        bounds_of(&app, "file").bottom(),
+        px(844.0 - 336.0),
+        "the last item right above the keyboard"
+    );
 }
