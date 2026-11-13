@@ -44,6 +44,8 @@
 //! a drawing names them and kept per canvas (their frames make bitmaps per
 //! device).
 
+mod offscreen;
+
 use std::{cell::RefCell, f64::consts::TAU, rc::Rc, sync::Arc};
 
 use nsh_core::{
@@ -56,6 +58,7 @@ use nsh_core::{
     },
     geometry::{Percentage, Radians, point, size},
 };
+pub(crate) use offscreen::render as render_offscreen;
 use rustc_hash::FxHashMap;
 use windows::{
     Win32::Graphics::{

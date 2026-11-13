@@ -752,6 +752,21 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::FileRequest { id, request } => {
             crate::file_requests::request(surface, *id, request)
         }
+        Command::RenderCanvas {
+            id,
+            drawing,
+            width,
+            height,
+            scale,
+            format,
+        } => crate::canvas::render_offscreen(
+            surface,
+            *id,
+            drawing.clone(),
+            (*width, *height),
+            *scale,
+            *format,
+        ),
         Command::OpenUrl { id, url } => {
             let opened = open_url(url);
             surface.event(
