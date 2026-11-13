@@ -15450,7 +15450,13 @@ mod components {
                 let image = crate::element::Painter::new()
                     .fill_color(crate::Color(0xff00_00ff))
                     .fill_rect(0.0, 0.0, 30.0, 20.0)
-                    .render(crate::Size::new(px(30.0), px(20.0)), Some(2.0));
+                    .render(
+                        crate::Size::new(px(30.0), px(20.0)),
+                        crate::canvas::render::RenderOptions {
+                            scale: Some(2.0),
+                            ..Default::default()
+                        },
+                    );
                 spawn(async move {
                     shown.set(match image.await {
                         Ok(bytes) => format!("ok {}", bytes.len()),

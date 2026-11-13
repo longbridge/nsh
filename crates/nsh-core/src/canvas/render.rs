@@ -1,5 +1,5 @@
 //! A drawing rendered offscreen into an image: `OffscreenCanvas`'s
-//! `convertToBlob` (TS) and [`render_canvas`](crate::element::ambient::render_canvas)
+//! `convertToBlob` (TS) and [`Painter::render`](crate::element::Painter::render)
 //! (Rust). The core checks the request ([`pixel_size`]) and sends it to the
 //! platform as [`Command::RenderCanvas`](crate::Command::RenderCanvas) on
 //! the root; the platform replays the drawing as its canvases do on screen,
@@ -8,7 +8,9 @@
 //! [`EventPayload::CanvasImage`](crate::EventPayload::CanvasImage)).
 //! Platforms whose [`Environment::canvas_render`](crate::platform::Environment::canvas_render)
 //! is set render; elsewhere a request fails at once with
-//! `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+//! `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. A render the platform has not
+//! answered within [`TIMEOUT`] fails with `ETIMEDOUT`; its late answer is
+//! dropped.
 
 use super::Drawing;
 use crate::{
@@ -17,16 +19,20 @@ use crate::{
 };
 
 /// The longest side of a rendered image, in pixels.
-pub const MAX_SIDE: u32 = 16_384;
+pub(crate) const MAX_SIDE: u32 = 16_384;
 
 /// The most pixels a rendered image may hold (64 MP, 256 MB of RGBA).
-pub const MAX_PIXELS: u64 = 64 * 1024 * 1024;
+pub(crate) const MAX_PIXELS: u64 = 64 * 1024 * 1024;
 
 /// The renders one engine may wait for at once.
 pub(crate) const MAX_PENDING: usize = 16;
 
+/// How long a render may take before it fails with `ETIMEDOUT`.
+pub(crate) const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// The image formats a drawing renders to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum ImageFormat {
     /// PNG, lossless with transparency.
     #[default]
@@ -52,8 +58,12 @@ impl ImageFormat {
 }
 
 /// A drawing to render: `drawing`, `size` big, at `scale`
-/// pixels per point (`None`: the screen's), encoded as `format`.
-#[derive(Debug, Clone)]
+/// pixels per point (`None`: the screen's), encoded as `format`. What the
+/// JS runtimes hand the core; Rust renders with
+/// [`Painter::render`](crate::element::Painter::render).
+#[doc(hidden)]
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct RenderRequest {
     /// What to draw, in points.
     pub drawing: Drawing,
@@ -65,11 +75,21 @@ pub struct RenderRequest {
     pub format: ImageFormat,
 }
 
+/// How [`Painter::render`](crate::element::Painter::render) renders.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[non_exhaustive]
+pub struct RenderOptions {
+    /// Pixels per point; `None`: the screen's.
+    pub scale: Option<f32>,
+    /// The encoding.
+    pub format: ImageFormat,
+}
+
 /// The size in pixels of a `size` drawing at `scale`
 /// pixels per point, or why it cannot be rendered: a size or scale that is
 /// not a positive finite number (`RangeError`), or an image past
 /// [`MAX_SIDE`] / [`MAX_PIXELS`] (`ERR_NSH_QUOTA_EXCEEDED`).
-pub fn pixel_size(size: Size<Points>, scale: f32) -> Result<(u32, u32), JsError> {
+pub(crate) fn pixel_size(size: Size<Points>, scale: f32) -> Result<(u32, u32), JsError> {
     let (width, height) = (size.width.0, size.height.0);
     for (name, value) in [("width", width), ("height", height), ("scale", scale)] {
         if !value.is_finite() || value <= 0.0 {

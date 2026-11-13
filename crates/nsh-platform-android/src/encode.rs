@@ -817,6 +817,9 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                         e.float(scale);
                         e.int(match format {
                             nsh_core::canvas::render::ImageFormat::Png => 0,
+                            // `CanvasRender.encode` answers an error for a
+                            // format it does not encode.
+                            _ => -1,
                         });
                         canvas(&mut e, &drawing);
                     }

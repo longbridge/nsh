@@ -304,14 +304,16 @@ unsafe fn convert(cx: *mut JsContext, this: JsValue, argc: c_int, argv: *mut JsV
     }
     let op = Op::RenderCanvas {
         call,
-        request: Box::new(RenderRequest {
-            drawing,
-            size: nsh_core::Size::new(
+        request: Box::new({
+            let mut request = RenderRequest::default();
+            request.drawing = drawing;
+            request.size = nsh_core::Size::new(
                 nsh_core::geometry::px(width),
                 nsh_core::geometry::px(height),
-            ),
-            scale,
-            format,
+            );
+            request.scale = scale;
+            request.format = format;
+            request
         }),
     };
     match dom::push_op(cx, op) {

@@ -114,11 +114,13 @@ pub(super) fn call(host: &Bindings, op: u32, args: &Value) -> Result<Value, Prop
             let call = args.index(2)?.as_number().unwrap_or(0.0) as u32;
             host.ops.borrow_mut().push(Op::RenderCanvas {
                 call,
-                request: Box::new(RenderRequest {
-                    drawing,
-                    size: nsh_core::Size::new(Points(width), Points(height)),
-                    scale,
-                    format,
+                request: Box::new({
+                    let mut request = RenderRequest::default();
+                    request.drawing = drawing;
+                    request.size = nsh_core::Size::new(Points(width), Points(height));
+                    request.scale = scale;
+                    request.format = format;
+                    request
                 }),
             });
             Ok(Value(0))

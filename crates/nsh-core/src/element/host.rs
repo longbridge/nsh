@@ -1872,20 +1872,26 @@ impl Painter {
         self.drawing
     }
 
-    /// Renders the drawing offscreen into a PNG of `size` points at `scale`
-    /// pixels per point (`None`: the screen's), as a canvas of that size
-    /// draws it on screen ([`crate::element::ambient::render_canvas`]). To
-    /// await in a task.
+    /// Renders the drawing offscreen into an image of `size` points, as a
+    /// canvas of that size draws it on screen (TS: `OffscreenCanvas`'s
+    /// `convertToBlob`), with `options`' scale (default: the screen's) and
+    /// format (default: PNG). To await in a task: the encoded bytes, or why
+    /// not: `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the platform renders
+    /// none (`nsh test`'s headless runs among them), a `RangeError` for a
+    /// size or scale that is not a positive number, `ERR_NSH_QUOTA_EXCEEDED`
+    /// for an image over 16384 pixels a side or 64 megapixels or past 16
+    /// renders at once, `ETIMEDOUT` when the platform has not answered in
+    /// 30 seconds.
     pub fn render(
         self,
         size: Size<Points>,
-        scale: Option<f32>,
+        options: crate::canvas::render::RenderOptions,
     ) -> crate::element::Answer<Result<Vec<u8>, crate::element::JsError>> {
         crate::element::ambient::render_canvas(crate::canvas::render::RenderRequest {
             drawing: self.drawing,
             size,
-            scale,
-            format: crate::canvas::render::ImageFormat::Png,
+            scale: options.scale,
+            format: options.format,
         })
     }
 

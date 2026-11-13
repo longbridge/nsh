@@ -171,6 +171,7 @@ fn encode(
             }
             png
         }
+        _ => Err(format!("{} images are not encoded here", format.mime())),
     }
 }
 

@@ -194,6 +194,7 @@ fn encode(pixels: Pixels, format: ImageFormat) -> Result<Vec<u8>, String> {
     let texture = gdk::MemoryTexture::new(width, height, memory, &bytes, stride);
     match format {
         ImageFormat::Png => Ok(texture.save_to_png_bytes().to_vec()),
+        _ => Err(format!("{} images are not encoded here", format.mime())),
     }
 }
 
