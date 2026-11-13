@@ -416,6 +416,19 @@ pub(crate) struct NavIvars {
     applying: Cell<bool>,
 }
 
+/// The recognizers of `nav`'s swipe back: the screen edge's and, since
+/// iOS 26, the content's, which can take an edge drag too.
+pub(crate) fn back_swipes(nav: &UINavigationController) -> Vec<Retained<UIGestureRecognizer>> {
+    let content = nav
+        .respondsToSelector(objc2::sel!(interactiveContentPopGestureRecognizer))
+        .then(|| nav.interactiveContentPopGestureRecognizer())
+        .flatten();
+    nav.interactivePopGestureRecognizer()
+        .into_iter()
+        .chain(content)
+        .collect()
+}
+
 /// A drag that starts at the screen's edge belongs to the stack: the top
 /// screen's scroll views wait for the back gesture to fail before they pan,
 /// so a swipe at the edge goes back instead of scrolling the page. The
@@ -1312,12 +1325,7 @@ impl StackHost {
         // Apply our permission delegate afterwards, to both recognizers:
         // on iOS 26 even an edge drag can use the content recognizer, whose
         // default delegate prevents popping with a hidden navigation bar.
-        if let Some(pop) = nav.interactivePopGestureRecognizer() {
-            pop.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-        }
-        if nav.respondsToSelector(objc2::sel!(interactiveContentPopGestureRecognizer))
-            && let Some(pop) = nav.interactiveContentPopGestureRecognizer()
-        {
+        for pop in back_swipes(&nav) {
             pop.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
         }
         Self {

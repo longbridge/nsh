@@ -804,12 +804,16 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(l) = a.level {
         let _ = write!(s, ",\"level\":{l}");
     }
-    // The views it names (`aria-activedescendant`, `aria-controls`).
+    // The views it names (`aria-activedescendant`, `aria-controls`,
+    // `aria-describedby`).
     if let Some(id) = a.active_descendant {
         let _ = write!(s, ",\"activeDescendant\":{id}");
     }
     if let Some(id) = a.controls {
         let _ = write!(s, ",\"controls\":{id}");
+    }
+    if let Some(id) = a.described_by {
+        let _ = write!(s, ",\"describedBy\":{id}");
     }
     if let Some(v) = &a.value {
         let n = |v: Option<f32>| v.map_or("null".to_owned(), |v| v.to_string());
@@ -1516,6 +1520,17 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             out.bool(*animated).end();
         }
         Command::SetClipboard(text) => out.item("cmd").num(id).str("setClipboard").str(text).end(),
+        Command::SetClipboardItem(item) => {
+            out.item("cmd")
+                .num(id)
+                .str("setClipboardItem")
+                .str(&item.text);
+            match &item.html {
+                Some(html) => out.str(html),
+                None => out.raw("null"),
+            };
+            out.end();
+        }
         Command::Notification(command) => {
             use nsh_core::notifications::NotificationCommand as N;
             match command {
@@ -1706,6 +1721,20 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                     out.item("cmd").num(id).str("setTitle").str(title).end();
                 }
             }
+            // While the app listens to quit requests, leaving the page asks
+            // the app first (`nsh.js` `deliverQuitRequest`).
+            (_, nsh_core::desktop::DesktopCommand::SetQuitOnRequest(quit)) => {
+                out.item("cmd")
+                    .num(id)
+                    .str("quitOnRequest")
+                    .bool(*quit)
+                    .end();
+            }
+            // The app's answer to the user leaving the page, while the page
+            // asks it.
+            (true, nsh_core::desktop::DesktopCommand::Quit) => {
+                out.item("cmd").num(id).str("quit").end();
+            }
             _ => log::debug!("web: command {desktop:?} is not supported"),
         },
         other => log::debug!("web: command {other:?} is not supported"),
@@ -1878,5 +1907,27 @@ mod tests {
             ),
             "[]"
         );
+    }
+
+    #[test]
+    fn listening_to_quit_requests_reaches_the_player() {
+        assert_eq!(
+            commands(nsh_core::ROOT_ID, DesktopCommand::SetQuitOnRequest(false)),
+            r#"[["cmd",1,"quitOnRequest",false]]"#
+        );
+        assert_eq!(
+            commands(nsh_core::ROOT_ID, DesktopCommand::SetQuitOnRequest(true)),
+            r#"[["cmd",1,"quitOnRequest",true]]"#
+        );
+    }
+
+    #[test]
+    fn the_apps_quit_reaches_the_player() {
+        assert_eq!(
+            commands(nsh_core::ROOT_ID, DesktopCommand::Quit),
+            r#"[["cmd",1,"quit"]]"#
+        );
+        // Restarting is the browser's (the user reloads).
+        assert_eq!(commands(nsh_core::ROOT_ID, DesktopCommand::Restart), "[]");
     }
 }

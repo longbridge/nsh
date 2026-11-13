@@ -65,6 +65,10 @@ pub mod storage;
 mod style;
 #[cfg(feature = "svg")]
 pub mod svg;
+/// SVG without the renderer: recognized, never drawn.
+#[cfg(not(feature = "svg"))]
+#[path = "svg_off.rs"]
+pub mod svg;
 pub mod tailwind;
 mod text;
 pub mod text_edit;
@@ -74,6 +78,7 @@ pub mod transition;
 pub mod url_scheme;
 pub mod web_resource;
 pub mod websocket;
+pub mod webview;
 
 // The derive macros name `::nsh_core`, also in this crate's own tests.
 extern crate self as nsh_core;

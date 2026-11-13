@@ -134,6 +134,15 @@ const box = editor.nodeRect(blockStart);
 />
 ```
 
+### Copy and paste
+
+A copy or cut puts the selection on the clipboard in two forms at once, as ProseMirror does: as plain text (Markdown with the
+`markdown` extension's `copyAsMarkdown`) and as HTML written by the schema's `renderHTML`, which mail, documents and
+other editors paste with its formatting. The HTML marks the copied slice (`data-pm-slice`), so a paste into a
+`RichEditor` gets the same nodes back, mentions and other inline nodes included, a part of a list item stays a part of
+one, and spaces are kept. Pasted HTML from elsewhere is read by the schema's parse rules. A Rust plugin changes what
+is copied with `transform_copied`.
+
 ### Pasted and dropped files
 
 Files reach the app, which decides what they become (an image node, an attachment, a link to an uploaded copy); the

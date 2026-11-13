@@ -361,6 +361,7 @@ impl AppView {
             .detach();
         bind_keys(cx);
         let surface = Surface::new(initial_environment());
+        crate::chrome::set_app_name(&surface, &options.title);
         surface.appearance.set(options.appearance);
         surface.transparent.set(options.transparent);
         if options.fps || nsh_engine::perf::enabled_by_env() {
@@ -1089,7 +1090,11 @@ fn engine_config(options: &AppOptions, app: App) -> EngineConfig {
         viewport: nsh_core::Size::default(),
         trace: options.trace,
         content_culling: true,
-        network: Some(nsh_engine::net::network()),
+        // Without `net`, `fetch` rejects and remote images fail.
+            #[cfg(feature = "net")]
+            network: Some(nsh_engine::net::network()),
+            #[cfg(not(feature = "net"))]
+            network: None,
         websocket: None,
         refuse_connections: None,
         filesystem: None,

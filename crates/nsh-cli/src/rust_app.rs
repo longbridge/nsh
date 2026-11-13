@@ -604,8 +604,24 @@ fn hack_spec(package: &serde_json::Value, node: Option<&serde_json::Value>) -> O
 }
 
 /// What a generated crate names of a platform crate's features: all but `js`
-/// and the standard JS modules, which a Rust app does not run.
-pub(crate) const RUST_APP_PLATFORM: &str = ", default-features = false, features = [\"shader\", \"editor\", \"emoji-picker\", \"highlight\", \"math\", \"plot\", \"rich-editor\", \"term\"]";
+/// and the standard JS modules, which a Rust app does not run, and those
+/// only some platform crates have ([`rust_app_platform`]).
+pub(crate) const RUST_APP_PLATFORM: &str = ", default-features = false, features = [\"shader\", \"editor\", \"emoji-picker\", \"highlight\", \"math\", \"plot\", \"rich-editor\", \"term\", \"websocket\", \"updater\", \"svg\"]";
+
+/// [`RUST_APP_PLATFORM`] for the platform crate `platform` (Linux, macOS,
+/// Windows, iOS, Android), with the features only it has: `net` (HTTP on
+/// ureq) on Linux and Windows, whose `fetch` and remote images are not the
+/// system's, and Linux's `sound` (GStreamer). Cargo resolves a workspace's
+/// dependencies for every target, so a feature named on a crate that lacks
+/// it fails every build of the generated workspace, a web one included.
+pub(crate) fn rust_app_platform(platform: &str) -> String {
+    let own = match platform {
+        "nsh-platform-linux" => ", \"net\", \"sound\"]",
+        "nsh-platform-windows" => ", \"net\"]",
+        _ => return RUST_APP_PLATFORM.to_owned(),
+    };
+    RUST_APP_PLATFORM.replacen(']', own, 1)
+}
 /// `nsh-base`'s features the hosts and runners name: they show TextView's
 /// code blocks highlighted, whatever `nsh-base`'s defaults are.
 const HIGHLIGHT: &str = ", features = [\"highlight\"]";
@@ -1922,7 +1938,10 @@ panic = \"abort\"
                 self.android_lib(true),
                 self.nsh.dep("nsh-core", ""),
                 self.nsh.dep("nsh-base", HIGHLIGHT),
-                self.nsh.dep("nsh-platform-android", RUST_APP_PLATFORM),
+                self.nsh.dep(
+                    "nsh-platform-android",
+                    &rust_app_platform("nsh-platform-android")
+                ),
             ),
         )?;
         write(
@@ -2057,7 +2076,7 @@ panic = \"abort\"
                 self.nsh.dep(lib, ", default-features = false"),
                 self.nsh.dep("nsh-core", ""),
                 self.nsh.dep("nsh-base", HIGHLIGHT),
-                self.nsh.dep(platform, RUST_APP_PLATFORM),
+                self.nsh.dep(platform, &rust_app_platform(platform)),
             ),
         )?;
         let lib = lib.replace('-', "_");
@@ -3295,6 +3314,45 @@ mod tests {
     use super::{AppCrate, Nsh, RootConfig, RustApp};
 
     #[test]
+    fn rust_app_platforms_name_only_features_they_have() {
+        let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for platform in [
+            "nsh-platform-linux",
+            "nsh-platform-macos",
+            "nsh-platform-windows",
+            "nsh-platform-ios",
+            "nsh-platform-android",
+        ] {
+            let manifest = super::nsh_crate(&checkout, platform).join("Cargo.toml");
+            let manifest = std::fs::read_to_string(&manifest).unwrap();
+            let features: Vec<&str> = super::toml_tables(&manifest)
+                .filter(|(table, line)| *table == "features" && !line.starts_with('#'))
+                .filter_map(|(_, line)| Some(line.split_once('=')?.0.trim()))
+                .collect();
+            let named = super::rust_app_platform(platform);
+            let (_, list) = named.split_once("features = [").unwrap();
+            for feature in list.trim_end_matches(']').split(',') {
+                let feature = feature.trim().trim_matches('"');
+                assert!(
+                    features.contains(&feature),
+                    "{platform} has no feature `{feature}`: {named}"
+                );
+            }
+        }
+        // HTTP on ureq where `fetch` is not the system's.
+        for (platform, net) in [
+            ("nsh-platform-linux", true),
+            ("nsh-platform-windows", true),
+            ("nsh-platform-macos", false),
+            ("nsh-platform-ios", false),
+            ("nsh-platform-android", false),
+        ] {
+            let named = super::rust_app_platform(platform);
+            assert_eq!(named.contains("\"net\""), net, "{platform}: {named}");
+        }
+    }
+
+    #[test]
     fn release_libraries_upgrade_old_caches_and_restore_symbols() {
         use std::{
             fs,
@@ -3832,6 +3890,18 @@ mod tests {
         }
         // Optional platform features come from the app, not its runner.
         assert!(!read("rust-linux/Cargo.toml").contains("webview"));
+        // `net` only on the platform crates that have it: a feature a crate
+        // lacks fails the resolution of the whole workspace.
+        for (dir, net) in [
+            ("rust-linux", true),
+            ("rust-windows", true),
+            ("rust-macos", false),
+            ("rust-ios", false),
+            ("rust-android", false),
+        ] {
+            let cargo = read(&format!("{dir}/Cargo.toml"));
+            assert_eq!(cargo.contains("\"net\""), net, "{cargo}");
+        }
         let android = read("rust-android/lib.rs");
         assert!(android.contains("nsh::main!(app_root());"), "{android}");
         assert!(read("rust-android/Cargo.toml").contains("default-features = false"));

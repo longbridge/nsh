@@ -138,6 +138,12 @@ function App() {
       <Text>{`Math off: ${TextView.plainText(TextView.parse("Math $x$", { math: false }))}`}</Text>
       <Text>{`From HTML: ${TextView.plainText(TextView.parseHtml("<p>Hi <i>there</i></p>"))}`}</Text>
       <Text>{`Unknown tag: ${TextView.plainText(TextView.parse("<US tech> up"))}`}</Text>
+      <TextView
+        document={{ blocks: [{ type: "codeBlock", id: "annotated", code: "Annotated code", wrap: true,
+          content: [{ type: "strong", content: [{ type: "text", text: "Annotated code" }] }] }] }}
+        codeBlockActions={[{ id: "export", label: "Export annotated" }]}
+        onCodeBlockAction={(event) => action.set(`${event.id} ${event.code.id}: ${event.code.code}`)}
+      />
     </View>
   );
 }

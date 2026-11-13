@@ -18,7 +18,7 @@ Every tag is a component in scope (`native-pipeline.md`): the primitives `View`,
 | `<Dialog>` | presented UIViewController | `open` (default true), `animation`, `onOpen`, `onClose`, `onCancel` (every close attempt), `onOpenChange({ open, reason })` (`"cancel"` / `"backdropPress"` / `"swipe"`); `closeOnEscape` / `closeOnBackdropPress` / `closeOnSwipe` (default true; iOS sheets swipe away, Escape and Android back close natively, then `onCancel` + `onOpenChange({ open: false, reason })` + `onClose`; the renderer keeps a removed dialog's `onClose` until the platform reports it, `dom.rs` `dismissed`); `class` / `style` style the popup (the view holding the children), `backdropClass` / `backdropStyle` add a backdrop part behind it (none otherwise) whose presses are close attempts; `presentation` (iOS: `fullScreen` over a clear background, `pageSheet` / `formSheet` keep the system's sheet background; ignored on Android, the desktops and the web, where a dialog is a transparent layer over the whole window); `statusBar` (below); `ios={{ supportedOrientations }}`, `android={{ statusBarTranslucent }}` (otherwise the content starts below the status bar) |
 | `<Overlay>` | a `NshView` in the root view (the surface's, or the dialog's around it) | its children on top of that root view, outside the parent's layout and clipping; `anchor` (a ref, `{ x, y }` or `{ origin, size }`), `placement`, `align`, `offset`, `margin`, `onPosition`, `onPressOutside`, `onCancel` ("Overlays" below) |
 | `<InputAccessoryView>` | a NshView set as `inputAccessoryView` | `nativeID`; inputs name it with `ios={{ inputAccessoryViewID }}`. A layout root as wide as the window and as tall as its content; the core resolves the id (`InputConfig::accessory`). Renders nothing on Android |
-| `<WebView>` | WKWebView (WebKit loaded on first use) | `src` (a URL) or `html` (inline HTML, shown instead of `src`) + `baseUrl`, `injectedJavaScript(BeforeContentLoaded)`, `onMessage` (pages call `window.nsh.postMessage`), `onLoad*`, `onNavigationStateChange`, `onDownload` (macOS: `WKDownload` into the app's data directory's `downloads/<id>/`, only with a listener), `incognito` (website data of its own, in memory: each platform makes the web view from its first props, and the core keeps the prop from changing afterwards), Rust's `url_scheme(scheme, handler)` (URL schemes the page loads from the app, `nsh_core::web_resource`: the handler is called on the main thread with a request answered once, from any thread; read when the web view is made, as `incognito`; iOS and macOS `WKURLSchemeHandler` in `nsh-platform-apple`, Linux `webkit_web_context_register_uri_scheme`); ref: `reload()`, `goBack()`, `goForward()`, `postMessage(data)`, `injectJavaScript(js)`, `load({ src, headers })` (headers on the document request only: `NSMutableURLRequest` + `loadRequest`) |
+| `<WebView>` | WKWebView (WebKit loaded on first use) | `src` (a URL) or `html` (inline HTML, shown instead of `src`) + `baseUrl`, `injectedJavaScript(BeforeContentLoaded)`, `onMessage` (pages call `window.nsh.postMessage`), `onLoad*`, `onNavigationStateChange`, `onDownload` (macOS's `WKDownload`, WebKitGTK's session downloads or WebView2's `DownloadStarting` into the app's data directory's `downloads/<id>/`, only with a listener; a Rust `onDownloadPending` listener chooses destinations instead), `incognito` (website data of its own, in memory: each platform makes the web view from its first props, and the core keeps the prop from changing afterwards), Rust's `url_scheme(scheme, handler)` (URL schemes the page loads from the app, `nsh_core::web_resource`: the handler is called on the main thread with a request answered once, from any thread; read when the web view is made, as `incognito`; iOS and macOS `WKURLSchemeHandler` in `nsh-platform-apple`, Linux `webkit_web_context_register_uri_scheme`); ref: `reload()`, `goBack()`, `goForward()`, `postMessage(data)`, `injectJavaScript(js)`, `load({ src, headers })` (headers on the document request only: `NSMutableURLRequest` + `loadRequest`) |
 | `nativeComponent` (`nsh`'s `nativeComponent`) | a `NshView` box filled by the registered component's view; own props may be bound to animated values | see [embedding.md](embedding.md) |
 | `<Video>` | AVPlayerLayer / AVPlayerViewController (AVFoundation loaded on first use) | `src` (a URL), `paused`, `muted`, `volume`, `rate`, `repeat`, the `objectFit` style (`object-*`), `controls`, `onLoad` / `onProgress` / `onEnd` / `onBuffer` / `onError`; ref: `seek(seconds)` |
 
@@ -59,6 +59,40 @@ exist, not an API to be compatible with. Components that need core or native sup
 of what is in scope: a host element's primitive is imported from its home (`import { View } from "nsh"`) and compiled
 in place, a component is imported (`import { Chart } from "app/native"`) or local; lowercase tags are errors
 (`native-pipeline.md`).
+
+## Desktop WebView downloads
+
+`nsh_core::webview` defines the download decision protocol. A Rust host registers `WebView::on_download_pending`;
+that registration alone opts into manual destinations, so there is no separate behavior prop. The platform emits
+`DownloadPending` with the download's `id`, `url` and `filename`; the core's typed listener wraps it in
+`WebDownloadPending`, whose private handle binds the original web view's node, executor and download id. The app
+calls `accept(impl Into<DownloadDestination>)` or `cancel()` and awaits `Answer<Result<(), String>>`: it settles
+the decision, not the transfer. Clones share the decision; a handle cannot be forged for another view or download.
+
+The core assigns a request id, keeps its target node and answer, and sends `Command::WebViewRequest` with the mount
+batch. The platform answers with `WebViewReply` on that node. Only a matching pending request is settled; replies
+from another node, duplicates and late replies are dropped, and unmount, unsupported hosts and `REPLY_TIMEOUT`
+settle with an error.
+
+A `DownloadDestination` is absolute, names a file, and its parent must exist. A `PathBuf` refuses an existing file;
+`DownloadDestination::default().path(..).overwrite(true)` replaces one. Platforms write an owned staging file beside
+the destination and publish atomically only on completion: failure, cancellation and teardown remove only that
+output, never the app's existing or completed file. Native deferrals are bounded; a pending decision the app never
+answers is cancelled. An unknown, duplicate or already-finished decision errors without touching another download.
+
+The handler registration alone sets the internal `WebProps::defer_downloads` flag (Rust-only, hidden, reset when the
+handler goes). On a platform where `Environment::webview_requests` is false, that request cannot be honored: the
+core mounts an inert empty document with JavaScript, injected scripts, source/base URL and back/forward gestures
+disabled, reports `onError`, and refuses app-driven `load`, `reload`, back, forward, `injectJavaScript` and
+`Evaluate` (the evaluation answer settles with an error). Removing the handler resets the flag and restores the
+app's page and automatic downloads. No public behavior enum or config exists for this.
+
+Without an `onDownloadPending` listener the platform keeps its automatic behavior: an `onDownload` listener saves
+into `<data dir>/<app id>/downloads/<id>/<sanitized filename>` (macOS, Windows and Linux). Every platform removes
+path separators, control characters, bidi controls and leading dots, and caps names at 200 bytes; Windows also
+refuses reserved device names (including `CONIN$`/`CONOUT$`, `COM`/`LPT` 0-9 and superscripts) and trailing dots or
+spaces. Downloads are Rust-only; TSX keeps the existing `onDownload` lifecycle and gains no path-writing API.
+Host authority stays with the app: it chooses the path, and capabilities continue to govern which pages load.
 
 ## The main thread never waits for JS
 
@@ -349,7 +383,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   field), macOS answers them as `AXSelectedChildren` / `AXLinkedUIElements` and tells VoiceOver when the active item
   changes (an input that is a combo box is its field's `AXComboBox`). `Environment::reads_active_descendants` says
   the platform reads them; elsewhere `nsh-base`'s `Select`, `Combobox` and `Command` announce the highlighted item
-  themselves. Views without a label read their texts. The props go as one `MountItem::ViewProps`, except
+  themselves. `accessibilityDescribedBy` (`aria-describedby`) names the element whose text describes this one (a
+  field's error line), looked up the same way into `Accessibility::described_by`; while that element is there, its
+  text (its labels and texts, the hidden ones left out) is also `Accessibility::description`, in the place of the
+  element's own `accessibilityDescription`, so every platform reads it where it reads a description; the web also
+  sets `aria-describedby` on the focused element. Views without a label read their texts. The props go as one `MountItem::ViewProps`, except
   a label changing alone on mounted props (one that follows app state: a count, a price), which goes as
   `MountItem::AccessibilityLabel`. The `increment` / `decrement` actions make an element adjustable whatever its
   role: iOS adds the adjustable trait to the traits of its role (`native_view.rs` `traits`), so VoiceOver's swipe up /
@@ -550,20 +588,24 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   where, and moves their views (`Insert` / `Remove`), so the platforms need nothing of their own: they draw and
   hit-test it as any view of the root, with the views' own z order.
 - **Layout**: a layout root of its own, laid out in a box the size of its root view (`position: fixed`: its insets,
-  size and margins are against that box; `inset-0` covers the root view). With `anchor` (a ref of a view,
-  `{ x, y }` in the root view's coordinates, touches' `pageX` / `pageY`, or a `Bounds` there, an input's
-  caret, `onCaretMove`'s `pageBounds`: `OverlayAnchor::Bounds`) the core places it on a side of the anchor's
-  frame (`nsh_core::overlay::place`): `placement` (`"top"`, `"bottom"` (default), `"left"`, `"right"`), on the other
+  size and margins are against that box; `inset-0` covers the root view), or with an anchor in the root view's safe
+  area less `margin` (below), which its insets, percentage sizes and margins are against then. With `anchor` (a ref
+  of a view, `{ x, y }` in the root view's coordinates, touches' `pageX` / `pageY`, or a `Bounds` there, an input's
+  caret, `onCaretMove`'s `pageBounds`: `OverlayAnchor::Bounds`) the core places it on a side of the anchor's frame
+  (`nsh_core::overlay::place`): `placement` (`"top"`, `"bottom"` (default), `"left"`, `"right"`), on the other
   side when only that one has room, the side with more room when neither has; `align` along it (`"start"`,
   `"center"` (default), `"end"`; start and end follow the direction above and below); `offset` from the anchor; then
-  moved along the side to stay inside the root view's safe area less `margin`. Rust's `anchor_beside(row, menu)`
-  (`OverlayAnchor::Beside`, a submenu's) lines its content (inside its own padding and border) up with the row along
-  its side, so a submenu's first item is level with its trigger, and places it outside the menu
-  around the row across it, so `offset` is a gap from the menu's edge, not from the row inside its padding. Rust's
-  `anchor_content(r)` (`OverlayAnchor::Content`, `Popover`'s, `HoverCard`'s and a desktop `Menu`'s) places it against
-  what the view draws: the box around its children with its padding and border, along an axis its style leaves `auto`
-  (a wrapper its parent stretches); the element that takes a component's slot goes by its own box, whether a TSX or a
-  Rust app passed it (`Core::content_anchor`: the slot's holder is that wrapper). The anchor's frame is
+  moved along the side to stay inside the root view's safe area less `margin`. An anchored overlay is laid out in
+  that area rather than the whole root view, so content wider than it (a paragraph) wraps within it; in a terminal,
+  within that area less the frame drawn a Cell outside its box. A side placement (`"left"`, `"right"`) is laid out in
+  the whole area too: the side's room is the `available` of `onPosition`, which an overlay follows to fit it. Rust's
+  `anchor_beside(row, menu)` (`OverlayAnchor::Beside`, a submenu's) lines its content (inside its own padding and
+  border) up with the row along its side, so a submenu's first item is level with its trigger, and places it outside
+  the menu around the row across it, so `offset` is a gap from the menu's edge, not from the row inside its padding.
+  Rust's `anchor_content(r)` (`OverlayAnchor::Content`, `Popover`'s, `HoverCard`'s and a desktop `Menu`'s) places it
+  against what the view draws: the box around its children with its padding and border, along an axis its style leaves
+  `auto` (a wrapper its parent stretches); the element that takes a component's slot goes by its own box, whether a
+  TSX or a Rust app passed it (`Core::content_anchor`: the slot's holder is that wrapper). The anchor's frame is
   `Core::measure`'s (scroll offsets and zoom applied, transforms not), so the overlay follows it as it scrolls and moves:
   `place_overlays` places anchored overlays again at the end of every commit (after the lists and the scroll offsets
   the platform reported). `onPosition` reports where it went (`placement`, the frame as `bounds`, `available`:

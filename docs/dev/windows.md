@@ -77,9 +77,13 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   indicator, then the border, all inside an opacity layer when translucent (bounded by the area the subtree draws in:
   an unbounded layer is a surface as large as the clip around it, often the window; a view that paints only its
   background color fades the color instead, with no layer). A view's content clip is pushed only when it has content
-  (text, an image, a canvas). The children of a clipping view (a scroll view's content) whose drawn area
-  (`drawn_area`: bounds, shadows, outlines, transformed children) lies outside what the window and the clips leave
-  visible are not drawn (`hidden_by_clips`, in the window's pass only). Transforms are CSS-like 4x4 matrices
+  (text, an image, a canvas). A subtree that draws nothing (no area and nothing outside it, with children that draw
+  nothing or are clipped away: a `display: none` subtree, which the core lays out with no size) is left out at its top
+  without visiting its views (`draws_nothing`). In the window's pass, a view whose own area (bounds, shadows, outlines,
+  hosted items, through its transforms) lies outside what the window and the clips of the views around it leave
+  visible, whichever ancestors those are, draws nothing of its own: with its subtree when that stays inside its box
+  (it clips, or has no children), else only its children, each culled the same way, so a long list in a box that does
+  not clip draws only its rows in sight. Transforms are CSS-like 4x4 matrices
   (`geom.rs`); affine ones are Direct2D's 3x2 world transform, projective ones (perspective) draw the subtree into an
   offscreen bitmap mapped with `DrawBitmap`'s perspective transform. Units are points: the device context's DPI is
   the window's (the process is per-monitor DPI aware, v2).
@@ -338,6 +342,10 @@ frame: changed views queue their old and new painted areas on their surface (`Su
 and the one before (`SwapChain::to_draw`), widened to the whole box and overflow of each shader view reading what is
 behind it that the damage meets (`with_backdrops`: the back buffer holds its own earlier output), and `Present1`
 presents only the changed rectangles.
+A subtree a frame leaves out (hidden, concealed, turned away, out of sight) forgets where it was painted
+(`NshView::forget_painted`): its old area was drawn by the change that left it out, and a record kept would add it to
+every later change of a view around it (a moved or shrunk panel's rows repainting their old area on each scroll
+frame). Each view knows whether its subtree holds a record at all, so these walks stop at subtrees that hold none.
 `Surface::invalidate` (theme, size, scale, device loss, composition) and changes it cannot bound draw the whole
 window. Changes wholly outside the window (an animation scrolled out of it) draw and present nothing.
 
@@ -379,8 +387,8 @@ What a frame costs then follows what changed: the gallery's Stocks page (~690 vi
 display) changes ~34 views a frame (pulsing sparklines, prices, the chart's live point), drawn in ~1.4 ms of
 `paint`. Canvases record their animated tail only (see the table above), omit paints whose current values cannot
 change a pixel, and ask for the cached damage of the slots that changed when the drawing lets them bound it (the full
-`DamageScan` scans otherwise); views without content of their own push no clip, and the children of a clipping view
-out of sight are not drawn.
+`DamageScan` scans otherwise); views without content of their own push no clip, and views out of sight are not drawn,
+under any clipping ancestor.
 
 ### Frame pacing
 
