@@ -385,12 +385,15 @@ fn copy_writes_markdown() {
 fn copied(app: &mut Headless) -> (String, String) {
     keys(app, &["mod+c"]);
     let _ = app.wait_until("the copy", Duration::from_secs(5), |s| {
-        s.clipboard_html().is_some()
+        s.clipboard_item()
+            .and_then(|item| item.html.as_deref())
+            .is_some()
     });
     (
         app.screen().clipboard().expect("copied text").to_owned(),
         app.screen()
-            .clipboard_html()
+            .clipboard_item()
+            .and_then(|item| item.html.as_deref())
             .expect("copied HTML")
             .to_owned(),
     )
@@ -430,15 +433,24 @@ fn a_cut_writes_html_and_pastes_back_as_it_was() {
     select_right(&mut app, 4);
     keys(&mut app, &["mod+x"]);
     let _ = app.wait_until("the cut", Duration::from_secs(5), |s| {
-        s.clipboard_html().is_some()
+        s.clipboard_item()
+            .and_then(|item| item.html.as_deref())
+            .is_some()
     });
     assert_eq!(
-        app.screen().clipboard_html(),
+        app.screen()
+            .clipboard_item()
+            .and_then(|item| item.html.as_deref()),
         Some(r#"<p data-pm-slice="1 1 []"><strong>bold</strong></p>"#)
     );
     tree(&mut app, r#"doc(paragraph("some "), paragraph("x"))"#);
     let text = app.screen().clipboard().expect("cut text").to_owned();
-    let html = app.screen().clipboard_html().expect("cut HTML").to_owned();
+    let html = app
+        .screen()
+        .clipboard_item()
+        .and_then(|item| item.html.as_deref())
+        .expect("cut HTML")
+        .to_owned();
     paste_html(&mut app, &text, &html);
     tree(
         &mut app,

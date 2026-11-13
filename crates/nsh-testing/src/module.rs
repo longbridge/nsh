@@ -2475,10 +2475,11 @@ impl App {
         self.with(|app| app.clipboard())
     }
 
-    /// The HTML on the clipboard with its text now (`Clipboard.write`),
-    /// `null` when it holds none. Headless tests only.
-    pub fn clipboard_html(&self) -> Result<Option<String>, JsError> {
-        self.with(|app| app.clipboard_html())
+    /// The item on the clipboard now, `{ text, html? }` (`Clipboard.write`;
+    /// text alone has no `html`), `null` when it holds none. Headless tests
+    /// only.
+    pub fn clipboard_item(&self) -> Result<Option<ClipboardItem>, JsError> {
+        self.with(|app| app.clipboard_item())
     }
 
     /// `f` with the app as it is now (the batches that came applied); a

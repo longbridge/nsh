@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use nsh_core::{
     Dialog, ResolvedTextStyle,
+    element::ClipboardItem,
     geometry::{Point, Points, Size},
     platform::{ColorScheme, Lifecycle},
 };
@@ -157,10 +158,10 @@ pub(crate) trait Driver: Send {
     /// The open context menu's actions, `None` when none is open.
     fn menu(&mut self) -> Result<Option<Vec<crate::menu::Entry>>, String>;
     fn clipboard(&mut self) -> Result<Option<String>, String>;
-    /// The HTML on the clipboard with its text (`app.clipboardHtml`).
+    /// The item on the clipboard, every format (`app.clipboardItem`).
     /// Only the headless app keeps it.
-    fn clipboard_html(&mut self) -> Result<Option<String>, String> {
-        Err("the clipboard's HTML is only read in a headless test".into())
+    fn clipboard_item(&mut self) -> Result<Option<ClipboardItem>, String> {
+        Err("the clipboard's item is only read in a headless test".into())
     }
     /// The embedding app sends event `name` with `data` to the app
     /// (`app.host.send`), which then settles.
@@ -378,9 +379,9 @@ impl Driver for Headless {
         self.catch_up();
         Ok(self.screen().clipboard().map(str::to_owned))
     }
-    fn clipboard_html(&mut self) -> Result<Option<String>, String> {
+    fn clipboard_item(&mut self) -> Result<Option<ClipboardItem>, String> {
         self.catch_up();
-        Ok(self.screen().clipboard_html().map(str::to_owned))
+        Ok(self.screen().clipboard_item().cloned())
     }
     fn send_host_event(&mut self, name: &str, data: Value) -> Result<(), String> {
         Headless::send_host_event(self, name, data)

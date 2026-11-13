@@ -147,15 +147,9 @@ pub(crate) fn set_clipboard(text: String) -> Action {
     Action::Command(ROOT_ID, Command::SetClipboard(text))
 }
 
-/// Puts `item` on the system clipboard: its text, and its HTML when it
-/// has some.
+/// Puts `item` on the system clipboard, each of its formats in one write.
 pub(crate) fn set_clipboard_item(item: ClipboardItem) -> Action {
-    let ClipboardItem { text, html } = item;
-    let command = match html {
-        Some(html) => Command::SetClipboardHtml { text, html },
-        None => Command::SetClipboard(text),
-    };
-    Action::Command(ROOT_ID, command)
+    Action::Command(ROOT_ID, Command::SetClipboardItem(item))
 }
 
 /// The text on the system clipboard (`""` when it holds none).

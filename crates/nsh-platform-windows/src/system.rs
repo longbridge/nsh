@@ -730,14 +730,21 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 clipboard_answer(*id, has, text),
             );
         }
-        Command::SetClipboardHtml { text, html } => {
-            let units: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
+        Command::SetClipboardItem(item) => {
+            let units: Vec<u16> = item.text.encode_utf16().chain(Some(0)).collect();
             let text: Vec<u8> = units.iter().flat_map(|u| u.to_le_bytes()).collect();
-            let html = clipboard::cf_html(html);
-            let mut html = html.into_bytes();
-            html.push(0);
             let unicode = u32::from(windows::Win32::System::Ole::CF_UNICODETEXT.0);
-            if !set_clipboard_formats(&[(unicode, &text), (html_format(), &html)]) {
+            let mut formats = vec![(unicode, text)];
+            if let Some(html) = &item.html {
+                let mut html = clipboard::cf_html(html).into_bytes();
+                html.push(0);
+                formats.push((html_format(), html));
+            }
+            let formats: Vec<(u32, &[u8])> = formats
+                .iter()
+                .map(|(kind, bytes)| (*kind, bytes.as_slice()))
+                .collect();
+            if !set_clipboard_formats(&formats) {
                 log::debug!("windows: cannot set the clipboard");
             }
         }

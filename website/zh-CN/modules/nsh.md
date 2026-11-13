@@ -1566,8 +1566,8 @@ write(item: ClipboardItem): Promise<void>;
 粘贴 HTML，其他应用粘贴文本。`html` 是一个片段（`<p>Hello <b>world</b></p>`），不是整个页面。不给 `html` 时等同于
 `writeText(text)`。Rust：`set_clipboard_item(item)`，参数是一个 `ClipboardItem`。
 
-`ClipboardItem` 是剪贴板上的一项内容，带有几种格式，和 GPUI 的 `ClipboardItem`、DOM 的 `ClipboardItem` 一样；在 NSH 中它是一个
-列出各格式的普通对象：`{ text, html? }`。
+`ClipboardItem` 是剪贴板上的一项内容，带有几种格式，和 GPUI 的 `ClipboardItem` 一样；在 NSH 中它是一个列出各格式的普通对象
+`{ text, html? }`，只是一个类型（浏览器的 `ClipboardItem` 类仍归页面所用）。一项内容的所有格式在一次写入中放上剪贴板，剪贴板以后支持的格式也加入同一项。
 
 HTML 以各平台的 HTML 类型和文本在同一次写入中放上剪贴板：Web 和 Linux 是 `text/html`，macOS 和 iOS 是 `public.html`，
 Android 是 HTML 剪贴项，Windows 是 `HTML Format`。GPUI 和终端写入文本。在 Web 上，处理用户按键或按下时发起的写入（例如

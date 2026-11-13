@@ -1423,7 +1423,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
     match command {
         Command::Dialog(dialog) => show_dialog(surface, dialog),
         // GPUI's clipboard items hold no HTML: the text only.
-        Command::SetClipboard(text) | Command::SetClipboardHtml { text, .. } => {
+        Command::SetClipboard(text) | Command::SetClipboardItem(nsh_core::element::ClipboardItem { text, .. }) => {
             let text = text.clone();
             crate::rt::on_app(move |cx| {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));

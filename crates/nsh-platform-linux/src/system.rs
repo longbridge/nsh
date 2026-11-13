@@ -783,7 +783,14 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 display.clipboard().set_text(text);
             }
         }
-        Command::SetClipboardHtml { text, html } => set_clipboard_html(text, html),
+        Command::SetClipboardItem(item) => match &item.html {
+            Some(html) => set_clipboard_html(&item.text, html),
+            None => {
+                if let Some(display) = gdk::Display::default() {
+                    display.clipboard().set_text(&item.text);
+                }
+            }
+        },
         Command::ReadClipboard { id, has_only } => read_clipboard(surface, *id, *has_only),
         Command::SetClipboardImage(uri) => set_clipboard_image(uri),
         Command::ReadClipboardImage { id, has_only } => {

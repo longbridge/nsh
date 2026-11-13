@@ -1263,8 +1263,8 @@ setTimeout(async () => {
 mount(() => <Text>{shown()}</Text>);
 "#;
 
-/// `Clipboard.write` sends the text with its HTML, and the text alone
-/// when it has none.
+/// `Clipboard.write` sends the item, every format in one command, with
+/// its HTML or without.
 #[test]
 fn the_clipboard_takes_text_with_its_html() {
     let (engine, rx) = start(CLIPBOARD_HTML);
@@ -1284,21 +1284,16 @@ fn the_clipboard_takes_text_with_its_html() {
     drop(engine);
     let written: Vec<_> = commands
         .into_iter()
-        .filter(|c| {
-            matches!(
-                c,
-                Command::SetClipboard(_) | Command::SetClipboardHtml { .. }
-            )
+        .filter_map(|c| match c {
+            Command::SetClipboardItem(item) => Some((item.text, item.html)),
+            _ => None,
         })
         .collect();
     assert_eq!(
         written,
         [
-            Command::SetClipboardHtml {
-                text: "a b".into(),
-                html: "<p>a <b>b</b></p>".into()
-            },
-            Command::SetClipboard("plain".into()),
+            ("a b".to_owned(), Some("<p>a <b>b</b></p>".to_owned())),
+            ("plain".to_owned(), None),
         ]
     );
 }

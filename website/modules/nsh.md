@@ -1610,8 +1610,9 @@ selection: apps that read formatting (mail, documents, rich text editors) paste 
 a fragment (`<p>Hello <b>world</b></p>`), not a whole page. Without `html` it is `writeText(text)`. Rust:
 `set_clipboard_item(item)` with a `ClipboardItem`.
 
-A `ClipboardItem` is one item on the clipboard in several formats, as GPUI's `ClipboardItem` and the DOM's are; here it
-is a plain object of its formats, `{ text, html? }`.
+A `ClipboardItem` is one item on the clipboard in several formats, as GPUI's `ClipboardItem` is; here it is a plain
+object of its formats, `{ text, html? }`, a type only (the browser's `ClipboardItem` class stays the page's). Every
+format of an item goes on in one write, and formats the clipboard learns later join the same item.
 
 The HTML goes on as each platform's HTML type, in one write with the text: `text/html` on the web and Linux,
 `public.html` on macOS and iOS, an HTML clip on Android and `HTML Format` on Windows. GPUI and terminals put the text.

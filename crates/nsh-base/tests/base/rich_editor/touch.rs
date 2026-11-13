@@ -44,7 +44,9 @@ fn a_long_press_selects_a_word_and_its_menu_copies_and_cuts_it() {
     assert_eq!(app.screen().clipboard(), Some("beta"));
     // With its HTML, as a keyboard copy writes it.
     assert_eq!(
-        app.screen().clipboard_html(),
+        app.screen()
+            .clipboard_item()
+            .and_then(|item| item.html.as_deref()),
         Some(r#"<p data-pm-slice="1 1 []">beta</p>"#)
     );
     assert!(app.menu().is_none());

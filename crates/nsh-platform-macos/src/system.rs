@@ -628,13 +628,15 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             pasteboard
                 .setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString });
         }
-        Command::SetClipboardHtml { text, html } => {
+        Command::SetClipboardItem(item) => {
             let pasteboard = NSPasteboard::generalPasteboard();
             pasteboard.clearContents();
             // SAFETY: immutable AppKit constants.
             let (string, kind_html) = unsafe { (NSPasteboardTypeString, NSPasteboardTypeHTML) };
-            pasteboard.setString_forType(&NSString::from_str(text), string);
-            pasteboard.setString_forType(&NSString::from_str(html), kind_html);
+            pasteboard.setString_forType(&NSString::from_str(&item.text), string);
+            if let Some(html) = &item.html {
+                pasteboard.setString_forType(&NSString::from_str(html), kind_html);
+            }
         }
         Command::ReadClipboard { id, has_only } => read_clipboard(surface, *id, *has_only),
         Command::SetClipboardImage(uri) => set_clipboard_image(uri),

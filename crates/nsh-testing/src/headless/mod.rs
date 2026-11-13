@@ -2680,11 +2680,21 @@ mod tests {
         app.first_render().unwrap();
         app.press("Rich").unwrap();
         assert_eq!(app.screen().clipboard(), Some("a b"));
-        assert_eq!(app.screen().clipboard_html(), Some("<p>a <b>b</b></p>"));
+        assert_eq!(
+            app.screen()
+                .clipboard_item()
+                .and_then(|item| item.html.as_deref()),
+            Some("<p>a <b>b</b></p>")
+        );
         // Text alone replaces both.
         app.press("Plain").unwrap();
         assert_eq!(app.screen().clipboard(), Some("plain"));
-        assert_eq!(app.screen().clipboard_html(), None);
+        assert_eq!(
+            app.screen()
+                .clipboard_item()
+                .and_then(|item| item.html.as_deref()),
+            None
+        );
     }
 
     /// A pad under a 10-point strip. A press reports where it was in the

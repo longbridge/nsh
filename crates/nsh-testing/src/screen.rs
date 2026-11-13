@@ -15,7 +15,9 @@ use std::{
 use nsh_core::{
     AccessibilityRole, AccessibilityState, Bounds, Command, Dialog, EventKind, EventMask,
     GestureValues, InputConfig, KeyCapture, MountBatch, MountItem, NodeId, PanActivation, Point,
-    PointerEvents, Points, Size, ViewKind, element::PropEnum, keymap::Keystroke,
+    PointerEvents, Points, Size, ViewKind,
+    element::{ClipboardItem, PropEnum},
+    keymap::Keystroke,
 };
 
 use crate::selector::{Matcher, Selector, TextMatch};
@@ -116,10 +118,9 @@ pub struct Screen {
     /// The dialogs shown, in order, and how many were answered.
     dialogs: Vec<Dialog>,
     answered: usize,
-    /// The clipboard's text.
-    clipboard: Option<String>,
-    /// The HTML the clipboard holds with its text (`Clipboard.write`).
-    clipboard_html: Option<String>,
+    /// The item on the clipboard: its text, and the HTML written with it
+    /// (`Clipboard.write`).
+    clipboard: Option<ClipboardItem>,
     /// Clipboard reads to answer: the request, and whether it asks only if
     /// the clipboard holds text.
     clipboard_reads: Vec<(u32, bool)>,
@@ -653,18 +654,11 @@ impl Screen {
     fn command(&mut self, id: NodeId, command: &Command) {
         match command {
             Command::Dialog(dialog) => self.dialogs.push((**dialog).clone()),
-            Command::SetClipboard(text) => {
-                self.clipboard = Some(text.clone());
-                self.clipboard_html = None;
-            }
-            Command::SetClipboardHtml { text, html } => {
-                self.clipboard = Some(text.clone());
-                self.clipboard_html = Some(html.clone());
-            }
+            Command::SetClipboard(text) => self.set_clipboard(Some(text.clone())),
+            Command::SetClipboardItem(item) => self.clipboard = Some(item.clone()),
             // An image replaces the text.
             Command::SetClipboardImage(_) => {
                 self.clipboard = None;
-                self.clipboard_html = None;
             }
             Command::ReadClipboard { id, has_only } => self.clipboard_reads.push((*id, *has_only)),
             Command::ReadClipboardImage { .. } => {
@@ -1421,18 +1415,21 @@ impl Screen {
 
     /// The clipboard's text.
     pub fn clipboard(&self) -> Option<&str> {
-        self.clipboard.as_deref()
+        self.clipboard.as_ref().map(|item| item.text.as_str())
     }
 
-    /// The HTML the clipboard holds with its text, when the app put some
-    /// there (`Clipboard.write`).
-    pub fn clipboard_html(&self) -> Option<&str> {
-        self.clipboard_html.as_deref()
+    /// The item on the clipboard, every format the app put there
+    /// (`Clipboard.write`); text alone is an item without HTML.
+    pub fn clipboard_item(&self) -> Option<&ClipboardItem> {
+        self.clipboard.as_ref()
     }
 
     pub(crate) fn set_clipboard(&mut self, text: Option<String>) {
-        self.clipboard = text;
-        self.clipboard_html = None;
+        self.clipboard = text.map(|text| {
+            let mut item = ClipboardItem::default();
+            item.text = text;
+            item
+        });
     }
 
     /// The clipboard reads asked since the last call.

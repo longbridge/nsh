@@ -1516,13 +1516,17 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             out.bool(*animated).end();
         }
         Command::SetClipboard(text) => out.item("cmd").num(id).str("setClipboard").str(text).end(),
-        Command::SetClipboardHtml { text, html } => out
-            .item("cmd")
-            .num(id)
-            .str("setClipboardHtml")
-            .str(text)
-            .str(html)
-            .end(),
+        Command::SetClipboardItem(item) => {
+            out.item("cmd")
+                .num(id)
+                .str("setClipboardItem")
+                .str(&item.text);
+            match &item.html {
+                Some(html) => out.str(html),
+                None => out.raw("null"),
+            };
+            out.end();
+        }
         Command::Notification(command) => {
             use nsh_core::notifications::NotificationCommand as N;
             match command {

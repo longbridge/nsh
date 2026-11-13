@@ -6621,7 +6621,7 @@ class Player {
       case "setBadge": this.setBadge(args[0]); break;
       case "openUrl": this.event(ROOT_ID, "onOpenUrl", { id: args[0], opened: this.openUrl(args[1]) }); break;
       case "setClipboard": this.writeClipboard(args[0]); break;
-      case "setClipboardHtml": this.writeClipboard(args[0], args[1]); break;
+      case "setClipboardItem": this.writeClipboard(args[0], args[1] ?? undefined); break;
       case "readClipboard": this.readClipboard(args[0], args[1]); break;
       case "setClipboardImage": this.writeClipboardImage(args[0]); break;
       case "readClipboardImage": this.readClipboardImage(args[0], args[1]); break;
