@@ -184,6 +184,7 @@ fn windows(cx: &mut TestAppContext) {
     // The engine (and the settings portal) run on threads of their own.
     cx.executor().allow_parking();
     keys_reach_the_fields_of_a_surface_showing_a_native_component(cx);
+    a_captured_key_release_is_kept_from_the_window(cx);
     compositions_are_reported_and_hold_values_until_they_end(cx);
     menu_shortcuts_leave_a_focused_field_the_keys_it_uses(cx);
     presses_carry_where_the_pointer_was(cx);
@@ -231,6 +232,102 @@ fn keys_reach_the_fields_of_a_surface_showing_a_native_component(cx: &mut TestAp
     wait_for(&view, cx, "bc");
     cx.simulate_keystrokes("right shift-right backspace");
     wait_for(&view, cx, "b");
+}
+
+mod captured_keys {
+    use nsh_core::prelude::*;
+
+    /// A focusable view that captures every key.
+    #[component]
+    pub(super) fn CapturedKeys() -> impl IntoElement {
+        view()
+            .w_full()
+            .h_full()
+            .focusable(true)
+            .capture_keys(nsh_core::KeyCapture::All)
+    }
+}
+
+/// The focusable stop a test app mounted, once it is drawn.
+fn wait_for_focus_stop(
+    surface: &Rc<crate::surface::Surface>,
+    cx: &mut VisualTestContext,
+) -> crate::view::NshView {
+    fn find(view: &crate::view::NshView) -> Option<crate::view::NshView> {
+        if view.state().props.focusable == Some(true) {
+            return Some(view.clone());
+        }
+        view.child_views()
+            .into_iter()
+            .find_map(|child| find(&child))
+    }
+    let start = Instant::now();
+    loop {
+        cx.run_until_parked();
+        if let Some(stop) = find(&surface.root) {
+            return stop;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the focusable view is not drawn"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn a_captured_key_release_is_kept_from_the_window(cx: &mut TestAppContext) {
+    let (view, cx) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(cx, |view, _| {
+        view.load(App::Rust(Root::of::<captured_keys::CapturedKeys>()))
+    });
+    // The window's focus on the surface, as its own keys reach it.
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    let surface = view.read_with(cx, |view, _| view.surface().clone());
+    let stop = wait_for_focus_stop(&surface, cx);
+    view.update(cx, |_, cx| {
+        crate::key_focus::focus(&surface, &stop);
+        crate::rt::flush(cx);
+    });
+    cx.run_until_parked();
+    let release = || gpui::KeyUpEvent {
+        keystroke: gpui::Keystroke::parse("a").unwrap(),
+    };
+    // The focus captures every key: the release is kept from the window's
+    // other handlers, as a captured press is.
+    let captured =
+        cx.update(|window, cx| window.dispatch_event(gpui::PlatformInput::KeyUp(release()), cx));
+    assert!(
+        !captured.propagate,
+        "a captured release reached the window's handlers"
+    );
+    assert!(
+        captured.default_prevented,
+        "a captured release ran the window's default"
+    );
+    // A captured press is kept the same way, through the path both share.
+    let pressed = cx.update(|window, cx| {
+        window.dispatch_event(
+            gpui::PlatformInput::KeyDown(gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke::parse("a").unwrap(),
+                is_held: false,
+                prefer_character_input: false,
+            }),
+            cx,
+        )
+    });
+    assert!(
+        !pressed.propagate,
+        "a captured press reached the window's handlers"
+    );
+    assert!(pressed.default_prevented);
+    // Without the focus the same release is the window's.
+    crate::key_focus::clear(&surface);
+    cx.run_until_parked();
+    let plain =
+        cx.update(|window, cx| window.dispatch_event(gpui::PlatformInput::KeyUp(release()), cx));
+    assert!(plain.propagate);
+    assert!(!plain.default_prevented);
 }
 
 fn compositions_are_reported_and_hold_values_until_they_end(cx: &mut TestAppContext) {

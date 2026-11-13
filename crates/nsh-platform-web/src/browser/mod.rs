@@ -26,6 +26,23 @@ use std::{cell::RefCell, rc::Rc};
 use nsh_core::{element::JsHost, js::host::HostInput};
 use values::{EXCEPTION, Value};
 
+thread_local! {
+    /// The page runs on an Apple platform, as its last environment said:
+    /// `mod` in keystrokes is Command there.
+    static APPLE_KEYBOARD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Records the page's keyboard conventions (its environment's
+/// `appleKeyboard`), for `captureKeys` decoding.
+pub(crate) fn set_apple_keyboard(apple: bool) {
+    APPLE_KEYBOARD.with(|apple_keyboard| apple_keyboard.set(apple));
+}
+
+/// Whether the page's keyboard conventions are Apple's (`mod` is Command).
+pub(crate) fn apple_keyboard() -> bool {
+    APPLE_KEYBOARD.with(std::cell::Cell::get)
+}
+
 struct Runtime {
     reactive: Rc<reactive::Runtime>,
     modules: modules::Modules,

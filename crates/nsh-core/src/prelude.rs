@@ -87,6 +87,8 @@ pub use crate::element::{
     JsError,
     JsObject,
     JsValue,
+    KeyCapture,
+    KeyEvent,
     // Scrolling and lists.
     KeyboardAppearance,
     KeyboardDismissMode,
