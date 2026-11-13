@@ -630,6 +630,19 @@ impl InputConfig {
             None => SubmitBehavior::Submit,
         }
     }
+
+    /// A password shown as plain text: the input holds a password
+    /// ([`InputConfig::auto_fill`] `current-password` or `new-password`)
+    /// but is not `secure`, as after a "show password" toggle. Platforms
+    /// type it as it is: Android's visible password keyboard, iOS's ASCII
+    /// keyboard, never capitalized, suggested or corrected.
+    pub fn visible_password(&self) -> bool {
+        !self.secure
+            && matches!(
+                self.auto_fill,
+                crate::ops::AutoFill::Password | crate::ops::AutoFill::NewPassword
+            )
+    }
 }
 
 impl Default for InputConfig {
