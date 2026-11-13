@@ -80,10 +80,10 @@ A web view takes the props of a [view](./view.md) (it has no children) plus:
 |---|---|---|---|
 | `onLoadStart` | `.on_load_start` | `WebViewNavigation` | A page started loading. |
 | `onLoad` | `.on_load` | `WebViewNavigation` | A page finished loading. |
-| `onError` | `.on_error` | `{ message, code? }` (`&str`, the message) | Loading failed; `code` is `"ERR_ACCESS_DENIED"` for a page, `html` or `baseUrl` the app's capabilities do not grant, and `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"` where the platform shows no web view (Rust: also `.on_unavailable`, the message). |
+| `onError` | `.on_error` | `{ message, code? }` (`&str`, the message) | Loading failed; `code` is `"ERR_ACCESS_DENIED"` for a page, `html` or `baseUrl` the app's capabilities do not grant, `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"` where the platform shows no web view (Rust: also `.on_unavailable`, the message), and `"ERR_NSH_WEBVIEW_TERMINATED"` when the page's process ended, until `reload()`, `load()` or a new source (Rust: also `.on_process_terminated`). |
 | `onNavigationStateChange` | `.on_navigation_state_change` | `WebViewNavigation` | The URL, title, loading state or history changed. |
 | `onMessage` | `.on_message` | `{ data: string }` (`&str`) | The page called `window.nsh.postMessage(data)`. |
-| `onDownload` | | `WebViewDownload` | A download started, finished or failed (macOS). |
+| `onDownload` | `.on_download` | `WebViewDownload` (`WebDownload`) | A desktop download started, finished or failed. |
 
 `WebViewNavigation` is `{ url, title, loading, canGoBack, canGoForward }`; in Rust `WebNavigation` with `url`, `title`,
 `loading`, `can_go_back` and `can_go_forward`.
@@ -97,12 +97,55 @@ engine](../docs/web-view-and-video.md#when-there-is-no-web-engine)).
 (an attachment, a type the web view does not show, a `download` link) is saved in the app's data directory as
 `downloads/<id>/<filename>`, where `path` points, and the app reads it with `fs/promises`.
 
-On macOS, adding the listener lets any loaded page allowed by the `webview` capability save downloads
-automatically. The app is responsible for its storage budget and for removing completed files from `downloads/`
-when it has finished using them. Removing the web view cancels downloads in progress and removes their partial
-directories. Downloads report through `onDownload`; converting a navigation into a download keeps `onError`
-for actual navigation failures. Filenames have control characters and bidirectional formatting controls removed,
-and long names are shortened to 200 bytes while preserving an extension that fits.
+On macOS, Windows and Linux, adding the listener lets any loaded page allowed by the `webview` capability save
+downloads automatically. The app is responsible for its storage budget and for removing completed files from
+`downloads/` when it has finished using them. Removing the web view cancels downloads in progress and removes
+their partial directories. Downloads report through `onDownload`; converting a navigation into a download keeps
+`onError` for actual navigation failures. Filenames have control characters, path separators and bidirectional
+formatting controls removed, and long names are shortened to 200 bytes while preserving an extension that fits.
+Windows also refuses reserved device names (`CON`, `NUL`, `PRN`, `AUX`, `COM1`-`COM9`, `LPT1`-`LPT9`, their
+superscript forms, and `CONIN$`/`CONOUT$`) and trailing dots or spaces.
+
+### Download destinations in Rust
+
+A Rust host chooses where a download goes by listening for it. Registering
+`.on_download_pending(..)` is the opt-in: with that listener the platform defers every download and writes nothing
+until the app accepts a destination or cancels it. Without it, the automatic behavior above applies. The listener
+receives a `WebDownloadPending` whose `id`, `url` and `filename` match the later `on_download` lifecycle; its
+`accept` and `cancel` methods act on that one download (clones share the same decision, and the handle cannot reach
+another view).
+
+```rust
+use nsh_core::prelude::*;
+use nsh_core::webview::{DownloadDestination, WebDownloadPending};
+
+web_view("https://example.com").on_download_pending(|event: &WebDownloadPending| {
+    let (event, path) = (event.clone(), std::env::temp_dir().join("report.pdf"));
+    spawn(async move {
+        // `PathBuf` refuses an existing file; `DownloadDestination` adds overwrite.
+        let destination = DownloadDestination::new(path).overwrite(false);
+        if let Err(error) = event.accept(destination).await {
+            log::warn!("download destination refused: {error}");
+        }
+    });
+});
+```
+
+`accept` resolves when the platform accepts the destination, not when the transfer finishes (`on_download`
+reports `started`, `finished` or `failed`). A destination must be absolute and in an existing directory; an
+existing file is refused unless `overwrite(true)` was given. Accepted transfers write an owned staging file beside
+the destination and publish it only when they finish, so failure, cancellation and teardown remove only that
+staging file and never an existing or completed file. `cancel()` works before acceptance (nothing is written) and
+while an accepted transfer runs. A decision the app never answers is cancelled after a bounded wait. Unknown,
+duplicate or already-finished decisions answer an error instead of affecting another download. Only the desktops
+report pending downloads; elsewhere a web view never bypasses the app's choice. A `WebDownloadPending::default()`
+did not come from an event, so its `accept` and `cancel` resolve with an error instead of guessing a download.
+
+Registering the handler is also the whole opt-in: there is no download-behavior prop. On a platform that cannot
+defer downloads, the page is kept inert instead of downloading automatically—an empty document with scripts,
+injected scripts and navigation disabled, an error reported, and `load`, `reload`, back/forward,
+`injectJavaScript` and script evaluation refused (evaluation rejects). Removing the handler restores the page and
+automatic downloads.
 
 ## Ref methods
 

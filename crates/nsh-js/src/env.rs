@@ -1,6 +1,7 @@
 //! The surface's environment: one signal per part
 //! (window, safe area, keyboard, color scheme, font scale, screen reader,
 //! reduced motion, pixel ratio, locale, locale settings, lifecycle, the
+//! wake count, the
 //! desktop window's state and the displays)
 //! written when the platform reports a
 //! change, read through read-only accessors; `nsh/device` (`platform`) and
@@ -51,9 +52,12 @@ enum Part {
     WindowState,
     Displays,
     Fps,
+    PerfStats,
+    Shaders,
+    WakeCount,
 }
 
-const PARTS: usize = 15;
+const PARTS: usize = 18;
 
 /// The environment's part of a context's state.
 pub(crate) struct Env {
@@ -190,6 +194,9 @@ pub(crate) fn init(cx: *mut JsContext) {
         } else if i == Part::Fps as usize {
             // No performance monitor until the platform installs one.
             boolean(false)
+        } else if i == Part::PerfStats as usize {
+            // No stats until the monitor measured a second.
+            qjs::JS_NULL
         } else {
             UNDEFINED
         };
@@ -573,6 +580,12 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
     if changed(&|p| p.lifecycle == next.lifecycle) {
         writes.push((Part::Lifecycle, string(cx, next.lifecycle.name())));
     }
+    if changed(&|p| p.wake_count == next.wake_count) {
+        writes.push((Part::WakeCount, number(next.wake_count as f32)));
+    }
+    if changed(&|p| p.shaders == next.shaders) {
+        writes.push((Part::Shaders, boolean(next.shaders)));
+    }
     if changed(&|p| p.window_state == next.window_state) {
         writes.push((
             Part::WindowState,
@@ -627,6 +640,23 @@ pub(crate) fn set_fps_enabled(cx: *mut JsContext, enabled: bool) -> Result<(), (
         env(cx).signals[Part::Fps as usize].get(),
         boolean(enabled),
     );
+    let failed = reactive::finish_value(cx, UNDEFINED);
+    // SAFETY: an inline tag check.
+    if unsafe { qjs::JS_IsException(failed) } {
+        Err(())
+    } else {
+        Ok(())
+    }
+}
+
+/// Takes in what the performance monitor measured last (`perfStats()`):
+/// `None` while it does not measure.
+pub(crate) fn set_perf_stats(
+    cx: *mut JsContext,
+    stats: Option<&nsh_core::platform::PerfStats>,
+) -> Result<(), ()> {
+    let value = stats.map_or(qjs::JS_NULL, |stats| to_js(cx, stats));
+    reactive::set_signal(cx, env(cx).signals[Part::PerfStats as usize].get(), value);
     let failed = reactive::finish_value(cx, UNDEFINED);
     // SAFETY: an inline tag check.
     if unsafe { qjs::JS_IsException(failed) } {
@@ -870,8 +900,9 @@ fn platform(cx: *mut JsContext) -> JsValue {
     )
 }
 
-/// `platform.select(spec)`: this OS's value, else `mobile` / `desktop`,
-/// else `native` (not on the web), else `default`.
+/// `platform.select(spec)`: this platform's name (when built outside NSH),
+/// else its OS, else `mobile` / `desktop`, else `native` (not on the web),
+/// else `default`.
 unsafe extern "C" fn platform_select(
     cx: *mut JsContext,
     _this: JsValue,
@@ -885,12 +916,16 @@ unsafe extern "C" fn platform_select(
     }
     let env = current(cx);
     let kind = if env.desktop() { "desktop" } else { "mobile" };
-    let keys = [env.os.name(), kind, "native", "default"];
-    for key in keys
+    let external = env.platform.filter(|&name| name != env.os.name());
+    let rest = [env.os.name(), kind, "native", "default"];
+    for key in external
         .into_iter()
+        .chain(rest)
         .filter(|k| *k != "native" || env.os != Os::Web)
     {
-        let key = std::ffi::CString::new(key).unwrap_or_default();
+        let Ok(key) = std::ffi::CString::new(key) else {
+            continue;
+        };
         let v = unsafe { qjs::JS_GetPropertyStr(cx, spec, key.as_ptr()) };
         if !unsafe { qjs::JS_IsUndefined(v) } {
             return v;
@@ -934,6 +969,14 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         ),
     ),
     (
+        "perfStats",
+        Export::Value(|cx| accessor(cx, Part::PerfStats)),
+        Ts::value(
+            "What the performance monitor measured over the last second (reactive):\nits frame rate and more, read once a second while it measures\n(`fpsEnabled()`), `null` while it does not and until its first second.",
+            "Accessor<PerfStats | null>",
+        ),
+    ),
+    (
         "fontScale",
         Export::Value(|cx| accessor(cx, Part::FontScale)),
         Ts::value(
@@ -974,11 +1017,27 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         ),
     ),
     (
+        "wakeCount",
+        Export::Value(|cx| accessor(cx, Part::WakeCount)),
+        Ts::value(
+            "How many times the system woke from sleep while the app ran, 0 until\nthe first wake (reactive): an effect that reads it runs again after each\nwake. A sleep may leave `lifecycle()` as it was (a laptop's lid closed\nand opened with the app in front), while network connections and timers\ndid not live through it: check or open them again there. macOS, Windows\nand Linux count wakes; on iOS and Android a sleeping device takes the\napp to the background, which `lifecycle()` reports.",
+            "Accessor<number>",
+        ),
+    ),
+    (
         "platform",
         Export::Value(platform),
         Ts::value(
             "The platform the app runs on, constant while it runs.",
             "PlatformInfo",
+        ),
+    ),
+    (
+        "shadersAvailable",
+        Export::Value(|cx| accessor(cx, Part::Shaders)),
+        Ts::value(
+            "Whether the platform draws shader views (`Shader`, `ShaderEffect`,\n`ShaderTransition`, `ScreenEffect`, `ScreenTransition`) (reactive).\n`false` where the platform was built without a renderer or draws in a\nterminal's cells; elsewhere `true` until the first shader mounts on a\nmachine without a GPU (WebGL 2 in a browser), when it turns `false` for\ngood. Show a shader while it holds and the app's own drawing (a `Canvas`,\nan image) otherwise.",
+            "Accessor<boolean>",
         ),
     ),
 ];
@@ -1000,6 +1059,22 @@ pub(crate) const DEVICE_TYPES: &str = r#"export interface PlatformSelectSpec<T> 
   /** Every platform but the web. */
   native?: T;
   default?: T;
+  /** A platform built outside NSH, by its `platform.name` (`"miniprogram"`, ...). */
+  [platform: string]: T | undefined;
+}
+
+/** What the performance monitor measured over the last second
+ * (`perfStats()`). */
+export interface PerfStats {
+  /** Frames shown per second: display refreshes in which the app changed
+   * something. An idle app reads low, which is not slowness. */
+  readonly fps: number;
+  /** The rate the display refreshes at (Hz), once the monitor saw it
+   * refresh. */
+  readonly refreshRate: number | null;
+  /** The share of recent frames that took longer than one refresh, from 0
+   * to 1 (`0.05` is 5%), as Rust's `dropped` (a `Percentage`) reads it. */
+  readonly dropped: number;
 }
 
 /** The user's locale settings beside the locale (`localeSettings()`). */
@@ -1064,9 +1139,10 @@ export interface PlatformInfo {
   /** The app runs under Mac Catalyst, in the Mac or the iPad idiom
    * (`os` is `"ios"`, `desktop` false). */
   readonly catalyst: boolean;
-  /** The value for this platform: its OS (`ios`, `macos`, `web`, ...),
-   * else `desktop` / `mobile` (by `platform.desktop`), else `native` (not
-   * on the web), else `default`. */
+  /** The value for this platform: its `name` (`"miniprogram"`, ...),
+   * else its OS (`ios`, `macos`, `web`, ...), else `desktop` / `mobile`
+   * (by `platform.desktop`), else `native` (not on the web), else
+   * `default`. */
   select<T>(spec: PlatformSelectSpec<T>): T | undefined;
 }
 "#;

@@ -4,6 +4,30 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Cross-platform keyboard integration (2026-11-12, macOS arm64, debug, upstream `9fd11f836` against the core at
+`c46f72f8c`): one fresh process per version running the same counter command below on the same machine.
+
+| Phase | Before (µs/commit) | After (µs/commit) | Ops | Mount items | Nodes |
+|---|---:|---:|---:|---:|---:|
+| Initial frame | 681 | 744 | 57 | 51 | 21 |
+| Press `+1` | 765 | 918 | 10 | 7 | 24 |
+
+Both runs passed. Ordinary views emitted the same work; these single-run smoke timings are not a speed benchmark.
+Native GTK, AppKit, Android and browser checks separately exercised actual key delivery and capture.
+
+Focused-view keyboard input (Linux x86_64, debug, against `a44d5628b`): one fresh process per version running
+`printf 'await app.press("+1");\n' | target/debug/nsh test examples/counter/App.tsx --trace`.
+The counter has no raw key listeners; its work counts stay unchanged.
+
+| Phase | Before (µs/commit) | After (µs/commit) | Ops | Mount items | Nodes |
+|---|---:|---:|---:|---:|---:|
+| Initial frame | 524 | 507 | 57 | 51 | 21 |
+| Press `+1` | 392 | 568 | 10 | 7 | 24 |
+
+These are single-run smoke timings, not a speed benchmark. Native XTest checks separately cover capture before
+defaults, menu ordering, popup-held releases and NumLock. In the native smoke app, a 1,250 ms key callback left
+the GTK 100 ms timer running (12 ticks); capture never waits for that callback.
+
 Retained RichEditor rows (2026-11-08 audit, Linux x86_64, against `058a745a`; dev/test profile with
 `nsh-core` and `nsh-base` at `opt-level=3`, `ApproxTextEngine`). Editing the visible first paragraph with content
 culling enabled, 80 ASCII characters per paragraph, both Core order checks applied together:
@@ -328,6 +352,9 @@ sends 2631 mount items instead of 2885 (no `ViewProps` set and set back in one c
   it replaced did (0.57ms).
   The native context records into a Rust list (`nsh-js` `canvas.rs`): the same 17 500 calls take ~1.0–1.1ms
   (~1.7ms in the former JS runtime, measured A/B), and 12 of them plus decoding one commit 21–22ms (61ms).
+- `OffscreenCanvas` on Windows: the UI thread records, submits the drawing and its copy, and maps the read-back
+  bitmap once a Direct3D event query polled every timer tick says the GPU is done, so a large image costs it the
+  recording and one copy of its rows, never a wait for the GPU; unpremultiplying and PNG encoding run on a thread.
 
 - Where JS time went in the former JS runtime (release `nsh trace`, which logs `event js` per dispatched event;
   2026-10-16, before the runtime went native): with Solid in JS, the empty app's eval was ~250µs (all of it the
@@ -340,6 +367,37 @@ sends 2631 mount items instead of 2885 (no `ViewProps` set and set back in one c
   `<If>`, a 3-row `<Each>`) on both: bundle 886 B JS / 1.7 KB bytecode vs 14 KB / 19.6 KB, eval ~95µs vs ~390µs, tap
   median ~5µs vs ~14µs in JS, commit ~15µs vs ~22µs. Scrolling a 1000-row `List` (avatar, two texts, a bound color)
   6000 pt: ~77µs vs ~150µs of JS per rebinding frame, commit ~205µs vs ~276µs.
+
+## Views made over frames (all platforms)
+
+A list row bound in the overscan, or a long reply staged into a chat, used to make its whole subtree in one batch:
+hundreds of native views nobody sees yet, created and committed by the platform in one frame (423 views took one 87 ms
+frame on macOS, mostly the Core Animation commit). The core now spreads them (`crates/nsh-core/src/core/pace.rs`):
+
+- once a turn has made 64 views, a view about to be made in a scroll view or a list cell waits, culled as content culling
+  holds views back (laid out, given a frame, made at once by a command for it);
+- after each layout the waiting views that show (their frame meets the viewport of every scroll view and list around
+  them) are made at once, down to their leaves; the rest come in later turns, nearest the viewport first, at most 32
+  views or 4 ms a turn, and the engine asks for a display frame while some wait;
+- content culling's overscan keeps the same budget.
+
+Views not made yet are not in the platform's accessibility tree, as culled content is not: they are out of sight and
+come within a few frames. Selection and select-all read the core's nodes, not native views. Test drivers turn content
+culling off, which turns pacing off, so their steps reach every view. Nothing waits that may show away from its frame
+(sticky, followers, overlays, screens, modals, transformed or animated views), nor anything outside scroll views and
+lists.
+
+Reproduce: `cargo test -p nsh-core --release --lib -- --ignored big_rows_bench --nocapture` (a 480 pt list of rows of
+420 views each, 5 rows bound). Linux x64, release:
+
+| | first batch | later batches | batches |
+|---|---|---|---|
+| before | 2,105 views (4,640 items), core 1.04 ms | none | 1 |
+| after | 100 views (290 items), core 1.02 ms | 32 views each (96 items), core < 25 us | 64 |
+
+Every view in sight is in the first batch in both. The platform's cost is per view made, so at the macOS figure of
+about 0.2 ms a view the first frame goes from about 420 ms of platform work to about 20 ms, and each later one about
+6 ms.
 
 ## Shader pictures on Linux
 
@@ -415,9 +473,14 @@ readback) is not this implementation. Linux `backdropFilter` remains unsupported
 Headless Chromium over CDP, a published package (`nsh package --target web`), 2026-10-28:
 
 - A call from app code into the runtime (a signal read or set, an element made) outside a Wasm entry costs ~1µs
-  however many values the app holds: the weak tracing runs at most every 100ms after the call
-  (`values.js` `schedule`), not inside it. With a full trace per call it cost ~0.11ms at 1 700 retained values and
-  ~1.2ms at 14 400 (a chat of 165 messages of 20 signals each), and a message pushed every second froze the page.
+  however many values the app holds: the weak tracing runs after the call, not inside it, at least 100ms apart
+  and twenty times as long after a run as it took (`values.js` `schedule`, `collectDelay`). With a full trace per
+  call it cost ~0.11ms at 1 700 retained values and ~1.2ms at 14 400 (a chat of 165 messages of 20 signals each),
+  and a message pushed every second froze the page.
+- Typing into a controlled `Input` beside 10 000 rows that each hold a handler, a key every 80ms, 2026-11-11: with
+  accessors keyed by numbers and the accounting spaced by its own cost, the accounting took ~3.65ms per key instead
+  of ~9.4ms and script ~5.4ms instead of ~10.7ms; with the CPU slowed 4×, accounting ~3.6ms instead of ~50.4ms,
+  script ~6.9ms instead of ~65ms, main-thread task time ~20.9ms instead of ~79.5ms per key.
 - The gallery's DataTable demo, quotes ticking every 33ms and no scroll, 10s: the rows are read a row per call
   (`JsHost::primitives`, op 49), ~220 000 value calls in 3s instead of ~8.7 million (a cell took five), script
   ~2.65s instead of ~3.86s, main thread ~4.7s instead of ~5.95s, garbage collection ~52ms instead of ~162ms.
@@ -598,7 +661,36 @@ draw a panel.
   on the main thread (18 ms of every frame: ~190 new drawings a second). After: no cap in NSH's windows, canvases
   rasterized on two workers and only what animates in place (`canvas.rs`).
 
-The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so debug timings are meaningful too; release uses fat LTO.
+  Canvas animated argument batches (`canvas.rs`, 2026-11-12, Linux x86_64, Ryzen 9 7950X, against
+  `9fd11f83`): the before / after setters and unchanged `DamageScan`, extracted into an isolated harness.
+  Rust 1.99.1, opt-level 3, fat LTO, one codegen unit, pinned to CPU 2, no concurrent builds; four warmup
+  updates, three processes with seven alternating pairs each, medians of all 21 samples per implementation:
+
+  | Static path points | Changed slots | Argument update, before → after |
+  |---|---|---|
+  | 0 | 64 | 16.157 → 1.311 µs |
+  | 400 | 64 | 272.069 → 5.407 µs |
+  | 4,000 | 8 | 316.143 → 41.026 µs |
+  | 4,000 | 32 | 1,263.803 → 41.492 µs |
+  | 4,000 | 64 | 2,526.364 → 42.080 µs |
+  | 4,000 | 256 | 10,262.553 → 46.824 µs |
+
+  A canvas's animated values are applied together: at most two whole-drawing damage scans and one
+  `view.changed()`, instead of up to two scans and one call per changed slot. Changed-slot storage is reused;
+  one changed slot keeps a scalar predicate. Controls with one slot and 0 / 400 / 4,000 static points take
+  0.0566 / 4.048 / 39.514 → 0.0563 / 3.986 / 39.279 µs (medians within 1.6%). The harness includes input
+  preparation, state borrowing and slot writes, with a notification counter and supporting type shims. It
+  excludes the actual invalidation walk, rasterization, workers, uploads, GPU work and presentation.
+
+  Headless `nsh test <entry> --trace` (debug, three alternating runs per version): a canvas of 256 animated
+  rectangles after 4,000 static path points keeps 287 ops / 284 mount items / 10 nodes initially, then
+  0 ops / 6 items / 10 nodes and 0 ops / 5 items / 10 nodes when resized to 760×420 and 920×540. Commit
+  medians are 2448 / 185 / 127 → 2490 / 171 / 140 µs. The counter control keeps 57 ops / 51 items / 21 nodes
+  initially and 10 ops / 7 items / 24 nodes after `+1` (395 / 276 → 410 / 305 µs). Every mount item matches
+  between versions. These are smoke checks of unchanged engine work; the optimization is in GPUI's animated
+  argument writes. Native frame-time and process CPU/GPU changes have not been measured.
+
+The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so debug timings are meaningful too; release uses fat LTO (the published distribution thin LTO over 16 codegen units: `docs/dev/tooling.md` "Releases").
 
 - Linux (GTK 4, release; a 1896×1030 window on a 120 Hz headless Hyprland output, NVIDIA; `--fps` readings and the
   host's threads' CPU from `/proc`, 20 s runs). Before = main as of `8ff7b9f6` (GSK's Vulkan renderer, canvases
@@ -647,6 +739,74 @@ The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so de
 
   Drawing each area in a pass of its own (up to 6) was tried first: Stocks' paint only went 2.7 → 2.2 ms, the
   passes each walking the tree and the merged areas covering ~30% of the window.
+
+  Canvas paints that cannot change pixels and slot-indexed canvas damage (`docs/dev/canvas.md` "Partial redraws"),
+  release, base `f0b4659e` (the baseline built from that commit in a detached worktree), i7-14650HX, RTX 4060
+  Laptop GPU, 2560 × 1600 at 240 Hz and 150% scale, a 1200 × 800 point gallery window. Six alternating
+  baseline/new runs per side (`examples/gallery/tools/perf.py --nsh <binary> --only Stocks,Canvas --seconds 4
+  --size 1200x800`, the logs kept by an external collector), each cell the median of the per-second phase means
+  and the nearest-rank p95 of the per-second p95s over the pooled seconds (`n`):
+
+  | Scenario (n before / after) | Phase | Before, mean / p95 | After, mean / p95 |
+  |---|---|---|---|
+  | Stocks idle (18 / 18) | canvas | 0.475 / 2.080 ms | 0.460 / 2.140 ms |
+  | Stocks idle (18 / 18) | paint | 4.350 / 9.010 ms | 4.405 / 9.180 ms |
+  | Stocks scroll (77 / 78) | canvas | 0.480 / 2.300 ms | 0.480 / 2.250 ms |
+  | Stocks scroll (77 / 78) | paint | 4.360 / 9.120 ms | 4.400 / 9.210 ms |
+  | Canvas idle (18 / 18) | canvas | 0.050 / 0.100 ms | 0.050 / 0.070 ms |
+  | Canvas idle (18 / 18) | paint | 0.510 / 0.690 ms | 0.500 / 0.740 ms |
+  | Canvas scroll (26 / 29) | canvas | 0.060 / 0.100 ms | 0.060 / 0.100 ms |
+  | Canvas scroll (26 / 29) | paint | 1.055 / 2.540 ms | 1.030 / 2.620 ms |
+
+  Both gallery demos hold their rate (240 fps in the Canvas demo; Stocks' live feed keeps it at a median 186–189
+  fps both sides) and the phases move within run-to-run noise: the gallery does not draw Flow's comet, the
+  workload this targets (48 strokes per flowing connector, about three quarters of them at alpha zero at a
+  typical step), and the Canvas demo's pulsing ring animates its radius, so its damage keeps the conservative
+  full scans. The flow document is measured after Flow's pin advances. Headless
+  `nsh test examples/gallery/App.tsx --trace` is unchanged: 3174 ops / 3169 mount items / 859 nodes in the first
+  commit and 11 ops / 0 items / 859 nodes in the second, with every item line equal between the binaries (the
+  bundle is 2 110 929 bytes from both). The scripted light and dark screenshots of the gallery's home page are
+  byte-identical between the binaries (SHA-256 `6a3568db…` light, `b24d354d…` dark).
+
+  Off-damage own painting, lazy box geometry and current-frame cache retention (`docs/dev/windows.md`
+  "Partial frames"), release, the same host and a 1200 × 800 point gallery window, base `f0b4659e`
+  (the detached worktree's binary). Three alternating baseline/new runs per side
+  (`examples/gallery/tools/perf.py --nsh <binary> --only Stocks,Canvas --seconds 4 --size
+  1200x800`, the logs kept by an external collector); `n` is the pooled seconds, each cell the median
+  of the per-second means and the nearest-rank p95 of the per-second p95s:
+
+  | Scenario (n before / after) | Phase | Before, mean / p50 / p95 | After, mean / p50 / p95 |
+  |---|---|---|---|
+  | Home idle (9 / 9) | paint | 4.40 / 3.60 / 7.79 ms | 3.16 / 2.55 / 7.01 ms |
+  | Home idle (9 / 9) | canvas | 0.47 / 0.24 / 2.20 ms | 0.37 / 0.23 / 1.51 ms |
+  | Home scroll (40 / 39) | paint | 4.60 / 4.06 / 8.38 ms | 3.66 / 2.73 / 8.77 ms |
+  | Stocks idle (9 / 9) | paint | 4.54 / 3.88 / 9.35 ms | 4.52 / 3.84 / 9.59 ms |
+  | Stocks scroll (41 / 38) | paint | 4.64 / 4.03 / 9.43 ms | 4.13 / 3.44 / 9.10 ms |
+  | Canvas idle (9 / 9) | paint | 0.52 / 0.51 / 0.77 ms | 0.45 / 0.44 / 0.60 ms |
+  | Canvas scroll (14 / 14) | paint | 1.07 / 0.57 / 2.69 ms | 1.04 / 0.51 / 2.65 ms |
+
+  The gallery's home index gains the most: its cards are non-clipping parents with children, so an
+  off-damage card no longer paints its background, border and shadow (paint's mean −28% idle, −20%
+  scrolled). Stocks' idle paint barely moves because its pulsing sparklines sit inside every visible
+  card's own box (the card is in damage); scrolling improves its mean by 11%. Frames per second are
+  unchanged or better (Home idle median 191 → 218, Stocks scroll 181 → 195, Canvas 240 both sides)
+  and commits are identical (17 / 18 / 49); CPU readings move by ±10 points between runs and are not
+  used to judge this change. The decoration cache does not reach its 96 MiB limit in the gallery, so
+  current-frame retention is covered by its unit tests rather than these runs. A nine-patch outer
+  shadow was tried and rejected: Direct2D's blur moves its faint outer tail by one alpha unit when
+  the destination shape's extent changes, so sliced pixels cannot equal the whole-box bake (the
+  measurement and the two fixes tried are in `windows.md` "Partial frames"); outer shadows keep the
+  original bake.
+
+  Headless `nsh test examples/gallery/App.tsx --trace` is unchanged: both binaries bundle
+  2 110 929 bytes; 3174 ops / 3169 mount items / 859 nodes in the first commit and 11 ops / 0 items /
+  859 nodes in the second, with every item line identical (only timings differ). The scripted light and
+  dark screenshots of the gallery's home page, the Styles demo (cards and shadows) and the Canvas demo
+  are byte-identical between the binaries: home `6a3568db…` light and `b24d354d…` dark, Styles
+  `ca47dbd1…` / `6e754557…`, Canvas `1d189674…` / `26ebaf3e…`. A resized viewport (777 × 523) is not
+  comparable byte for byte: shots a second apart in one run differ by 17 064 pixels (new binary) and
+  18 093 (baseline) of 965 448, the resized frames keep repainting, so the resize evidence is visual
+  only and the partial-frame BGRA tests cover the drawing.
 
 - Tailwind containing blocks, font-relative lengths and intrinsic text sizes (PR #323 follow-up, Linux,
   debug counter trace against `70254f80`): first commit 656 → 674µs, press commit 313 → 312µs;

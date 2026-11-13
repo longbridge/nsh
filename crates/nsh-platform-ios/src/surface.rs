@@ -394,12 +394,18 @@ impl RootView {
             host: false,
             // UIKit has no screen color sampler.
             screen_color: false,
+            // Drawings replayed into Core Graphics bitmaps
+            // ([`crate::canvas::Offscreen`]).
+            canvas_render: true,
             // The Speech framework fed by the microphone.
             speech: true,
             // The notification center.
             notifications: true,
             // AVAudioEngine and AVPlayer.
             audio: true,
+            web_evaluate: true,
+            // wgpu on Metal, in builds with it, until it finds no GPU.
+            shaders: nsh_engine::shader::LINKED,
             // No file dialogs, file manager or trash (Catalyst included):
             // the default, so the core answers those requests.
             ..Environment::default()
@@ -757,7 +763,7 @@ impl RootView {
             header_heights: header_heights(mtm),
             limits: self.ivars().options.limits,
             ui_sets: crate::ui_sets(),
-            runtime: None,
+            runtime: self.ivars().options.runtime.clone(),
             data_dir: self.ivars().options.data_dir.clone(),
             cache: system_cache(self.ivars().options.cache.clone()),
             storage: self.ivars().options.storage.as_ref().map(|dir| {
@@ -772,6 +778,7 @@ impl RootView {
             speech: None,
             audio: None,
             windows: None,
+            login_item: None,
         };
         // A test session's app: the test's storage, network and trace.
         #[cfg(feature = "dev")]
@@ -871,6 +878,7 @@ fn header_heights(mtm: MainThreadMarker) -> (Points, Points) {
 
 /// Options of a [`Surface`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SurfaceOptions {
     /// Log per-commit timings.
     pub trace: bool,
@@ -878,6 +886,10 @@ pub struct SurfaceOptions {
     pub asset_base: Option<AssetBase>,
     /// The VM limits of the apps it runs.
     pub limits: nsh_engine::Limits,
+    /// The runtime for async tasks; `None` uses NSH's shared runtime.
+    /// The embedding app owns it and must keep it running until the view
+    /// stops. Dropping the view does not shut the runtime down.
+    pub runtime: Option<tokio::runtime::Handle>,
     /// What the embedding app grants the apps it runs at most (`None`: what
     /// each app declares).
     pub granted: Option<nsh_engine::Capabilities>,
@@ -914,6 +926,7 @@ impl Default for SurfaceOptions {
             trace: false,
             asset_base: None,
             limits: nsh_engine::Limits::default(),
+            runtime: None,
             granted: None,
             data_dir: data_dir(),
             storage: None,

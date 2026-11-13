@@ -10,7 +10,8 @@
 //! whose [`WindowRef::set`] changes its attributes and whose requests
 //! ([`WindowRef::set_mode`], [`WindowRef::minimize`], ...) the
 //! platform carries out, reporting what happened in
-//! [`WindowRef::state`]. [`quit`] and [`restart`] are `Application`'s.
+//! [`WindowRef::state`]. [`quit`], [`restart`], [`launch_at_login`] and
+//! [`set_launch_at_login`] are `Application`'s.
 //!
 //! A custom title bar hides the system's (`TitleBarOptions` with
 //! [`TitleBarStyle::Hidden`](crate::desktop::TitleBarStyle::Hidden)),
@@ -54,9 +55,10 @@ use super::{
 use crate::{
     Command, EventKind, EventPayload,
     desktop::{
-        self, CloseReason, DesktopCommand, Display, DisplayId, MenuAction, MenuBarMode, MenuRole,
-        Shortcut, WindowAttributes, WindowCloseCause, WindowEvent, WindowFrame, WindowKind,
-        WindowMode, WindowOptions, WindowPlacement, WindowPosition, WindowRequest, WindowState,
+        self, CloseReason, DesktopCommand, Display, DisplayId, LaunchAtLoginError, MenuAction,
+        MenuBarMode, MenuRole, Shortcut, TrayTitlePlacement, TrayTitleRun, WindowAttributes,
+        WindowCloseCause, WindowEvent, WindowFrame, WindowKind, WindowMode, WindowOptions,
+        WindowPlacement, WindowPosition, WindowRequest, WindowState,
     },
     geometry::{Bounds, Edges, Point, Points, Size},
     keymap::When,
@@ -700,6 +702,8 @@ impl IntoElement for Window {
                                 }
                             }
                             WindowEvent::Closed { cause } => close(*cause),
+                            // The root's ([`Core`](crate::Core) hears it).
+                            WindowEvent::QuitRequest => {}
                         }
                     }),
                 ));
@@ -932,14 +936,96 @@ impl super::Component for OpenedWindowsHost {
 /// its windows close and the engine stops as when the last window closes
 /// (an embedding app's close handling runs as it does for the Quit item),
 /// then the app's run ends, also when closing the window alone would leave
-/// it running (a window kept hidden for the Dock, a tray icon). As with the
-/// Quit item, the app cannot cancel it; a GPUI host that owns the window is
-/// asked first and quits when it is ready. For a menu item or a button of
+/// it running (a window kept hidden for the Dock, a tray icon). It quits
+/// whether or not the app listens to quit requests ([`on_quit_request`]):
+/// that is how an app that asks first quits once it is ready; a GPUI host
+/// that owns the window is asked first and quits when it is ready. For a
+/// menu item or a button of
 /// the app's own that quits, and for restarting after an update. A view
 /// embedded in another app leaves the app's lifecycle to that app. On
 /// platforms without desktop windows this has no effect.
 pub fn quit() {
     super::desktop_command(DesktopCommand::Quit);
+}
+
+pub use super::quit::QUIT_TIMEOUT;
+
+/// Runs `f` as the app quits, for its cleanup (TS: `Application.on("quit",
+/// …)`), as GPUI's `App::on_app_quit`: saving what it keeps, closing a
+/// connection. It cannot keep the app running; an app that asks first
+/// listens to quit requests ([`on_quit_request`]). It runs when the app
+/// stops: its Quit
+/// item and [`quit`], its last window closing, the system ending it
+/// (logging out), a host app removing its view. The engine waits for the
+/// futures it returns [`QUIT_TIMEOUT`] at most, together, and while it
+/// waits the platform does: keep it short. Removed with the current owner.
+///
+/// ```ignore
+/// on_app_quit(move || {
+///     let draft = draft.get_untracked();
+///     async move { save_draft(draft).await }
+/// });
+/// ```
+pub fn on_app_quit<F>(f: impl FnMut() -> F + 'static)
+where
+    F: std::future::Future<Output = ()> + 'static,
+{
+    let owner = Owner::current();
+    let f = RefCell::new(f);
+    let listener: super::quit::QuitListener = Rc::new(move || {
+        let future = owner.run(|| (f.borrow_mut())());
+        super::ambient::owned(owner, future)
+    });
+    let subscription = add_quit_listener(listener);
+    cleanup(move || drop(subscription));
+}
+
+/// Runs `f` each time the user asks to quit the app (TS:
+/// `Application.on("quitRequest", …)`), as AppKit's
+/// `applicationShouldTerminate:`: while one is registered, the app's Quit
+/// item and the platform's quit key (Command-Q, Ctrl+Q) no longer quit, and
+/// the app decides: it asks the user, saves, or waits for work to finish,
+/// then calls [`quit`]. Without one they quit as before. The system ending
+/// the app (logging out, shutting down) never asks: [`on_app_quit`] runs
+/// then. Standalone apps on macOS, Windows and Linux; a view embedded in
+/// another app leaves the app's lifecycle to that app. Removed with the
+/// current owner.
+///
+/// ```ignore
+/// on_quit_request(move || {
+///     if busy.get_untracked() {
+///         confirm_quit.set(true);
+///     } else {
+///         quit();
+///     }
+/// });
+/// ```
+pub fn on_quit_request(f: impl Fn() + 'static) {
+    let owner = Owner::current();
+    let listener: super::quit::QuitRequestListener = Rc::new(move || owner.run(&f));
+    let subscription = add_quit_request_listener(listener);
+    cleanup(move || drop(subscription));
+}
+
+/// Adds `listener` to what hears the user ask to quit, until the
+/// subscription drops (`Application.on("quitRequest")` keeps one per JS
+/// listener).
+pub(crate) fn add_quit_request_listener(
+    listener: super::quit::QuitRequestListener,
+) -> super::quit::Subscription<super::quit::QuitRequestListener> {
+    let requests = &super::ambient::executor().quit_requests;
+    let id = requests.borrow_mut().add(listener);
+    super::quit::Subscription::new(requests, id)
+}
+
+/// Adds `listener` to what runs as the app quits, until the subscription
+/// drops (`Application.on("quit")` keeps one while the VM lasts).
+pub(crate) fn add_quit_listener(
+    listener: super::quit::QuitListener,
+) -> super::quit::QuitSubscription {
+    let quit = &super::ambient::executor().quit;
+    let id = quit.borrow_mut().add(listener);
+    super::quit::QuitSubscription::new(quit, id)
 }
 
 /// Restarts the app (TS: `Application.restart`): it quits as [`quit`]
@@ -951,6 +1037,41 @@ pub fn quit() {
 /// that app, and on other platforms this has no effect.
 pub fn restart() {
     super::desktop_command(DesktopCommand::Restart);
+}
+
+/// Whether the system opens the app when the user logs in (TS:
+/// `Application.launchAtLogin()`), as the system has it now: ask again when
+/// the app shows it, as the user may change it in the system's settings.
+/// To await in a task. `false` wherever the app cannot launch at login (a
+/// view embedded in another app, `nsh run`, iOS, Android, the web), while
+/// macOS waits for the user to approve it in Login Items, and when the
+/// system cannot be read (logged). On macOS it is the app's bundle id's, the
+/// same for every copy of the app; on Windows and Linux it is this copy's.
+pub fn launch_at_login() -> impl Future<Output = bool> + 'static {
+    let answer = super::login_item_request(None);
+    async move {
+        answer.await.unwrap_or_else(|error| {
+            log::warn!("{error}");
+            false
+        })
+    }
+}
+
+/// Turns launching at login on or off (TS:
+/// `Application.setLaunchAtLogin(enabled)`): turning on what is on and off
+/// what is off succeed. Call it when the user turns the app's own setting on
+/// or off, never on the app's own (at every start, say): what the user
+/// chose in the system's settings stands. The changes run in the order the
+/// app makes them. On macOS the system may then wait for the user's
+/// approval, and [`launch_at_login`] reads `false` until they give it.
+/// Fails with [`LaunchAtLoginError::Unavailable`] where the app cannot
+/// launch at login and with the system's error when it refuses.
+pub fn set_launch_at_login(
+    enabled: bool,
+) -> impl Future<Output = Result<(), LaunchAtLoginError>> + 'static {
+    // Asked now, so the changes keep the order of the calls.
+    let answer = super::login_item_request(Some(enabled));
+    async move { answer.await.map(|_| ()) }
 }
 
 /// An item of a menu (TS: `nsh/desktop`'s `MenuItem`): an item that runs
@@ -975,6 +1096,12 @@ pub struct MenuItem {
     enabled: bool,
     checked: Option<bool>,
     icon: Option<ImageSrc>,
+    /// An SF Symbol name for iOS header menus; see [`Self::symbol`].
+    symbol: Option<String>,
+    /// Destructive on iOS; ignored on the desktops; see [`Self::destructive`].
+    destructive: bool,
+    /// Inline section when this is a submenu; see [`Self::inline`].
+    inline: bool,
     on_select: Option<MenuHandler>,
 }
 
@@ -996,6 +1123,9 @@ impl MenuItem {
             enabled: true,
             checked: None,
             icon: None,
+            symbol: None,
+            destructive: false,
+            inline: false,
             on_select: None,
         }
     }
@@ -1073,9 +1203,34 @@ impl MenuItem {
     /// the color of the menu's text; a bitmap keeps its colors. It loads
     /// off the main thread and shows once it has (one that fails to load
     /// leaves the item without an icon, with a warning). GTK's menus show
-    /// no icons beside labels, and a terminal shows no images.
+    /// no icons beside labels, and a terminal shows no images. For an SF
+    /// Symbol name for iOS header menus, use [`Self::symbol`] instead.
     pub fn icon(mut self, src: impl Into<ImageSrc>) -> Self {
         self.icon = Some(src.into());
+        self
+    }
+
+    /// An SF Symbol name beside its label in iOS header menus; ignored
+    /// elsewhere (including macOS). Takes the place of [`Self::icon`] when
+    /// both are set.
+    pub fn symbol(mut self, name: impl Into<String>) -> Self {
+        self.symbol = Some(name.into());
+        self
+    }
+
+    /// Marks the action destructive: iOS draws it red; the desktops ignore
+    /// it.
+    pub fn destructive(mut self, destructive: bool) -> Self {
+        self.destructive = destructive;
+        self
+    }
+
+    /// An inline section when this is a submenu ([`Self::submenu`]): on
+    /// iOS, `UIMenuOptions.displayInline` with the label as the section
+    /// title; on the desktops, its items between separators, its label
+    /// not shown.
+    pub fn inline(mut self, inline: bool) -> Self {
+        self.inline = inline;
         self
     }
 
@@ -1108,6 +1263,17 @@ impl fmt::Debug for MenuItem {
 
 /// Makes the platform's items of `items`, keeping their handlers (run
 /// under `owner`) in `handlers` with the ids it gives them.
+pub(crate) fn decode_for_header(
+    items: Vec<MenuItem>,
+    mac: bool,
+    owner: &Owner,
+    handlers: &mut Vec<(u32, MenuHandler)>,
+) -> Vec<desktop::MenuItem> {
+    decode(items, mac, owner, handlers)
+}
+
+/// Makes the platform's items of `items`, keeping their handlers (run
+/// under `owner`) in `handlers` with the ids it gives them.
 fn decode(
     items: Vec<MenuItem>,
     mac: bool,
@@ -1124,6 +1290,8 @@ fn decode(
                 enabled: item.enabled,
                 items: decode(items, mac, owner, handlers),
                 icon: item.icon.as_ref().and_then(ImageSrc::menu_icon),
+                symbol: item.symbol,
+                inline: item.inline,
             },
             Kind::Action => {
                 let id = match item.on_select {
@@ -1149,6 +1317,8 @@ fn decode(
                     role: item.role,
                     when: item.when,
                     icon: item.icon.as_ref().and_then(ImageSrc::menu_icon),
+                    symbol: item.symbol,
+                    destructive: item.destructive,
                 })
             }
         })
@@ -1187,7 +1357,12 @@ pub fn set_application_menu(items: impl Into<Option<Vec<MenuItem>>>) {
     };
     let owner = Owner::current();
     let mut handlers = Vec::new();
-    let items = decode(items, super::os() == Os::MacOs, &owner, &mut handlers);
+    let items = desktop::MenuItem::with_inline_expanded(&decode(
+        items,
+        super::os() == Os::MacOs,
+        &owner,
+        &mut handlers,
+    ));
     let generation = {
         let mut m = menus.borrow_mut();
         m.app_generation += 1;
@@ -1237,7 +1412,12 @@ fn popup(items: Vec<MenuItem>, at: Option<Point<Points>>) -> Answer<()> {
     let menus = super::view_menus();
     let owner = Owner::current();
     let mut handlers = Vec::new();
-    let items = decode(items, super::os() == Os::MacOs, &owner, &mut handlers);
+    let items = desktop::MenuItem::with_inline_expanded(&decode(
+        items,
+        super::os() == Os::MacOs,
+        &owner,
+        &mut handlers,
+    ));
     let generation = {
         let mut m = menus.borrow_mut();
         // One context menu at a time: one shown before is closed by now.
@@ -1266,4 +1446,258 @@ fn popup(items: Vec<MenuItem>, at: Option<Point<Points>>) -> Answer<()> {
         at,
     });
     answer
+}
+
+/// A click on the tray's icon ([`Tray::on_click`]; TS: `TrayClickEvent`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct TrayClickEvent {
+    /// The icon's frame on the screen, in points, in the coordinates of
+    /// [`displays`] and [`WindowRef::set_bounds`]: where to place a window
+    /// beside it. `None` when the system does not say where the icon is
+    /// (always on Linux).
+    pub bounds: Option<Bounds<Points>>,
+}
+
+/// The app's icon in the system tray, for [`set_tray`] (TS:
+/// `TrayOptions`): the notification area on Windows, the menu bar's right
+/// side on macOS, a StatusNotifierItem on Linux.
+#[derive(Default)]
+#[must_use = "a tray shows nothing until given to set_tray"]
+pub struct Tray {
+    icon: Option<ImageSrc>,
+    tooltip: String,
+    title: Vec<TrayTitleRun>,
+    title_placement: TrayTitlePlacement,
+    menu: Vec<MenuItem>,
+    on_click: Option<TrayClick>,
+}
+
+type TrayClick = Rc<dyn Fn(&TrayClickEvent)>;
+
+/// A tray icon to give to [`set_tray`]: the app's icon, its name as the
+/// tooltip, no menu.
+pub fn tray() -> Tray {
+    Tray::default()
+}
+
+impl Tray {
+    /// The icon (as [`Image`](super::Image)'s source). Keep it simple and
+    /// square: panels draw it at 16 to 24 pixels. An SVG is a template on
+    /// macOS, drawn in the menu bar's text color; elsewhere it keeps its
+    /// colors. Without one, the app's icon where the system has one.
+    pub fn icon(mut self, src: impl Into<ImageSrc>) -> Self {
+        self.icon = Some(src.into());
+        self
+    }
+
+    /// Shown when the pointer rests on the icon (the app's name without
+    /// it).
+    pub fn tooltip(mut self, tooltip: impl Into<String>) -> Self {
+        self.tooltip = tooltip.into();
+        self
+    }
+
+    /// Text beside the icon, in runs each of its own color: what the app
+    /// keeps in sight (a price, a count). macOS's menu bar shows it in its
+    /// font; Linux's panels that show AppIndicator labels show its text
+    /// right of the icon; Windows' notification area shows the icon alone.
+    ///
+    /// ```ignore
+    /// tray().title([
+    ///     TrayTitleRun::new("AAPL 228.00 "),
+    ///     TrayTitleRun::new("+1.33%").color(rgb(0xd92d20)),
+    /// ])
+    /// ```
+    pub fn title(mut self, runs: impl IntoIterator<Item = TrayTitleRun>) -> Self {
+        self.title = runs.into_iter().collect();
+        self
+    }
+
+    /// Which side of the icon the title shows on (macOS; Linux's panels
+    /// draw it right of the icon).
+    pub fn title_placement(mut self, placement: TrayTitlePlacement) -> Self {
+        self.title_placement = placement;
+        self
+    }
+
+    /// Its menu, opened by a secondary click (and a primary one without
+    /// [`Tray::on_click`]).
+    pub fn menu(mut self, items: impl IntoIterator<Item = MenuItem>) -> Self {
+        self.menu = items.into_iter().collect();
+        self
+    }
+
+    /// Runs when the icon is clicked with the primary button (on Windows,
+    /// Enter or Space on the icon too), with where the icon is.
+    pub fn on_click(mut self, f: impl Fn(&TrayClickEvent) + 'static) -> Self {
+        self.on_click = Some(Rc::new(f));
+        self
+    }
+}
+
+impl fmt::Debug for Tray {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Tray")
+            .field("tooltip", &self.tooltip)
+            .field("title", &self.title)
+            .field("title_placement", &self.title_placement)
+            .field("menu", &self.menu)
+            .field("on_click", &self.on_click.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Shows the app's icon in the system tray, or changes it; `None` removes
+/// it (TS: `Tray.set`). One per app, shared with TS: the last set wins.
+/// Call it again to change it; in an [`effect`] it follows the signals it
+/// reads. Its menu's and click's handlers run while the current owner
+/// lives: the icon stays after it, inert, until it is set again. Nothing
+/// happens off desktops.
+///
+/// ```ignore
+/// set_tray(
+///     tray()
+///         .icon("tray.svg")
+///         .tooltip("Player")
+///         .menu([MenuItem::new("Quit").on_select(quit)])
+///         .on_click(|e| show_popover(e.bounds)),
+/// );
+/// ```
+///
+/// [`effect`]: super::effect
+pub fn set_tray(tray: impl Into<Option<Tray>>) {
+    if !desktop_os() {
+        return;
+    }
+    let menus = super::view_menus();
+    let Some(tray) = tray.into() else {
+        let mut m = menus.borrow_mut();
+        m.tray_generation += 1;
+        let old = (std::mem::take(&mut m.tray), m.tray_click.take());
+        drop(m);
+        drop(old);
+        super::desktop_command(DesktopCommand::SetTray(None));
+        return;
+    };
+    let owner = Owner::current();
+    let mut handlers = Vec::new();
+    let items = decode(tray.menu, super::os() == Os::MacOs, &owner, &mut handlers);
+    let click = tray.on_click.map(|f| {
+        let id = menus.borrow_mut().next_id();
+        let handler: super::menus::TrayClickHandler =
+            Rc::new(move |bounds| owner.run(|| f(&TrayClickEvent { bounds })));
+        (id, handler)
+    });
+    let command = desktop::Tray {
+        icon: tray.icon.as_ref().and_then(ImageSrc::menu_icon),
+        tooltip: tray.tooltip,
+        title: tray.title,
+        title_placement: tray.title_placement,
+        menu: items.into(),
+        click: click.as_ref().map_or(0, |(id, _)| *id),
+    };
+    let generation = {
+        let mut m = menus.borrow_mut();
+        m.tray_generation += 1;
+        let old = (
+            std::mem::replace(&mut m.tray, handlers),
+            std::mem::replace(&mut m.tray_click, click),
+        );
+        let generation = m.tray_generation;
+        drop(m);
+        drop(old);
+        generation
+    };
+    let weak = Rc::downgrade(&menus);
+    cleanup(move || {
+        if let Some(menus) = weak.upgrade() {
+            let mut m = menus.borrow_mut();
+            if m.tray_generation == generation {
+                let old = (std::mem::take(&mut m.tray), m.tray_click.take());
+                drop(m);
+                drop(old);
+            }
+        }
+    });
+    super::desktop_command(DesktopCommand::SetTray(Some(command)));
+}
+
+/// Registers `keystroke` system-wide, heard whichever app has the keyboard
+/// (TS: `GlobalShortcut.register`): `on_press` runs at each press, under
+/// the current owner, until [`unregister_global_shortcut`] or the owner
+/// goes. The keystroke is written as a [`MenuItem::shortcut`]'s
+/// (`"mod+shift+k"`). The answer is whether the system took it: `false`
+/// when another app holds it, or off desktops; it need not be awaited.
+/// Registering a keystroke again replaces its function.
+///
+/// On Linux it goes through the desktop portal
+/// (`org.freedesktop.portal.GlobalShortcuts`): the desktop may ask the
+/// user to confirm it or let them pick another keystroke, and Hyprland
+/// binds it in its own configuration
+/// (`bind = …, global, <app id>:<shortcut>`).
+///
+/// # Panics
+///
+/// When `keystroke` is not one.
+pub fn register_global_shortcut(keystroke: &str, on_press: impl Fn() + 'static) -> Answer<bool> {
+    let shortcut = match Shortcut::parse(keystroke, super::os() == Os::MacOs) {
+        Ok(shortcut) => shortcut,
+        Err(e) => panic!("register_global_shortcut: {e}"),
+    };
+    let (answer, slot) = Answer::new();
+    if !desktop_os() {
+        slot.borrow_mut().deliver(false);
+        return answer;
+    }
+    unregister_where(|g| g.shortcut == shortcut);
+    let menus = super::view_menus();
+    let owner = Owner::current();
+    let id = {
+        let mut m = menus.borrow_mut();
+        let id = m.next_id();
+        m.globals.push(super::menus::Global {
+            id,
+            shortcut,
+            on_press: Rc::new(move || owner.run(&on_press)),
+            registered: Some(slot),
+        });
+        id
+    };
+    cleanup(move || unregister_where(|g| g.id == id));
+    super::desktop_command(DesktopCommand::RegisterGlobalShortcut { id, shortcut });
+    answer
+}
+
+/// Gives back `keystroke`, registered with [`register_global_shortcut`]
+/// (TS: `GlobalShortcut.unregister`). A keystroke that is not one, or not
+/// registered, does nothing.
+pub fn unregister_global_shortcut(keystroke: &str) {
+    if let Ok(shortcut) = Shortcut::parse(keystroke, super::os() == Os::MacOs) {
+        unregister_where(|g| g.shortcut == shortcut);
+    }
+}
+
+/// Gives back every shortcut registered with [`register_global_shortcut`]
+/// (TS: `GlobalShortcut.unregisterAll`).
+pub fn unregister_all_global_shortcuts() {
+    unregister_where(|_| true);
+}
+
+fn unregister_where(remove: impl Fn(&super::menus::Global) -> bool) {
+    let menus = super::view_menus();
+    let removed: Vec<super::menus::Global> = {
+        let mut m = menus.borrow_mut();
+        let (removed, kept) = std::mem::take(&mut m.globals)
+            .into_iter()
+            .partition(&remove);
+        m.globals = kept;
+        removed
+    };
+    for g in removed {
+        if let Some(slot) = g.registered {
+            slot.borrow_mut().deliver(false);
+        }
+        super::desktop_command(DesktopCommand::UnregisterGlobalShortcut(g.id));
+    }
 }

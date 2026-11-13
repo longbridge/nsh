@@ -366,7 +366,13 @@ impl Area {
                 return;
             };
             let Some(view) = c.widget() else { return };
-            if !c.is_focus() && view.root().and_then(|r| r.focus()).as_ref() != Some(&view) {
+            // Its edit menu (a popover, which leaves the window with no
+            // focus widget) keeps it too.
+            let inside = view
+                .root()
+                .and_then(|r| r.focus())
+                .is_none_or(|f| f == view || f.is_ancestor(&view));
+            if !c.is_focus() && !inside {
                 clear(&surface, id);
             }
         });
@@ -699,6 +705,11 @@ fn selected_text(surface: &Surface, id: NodeId) -> Option<(NshView, String)> {
         return None;
     }
     Some((area, text))
+}
+
+/// Whether selectable view `area` has a selection to copy.
+pub(crate) fn has_selection(surface: &Surface, area: &NshView) -> bool {
+    selected_text(surface, area.state().id).is_some()
 }
 
 /// Copies area `id`'s selection to the clipboard.

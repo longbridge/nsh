@@ -12,23 +12,35 @@
 //! conditions). An item with `checked` is checkable (a setting, or one
 //! choice of a group by its `role`): the value is the app's, its indicator
 //! a part that takes the item's state.
+//!
+//! Each level's items are in a scroll view inside its popup, which is held
+//! to the room its overlay is told on its side (`onPosition`'s
+//! `available`), so the core chooses the side at the popup's natural size
+//! and the items scroll past the room rather than run out of the window.
+//! The keys measure where the items are to bring the one they move to into
+//! view and to page by the viewport.
 
 use std::{
     cell::{Cell, RefCell},
+    collections::VecDeque,
     rc::Rc,
     time::Duration,
 };
 
 use nsh_core::{
-    AccessibilityState, Checked, ContextMenuEvent, TouchEvent, TouchPhase,
+    AccessibilityState, Checked, ContextMenuEvent, PointerType, TouchEvent, TouchPhase,
     element::{OrderWatch, Style, watch_order},
     geometry::Axis,
     keymap::When,
+    overlay::OverlayAnchor,
     prelude::*,
 };
 
 use crate::{
-    popup::{OpenChangeReason, OpenState, PopupPresence, SheetMotion, StateLooks, lifecycle},
+    popup::{
+        OpenChangeReason, OpenState, PopupPresence, SheetMotion, StateLooks,
+        bottom_panel_max_height, keyboard_lift, lifecycle,
+    },
     roving::{bar_trigger, leave_bar, popup_bar},
     terminal::{MENU_CHECK, MENU_RADIO, MENU_UNCHECKED, SUBMENU_ARROW, is_terminal, line, rule},
 };
@@ -163,22 +175,28 @@ enum SubmenuKey {
     Leave,
 }
 
-/// Where an arrow key, Home or End moves the focus among a level's items.
+/// Where an arrow key, Home, End, Page Up or Page Down moves the focus
+/// among a level's items.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ItemStep {
     Previous,
     Next,
     First,
     Last,
+    PageUp,
+    PageDown,
 }
 
 /// The keys that move the focus between a level's items, as WAI-ARIA's
-/// menu has them: Up and Down wrap around.
+/// menu has them: Up and Down wrap around; Page Up and Page Down go a
+/// view at a time and stop at the ends, as the desktops' lists do.
 const ITEM_KEYS: &[(&str, bool, ItemStep)] = &[
     ("up", true, ItemStep::Previous),
     ("down", true, ItemStep::Next),
     ("home", false, ItemStep::First),
     ("end", false, ItemStep::Last),
+    ("pageup", true, ItemStep::PageUp),
+    ("pagedown", true, ItemStep::PageDown),
 ];
 
 /// An item of a menu, a submenu's trigger among its menu's items, or a
@@ -255,6 +273,16 @@ impl Rows {
         let at = if end { 1.0 } else { 0.0 };
         self.list
             .scroll_to_index(index as u32, Percentage(at), px(0.0), false);
+        // The rows in view once it scrolled, until the list says: a page
+        // pressed before then pages from there.
+        if let Some((first, last)) = self.visible.get() {
+            let shown = last - first;
+            let first = match end {
+                true => index.saturating_sub(shown),
+                false => index.min(self.len().saturating_sub(shown + 1)),
+            };
+            self.visible.set(Some((first, first + shown)));
+        }
     }
 }
 
@@ -280,12 +308,15 @@ enum Start {
     Outside,
     /// At a place: the one after it (or before it), around the ends.
     At(usize),
+    /// On a place: it comes first.
+    On(usize),
 }
 
 /// One place in a level's walk, as the walk finds it.
 enum Spot {
-    /// An enabled item: focus it (a list's row: brought into view).
-    Focus(ElementRef, Option<(Rc<Rows>, usize)>),
+    /// An enabled item, by key: focus it (a list's row: brought into
+    /// view).
+    Focus(u64, ElementRef, Option<(Rc<Rows>, usize)>),
     /// Disabled, or a list's row made without an item.
     Skip,
     /// A list's row not made yet.
@@ -307,6 +338,24 @@ struct Pending {
 struct Walk {
     parts: Vec<Entry>,
     len: usize,
+    /// Where its items are in its scroll view, measured for a page.
+    geometry: Option<Geometry>,
+}
+
+/// Where a level's items (not a list's rows) are in its scroll view.
+struct Geometry {
+    viewport: f32,
+    /// Each item's top and bottom in the viewport, by key.
+    spans: Vec<(u64, f32, f32)>,
+}
+
+impl Geometry {
+    fn span(&self, key: u64) -> Option<(f32, f32)> {
+        self.spans
+            .iter()
+            .find(|s| s.0 == key)
+            .map(|&(_, top, bottom)| (top, bottom))
+    }
 }
 
 impl Walk {
@@ -353,6 +402,72 @@ impl Walk {
         None
     }
 
+    /// Place `at` is in view: an item wholly in the level's scroll view
+    /// (any item, unmeasured), or a list's row wholly in its viewport.
+    fn shown(&self, at: usize) -> bool {
+        self.part_at(at).is_some_and(|(e, row)| match &e.rows {
+            None => self.span(e).is_none_or(|(top, bottom)| {
+                let viewport = self.geometry.as_ref().map_or(0.0, |g| g.viewport);
+                top >= -0.5 && bottom <= viewport + 0.5
+            }),
+            Some(r) => {
+                matches!(r.visible.get(), Some((first, last)) if (first..=last).contains(&row))
+            }
+        })
+    }
+
+    /// Item `e`'s top and bottom in the level's scroll view, measured.
+    fn span(&self, e: &Entry) -> Option<(f32, f32)> {
+        self.geometry.as_ref()?.span(e.key)
+    }
+
+    /// From item place `first`, out of view, the place a view on (back,
+    /// going `dir` backward): the last of the items after it that fit in
+    /// the viewport with it. `None` for a list's row, or unmeasured.
+    fn page_from(&self, first: usize, dir: Dir) -> Option<usize> {
+        let viewport = self.geometry.as_ref()?.viewport;
+        let span = |at: usize| {
+            let (e, _) = self.part_at(at)?;
+            if e.rows.is_some() {
+                return None;
+            }
+            self.span(e)
+        };
+        let (top, bottom) = span(first)?;
+        let mut target = first;
+        match dir {
+            Dir::Forward => {
+                let limit = top + viewport + 0.5;
+                while span(target + 1).is_some_and(|(_, b)| b <= limit) {
+                    target += 1;
+                }
+            }
+            Dir::Backward => {
+                let limit = bottom - viewport - 0.5;
+                while let Some(at) = target.checked_sub(1)
+                    && span(at).is_some_and(|(t, _)| t >= limit)
+                {
+                    target = at;
+                }
+            }
+        }
+        Some(target)
+    }
+
+    /// The list place `at` is in: the places of its first and last rows,
+    /// and how many rows its viewport shows.
+    fn list_at(&self, at: usize) -> Option<(usize, usize, usize)> {
+        let (entry, row) = self.part_at(at)?;
+        let rows = entry.rows.as_ref()?;
+        let start = at - row;
+        let page = rows
+            .visible
+            .get()
+            .map_or(1, |(first, last)| last + 1 - first)
+            .max(1);
+        Some((start, start + rows.len() - 1, page))
+    }
+
     fn spot(&self, at: usize) -> Spot {
         let Some((entry, row)) = self.part_at(at) else {
             return Spot::Skip;
@@ -360,12 +475,12 @@ impl Walk {
         let Some(rows) = &entry.rows else {
             return match entry.disabled.get_untracked() {
                 true => Spot::Skip,
-                false => Spot::Focus(entry.node, None),
+                false => Spot::Focus(entry.key, entry.node, None),
             };
         };
         match rows.item(row) {
             Some(item) if item.disabled.get_untracked() => Spot::Skip,
-            Some(item) => Spot::Focus(item.node, Some((rows.clone(), row))),
+            Some(item) => Spot::Focus(item.key, item.node, Some((rows.clone(), row))),
             None if rows.made(row) => Spot::Skip,
             None => Spot::Reveal(rows.clone(), row),
         }
@@ -384,6 +499,73 @@ struct Items {
     focused: Signal<Option<u64>>,
     /// A list's row the keys moved to before the list made it.
     pending: Rc<RefCell<Option<Pending>>>,
+    /// The item the pointer last moved over, which it gave the keyboard
+    /// focus, until the keys move on or the pointer leaves it.
+    pointed: Rc<Cell<Option<u64>>>,
+    /// Each open level's scroll view and its offset ([`items_scroll`]).
+    scrolls: Rc<RefCell<Vec<LevelScroll>>>,
+    /// The item the keys last moved the focus to, until it has it: the
+    /// keys pressed before then go on from it, not from the item the
+    /// platform still has focused.
+    cursor: Rc<Cell<Option<u64>>>,
+    /// Key moves under way that measure first (a reveal, a page): the
+    /// keys pressed meanwhile wait in `queued`, so each acts on where the
+    /// one before it left the menu, as the desktops' menus take keys typed
+    /// ahead.
+    busy: Rc<Cell<u32>>,
+    queued: Rc<RefCell<VecDeque<Queued>>>,
+    /// Each item's select, by key, for a Return or Space typed ahead of
+    /// the focus.
+    selects: Rc<RefCell<Vec<(u64, Select)>>>,
+}
+
+/// A key's move waiting for the ones under way.
+type Queued = Box<dyn FnOnce()>;
+
+/// An item's select.
+type Select = Rc<dyn Fn()>;
+
+/// A key move under way: the keys waiting for it go on once it ends.
+struct Busy(Items);
+
+impl Busy {
+    fn new(items: &Items) -> Self {
+        items.busy.set(items.busy.get() + 1);
+        Self(items.clone())
+    }
+}
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        let items = &self.0;
+        items.busy.set(items.busy.get() - 1);
+        while items.busy.get() == 0 {
+            let Some(next) = items.queued.borrow_mut().pop_front() else {
+                break;
+            };
+            next();
+        }
+    }
+}
+
+/// The scroll view a level's items are in, and how far it is scrolled.
+#[derive(Clone)]
+struct LevelScroll {
+    level: u32,
+    view: ElementRef,
+    /// Its offset, as it last reported it (or the keys scrolled it to).
+    offset: Signal<Points>,
+    /// Its offset as it last reported it: where the core measures its
+    /// items, until it reports the scroll the keys asked for.
+    reported: Signal<Points>,
+}
+
+impl LevelScroll {
+    /// How far a measured position is from where it is once the scroll
+    /// the keys asked for is done.
+    fn lag(&self) -> f32 {
+        (self.reported.get_untracked() - self.offset.get_untracked()).0
+    }
 }
 
 impl Items {
@@ -417,6 +599,12 @@ impl Items {
             keyed,
             focused: signal(None),
             pending: Rc::new(RefCell::new(None)),
+            pointed: Rc::new(Cell::new(None)),
+            scrolls: Rc::new(RefCell::new(Vec::new())),
+            cursor: Rc::new(Cell::new(None)),
+            busy: Rc::new(Cell::new(0)),
+            queued: Rc::new(RefCell::new(VecDeque::new())),
+            selects: Rc::new(RefCell::new(Vec::new())),
         };
         *made.borrow_mut() = Some(items.clone());
         items
@@ -464,13 +652,16 @@ impl Items {
             };
             match walk.spot(place) {
                 Spot::Reveal(..) => return,
-                Spot::Focus(node, _) => (p.level, place, p.dir, Err(node)),
+                Spot::Focus(key, node, _) => (p.level, place, p.dir, Err((key, node))),
                 Spot::Skip => (p.level, place, p.dir, Ok(p.budget)),
             }
         };
         self.pending.replace(None);
         match budget {
-            Err(node) => node.focus(),
+            Err((key, node)) => {
+                self.cursor.set(Some(key));
+                node.focus();
+            }
             Ok(budget) => {
                 self.walk_from(level, Start::At(place), dir, budget);
             }
@@ -490,7 +681,11 @@ impl Items {
             .iter()
             .map(|e| e.rows.as_ref().map_or(1, |r| r.len()))
             .sum();
-        Walk { parts, len }
+        Walk {
+            parts,
+            len,
+            geometry: None,
+        }
     }
 
     /// Moves the focus to the first enabled item of level `level` from
@@ -498,6 +693,8 @@ impl Items {
     /// `budget` places. A list's row not made yet is scrolled to and
     /// focused once made ([`Self::reveal_pending`]). Whether it found one.
     fn walk_from(&self, level: u32, from: Start, dir: Dir, budget: usize) -> bool {
+        // The keys move on: the item the pointer is on is no longer theirs.
+        self.pointed.set(None);
         let walk = self.walk(level);
         let n = walk.len;
         if n == 0 {
@@ -511,14 +708,17 @@ impl Items {
             (Start::Outside, Dir::Forward) => 0,
             (Start::Outside, Dir::Backward) => n - 1,
             (Start::At(at), _) => next(at.min(n - 1)),
+            (Start::On(at), _) => at.min(n - 1),
         };
         let budget = budget.min(n);
         for looked in 1..=budget {
             match walk.spot(at) {
-                Spot::Focus(node, row) => {
-                    if let Some((rows, index)) = row {
-                        rows.bring(index, dir);
+                Spot::Focus(key, node, row) => {
+                    match row {
+                        Some((rows, index)) => rows.bring(index, dir),
+                        None => self.reveal(level, node),
                     }
+                    self.cursor.set(Some(key));
                     node.focus();
                     return true;
                 }
@@ -538,6 +738,130 @@ impl Items {
             at = next(at);
         }
         false
+    }
+
+    /// Adds level `level`'s scroll view, forgotten when the current owner
+    /// (the level's popup or sheet) ends.
+    fn add_scroll(
+        &self,
+        level: u32,
+        view: ElementRef,
+        offset: Signal<Points>,
+        reported: Signal<Points>,
+    ) {
+        self.scrolls.borrow_mut().push(LevelScroll {
+            level,
+            view,
+            offset,
+            reported,
+        });
+        let scrolls = self.scrolls.clone();
+        cleanup(move || scrolls.borrow_mut().retain(|s| s.view != view));
+    }
+
+    /// Scrolls item `node` of level `level` into its scroll view, the keys
+    /// having moved to it: the platforms bring only a focused text field
+    /// into view, and a menu held to its room scrolls its items past it.
+    /// The pointer's focus never scrolls (it is on an item it sees).
+    ///
+    /// Measured where the core has the items, which is behind a scroll
+    /// the keys asked for and the platform has not reported yet: the
+    /// positions are taken back to that scroll ([`LevelScroll::lag`]),
+    /// and the keys pressed meanwhile wait for it ([`Busy`]).
+    fn reveal(&self, level: u32, node: ElementRef) {
+        let Some(scroll) = self.scroll_of(level) else {
+            return;
+        };
+        let last = self
+            .walk(level)
+            .parts
+            .last()
+            .map(|e| e.rows.as_ref().map_or(e.node, |r| r.list));
+        let busy = Busy::new(self);
+        spawn(async move {
+            let _busy = busy;
+            let LevelScroll { view, offset, .. } = scroll;
+            let (item, port) = (node.measure(), view.measure());
+            let end = last.map(|n| n.measure());
+            let (Some(item), Some(port)) = (item.await, port.await) else {
+                return;
+            };
+            let end = match end {
+                Some(end) => end.await,
+                None => None,
+            };
+            let lag = scroll.lag();
+            let start = (item.page.y - port.page.y).0 + lag;
+            let viewport = port.frame.size.height.0;
+            let delta = nsh_core::scroll::reveal_delta(
+                Points(start),
+                Points(start + item.frame.size.height.0),
+                port.frame.size.height,
+            );
+            if delta.0.abs() >= 0.5 {
+                // No further than the content goes (its last item's end).
+                let most = end.map_or(f32::INFINITY, |e| {
+                    let bottom = (e.page.y - port.page.y).0 + lag + e.frame.size.height.0;
+                    (offset.get_untracked().0 + bottom - viewport).max(0.0)
+                });
+                let to = Points((offset.get_untracked().0 + delta.0).clamp(0.0, most));
+                offset.set(to);
+                view.scroll_to(point(px(0.0), to), false);
+            }
+        });
+    }
+
+    /// Level `level`'s scroll view, while it is open.
+    fn scroll_of(&self, level: u32) -> Option<LevelScroll> {
+        self.scrolls
+            .borrow()
+            .iter()
+            .rev()
+            .find(|s| s.level == level)
+            .cloned()
+    }
+
+    /// Page Down or Page Up in level `level` ([`Self::page`]), from where
+    /// its items are in its scroll view: measured first, a page is what the
+    /// viewport shows.
+    fn page_in_view(&self, level: u32, place: Option<usize>, dir: Dir) {
+        let walk = self.walk(level);
+        let Some(scroll) = self.scroll_of(level) else {
+            return self.page(level, &walk, place, dir);
+        };
+        let view = scroll.view;
+        let items = self.clone();
+        let busy = Busy::new(self);
+        spawn(async move {
+            let _busy = busy;
+            let port = view.measure();
+            let spans: Vec<_> = walk
+                .parts
+                .iter()
+                .filter(|e| e.rows.is_none())
+                .map(|e| (e.key, e.node.measure()))
+                .collect();
+            let Some(port) = port.await else {
+                return items.page(level, &walk, place, dir);
+            };
+            let mut measured = Vec::with_capacity(spans.len());
+            // Where they are once the scroll the keys asked for is done.
+            let lag = scroll.lag();
+            for (key, span) in spans {
+                if let Some(m) = span.await {
+                    let top = (m.page.y - port.page.y).0 + lag;
+                    measured.push((key, top, top + m.frame.size.height.0));
+                }
+            }
+            let walk = Walk {
+                geometry: Some(Geometry {
+                    viewport: port.frame.size.height.0,
+                    spans: measured,
+                }),
+                ..walk
+            };
+            items.page(level, &walk, place, dir);
+        });
     }
 
     /// Focuses the first enabled item of submenu `level` once its items
@@ -622,18 +946,100 @@ impl Items {
         })
     }
 
-    /// Moves the focus from item `key` to the enabled item of its level
-    /// that `step` names.
+    /// Moves the focus from item `key` (or the one the pointer moved to
+    /// since, whose focus may still be on its way) to the enabled item of
+    /// its level that `step` names.
     fn step(&self, key: u64, step: ItemStep) {
-        if let Some(level) = self.level_of(key) {
-            self.step_in(level, Some(key), step);
+        self.in_turn(move |items| {
+            let key = items.moved_to().unwrap_or(key);
+            if let Some(level) = items.level_of(key) {
+                items.step_in(level, Some(key), step);
+            }
+        });
+    }
+
+    /// Runs a key's move now, or once the moves under way ended.
+    fn in_turn(&self, run: impl FnOnce(&Items) + 'static) {
+        if self.busy.get() == 0 {
+            return run(self);
+        }
+        let items = self.clone();
+        self.queued
+            .borrow_mut()
+            .push_back(Box::new(move || run(&items)));
+    }
+
+    /// The item the keys go on from ahead of the focus: the one the pointer
+    /// is on, or the one the keys moved to whose focus is still on its way.
+    fn moved_to(&self) -> Option<u64> {
+        self.pointed
+            .get()
+            .or(self.cursor.get().filter(|&c| self.level_of(c).is_some()))
+    }
+
+    /// Item `key` was pressed while the keys moved the focus from it, or
+    /// ahead of a move under way: a Return or Space typed ahead, which
+    /// selects the item the keys move to once they are there. Whether it
+    /// took the press.
+    fn press_ahead(&self, key: u64) -> bool {
+        let ahead = self.cursor.get().is_some_and(|c| c != key);
+        if self.busy.get() == 0 && !ahead {
+            return false;
+        }
+        self.in_turn(move |items| {
+            let to = items.cursor.get().unwrap_or(key);
+            let select = items
+                .selects
+                .borrow()
+                .iter()
+                .find(|s| s.0 == to)
+                .map(|s| s.1.clone());
+            if let Some(select) = select {
+                select();
+            }
+        });
+        true
+    }
+
+    /// Adds item `key`'s select, forgotten when the current owner ends.
+    fn add_select(&self, key: u64, select: Rc<dyn Fn()>) {
+        self.selects.borrow_mut().push((key, select));
+        let selects = self.selects.clone();
+        cleanup(move || selects.borrow_mut().retain(|s| s.0 != key));
+    }
+
+    /// The pointer moved over item `key`, enabled: it takes the keyboard
+    /// focus, as the desktops' menus highlight one item for the pointer
+    /// and the keys alike, so the keys go on from it. A move, not the
+    /// pointer coming over it: a list scrolled under a still pointer
+    /// leaves the focus where the keys put it.
+    fn point(&self, key: u64, node: ElementRef) {
+        self.pending.replace(None);
+        self.cursor.set(None);
+        self.keyed.replace(None);
+        self.pointed.set(Some(key));
+        if self.focused.get_untracked() != Some(key) {
+            node.focus();
+        }
+    }
+
+    /// The pointer left item `key`: the focus it gave the item goes with
+    /// it, as the desktops' menus show no item highlighted then.
+    fn unpoint(&self, key: u64, node: ElementRef) {
+        if self.pointed.get() != Some(key) {
+            return;
+        }
+        self.pointed.set(None);
+        if self.focused.get_untracked() == Some(key) {
+            node.blur();
         }
     }
 
     /// Moves the focus to the enabled item of submenu `level` that `step`
-    /// names from item `key`, or from none: Down and Home go to the first,
-    /// Up and End to the last. A list's rows count one by one, made or
-    /// not.
+    /// names from item `key`, or from none: Down and Home go to the
+    /// first, Up and End to the last, Page Down and Page Up a page from
+    /// the start or the end ([`Self::page`]). A list's rows count one by
+    /// one, made or not.
     fn step_in(&self, level: u32, key: Option<u64>, step: ItemStep) {
         // A row the keys are still waiting for counts as reached, so keys
         // pressed faster than the list makes rows each move on one.
@@ -652,42 +1058,108 @@ impl Items {
             (ItemStep::Previous, None) => (Start::Outside, Dir::Backward),
             (ItemStep::Next, Some(at)) => (Start::At(at), Dir::Forward),
             (ItemStep::Previous, Some(at)) => (Start::At(at), Dir::Backward),
+            (ItemStep::PageDown, _) => return self.page_in_view(level, place, Dir::Forward),
+            (ItemStep::PageUp, _) => return self.page_in_view(level, place, Dir::Backward),
         };
         self.walk_from(level, from, dir, usize::MAX);
+    }
+
+    /// Page Down (or Page Up, going `dir` backward) from place `place` of
+    /// level `level`, or from outside its items: to the last enabled item
+    /// of the ones in view after it (the first, before it), as the
+    /// desktops' lists page. With the next place out of view, a view on:
+    /// an item the level's scroll view holds, the last of the items that
+    /// fit in its viewport with it (scrolled into view as it is focused);
+    /// a list's row, the row a view of the list on (the list scrolls to
+    /// it). The focus goes to the enabled one nearest it, back toward
+    /// `place`. It stops at the ends.
+    fn page(&self, level: u32, walk: &Walk, place: Option<usize>, dir: Dir) {
+        let n = walk.len;
+        let first = match (dir, place) {
+            (Dir::Forward, None) => Some(0),
+            (Dir::Forward, Some(at)) => Some(at + 1),
+            (Dir::Backward, None) => n.checked_sub(1),
+            (Dir::Backward, Some(at)) => at.checked_sub(1),
+        };
+        let Some(first) = first.filter(|&at| at < n) else {
+            return;
+        };
+        let on = |at: usize| match dir {
+            Dir::Forward => Some(at + 1).filter(|&next| next < n),
+            Dir::Backward => at.checked_sub(1),
+        };
+        let target = if walk.shown(first) {
+            // The places in view from it on, items and rows alike.
+            let mut target = first;
+            while let Some(next) = on(target).filter(|&next| walk.shown(next)) {
+                target = next;
+            }
+            target
+        } else if let Some(target) = walk.page_from(first, dir) {
+            // An item the level's scroll view holds out of view.
+            target
+        } else {
+            // A list's row out of view.
+            let Some((start, end, page)) = walk.list_at(first) else {
+                return;
+            };
+            match dir {
+                Dir::Forward => (first + page - 1).min(end),
+                Dir::Backward => first.saturating_sub(page - 1).max(start),
+            }
+        };
+        let back = match dir {
+            Dir::Forward => Dir::Backward,
+            Dir::Backward => Dir::Forward,
+        };
+        self.walk_from(level, Start::On(target), back, target.abs_diff(first) + 1);
     }
 
     /// Binds the keys that move the focus into the menu's items while
     /// `active` and none of them has it (a menu the pointer opened), as
     /// the desktops' menus take them: Down and Home focus the first
-    /// enabled item, Up and End the last. Once an item has the focus, its
-    /// own keys take over.
+    /// enabled item, Up and End the last, Page Down and Page Up a page
+    /// from either end; from the item the pointer is on when its focus is
+    /// still on its way. Once an item has the focus, its own keys take
+    /// over.
     fn bind_entry_keys(&self, active: impl Fn() -> bool + 'static) {
         let (items, current) = (self.clone(), self.focused);
         crate::keys::bind_while(
             move || active() && current.get().is_none(),
             ITEM_KEYS,
-            move |step| items.step_in(0, None, step),
+            move |step| {
+                items.in_turn(move |items| match items.moved_to() {
+                    Some(key) => items.step(key, step),
+                    None => items.step_in(0, None, step),
+                })
+            },
         );
     }
 
-    /// Binds the keys that move the focus from item `key` while `focused`.
-    fn bind_keys(&self, key: u64, focused: Signal<bool>) {
-        let current = self.focused;
+    /// Binds the keys that move the focus from item `key` while `focused`
+    /// and its level is `open` (none on its way out).
+    fn bind_keys(&self, key: u64, focused: Signal<bool>, open: Memo<bool>) {
+        let (current, cursor) = (self.focused, self.cursor.clone());
         effect(move || {
             if focused.get() {
+                // The focus the keys moved here has come.
+                if cursor.get() == Some(key) {
+                    cursor.set(None);
+                }
                 current.set(Some(key));
             } else if current.get_untracked() == Some(key) {
                 current.set(None);
             }
         });
+        // The menu's own state may go before the item.
         cleanup(move || {
-            if current.get_untracked() == Some(key) {
-                current.set(None);
+            if untracked(|| current.try_get()) == Some(Some(key)) {
+                current.try_set(None);
             }
         });
         let items = self.clone();
         crate::keys::bind_while(
-            move || focused.get(),
+            move || focused.get() && open.get(),
             ITEM_KEYS,
             move |step| items.step(key, step),
         );
@@ -718,6 +1190,27 @@ fn close_other_submenu(
         why.stamp(reason);
         open_sub.set(None);
     }
+}
+
+/// Level `level`'s items in a scroll view, which its popup (held to the
+/// room on its side) or sheet (to the window) shrinks: the items scroll
+/// past it instead of running out of the window, as `gpui-component`'s
+/// menu scrolls its items past its `max_h`. The keys bring the item they
+/// focus into view ([`Items::reveal`]).
+fn items_scroll(items: &Items, level: u32, children: Prop<Children>) -> AnyElement {
+    let me = element_ref();
+    let (offset, reported) = (signal(Points::ZERO), signal(Points::ZERO));
+    items.add_scroll(level, me, offset, reported);
+    scroll()
+        .element_ref(&me)
+        .flex_shrink(1.0)
+        .min_h(px(0.0))
+        .on_scroll(move |e: &ScrollEvent| {
+            reported.set(e.offset.y);
+            offset.set(e.offset.y);
+        })
+        .child(children)
+        .into_element()
 }
 
 /// The parts and placement both kinds of menus take.
@@ -755,8 +1248,9 @@ impl Surface {
 #[derive(Clone)]
 enum At {
     Trigger(ElementRef),
-    /// At a point, about the element a closing gives the focus back to.
-    Pointer(Signal<Point<Points>>, ElementRef),
+    /// At a point, about the element a closing gives the focus back to;
+    /// below that element while there is no point (the app opened it).
+    Pointer(Signal<Option<Point<Points>>>, ElementRef),
 }
 
 /// What the user asked of a menu, which its items read: the item an
@@ -811,7 +1305,7 @@ fn surface(
         next: stored(1),
         looks: parts.looks(),
         popup: presence.popup(),
-        items,
+        items: items.clone(),
         leave: None,
         why,
     });
@@ -845,24 +1339,31 @@ fn surface(
     // transitions between its looks.
     let motion = SheetMotion::new(move || sheet && open.get(), || Placement::Bottom);
     // The keyboard focus in a trigger's popup as it closes (Escape, an
-    // item chosen) goes back to the trigger once the popup is gone, as a
-    // select's does: the item it was on goes with the popup.
+    // item chosen) goes back to the trigger as the popup starts to go, as
+    // a select's does: a key pressed during its exit is the trigger's, not
+    // the item's it was on. Not after a press outside, which put the focus
+    // where it pressed.
     let trigger = match &at {
         At::Trigger(anchor) | At::Pointer(_, anchor) if !sheet => Some(*anchor),
         _ => None,
     };
-    let inside = stored(false);
-    let refocus = stored(false);
-    if trigger.is_some() {
-        presence.popup().on_focus_in(move || {
-            inside.replace(true);
-        });
-        presence.popup().on_focus_out(move || {
-            inside.replace(false);
-        });
+    if let Some(anchor) = trigger {
+        presence.focus_back_on_close(
+            move || open.get(),
+            move || {
+                if closed_by.get() != Some(OpenChangeReason::PressOutside) {
+                    anchor.focus();
+                }
+            },
+        );
+    }
+    // Opened again from the keyboard on its way out, it is taken back with
+    // its items still there: no layout comes to focus the one asked for.
+    if !sheet {
+        let items = items.clone();
         effect(move || {
-            if !open.get() {
-                refocus.replace(inside.get());
+            if open.get() && keyed.get().is_some() && presence.mounted_untracked() {
+                untracked(|| items.focus_pending());
             }
         });
     }
@@ -882,14 +1383,7 @@ fn surface(
             },
             move || {
                 closed(MenuEvent::Close);
-                let pressed_outside =
-                    closed_by.replace(None) == Some(OpenChangeReason::PressOutside);
-                if let Some(anchor) = trigger
-                    && refocus.replace(false)
-                    && !pressed_outside
-                {
-                    anchor.focus();
-                }
+                closed_by.replace(None);
             },
         );
     }
@@ -920,25 +1414,34 @@ fn surface(
                 let panel = overlay()
                     .left_0()
                     .right_0()
-                    .bottom_0()
+                    // Above the keyboard, below the status bar, whatever
+                    // the items.
+                    .bottom(move || Length::from(keyboard_lift()))
+                    .max_h(bottom_panel_max_height)
                     .role(AccessibilityRole::Menu)
                     .app_class(parts.popup_class)
                     .inline_style(parts.popup_style)
                     .bind_translate_y(&motion.y)
                     .on_layout(move |frame: &Bounds<Points>| motion.laid_out(frame.size))
                     .on_cancel(cancel.clone())
-                    .child(children);
+                    .child(items_scroll(&items, 0, children));
                 return vec![backdrop.into_element(), panel.into_element()];
             }
             let popup = match &at {
                 At::Trigger(anchor) => overlay().anchor_content(anchor),
-                At::Pointer(point, _) => {
-                    let point = *point;
-                    overlay().anchor_point(move || point.get())
+                At::Pointer(point, anchor) => {
+                    let (point, anchor) = (*point, *anchor);
+                    overlay().anchor_to(move || match point.get() {
+                        Some(p) => OverlayAnchor::Point(p),
+                        None => anchor
+                            .node()
+                            .map_or(OverlayAnchor::None, OverlayAnchor::Content),
+                    })
                 }
             };
             let dismiss = dismiss.clone();
             let placed = placed.clone();
+            let room = signal(None::<Points>);
             let popup = popup
                 .placement(parts.placement)
                 .align(parts.align)
@@ -948,12 +1451,16 @@ fn surface(
                 .element_ref(&presence.popup())
                 .app_class(move || presence.class())
                 .state_inline_style(move || presence.style())
+                // Never past the room on its side: its items scroll. Until
+                // the core says where it went, the window bounds it.
+                .max_h(move || Length::from(room.get().unwrap_or_else(|| window().height)))
                 .on_position(move |p: &OverlayPosition| {
+                    room.set(Some(p.available.height));
                     placed(MenuEvent::Position(p.placement, p.bounds, p.available))
                 })
                 .on_press_outside(move |_: &Point<Points>| dismiss(OpenChangeReason::PressOutside))
                 .on_cancel(cancel.clone())
-                .child(children);
+                .child(items_scroll(&items, 0, children));
             vec![popup.into_element()]
         },
     )
@@ -1052,9 +1559,17 @@ pub enum MenuEvent {
 /// with the keyboard focus on its first enabled item, Up on its last
 /// (WAI-ARIA's menu button); a press opens it with none, and on the
 /// desktops Down or Home then focuses the first, Up or End the last, as
-/// the desktops' menus do. It looks like
-/// nothing: style the popup or sheet with
-/// `popupClass` / `popupStyle`, the backdrop with `backdropClass` /
+/// the desktops' menus do. Page Down and Page Up go to the last and first
+/// enabled items in view, a view at a time, stopping at the ends. On the
+/// desktops the pointer moving over an item gives it the keyboard focus,
+/// so the keys go on from it (its `focus:` styles apply, as `hover:`
+/// ones). The popup (each submenu's too) is never taller than the room on
+/// the side it goes on, nor the sheet than the window below the status
+/// bar: the items scroll inside it, the keys bring the item they move to
+/// into view, and a submenu closes once its trigger scrolls out of view.
+/// It goes on the side where it fits whole. It looks like nothing: style
+/// the popup or sheet with `popupClass` / `popupStyle` (draw the surface
+/// there, around the scrolling items), the backdrop with `backdropClass` /
 /// `backdropStyle`, and the items.
 #[component]
 pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
@@ -1116,6 +1631,7 @@ pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
                     KeyOptions {
                         when: When::NotEditing,
                         repeat: false,
+                        for_focus: true,
                         ..Default::default()
                     },
                     move |_| {
@@ -1184,7 +1700,10 @@ pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct ContextMenuProps {
     /// Open (controlled): the app owns the value and changes it in
-    /// `onOpenChange`. Without it the menu keeps its own state.
+    /// `onOpenChange`. Without it the menu keeps its own state. Set true
+    /// by the app itself (a key of its own, a list with the focus asking
+    /// for its row's menu), it opens as from the keyboard: below the
+    /// trigger with the keyboard focus on its first enabled item.
     pub open: Prop<Option<bool>>,
     /// No menu: the secondary button and held fingers do nothing.
     #[prop(default)]
@@ -1231,11 +1750,15 @@ pub struct ContextMenuProps {
 /// A menu about its trigger: the secondary button (a right click, a
 /// two-finger click) opens it where the pointer is on the desktops; a
 /// finger held on the trigger opens it as a sheet at the bottom of the
-/// screen on phones and tablets. Shift+F10 or the Menu key on the focused
+/// screen on phones and tablets. While it is open, a secondary click on
+/// the trigger opens it again where the pointer is (it reports closing,
+/// then opening); one elsewhere closes it. Shift+F10 or the Menu key on the focused
 /// trigger (the web, Linux) and a screen reader's "show menu" action (VoiceOver's
 /// VO-Shift-M on macOS, UI Automation's `ShowContextMenu` on Windows) open
 /// it below the trigger with the keyboard focus on its first enabled item,
 /// as WAI-ARIA has it, and closing it gives the focus back to the trigger.
+/// So does an opening by the app (`open` set true with no request from
+/// the trigger).
 /// Opened by the pointer with no item focused, Down or Home focus the
 /// first enabled item and Up or End the last, as `Menu`'s keys do.
 /// Its items are those of `Menu`, and so is how it
@@ -1257,8 +1780,21 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
         why.stamp(reason);
         open.request(next, || cx.emit(MenuEvent::OpenChange(next, reason)));
     });
-    let point = signal(Point::<Points>::default());
+    // Where the pointer asked for it; none when the app opened it.
+    let point = signal(None::<Point<Points>>);
     let anchor = element_ref();
+    // Opened by the app itself (a key of its own, a list with the focus
+    // asking for its row's menu) rather than by the trigger: below the
+    // trigger with the first enabled item focused, as from the keyboard.
+    let shown = stored(false);
+    effect(move || {
+        let now = open.get();
+        let before = shown.replace(now);
+        if now && !before && untracked(|| open.opened_by_app()) {
+            point.set(None);
+            keyed.replace(Some(Keyed::First));
+        }
+    });
     let parts = Surface {
         placement: Prop::from(Placement::Bottom),
         align: Prop::from(Align::Start),
@@ -1282,7 +1818,7 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
             trigger
                 .element_ref(&anchor)
                 .on_context_menu(move |e: &ContextMenuEvent| {
-                    point.set(e.page_position);
+                    point.set(Some(e.page_position));
                     // No pointer: the keyboard (Shift+F10, the Menu key) or
                     // an assistive technology, placed at the trigger by the
                     // platform.
@@ -1294,11 +1830,17 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
                 // A held finger opens it on any touch screen, a desktop's
                 // too (a touch laptop, a browser with a mouse and a touch
                 // screen); opening again when the platform also raises a
-                // context menu for the hold changes nothing.
+                // context menu for the hold changes nothing. A held mouse
+                // button, which desktops also report as a touch, is a slow
+                // click or the start of a drag: it opens nothing (the
+                // secondary button does).
                 .on_touch(move |e: &TouchEvent| {
                     let at = e.points.first().map(|p| p.page);
                     match e.phase {
-                        TouchPhase::Start if e.points.len() == 1 => {
+                        TouchPhase::Start
+                            if e.points.len() == 1
+                                && e.points[0].pointer_type != PointerType::Mouse =>
+                        {
                             let on_hold = on_hold.clone();
                             let page = at.unwrap_or_default();
                             let task = set_timeout(HOLD, move || {
@@ -1309,7 +1851,7 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
                                 // styles reset now.
                                 anchor.cancel_press();
                                 keyed.replace(None);
-                                point.set(page);
+                                point.set(Some(page));
                                 on_hold(true, OpenChangeReason::LongPress);
                             });
                             if let Some((old, _)) = hold.replace(Some((task, page))) {
@@ -1418,17 +1960,49 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
     let (checked, disabled) = (props.checked, props.disabled);
     let node = element_ref();
     let focused = signal(false);
-    if let Some(m) = &hover {
+    let key = hover.as_ref().map(|m| {
         let key = m.items.add(node, m.level, disabled);
-        m.items.bind_keys(key, focused);
-    }
+        m.items.bind_keys(key, focused, m.open);
+        key
+    });
+    // Desktops: the pointer moving over it gives it the keyboard focus.
+    let pointer = hover
+        .as_ref()
+        .filter(|m| !m.sheet)
+        .map(|m| m.items.clone())
+        .zip(key);
+    let (moved_over, left) = (pointer.clone(), pointer);
     // In a submenu, Left on the item leaves it for its trigger.
-    if let Some(leave) = hover.as_ref().and_then(|m| m.leave.clone()) {
+    if let Some((leave, open)) = hover
+        .as_ref()
+        .and_then(|m| m.leave.clone().zip(Some(m.open)))
+    {
         crate::keys::bind_while(
-            move || focused.get(),
+            move || focused.get() && open.get(),
             &[("left", false, ())],
             move |()| leave(),
         );
+    }
+    let select: Rc<dyn Fn()> = {
+        let chosen = chosen.clone();
+        let close_on_select = props.close_on_select;
+        Rc::new(move || {
+            // On its way out a menu takes no presses: the pointer's go
+            // through it, and the keyboard's (Return on an item the focus
+            // has not left yet) do nothing.
+            if chosen.as_ref().is_some_and(|m| !m.open.get_untracked()) {
+                return;
+            }
+            cx.emit(MenuItemEvent::Select);
+            if close_on_select.get_untracked()
+                && let Some(m) = &chosen
+            {
+                (m.close)(OpenChangeReason::Select);
+            }
+        })
+    };
+    if let (Some(m), Some(key)) = (&hover, key) {
+        m.items.add_select(key, select.clone());
     }
     let (indicator, children, role) = (props.indicator, props.children, props.role);
     let (indicator_class, indicator_style) = (props.indicator_class, props.indicator_style);
@@ -1523,13 +2097,25 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
                 close_other_submenu(m.open_sub, m.why, None, OpenChangeReason::Hover);
             }
         })
+        .when_some(moved_over, |v, (items, key)| {
+            v.on_mouse_move(move |_: &MouseEvent| {
+                if !disabled.get_untracked() {
+                    items.point(key, node);
+                }
+            })
+        })
+        .when_some(left, |v, (items, key)| {
+            v.on_mouse_leave(move |_: &MouseEvent| items.unpoint(key, node))
+        })
         .on_press(move || {
-            cx.emit(MenuItemEvent::Select);
-            if props.close_on_select.get_untracked()
-                && let Some(m) = &chosen
+            // A Return or Space typed ahead of a key move selects the item
+            // the keys move to.
+            if let (Some(m), Some(key)) = (&chosen, key)
+                && m.items.press_ahead(key)
             {
-                (m.close)(OpenChangeReason::Select);
+                return;
             }
+            select();
         })
         .children(content)
 }
@@ -1579,7 +2165,8 @@ pub struct MenuListProps {
 /// is in, among the items around it: Up, Down, Home and End walk every row
 /// of the list, made or not, scrolling to a row before focusing it and
 /// passing over disabled ones, and go on to the items before and after the
-/// list (a submenu's trigger too). Bound its height with a style (`h`,
+/// list (a submenu's trigger too); Page Down and Page Up scroll it a view
+/// at a time. Bound its height with a style (`h`,
 /// `max_h`); `render_item` draws each row from its index. A row's
 /// `Submenu` closes with its row when the list scrolls the row away and
 /// reuses its cell.
@@ -1683,10 +2270,11 @@ pub enum SubmenuEvent {
 }
 
 /// A menu inside a menu: on the desktops its items are a popup beside its
-/// trigger, opened as the pointer comes over the trigger or presses it; on
-/// touch screens pressing the trigger shows its items in the sheet instead
-/// of the ones around it, with its `back` row first. Its popups take the
-/// menu's `popupClass` / `popupStyle` and its states' looks
+/// trigger, its first item level with the trigger (inside the popup's
+/// padding and border), opened as the pointer comes over the trigger or
+/// presses it; on touch screens pressing the trigger shows its items in
+/// the sheet instead of the ones around it, with its `back` row first. Its
+/// popups take the menu's `popupClass` / `popupStyle` and its states' looks
 /// (`popupStartingClass`, `popupEndingClass`, ...). In a terminal its
 /// trigger is a row that ends with ` ›` ([`crate::terminal`]).
 /// On the desktops and in a terminal, Right, Return or Space on its
@@ -1807,7 +2395,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
     // be open already, from the pointer); Left leaves the submenu the
     // trigger is in.
     let focused = signal(false);
-    menu.items.bind_keys(item_key, focused);
+    menu.items.bind_keys(item_key, focused, around);
     // The keyboard on its trigger closes another submenu of its level
     // that the pointer opened; its own stays as it is.
     let focus_in = move || {
@@ -1817,7 +2405,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
     {
         let (items, up) = (menu.items.clone(), menu.leave.clone());
         crate::keys::bind_while(
-            move || focused.get(),
+            move || focused.get() && around.get(),
             &[
                 ("right", false, SubmenuKey::Enter),
                 ("enter", false, SubmenuKey::Enter),
@@ -1855,6 +2443,20 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
             open_sub.set(None);
         }
     };
+    // The pointer moving over its trigger gives the trigger the keyboard
+    // focus, as over any item of its menu.
+    let pointed = {
+        let items = menu.items.clone();
+        Rc::new(move |_: &MouseEvent| {
+            if !props.disabled.get_untracked() {
+                items.point(item_key, anchor);
+            }
+        })
+    };
+    let unpointed = {
+        let items = menu.items.clone();
+        Rc::new(move |_: &MouseEvent| items.unpoint(item_key, anchor))
+    };
     let trigger = match is_terminal() {
         // The terminal's item: the trigger's content, then ` ›` at the
         // row's end, one item.
@@ -1870,11 +2472,14 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
             .on_focus(focus_in)
             .on_blur(move || focused.set(false))
             .on_mouse_enter(move |_: &MouseEvent| open_by(OpenChangeReason::Hover))
+            .on_mouse_move(move |e: &MouseEvent| pointed(e))
+            .on_mouse_leave(move |e: &MouseEvent| unpointed(e))
             .on_press(move || open_by(OpenChangeReason::TriggerPress))
             .child(props.trigger.place(|t| t.flex_grow(1.0)))
             .child(text(SUBMENU_ARROW).text_color(move || crate::theme::theme().muted_foreground))
             .into_element(),
         false => props.trigger.place(move |t| {
+            let (pointed, unpointed) = (pointed.clone(), unpointed.clone());
             t.element_ref(&anchor)
                 .role(AccessibilityRole::Menuitem)
                 .accessibility_state(move || AccessibilityState {
@@ -1885,14 +2490,47 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
                 .on_focus(focus_in)
                 .on_blur(move || focused.set(false))
                 .on_mouse_enter(move |_: &MouseEvent| open_by(OpenChangeReason::Hover))
+                .on_mouse_move(move |e: &MouseEvent| pointed(e))
+                .on_mouse_leave(move |e: &MouseEvent| unpointed(e))
                 .on_press(move || open_by(OpenChangeReason::TriggerPress))
         }),
     };
+    let items = menu.items.clone();
+    // Open, it closes once the menu's items scroll its trigger out of
+    // view, as a `MenuList` row's does when the list scrolls the row away:
+    // its popup stays beside nothing. Measured as the menu scrolls, only
+    // while it is open.
+    {
+        let (items, level) = (items.clone(), menu.level);
+        effect(move || {
+            if !sub_open.get() {
+                return;
+            }
+            let Some(scroll) = items.scroll_of(level) else {
+                return;
+            };
+            // Returning to zero can hide a trigger at the viewport's end too.
+            scroll.offset.get();
+            spawn(async move {
+                let (trigger, port) = (anchor.measure(), scroll.view.measure());
+                let (Some(trigger), Some(port)) = (trigger.await, port.await) else {
+                    return;
+                };
+                let top = trigger.page.y - port.page.y;
+                let gone = top + trigger.frame.size.height <= Points::ZERO
+                    || top >= port.frame.size.height;
+                if gone && open_sub.get_untracked() == Some(id) {
+                    open_sub.set(None);
+                }
+            });
+        });
+    }
     view()
         .child(trigger)
         .child(when(
             move || presence.mounted(),
             move || {
+                let room = signal(None::<Points>);
                 overlay()
                     .anchor_beside(&anchor, &edges)
                     .offset(props.offset)
@@ -1902,8 +2540,11 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
                     .element_ref(&presence.popup())
                     .app_class(move || presence.class())
                     .state_inline_style(move || presence.style())
+                    // As the menu's: held to its room, its items scroll.
+                    .max_h(move || Length::from(room.get().unwrap_or_else(|| window().height)))
+                    .on_position(move |p: &OverlayPosition| room.set(Some(p.available.height)))
                     .on_cancel(cancel.clone())
-                    .child(props.children)
+                    .child(items_scroll(&items, id, props.children))
             },
         ))
         .into_element()

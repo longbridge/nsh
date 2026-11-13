@@ -28,7 +28,7 @@ use crate::{target::EventTarget, text_view::TextView};
 /// not flash pressed states.
 const SCROLL_PRESS_DELAY: f64 = 0.13;
 /// How long a press must be held to become a long press (by default).
-const LONG_PRESS: f64 = 0.5;
+pub(crate) const LONG_PRESS: f64 = 0.5;
 /// How far outside the view the finger may wander before the press ends.
 const RETENTION: f64 = 20.0;
 
@@ -39,6 +39,9 @@ pub(crate) struct PressIvars {
     pressed: Cell<bool>,
     /// `onLongPress` fired: the release is not a press.
     long_pressed: Cell<bool>,
+    /// The touch only dismisses the keyboard if it is a tap
+    /// (`keyboardShouldPersistTaps` "never"): its release is not a press.
+    tap_only: Cell<bool>,
     /// Invalidates delayed callbacks of earlier touches.
     generation: Cell<u64>,
     /// Report long presses.
@@ -76,16 +79,18 @@ define_class!(
     impl PressRecognizer {
         #[unsafe(method(touchesBegan:withEvent:))]
         fn touches_began(&self, touches: &NSSet<UITouch>, event: &UIEvent) {
+            // Before the press acts: the focus it moves does not show.
+            self.ivars()
+                .target
+                .input_with(nsh_core::platform::InputModality::Pointer);
             let (Some(view), Some(touch)) = (self.view(), touches.anyObject()) else {
                 return self.set_state(UIGestureRecognizerState::Failed);
             };
-            if touches.count() > 1
-                || self.handled_deeper(&touch, &view)
-                || !self.ivars().target.press_allowed(&view)
-            {
+            if touches.count() > 1 || self.handled_deeper(&touch, &view) {
                 return self.set_state(UIGestureRecognizerState::Failed);
             }
             let ivars = self.ivars();
+            ivars.tap_only.set(ivars.target.tap_only(&view));
             let link = view
                 .downcast_ref::<TextView>()
                 .and_then(|t| t.link_at(touch.locationInView(Some(&view))));
@@ -122,6 +127,7 @@ define_class!(
                         r.press_in();
                     }
                     r.ivars().long_pressed.set(true);
+                    r.ivars().target.press_held();
                     r.report(Report::LongPress);
                 });
             }
@@ -209,6 +215,7 @@ impl PressRecognizer {
             start: Cell::new(CGPoint::ZERO),
             pressed: Cell::new(false),
             long_pressed: Cell::new(false),
+            tap_only: Cell::new(false),
             generation: Cell::new(0),
             long_press: Cell::new(false),
             long_press_delay: Cell::new(LONG_PRESS),
@@ -264,12 +271,13 @@ impl PressRecognizer {
     }
 
     /// The touch ended on the view: reports the press out, and returns
-    /// true if this was a press (not a long press).
+    /// true if this was a press (not a long press, nor a tap that only
+    /// dismisses the keyboard).
     pub(crate) fn release(&self) -> bool {
         if self.ivars().pressed.replace(false) {
             self.report(Report::PressOut);
         }
-        !self.ivars().long_pressed.get()
+        !self.ivars().long_pressed.get() && !self.ivars().tap_only.get()
     }
 
     fn set_state(&self, state: UIGestureRecognizerState) {

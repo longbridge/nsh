@@ -122,7 +122,10 @@ keeps its id while it is the same node, or the node at its index with its type),
 and reports `change` (the revision only: the document is read on demand, `docJson()`) and `selectionChange`.
 
 Rendering (`render.rs`): a scroll view of the content box, holding the selection's boxes, the blocks, the
-placeholder and the caret. A block is a view keyed by id whose classes and styles are its node's
+placeholder and the caret. The scroll view is `flex: 1 1 auto` in the root, so the root sizes as CSS's `height:
+auto`: without a height it is the content's height (the core lays the blocks' texts out in the same commit as the
+edit), a `max-height` shrinks the scroll view, which scrolls from then on, and a set height or flex size is filled
+as before. A block is a view keyed by id whose classes and styles are its node's
 part (`classes.nodes` / `styles.nodes` by type name, then `type[attr=value]`), node decorations' `class` and the
 `selectedNode` part. Containers hold their children's views; the children of a node whose spec's `extra.listMarker`
 is `"bullet"` or `"ordered"` (the starter's lists) carry a marker the view draws in the `listMarker` part, absolutely
@@ -156,11 +159,20 @@ in a terminal, it blurs the editor, so the focus can leave it (Escape stays boun
 suggestion's).
 Presses: a node view's `handle_event`, the plugins' click hooks (`handle_click_on` per ancestor, then
 `handle_click`, double and triple likewise), then a caret (Shift extends), a word, the textblock or a node selection;
-a drag extends through `create_selection_between`, and past the viewport's top or bottom it scrolls the view on a timer (the code `Editor`'s `AutoScroll` and `edge_speed`) and extends again at each step. Paste: `transform_pasted_text`, `clipboard_text_parser` (else
-`slice_from_text`), `transform_pasted`, `handle_paste`, else a replace of the selection (origin `Paste`). Files
+a drag extends through `create_selection_between`, and past the viewport's top or bottom it scrolls the view on a timer (the code `Editor`'s `AutoScroll` and `edge_speed`) and extends again at each step. Paste: HTML through `transform_pasted_html` and the
+`clipboard_parser` (else the schema's), read by `DomParser::parse_from_clipboard`: HTML an editor copied carries
+`data-pm-slice` and comes back as the copied slice (its open depths, its whitespace, wrapped in its context again),
+other HTML is fitted to the selection (`parse_with_context`); else text through `transform_pasted_text`,
+`clipboard_text_parser` (else `slice_from_text`); then `transform_pasted`, `handle_paste`, else a replace of the selection (origin `Paste`). Files
 (images with their bytes, `file:` URLs from a file manager) go to the app as `onPasteFiles` and insert nothing,
-as Tiptap's file handler leaves them to its `onPaste`. Copy:
-`clipboard_text_serializer`, else `slice_to_text`.
+as Tiptap's file handler leaves them to its `onPaste`. Files dropped on the desktops are the host's `onFileDrop`
+(a component's host takes a view's file drop events, `ComponentHostProps`): the root listens only when the app
+does, the sink belongs to that destination as any input does, and the document and selection stay. Copy
+(ProseMirror's; also a cut and the touch edit menu's Copy and Cut): the selection's slice through each plugin's
+`transform_copied`, put on the clipboard as text and HTML in one write (`set_clipboard_item`): the text by
+`clipboard_text_serializer`, else `slice_to_text`; the HTML by the schema's `DomSerializer` and
+`serialize_for_clipboard`, which records the slice's open depths and context in `data-pm-slice` as ProseMirror does,
+so ProseMirror and Tiptap editors read it back too.
 
 Touch screens (`view/touch.rs`, after the code `Editor`'s `touch.rs`): a tap places the caret as a press does, a
 double tap (two taps within 300 ms and 24 points, or the platform's click count) selects a word and a triple tap the
@@ -176,13 +188,20 @@ on Android) over the selection when the long press's finger lifts, after a sweep
 a tap on the selection, and at the caret after a long press on blank space or a tap on the caret. As gpui-kit's
 input, it offers Cut, Copy, Paste and Select All and leaves out what cannot apply (`touch::menu_actions`): Cut and
 Copy without a selection, Cut and Paste in a read-only editor, Select All when everything is selected. The bounds
-are the session's selection, which the view may not have rendered yet. Paste is the sink's own (its `onPaste`, with
+are the session's selection, which the view may not have rendered yet, grown by the knobs' room above and below
+while handles show, so the menu leaves them free to take a finger. Paste is the sink's own (its `onPaste`, with
 HTML and files); Cut, Copy and Select All come back as `EventKind::EditAction` and run as the keys' commands do.
 
 The bubble menu (`bubbleMenu`, a slot): an empty box over the selection's lines (`Rv::selection_box`), inside the
 content box so it scrolls with the text, anchors an `overlay()` holding the app's content (`bubbleMenuPlacement`,
 `bubbleMenuOffset`); the overlay flips and stays on screen as the core's overlays do. Whether it shows is the app's:
 it passes the slot while it wants the menu.
+
+The content layer (`contentLayer`, a slot): a box over the whole content box, after everything the editor
+draws (`render.rs` `content_layer`), so what the app places in it scrolls with the text in the same frame: a
+block's handle in the margin, a marker beside a node. The box takes no press (`pointer-events: box-none`); its
+children do. The app places them in the content box's points, which `nodeRect(pos)` (a block's box) and
+`coordsAtPos(pos)` answer in.
 
 Tables (`view/table.rs`): the tree walk flattens a table (a node whose spec's `extra.tableRole` is `"table"`): its
 cells, row after row, are the table's children; rows have no view. The table's block is a grid (`grid()`): a column
@@ -314,7 +333,7 @@ JS describes.
 - **Events**: `revision` (the session's subscribers: `{ revision }` after every change, from any source), `create`, `update`, `selectionUpdate`, `transaction` (a summary), `focus`, `blur`, `paste`, `drop`,
   `delete`, `destroy`, posted to JS after the fact.
 - **Formats**: JSON (Tiptap's document JSON loads as is), Markdown (each type's form declared by its extension), HTML
-  (parse rules and `toDOM` per type, `DomParser` / `DomSerializer`), text (`renderText` per type).
+  (parse rules and `toDOM` per type, `DomParser` / `DomSerializer`; `format: "html"` reads `content` and `setContent`, `getHTML()` writes), text (`renderText` per type).
 - **JS face** (`js/extension_api.rs`): `createRichEditor({ extensions: [StarterKit.configure({ heading: { levels:
   [1, 2, 3] } }), Underline], content, editable })`. The built-in extensions are classes whose statics make them
   (`configure`, `extend`); a class itself in `extensions` is the extension with its defaults (`ExtensionEntry` reads a
@@ -365,12 +384,17 @@ commands of the built-in registry (`register_commands` of each module): `setLink
   outside the range or with a selection). `handle_key_down` while active: Escape runs `on_key_down` and dispatches
   the exit meta; then `on_key_down`; then `capture_keys` are taken and recorded in the state (`last_key`,
   `key_count`, a meta-only transaction outside the history), which is how JS's list hears its keys without the
-  input path waiting for JS. `decorations` gives the active range the options' classes. `mention_node` /
+  input path waiting for JS. Whether the list shows is decided beforehand for the same reason, as GPUI Kit's
+  completion menu is open while it has items: `set_suggestion_open` (JS `setSuggestionOpen`) stores `open` with a
+  meta, `apply` opens it again when the query or the decoration id changes (a new suggestion), and while it is
+  `false` the captured keys are not taken (Enter reaches the keymap and the plugins after it). An unchanged state
+  dispatches nothing, so an app saying it on every `transaction` does not loop. `decorations` gives the active range the options' classes. `mention_node` /
   `insert_mention` are Tiptap's Mention (the text `char + (label ?? id)`, a space after it, a space already there
   taken in).
 
 The JS face (`js/extensions.rs`): `link`, `characterCount`, `suggestion` (plugin specs of the kinds `Link`,
-`CharacterCount`, `Suggestion` with typed option objects), `withMention`, the command helpers, and the session's
+`CharacterCount`, `Suggestion` with typed option objects), `withMention`, the command helpers
+(`setSuggestionOpen` among them), and the session's
 `suggestion(key)`, `characters(mode)`, `words()` and `characterLimit`.
 
 ## Tables (`tables/`)

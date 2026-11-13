@@ -128,7 +128,7 @@ pub(crate) struct Dt {
     anchor_y: Signal<Anchor>,
     // Web desktop wheels follow one-to-one; explicit drags still span the
     // entire range. Touch idioms retain their existing anchored physics.
-    web_desktop: bool,
+    pub(super) web_desktop: bool,
     drag_x: Signal<Option<Anchor>>,
     drag_y: Signal<Option<Anchor>>,
     rows_window: RowWindow,
@@ -925,7 +925,7 @@ impl Dt {
     }
 
     /// Scrolls the rows to content offset `content` at the top.
-    fn scroll_rows_to(&self, g: &Geo, content: f64, animated: bool) {
+    pub(super) fn scroll_rows_to(&self, g: &Geo, content: f64, animated: bool) {
         let y = self.offset_to(&g.y, g.cy, content, animated, self.anchor_y, self.scroll_y);
         self.vscroll
             .scroll_to(Point { x: Points::ZERO, y }, animated);

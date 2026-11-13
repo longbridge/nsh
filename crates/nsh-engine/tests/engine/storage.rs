@@ -85,6 +85,7 @@ fn launch(
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -199,6 +200,7 @@ fn rust_shares_the_entries_of_js() {
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(shown(&rx, "rust"), "rust saw 1 from_rust,launches");
@@ -304,6 +306,7 @@ fn rust_edits_the_storage() {
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(shown(&rx, "rust"), "rust b true 0 true");
@@ -356,6 +359,9 @@ struct WriterProps {}
 #[component]
 fn Writer(_props: WriterProps) -> impl IntoElement {
     Storage::set_item("from", "rust").unwrap();
+    let dir = nsh_core::prelude::data_dir().expect("the app's data directory");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("app.db"), "rust").unwrap();
     text(|| "rust wrote".to_owned())
 }
 
@@ -390,12 +396,16 @@ fn a_rust_root_keeps_its_data_under_its_id() {
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(shown(&rx, "rust"), "rust wrote");
     drop(engine);
     let file = root.join("com.example.rusty/storage.json");
     assert_eq!(std::fs::read_to_string(file).unwrap(), r#"{"from":"rust"}"#);
+    // Its own files sit beside its storage (`data_dir`).
+    let db = root.join("com.example.rusty/app.db");
+    assert_eq!(std::fs::read_to_string(db).unwrap(), "rust");
 }
 
 #[test]

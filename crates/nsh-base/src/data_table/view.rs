@@ -175,6 +175,7 @@ pub(crate) fn render(dt: Dt) -> impl IntoElement {
     let strip_x = Lead::new();
     let (body_dt, header_dt, hit_dt, strip_dt, over_dt) =
         (dt.clone(), dt.clone(), dt.clone(), dt.clone(), dt.clone());
+    let bar_dt = dt.clone();
     let (body_dt2, header_dt2) = (dt.clone(), dt.clone());
     let family = move || props.font_family.get();
     part(
@@ -216,6 +217,7 @@ pub(crate) fn render(dt: Dt) -> impl IntoElement {
                 .otherwise(move || header(header_dt2.clone(), false)),
             )
             .child(strip(strip_dt, strip_x))
+            .child(projected_vertical_bar(bar_dt))
             .child(overlays(over_dt)),
     )
 }
@@ -233,6 +235,7 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
     let (scroll_dt, hscroll_dt, strip_dt) = (dt.clone(), dt.clone(), dt.clone());
     let (top_dt, height_dt, width_dt) = (dt.clone(), dt.clone(), dt.clone());
     let (press, hover, menu) = (dt.clone(), dt.clone(), dt.clone());
+    let indicator_dt = dt.clone();
     let (leave, focus, blur) = (dt.clone(), dt.clone(), dt.clone());
     scroll()
         .element_ref(&dt.vscroll)
@@ -242,6 +245,9 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
         .bottom_0()
         .top(move || Length::from(px(top_dt.geo().header)))
         .scrollbar(move || {
+            if indicator_dt.web_desktop && indicator_dt.geo().y.scaled() {
+                return false;
+            }
             props
                 .vertical_scrollbar
                 .get()
@@ -441,6 +447,83 @@ fn strip(dt: Dt, lead: Lead) -> impl IntoElement {
                     .w(move || Length::from(px(content_width(&width_dt)))),
             )
     })
+}
+
+/// A scaled web table follows wheel input from a local anchor. Its native
+/// offset recenters at rest, so that offset cannot also be its visible bar.
+/// This separate, bounded scroll view represents the proportional position;
+/// recentering the hit layer leaves both its offset and its thumb unchanged.
+fn projected_vertical_bar(dt: Dt) -> impl IntoElement {
+    let shown_dt = dt.clone();
+    when(
+        move || {
+            shown_dt.web_desktop
+                && shown_dt.geo().y.scaled()
+                && shown_dt
+                    .props
+                    .vertical_scrollbar
+                    .get()
+                    .unwrap_or(shown_dt.props.scrollbar.get())
+        },
+        move || {
+            let bar = element_ref();
+            let target = Rc::new(Cell::new(None::<Points>));
+            let sync_dt = dt.clone();
+            let sync_target = target.clone();
+            effect(move || {
+                let g = sync_dt.geo();
+                let y = g.y.scroll_points(g.cy);
+                if sync_target.replace(Some(y)) == Some(y) {
+                    return;
+                }
+                bar.scroll_to(Point { x: Points::ZERO, y }, false);
+            });
+            let mount_dt = dt.clone();
+            let mount_target = target.clone();
+            let layout_dt = dt.clone();
+            let height_dt = dt.clone();
+            let scroll_dt = dt.clone();
+            let wheel_dt = dt.clone();
+            scroll()
+                .element_ref(&bar)
+                .test_id("data-table-proportional-scrollbar")
+                .on_layout(move |_: &Bounds<Points>| {
+                    let g = untracked(|| mount_dt.geo());
+                    let y = g.y.scroll_points(g.cy);
+                    mount_target.set(Some(y));
+                    bar.scroll_to(Point { x: Points::ZERO, y }, false);
+                })
+                .absolute()
+                .right_0()
+                .bottom_0()
+                .w(px(STRIP))
+                .top(move || Length::from(px(layout_dt.geo().header)))
+                .bounces(false)
+                .on_scroll(move |e: &ScrollEvent| {
+                    // Programmatic following must not feed rounding back into
+                    // the document's position, including when the bar is hidden.
+                    if target
+                        .get()
+                        .is_some_and(|y| (e.offset.y - y).0.abs() <= 0.5)
+                    {
+                        return;
+                    }
+                    let g = untracked(|| scroll_dt.geo());
+                    let content = g.y.content_offset(f64::from(e.offset.y.0));
+                    scroll_dt.scroll_rows_to(&g, content, false);
+                })
+                .child(
+                    view()
+                        .w(relative(1.0))
+                        .h(move || Length::from(px(height_dt.geo().y.extent() as f32)))
+                        .on_wheel(move |e: &nsh_core::WheelEvent| {
+                            let g = untracked(|| wheel_dt.geo());
+                            let delta = e.delta.points(px(g.row_height));
+                            wheel_dt.scroll_rows_to(&g, g.cy + f64::from(delta.y.0), false);
+                        }),
+                )
+        },
+    )
 }
 
 // The body.

@@ -85,8 +85,12 @@ fn unix_time(ms: f64) -> std::time::SystemTime {
 const CLOCK_TIMEOUT: Duration = Duration::from_secs(60);
 /// A long press's hold when the view does not say (`delayLongPress`).
 const LONG_PRESS: Duration = Duration::from_millis(500);
-/// How many gestures scrolling a view into view takes at most.
-const SCROLLS_INTO_VIEW: usize = 20;
+/// How many gestures scrolling a view into view takes at most: only a
+/// guard against a view that keeps moving without ever arriving. Gestures
+/// that move nothing end it sooner ([`anchor`]), and each moves at most
+/// part of its scroll view, so a row far down a long list in a small window
+/// (the gallery's home at 640x480 needs about 30) takes many.
+const SCROLLS_INTO_VIEW: usize = 100;
 
 /// What a host's app shows, as test steps see it: the batches the host
 /// applied and the errors the app reported.
@@ -695,6 +699,8 @@ impl MenuValue {
                 role: None,
                 when: nsh_core::keymap::When::Always,
                 icon: None,
+                symbol: None,
+                destructive: false,
             }),
             MenuValue::Submenu {
                 label,
@@ -706,6 +712,8 @@ impl MenuValue {
                 items: items.into_iter().map(MenuValue::into_item).collect(),
                 // A scene's answer is about what a test can ask of a menu.
                 icon: None,
+                symbol: None,
+                inline: false,
             },
         }
     }
@@ -1013,6 +1021,14 @@ pub trait Native: Send + Sync {
     /// bounds so the agent can scroll them into view; `None` means the
     /// platform has no displayed view for this node.
     fn bounds(&self, id: NodeId) -> Option<Bounds<Points>>;
+    /// How far scroll view `id` can still scroll along its axis
+    /// (`horizontal`): back towards its start and on towards its end.
+    /// `None` where the platform does not say: the agent's gestures find
+    /// out.
+    fn scroll_room(&self, id: NodeId, horizontal: bool) -> Option<(Points, Points)> {
+        let _ = (id, horizontal);
+        None
+    }
     /// The window the pointer's input that follows acts in, until the next
     /// call: the one whose root node is `window` ([`nsh_core::ROOT_ID`]:
     /// the main window). The points [`Native::press`],
@@ -1123,6 +1139,13 @@ pub trait Native: Send + Sync {
                 .into(),
         )
     }
+    /// An input method composes `text` in the focused input: marked text
+    /// at the caret, in place of what it composed; empty, the composition
+    /// ends with nothing committed.
+    fn compose(&self, text: &str) -> Result<(), String> {
+        let _ = text;
+        Err("`compose` runs headless and on macOS for now".into())
+    }
     /// Chooses the action of the open context menu (`Menu.popup`) at the
     /// end of `path`: the labels of the submenus on the way, then its own.
     fn choose_menu_item(&self, path: &[String]) -> Result<(), String> {
@@ -1152,7 +1175,7 @@ pub trait Native: Send + Sync {
     /// does.
     fn drop_files(&self, at: Point<Points>, uris: Vec<String>) -> Result<(), String> {
         let _ = (at, uris);
-        Err("`dropFiles` runs headless and on Linux for now".into())
+        Err("`dropFiles` runs headless, on Linux and on macOS for now".into())
     }
     /// Lets go of the button [`Native::drag_and_hold`] holds, at `at`.
     fn drop_at(&self, at: Point<Points>) -> Result<(), String> {
@@ -1496,6 +1519,7 @@ impl Agent {
             TestStep::OpenedUrls => self.scene.opened_urls().map(Value::from),
             TestStep::DragAndHold { selector, x, y } => done(self.drag_and_hold(&selector, x, y)),
             TestStep::Drop => done(self.drop_held()),
+            TestStep::Compose { selector, text } => done(self.compose(&selector, &text)),
             TestStep::DropFiles { selector, uris } => done(
                 self.find(&selector, "view", PickTarget::View)
                     .and_then(|(_, at)| self.native.drop_files(at, uris))
@@ -1838,18 +1862,34 @@ impl Agent {
             {
                 misses += 1;
             }
+            // A scroll view already at the end a gesture would move it
+            // towards brings nothing nearer: the finger would pull it past
+            // that end (a pull to refresh, a page sheet following the drag
+            // down and closing).
+            let can_move = |scroller: NodeId, horizontal: bool, b: &Bounds<Points>| {
+                let back = if horizontal {
+                    at.x.0 < b.center().x.0
+                } else {
+                    at.y.0 < b.center().y.0
+                };
+                self.native
+                    .scroll_room(scroller, horizontal)
+                    .is_none_or(|(start, end)| if back { start.0 } else { end.0 } >= 1.0)
+            };
             // The innermost scroll view whose bounds leave the middle out,
             // or near their edge (where a finger does not press and bars,
             // the home indicator and fades sit), else the outermost one
             // when the window does.
             let hiding = scrollers.iter().find_map(|&(scroller, horizontal)| {
                 let b = self.native.bounds(scroller)?;
-                (!well_inside(&b, at, horizontal)).then_some((scroller, horizontal, b))
+                (!well_inside(&b, at, horizontal) && can_move(scroller, horizontal, &b))
+                    .then_some((scroller, horizontal, b))
             });
             let hiding = hiding.or_else(|| {
                 let &(s, h) = scrollers.last()?;
                 (!well_inside(&window, at, h)).then_some(())?;
-                Some((s, h, self.native.bounds(s)?))
+                let b = self.native.bounds(s)?;
+                can_move(s, h, &b).then_some((s, h, b))
             });
             let Some((scroll, horizontal, scroller)) = hiding else {
                 if window.contains(&at) {
@@ -2055,6 +2095,16 @@ impl Agent {
         self.settled()
     }
 
+    fn compose(&self, selector: &str, text: &str) -> Result<(), String> {
+        // In the field the user is in: a press would commit what it composes.
+        let (id, _) = self.find(selector, "input", PickTarget::Input)?;
+        if self.native.focused() != Some(id) {
+            self.focus(selector)?;
+        }
+        self.native.compose(text)?;
+        self.settled()
+    }
+
     fn right_click(&self, selector: &str) -> Result<(), String> {
         if !self.native.mouse() {
             return Err(
@@ -2257,7 +2307,11 @@ impl Agent {
     }
 
     fn on_screen(&self) -> String {
-        format!("on screen: {:?}", self.scene.texts().unwrap_or_default())
+        let texts = self.scene.texts().unwrap_or_default();
+        format!(
+            "on screen: [{}]",
+            crate::failure::screen_texts(&texts, Some(crate::failure::SCREEN_TEXT_LIMIT))
+        )
     }
 }
 
@@ -2273,7 +2327,7 @@ mod tests {
     };
     use nsh_engine::{EngineConfig, EngineControl};
 
-    use super::*;
+    use super::{Key, *};
 
     /// A count and a button that adds one.
     #[component]
@@ -2402,6 +2456,10 @@ mod tests {
                 size(px(320.0), px(height)),
             ))
         }
+        fn scroll_room(&self, _: NodeId, _: bool) -> Option<(Points, Points)> {
+            let offset = *self.offset.lock().unwrap();
+            Some((px(offset), px(Page::CONTENT - Page::LENGTH - offset)))
+        }
         fn viewport(&self) -> Size<Points> {
             size(px(320.0), px(640.0))
         }
@@ -2506,6 +2564,53 @@ mod tests {
             near[2] == bottom && near[3..].iter().all(|&y| y == top),
             "{near:?}"
         );
+    }
+
+    #[test]
+    fn a_view_no_gesture_brings_nearer_is_pressed_where_it_is() {
+        use nsh_core::{MountItem, ViewKind};
+        // The gestures that bring view 4 at `target` into view from
+        // `offset`, in a modal (6) shown from inside scroll view 2 or in the
+        // scroll view itself.
+        let landings = |target: f32, offset: f32, modal: bool| {
+            let model = Arc::new(Model::default());
+            let create = |id, kind| MountItem::Create { id, kind };
+            let insert = |parent, child| MountItem::Insert {
+                parent,
+                child,
+                before: None,
+            };
+            let mut items = vec![
+                create(2, ViewKind::Scroll),
+                create(4, ViewKind::View),
+                insert(1, 2),
+            ];
+            if modal {
+                items.extend([create(6, ViewKind::Modal), insert(2, 6), insert(6, 4)]);
+            } else {
+                items.push(insert(2, 4));
+            }
+            model.apply(&MountBatch { items });
+            let landed = Arc::new(Mutex::new(Vec::new()));
+            let page = Page {
+                offset: Mutex::new(offset),
+                target,
+                undone: Vec::new(),
+                landed: landed.clone(),
+            };
+            let agent = Agent::new(model, Box::new(page));
+            let (at, _) = agent.bring_into_view(4, "id:row", None).unwrap();
+            (at.y.0, landed.lock().unwrap().len())
+        };
+        // At the top edge of a scroll view at its top: a finger dragging it
+        // down would pull it past its top (a pull to refresh, a page sheet
+        // closing), so it is pressed where it is.
+        assert_eq!(landings(10.0, 0.0, false), (30.0, 0));
+        // Scrolled down, the scroll view brings it nearer.
+        assert!(landings(300.0, 280.0, false).1 > 0);
+        // A modal shows over the window: the scroll view around it in the
+        // tree does not move it.
+        assert_eq!(landings(300.0, 280.0, true), (40.0, 0));
     }
 
     #[test]

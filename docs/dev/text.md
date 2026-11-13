@@ -24,6 +24,16 @@
   edges at bidi boundaries and caches them with the layout. Linux selection drawing reuses its rectangle buffer.
   Test-id-only span updates remount the text metadata with its cached final layout (`LaidText`), retaining fitted
   font sizes. They preserve prepared state and measurement caches and raise no `onTextLayout`.
+- A text laid out gives Taffy its first line's baseline, below its top through its padding and border
+  (`TextEngine::first_baseline`: every built-in engine, CoreText on macOS and iOS, Android, Pango, DirectWrite, GPUI,
+  the web, Cells and the headless one; `measure_leaf`, cached per width in `TextContext::baseline`), so a flex row
+  with `items-baseline` lines its texts up by their first baselines on every platform, as CSS does. An engine that does
+  not report one (the trait's default, for a custom engine) gives `None` and the text is aligned by its bottom edge,
+  Taffy's fallback for a box without a baseline: texts of different sizes in a row then sit off each other's baseline
+  by the difference of what is below their baselines. Only a text
+  aligned by baseline is asked (`layout_tree::Aligned`, from its `align-self` or its container's `align-items`), and
+  only when it is laid out, not measured (Taffy's baseline pass lays its items out); a text measured by an estimate has
+  none.
 - A text engine whose lines take all that fits and whose `measure` reports the widest line's width says so
   (`TextEngine::breaks_lines_greedily`: macOS, Linux). The core then reuses a measurement for every maximum width from
   that width to the one measured (`measure_text`, `SameLines`), and measures a growing width a little ahead to cover
@@ -102,10 +112,20 @@
   responder clears, so a surface shows one selection. Android (`selectable_view.rs`, `SelectableView.java`): the
   shared Rust model runs on the UI thread over JNI, hit-testing through a Java callback; a long press selects a word,
   then handles and a floating `ActionMode` (Copy, Select all, Share).
-- **Color changes**: a text whose spans change only their colors (text, decoration and background) keeps its
-  typesetting, measurements and layout where the platform draws colors from the text it mounts
-  (`TextEngine::draws_colors_from_text`: macOS, Windows, Linux and GPUI): only the new text is mounted with the layout,
-  so a word fading in costs one draw, not a new layout of its paragraph. The other backends typeset it again.
+- **Color changes**: a text whose spans change only their colors (text, decoration and background) or which of them
+  are hidden keeps its typesetting, measurements and layout where the platform draws colors from the text it mounts
+  (`TextEngine::draws_colors_from_text`: macOS, Windows, Linux and GPUI, which also read `hidden` there): only the new
+  text is mounted with the layout, so a word fading in, or shown after waiting hidden, costs one draw, not a new layout
+  of its paragraph. macOS draws again only the lines of the characters drawn otherwise
+  (`AttributedText::recolored_ranges`, `text::damage`). The other backends typeset it again.
+- **Span states**: a nested `<Text>` has no view to report its interaction states, so the core takes them from the
+  events of its link. A span whose classes or state styles read `hover:` is a link hearing `MouseEnter` /
+  `MouseLeave` (as a hinted one: no press, no stop of Tab, none inside a span taking presses), and a link reading
+  `active:` also hears `PressDown` / `PressUp` (`Core::collect_text`); `Core::span_state` turns those events into the
+  span's `HOVERED` / `PRESSED` before anything else handles them (a cancelled press's dropped release too), and the
+  restyled span merges into its text again. The platforms only hit-test their links as they already do for hints
+  and presses. A color change takes the path above; a decoration line typesets the paragraph again without laying
+  out the views around it (`layout_eq`).
 - **Span backgrounds**: `backgroundColor` / `borderRadius` on a nested `<Text>` (its view style, which spans otherwise
   ignore) become `ResolvedTextStyle::background` (`TextBackground`: color, radius and the span's node, so neighboring
   spans that look the same stay apart), inherited by the spans inside it; the block's own background stays its view's.
@@ -117,8 +137,8 @@
   the runs.
 - **Hidden spans**: `visibility: "hidden"` on a nested `<Text>` (`.invisible()`) marks its runs, and those of the
   spans inside it, `ResolvedTextStyle::hidden`. The core resolves them in `collect_text`: their characters stay in the
-  text and lay out as visible ones (`hidden` is not part of `layout_eq`, so toggling it draws again without measuring),
-  and they make no links; attachments inside them are hidden views (`Core::hide_attachments`). Each backend skips the
+  text and lay out as visible ones (`hidden` is not part of `layout_eq`, so toggling it draws again without measuring,
+  and where colors are drawn from the text without typesetting either), and they make no links; attachments inside them are hidden views (`Core::hide_attachments`). Each backend skips the
   hidden runs when it draws (glyphs, color emoji, decorations, shadows, animated colors), never relying on the
   transparent color alone; macOS, Windows, Linux and GPUI also leave them out of selection highlights
   (`AttributedText::visible_ranges`), while iOS and Android highlight a selection over them. What leaves
@@ -149,7 +169,9 @@
   `top` / `bottom` (the line box's) and `sub` / `super` / lengths are not offered: the engines size placeholders
   before lines exist. The headless engine's font is its line (ascent 1.2 em, descent 0, x height 0.5 em). After the final layout the core places its native view, a child of the text view (Android's
   `TextBox` is a ViewGroup for this), on the placeholder (`TextEngine::attachments`); attachments cut off by the line limit or
-  an ellipsis move out of sight. Their own children are normal layout children; a text inside them built after the block
+  an ellipsis move out of sight. Their own children are normal layout children, made with the attachment: a scroll
+  view around the text never culls them (`Core::cull_scope`), as its walk does not reach inside texts, though past
+  a turn's budget they may wait for the next turns as other views do (`pace.rs`); a text inside them built after the block
   resizes them and builds the block again (`check_attachments`). They take presses of their own; copying leaves the
   placeholders out. Text inside an attachment takes the color of the text around it (the nearest color set on its
   spans, its block or the views around, as CSS's `color` reaches an inline block and `currentColor` reaches the
@@ -163,3 +185,12 @@
 
 See also the text pitfalls in [pitfalls.md](pitfalls.md) and the engines in `crates/nsh-platform-ios/src/text.rs` /
 `crates/nsh-platform-android/src/text.rs`.
+
+On macOS, inline link accessibility elements interleave with the paragraph's
+static text. Headings and app-labelled text keep their name and expose only
+link children. Selectable text whose accessibility value is its drawn text,
+and its link elements, expose `AXSelectedTextRange` and `AXSelectedText`.
+Selecting a range in an element's displayed text uses the enclosing
+selectable view's selection, including its copy behavior and `onSelectionChange`.
+`SelectionModel::select_range` sets UTF-16 positions directly for this path and
+clamps offsets out of surrogate pairs.

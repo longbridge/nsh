@@ -27,7 +27,8 @@
 //! Windows only (where the CLI is `bin/nsh.exe`). The GPUI and terminal
 //! development hosts are built for this machine on each of the three. The web runtime is built
 //! everywhere: it needs a clang that targets wasm32 and `llvm-ar`
-//! (`docs/dev/web.md`).
+//! (`docs/dev/web.md`). `NSH_DIST_NO_ANDROID` and `NSH_DIST_NO_WEB` leave the
+//! Android and web runtimes out, which the release builds only once.
 
 use std::{
     env,
@@ -104,7 +105,7 @@ pub(crate) fn dist() -> anyhow::Result<()> {
                 if package == "nsh-linux-app" {
                     args.extend([
                         "--features",
-                        "js,shader,editor,highlight,math,plot,rich-editor,zlib,crypto",
+                        "js,shader,editor,highlight,math,plot,rich-editor,zlib,crypto,websocket,updater,svg,net,sound",
                     ]);
                 }
             }
@@ -184,21 +185,31 @@ pub(crate) fn dist() -> anyhow::Result<()> {
     // An explicitly configured compiler is a promise that the web runtimes
     // are wanted: on a release runner a broken one must fail the build
     // rather than quietly ship an archive with no `runtime/web`.
+    // `NSH_DIST_NO_WEB` leaves them out: the release's builds that don't
+    // publish the `web` component set it, as with `NSH_DIST_NO_ANDROID`.
     let configured = ["CC_wasm32_unknown_unknown", "CC"]
         .iter()
         .any(|key| env::var_os(key).is_some_and(|value| !value.is_empty()));
     let compiler = wasm_cc(|key| env::var_os(key));
-    let compiles = wasm_compiles(&compiler, |command| {
-        command.status().is_ok_and(|status| status.success())
-    });
-    let web = web_runtimes_plan(configured, compiles, &compiler)?;
-    if web {
-        web_runtimes(&root, &out, &release)?;
-    } else {
-        term::warn(
+    let web = web_runtimes_plan(
+        env::var_os("NSH_DIST_NO_WEB").is_some_and(|value| !value.is_empty()),
+        configured,
+        || {
+            wasm_compiles(&compiler, |command| {
+                command.status().is_ok_and(|status| status.success())
+            })
+        },
+        &compiler,
+    )?;
+    match web {
+        WebRuntimes::Build => web_runtimes(&root, &out, &release)?,
+        WebRuntimes::OptedOut => {
+            term::warn("NSH_DIST_NO_WEB is set: the distribution has no web runtime")
+        }
+        WebRuntimes::NoCompiler => term::warn(
             "no working wasm32 C compiler (set CC_wasm32_unknown_unknown): \
              the distribution has no web runtime",
-        );
+        ),
     }
 
     // Android runtimes. Windows machines often have no Android SDK: the
@@ -268,14 +279,32 @@ fn wasm_cc(get: impl Fn(&str) -> Option<OsString>) -> OsString {
     OsString::from("clang")
 }
 
-/// Whether to build the web runtimes. A developer who explicitly configured
-/// a wasm32 compiler expects them: a broken toolchain must fail the release
-/// rather than quietly ship an archive with no `runtime/web`. With nothing
-/// configured, a machine without a wasm32 clang still gets a usable (web-less)
-/// distribution, as before.
-fn web_runtimes_plan(configured: bool, compiles: bool, compiler: &OsStr) -> anyhow::Result<bool> {
-    if compiles {
-        return Ok(true);
+/// Whether the distribution has the web runtimes.
+#[derive(Debug, PartialEq, Eq)]
+enum WebRuntimes {
+    Build,
+    /// `NSH_DIST_NO_WEB` is set.
+    OptedOut,
+    /// No compiler was configured and the default one cannot target wasm32.
+    NoCompiler,
+}
+
+/// Whether to build the web runtimes. An opt-out wins without probing the
+/// compiler. A developer who explicitly configured a wasm32 compiler expects
+/// them: a broken toolchain must fail the release rather than quietly ship an
+/// archive with no `runtime/web`. With nothing configured, a machine without
+/// a wasm32 clang still gets a usable (web-less) distribution, as before.
+fn web_runtimes_plan(
+    opted_out: bool,
+    configured: bool,
+    compiles: impl FnOnce() -> bool,
+    compiler: &OsStr,
+) -> anyhow::Result<WebRuntimes> {
+    if opted_out {
+        return Ok(WebRuntimes::OptedOut);
+    }
+    if compiles() {
+        return Ok(WebRuntimes::Build);
     }
     if configured {
         bail!(
@@ -284,7 +313,7 @@ fn web_runtimes_plan(configured: bool, compiles: bool, compiler: &OsStr) -> anyh
             compiler.to_string_lossy()
         );
     }
-    Ok(false)
+    Ok(WebRuntimes::NoCompiler)
 }
 
 /// Why the distribution is made without the Android runtimes, or `None` to
@@ -455,7 +484,15 @@ fn make_aar(built: &Path, abis: &[String], dev: bool, aar: &Path) -> anyhow::Res
             r#"<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.longbridge.nsh">
     <uses-sdk android:minSdkVersion="{}" />
-    <uses-permission android:name="android.permission.INTERNET" />{}
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Text actions (Translate and the like) the selection menu offers,
+        as TextView's: Android 11+ hides other apps' activities otherwise. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>{}
 </manifest>
 "#,
             android::MIN_SDK,
@@ -616,7 +653,8 @@ mod tests {
     };
 
     use super::{
-        AAR_KEEP_RULES, android_skip, make_aar, wasm_cc, wasm_compiles, web_runtimes_plan,
+        AAR_KEEP_RULES, WebRuntimes, android_skip, make_aar, wasm_cc, wasm_compiles,
+        web_runtimes_plan,
     };
 
     #[test]
@@ -681,16 +719,25 @@ mod tests {
     #[test]
     fn an_explicit_compiler_failure_fails_the_distribution() {
         let cc = OsStr::new("/opt/llvm/bin/clang");
-        assert!(web_runtimes_plan(false, true, cc).unwrap());
-        assert!(web_runtimes_plan(true, true, cc).unwrap());
+        let plan = |configured, compiles| web_runtimes_plan(false, configured, || compiles, cc);
+        assert_eq!(plan(false, true).unwrap(), WebRuntimes::Build);
+        assert_eq!(plan(true, true).unwrap(), WebRuntimes::Build);
         // Nothing configured: a machine with no wasm32 clang still gets a
         // distribution, just without the web runtimes.
-        assert!(!web_runtimes_plan(false, false, cc).unwrap());
-        // release.yml always sets CC_wasm32_unknown_unknown: a broken
-        // toolchain there must not quietly ship an archive with no
+        assert_eq!(plan(false, false).unwrap(), WebRuntimes::NoCompiler);
+        // release.yml sets CC_wasm32_unknown_unknown where it builds them: a
+        // broken toolchain there must not quietly ship an archive with no
         // runtime/web.
-        let error = web_runtimes_plan(true, false, cc).unwrap_err().to_string();
+        let error = plan(true, false).unwrap_err().to_string();
         assert!(error.contains("/opt/llvm/bin/clang"), "{error}");
+    }
+
+    #[test]
+    fn web_is_left_out_when_opted_out() {
+        let cc = OsStr::new("/opt/llvm/bin/clang");
+        // The opt-out wins over a configured compiler, without probing it.
+        let plan = web_runtimes_plan(true, true, || panic!("probed the compiler"), cc);
+        assert_eq!(plan.unwrap(), WebRuntimes::OptedOut);
     }
 
     /// A stripped executable (this test's own) is smaller and still runs:

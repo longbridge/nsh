@@ -19,21 +19,22 @@ use nsh_engine::EngineControl;
 use objc2::{
     MainThreadMarker, MainThreadOnly, Message, rc::Retained, runtime::ProtocolObject, sel,
 };
-use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
+use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize, CGVector};
 use objc2_quartz_core::{CAAnimation, CALayer, CAMediaTiming, CATransform3D};
 use objc2_ui_kit::{
     UIActivityIndicatorView, UIActivityIndicatorViewStyle, UIControlEvents, UIDevice,
-    UIGestureRecognizer, UIGestureRecognizerState, UIPanGestureRecognizer,
+    UIGestureRecognizer, UIGestureRecognizerState, UINavigationController, UIPanGestureRecognizer,
     UIPinchGestureRecognizer, UIRefreshControl, UIRotationGestureRecognizer, UIScrollView,
     UIScrollViewContentInsetAdjustmentBehavior, UIScrollViewKeyboardDismissMode,
-    UITraitEnvironment, UIUserInterfaceIdiom, UIView, UIViewAnimationOptions,
-    UIViewControllerTransitionCoordinator, UIViewControllerTransitionCoordinatorContext,
+    UISpringTimingParameters, UITraitEnvironment, UIUserInterfaceIdiom, UIView, UIViewAnimating,
+    UIViewAnimationOptions, UIViewControllerTransitionCoordinator,
+    UIViewControllerTransitionCoordinatorContext, UIViewPropertyAnimator,
 };
 
 use crate::{
     animation::Animator,
     decor::{self, Decor},
-    image::{AssetBase, DecodedImage, ImageLoader, Request, not_a_bitmap},
+    image::{AssetBase, DecodedImage, ImageLoader, Request},
     input::Input,
     native_view::NshView,
     navigation::{ModalHost, ScreenHost, StackHost},
@@ -155,6 +156,9 @@ struct Gestures {
 struct PanScroll {
     view: Retained<UIScrollView>,
     offset: f32,
+    /// `onPanStart` went out: it waits for the panel to move, so scrolling
+    /// alone does not start a sheet's drag (which ends editing).
+    started: bool,
 }
 
 /// Pull-to-refresh. `UIRefreshControl` throws under Mac Catalyst's Mac
@@ -592,6 +596,8 @@ pub(crate) struct Mounter {
     target: Retained<EventTarget>,
     animator: Animator,
     images: ImageLoader,
+    /// `OffscreenCanvas` renders waiting for their images.
+    offscreen: crate::canvas::Offscreen,
     /// The engine's sounds and players ([`crate::audio`]).
     audio: crate::audio::Speaker,
     /// What the app may reach (web view navigations check it).
@@ -635,6 +641,12 @@ pub(crate) struct Mounter {
     /// catch up when it ends (UIKit breaks transitions that start while
     /// another one is running).
     deferred_stacks: Vec<NodeId>,
+    /// The orientations the root was last given, until they are applied:
+    /// after the batch's pushes and pops, and after any transition under
+    /// way (a turn started during a push can make UIKit cancel the push).
+    orientations: Option<u8>,
+    /// Whether applying them waits for a transition to end.
+    orientations_waiting: bool,
     /// Screens whose header changed in the current batch.
     dirty_headers: Vec<NodeId>,
     /// Modals to present or dismiss at the end of the current batch.
@@ -645,8 +657,10 @@ pub(crate) struct Mounter {
     touch_trackers: Vec<(NodeId, Retained<crate::touch::TouchTracker>)>,
     /// Views listening to touches (the trackers run while there are any).
     touch_listeners: usize,
-    /// Scroll views a JS responder keeps from scrolling.
-    blocked_scrolls: Vec<Retained<UIScrollView>>,
+    /// The native gestures a JS responder keeps from taking its touches:
+    /// the pans of the scroll views and the swipe back of the stacks around
+    /// it.
+    blocked_gestures: Vec<Retained<UIGestureRecognizer>>,
     /// Vertical scroll views whose content size arrived in this batch, with
     /// the height that came with it. A batch applies a scroll view's content
     /// size before the frames of the children it measures (`ScrollContent` is
@@ -728,6 +742,7 @@ impl Mounter {
                 },
                 access.clone(),
             ),
+            offscreen: Default::default(),
             audio: Default::default(),
             control,
             access,
@@ -756,13 +771,15 @@ impl Mounter {
             dirty_stacks: Vec::new(),
             bottom_bar_dirty: false,
             deferred_stacks: Vec::new(),
+            orientations: None,
+            orientations_waiting: false,
             dirty_headers: Vec::new(),
             dirty_modals: Vec::new(),
             asset_base: asset_base.clone(),
             sticky: Default::default(),
             touch_trackers: Vec::new(),
             touch_listeners: 0,
-            blocked_scrolls: Vec::new(),
+            blocked_gestures: Vec::new(),
             content_sizes: Vec::new(),
             narrowed: Vec::new(),
             frames_applied: false,
@@ -812,6 +829,7 @@ impl Mounter {
         }
         self.created.clear();
         self.finish_navigation();
+        self.apply_orientations();
         if animation_changed {
             self.apply_animations();
         }
@@ -930,8 +948,8 @@ impl Mounter {
         &self.target
     }
 
-    /// Node `id`'s view (`nsh test --target ios`).
-    #[cfg(feature = "dev")]
+    /// Node `id`'s view (the root's window for the orientations;
+    /// `nsh test --target ios`).
     pub(crate) fn ui_view(&self, id: NodeId) -> Option<Retained<UIView>> {
         Some(self.slot(id)?.native.view().retain())
     }
@@ -943,6 +961,34 @@ impl Mounter {
             Native::Text(text) => Some(text.clone()),
             _ => None,
         }
+    }
+
+    /// How far scroll view `id` can still scroll back towards its start
+    /// and on towards its end along its axis (`None`: it is no scroll
+    /// view).
+    #[cfg(feature = "dev")]
+    pub(crate) fn scroll_room(&self, id: NodeId, horizontal: bool) -> Option<(CGFloat, CGFloat)> {
+        let Native::Scroll(scroll) = &self.slot(id)?.native else {
+            return None;
+        };
+        let inset = scroll.adjustedContentInset();
+        let (offset, content, size) = (
+            scroll.contentOffset(),
+            scroll.contentSize(),
+            scroll.bounds().size,
+        );
+        let (start, end) = if horizontal {
+            (
+                offset.x + inset.left,
+                content.width + inset.right - size.width - offset.x,
+            )
+        } else {
+            (
+                offset.y + inset.top,
+                content.height + inset.bottom - size.height - offset.y,
+            )
+        };
+        Some((start.max(0.0), end.max(0.0)))
     }
 
     /// The text input `id` holds (`None`: it is no input).
@@ -1481,6 +1527,7 @@ impl Mounter {
                 let scale = self.display_scale();
                 let was_screen = self.shaders.draws_screen(id);
                 let role = layer.as_ref().map(|l| l.role);
+                let mounted = layer.is_some();
                 let screen = matches!(
                     role,
                     Some(ShaderRole::Screen | ShaderRole::ScreenTransition)
@@ -1508,6 +1555,11 @@ impl Mounter {
                 {
                     self.shaders
                         .set(id, &host, children, &s.style, scale, layer);
+                    // No GPU: the app hears it (`shadersAvailable()`); the
+                    // engine takes the first report only.
+                    if mounted && self.shaders.without_device() {
+                        self.control.shaders_unavailable();
+                    }
                 }
                 if was_screen && !screen {
                     self.release_root_effect();
@@ -1688,6 +1740,8 @@ impl Mounter {
                 | Command::GoBack
                 | Command::GoForward
                 | Command::StopLoading
+                | Command::Evaluate { .. }
+                | Command::CancelEvaluate { .. }
                 | Command::InjectJavaScript(_)
                 | Command::PostMessage(_)
                 | Command::Load(_)),
@@ -1769,6 +1823,32 @@ impl Mounter {
             ) if id == nsh_core::ROOT_ID => {
                 crate::picker::pick_files(request, asked, native.view(), &self.control);
             }
+            (
+                Command::RenderCanvas {
+                    id: request,
+                    drawing,
+                    width,
+                    height,
+                    scale,
+                    format,
+                },
+                _,
+            ) if id == nsh_core::ROOT_ID => {
+                let display_scale = self.display_scale();
+                self.offscreen.render(
+                    crate::canvas::RenderRequest {
+                        id: request,
+                        drawing,
+                        width,
+                        height,
+                        scale,
+                        format,
+                    },
+                    &mut self.images,
+                    display_scale,
+                    &self.control,
+                );
+            }
             (Command::Speech(command), _) if id == nsh_core::ROOT_ID => {
                 crate::speech::command(&self.control, &command);
             }
@@ -1808,11 +1888,18 @@ impl Mounter {
             (Command::ClearJsResponder, _) => self.clear_js_responder(),
             (Command::Announce(text), _) => crate::system::announce(&text),
             (Command::Haptic(haptic), _) => crate::system::haptic(haptic),
+            (Command::Orientations(bits), _) if id == nsh_core::ROOT_ID => {
+                self.orientations = Some(bits);
+            }
             (Command::PerfMonitor(true), _) => self.measure(),
             (Command::PerfMonitor(false), _) => self.stop_measuring(),
             (Command::Tokens(tokens), _) => self.alert_tint = crate::system::alert_tint(&tokens),
             (Command::ImageInfo { id, uri }, _) => self.images.info(id, &uri),
             (Command::SetClipboard(text), _) => crate::system::set_clipboard(&text),
+            (Command::SetClipboardItem(item), _) => match &item.html {
+                Some(html) => crate::system::set_clipboard_html(&item.text, html),
+                None => crate::system::set_clipboard(&item.text),
+            },
             (Command::OpenUrl { id, url }, _) => crate::system::open_url(id, &url, &self.control),
             (Command::ReadClipboard { id, has_only }, _) => {
                 let (has, text) = crate::system::read_clipboard(has_only);
@@ -2300,9 +2387,10 @@ impl Mounter {
     }
 
     /// A JS responder took the touches on `id`: with `block`, the scroll
-    /// views around it stop scrolling until it lets go, and the presses of
-    /// the views around it end without a press (the finger is the
-    /// responder's: a drag of a selection handle is no tap on the text).
+    /// views around it stop scrolling and the stacks around it take no
+    /// swipe back until it lets go, and the presses of the views around it
+    /// end without a press (the finger is the responder's: a drag of a
+    /// selection handle is no tap on the text).
     fn set_js_responder(&mut self, id: NodeId, block: bool) {
         self.clear_js_responder();
         if !block {
@@ -2319,11 +2407,20 @@ impl Mounter {
                     recognizer.setEnabled(true);
                 }
             }
-            if let Some(scroll) = v.downcast_ref::<UIScrollView>() {
-                let pan = scroll.panGestureRecognizer();
-                if pan.isEnabled() {
-                    pan.setEnabled(false);
-                    self.blocked_scrolls.push(scroll.retain());
+            let scroll = v
+                .downcast_ref::<UIScrollView>()
+                .map(|scroll| Retained::into_super(scroll.panGestureRecognizer()));
+            // A stack's view: its controller is the next responder.
+            let swipes = v
+                .nextResponder()
+                .and_then(|r| r.downcast::<UINavigationController>().ok())
+                .map(|nav| crate::navigation::back_swipes(&nav))
+                .unwrap_or_default();
+            for gesture in scroll.into_iter().chain(swipes) {
+                if gesture.isEnabled() {
+                    // Turning it off also cancels a gesture that began.
+                    gesture.setEnabled(false);
+                    self.blocked_gestures.push(gesture);
                 }
             }
             current = v.superview();
@@ -2331,8 +2428,8 @@ impl Mounter {
     }
 
     fn clear_js_responder(&mut self) {
-        for scroll in self.blocked_scrolls.drain(..) {
-            scroll.panGestureRecognizer().setEnabled(true);
+        for gesture in self.blocked_gestures.drain(..) {
+            gesture.setEnabled(true);
         }
     }
 
@@ -2880,9 +2977,6 @@ impl Mounter {
                 scale,
                 crate::image::Look::default(),
             ) {
-                Request::Ready(decoded) if decoded.vector => {
-                    log::warn!("canvas image failed: {}", not_a_bitmap(&image.uri));
-                }
                 Request::Ready(decoded) => view.set_image(image.uri.clone(), decoded.image),
                 Request::Pending => {}
             }
@@ -2942,6 +3036,7 @@ impl Mounter {
     }
 
     pub(crate) fn image_loaded(&mut self, key: &str, result: Result<DecodedImage, String>) {
+        self.offscreen.image_loaded(key, &result, &self.control);
         for id in self.images.finish(key, &result) {
             if let Some(Slot {
                 native: Native::Canvas(view),
@@ -2950,9 +3045,6 @@ impl Mounter {
             {
                 // Canvas images are requested at their natural size.
                 match (&result, key.strip_prefix("0@")) {
-                    (Ok(decoded), Some(uri)) if decoded.vector => {
-                        log::warn!("canvas image failed: {}", not_a_bitmap(uri));
-                    }
                     (Ok(decoded), Some(uri)) => view.set_image(uri.into(), decoded.image.clone()),
                     (Err(message), _) => log::warn!("canvas image failed: {message}"),
                     _ => {}
@@ -3526,10 +3618,24 @@ impl Mounter {
             );
             if screen.config.large_title {
                 // Large titles collapse as the content scrolls under them.
-                if let Some(scroll) = first_scroll_view(&screen.view) {
+                if let Some(scroll) = first_scroll_view(&screen.view)
+                    && scroll.contentInsetAdjustmentBehavior()
+                        != UIScrollViewContentInsetAdjustmentBehavior::Automatic
+                {
+                    // UIKit keeps a scroll view at its top when its safe area
+                    // changes, not when it starts to adjust for it. One
+                    // already on screen (new content, or a header that turned
+                    // large in place) would keep its offset: its content
+                    // under the header, read as scrolled, the title collapsed.
+                    let at_top = scroll.contentOffset().y <= -scroll.adjustedContentInset().top;
                     scroll.setContentInsetAdjustmentBehavior(
                         UIScrollViewContentInsetAdjustmentBehavior::Automatic,
                     );
+                    if at_top {
+                        let mut offset = scroll.contentOffset();
+                        offset.y = -scroll.adjustedContentInset().top;
+                        scroll.setContentOffset(offset);
+                    }
                 }
             }
         }
@@ -3605,6 +3711,63 @@ impl Mounter {
         if self.deferred_stacks.contains(&id) {
             Self::finish_deferred(&self.shared, id);
         }
+    }
+
+    /// Applies the orientations the root was last given, once no stack is
+    /// pushing or popping and nothing is being presented: UIKit can cancel
+    /// a push the screen starts turning during, which reads as the user
+    /// going back.
+    fn apply_orientations(&mut self) {
+        let Some(bits) = self.orientations else {
+            return;
+        };
+        if self.orientations_waiting {
+            return;
+        }
+        let Some(root) = self.ui_view(nsh_core::ROOT_ID) else {
+            return;
+        };
+        let presenting = root
+            .window()
+            .and_then(|w| w.rootViewController())
+            .and_then(|c| c.transitionCoordinator());
+        let moving = presenting.or_else(|| {
+            self.views
+                .iter()
+                .flatten()
+                .find_map(|slot| match &slot.native {
+                    Native::Stack(stack) => stack.nav.transitionCoordinator(),
+                    _ => None,
+                })
+        });
+        if let Some(coordinator) = moving {
+            self.orientations_waiting = true;
+            let shared = self.shared.clone();
+            let done = RcBlock::new(
+                move |_: NonNull<
+                    ProtocolObject<dyn UIViewControllerTransitionCoordinatorContext>,
+                >| {
+                    // On the next turn, as the stacks catch up
+                    // (`finish_deferred`): the coordinator outlives this
+                    // callback, and a push they make waits its turn too.
+                    let shared = shared.clone();
+                    DispatchQueue::main().exec_async(move || {
+                        let mtm = MainThreadMarker::new().expect("main queue");
+                        if let Some(m) = shared.get(mtm).borrow_mut().as_mut() {
+                            m.orientations_waiting = false;
+                            m.apply_orientations();
+                        }
+                    });
+                },
+            );
+            // Refused when the transition is already ending.
+            if coordinator.animateAlongsideTransition_completion(None, Some(&done)) {
+                return;
+            }
+            self.orientations_waiting = false;
+        }
+        self.orientations = None;
+        crate::system::set_orientations(bits, &root);
     }
 
     /// Applies the changes stack `id` deferred during a transition, on the
@@ -3927,6 +4090,16 @@ impl Mounter {
         }
     }
 
+    /// A trailing `ios.headerRightItems` press or menu action: the root's
+    /// [`EventKind::Menu`] with the item's numeric id.
+    pub(crate) fn menu_id_event(&self, id: u32) {
+        self.control.dispatch_event(
+            nsh_core::ROOT_ID,
+            EventKind::Menu,
+            EventPayload::Map(vec![("id", nsh_core::PayloadValue::Number(id as f64))]),
+        );
+    }
+
     /// The finger lifted on a pressable view.
     pub(crate) fn pressed(&mut self, id: NodeId, at: PressAt) {
         if let Some(s) = self.slot(id)
@@ -3983,6 +4156,7 @@ impl Mounter {
                     view: scroll.retain(),
                     offset: (scroll.contentOffset().y + scroll.adjustedContentInset().top).max(0.0)
                         as f32,
+                    started: false,
                 });
                 break;
             }
@@ -4075,7 +4249,8 @@ impl Mounter {
             if let Some(s) = self.slot_mut(id) {
                 (s.gesture_start[0], s.gesture_start[1]) = (x, y);
             }
-            if events.contains(EventKind::PanStart) {
+            let deferred = self.slot(id).is_some_and(|s| s.pan_scroll.is_some());
+            if events.contains(EventKind::PanStart) && !deferred {
                 self.control
                     .dispatch_event(id, EventKind::PanStart, payload(self));
             }
@@ -4095,6 +4270,15 @@ impl Mounter {
                     .map_or(start[1] + t.y as f32, |scroll| {
                         (start[1] + t.y as f32 - scroll.offset).max(0.0)
                     });
+                let begins = y != start[1]
+                    && self
+                        .slot_mut(id)
+                        .and_then(|s| s.pan_scroll.as_mut())
+                        .is_some_and(|scroll| !std::mem::replace(&mut scroll.started, true));
+                if begins && events.contains(EventKind::PanStart) {
+                    self.control
+                        .dispatch_event(id, EventKind::PanStart, payload(self));
+                }
                 self.animator.set(n, y);
                 if let Some(scroll) = self.slot(id).and_then(|s| s.pan_scroll.as_ref()) {
                     let offset = scroll.view.contentOffset();
@@ -4555,7 +4739,7 @@ impl Drop for Mounter {
 }
 
 /// The first scroll view in `view`'s subtree (breadth first).
-fn first_scroll_view(view: &UIView) -> Option<Retained<UIScrollView>> {
+pub(crate) fn first_scroll_view(view: &UIView) -> Option<Retained<UIScrollView>> {
     let mut queue = vec![view.retain()];
     while !queue.is_empty() {
         let mut next = Vec::new();
@@ -4820,7 +5004,7 @@ fn animate(
     f: impl Fn() + 'static,
 ) {
     let block = block2::RcBlock::new(f);
-    let (duration, delay) = (t.duration_ms as f64 / 1000.0, t.delay_ms as f64 / 1000.0);
+    let (duration, delay) = (t.run_ms() as f64 / 1000.0, t.delay_ms as f64 / 1000.0);
     let base = UIViewAnimationOptions::BeginFromCurrentState
         | UIViewAnimationOptions::AllowUserInteraction;
     match t.curve {
@@ -4835,17 +5019,35 @@ fn animate(
                 mtm,
             )
         }),
-        LayoutCurve::Spring { damping } => {
+        LayoutCurve::FittedSpring { damping_ratio } => {
             UIView::animateWithDuration_delay_usingSpringWithDamping_initialSpringVelocity_options_animations_completion(
                 duration,
                 delay,
-                damping as CGFloat,
+                damping_ratio as CGFloat,
                 0.0,
                 base,
                 &block,
                 None,
                 mtm,
             )
+        }
+        // UIKit's own spring of the same physics, which UIKit times by the
+        // physics (`duration`, the time it settles in, is left aside).
+        LayoutCurve::Spring(spring) => {
+            let timing = UISpringTimingParameters::initWithMass_stiffness_damping_initialVelocity(
+                UISpringTimingParameters::alloc(mtm),
+                spring.mass as CGFloat,
+                spring.stiffness as CGFloat,
+                spring.damping as CGFloat,
+                CGVector { dx: 0.0, dy: 0.0 },
+            );
+            let animator = UIViewPropertyAnimator::initWithDuration_timingParameters(
+                UIViewPropertyAnimator::alloc(mtm),
+                duration,
+                ProtocolObject::from_ref(&*timing),
+            );
+            animator.addAnimations(&block);
+            animator.startAnimationAfterDelay(delay);
         }
         curve => {
             let curve = match curve {
@@ -4892,7 +5094,7 @@ fn disappear(
         }
     });
     UIView::animateWithDuration_delay_options_animations_completion(
-        t.duration_ms as f64 / 1000.0,
+        t.run_ms() as f64 / 1000.0,
         t.delay_ms as f64 / 1000.0,
         UIViewAnimationOptions::BeginFromCurrentState,
         &block,

@@ -19,6 +19,7 @@ use jni::{
 };
 use nsh_core::{
     EventKind, EventPayload, MountBatch, MountItem, NodeId, PayloadValue, Points, Size,
+    canvas::render::RenderFailure,
     geometry::{DevicePixels, point, px, size},
 };
 use nsh_engine::{
@@ -40,6 +41,8 @@ pub(crate) struct Host {
     density: Density,
     trace: bool,
     engine: Mutex<Option<Engine>>,
+    /// Fences WebView completions from engines replaced on this surface.
+    web_generation: AtomicU64,
     /// The running engine's control, for answers the sink gives itself
     /// (never locked while an engine stops, unlike `engine`).
     answers: Mutex<Option<EngineControl>>,
@@ -61,6 +64,8 @@ pub(crate) struct Host {
     granted: Mutex<Option<nsh_engine::Capabilities>>,
     /// The VM limits of loaded apps (`NshView.setLimits`).
     limits: Mutex<nsh_engine::Limits>,
+    /// The embedding app's runtime for apps loaded from now on.
+    runtime: Mutex<Option<tokio::runtime::Handle>>,
     /// Where loaded apps keep their data, each in a directory named by its
     /// id ([`EngineConfig::data_dir`]): `nsh` in the files directory.
     pub(crate) data_dir: Option<std::path::PathBuf>,
@@ -118,6 +123,15 @@ impl Host {
 
     fn control(&self) -> Option<EngineControl> {
         self.engine.lock().ok()?.as_ref().map(Engine::control)
+    }
+
+    /// The user gave the surface input with `modality` (a finger, a mouse
+    /// or a hardware key going down): told before it acts, so the focus
+    /// it moves shows or not (`focus-visible:`).
+    pub(crate) fn input_with(&self, modality: nsh_core::platform::InputModality) {
+        if let Some(control) = self.control() {
+            control.set_input_modality(modality);
+        }
     }
 
     /// Hands event `kind` of node `id` to the running app.
@@ -178,7 +192,11 @@ impl Host {
         }
         // Stop the old engine first: its batches must not reach the new app.
         *self.answers.lock().expect("answers") = None;
-        let old = self.engine.lock().expect("engine").take();
+        let (old, web_generation) = {
+            let mut engine = self.engine.lock().expect("engine");
+            let generation = self.web_generation.fetch_add(1, Ordering::Relaxed) + 1;
+            (engine.take(), generation)
+        };
         if let Some(old) = old {
             drop(old);
             // No `Delete` follows for its views: its native components
@@ -214,7 +232,7 @@ impl Host {
             header_heights: (nsh_core::Points(56.0), nsh_core::Points(56.0)),
             limits: *self.limits.lock().expect("limits"),
             ui_sets: crate::ui_sets(),
-            runtime: None,
+            runtime: self.runtime.lock().expect("runtime").clone(),
             data_dir: self.data_dir.clone(),
             cache,
             storage: self.storage.lock().expect("storage").as_ref().map(|dir| {
@@ -229,9 +247,10 @@ impl Host {
             speech: None,
             audio: None,
             windows: None,
+            login_item: None,
         };
         let density = self.density.clone();
-        let sink = Sink(self.clone());
+        let sink = Sink(self.clone(), web_generation);
         // A test session's app: the test's storage, network and trace.
         #[cfg(feature = "dev")]
         if let Some(model) = &*self.test_model.lock().unwrap_or_else(|e| e.into_inner()) {
@@ -428,7 +447,7 @@ fn register_inline_images(host: &Host, batch: &MountBatch) {
 
 /// Hands commits to the UI thread: one `NshView.submit(bytes, objects, seq)`
 /// call per batch.
-struct Sink(Arc<Host>);
+struct Sink(Arc<Host>, u64);
 
 impl MountSink for Sink {
     fn submit(&self, batch: MountBatch) {
@@ -439,7 +458,7 @@ impl MountSink for Sink {
         }
         answer_clipboard_reads(host, &batch);
         register_inline_images(host, &batch);
-        let mut encoded = encode::encode(batch);
+        let mut encoded = encode::encode(batch, self.1);
         if let Some(keymap) = encoded.keymap.take() {
             host.keymap
                 .lock()
@@ -612,6 +631,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         density: Density::new(density),
         trace: trace != 0,
         engine: Mutex::new(None),
+        web_generation: AtomicU64::new(0),
         answers: Mutex::new(None),
         pending: Mutex::new(None),
         viewport: Mutex::new(Size::new(px(0.0), px(0.0))),
@@ -620,6 +640,13 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
             // the system's viewer reads it through the FilesProvider. The
             // dialogs have no answer here.
             file_requests: true,
+            // `OffscreenCanvas`: `CanvasRender.java` replays drawings into
+            // bitmaps with the on-screen canvas's painter.
+            canvas_render: true,
+            web_evaluate: true,
+            // wgpu on Vulkan or GLES, in builds with it, until it finds no
+            // GPU.
+            shaders: nsh_engine::shader::LINKED,
             ..Environment::default()
         }),
         animation_queue: Mutex::new(VecDeque::new()),
@@ -629,6 +656,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         epoch: Instant::now(),
         granted: Mutex::new(None),
         limits: Mutex::new(nsh_engine::Limits::default()),
+        runtime: Mutex::new(None),
         data_dir,
         storage: Mutex::new(None),
         access: Mutex::new(Arc::default()),
@@ -778,7 +806,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_setCache(
 /// What the running app's disk cache holds for `url`: its bytes (`byte[]`)
 /// when they are fresh, the conditional request headers to revalidate a
 /// stale copy with (`String[]`, names and values; empty: none), or null (a
-/// miss, or no disk cache). Called on the image threads.
+/// miss, or no disk cache). A copy that came through a redirect the app may
+/// no longer follow is dropped, and a miss. Called on the image threads.
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_imageCacheLookup<'local>(
     mut env: JNIEnv<'local>,
@@ -795,7 +824,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheLookup<'local>(
     let Ok(url) = env.get_string(&url).map(String::from) else {
         return JObject::null();
     };
-    match cache.lookup(&url) {
+    let access = host.access.lock().expect("access").clone();
+    match cache.lookup(&url, &access) {
         Lookup::Fresh(bytes) => env
             .byte_array_from_slice(&bytes)
             .map(JObject::from)
@@ -812,6 +842,23 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheLookup<'local>(
     }
 }
 
+/// The strings of a Java `String[]` (null: none; a null element: empty).
+fn read_strings(env: &mut JNIEnv<'_>, array: &JObjectArray<'_>) -> Vec<String> {
+    if array.is_null() {
+        return Vec::new();
+    }
+    let len = env.get_array_length(array).unwrap_or(0);
+    (0..len)
+        .map(|i| {
+            env.get_object_array_element(array, i)
+                .ok()
+                .filter(|o| !o.is_null())
+                .and_then(|o| env.get_string(&JString::from(o)).ok().map(String::from))
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
 /// `strings` as a Java `String[]`.
 fn string_array<'local>(env: &mut JNIEnv<'local>, strings: &[&str]) -> Option<JObject<'local>> {
     let array = env
@@ -826,7 +873,8 @@ fn string_array<'local>(env: &mut JNIEnv<'local>, strings: &[&str]) -> Option<JO
 
 /// Ends the download of `url` that `imageCacheLookup` started: `status` 0
 /// when the request failed, else the response's status, `headers` (names
-/// and values) and body (null without one). Stores, updates or drops the
+/// and values), body (null without one) and `redirects`, the URLs the
+/// download was redirected to (null: none). Stores, updates or drops the
 /// cached copy, and returns the cached bytes when they are what to show
 /// (a `304`; a stale copy when the request failed or the server erred), or
 /// null: the response's own body (a `2xx`), or an error. Called on the
@@ -840,6 +888,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheComplete<'local>(
     status: jint,
     headers: JObjectArray<'local>,
     body: JByteArray<'local>,
+    redirects: JObjectArray<'local>,
 ) -> JByteArray<'local> {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
@@ -852,18 +901,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheComplete<'local>(
     let response = if status <= 0 {
         Err("the request failed".to_owned())
     } else {
-        let mut strings = Vec::new();
-        if !headers.is_null() {
-            let len = env.get_array_length(&headers).unwrap_or(0);
-            for i in 0..len {
-                let value = env
-                    .get_object_array_element(&headers, i)
-                    .ok()
-                    .filter(|o| !o.is_null())
-                    .and_then(|o| env.get_string(&JString::from(o)).ok().map(String::from));
-                strings.push(value.unwrap_or_default());
-            }
-        }
+        let strings = read_strings(&mut env, &headers);
         let pairs = strings
             .as_chunks::<2>()
             .0
@@ -874,15 +912,17 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheComplete<'local>(
         } else {
             env.convert_byte_array(&body).unwrap_or_default()
         };
-        Ok(nsh_core::image::Fetched::new(
+        let fetched = nsh_core::image::Fetched::new(
             status as u16,
             nsh_core::image::CacheHeaders::from_pairs(pairs),
             body,
-        ))
+        );
+        Ok(fetched.redirected(read_strings(&mut env, &redirects)))
     };
     // A 2xx's bytes are the body Java has.
     let own = (200..300).contains(&status);
-    match cache.complete(&url, response) {
+    let access = host.access.lock().expect("access").clone();
+    match cache.complete(&url, &access, response) {
         Ok(bytes) if !own => env
             .byte_array_from_slice(&bytes)
             .unwrap_or_else(|_| JByteArray::default()),
@@ -968,6 +1008,30 @@ extern "system" fn Java_com_longbridge_nsh_Native_allowsWebview(
     };
     let access = host.access.lock().expect("access").clone();
     access.allows_webview(&String::from(url)).into()
+}
+
+/// Whether the running app's web pages may capture `kind` (`"microphone"`,
+/// `"camera"`).
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_allowsWebMedia(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    kind: JString<'_>,
+) -> jboolean {
+    use nsh_core::access::WebMedia;
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let Ok(kind) = env.get_string(&kind) else {
+        return 0;
+    };
+    let media = match String::from(kind).as_str() {
+        "microphone" => WebMedia::Microphone,
+        "camera" => WebMedia::Camera,
+        _ => return 0,
+    };
+    let access = host.access.lock().expect("access").clone();
+    access.allows_web_media(media).into()
 }
 
 /// The URL a media load redirected from `base` to `location` goes on to, or
@@ -1099,6 +1163,25 @@ extern "system" fn Java_com_longbridge_nsh_Native_load(
     #[cfg(not(feature = "js"))]
     let _ = updater;
     host.load(bundle);
+}
+
+/// Sets the runtime for apps loaded next in one `NshView`.
+///
+/// Call before loading an app or connecting a dev server. Later changes
+/// apply from the next load, including an app waiting for its first size;
+/// a running engine keeps its runtime. `None` restores NSH's shared runtime.
+/// The embedding app owns the runtime and must keep it running until its
+/// engines stop. Destroying the view does not shut the runtime down.
+///
+/// # Safety
+///
+/// `handle` must be the live native handle of a `NshView` from this linked
+/// library (its `handle` field). Call on the view's UI thread, before it is
+/// destroyed, so destruction cannot invalidate the handle during this call.
+pub unsafe fn set_runtime(handle: jlong, runtime: Option<tokio::runtime::Handle>) {
+    // SAFETY: the caller guarantees a live handle that cannot be destroyed.
+    let host = unsafe { host(handle) };
+    *host.runtime.lock().expect("runtime") = runtime;
 }
 
 /// Runs a Rust app's root in the `NshView` with native handle `handle`
@@ -1382,6 +1465,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_press(
     let Some(kind) = encode::kind_from(kind) else {
         return;
     };
+    if kind == EventKind::PressDown {
+        host.input_with(nsh_core::platform::InputModality::Pointer);
+    }
     let event = nsh_core::PressEvent {
         position: point(px(x), px(y)),
         page_position: point(px(page_x), px(page_y)),
@@ -1459,9 +1545,13 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
                 page: point(px(c[i * 4]), px(c[i * 4 + 1])),
                 location: point(px(c[i * 4 + 2]), px(c[i * 4 + 3])),
                 changed: flags[i] != 0,
+                pointer_type: nsh_core::PointerType::Touch,
             }
         })
         .collect();
+    if phase == 0 {
+        host.input_with(nsh_core::platform::InputModality::Pointer);
+    }
     let phase = match phase {
         0 => nsh_core::TouchPhase::Start,
         1 => nsh_core::TouchPhase::Move,
@@ -1520,6 +1610,64 @@ extern "system" fn Java_com_longbridge_nsh_Native_paste(
             id as NodeId,
             EventKind::Paste,
             EventPayload::Paste(Box::new(paste)),
+        );
+    }
+}
+
+/// `Native.canvasImage`'s `failure`: the image could not be drawn or
+/// encoded. `CanvasRender.java`'s `RENDER_FAILED`.
+const RENDER_FAILED: jint = 0;
+/// `Native.canvasImage`'s `failure`: the system could not make a bitmap
+/// this large. `CanvasRender.java`'s `RENDER_TOO_LARGE`.
+const RENDER_TOO_LARGE: jint = 1;
+
+/// The failure `Native.canvasImage` reports: its `failure` kind
+/// ([`RENDER_FAILED`], [`RENDER_TOO_LARGE`]; an unknown one is a plain
+/// failure) and message.
+fn render_failure(failure: jint, message: String) -> RenderFailure {
+    match failure {
+        RENDER_TOO_LARGE => RenderFailure::TooLarge(message),
+        RENDER_FAILED => RenderFailure::Failed(message),
+        _ => RenderFailure::Failed(message),
+    }
+}
+
+/// The answer to an offscreen canvas render (`CanvasRender.java`): the
+/// encoded image's bytes, or when they are null why not, `failure`
+/// ([`RENDER_FAILED`], [`RENDER_TOO_LARGE`]) and `error`. The bytes cross
+/// as a `byte[]`, never through the event map's boxed values.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_canvasImage(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    request: jint,
+    bytes: JByteArray<'_>,
+    failure: jint,
+    error: JString<'_>,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let result = if bytes.is_null() {
+        let error = (!error.is_null())
+            .then(|| env.get_string(&error).ok().map(String::from))
+            .flatten();
+        Err(render_failure(
+            failure,
+            error.unwrap_or_else(|| "the canvas could not be drawn".into()),
+        ))
+    } else {
+        env.convert_byte_array(&bytes)
+            .map_err(|e| format!("the image could not be read: {e}").into())
+    };
+    if let Some(control) = host.control() {
+        control.dispatch_event(
+            nsh_core::ROOT_ID,
+            EventKind::CanvasImage,
+            EventPayload::CanvasImage {
+                id: request as u32,
+                result,
+            },
         );
     }
 }
@@ -1703,6 +1851,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 "canGoBack" => "canGoBack",
                 "canGoForward" => "canGoForward",
                 "data" => "data",
+                "generation" => "generation",
                 "message" => "message",
                 "code" => "code",
                 "duration" => "duration",
@@ -1758,6 +1907,27 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
             EventPayload::Map(fields)
         }
     };
+    if kind == EventKind::WebEvaluation {
+        let generation = match &payload {
+            EventPayload::Map(fields) => fields.iter().find_map(|(key, value)| match value {
+                PayloadValue::Str(value) if *key == "generation" => value.parse::<u64>().ok(),
+                _ => None,
+            }),
+            _ => None,
+        };
+        // Check and capture the control under the same lock load() uses
+        // to replace it: a late callback can only reach its own engine.
+        let control = {
+            let engine = host.engine.lock().expect("engine");
+            (generation == Some(host.web_generation.load(Ordering::Relaxed)))
+                .then(|| engine.as_ref().map(Engine::control))
+                .flatten()
+        };
+        if let Some(control) = control {
+            control.dispatch_event(id as NodeId, kind, payload);
+        }
+        return;
+    }
     match host.control() {
         Some(control) => control.dispatch_event(id as NodeId, kind, payload),
         // A link before the app runs (the launch intent's): the engine
@@ -1797,7 +1967,15 @@ extern "system" fn Java_com_longbridge_nsh_Native_afterBatch(
         ui.apply(item);
     }
     finish(host, &mut ui);
-    floats(&env, &ui.outputs())
+    let unavailable = ui.shaders.take_unavailable();
+    let outputs = floats(&env, &ui.outputs());
+    drop(ui);
+    // No GPU for the shader views just mounted: the app hears it
+    // (`shadersAvailable()`).
+    if unavailable && let Some(control) = host.control() {
+        control.shaders_unavailable();
+    }
+    outputs
 }
 
 /// Runs the next function the app asked to run on the UI thread
@@ -2315,7 +2493,7 @@ fn floats(env: &JNIEnv<'_>, values: &[f32]) -> jfloatArray {
     array.into_raw()
 }
 
-/// A registered native component emitted `name` (JSON data or `null`).
+/// The files picked for a pick (`Picker.java`'s answer).
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_picked(
     mut env: JNIEnv<'_>,
@@ -2326,12 +2504,15 @@ extern "system" fn Java_com_longbridge_nsh_Native_picked(
     types: jni::objects::JObjectArray<'_>,
     data: jni::objects::JObjectArray<'_>,
     sizes: jni::objects::JIntArray<'_>,
+    lengths: jni::objects::JLongArray<'_>,
 ) {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
     let count = env.get_array_length(&data).unwrap_or(0).max(0);
     let mut dims = vec![0; count as usize * 2];
     let _ = env.get_int_array_region(&sizes, 0, &mut dims);
+    let mut lens = vec![0; count as usize];
+    let _ = env.get_long_array_region(&lengths, 0, &mut lens);
     let string = |env: &mut JNIEnv<'_>, array: &jni::objects::JObjectArray<'_>, i: i32| {
         env.get_object_array_element(array, i)
             .ok()
@@ -2346,6 +2527,12 @@ extern "system" fn Java_com_longbridge_nsh_Native_picked(
         let Ok(bytes) = env.get_object_array_element(&data, i) else {
             continue;
         };
+        // No bytes: a file larger than the pick reads, its size alone.
+        if bytes.is_null() {
+            let len = u64::try_from(lens[i as usize]).unwrap_or(0);
+            files.push(nsh_core::picker::PickedFile::too_large(name, mime, len));
+            continue;
+        }
         let Ok(bytes) = env.convert_byte_array(JByteArray::from(bytes)) else {
             continue;
         };

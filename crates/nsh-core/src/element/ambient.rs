@@ -9,6 +9,7 @@
 
 use std::{
     any::{Any, TypeId},
+    cell::Cell,
     future::Future,
     path::PathBuf,
     rc::Rc,
@@ -22,7 +23,10 @@ use super::{
     AdaptiveColor, Environment, Memo, Owner, Signal, SignalEquals, Tokens, cleanup, computed,
     reactive::with_data,
     signal_with,
-    task::{self, Action, Answer, ClipboardImage, DialogAnswer, Executor, FileAnswer, ImageSize},
+    task::{
+        self, Action, Answer, ClipboardImage, ClipboardItem, DialogAnswer, Executor, FileAnswer,
+        ImageSize,
+    },
 };
 use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size,
@@ -47,11 +51,16 @@ pub(crate) struct Ambient {
     measure: Option<MeasureFn>,
     /// The app's key-value storage (`nsh/storage`).
     storage: Option<crate::storage::Store>,
+    /// The app's own data directory ([`data_dir`]).
+    data_dir: Option<std::path::PathBuf>,
     /// The displays (desktops), as the platform reports them.
     displays: Option<Signal<Arc<[crate::desktop::Display]>>>,
     /// Whether the performance monitor measures, as the platform reports
     /// it.
     perf_monitor: Option<Signal<bool>>,
+    /// What the performance monitor measured last, as the engine reports
+    /// it ([`perf_stats`]).
+    perf_stats: Option<Signal<Option<crate::platform::PerfStats>>>,
     /// The main window's close presses: how many, and the last one's
     /// reason ([`crate::element::desktop::WindowRef::on_close_press`]).
     main_close_press: Option<Signal<(u64, crate::desktop::CloseReason)>>,
@@ -85,7 +94,9 @@ struct EnvSignals {
     locale: Memo<Locale>,
     locale_settings: Memo<LocaleSettings>,
     lifecycle: Memo<Lifecycle>,
+    wake_count: Memo<u32>,
     screen_color: Memo<bool>,
+    shaders: Memo<bool>,
 }
 
 impl EnvSignals {
@@ -114,7 +125,9 @@ impl EnvSignals {
                 locale: part!(locale),
                 locale_settings: part!(locale_settings),
                 lifecycle: part!(lifecycle),
+                wake_count: part!(wake_count),
                 screen_color: part!(screen_color),
+                shaders: part!(shaders),
             }
         })
     }
@@ -139,6 +152,12 @@ impl super::Runtime {
     pub(crate) fn set_storage(&self, storage: crate::storage::Store) {
         let _entered = self.enter();
         with_data(|d| d.ambient.storage = Some(storage));
+    }
+
+    /// The app's own data directory ([`data_dir`]).
+    pub(crate) fn set_data_dir(&self, dir: Option<std::path::PathBuf>) {
+        let _entered = self.enter();
+        with_data(|d| d.ambient.data_dir = dir);
     }
 
     /// How text is measured (the core's text engine).
@@ -176,6 +195,16 @@ impl super::Runtime {
         let signal = perf_monitor_signal();
         if signal.get_untracked() != enabled {
             signal.set(enabled);
+        }
+    }
+
+    /// What the performance monitor measured last (`None`: it does not
+    /// measure): what read it runs again.
+    pub(crate) fn set_perf_stats(&self, stats: Option<crate::platform::PerfStats>) {
+        let _entered = self.enter();
+        let signal = perf_stats_signal();
+        if signal.get_untracked() != stats {
+            signal.set(stats);
         }
     }
 
@@ -297,6 +326,28 @@ pub fn screen_reader() -> bool {
     env(|e| e.screen_reader)
 }
 
+/// The platform's screen readers follow the active descendant a focused
+/// element names ([`super::Interactive::accessibility_active_descendant`],
+/// [`crate::platform::Environment::reads_active_descendants`]); it does
+/// not change.
+pub fn reads_active_descendants() -> bool {
+    with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .expect("the core sets the environment")
+        .with_untracked(|e| e.reads_active_descendants)
+}
+
+/// Whether the platform draws shader views ([`super::shader`] and the
+/// other shader elements; TS: `shadersAvailable()`), reading subscribes.
+/// `false` where the platform was built without a renderer, on a grid
+/// surface, or once the platform found no GPU; it starts `true` elsewhere
+/// and turns `false` (never back) when the first shader mounts on a
+/// machine without one, so an app shows a shader while this holds and
+/// its own drawing (a canvas, an image) otherwise. Whether a source
+/// compiles is [`crate::shader::Shader::compile`]'s answer.
+pub fn shaders_available() -> bool {
+    env(|e| e.shaders)
+}
+
 /// Whether the surface lays out right to left: the root's direction,
 /// which follows the user's language unless the app sets the root's
 /// `direction` (reading subscribes).
@@ -349,6 +400,18 @@ pub fn locale_settings() -> LocaleSettings {
 /// so an effect pauses work in the background and resumes it after.
 pub fn lifecycle() -> Lifecycle {
     env(|e| e.lifecycle)
+}
+
+/// How many times the system woke from sleep while the app ran (TS:
+/// `wakeCount()`), 0 until the first wake. Reading it subscribes, so an
+/// effect that reads it runs again after each wake: a sleep may leave
+/// [`lifecycle`] as it was (a laptop's lid closed and opened with the app
+/// in front), while network connections and timers did not live through
+/// it, so the app checks or opens them again there. macOS, Windows and
+/// Linux count wakes; on iOS and Android a sleeping device takes the app
+/// to the background, which [`lifecycle`] reports.
+pub fn wake_count() -> u32 {
+    env(|e| e.wake_count)
 }
 
 /// The operating system (TS: `platform.os`); it does not change.
@@ -554,6 +617,33 @@ pub(crate) fn with_storage<R>(f: impl FnOnce(&crate::storage::Store) -> R) -> R 
     f(&storage)
 }
 
+/// The app's own data directory (TS: `process.dataDir`): where its files
+/// are kept, `<data_dir>/<app id>` of the engine, beside its
+/// `storage.json`, on every platform. `None` when the host keeps no files
+/// for the app (the web). The directory may not exist yet: create it
+/// before writing.
+///
+/// ```ignore
+/// let db = data_dir().map(|dir| dir.join("app.sqlite"));
+/// ```
+pub fn data_dir() -> Option<std::path::PathBuf> {
+    with_data(|d| d.ambient.data_dir.clone())
+}
+
+/// The file the app's log lines are written to (TS: `process.logFile`): a
+/// packaged desktop app's rolling log, `logs/app.log` in the app's data
+/// directory, for a diagnostics report or an "Open logs folder" command
+/// (older files beside it are `app.1.log`, `app.2.log`, ...). `None` where
+/// the lines go to the platform's log only: development hosts, embedding
+/// apps, mobile, the web.
+///
+/// ```ignore
+/// let folder = log_file().and_then(|file| file.parent().map(Path::to_path_buf));
+/// ```
+pub fn log_file() -> Option<std::path::PathBuf> {
+    crate::log_file::path().map(std::path::Path::to_path_buf)
+}
+
 /// Opens `url` outside the app (TS: `openUrl` of `nsh/device`): a web page
 /// in the browser, a `mailto:` or `tel:` link in its app, any scheme
 /// another app registered. The embedding app may take it first (its host
@@ -571,6 +661,14 @@ pub fn open_url(url: impl Into<String>) -> Answer<bool> {
 /// Puts `text` on the system clipboard (TS: `Clipboard.writeText`).
 pub fn set_clipboard(text: impl Into<String>) {
     act(super::services::set_clipboard(text.into()));
+}
+
+/// Puts `item` on the system clipboard (TS: `Clipboard.write`): its
+/// text, and its HTML as the platform's HTML type, which apps that read
+/// formatting paste. Where the platform has no HTML on the clipboard (a
+/// terminal) the text only.
+pub fn set_clipboard_item(item: ClipboardItem) {
+    act(super::services::set_clipboard_item(item));
 }
 
 /// The text on the system clipboard, `""` when it holds none (TS:
@@ -618,6 +716,16 @@ pub(crate) fn clipboard_checked_image() -> Answer<Result<Option<ClipboardImage>,
 /// `Clipboard.hasImage`).
 pub fn clipboard_has_image() -> Answer<bool> {
     let (answer, action) = super::services::clipboard_has_image();
+    act(action);
+    answer
+}
+
+/// Renders `request`'s drawing offscreen into an image
+/// ([`super::Painter::render`]).
+pub(crate) fn render_canvas(
+    request: crate::canvas::render::RenderRequest,
+) -> Answer<Result<Vec<u8>, super::JsError>> {
+    let (answer, action) = super::services::render_canvas(request);
     act(action);
     answer
 }
@@ -807,6 +915,13 @@ pub fn close_notification(id: impl Into<String>) {
     )));
 }
 
+/// Removes every notification of the app's, shown or waiting to show, those
+/// an earlier run of the app left included where the platform can reach
+/// them (TS: `Notifications.closeAll`): what signing out clears.
+pub fn close_all_notifications() {
+    act(Action::Notification(super::NotificationAction::CloseAll));
+}
+
 /// Shows `count` on the app's icon, 0 clears it (TS: `Notifications.setBadge`).
 pub fn set_badge(count: u32) {
     act(Action::Notification(super::NotificationAction::SetBadge(
@@ -822,6 +937,34 @@ pub fn next_notification_press() -> Answer<String> {
     act(Action::Notification(super::NotificationAction::NextPress(
         slot,
     )));
+    answer
+}
+
+/// The next files the system opens the app with (TS:
+/// `Application.on("openFiles", ...)`, GPUI's `on_open_urls` for files):
+/// files of the types the app declares (`nsh.json` `fileTypes`) the user
+/// opened with it (Open With, a double click, a drop on its icon) at
+/// launch or while it runs, as absolute paths. Those that came before
+/// anything listened, the files that launched the app included, come at
+/// once (at most [`crate::file_type::MAX_PENDING`]). Links of the app's
+/// schemes come apart ([`next_url_scheme_open`]). One call waits at a time,
+/// as with [`next_url_scheme_open`]. To await in a task.
+pub fn next_open_files() -> Answer<Vec<std::path::PathBuf>> {
+    let (answer, slot) = Answer::new();
+    act(Action::NextOpenFiles(slot));
+    answer
+}
+
+/// The next later launch of the app (TS: `Application.on("secondInstance",
+/// ...)`): with `nsh.json` `"singleInstance": true`, a second launch on
+/// Windows or Linux hands the running instance its arguments and working
+/// directory and exits; those that came before anything listened first
+/// ([`crate::single_instance`]). The main window is already brought
+/// forward. Never on macOS (Launch Services activates the running app
+/// instead), iOS, Android or the web. To await in a task.
+pub fn next_second_instance() -> Answer<crate::single_instance::SecondInstance> {
+    let (answer, slot) = Answer::new();
+    act(Action::NextSecondInstance(slot));
     answer
 }
 
@@ -841,7 +984,10 @@ pub fn next_url_scheme_open() -> Answer<String> {
 /// the user typed ([`crate::url_scheme::AppUrlChange`]). [`app_url`] reads
 /// it already. Moves while nothing listened since the app started are not
 /// kept; once something listened, at most
-/// [`crate::url_scheme::MAX_PENDING`] wait. To await in a task.
+/// [`crate::url_scheme::MAX_PENDING`] wait. One call waits at a time, as
+/// with [`next_url_scheme_open`]: a newer call takes the next move and the
+/// one before gets none, so an app awaits it in one task (TS's `change`
+/// listeners share one). To await in a task.
 pub fn next_app_url_change() -> Answer<crate::url_scheme::AppUrlChange> {
     let (answer, slot) = Answer::new();
     act(Action::NextAppUrlChange(slot));
@@ -904,6 +1050,17 @@ pub(crate) fn set_app_url_from_js(url: String, history: crate::url_scheme::Histo
 pub fn web_input_available() -> Answer<bool> {
     let (answer, slot) = Answer::new();
     act(Action::WebInputAvailable(slot));
+    answer
+}
+
+/// Whether a web view's ref runs scripts and answers with their results
+/// here (TS: `WebView.evaluateAvailable()`,
+/// [`ElementRef::evaluate`](super::ElementRef::evaluate)): the platform has
+/// it and the app's capabilities grant `webview`. Elsewhere `evaluate`
+/// fails with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. To await in a task.
+pub fn web_evaluate_available() -> Answer<bool> {
+    let (answer, slot) = Answer::new();
+    act(Action::WebEvaluateAvailable(slot));
     answer
 }
 
@@ -1025,6 +1182,12 @@ pub(crate) fn host_call(
     answer
 }
 
+/// Hands `args` to function `name` of the embedding app, with no answer
+/// (TS: `host.post`).
+pub(crate) fn host_post(name: String, args: crate::JsonValue) {
+    act(Action::HostPost { name, args });
+}
+
 /// Forgets the host calls whose answers were dropped (they timed out).
 pub(crate) fn forget_host_calls() {
     act(Action::ForgetHostCalls);
@@ -1111,16 +1274,37 @@ impl<T> Future for Spawned<T> {
 pub fn spawn<T: 'static>(future: impl Future<Output = T> + 'static) -> Spawned<T> {
     let executor = executor();
     let owner = Owner::current();
+    let cancel = Rc::new(Cell::new(None));
+    // Made outside the block and moved in: a task cancelled before its
+    // first poll drops it too.
+    let release = Release(cancel.clone());
     let task = task::spawn_future(
         &executor,
         Owned {
             owner,
-            future: Box::pin(future),
+            future: Box::pin(async move {
+                let _release = release;
+                future.await
+            }),
         },
     );
     let handle = task.handle();
-    cleanup(move || handle.cancel());
+    // Taken back from the owner when the task ends first (it finished or
+    // was cancelled), so a long-lived owner does not keep one per task.
+    cancel.set(super::reactive::removable_cleanup(move || handle.cancel()));
     Spawned(task)
+}
+
+/// Takes a task's cleanup back from its owner as the task's future goes
+/// (it finished, or was dropped when cancelled).
+struct Release(Rc<Cell<Option<super::reactive::RemovableCleanup>>>);
+
+impl Drop for Release {
+    fn drop(&mut self) {
+        if let Some(cancel) = self.0.take() {
+            cancel.remove();
+        }
+    }
 }
 
 /// Runs `f` on the platform's main thread (the UI thread), for APIs that
@@ -1144,6 +1328,17 @@ pub fn run_on_main_thread<R: Send + 'static>(
 }
 
 /// A future polled under `owner` ([`Owner::scope`]).
+/// `future`, polled under `owner`, boxed for the executor.
+pub(super) fn owned(
+    owner: Owner,
+    future: impl Future<Output = ()> + 'static,
+) -> std::pin::Pin<Box<dyn Future<Output = ()>>> {
+    Box::pin(Owned {
+        owner,
+        future: Box::pin(future),
+    })
+}
+
 struct Owned<F> {
     owner: Owner,
     future: std::pin::Pin<Box<F>>,
@@ -1204,7 +1399,7 @@ pub fn timer(delay: Duration) -> Delay {
 pub fn timer_until(at: Instant) -> Delay {
     Delay {
         at,
-        registered: false,
+        timer: None,
         #[cfg(not(target_arch = "wasm32"))]
         elsewhere: None,
     }
@@ -1217,8 +1412,9 @@ pub fn timer_until(at: Instant) -> Delay {
 #[derive(Debug)]
 pub struct Delay {
     at: Instant,
-    /// The core keeps it.
-    registered: bool,
+    /// Its timer in the core, which dropping the delay takes back (a task
+    /// cancelled before its time).
+    timer: Option<task::TimerKey>,
     #[cfg(not(target_arch = "wasm32"))]
     elsewhere: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
 }
@@ -1235,15 +1431,18 @@ impl Future for Delay {
             return sleep.as_mut().poll(cx);
         }
         if crate::time::now() >= self.at {
+            // Its timer goes too if it has not fired yet (the task was
+            // polled for something else).
+            self.timer = None;
             return std::task::Poll::Ready(());
         }
-        if self.registered {
+        if let Some(timer) = &self.timer {
+            timer.set_waker(cx.waker());
             return std::task::Poll::Pending;
         }
         match super::reactive::try_with_data(|d| d.ambient.executor.clone()).flatten() {
             Some(executor) => {
-                executor.add_timer(self.at, cx.waker().clone());
-                self.registered = true;
+                self.timer = Some(executor.add_timer(self.at, cx.waker().clone()));
                 std::task::Poll::Pending
             }
             #[cfg(not(target_arch = "wasm32"))]
@@ -1376,6 +1575,13 @@ pub struct KeyOptions {
     /// component closes its popup on Tab and the focus moves on as it
     /// would ([`crate::keymap::KeyMatch::Notify`]).
     pub pass_through: bool,
+    /// The keys of the view with the keyboard focus: a component binds
+    /// them while its part has the focus or its popup is open (a menu
+    /// button's Return opens its menu). Return and Space reach such a
+    /// binding before the focused control's press; others of those keys
+    /// give way to the control the focus is on (default)
+    /// ([`crate::keymap::KeyBinding::for_focus`]).
+    pub for_focus: bool,
 }
 
 /// Whether shortcuts follow Apple's conventions here (`mod` is Command):
@@ -1435,6 +1641,7 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
         |id| {
             crate::keymap::KeyBinding::new(id, parsed, options.when, options.repeat)
                 .passing_through(options.pass_through)
+                .focus_keys(options.for_focus)
         },
         keystroke.into(),
         handler,
@@ -1674,6 +1881,33 @@ pub fn set_fps_enabled(enabled: bool) {
     act(super::services::perf_monitor(enabled));
 }
 
+/// What the performance monitor measured over the last second (TS:
+/// `perfStats()`): its frame rate and more, read once a second while it
+/// measures ([`fps_enabled`]), `None` while it does not (and until its first
+/// second). Reading it in a binding subscribes it.
+pub fn perf_stats() -> Option<crate::platform::PerfStats> {
+    perf_stats_signal().get()
+}
+
+/// The performance stats' signal, none until the engine reports some.
+fn perf_stats_signal() -> Signal<Option<crate::platform::PerfStats>> {
+    if let Some(signal) = with_data(|d| d.ambient.perf_stats) {
+        return signal;
+    }
+    let signal = Owner::detached().run(|| super::signal(None));
+    with_data(|d| d.ambient.perf_stats = Some(signal));
+    signal
+}
+
+/// How the performance monitor shows (TS: `setFpsMode`), now and whenever it
+/// shows later: its whole panel ([`crate::FpsMode::Expanded`], the
+/// default), collapsed to its frame rate, or nothing while it still
+/// measures. A click on the panel switches between the first two. macOS's
+/// panel takes it; platforms without a panel ignore it.
+pub fn set_fps_mode(mode: crate::FpsMode) {
+    act(super::services::perf_monitor_mode(mode));
+}
+
 /// The performance monitor's signal, off until the platform reports it.
 fn perf_monitor_signal() -> Signal<bool> {
     if let Some(signal) = with_data(|d| d.ambient.perf_monitor) {
@@ -1705,6 +1939,16 @@ pub(crate) fn desktop_command(command: crate::desktop::DesktopCommand) {
         crate::ROOT_ID,
         Command::Desktop(Box::new(command)),
     ));
+}
+
+/// Asks the core whether the app launches at login (`enabled` `None`) or
+/// to change it ([`Action::LoginItem`]).
+pub(crate) fn login_item_request(
+    enabled: Option<bool>,
+) -> Answer<Result<bool, crate::desktop::LaunchAtLoginError>> {
+    let (answer, slot) = Answer::new();
+    act(Action::LoginItem(enabled, slot));
+    answer
 }
 
 #[cfg(test)]

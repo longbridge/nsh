@@ -14,14 +14,14 @@ use nsh_core::{
 };
 use nsh_engine::{App, Bundle, ColorScheme, EngineConfig, Environment, Idiom, Limits, Os, Root};
 use objc2::{
-    MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained,
-    runtime::ProtocolObject, sel,
+    MainThreadMarker, MainThreadOnly, define_class, msg_send,
+    rc::Retained,
+    runtime::{AnyClass, AnyObject, ProtocolObject},
 };
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
-    NSApplicationTerminateReply, NSAutoresizingMaskOptions, NSEvent, NSEventModifierFlags,
-    NSEventType, NSMenu, NSMenuItem, NSScreen, NSView, NSWindow, NSWindowDelegate,
-    NSWindowStyleMask,
+    NSApplicationTerminateReply, NSAutoresizingMaskOptions, NSScreen, NSView, NSWindow,
+    NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_foundation::{
     NSArray, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL,
@@ -34,7 +34,7 @@ use crate::{
 
 static UI_SETS: RwLock<Option<Vec<nsh_core::element::Registry>>> = RwLock::new(None);
 
-/// Sets the UI sets every engine serves (default: `nsh/base`); an app
+/// Sets the UI sets every engine serves (default: `nsh/base`'s core part, enough for a Rust app; hosts that run JS pass all of `nsh/base`, `nsh_base::registry()`); an app
 /// with Rust components of its own calls this before [`run_app`].
 pub fn set_ui_sets(sets: Vec<nsh_core::element::Registry>) {
     *UI_SETS.write().unwrap_or_else(|e| e.into_inner()) = Some(sets);
@@ -87,13 +87,20 @@ fn register_app_components(components: &crate::native::Components) {
     }
 }
 
-/// The UI sets engines serve.
+/// The UI sets engines serve: [`set_ui_sets`]'s, else `nsh/base`'s core
+/// part only. A Rust app makes `nsh/base`'s components by type, so
+/// registering every part would link every component into its binary;
+/// hosts that run JS register the sets their code imports.
 pub(crate) fn ui_sets() -> Vec<nsh_core::element::Registry> {
     UI_SETS
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
-        .unwrap_or_else(|| vec![nsh_base::registry()])
+        .unwrap_or_else(|| {
+            vec![nsh_base::registry_of([
+                nsh_base::parts::core as nsh_base::parts::Part
+            ])]
+        })
 }
 
 /// What [`run_app`] runs.
@@ -200,6 +207,12 @@ pub struct AppOptions {
     /// notification center delegate of its own keeps it. Without it the
     /// permission is `unavailable` and nothing shows. [`run_app`] sets it.
     pub notifications: bool,
+    /// The app [`run_app`] runs reads and changes the app bundle's login
+    /// item (`Application.loginItem()`: `SMAppService.mainApp`, which System
+    /// Settings lists under Login Items). False by default, and read by
+    /// [`run_app`]'s view only: a view embedded in another app has no login
+    /// item. The release runner sets it, except under `nsh run`.
+    pub login_item: bool,
     /// The embedding app's channel with the apps the view runs
     /// (`nsh/host`): their launch parameters, events to them and handlers of
     /// their calls and posts ([`AppView::host`]). One for every app the view
@@ -245,6 +258,7 @@ impl Default for AppOptions {
             cache: Default::default(),
             storage: None,
             notifications: false,
+            login_item: false,
             host: nsh_engine::HostChannel::default(),
             transparent: false,
         }
@@ -323,6 +337,9 @@ pub struct AppView {
     options: RefCell<AppOptions>,
     /// The performance monitor's HUD, while it shows.
     fps: RefCell<Option<Rc<crate::fps::Hud>>>,
+    /// How the performance monitor shows ([`AppView::set_fps_mode`]): kept
+    /// while it is hidden, and switched by a click on its panel.
+    fps_mode: Rc<Cell<nsh_core::FpsMode>>,
     #[cfg(feature = "dev")]
     pub(crate) dev: RefCell<Option<crate::dev::DevSession>>,
 }
@@ -360,6 +377,9 @@ impl AppView {
             container,
             options: RefCell::new(options),
             fps: RefCell::new(None),
+            fps_mode: Rc::new(Cell::new(
+                nsh_engine::perf::mode_by_env().unwrap_or_default(),
+            )),
             #[cfg(feature = "dev")]
             dev: RefCell::new(None),
         });
@@ -368,6 +388,12 @@ impl AppView {
         *view.surface.perf_toggle.borrow_mut() = Some(Box::new(move |show| {
             if let Some(view) = weak.upgrade() {
                 view.set_fps_monitor(show);
+            }
+        }));
+        let weak = Rc::downgrade(&view);
+        *view.surface.perf_mode.borrow_mut() = Some(Box::new(move |mode| {
+            if let Some(view) = weak.upgrade() {
+                view.set_fps_mode(mode);
             }
         }));
         if view.options.borrow().fps || nsh_engine::perf::enabled_by_env() {
@@ -438,6 +464,11 @@ impl AppView {
             audio: None,
             // The app's windows of its own are this backend's.
             windows: None,
+            // The standalone app's alone (`run_app`), when its runner says.
+            login_item: (options.login_item && self.surface.standalone.get()).then(|| {
+                Arc::new(crate::login_item::LoginItem)
+                    as Arc<dyn nsh_core::desktop::LoginItemBackend>
+            }),
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         *self.surface.chunks.borrow_mut() = options.chunks.clone();
@@ -470,9 +501,23 @@ impl AppView {
     pub fn set_fps_monitor(&self, show: bool) {
         let mut hud = self.fps.borrow_mut();
         match (show, hud.is_some()) {
-            (true, false) => *hud = Some(crate::fps::Hud::show(self)),
+            (true, false) => *hud = Some(crate::fps::Hud::show(self, self.fps_mode.clone())),
             (false, true) => *hud = None,
             _ => {}
+        }
+    }
+
+    /// How the performance monitor shows, now and whenever it shows later
+    /// (`setFpsMode`): its whole panel ([`nsh_core::FpsMode::Expanded`],
+    /// the default; `NSH_FPS=collapsed` or `hidden` start it otherwise),
+    /// a pill with the frame rate alone, colored by the frame budget
+    /// ([`nsh_core::FpsMode::Collapsed`]), or nothing while it still
+    /// measures and logs ([`nsh_core::FpsMode::Hidden`]). A click on the
+    /// panel switches between the first two.
+    pub fn set_fps_mode(&self, mode: nsh_core::FpsMode) {
+        self.fps_mode.set(mode);
+        if let Some(hud) = &*self.fps.borrow() {
+            hud.update();
         }
     }
 
@@ -545,11 +590,17 @@ fn initial_environment() -> Environment {
         os: Os::MacOs,
         idiom: Idiom::Desktop,
         screen_color: true,
+        canvas_render: true,
         file_requests: true,
         speech: true,
         notifications: true,
         audio: true,
         web_input: true,
+        web_evaluate: true,
+        webview_requests: true,
+        reads_active_descendants: true,
+        // wgpu, in builds with it, until it finds no GPU.
+        shaders: nsh_engine::shader::LINKED,
         ..Environment::default()
     }
 }
@@ -726,8 +777,9 @@ define_class!(
             crate::notifications::enable();
         }
 
-        // The links of the schemes the app claims (`CFBundleURLTypes`), the
-        // one that launched it included.
+        // The links of the schemes the app claims (`CFBundleURLTypes`) and
+        // the files of the types it opens (`CFBundleDocumentTypes`, as
+        // `file://` URLs), those that launched it included.
         #[unsafe(method(application:openURLs:))]
         fn open_urls(&self, app: &NSApplication, urls: &NSArray<NSURL>) {
             for url in urls.iter() {
@@ -766,6 +818,11 @@ define_class!(
 
         #[unsafe(method(applicationShouldTerminate:))]
         fn should_terminate(&self, app: &NSApplication) -> NSApplicationTerminateReply {
+            // The user asked while the app listens to quit requests: it
+            // decides, and quits with `quit()` ([`quit_app`]).
+            if !system_quit() && ask_quit() {
+                return NSApplicationTerminateReply::TerminateCancel;
+            }
             finish_running(app);
             // The caller owns process termination after run_app returns.
             NSApplicationTerminateReply::TerminateCancel
@@ -853,13 +910,20 @@ pub(crate) fn close_main_window(key: u64) -> bool {
             .borrow()
             .as_ref()
             .filter(|running| running.view.surface().key() == key)
-            .map(|running| (running.window.clone(), running.keep_alive_on_close))
+            .map(|running| {
+                (
+                    running.window.clone(),
+                    running.keep_alive_on_close,
+                    running.view.surface().clone(),
+                )
+            })
     });
-    let Some((window, keep_alive)) = target else {
+    let Some((window, keep_alive, surface)) = target else {
         return false;
     };
     if keep_alive {
-        window.orderOut(None);
+        // Hidden, in full screen once it has left full screen.
+        crate::window::hide(&surface, nsh_core::ROOT_ID, &window);
     } else {
         window.close();
     }
@@ -894,6 +958,46 @@ pub(crate) fn restart_app() {
     });
 }
 
+/// The standalone app's quit request goes to the app, when it listens
+/// ([`crate::chrome::ask_quit`]).
+fn ask_quit() -> bool {
+    let surface = RUNNING.with(|running| {
+        running
+            .borrow()
+            .as_ref()
+            .map(|running| running.view.surface().clone())
+    });
+    surface.is_some_and(|surface| crate::chrome::ask_quit(&surface))
+}
+
+/// Whether the quit AppKit asks about is the system's: logging out,
+/// restarting or shutting down send the app a quit Apple event with a
+/// reason (`keyAEQuitReason`); the Quit item, Command-Q and the Dock's
+/// Quit carry none.
+fn system_quit() -> bool {
+    /// `keyAEQuitReason`, `'why?'`.
+    const QUIT_REASON: u32 = u32::from_be_bytes(*b"why?");
+    let Some(class) = AnyClass::get(c"NSAppleEventManager") else {
+        return false;
+    };
+    // SAFETY: Foundation's shared Apple event manager and the event it
+    // handles now (nil outside one), on the main thread.
+    let event: Option<Retained<AnyObject>> = unsafe {
+        let manager: Option<Retained<AnyObject>> = msg_send![class, sharedAppleEventManager];
+        match manager {
+            Some(manager) => msg_send![&manager, currentAppleEvent],
+            None => None,
+        }
+    };
+    let Some(event) = event else {
+        return false;
+    };
+    // SAFETY: an `NSAppleEventDescriptor`'s attribute, nil when absent.
+    let reason: Option<Retained<AnyObject>> =
+        unsafe { msg_send![&event, attributeDescriptorForKeyword: QUIT_REASON] };
+    reason.is_some()
+}
+
 /// Ends the standalone event loop, returning process ownership to its caller.
 fn finish_running(app: &NSApplication) {
     let window = RUNNING.with(|running| {
@@ -909,23 +1013,32 @@ fn finish_running(app: &NSApplication) {
         window.close();
     }
     stop_running();
-    app.stop(None);
-    // stop: takes effect after the next event. A close can arrive through a
-    // dispatch block rather than an AppKit event, so wake nextEventMatchingMask
-    // explicitly instead of waiting for the user to move the mouse.
-    if let Some(event) = NSEvent::otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2(
-        NSEventType::ApplicationDefined,
-        NSPoint::new(0.0, 0.0),
-        NSEventModifierFlags::empty(),
-        0.0,
-        0,
-        None,
-        0,
-        0,
-        0,
-    ) {
-        app.postEvent_atStart(&event, true);
+    // `stop:` in a modal loop ends that loop, not the app's. With an alert
+    // shown on its own (`system::run_alone`; the app stopping told it to
+    // stop), the app's loop is stopped once that one is over: from the
+    // default mode, which a modal loop does not run.
+    if app.modalWindow().is_some() {
+        let block = block2::RcBlock::new(|| {
+            if let Some(mtm) = MainThreadMarker::new() {
+                stop_event_loop(&NSApplication::sharedApplication(mtm));
+            }
+        });
+        // SAFETY: an immutable constant of Foundation.
+        let modes = NSArray::from_slice(&[unsafe { objc2_foundation::NSDefaultRunLoopMode }]);
+        // SAFETY: the block runs on the main thread, where it was made.
+        unsafe { objc2_foundation::NSRunLoop::mainRunLoop().performInModes_block(&modes, &block) };
+        return;
     }
+    stop_event_loop(app);
+}
+
+/// Stops the app's event loop ([`run_app`]'s `run`). `stop:` takes effect
+/// after the next event. A close can arrive through a dispatch block rather
+/// than an AppKit event, so nextEventMatchingMask is woken explicitly
+/// instead of waiting for the user to move the mouse.
+fn stop_event_loop(app: &NSApplication) {
+    app.stop(None);
+    crate::system::wake(app);
 }
 
 /// Stops the standalone app's engine (its window closes).
@@ -973,7 +1086,6 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     crate::chrome::set_app_name(&options.title);
     let delegate: Retained<Delegate> = unsafe { msg_send![Delegate::alloc(mtm), init] };
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-    app.setMainMenu(Some(&main_menu(mtm, &options.title)));
 
     // nsh.json `window`: known before the window is made, so its first
     // frame has it.
@@ -1037,6 +1149,7 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     crate::system::open_window(&window, options.appearance);
     let view = AppView::new(mtm, options.clone());
+    crate::chrome::show_standard_menu(view.surface());
     view.surface().standalone.set(true);
     // The standalone window's attributes own its live transparency state;
     // the surface-only flag remains for embedded AppViews.
@@ -1150,83 +1263,6 @@ fn center_on_display(window: &NSWindow, display: WindowDisplay) {
 fn secondary(frames: &[NSRect]) -> Option<usize> {
     let primary = frames.first()?;
     frames.iter().position(|f| f != primary)
-}
-
-/// The app menu (About, Hide, Quit), Edit (the text commands fields
-/// answer: undo, cut, copy, paste, select all) and Window (minimize, zoom,
-/// full screen, close).
-fn main_menu(mtm: MainThreadMarker, title: &str) -> Retained<NSMenu> {
-    let bar = NSMenu::new(mtm);
-    let item = |menu: &NSMenu, title: &str, action: Option<objc2::runtime::Sel>, key: &str| {
-        // SAFETY: the actions are AppKit's standard ones, sent down the
-        // responder chain.
-        let item = unsafe {
-            NSMenuItem::initWithTitle_action_keyEquivalent(
-                NSMenuItem::alloc(mtm),
-                &NSString::from_str(title),
-                action,
-                &NSString::from_str(key),
-            )
-        };
-        menu.addItem(&item);
-        item
-    };
-    let submenu = |name: &str| {
-        let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(name));
-        let holder = item(&bar, name, None, "");
-        holder.setSubmenu(Some(&menu));
-        menu
-    };
-    let app_menu = submenu(title);
-    item(
-        &app_menu,
-        &format!("About {title}"),
-        Some(sel!(orderFrontStandardAboutPanel:)),
-        "",
-    );
-    app_menu.addItem(&NSMenuItem::separatorItem(mtm));
-    item(&app_menu, &format!("Hide {title}"), Some(sel!(hide:)), "h");
-    let others = item(
-        &app_menu,
-        "Hide Others",
-        Some(sel!(hideOtherApplications:)),
-        "h",
-    );
-    others
-        .setKeyEquivalentModifierMask(NSEventModifierFlags::Command | NSEventModifierFlags::Option);
-    app_menu.addItem(&NSMenuItem::separatorItem(mtm));
-    item(
-        &app_menu,
-        &format!("Quit {title}"),
-        Some(sel!(terminate:)),
-        "q",
-    );
-
-    let edit = submenu("Edit");
-    item(&edit, "Undo", Some(sel!(undo:)), "z");
-    // An uppercase key equivalent is Shift with it.
-    item(&edit, "Redo", Some(sel!(redo:)), "Z");
-    edit.addItem(&NSMenuItem::separatorItem(mtm));
-    item(&edit, "Cut", Some(sel!(cut:)), "x");
-    item(&edit, "Copy", Some(sel!(copy:)), "c");
-    item(&edit, "Paste", Some(sel!(paste:)), "v");
-    item(&edit, "Select All", Some(sel!(selectAll:)), "a");
-
-    let window = submenu("Window");
-    item(&window, "Minimize", Some(sel!(performMiniaturize:)), "m");
-    item(&window, "Zoom", Some(sel!(performZoom:)), "");
-    let full = item(
-        &window,
-        "Enter Full Screen",
-        Some(sel!(toggleFullScreen:)),
-        "f",
-    );
-    full.setKeyEquivalentModifierMask(
-        NSEventModifierFlags::Command | NSEventModifierFlags::Control,
-    );
-    window.addItem(&NSMenuItem::separatorItem(mtm));
-    item(&window, "Close", Some(sel!(performClose:)), "w");
-    bar
 }
 
 #[cfg(test)]

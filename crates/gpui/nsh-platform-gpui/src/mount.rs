@@ -149,6 +149,8 @@ impl Mounter {
             }
             MountItem::Remove { id } => {
                 if let Some(view) = &self.get(*id) {
+                    crate::input::removed(surface, view);
+                    crate::key_focus::detached(surface, view);
                     crate::text_input::removing(surface, view);
                     crate::file_drop::invalidate(surface, *id);
                     crate::navigation::removing(surface, view);
@@ -160,6 +162,8 @@ impl Mounter {
             }
             MountItem::Delete { id } => {
                 if let Some(view) = self.views.remove(*id) {
+                    crate::input::removed(surface, &view);
+                    crate::key_focus::detached(surface, &view);
                     crate::text_input::removing(surface, &view);
                     crate::file_drop::invalidate(surface, *id);
                     crate::navigation::removing(surface, &view);
@@ -420,9 +424,15 @@ impl Mounter {
         let view = self.views.get(id);
         let view = view.as_ref();
         match command {
-            Command::Focus => view.map_or((), crate::text_input::focus),
+            // An input edits; a stop takes the keyboard focus.
+            Command::Focus => match view {
+                Some(view) if view.kind() == ViewKind::Input => crate::text_input::focus(view),
+                Some(view) => crate::key_focus::focus(surface, view),
+                None => {}
+            },
             Command::Blur => match view {
                 Some(view) if view.kind() == ViewKind::Input => crate::text_input::blur(view),
+                Some(view) if crate::key_focus::blur(surface, view) => {}
                 _ => crate::text_input::blur_all(surface),
             },
             Command::SetSelection { start, end } => {

@@ -19,6 +19,9 @@ name: Release
 #   revision). A night without new commits
 #   builds nothing. There is one `nightly` tag, moved to each build's commit,
 #   never a tag per night. Running it by hand with *nightly* publishes one now.
+#   Wednesday (Singapore time) is release day: the scheduled nightly skips it,
+#   and publishing a stable release rebuilds the nightly from the latest
+#   `main` instead, so `install.sh --nightly` is never older than stable.
 #
 # Pull requests and the merge queue never run it: its builds are CI's
 # longest and held the runners every queued pull request waited for.
@@ -41,6 +44,9 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Publishing a stable release refreshes the nightly (see above).
+  release:
+    types: [published]
   schedule:
     # 18:30 UTC, 02:30 in Singapore: after the day's merges.
     - cron: "30 18 * * *"
@@ -59,7 +65,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.tag || ((github.event_name == 'schedule' || inputs.nightly) && 'nightly') || github.ref_name }}
+  group: release-${{ inputs.tag || ((github.event_name == 'schedule' || github.event_name == 'release' || inputs.nightly) && 'nightly') || github.ref_name }}
   cancel-in-progress: false
 
 defaults:
@@ -68,8 +74,8 @@ defaults:
 
 env:
   CARGO_TERM_COLOR: always
-  TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
-  NIGHTLY: ${{ github.event_name == 'schedule' || inputs.nightly == true }}
+  TAG: ${{ inputs.tag || (github.event_name == 'push' && github.ref_type == 'tag' && github.ref_name) || '' }}
+  NIGHTLY: ${{ github.event_name == 'schedule' || (github.event_name == 'release' && !github.event.release.prerelease) || inputs.nightly == true }}
 
 jobs:
   # What to build: the tag, the latest main for the nightly (nothing when
@@ -77,6 +83,8 @@ jobs:
   plan:
     name: Plan
     runs-on: ubuntu-latest
+    # A published prerelease (the nightly itself) is not a stable release.
+    if: github.event_name != 'release' || !github.event.release.prerelease
     outputs:
       ref: ${{ steps.plan.outputs.ref }}
       build: ${{ steps.plan.outputs.build }}
@@ -95,6 +103,12 @@ jobs:
             ref="$TAG"
           elif [[ "$NIGHTLY" == true ]]; then
             ref=$(gh api "repos/$GH_REPO/commits/main" --jq .sha)
+            # Release day: the stable release refreshes the nightly once it
+            # is published, so the 02:30 build would only be replaced.
+            if [[ "$GITHUB_EVENT_NAME" == schedule && "$(TZ=Asia/Singapore date +%u)" == 3 ]]; then
+              echo "Wednesday is release day; the stable release refreshes the nightly."
+              build=false
+            fi
             built=$(gh api "repos/$GH_REPO/commits/nightly" --jq .sha 2> /dev/null || true)
             if [[ "$ref" == "$built" && "$GITHUB_EVENT_NAME" == schedule ]]; then
               echo "The nightly already has main ($ref)."
@@ -117,9 +131,10 @@ jobs:
         # built for the runner's processor, so each architecture has a runner
         # of its own. `embed` names the embedding SDK a build releases. The
         # components the same everywhere (Android, web) come from x86_64
-        # Linux's build, so the arm64 Linux and Windows builds skip Android
-        # (`no_android`; the NDK has no toolchain for arm64 Linux). It also
-        # sets `NSH_DIST_NO_ANDROID`, so xtask skips it where an SDK is found.
+        # Linux's build alone (`shared`); every other build sets
+        # `NSH_DIST_NO_ANDROID` and `NSH_DIST_NO_WEB` and skips them: built
+        # there, they were thrown away at packing, and cost the macOS and
+        # x86_64 Windows builds 40 to 65 minutes each.
         include:
           # The iOS runtimes and SDK need Xcode and Apple silicon; the macOS
           # runtime is built for this machine.
@@ -128,19 +143,19 @@ jobs:
             embed: ios
           - name: macos-x86_64
             os: macos-15-intel
-          # 24.04 has GTK 4.14 and Pango 1.52+, what the Linux runtime needs;
-          # its binaries need glibc 2.39 and GTK 4.14 or newer where they run.
+          # Ubuntu 24.04 has GTK 4.14 and Pango 1.52+, what the Linux runtime
+          # needs; its binaries need glibc 2.39 and GTK 4.14 or newer where
+          # they run.
           - name: linux-x86_64
             os: ubuntu-24.04
             embed: android
+            shared: true
           - name: linux-arm64
             os: ubuntu-24.04-arm
-            no_android: true
           - name: windows-x86_64
             os: windows-latest
           - name: windows-arm64
             os: windows-11-arm
-            no_android: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -177,7 +192,7 @@ jobs:
       # the GPUI runtime X11, Wayland, xkbcommon, fontconfig and FreeType,
       # GTK 3 and WebKitGTK 4.1 (web views) and GStreamer (videos).
       - name: Install clang, GTK 4 and GPUI's libraries
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
         run: |
           sudo apt-get update
           sudo apt-get install -y clang llvm libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev \
@@ -188,12 +203,12 @@ jobs:
       # The Android runtime: `javac` + `d8` (Java 17), the SDK's
       # `platforms;android-35` and an NDK (the images have the SDK and NDKs).
       - uses: actions/setup-java@v4
-        if: ${{ !matrix.no_android }}
+        if: ${{ matrix.shared }}
         with:
           distribution: temurin
           java-version: "17"
       - name: Install the Android platform
-        if: ${{ !matrix.no_android }}
+        if: ${{ matrix.shared }}
         run: |
           if [[ ! -f "$ANDROID_HOME/platforms/android-35/android.jar" ]]; then
             sdkmanager=$(ls "$ANDROID_HOME"/cmdline-tools/latest/bin/sdkmanager* | head -1)
@@ -210,6 +225,7 @@ jobs:
       # The web runtime's C code (zstd) needs upstream LLVM: Apple's clang
       # does not target wasm32. Check the C tools before building runtimes.
       - name: Set up WebAssembly C tools
+        if: ${{ matrix.shared }}
         run: |
           suffix=""
           if [[ "$RUNNER_OS" == macOS ]]; then
@@ -256,6 +272,7 @@ jobs:
           echo "AR_wasm32_unknown_unknown=$ar" >> "$GITHUB_ENV"
 
       - name: Cache Cargo
+        if: runner.environment == 'github-hosted'
         uses: actions/cache@v4
         with:
           path: |
@@ -265,11 +282,30 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-release-cargo-
 
+      # A self-hosted runner builds with huacnlee/cargo (AGENTS.md
+      # "Commands"), whose build directory outside the checkout survives
+      # the checkout's clean: a release rebuilds only what changed.
+      - name: Cargo
+        if: runner.environment == 'self-hosted'
+        uses: ./.github/actions/cargo
+        with:
+          cache: release-${{ matrix.name }}
+
       # A nightly CLI knows its channel: `nsh update` stays on it.
+      # The release profile's fat LTO over one codegen unit links each of
+      # the distribution's ~15 executables single-threaded, 5 to 25 minutes
+      # apiece: thin LTO over 16 units takes a fraction of that for little
+      # run-time cost. The web profile, which inherits release, keeps fat
+      # LTO: what pages download is built for size (docs/dev/web.md).
       - name: Build the distribution
         env:
+          CARGO_PROFILE_RELEASE_LTO: thin
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+          CARGO_PROFILE_WEB_LTO: fat
+          CARGO_PROFILE_WEB_CODEGEN_UNITS: "1"
           NSH_CHANNEL: ${{ env.NIGHTLY == 'true' && 'nightly' || 'stable' }}
-          NSH_DIST_NO_ANDROID: ${{ matrix.no_android && '1' || '' }}
+          NSH_DIST_NO_ANDROID: ${{ !matrix.shared && '1' || '' }}
+          NSH_DIST_NO_WEB: ${{ !matrix.shared && '1' || '' }}
         run: cargo xtask dist -v
 
       # The packaged CLI makes and bundles a new app.
@@ -286,6 +322,9 @@ jobs:
 
       - name: Package
         run: |
+          # `target/` outlives the run on a self-hosted runner: start empty,
+          # never upload the previous release's assets.
+          rm -rf target/release-assets
           mkdir -p target/release-assets
           cd target/release-assets
           cp -R ../../dist/nsh nsh
@@ -337,7 +376,7 @@ jobs:
   release:
     name: Release
     needs: dist
-    if: inputs.tag != '' || github.ref_type == 'tag'
+    if: inputs.tag != '' || (github.event_name == 'push' && github.ref_type == 'tag')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -382,7 +421,7 @@ jobs:
   nightly:
     name: Nightly
     needs: [plan, dist]
-    if: needs.plan.outputs.build == 'true' && (github.event_name == 'schedule' || inputs.nightly == true)
+    if: needs.plan.outputs.build == 'true' && (github.event_name == 'schedule' || github.event_name == 'release' || inputs.nightly == true)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -403,11 +442,13 @@ jobs:
           # What `nsh update nightly` compares its revision with.
           version=$(gh api "repos/$GH_REPO/contents/Cargo.toml?ref=$SHA" --jq .content | base64 -d |
             sed -n 's/^version = "\(.*\)"$/\1/p' | head -1)
-          jq -n --arg version "$version" --arg commit "$SHA" '{version: $version, commit: $commit}' \
+          date=$(date -u +%Y-%m-%d)
+          jq -n --arg version "$version" --arg commit "$SHA" --arg date "$date" \
+            '{version: $version, commit: $commit, date: $date}' \
             > assets/nsh-release.json
           cat assets/nsh-release.json
           notes=$(cat <<NOTES
-          The latest \`main\`, built $(date -u +%Y-%m-%d) from [\`$short\`](https://github.com/$GH_REPO/commit/$SHA). It is rebuilt every night that \`main\` changes.
+          The latest \`main\`, built $date from [\`$short\`](https://github.com/$GH_REPO/commit/$SHA). It is rebuilt every night that \`main\` changes.
 
           \`\`\`sh
           curl -fsSL https://nsh.dev/install.sh | sh -s -- --nightly
@@ -418,4 +459,4 @@ jobs:
           )
           gh release delete nightly --cleanup-tag --yes 2> /dev/null || true
           gh release create nightly assets/* --target "$SHA" --prerelease --latest=false \
-            --title "nsh nightly ($short)" --notes "$notes"
+            --title "nsh nightly $date ($short)" --notes "$notes"

@@ -25,8 +25,8 @@
 //! SVG images (sniffed from their bytes) are drawn by
 //! [`nsh_core::svg`] at the bucket's size, then go through the same blur,
 //! color matrix, tint and budget as decoded bitmaps; their size is their
-//! intrinsic size in points (CSS pixels of the SVG). Canvases draw bitmaps
-//! only.
+//! intrinsic size in points (CSS pixels of the SVG). Canvases draw them as
+//! their rasterized bitmap.
 //!
 //! Animated GIF / PNG / WebP images play through a keyframe animation of the
 //! layer's `contents`. The `placeholder` shows until the image arrives (and
@@ -135,7 +135,8 @@ fn context(surface: &Surface, uri: &str) -> Context {
     Context {
         asset_base: surface.asset_base.borrow().clone(),
         read_asset: None,
-        access: Arc::default(),
+        access: surface.native.access(),
+        media_files: surface.media_files.borrow().clone(),
         disk: remote
             .then(|| surface.image_cache.borrow().clone())
             .flatten(),
@@ -160,9 +161,9 @@ enum Heard {
 
 struct DownloadIvars {
     heard: Mutex<mpsc::Sender<Heard>>,
-    /// The URL of the hop it is at, the redirects so far, and why one was
-    /// refused.
-    hop: Mutex<(String, usize, Option<String>)>,
+    /// The URL of the hop it is at, the redirects followed so far, and why
+    /// one was refused.
+    hop: Mutex<(String, Vec<String>, Option<String>)>,
     access: Access,
 }
 
@@ -205,16 +206,15 @@ define_class!(
                 .map(|u| u.to_string())
                 .unwrap_or_default();
             let mut hop = self.ivars().hop.lock().unwrap_or_else(|e| e.into_inner());
-            let granted = match hop.1 {
-                n if n >= nsh_core::image::loader::MAX_REDIRECTS => {
-                    Err("too many redirects".to_owned())
-                }
-                _ => nsh_core::image::loader::redirect(&self.ivars().access, &hop.0, &next),
+            let granted = if hop.1.len() >= nsh_core::image::loader::MAX_REDIRECTS {
+                Err("too many redirects".to_owned())
+            } else {
+                nsh_core::image::loader::redirect(&self.ivars().access, &hop.0, &next)
             };
             match granted {
                 Ok(url) => {
-                    hop.0 = url;
-                    hop.1 += 1;
+                    hop.0.clone_from(&url);
+                    hop.1.push(url);
                     drop(hop);
                     completion.call((request as *const NSURLRequest as *mut NSURLRequest,));
                 }
@@ -297,7 +297,7 @@ impl Transport for UrlSession {
         let (tx, rx) = mpsc::channel();
         let delegate = ImageDownload::alloc().set_ivars(DownloadIvars {
             heard: Mutex::new(tx),
-            hop: Mutex::new((get.url.to_owned(), 0, None)),
+            hop: Mutex::new((get.url.to_owned(), Vec::new(), None)),
             access: get.access.clone(),
         });
         // SAFETY: NSObject's designated initializer.
@@ -349,19 +349,25 @@ impl Transport for UrlSession {
                     (get.progress)(bytes.len() as u64, total);
                 }
                 Ok(Heard::Done(error)) => {
-                    let refused = delegate
-                        .ivars()
-                        .hop
-                        .lock()
-                        .ok()
-                        .and_then(|mut h| h.2.take());
+                    let (redirects, refused) = {
+                        let mut hop = delegate
+                            .ivars()
+                            .hop
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
+                        (std::mem::take(&mut hop.1), hop.2.take())
+                    };
+                    // The redirect not followed is the response (`status`):
+                    // the disk cache drops its copy of the URL.
                     if let Some(refused) = refused {
-                        return Err(refused);
+                        return Ok(Fetched::refused(status, refused));
                     }
                     if let Some(error) = error {
                         return Err(error);
                     }
-                    return Ok(Fetched::new(status, headers, bytes));
+                    // The disk cache keeps the redirects with the copy and
+                    // checks them again before it serves it.
+                    return Ok(Fetched::new(status, headers, bytes).redirected(redirects));
                 }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return Err("download lost".into()),
@@ -491,7 +497,10 @@ fn images() -> &'static Images<Picture> {
         Images::new(
             nsh_core::image::budget(),
             |bytes: &ImageData, target: &Target| {
-                let picture = decode(bytes, target)?;
+                let picture = match bytes.rgba() {
+                    Some(rgba) => from_rgba(rgba)?,
+                    None => decode(bytes, target)?,
+                };
                 let cost = picture.cost();
                 Ok((picture.clone(), picture.natural, cost))
             },
@@ -751,6 +760,29 @@ fn decode(bytes: &[u8], target: &Target) -> Result<Picture, String> {
     }
 }
 
+/// A pixel buffer ([`ImageSrc::rgba`](nsh_core::element::ImageSrc::rgba)),
+/// taken as it is: no decode, at its own size; any thread.
+fn from_rgba((width, height, rgba): (u32, u32, &[u8])) -> Result<Picture, String> {
+    let mut pixels = rgba.to_vec();
+    for px in pixels.as_chunks_mut::<4>().0 {
+        let a = u16::from(px[3]);
+        for c in &mut px[..3] {
+            *c = ((u16::from(*c) * a + 127) / 255) as u8;
+        }
+    }
+    let mut raster = nsh_core::svg::Raster::default();
+    raster.width = width;
+    raster.height = height;
+    raster.pixels = pixels;
+    let image = rgba_image(&raster).ok_or("cannot make a CGImage")?;
+    Ok(Picture {
+        frames: Arc::new([image]),
+        key_times: Arc::new([0.0, 1.0]),
+        duration: 0.0,
+        natural: Natural::Pixels(width, height),
+    })
+}
+
 /// Draws an SVG, its longest side `longest` pixels; any thread.
 fn decode_svg(bytes: &[u8], longest: u32) -> Result<Picture, String> {
     let raster = nsh_core::svg::rasterize(bytes, longest.max(1)).map_err(|e| e.to_string())?;
@@ -910,8 +942,9 @@ fn frame_delay(source: &CGImageSource, i: usize) -> u32 {
 /// Loads the bitmap `uri` (`https://…`, `asset:/…`, a file path, `data:`)
 /// for a canvas, at its natural size, and hands over its (first) frame;
 /// `done` runs on the main thread (before this returns when it is in
-/// memory: callers must not hold a borrow `done` takes). Canvases draw
-/// bitmaps: an SVG is an image that failed to load.
+/// memory: callers must not hold a borrow `done` takes). An SVG is
+/// rasterized by the shared SVG renderer and its frame handed over as a
+/// bitmap.
 pub(crate) fn load(
     surface: &Rc<Surface>,
     uri: &str,
@@ -986,14 +1019,10 @@ pub(crate) fn load_icon(
     )
 }
 
-/// The first frame of `picture`, loaded from `uri`, unless it is an SVG.
-fn bitmap(uri: &str, picture: Picture) -> Result<CFRetained<CGImage>, String> {
-    match picture.natural {
-        Natural::Vector(_) => Err(format!(
-            "{uri} is an SVG image: canvases draw bitmaps (PNG, JPEG, ...)"
-        )),
-        Natural::Pixels(..) => Ok(picture.frames[0].clone()),
-    }
+/// The first frame of `picture`, loaded from `uri`; an SVG is rasterized
+/// by the shared SVG renderer, so its frame is a bitmap here too.
+fn bitmap(_uri: &str, picture: Picture) -> Result<CFRetained<CGImage>, String> {
+    Ok(picture.frames[0].clone())
 }
 
 /// `Command::ImageInfo` (`Image.getSize`, `Image.prefetch`): reads the
@@ -1625,10 +1654,11 @@ mod tests {
     }
 
     #[test]
-    fn svg_is_no_canvas_image() {
+    fn svg_is_a_canvas_image() {
         let logo = decoded(SVG_LOGO, 48).unwrap();
-        let error = bitmap("asset:/logo.svg", logo).unwrap_err();
-        assert!(error.starts_with("asset:/logo.svg"), "{error}");
+        let image = bitmap("asset:/logo.svg", logo).unwrap();
+        assert_eq!(CGImage::width(Some(&*image)), 48);
+        assert_eq!(CGImage::height(Some(&*image)), 24);
         let png = decoded(&png_pixel(), 0).unwrap();
         assert_eq!(png.natural, Natural::Pixels(1, 1));
         assert!(bitmap("asset:/a.png", png).is_ok());

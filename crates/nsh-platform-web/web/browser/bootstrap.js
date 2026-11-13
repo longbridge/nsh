@@ -117,6 +117,7 @@
 			post(name, data) {
 				nameOf(name);
 				if (initial[0]) invoke(432, [name, data]);
+				else if (environment.host()) platform.post(name, data);
 			}
 		};
 		dom.rootProp("onHost", (value) => {
@@ -2246,6 +2247,7 @@
 		"keyExtractor",
 		"stickyHeaderIndices",
 		"initialScrollIndex",
+		"initialScrollAtEnd",
 		"onViewableItemsChange",
 		"viewabilityConfig",
 		"refreshing",
@@ -2424,7 +2426,12 @@
 				if (delay > 0) state.timer = setTimeout(report, delay);
 				else report();
 			});
-			if (typeof props.initialScrollIndex === "number") invoke(314, [
+			if (props.initialScrollAtEnd) invoke(314, [
+				id,
+				"scrollToEnd",
+				{ animated: false }
+			]);
+			else if (typeof props.initialScrollIndex === "number") invoke(314, [
 				id,
 				"scrollToIndex",
 				{
@@ -2519,6 +2526,8 @@
 	const MAX_GENERATION = 4095;
 	const EXCEPTION = 4294967295;
 	const COLLECT_MS = 100;
+	const COLLECT_COST_RATIO = 20;
+	const NUMBER_KEY_GENERATIONS = 2 ** 21;
 	const { setTimeout: collectLater, clearTimeout: cancelCollect } = globalThis;
 	const pageNow = globalThis.performance.now.bind(globalThis.performance);
 	var Values = class {
@@ -2554,6 +2563,7 @@
 			this.weakened = false;
 			this.collectTimer = 0;
 			this.lastCollect = 0;
+			this.lastCollectCost = 0;
 		}
 		put(value) {
 			if (this.closed) throw new Error("the app was disposed");
@@ -2619,16 +2629,22 @@
 			this.weakened = false;
 			for (const slot of this.slots) if (slot?.refs > 0 && slot.weak) slot.value = slot.weak.deref();
 		}
+		collectDelay(now) {
+			return Math.max(0, this.lastCollect + Math.max(COLLECT_MS, COLLECT_COST_RATIO * this.lastCollectCost) - now);
+		}
 		schedule(trace) {
 			this.trace ??= trace;
 			if (this.collectTimer) return;
-			const wait = Math.max(0, this.lastCollect + COLLECT_MS - pageNow());
+			const wait = this.collectDelay(pageNow());
 			this.collectTimer = collectLater(() => {
 				this.collectTimer = 0;
 				if (this.closed) return;
 				if (this.depth > 0) return this.schedule(trace);
 				this.collect(trace);
 			}, wait);
+		}
+		accessorKey(owner, generation) {
+			return generation < NUMBER_KEY_GENERATIONS ? generation * 4294967296 + owner : `${owner}:${generation}`;
 		}
 		collect(trace) {
 			this.lastCollect = pageNow();
@@ -2639,7 +2655,7 @@
 				trace();
 				const mirrors = /* @__PURE__ */ new WeakMap(), counts = /* @__PURE__ */ new Map();
 				for (const [kind, owner, generation, id] of this.edges) {
-					const peer = (kind === 0 ? this.classPeers.get(owner) : kind === 2 ? this.nodes.get(owner) : this.accessors.get(`${owner}:${generation}`))?.deref();
+					const peer = (kind === 0 ? this.classPeers.get(owner) : kind === 2 ? this.nodes.get(owner) : this.accessors.get(this.accessorKey(owner, generation)))?.deref();
 					if (!peer) continue;
 					const slot = this.slot(id);
 					if (slot.refs === Infinity || slot.weak && slot.value === void 0) continue;
@@ -2664,6 +2680,7 @@
 				this.edges = null;
 			} finally {
 				this.depth--;
+				this.lastCollectCost = pageNow() - this.lastCollect;
 			}
 		}
 		reconcile() {
@@ -2929,6 +2946,7 @@
 							type: this.get(c),
 							lastModified: Number.isNaN(number) ? Date.now() : number
 						}));
+						case 51: return this.put(new Blob([this.get(a)], { type: this.get(b) }));
 						case 43: return this.put(String(this.get(a)));
 						case 45: return Number(this.hasError);
 						case 46:
@@ -3026,13 +3044,13 @@
 		};
 		const guarded = (fn) => (...args) => protect(() => fn(...args));
 		const finalizers = new FinalizationRegistry((handle) => {
-			values?.accessors.delete(`${handle[0]}:${handle[1]}`);
+			values?.accessors.delete(values.accessorKey(handle[0], handle[1]));
 			if (live()) call(114, handle);
 		});
 		const accessor = (handle) => {
 			const read = () => call(101, handle);
 			finalizers.register(read, handle);
-			values?.accessors.set(`${handle[0]}:${handle[1]}`, new WeakRef(read));
+			values?.accessors.set(values.accessorKey(handle[0], handle[1]), new WeakRef(read));
 			values?.reconcile();
 			return read;
 		};
@@ -3309,8 +3327,17 @@
 			refresh() {
 				if (live()) apply(invoke(200, []));
 			},
-			measure(node) {
-				return call(315, [], node, [], true, false);
+			/** `ref.measure()`, or with `"scrollPosition"` a list's `ref.measureScrollPosition()`. */
+			measure(node, what) {
+				return call(315, [], node, what ? [what] : [], true, false);
+			},
+			/** Runtime op `op` on `receiver` and `args` answered by a reply: its promise, which rejects for what the op refuses. */
+			request(op, receiver, args) {
+				try {
+					return call(op, [], receiver, args, true);
+				} catch (error) {
+					return Promise.reject(error);
+				}
 			},
 			reply(id, ok, value) {
 				const waiter = pending.get(id);
@@ -3351,6 +3378,7 @@
 			"zoomTo",
 			"scrollToIndex",
 			"scrollToEnd",
+			"reveal",
 			"reload",
 			"goBack",
 			"goForward",
@@ -3369,6 +3397,14 @@
 				name,
 				argument
 			]);
+		};
+		prototype.evaluate = async function(script, options) {
+			if (typeof script !== "string") throw new TypeError("evaluate expects a script string");
+			if (options !== void 0 && (options === null || typeof options !== "object")) throw new TypeError("evaluate's options must be an object");
+			if (!values.nodeIds.has(this)) throw new TypeError("nsh: not a node");
+			const error = /* @__PURE__ */ new Error("web views evaluate no scripts here");
+			error.code = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
+			throw error;
 		};
 		prototype.setSelection = function(start, end = start) {
 			return call(314, [
@@ -3399,6 +3435,9 @@
 		};
 		prototype.measure = function() {
 			return measure(this);
+		};
+		prototype.measureScrollPosition = function() {
+			return measure(this, "scrollPosition");
 		};
 		const finalizers = new FinalizationRegistry((id) => {
 			if (live()) {
@@ -3680,19 +3719,6 @@
 //#region ../nsh-platform-web/web/browser/components.js
 	function createComponents(invoke, values, reactive, dom) {
 		const states = /* @__PURE__ */ new WeakMap();
-		const hostProps = [
-			"class",
-			"classList",
-			"style",
-			"activeStyle",
-			"hoverStyle",
-			"focusStyle",
-			"focusWithinStyle",
-			"disabledStyle",
-			"testID",
-			"tooltip",
-			"onLayout"
-		];
 		const handler = (name) => "on" + name[0].toUpperCase() + name.slice(1);
 		const make = (spec, call) => function(props = {}) {
 			const rt = dom.rt;
@@ -3758,7 +3784,7 @@
 					prop.name,
 					value
 				]));
-				for (const name of hostProps) update(name, (value) => rt.prop(node, name, value));
+				for (const name of spec.hostProps) update(name, (value) => rt.prop(node, name, value));
 				if (failed) throw failed;
 			});
 			if (typeof props.ref === "function") {
@@ -4074,7 +4100,7 @@
 
 //#endregion
 //#region ../nsh-platform-web/web/browser/canvas.js
-	function createCanvas(invoke, reactive, dom, live, wake) {
+	function createCanvas(invoke, reactive, dom, live, wake, request = () => Promise.reject(/* @__PURE__ */ new Error("offscreen canvases are not available here"))) {
 		const recordings = /* @__PURE__ */ new WeakMap(), retained = /* @__PURE__ */ new WeakMap();
 		const call = (op, args) => {
 			if (!live()) throw new Error("the app was disposed");
@@ -4102,7 +4128,72 @@
 		};
 		const record = (object, code, args) => {
 			const r = data(object);
-			if (!r.closed) r.out.push(code, ...args.map((v) => snapshot(v)));
+			if (r.closed) return;
+			const values = args.map((v) => snapshot(v));
+			r.out.push(code, ...values);
+			if (r.reuse) track(r, code, values);
+		};
+		const IDENTITY = [
+			1,
+			0,
+			0,
+			1,
+			0,
+			0
+		];
+		const same = (values, expected) => values.length === expected.length && values.every((v, i) => v === expected[i]);
+		const animated = (v) => Array.isArray(v) ? v.some(animated) : v !== null && typeof v === "object";
+		const reuse = (width, height) => ({
+			width,
+			height,
+			identity: true,
+			clipped: false,
+			saved: [],
+			path: [],
+			pathExact: true,
+			properties: /* @__PURE__ */ new Map()
+		});
+		const track = (r, code, values) => {
+			const t = r.reuse;
+			if (code === 0) t.saved.push([t.identity, t.clipped]);
+			else if (code === 1) {
+				const s = t.saved.pop();
+				if (s) [t.identity, t.clipped] = s;
+			} else if (code === 2) t.identity &&= same(values, [0, 0]);
+			else if (code === 3) t.identity &&= same(values, [1, 1]);
+			else if (code === 4) t.identity &&= same(values, [0]);
+			else if (code === 5) t.identity &&= same(values, IDENTITY);
+			else if (code === 6) t.identity = same(values, IDENTITY);
+			else if (code === 20) t.clipped = true;
+			else if (code === 7) {
+				t.path = [];
+				t.pathExact = true;
+			} else if (code >= 8 && code <= 17) {
+				t.path.push(code, ...values);
+				t.pathExact &&= t.identity;
+			} else if (code >= 24 && code <= 39 || code === 43) {
+				let h = t.properties.get(code);
+				if (!h) t.properties.set(code, h = []);
+				h.push([code, ...values]);
+			} else if (code === 23) {
+				const [x, y, w, h] = values;
+				if (!values.every((n) => typeof n === "number" && Number.isFinite(n))) return;
+				if (!(Math.min(x, x + w) <= 0 && Math.min(y, y + h) <= 0 && Math.max(x, x + w) >= t.width && Math.max(y, y + h) >= t.height) || !t.identity || t.clipped || t.saved.length || t.path.length && !t.pathExact) return;
+				const candidates = [...t.properties.values()].flat();
+				const effective = candidates.length ? call(605, [candidates]) : [];
+				let i = 0;
+				const kept = [];
+				for (const [property, history] of [...t.properties]) {
+					let last = null;
+					for (const op of history) if (effective[i++]) last = op;
+					if (last) {
+						t.properties.set(property, [last]);
+						kept.push(...last);
+					} else t.properties.delete(property);
+				}
+				if (animated(kept) || animated(t.path)) return;
+				r.out = [...kept, ...t.path];
+			}
 		};
 		const make = (prototype, kind, size) => {
 			const object = Object.create(prototype);
@@ -4378,11 +4469,65 @@
 			});
 			return node;
 		}
+		const offscreens = /* @__PURE__ */ new WeakMap();
+		const offscreen = (object) => {
+			const o = offscreens.get(object);
+			if (!o) throw new TypeError("Illegal invocation");
+			return o;
+		};
+		const dimension = (value, name) => {
+			const n = Number(value);
+			if (!Number.isFinite(n) || n < 0) throw new TypeError(`OffscreenCanvas: ${name} must be a finite number not below 0`);
+			return Math.trunc(n);
+		};
+		class OffscreenCanvas {
+			constructor(width, height) {
+				offscreens.set(this, {
+					width: dimension(width, "width"),
+					height: dimension(height, "height"),
+					context: null
+				});
+			}
+			get width() {
+				return offscreens.get(this)?.width;
+			}
+			get height() {
+				return offscreens.get(this)?.height;
+			}
+			getContext(kind) {
+				const o = offscreen(this);
+				if (String(kind) !== "2d") return null;
+				if (!o.context) {
+					o.context = make(CanvasRenderingContext2D.prototype, "context", {
+						width: o.width,
+						height: o.height
+					});
+					data(o.context).reuse = reuse(o.width, o.height);
+				}
+				return o.context;
+			}
+			convertToBlob(options) {
+				try {
+					const o = offscreen(this);
+					const type = options?.type === void 0 ? "" : String(options.type);
+					const scale = options?.scale === void 0 ? null : Number(options.scale);
+					return request(604, o.context ? data(o.context).out : [], [
+						o.width,
+						o.height,
+						type,
+						scale
+					]);
+				} catch (error) {
+					return Promise.reject(error);
+				}
+			}
+		}
 		return {
 			Canvas,
 			Path2D,
 			CanvasRenderingContext2D,
-			CanvasGradient
+			CanvasGradient,
+			OffscreenCanvas
 		};
 	}
 
@@ -5092,7 +5237,8 @@
 			e.id,
 			e.when,
 			e.repeat,
-			e.passThrough
+			e.passThrough,
+			e.forFocus
 		]), !!platform.appleKeyboard]);
 		dom.rootProp("onKeyCommand", (id) => {
 			const entry = entries.find((entry) => entry.id === id);
@@ -5112,7 +5258,7 @@
 					pairs = [[String(first), handler]];
 				}
 				if (options != null && typeof options !== "object") throw new TypeError("keymap.bind: options must be an object");
-				const when = options?.when, repeat = !!options?.repeat, passThrough = !!options?.passThrough;
+				const when = options?.when, repeat = !!options?.repeat, passThrough = !!options?.passThrough, forFocus = !!options?.forFocus;
 				if (when !== void 0 && when !== "always" && when !== "notEditing") throw new TypeError("keymap.bind: when must be always or notEditing");
 				const added = pairs.map(([text, handler]) => {
 					if (typeof handler !== "function") throw new TypeError(`keymap.bind: the handler of ${JSON.stringify(text)} is not a function`);
@@ -5123,7 +5269,8 @@
 						id: next++,
 						when,
 						repeat,
-						passThrough
+						passThrough,
+						forFocus
 					};
 				});
 				const updated = [...entries, ...added];
@@ -5200,6 +5347,8 @@
 			screenReader: false,
 			host: false,
 			lifecycle: "active",
+			shaders: true,
+			wakeCount: 0,
 			localeSettings: {
 				languages: ["en-US"],
 				timeZone: "UTC",
@@ -5212,13 +5361,22 @@
 		const tokens = reactive.signal(0);
 		const insets = reactive.context(() => fields.safeArea());
 		const platform = {
+			name: "web",
 			os: "web",
 			version: "0.0",
 			idiom: "desktop",
 			desktop: true,
 			catalyst: false,
 			select(spec) {
-				return "web" in spec ? spec.web : this.desktop ? spec.desktop ?? spec.default : spec.mobile ?? spec.default;
+				if (!spec || typeof spec !== "object") return void 0;
+				const keys = this.name !== this.os ? [this.name, this.os] : [this.os];
+				keys.push(this.desktop ? "desktop" : "mobile");
+				if (this.os !== "web") keys.push("native");
+				keys.push("default");
+				for (const key of keys) {
+					const value = spec[key];
+					if (value !== void 0) return value;
+				}
 			}
 		};
 		let appearance = "system", systemScheme = "light";
@@ -5242,7 +5400,10 @@
 			localeSettings: () => fields.localeSettings(),
 			lifecycle: () => fields.lifecycle(),
 			platform,
-			fpsEnabled: () => false
+			shadersAvailable: () => fields.shaders(),
+			wakeCount: () => fields.wakeCount(),
+			fpsEnabled: () => false,
+			perfStats: () => null
 		};
 		const accessibility = {
 			reduceMotion: () => fields.reduceMotion(),
@@ -6107,7 +6268,7 @@
 		installFetch: () => installFetch,
 		installTesting: () => installTesting
 	});
-	function configureAPIs(nsh, modules, dom, active, env) {
+	function configureAPIs(nsh, modules, dom, active, env, page = {}) {
 		nsh.nextTick = (callback, ...args) => {
 			if (typeof callback !== "function") throw new TypeError("nextTick: callback must be a function");
 			queueMicrotask(() => {
@@ -6126,7 +6287,9 @@
 			parent: null,
 			state: () => null,
 			titleBar: env.titleBar,
-			set() {},
+			set(attributes) {
+				if (typeof attributes?.title === "string") page.setWindowTitle?.(attributes.title);
+			},
 			show() {},
 			hide() {},
 			focus() {},

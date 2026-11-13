@@ -205,6 +205,15 @@ pub(crate) fn decode_command<'js>(
                 .and_then(|o| o.get::<_, Option<bool>>("animated").ok().flatten())
                 .unwrap_or(true),
         },
+        "reveal" => Command::Reveal(
+            <nsh_core::RevealOptions as HostValue>::decode(&Js(arg.clone()), &mut HostCx::default())
+                .ok_or_else(|| {
+                    Exception::throw_type(
+                        arg.ctx(),
+                        "reveal: vertical and horizontal must be \"start\", \"center\", \"end\" or \"nearest\"",
+                    )
+                })?,
+        ),
         "layoutAnimation" => Command::LayoutAnimation(
             <LayoutAnimation as HostValue>::decode(&Js(arg), &mut HostCx::default())
                 .unwrap_or_default(),
@@ -443,7 +452,19 @@ pub(crate) fn decode_prop<'js>(
     }
     let mut cx = tag.map_or_else(HostCx::default, HostCx::for_element);
     let input = Js(value);
-    let decoded = <Prop as HostProps>::decode(name, &input, &mut cx);
+    // `captureKeys` holds keystrokes: `mod` is Command where the platform
+    // follows Apple's conventions, which this runtime knows from its
+    // environment even though it decodes outside the engine's ambient one.
+    let decoded = if name == "captureKeys" {
+        let ctx = input.0.ctx();
+        let raw = ctx.as_raw().as_ptr();
+        // SAFETY: the app's state, for this call into JS.
+        let os = unsafe { &(*crate::state::state(raw)).dom }.os();
+        let apple = nsh_core::keymap::apple_keys(os, crate::env::current(raw).apple_keyboard);
+        Some(nsh_core::js::host::decode_capture_keys(&input, &mut cx, apple).map(Prop::KeyCapture))
+    } else {
+        <Prop as HostProps>::decode(name, &input, &mut cx)
+    };
     for message in cx.warnings {
         warnings.warn(message);
     }
@@ -1396,7 +1417,7 @@ mod tests {
         );
         assert_eq!(
             a.update.map(|u| u.curve),
-            Some(LayoutCurve::Spring { damping: 0.7 })
+            Some(LayoutCurve::FittedSpring { damping_ratio: 0.7 })
         );
         assert_eq!(a.delete, None);
         // Damping is held to 0.01..1; without a duration, 300 ms.
@@ -1404,7 +1425,7 @@ mod tests {
         assert_eq!(
             b.update,
             Some(LayoutTransition {
-                curve: LayoutCurve::Spring { damping: 1.0 },
+                curve: LayoutCurve::FittedSpring { damping_ratio: 1.0 },
                 property: LayoutProperty::Opacity,
                 duration_ms: 300.0,
                 delay_ms: 0.0,

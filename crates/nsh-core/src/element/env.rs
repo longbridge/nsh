@@ -29,6 +29,9 @@ pub struct Environment {
     pub reduce_motion: bool,
     /// A screen reader runs.
     pub screen_reader: bool,
+    /// The platform's screen readers follow active descendants
+    /// ([`crate::platform::Environment::reads_active_descendants`]).
+    pub reads_active_descendants: bool,
     /// Right-to-left layout.
     pub rtl: bool,
     /// Device pixels per point.
@@ -60,9 +63,15 @@ pub struct Environment {
     /// Whether the app is in use: in the foreground, visible without the
     /// focus, or in the background.
     pub lifecycle: Lifecycle,
+    /// How many times the system woke from sleep while the surface ran
+    /// ([`crate::platform::Environment::wake_count`]).
+    pub wake_count: u32,
     /// The platform picks colors from the screen
     /// ([`crate::platform::Environment::screen_color`]).
     pub screen_color: bool,
+    /// The platform renders canvas drawings offscreen into images
+    /// ([`crate::platform::Environment::canvas_render`]).
+    pub canvas_render: bool,
     /// The platform shows file dialogs and opens, reveals and trashes local
     /// paths ([`crate::platform::Environment::file_requests`]).
     pub file_requests: bool,
@@ -81,9 +90,18 @@ pub struct Environment {
     /// The platform gives web views trusted input
     /// ([`crate::platform::Environment::web_input`]).
     pub web_input: bool,
+    /// The platform answers awaitable WebView evaluations
+    /// ([`crate::Command::Evaluate`]); false rejects as unavailable.
+    pub web_evaluate: bool,
     /// The platform shows web views
     /// ([`crate::platform::Environment::web_views`]).
     pub web_views: bool,
+    /// The platform carries out web view requests
+    /// ([`crate::platform::Environment::webview_requests`]).
+    pub webview_requests: bool,
+    /// The platform draws shader views
+    /// ([`crate::platform::Environment::shaders`]).
+    pub shaders: bool,
 }
 
 impl Environment {
@@ -107,6 +125,7 @@ impl Default for Environment {
             font_scale: 1.0,
             reduce_motion: false,
             screen_reader: false,
+            reads_active_descendants: false,
             rtl: false,
             pixel_ratio: 1.0,
             os: Os::default(),
@@ -119,14 +138,19 @@ impl Default for Environment {
             ctrl_for_command: false,
             host: false,
             lifecycle: Lifecycle::Active,
+            wake_count: 0,
             screen_color: false,
+            canvas_render: false,
             file_requests: false,
             speech: false,
             notifications: false,
             audio: false,
             cell: None,
             web_input: false,
+            web_evaluate: false,
             web_views: true,
+            webview_requests: false,
+            shaders: true,
         }
     }
 }

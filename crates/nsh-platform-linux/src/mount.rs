@@ -131,6 +131,7 @@ impl Mounter {
             MountItem::Remove { id } => {
                 if let Some(view) = self.get(*id) {
                     crate::selectable_view::touched(surface, view);
+                    crate::input::removed(surface, view);
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, view, self.layout_animation.as_ref()) {
                         self.detach(surface, view);
@@ -142,6 +143,7 @@ impl Mounter {
                 crate::navigation::deleted(surface, *id);
                 if let Some(view) = self.views.remove(id) {
                     crate::selectable_view::touched(surface, &view);
+                    crate::input::removed(surface, &view);
                     crate::native::deleted(surface, &view);
                     crate::shader::deleted(surface, &view);
                     // A removal animation detaches the view when it ends.
@@ -448,7 +450,7 @@ impl Mounter {
             // mounter again while a batch is applied.
             Command::AccessibilityFocus => {
                 if let Some(view) = view {
-                    view.grab_focus();
+                    crate::access::focus(surface, view);
                 }
             }
             Command::ImageInfo { .. } => crate::image::command(surface, id, command),
@@ -462,6 +464,7 @@ impl Mounter {
             | Command::InjectJavaScript(_)
             | Command::PostMessage(_)
             | Command::Load(_)
+            | Command::WebViewRequest(_)
             | Command::Seek(_)
             | Command::Native { .. } => {
                 if let Some(view) = view {

@@ -15,7 +15,7 @@ NSH 应用在 iOS 上用 UIKit 视图和 CoreText 文本运行，支持真机和
 ## 环境要求
 
 - Mac 上的 **Xcode**，以及一个 iOS 模拟器运行时（`xcodebuild -downloadPlatform iOS` 可以安装）。见[安装](./installation.md#ios-与-mac-catalyst)。
-- 应用需要 **iOS 15.0** 及以上，支持 iPhone 和 iPad。
+- 应用需要 **iOS 15.0** 及以上，或应用指定的更高版本（见[最低系统版本](./packaging.md#最低系统版本)），支持 iPhone 和 iPad。
 
 ## 运行应用
 
@@ -42,6 +42,10 @@ nsh package --target ios --sign "Apple Distribution: Example Inc (ABCDE12345)" -
 在 Rust 应用的目录里，应用是用你的 crate 构建的 iOS runner；TSX 应用需写明入口（`nsh package App.tsx --target ios-simulator --run`）。
 
 `--target ios` 为真机、TestFlight 或 App Store 生成签名的 `.ipa`。签名身份、描述文件和图标见[打包](./packaging.md#ios-真机)。
+
+应用把它的警告、错误以及 `console.log` 和 `console.info` 日志写入统一日志，以它的 id 为子系统：连接的 iPhone 上的日志在“控制台”应用中查看，
+模拟器里的用 `xcrun simctl spawn booted log stream --predicate 'subsystem == "com.example.notes"'` 查看
+（[打包应用的日志](./dev-server-and-debugging.md#a-packaged-apps-logs)）。
 
 ## 嵌入 iOS 应用
 
@@ -138,7 +142,7 @@ nsh build App.tsx --release --out MyApp/nsh
 | `bundle.js` | 同一个应用的 JS 源码。 |
 | `bundle.js.map` | 它的 source map（堆栈跟踪会指向你的 `.tsx` 文件）。 |
 | `capabilities.json` | 应用声明的[能力](./sandbox-and-capabilities.md)，仅当 `nsh.json` 中有声明时生成。 |
-| `assets/` | 应用导入的图片和字体，路径相对于入口文件。 |
+| `assets/` | 应用导入的图片和字体，路径为它们在应用目录中的路径。 |
 
 ## 显示应用
 
@@ -175,6 +179,11 @@ final class EmbedController: UIViewController {
     override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation {
         NshAppView.preferredStatusBarUpdateAnimation
     }
+
+    // 由显示中的页面决定方向（`supportedOrientations`）。
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        NshAppView.supportedInterfaceOrientations ?? super.supportedInterfaceOrientations
+    }
 }
 ```
 
@@ -209,6 +218,7 @@ final class EmbedController: UIViewController {
 | `handle(_ name: String, _ handler:)` | 在主线程处理应用对 `name` 的调用（`host.call`）和投递（`host.post`）：`{ data, reply in … }`，或一个 `async throws` 函数 `{ data in … }`，其结果即调用的回答。 |
 | `removeHandler(_ name: String)` | 移除 `name` 的处理函数：应用对它的调用随即失败。 |
 | `static preferredStatusBarStyle`、`prefersStatusBarHidden`、`preferredStatusBarUpdateAnimation` | 正在运行的应用请求的状态栏设置（其页面和对话框的 `statusBar`、`nsh.json` 的默认值）：在宿主视图控制器的对应重写中返回它们。 |
+| `static supportedInterfaceOrientations` | 显示中的页面请求的方向（`NavPage` 的 `supportedOrientations`）：在宿主视图控制器的对应重写中返回它，为 `nil` 时返回控制器自己的。 |
 
 > [!IMPORTANT]
 > `bundle.nshc`（字节码）只能从应用包内部加载。QuickJS 不校验字节码，其他来源的字节码可能破坏内存：对于应用包之外的文件，请加载
@@ -420,9 +430,13 @@ try app.loadBundle(at: bundledURL)
 - **线程。** `NshAppView` 隔离在 main actor 上。`NshTrust`、`NshPackage` 和 `NshComponentContext` 是线程安全的。JS
   引擎运行在自己的线程上；主线程从不等待它。
 - **状态栏。** 嵌入应用的页面和对话框（`statusBar`）会改变 `NshAppView.preferredStatusBarStyle` 等属性的返回值；宿主视图控制器必须像上面的示例那样转发它们。
+- **方向。** 页面的 `supportedOrientations` 会改变 `NshAppView.supportedInterfaceOrientations` 的返回值；宿主视图控制器像上面的示例那样转发它，屏幕按其控制器允许的方向转动。
 - **安全区域。** 应用照常在 Rust 中使用 `safe_area()`，在 TSX 中在内边距里使用
   `env(safe-area-inset-*)` 或 [`nsh`](../modules/nsh.md#safe-area-and-keyboard) 的 `safeAreaInsets()`。放在你自己标题栏下方的 `NshAppView` 拿到的是适用于它自身的 insets，而不是整个窗口的。
 - **Mac Catalyst。** 同一个 framework 也可用于 Catalyst 应用。
+- **日志。** 应用的警告、错误以及 `console.log` 和 `console.info` 日志写入统一日志，以你的应用的 bundle identifier 为子系统、这一行的 target
+  为类别（`console.*` 是 `js`）：由 Xcode 运行应用时 Xcode 控制台会显示它们，“控制台”应用和 `log stream` 也会
+  （[打包应用的日志](./dev-server-and-debugging.md#a-packaged-apps-logs)）。
 
 ## 另请参阅
 

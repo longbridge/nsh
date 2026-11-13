@@ -59,7 +59,7 @@ use objc2_app_kit::{
     NSProgressIndicator, NSProgressIndicatorStyle, NSRequestUserAttentionType, NSResponder,
     NSScreen, NSStatusWindowLevel, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
     NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowButton, NSWindowCollectionBehavior,
-    NSWindowDelegate, NSWindowOrderingMode, NSWindowStyleMask,
+    NSWindowDelegate, NSWindowOcclusionState, NSWindowOrderingMode, NSWindowStyleMask,
 };
 use objc2_core_graphics::kCGDesktopIconWindowLevel;
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
@@ -163,6 +163,10 @@ define_class!(
 
         #[unsafe(method(sendEvent:))]
         fn send_event(&self, event: &NSEvent) {
+            #[cfg(feature = "dev")]
+            if let Some(placed) = crate::synth::placed(event) {
+                return self.sendEvent(&placed);
+            }
             if !self.ivars().background.get() || !self.pass_title_bar_press(event) {
                 // SAFETY: NSWindow's own dispatch of the event.
                 unsafe { msg_send![super(self), sendEvent: event] }
@@ -244,6 +248,17 @@ define_class!(
         #[unsafe(method(canBecomeMainWindow))]
         fn can_become_main(&self) -> bool {
             false
+        }
+
+        #[unsafe(method(sendEvent:))]
+        fn send_event(&self, event: &NSEvent) {
+            // The test agent's events where it made them, as in NshWindow.
+            #[cfg(feature = "dev")]
+            if let Some(placed) = crate::synth::placed(event) {
+                return self.sendEvent(&placed);
+            }
+            // SAFETY: NSWindow's own dispatch of the event.
+            unsafe { msg_send![super(self), sendEvent: event] }
         }
     }
 );
@@ -469,9 +484,9 @@ pub(crate) fn key_root(surface: &Surface) -> NshView {
         .unwrap_or_else(|| surface.root.clone())
 }
 
-/// The window a sheet (an open or save panel, an alert) the user asked
-/// for slides down from: the app's own window that has the keyboard when
-/// it has a title bar to hang it from, else the main window.
+/// The window a sheet the user asked for (an alert, an open or save panel:
+/// [`panel_window`]) slides down from: the app's own window that has the
+/// keyboard when it has a title bar to hang it from, else the main window.
 pub(crate) fn sheet_window(surface: &Surface) -> Option<Retained<NSWindow>> {
     let own = surface.windows.try_borrow().ok().and_then(|windows| {
         windows
@@ -480,6 +495,159 @@ pub(crate) fn sheet_window(surface: &Surface) -> Option<Retained<NSWindow>> {
             .map(|w| w.window.clone())
     });
     own.or_else(|| surface.root.ns().window())
+}
+
+/// The window an open or save panel, or an alert ([`crate::system`]),
+/// slides down from: the [`sheet_window`] while the user sees it
+/// ([`panel_placement`]). A sheet of a window out of sight (a tray app's
+/// hidden main window, a minimized one, one kept off every screen) stays
+/// out of sight with it, so the panel shows in a window of its own instead
+/// (`None`), the app activated first as `focus()` activates it: a panel of
+/// an inactive app opens behind the front app's windows.
+pub(crate) fn panel_window(surface: &Surface) -> Option<Retained<NSWindow>> {
+    let window = sheet_window(surface);
+    let app = NSApplication::sharedApplication(surface.mtm);
+    let sight = window.as_deref().map(|w| Sight::of(w, &app));
+    match panel_placement(sight, app.isActive(), in_background(surface.mtm)) {
+        PanelPlacement::Sheet => window,
+        PanelPlacement::Alone(activation) => {
+            activation.apply(&app);
+            None
+        }
+    }
+}
+
+/// What the user sees of a window.
+#[derive(Debug, Clone, Copy)]
+struct Sight {
+    /// It is ordered in (`isVisible`) and its app is not hidden.
+    shown: bool,
+    /// It is in the Dock (`isMiniaturized`).
+    minimized: bool,
+    /// Some of it is on a screen: `screen` is nil for a window wholly off
+    /// every screen.
+    on_screen: bool,
+    /// None of it shows (`occlusionState` without `Visible`): it is out of
+    /// sight as above, wholly covered by other windows, or the screen is
+    /// locked. The window server tells a moment after the window is
+    /// ordered in or out, so the fields above say it first.
+    occluded: bool,
+}
+
+impl Sight {
+    /// What the user sees of `window` now.
+    fn of(window: &NSWindow, app: &NSApplication) -> Sight {
+        Sight {
+            shown: window.isVisible() && !app.isHidden(),
+            minimized: window.isMiniaturized(),
+            on_screen: window.screen().is_some(),
+            occluded: !window
+                .occlusionState()
+                .contains(NSWindowOcclusionState::Visible),
+        }
+    }
+
+    /// Whether some of the window shows on a screen now: AppKit fires its
+    /// views' display links only then ([`link_window`]).
+    fn seen(self) -> bool {
+        self.shown && !self.minimized && self.on_screen && !self.occluded
+    }
+}
+
+/// The root view the surface's display link is made from
+/// ([`Surface::ensure_ticking`]): that of the window it follows
+/// ([`link_window`]), the main window's being the surface's root;
+/// `current` is the one it is made from now.
+pub(crate) fn link_root(surface: &Surface, current: Option<&NshView>) -> NshView {
+    let app = NSApplication::sharedApplication(surface.mtm);
+    let main = surface.root.ns().window().map(|w| Sight::of(&w, &app));
+    // Only while a window opens or closes is the list held: the link
+    // stays where it is until the next look.
+    let Ok(windows) = surface.windows.try_borrow() else {
+        return current.unwrap_or(&surface.root).clone();
+    };
+    // Read lazily: while the main window shows, the others are not looked
+    // at (the common case, on every resume of the link).
+    let own = windows.values().map(|w| {
+        let candidate = LinkCandidate {
+            sight: Sight::of(&w.window, &app),
+            key: is_key(&w.window),
+            current: current == Some(&w.view),
+        };
+        (&w.view, candidate)
+    });
+    link_window(main, own).unwrap_or(&surface.root).clone()
+}
+
+/// A window of the app's own the surface's display link may follow
+/// ([`link_window`]).
+#[derive(Debug, Clone, Copy)]
+struct LinkCandidate {
+    /// What the user sees of it.
+    sight: Sight,
+    /// It has the keyboard ([`is_key`]).
+    key: bool,
+    /// The link is made from its root now.
+    current: bool,
+}
+
+/// The window the surface's display link follows, given what the user sees
+/// of the main window (`None`: the surface's root is in no window) and the
+/// app's own windows: `None` for the main window, else the `T` of one of
+/// the app's own.
+///
+/// One link drives every window of the surface, and AppKit fires a view's
+/// link only while some of its window shows on a screen ([`Sight::seen`]),
+/// so it follows a window that shows: the main window while it does, as
+/// always; else one of the app's own (the main window hidden, as a tray
+/// app's, minimized or covered), the key one first, then the one it
+/// follows now, so a new link is made only when needed, then any. While
+/// none shows, no link fires wherever it is made: it stays on the window
+/// it follows (the main window when that one closed), and moves when one
+/// shows again.
+fn link_window<T>(
+    main: Option<Sight>,
+    own: impl IntoIterator<Item = (T, LinkCandidate)>,
+) -> Option<T> {
+    if main.is_some_and(Sight::seen) {
+        return None;
+    }
+    // The best so far, by rank: 0 key and seen (taken at once), 1 followed
+    // now and seen, 2 seen, 3 followed now and out of sight.
+    let mut best: Option<(u8, T)> = None;
+    for (window, c) in own {
+        let rank = match (c.sight.seen(), c.key, c.current) {
+            (true, true, _) => return Some(window),
+            (true, false, true) => 1,
+            (true, false, false) => 2,
+            (false, _, true) => 3,
+            (false, _, false) => continue,
+        };
+        if best.as_ref().is_none_or(|(r, _)| rank < *r) {
+            best = Some((rank, window));
+        }
+    }
+    best.map(|(_, window)| window)
+}
+
+/// How [`panel_window`] shows a panel.
+#[derive(Debug, PartialEq, Eq)]
+enum PanelPlacement {
+    /// As a sheet of the window.
+    Sheet,
+    /// In a window of its own, the app activated first as it says.
+    Alone(Activation),
+}
+
+/// How a panel shows, given what the user sees of the window it would
+/// slide down from (`None`: the surface is in no window) and whether the
+/// app is active and runs in the background: alone, it takes the keyboard
+/// as `focus()` does, since the user asked for it.
+fn panel_placement(sight: Option<Sight>, active: bool, background: bool) -> PanelPlacement {
+    match sight {
+        Some(s) if s.shown && !s.minimized && s.on_screen => PanelPlacement::Sheet,
+        _ => PanelPlacement::Alone(activation(active, background, true, true)),
+    }
 }
 
 /// The root view window `id` shows (the surface's root for the main
@@ -968,13 +1136,7 @@ fn request(surface: &Rc<Surface>, id: NodeId, request: &WindowRequest) {
     let mtm = surface.mtm;
     match request {
         WindowRequest::Show => show(surface, id, &window, false),
-        WindowRequest::Hide => {
-            if let Some(w) = surface.windows.borrow().get(&id) {
-                w.showing.set(Showing::Done);
-            }
-            window.orderOut(None);
-            lost_key(surface, &window);
-        }
+        WindowRequest::Hide => hide(surface, id, &window),
         WindowRequest::Focus => show(surface, id, &window, true),
         WindowRequest::Close => close_request(surface, id, &window),
         WindowRequest::Minimize => {
@@ -1045,6 +1207,42 @@ fn request(surface: &Rc<Surface>, id: NodeId, request: &WindowRequest) {
     report(surface, id);
 }
 
+/// `hide()` (and the main window's close with `keepAliveOnClose`): window
+/// `id` is ordered out, one in full screen once it has left full screen
+/// ([`crate::window_state::hide`]), so its space does not stay behind.
+pub(crate) fn hide(surface: &Surface, id: NodeId, window: &NSWindow) {
+    if let Some(w) = surface.windows.borrow().get(&id) {
+        w.showing.set(Showing::Done);
+    }
+    let now = if id == ROOT_ID {
+        crate::window_state::hide(&surface.window, window)
+    } else {
+        with_watch(surface, id, |watch| {
+            crate::window_state::hide(watch, window)
+        })
+        .unwrap_or(true)
+    };
+    if now {
+        window.orderOut(None);
+        lost_key(surface, window);
+    }
+}
+
+/// A window the app hid in full screen is back on its desktop: it is
+/// ordered out.
+pub(crate) fn hidden_after_full_screen(surface: &Surface, target: Target) {
+    let id = match target {
+        Target::Main => ROOT_ID,
+        Target::Own(id) => id,
+    };
+    let Some(window) = window_of(surface, id) else {
+        return;
+    };
+    window.orderOut(None);
+    lost_key(surface, &window);
+    report(surface, id);
+}
+
 /// `f` with the watch of window `id` (the main window's for the root).
 fn with_target_watch(surface: &Surface, id: NodeId, f: impl FnOnce(&Watch)) {
     if id == ROOT_ID {
@@ -1057,6 +1255,8 @@ fn with_target_watch(surface: &Surface, id: NodeId, f: impl FnOnce(&Watch)) {
 /// Shows window `id` (`focus`: and makes it key); a new window waiting for
 /// its first frame shows with it.
 fn show(surface: &Surface, id: NodeId, window: &NSWindow, focus: bool) {
+    // Shown again while it leaves full screen: it stays.
+    with_target_watch(surface, id, crate::window_state::shown);
     if let Some(w) = surface.windows.borrow().get(&id)
         && let Showing::Waiting(_) = w.showing.get()
     {
@@ -1088,18 +1288,7 @@ fn order_front(surface: &Surface, window: &NSWindow, activate: bool, key: bool, 
     if focus && window.isMiniaturized() {
         window.deminiaturize(None);
     }
-    match activation(app.isActive(), in_background(surface.mtm), activate, focus) {
-        Activation::None => {}
-        Activation::Ask => app.activate(),
-        // `activate()` only asks since macOS 14, and macOS turns it down
-        // after a click on the app's tray icon, even one made in the
-        // click's action: the window would come front with the keyboard
-        // still in the app the user was in.
-        Activation::Take => {
-            #[allow(deprecated)]
-            app.activateIgnoringOtherApps(true);
-        }
-    }
+    activation(app.isActive(), in_background(surface.mtm), activate, focus).apply(&app);
     if key && window.canBecomeKeyWindow() {
         window.makeKeyAndOrderFront(None);
         became_key(surface, window);
@@ -1113,7 +1302,8 @@ fn order_front(surface: &Surface, window: &NSWindow, activate: bool, key: bool, 
     }
 }
 
-/// How [`order_front`] activates the app.
+/// How [`order_front`] activates the app (and [`panel_window`], for an
+/// open or save panel or an alert shown alone).
 #[derive(Debug, PartialEq, Eq)]
 enum Activation {
     /// Not at all: it is active, the window does not activate it (a panel),
@@ -1122,9 +1312,28 @@ enum Activation {
     /// It asks macOS, which may turn it down: a window shown (`show()`, a
     /// new window) stays out of the way of the app the user is in.
     Ask,
-    /// It takes the keyboard from the app in front (`focus()`), as other
-    /// toolkits' focus calls do.
+    /// It takes the keyboard from the app in front (`focus()`, an open or
+    /// save panel or an alert shown alone), as other toolkits' focus calls
+    /// do.
     Take,
+}
+
+impl Activation {
+    /// Activates `app` as it says.
+    fn apply(self, app: &NSApplication) {
+        match self {
+            Activation::None => {}
+            Activation::Ask => app.activate(),
+            // `activate()` only asks since macOS 14, and macOS turns it down
+            // after a click on the app's tray icon, even one made in the
+            // click's action: the window would come front with the keyboard
+            // still in the app the user was in.
+            Activation::Take => {
+                #[allow(deprecated)]
+                app.activateIgnoringOtherApps(true);
+            }
+        }
+    }
 }
 
 fn activation(active: bool, background: bool, activates: bool, focus: bool) -> Activation {
@@ -1295,6 +1504,8 @@ fn open_window(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
         window.setAppearance(surface.root.ns().appearance().as_deref());
         crate::window_state::observe(surface, Target::Own(id), &w.watch, Some(&window));
     }
+    // Dialogs of its first render were presented before it was a window.
+    crate::navigation::window_opened(surface, view);
     // A dialog stays above its parent and moves with it.
     if kind == WindowKind::Dialog
         && let Some(parent) = &parent_window
@@ -1490,6 +1701,9 @@ pub(crate) fn launched_main(surface: &Surface, mode: Option<WindowMode>, shown: 
 /// The standalone app's main window shows: the first time, it takes the
 /// mode it opens in.
 pub(crate) fn main_shown(surface: &Surface) {
+    // Shown again while it leaves full screen (the Dock icon, a link):
+    // it stays.
+    crate::window_state::shown(&surface.window);
     if let Some(mode) = surface.main_open_mode.take()
         && let Some(window) = surface.root.ns().window()
     {
@@ -1925,6 +2139,8 @@ pub(crate) fn removed(surface: &Surface, view: &NshView) -> bool {
     let window = w.window.clone();
     close(w);
     lost_key(surface, &window);
+    // A link made from its root would neither fire nor let the root go.
+    surface.follow_windows();
     true
 }
 
@@ -1938,6 +2154,7 @@ pub(crate) fn close_all(surface: &Surface) {
     }
     dock::set(surface.key(), ROOT_ID, None);
     surface.main_window.reset();
+    surface.follow_windows();
 }
 
 fn close(w: AppWindow) {
@@ -2408,6 +2625,176 @@ mod tests {
             assert_eq!(activation(true, false, true, focus), Activation::None);
             assert_eq!(activation(false, true, true, focus), Activation::None);
             assert_eq!(activation(false, false, false, focus), Activation::None);
+        }
+    }
+
+    #[test]
+    fn panels_are_sheets_of_windows_in_sight_else_shown_alone() {
+        let seen = Sight {
+            shown: true,
+            minimized: false,
+            on_screen: true,
+            occluded: false,
+        };
+        // A window the user sees takes the panel as a sheet, active app or
+        // not, as it always did.
+        for (active, background) in [(true, false), (false, false), (false, true)] {
+            assert_eq!(
+                panel_placement(Some(seen), active, background),
+                PanelPlacement::Sheet
+            );
+        }
+        // Hidden (a tray app's main window), minimized, off every screen
+        // (a placeholder kept out of sight) or no window: a panel of its
+        // own, the inactive app activated as `focus()` activates it; an
+        // active app is in front already, a background one (a test's)
+        // never activates.
+        let out_of_sight = [
+            Some(Sight {
+                shown: false,
+                ..seen
+            }),
+            Some(Sight {
+                minimized: true,
+                ..seen
+            }),
+            Some(Sight {
+                on_screen: false,
+                ..seen
+            }),
+            None,
+        ];
+        for sight in out_of_sight {
+            assert_eq!(
+                panel_placement(sight, false, false),
+                PanelPlacement::Alone(Activation::Take)
+            );
+            assert_eq!(
+                panel_placement(sight, true, false),
+                PanelPlacement::Alone(Activation::None)
+            );
+            assert_eq!(
+                panel_placement(sight, false, true),
+                PanelPlacement::Alone(Activation::None)
+            );
+        }
+    }
+
+    #[test]
+    fn the_display_link_follows_a_window_that_shows() {
+        let seen = Sight {
+            shown: true,
+            minimized: false,
+            on_screen: true,
+            occluded: false,
+        };
+        // AppKit fires no link of a window hidden (a tray app's main
+        // window, `defaultVisible: false`; also one just ordered out, which
+        // the window server still reports visible), minimized, off every
+        // screen or wholly covered (also with the screen locked, and one
+        // just ordered in, which the window server has not reported
+        // visible yet).
+        let hidden = Sight {
+            shown: false,
+            ..seen
+        };
+        let minimized = Sight {
+            minimized: true,
+            occluded: true,
+            ..seen
+        };
+        let off_screen = Sight {
+            on_screen: false,
+            occluded: true,
+            ..seen
+        };
+        let covered = Sight {
+            occluded: true,
+            ..seen
+        };
+        for sight in [hidden, minimized, off_screen, covered] {
+            assert!(!sight.seen(), "{sight:?}");
+        }
+        assert!(seen.seen());
+        let own = |sight, key, current| LinkCandidate {
+            sight,
+            key,
+            current,
+        };
+        // The main window while it shows, as always, whatever the app's
+        // windows, which are not even read then.
+        assert_eq!(
+            link_window(Some(seen), [("a", own(seen, true, true))]),
+            None
+        );
+        let mut read = false;
+        let unread = std::iter::from_fn(|| {
+            read = true;
+            None::<(&str, LinkCandidate)>
+        });
+        assert_eq!(link_window(Some(seen), unread), None);
+        assert!(!read, "the app's windows were read");
+        // The main window out of sight, or the surface's root in no window
+        // (an embedded view not yet in its host's): a window of the app's
+        // own that shows.
+        for main in [
+            Some(hidden),
+            Some(minimized),
+            Some(off_screen),
+            Some(covered),
+            None,
+        ] {
+            assert_eq!(
+                link_window(main, [("a", own(seen, false, false))]),
+                Some("a")
+            );
+            // The key one first, then the one followed now (no new link
+            // for nothing), then any; one out of sight is passed over,
+            // key or followed.
+            assert_eq!(
+                link_window(
+                    main,
+                    [("a", own(seen, false, true)), ("b", own(seen, true, false))]
+                ),
+                Some("b")
+            );
+            assert_eq!(
+                link_window(
+                    main,
+                    [
+                        ("a", own(seen, false, false)),
+                        ("b", own(seen, false, true)),
+                        ("c", own(seen, false, false))
+                    ]
+                ),
+                Some("b")
+            );
+            assert_eq!(
+                link_window(
+                    main,
+                    [
+                        ("a", own(hidden, true, true)),
+                        ("b", own(covered, true, false)),
+                        ("c", own(seen, false, false))
+                    ]
+                ),
+                Some("c")
+            );
+            // None shows: no link fires wherever it is made, so it stays
+            // on the window it follows...
+            assert_eq!(
+                link_window(
+                    main,
+                    [
+                        ("a", own(covered, true, false)),
+                        ("b", own(minimized, false, true))
+                    ]
+                ),
+                Some("b")
+            );
+            // ...or on the main window, as when the one it followed closed.
+            assert_eq!(link_window(main, [("a", own(hidden, true, false))]), None);
+            assert_eq!(link_window::<&str>(main, []), None);
         }
     }
 }

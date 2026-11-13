@@ -124,7 +124,7 @@ impl Encoded {
     }
 }
 
-pub(crate) fn encode(batch: MountBatch) -> Encoded {
+pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
     let mut e = Encoded {
         bytes: Vec::with_capacity(batch.items.len() * 16),
         ..Encoded::default()
@@ -566,6 +566,19 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     Command::GoBack => e.int(5),
                     Command::GoForward => e.int(6),
                     Command::StopLoading => e.int(7),
+                    Command::Evaluate { request, script } => {
+                        e.int(51);
+                        e.int(request as i32);
+                        e.string(web_generation.to_string());
+                        let key = format!("__nsh_evaluation_{id}_{request}");
+                        e.string(nsh_core::platform::web_evaluation::start_script(&script, &key));
+                        e.string(nsh_core::platform::web_evaluation::poll_script(&key));
+                        e.string(nsh_core::platform::web_evaluation::cleanup_script(&key));
+                    }
+                    Command::CancelEvaluate { request } => {
+                        e.int(52);
+                        e.int(request as i32);
+                    }
                     Command::InjectJavaScript(js) => {
                         e.int(8);
                         e.string(js);
@@ -672,6 +685,12 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                             _ => -1,
                         });
                     }
+                    // `Mounter.orientations` reads the `ModalConfig`
+                    // bits (0: the app's own).
+                    Command::Orientations(bits) => {
+                        e.int(54);
+                        e.int(i32::from(bits));
+                    }
                     Command::ImageInfo { id, uri } => {
                         e.int(19);
                         e.int(id as i32);
@@ -699,6 +718,17 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         e.int(22);
                         e.string(text);
                     }
+                    Command::SetClipboardItem(item) => match item.html {
+                        Some(html) => {
+                            e.int(56);
+                            e.string(item.text);
+                            e.string(html);
+                        }
+                        None => {
+                            e.int(22);
+                            e.string(item.text);
+                        }
+                    },
                     Command::ReadClipboard { id, has_only } => {
                         e.int(23);
                         e.int(id as i32);
@@ -726,20 +756,22 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     }
                     // `Picker.java`: the request, the limit, the extensions
                     // offered (comma-separated; empty: any file) and the
-                    // largest file read.
+                    // largest file read (at most 512 MiB: an `int`).
                     Command::PickFiles { id, request } => {
                         e.int(45);
                         e.int(id as i32);
                         e.int(request.limit as i32);
                         e.string(nsh_core::file_dialog::extensions(&request.filters).join(","));
-                        e.int(nsh_core::picker::MAX_PICKED_FILE_BYTES as i32);
+                        e.int(i32::try_from(request.size_limit()).unwrap_or(i32::MAX));
                     }
                     // Turned into a mount item / `ScrollTo` by the core.
                     Command::LayoutAnimation(_)
                     | Command::SetStatusBar(_)
                     | Command::CancelPress
                     | Command::ScrollToIndex { .. }
+                    | Command::Reveal(_)
                     | Command::Measure { .. }
+                    | Command::MeasureScrollPosition { .. }
                     | Command::ScrollToEnd { .. }
                     // Desktops only.
                     | Command::Desktop(_)
@@ -749,6 +781,10 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     // No host answers `nsh/host` here (`Environment::host`):
                     // the core rejects the calls first.
                     | Command::HostCall { .. }
+                    | Command::HostPost { .. }
+                    // No desktop web view controls (`Environment::webview_requests`):
+                    // the core answers these first.
+                    | Command::WebViewRequest(_)
                     // No eyedropper (`Environment::screen_color`): the core
                     // answers no color first.
                     | Command::PickScreenColor { .. } => e.int(-1),
@@ -777,13 +813,38 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                             e.int(id as i32);
                         }
                     },
+                    // `CanvasRender.java` (`Mounter`'s op 55): the request,
+                    // the size in pixels, the scale, the format (0: PNG),
+                    // then the drawing as `CANVAS` carries it.
+                    Command::RenderCanvas {
+                        id,
+                        drawing,
+                        width,
+                        height,
+                        scale,
+                        format,
+                    } => {
+                        e.int(55);
+                        e.int(id as i32);
+                        e.int(width as i32);
+                        e.int(height as i32);
+                        e.float(scale);
+                        e.int(match format {
+                            nsh_core::canvas::render::ImageFormat::Png => 0,
+                            // `CanvasRender.encode` answers an error for a
+                            // format it does not encode.
+                            _ => -1,
+                        });
+                        canvas(&mut e, &drawing);
+                    }
                     // No speech recognizer (`Environment::speech`): the core
                     // ends the sessions first.
                     | Command::Speech(_)
                     // Trusted web view input is macOS's for now.
                     | Command::SendInput(_)
                     // No performance monitor on Android yet.
-                    | Command::PerfMonitor(_) => e.int(-1),
+                    | Command::PerfMonitor(_)
+                    | Command::PerfMonitorMode(_) => e.int(-1),
                     // `Audio.java`: the sub-opcode, then the command's
                     // fields (see `audio_command`).
                     Command::Audio(command) => {
@@ -816,6 +877,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                                 e.int(4);
                                 e.int(count as i32);
                             }
+                            N::CloseAll => e.int(5),
                             _ => e.int(-1),
                         }
                     }
@@ -1304,7 +1366,9 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         Some(true) => 1,
     });
     e.opt_string(a.label.as_deref());
-    e.opt_string(a.hint.as_deref());
+    // The hint text: the description, then the hint (Android has no
+    // description of its own beside the label).
+    e.opt_string(a.help_text(None).as_deref());
     e.int(role_index(a.role));
     let s = a.state;
     let mut flags = 0;
@@ -1345,6 +1409,9 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         Some(AccessibilityCurrent::Date) => 5,
         Some(AccessibilityCurrent::Time) => 6,
     } << 11;
+    if s.invalid {
+        flags |= 1 << 14;
+    }
     e.int(flags);
     match &a.value {
         Some(v) => {
@@ -1443,8 +1510,13 @@ fn role_index(role: AccessibilityRole) -> i32 {
         TreeItem => 40,
         MenuItemCheckbox => 41,
         MenuItemRadio => 42,
+        Dialog => 43,
+        AlertDialog => 44,
     }
 }
+
+/// The intervals a physical spring's progress is sampled in for Java's interpolator.
+const SPRING_SAMPLES: usize = 64;
 
 fn layout_transition(e: &mut Encoded, t: Option<LayoutTransition>) {
     let Some(t) = t else {
@@ -1456,16 +1528,29 @@ fn layout_transition(e: &mut Encoded, t: Option<LayoutTransition>) {
         LayoutCurve::EaseIn => (1, 0.0),
         LayoutCurve::EaseOut => (2, 0.0),
         LayoutCurve::EaseInEaseOut => (3, 0.0),
-        LayoutCurve::Spring { damping } => (4, damping),
+        LayoutCurve::FittedSpring { damping_ratio } => (4, damping_ratio),
         LayoutCurve::Keyboard => (5, 0.0),
+        LayoutCurve::Spring(_) => (6, 0.0),
     };
     e.int(curve);
     e.float(damping);
+    if let LayoutCurve::Spring(spring) = t.curve {
+        // The spring's progress, sampled evenly over the time it settles in: Java draws it
+        // piecewise linear (`Mounter.Transition`), so the physics stays in Rust.
+        e.int(SPRING_SAMPLES as i32 + 1);
+        for i in 0..=SPRING_SAMPLES {
+            e.float(if i == SPRING_SAMPLES {
+                1.0
+            } else {
+                spring.progress(spring.settle_ms() * i as f32 / SPRING_SAMPLES as f32)
+            });
+        }
+    }
     e.int(match t.property {
         LayoutProperty::Opacity => 0,
         LayoutProperty::Scale => 1,
     });
-    e.float(t.duration_ms);
+    e.float(t.run_ms());
     e.float(t.delay_ms);
 }
 
@@ -1568,7 +1653,7 @@ fn input(e: &mut Encoded, c: &InputConfig) {
     e.bool(c.replaced);
 }
 
-// --- Canvas drawings (`CanvasBox.java`) -------------------------------------
+// --- Canvas drawings (`CanvasPainter.java`) ---------------------------------
 //
 // A word count, then the operations as 32-bit words: operation codes as in
 // `nsh_core::js::canvas` (`CV_*`), numbers as float bits, animated value
@@ -1760,6 +1845,9 @@ fn canvas(e: &mut Encoded, d: &nsh_core::canvas::Drawing) {
                 for v in source {
                     e.float(v);
                 }
+                // A missing size is the source's pixels over this many
+                // points, never the screen's density.
+                e.float(image.density());
                 e.nums(dest);
             }
         }
@@ -1899,6 +1987,38 @@ mod tests {
 
     use super::*;
 
+    /// `drawImage(uri, 1, 2)` encoded for `CanvasPainter.java`: the URI,
+    /// no source, the source's four floats, the file name's density, then
+    /// the destination with its missing size NaN.
+    #[test]
+    fn a_canvas_image_carries_its_file_name_s_density() {
+        use nsh_core::canvas::{CanvasImage, CanvasOp, Drawing, Num};
+        let nan = Num::Const(f32::NAN);
+        for (uri, density) in [("asset:/dot.png", 1.0), ("asset:/dot@3x.png", 3.0)] {
+            let drawing = Drawing {
+                ops: vec![CanvasOp::DrawImage {
+                    image: CanvasImage { uri: uri.into() },
+                    source: None,
+                    dest: [Num::Const(1.0), Num::Const(2.0), nan, nan],
+                }],
+                ..Drawing::default()
+            };
+            let mut e = Encoded::default();
+            canvas(&mut e, &drawing);
+            let words: Vec<u32> = e
+                .bytes
+                .chunks_exact(4)
+                .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+                .collect();
+            // The word count, the code, the URI's object, no source.
+            assert_eq!(&words[..4], &[12, 42, 0, 0]);
+            let floats: Vec<f32> = words[4..].iter().map(|w| f32::from_bits(*w)).collect();
+            assert_eq!(&floats[..7], &[0.0, 0.0, 0.0, 0.0, density, 1.0, 2.0]);
+            assert!(floats[7].is_nan() && floats[8].is_nan());
+            assert_eq!(floats.len(), 9);
+        }
+    }
+
     /// The ints a batch of one file request is encoded as.
     fn ints(request: FileRequest) -> Vec<i32> {
         let batch = MountBatch {
@@ -1910,7 +2030,7 @@ mod tests {
                 },
             }],
         };
-        encode(batch)
+        encode(batch, 0)
             .bytes
             .chunks_exact(4)
             .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
@@ -1938,5 +2058,83 @@ mod tests {
         ] {
             assert_eq!(ints(request), vec![COMMAND, 3, 30, 7]);
         }
+    }
+    #[test]
+    fn a_canvas_render_carries_its_size_scale_and_drawing() {
+        use nsh_core::canvas::{CanvasOp, Drawing, Num, render::ImageFormat};
+
+        let drawing = Drawing {
+            ops: vec![CanvasOp::FillRect([
+                Num::Const(1.0),
+                Num::Const(2.0),
+                Num::Const(3.0),
+                Num::Const(4.0),
+            ])],
+            ..Drawing::default()
+        };
+        let batch = MountBatch {
+            items: vec![MountItem::Command {
+                id: nsh_core::ROOT_ID,
+                command: Command::RenderCanvas {
+                    id: 9,
+                    drawing: std::sync::Arc::new(drawing),
+                    width: 60,
+                    height: 40,
+                    scale: 2.0,
+                    format: ImageFormat::Png,
+                },
+            }],
+        };
+        let ints: Vec<i32> = encode(batch, 0)
+            .bytes
+            .chunks_exact(4)
+            .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+            .collect();
+        // `COMMAND`, the root, op 55 (`Mounter.java`), the request, the
+        // pixel size, the scale's bits, PNG, then `CANVAS`'s words: their
+        // count and fillRect (21) with its four numbers.
+        let f = |v: f32| v.to_bits() as i32;
+        assert_eq!(
+            ints,
+            vec![
+                COMMAND,
+                nsh_core::ROOT_ID as i32,
+                55,
+                9,
+                60,
+                40,
+                f(2.0),
+                0,
+                5,
+                21,
+                f(1.0),
+                f(2.0),
+                f(3.0),
+                f(4.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn web_evaluations_carry_the_originating_engine_generation() {
+        let encoded = encode(
+            MountBatch {
+                items: vec![MountItem::Command {
+                    id: 3,
+                    command: Command::Evaluate {
+                        request: u32::MAX,
+                        script: "42".into(),
+                    },
+                }],
+            },
+            19,
+        );
+        let ints: Vec<_> = encoded
+            .bytes
+            .chunks_exact(4)
+            .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+            .collect();
+        assert_eq!(ints, vec![COMMAND, 3, 51, -1, 0, 1, 2, 3]);
+        assert!(matches!(&encoded.objects[0], Obj::Str(generation) if generation == "19"));
     }
 }

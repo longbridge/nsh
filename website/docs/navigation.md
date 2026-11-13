@@ -230,7 +230,7 @@ Pages stay mounted while their route is in the stack: going back shows the previ
 
 A page (`nav_page()` in Rust, `NavPage` in TSX) wraps a page's content and carries its header. iOS and Android show their system header, set up by the title and the header options. The desktops and the web show the page's header slot (`.header(..)`, TSX `header`), your own views, at the top of the page: as wide as the page, as tall as it lays out, with the content below it. Give a page both, as the example above does, and it looks at home everywhere. All options are reactive: change a signal and the header follows.
 
-In Rust, each prop below is a method of `nav_page()` in snake case: `.title(..)`, `.header(..)`, `.header_visible(..)`, `.header_transparent(..)`, `.header_style_with(..)`, `.header_style(..)`, `.header_back_visible(..)`, `.header_left(..)`, `.header_right(..)`, `.header_title(..)`, `.header_large_title(..)`, `.header_back_title(..)`, `.animation(ScreenAnimation::Fade)`, `.status_bar(..)`, `.pop_on_swipe(..)`, `.pop_on_back(..)`, `.on_back_press(..)`, `.on_dismiss(..)`; its children are its content.
+In Rust, each prop below is a method of `nav_page()` in snake case: `.title(..)`, `.header(..)`, `.header_visible(..)`, `.header_transparent(..)`, `.header_style_with(..)`, `.header_style(..)`, `.header_back_visible(..)`, `.header_left(..)`, `.header_right(..)`, `.header_title(..)`, `.header_large_title(..)`, `.header_back_title(..)`, `.header_right_items(..)`, `.animation(ScreenAnimation::Fade)`, `.status_bar(..)`, `.pop_on_swipe(..)`, `.pop_on_back(..)`, `.on_back_press(..)`, `.on_dismiss(..)`; its children are its content.
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
@@ -247,6 +247,7 @@ In Rust, each prop below is a method of `nav_page()` in snake case: `.title(..)`
 | `ios={{ headerLeftSystemItem }}` | same as `headerRightSystemItem` | | iOS: the same, at the start of the header, pressing `headerLeft`. |
 | `ios={{ headerRightSymbol }}` | `string` | | iOS: UIKit's own bar button showing the SF Symbol of that name (`"slider.horizontal.3"`) in place of `headerRight`'s views; a press on it is a press on the first pressable view of `headerRight`, and VoiceOver reads that view's label. `headerRightSystemItem` wins over it; a name SF Symbols does not have shows `headerRight` as it is. Android shows `headerRight` as it is. |
 | `ios={{ headerLeftSymbol }}` | `string` | | iOS: the same, at the start of the header, pressing `headerLeft`. |
+| `ios={{ headerRightItems }}` | `HeaderItem[]` | | iOS: several UIKit bar buttons at the end of the header (first at the trailing edge). Each item shows exactly one of `systemItem`, `symbol` or `label` (the button's title when it has neither system item nor symbol; otherwise VoiceOver's label), with optional `key` (to keep the `UIBarButtonItem` across updates), `disabled`, `onPress` (when it has no menu), and `menu` (`nsh/desktop`'s [`MenuItem`](../modules/nsh-desktop.md#menu-items) items: `onSelect`, `destructive`, `inline`, `symbol`). A non-empty list wins over `headerRightSystemItem` / `headerRightSymbol` and leaves `headerRight`'s views out of the iOS bar (they stay the fallback on Android, the desktops and the web). An empty list is unset. |
 | `headerTitle` | `JSX.Element` | | iOS and Android: views replacing the title. |
 | `headerLargeTitle` | `boolean` | `false` | iOS: a large title that shrinks into the bar as the content scrolls. |
 | `headerBackTitle` | `string` | | The label of the back button that leads back to this page (iOS; Android's up arrow says it to screen readers). |
@@ -257,6 +258,64 @@ In Rust, each prop below is a method of `nav_page()` in snake case: `.title(..)`
 | `onBackPress` | `() => void` | | The user pressed back on the page, whether or not `popOnBack` let it pop. |
 | `onDismiss` | `() => void` | | The user popped the page; its route is already removed. |
 | `style`, `class` | | | The page's content view. |
+
+On iOS, several trailing system bar buttons (with optional native menus) stand in for `headerRight`. Each button and each menu item carries its own handler (`onPress` / `onSelect`); the platform reports them as the root's menu event, the same path desktop menus use:
+
+```tsx
+<NavPage
+  title="Keys"
+  headerRight={<Text onPress={onEdit}>Edit</Text>}
+  ios={{
+    headerRightItems: [
+      { key: "edit", systemItem: "edit", onPress: onEdit },
+      {
+        key: "more",
+        symbol: "ellipsis.circle",
+        label: "More",
+        menu: [
+          { label: "Share", symbol: "square.and.arrow.up", onSelect: share },
+          {
+            label: "Danger",
+            inline: true,
+            submenu: [
+              { label: "Delete", destructive: true, onSelect: remove },
+            ],
+          },
+        ],
+      },
+    ],
+  }}
+/>
+```
+
+In Rust, build the same list with `nsh_core::element::header::HeaderItem` and `nsh_core::element::desktop::MenuItem`:
+
+```rust
+use nsh_base::nav_page;
+use nsh_core::element::{desktop::MenuItem, header::HeaderItem, HeaderSystemItem};
+
+nav_page()
+    .header_right_items(vec![
+        HeaderItem::system(HeaderSystemItem::Edit)
+            .key("edit")
+            .on_press(on_edit),
+        HeaderItem::new("Filter").key("filter").on_press(on_filter),
+        HeaderItem::symbol("ellipsis.circle")
+            .key("more")
+            .label("More")
+            .menu([
+                MenuItem::new("Share")
+                    .symbol("square.and.arrow.up")
+                    .on_select(share),
+                MenuItem::submenu("Danger", [
+                    MenuItem::new("Delete").destructive(true).on_select(remove),
+                ])
+                .inline(true),
+            ]),
+    ])
+```
+
+`headerRight` stays the fallback for Android, the desktops and the web. A non-empty `headerRightItems` wins over `headerRightSystemItem` and `headerRightSymbol`.
 
 Header items are ordinary views, so they can be pressable and reactive:
 

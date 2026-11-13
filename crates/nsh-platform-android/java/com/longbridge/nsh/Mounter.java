@@ -5,6 +5,7 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.TimeInterpolator;
 import android.animation.ValueAnimator;
 import android.content.Context;
+import android.content.pm.ActivityInfo;
 import android.graphics.Rect;
 import android.text.Layout;
 import android.util.SparseArray;
@@ -106,8 +107,10 @@ final class Mounter {
 
     /** One part of a layout animation (`encode.rs` `layout_transition`). */
     private static final class Transition {
-        int curve; // 0 linear, 1 ease in, 2 ease out, 3 ease in-out, 4 spring, 5 the keyboard's
+        int curve; // 0 linear, 1 ease in, 2 ease out, 3 ease in-out, 4 fitted spring, 5 the keyboard's, 6 spring
         float damping;
+        /** A spring's progress (6), sampled evenly over the time it settles in (the duration), ending at 1. */
+        float[] samples;
         int property; // 0 opacity, 1 scale
         long duration, delay;
 
@@ -121,6 +124,16 @@ final class Mounter {
                     // React Native's spring interpolator.
                     float d = damping;
                     return t -> (float) (1 + Math.pow(2, -10 * t) * Math.sin((t - d / 4) * Math.PI * 2 / d));
+                }
+                case 6: {
+                    float[] p = samples;
+                    int last = p.length - 1;
+                    return t -> {
+                        if (t >= 1) return 1;
+                        float x = Math.max(t, 0) * last;
+                        int i = (int) x;
+                        return p[i] + (p[i + 1] - p[i]) * (x - i);
+                    };
                 }
                 default: return new AccelerateDecelerateInterpolator();
             }
@@ -220,9 +233,9 @@ final class Mounter {
             }
 
             @Override
-            public byte[] complete(String url, int status, String[] headers, byte[] body) {
+            public byte[] complete(String url, int status, String[] headers, byte[] body, String[] redirects) {
                 long handle = handle();
-                return handle == 0 ? null : Native.imageCacheComplete(handle, url, status, headers, body);
+                return handle == 0 ? null : Native.imageCacheComplete(handle, url, status, headers, body, redirects);
             }
         };
         root = new Box(context, this, 1);
@@ -232,6 +245,11 @@ final class Mounter {
     /** Whether the running app's web views may navigate to {@code url} (its capabilities). */
     boolean allowsWebview(String url) {
         return Native.allowsWebview(handle(), url);
+    }
+
+    /** Whether the running app's web pages may capture {@code kind} (its {@code webview.media}). */
+    boolean allowsWebMedia(String kind) {
+        return Native.allowsWebMedia(handle(), kind);
     }
 
     long handle() {
@@ -400,6 +418,7 @@ final class Mounter {
                         if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof TabBarComponent) {
                             ((TabBarComponent) ((ComponentBox) v).component).appearanceChanged();
                         }
+                        if (v instanceof StackBox.ScreenBox) ((StackBox.ScreenBox) v).appearanceChanged();
                     }
                     if (barStyle == 0) {
                         SystemUi.statusBar(context, barStyle, barHidden, night());
@@ -640,6 +659,10 @@ final class Mounter {
         Transition t = new Transition();
         t.curve = b.getInt();
         t.damping = b.getFloat();
+        if (t.curve == 6) {
+            t.samples = new float[b.getInt()];
+            for (int i = 0; i < t.samples.length; i++) t.samples[i] = b.getFloat();
+        }
         t.property = b.getInt();
         t.duration = (long) b.getFloat();
         t.delay = (long) b.getFloat();
@@ -714,6 +737,8 @@ final class Mounter {
      */
     void destroyComponents() {
         Notifications.forget(this);
+        // A page's orientations go with the app.
+        orientations(0);
         if (audio != null) {
             audio.release();
             audio = null;
@@ -721,6 +746,7 @@ final class Mounter {
         for (int i = 0; i < views.size(); i++) {
             View v = views.valueAt(i);
             if (v instanceof ComponentBox) ((ComponentBox) v).destroy();
+            if (v instanceof WebBox) ((WebBox) v).destroy();
             if (v instanceof ScrollBox) {
                 ((ScrollBox) v).unmounted = true;
                 unkeyScroll((ScrollBox) v);
@@ -1653,26 +1679,21 @@ final class Mounter {
     }
 
     /** Applies `[animating, (view, prop, value)*]` from the animator. */
-    /** A canvas's drawing; loads the images it draws (bitmaps: an SVG is an image that failed to load). */
+    /** A canvas's drawing; loads the images it draws (an SVG as its rasterized bitmap). */
     private void drawing(CanvasBox canvas, int[] code, Object[] objects) {
         for (String uri : canvas.setDrawing(code, objects)) {
             if (canvas.images.containsKey(uri)) continue;
             // At their natural size: the drawing may scale them anyway.
             Images.Image cached = images.request(uri, 0, 0, (image, error) -> {
-                if (image != null && !image.vector) {
+                if (image != null) {
                     canvas.images.put(uri, image);
                     canvas.invalidate();
                 } else {
-                    android.util.Log.w("nsh", "canvas image failed: " + (image != null ? notABitmap(uri) : error));
+                    android.util.Log.w("nsh", "canvas image failed: " + error);
                 }
             });
-            if (cached != null && cached.vector) android.util.Log.w("nsh", "canvas image failed: " + notABitmap(uri));
-            else if (cached != null) canvas.images.put(uri, cached);
+            if (cached != null) canvas.images.put(uri, cached);
         }
-    }
-
-    private static String notABitmap(String uri) {
-        return uri + " is an SVG image: canvases draw bitmaps (PNG, JPEG, ...)";
     }
 
     /** Canvas animated value slot `n` arrives as property `CANVAS_ARG + n` (`animation.rs`). */
@@ -1889,6 +1910,14 @@ final class Mounter {
         }
         dirtyModals.clear();
         updateBack();
+    }
+
+    /** Reports every mounted screen's insets again, after the view's safe area changed. */
+    void reportAllScreenInsets() {
+        for (int i = 0; i < screenOptions.size(); i++) {
+            int id = screenOptions.keyAt(i);
+            if (views.get(id) instanceof StackBox.ScreenBox) reportScreenInsets(id, screenOptions.valueAt(i));
+        }
     }
 
     /** A screen's insets below its header, for `safeAreaInsets()`. */
@@ -2140,6 +2169,49 @@ final class Mounter {
         if (f.getRootView() == host.getRootView()) host.requestFocus();
     }
 
+    /** The activity's requested orientation before a page set one (null: none set). */
+    private Integer ownOrientation;
+
+    /**
+     * A page's {@code supportedOrientations} ({@code nsh_core::ModalConfig}
+     * bits: 1 portrait, 2 upside down, 4 landscape-left, 8 landscape-right;
+     * 0 gives the activity back the orientation it had). Landscape-left is
+     * UIKit's {@code UIInterfaceOrientationLandscapeLeft}, the device
+     * turned clockwise: Android's reverse landscape. Two-sided sets follow
+     * the user's rotation lock ({@code USER_*}).
+     */
+    private void orientations(int bits) {
+        android.app.Activity activity = SystemUi.activity(context);
+        if (activity == null) return;
+        if (bits == 0) {
+            if (ownOrientation != null) activity.setRequestedOrientation(ownOrientation);
+            ownOrientation = null;
+            return;
+        }
+        if (ownOrientation == null) ownOrientation = activity.getRequestedOrientation();
+        boolean portrait = (bits & 1) != 0, upsideDown = (bits & 2) != 0;
+        boolean left = (bits & 4) != 0, right = (bits & 8) != 0;
+        int requested;
+        if ((portrait || upsideDown) && (left || right)) {
+            requested = portrait && upsideDown && left && right
+                    ? ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+                    : ActivityInfo.SCREEN_ORIENTATION_USER;
+        } else if (portrait && upsideDown) {
+            requested = ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT;
+        } else if (portrait) {
+            requested = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT;
+        } else if (upsideDown) {
+            requested = ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT;
+        } else if (left && right) {
+            requested = ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE;
+        } else if (left) {
+            requested = ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE;
+        } else {
+            requested = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
+        }
+        activity.setRequestedOrientation(requested);
+    }
+
     /**
      * `Haptics` of `nsh/mobile`: the haptic feedback constant closest to
      * `haptic` (`nsh_core::Haptic`, in the order `encode.rs` writes), which
@@ -2265,8 +2337,11 @@ final class Mounter {
                 boolean block = b.getInt() != 0;
                 clearJsResponder();
                 if (block && v != null) {
-                    // Scroll views around the responder stop taking its touches.
+                    // Scroll views around the responder stop taking its touches, and the presses around it
+                    // end: a handle held past the long press delay is no long press of the text around it.
                     for (ViewParent p = v.getParent(); p != null; p = p.getParent()) {
+                        if (p instanceof Box) ((Box) p).cancelPress();
+                        else if (p instanceof TextBox && ((TextBox) p).press != null) ((TextBox) p).press.cancel();
                         if (p instanceof ScrollBox) {
                             ((ScrollBox) p).jsBlocked = true;
                             blockedScrolls.add((ScrollBox) p);
@@ -2286,6 +2361,20 @@ final class Mounter {
                 float x = b.getFloat(), y = b.getFloat(), w = b.getFloat(), h = b.getFloat();
                 int actions = b.getInt();
                 if (v instanceof InputBox) ((InputBox) v).openEditMenu(x, y, w, h, actions);
+                break;
+            }
+            case 51: {
+                int request = b.getInt();
+                String generation = (String) objects[b.getInt()];
+                String start = (String) objects[b.getInt()];
+                String poll = (String) objects[b.getInt()];
+                String cleanup = (String) objects[b.getInt()];
+                if (v instanceof WebBox) ((WebBox) v).evaluate(request, generation, start, poll, cleanup);
+                break;
+            }
+            case 52: {
+                int request = b.getInt();
+                if (v instanceof WebBox) ((WebBox) v).cancelEvaluation(request);
                 break;
             }
             case 50:
@@ -2309,6 +2398,12 @@ final class Mounter {
             }
             case 22: {
                 SystemUi.setClipboard(context, (String) objects[b.getInt()]);
+                break;
+            }
+            case 56: {
+                String text = (String) objects[b.getInt()];
+                String html = (String) objects[b.getInt()];
+                SystemUi.setClipboardHtml(context, text, html);
                 break;
             }
             case 25: {
@@ -2356,6 +2451,18 @@ final class Mounter {
                 int request = b.getInt();
                 eventMap(1, Native.FILE_REQUEST, new String[] {"id", "error"},
                         new Object[] {(double) request, "not supported on Android"});
+                break;
+            }
+            case 55: {
+                // `encode.rs` `Command::RenderCanvas`: the request, the size in pixels, the scale, the format,
+                // then the drawing as `CANVAS` carries it.
+                int request = b.getInt(), width = b.getInt(), height = b.getInt();
+                float scale = b.getFloat();
+                int format = b.getInt(), words = b.getInt();
+                int[] code = new int[words];
+                b.asIntBuffer().get(code);
+                b.position(b.position() + words * 4);
+                CanvasRender.render(this, request, width, height, scale, format, code, objects);
                 break;
             }
             case 44: {
@@ -2406,6 +2513,10 @@ final class Mounter {
             }
             case 48: {
                 haptic(host, b.getInt());
+                break;
+            }
+            case 54: {
+                orientations(b.getInt());
                 break;
             }
             case 18: {
@@ -2535,6 +2646,44 @@ final class Mounter {
 
     // --- Events --------------------------------------------------------------
 
+    /**
+     * The scroll view whose `keyboardShouldPersistTaps` "never" holds the current touch: if the touch is a tap, it
+     * only dismisses the keyboard; meanwhile it presses nothing.
+     */
+    private ScrollBox tapScroll;
+    /** A view of the touch reported a long press: it is no tap. */
+    private boolean longPressed;
+
+    void startTapOnly(ScrollBox s) {
+        tapScroll = s;
+    }
+
+    void endTapOnly(ScrollBox s) {
+        if (tapScroll == s) tapScroll = null;
+    }
+
+    /**
+     * At a root (the surface, a modal), before it dispatches {@code e}: a tap that only dismisses the keyboard
+     * reaches the views and JS responders as a cancel, so nothing inside (a responder, a web view) acts on it.
+     * Returns the event to dispatch, a new one to recycle when it is not {@code e}.
+     */
+    android.view.MotionEvent keyboardTap(android.view.MotionEvent e) {
+        int action = e.getActionMasked();
+        if (action == android.view.MotionEvent.ACTION_DOWN) {
+            // Set by the scroll view as the down goes through it; nothing of an earlier touch lingers.
+            tapScroll = null;
+            longPressed = false;
+            return e;
+        }
+        if (action != android.view.MotionEvent.ACTION_UP || tapScroll == null || longPressed || !tapScroll.stillTap(e)) return e;
+        ScrollBox s = tapScroll;
+        tapScroll = null;
+        s.hideKeyboard();
+        android.view.MotionEvent cancel = android.view.MotionEvent.obtain(e);
+        cancel.setAction(android.view.MotionEvent.ACTION_CANCEL);
+        return cancel;
+    }
+
     boolean wants(int id, int kind) {
         if (kind >= 64) return (eventsHigh.get(id) & (1L << (kind - 64))) != 0;
         return (events.get(id) & (1L << kind)) != 0;
@@ -2554,6 +2703,7 @@ final class Mounter {
     private final android.util.SparseArray<float[]> panActivations = new android.util.SparseArray<>();
     /** Scroll views an activated pan gate blocks. */
     private final java.util.ArrayList<ScrollBox> gatedScrolls = new java.util.ArrayList<>();
+    private View activeGate;
 
     private void clearJsResponder() {
         for (ScrollBox s : blockedScrolls) s.jsBlocked = false;
@@ -2578,6 +2728,7 @@ final class Mounter {
     /** The pan gate of {@code v} activated: the scroll views around it stop taking the touches. */
     void gateBlock(View v) {
         gateRelease();
+        activeGate = v;
         for (ViewParent p = v.getParent(); p != null; p = p.getParent()) {
             if (p instanceof ScrollBox) {
                 ((ScrollBox) p).gateBlocked = true;
@@ -2589,8 +2740,14 @@ final class Mounter {
 
     /** The touches of an activated pan gate ended. */
     void gateRelease() {
+        activeGate = null;
         for (ScrollBox s : gatedScrolls) s.gateBlocked = false;
         gatedScrolls.clear();
+    }
+
+    /** The view whose pan gate activated for the touches down now, or null. */
+    View activeGate() {
+        return activeGate;
     }
 
     void event(int id, int kind) {
@@ -2617,6 +2774,8 @@ final class Mounter {
      * where the touch is in {@code v} and in its root view.
      */
     void press(int id, int kind, View v, PressAt at) {
+        if (kind == Native.LONG_PRESS) longPressed = true;
+        if (kind == Native.PRESS && tapScroll != null) return;
         // The surface, or the window of the modal the view is in.
         View root = v.getRootView() == host.getRootView() ? host : v.getRootView();
         int[] rootAt = new int[2];
@@ -2644,6 +2803,17 @@ final class Mounter {
     /** An event with an object payload. */
     void paste(int id, String text, byte[][] images, String[] uris) {
         Native.paste(handle(), id, text, images, uris);
+    }
+
+    /**
+     * Answers `OffscreenCanvas` render {@code request} ({@link CanvasRender}): the encoded image, or why it failed
+     * ({@code failure}: {@link CanvasRender#RENDER_FAILED} or {@link CanvasRender#RENDER_TOO_LARGE}, and {@code error}).
+     * Once the view is destroyed there is no app to tell.
+     */
+    void canvasImage(int request, byte[] bytes, int failure, String error) {
+        long handle = handle();
+        if (handle == 0) return;
+        Native.canvasImage(handle, request, bytes, failure, error);
     }
 
     void eventMap(int id, int kind, String[] keys, Object[] values) {

@@ -6,7 +6,7 @@ import { AlertDialog, Dialog, NavPage, NavStack, Input, createNavStack } from "n
 import { safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
-import { Appear, backdrop, Badge, Button, Card, colors, DemoPage, density, dialogCard, dialogText, dialogTitle, Figure, finish, header, hint, hovered, IconTile, Inset, motion, PageHeader, Press, radius, Section, Stat, tints, Toggle } from "../ui";
+import { Appear, backdrop, Badge, Button, Card, colors, DemoPage, density, dialogCard, dialogText, dialogTitle, Figure, finish, header, hint, hovered, IconTile, Inset, motion, PageHeader, Press, radius, Section, Stat, tints, LabeledToggle } from "../ui";
 import { TitleBar } from "../TitleBar";
 
 const edges = ["top", "bottom", "left", "right"] as const;
@@ -222,6 +222,127 @@ function CustomHeader() {
   );
 }
 
+/** Trailing iOS bar buttons with a native menu; other platforms keep the
+ * `headerRight` views. */
+function NativeBarButtons() {
+  const filter = signal<"all" | "open" | "done">("all");
+  const log = signal("Tap Edit, Filter or +");
+  const editing = signal(false);
+  const right = () => (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+      <Text
+        onPress={() => {
+          editing.set(!editing());
+          log.set(editing() ? "Editing" : "Edit");
+        }}
+        hitSlop={10}
+        style={{ color: colors.accent, fontSize: 17, fontWeight: "500" }}
+      >
+        {editing() ? "Done" : "Edit"}
+      </Text>
+      <Text
+        onPress={() => log.set(`Filter: ${filter()}`)}
+        hitSlop={10}
+        style={{ color: colors.accent, fontSize: 17, fontWeight: "500" }}
+      >
+        Filter
+      </Text>
+      <Text onPress={() => log.set("Add")} hitSlop={10} style={{ color: colors.accent, fontSize: 22, fontWeight: "400" }}>
+        +
+      </Text>
+    </View>
+  );
+  return (
+    <NavPage
+      title="Bar buttons"
+      {...header}
+      headerRight={right()}
+      header={<PageHeader title="Bar buttons" right={right()} />}
+      ios={{
+        headerRightItems: [
+          {
+            key: "edit",
+            label: editing() ? "Done" : "Edit",
+            onPress: () => {
+              editing.set(!editing());
+              log.set(editing() ? "Editing" : "Edit");
+            },
+          },
+          {
+            key: "filter",
+            label: "Filter",
+            menu: [
+              {
+                label: "All",
+                checked: filter() === "all",
+                onSelect: () => {
+                  filter.set("all");
+                  log.set("Filter: all");
+                },
+              },
+              {
+                label: "Open",
+                checked: filter() === "open",
+                onSelect: () => {
+                  filter.set("open");
+                  log.set("Filter: open");
+                },
+              },
+              {
+                label: "Done",
+                checked: filter() === "done",
+                onSelect: () => {
+                  filter.set("done");
+                  log.set("Filter: done");
+                },
+              },
+              {
+                label: "Danger",
+                inline: true,
+                submenu: [
+                  {
+                    label: "Clear filters",
+                    destructive: true,
+                    symbol: "trash",
+                    onSelect: () => {
+                      filter.set("all");
+                      log.set("Filters cleared");
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            key: "add",
+            systemItem: "add",
+            label: "Add",
+            onPress: () => log.set("Add"),
+          },
+        ],
+      }}
+    >
+      <Page
+        intro={hint(
+          "iOS: Edit, Filter (a native menu with a check mark) and + share one Liquid Glass group on iOS 26. Android and the desktops show the same actions as headerRight views.",
+          "The trailing actions are views here; on iOS they are UIKit bar buttons with a native Filter menu.",
+        )}
+      >
+        <Section title="Last action" note="onPress / onSelect">
+          <Figure value={log()} />
+        </Section>
+        <Section title="Filter" note="checked menu item">
+          <View style={{ flexDirection: "row" }}>
+            <Stat width="33%" label="All" value={filter() === "all" ? "On" : "—"} tone={filter() === "all" ? "up" : "neutral"} />
+            <Stat width="33%" label="Open" value={filter() === "open" ? "On" : "—"} tone={filter() === "open" ? "up" : "neutral"} />
+            <Stat width="34%" label="Done" value={filter() === "done" ? "On" : "—"} tone={filter() === "done" ? "up" : "neutral"} />
+          </View>
+        </Section>
+      </Page>
+    </NavPage>
+  );
+}
+
 function Locked() {
   return (
     <NavPage title="No swipe back" {...header} popOnSwipe={false} header={<PageHeader title="No swipe back" />}>
@@ -278,7 +399,7 @@ function Unsaved() {
             onBlur={() => focused.set(false)}
             placeholder="A draft"
             style={{
-              placeholderColor: colors.faint,
+              placeholderColor: colors.muted,
               caretColor: colors.accent,
               selectionColor: colors.accent,
               height: 48,
@@ -429,7 +550,8 @@ function ModalBody(props: { title: string; note: string; body: string; fullScree
  * (`#/messages/Invoice`), opens at `UrlScheme.url()`, gives each page its
  * address as the stack changes (`onChange` → `UrlScheme.setUrl`, the
  * browser's back included, which pops the stack) and hears links
- * (`UrlScheme.on("open")`). Only the web shows the address. */
+ * (`UrlScheme.on("open")`) and the moves the stack does not account for
+ * (`UrlScheme.on("change")`). Only the web shows the address. */
 function Addressed() {
   const prefix = "#/messages/";
   const opened = (UrlScheme.url() ?? "").split("#")[1] ?? "";
@@ -442,6 +564,9 @@ function Addressed() {
     opens.set(opens() + 1);
     address.set(url);
   });
+  // A back or forward between entries of the same pages, or an address the
+  // user typed (the web): the stack stays, the address shown follows.
+  UrlScheme.on("change", ({ url }) => address.set(url));
   // The address without the app's part, then the open message's.
   const addressOf = (top: string) => `${(UrlScheme.url() ?? "").split("#")[0]}${top === "Inbox" ? "" : prefix + encodeURIComponent(top)}`;
   // The app's part of an address: the same on the web (the page's address
@@ -460,7 +585,11 @@ function Addressed() {
           }}
         >
           {(route) => (
-            <NavPage header={<Text style={{ padding: 12, fontSize: 15, fontWeight: "600", color: colors.text }}>{route}</Text>}>
+            // The card's surface, not the system's page color, under each page.
+            <NavPage
+              header={<Text style={{ padding: 12, fontSize: 15, fontWeight: "600", color: colors.text }}>{route}</Text>}
+              style={{ backgroundColor: colors.surface }}
+            >
               <View style={{ padding: 12, gap: 8 }}>
                 {route === "Inbox" ? (
                   <Each of={["Welcome", "Invoice", "Travel"]}>
@@ -522,10 +651,11 @@ export function Navigation() {
               <LinkRow icon="lists" title="Large title list" note="headerLargeTitle, List" onPress={push(LargeTitleList)} />
               <LinkRow icon="styles" title="Transparent header" note="headerTransparent" onPress={push(Transparent)} />
               <LinkRow icon="star" title="Custom header items" note="headerLeft / Title / Right" onPress={push(CustomHeader)} />
+              <LinkRow icon="sliders" title="Native bar buttons" note="ios.headerRightItems" onPress={push(NativeBarButtons)} />
               <LinkRow icon="mobile" title="No header" note="headerVisible={false}" onPress={push(Headerless)} />
               <LinkRow icon="spark" title="Fade in" note='animation="fade"' onPress={push(Faded)} />
-              <LinkRow icon="play" title="No animation" note='animation="none"' onPress={push(Instant)} />
-              <LinkRow icon="gestures" title="No swipe back" note="popOnSwipe={false}" onPress={push(Locked)} />
+              <LinkRow icon="animation" title="No animation" note='animation="none"' onPress={push(Instant)} />
+              <LinkRow icon="back" title="No swipe back" note="popOnSwipe={false}" onPress={push(Locked)} />
               <LinkRow icon="form" title="Unsaved changes" note="popOnBack + onBackPress" onPress={push(Unsaved)} />
               <LinkRow icon="lists" title="A deep stack" note="push / popToRoot" onPress={push(() => <Deep depth={1} />)} />
             </View>
@@ -548,7 +678,7 @@ export function Navigation() {
             icon="system"
             title="Back button"
             subtitle={hint("Android: BackHandler", "BackHandler: Escape, Alt+Left")}
-            right={<Toggle value={intercept()} onChange={(v) => intercept.set(v)} label="Intercept the back button" />}
+            right={<LabeledToggle label="Intercept" value={intercept()} onChange={(v) => intercept.set(v)} />}
           >
             <Figure value={String(backs())} unit={backs() === 1 ? "press" : "presses"} note={intercept() ? "caught" : "popped"} tone={intercept() ? "warn" : "accent"} />
             <Text style={{ fontSize: 13, lineHeight: 18, color: colors.muted }}>
@@ -564,6 +694,7 @@ export function Navigation() {
         open={sheet() === "fullScreen" || sheet() === "pageSheet" || sheet() === "formSheet" || sheet() === "fade"}
         presentation={sheet() === "pageSheet" ? "pageSheet" : sheet() === "formSheet" ? "formSheet" : "fullScreen"}
         animation={sheet() === "fade" ? "fade" : "slide"}
+        accessibilityLabel={current()?.title ?? ""}
         onOpenChange={({ open }) => !open && close()}
         style={{ flex: 1 }}
       >
@@ -581,6 +712,7 @@ export function Navigation() {
       <Dialog
         open={sheet() === "kept"}
         presentation="pageSheet"
+        accessibilityLabel="Kept open"
         closeOnEscape={false}
         closeOnBackdropPress={false}
         closeOnSwipe={false}
@@ -598,6 +730,9 @@ export function Navigation() {
       <Dialog
         open={sheet() === "dialog"}
         animation="fade"
+        role="alertdialog"
+        accessibilityLabel="Delete “Launch notes”?"
+        accessibilityDescription="The note and its 14 comments go for everyone it is shared with. This cannot be undone."
         onOpenChange={({ open }) => !open && close()}
         backdropStyle={backdrop()}
         style={{ margin: "auto", width: platform.desktop ? 360 : 340, maxWidth: "90%" }}

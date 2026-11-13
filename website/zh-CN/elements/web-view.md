@@ -76,10 +76,10 @@ web view 接受 [view](./view.md) 的属性（它没有子元素），另外还�
 |---|---|---|---|
 | `onLoadStart` | `.on_load_start` | `WebViewNavigation` | 页面开始加载。 |
 | `onLoad` | `.on_load` | `WebViewNavigation` | 页面加载完成。 |
-| `onError` | `.on_error` | `{ message, code? }`（`&str`，即消息） | 加载失败；页面、`html` 或 `baseUrl` 不在应用的能力范围内时 `code` 为 `"ERR_ACCESS_DENIED"`，平台无法显示网页视图时为 `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`（Rust 中也可用 `.on_unavailable`，参数为消息）。 |
+| `onError` | `.on_error` | `{ message, code? }`（`&str`，即消息） | 加载失败；页面、`html` 或 `baseUrl` 不在应用的能力范围内时 `code` 为 `"ERR_ACCESS_DENIED"`，平台无法显示网页视图时为 `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`（Rust 中也可用 `.on_unavailable`，参数为消息），页面的进程结束时为 `"ERR_NSH_WEBVIEW_TERMINATED"`，直到 `reload()`、`load()` 或新的来源（Rust 中也可用 `.on_process_terminated`）。 |
 | `onNavigationStateChange` | `.on_navigation_state_change` | `WebViewNavigation` | URL、标题、加载状态或历史记录发生变化。 |
 | `onMessage` | `.on_message` | `{ data: string }`（`&str`） | 页面调用了 `window.nsh.postMessage(data)`。 |
-| `onDownload` | | `WebViewDownload` | 下载开始、完成或失败（macOS）。 |
+| `onDownload` | `.on_download` | `WebViewDownload`（`WebDownload`） | 桌面下载开始、完成或失败。 |
 
 `WebViewNavigation` 为 `{ url, title, loading, canGoBack, canGoForward }`；Rust 中为 `WebNavigation`，字段是 `url`、`title`、`loading`、`can_go_back` 和 `can_go_forward`。
 
@@ -87,7 +87,31 @@ web view 接受 [view](./view.md) 的属性（它没有子元素），另外还�
 
 `WebViewDownload` 为 `{ state, id, url, filename, path, bytes?, message? }`：`state` 为 `"started"`、`"finished"`（带文件大小 `bytes`）或 `"failed"`（带原因 `message`）。设置了 `onDownload` 后，页面下载的内容（附件、web view 不显示的类型、`download` 链接）保存在应用数据目录的 `downloads/<id>/<filename>`，即 `path` 所指的位置，应用用 `fs/promises` 读取。
 
-在 macOS 上，添加监听器后，`webview` 能力允许加载的任何页面都可以自动保存下载文件。应用负责管理存储空间，并在使用完毕后删除 `downloads/` 中已完成的文件。移除 web view 会取消正在进行的下载，并删除其未完成的目录。下载通过 `onDownload` 报告；导航转为下载时，`onError` 只报告实际的导航失败。文件名会移除控制字符和双向格式控制符；过长的名称会缩短到 200 字节，并保留能容纳的扩展名。
+在 macOS、Windows 和 Linux 上，添加监听器后，`webview` 能力允许加载的任何页面都可以自动保存下载文件。应用负责管理存储空间，并在使用完毕后删除 `downloads/` 中已完成的文件。移除 web view 会取消正在进行的下载，并删除其未完成的目录。下载通过 `onDownload` 报告；导航转为下载时，`onError` 只报告实际的导航失败。文件名会移除控制字符、路径分隔符和双向格式控制符；过长的名称会缩短到 200 字节，并保留能容纳的扩展名。Windows 还会拒绝保留设备名（`CON`、`NUL`、`PRN`、`AUX`、`COM1`-`COM9`、`LPT1`-`LPT9`、其上标形式，以及 `CONIN$`/`CONOUT$`）和结尾的点或空格。
+
+### Rust 中指定下载目的地
+
+Rust 宿主通过监听下载来决定其去向。注册 `.on_download_pending(..)` 本身就是选择手动处理：有了该监听器，平台会推迟每个下载，在应用接受目的地或取消之前不写入任何内容；没有它则采用上面的自动行为。监听器收到 `WebDownloadPending`，其 `id`、`url` 和 `filename` 与之后的 `on_download` 生命周期一致；它的 `accept` 和 `cancel` 只作用于该下载（克隆共享同一决策，句柄无法触及其他视图）。
+
+```rust
+use nsh_core::prelude::*;
+use nsh_core::webview::{DownloadDestination, WebDownloadPending};
+
+web_view("https://example.com").on_download_pending(|event: &WebDownloadPending| {
+    let (event, path) = (event.clone(), std::env::temp_dir().join("report.pdf"));
+    spawn(async move {
+        // `PathBuf` 拒绝已有文件；`DownloadDestination` 可显式启用覆盖。
+        let destination = DownloadDestination::new(path).overwrite(false);
+        if let Err(error) = event.accept(destination).await {
+            log::warn!("下载目的地被拒绝：{error}");
+        }
+    });
+});
+```
+
+`accept` 在平台接受目的地时完成，而不是传输完成时（传输过程由 `on_download` 报告 `started`、`finished` 或 `failed`）。目的地必须是绝对路径且父目录存在；除非 `overwrite(true)`，已有文件会被拒绝。接受后的传输先写目的地旁的专属暂存文件，完成时才发布，因此失败、取消和拆卸只删除该暂存文件，永不删除已有或已完成的文件。`cancel()` 在接受前（不写入任何内容）和接受后传输期间均可用。应用一直不回答的决策会在有限等待后取消；未知、重复或已完成的决策返回错误，不会影响其他下载。只有桌面平台报告待处理的下载；其他平台不会绕过应用的选择。`WebDownloadPending::default()` 不是来自事件，它的 `accept` 和 `cancel` 会明确返回错误，而不是猜测某个下载。
+
+注册该监听器本身就是全部选择：没有单独的下载行为属性。在无法推迟下载的平台上，页面保持惰性，而不是自动下载：核心挂载空文档，禁用脚本、注入脚本和导航，报告错误，并拒绝 `load`、`reload`、后退/前进、`injectJavaScript` 与脚本求值（求值以错误结束）。移除监听器后，页面和自动下载都会恢复。
 
 ## ref 方法
 

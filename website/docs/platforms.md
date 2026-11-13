@@ -68,6 +68,38 @@ A Rust host mounts a Rust root (`Root::of::<App>()`) as `AppSource::Rust` or `Ap
 > [!NOTE]
 > Rust hosts embed NSH with the platform crates from the NSH repository; the `AppView` of macOS, Windows and Linux loads bundles from the app's own files (or source code), with the default limits. The GPUI crate and the iOS and Android SDKs also load [signed packages](./signed-packages.md) and set limits and capabilities per view ([Sandbox and capabilities](./sandbox-and-capabilities.md)).
 
+### Share a mobile host's Tokio runtime
+
+A Rust-linked mobile host can run NSH's async tasks on the Tokio runtime it already has. Each view keeps a clone of the runtime's `Handle`; the app owns the runtime and keeps it running (with IO and time enabled) until its views stop. `None` uses NSH's shared runtime.
+
+On iOS, set the runtime in the options of `AppView` (or `Surface`); every load of the view uses it:
+
+```rust
+let mut options = SurfaceOptions::default();
+options.runtime = Some(runtime.handle().clone());
+let view = AppView::new(mtm, frame, options);
+view.load(bundle);
+```
+
+On Android, call `nsh::set_runtime` on the UI thread with the `NshView`'s native handle (its `handle` field), before the view loads an app or connects to a dev server. The setting belongs to that view and applies from its next load; a running engine keeps the runtime it started with. A JNI function in the app's own library reads the handle:
+
+```rust
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_example_app_RuntimeBridge_configure(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    view: JObject<'_>,
+) {
+    let Ok(handle) = env.get_field(&view, "handle", "J").and_then(|v| v.j()) else {
+        return;
+    };
+    // SAFETY: called on the UI thread with a live NshView of this library.
+    unsafe { nsh::set_runtime(handle, Some(app_runtime().clone())) };
+}
+```
+
+In minified builds, keep the bridge class's names (`-keep class com.example.app.RuntimeBridge { *; }`); the distributed AARs already keep the `com.longbridge.nsh` package, `NshView.handle` included.
+
 ## Writing for every platform
 
 Most of an app needs no platform checks: elements, styles, layout and modules behave the same everywhere. Where platforms differ, NSH gives the difference one place ([Platform-specific code](./platform-specific.md)):

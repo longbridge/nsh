@@ -23,14 +23,25 @@ export function createEnvironment(reactive, invoke, dom) {
   const initial = { window: { width: 0, height: 0 }, safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
     titleBar: { height: 0, left: 0, right: 0 }, keyboard: { height: 0, duration: 0.25 },
     colorScheme: "light", fontScale: 1, pixelRatio: 1, locale: "en-US", reduceMotion: false, screenReader: false, host: false,
-    lifecycle: "active",
+    lifecycle: "active", shaders: true, wakeCount: 0,
     localeSettings: { languages: ["en-US"], timeZone: "UTC", hourCycle: "h12", firstDayOfWeek: 7,
       measurementSystem: "us", temperatureUnit: "fahrenheit" } };
   const fields = Object.fromEntries(Object.entries(initial).map(([name, value]) => [name, reactive.signal(value)]));
   const tokens = reactive.signal(0);
   const insets = reactive.context(() => fields.safeArea());
-  const platform = { os: "web", version: "0.0", idiom: "desktop", desktop: true, catalyst: false,
-    select(spec) { return "web" in spec ? spec.web : this.desktop ? spec.desktop ?? spec.default : spec.mobile ?? spec.default; } };
+  const platform = { name: "web", os: "web", version: "0.0", idiom: "desktop", desktop: true, catalyst: false,
+    select(spec) {
+      if (!spec || typeof spec !== "object") return undefined;
+      const keys = this.name !== this.os ? [this.name, this.os] : [this.os];
+      keys.push(this.desktop ? "desktop" : "mobile");
+      if (this.os !== "web") keys.push("native");
+      keys.push("default");
+      for (const key of keys) {
+        const value = spec[key];
+        if (value !== undefined) return value;
+      }
+      return undefined;
+    } };
   let appearance = "system", systemScheme = "light";
   const setColorScheme = scheme => {
     if (!["light", "dark", "system"].includes(scheme)) throw new TypeError('setColorScheme: expected "light", "dark" or "system"');
@@ -47,8 +58,13 @@ export function createEnvironment(reactive, invoke, dom) {
     windowSize: () => fields.window(), colorScheme: () => fields.colorScheme(), setColorScheme,
     fontScale: () => fields.fontScale(), pixelRatio: () => fields.pixelRatio(), locale: () => fields.locale(),
     localeSettings: () => fields.localeSettings(), lifecycle: () => fields.lifecycle(), platform,
-    // A browser page has no performance monitor (its developer tools measure it).
+    shadersAvailable: () => fields.shaders(),
+    // The engine's count; a page has no system sleep to hear, so it stays 0.
+    wakeCount: () => fields.wakeCount(),
+    // A browser page has no performance monitor (its developer tools measure it),
+    // so no stats either.
     fpsEnabled: () => false,
+    perfStats: () => null,
   };
   const accessibility = { reduceMotion: () => fields.reduceMotion(), screenReaderEnabled: () => fields.screenReader() };
   // nsh-js's `appInfo` (`env.rs`): what the build wrote, handed over by

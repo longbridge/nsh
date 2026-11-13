@@ -25,9 +25,17 @@
 //!   (an attachment, a type WebKit cannot show, a `download` link) with
 //!   WebKit's `WKDownload` into the app's data directory,
 //!   `downloads/<id>/<name>`, and reports it as it starts, finishes or
-//!   fails; without a listener those navigations stay as they were.
-//!   Dropping the host cancels active downloads and removes their partial
-//!   directories after cancellation. The app owns completed files' retention.
+//!   fails; without a listener those navigations stay as they were. A web
+//!   view with an `onDownloadPending` listener instead defers every
+//!   download and reports it (`DownloadPending`) for the app to accept a
+//!   destination or cancel: nothing is written until it accepts, and an
+//!   accepted download writes an owned staging file beside the destination
+//!   and publishes it only when it finishes (never replacing an existing
+//!   file unless the app asked to overwrite it). A decision the app does
+//!   not answer in time is cancelled. Dropping the host cancels pending
+//!   decisions and active downloads and removes only what the platform was
+//!   writing (a download's own directory, or a manual download's staging
+//!   file). The app owns completed files' retention.
 //! - **Registered components**: [`AppView::register_component`] names a
 //!   factory; the core creates a [`ViewKind::Native`] container, names the
 //!   component ([`MountItem::Component`]) and sends its props as JSON as
@@ -45,13 +53,20 @@ use std::{
     path::{Path, PathBuf},
     ptr::NonNull,
     rc::{Rc, Weak},
-    sync::{Arc, OnceLock},
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
 };
 
 use block2::RcBlock;
 use nsh_core::{
     Bounds, Command, EventKind, EventPayload, JsonValue, NativeProps, NodeId, PayloadValue, Points,
-    ResizeMode, Size, VideoProps, ViewKind, WebInput, WebKey, WebProps, WebSource, geometry::Point,
+    ResizeMode, Size, VideoProps, ViewKind, WebInput, WebKey, WebProps, WebSource,
+    access::WebMedia,
+    geometry::Point,
+    webview::{WebViewOperation, WebViewRequest},
 };
 use nsh_engine::{Access, App, EngineControl, Policy};
 use objc2::{
@@ -272,6 +287,12 @@ impl NativeState {
         *self.access.borrow_mut() = Some(Arc::new(access));
     }
 
+    /// What the running app may reach (all before an app starts): what
+    /// its image loads check their redirects against.
+    pub(crate) fn access(&self) -> Arc<Access> {
+        self.access.borrow().clone().unwrap_or_default()
+    }
+
     /// Drops every control (the app stopped): media stops playing.
     pub(crate) fn clear(&self) {
         let hosts = std::mem::take(&mut *self.hosts.borrow_mut());
@@ -424,14 +445,68 @@ pub(crate) fn command(surface: &Rc<Surface>, view: &NshView, command: &Command) 
                 web_input(&web, input);
             }
         }
+        Command::Evaluate { .. } | Command::CancelEvaluate { .. } => {
+            let found = match surface.native.hosts.borrow().get(&view.id()) {
+                Some(Host::Web(web)) => Some((
+                    web.handler.ivars().evaluations.clone(),
+                    web.props.as_ref().is_none_or(|p| p.javascript_enabled),
+                )),
+                _ => None,
+            };
+            let Some((evaluations, scripts)) = found else {
+                return;
+            };
+            match command {
+                Command::Evaluate { request, script } => {
+                    evaluations.start(*request, script, scripts)
+                }
+                Command::CancelEvaluate { request } => evaluations.cancel(*request),
+                _ => {}
+            }
+        }
+        Command::WebViewRequest(request) => {
+            // The target is taken before anything may reenter the hosts
+            // (accepting a download resumes WebKit, which calls the
+            // delegate back).
+            let target = match surface.native.hosts.borrow().get(&view.id()) {
+                Some(Host::Web(host)) => Some((host.web.clone(), host.handler.clone())),
+                _ => None,
+            };
+            match target {
+                Some((Some(web), handler)) => {
+                    web_request(surface, view.id(), &web, &handler, request);
+                }
+                Some((None, _)) => reply(
+                    surface,
+                    view.id(),
+                    request.id,
+                    Err("the web view is not available: WebKit could not be loaded".into()),
+                ),
+                None => reply(
+                    surface,
+                    view.id(),
+                    request.id,
+                    Err("this view is not a web view".into()),
+                ),
+            }
+        }
         _ => {
             // WebKit may call the handler back synchronously (`stopLoading`
             // fails the navigation): the hosts are not borrowed meanwhile.
-            let web = match surface.native.hosts.borrow().get(&view.id()) {
-                Some(Host::Web(web)) => web.web.clone(),
+            let found = match surface.native.hosts.borrow().get(&view.id()) {
+                Some(Host::Web(web)) => web
+                    .web
+                    .clone()
+                    .map(|w| (w, web.handler.ivars().evaluations.clone())),
                 _ => None,
             };
-            if let Some(web) = web {
+            if let Some((web, evaluations)) = found {
+                if matches!(
+                    command,
+                    Command::Reload | Command::GoBack | Command::GoForward | Command::Load(_)
+                ) {
+                    evaluations.navigated();
+                }
                 web_command(&web, command);
             }
         }
@@ -916,6 +991,8 @@ struct VideoHost {
     /// The props applied (`None` before the first).
     props: Option<VideoProps>,
     repeat: Rc<Cell<bool>>,
+    /// The item played to its end (and does not loop).
+    ended: Rc<Cell<bool>>,
 }
 
 impl VideoHost {
@@ -931,6 +1008,7 @@ impl VideoHost {
             status: Rc::default(),
             props: None,
             repeat: Rc::default(),
+            ended: Rc::default(),
         }
     }
 
@@ -953,6 +1031,11 @@ impl VideoHost {
         }
         self.repeat.set(p.repeat);
         if let Some(player) = &self.player {
+            // Played from the end, a video starts over: a seek the app
+            // makes in the same turn arrives after these props.
+            if !p.paused && old.paused && self.ended.replace(false) {
+                seek_exactly(player, 0.0);
+            }
             // SAFETY: AVPlayer's documented API.
             unsafe {
                 let _: () = msg_send![player, setMuted: Bool::new(p.muted)];
@@ -984,6 +1067,7 @@ impl VideoHost {
     fn open(&mut self, source: Option<&str>, base: Option<&AssetBase>) {
         self.close();
         self.status = Rc::default();
+        self.ended.set(false);
         let Some(source) = source else { return };
         let url = match locate(source, base) {
             Some(Location::Uri(uri)) => NSURL::URLWithString(&NSString::from_str(&uri)),
@@ -1005,10 +1089,15 @@ impl VideoHost {
         // The end of the item: report it, and loop if asked.
         // SAFETY: AVPlayer's documented API.
         let item: Option<Retained<AnyObject>> = unsafe { msg_send![&player, currentItem] };
-        let (emitter, repeat) = (self.emitter.clone(), self.repeat.clone());
+        let (emitter, repeat, ended) = (
+            self.emitter.clone(),
+            self.repeat.clone(),
+            self.ended.clone(),
+        );
         let weak_player = objc2::rc::Weak::from_retained(&player);
         let block = RcBlock::new(move |_: NonNull<NSNotification>| {
             emitter.emit(EventKind::End, || EventPayload::None);
+            ended.set(!repeat.get());
             if repeat.get()
                 && let Some(player) = weak_player.load()
             {
@@ -1125,19 +1214,32 @@ impl VideoHost {
     }
 
     fn seek(&self, seconds: f64) {
-        if let Some(player) = &self.player {
-            let zero = CMTime::from_seconds(0.0);
+        let Some(player) = &self.player else { return };
+        seek_exactly(player, seconds);
+        // The player stopped itself at the end; a video the app has not
+        // paused plays on from where it was sought.
+        if self.ended.replace(false)
+            && let Some(props) = &self.props
+            && !props.paused
+        {
             // SAFETY: AVPlayer's documented API.
-            let _: () = unsafe {
-                msg_send![
-                    player,
-                    seekToTime: CMTime::from_seconds(seconds.max(0.0)),
-                    toleranceBefore: zero,
-                    toleranceAfter: zero
-                ]
-            };
+            let _: () = unsafe { msg_send![player, setRate: props.rate] };
         }
     }
+}
+
+/// Seeks `player` to `seconds`, to the frame.
+fn seek_exactly(player: &AnyObject, seconds: f64) {
+    let zero = CMTime::from_seconds(0.0);
+    // SAFETY: AVPlayer's documented API.
+    let _: () = unsafe {
+        msg_send![
+            player,
+            seekToTime: CMTime::from_seconds(seconds.max(0.0)),
+            toleranceBefore: zero,
+            toleranceAfter: zero
+        ]
+    };
 }
 
 impl Drop for VideoHost {
@@ -1233,6 +1335,54 @@ fn report(player: &AnyObject, emitter: &Emitter, status: &Status) {
 /// Lets pages talk to the app: `window.nsh.postMessage(data)`.
 const BRIDGE: &str = "window.nsh = window.nsh || { postMessage: function (data) { window.webkit.messageHandlers.nsh.postMessage(String(data)); } };";
 
+/// WebKit's destination decision for one download: a `Block_copy` of the
+/// completion handler, owned until the app accepts (a destination URL) or
+/// cancels (null).
+struct Decide {
+    block: *mut block2::Block<dyn Fn(*mut NSURL) + 'static>,
+}
+
+impl Decide {
+    /// Copies `completion`: WebKit keeps a completion handler callable
+    /// after its delegate method returns, but the Rust borrow does not
+    /// outlive the call.
+    fn new(completion: &block2::Block<dyn Fn(*mut NSURL)>) -> Self {
+        let copy = completion.copy();
+        // The pointer's metadata is the block's; only the trait object's
+        // (phantom) lifetime differs. The copy outlives the borrow because
+        // it is a `Block_copy` of a completion handler, which WebKit may
+        // call after the delegate method returns.
+        let block = block2::RcBlock::into_raw(copy).cast::<()>()
+            as *mut block2::Block<dyn Fn(*mut NSURL) + 'static>;
+        Decide { block }
+    }
+
+    /// Answers with `url` (`None`: cancel).
+    fn call(self, url: Option<&NSURL>) {
+        let block = self.block;
+        std::mem::forget(self);
+        let url = url.map_or(std::ptr::null_mut(), |url| {
+            url as *const NSURL as *mut NSURL
+        });
+        // SAFETY: `block` is the +1 this `Decide` owns, and it is called
+        // once (`call` consumes it).
+        if let Some(block) = unsafe { block2::RcBlock::from_raw(block) } {
+            block.call((url,));
+        }
+    }
+}
+
+impl Drop for Decide {
+    fn drop(&mut self) {
+        if !self.block.is_null() {
+            // SAFETY: owns the only reference to the copy made in `new`.
+            unsafe {
+                drop(block2::RcBlock::from_raw(self.block));
+            }
+        }
+    }
+}
+
 /// Ivars of [`WebHandler`].
 struct WebIvars {
     emitter: Emitter,
@@ -1244,9 +1394,22 @@ struct WebIvars {
     downloads: Option<PathBuf>,
     /// The downloads under way, by their `WKDownload`.
     active: RefCell<FxHashMap<usize, Download>>,
+    /// The manual downloads waiting for the app's destination decision, by
+    /// the id reported in `DownloadPending`.
+    pending: RefCell<FxHashMap<String, PendingDownload>>,
+    /// The view's lifetime: false once its host is dropped, so a late
+    /// cancel completion cannot deliver a reply to a restarted engine's
+    /// node with the same request id.
+    alive: Arc<AtomicBool>,
     navigation: Cell<Option<usize>>,
     /// Response policies that converted a navigation into a download.
     downloading: RefCell<FxHashSet<usize>>,
+    /// The folder path (`/a/b/`) of the `file://` page the app last loaded
+    /// here: the only files this web view may open (its pages can link to
+    /// each other, never to a file outside it).
+    file: RefCell<Option<String>>,
+    /// `evaluate()`'s requests in this web view.
+    evaluations: Rc<nsh_platform_apple::web_evaluation::Evaluations>,
 }
 
 /// A download under way: its `WKDownload` (kept alive until it ends) and
@@ -1256,7 +1419,34 @@ struct Download {
     id: String,
     url: String,
     filename: String,
+    /// Where it writes: `downloads/<id>/<name>` (automatic), or the
+    /// destination the app chose (manual). A manual download's bytes go to
+    /// `stage` first and are published here when it finishes.
     path: PathBuf,
+    /// The app chose `path`: cleanup removes only `stage`, never a
+    /// directory of the platform's own.
+    manual: bool,
+    /// Where WebKit writes a manual download: a unique sibling of `path`,
+    /// so the destination is never touched before it finishes.
+    stage: Option<PathBuf>,
+    /// `overwrite`: publishing replaces a file that appeared at `path`;
+    /// without it, publishing fails rather than replace one.
+    overwrite: bool,
+}
+
+/// How long a manual download's destination decision waits for the app
+/// before it is released (the download cancelled, the failure reported): a
+/// decision the app never answers must not hold the page.
+const DOWNLOAD_DECISION_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// A manual download waiting for the app to choose where it goes.
+struct PendingDownload {
+    /// The `WKDownload`, whose key finds its [`Download`] entry.
+    download: Retained<AnyObject>,
+    key: usize,
+    /// WebKit's destination decision: called with the file URL to accept,
+    /// or null to cancel. Nothing is written until it is called.
+    decide: Decide,
 }
 
 define_class!(
@@ -1300,13 +1490,13 @@ define_class!(
                     .map(|s| s.to_string());
                 (main, url.unwrap_or_default())
             };
-            let allowed = !main
-                || url.is_empty()
-                || self
-                    .ivars()
-                    .access
-                    .as_ref()
-                    .is_none_or(|a| a.allows_webview(&url));
+            let ivars = self.ivars();
+            let allowed = navigation_allowed(
+                ivars.access.as_deref(),
+                ivars.file.borrow().as_deref(),
+                main,
+                &url,
+            );
             if !allowed {
                 log::warn!(target: "js", "web view navigation to {url} is not granted");
                 let message = format!("navigation to {url} is not granted");
@@ -1322,7 +1512,7 @@ define_class!(
             // SAFETY: WKNavigationAction's `shouldPerformDownload` (macOS
             // 11.3), asked only where it exists.
             let download = allowed
-                && self.saves_downloads()
+                && self.wants_download()
                 && unsafe {
                     let known: Bool = msg_send![
                         action,
@@ -1337,6 +1527,34 @@ define_class!(
             decide.call((if download { 2 } else { allowed as isize },));
         }
 
+        /// The page's `getUserMedia` gets what the app's `webview.media`
+        /// capability grants; the system still asks the user.
+        #[unsafe(method(webView:requestMediaCapturePermissionForOrigin:initiatedByFrame:type:decisionHandler:))]
+        fn media_capture(
+            &self,
+            _web: &AnyObject,
+            _origin: &AnyObject,
+            _frame: &AnyObject,
+            kind: isize,
+            decide: &block2::Block<dyn Fn(isize)>,
+        ) {
+            // WKMediaCaptureTypeCamera = 0, Microphone = 1, CameraAndMicrophone = 2.
+            let wanted: &[WebMedia] = match kind {
+                0 => &[WebMedia::Camera],
+                1 => &[WebMedia::Microphone],
+                _ => &[WebMedia::Camera, WebMedia::Microphone],
+            };
+            let access = self.ivars().access.as_ref();
+            let granted = wanted
+                .iter()
+                .all(|m| access.is_some_and(|a| a.allows_web_media(*m)));
+            if !granted {
+                log::warn!(target: "js", "web view media capture is not granted: add it to capabilities.webview.media");
+            }
+            // WKPermissionDecisionGrant = 1, Deny = 2.
+            decide.call((if granted { 1 } else { 2 },));
+        }
+
         /// What the page cannot show, or the server sends as an attachment,
         /// is downloaded when the app listens for downloads.
         #[unsafe(method(webView:decidePolicyForNavigationResponse:decisionHandler:))]
@@ -1346,7 +1564,7 @@ define_class!(
             response: &AnyObject,
             decide: &block2::Block<dyn Fn(isize)>,
         ) {
-            let download = self.saves_downloads() && is_download(response);
+            let download = self.wants_download() && is_download(response);
             if download && let Some(navigation) = self.ivars().navigation.get() {
                 self.ivars().downloading.borrow_mut().insert(navigation);
             }
@@ -1371,25 +1589,68 @@ define_class!(
             self.adopt(download);
         }
 
-        /// Each download gets a directory of its own, so two files of the
-        /// same name never meet.
+        /// An automatic download gets a directory of its own, so two files
+        /// of the same name never meet. A manual one waits here for the
+        /// app: nothing is written until it accepts a destination (or the
+        /// decision expires).
         #[unsafe(method(download:decideDestinationUsingResponse:suggestedFilename:completionHandler:))]
         fn download_destination(
             &self,
             download: &AnyObject,
             _response: &AnyObject,
             suggested: &NSString,
-            done: &block2::Block<dyn Fn(*const NSURL)>,
+            done: &block2::Block<dyn Fn(*mut NSURL)>,
         ) {
             let key = download_key(download);
             let mut active = self.ivars().active.borrow_mut();
             let Some(entry) = active.get_mut(&key) else {
                 drop(active);
-                done.call((std::ptr::null(),));
+                done.call((std::ptr::null_mut(),));
                 return;
             };
             // The server's name replaces the one taken from the URL when it was adopted.
             entry.filename = file_name(&suggested.to_string());
+            // The choice is the one made when the download was adopted: a
+            // listener change between the two callbacks must not turn an
+            // automatic download's directory into a manual one's chosen
+            // file (or the other way, whose cleanup would remove a
+            // directory the app owns).
+            let manual = entry.manual;
+            if manual {
+                let (id, url, filename) =
+                    (entry.id.clone(), entry.url.clone(), entry.filename.clone());
+                // Without a listener the decision would go unanswered: cancel.
+                if !self.ivars().emitter.listens(EventKind::DownloadPending) {
+                    log::warn!(
+                        target: "js",
+                        "web view download `{id}` has no `onDownloadPending` listener: cancelled"
+                    );
+                    active.remove(&key);
+                    drop(active);
+                    done.call((std::ptr::null_mut(),));
+                    return;
+                }
+                // SAFETY: WebKit passes a live WKDownload; it is kept with
+                // the decision until the app answers.
+                let object =
+                    unsafe { Retained::retain(download as *const AnyObject as *mut AnyObject) }
+                        .expect("a download");
+                let decide = Decide::new(done);
+                drop(active);
+                self.ivars().pending.borrow_mut().insert(
+                    id.clone(),
+                    PendingDownload {
+                        download: object,
+                        key,
+                        decide,
+                    },
+                );
+                self.emit(EventKind::DownloadPending, || {
+                    nsh_core::webview::download_pending_payload(&id, &url, &filename)
+                });
+                self.schedule_decision_timeout(id);
+                return;
+            }
             let dir = entry.path.parent().map(Path::to_path_buf).unwrap_or_default();
             entry.path = dir.join(&entry.filename);
             if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -1398,34 +1659,69 @@ define_class!(
                 let entry = active.remove(&key).expect("tracked above");
                 drop(active);
                 self.emit(EventKind::Download, || failed_event(&entry, e.to_string()));
-                done.call((std::ptr::null(),));
+                done.call((std::ptr::null_mut(),));
                 return;
             }
-            let destination = NSURL::fileURLWithPath(&NSString::from_str(&entry.path.to_string_lossy()));
+            let destination =
+                NSURL::fileURLWithPath(&NSString::from_str(&entry.path.to_string_lossy()));
             let started = download_event("started", entry, None);
             drop(active);
             self.emit(EventKind::Download, || started);
-            done.call((Retained::as_ptr(&destination),));
+            done.call((Retained::as_ptr(&destination) as *mut NSURL,));
         }
 
         #[unsafe(method(downloadDidFinish:))]
         fn download_finished(&self, download: &AnyObject) {
-            let Some(entry) = self.ivars().active.borrow_mut().remove(&download_key(download)) else {
+            let entry = self.ivars().active.borrow_mut().remove(&download_key(download));
+            self.forget_pending(download);
+            let Some(entry) = entry else {
                 return;
             };
-            let bytes = std::fs::metadata(&entry.path).map_or(0, |m| m.len());
-            self.emit(EventKind::Download, || download_event("finished", &entry, Some(bytes)));
+            match &entry.stage {
+                // A manual download: publish the staging file at the
+                // destination now. An existing file is replaced only when
+                // the app said `overwrite`; otherwise publishing fails and
+                // leaves it untouched.
+                Some(stage) => {
+                    let bytes = std::fs::metadata(stage).map_or(0, |m| m.len());
+                    match publish_download(stage, &entry.path, entry.overwrite) {
+                        Ok(()) => self.emit(EventKind::Download, || {
+                            download_event("finished", &entry, Some(bytes))
+                        }),
+                        Err(error) => {
+                            let _ = std::fs::remove_file(stage);
+                            log::warn!(
+                                target: "js",
+                                "web view download into {}: {error}",
+                                entry.path.display()
+                            );
+                            let message =
+                                format!("cannot publish `{}`: {error}", entry.path.display());
+                            self.emit(EventKind::Download, || failed_event(&entry, message));
+                        }
+                    }
+                }
+                None => {
+                    let bytes = std::fs::metadata(&entry.path).map_or(0, |m| m.len());
+                    self.emit(EventKind::Download, || {
+                        download_event("finished", &entry, Some(bytes))
+                    });
+                }
+            }
         }
 
         #[unsafe(method(download:didFailWithError:resumeData:))]
         fn download_failed(&self, download: &AnyObject, error: &AnyObject, _resume: Option<&AnyObject>) {
-            let Some(entry) = self.ivars().active.borrow_mut().remove(&download_key(download)) else {
+            let entry = self.ivars().active.borrow_mut().remove(&download_key(download));
+            self.forget_pending(download);
+            let Some(entry) = entry else {
                 return;
             };
-            // A download can fail before it has a destination (no response yet): nothing was written then.
-            if let Some(dir) = entry.path.parent().filter(|dir| dir.exists()) {
-                let _ = std::fs::remove_dir_all(dir);
-            }
+            // A download can fail before it has a destination (no response
+            // yet): nothing was written then. Only the platform's own
+            // output is removed: an automatic download's directory, or a
+            // manual download's staging file (never the app's destination).
+            remove_output(output_of(&entry));
             // SAFETY: `localizedDescription` of an NSError.
             let message: Retained<NSString> = unsafe { msg_send![error, localizedDescription] };
             self.emit(EventKind::Download, || failed_event(&entry, message.to_string()));
@@ -1433,10 +1729,29 @@ define_class!(
 
         #[unsafe(method(webView:didStartProvisionalNavigation:))]
         fn did_start(&self, web: &AnyObject, navigation: Option<&AnyObject>) {
+            self.ivars().evaluations.navigated();
             self.ivars().navigation.set(navigation.map(download_key));
             self.emit(EventKind::LoadStart, || navigation_state(web, true));
             self.emit(EventKind::NavigationStateChange, || {
                 navigation_state(web, true)
+            });
+        }
+
+        #[unsafe(method(webViewWebContentProcessDidTerminate:))]
+        fn process_terminated(&self, _web: &AnyObject) {
+            self.ivars().evaluations.process_terminated();
+            // The app keeps running; the page comes back on its next reload.
+            self.emit(EventKind::Error, || {
+                EventPayload::Map(vec![
+                    (
+                        "message",
+                        PayloadValue::Str("The web content process terminated".into()),
+                    ),
+                    (
+                        "code",
+                        PayloadValue::Str(nsh_core::element::codes::WEBVIEW_TERMINATED.into()),
+                    ),
+                ])
             });
         }
 
@@ -1468,20 +1783,201 @@ define_class!(
     }
 );
 
+/// A manual download the app accepted: WebKit's destination decision and
+/// the staging file it writes (published at the app's destination when it
+/// finishes).
+struct Accepted {
+    decide: Decide,
+    /// The [`Download`] entry the decision belongs to.
+    key: usize,
+    destination: Retained<NSURL>,
+}
+
+/// A cancel the caller may carry out once it has answered the request:
+/// pending decisions are released, started transfers stopped and cleaned.
+enum Cancelled {
+    /// The app never accepted a destination: releasing the decision
+    /// cancels the download and writes nothing.
+    Pending(Decide),
+    /// A transfer: cancelling stops it, removes the output it wrote, and
+    /// reports the `Download` event.
+    Active {
+        download: Retained<AnyObject>,
+        output: Output,
+        event: EventPayload,
+    },
+}
+
+/// The output a download was writing, so a cancel or failure removes only
+/// what the platform owns.
+#[derive(Debug, PartialEq)]
+enum Output {
+    /// An automatic download's directory of its own.
+    Directory(PathBuf),
+    /// The file at a destination the app chose.
+    File(PathBuf),
+    /// Nothing written yet.
+    None,
+}
+
+/// The output a download owns: the unique staging file a download was
+/// accepted into (never the destination the app chose, which cleanup must
+/// not touch), or an automatic download's own directory.
+///
+/// A stored staging path wins over the `manual` flag: if the two ever
+/// disagree (a listener change across callbacks), cleanup must not infer an
+/// owned directory from the destination the app chose.
+fn output_for(manual: bool, stage: Option<&Path>, path: &Path) -> Output {
+    if let Some(stage) = stage.filter(|stage| !stage.as_os_str().is_empty()) {
+        return Output::File(stage.to_path_buf());
+    }
+    if manual {
+        // Nothing has been written yet: nothing to remove.
+        return Output::None;
+    }
+    match path.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => Output::Directory(dir.to_path_buf()),
+        _ => Output::None,
+    }
+}
+
+/// The output `entry` writes.
+fn output_of(entry: &Download) -> Output {
+    output_for(entry.manual, entry.stage.as_deref(), &entry.path)
+}
+
+/// The unique staging file a manual download writes next to `path`
+/// (same directory, so publishing is a same-filesystem link or rename).
+///
+/// The first candidate can, by construction, be the destination the app
+/// chose (it names a file, not a directory): a staging path equal to the
+/// destination is skipped for a second fixed sibling. An existing
+/// candidate is a refused staging slot, never overwritten.
+fn download_stage_path(path: &Path, id: &str) -> Result<PathBuf, String> {
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+    for stage in [
+        parent.join(format!(".nsh-download-{id}.part")),
+        parent.join(format!(".nsh-download-{id}.part.tmp")),
+    ] {
+        if stage
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&path.to_string_lossy())
+        {
+            continue;
+        }
+        match std::fs::symlink_metadata(&stage) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(stage),
+            Ok(_) => {
+                return Err(format!(
+                    "`{}` is in the way of the download's staging file",
+                    stage.display()
+                ));
+            }
+            Err(error) => {
+                return Err(format!(
+                    "cannot stage the download in `{}`: {error}",
+                    parent.display()
+                ));
+            }
+        }
+    }
+    Err(format!(
+        "cannot stage the download in `{}`",
+        parent.display()
+    ))
+}
+
+/// Publishes a finished manual download's staging file at `path`:
+/// `overwrite` replaces a file there atomically; otherwise a create-new
+/// link publishes only when nothing is there (a file that appeared
+/// meanwhile is left untouched and the publish fails).
+fn publish_download(stage: &Path, path: &Path, overwrite: bool) -> std::io::Result<()> {
+    if overwrite {
+        // A rename replaces the directory entry atomically.
+        std::fs::rename(stage, path)
+    } else {
+        // A hard link creates the destination only if it does not exist.
+        std::fs::hard_link(stage, path)?;
+        // The published file has the destination's name; the staging name
+        // is ours to remove.
+        let _ = std::fs::remove_file(stage);
+        Ok(())
+    }
+}
+
+/// Removes what `output` holds (a download's own directory, or the file
+/// it was writing).
+fn remove_output(output: Output) {
+    match output {
+        Output::Directory(dir) => {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+        Output::File(file) => {
+            let _ = std::fs::remove_file(file);
+        }
+        Output::None => {}
+    }
+}
+
+/// Checks the app's destination for a manual download. An existing file is
+/// refused without `overwrite`; with it the file is left untouched until
+/// the finished download replaces it atomically. Answers the destination.
+fn download_destination_path(path: &Path, overwrite: bool) -> Result<PathBuf, String> {
+    if !path.is_absolute() {
+        return Err(format!(
+            "`{}` is not an absolute destination path",
+            path.display()
+        ));
+    }
+    if path.file_name().is_none_or(|name| name.is_empty()) {
+        return Err(format!("`{}` names no file", path.display()));
+    }
+    let Some(parent) = path.parent() else {
+        return Err(format!("`{}` has no directory", path.display()));
+    };
+    if !parent.is_dir() {
+        return Err(format!("`{}` is not in a directory", path.display()));
+    }
+    match std::fs::symlink_metadata(path) {
+        Ok(info) => {
+            if info.is_dir() {
+                return Err(format!("`{}` is a directory", path.display()));
+            }
+            if !overwrite {
+                return Err(format!(
+                    "`{}` exists; accept the download with overwrite to replace it",
+                    path.display()
+                ));
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!("cannot use `{}`: {error}", path.display()));
+        }
+    }
+    Ok(path.to_path_buf())
+}
+
 impl WebHandler {
     fn new(
         mtm: MainThreadMarker,
         emitter: Emitter,
         access: Option<Arc<Access>>,
         downloads: Option<PathBuf>,
+        evaluations: Rc<nsh_platform_apple::web_evaluation::Evaluations>,
+        alive: Arc<AtomicBool>,
     ) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(WebIvars {
             emitter,
             access,
             downloads,
             active: RefCell::default(),
+            pending: RefCell::default(),
+            alive,
             navigation: Cell::default(),
             downloading: RefCell::default(),
+            file: RefCell::new(None),
+            evaluations,
         });
         // SAFETY: NSObject's designated initializer.
         unsafe { msg_send![super(this), init] }
@@ -1491,10 +1987,15 @@ impl WebHandler {
         self.ivars().emitter.emit(kind, payload);
     }
 
-    /// Whether this web view turns downloads into files: the app has a
-    /// directory and listens for them.
-    fn saves_downloads(&self) -> bool {
-        self.ivars().downloads.is_some() && self.ivars().emitter.listens(EventKind::Download)
+    /// Whether this web view turns downloads into files: an
+    /// `onDownloadPending` listener (the app chooses every destination), or
+    /// an `onDownload` listener with a data directory (the upstream
+    /// automatic behavior). Without a listener the navigations stay as
+    /// they were.
+    fn wants_download(&self) -> bool {
+        self.ivars().emitter.listens(EventKind::DownloadPending)
+            || (self.ivars().downloads.is_some()
+                && self.ivars().emitter.listens(EventKind::Download))
     }
 
     /// Becomes the delegate of `download` and tracks it from now on, so a
@@ -1505,9 +2006,16 @@ impl WebHandler {
         // SAFETY: WKDownload's `delegate` (weak); this handler outlives it
         // as the web view's delegate, and keeps it in `active` until it ends.
         let _: () = unsafe { msg_send![download, setDelegate: self] };
-        let Some(root) = self.ivars().downloads.as_ref() else {
+        // The choice is made when the download is adopted: a listener
+        // registered or dropped between the two callbacks must not turn an
+        // automatic download's directory into a manual one's chosen file
+        // (whose cleanup would remove a directory the app owns), or the
+        // other way.
+        let manual = self.ivars().emitter.listens(EventKind::DownloadPending);
+        let root = self.ivars().downloads.clone();
+        if !manual && root.is_none() {
             return;
-        };
+        }
         // SAFETY: NSUUID's and WKDownload's documented API.
         let (id, url) = unsafe {
             let uuid: Retained<AnyObject> = msg_send![class(c"NSUUID").expect("Foundation"), UUID];
@@ -1518,7 +2026,11 @@ impl WebHandler {
             (id.to_string().to_lowercase(), url.unwrap_or_default())
         };
         let filename = file_name(url_file_name(&url));
-        let path = root.join(&id).join(&filename);
+        // A manual download has no destination until the app picks one.
+        let path = match root {
+            Some(root) if !manual => root.join(&id).join(&filename),
+            _ => PathBuf::new(),
+        };
         // SAFETY: `download` is a live WKDownload this handler delegates.
         let object = unsafe { Retained::retain(download as *const AnyObject as *mut AnyObject) }
             .expect("a download");
@@ -1528,11 +2040,201 @@ impl WebHandler {
             url,
             filename,
             path,
+            manual,
+            stage: None,
+            overwrite: false,
         };
         self.ivars()
             .active
             .borrow_mut()
             .insert(download_key(download), entry);
+    }
+
+    /// Accepts download `id` into `path`: WebKit writes to a unique staging
+    /// file beside it, and the finished download publishes it (replacing an
+    /// existing file only with `overwrite`). The destination is never
+    /// touched before then. The pending decision stays while the
+    /// destination is refused, so the app may retry it. The caller answers
+    /// the request before [`Self::finish_accept`] starts the download.
+    fn accept_download(&self, id: &str, path: &Path, overwrite: bool) -> Result<Accepted, String> {
+        if !self.ivars().pending.borrow().contains_key(id) {
+            return Err(format!("no pending download with id `{id}`"));
+        }
+        let path = download_destination_path(path, overwrite)?;
+        // WebKit writes to the staging file, never the destination: the
+        // finished download publishes it there. A refused staging slot
+        // keeps the pending decision (the app may retry elsewhere).
+        let stage = download_stage_path(&path, id)?;
+        let Some(pending) = self.ivars().pending.borrow_mut().remove(id) else {
+            return Err(format!("no pending download with id `{id}`"));
+        };
+        if let Some(entry) = self.ivars().active.borrow_mut().get_mut(&pending.key) {
+            entry.path = path;
+            entry.stage = Some(stage.clone());
+            entry.overwrite = overwrite;
+        }
+        let destination = NSURL::fileURLWithPath(&NSString::from_str(&stage.to_string_lossy()));
+        Ok(Accepted {
+            decide: pending.decide,
+            key: pending.key,
+            destination,
+        })
+    }
+
+    /// Starts an accepted download: WebKit writes to its staging file (the
+    /// destination is published when it finishes), and the `Download`
+    /// lifecycle reports it as automatic downloads are.
+    fn finish_accept(&self, accepted: Accepted) {
+        let started = self
+            .ivars()
+            .active
+            .borrow()
+            .get(&accepted.key)
+            .map(|entry| download_event("started", entry, None));
+        if let Some(started) = started {
+            self.emit(EventKind::Download, || started);
+        }
+        let Accepted {
+            decide,
+            destination,
+            ..
+        } = accepted;
+        decide.call(Some(&destination));
+    }
+
+    /// Cancels download `id`: a pending decision is released; an accepted
+    /// transfer is stopped (the caller settles once writing has stopped,
+    /// dropping only its staging file, and reports its failure).
+    fn cancel_download(&self, id: &str) -> Result<Cancelled, String> {
+        if let Some(pending) = self.ivars().pending.borrow_mut().remove(id) {
+            self.ivars().active.borrow_mut().remove(&pending.key);
+            return Ok(Cancelled::Pending(pending.decide));
+        }
+        let entry = {
+            let mut active = self.ivars().active.borrow_mut();
+            let key = active
+                .iter()
+                .find_map(|(key, entry)| (entry.id == id).then_some(*key));
+            key.and_then(|key| active.remove(&key))
+        };
+        let Some(entry) = entry else {
+            return Err(format!("no active download with id `{id}`"));
+        };
+        let output = output_of(&entry);
+        let event = failed_event(&entry, "cancelled".to_owned());
+        Ok(Cancelled::Active {
+            download: entry.download,
+            output,
+            event,
+        })
+    }
+
+    /// Stops an accepted transfer, and only once WebKit reports that
+    /// writing stopped removes the staging file it wrote and settles the
+    /// request (a fire-and-forget cancel is not enough). A completed
+    /// download was already taken out of `active`, so its published file
+    /// is never touched.
+    fn cancel_active(
+        &self,
+        download: Retained<AnyObject>,
+        output: Output,
+        event: EventPayload,
+        surface: &Rc<Surface>,
+        node: NodeId,
+        request: u64,
+    ) {
+        let weak = Rc::downgrade(surface);
+        let alive = self.ivars().alive.clone();
+        // The block may be called again (it is an `Fn`): the output and
+        // the event are taken once.
+        let state = Rc::new(RefCell::new(Some((output, event))));
+        let done = RcBlock::new(move |_resume: *const AnyObject| {
+            let Some((output, event)) = state.borrow_mut().take() else {
+                return;
+            };
+            // Writing has stopped: only the staging file is ours, and it is
+            // removed even if the view is going.
+            remove_output(output);
+            while_alive(&alive, || {
+                if let Some(surface) = weak.upgrade() {
+                    reply(&surface, node, request, Ok(JsonValue::Null));
+                    surface.event(node, EventKind::Download, event);
+                }
+            });
+        });
+        // SAFETY: the retained WKDownload is still live; cancel copies the
+        // block and calls it after writing has stopped (on the main queue).
+        unsafe {
+            let _: () = msg_send![&download, cancel: &*done];
+        }
+    }
+
+    /// Forgets the decision of a download WebKit finished or failed
+    /// before the app answered it, releasing it (which cancels it).
+    fn forget_pending(&self, download: &AnyObject) {
+        let mut gone = Vec::new();
+        {
+            let mut pending = self.ivars().pending.borrow_mut();
+            let mut keep = FxHashMap::default();
+            for (id, decision) in pending.drain() {
+                let same = std::ptr::eq(
+                    Retained::as_ptr(&decision.download).cast::<u8>(),
+                    (download as *const AnyObject).cast::<u8>(),
+                );
+                if same {
+                    gone.push(decision.decide);
+                } else {
+                    keep.insert(id, decision);
+                }
+            }
+            *pending = keep;
+        }
+        for decide in gone {
+            decide.call(None);
+        }
+    }
+
+    /// The app did not answer a manual download's destination in
+    /// [`DOWNLOAD_DECISION_TIMEOUT`]: release it (cancelled) and report it
+    /// as the failed download it is (nothing was written).
+    fn expire_pending(&self, id: &str) {
+        let Some(pending) = self.ivars().pending.borrow_mut().remove(id) else {
+            return;
+        };
+        let entry = self.ivars().active.borrow_mut().remove(&pending.key);
+        pending.decide.call(None);
+        let message = "no download destination was accepted in time".to_owned();
+        log::warn!(target: "js", "web view download `{id}`: {message}");
+        if let Some(entry) = entry {
+            let failed = failed_event(&entry, message);
+            self.emit(EventKind::Download, || failed);
+        }
+    }
+
+    /// Releases the decision of download `id` after
+    /// [`DOWNLOAD_DECISION_TIMEOUT`].
+    fn schedule_decision_timeout(&self, id: String) {
+        let mtm = MainThreadMarker::new().expect("main thread");
+        let target = dispatch2::MainThreadBound::new(
+            (self.ivars().emitter.clone(), id, self.ivars().alive.clone()),
+            mtm,
+        );
+        let when = dispatch2::DispatchTime::NOW.time(DOWNLOAD_DECISION_TIMEOUT.as_nanos() as i64);
+        let _ = dispatch2::DispatchQueue::main().after(when, move || {
+            let mtm = MainThreadMarker::new().expect("main queue");
+            let (emitter, id, alive) = target.into_inner(mtm);
+            if !alive.load(Ordering::Acquire) {
+                return;
+            }
+            let Some(surface) = emitter.surface.upgrade() else {
+                return;
+            };
+            let handler = match surface.native.hosts.borrow().get(&emitter.id) {
+                Some(Host::Web(host)) => host.handler.clone(),
+                _ => return,
+            };
+            handler.expire_pending(&id);
+        });
     }
 
     fn failed(&self, navigation: Option<&AnyObject>, err: &AnyObject) {
@@ -1555,12 +2257,18 @@ impl WebHandler {
     }
 
     fn cancel_downloads(&self) {
-        // Release the borrow before WebKit can call back into the delegate.
+        // Release the borrows before WebKit can call back into the delegate.
+        let pending = std::mem::take(&mut *self.ivars().pending.borrow_mut());
+        for (_, decision) in pending {
+            decision.decide.call(None);
+        }
         let active = std::mem::take(&mut *self.ivars().active.borrow_mut());
         for entry in active.into_values() {
+            let output = output_of(&entry);
+            let state = Rc::new(RefCell::new(Some(output)));
             let done = RcBlock::new(move |_resume: *const AnyObject| {
-                if let Some(dir) = entry.path.parent() {
-                    let _ = std::fs::remove_dir_all(dir);
+                if let Some(output) = state.borrow_mut().take() {
+                    remove_output(output);
                 }
             });
             // SAFETY: each retained WKDownload is still live; cancel copies
@@ -1719,6 +2427,100 @@ fn describe(object: &AnyObject) -> String {
     d.to_string()
 }
 
+/// Whether a web view may navigate to `url`: a frame inside the page, a
+/// file in the folder of the `file://` page the app itself loaded there
+/// (`folder`, which the `webview` grant, made of web hosts, can't name),
+/// and what the grant allows. Never a file outside that folder.
+fn navigation_allowed(
+    access: Option<&Access>,
+    folder: Option<&str>,
+    main: bool,
+    url: &str,
+) -> bool {
+    if !main || url.is_empty() {
+        return true;
+    }
+    if is_file_url(url) {
+        return folder.is_some_and(|dir| {
+            local_file_path(url).is_some_and(|path| path.starts_with(dir) && !has_dot_segment(path))
+        });
+    }
+    access.is_none_or(|a| a.allows_webview(url))
+}
+
+fn is_file_url(url: &str) -> bool {
+    url.get(..5)
+        .is_some_and(|s| s.eq_ignore_ascii_case("file:"))
+}
+
+/// The path of a local `file://` URL, without query or fragment: `None`
+/// for any other URL and for a file on another host. `file:///a` and
+/// `file://localhost/a` are the same file, `/a`.
+fn local_file_path(url: &str) -> Option<&str> {
+    const SCHEME: &str = "file://";
+    if !url
+        .get(..SCHEME.len())
+        .is_some_and(|s| s.eq_ignore_ascii_case(SCHEME))
+    {
+        return None;
+    }
+    let rest = &url[SCHEME.len()..];
+    let slash = rest.find('/')?;
+    let host = &rest[..slash];
+    if !(host.is_empty() || host.eq_ignore_ascii_case("localhost")) {
+        return None;
+    }
+    let path = &rest[slash..];
+    Some(path.split(['?', '#']).next().unwrap_or(path))
+}
+
+/// Whether `path` has a `.` or `..` segment, written out or
+/// percent-encoded (`%2e`, `..%2f`), which could name a folder above the
+/// one it seems to.
+fn has_dot_segment(path: &str) -> bool {
+    percent_decoded(path)
+        .split(|&b| b == b'/')
+        .any(|segment| segment == b"." || segment == b"..")
+}
+
+/// The folder path (`/a/b/`) a `file://` page may read: the file's own and
+/// what is under it, nothing above. `None` for any other URL, which loads
+/// as a request, for a file on another host, for a file at the root, whose
+/// folder is the whole disk (`file://localhost/a.pdf` included), and for a
+/// path with a `.` or `..` segment.
+fn file_read_scope(uri: &str) -> Option<&str> {
+    let path = local_file_path(uri)?;
+    if has_dot_segment(path) {
+        return None;
+    }
+    let end = path.rfind('/')? + 1;
+    (end > 1).then(|| &path[..end])
+}
+
+/// `s` with each `%XX` turned into its byte; a `%` not followed by two hex
+/// digits stays as it is.
+fn percent_decoded(s: &str) -> Vec<u8> {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| (b as char).to_digit(16);
+        if bytes[i] == b'%'
+            && let (Some(h), Some(l)) = (
+                bytes.get(i + 1).copied().and_then(hex),
+                bytes.get(i + 2).copied().and_then(hex),
+            )
+        {
+            out.push((h * 16 + l) as u8);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
 /// A JS string literal for `s`.
 fn js_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
@@ -1754,6 +2556,9 @@ struct WebHost {
     /// The page scrolls with the wheel and the trackpad
     /// (`scrollable`).
     scrolls: bool,
+    /// False once this host is dropped: an asynchronous cancel completion
+    /// stops delivering a reply then (cleanup still runs).
+    alive: Arc<AtomicBool>,
 }
 
 impl WebHost {
@@ -1763,7 +2568,26 @@ impl WebHost {
         access: Option<Arc<Access>>,
         downloads: Option<PathBuf>,
     ) -> Self {
-        let handler = WebHandler::new(surface.mtm, Emitter::new(surface, view), access, downloads);
+        // Replies are internal events: they reach the engine whether or not
+        // the app listens.
+        let weak = Rc::downgrade(surface);
+        let evaluations = nsh_platform_apple::web_evaluation::Evaluations::new(
+            view.id(),
+            Box::new(move |id, kind, payload| {
+                if let Some(surface) = weak.upgrade() {
+                    surface.event(id, kind, payload);
+                }
+            }),
+        );
+        let alive = Arc::new(AtomicBool::new(true));
+        let handler = WebHandler::new(
+            surface.mtm,
+            Emitter::new(surface, view),
+            access,
+            downloads,
+            evaluations,
+            alive.clone(),
+        );
         WebHost {
             holder: objc2::rc::Weak::new(&**view),
             web: None,
@@ -1771,6 +2595,7 @@ impl WebHost {
             schemes: None,
             props: None,
             scrolls: true,
+            alive,
         }
     }
 
@@ -1811,6 +2636,7 @@ impl WebHost {
                     configuration: &*config
                 ];
                 let _: () = msg_send![&web, setNavigationDelegate: &**handler];
+                let _: () = msg_send![&web, setUIDelegate: &**handler];
                 // Transparent by default (WebKit paints white otherwise): a
                 // page without a background shows the view behind it, the
                 // way `backgroundColor` on the node expects.
@@ -1821,6 +2647,7 @@ impl WebHost {
             }
         });
         self.web = web.flatten();
+        self.handler.ivars().evaluations.set_web(self.web.as_ref());
     }
 
     /// Whether `view` is its `WKWebView`.
@@ -1841,6 +2668,9 @@ impl WebHost {
             self.make(p);
         }
         let Some(web) = &self.web else { return };
+        if !p.javascript_enabled {
+            self.handler.ivars().evaluations.scripts_disabled();
+        }
         let old = self.props.take();
         let first = old.is_none();
         let old = old.unwrap_or_default();
@@ -1887,12 +2717,29 @@ impl WebHost {
                 msg_send![&prefs, setAllowsContentJavaScript: Bool::new(p.javascript_enabled)];
             // Scripts apply to pages loaded from now on: load again.
             if first || p.source != old.source || scripts_changed {
+                // Only the file this load opens is the page's own: none for
+                // any other source.
+                *self.handler.ivars().file.borrow_mut() = None;
+                if p.source != WebSource::None {
+                    self.handler.ivars().evaluations.navigated();
+                }
                 match &p.source {
                     WebSource::Uri(uri) => {
-                        if let (Some(url), Some(cls)) = (
-                            NSURL::URLWithString(&NSString::from_str(uri)),
-                            class(c"NSURLRequest"),
-                        ) {
+                        let url = NSURL::URLWithString(&NSString::from_str(uri));
+                        let dir = file_read_scope(uri);
+                        let scope = dir.and_then(|dir| {
+                            NSURL::URLWithString(&NSString::from_str(&format!("file://{dir}")))
+                        });
+                        if let (Some(url), Some(scope), Some(dir)) = (&url, scope, dir) {
+                            *self.handler.ivars().file.borrow_mut() = Some(dir.to_owned());
+                            // A request for a file URL shows nothing: WebKit
+                            // reads a local file only where it is let.
+                            let _: Option<Retained<AnyObject>> = msg_send![
+                                web,
+                                loadFileURL: &**url,
+                                allowingReadAccessToURL: &*scope
+                            ];
+                        } else if let (Some(url), Some(cls)) = (url, class(c"NSURLRequest")) {
                             let request: Retained<AnyObject> =
                                 msg_send![cls, requestWithURL: &*url];
                             let _: Option<Retained<AnyObject>> =
@@ -1919,13 +2766,16 @@ impl WebHost {
 
 impl Drop for WebHost {
     fn drop(&mut self) {
+        self.alive.store(false, Ordering::Release);
         self.handler.cancel_downloads();
+        self.handler.ivars().evaluations.dispose();
         let Some(web) = &self.web else { return };
         // SAFETY: breaks the cycle web view → content controller → handler
         // and stops the page.
         unsafe {
             let _: () = msg_send![web, stopLoading];
             let _: () = msg_send![web, setNavigationDelegate: std::ptr::null::<AnyObject>()];
+            let _: () = msg_send![web, setUIDelegate: std::ptr::null::<AnyObject>()];
             let config: Retained<AnyObject> = msg_send![web, configuration];
             let content: Retained<AnyObject> = msg_send![&config, userContentController];
             let _: () = msg_send![
@@ -1933,6 +2783,83 @@ impl Drop for WebHost {
                 removeScriptMessageHandlerForName: &*NSString::from_str("nsh")
             ];
         }
+    }
+}
+
+/// Handles a [`WebViewOperation`] on `web` and answers through
+/// `EventKind::WebViewReply`.
+fn web_request(
+    surface: &Rc<Surface>,
+    node: NodeId,
+    web: &AnyObject,
+    handler: &WebHandler,
+    request: &WebViewRequest,
+) {
+    let _ = web;
+    match &request.operation {
+        WebViewOperation::AcceptDownload { id, destination } => {
+            match handler.accept_download(id, &destination.path, destination.overwrite) {
+                Ok(accepted) => {
+                    // The request is settled before WebKit resumes: the
+                    // app's answer resolves with what it asked for, and the
+                    // `Download` lifecycle reports what follows.
+                    reply(surface, node, request.id, Ok(JsonValue::Null));
+                    handler.finish_accept(accepted);
+                }
+                Err(error) => reply(surface, node, request.id, Err(error)),
+            }
+        }
+        WebViewOperation::CancelDownload { id } => match handler.cancel_download(id) {
+            // A pending decision writes nothing: releasing it stops the
+            // download, then the request is settled.
+            Ok(Cancelled::Pending(decide)) => {
+                decide.call(None);
+                reply(surface, node, request.id, Ok(JsonValue::Null));
+            }
+            // An accepted transfer: stop it, wait for WebKit to stop
+            // writing, remove the staging file, then settle and report.
+            Ok(Cancelled::Active {
+                download,
+                output,
+                event,
+            }) => handler.cancel_active(download, output, event, surface, node, request.id),
+            Err(error) => reply(surface, node, request.id, Err(error)),
+        },
+        // A newer core's operation: answer it rather than leave it pending.
+        _ => reply(
+            surface,
+            node,
+            request.id,
+            Err("this macOS backend does not know the web view operation".into()),
+        ),
+    }
+}
+
+/// The [`EventKind::WebViewReply`] envelope of request `request`:
+/// `{id, ok: true, value}` or `{id, ok: false, error}`.
+fn reply_value(request: u64, result: Result<JsonValue, String>) -> JsonValue {
+    match result {
+        Ok(value) => serde_json::json!({"id": request, "ok": true, "value": value}),
+        Err(error) => serde_json::json!({"id": request, "ok": false, "error": error}),
+    }
+}
+
+/// Answers request `request` of `node`: success carries `value` (null for
+/// unit operations), failure `error`.
+fn reply(surface: &Surface, node: NodeId, request: u64, result: Result<JsonValue, String>) {
+    surface.event(
+        node,
+        EventKind::WebViewReply,
+        EventPayload::Json(reply_value(request, result)),
+    );
+}
+
+/// Runs a late reply only while its web view lives: a completion that
+/// outlives its host must not reach a restarted engine's node with the
+/// same id.
+fn while_alive(alive: &Arc<AtomicBool>, reply: impl FnOnce()) {
+    if alive.load(Ordering::Acquire) {
+        reply();
     }
 }
 
@@ -2186,6 +3113,144 @@ mod tests {
     }
 
     #[test]
+    fn a_file_url_reads_its_own_folder_and_nothing_wider() {
+        assert_eq!(
+            file_read_scope("file:///tmp/opened/7f/Invoice%20May.pdf"),
+            Some("/tmp/opened/7f/")
+        );
+        assert_eq!(
+            file_read_scope("FILE:///tmp/x/a.pdf#page=2"),
+            Some("/tmp/x/")
+        );
+        assert_eq!(
+            file_read_scope("file://localhost/tmp/x/a.pdf"),
+            Some("/tmp/x/")
+        );
+        assert_eq!(
+            file_read_scope("file://LOCALHOST/tmp/x/a.pdf"),
+            Some("/tmp/x/")
+        );
+        assert_eq!(
+            file_read_scope("file:///tmp/x/a.pdf?/b/c"),
+            Some("/tmp/x/"),
+            "a slash after the path is no folder"
+        );
+        assert_eq!(
+            file_read_scope("file:///tmp/x/..a/b..pdf"),
+            Some("/tmp/x/..a/"),
+            "dots in a name are a name"
+        );
+        assert_eq!(file_read_scope("file:///tmp/x/a%20.pdf"), Some("/tmp/x/"));
+        for uri in [
+            "file:///a.pdf",
+            "file://localhost/a.pdf",
+            "file://localhost/",
+            "file://server/share/a.pdf",
+            "file://localhost",
+            "file:///tmp/x/../../a.pdf",
+            "file:///tmp/x/./a.pdf",
+            "file:///tmp/x/%2e%2e/%2E%2E/a.pdf",
+            "file:///tmp/x/.%2e/a.pdf",
+            "file:///tmp/x/..%2f..%2fetc/a.pdf",
+            "file:///tmp/x/..%2F/a.pdf",
+            "file://localhost/tmp/../a.pdf",
+            "file:///tmp/../a.pdf#page=2",
+            "http://127.0.0.1:8790/file/raw/m1/a.pdf",
+            "https://example.com/a.pdf",
+            "about:blank",
+            "/tmp/b.pdf",
+            "",
+        ] {
+            assert_eq!(file_read_scope(uri), None, "{uri}");
+        }
+    }
+
+    #[test]
+    fn a_web_view_opens_only_files_in_the_folder_it_was_given() {
+        let dir = "/tmp/opened/7f/";
+        let native = Policy::default().access();
+        let go =
+            |loaded: Option<&str>, url: &str| navigation_allowed(Some(&native), loaded, true, url);
+        for url in [
+            "file:///tmp/opened/7f/a.pdf",
+            "file:///tmp/opened/7f/a.pdf#page=2",
+            "FILE:///tmp/opened/7f/a.pdf",
+            "file://localhost/tmp/opened/7f/a.pdf",
+            "file:///tmp/opened/7f/b.html",
+            "file:///tmp/opened/7f/sub/c.html?x=1",
+        ] {
+            assert!(go(Some(dir), url), "same folder: {url}");
+        }
+        for url in [
+            "file:///tmp/opened/a.pdf",
+            "file:///etc/passwd",
+            "file://localhost/etc/passwd",
+            "file://server/tmp/opened/7f/a.pdf",
+            "file:///tmp/opened/7f/../x.pdf",
+            "file:///tmp/opened/7f/%2e%2e/x.pdf",
+            "file:///tmp/opened/7fx/a.pdf",
+        ] {
+            assert!(!go(Some(dir), url), "outside the folder: {url}");
+        }
+        assert!(
+            !go(None, "file:///tmp/opened/7f/a.pdf"),
+            "a web view that loaded no file (the mail reader)"
+        );
+        assert!(
+            !navigation_allowed(None, None, true, "file:///tmp/a.pdf"),
+            "nothing known of the app"
+        );
+        // Not a file: the grant decides, unrestricted or not.
+        assert!(go(Some(dir), "https://example.com/a"));
+        assert!(go(None, "about:blank"));
+        let granted = nsh_core::access::Capabilities::from_json(
+            &serde_json::json!({ "webview": { "hosts": ["example.com"] } }),
+        )
+        .unwrap();
+        let app = Access {
+            declared: granted,
+            granted: None,
+        };
+        for url in [
+            "data:text/html,<p>x</p>",
+            "buwiz://chat/new",
+            "javascript:alert(1)",
+        ] {
+            assert!(!go(Some(dir), url), "not a web page: {url}");
+            assert!(
+                !navigation_allowed(Some(&app), Some(dir), true, url),
+                "{url}"
+            );
+        }
+        assert!(!navigation_allowed(
+            Some(&app),
+            Some(dir),
+            true,
+            "https://evil.example/a"
+        ));
+        assert!(
+            navigation_allowed(Some(&app), Some(dir), true, "file:///tmp/opened/7f/a.pdf"),
+            "a JS app's own file page"
+        );
+        assert!(!navigation_allowed(
+            Some(&app),
+            None,
+            true,
+            "file:///tmp/opened/7f/a.pdf"
+        ));
+        assert!(navigation_allowed(
+            Some(&app),
+            None,
+            true,
+            "https://example.com/a"
+        ));
+        assert!(
+            navigation_allowed(Some(&app), None, false, "file:///etc/passwd"),
+            "a frame inside the page"
+        );
+    }
+
+    #[test]
     fn quotes_js_strings() {
         assert_eq!(js_string("a\"b\\c\nd"), r#""a\"b\\c\nd""#);
         assert_eq!(js_string("\u{1}"), r#""\u0001""#);
@@ -2200,5 +3265,138 @@ mod tests {
         assert!(components.factory(&"com.example.map".into()).is_some());
         assert!(components.factory(&"com.example.none".into()).is_none());
         assert_eq!(format!("{components:?}"), r#"{"com.example.map"}"#);
+    }
+    fn download_scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("nsh-webview-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a temporary directory");
+        dir
+    }
+
+    #[test]
+    fn validates_manual_download_destinations() {
+        let dir = download_scratch("destinations");
+        let target = dir.join("report.pdf");
+        // A new file is accepted as is.
+        assert_eq!(
+            download_destination_path(&target, false),
+            Ok(target.clone())
+        );
+        // An existing file is refused (and left alone) unless the app said
+        // overwrite; then it is cleared for WebKit, not written through.
+        std::fs::write(&target, b"old").expect("an existing file");
+        assert!(download_destination_path(&target, false).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"old".to_vec());
+        assert_eq!(download_destination_path(&target, true), Ok(target.clone()));
+        assert_eq!(std::fs::read(&target).unwrap(), b"old".to_vec());
+        // Relative paths, missing directories and directories are refused.
+        assert!(download_destination_path(Path::new("relative.pdf"), true).is_err());
+        assert!(download_destination_path(&dir.join("missing/report.pdf"), true).is_err());
+        assert!(download_destination_path(&dir, true).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn removes_only_the_owned_output_never_the_destination() {
+        let dir = download_scratch("output");
+        let folder = dir.join("chosen");
+        std::fs::create_dir_all(&folder).expect("a chosen directory");
+        let target = folder.join("report.pdf");
+        std::fs::write(&target, b"completed").expect("a completed file");
+        let stage = folder.join(".nsh-download-id.part");
+        std::fs::write(&stage, b"partial").expect("a partial staging file");
+        let output = output_for(true, Some(&stage), &target);
+        assert_eq!(output, Output::File(stage.clone()));
+        remove_output(output);
+        assert!(!stage.exists());
+        assert_eq!(std::fs::read(&target).unwrap(), b"completed".to_vec());
+        assert!(folder.is_dir());
+
+        // An automatic download owns the directory of its own.
+        let own = dir.join("0f0e-uuid");
+        std::fs::create_dir_all(&own).expect("a download's directory");
+        std::fs::write(own.join("report.pdf"), b"partial").expect("a partial file");
+        let output = output_for(false, None, &own.join("report.pdf"));
+        assert_eq!(output, Output::Directory(own.clone()));
+        remove_output(output);
+        assert!(!own.exists());
+
+        // Nothing was written before a destination was chosen.
+        assert_eq!(output_for(true, None, Path::new("")), Output::None);
+        assert_eq!(output_for(false, None, Path::new("")), Output::None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn publishes_manual_downloads_only_when_finished() {
+        let dir = download_scratch("publish");
+        let target = dir.join("report.pdf");
+        std::fs::write(&target, b"old").expect("an existing destination");
+        let stage = download_stage_path(&target, "abc-123").expect("a staging slot");
+        assert_eq!(stage.parent(), Some(dir.as_path()));
+        assert_ne!(stage, target);
+
+        // Overwrite: the finished download replaces the destination
+        // atomically, and the staging name is gone.
+        std::fs::write(&stage, b"new").expect("a staging file");
+        publish_download(&stage, &target, true).expect("a replace");
+        assert_eq!(std::fs::read(&target).unwrap(), b"new".to_vec());
+        assert!(!stage.exists());
+
+        // Create-new: a file that appeared at the destination meanwhile
+        // makes publishing fail, and it stays byte-identical.
+        std::fs::write(&target, b"later").expect("the destination again");
+        std::fs::write(&stage, b"ours").expect("a staging file");
+        assert!(publish_download(&stage, &target, false).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"later".to_vec());
+        remove_output(Output::File(stage.clone()));
+        assert!(!stage.exists());
+        assert_eq!(std::fs::read(&target).unwrap(), b"later".to_vec());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stages_never_at_the_destination_and_never_overwrite_a_stale_slot() {
+        let dir = download_scratch("stage");
+        let target = dir.join(".nsh-download-id.part");
+        let stage = download_stage_path(&target, "id").expect("a second sibling");
+        assert_ne!(stage, target);
+        assert_eq!(
+            stage.file_name().unwrap().to_string_lossy(),
+            ".nsh-download-id.part.tmp"
+        );
+
+        let alias = dir.join(".NSH-DOWNLOAD-case.part");
+        let stage = download_stage_path(&alias, "case").expect("a distinct sibling");
+        std::fs::write(&stage, b"complete").unwrap();
+        assert!(!alias.exists());
+        publish_download(&stage, &alias, false).unwrap();
+        assert_eq!(std::fs::read(&alias).unwrap(), b"complete");
+        assert!(!stage.exists());
+
+        let occupied = dir.join(".nsh-download-other.part");
+        std::fs::write(&occupied, b"keep").expect("an occupied slot");
+        let other = dir.join("other.pdf");
+        assert!(download_stage_path(&other, "other").is_err());
+        assert_eq!(std::fs::read(&occupied).unwrap(), b"keep".to_vec());
+
+        let normal = dir.join("normal.pdf");
+        let stage = download_stage_path(&normal, "normal").expect("a staging slot");
+        assert_eq!(
+            stage.file_name().unwrap().to_string_lossy(),
+            ".nsh-download-normal.part"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn late_replies_stop_at_the_view_lifetime() {
+        let alive = Arc::new(AtomicBool::new(true));
+        let mut delivered = 0;
+        while_alive(&alive, || delivered += 1);
+        assert_eq!(delivered, 1);
+        alive.store(false, Ordering::Release);
+        while_alive(&alive, || delivered += 1);
+        assert_eq!(delivered, 1);
     }
 }

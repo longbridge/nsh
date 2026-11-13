@@ -224,7 +224,7 @@ pub(crate) fn run(
     // until it is replaced.
     let udid = match target {
         Target::Ios => {
-            let udid = simulator(device)?;
+            let udid = simulator(device, SimulatorWindow::Front)?;
             let _ = simctl(&["terminate", &udid, BUNDLE_ID]);
             Some(udid)
         }
@@ -399,6 +399,7 @@ fn run_rust_app(
         }
         // A menu bar app on macOS (the other runners leave it).
         config.macos.add_to_app_json(&mut info);
+        config.add_file_types_to_app_json(&mut info);
         // The main window's launch options, as a package's `app.json`.
         if let Some(window) = &config.window {
             info["window"] = window.clone();
@@ -441,7 +442,7 @@ fn run_rust_app(
             run_rust_local(&app, &mut command)
         }
         Target::Ios => {
-            let udid = simulator(device)?;
+            let udid = simulator(device, SimulatorWindow::Front)?;
             let env = simctl_app_env(&config);
             let out = run.join("ios");
             package_for_run(
@@ -538,6 +539,7 @@ fn package_for_run(
         keystore: None,
         abis,
         format: crate::android::Format::Apk,
+        arch: None,
         run: false,
         asset_url: None,
     })
@@ -848,6 +850,9 @@ pub(crate) fn install_android_host(
                 dev: true,
                 cleartext: true,
                 notifications: true,
+                // The host runs any app: its pages may capture media.
+                microphone: true,
+                camera: true,
                 schemes: &[],
                 rust: false,
                 dark: false,
@@ -1120,9 +1125,20 @@ struct Device {
     available: bool,
 }
 
+/// How [`simulator`] shows the simulators' window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SimulatorWindow {
+    /// In front, active: `nsh run`, where the user works with the app.
+    Front,
+    /// Opened, or left where it is, without becoming the active app: `nsh
+    /// test`, whose input goes to the app in the simulator directly, so the
+    /// keyboard stays with the app the user types in.
+    Behind,
+}
+
 /// Picks a simulator (`wanted` by name or UDID; else a booted one; else the
-/// newest iPhone), boots it and shows the Simulator app.
-pub(crate) fn simulator(wanted: Option<&str>) -> anyhow::Result<String> {
+/// newest iPhone), boots it and shows the Simulator app (`window`).
+pub(crate) fn simulator(wanted: Option<&str>, window: SimulatorWindow) -> anyhow::Result<String> {
     let list: DeviceList =
         serde_json::from_str(&simctl(&["list", "devices", "available", "--json"])?)?;
     // Runtimes sort by version within a platform; newest last.
@@ -1163,27 +1179,41 @@ pub(crate) fn simulator(wanted: Option<&str>) -> anyhow::Result<String> {
     if let Some(step) = booting {
         step.done(format!("booted {}", device.name));
     }
-    show_simulators();
+    show_simulators(window);
     Ok(device.udid.clone())
+}
+
+/// `open`'s arguments before what it opens: `-g` keeps a window opened
+/// [`SimulatorWindow::Behind`] from activating the app.
+fn open_args(window: SimulatorWindow) -> &'static [&'static str] {
+    match window {
+        SimulatorWindow::Front => &[],
+        SimulatorWindow::Behind => &["-g"],
+    }
 }
 
 /// Brings up the simulators' window: Simulator.app, or DeviceHub.app in
 /// Xcode versions that replaced it.
-fn show_simulators() {
+fn show_simulators(window: SimulatorWindow) {
     let quiet = |cmd: &mut Command| {
         cmd.stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
             .is_ok_and(|s| s.success())
     };
-    if quiet(Command::new("open").args(["-b", "com.apple.iphonesimulator"])) {
+    let open = || {
+        let mut open = Command::new("open");
+        open.args(open_args(window));
+        open
+    };
+    if quiet(open().args(["-b", "com.apple.iphonesimulator"])) {
         return;
     }
     let developer = Command::new("xcode-select").arg("-p").output();
     if let Ok(out) = developer {
         let developer = String::from_utf8_lossy(&out.stdout);
         let hub = Path::new(developer.trim()).join("../Applications/DeviceHub.app");
-        if hub.exists() && quiet(Command::new("open").arg(&hub)) {
+        if hub.exists() && quiet(open().arg(&hub)) {
             return;
         }
     }
@@ -1215,9 +1245,12 @@ fn info_plist(target: Target) -> String {
              <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>"
         }
     };
-    // The host runs any app: it may recognize speech.
+    // The host runs any app: it may recognize speech and its pages may
+    // capture media.
     let usage = crate::package::USAGE_DESCRIPTIONS
         .iter()
+        .copied()
+        .chain([crate::package::WEB_MEDIA_USAGE_DESCRIPTIONS[1]].map(|(_, key, text)| (key, text)))
         .map(|(key, text)| format!("<key>{key}</key><string>{text}</string>"))
         .collect::<Vec<_>>()
         .join("\n    ");
@@ -1246,9 +1279,18 @@ mod tests {
     use clap::ValueEnum as _;
 
     use super::{
-        HostWindow, Target, android_app_env, android_env_extras, shell_quote, simctl_app_env,
-        simctl_child_env,
+        HostWindow, SimulatorWindow, Target, android_app_env, android_env_extras, open_args,
+        shell_quote, simctl_app_env, simctl_child_env,
     };
+
+    /// `nsh run` brings the simulators' window to the front; `nsh test`
+    /// opens it without activating it (`open -g`), so the keyboard stays
+    /// with the app the user types in.
+    #[test]
+    fn only_a_run_brings_the_simulator_to_the_front() {
+        assert!(open_args(SimulatorWindow::Front).is_empty());
+        assert_eq!(open_args(SimulatorWindow::Behind), ["-g"]);
+    }
 
     /// The simulator's app gets the declared variables this environment
     /// has, prefixed for simctl, each once; undeclared ones stay behind,

@@ -375,7 +375,10 @@ impl<M: TextEngine> Core<M> {
         }
         // And its `position: sticky` views'.
         all.extend_from_slice(&scroll.view_sticky);
-        all.sort_by_key(|r| r.cell);
+        // By cell, its built-in bar last: the platforms raise the cells in
+        // this order, and the bar draws over the viewport, rows included.
+        let bar = scroll.bar.as_ref().map(|b| b.0);
+        all.sort_by_key(|r| (Some(r.cell) == bar, r.cell));
         all
     }
 
@@ -705,6 +708,16 @@ impl<M: TextEngine> Core<M> {
 /// replay while it has any.
 fn issue(scroll: &mut ScrollState, pending: PendingScroll) {
     scroll.issued = scroll.issued.wrapping_add(1);
+    if let Some((n, (x, y))) = scroll.target.as_mut() {
+        *n = scroll.issued;
+        if let PendingScroll::By(by) = pending {
+            if scroll.horizontal {
+                *x += by;
+            } else {
+                *y += by;
+            }
+        }
+    }
     if !scroll.dependents.is_empty() {
         scroll.pending.push((scroll.issued, pending));
     }

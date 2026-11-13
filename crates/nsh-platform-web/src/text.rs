@@ -13,6 +13,7 @@
 use std::{
     cell::{Cell, RefCell},
     ops::Range,
+    rc::Rc,
     sync::{Arc, OnceLock},
 };
 
@@ -53,6 +54,9 @@ pub(crate) struct WebTextEngine {
     metrics: RefCell<FxHashMap<Arc<str>, (f32, f32)>>,
     /// The x height of a font (attachments in the middle of a line).
     x_heights: RefCell<FxHashMap<Arc<str>, f32>>,
+    /// The long texts prepared last, newest last: an edit of one keeps the
+    /// pieces and lines outside what it changed ([`Recent`]).
+    recent: RefCell<Vec<Recent>>,
 }
 
 impl WebTextEngine {
@@ -64,6 +68,8 @@ impl WebTextEngine {
         self.emoji_measured.set(false);
         self.metrics.borrow_mut().clear();
         self.x_heights.borrow_mut().clear();
+        // Their pieces' widths are stale too.
+        self.recent.borrow_mut().clear();
     }
 
     fn x_height(&self, font: &Arc<str>, size: f32) -> f32 {
@@ -283,7 +289,7 @@ enum AtomKind {
 /// than a line).
 #[derive(Debug, Clone)]
 struct Atom {
-    text: String,
+    text: Rc<str>,
     style: u16,
     width: f32,
     kind: AtomKind,
@@ -295,7 +301,12 @@ struct Atom {
 /// What [`WebTextEngine::prepare`] makes.
 #[derive(Debug)]
 pub(crate) struct Prepared {
-    atoms: Vec<Atom>,
+    atoms: Rc<[Atom]>,
+    /// Its lines at the widths it was broken at ([`Broken`]).
+    lines: LinesCache,
+    /// The text it is an edit of, whose lines it reuses where the edit
+    /// cannot have changed them.
+    base: Option<Base>,
     styles: Arc<[RunStyle]>,
     align: TextAlign,
     max_lines: u32,
@@ -408,10 +419,13 @@ impl wrap::Item for Atom {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 struct LineBox {
     /// Atoms `start..end`.
     start: usize,
     end: usize,
+    /// The last atom breaking the line looked at ([`wrap::Filled::next`]).
+    next: usize,
     /// Width without trailing spaces.
     width: f32,
     height: f32,
@@ -419,9 +433,76 @@ struct LineBox {
     above: f32,
 }
 
+#[cfg(test)]
+impl Prepared {
+    /// Whether it was prepared as an edit of a recent text ([`Base`]).
+    pub(crate) fn is_edit(&self) -> bool {
+        self.base.is_some()
+    }
+
+    /// Its atoms, for comparing.
+    pub(crate) fn atoms_debug(&self) -> String {
+        format!("{:?}", self.atoms)
+    }
+}
+
+/// The lines of a prepared text at one maximum width.
+#[derive(Debug)]
+struct Broken {
+    /// The maximum width's bits (unbounded: `None`).
+    key: Option<u32>,
+    /// The atoms the lines are of, when words wider than a line were split
+    /// into characters; the prepared ones otherwise.
+    split: Option<Vec<Atom>>,
+    lines: Vec<LineBox>,
+}
+
+impl Broken {
+    fn atoms<'a>(&'a self, p: &'a Prepared) -> &'a [Atom] {
+        self.split.as_deref().unwrap_or(&p.atoms)
+    }
+}
+
+/// The widths a prepared text was broken at, few: a measure, a layout
+/// and the baseline all take the same lines.
+type LinesCache = Rc<RefCell<Vec<Rc<Broken>>>>;
+
+/// What a prepared text that is an edit of another keeps of it: atoms
+/// before `first` are the other's, and atoms from `new_after` on are its
+/// atoms from `old_after` on, moved.
+#[derive(Debug)]
+struct Base {
+    lines: LinesCache,
+    first: usize,
+    old_after: usize,
+    new_after: usize,
+}
+
+/// A long text prepared recently: what an edit of it is compared with.
+struct Recent {
+    units: Vec<u16>,
+    spans: Vec<(u32, u32, ResolvedTextStyle)>,
+    attachments: Vec<(u32, AttachmentBox)>,
+    atoms: Rc<[Atom]>,
+    lines: LinesCache,
+}
+
+/// An attachment's width, top above the baseline and extent above and
+/// below it.
+type AttachmentBox = (f32, f32, f32, f32);
+
+/// Texts at least this long (UTF-16 units) are kept for the edits after
+/// them ([`Recent`]); shorter ones are prepared again whole, quickly.
+const RECENT_MIN_UNITS: usize = 1024;
+
+/// How many recent texts are kept ([`Recent`]), how many widths each
+/// prepared text keeps lines at ([`LinesCache`]).
+const RECENT: usize = 4;
+const WIDTHS: usize = 4;
+
 /// A piece of a line on its way to the runs.
 struct Part {
-    text: String,
+    text: Rc<str>,
     style: u16,
     width: f32,
     kind: AtomKind,
@@ -430,6 +511,38 @@ struct Part {
     /// The `…` of a truncated last line, which is drawn but belongs to no
     /// offset.
     ellipsis: bool,
+}
+
+/// The end of the paragraph atom `from` is in: its break, or the end.
+fn paragraph_end(atoms: &[Atom], from: usize) -> usize {
+    atoms[from..]
+        .iter()
+        .position(|a| a.kind == AtomKind::Newline)
+        .map_or(atoms.len(), |i| from + i)
+}
+
+/// How many UTF-16 units `old` and `new` share at their start and, of the
+/// rest, at their end, never splitting a surrogate pair.
+fn common_ends(old: &[u16], new: &[u16]) -> (usize, usize) {
+    let mut prefix = old.iter().zip(new).take_while(|(a, b)| a == b).count();
+    if prefix > 0
+        && (0xD800..0xDC00).contains(&new[prefix - 1])
+        && prefix < new.len().min(old.len())
+    {
+        prefix -= 1;
+    }
+    let most = old.len().min(new.len()) - prefix;
+    let mut suffix = old
+        .iter()
+        .rev()
+        .zip(new.iter().rev())
+        .take(most)
+        .take_while(|(a, b)| a == b)
+        .count();
+    if suffix > 0 && (0xDC00..0xE000).contains(&new[new.len() - suffix]) {
+        suffix -= 1;
+    }
+    (prefix, suffix)
 }
 
 /// The characters of a run starting at `start` that are in `links`:
@@ -466,12 +579,349 @@ fn link_parts(links: &[(u32, u32)], start: u32, text: &str) -> Vec<(u32, u32, u1
 }
 
 impl WebTextEngine {
-    /// Lines of `p` at `max_width` (unbounded: `None`).
-    fn break_lines(&self, p: &Prepared, max_width: Option<f32>) -> (Vec<Atom>, Vec<LineBox>) {
+    /// Cuts the characters `range` (UTF-16 offsets) of a text into atoms,
+    /// measured: `range` starts and ends where atoms do, as the text's
+    /// ends, its spans' and its pieces' (between which atoms are cut by
+    /// the characters on either side alone) do.
+    fn atomize(
+        &self,
+        out: &mut Vec<Atom>,
+        units: &[u16],
+        spans: &[nsh_core::TextSpan],
+        styles: &[RunStyle],
+        attachments: &FxHashMap<u32, AttachmentBox>,
+        range: Range<u32>,
+    ) {
+        for (index, span) in spans.iter().enumerate() {
+            let Some(run) = styles.get(index) else {
+                break;
+            };
+            let index = index as u16;
+            let style = run.style;
+            let font = run.font.clone();
+            let numeric = run.numeric.clone();
+            let start = (span.start.max(range.start)) as usize;
+            let end = (span.end.min(range.end) as usize).min(units.len());
+            if start >= end {
+                continue;
+            }
+            let s = String::from_utf16_lossy(&units[start..end]);
+            let spacing = style.letter_spacing.0;
+            let mut at = start as u32;
+            let mut word = String::new();
+            let mut word_start = at;
+            let push = |atoms: &mut Vec<Atom>, text: String, kind, start, end| {
+                let width = match kind {
+                    AtomKind::Text | AtomKind::Space => {
+                        self.width(&font, numeric.as_ref(), &text)
+                            + spacing * text.chars().count() as f32
+                    }
+                    // Its placeholder's room on the line.
+                    AtomKind::Attachment(w, ..) => w,
+                    AtomKind::Newline => 0.0,
+                };
+                atoms.push(Atom {
+                    text: text.into(),
+                    style: index,
+                    width,
+                    kind,
+                    start,
+                    end,
+                });
+            };
+            let mut chars = s.chars().peekable();
+            while let Some(c) = chars.next() {
+                let len = c.len_utf16() as u32;
+                let attachment = (c == OBJECT).then(|| attachments.get(&at)).flatten();
+                if c == '\n' || c == ' ' || c == '\t' || wrap::is_cjk(c) || attachment.is_some() {
+                    if !word.is_empty() {
+                        push(
+                            out,
+                            std::mem::take(&mut word),
+                            AtomKind::Text,
+                            word_start,
+                            at,
+                        );
+                    }
+                    if c == '\n' {
+                        push(out, String::new(), AtomKind::Newline, at, at + len);
+                    } else if let Some(&(w, top, up, down)) = attachment {
+                        push(
+                            out,
+                            String::new(),
+                            AtomKind::Attachment(w, top, up, down),
+                            at,
+                            at + len,
+                        );
+                    } else if wrap::is_cjk(c) {
+                        push(out, c.to_string(), AtomKind::Text, at, at + len);
+                    } else {
+                        // A run of spaces is one atom.
+                        let mut spaces = c.to_string();
+                        let mut end = at + len;
+                        while let Some(&n) = chars.peek()
+                            && (n == ' ' || n == '\t')
+                        {
+                            spaces.push(n);
+                            end += 1;
+                            chars.next();
+                        }
+                        push(out, spaces, AtomKind::Space, at, end);
+                        at = end;
+                        word_start = at;
+                        continue;
+                    }
+                    at += len;
+                    word_start = at;
+                } else {
+                    if word.is_empty() {
+                        word_start = at;
+                    }
+                    word.push(c);
+                    at += len;
+                    // A hyphen ends a word (the line may break after it).
+                    if c == '-' && chars.peek().is_some_and(|n| n.is_alphanumeric()) {
+                        push(
+                            out,
+                            std::mem::take(&mut word),
+                            AtomKind::Text,
+                            word_start,
+                            at,
+                        );
+                        word_start = at;
+                    }
+                }
+            }
+            if !word.is_empty() {
+                push(out, word, AtomKind::Text, word_start, at);
+            }
+        }
+    }
+
+    /// `units` as an edit of a long text prepared recently ([`Recent`]):
+    /// its atoms, the other's outside the characters the edit changed (with
+    /// the words they touch) and new ones for those, measured, and what its
+    /// lines can reuse. `None` when no recent text has its spans, styles and
+    /// attachments outside the edit.
+    fn edit_of_recent(
+        &self,
+        units: &[u16],
+        text: &AttributedText,
+        attachments: &[(u32, AttachmentBox)],
+        styles: &[RunStyle],
+    ) -> Option<(Rc<[Atom]>, Option<Base>)> {
+        if units.len() < RECENT_MIN_UNITS
+            || !text
+                .spans
+                .windows(2)
+                .all(|w| w[0].start <= w[0].end && w[0].end <= w[1].start)
+        {
+            return None;
+        }
+        let mut recent = self.recent.borrow_mut();
+        // The one sharing the most with it, at either end.
+        let (index, prefix, suffix) = recent
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                let (p, s) = common_ends(&r.units, units);
+                (i, p, s)
+            })
+            .max_by_key(|&(_, p, s)| p + s)?;
+        if (prefix + suffix) * 2 < units.len() {
+            return None;
+        }
+        let old = recent.remove(index);
+        drop(recent);
+        let atoms = &old.atoms;
+        let old_len = old.units.len() as u32;
+        let new_len = units.len() as u32;
+        let (prefix, suffix) = (prefix as u32, suffix as u32);
+        let old_end = old_len - suffix;
+        let delta = i64::from(new_len) - i64::from(old_len);
+        let moved = |at: u32| (i64::from(at) + delta) as u32;
+        // From the first atom the edit touches (a word typed on grows)
+        // to the first one after the edit and the character before it.
+        let first = atoms.partition_point(|a| a.end < prefix);
+        let from = atoms.get(first).map_or(prefix, |a| a.start.min(prefix));
+        let old_after = atoms.partition_point(|a| a.start <= old_end);
+        let old_to = atoms.get(old_after).map_or(old_len, |a| a.start);
+        let to = moved(old_to);
+        // Spans, styles and attachments the same before `from` and after
+        // `to` (moved).
+        let new_spans: Vec<(u32, u32, ResolvedTextStyle)> = text
+            .spans
+            .iter()
+            .map(|s| (s.start, s.end, s.style))
+            .collect();
+        let clamp = |(start, end, style): (u32, u32, ResolvedTextStyle), len: u32| {
+            (start, end.min(len), style)
+        };
+        let before = |spans: &[(u32, u32, ResolvedTextStyle)], len| {
+            spans
+                .iter()
+                .map(move |&s| clamp(s, len))
+                .filter(|&(start, ..)| start < from)
+                // A span ending at `from` ends an atom there.
+                .map(|(start, end, style)| (start, end.min(from), end > from, style))
+                .collect::<Vec<_>>()
+        };
+        if before(&old.spans, old_len) != before(&new_spans, new_len)
+            || old.spans.first().map(|s| s.2) != new_spans.first().map(|s| s.2)
+        {
+            return None;
+        }
+        let after_old: Vec<_> = old
+            .spans
+            .iter()
+            .map(|&s| clamp(s, old_len))
+            .enumerate()
+            .filter(|&(_, (_, end, _))| end > old_to)
+            .collect();
+        let after_new: Vec<_> = new_spans
+            .iter()
+            .map(|&s| clamp(s, new_len))
+            .enumerate()
+            .filter(|&(_, (_, end, _))| end > to)
+            .collect();
+        if after_old.len() != after_new.len()
+            || !after_old.iter().zip(&after_new).all(|(o, n)| {
+                let ((_, (os, oe, ostyle)), (_, (ns, ne, nstyle))) = (o, n);
+                // A span starting at `to` starts an atom there.
+                ostyle == nstyle
+                    && moved(*oe) == *ne
+                    && moved(*os).max(to) == (*ns).max(to)
+                    && (*os < old_to) == (*ns < to)
+            })
+        {
+            return None;
+        }
+        // Atoms after the edit take the style of the same span moved.
+        let style_shift = match (after_old.first(), after_new.first()) {
+            (Some((o, _)), Some((n, _))) => *n as i64 - *o as i64,
+            _ => 0,
+        };
+        let attachments_before =
+            |list: &[(u32, AttachmentBox)]| list.iter().take_while(|a| a.0 < from).count();
+        let old_before = attachments_before(&old.attachments);
+        if old.attachments[..old_before] != attachments[..attachments_before(attachments)]
+            || !old
+                .attachments
+                .iter()
+                .filter(|a| a.0 >= old_to)
+                .map(|&(i, b)| (moved(i), b))
+                .eq(attachments.iter().filter(|a| a.0 >= to).copied())
+        {
+            return None;
+        }
+        let mut edited = Vec::with_capacity(atoms.len() + 8);
+        edited.extend_from_slice(&atoms[..first]);
+        let map: FxHashMap<u32, AttachmentBox> = attachments
+            .iter()
+            .filter(|a| (from..to).contains(&a.0))
+            .copied()
+            .collect();
+        self.atomize(&mut edited, units, &text.spans, styles, &map, from..to);
+        let new_after = edited.len();
+        edited.extend(atoms[old_after..].iter().map(|a| Atom {
+            start: moved(a.start),
+            end: moved(a.end),
+            style: (i64::from(a.style) + style_shift) as u16,
+            ..a.clone()
+        }));
+        Some((
+            edited.into(),
+            Some(Base {
+                lines: Rc::clone(&old.lines),
+                first,
+                old_after,
+                new_after,
+            }),
+        ))
+    }
+
+    /// Lines of `p` at `max_width` (unbounded: `None`), kept with it: a
+    /// measure, the baseline and the layout at one width break it once.
+    fn break_lines(&self, p: &Prepared, max_width: Option<f32>) -> Rc<Broken> {
         let max = if p.no_wrap { None } else { max_width };
+        let key = max.map(f32::to_bits);
+        if let Some(broken) = p.lines.borrow().iter().find(|b| b.key == key) {
+            return Rc::clone(broken);
+        }
+        let wide = max.is_some_and(|max| {
+            p.atoms
+                .iter()
+                .any(|a| a.kind == AtomKind::Text && a.width > max + 0.01)
+        });
+        let broken = Rc::new(if wide {
+            self.break_split(p, max, key)
+        } else {
+            Broken {
+                key,
+                split: None,
+                lines: Self::break_atoms(p, max, key),
+            }
+        });
+        let mut lines = p.lines.borrow_mut();
+        if lines.len() >= WIDTHS {
+            lines.remove(0);
+        }
+        lines.push(Rc::clone(&broken));
+        broken
+    }
+
+    /// The lines of `p`'s atoms as they are (no word wider than a line):
+    /// of an edit, the lines of the text it edits up to the first one the
+    /// edit can change and from the first one that starts on the text
+    /// after it as it started there before, and only those between broken
+    /// again.
+    fn break_atoms(p: &Prepared, max: Option<f32>, key: Option<u32>) -> Vec<LineBox> {
+        let atoms = &p.atoms[..];
+        let old = p.base.as_ref().and_then(|base| {
+            let lines = base.lines.borrow();
+            let old = lines.iter().find(|b| b.key == key && b.split.is_none())?;
+            Some((base, Rc::clone(old)))
+        });
+        let Some((base, old)) = old else {
+            let filled = wrap::fill_from(atoms, max, 0, |_| false);
+            return Self::line_boxes(p, atoms, &filled);
+        };
+        // Lines that looked at nothing from the first changed atom on.
+        let keep = old.lines.partition_point(|l| l.next < base.first);
+        let from = old.lines.get(keep).map_or(0, |l| l.start);
+        let shift = |i: usize| (i + base.new_after).wrapping_sub(base.old_after);
+        // A line starting on the moved atoms (after the one before them,
+        // which an empty line takes its height from) as one did before:
+        // the lines from there are the ones before, moved.
+        let resume = |start: usize| -> Option<usize> {
+            if start <= base.new_after {
+                return None;
+            }
+            let old_start = (start + base.old_after).checked_sub(base.new_after)?;
+            let i = old.lines[keep..].partition_point(|l| l.start < old_start) + keep;
+            (old.lines.get(i)?.start == old_start).then_some(i)
+        };
+        let filled = wrap::fill_from(atoms, max, from, |start| resume(start).is_some());
+        let mut lines = Vec::with_capacity(old.lines.len() + filled.lines.len());
+        lines.extend_from_slice(&old.lines[..keep]);
+        lines.extend(Self::line_boxes(p, atoms, &filled));
+        if let Some(i) = filled.stopped.and_then(resume) {
+            lines.extend(old.lines[i..].iter().map(|l| LineBox {
+                start: shift(l.start),
+                end: shift(l.end),
+                next: shift(l.next),
+                ..*l
+            }));
+        }
+        lines
+    }
+
+    /// The lines of `p` with words wider than a line split into
+    /// characters.
+    fn break_split(&self, p: &Prepared, max: Option<f32>, key: Option<u32>) -> Broken {
         // Words wider than a line are split into characters first.
         let mut atoms: Vec<Atom> = Vec::with_capacity(p.atoms.len());
-        for atom in &p.atoms {
+        for atom in p.atoms.iter() {
             match max {
                 Some(max) if atom.kind == AtomKind::Text && atom.width > max + 0.01 => {
                     let run = &p.styles[atom.style as usize];
@@ -487,7 +937,7 @@ impl WebTextEngine {
                         atoms.push(Atom {
                             width: self.run_width(run, cluster)
                                 + run.style.letter_spacing.0 * cluster.chars().count() as f32,
-                            text: cluster.to_owned(),
+                            text: cluster.into(),
                             style: atom.style,
                             kind: AtomKind::Text,
                             start: at,
@@ -500,11 +950,24 @@ impl WebTextEngine {
                 _ => atoms.push(atom.clone()),
             }
         }
-        // Metrics of the styles on each line (of the previous atom's style
-        // for an empty line).
-        let lines = wrap::fill(&atoms, max)
-            .into_iter()
-            .map(|line| {
+        let filled = wrap::fill_from(&atoms, max, 0, |_| false);
+        let lines = Self::line_boxes(p, &atoms, &filled);
+        Broken {
+            key,
+            split: Some(atoms),
+            lines,
+        }
+    }
+
+    /// The boxes of filled lines: their heights and baselines, from the
+    /// metrics of the styles on each (of the previous atom's style for an
+    /// empty line).
+    fn line_boxes(p: &Prepared, atoms: &[Atom], filled: &wrap::Filled) -> Vec<LineBox> {
+        filled
+            .lines
+            .iter()
+            .zip(&filled.next)
+            .map(|(line, &next)| {
                 let end = line.end;
                 let mut height = 0.0f32;
                 let mut above = 0.0f32;
@@ -548,13 +1011,13 @@ impl WebTextEngine {
                 LineBox {
                     start: line.start,
                     end,
+                    next,
                     width: line.width,
                     height,
                     above,
                 }
             })
-            .collect();
-        (atoms, lines)
+            .collect()
     }
 }
 
@@ -571,10 +1034,9 @@ impl TextEngine for WebTextEngine {
         alignments: &nsh_core::AttachmentAlignments,
     ) -> Prepared {
         let mut styles: Vec<RunStyle> = Vec::with_capacity(text.spans.len());
-        let mut atoms = Vec::new();
         // UTF-16 offset -> attachment: width, top above the baseline,
         // extent above and below it.
-        let attachments: FxHashMap<u32, (f32, f32, f32, f32)> = text
+        let mut attachments: Vec<(u32, AttachmentBox)> = text
             .attachments
             .iter()
             .map(|a| {
@@ -605,6 +1067,7 @@ impl TextEngine for WebTextEngine {
                 )
             })
             .collect();
+        attachments.sort_by_key(|&(index, _)| index);
         let units: Vec<u16> = text.text.encode_utf16().collect();
         for span in &text.spans {
             let style = span.style;
@@ -612,109 +1075,48 @@ impl TextEngine for WebTextEngine {
             let numeric: Option<Arc<str>> =
                 font_variant_numeric(style.font_variant).map(Into::into);
             let (ascent, descent) = self.metrics(&font, style.font_size.0);
-            let index = styles.len() as u16;
             styles.push(RunStyle {
                 style,
-                font: font.clone(),
-                numeric: numeric.clone(),
+                font,
+                numeric,
                 ascent,
                 descent,
             });
-            let start = span.start as usize;
-            let end = (span.end as usize).min(units.len());
-            if start >= end {
-                continue;
+        }
+        let edit = self.edit_of_recent(&units, text, &attachments, &styles);
+        let (atoms, base) = match edit {
+            Some(edit) => edit,
+            None => {
+                let mut atoms = Vec::new();
+                let attachments = attachments.iter().copied().collect();
+                self.atomize(
+                    &mut atoms,
+                    &units,
+                    &text.spans,
+                    &styles,
+                    &attachments,
+                    0..units.len() as u32,
+                );
+                (atoms.into(), None)
             }
-            let s = String::from_utf16_lossy(&units[start..end]);
-            let spacing = style.letter_spacing.0;
-            let mut at = span.start;
-            let mut word = String::new();
-            let mut word_start = at;
-            let push = |atoms: &mut Vec<Atom>, text: String, kind, start, end| {
-                let width = match kind {
-                    AtomKind::Text | AtomKind::Space => {
-                        self.width(&font, numeric.as_ref(), &text)
-                            + spacing * text.chars().count() as f32
-                    }
-                    // Its placeholder's room on the line.
-                    AtomKind::Attachment(w, ..) => w,
-                    AtomKind::Newline => 0.0,
-                };
-                atoms.push(Atom {
-                    text,
-                    style: index,
-                    width,
-                    kind,
-                    start,
-                    end,
-                });
-            };
-            let mut chars = s.chars().peekable();
-            while let Some(c) = chars.next() {
-                let len = c.len_utf16() as u32;
-                let attachment = (c == OBJECT).then(|| attachments.get(&at)).flatten();
-                if c == '\n' || c == ' ' || c == '\t' || wrap::is_cjk(c) || attachment.is_some() {
-                    if !word.is_empty() {
-                        push(
-                            &mut atoms,
-                            std::mem::take(&mut word),
-                            AtomKind::Text,
-                            word_start,
-                            at,
-                        );
-                    }
-                    if c == '\n' {
-                        push(&mut atoms, String::new(), AtomKind::Newline, at, at + len);
-                    } else if let Some(&(w, top, up, down)) = attachment {
-                        push(
-                            &mut atoms,
-                            String::new(),
-                            AtomKind::Attachment(w, top, up, down),
-                            at,
-                            at + len,
-                        );
-                    } else if wrap::is_cjk(c) {
-                        push(&mut atoms, c.to_string(), AtomKind::Text, at, at + len);
-                    } else {
-                        // A run of spaces is one atom.
-                        let mut spaces = c.to_string();
-                        let mut end = at + len;
-                        while let Some(&n) = chars.peek()
-                            && (n == ' ' || n == '\t')
-                        {
-                            spaces.push(n);
-                            end += 1;
-                            chars.next();
-                        }
-                        push(&mut atoms, spaces, AtomKind::Space, at, end);
-                        at = end;
-                        word_start = at;
-                        continue;
-                    }
-                    at += len;
-                    word_start = at;
-                } else {
-                    if word.is_empty() {
-                        word_start = at;
-                    }
-                    word.push(c);
-                    at += len;
-                    // A hyphen ends a word (the line may break after it).
-                    if c == '-' && chars.peek().is_some_and(|n| n.is_alphanumeric()) {
-                        push(
-                            &mut atoms,
-                            std::mem::take(&mut word),
-                            AtomKind::Text,
-                            word_start,
-                            at,
-                        );
-                        word_start = at;
-                    }
-                }
+        };
+        let lines = LinesCache::default();
+        if units.len() >= RECENT_MIN_UNITS {
+            let mut recent = self.recent.borrow_mut();
+            if recent.len() >= RECENT {
+                recent.remove(0);
             }
-            if !word.is_empty() {
-                push(&mut atoms, word, AtomKind::Text, word_start, at);
-            }
+            recent.push(Recent {
+                units,
+                spans: text
+                    .spans
+                    .iter()
+                    .map(|s| (s.start, s.end, s.style))
+                    .collect(),
+                attachments,
+                atoms: Rc::clone(&atoms),
+                lines: Rc::clone(&lines),
+            });
         }
         if styles.is_empty() {
             let style = ResolvedTextStyle::default();
@@ -730,6 +1132,8 @@ impl TextEngine for WebTextEngine {
         }
         Prepared {
             atoms,
+            lines,
+            base,
             styles: styles.into(),
             align: text.align,
             max_lines: text.max_lines,
@@ -742,13 +1146,26 @@ impl TextEngine for WebTextEngine {
 
     fn measure(&self, prepared: &Prepared, max_width: Option<Points>) -> Size<Points> {
         let max_width = max_width.map(|m| m.0);
-        let (_, lines) = self.break_lines(prepared, max_width);
+        let broken = self.break_lines(prepared, max_width);
+        let lines = &broken.lines;
         let shown = match prepared.max_lines {
             0 => lines.len(),
             n => lines.len().min(n as usize),
         };
         let lines = &lines[..shown];
-        let width = lines.iter().fold(0.0f32, |w, l| w.max(l.width));
+        let mut width = lines.iter().fold(0.0f32, |w, l| w.max(l.width));
+        // A clamp's last line inside its paragraph holds the rest of it,
+        // cut at the box (`layout`).
+        if shown < broken.lines.len()
+            && prepared.ellipsize != EllipsizeMode::Clip
+            && let (Some(max), Some(last)) = (max_width, lines.last())
+            && broken
+                .atoms(prepared)
+                .get(last.end)
+                .is_some_and(|a| a.kind != AtomKind::Newline)
+        {
+            width = max;
+        }
         let height: f32 = lines.iter().map(|l| l.height).sum();
         let width = match max_width {
             Some(max) => width.min(max),
@@ -757,11 +1174,22 @@ impl TextEngine for WebTextEngine {
         Size::new(Points(width.ceil()), Points(height.ceil()))
     }
 
+    fn first_baseline(&self, prepared: &Prepared, width: Points) -> Option<Points> {
+        // `layout` puts the first line's baseline its tallest ascent (with
+        // half-leading) below the top.
+        self.break_lines(prepared, Some(width.0))
+            .lines
+            .first()
+            .map(|line| Points(line.above))
+    }
+
     fn layout(&self, prepared: &Prepared, size: Size<Points>) -> TextLayout {
-        let (atoms, mut lines) = self.break_lines(prepared, Some(size.width.0));
+        let broken = self.break_lines(prepared, Some(size.width.0));
+        let atoms = broken.atoms(prepared);
+        let mut lines = &broken.lines[..];
         let mut truncated = false;
         if prepared.max_lines > 0 && lines.len() > prepared.max_lines as usize {
-            lines.truncate(prepared.max_lines as usize);
+            lines = &lines[..prepared.max_lines as usize];
             truncated = true;
         }
         let styles = prepared.styles.clone();
@@ -782,6 +1210,19 @@ impl TextEngine for WebTextEngine {
         let count = lines.len();
         for (n, line) in lines.iter().enumerate() {
             let last = n + 1 == count;
+            let clamped = last && truncated && prepared.ellipsize != EllipsizeMode::Clip;
+            // The last line a clamp shows holds the rest of its paragraph
+            // and is cut at the box, as CoreText, Pango and StaticLayout
+            // cut it: ending it where it broke would leave the ellipsis
+            // after a word that fit and the box empty past it.
+            let line = &if clamped {
+                LineBox {
+                    end: paragraph_end(atoms, line.end),
+                    ..*line
+                }
+            } else {
+                *line
+            };
             // Atoms of the line, without trailing spaces.
             let mut end = line.end;
             while end > line.start && atoms[end - 1].kind == AtomKind::Space {
@@ -798,24 +1239,39 @@ impl TextEngine for WebTextEngine {
                     ellipsis: false,
                 })
                 .collect();
-            let mut width = line.width;
+            let mut width = if clamped {
+                pieces.iter().map(|p| p.width).sum()
+            } else {
+                line.width
+            };
             // Not drawn, but a caret after them stands past them: the line
             // reports them in its width, as CoreText's lines do.
             let mut hanging: f32 = atoms[end..line.end].iter().map(|a| a.width).sum();
-            if last && truncated && prepared.ellipsize != EllipsizeMode::Clip {
+            if clamped {
                 hanging = 0.0;
                 let style = pieces.last().map_or(0, |p| p.style);
                 let ellipsis = self.run_width(&styles[style as usize], "…");
-                // Drop characters from the end until the ellipsis fits.
-                while width + ellipsis > size.width.0 + 0.01
+                let fits = |width: f32| width + ellipsis <= size.width.0 + 0.01;
+                // Pieces wholly past the box go at once (the line can hold
+                // a long paragraph); the one the box ends in loses
+                // characters from its end until the ellipsis fits.
+                while !fits(width)
                     && let Some(mut piece) = pieces.pop()
                 {
                     width -= piece.width;
-                    if piece.kind == AtomKind::Text && piece.text.chars().count() > 1 {
-                        piece.text.pop();
-                        piece.width = self.run_width(&styles[piece.style as usize], &piece.text);
-                        width += piece.width;
-                        pieces.push(piece);
+                    if fits(width) && piece.kind == AtomKind::Text {
+                        let mut shorter = piece.text.to_string();
+                        while shorter.chars().count() > 1 {
+                            shorter.pop();
+                            let w = self.run_width(&styles[piece.style as usize], &shorter);
+                            if fits(width + w) {
+                                piece.text = shorter.into();
+                                piece.width = w;
+                                width += w;
+                                pieces.push(piece);
+                                break;
+                            }
+                        }
                     }
                 }
                 // Trailing spaces before the ellipsis go.
@@ -823,7 +1279,7 @@ impl TextEngine for WebTextEngine {
                     width -= space.width;
                 }
                 pieces.push(Part {
-                    text: "…".to_owned(),
+                    text: "…".into(),
                     style,
                     width: ellipsis,
                     kind: AtomKind::Text,
@@ -897,7 +1353,7 @@ impl TextEngine for WebTextEngine {
                         runs.push(Run {
                             x,
                             y: baseline - s.ascent,
-                            text,
+                            text: text.to_string(),
                             style,
                             start: (!ellipsis).then_some(start),
                             links: Vec::new(),

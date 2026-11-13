@@ -286,7 +286,8 @@ and the classes naming tokens, `nsh/base` and Rust components' `theme()` follow 
 appearances. An embedding app's [theme overrides](../docs/tailwind.md#theme-tokens) still win over it. `null` gives
 back the theme the app was built with.
 
-The theme is read whole: when a value cannot be read (a color NSH does not know, such as `#zz` or `lab()`, a `var()`
+The theme is read whole: when a value cannot be read (a color NSH does not know, such as `#zz`, `lab()` or
+`rgb(255 0 0)garbage`, a `var()`
 that names no color, or a value that is no color in one appearance where the other's is), `setTheme` throws a
 `TypeError` that names each one, and the theme shown stays. Values of no kind a token has, such as shadows, are left
 out as they are from `nsh.json`'s. Build the new theme from the app's own, so the tokens its classes name keep a value
@@ -1070,6 +1071,28 @@ effect(() => {
 });
 ```
 
+### wakeCount
+
+```ts
+const wakeCount: Accessor<number>;
+```
+
+How many times the system woke from sleep while the app ran: 0 at the start, one more after each wake. A sleep may leave `lifecycle()` as it was (a laptop's lid closed and opened with the app in front), while network connections and timers did not live through it. Reactive: an effect that reads it runs again after each wake, where the app checks its connections or opens them again. macOS, Windows and Linux count wakes; on iOS and Android a sleeping device takes the app to the background, which `lifecycle()` reports. Rust: `wake_count() -> u32`.
+
+```rust tabs
+effect(move || {
+    if wake_count() > 0 {
+        feed.reconnect();
+    }
+});
+```
+
+```tsx tabs
+effect(() => {
+  if (wakeCount() > 0) feed.reconnect();
+});
+```
+
 ### setColorScheme
 
 ```ts
@@ -1089,6 +1112,53 @@ function setFpsEnabled(enabled: boolean): void;
 
 ```tsx
 <Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
+```
+
+### setFpsMode
+
+```ts
+function setFpsMode(mode: "expanded" | "collapsed" | "hidden"): void;
+```
+
+How the performance monitor shows, now and whenever it shows later: `"expanded"`, its whole panel (the default); `"collapsed"`, a pill with the frame rate alone, colored by the frame budget; `"hidden"`, nothing on screen while it still measures and logs. A click on the panel switches between the first two. macOS's panel takes it ([macOS](../docs/macos.md#performance-monitor)); platforms without a panel ignore it, and Linux's panel collapses on a click but doesn't take it yet. `NSH_FPS=collapsed` or `NSH_FPS=hidden` start the monitor so. Rust: `set_fps_mode(FpsMode::Collapsed)`.
+
+### perfStats
+
+```ts
+const perfStats: Accessor<PerfStats | null>;
+
+interface PerfStats {
+  readonly fps: number;
+  readonly refreshRate: number | null;
+  readonly dropped: number;
+}
+```
+
+What the monitor measured over the last second, read once a second while it measures (`fpsEnabled()`), and `null` while it does not and until its first second, so an app can show it its own way. `fps` is the frames shown per second: an idle app reads low, which is not slowness (only display refreshes in which the app changed count). `refreshRate` is the rate the display refreshes at (Hz), `null` until the monitor saw it refresh; `dropped` is the share of recent frames that took longer than one refresh, from 0 to 1 (`0.05` is 5%; in Rust a `Percentage`, the same fraction). Headless test runs measure too and draw no frames: they read 0 fps. Rust: `perf_stats() -> Option<PerfStats>`.
+
+```tsx
+<If when={perfStats()}>
+  <Text>{`${Math.round(perfStats()!.fps)} FPS`}</Text>
+</If>
+```
+
+### shadersAvailable
+
+```ts
+const shadersAvailable: Accessor<boolean>;
+```
+
+Whether the platform draws shader views (`Shader`, `ShaderEffect`, `ShaderTransition`, `ScreenEffect`,
+`ScreenTransition`), reactive. It is `true` on iOS, Android, macOS, Windows, Linux, GPUI, the web and in headless tests,
+and `false` in a terminal and in apps built with the `shader` feature turned off. It starts `true` and turns `false`
+for good when the first shader mounts on a machine whose GPU NSH cannot open (a browser without WebGL 2), so show the
+shader while it holds and the app's own drawing otherwise ([Shader](../elements/shader.md#whether-shaders-draw)).
+Rust: `shaders_available() -> bool`.
+
+```tsx
+<If when={shadersAvailable()} else={<Image src={backdrop} style={{ flex: 1 }} />}>
+  <Shader source={BACKDROP} style={{ flex: 1 }} />
+</If>
 ```
 
 ### platform
@@ -1139,10 +1209,11 @@ interface PlatformSelectSpec<T> {
   desktop?: T;  // platform.desktop true: macOS, Windows, Linux, desktop browsers, terminals
   native?: T;   // every platform but the web
   default?: T;
+  [platform: string]: T | undefined; // a platform built outside NSH, by its platform.name
 }
 ```
 
-Returns the value for the current OS (`ios`, `android`, `web`, ...), else `desktop` or `mobile` (by `platform.desktop`), else `native` (every platform but the web), else `default`, else `undefined`. Rust code matches on `os()` (and `is_desktop()` for `mobile` / `desktop`).
+Returns the value for `platform.name` (on a platform built outside NSH), else the current OS (`ios`, `android`, `web`, ...), else `desktop` or `mobile` (by `platform.desktop`), else `native` (every platform but the web), else `default`, else `undefined`. Rust code matches on `os()` (with `platform_name()` and `is_desktop()`).
 
 ```rust tabs
 use nsh_core::platform::Os;
@@ -1451,6 +1522,7 @@ import { Clipboard } from "nsh";
 ```ts
 const Clipboard: {
   writeText(text: string): Promise<void>;
+  write(item: ClipboardItem): Promise<void>;
   readText(): Promise<string>;
   hasText(): Promise<boolean>;
   writeImage(src: string): Promise<void>;
@@ -1458,6 +1530,11 @@ const Clipboard: {
   hasImage(): Promise<boolean>;
   readFiles(): Promise<string[]>;
 };
+
+interface ClipboardItem {
+  text: string; // the content as plain text
+  html?: string; // the same content as HTML
+}
 
 interface ClipboardImage {
   url: string; // a URL that Image shows and fetch reads
@@ -1468,6 +1545,7 @@ interface ClipboardImage {
 | TS | Rust (`nsh_core::prelude`) |
 |---|---|
 | `await Clipboard.writeText(text)` | `set_clipboard(text)` |
+| `await Clipboard.write({ text, html })` | `set_clipboard_item(item)` (a `ClipboardItem`) |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
 | `await Clipboard.hasText()` | `clipboard_has_string().await -> bool` |
 | `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` |
@@ -1520,6 +1598,42 @@ const copied = signal(false);
 >
   <Text>{copied() ? "Copied" : "Copy"}</Text>
 </View>;
+```
+
+### Clipboard.write
+
+```ts
+write(item: ClipboardItem): Promise<void>;
+```
+
+Puts the same content as plain text and as HTML on the clipboard, replacing what was there, as a browser copies a
+selection: apps that read formatting (mail, documents, rich text editors) paste the HTML, others the text. `html` is
+a fragment (`<p>Hello <b>world</b></p>`), not a whole page. Without `html` it is `writeText(text)`. Rust:
+`set_clipboard_item(item)` with a `ClipboardItem`.
+
+A `ClipboardItem` is one item on the clipboard in several formats, as GPUI's `ClipboardItem` is; here it is a plain
+object of its formats, `{ text, html? }`, a type only (the browser's `ClipboardItem` class stays the page's). Every
+format of an item goes on in one write, and formats the clipboard learns later join the same item.
+
+The HTML goes on as each platform's HTML type, in one write with the text: `text/html` on the web and Linux,
+`public.html` on macOS and iOS, an HTML clip on Android and `HTML Format` on Windows. GPUI and terminals put the text.
+On the web, a write made while the user's key or press is handled (a `RichEditor`'s copy) goes through the page's copy
+event, as a browser copies a selection. `Clipboard.readText` reads the text back; a paste reads the HTML (`onPaste`'s
+`html`).
+
+```rust tabs
+use nsh_core::prelude::*;
+
+let mut item = ClipboardItem::default();
+item.text = "Hello world".into();
+item.html = Some("<p>Hello <b>world</b></p>".into());
+set_clipboard_item(item);
+```
+
+```tsx tabs
+import { Clipboard } from "nsh";
+
+await Clipboard.write({ text: "Hello world", html: "<p>Hello <b>world</b></p>" });
 ```
 
 ### Clipboard.readText
@@ -1677,7 +1791,10 @@ writeImage(src: string): Promise<void>;
 
 Puts the image of `src`, a base64 `data:` URL or the `url` `readImage` gave, on the clipboard, replacing what it holds.
 Rust: `set_clipboard_image(src)`. On Windows it takes a PNG, the format browsers, Office and the Snipping Tool read. On
-Android it rejects with `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`.
+the web the image goes on the clipboard as a PNG, the image format browsers write; an image of another format also goes
+on as it is, as HTML (`<img>`, in a paste's `html`) and, in Chromium browsers, as the original `readImage` returns, so a
+GIF keeps its frames. On Android it rejects with
+`"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`.
 
 ```rust tabs
 set_clipboard_image(image.url.clone());
@@ -1750,10 +1867,15 @@ interface PickFilesOptions {
   multiple?: boolean; // let the user pick several (false: one)
   limit?: number; // at most this many when multiple (up to 100)
   filters?: { name: string; extensions: string[] }[]; // the types offered (none: any file)
+  maxSize?: number; // the largest file read, in bytes (512 MiB, also the most)
 }
 
 interface PickedFile {
-  file: File; // name, type, size in bytes and the bytes, as they are
+  file: File | null; // name, type, size in bytes and the bytes, as they are; null when not read
+  name: string;
+  type: string;
+  size: number; // in bytes, read or not
+  status: "read" | "tooLarge"; // "tooLarge": larger than maxSize, its bytes not read
 }
 
 interface PickImagesOptions {
@@ -1781,6 +1903,8 @@ interface PickedImage {
 | `image.size` | `file.size` (`Size<DevicePixels>`) |
 | `await Picker.pickFiles(options)` | `pick_files(request).await -> Vec<PickedFile>` |
 | `filters` | `FilePickRequest::new(multiple, limit).filter(FileFilter::new("Documents", ["pdf"]))` |
+| `maxSize` | `.max_size(10 << 20)` |
+| `picked.status`, `.size` | `file.status` (`PickedStatus::TooLarge`), `file.len` |
 
 ### Picker.pickImages
 
@@ -1898,8 +2022,13 @@ It rejects as `pickImages` does: a `RangeError` for options out of range (`limit
 const picked = await Picker.pickFiles({
   multiple: true,
   filters: [{ name: "Documents", extensions: ["pdf", "md"] }],
+  maxSize: 10 * 1024 * 1024,
 });
-for (const { file } of picked) {
+for (const { file, name } of picked) {
+  if (!file) {
+    showError(`${name} is larger than 10 MB`);
+    continue;
+  }
   const form = new FormData();
   form.append("document", file);
   await fetch("https://api.example.com/documents", { method: "POST", body: form });
@@ -1908,7 +2037,7 @@ for (const { file } of picked) {
 
 | Platform | Picker | Filters |
 |---|---|---|
-| macOS | `NSOpenPanel` sheet | All the extensions at once |
+| macOS | `NSOpenPanel`: a sheet of the app's window, or, while that window is out of sight (a tray app's hidden main window), a panel of its own in front | All the extensions at once |
 | Windows | `IFileOpenDialog` | One choice per filter, shown by its name |
 | Linux | `GtkFileDialog` (the portal's where there is one) | One choice per filter, shown by its name |
 | iOS | `UIDocumentPickerViewController`, as copies | All the extensions at once |
@@ -1917,8 +2046,9 @@ for (const { file } of picked) {
 | GPUI | GPUI's open dialog, which offers any file | Files that do not pass are left out afterwards |
 
 None needs a permission. Files come as they are: nothing is converted, and each keeps its name. A file's whole bytes are
-read into memory, so a file larger than 512 MiB is left out of the answer and logged. A filter is what the picker
-offers, not a promise: check what you get.
+read into memory, up to `maxSize` (512 MiB when not given, and never more): a larger file is not read and comes with its
+name, type and size only (`file` null, `status` `"tooLarge"`), so the app can tell the user. A filter is what the
+picker offers, not a promise: check what you get.
 
 ### Embedding apps
 
@@ -1957,8 +2087,8 @@ async function notifyMe() {
 }
 ```
 
-Rust code calls `request_notification_permission`, `show_notification`, `close_notification`, `set_badge` and
-`next_notification_press` of `nsh_core::prelude`.
+Rust code calls `request_notification_permission`, `show_notification`, `close_notification`,
+`close_all_notifications`, `set_badge` and `next_notification_press` of `nsh_core::prelude`.
 
 | Platform | Notifications | Badge |
 | --- | --- | --- |
@@ -1983,6 +2113,20 @@ to the browser.
 
 ```tsx
 await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
+```
+
+### Notifications.closeAll
+
+`closeAll()` removes every notification the app showed, shown or waiting to show. Call it when the user signs out, so
+what the notifications said goes with the account. On Apple platforms, Windows and Android the system's notification
+center keeps notifications across runs, and `closeAll()` removes the ones NSH showed there, an earlier run's included,
+while an embedding app's own notifications stay. On Linux and the web it removes those the running app showed.
+
+```tsx
+async function signOut() {
+  await Notifications.closeAll();
+  Notifications.setBadge(0);
+}
 ```
 
 ### Notifications.on
@@ -2054,7 +2198,7 @@ An app that embeds NSH owns its schemes and hands a URL to its view: `AppView.op
 const UrlScheme: {
   on(event: "open", listener: (event: { url: string }) => void): () => void;
   /** The address moved without the app moving it (the web's back and forward, an address the user typed). */
-  on(event: "change", listener: (event: { url: string; cause: "back" | "forward" | "address" }) => void): () => void;
+  on(event: "change", listener: (event: { url: string; reason: "back" | "forward" | "address" }) => void): () => void;
   /** The app's address, or null when it has none. */
   url(): string | null;
   /** Sets the address of the page shown; the app's pages stay as they are. */
@@ -2147,7 +2291,7 @@ address and what moved it. `url()` reads the address already, and the app shows 
 UrlScheme.on("change", ({ url }) => tab.set(tabOf(url)));
 ```
 
-| `cause` | When (on the web, the app the whole page) |
+| `reason` | When (on the web, the app the whole page) |
 | --- | --- |
 | `"back"`, `"forward"` | The browser's back or forward went to an entry of the same pages with another address (an address the user typed), or a back popped pages and left an address the app did not set as it answered (no `onChange` sets one) |
 | `"address"` | The user gave the page an address of the app's, a `#fragment` typed in the address bar: a new entry after the current one, with the app's pages as they are |
@@ -2156,7 +2300,7 @@ What the stack accounts for stays as it is: a back that pops pages is the stack'
 stack no longer has is `open`, and the app's own `setUrl` is no `change`. Moves that come while nothing listens are not
 kept: `url()` has them. The native platforms, GPUI hosts and terminals have no history of addresses, so `change` comes
 only on the web. Rust code awaits `next_app_url_change()` of `nsh_core::prelude`, an `AppUrlChange` with the `url` and
-its `cause`.
+its `reason`.
 
 ## Speech
 
@@ -2326,7 +2470,7 @@ import { AudioPlayer, Sound } from "nsh";
 ```ts
 declare class Sound {
   static available(): Promise<boolean>;
-  static load(src: string): Promise<Sound>;
+  static load(src: string | Uint8Array): Promise<Sound>;
   play(options?: { volume?: number; rate?: number }): void;
   stop(): void;
   readonly duration: number;
@@ -2372,8 +2516,10 @@ type AudioErrorCode =
 
 Loads a sound from an imported audio file (`import click from "./sounds/click.wav"`: the import is the file's
 `asset:/` URL, and the file ships with the app), a `file:` URL, a `data:` URI or an `http(s)` URL
-the app's `network` capability grants, and decodes it into memory. A source the engine loaded already is shared: two
-components loading the same click cost one decode. The sound is freed by `dispose()`, or when what loaded it goes (a
+the app's `network` capability grants, or from a sound file's bytes (a `Uint8Array` the app made or downloaded; in
+Rust also bytes it embeds, `load_sound(include_bytes!("tick.wav"))`), and decodes it into memory. The bytes' format
+(WAV, AAC, MP3, ...) is read from the bytes themselves. A source the engine loaded already is shared, and so are equal
+bytes: two components loading the same click cost one decode. The sound is freed by `dispose()`, or when what loaded it goes (a
 component unmounts). A sound is at most 8 MB encoded and 5 seconds long, and an app holds at most 64 sounds and 16 MB
 of decoded audio at once; past them `load` rejects with `code` `"ERR_NSH_QUOTA_EXCEEDED"`. Longer audio is an
 `AudioPlayer`'s.
@@ -2788,13 +2934,14 @@ interface KeyBindingOptions {
   when?: "always" | "notEditing";
   repeat?: boolean;
   passThrough?: boolean;
+  forFocus?: boolean;
 }
 ```
 
 | TS | Rust |
 |---|---|
 | `keymap.bind(keystroke, handler)` | `on_key(keystroke, handler)` |
-| `keymap.bind(keystroke, handler, { when, repeat, passThrough })` | `on_key_with(keystroke, KeyOptions { when, repeat, pass_through }, handler)`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
+| `keymap.bind(keystroke, handler, { when, repeat, passThrough, forFocus })` | `on_key_with(keystroke, KeyOptions { when, repeat, pass_through, for_focus }, handler)`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
 | `keymap.bind({ … })` | one `on_key` per keystroke |
 | `keymap.label(keystroke)` | `key_label(keystroke)` |
 
@@ -2966,6 +3113,20 @@ on_key_with("tab", KeyOptions { pass_through: true, ..KeyOptions::default() }, m
 
 ```tsx tabs
 keymap.bind("tab", close, { passThrough: true });
+```
+
+With the keyboard focus on a view that takes presses (`onPress`), a plain Return or Space (Shift allowed) presses that view, and the app's other bindings of those keys give way to it: a dialog's Return for its main action does not act instead of the button the user moved the focus to. A view's own Return or Space binds with `forFocus: true`: bound while the view has the focus, it takes those keys before the press. A tile whose Space flips its switch and whose Return opens it:
+
+```rust tabs
+on_key_with("space", KeyOptions { for_focus: true, ..KeyOptions::default() }, move |_| flip());
+```
+
+```tsx tabs
+<View
+  onPress={open}
+  onFocus={() => (unbind = keymap.bind("space", flip, { forFocus: true }))}
+  onBlur={() => unbind?.()}
+/>
 ```
 
 Menu shortcuts give way to a binding of the same keystroke: the application menu's ([`nsh/desktop`](./nsh-desktop)) on every desktop, and on macOS the built-in menus' too (Cmd+W, Cmd+C, ...). While you develop with `nsh run`, Cmd+R / Ctrl+R always reloads the app, even if it binds `mod+r`; a packaged app can bind it.

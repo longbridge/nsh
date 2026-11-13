@@ -90,6 +90,7 @@ mount(App);
 | `.active(\|s\| ..)` | `activeStyle` | `active:` | 按下时。 |
 | `.hover(\|s\| ..)` | `hoverStyle` | `hover:` | 指针悬停在上面时（桌面、iPad 指针、浏览器）。 |
 | `.focus(\|s\| ..)` | `focusStyle` | `focus:` | 获得焦点时。 |
+| `.focus_visible(\|s\| ..)` | `focusVisibleStyle` | `focus-visible:` | 获得焦点并显示焦点时：键盘把焦点移到了这里（按压或轻点给出的焦点不显示）。 |
 | `.focus_within(\|s\| ..)` | `focusWithinStyle` | `focus-within:` | 自身或内部的视图获得焦点时：包住正在编辑的输入框的外框。 |
 | `.disabled_style(\|s\| ..)` | `disabledStyle` | `disabled:` | 禁用时。 |
 | `.ripple(Ripple { .. })` | `android={{ ripple }}` | | Android 的 Material 水波纹（`color`、`borderless`、`radius`、`foreground`），叠加在这些样式之上。 |
@@ -177,7 +178,7 @@ view()
 |---|---|---|
 | `.hit_slop(EdgeInsets)` | `hitSlop: number \| { top?, right?, bottom?, left? }` | 在边界四周增加的点数。`EdgeInsets::all(..)` 和 TSX 的数字都作用于四边。 |
 
-扩展出的区域要留在父视图的范围内（给小视图留出一些 margin 或 padding）：命中测试要经过父视图才能到达子视图，落在父视图之外的触摸到不了子视图的扩展区域。
+扩展出的区域超出父视图及更上层视图的范围时同样接收触摸，和放在父视图之外的子视图一样（见下文）：一行高 24 点、行内同样高 24 点的按钮扩展 10 点，就能在这一行上下 10 点内接收触摸。视图重叠时仍是上层的视图优先，与扩展区域无关。裁剪溢出的视图（`overflow: hidden`、滚动视图、列表）同样裁剪它所含视图的扩展区域：落在它之外、不显示内容的地方的触摸不会进入。
 
 ## 超出父视图的子视图
 
@@ -304,6 +305,8 @@ mount(App);
 - **只绑定一个轴时，另一个轴照常滚动。** 只绑定水平值时，只有手指的水平移动大于垂直移动，拖动才会开始，所以竖向滚动视图里的横向滑动行仍然可以上下滚动。这个判断在系统询问手势能否开始时由原生做出。
 - **拖动、捏合和旋转可以同时进行**：同一张卡片可以同时被拖动、缩放和旋转。
 - **用松手速度做物理效果。** 拖动结束时的速度可以直接作为弹簧或衰减的速度；绑定的值用来挑选吸附点。
+
+视图挂着拖动回调或 `pan` 值时就可以拖动，所以在表达式里写条件就能开关它的拖动：`onPanEnd={zoomed() ? undefined : close}` 在 `zoomed()` 为真时把拖动交给里面的内容。条件要写在表达式里：只写一个名字（`onPanEnd={handler}`）只设置一次（[哪些会重新运行](./jsx-and-components.md#哪些会重新运行)）。
 
 ```rust tabs
 // 吸附到左边或右边的卡片。
@@ -438,7 +441,7 @@ let origin = 0;
 
 | Rust | TSX | 说明 |
 |---|---|---|
-| `.on_responder_grant(..)` | `onResponderGrant` | 该视图现在是响应者。Rust 默认阻止原生滚动视图接管触摸（`TouchClaim::block_native(false)` 则允许）；TSX 中返回 `true` 达到同样效果。 |
+| `.on_responder_grant(..)` | `onResponderGrant` | 该视图现在是响应者。Rust 默认阻止原生滚动视图接管触摸，在 iOS 上也阻止其外层导航栈的滑动返回（`TouchClaim::block_native(false)` 则允许）；TSX 中返回 `true` 达到同样效果。 |
 | `.on_responder_reject(..)` | `onResponderReject` | 另一个视图是响应者且不肯放手。 |
 | `.on_responder_start(..)` | `onResponderStart` | 又有一根手指按下。 |
 | `.on_responder_move(..)` | `onResponderMove` | 手指移动。 |

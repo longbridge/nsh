@@ -1791,6 +1791,17 @@ impl TextEngine for DWriteTextEngine {
         Size::new(Points(width.ceil()), Points(height.ceil()))
     }
 
+    fn first_baseline(&self, p: &Prepared, width: Points) -> Option<Points> {
+        // Typeset at the size it measures `width` wide, as the text is laid
+        // out: the baseline of its first line (a run's is the same `top +
+        // ascent`; the line, as a line of only a break or an attachment has
+        // no runs).
+        let layout = self.layout(p, self.measure(p, Some(width)));
+        let layout = layout.downcast::<WinLayout>()?;
+        let first = &layout.lines.first()?.info;
+        Some(first.y + first.ascender)
+    }
+
     fn layout(&self, p: &Prepared, size: Size<Points>) -> TextLayout {
         let shown = self.configure(p, Some(size.width.0));
         let Some(layout) = &p.layout else {
@@ -2643,6 +2654,21 @@ pub(crate) fn range_rect(state: &ViewState, start: u32, end: u32) -> Option<(f32
     first
 }
 
+/// The box (view coordinates) around the rectangles the characters
+/// `start..end` of the text view with `state` cover (a selectable view's
+/// selection).
+pub(crate) fn range_bounds(state: &ViewState, start: u32, end: u32) -> Option<Bounds<Points>> {
+    let drawn = state.text.as_ref()?;
+    let layout = drawn.layout.downcast::<WinLayout>()?;
+    let (cx, cy) = (drawn.content.origin.x.0, drawn.content.origin.y.0);
+    let mut out: Option<Bounds<Points>> = None;
+    layout.range_rects((start, end), |x, y, w, h| {
+        let line = crate::geom::rect(cx + x, cy + y, w, h);
+        out = Some(out.map_or(line, |b| b.union(&line)));
+    });
+    out
+}
+
 /// The UTF-16 offset of the character at `(x, y)` (view coordinates), if
 /// any (presses on nested text links).
 pub(crate) fn char_at(state: &ViewState, x: f32, y: f32) -> Option<u32> {
@@ -2928,7 +2954,7 @@ pub(crate) fn context_menu(surface: &Rc<crate::surface::Surface>, view: &NshView
         vec![
             LocalItem::Item {
                 role: Some(MenuRole::Copy),
-                label: "",
+                label: String::new(),
                 enabled: selected,
                 action: Rc::new(move |_| {
                     if let Some(text) = selected_text(&copy) {
@@ -2938,7 +2964,7 @@ pub(crate) fn context_menu(surface: &Rc<crate::surface::Surface>, view: &NshView
             },
             LocalItem::Item {
                 role: Some(MenuRole::SelectAll),
-                label: "",
+                label: String::new(),
                 enabled: true,
                 action: Rc::new(move |s| {
                     let len = all.state().text.as_ref().map_or(0, |t| t.text.len_utf16());
@@ -3604,6 +3630,42 @@ mod tests {
         // Its middle above the baseline.
         let (top, up, _) = place(nsh_core::VerticalAlign::Middle);
         assert!(top + 15.0 < up, "{top} {up}");
+    }
+
+    /// A text's first baseline (what `align-items: baseline` lines it up
+    /// by) is where its first line is drawn, wrapped or not, and grows
+    /// with the font.
+    #[test]
+    fn the_first_baseline_is_the_first_lines() {
+        let engine = engine();
+        let at_of = |content: &str, size: f32, width: Option<f32>| {
+            let t = text(&[(content, plain(size))]);
+            let (measured, layout) = layout_of(&engine, &t, width);
+            let prepared = engine.prepare(&t);
+            let baseline = engine
+                .first_baseline(&prepared, measured.width)
+                .expect("a first line");
+            let line = engine.lines(&layout).remove(0);
+            (baseline.0, line.y.0 + line.ascender.0)
+        };
+        let at = |size, width| at_of("Chat with the world", size, width);
+        let near = |a: f32, b: f32| (a - b).abs() < 0.5;
+        let (small, drawn) = at(12.0, None);
+        assert!(near(small, drawn), "{small} {drawn}");
+        let (wrapped, drawn) = at(12.0, Some(30.0));
+        assert!(
+            near(wrapped, drawn) && near(wrapped, small),
+            "{wrapped} {drawn}"
+        );
+        let (large, _) = at(24.0, None);
+        assert!(large > small, "{large} {small}");
+        // A first line of only a break has no runs: its own baseline, not
+        // the next line's.
+        let (broken, drawn) = at_of("\nChat", 12.0, None);
+        assert!(
+            near(broken, drawn) && near(broken, small),
+            "{broken} {drawn}"
+        );
     }
 
     #[test]

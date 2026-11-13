@@ -638,16 +638,24 @@ unsafe extern "C" fn pan_create(
     }
 }
 
-/// The centroid of `e.touches`.
-fn centroid(cx: *mut JsContext, e: JsValue) -> (f64, f64, usize) {
+/// The centroid of `e.touches`; `None` (an exception pending) when the
+/// array's length throws or is longer than [`dom::MAX_ARRAY_ITEMS`] (the
+/// app may call the handlers with an event of its own).
+fn centroid(cx: *mut JsContext, e: JsValue) -> Option<(f64, f64, usize)> {
     let list = get(cx, e, c"touches");
-    let mut len: i64 = 0;
+    let mut len = 0;
     let (mut x, mut y) = (0.0, 0.0);
     // SAFETY: reads of live values, freed after.
     unsafe {
-        if qjs::JS_IsArray(list) && qjs::JS_GetLength(cx, list, &mut len) == 0 {
-            for i in 0..len.max(0) {
-                let p = qjs::JS_GetPropertyInt64(cx, list, i);
+        if qjs::JS_IsArray(list) {
+            // Read natively: a sparse array is as long as it says.
+            let Some(n) = dom::checked_len(cx, list) else {
+                qjs::JS_FreeValue(cx, list);
+                return None;
+            };
+            len = n;
+            for i in 0..len {
+                let p = qjs::JS_GetPropertyUint32(cx, list, i);
                 x += get_number(cx, p, c"pageX");
                 y += get_number(cx, p, c"pageY");
                 qjs::JS_FreeValue(cx, p);
@@ -655,8 +663,8 @@ fn centroid(cx: *mut JsContext, e: JsValue) -> (f64, f64, usize) {
         }
         qjs::JS_FreeValue(cx, list);
     }
-    let n = len.max(1) as f64;
-    (x / n, y / n, len.max(0) as usize)
+    let n = f64::from(len.max(1));
+    Some((x / n, y / n, len as usize))
 }
 
 fn remember(cx: *mut JsContext, last: JsValue, x: f64, y: f64, time: f64, count: usize) {
@@ -666,9 +674,10 @@ fn remember(cx: *mut JsContext, last: JsValue, x: f64, y: f64, time: f64, count:
     set(cx, last, c"n", number(count as f64));
 }
 
-/// A grant or a first finger: the gesture starts here.
-fn reset(cx: *mut JsContext, gs: JsValue, last: JsValue, e: JsValue) {
-    let (x, y, n) = centroid(cx, e);
+/// A grant or a first finger: the gesture starts here; `None` (an
+/// exception pending) as [`centroid`].
+fn reset(cx: *mut JsContext, gs: JsValue, last: JsValue, e: JsValue) -> Option<()> {
+    let (x, y, n) = centroid(cx, e)?;
     for (k, v) in [
         (c"moveX", x),
         (c"moveY", y),
@@ -683,11 +692,13 @@ fn reset(cx: *mut JsContext, gs: JsValue, last: JsValue, e: JsValue) {
     }
     set(cx, gs, c"numberActiveTouches", number(n as f64));
     remember(cx, last, x, y, get_number(cx, e, c"timestamp"), n);
+    Some(())
 }
 
 /// Moves the gesture to `e`'s touches (a finger going down or up makes
-/// the centroid jump, which is no movement).
-fn update(cx: *mut JsContext, gs: JsValue, last: JsValue, e: JsValue) {
+/// the centroid jump, which is no movement); `None` (an exception
+/// pending) as [`centroid`].
+fn update(cx: *mut JsContext, gs: JsValue, last: JsValue, e: JsValue) -> Option<()> {
     let time = get_number(cx, e, c"timestamp");
     let (lx, ly, lt, ln) = (
         get_number(cx, last, c"x"),
@@ -695,9 +706,9 @@ fn update(cx: *mut JsContext, gs: JsValue, last: JsValue, e: JsValue) {
         get_number(cx, last, c"t"),
         get_number(cx, last, c"n") as usize,
     );
-    let (x, y, n) = centroid(cx, e);
+    let (x, y, n) = centroid(cx, e)?;
     if time == lt && n == ln {
-        return;
+        return Some(());
     }
     set(cx, gs, c"numberActiveTouches", number(n as f64));
     if n == ln {
@@ -722,6 +733,7 @@ fn update(cx: *mut JsContext, gs: JsValue, last: JsValue, e: JsValue) {
     set(cx, gs, c"moveX", number(x));
     set(cx, gs, c"moveY", number(y));
     remember(cx, last, x, y, time, n);
+    Some(())
 }
 
 /// Calls the config's `name(e, gs)`; `None` when it has none.
@@ -785,9 +797,11 @@ unsafe extern "C" fn pan_handler(
     match magic {
         // onStartShouldSetResponderCapture
         0 => {
-            let (_, _, n) = centroid(cx, e);
-            if n == 1 {
-                reset(cx, gs, last, e);
+            let Some((_, _, n)) = centroid(cx, e) else {
+                return qjs::JS_EXCEPTION;
+            };
+            if n == 1 && reset(cx, gs, last, e).is_none() {
+                return qjs::JS_EXCEPTION;
             }
             set(cx, gs, c"numberActiveTouches", number(n as f64));
             let r = callback(cx, config, c"onStartShouldSetPanResponderCapture", e, gs);
@@ -798,14 +812,18 @@ unsafe extern "C" fn pan_handler(
             false,
         ),
         2 => {
-            update(cx, gs, last, e);
+            if update(cx, gs, last, e).is_none() {
+                return qjs::JS_EXCEPTION;
+            }
             answer(
                 callback(cx, config, c"onMoveShouldSetPanResponderCapture", e, gs),
                 false,
             )
         }
         3 => {
-            update(cx, gs, last, e);
+            if update(cx, gs, last, e).is_none() {
+                return qjs::JS_EXCEPTION;
+            }
             answer(
                 callback(cx, config, c"onMoveShouldSetPanResponder", e, gs),
                 false,
@@ -813,7 +831,9 @@ unsafe extern "C" fn pan_handler(
         }
         // onResponderGrant: the gesture starts at the grant.
         4 => {
-            reset(cx, gs, last, e);
+            if reset(cx, gs, last, e).is_none() {
+                return qjs::JS_EXCEPTION;
+            }
             if let Some(r) = callback(cx, config, c"onPanResponderGrant", e, gs) {
                 // SAFETY: an inline tag check.
                 if unsafe { qjs::JS_IsException(r) } {
@@ -828,7 +848,9 @@ unsafe extern "C" fn pan_handler(
         }
         5 => ignore(callback(cx, config, c"onPanResponderReject", e, gs)),
         6..=8 => {
-            update(cx, gs, last, e);
+            if update(cx, gs, last, e).is_none() {
+                return qjs::JS_EXCEPTION;
+            }
             let name = match magic {
                 6 => c"onPanResponderStart",
                 7 => c"onPanResponderMove",
@@ -990,6 +1012,7 @@ mod tests {
                 page: point(px(x), px(y)),
                 location: point(px(x), px(y)),
                 changed: true,
+                pointer_type: nsh_core::PointerType::Touch,
             }],
         }))
     }

@@ -17,7 +17,7 @@ macOS 后端的行为是桌面应用：鼠标、触控板和键盘输入，可�
 
 ## 环境要求
 
-- 运行应用的机器需要 **macOS 14** 及以上。
+- 运行应用的机器需要 **macOS 14** 及以上，或应用指定的更高版本（见[最低系统版本](./packaging.md#最低系统版本)）。
 - Xcode 命令行工具（`xcode-select --install`），用于构建 Rust 应用的 runner、从源码构建 NSH 的 macOS 运行时以及打包应用
   （`codesign`、`sips`）。在 Mac 上用 `cargo xtask dist` 制作的发行版把 TSX 应用的运行时放在 `runtime/macos/` 中。
 
@@ -73,6 +73,8 @@ dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1
 下方的柱状图是最近 120 帧的主线程耗时，与一次刷新的时长（横线）对比：在一半以内为绿色，在其以内为琥珀色，超过为红色。
 面板显示时，读数也会每秒记录到日志一次（target `nsh::fps`，格式与 Linux 后端相同，帧阶段为 macOS 的 `tick`、`drain` 和 `canvas`；毫秒，依次为 mean/p50/p95/max），`nsh test --fps -v` 会显示这些日志，`examples/gallery/tools/perf.py` 会读取它们。请测量 release 构建；监视器关闭时没有任何开销。
 
+点一下面板，它会收成一个只显示帧率的小药丸：帧的主线程耗时 95 分位数在一次刷新时长的一半以内为绿色，在其以内为琥珀色，超过为红色（与柱状图的颜色相同）；再点一下展开。VoiceOver 把它读成一个带这个数值的按钮，按下的效果相同。面板只接收落在它上面的点击，应用的其他区域照常收到鼠标，与没有面板时一样。应用用 `setFpsMode` 设置它的显示方式（`"expanded"`、`"collapsed"`，或 `"hidden"`：不显示任何东西，但照常测量并记录日志；Rust：`set_fps_mode(FpsMode::Collapsed)`，嵌入时用 `AppView::set_fps_mode`），立即生效，之后再显示时也照此显示；`NSH_FPS=collapsed` 或 `NSH_FPS=hidden` 让它以这种方式启动。
+
 ## 打包
 
 ```sh
@@ -93,6 +95,11 @@ nsh package App.tsx --target macos [--run]   # TSX 应用
 ```
 
 `.app` 使用 ad hoc 签名，因此可以在构建它的 Mac 上运行。要分发它，请用 Developer ID 签名并进行公证。`--run` 会在打包后打开应用。
+
+应用把它的警告、错误以及 `console.log` 和 `console.info` 日志写入统一日志，以它的 id 为子系统：“控制台”应用会显示它们，
+`log stream --predicate 'subsystem == "com.example.notes"'` 也会。从终端启动时（`.nsh/out/<Name>.app/Contents/MacOS/<Name>`），
+它还会把日志打印在终端里；标准错误重定向到文件时（`2> app.log`、`open --stderr app.log`）也会写进文件
+（[打包应用的日志](./dev-server-and-debugging.md#a-packaged-apps-logs)）。
 
 ## 菜单栏应用
 
@@ -145,6 +152,9 @@ function App() {
 mount(App);
 ```
 
+菜单栏应用常常提供登录时打开：用户打开它时，`Application.setLaunchAtLogin(true)` 把应用包登记为登录项（见
+[登录时打开](../modules/nsh-desktop.md#登录时打开)）。
+
 用 `AppView` 嵌入的应用按宿主应用的方式参与系统界面（宿主的 `LSUIElement`，或 `NSApplication.setActivationPolicy`）。
 
 ## 嵌入 Mac 应用
@@ -193,6 +203,10 @@ view.load(Bundle::source(code).into());
 
 `AppOptions::notifications` 把进程的[通知](../modules/nsh.md#notifications)交给视图运行的应用：横幅、点击和角标都归它。默认关闭，这时嵌入应用的通知是 `unavailable`，你的应用的通知仍归你；`run_app` 会打开它。
 
+`AppOptions::login_item` 让 `run_app` 运行的应用拥有[登录项](../modules/nsh-desktop.md#登录时打开)：应用包的登录项
+（`SMAppService.mainApp`）。默认关闭，且只有 `run_app` 读取它，所以嵌入应用 不会登录时打开；`nsh package`
+构建的应用的运行器会打开它。
+
 `AppOptions::cache`（或 `AppView::set_cache`，作用于之后加载的应用）设置应用保存缓存（[下载的图片](./images-and-assets.md#磁盘缓存)）的位置和每种缓存的大小（`CacheOptions`：默认为系统的缓存目录和 256 MiB 图片）。
 
 `AppView::set_locale(Some(locale))` 和 `AppView::set_font_scale(Some(scale))` 用你的应用的语言和文字大小代替系统的设置（`None` 恢复跟随系统）：`locale()`、`Intl`、`fontScale()` 和文字立即跟随（[设备与环境](./device-and-environment.md#在嵌入它的应用中)）。
@@ -221,11 +235,12 @@ view.load(Bundle::source(code).into());
 运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`platform.idiom` 为 `"desktop"`），`os_version()`（`platform.version`）为 macOS 的版本号，
 深色模式实时跟随系统外观。见[设备与环境](./device-and-environment.md)。
 
-输入是桌面输入：鼠标、触控板（带惯性的滚动、捏合和旋转）和键盘。可选择的文本通过拖动、双击和三击选择，用 Cmd+C 复制。
+输入是桌面输入：鼠标、触控板（带惯性的滚动、捏合和旋转）和键盘。可缩放的滚动视图用触控板捏合或 Control + 滚轮以指针为中心缩放，缩放后可以双向滚动。可选择的文本通过拖动、双击和三击选择，用 Cmd+C 复制。
 Escape、Option+Left、Cmd+[ 和鼠标的后退键会关闭最新的对话框或在栈中返回（焦点在输入框或网页中时，Escape 只会离开它；
 网页先收到这些按键，它自己用掉的不会触发返回）；`Dialog` 是覆盖整个窗口的一层，显示应用的弹出层和背景。页面在顶部显示它的 `header`。
 点击 `Input` 的任意位置（包括内边距）都会把光标放到最近的位置。
-`AlertDialog` 以 `NSAlert` 表单的形式显示在窗口上：不超过两个操作的提示框操作排成一行（取消操作在最左边，最后一个普通操作是
+`AlertDialog` 显示 `NSAlert`：它是用户所在窗口上的表单；该窗口不可见时（如托盘应用隐藏的主窗口、应用被隐藏、窗口最小化或不在任何屏幕上），
+它单独显示在所有窗口最前面，在得到回答之前接收应用的输入，应用本身照常运行。不超过两个操作的提示框操作排成一行（取消操作在最左边，最后一个普通操作是
 Return 的默认操作）；更多操作以及操作表的操作按顺序竖排，取消操作在最后，没有默认操作；Escape 选择取消操作。
 
 ### 表格无障碍
@@ -258,7 +273,6 @@ Return 不会提交。`onKeyPress` 报告的内容与 React Native 一致：输�
 
 不支持或有所不同：
 
-- **可缩放的滚动视图**（`zoomTo`、缩放相关属性）。
 - **`brightness()`** 大于 1 不绘制。**`mixBlendMode`** 和**背景材质**由 Core Animation 绘制：
   `mixBlendMode` 是视图图层的合成滤镜，`macos={{ backdrop: { material, blending, state } }}` 是视图下方的
   `NSVisualEffectView`（任意 AppKit 材质和状态，无论是否设置了 `backdropFilter`），`glassTintColor` 是 macOS 26 上

@@ -12,7 +12,7 @@
 //! SVG images (sniffed from their bytes) are drawn by [`nsh_core::svg`] at
 //! the requested pixel size instead, then blurred, filtered, tinted and
 //! cached as bitmaps; their size is their intrinsic size in points.
-//! Canvases draw bitmaps only.
+//! Canvases draw the rasterized bitmap, as for any other image.
 
 use dispatch2::{DispatchQueue, DispatchQueueGlobalPriority, GlobalQueueIdentifier};
 use nsh_core::{
@@ -53,13 +53,6 @@ pub(crate) struct DecodedImage {
     pub(crate) image: Retained<UIImage>,
     pub(crate) width: u32,
     pub(crate) height: u32,
-    /// An SVG, which canvases do not draw.
-    pub(crate) vector: bool,
-}
-
-/// Why a canvas leaves out the SVG image `uri`.
-pub(crate) fn not_a_bitmap(uri: &str) -> String {
-    format!("{uri} is an SVG image: canvases draw bitmaps (PNG, JPEG, ...)")
 }
 
 define_class!(
@@ -344,12 +337,15 @@ impl ImageLoader {
             // fresh copy.
             Some(Source::Url(_)) if remote && self.disk.is_some() => {
                 let cache = self.disk.clone().expect("a disk cache");
+                let access = self.access.clone();
                 let uri = uri.to_owned();
                 DispatchQueue::global_queue(GlobalQueueIdentifier::Priority(
                     DispatchQueueGlobalPriority::Default,
                 ))
                 .exec_async(move || {
-                    let event = match cache.lookup(&uri) {
+                    // A copy that came through a redirect the app may no
+                    // longer follow is dropped there: it downloads again.
+                    let event = match cache.lookup(&uri, &access) {
                         Lookup::Fresh(bytes) => LoadEvent::Bytes {
                             uri,
                             result: Ok(ns_data(&bytes)),
@@ -700,6 +696,9 @@ struct DownloadState {
     total: u64,
     status: isize,
     headers: CacheHeaders,
+    /// The redirects followed so far: the disk cache keeps them with the
+    /// copy and checks them again before it serves it.
+    redirects: Vec<String>,
     reported: Option<std::time::Instant>,
 }
 
@@ -732,8 +731,19 @@ define_class!(
                 .and_then(|u| u.absoluteString())
                 .map(|u| u.to_string());
             // The app's own assets (the dev server's) are not network access.
-            let granted = ivars.uri.starts_with("asset:/")
-                || next.is_some_and(|next| ivars.access.media_redirect(&ivars.uri, &next).is_ok());
+            let granted = if ivars.uri.starts_with("asset:/") {
+                true
+            } else {
+                let followed =
+                    next.and_then(|next| ivars.access.media_redirect(&ivars.uri, &next).ok());
+                match followed {
+                    Some(next) => {
+                        ivars.data.lock().expect("download").redirects.push(next);
+                        true
+                    }
+                    None => false,
+                }
+            };
             let next = if granted {
                 request as *const NSURLRequest as *mut NSURLRequest
             } else {
@@ -757,13 +767,14 @@ define_class!(
                 (Some(cache), error) => {
                     let response = match error {
                         Some(e) => Err(e.localizedDescription().to_string()),
-                        None => Ok(Fetched::new(
-                            state.status as u16,
-                            state.headers,
-                            state.bytes,
-                        )),
+                        None => Ok(
+                            Fetched::new(state.status as u16, state.headers, state.bytes)
+                                .redirected(state.redirects),
+                        ),
                     };
-                    cache.complete(&ivars.uri, response).map(|b| ns_data(&b))
+                    cache
+                        .complete(&ivars.uri, &ivars.access, response)
+                        .map(|b| ns_data(&b))
                 }
                 (None, Some(e)) => Err(e.localizedDescription().to_string()),
                 (None, None) if state.status >= 400 => Err(format!("HTTP {}", state.status)),
@@ -946,7 +957,6 @@ fn decode_svg(bytes: &[u8], d: Decoding) -> Option<DecodedImage> {
         ),
         width,
         height,
-        vector: true,
     })
 }
 
@@ -1035,7 +1045,6 @@ fn decode(data: &CFData, d: Decoding) -> Option<DecodedImage> {
             image,
             width,
             height,
-            vector: false,
         };
         let count = source.count().min(MAX_FRAMES);
         if count <= 1 {
@@ -1224,7 +1233,6 @@ mod tests {
         // SAFETY: a plain property of an immutable image.
         assert_eq!(unsafe { icon.image.scale() }, 3.0);
         let logo = decode(&CFData::from_bytes(LOGO), decoding(144, 2.0)).unwrap();
-        assert!(logo.vector);
         let image = cg(&logo);
         assert_eq!(
             (CGImage::width(Some(&image)), CGImage::height(Some(&image))),

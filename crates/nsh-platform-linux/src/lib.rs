@@ -35,8 +35,10 @@ mod gtk_test;
 mod image;
 mod input;
 mod key_focus;
+mod keyboard;
 mod keymap;
 mod links;
+mod login_item;
 mod menu_style;
 mod mount;
 mod native;
@@ -45,6 +47,9 @@ mod notifications;
 mod scroll;
 mod selectable_view;
 mod shader;
+// Without GStreamer (the feature `sound`), a stand-in whose loads fail
+// as not supported.
+#[cfg_attr(not(feature = "sound"), path = "sound_off.rs")]
 mod sound;
 mod surface;
 #[cfg(feature = "dev")]
@@ -60,7 +65,10 @@ mod window;
 mod xtest;
 
 pub use gtk4;
-pub use nsh_core::platform::{Appearance, Locale};
+pub use nsh_core::{
+    file_type,
+    platform::{Appearance, Locale},
+};
 pub use nsh_engine::{
     App, Bundle, ByteSize, CacheLocation, CacheOptions, CachePolicy, Limits, Root,
 };

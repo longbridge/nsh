@@ -1,4 +1,13 @@
 # What a user does and sees (compat/apps.rs): each case after its tap.
+# events-keyboard: both transitions bubble once, never to a sibling.
+tap id:case-events-keyboard
+expect Key route: none
+event id:keyboard-target onKeyDown key=Enter code=Enter defaultPrevented=false repeat=false
+expect Key route: target-down outer-down
+event id:keyboard-target onKeyUp key=Enter code=Enter defaultPrevented=false repeat=false
+expect Key route: target-down outer-down target-up outer-up
+covers [events] onKeyDown
+covers [events] onKeyUp
 # events-context-menu
 tap id:case-events-context-menu
 expect Menu: none
@@ -318,3 +327,10 @@ expect Committed: 腾
 event id:compose onCompositionChange composing=false text=""
 expect Composition: ended []
 covers [events] onCompositionChange
+# events-pinch
+tap id:case-events-pinch
+expect Pinch: none
+# The canvas asks the platform for touchpad pinches over it. (The payload
+# takes steps once nsh-compat's `event` builds it.)
+listens id:canvas onPinch
+covers [events] onPinch

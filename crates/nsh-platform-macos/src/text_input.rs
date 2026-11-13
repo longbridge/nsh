@@ -34,9 +34,12 @@
 //! natively and reported as `onCompositionChange`: as it starts and
 //! changes (AppKit tells only of the selection then: marking text sends no
 //! `textDidChange:`), and as it ends, after the `onChangeText` of the
-//! committed text. A value from JS that comes during a composition waits for its
+//! committed text. Meanwhile the core measures the input with what it
+//! shows, the composition included (`EngineControl::input_composing`). A value from JS that comes during a composition waits for its
 //! end: setting the text then would end the input method's session and
-//! commit what it composes.
+//! commit what it composes. Leaving the input commits the composition, as
+//! a browser's blur does ([`commit_marked`]): what was composed stays and
+//! is reported before the composition ends.
 //!
 //! Focus follows desktop habits: Tab moves between fields (the window
 //! recalculates its key view loop), Escape leaves the field, and clicking
@@ -69,12 +72,13 @@ use objc2_app_kit::{
     NSFontAttributeName, NSForegroundColorAttributeName, NSLineBreakMode, NSMutableParagraphStyle,
     NSParagraphStyleAttributeName, NSPasteboard, NSResponder, NSScrollView, NSSecureTextField,
     NSText, NSTextAlignment, NSTextDelegate, NSTextField, NSTextFieldDelegate, NSTextInputClient,
-    NSTextView, NSTextViewDelegate, NSValidatedUserInterfaceItem, NSView, NSWritingDirection,
+    NSTextStorage, NSTextView, NSTextViewDelegate, NSValidatedUserInterfaceItem, NSView,
+    NSWritingDirection,
 };
 use objc2_core_foundation::{CGFloat, CGSize};
 use objc2_foundation::{
-    NSAttributedString, NSDictionary, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRange,
-    NSString,
+    NSArray, NSAttributedString, NSDictionary, NSNotification, NSObject, NSObjectProtocol, NSPoint,
+    NSRange, NSRect, NSString, NSUndoManager,
 };
 
 use crate::{
@@ -94,10 +98,26 @@ enum Editor {
     Area {
         scroller: Retained<NSScrollView>,
         view: Retained<NSTextView>,
+        /// Retained because `NSTextView.textStorage` is an assign property.
+        storage: Retained<NSTextStorage>,
     },
 }
 
 impl Editor {
+    /// Clears this editor's undo records without changing another input's history.
+    fn clear_undo(
+        &self,
+        fallback: Option<&Retained<NSUndoManager>>,
+    ) -> Option<Retained<NSUndoManager>> {
+        let Editor::Area { view, storage, .. } = self else {
+            return None;
+        };
+        let manager = view.undoManager().or_else(|| fallback.cloned())?;
+        // SAFETY: AppKit registers text undo operations with the text storage as target.
+        unsafe { manager.removeAllActionsWithTarget(storage) };
+        Some(manager)
+    }
+
     /// The view hosted in the input's view.
     fn host(&self) -> Retained<NSView> {
         match self {
@@ -257,6 +277,8 @@ impl Editor {
 /// The native side of an input view ([`crate::view::ViewState::input`]).
 pub(crate) struct InputState {
     editor: RefCell<Editor>,
+    /// Retains a manager when available for cleanup after editor detachment.
+    undo_manager: RefCell<Option<Retained<NSUndoManager>>>,
     /// Hears the editors (their `delegate` is weak).
     delegate: Retained<InputDelegate>,
     /// Fills the view and holds the editor ([`InputPad`]).
@@ -365,6 +387,7 @@ impl Ctx {
         }
         let count = input.count.get() + 1;
         input.count.set(count);
+        input.remember_undo_manager();
         let text = input.editor.borrow().text();
         input.known.borrow_mut().clone_from(&text);
         // A composition that starts or changes is reported before the text
@@ -430,6 +453,14 @@ impl Ctx {
             if seen {
                 input.apply_value(&value, count);
             }
+        }
+        // The core measures what the input shows meanwhile (the marked text
+        // is in the editor's text), so a composition that wraps a line
+        // grows the input before it commits.
+        if let Some((surface, view, _)) = self.get() {
+            let shown = composing.then(|| input.editor.borrow().text());
+            let id = view.id();
+            surface.control(|c| c.input_composing(id, shown));
         }
         self.send(EventKind::CompositionChange, || {
             EventPayload::Map(vec![
@@ -542,6 +573,11 @@ impl Ctx {
         }
         set_focused(&surface, &view, focused);
         if focused {
+            // AppKit receives input clicks outside the drawn-text pointer path.
+            // Programmatic focus (Find, dialogs) preserves the selection.
+            if crate::view::pressing(view.ns().mtm()) {
+                crate::text::clear(&surface);
+            }
             // The scroll views around show the field, as on phones.
             crate::scroll::reveal(&surface, &view);
         }
@@ -786,8 +822,11 @@ pub(crate) fn tab(surface: &Surface, from: &NSView, backward: bool) -> bool {
         // A text view's clip view comes right before it in the loop and
         // gives the focus back to it: skip the views around `from`.
         if next.isDescendantOf(&scope)
-            && (!crate::view::is_ours(&next)
-                || NshView::from_ns(&next).is_some_and(|view| crate::input::is_key_stop(&view)))
+            && (if crate::view::is_ours(&next) {
+                NshView::from_ns(&next).is_some_and(|view| crate::input::is_key_stop(&view))
+            } else {
+                held_seen(&next)
+            })
             && !from.isDescendantOf(&next)
         {
             return window.makeFirstResponder(Some(&next));
@@ -795,6 +834,20 @@ pub(crate) fn tab(surface: &Surface, from: &NSView, backward: bool) -> bool {
         at = next;
     }
     false
+}
+
+/// Whether a view of the key view loop that is not ours (an input's field,
+/// a hosted view) shows to the keyboard: the view of ours holding it does
+/// ([`NshView::seen_by_keys`]).
+fn held_seen(view: &NSView) -> bool {
+    let mut at = crate::view::superview(view);
+    while let Some(ns) = at {
+        if let Some(view) = NshView::from_ns(&ns) {
+            return view.seen_by_keys();
+        }
+        at = crate::view::superview(&ns);
+    }
+    true
 }
 
 /// Defines a field class: `NSTextField` or `NSSecureTextField` that tells
@@ -826,6 +879,57 @@ macro_rules! define_field {
             impl $name {
                 $($extra)*
 
+                // A combo box's field is the combo box, as WebKit's is: the
+                // element VoiceOver is on while the list is open, named and
+                // expanded as the input, its selected child the input's
+                // active descendant, its linked element the list
+                // ([`crate::access::combobox_field`]).
+                #[unsafe(method_id(accessibilityRole))]
+                fn accessibility_role(&self) -> Option<Retained<NSString>> {
+                    match self.combobox() {
+                        Some(_) => Some(NSString::from_str("AXComboBox")),
+                        // Forwarding this override to AppKit exposes AXUnknown,
+                        // for secure fields too. Both have the text-field role.
+                        None => Some(NSString::from_str("AXTextField")),
+                    }
+                }
+
+                #[unsafe(method_id(accessibilityLabel))]
+                fn accessibility_label(&self) -> Option<Retained<NSString>> {
+                    match self.combobox() {
+                        Some(field) => field.label.map(|l| NSString::from_str(&l)),
+                        // SAFETY: NSTextField's own label.
+                        None => unsafe { msg_send![super(self), accessibilityLabel] },
+                    }
+                }
+
+                #[unsafe(method(isAccessibilityExpanded))]
+                fn is_accessibility_expanded(&self) -> bool {
+                    match self.combobox() {
+                        Some(field) => field.expanded,
+                        // SAFETY: NSTextField's own state.
+                        None => unsafe { msg_send![super(self), isAccessibilityExpanded] },
+                    }
+                }
+
+                #[unsafe(method_id(accessibilitySelectedChildren))]
+                fn accessibility_selected_children(&self) -> Option<Retained<NSArray>> {
+                    match self.combobox().and_then(|f| f.active) {
+                        Some(active) => Some(NSArray::from_retained_slice(&[active])),
+                        // SAFETY: NSTextField's own answer.
+                        None => unsafe { msg_send![super(self), accessibilitySelectedChildren] },
+                    }
+                }
+
+                #[unsafe(method_id(accessibilityLinkedUIElements))]
+                fn accessibility_linked_ui_elements(&self) -> Option<Retained<NSArray>> {
+                    match self.combobox().and_then(|f| f.controls) {
+                        Some(list) => Some(NSArray::from_retained_slice(&[list])),
+                        // SAFETY: NSTextField's own answer.
+                        None => unsafe { msg_send![super(self), accessibilityLinkedUIElements] },
+                    }
+                }
+
                 #[unsafe(method(becomeFirstResponder))]
                 fn become_first_responder(&self) -> bool {
                     // AppKit selects the whole text as the field takes the
@@ -843,6 +947,18 @@ macro_rules! define_field {
                         cx.focus_changed(true);
                     }
                     ok
+                }
+
+                /// Its field editor is about to end editing: what an input
+                /// method composes there is committed first.
+                #[unsafe(method(textShouldEndEditing:))]
+                fn text_should_end_editing(&self, text: &NSText) -> bool {
+                    if let Some(editor) = text.downcast_ref::<NSTextView>() {
+                        commit_marked(editor);
+                    }
+                    // SAFETY: NSTextField's own handling (it implements
+                    // NSTextDelegate).
+                    unsafe { msg_send![super(self), textShouldEndEditing: text] }
                 }
 
                 #[unsafe(method(textDidEndEditing:))]
@@ -911,6 +1027,19 @@ macro_rules! define_field {
             }
         }
     };
+}
+
+/// What a field of an input answers for its view.
+trait FieldOf {
+    /// The input view's combo box, when the field is one.
+    fn combobox(&self) -> Option<crate::access::ComboboxField>;
+}
+
+impl<T: objc2::DefinedClass<Ivars = OnceCell<Ctx>>> FieldOf for T {
+    fn combobox(&self) -> Option<crate::access::ComboboxField> {
+        let (_, view, _) = self.ivars().get()?.get()?;
+        crate::access::combobox_field(&view)
+    }
 }
 
 define_field!(
@@ -1071,8 +1200,31 @@ define_text_view!(
             ok
         }
 
+        /// Scrolls the selection into view once AppKit laid the text out
+        /// ([`reveal_caret_later`]).
+        #[unsafe(method(nshRevealSelection))]
+        fn reveal_selection(&self) {
+            let range = self.selectedRange();
+            // SAFETY: NSTextView's TextKit 2 objects and their methods, when
+            // it has them (nil otherwise: TextKit 1 lays out as it scrolls).
+            unsafe {
+                let manager: Option<Retained<AnyObject>> = msg_send![self, textLayoutManager];
+                if let Some(manager) = manager {
+                    let content: Option<Retained<AnyObject>> = msg_send![&manager, textContentManager];
+                    if let Some(content) = content {
+                        let all: Option<Retained<AnyObject>> = msg_send![&content, documentRange];
+                        if let Some(all) = all {
+                            let _: () = msg_send![&manager, ensureLayoutForRange: &*all];
+                        }
+                    }
+                }
+            }
+            self.scrollRangeToVisible(range);
+        }
+
         #[unsafe(method(resignFirstResponder))]
         fn resign_first_responder(&self) -> bool {
+            commit_marked(self);
             // SAFETY: NSTextView's own method.
             let ok: bool = unsafe { msg_send![super(self), resignFirstResponder] };
             if ok && let Some(cx) = self.ivars().get() {
@@ -1090,6 +1242,26 @@ define_text_view!(
             if let Some(cx) = self.ivars().get() {
                 cx.composition_changed();
             }
+        }
+
+        /// Where an input method opens its candidates. TextKit 2 lays out
+        /// only the text near the visible part and has no rect for the
+        /// rest (a point-wide view, a line per character, soon holds
+        /// such text): the visible part, not the screen's corner.
+        #[unsafe(method(firstRectForCharacterRange:actualRange:))]
+        fn first_rect(&self, range: NSRange, actual: *mut NSRange) -> NSRect {
+            // SAFETY: NSTextView's own method (NSTextInputClient); `actual`
+            // is the caller's.
+            let rect: NSRect = unsafe {
+                msg_send![super(self), firstRectForCharacterRange: range, actualRange: actual]
+            };
+            if rect != NSRect::ZERO {
+                return rect;
+            }
+            let Some(window) = self.window() else {
+                return rect;
+            };
+            window.convertRectToScreen(self.convertRect_toView(self.visibleRect(), None))
         }
 
         /// A paste (Edit > Paste, Command+V, the context menu): reported,
@@ -1159,7 +1331,15 @@ pub(crate) fn test_paste(
     window: &objc2_app_kit::NSWindow,
     content: &nsh_core::PasteEvent,
 ) -> Result<(), String> {
-    use objc2_app_kit::{NSPasteboardItem, NSPasteboardTypeString, NSPasteboardWriting};
+    with_focused(window, |text_view, cx| paste_from(text_view, &cx, content))?
+}
+
+/// Runs `f` with the text view that edits the focused input and its
+/// context: an error when no input of the app has the focus.
+fn with_focused<R>(
+    window: &objc2_app_kit::NSWindow,
+    f: impl FnOnce(&NSTextView, Ctx) -> R,
+) -> Result<R, String> {
     let responder = window.firstResponder().ok_or("no input has the focus")?;
     let object: &AnyObject = &responder;
     let (text_view, cx): (&NSTextView, Option<Ctx>) =
@@ -1170,7 +1350,64 @@ pub(crate) fn test_paste(
         } else {
             return Err("no input of the app has the focus".into());
         };
-    let cx = cx.ok_or("the focused input is gone")?;
+    Ok(f(text_view, cx.ok_or("the focused input is gone")?))
+}
+
+/// The input focused in `window` leaves the tree
+/// ([`crate::input::removed`]): its focus is reported gone now, so the end
+/// of its editing says nothing to it.
+pub(crate) fn taken_out(window: &objc2_app_kit::NSWindow) {
+    let _ = with_focused(window, |_, cx| {
+        if let Some((surface, view, input)) = cx.get()
+            && input.focused.replace(false)
+        {
+            set_focused(&surface, &view, false);
+        }
+    });
+}
+
+/// The input that has the keyboard focus, if one of the app's has it.
+#[cfg(feature = "dev")]
+pub(crate) fn test_focused(window: &objc2_app_kit::NSWindow) -> Option<nsh_core::NodeId> {
+    with_focused(window, |_, cx| cx.get().map(|(_, view, _)| view.id()))
+        .ok()
+        .flatten()
+}
+
+/// A test's input method (`nsh test --target macos`): composes `text` in
+/// the focused input as one does, marked text at the caret in place of
+/// what it composed; an empty `text` ends the composition with nothing
+/// committed.
+#[cfg(feature = "dev")]
+pub(crate) fn test_compose(window: &objc2_app_kit::NSWindow, text: &str) -> Result<(), String> {
+    with_focused(window, |text_view, _| {
+        let marked = NSString::from_str(text);
+        let caret = NSRange::new(marked.length(), 0);
+        let replace = NSRange::new(objc2_foundation::NSNotFound as usize, 0);
+        // SAFETY: NSTextInputClient's methods, which NSTextView implements,
+        // with a string and ranges inside it.
+        unsafe {
+            let _: () = msg_send![
+                text_view,
+                setMarkedText: &*marked,
+                selectedRange: caret,
+                replacementRange: replace
+            ];
+            if text.is_empty() {
+                let _: () = msg_send![text_view, unmarkText];
+            }
+        }
+    })
+}
+
+/// [`test_paste`]'s paste into `text_view`, the editor of `cx`.
+#[cfg(feature = "dev")]
+fn paste_from(
+    text_view: &NSTextView,
+    cx: &Ctx,
+    content: &nsh_core::PasteEvent,
+) -> Result<(), String> {
+    use objc2_app_kit::{NSPasteboardItem, NSPasteboardTypeString, NSPasteboardWriting};
     let board = NSPasteboard::pasteboardWithUniqueName();
     board.clearContents();
     let mut items: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> = Vec::new();
@@ -1540,6 +1777,23 @@ define_class!(
 );
 
 impl InputState {
+    fn clear_undo(&self, editor: &Editor) {
+        let fallback = self.undo_manager.borrow().clone();
+        if let Some(manager) = editor.clear_undo(fallback.as_ref()) {
+            *self.undo_manager.borrow_mut() = Some(manager);
+        }
+    }
+
+    fn remember_undo_manager(&self) {
+        let editor = self.editor.borrow();
+        let Editor::Area { view, .. } = &*editor else {
+            return;
+        };
+        if let Some(manager) = view.undoManager() {
+            *self.undo_manager.borrow_mut() = Some(manager);
+        }
+    }
+
     fn update_placeholder(&self) {
         let editor = self.editor.borrow();
         let shown = matches!(&*editor, Editor::Area { .. })
@@ -1556,6 +1810,7 @@ impl InputState {
         let old_len = editor.ns_text().length() as u32;
         let caret = editor.selection().map(|(_, end)| end);
         self.applying.set(true);
+        self.clear_undo(&editor);
         editor.set_text(text);
         if let Some(caret) = caret {
             let len = utf16_len(text) as u32;
@@ -1642,6 +1897,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
         }
         InputState {
             editor: RefCell::new(new_editor(mtm, &cx, &delegate, false, false)),
+            undo_manager: RefCell::new(None),
             delegate,
             pad: InputPad::create(mtm),
             placeholder,
@@ -1694,6 +1950,10 @@ fn new_editor(
         };
         // SAFETY: the class is a subclass of NSTextView.
         let view: Retained<NSTextView> = unsafe { Retained::cast_unchecked(area) };
+        // SAFETY: initWithFrame creates a text system; retaining its storage
+        // here keeps the target alive through undo cleanup.
+        let storage = unsafe { view.textStorage() }
+            .expect("NSTextView's frame initializer creates a text storage");
         view.setMinSize(CGSize::new(0.0, size.height));
         view.setMaxSize(CGSize::new(CGFloat::MAX, CGFloat::MAX));
         view.setVerticallyResizable(true);
@@ -1744,7 +2004,11 @@ fn new_editor(
                     );
             }
         }
-        Editor::Area { scroller, view }
+        Editor::Area {
+            scroller,
+            view,
+            storage,
+        }
     } else {
         let field = if secure {
             SecureField::create(mtm, cx.clone())
@@ -1770,6 +2034,13 @@ fn new_editor(
     }
 }
 
+impl Drop for InputState {
+    fn drop(&mut self) {
+        let fallback = self.undo_manager.get_mut().clone();
+        self.editor.get_mut().clear_undo(fallback.as_ref());
+    }
+}
+
 /// `Input`.
 pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig) {
     let Some(input) = view.state().input.clone() else {
@@ -1782,6 +2053,7 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
     if swap {
         let old = input.editor.borrow().clone();
         let text = old.text();
+        input.clear_undo(&old);
         let focused = input.focused.get();
         if focused {
             input.cx.unfocus();
@@ -1832,6 +2104,7 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
         Editor::Area {
             scroller,
             view: text,
+            ..
         } => {
             // A built-in bar of the app's takes the indicator's place; the
             // text still scrolls with the wheel, the keys and the caret.
@@ -1859,6 +2132,11 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
     *input.config.borrow_mut() = config.clone();
     if editor.focused() {
         input.style_editor();
+        // A new font or paragraph style lays the text out again from
+        // estimates: keep the line being edited in view.
+        if let Editor::Area { view, .. } = &editor {
+            reveal_caret_later(view);
+        }
     }
     input.update_placeholder();
     let first = !input.configured.replace(true);
@@ -1867,6 +2145,15 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
     }
     place(view, &input);
     report_scroll(surface, view, &input);
+}
+
+/// Clears text undo records before a deleted input's editor can be released.
+pub(crate) fn deleted(view: &NshView) {
+    let Some(input) = view.state().input.clone() else {
+        return;
+    };
+    let editor = input.editor.borrow().clone();
+    input.clear_undo(&editor);
 }
 
 /// Reports how far a multiline input's text scrolled while a built-in bar
@@ -1878,6 +2165,7 @@ fn report_scroll(surface: &Surface, view: &NshView, input: &InputState) {
     let Editor::Area {
         scroller,
         view: text,
+        ..
     } = &*input.editor.borrow()
     else {
         return;
@@ -1919,6 +2207,7 @@ pub(crate) fn scroll_to(view: &NshView, y: Points, animated: bool) {
     let Editor::Area {
         scroller,
         view: text,
+        ..
     } = &*input.editor.borrow()
     else {
         return;
@@ -2126,7 +2415,8 @@ fn place(view: &NshView, input: &InputState) {
         // they were added.
         window.setAutorecalculatesKeyViewLoop(true);
     }
-    match &*input.editor.borrow() {
+    let editor = input.editor.borrow();
+    match &*editor {
         Editor::Line { field, .. } => {
             // One line, centered in the box as UIKit centers it; a box
             // shorter than the line grows around its center. The cell
@@ -2147,7 +2437,7 @@ fn place(view: &NshView, input: &InputState) {
             };
             host(field, rect);
         }
-        Editor::Area { scroller, view } => {
+        Editor::Area { scroller, view, .. } => {
             // The placeholder goes first: hosted views stack in order. A
             // label insets its text as a field does; it starts where the
             // editor's first line of text does.
@@ -2160,8 +2450,32 @@ fn place(view: &NshView, input: &InputState) {
                 ),
             };
             host(&input.placeholder, label);
+            let before = scroller.frame().size;
             host(scroller, content);
+            if scroller.frame().size != before && editor.focused() {
+                reveal_caret_later(view);
+            }
         }
+    }
+}
+
+/// Keeps the caret of a multiline input being edited in view as the input
+/// is resized or its text styled again, as typing keeps it: an input that grows with its text (a
+/// paste past its maximum height) kept its old offset, the line being
+/// edited out of view until the next key. Its text may not be laid out yet
+/// (TextKit 2 lays it out lazily, from estimates: a paste scrolls to an
+/// estimate of the caret), so on the next turn of the run loop the text is
+/// laid out and the selection revealed.
+fn reveal_caret_later(view: &NSTextView) {
+    // SAFETY: the text view answers the selector (`TextArea`'s
+    // `nshRevealSelection`), which takes no argument.
+    unsafe {
+        let _: () = msg_send![
+            view,
+            performSelector: sel!(nshRevealSelection),
+            withObject: std::ptr::null::<AnyObject>(),
+            afterDelay: 0.0f64
+        ];
     }
 }
 
@@ -2230,6 +2544,21 @@ pub(crate) fn accessory(_surface: &Rc<Surface>, _parent: &NshView, child: &NshVi
     log::debug!("input accessory {} is not shown on macOS", child.id());
 }
 
+/// The element VoiceOver is on while `view` has the keyboard focus: an
+/// input's editor (its field, or its text view), else the view.
+pub(crate) fn accessibility_element(view: &NshView) -> Retained<NSView> {
+    let editor = view
+        .state()
+        .input
+        .as_ref()
+        .map(|i| i.editor.borrow().clone());
+    match editor {
+        Some(Editor::Line { field, .. }) => Retained::into_super(Retained::into_super(field)),
+        Some(Editor::Area { view, .. }) => Retained::into_super(Retained::into_super(view)),
+        None => objc2::Message::retain(view.ns()),
+    }
+}
+
 /// `focus()`.
 pub(crate) fn focus(view: &NshView) {
     let input = view.state().input.clone();
@@ -2258,6 +2587,26 @@ pub(crate) fn blur_all(surface: &Rc<Surface>) {
             to_root(&window, surface);
         }
     }
+}
+
+/// Commits what an input method composes in `view` (its marked text) as
+/// the editor loses the focus, as a browser's blur does: the input method
+/// drops its session and the composed text is inserted as its commit
+/// inserts it, so the input reports the text before the composition's end.
+/// AppKit would unmark it in place, which the input hears of as a
+/// selection change while the text is being replaced, and so ended the
+/// composition first.
+fn commit_marked(view: &NSTextView) {
+    if !view.hasMarkedText() {
+        return;
+    }
+    let range = view.markedRange();
+    let composed = view.string().substringWithRange(range);
+    if let Some(context) = view.inputContext() {
+        context.discardMarkedText();
+    }
+    // SAFETY: an NSString over the marked range, which is in the text.
+    unsafe { view.insertText_replacementRange(&composed, range) };
 }
 
 /// Ends editing and gives the keyboard focus to the root `window` shows.

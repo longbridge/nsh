@@ -210,6 +210,18 @@ pub(crate) fn handle_box(edge: Edge, caret: Bounds<Points>) -> Bounds<Points> {
     )
 }
 
+/// `selection`'s box grown by the room the handles' knobs hang in, above
+/// it and below it: what the edit menu keeps clear of.
+pub(crate) fn menu_bounds_around_handles(selection: Bounds<Points>) -> Bounds<Points> {
+    Bounds::new(
+        Point::new(selection.origin.x, selection.origin.y - px(KNOB_ROOM)),
+        Size::new(
+            selection.size.width,
+            selection.size.height + px(KNOB_ROOM * 2.0),
+        ),
+    )
+}
+
 /// What the edit menu offers: Cut and Copy over a selection (Cut only
 /// where the text can change), Paste where the text can change (without
 /// reading the clipboard, which iOS announces), Select All unless all of
@@ -585,9 +597,17 @@ impl Rv {
             (s.from(), s.to()) == (all.from(), all.to()) || state.doc().text_content().is_empty();
         let selection = !s.empty();
         let (menu, bounds) = if selection {
+            let handles = self.touch_range().is_some();
             let bounds = self
                 .visible_selection_box(s.from(), s.to())
-                .or_else(|| self.node_box(s.from()));
+                .or_else(|| self.node_box(s.from()))
+                // Clear of the handles' knobs, above the start's line and
+                // below the end's: a menu over a knob takes its touches
+                // (Android's floating toolbar does).
+                .map(|b| match handles {
+                    true => menu_bounds_around_handles(b),
+                    false => b,
+                });
             (Menu::Selection(s.from(), s.to()), bounds)
         } else {
             let caret = self.geo.borrow().caret_rect(s.head(), s.affinity());
@@ -783,6 +803,24 @@ mod tests {
         // Past the other end the ends swap; onto it, it stops.
         assert_eq!(handle_selection(11, 0), Some((11, 0)));
         assert_eq!(handle_selection(6, 6), None);
+    }
+
+    #[test]
+    fn the_menu_keeps_clear_of_the_handles_knobs() {
+        // A 20 point line at y 40: the start's knob hangs in the 16 points
+        // above it, the end's in the 16 below.
+        let line = Bounds::new(
+            Point::new(px(10.0), px(40.0)),
+            Size::new(px(80.0), px(20.0)),
+        );
+        let menu = menu_bounds_around_handles(line);
+        assert_eq!(menu.origin.y, px(40.0 - KNOB_ROOM));
+        assert_eq!(menu.size.height, px(20.0 + 2.0 * KNOB_ROOM));
+        let start = handle_box(
+            Edge::Start,
+            Bounds::new(line.origin, Size::new(px(0.0), px(20.0))),
+        );
+        assert!(menu.origin.y <= start.origin.y);
     }
 
     #[test]

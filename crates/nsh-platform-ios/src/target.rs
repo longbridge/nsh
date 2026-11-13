@@ -40,6 +40,13 @@ pub(crate) struct TargetIvars {
     /// The scroll views of the surface the embedding app may watch
     /// ([`crate::scroll_watch`]).
     scrolls: crate::scroll_watch::SurfaceScrolls,
+    /// A press of the current touch became a long press: it is no tap that
+    /// dismisses the keyboard.
+    held: std::cell::Cell<bool>,
+    /// The touch on a scroll view whose `keyboardShouldPersistTaps` is
+    /// "never", where it went down in the window and when: if it is a tap,
+    /// it only dismisses the keyboard.
+    tap_start: std::cell::RefCell<Option<(Retained<UITouch>, CGPoint, f64)>>,
 }
 
 define_class!(
@@ -306,7 +313,32 @@ define_class!(
 
         #[unsafe(method(gestureRecognizerShouldBegin:))]
         fn should_begin(&self, recognizer: &UIGestureRecognizer) -> bool {
+            if recognizer.isKindOfClass(UITapGestureRecognizer::class())
+                && self.ivars().tap_start.borrow().is_some()
+            {
+                return self
+                    .still_tap(
+                        recognizer.locationInView(None),
+                        objc2_quartz_core::CACurrentMediaTime(),
+                    )
+                    .into();
+            }
             self.pan_should_begin(recognizer)
+        }
+
+        /// Taps the views inside the scroll view recognize (a web view's
+        /// link) wait for its keyboard tap to fail: a tap that only dismisses
+        /// the keyboard does nothing else.
+        #[unsafe(method(gestureRecognizer:shouldBeRequiredToFailByGestureRecognizer:))]
+        fn required_to_fail_by(&self, recognizer: &UIGestureRecognizer, other: &UIGestureRecognizer) -> bool {
+            recognizer.isKindOfClass(UITapGestureRecognizer::class())
+                && other.isKindOfClass(UITapGestureRecognizer::class())
+                && match (recognizer.view(), other.view()) {
+                    (Some(scroll), Some(inside)) => {
+                        !std::ptr::eq::<UIView>(&*scroll, &*inside) && inside.isDescendantOfView(&scroll)
+                    }
+                    _ => false,
+                }
         }
 
         /// The keyboard tap of scroll views only sees taps that dismiss the
@@ -320,8 +352,17 @@ define_class!(
             {
                 m.pan_touch(view.tag() as NodeId, &touched);
             }
-            !recognizer.isKindOfClass(UITapGestureRecognizer::class())
-                || self.tap_dismisses_keyboard(touch)
+            if !recognizer.isKindOfClass(UITapGestureRecognizer::class()) {
+                return true.into();
+            }
+            self.ivars().held.set(false);
+            let dismisses = self.tap_dismisses_keyboard(touch);
+            let never = touch
+                .view()
+                .is_some_and(|v| self.keyboard_tap(&v) == Some(KeyboardTaps::Never));
+            *self.ivars().tap_start.borrow_mut() = (dismisses && never)
+                .then(|| (touch.retain(), touch.locationInView(None), touch.timestamp()));
+            dismisses
         }
     }
 
@@ -443,6 +484,9 @@ define_class!(
     }
 );
 
+/// How far a tap that dismisses the keyboard may move (points).
+const TAP_MOVEMENT: f64 = 10.0;
+
 /// A tap on a scroll view that dismisses the keyboard; its delegate
 /// (`gestureRecognizer:shouldReceiveTouch:`) lets through only taps that
 /// should.
@@ -459,7 +503,8 @@ pub(crate) fn keyboard_tap_recognizer(
             Some(objc2::sel!(dismissKeyboard:)),
         )
     };
-    tap.setCancelsTouchesInView(false);
+    // The views under a tap that only dismisses the keyboard get a cancel.
+    tap.setCancelsTouchesInView(true);
     tap.setDelegate(Some(ProtocolObject::from_ref(&**target)));
     tap
 }
@@ -518,6 +563,8 @@ impl EventTarget {
             scrolls_applied: Default::default(),
             keymap: Default::default(),
             scrolls,
+            held: Default::default(),
+            tap_start: Default::default(),
         });
         // SAFETY: NSObject's designated initializer.
         unsafe { msg_send![super(this), init] }
@@ -545,6 +592,13 @@ impl EventTarget {
         self.ivars().scrolls_applied.borrow_mut().remove(&id);
     }
 
+    /// The user gave the surface input with `modality` (a finger going
+    /// down, a hardware key): told before it acts, so the focus it moves
+    /// shows or not (`focus-visible:`).
+    pub(crate) fn input_with(&self, modality: nsh_core::platform::InputModality) {
+        self.ivars().control.set_input_modality(modality);
+    }
+
     /// The app's keyboard shortcuts.
     pub(crate) fn keymap(&self) -> &crate::keymap::KeymapState {
         &self.ivars().keymap
@@ -570,6 +624,34 @@ impl EventTarget {
     /// A finger went down on (or left) pressable view `id`.
     pub(crate) fn press_changed(&self, id: NodeId, pressed: bool, at: PressAt) {
         self.with_mounter(move |m| m.press_changed(id, pressed, at));
+    }
+
+    /// A press of the current touch became a long press.
+    pub(crate) fn press_held(&self) {
+        self.ivars().held.set(true);
+    }
+
+    /// Whether `touch`, ending, is a tap that only dismisses the keyboard
+    /// (`keyboardShouldPersistTaps` "never"): JS responders get a cancel.
+    pub(crate) fn dismissing_tap(&self, touch: &UITouch) -> bool {
+        let same = self
+            .ivars()
+            .tap_start
+            .borrow()
+            .as_ref()
+            .is_some_and(|(t, _, _)| std::ptr::eq::<UITouch>(&**t, touch));
+        same && self.still_tap(touch.locationInView(None), touch.timestamp())
+    }
+
+    /// Whether the touch `tap_start` holds, at `at` (in the window) at
+    /// `time`, is still a tap: quick, not held, and it moved nothing.
+    fn still_tap(&self, at: CGPoint, time: f64) -> bool {
+        let Some((_, start, since)) = self.ivars().tap_start.borrow().clone() else {
+            return false;
+        };
+        !self.ivars().held.get()
+            && (at.x - start.x).hypot(at.y - start.y) <= TAP_MOVEMENT
+            && time - since < crate::press::LONG_PRESS
     }
 
     /// A press on view `id` was held long enough.
@@ -715,10 +797,11 @@ impl EventTarget {
         }
     }
 
-    /// A press starts on `view`: false while the keyboard is up and taps
-    /// only dismiss it (`keyboardShouldPersistTaps` "never").
-    pub(crate) fn press_allowed(&self, view: &UIView) -> bool {
-        self.keyboard_tap(view) != Some(KeyboardTaps::Never) || on_input(view)
+    /// A press starts on `view`: true while the keyboard is up and a tap
+    /// only dismisses it (`keyboardShouldPersistTaps` "never"), a long
+    /// press still goes through.
+    pub(crate) fn tap_only(&self, view: &UIView) -> bool {
+        self.keyboard_tap(view) == Some(KeyboardTaps::Never) && !on_input(view)
     }
 
     /// The host stopped `scroll`'s glide ([`crate::ScrollHandle::stop_scrolling`]):

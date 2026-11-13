@@ -91,7 +91,7 @@ Events:
 |---|---|---|
 | `onLoadStart` | `WebViewNavigation` | A page started loading. |
 | `onLoad` | `WebViewNavigation` | A page finished loading. |
-| `onError` | `{ message, code? }` | Loading failed, or the platform shows no web view (`code` `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`, below). |
+| `onError` | `{ message, code? }` | Loading failed, the platform shows no web view (`code` `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`), or the page's process ended (`code` `"ERR_NSH_WEBVIEW_TERMINATED"`); both below. |
 | `onNavigationStateChange` | `WebViewNavigation` | The URL, title, loading state or history changed. |
 | `onMessage` | `{ data: string }` | The page posted a message (below). |
 
@@ -185,7 +185,7 @@ mount(Browser);
 
 ### Messaging between the page and the app
 
-Pages talk to the app with `window.nsh.postMessage(string)`, which arrives as `on_message` (`onMessage`). The app talks to the page with the ref's `post_message` (`postMessage(string)`), which arrives in the page as a `message` event on `window`. Messages are strings; send JSON for structured data.
+Pages talk to the app with `window.nsh.postMessage(string)`, which arrives as `on_message` (`onMessage`). The app talks to the page with the ref's `post_message` (`postMessage(string)`), which arrives in the page as a `message` event on `window`. Messages are strings; send JSON for structured data. Treat what arrives as untrusted data and check it before acting on it: any script the page runs can post, and on Android `window.nsh` is in every frame of the page, `iframe`s included.
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -485,6 +485,29 @@ function Preview(props: { url: string }) {
 }
 ```
 
+### When the page's process ends
+
+A web view's page runs in a process of its own, which can end while the app runs: it crashed, or the system took
+its memory back. The app keeps running and the web view shows no page; its `onError` comes with `code`
+`"ERR_NSH_WEBVIEW_TERMINATED"` (Rust: `.on_process_terminated`, the message). The ref's `reload()`, `load()` or a new
+`src` / `html` shows a page again (Android makes a new WebView for it). iOS, macOS, Linux and Android report it.
+
+```tsx
+import { WebView, type WebViewRef } from "nsh";
+
+function Diagram(props: { html: string }) {
+  let web!: WebViewRef;
+  return (
+    <WebView
+      ref={web}
+      html={props.html}
+      onError={(e) => e.code === "ERR_NSH_WEBVIEW_TERMINATED" && web.reload()}
+      style={{ flex: 1 }}
+    />
+  );
+}
+```
+
 ## Video
 
 ```rust tabs
@@ -566,7 +589,7 @@ function Player() {
 mount(Player);
 ```
 
-Playback is controlled by props: set `paused`, `muted`, `volume` and `rate` from signals and the player follows. The ref has `seek(seconds)`.
+Playback is controlled by props: set `paused`, `muted`, `volume` and `rate` from signals and the player follows. Unpausing a video that played to its end plays it again from the start. The ref has `seek(seconds)`.
 
 In Rust, `video(url)` makes the player (the URL a value, a signal or a closure) and each prop is a builder method in snake case (`paused`, `repeat(true)`, `object_fit(ResizeMode::Contain)` (the `objectFit` style), `progress_interval` for `progressUpdateInterval`); `on_load` gets a `VideoInfo` (`duration`, `size`), `on_progress` a `VideoProgress` (`current_time`, `duration`) and `on_buffer` a `bool`.
 

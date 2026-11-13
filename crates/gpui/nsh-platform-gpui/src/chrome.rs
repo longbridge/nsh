@@ -887,6 +887,7 @@ pub(crate) fn own_window_parts(
     height: Option<f32>,
     resizable: bool,
     window: &Window,
+    cx: &gpui::App,
 ) -> Vec<AnyElement> {
     let client = PLATFORM == Platform::Linux
         && matches!(
@@ -907,7 +908,7 @@ pub(crate) fn own_window_parts(
                 surface,
                 Some(root),
                 window.is_maximized(),
-                window.is_window_active(),
+                crate::window::is_active(window, cx),
                 height,
                 &theme,
             ))
@@ -927,7 +928,7 @@ fn observe(surface: &Rc<Surface>, window: &Window, cx: &App) {
         menus::close(surface);
     }
     c.maximized.set(window.is_maximized());
-    c.active.set(window.is_window_active());
+    c.active.set(crate::window::is_active(window, cx));
     c.client_decorated.set(matches!(
         window.window_decorations(),
         gpui::Decorations::Client { .. }
@@ -1067,6 +1068,14 @@ pub(crate) fn drag_area(surface: &Rc<Surface>, root: Option<nsh_core::NodeId>) -
                 if phase != DispatchPhase::Bubble || !h.is_hovered(window) {
                     return;
                 }
+                // Windows moves the window itself from the press it hit
+                // tests as `HTCAPTION`: the platform hands the press to the
+                // app before `DefWindowProc` sees it, so consuming it keeps
+                // the window from moving at all (`start_window_move` does
+                // nothing on Windows).
+                if PLATFORM == Platform::Windows {
+                    return;
+                }
                 let _in = crate::window::enter(&surface, root);
                 let (ox, oy) = surface.origin.get();
                 let (x, y) = (f32::from(e.position.x), f32::from(e.position.y));
@@ -1164,6 +1173,14 @@ fn title_row(surface: &Rc<Surface>, theme: &Theme) -> AnyElement {
         .border_b_1()
         .border_color(theme.bar_border)
         .on_mouse_down(MouseButton::Left, move |e, window, cx| {
+            // Windows moves the window itself for a press on the caption
+            // (its hit test answers `HTCAPTION`, which also maximizes on a
+            // double click and opens the window menu): a press the app
+            // consumes never reaches `DefWindowProc`, so the window would
+            // not move, and `Window::start_window_move` does nothing there.
+            if PLATFORM == Platform::Windows {
+                return;
+            }
             title_press(&s, e, window);
             cx.stop_propagation();
         });
@@ -1456,6 +1473,8 @@ fn default_mac_menu(title: &str) -> Arc<[MenuItem]> {
             role: Some(role),
             when: nsh_core::keymap::When::Always,
             icon: None,
+            symbol: None,
+            destructive: false,
         })
     };
     let submenu = |label: &str, items: Vec<MenuItem>| MenuItem::Submenu {
@@ -1463,6 +1482,8 @@ fn default_mac_menu(title: &str) -> Arc<[MenuItem]> {
         enabled: true,
         items,
         icon: None,
+        symbol: None,
+        inline: false,
     };
     vec![
         submenu(

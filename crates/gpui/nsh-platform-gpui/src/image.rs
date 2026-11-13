@@ -17,7 +17,7 @@
 //! that grows past its bucket loads the next one. SVG images (sniffed from
 //! their bytes) are drawn by [`nsh_core::svg`] at the bucket's size and
 //! then handled as bitmaps; their size is their intrinsic size in points.
-//! Canvases draw bitmaps only ([`load_bitmap`]).
+//! Canvases draw them as their rasterized bitmap ([`load_bitmap`]).
 //!
 //! A decoded entry's picture on the main thread ([`Image`]) counts what it
 //! adds in its entry ([`nsh_core::image::MemoryCache::add_cost`]): its
@@ -41,7 +41,9 @@
 //! translucent screens). While a variant is being made, the closest one
 //! that is ready is drawn. A texture leaves GPUI's atlases when its last
 //! owner drops it ([`Texture`]). GPUI rounds the sprite: the corners of
-//! the innermost rounded clip it reaches ([`DrawCx::clip_rounded`]).
+//! the innermost rounded clip it reaches ([`DrawCx::clip_rounded`]). A
+//! sprite cannot turn: under a rotation, skew or perspective the picture
+//! is drawn by [`turn`].
 //!
 //! A file named `…@2x.png` (or a source with a declared size) has its
 //! natural size scaled accordingly, as on iOS.
@@ -91,6 +93,8 @@ use crate::{
     surface::Surface,
     view::{NshView, ViewState},
 };
+
+mod turn;
 
 /// Threads that make variants.
 const WORKERS: usize = 4;
@@ -155,6 +159,7 @@ fn context(surface: &Surface, uri: &str) -> Context {
         asset_base: surface.asset_base.borrow().clone(),
         read_asset: None,
         access: surface.access.borrow().clone(),
+        media_files: surface.media_files.borrow().clone(),
         disk: remote
             .then(|| surface.image_cache.borrow().clone())
             .flatten(),
@@ -447,6 +452,18 @@ fn decode(bytes: &[u8], target: &Target) -> Result<Pixels, String> {
         }
     }
     decode_still(bytes, longest)
+}
+
+/// A pixel buffer ([`ImageSrc::rgba`](nsh_core::element::ImageSrc::rgba)),
+/// taken as it is: no decode, at its own size.
+fn from_rgba((w, h, rgba): (u32, u32, &[u8])) -> Result<Pixels, String> {
+    let frame = image::RgbaImage::from_raw(w, h, rgba.to_vec()).ok_or("RGBA of the wrong size")?;
+    Ok(Pixels::new(
+        vec![bgra_frame(frame)],
+        Vec::new(),
+        0,
+        Natural::Pixels(w, h),
+    ))
 }
 
 /// The size `onLoad` and `Image.getSize` report: pixels, or an SVG's whole
@@ -909,6 +926,8 @@ pub(crate) struct Image {
     key: Key,
     /// Its atlas copy is counted (it was drawn).
     drawn: Cell<bool>,
+    /// The one color an SVG is drawn in, once asked ([`Image::one_color`]).
+    one_color: std::cell::OnceCell<Option<Color>>,
 }
 
 /// A decoded image, shared.
@@ -930,6 +949,28 @@ impl Image {
     /// variant made, or dropped).
     fn count(&self, delta: isize) {
         images().memory().add_cost(&self.key, delta);
+    }
+
+    /// The color an SVG is drawn in when it has one (every pixel that
+    /// shows has it, antialiased edges aside): such an icon turns as a
+    /// monochrome sprite.
+    fn one_color(&self) -> Option<Color> {
+        if !matches!(self.natural, Natural::Vector(_)) {
+            return None;
+        }
+        *self.one_color.get_or_init(|| {
+            let bytes = self.texture.image().as_bytes(0)?;
+            let mut first: Option<[u8; 3]> = None;
+            for px in bytes.as_chunks::<4>().0.iter().filter(|px| px[3] >= 128) {
+                let bgr = [px[0], px[1], px[2]];
+                let one = first.get_or_insert(bgr);
+                if one.iter().zip(&bgr).any(|(a, b)| a.abs_diff(*b) > 4) {
+                    return None;
+                }
+            }
+            let [b, g, r] = first?;
+            Some(Color(u32::from_be_bytes([r, g, b, 0xff])))
+        })
     }
 }
 
@@ -954,6 +995,7 @@ fn picture(pixels: &Pixels, key: Key) -> Picture {
         variants: RefCell::default(),
         key: key.clone(),
         drawn: Cell::new(false),
+        one_color: Default::default(),
     });
     // An entry evicted already would never drop it: it is not kept.
     if images().memory().contains(&key) {
@@ -968,7 +1010,10 @@ fn images() -> &'static Images<Pixels> {
         Images::with_on_evict(
             nsh_core::image::budget(),
             |bytes: &ImageData, target: &Target| {
-                let pixels = decode(bytes, target)?;
+                let pixels = match bytes.rgba() {
+                    Some(rgba) => from_rgba(rgba)?,
+                    None => decode(bytes, target)?,
+                };
                 let cost = pixels.bytes();
                 Ok((pixels.clone(), pixels.natural, cost))
             },
@@ -1123,8 +1168,8 @@ fn fetch(
 /// Loads the bitmap `uri` (`https://…`, `asset:/…`, a file path, `data:`)
 /// for a canvas off the main thread, at its natural size; `done` runs on
 /// the main thread with the image (every frame of an animation: frame 0
-/// is the first). Canvases draw bitmaps: an SVG is an image that failed
-/// to load.
+/// is the first). An SVG is rasterized by the shared SVG renderer and
+/// handed over as its bitmap.
 ///
 /// A cached image is handed over before this returns: callers must not
 /// hold a borrow of view state that `done` takes.
@@ -1133,14 +1178,8 @@ pub(crate) fn load_bitmap(
     uri: &str,
     done: impl FnOnce(Result<Rc<Texture>, String>) + 'static,
 ) {
-    let name = uri.to_owned();
     let done = move |result: Result<(Picture, Lease), String>| {
-        done(result.and_then(|(p, _)| match p.natural {
-            Natural::Vector(_) => Err(format!(
-                "{name} is an SVG image: canvases draw bitmaps (PNG, JPEG, ...)"
-            )),
-            Natural::Pixels(..) => Ok(p.texture.clone()),
-        }));
+        done(result.map(|(p, _)| p.texture.clone()))
     };
     let source = ImageSource {
         uri: uri.into(),
@@ -1411,6 +1450,8 @@ pub(crate) struct ImageState {
     /// The surface's key and the view's node id: timers find the view
     /// again with them (and find nothing once it is gone).
     owner: (u64, NodeId),
+    /// The placeholder and the image as last drawn turned.
+    turned: RefCell<[turn::Turned; 2]>,
 }
 
 /// Where an animation is in its timeline: pure bookkeeping, in monotonic
@@ -2015,12 +2056,15 @@ fn level(pixels: (u32, u32), drawn: (f32, f32), blur: f32) -> (u8, u8) {
     (mip, radius.round().clamp(1.0, 254.0) as u8)
 }
 
-/// Draws one picture with the view's mode, the clip's corners, tint,
-/// filters, blur and `alpha` (with the pass's opacity).
+/// Draws one picture (`slot` 0: the placeholder, 1: the image) with the
+/// view's mode, the clip's corners, tint, filters, blur and `alpha` (with
+/// the pass's opacity).
+#[allow(clippy::too_many_arguments)]
 fn draw_one(
     cx: &mut DrawCx<'_>,
     state: &ViewState,
     image: &ImageState,
+    slot: usize,
     picture: &Picture,
     frame: usize,
     source: Option<&ImageSource>,
@@ -2036,6 +2080,7 @@ fn draw_one(
     if fw <= 0.0 || fh <= 0.0 || cx.culled() {
         return;
     }
+    let fade = alpha;
     let alpha = (alpha * cx.opacity * ALPHA_STEPS as f32).round();
     if alpha <= 0.0 {
         return;
@@ -2062,6 +2107,38 @@ fn draw_one(
         tint: state.style.tint_color,
         alpha: alpha.min(ALPHA_STEPS as f32) as u8,
     };
+    let turned = &mut image.turned.borrow_mut()[slot];
+    let upright = cx.axis_aligned();
+    if upright {
+        *turned = turn::Turned::default();
+    }
+    // A one-color SVG the GPU turns: only its alpha (at the size drawn) is
+    // needed, the color filters and opacity go to its color.
+    let color = state.style.tint_color.or_else(|| picture.one_color());
+    if !upright
+        && blur == 0.0
+        && let Some(color) = color
+    {
+        let plain = Look {
+            mip,
+            ..Look::default()
+        };
+        let frame = frame.min(picture.texture.frames().saturating_sub(1));
+        if let Some(mask) = texture_for(picture, plain, 0, image.owner.0)
+            && turn::draw_mask(
+                cx,
+                turned,
+                &mask,
+                frame,
+                (w, h),
+                (x, y, fw, fh),
+                color,
+                fade,
+            )
+        {
+            return;
+        }
+    }
     let Some(texture) = texture_for(picture, look, blur_px, image.owner.0) else {
         return;
     };
@@ -2069,13 +2146,18 @@ fn draw_one(
     if Rc::ptr_eq(&texture, &picture.texture) && !picture.drawn.replace(true) {
         picture.count(picture.bytes() as isize);
     }
-    let boxed = cx.rect(0.0, 0.0, w, h);
-    let placed = cx.rect(x, y, fw, fh);
+    let frame = frame.min(texture.frames().saturating_sub(1));
+    if !upright && turn::draw_resampled(cx, turned, &texture, frame, (w, h), (x, y, fw, fh)) {
+        return;
+    }
+    // Partly behind the viewer: drawn upright at its own size rather than
+    // stretched over its bounding box.
+    let boxed = cx.upright(0.0, 0.0, w, h);
+    let placed = cx.upright(x, y, fw, fh);
     // GPUI rounds the sprite itself: the corners of the innermost rounded
     // clip (the view's own, or a rounded parent's) that the part shown
     // reaches.
     let (shown, corners) = cx.clip_rounded(boxed.intersect(&placed), Corners::default());
-    let frame = frame.min(texture.frames().saturating_sub(1));
     let data = texture.image().clone();
     cx.paint(|window, _| {
         if let Err(e) = window.paint_image(shown, placed, corners, data, frame, false) {
@@ -2093,7 +2175,7 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
         && (image.image.is_none() || fading)
     {
         let source = image.options.placeholder.as_ref();
-        draw_one(cx, state, image, placeholder, 0, source, 1.0);
+        draw_one(cx, state, image, 0, placeholder, 0, source, 1.0);
     }
     let Some(picture) = &image.image else { return };
     let frame = match &image.playback {
@@ -2111,7 +2193,7 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
     };
     let alpha = if fading { image.alpha } else { 1.0 };
     let source = image.source.as_ref();
-    draw_one(cx, state, image, picture, frame, source, alpha);
+    draw_one(cx, state, image, 1, picture, frame, source, alpha);
 }
 
 #[cfg(test)]
@@ -2135,6 +2217,19 @@ mod tests {
             frames: Frames::All,
         };
         decode(bytes, &target)
+    }
+
+    #[test]
+    fn takes_rgba_buffers_as_they_are() {
+        let rgba = [255u8, 0, 0, 255, 0, 0, 255, 128];
+        let pixels = from_rgba((2, 1, &rgba)).unwrap();
+        assert_eq!(pixels.natural, Natural::Pixels(2, 1));
+        // BGRA, alpha straight.
+        assert_eq!(
+            pixels.image.as_bytes(0).unwrap(),
+            &[0, 0, 255, 255, 255, 0, 0, 128]
+        );
+        assert!(from_rgba((2, 2, &rgba)).is_err());
     }
 
     #[test]
@@ -2408,15 +2503,14 @@ mod tests {
     }
 
     #[test]
-    fn svg_draws_no_text_or_embedded_images() {
-        // GPUI's own resvg / usvg enable text and raster images: an SVG
-        // still draws neither (no fonts loaded, the resolver resolves
-        // nothing).
-        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><text x="0" y="9" font-size="10" fill="#f00">NSH</text><image width="20" height="10" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="/></svg>"##;
+    fn svg_draws_embedded_raster_images() {
+        // nsh-core's loader decodes inline raster data (text needs a system
+        // font, which a test machine may not have).
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><image width="20" height="10" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="/></svg>"##;
         let decoded = decoded(svg, 20).unwrap();
         assert_eq!(decoded.size(), (20, 10));
         let bytes = decoded.image.as_bytes(0).unwrap();
-        assert!(bytes.iter().all(|&b| b == 0), "nothing drawn");
+        assert!(bytes.iter().any(|&b| b != 0), "the embedded image draws");
     }
 
     #[test]

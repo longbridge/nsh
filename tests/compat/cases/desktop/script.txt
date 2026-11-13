@@ -101,3 +101,14 @@ covers [nsh/desktop] Tray
 tap id:case-home-dir-access
 expect Home: Error ERR_ACCESS_DENIED homeDir ""
 covers [os] homedir
+# launch-at-login
+tap id:case-launch-at-login
+# A run that cannot launch at login (headless, as a view embedded in another
+# app and `nsh run`): reading it is false, turning it on rejects, and so does
+# a wrong use, with a TypeError.
+expect Launch at login: boolean false
+tap id:enable
+expect Set: true ERR_FEATURE_UNAVAILABLE_ON_PLATFORM
+tap id:misuse
+expect Misuse: TypeError
+covers [nsh/desktop] Application

@@ -62,6 +62,10 @@ use objc2_core_graphics::{
 use objc2_core_text::{CTLine, kCTFontAttributeName, kCTForegroundColorFromContextAttributeName};
 use rustc_hash::FxHashMap;
 
+mod offscreen;
+
+pub(crate) use offscreen::render as render_offscreen;
+
 use crate::{
     surface::Surface,
     view::{NshView, ViewState},
@@ -822,6 +826,7 @@ impl<'a> Replay<'a> {
                 dest,
             } => self.image(
                 &image.uri,
+                image.density(),
                 source.map(|b| [b.origin.x, b.origin.y, b.size.width, b.size.height].map(|v| v.0)),
                 dest,
             ),
@@ -1267,15 +1272,17 @@ impl<'a> Replay<'a> {
         CGContext::restore_g_state(c);
     }
 
-    fn image(&self, uri: &str, source: Option<[f32; 4]>, dest: &[Num; 4]) {
+    fn image(&self, uri: &str, density: f32, source: Option<[f32; 4]>, dest: &[Num; 4]) {
         let Some(Some(image)) = self.images.get(uri) else {
             return;
         };
         let mut part: Option<CFRetained<CGImage>> = None;
-        // Pixels as points, as a canvas bitmap's CSS pixels.
+        // Its pixels over its file name's density (`@3x`), as an `Image`'s,
+        // never the screen's: the same size on every display.
+        let density = f64::from(density);
         let size = (
-            CGImage::width(Some(image)) as f64,
-            CGImage::height(Some(image)) as f64,
+            CGImage::width(Some(image)) as f64 / density,
+            CGImage::height(Some(image)) as f64 / density,
         );
         let [dx, dy, mut dw, mut dh] = dest.map(|v| self.n(v));
         if let Some([sx, sy, sw, sh]) = source {
@@ -1288,10 +1295,10 @@ impl<'a> Replay<'a> {
                 return;
             }
             if dw.is_nan() {
-                dw = sw as f64;
+                dw = sw as f64 / density;
             }
             if dh.is_nan() {
-                dh = sh as f64;
+                dh = sh as f64 / density;
             }
         }
         if dw.is_nan() {
@@ -1457,12 +1464,12 @@ fn fit_corners(w: f64, h: f64, radii: [f64; 4]) -> [f64; 4] {
 #[cfg(test)]
 mod tests {
     use nsh_core::{
-        canvas::PathOp,
-        geometry::{Percentage, Point},
+        canvas::{CanvasImage, PathOp},
+        geometry::{Bounds, Percentage, Point, ScaledPixels, Size},
     };
     use objc2_core_graphics::{
-        CGBitmapContextCreate, CGBitmapContextGetData, CGColorSpace, CGImageAlphaInfo,
-        CGImageByteOrderInfo,
+        CGBitmapContextCreate, CGBitmapContextCreateImage, CGBitmapContextGetData, CGColorSpace,
+        CGImageAlphaInfo, CGImageByteOrderInfo,
     };
 
     use super::*;
@@ -1784,6 +1791,72 @@ mod tests {
             // Not cast the other way, nor half as far (base space pixels).
             assert_eq!(pixel(&bytes, flipped, 35.0, 0.5)[3], 0);
             assert_eq!(pixel(&bytes, flipped, 25.0, 22.5)[3], 0);
+        }
+    }
+
+    /// An opaque `w` × `h` pixel image.
+    fn opaque_image(w: usize, h: usize) -> CFRetained<CGImage> {
+        let space = CGColorSpace::new_device_rgb().unwrap();
+        // SAFETY: a context with pixels of its own.
+        let cx = unsafe {
+            CGBitmapContextCreate(
+                std::ptr::null_mut(),
+                w,
+                h,
+                8,
+                w * 4,
+                Some(&space),
+                CGImageAlphaInfo::PremultipliedFirst.0 | CGImageByteOrderInfo::Order32Little.0,
+            )
+        }
+        .unwrap();
+        CGContext::set_rgb_fill_color(Some(&cx), 1.0, 0.0, 0.0, 1.0);
+        CGContext::fill_rect(
+            Some(&cx),
+            CGRect::new(CGPoint::ZERO, CGSize::new(w as CGFloat, h as CGFloat)),
+        );
+        CGBitmapContextCreateImage(Some(&cx)).unwrap()
+    }
+
+    #[test]
+    fn an_image_draws_its_pixels_over_its_file_density() {
+        // 60 × 30 pixels at (0, 0) without a destination size: 60 × 30
+        // points as `dot.png`, 20 × 10 as `dot@3x.png`; a 30 × 15 pixel
+        // part of it 30 × 15 and 10 × 5. Painted at scale 2.
+        let nan = Num::Const(f32::NAN);
+        let c = Num::Const;
+        for (uri, (w, h), source, (pw, ph)) in [
+            ("asset:/dot.png", (60.0, 30.0), None, (0.0, 0.0)),
+            ("asset:/dot@3x.png", (20.0, 10.0), None, (0.0, 0.0)),
+            ("asset:/dot.png", (30.0, 15.0), Some(()), (30.0, 15.0)),
+            ("asset:/dot@3x.png", (10.0, 5.0), Some(()), (30.0, 15.0)),
+        ] {
+            let source = source.map(|()| Bounds {
+                origin: Point::new(ScaledPixels(0.0), ScaledPixels(0.0)),
+                size: Size {
+                    width: ScaledPixels(pw),
+                    height: ScaledPixels(ph),
+                },
+            });
+            let canvas = CanvasState {
+                drawing: Some(Arc::new(Drawing {
+                    ops: vec![CanvasOp::DrawImage {
+                        image: CanvasImage { uri: uri.into() },
+                        source,
+                        dest: [c(0.0), c(0.0), nan, nan],
+                    }],
+                    ..Drawing::default()
+                })),
+                images: [(Arc::from(uri), Some(opaque_image(60, 30)))]
+                    .into_iter()
+                    .collect(),
+                ..CanvasState::default()
+            };
+            let bytes = pixels(&canvas);
+            let what = format!("{uri}, part {source:?}");
+            assert_eq!(pixel(&bytes, true, w - 0.5, h - 0.5)[3], 255, "{what}");
+            assert_eq!(pixel(&bytes, true, w + 0.5, 0.5)[3], 0, "{what}");
+            assert_eq!(pixel(&bytes, true, 0.5, h + 0.5)[3], 0, "{what}");
         }
     }
 }

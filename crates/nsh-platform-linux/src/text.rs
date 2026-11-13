@@ -22,7 +22,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use gtk4::{self as gtk, glib, glib::translate::ToGlibPtr, graphene, gsk, prelude::*};
+use gtk4::{self as gtk, gio, glib, glib::translate::ToGlibPtr, graphene, gsk, prelude::*};
 use nsh_core::{
     Affinity, AttributedText, Bounds, Color, DecorationStyle, EllipsizeMode, EventKind, Points,
     ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextLine, TextPosition, TextSpan,
@@ -295,6 +295,9 @@ struct Line {
     info: TextLine,
     /// Its runs in [`LinuxLayout::runs`].
     runs: std::ops::Range<usize>,
+    /// Its baseline: where its runs are drawn (`info.ascender` is from its
+    /// logical top, which a `lineHeight` moves off the line's top).
+    baseline: f32,
 }
 
 /// A final layout: plain data, drawn on the main thread.
@@ -880,6 +883,15 @@ impl TextEngine for PangoTextEngine {
         true
     }
 
+    fn first_baseline(&self, prepared: &Prepared, width: Points) -> Option<Points> {
+        // Typeset at the size it measures `width` wide, as the text is laid
+        // out: the baseline of its first line (the line's, as a line of
+        // only a break or an inline view has no runs).
+        let layout = self.layout(prepared, self.measure(prepared, Some(width)));
+        let layout = layout.downcast::<LinuxLayout>()?;
+        Some(Points(layout.lines.first()?.baseline))
+    }
+
     fn layout(&self, prepared: &Prepared, size: Size<Points>) -> TextLayout {
         let shown = self.configure(prepared, Some(size.width.0));
         let layout = &prepared.layout;
@@ -1010,6 +1022,7 @@ impl TextEngine for PangoTextEngine {
                     x_height: Points(x_height),
                 },
                 runs: first..out.runs.len(),
+                baseline,
             });
         }
         TextLayout(Arc::new(out))
@@ -1697,10 +1710,7 @@ impl Selection {
             let ctrl = modifiers.contains(ModifierType::CONTROL_MASK);
             match key {
                 Key::c | Key::C | Key::Insert if ctrl => copy(&view),
-                Key::a | Key::A if ctrl => {
-                    let len = view.state().text.as_ref().map_or(0, |t| t.text.len_utf16());
-                    select(&view, Some((0, len)));
-                }
+                Key::a | Key::A if ctrl => select_all(&view),
                 // Without a selection Escape goes on (to going back).
                 Key::Escape if view_selection(&view).is_some_and(|s| s.range.get().is_some()) => {
                     select(&view, None)
@@ -1714,14 +1724,34 @@ impl Selection {
             // The window going to the background keeps its focus widget,
             // and so the selection.
             if let Some(view) = weak.upgrade()
-                && view.root().and_then(|r| r.focus()).as_ref() != Some(view.upcast_ref())
+                && !view
+                    .root()
+                    .and_then(|r| r.focus())
+                    .is_none_or(|f| &f == view.upcast_ref::<gtk::Widget>() || f.is_ancestor(&view))
             {
+                // Its edit menu (a popover, which leaves the window with no
+                // focus widget) keeps it too.
                 select(&view, None);
             }
         });
         for c in &selection.controllers {
             view.add_controller(c.clone());
         }
+        // The window menu's and the context menu's Copy and Select All.
+        let action = |name: &str, f: fn(&NshView)| {
+            let action = gio::SimpleAction::new(name, None);
+            let weak = view.downgrade();
+            action.connect_activate(move |_, _| {
+                if let Some(view) = weak.upgrade() {
+                    f(&view);
+                }
+            });
+            let group = gio::SimpleActionGroup::new();
+            group.add_action(&action);
+            group
+        };
+        view.insert_action_group("clipboard", Some(&action("copy", copy)));
+        view.insert_action_group("selection", Some(&action("select-all", select_all)));
         selection
     }
 
@@ -1733,6 +1763,8 @@ impl Selection {
         for c in &self.controllers {
             view.remove_controller(c);
         }
+        view.insert_action_group("clipboard", None::<&gio::ActionGroup>);
+        view.insert_action_group("selection", None::<&gio::ActionGroup>);
         view.set_focusable(false);
     }
 
@@ -1908,6 +1940,17 @@ fn dragged(view: &NshView, dx: f32, dy: f32, x: f32, y: f32) {
         extend(&drawn.text.text, s.anchor.get(), caret, s.unit.get())
     };
     select(view, Some(range));
+}
+
+/// Selects all of `view`'s text.
+fn select_all(view: &NshView) {
+    let len = view.state().text.as_ref().map_or(0, |t| t.text.len_utf16());
+    select(view, Some((0, len)));
+}
+
+/// Whether `view` (selectable text) has a selection to copy.
+pub(crate) fn has_selection(view: &NshView) -> bool {
+    selected_text(view).is_some()
 }
 
 /// Copies the selection to the clipboard.
@@ -2406,6 +2449,52 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A text's first baseline (what `align-items: baseline` lines it up
+    /// by) is where its first line is drawn, wrapped or not, also with a
+    /// line height, and grows with the font.
+    #[test]
+    fn the_first_baseline_is_the_first_lines() {
+        let engine = PangoTextEngine::new("sans-serif".into());
+        let at_of = |content: &str, style: ResolvedTextStyle, width: Option<f32>| {
+            let t = text(&[(content, style)]);
+            let prepared = engine.prepare(&t);
+            let measured = engine.measure(&prepared, width.map(Points));
+            let baseline = engine
+                .first_baseline(&prepared, measured.width)
+                .expect("a first line");
+            let line = engine.lines(&engine.layout(&prepared, measured)).remove(0);
+            (baseline.0, (line.y + line.ascender).0)
+        };
+        let at = |style, width| at_of("Chat with the world", style, width);
+        let near = |a: f32, b: f32| (a - b).abs() < 0.5;
+        let sized = |size: f32| ResolvedTextStyle {
+            font_size: Points(size),
+            ..Default::default()
+        };
+        let (small, drawn) = at(sized(12.0), None);
+        assert!(near(small, drawn), "{small} {drawn}");
+        let (wrapped, drawn) = at(sized(12.0), Some(30.0));
+        assert!(
+            near(wrapped, drawn) && near(wrapped, small),
+            "{wrapped} {drawn}"
+        );
+        let spaced = ResolvedTextStyle {
+            line_height: Points(26.0),
+            ..sized(17.0)
+        };
+        let (baseline, drawn) = at(spaced, None);
+        assert!(near(baseline, drawn), "{baseline} {drawn}");
+        let (large, _) = at(sized(24.0), None);
+        assert!(large > small, "{large} {small}");
+        // A first line of only a break has no runs: its own baseline, not
+        // the next line's.
+        let (broken, drawn) = at_of("\nChat", sized(12.0), None);
+        assert!(
+            near(broken, drawn) && near(broken, small),
+            "{broken} {drawn}"
+        );
     }
 
     /// With a fixed `lineHeight`, an attachment taller than the line grows

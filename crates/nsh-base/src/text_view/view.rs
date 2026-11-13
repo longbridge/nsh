@@ -197,6 +197,12 @@ pub struct TextViewSelectionEvent {
     /// Where it starts in the view's whole text (UTF-16 units), when the
     /// platform knows it.
     pub start: Option<u32>,
+    /// The box around it in the view, while something is selected and the
+    /// platform knows it.
+    pub bounds: Option<Bounds<Points>>,
+    /// The same box in the root view the view is in, as of the event (an
+    /// `Overlay`'s `anchor`).
+    pub page_bounds: Option<Bounds<Points>>,
 }
 
 /// An action of the code blocks of a [`TextView`] (`codeBlockActions`).
@@ -314,6 +320,8 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
             cx.emit(TextViewEvent::SelectionChange(TextViewSelectionEvent {
                 text: e.text.clone().into(),
                 start: e.start,
+                bounds: e.bounds,
+                page_bounds: e.page_bounds,
             }));
         })
         .map(|mut el| {
@@ -1115,13 +1123,17 @@ impl Cx {
                     .map(|(i, action)| self.code_action(action, code, &format!("{key}.{i}"))),
             )
         });
-        // The app's highlighter, else the built-in one (which may color the
-        // code a moment after it shows), else plain.
-        let body = match &self.highlighter {
-            Some(h) => text("").children(h.spans(code)),
-            None => match super::highlight::built_in(code) {
-                Some(spans) => text("").children(spans),
-                None => text(code.code.clone()),
+        // The block's own annotated content, else the app's highlighter, else
+        // the built-in one (which may color the code a moment after it
+        // shows), else plain.
+        let body = match annotated(code) {
+            Some(content) => self.span(content, key),
+            None => match &self.highlighter {
+                Some(h) => text("").children(h.spans(code)),
+                None => match super::highlight::built_in(code) {
+                    Some(spans) => text("").children(spans),
+                    None => text(code.code.clone()),
+                },
             },
         };
         // The padding is the code's, inside the scroll view: the code
@@ -1143,15 +1155,20 @@ impl Cx {
             .bg(move || theme().muted)
             .text_size(px(CODE_SIZE))
             .line_height(px(CODE_SIZE * CODE_LINE));
+        let body = self.part(body, Part::CodeBlockCode);
+        let content = if code.wrap {
+            body.w_full().min_w_0().into_element()
+        } else {
+            self.part(
+                scroll().horizontal().scrollbar(self.code_scroll_indicator),
+                Part::CodeBlockScroll,
+            )
+            .child(body)
+            .into_element()
+        };
         // The actions last, so they are drawn over the code.
         self.part(block, Part::CodeBlock)
-            .child(
-                self.part(
-                    scroll().horizontal().scrollbar(self.code_scroll_indicator),
-                    Part::CodeBlockScroll,
-                )
-                .child(self.part(body, Part::CodeBlockCode)),
-            )
+            .child(content)
             .child(header)
             .into_element()
     }
@@ -1826,6 +1843,12 @@ impl Cx {
                     .role(role)
                     .label(SharedString::from(image.alt.clone()))
                     .on_press(press)
+                    // On its own, as wide as the text: the app's image
+                    // sizes against this view, so a `w_full()` of its own
+                    // fills the column and a `max_w(relative(1.0))` holds
+                    // it to the column, as the document's own images are
+                    // held (one of a fixed width keeps it, at the start).
+                    .when(matches!(flow, ImageFlow::Block), |v| v.w_full())
                     .child(el)
                     // The view taking the press is the image's anchor.
                     .when_some(hint, |v, hint| v.child(hint.0))
@@ -2434,6 +2457,23 @@ fn ink_on(bg: Hsla) -> Hsla {
         rgb(0x1f1e1c).into()
     } else {
         rgb(0xf4f3f0).into()
+    }
+}
+
+/// A code block's annotated `content`, when it has one whose plain text is
+/// its `code` (what copying takes): other content would show one text and
+/// copy another, so it is ignored with a warning.
+fn annotated(code: &CodeBlock) -> Option<&[Inline]> {
+    if code.content.is_empty() {
+        return None;
+    }
+    let mut plain = String::new();
+    super::document::inline_text(&code.content, &mut plain);
+    if plain == code.code {
+        Some(&code.content)
+    } else {
+        log::warn!("TextView: a code block's content does not spell its code; showing the code");
+        None
     }
 }
 

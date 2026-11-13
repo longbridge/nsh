@@ -396,12 +396,7 @@ fn cast(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4, spec: &ShadowSpec, opa
         for child in children {
             let (local, child_opacity) = {
                 let cs = child.state();
-                let o = state.child_origin(cs.frame, cs.shift);
-                let mut local = Mat4::new().translate(o.0, o.1);
-                if let Some(t) = cs.transform() {
-                    local = Mat4::mul(&t, &local);
-                }
-                (local, cs.opacity())
+                (state.child_matrix(&cs), cs.opacity())
             };
             if child_opacity <= 0.0 {
                 continue;
@@ -478,14 +473,19 @@ pub(crate) fn draw_border(cx: &mut DrawCx<'_>, state: &ViewState) {
     // With the animated color: a border declared transparent shows once
     // its color is animated.
     let b = state.borders();
-    let o = state.style.outline;
-    let radii = state.radii();
     if b.is_visible() {
-        draw_borders(cx, &b, w, h, radii);
+        draw_borders(cx, &b, w, h, state.radii());
     }
-    if o.is_visible() {
-        draw_outline(cx, &o, w, h, radii);
+}
+
+/// Draws the view's outline, over its children (as CSS does).
+pub(crate) fn draw_outline_of(cx: &mut DrawCx<'_>, state: &ViewState) {
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
+    let o = state.style.outline;
+    if w <= 0.0 || h <= 0.0 || !o.is_visible() || cx.culled() {
+        return;
     }
+    draw_outline(cx, &o, w, h, state.radii());
 }
 
 /// Pixels per unit of the current coordinates (how finely curves are

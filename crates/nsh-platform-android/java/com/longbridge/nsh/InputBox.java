@@ -188,6 +188,7 @@ final class InputBox extends FrameLayout implements Node {
         // fallback fonts' taller metrics (HyperOS's sans-serif has them) would
         // put the centered text above the middle of the field.
         if (Build.VERSION.SDK_INT >= 28) edit.setFallbackLineSpacing(false);
+        if (Build.VERSION.SDK_INT >= 35) edit.setLocalePreferredLineHeightForMinimumUsed(false);
         defaultVerticalBar = edit.isVerticalScrollBarEnabled();
         edit.addTextChangedListener(new TextWatcher() {
             @Override
@@ -580,7 +581,10 @@ final class InputBox extends FrameLayout implements Node {
             editMenu.invalidateContentRect();
             return;
         }
-        editMenu = edit.startActionMode(new android.view.ActionMode.Callback2() {
+        // From the root view: a floating toolbar keeps to the view that started it, and the field is a sliver at
+        // the caret, so its toolbar would sit there over the selection's handles whatever the bounds said.
+        View origin = edit.getRootView() == mounter.host.getRootView() ? mounter.host : edit.getRootView();
+        editMenu = origin.startActionMode(new android.view.ActionMode.Callback2() {
             @Override
             public boolean onCreateActionMode(android.view.ActionMode m, android.view.Menu menu) {
                 menu.add(android.view.Menu.NONE, android.R.id.cut, 0, android.R.string.cut);
@@ -626,7 +630,7 @@ final class InputBox extends FrameLayout implements Node {
 
             @Override
             public void onGetContentRect(android.view.ActionMode m, View v, android.graphics.Rect out) {
-                // From the root view (the surface, or the window of the modal the field is in) to the field.
+                // From the root view (the surface, or the window of the modal the field is in) to the view that started it.
                 View root = v.getRootView() == mounter.host.getRootView() ? mounter.host : v.getRootView();
                 int[] rootAt = new int[2], at = new int[2];
                 root.getLocationOnScreen(rootAt);

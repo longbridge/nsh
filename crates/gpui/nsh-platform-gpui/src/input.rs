@@ -10,9 +10,9 @@
 //!
 //! Hit testing walks the views ([`pick`]), as the Linux backend does:
 //! points go into children through their frames, the parent's scroll
-//! offset and sticky shift ([`ViewState::child_origin`]) and their
-//! transforms (inverted with [`Mat4::unproject`], so 3D transforms hit
-//! where they are drawn). Hidden and concealed views, `pointerEvents`,
+//! offset, zoom and sticky shift ([`ViewState::child_matrix`]) and their
+//! transforms (inverted with [`crate::geom::Mat4::unproject`], so 3D
+//! transforms hit where they are drawn). Hidden and concealed views, `pointerEvents`,
 //! `hitSlop` and `overflow: hidden` are honored; outside a view's bounds,
 //! only the area its descendants cover (`MountItem::Overflow`: a dropdown
 //! under its field) is looked into, as on iOS and Android. The items a
@@ -53,7 +53,9 @@
 //! backends do. Without phases (Wayland; X11 reports touchpads as wheel
 //! lines) a precise scroll ends once its deltas pause. Touchpad pinches
 //! (GPUI's `PinchEvent`, [`touchpad_pinch`]) and Ctrl + wheel pinch the
-//! view under the pointer.
+//! view under the pointer; a touchpad pinch over a zoomable scroll view
+//! nearer than a view that pinches zooms it around the pointer
+//! ([`crate::scroll::pinch`]). Ctrl + wheel never zooms a scroll view.
 //!
 //! The decisions over plain data (what a pointer going down may start, a
 //! press's events, hover changes, hit areas, pinches, wheel latching) are
@@ -70,15 +72,15 @@ use nsh_core::{
     geometry::Points,
     input::{
         self, Candidate, Gate, Grab, GrabOptions, HitArea, Link, PAN_SLOP, PRESS_SLOP, Pinch,
-        SCROLL_PRESS_DELAY, TOUCHPAD_IDLE, VelocityTracker, ZOOM_IDLE, ZOOM_NOTCH, has_press,
-        laid_out, latch_holds, touchpad_wait, transforms,
+        SCROLL_PRESS_DELAY, TOUCHPAD_IDLE, VelocityTracker, WheelLatch, WheelStep, ZOOM_IDLE,
+        ZOOM_NOTCH, has_press, laid_out, latch_holds, touchpad_wait, transforms,
     },
+    platform::InputModality,
     tailwind::state::{HOVERED, PRESSED},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
-    geom::Mat4,
     surface::Surface,
     view::{ItemPointer, Native, NshView, ViewState},
 };
@@ -91,8 +93,13 @@ struct Transform {
     view: NshView,
     pinch: bool,
     rotation: bool,
+    /// It zooms `view`, a zoomable scroll view, rather than driving its
+    /// pinch values.
+    zoom: bool,
     scale: f32,
     degrees: f32,
+    /// Where the pointer is (root coordinates).
+    at: (f32, f32),
 }
 
 /// Two touchscreen fingers transforming a view.
@@ -274,6 +281,15 @@ pub(crate) struct Input {
     /// The scroll view mouse wheel notches go to while they keep coming,
     /// whether they scroll horizontally, and when the last one came (ms).
     latch: RefCell<Option<(NshView, bool, f64)>>,
+    /// The `onWheel` listener a scroll went to, which keeps the rest of it.
+    wheel_listener: RefCell<WheelLatch<NshView>>,
+    /// The `onPinch` listener a touchpad pinch went to, to its end, and the
+    /// pinch's absolute scale (GPUI's Linux deltas change it).
+    pinch_listener: RefCell<WheelLatch<NshView>>,
+    pinch_scale: Cell<f32>,
+    /// When the gesture [`Input::wheel_listener`] follows last moved (ms):
+    /// GPUI tells no end of the momentum after it, so a pause ends it.
+    wheel_listener_last: Cell<f64>,
     /// Views that track `HOVERED`.
     hover_tracked: RefCell<FxHashSet<NodeId>>,
     /// Views listening to mouse motion; other apps skip the extra hit test.
@@ -311,9 +327,11 @@ pub(crate) struct Input {
 }
 
 impl Input {
-    /// A touchpad pinch is going on ([`touchpad_pinch`]).
+    /// A touchpad pinch is going on ([`touchpad_pinch`]): a native one, or
+    /// one an `onPinch` listener took (a pinch nothing takes or pinches
+    /// is not the surface's, so a lost end cannot keep it).
     pub(crate) fn pinching(&self) -> bool {
-        self.pinch.borrow().is_some()
+        self.pinch.borrow().is_some() || self.pinch_listener.borrow().taker().is_some()
     }
 }
 
@@ -486,6 +504,8 @@ pub(crate) fn reset(surface: &Surface) {
     input.wheel.borrow_mut().take();
     input.momentum.set(None);
     input.latch.borrow_mut().take();
+    input.wheel_listener.borrow_mut().clear();
+    input.pinch_listener.borrow_mut().clear();
     input.hover_tracked.borrow_mut().clear();
     input.mouse_tracked.borrow_mut().clear();
     input.hovered.borrow_mut().clear();
@@ -532,6 +552,46 @@ fn update_hover_tracking(surface: &Surface, view: &NshView) {
         // Not hovered as far as anyone knows: picked again if hovering it
         // matters again under the pointer.
         surface.input.hovered.borrow_mut().retain(|v| v != view);
+    }
+}
+
+/// `Remove` / `Delete` of `view`: it and the views inside it leave the
+/// hover, their `HOVERED` cleared without `onMouseLeave`, as a removed DOM
+/// element hears none. A removed view may outlive its component (a JS
+/// cycle keeps its node until a collection), whose handlers must not run.
+pub(crate) fn removed(surface: &Surface, view: &NshView) {
+    let input = &surface.input;
+    let inside = |v: &NshView| {
+        let mut at = Some(v.clone());
+        while let Some(v) = at {
+            if v == *view {
+                return true;
+            }
+            at = v.parent_view();
+        }
+        false
+    };
+    if input
+        .link_hovered
+        .borrow()
+        .as_ref()
+        .is_some_and(|(v, _)| inside(v))
+    {
+        input.link_hovered.borrow_mut().take();
+    }
+    if input.hovered.borrow().is_empty() {
+        return;
+    }
+    let mut gone = Vec::new();
+    input.hovered.borrow_mut().retain(|v| {
+        if inside(v) {
+            gone.push(v.clone());
+            return false;
+        }
+        true
+    });
+    for v in &gone {
+        set_state(surface, v, HOVERED, false);
     }
 }
 
@@ -1061,6 +1121,11 @@ pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshV
 
 /// A pointer event from the window.
 pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
+    // Before the press acts: the focus it moves does not show
+    // (`focus-visible:`).
+    if matches!(event.kind, PointerKind::Down) {
+        surface.control(|c| c.set_input_modality(InputModality::Pointer));
+    }
     let key = if event.touch || event.pen {
         Key::Touch(event.pointer)
     } else {
@@ -1120,8 +1185,14 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
             motion(surface, key, x, y, time);
         }
         PointerKind::Up => {
-            if mouse && event.button != 0 {
-                return;
+            if mouse {
+                surface.input.last.set(Some((x, y)));
+                if let Some(released) = mouse_button(event.button) {
+                    mouse_up(surface, x, y, event.modifiers, released);
+                }
+                if event.button != 0 {
+                    return;
+                }
             }
             up(surface, key, Some((x, y)), time, false);
         }
@@ -1137,6 +1208,108 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
             set_hover_item(surface, None, (x, y), event.modifiers);
         }
     }
+}
+
+/// `onWheel` for a wheel by `delta` from the window, in `phase` of a
+/// touchpad gesture (precise deltas): the nearest view around the one
+/// under the pointer that listens hears it ([`input::wheel_listener`]),
+/// and one scroll stays where it went ([`WheelLatch`]: a gesture and the
+/// system's momentum after it on the view its first move found, steps on
+/// theirs while they keep coming; a scroll going on in a scroll view is
+/// only observed). Returns whether that view takes the wheel, so nothing
+/// scrolls or zooms natively.
+pub(crate) fn wheel_event(
+    surface: &Rc<Surface>,
+    event: &WheelEvent,
+    delta: nsh_core::WheelDelta,
+    phase: Option<GesturePhase>,
+) -> bool {
+    let (x, y) = (event.x, event.y);
+    let input = &surface.input;
+    let time = event.time * 1000.0;
+    // The axis the scroll views take it on: Shift turns a mouse's vertical
+    // notches horizontal (`wheel`), and the latch is kept on that axis.
+    let horizontal = if !event.precise && event.dx == 0.0 && event.modifiers.shift {
+        event.dy != 0.0
+    } else {
+        event.dx.abs() > event.dy.abs()
+    };
+    let mut gesture = input.wheel_listener.borrow().in_gesture();
+    if gesture && time - input.wheel_listener_last.get() > TOUCHPAD_IDLE {
+        input.wheel_listener.borrow_mut().clear();
+        gesture = false;
+    }
+    input.wheel_listener_last.set(time);
+    let step = match phase {
+        Some(GesturePhase::Began) => WheelStep::Begin,
+        // The fingers lifted: the system's momentum (moves without a
+        // phase) goes on where the gesture went.
+        Some(GesturePhase::Moved | GesturePhase::Ended) if gesture => WheelStep::Continue,
+        Some(GesturePhase::Cancelled) if gesture => WheelStep::End,
+        _ => WheelStep::Discrete {
+            horizontal,
+            precise: event.precise,
+            time,
+        },
+    };
+    let moved = delta.xy() != (0.0, 0.0);
+    let scrolling = input.wheel.borrow().is_some()
+        || input
+            .momentum
+            .get()
+            .is_some_and(|last| time - last < TOUCHPAD_IDLE)
+        || input
+            .latch
+            .borrow()
+            .as_ref()
+            .is_some_and(|(view, h, last)| latch_holds(*h, *last, horizontal, time) && shown(view));
+    // Whether a listener had this scroll before (a new gesture has none
+    // yet, whatever the last one left).
+    let took = step != WheelStep::Begin && input.wheel_listener.borrow().taker().is_some();
+    let routed = input.wheel_listener.borrow_mut().route(
+        step,
+        moved,
+        scrolling,
+        |v| shown(v) && v.state().events.contains(EventKind::Wheel),
+        || {
+            let hit = pick(&surface.input_root(), x, y, true)?;
+            input::wheel_listener(
+                chain(&hit.view),
+                |v| v.state().events.contains(EventKind::Wheel),
+                // A multiline field scrolls its own lines.
+                |v| matches!(v.kind(), ViewKind::Scroll | ViewKind::Input),
+            )
+        },
+    );
+    let Some((view, takes)) = routed else {
+        return false;
+    };
+    if takes && !took && matches!(phase, Some(GesturePhase::Moved)) {
+        // A scroll view held this gesture for the resting fingers: it lets
+        // go.
+        wheel_input(
+            surface,
+            x,
+            y,
+            0.0,
+            0.0,
+            time,
+            WheelInput::Stop { fling: false },
+        );
+    }
+    if !moved {
+        return takes;
+    }
+    let (location_x, location_y) = local(&view, x, y);
+    let wheel = nsh_core::WheelEvent::new(
+        nsh_core::geometry::point(Points(location_x), Points(location_y)),
+        nsh_core::geometry::point(Points(x), Points(y)),
+        delta,
+        event.modifiers.core(),
+    );
+    let id = view.state().id;
+    surface.event(id, EventKind::Wheel, EventPayload::Wheel(wheel));
+    takes
 }
 
 /// A wheel event from the window.
@@ -1176,40 +1349,90 @@ pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
     wheel_input(surface, x, y, dx, dy, event.time * 1000.0, kind);
 }
 
-/// A key from the window; true when handled. Only key downs (and their
-/// repeats) go to the modules; ups are not acted on.
+/// A key the surface synthesized (a menu role's edit key, the window's own
+/// Tab, the test agent's presses), not one GPUI reported: no raw
+/// notification follows, as no platform source reported it. True when
+/// handled. Only key downs (and their repeats) go to the modules; ups are
+/// not acted on.
 pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
+    window_key(surface, event, None)
+}
+
+/// A key GPUI reported: the virtual-key event the shared input code reads
+/// and, when the focused view hears raw keys (or captures them), the key
+/// as the source reported it ([`crate::keys::RawKey`]). True when handled.
+pub(crate) fn window_key(
+    surface: &Rc<Surface>,
+    event: KeyEvent,
+    raw: Option<crate::keys::RawKey>,
+) -> bool {
+    // Before the key acts: the focus it moves shows (`focus-visible:`). A
+    // modifier alone (Shift, Control, Alt, the Windows / Command keys)
+    // does not count.
+    const MODIFIERS: [u16; 11] = [
+        0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C,
+    ];
+    if event.down && !MODIFIERS.contains(&event.vk) {
+        surface.control(|c| c.set_input_modality(InputModality::Keyboard));
+    }
     if event.down && event.vk == VK_ESCAPE {
         crate::text_input::disarm(surface);
     }
-    if event.down && crate::text_input::hold_key(surface, &event) {
+    if event.down && crate::text_input::hold_key(surface, &event, raw.as_ref()) {
         return true;
     }
-    key_now(surface, event)
+    key_now_raw(surface, event, raw)
 }
 
 /// A key from the window, or one that waited behind typed text for the
-/// next field ([`crate::text_input`]). True when handled.
-pub(crate) fn key_now(surface: &Rc<Surface>, event: KeyEvent) -> bool {
+/// next field ([`crate::text_input`]), with the key as the source reported
+/// it: the view with the keyboard focus hears it after the app's shortcuts
+/// and before the native defaults, which a capture rule suppresses. True
+/// when handled.
+pub(crate) fn key_now_raw(
+    surface: &Rc<Surface>,
+    event: KeyEvent,
+    raw: Option<crate::keys::RawKey>,
+) -> bool {
     let input = &surface.input;
+    // The source's own key, for a key no virtual key code names: the app's
+    // bindings and capture rules match it (`shift+/` for GPUI's `?`).
+    let source = source_stroke(&event, raw.as_ref()).copied();
     if !event.down {
         crate::keymap::released(surface, &event);
+        if let Some(stroke) = source {
+            crate::keymap::released_stroke(surface, &stroke);
+        }
+        // The source's own release reaches the focused view, whatever went
+        // down on it (GPUI sends no synthetic releases).
+        let captured = raw.as_ref().is_some_and(|raw| notify_raw(surface, raw));
         // `DefWindowProc` opens the window menu when Alt is released after
         // it saw no other key: swallow the release once Alt + key was ours.
-        return event.vk == VK_MENU && input.alt_combo.replace(false);
+        return (event.vk == VK_MENU && input.alt_combo.replace(false)) || captured;
     }
     // The window's shortcuts (full screen, the dev host's reload) work
     // wherever the focus is.
     let shortcut = surface.shortcuts.borrow().iter().any(|f| f(&event));
     let editing = crate::text_input::focused(surface).is_some();
-    let handled = shortcut
+    let mut handled = shortcut
         || crate::system::key(surface, &event)
-        || crate::keymap::key(surface, &event, editing)
+        || crate::keymap::key_stroke(surface, &event, editing, source);
+    // The focused view hears the key as the source reported it, and a
+    // capture rule over it runs no native default. A text field or a
+    // native component owns its keys: its ancestors hear none of them.
+    if !handled
+        && !editing
+        && let Some(raw) = &raw
+    {
+        handled = notify_raw(surface, raw);
+    }
+    handled = handled
         || crate::chrome::shortcut(surface, &event)
         || crate::text_input::key(surface, &event)
         || crate::text::key(surface, &event)
         || crate::selectable_view::key(surface, &event)
         || crate::navigation::key_pressed(surface, &event)
+        || crate::key_focus::key(surface, &event)
         || {
             let (x, y) = input.last.get().unwrap_or((-1.0, -1.0));
             crate::scroll::key(surface, &event, x, y)
@@ -1221,6 +1444,125 @@ pub(crate) fn key_now(surface: &Rc<Surface>, event: KeyEvent) -> bool {
     handled
 }
 
+/// The source's canonical shortcut stroke of a key nsh has no virtual key
+/// code for (`shift+/` for GPUI's `?`), for the shared keymap's bindings
+/// and for capture rules. A key with a code keeps the code's meaning.
+fn source_stroke<'a>(
+    event: &KeyEvent,
+    raw: Option<&'a crate::keys::RawKey>,
+) -> Option<&'a nsh_core::keymap::Keystroke> {
+    if event.vk != 0 {
+        return None;
+    }
+    raw?.stroke()
+}
+
+/// Whether the focused view or an enabled ancestor hears raw keys
+/// (`onKeyDown` / `onKeyUp`) or captures them: only then is a key needed
+/// as the source reported it.
+pub(crate) fn hears_keys(surface: &Surface) -> bool {
+    let Some(view) = crate::key_focus::focused(surface) else {
+        return false;
+    };
+    // A window of the app's own keeps its keys: its focused view hears
+    // them only where the input root says the keys come in.
+    let window = crate::window::entered(surface).unwrap_or(ROOT_ID);
+    if crate::window::root_of(surface, &view) != window {
+        return false;
+    }
+    hears_chain(surface, Some(view))
+}
+
+/// The view a keyboard interest or capture walk goes to from `view`: the
+/// logical parent the core points it at ([`nsh_core::ViewProps::key_parent`]:
+/// an overlay's content is mounted in a portal host, at the root, while it
+/// is logically inside the view that opened it), else the mounted parent.
+/// A `key_parent` naming no mounted view ends the walk: the logical
+/// ancestor is gone, and the mounted parent is not where its keys go.
+fn key_parent(surface: &Surface, view: &NshView) -> Option<NshView> {
+    let logical = view.state().props.key_parent;
+    match logical {
+        Some(id) => surface.view(id),
+        None => view.parent_view(),
+    }
+}
+
+/// Whether `view` or an enabled ancestor hears raw keys or captures them,
+/// by the logical tree (`key_parent`).
+fn hears_chain(surface: &Surface, mut current: Option<NshView>) -> bool {
+    while let Some(view) = current {
+        {
+            let state = view.state();
+            if state.events.contains(EventKind::KeyDown)
+                || state.events.contains(EventKind::KeyUp)
+                || !state.props.key_capture.is_none()
+            {
+                return true;
+            }
+        }
+        current = key_parent(surface, &view);
+    }
+    false
+}
+
+/// Reports a key as the source reported it to the focused view of the
+/// window it came in (`EventKind::KeyDown` / `KeyUp`): the core bubbles it
+/// to the view's enabled ancestors. The capture rules mounted over that
+/// view, and their canonical shortcut keystrokes, decide
+/// `default_prevented` for this transition, anew. True when the policy
+/// took it: no native default follows.
+pub(crate) fn notify_raw(surface: &Surface, raw: &crate::keys::RawKey) -> bool {
+    let Some(view) = crate::key_focus::focused(surface) else {
+        return false;
+    };
+    let window = crate::window::entered(surface).unwrap_or(ROOT_ID);
+    if crate::window::root_of(surface, &view) != window {
+        return false;
+    }
+    // A keymap alone may have needed the raw key (its stroke): a view that
+    // neither listens nor captures hears no notification.
+    if !hears_chain(surface, Some(view.clone())) {
+        return false;
+    }
+    let mut event = raw.event(false);
+    // The same decision the engine makes for a browser page
+    // (`Core::key_captured`), from the source's own key for a key with no
+    // virtual code; an engine on its own thread cannot answer it before
+    // the platform's default, so the mounted rules are read here.
+    let captured = captures(surface, &view, raw.stroke());
+    event.default_prevented = captured;
+    let kind = if raw.down {
+        EventKind::KeyDown
+    } else {
+        EventKind::KeyUp
+    };
+    surface.event(view.id(), kind, EventPayload::Key(event));
+    captured
+}
+
+/// Whether the focused `view` or an enabled ancestor captures the key of
+/// canonical shortcut `stroke` (`capture_keys`), by the logical tree
+/// (`key_parent`): a captured key notifies and runs no native default.
+fn captures(
+    surface: &Surface,
+    view: &NshView,
+    stroke: Option<&nsh_core::keymap::Keystroke>,
+) -> bool {
+    let mut current = Some(view.clone());
+    while let Some(view) = current {
+        {
+            let state = view.state();
+            if !state.props.accessibility.state.disabled
+                && state.props.key_capture.captures_key(stroke)
+            {
+                return true;
+            }
+        }
+        current = key_parent(surface, &view);
+    }
+    false
+}
+
 /// A key from the window while one of the surface's native components has
 /// the keyboard focus; true when handled. GPUI gives the component the key
 /// first (its key bindings, then its key listeners), so this sees only
@@ -1228,16 +1570,26 @@ pub(crate) fn key_now(surface: &Rc<Surface>, event: KeyEvent) -> bool {
 /// bindings as while a text field is edited (a binding whose `when` is
 /// `auto` leaves typing keys to the component), then the menu's shortcuts.
 /// Every other key stays the component's.
-pub(crate) fn component_key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
+pub(crate) fn component_key(
+    surface: &Rc<Surface>,
+    event: KeyEvent,
+    raw: Option<&crate::keys::RawKey>,
+) -> bool {
+    // A key the component let through that nsh has no code for matches by
+    // the source's stroke, as while no component has the focus.
+    let source = source_stroke(&event, raw).copied();
     if !event.down {
         crate::keymap::released(surface, &event);
+        if let Some(stroke) = source {
+            crate::keymap::released_stroke(surface, &stroke);
+        }
         return event.vk == VK_MENU && surface.input.alt_combo.replace(false);
     }
     if event.vk == VK_ESCAPE {
         crate::text_input::disarm(surface);
     }
     let handled = surface.shortcuts.borrow().iter().any(|f| f(&event))
-        || crate::keymap::key(surface, &event, true)
+        || crate::keymap::key_stroke(surface, &event, true, source)
         || crate::chrome::shortcut(surface, &event);
     if handled && event.modifiers.alt {
         surface.input.alt_combo.set(true);
@@ -1267,7 +1619,8 @@ fn tab(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
         return false;
     }
     let focused = crate::text_input::focused(surface)
-        .or_else(|| crate::native::focused_component(surface).and_then(|id| surface.view(id)));
+        .or_else(|| crate::native::focused_component(surface).and_then(|id| surface.view(id)))
+        .or_else(|| crate::key_focus::focused(surface));
     let current = focused.and_then(|f| stops.iter().position(|v| *v == f));
     // Past the ends the window's focus moves on ([`tab_to_edge`]).
     let Some(next) = input::tab_stop(current, stops.len(), m.shift, false) else {
@@ -1298,39 +1651,46 @@ pub(crate) fn tab_to_edge(surface: &Rc<Surface>, shift: bool) -> bool {
     }
 }
 
-/// Moves the keyboard focus to `view`: a text field, or a native component
-/// (focused by [`crate::native::apply_focus`], which has the window).
+/// Moves the keyboard focus to a field, a native component, or a custom view.
 fn focus_stop(surface: &Rc<Surface>, view: &NshView) {
-    if view.kind() == ViewKind::Native {
-        crate::native::tab_to(surface, view.id());
-    } else {
-        crate::text_input::tab_to(view);
+    match view.kind() {
+        ViewKind::Native => crate::native::tab_to(surface, view.id()),
+        ViewKind::Input => crate::text_input::tab_to(view),
+        _ => crate::key_focus::focus(surface, view),
     }
 }
 
 /// The Tab stops shown under `view`, in tree order (a scroll view's
-/// content as it is on screen): enabled text fields and
-/// the native components that take the keyboard.
+/// content as it is on screen; a shown overlay's content after the view it
+/// follows, [`input::tab_order`]): enabled fields, focusable custom views,
+/// and native components that take the keyboard.
 fn collect_stops(surface: &Surface, view: &NshView, out: &mut Vec<NshView>) {
-    {
+    let skipped = |view: &NshView| {
         let s = view.state();
-        if s.style.hidden || s.concealed || s.props.pointer_events == PointerEvents::None {
-            return;
+        s.style.hidden || s.concealed || s.props.pointer_events == PointerEvents::None
+    };
+    let order = input::tab_order(
+        view.clone(),
+        |view| {
+            if skipped(view) {
+                return Vec::new();
+            }
+            view.with_children_in_reading_order(<[NshView]>::to_vec)
+        },
+        NshView::id,
+        |view| view.state().props.tab_after,
+    );
+    out.extend(order.into_iter().filter(|view| {
+        if skipped(view) {
+            return false;
         }
-        let stop = match s.kind {
+        let s = view.state();
+        match s.kind {
             ViewKind::Input => !s.props.accessibility.state.disabled,
             ViewKind::Native => crate::native::focusable(surface, s.id),
-            _ => false,
-        };
-        if stop {
-            out.push(view.clone());
+            _ => s.props.focus_stop(s.events.contains(EventKind::Press)),
         }
-    }
-    view.with_children_in_reading_order(|children| {
-        for child in children {
-            collect_stops(surface, child, out);
-        }
-    });
+    }));
 }
 
 // --- Hit testing --------------------------------------------------------------------
@@ -1408,13 +1768,11 @@ fn pick_in(view: &NshView, x: f32, y: f32, items: bool) -> Option<Hit> {
         kids.iter().rev().find_map(|child| {
             let (cx, cy) = {
                 let c = child.state();
-                let (ox, oy) = s.child_origin(c.frame, c.shift);
-                match c.transform() {
-                    None => (x - ox, y - oy),
-                    Some(t) => {
-                        let local = Mat4::mul(&t, &Mat4::new().translate(ox, oy));
-                        local.unproject(x, y)?
-                    }
+                if c.transform().is_none() && s.child_scale() == 1.0 {
+                    let (ox, oy) = s.child_origin(c.frame, c.shift);
+                    (x - ox, y - oy)
+                } else {
+                    s.child_matrix(&c).unproject(x, y)?
                 }
             };
             pick_in(child, cx, cy, items)
@@ -1509,6 +1867,7 @@ fn down(
     let Some(mut hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
+    crate::key_focus::pointer_down(surface, &hit.view);
     let touch = key != Key::Mouse;
     let mut item = None;
     if let Some(native) = hit.item.take() {
@@ -1600,6 +1959,13 @@ fn down(
         input.js_block.set(false);
     }
     let views = chain(&hit.view);
+    if !native
+        && let Some(target) = views
+            .iter()
+            .find(|view| view.state().props.focusable == Some(true))
+    {
+        crate::key_focus::focus(surface, target);
+    }
     // The gate follows the first pointer only, as on the other platforms.
     let first = input.pointers.borrow().is_empty();
     let options = GrabOptions::new(touch, native, selects, first);
@@ -1894,6 +2260,11 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     page: nsh_core::geometry::point(Points(p.x), Points(p.y)),
                     location: nsh_core::geometry::point(Points(lx), Points(ly)),
                     changed: is_changed,
+                    pointer_type: if p.key == Key::Mouse {
+                        nsh_core::PointerType::Mouse
+                    } else {
+                        nsh_core::PointerType::Touch
+                    },
                 }
             })
             .collect()
@@ -2113,12 +2484,38 @@ fn transform_view(surface: &Surface, view: &NshView) -> Transform {
         view: view.clone(),
         pinch,
         rotation,
+        zoom: false,
         scale: 1.0,
         degrees: 0.0,
+        at: (0.0, 0.0),
     }
 }
 
-fn transform_begin(surface: &Surface, t: &Transform) {
+/// Whether a pinch at `view` pinches it: it zooms (a zoomable scroll
+/// view) or has native pinch values.
+fn pinches(surface: &Rc<Surface>, view: &NshView) -> bool {
+    if crate::scroll::pinches(surface, view) {
+        return true;
+    }
+    let s = view.state();
+    transforms(&gesture_values(surface, view, s.id), s.events).0
+}
+
+/// The pinch of `view` ([`pinches`]) at `(x, y)` (root coordinates): it
+/// zooms a zoomable scroll view, nearer than the pinch values it may also
+/// have.
+fn pinch_view(surface: &Rc<Surface>, view: &NshView, x: f32, y: f32) -> Transform {
+    let mut t = transform_view(surface, view);
+    t.rotation = false;
+    t.zoom = crate::scroll::pinches(surface, view);
+    t.at = (x, y);
+    t
+}
+
+fn transform_begin(surface: &Rc<Surface>, t: &Transform) {
+    if t.zoom {
+        return crate::scroll::pinch_begin(surface, &t.view);
+    }
     let (id, events) = {
         let s = t.view.state();
         (s.id, s.events)
@@ -2142,6 +2539,10 @@ fn transform_begin(surface: &Surface, t: &Transform) {
 }
 
 fn transform_move(surface: &Rc<Surface>, t: &Transform) {
+    if t.zoom {
+        let (x, y) = local(&t.view, t.at.0, t.at.1);
+        return crate::scroll::pinch(surface, &t.view, t.scale, x, y);
+    }
     let id = t.view.state().id;
     {
         let mut anim = surface.anim.borrow_mut();
@@ -2156,7 +2557,11 @@ fn transform_move(surface: &Rc<Surface>, t: &Transform) {
     surface.ensure_ticking();
 }
 
-fn transform_end(surface: &Surface, t: &Transform) {
+fn transform_end(surface: &Rc<Surface>, t: &Transform) {
+    if t.zoom {
+        let (x, y) = local(&t.view, t.at.0, t.at.1);
+        return crate::scroll::pinch_end(surface, &t.view, x, y);
+    }
     let (id, events) = {
         let s = t.view.state();
         (s.id, s.events)
@@ -2261,6 +2666,8 @@ fn wheel_zoom(surface: &Rc<Surface>, x: f32, y: f32, dy: f32) -> bool {
             let Some(hit) = pick(&surface.input_root(), x, y, true) else {
                 return false;
             };
+            // Only views with pinch values: Ctrl + wheel never zooms a
+            // scroll view, it scrolls it.
             let view = chain(&hit.view).into_iter().find(|v| {
                 let s = v.state();
                 transforms(&gesture_values(surface, v, s.id), s.events).0
@@ -2447,6 +2854,38 @@ fn mouse_event(
         button,
     );
     surface.event(id, kind, EventPayload::Mouse(event));
+}
+
+/// `onMouseUp` of the views under the mouse at `(x, y)` (root coordinates)
+/// and the views they are inside, inside out, each with the mouse in it and
+/// the button that was released.
+fn mouse_up(
+    surface: &Surface,
+    x: f32,
+    y: f32,
+    modifiers: Modifiers,
+    button: nsh_core::MouseButton,
+) {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
+        return;
+    };
+    for view in chain(&hit.view) {
+        let id = {
+            let state = view.state();
+            if !state.events.contains(EventKind::MouseUp) {
+                continue;
+            }
+            state.id
+        };
+        let (location_x, location_y) = local(&view, x, y);
+        let event = nsh_core::MouseEvent::released(
+            nsh_core::geometry::point(Points(location_x), Points(location_y)),
+            nsh_core::geometry::point(Points(x), Points(y)),
+            modifiers.core(),
+            button,
+        );
+        surface.event(id, EventKind::MouseUp, EventPayload::Mouse(event));
+    }
 }
 
 /// A mouse button numbered as [`PointerEvent::button`] numbers them.
@@ -2806,6 +3245,9 @@ pub(crate) fn touchpad_pinch(
     phase: GesturePhase,
 ) {
     let input = &surface.input;
+    if pinch_event(surface, x, y, delta, phase) {
+        return;
+    }
     if phase == GesturePhase::Began {
         if let Some((old, _)) = input.pinch.borrow_mut().take() {
             transform_end(surface, &old);
@@ -2813,13 +3255,9 @@ pub(crate) fn touchpad_pinch(
         let Some(hit) = pick(&surface.input_root(), x, y, true) else {
             return;
         };
-        let view = chain(&hit.view).into_iter().find(|v| {
-            let s = v.state();
-            transforms(&gesture_values(surface, v, s.id), s.events).0
-        });
+        let view = chain(&hit.view).into_iter().find(|v| pinches(surface, v));
         let Some(view) = view else { return };
-        let mut t = transform_view(surface, &view);
-        t.rotation = false;
+        let t = pinch_view(surface, &view, x, y);
         transform_begin(surface, &t);
         *input.pinch.borrow_mut() = Some((t, 1.0));
     }
@@ -2831,6 +3269,7 @@ pub(crate) fn touchpad_pinch(
             };
             *absolute = pinch_scale(t.scale, *absolute, delta);
             t.scale = *absolute;
+            t.at = (x, y);
             t.clone()
         };
         transform_move(surface, &t);
@@ -2840,6 +3279,63 @@ pub(crate) fn touchpad_pinch(
     {
         transform_end(surface, &t);
     }
+}
+
+/// `onPinch` for a touchpad pinch event in `phase` at `(x, y)` (`delta`:
+/// GPUI's): the nearest view around the one under the pointer that
+/// listens hears the pinch from its start to its end ([`WheelLatch`]).
+/// Returns whether that view takes it ([`input::wheel_listener`]: no view
+/// that pinches natively is nearer, nor is it one), so nothing pinches
+/// natively.
+fn pinch_event(surface: &Rc<Surface>, x: f32, y: f32, delta: f32, phase: GesturePhase) -> bool {
+    let input = &surface.input;
+    let (step, pinch_phase) = match phase {
+        GesturePhase::Began => {
+            input.pinch_scale.set(1.0);
+            (WheelStep::Begin, nsh_core::PinchPhase::Start)
+        }
+        GesturePhase::Moved => (WheelStep::Continue, nsh_core::PinchPhase::Move),
+        GesturePhase::Ended | GesturePhase::Cancelled => {
+            (WheelStep::End, nsh_core::PinchPhase::End)
+        }
+    };
+    let routed = input.pinch_listener.borrow_mut().route(
+        step,
+        true,
+        false,
+        |v| shown(v) && v.state().events.contains(EventKind::Pinch),
+        || {
+            let hit = pick(&surface.input_root(), x, y, true)?;
+            input::wheel_listener(
+                chain(&hit.view),
+                |v| v.state().events.contains(EventKind::Pinch),
+                |v| pinches(surface, v),
+            )
+        },
+    );
+    let Some((view, takes)) = routed else {
+        return false;
+    };
+    // The change of scale since the last event: GPUI's on macOS and
+    // Windows; on Linux its delta changes the gesture's absolute scale.
+    let relative = if cfg!(target_os = "linux") {
+        let before = input.pinch_scale.get().max(0.01);
+        input.pinch_scale.set(before + delta);
+        (before + delta) / before - 1.0
+    } else {
+        delta
+    };
+    let (location_x, location_y) = local(&view, x, y);
+    let pinch = nsh_core::PinchEvent::new(
+        nsh_core::geometry::point(Points(location_x), Points(location_y)),
+        nsh_core::geometry::point(Points(x), Points(y)),
+        nsh_core::geometry::Percentage(relative),
+        pinch_phase,
+        input.modifiers.get().core(),
+    );
+    let id = view.state().id;
+    surface.event(id, EventKind::Pinch, EventPayload::Pinch(pinch));
+    takes
 }
 
 /// The scale of a touchpad pinch at `scale` (its absolute scale so far
@@ -3398,5 +3894,476 @@ mod tests {
             assert!((pinch_scale(2.0, 2.0, 0.1) - 2.2).abs() < 1e-6);
         }
         assert_eq!(pinch_scale(0.02, 0.02, -5.0), 0.01);
+    }
+
+    /// A surface with a 400 × 400 scroll view zooming up to 4× over a
+    /// 400 × 400 picture with a 20 × 20 badge at (80, 80): (surface,
+    /// scroll view, badge).
+    fn zooming_surface() -> (Rc<Surface>, NshView, NshView) {
+        let surface = Surface::new(nsh_engine::Environment::default());
+        surface.root.state_mut().frame = rect(0.0, 0.0, 400.0, 400.0);
+        let frame = rect(0.0, 0.0, 400.0, 400.0);
+        let scroll = view(&surface.root, 2, ViewKind::Scroll, frame);
+        let picture = view(&scroll, 4, ViewKind::View, frame);
+        let badge = view(&picture, 6, ViewKind::View, rect(80.0, 80.0, 20.0, 20.0));
+        let behavior = nsh_core::ScrollBehavior {
+            max_zoom: 4.0,
+            ..Default::default()
+        };
+        crate::scroll::behavior(&surface, &scroll, &behavior);
+        let size = nsh_core::geometry::size(Points(400.0), Points(400.0));
+        crate::scroll::content(&surface, &scroll, size);
+        (surface, scroll, badge)
+    }
+
+    fn zoom(scroll: &NshView) -> (f32, f32, f32) {
+        let state = scroll.state();
+        let s = state.scroll.as_ref().unwrap();
+        (s.zoom, s.x.0, s.y.0)
+    }
+
+    #[test]
+    fn zoomed_content_is_hit_where_it_is_drawn() {
+        let (surface, scroll, badge) = zooming_surface();
+        let root = surface.input_root();
+        assert_eq!(at(&root, 90.0, 90.0), Some(6));
+        assert_eq!(at(&root, 170.0, 170.0), Some(4));
+        let zoom_to = nsh_core::Command::ZoomTo {
+            scale: 2.0,
+            center: Some(nsh_core::geometry::point(Points(0.0), Points(0.0))),
+            animated: false,
+        };
+        crate::scroll::command(&surface, &scroll, &zoom_to);
+        assert_eq!(zoom(&scroll), (2.0, 0.0, 0.0));
+        // The badge is drawn at (160, 160), 40 × 40.
+        assert_eq!(at(&root, 90.0, 90.0), Some(4));
+        assert_eq!(at(&root, 170.0, 170.0), Some(6));
+        assert_eq!(at(&root, 195.0, 195.0), Some(6));
+        assert_eq!(local(&badge, 180.0, 180.0), (10.0, 10.0));
+        let m = badge.to_root().unwrap();
+        assert_eq!(m.map(20.0, 20.0), Some((200.0, 200.0)));
+        // Panned by the wheel, both ways.
+        crate::scroll::wheel(&surface, &scroll, 40.0, 60.0);
+        assert_eq!(zoom(&scroll), (2.0, 40.0, 60.0));
+        assert_eq!(at(&root, 125.0, 105.0), Some(6));
+    }
+
+    #[test]
+    fn touchpad_pinches_zoom_around_the_pointer_and_ctrl_wheel_does_not() {
+        let (surface, scroll, _) = zooming_surface();
+        let ctrl = Modifiers {
+            ctrl: true,
+            ..Default::default()
+        };
+        for _ in 0..5 {
+            wheel(
+                &surface,
+                WheelEvent {
+                    x: 100.0,
+                    y: 100.0,
+                    dx: 0.0,
+                    dy: -ZOOM_NOTCH.0,
+                    precise: false,
+                    modifiers: ctrl,
+                    time: 0.0,
+                },
+            );
+        }
+        assert_eq!(zoom(&scroll), (1.0, 0.0, 0.0));
+        assert!(surface.input.zoom.borrow().is_none());
+
+        // A touchpad pinch at (300, 200).
+        touchpad_pinch(&surface, 300.0, 200.0, 0.0, GesturePhase::Began);
+        touchpad_pinch(&surface, 300.0, 200.0, 1.0, GesturePhase::Moved);
+        let (z, x, y) = zoom(&scroll);
+        assert!(z > 1.5, "{z}");
+        assert!((x - 300.0 * (z - 1.0)).abs() < 1e-3, "{x}");
+        assert!((y - 200.0 * (z - 1.0)).abs() < 1e-3, "{y}");
+        touchpad_pinch(&surface, 300.0, 200.0, 0.0, GesturePhase::Ended);
+        assert_eq!(zoom(&scroll).0, z);
+    }
+
+    // --- Raw keys -----------------------------------------------------------------
+
+    /// A GPUI keystroke as a platform reports it, with no modifiers.
+    fn stroke_of(key: &str, key_char: Option<&str>) -> gpui::Keystroke {
+        gpui::Keystroke {
+            modifiers: Default::default(),
+            key: key.to_string(),
+            key_char: key_char.map(str::to_string),
+        }
+    }
+
+    /// A down (or up) key from the window for virtual key code `vk` (0:
+    /// none), as GPUI reported its raw key.
+    fn press(surface: &Rc<Surface>, vk: u16, down: bool, raw: crate::keys::RawKey) -> bool {
+        window_key(
+            surface,
+            KeyEvent {
+                vk,
+                down,
+                repeat: false,
+                modifiers: Modifiers::default(),
+            },
+            Some(raw),
+        )
+    }
+
+    /// A surface whose root draws, with a focusable view 2 that has the
+    /// keyboard focus (as a `focus()` from the app gives it).
+    fn focused_surface() -> (Rc<Surface>, NshView) {
+        let surface = Surface::new(nsh_engine::Environment::default());
+        surface.root.set_invalidate(Rc::new(|| {}));
+        surface.root.state_mut().frame = rect(0.0, 0.0, 400.0, 400.0);
+        let focused = view(
+            &surface.root,
+            2,
+            ViewKind::View,
+            rect(0.0, 0.0, 100.0, 100.0),
+        );
+        focused.state_mut().props.focusable = Some(true);
+        crate::key_focus::focus(&surface, &focused);
+        (surface, focused)
+    }
+
+    #[test]
+    fn hardware_keys_tab_between_custom_views_and_capture_keeps_the_focus() {
+        let (surface, first) = focused_surface();
+        let second = view(
+            &surface.root,
+            4,
+            ViewKind::View,
+            rect(0.0, 120.0, 100.0, 100.0),
+        );
+        second.state_mut().events.set(EventKind::Press, true);
+        crate::key_focus::clear(&surface);
+        let tab = || crate::keys::RawKey::down(&stroke_of("tab", None), false);
+
+        assert!(press(&surface, VK_TAB, true, tab()));
+        assert_eq!(crate::key_focus::focused(&surface), Some(first.clone()));
+        first.state_mut().props.key_capture = nsh_core::KeyCapture::All;
+        assert!(press(&surface, VK_TAB, true, tab()));
+        assert_eq!(crate::key_focus::focused(&surface), Some(first.clone()));
+        first.state_mut().props.key_capture = nsh_core::KeyCapture::None;
+        assert!(press(&surface, VK_TAB, true, tab()));
+        assert_eq!(crate::key_focus::focused(&surface), Some(second.clone()));
+        // The embedding window gets Tab after the final stop.
+        assert!(!press(&surface, VK_TAB, true, tab()));
+        assert_eq!(crate::key_focus::focused(&surface), Some(second));
+    }
+
+    #[test]
+    fn a_pointer_press_focuses_an_explicit_custom_view_without_a_press_handler() {
+        let (surface, first) = focused_surface();
+        crate::key_focus::clear(&surface);
+        down(
+            &surface,
+            Key::Mouse,
+            10.0,
+            10.0,
+            1.0,
+            1,
+            Modifiers::default(),
+        );
+        assert_eq!(crate::key_focus::focused(&surface), Some(first));
+    }
+
+    #[test]
+    fn capture_rules_apply_from_the_focus_up_through_its_ancestors() {
+        let root = root();
+        let outer = view(&root, 2, ViewKind::View, rect(0.0, 0.0, 300.0, 300.0));
+        let inner = view(&outer, 4, ViewKind::View, rect(0.0, 0.0, 100.0, 100.0));
+        let sibling = view(&root, 6, ViewKind::View, rect(0.0, 300.0, 100.0, 100.0));
+        // Ordinary views: the walk follows the mounted parents.
+        let surface = Surface::new(nsh_engine::Environment::default());
+        let shift_a = || {
+            let mut stroke = stroke_of("a", Some("A"));
+            stroke.modifiers.shift = true;
+            stroke
+        };
+        // The stroke the input code matches: the source's own key and
+        // modifiers, as `keys::RawKey` derives it.
+        let captured = |view: &NshView, k: &gpui::Keystroke| {
+            let raw = crate::keys::RawKey::down(k, false);
+            captures(&surface, view, raw.stroke())
+        };
+
+        // A rule over the focused view captures the keys it names, as the
+        // keymap spells them: Shift+A is `a` with Shift.
+        outer.state_mut().props.key_capture = nsh_core::KeyCapture::keys([
+            nsh_core::keymap::Keystroke::parse_with("shift+a", false).unwrap(),
+        ]);
+        assert!(captured(&inner, &shift_a()));
+        assert!(!captured(&inner, &stroke_of("a", Some("a"))));
+        // Caps Lock reports the typed `A` with no Shift: it is the `a` key,
+        // so the `shift+a` rule does not take it.
+        assert!(!captured(&inner, &stroke_of("a", Some("A"))));
+        // A sibling's rule is not over the focus.
+        sibling.state_mut().props.key_capture = nsh_core::KeyCapture::All;
+        assert!(!captured(&inner, &stroke_of("a", Some("a"))));
+        // A disabled view captures nothing.
+        outer.state_mut().props.accessibility.state.disabled = true;
+        assert!(!captured(&inner, &shift_a()));
+        outer.state_mut().props.accessibility.state.disabled = false;
+        // Shift+/ arrives as GPUI's `?`: a rule naming the US key captures
+        // it, through the keymap's canonical stroke for matching (the
+        // payload keeps the source's `?`).
+        outer.state_mut().props.key_capture = nsh_core::KeyCapture::keys([
+            nsh_core::keymap::Keystroke::parse_with("shift+/", false).unwrap(),
+        ]);
+        let question = stroke_of("?", Some("?"));
+        assert!(captured(&inner, &question));
+        // A rule naming another key does not.
+        assert!(!captured(&inner, &stroke_of("a", Some("a"))));
+        // `All` takes the keys no shortcut can name.
+        outer.state_mut().props.key_capture = nsh_core::KeyCapture::All;
+        assert!(captured(&inner, &question));
+        assert!(captured(&inner, &stroke_of("é", Some("é"))));
+        assert!(captured(&inner, &stroke_of("dead_acute", None)));
+        // The focus' own rule is looked at first, then its ancestors'.
+        inner.state_mut().props.key_capture = nsh_core::KeyCapture::None;
+        assert!(captured(&inner, &stroke_of("é", Some("é"))));
+    }
+
+    /// Core mounts an overlay's content in a portal host at the root while
+    /// its logical parent stays where it was opened
+    /// (`ViewProps::key_parent`). Keyboard interest and capture follow that
+    /// logical tree: the content is captured by an ancestor that is not its
+    /// mounted parent, and a sibling portal captures nothing of another's
+    /// ancestors.
+    #[test]
+    fn a_portaled_overlays_keys_follow_its_logical_ancestors() {
+        use nsh_core::MountItem;
+
+        let surface = Surface::new(nsh_engine::Environment::default());
+        surface.root.set_invalidate(Rc::new(|| {}));
+        surface.root.state_mut().frame = rect(0.0, 0.0, 400.0, 400.0);
+        // 2: the logical ancestor; 3: the portal host at the root; 4: the
+        // overlay's content, mounted in 3 and logically inside 2; 5: a
+        // sibling portal's content in 3, logically inside 6, which has no
+        // keys. ROOT_ID is reserved for the surface itself.
+        let tree: [(NodeId, NodeId); 5] =
+            [(2, ROOT_ID), (3, ROOT_ID), (4, 3), (5, 3), (6, ROOT_ID)];
+        for &(id, parent) in &tree {
+            let mut mounter = surface.mounter.borrow_mut();
+            mounter.apply(
+                &surface,
+                &MountItem::Create {
+                    id,
+                    kind: ViewKind::View,
+                },
+            );
+            mounter.apply(
+                &surface,
+                &MountItem::Insert {
+                    parent,
+                    child: id,
+                    before: None,
+                },
+            );
+        }
+        surface.mounter.borrow_mut().end_batch(&surface);
+        let ancestor = surface.view(2).unwrap();
+        let host = surface.view(3).unwrap();
+        let content = surface.view(4).unwrap();
+        let sibling = surface.view(5).unwrap();
+        // The core's Insert parent is the portal host, not the logical one.
+        assert_eq!(content.parent_view(), Some(host.clone()));
+        {
+            let mut state = content.state_mut();
+            state.props.focusable = Some(true);
+            state.props.key_parent = Some(2);
+        }
+        {
+            let mut state = sibling.state_mut();
+            state.props.focusable = Some(true);
+            state.props.key_parent = Some(6);
+        }
+        let raw = || crate::keys::RawKey::down(&stroke_of("?", Some("?")), false);
+        // The source's payload is untouched, its matching stroke is the
+        // keymap's.
+        assert_eq!(raw().event(false).key, "?");
+        assert!(!raw().event(false).modifiers.shift);
+        assert_eq!(
+            raw().stroke().map(|stroke| stroke.key),
+            Some(nsh_core::keymap::Key::Char('/'))
+        );
+        // The logical ancestor captures every key; the content itself has
+        // no rule and no listener.
+        ancestor.state_mut().props.key_capture = nsh_core::KeyCapture::All;
+        crate::key_focus::focus(&surface, &content);
+        assert_eq!(crate::key_focus::focused(&surface), Some(content.clone()));
+        assert!(hears_keys(&surface));
+        assert!(captures(&surface, &content, raw().stroke()));
+        assert!(press(&surface, 0, true, raw()));
+        // The sibling portal's focus finds none of the other's ancestors.
+        crate::key_focus::focus(&surface, &sibling);
+        assert_eq!(crate::key_focus::focused(&surface), Some(sibling.clone()));
+        assert!(!hears_keys(&surface));
+        assert!(!captures(&surface, &sibling, raw().stroke()));
+        // Interest alone, through the logical ancestor, for both
+        // transitions; it captures nothing.
+        crate::key_focus::focus(&surface, &content);
+        ancestor.state_mut().props.key_capture = nsh_core::KeyCapture::None;
+        ancestor.state_mut().events.set(EventKind::KeyDown, true);
+        assert!(hears_keys(&surface));
+        assert!(!captures(&surface, &content, raw().stroke()));
+        ancestor.state_mut().events.set(EventKind::KeyDown, false);
+        ancestor.state_mut().events.set(EventKind::KeyUp, true);
+        assert!(hears_keys(&surface));
+        // A `key_parent` naming no mounted view ends the walk: the mounted
+        // portal host is not where the content's keys go.
+        content.state_mut().props.key_parent = Some(99);
+        assert!(!hears_keys(&surface));
+        assert!(!captures(&surface, &content, raw().stroke()));
+    }
+
+    #[test]
+    fn a_captured_key_runs_no_native_default_and_is_reported_handled() {
+        let (surface, focused) = focused_surface();
+        assert_eq!(crate::key_focus::focused(&surface), Some(focused.clone()));
+        // A printable key nothing else takes: it is heard, and nothing
+        // takes it.
+        let raw = || crate::keys::RawKey::down(&stroke_of("q", Some("q")), false);
+        assert!(!press(&surface, 0x51, true, raw()));
+        // The focus captures every key: the platform keeps it.
+        focused.state_mut().props.key_capture = nsh_core::KeyCapture::All;
+        assert!(press(&surface, 0x51, true, raw()));
+        // So does a key nsh has no virtual key code for.
+        let question = || crate::keys::RawKey::down(&stroke_of("?", Some("?")), false);
+        assert!(press(&surface, 0, true, question()));
+        // A release is the source's own transition, captured anew.
+        assert!(press(
+            &surface,
+            0,
+            false,
+            crate::keys::RawKey::up(&stroke_of("?", Some("?")))
+        ));
+        // Shift+/ arrives as the source's `?`: a rule naming it captures
+        // the key through the real routing, and the payload is not rewritten.
+        focused.state_mut().props.key_capture = nsh_core::KeyCapture::keys([
+            nsh_core::keymap::Keystroke::parse_with("shift+/", false).unwrap(),
+        ]);
+        assert!(press(&surface, 0, true, question()));
+        // A listening rule that does not match leaves the key to the
+        // platform's defaults.
+        focused.state_mut().props.key_capture = nsh_core::KeyCapture::keys([
+            nsh_core::keymap::Keystroke::parse_with("a", false).unwrap(),
+        ]);
+        assert!(!press(&surface, 0x51, true, raw()));
+        assert!(press(
+            &surface,
+            0x41,
+            true,
+            crate::keys::RawKey::down(&stroke_of("a", Some("a")), false)
+        ));
+    }
+
+    #[test]
+    fn a_no_virtual_code_key_runs_its_binding_before_capture() {
+        use std::sync::Arc;
+
+        use nsh_core::keymap::{KeyBinding, Keymap, Keystroke, When};
+
+        let (surface, focused) = focused_surface();
+        let shift_slash = Keystroke::parse_with("shift+/", false).unwrap();
+        // The app binds the key GPUI reports as `?`, which has no virtual
+        // key code: the shared table matches the source's stroke.
+        crate::keymap::set(
+            &surface,
+            Arc::new(Keymap::new(vec![KeyBinding::new(
+                1,
+                shift_slash,
+                When::Auto,
+                false,
+            )])),
+        );
+        let question = || crate::keys::RawKey::down(&stroke_of("?", Some("?")), false);
+        // The binding takes the key before any capture rule or default, and
+        // does not need one.
+        assert!(press(&surface, 0, true, question()));
+        crate::keymap::forget_held(&surface);
+        focused.state_mut().props.key_capture = nsh_core::KeyCapture::All;
+        assert!(press(&surface, 0, true, question()));
+        // A binding that passes the key through leaves it to the capture
+        // rule, which then takes it.
+        crate::keymap::forget_held(&surface);
+        crate::keymap::set(
+            &surface,
+            Arc::new(Keymap::new(vec![
+                KeyBinding::new(2, shift_slash, When::Auto, false).passing_through(true),
+            ])),
+        );
+        focused.state_mut().props.key_capture = nsh_core::KeyCapture::None;
+        assert!(!press(&surface, 0, true, question()));
+        focused.state_mut().props.key_capture = nsh_core::KeyCapture::All;
+        assert!(press(&surface, 0, true, question()));
+    }
+
+    /// `nsh test --target gpui`'s key step reaches the raw path: the
+    /// explicit keystroke is the source, so bindings and capture decide it
+    /// as they do a window's own keys.
+    #[cfg(feature = "dev")]
+    #[test]
+    fn a_test_steps_key_goes_through_the_raw_router() {
+        use std::sync::Arc;
+
+        use nsh_core::keymap::{KeyBinding, Keymap, Keystroke, When};
+
+        let (surface, focused) = focused_surface();
+        let shift_slash = Keystroke::parse_with("shift+/", false).unwrap();
+        // Nothing takes it: the step's key goes on.
+        assert!(!crate::synth::press_keys(&surface, &shift_slash));
+        // The focus captures it, through the same raw notification real
+        // keys send.
+        focused.state_mut().props.key_capture = nsh_core::KeyCapture::All;
+        assert!(crate::synth::press_keys(&surface, &shift_slash));
+        // A passing binding leaves it to capture, a consuming one takes it
+        // first.
+        crate::keymap::forget_held(&surface);
+        crate::keymap::set(
+            &surface,
+            Arc::new(Keymap::new(vec![
+                KeyBinding::new(1, shift_slash, When::Auto, false).passing_through(true),
+            ])),
+        );
+        focused.state_mut().props.key_capture = nsh_core::KeyCapture::None;
+        assert!(!crate::synth::press_keys(&surface, &shift_slash));
+        focused.state_mut().props.key_capture = nsh_core::KeyCapture::All;
+        assert!(crate::synth::press_keys(&surface, &shift_slash));
+        crate::keymap::forget_held(&surface);
+        crate::keymap::set(
+            &surface,
+            Arc::new(Keymap::new(vec![KeyBinding::new(
+                2,
+                shift_slash,
+                When::Auto,
+                false,
+            )])),
+        );
+        focused.state_mut().props.key_capture = nsh_core::KeyCapture::None;
+        assert!(crate::synth::press_keys(&surface, &shift_slash));
+    }
+
+    #[test]
+    fn only_a_focused_view_that_hears_or_captures_builds_raw_keys() {
+        let (surface, focused) = focused_surface();
+        // A view with the focus and no listener or rule: the ordinary
+        // fast path.
+        assert!(!hears_keys(&surface));
+        focused.state_mut().events.set(EventKind::KeyDown, true);
+        assert!(hears_keys(&surface));
+        focused.state_mut().events.set(EventKind::KeyDown, false);
+        // A capture rule alone hears them: it decides without a listener.
+        focused.state_mut().props.key_capture = nsh_core::KeyCapture::All;
+        assert!(hears_keys(&surface));
+        // A release listener alone does too.
+        focused.state_mut().props.key_capture = nsh_core::KeyCapture::None;
+        focused.state_mut().events.set(EventKind::KeyUp, true);
+        assert!(hears_keys(&surface));
+        // Nothing focused (a click leaves the view): no raw key.
+        focused.state_mut().events.set(EventKind::KeyUp, false);
+        crate::key_focus::clear(&surface);
+        assert!(!hears_keys(&surface));
     }
 }
