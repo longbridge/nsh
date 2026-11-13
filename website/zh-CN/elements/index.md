@@ -215,6 +215,8 @@ view()
 
 与 CSS 的 `:hover` 和 DOM 的 `mouseenter` 一样，鼠标在视图上或在其内部任何内容上时，视图都算作被悬停，因此鼠标下方视图外层的视图也会收到 `onMouseEnter`（由外向内；`onMouseLeave` 由内向外）。事件在发生之后才通知应用，触摸从不触发。从鼠标下方移除的视图会收到 `onMouseLeave`，在 Linux 和 Windows 上要等到鼠标下一次移动。
 
+每个组件都接受这三个事件，`nsh/base` 的组件和应用自己 crate 中的组件都一样：`<Button onMouseEnter>`、`<Switch onMouseMove>`，Rust 中为 `button().on_mouse_enter(..)`。它们以同样的 `MouseEvent` 报告鼠标在组件根视图上的情况，在组件自己处理之后到达；只有应用监听时，组件才监听。
+
 `MouseEvent` 像 GPUI 的 `MouseMoveEvent` 一样给出鼠标的位置：`position` 是在视图中的位置（一个 `Point`，单位为点，已去掉视图的变换），`pagePosition` 是在视图所在根视图中的位置（与触摸相同），按住的 `modifiers`（`control`、`alt`、`shift`、`platform`：Apple 平台上是 Command，其他平台是 Windows 键），`pressedButton`：按下的按键（`"left"`、`"right"`、`"middle"`、`"back"` 或 `"forward"`，即 GPUI 的 `MouseButton`），没有按键或松开时为 `null`，以及 `button`：本次事件中变化的按键，即 `onMouseUp` 上松开的按键，移动时为 `null`；Rust 中为 `position`、`page_position`、`modifiers`、`pressed_button` 和 `button`。在桌面平台和 Web 上，拖动同时也是触摸（`onTouchMove`、响应者系统），它的移动带着 `pressedButton` 到达 `onMouseMove`：只跟随悬停的反馈跳过这些移动即可；iOS 和 Android 的悬停报告的是没有按键按下的指针。移动事件每帧最多一次，总是最新的那次，并且一定在随后的 `onMouseLeave` 之前到达，因此处理函数可以在每次移动时重绘：
 
 ```rust tabs

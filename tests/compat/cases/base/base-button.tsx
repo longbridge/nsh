@@ -5,8 +5,9 @@
 // `accessibilityLabel`, `selected`, `disabled`), the app's look (`style`,
 // `class`, `selectedStyle` while selected, `disabledStyle` while
 // disabled), how far outside it presses count (`hitSlop`, a number for
-// every side or some sides), all following signals. Its script checks
-// each.
+// every side or some sides), all following signals, and the mouse over
+// it (`onMouseEnter`, `onMouseMove`, `onMouseLeave`, a view's, which every
+// component's host takes). Its script checks each.
 import { Text, View, signal } from "nsh";
 import { Button } from "nsh/base";
 
@@ -18,6 +19,7 @@ function App() {
   const disabled = signal(true);
   const blocked = signal(0);
   const wide = signal(false);
+  const mouse = signal("none");
   return (
     <View style={{ flex: 1, paddingTop: 20, gap: 4 }}>
       <Button
@@ -65,6 +67,19 @@ function App() {
       <Button testID="sides" hitSlop={wide() ? { top: 4, left: 2 } : 0} onPress={() => wide.set(!wide())}>
         <Text>Widen</Text>
       </Button>
+      <Button
+        testID="hover"
+        onMouseEnter={(e) => mouse.set(`in ${e.position.x},${e.position.y}`)}
+        onMouseMove={(e) =>
+          mouse.set(
+            `move ${e.position.x},${e.position.y} page ${e.pagePosition.y}${e.modifiers.shift ? " shift" : ""}${e.pressedButton ? ` ${e.pressedButton} down` : ""}`,
+          )
+        }
+        onMouseLeave={(e) => mouse.set(`${mouse()} out ${e.position.x},${e.position.y}`)}
+      >
+        <Text>Hover me</Text>
+      </Button>
+      <Text>{`Mouse: ${mouse()}`}</Text>
     </View>
   );
 }

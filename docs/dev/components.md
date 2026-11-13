@@ -811,8 +811,13 @@ element: at the view's first mount, before the host's native view is sent, the c
 (`Core::retag`: a text, a screen, a modal, a list), so the root's props and children apply to it; a root that is a
 region goes in the host view. Besides the component's own props, JS sets a view's props on the host
 (`nsh-js` `components.rs`' `HOST_PROPS`, declared as `ComponentHostProps`): classes, styles, `testID`, `tooltip`,
-`onLayout` and the desktop file drops (`onFileDragEnter`, `onFileDragLeave`, `onFileDrop`), so a component is a drop
-destination only where the app listens.
+`onLayout`, the desktop file drops (`onFileDragEnter`, `onFileDragLeave`, `onFileDrop`) and the mouse over it
+(`onMouseEnter`, `onMouseMove`, `onMouseLeave`), so a component is a drop destination, and hears the mouse, only
+where the app listens. A Rust view gives a nested component's element the mouse listeners the same way
+(`ComponentBuilder::on_mouse_enter` / `on_mouse_move` / `on_mouse_leave`, kept as the instance's `given_handlers`
+and run by the view that gave them). The host's node listens to the union of its root's events, JS's and those
+given (`Core::host_listen`); an event on it reaches the root's listeners, then the given ones, then JS's
+(`dispatch_event`: a host JS listens on is never reported handled).
 
 A root that is a component (a view that is `press()`) is made on the same host, as a TSX function component returning
 another is that one: the nested instance's host is an alias of the host's node (`Core::alias`: another id naming the

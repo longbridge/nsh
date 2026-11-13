@@ -11998,6 +11998,122 @@ mod components {
         assert_eq!(child_ids(&c, 2).len(), 2, "and shows again");
     }
 
+    /// Counts the mouse coming over its root, which hears it itself.
+    #[component]
+    fn OwnHover() -> impl IntoElement {
+        let n = signal(0_u32);
+        view()
+            .on_mouse_enter(move |_: &MouseEvent| n.update(|n| *n += 1))
+            .child(text(move || format!("own {}", n.get())))
+    }
+
+    /// Places an `OwnHover` and counts the mouse coming over it too.
+    #[component]
+    fn GivenHover() -> impl IntoElement {
+        let n = signal(0_u32);
+        view()
+            .child(own_hover().on_mouse_enter(move |e: &MouseEvent| {
+                assert_eq!(e.position.x, px(3.0));
+                n.update(|n| *n += 1)
+            }))
+            .child(text(move || format!("given {}", n.get())))
+    }
+
+    fn mouse_at(x: f32) -> EventPayload {
+        EventPayload::Mouse(crate::MouseEvent::new(
+            crate::geometry::point(px(x), px(1.0)),
+            crate::geometry::point(px(x), px(1.0)),
+            crate::keymap::Modifiers::default(),
+            None,
+        ))
+    }
+
+    #[test]
+    fn js_on_a_host_hears_the_mouse_its_root_hears_as_well() {
+        let mut c = mount_host::<OwnHover>();
+        // Only the root listens: the component handles it.
+        assert!(c.component_event(2, EventKind::MouseEnter, &mouse_at(3.0)));
+        apply(
+            &mut c,
+            vec![Op::Listen {
+                id: 2,
+                event: EventKind::MouseEnter,
+                enabled: true,
+            }],
+        );
+        // JS listens too: the root hears it, then JS.
+        assert!(!c.component_event(2, EventKind::MouseEnter, &mouse_at(3.0)));
+        let batch = c.commit().unwrap();
+        assert!(
+            texts(&batch).iter().any(|t| t == "own 2"),
+            "{:?}",
+            texts(&batch)
+        );
+        // JS stops: the root still listens.
+        apply(
+            &mut c,
+            vec![Op::Listen {
+                id: 2,
+                event: EventKind::MouseEnter,
+                enabled: false,
+            }],
+        );
+        c.commit();
+        assert!(events_of(&c, 2).contains(EventKind::MouseEnter));
+    }
+
+    #[test]
+    fn a_view_hears_the_mouse_over_a_component_it_places() {
+        let mut c = mount_host::<GivenHover>();
+        let nested = child_ids(&c, 2)[0];
+        assert!(events_of(&c, nested).contains(EventKind::MouseEnter));
+        // Its root hears it, then the view that placed it; JS does not.
+        assert!(c.component_event(nested, EventKind::MouseEnter, &mouse_at(3.0)));
+        let batch = c.commit().unwrap();
+        let shown = texts(&batch);
+        assert!(shown.iter().any(|t| t == "own 1"), "{shown:?}");
+        assert!(shown.iter().any(|t| t == "given 1"), "{shown:?}");
+    }
+
+    /// Places an `OwnHover` and hears the mouse moving over it until its
+    /// button is pressed.
+    #[component]
+    fn MaybeGiven() -> impl IntoElement {
+        let listen = signal(true);
+        let n = signal(0_u32);
+        view()
+            .child(dynamic(move || {
+                let el = own_hover();
+                if listen.get() {
+                    el.on_mouse_move(move |_: &MouseEvent| n.update(|n| *n += 1))
+                } else {
+                    el
+                }
+            }))
+            .child(
+                view()
+                    .on_press(move || listen.set(false))
+                    .child(text(move || format!("moves {}", n.get()))),
+            )
+    }
+
+    #[test]
+    fn a_component_stops_listening_when_the_view_stops_giving_a_listener() {
+        let mut c = mount_host::<MaybeGiven>();
+        let nested = child_ids(&c, 2)[0];
+        assert!(events_of(&c, nested).contains(EventKind::MouseMove));
+        assert!(c.component_event(nested, EventKind::MouseMove, &mouse_at(3.0)));
+        let batch = c.commit().unwrap();
+        assert!(texts(&batch).iter().any(|t| t == "moves 1"));
+        let button = child_ids(&c, 2)[1];
+        c.component_event(button, EventKind::Press, &EventPayload::None);
+        c.commit();
+        let nested = child_ids(&c, 2)[0];
+        assert!(!events_of(&c, nested).contains(EventKind::MouseMove));
+        // Its root's own stay.
+        assert!(events_of(&c, nested).contains(EventKind::MouseEnter));
+    }
+
     #[component]
     fn SlotLayoutRerun(props: PanelProps) -> impl IntoElement {
         let count = signal(0_u32);

@@ -2891,6 +2891,39 @@ pub trait ComponentBuilder: Element {
         self
     }
 
+    /// The mouse came over its root or an element inside it (never on
+    /// touches): where, as [`Interactive::on_mouse_enter`] (TS:
+    /// `onMouseEnter` given the component). Its root's own listeners run
+    /// first.
+    fn on_mouse_enter<M>(mut self, listener: impl IntoListener<MouseEvent, M>) -> Self {
+        self.node().handlers.push((
+            EventKind::MouseEnter,
+            events::typed(listener.into_listener(), events::mouse),
+        ));
+        self
+    }
+
+    /// The mouse left its root and the elements inside it, or the window:
+    /// where it was last, as [`Interactive::on_mouse_leave`].
+    fn on_mouse_leave<M>(mut self, listener: impl IntoListener<MouseEvent, M>) -> Self {
+        self.node().handlers.push((
+            EventKind::MouseLeave,
+            events::typed(listener.into_listener(), events::mouse),
+        ));
+        self
+    }
+
+    /// The mouse moved over its root (or an element inside it), with or
+    /// without a button down, at most once per frame, as
+    /// [`Interactive::on_mouse_move`].
+    fn on_mouse_move<M>(mut self, listener: impl IntoListener<MouseEvent, M>) -> Self {
+        self.node().handlers.push((
+            EventKind::MouseMove,
+            events::typed(listener.into_listener(), events::mouse),
+        ));
+        self
+    }
+
     /// Puts `handle` on this component: its updates go to it.
     fn component_ref(mut self, handle: &super::ComponentRef<Self::Component>) -> Self {
         self.__element().node.attrs.element_ref = handle.element().target();
