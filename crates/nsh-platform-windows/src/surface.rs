@@ -551,6 +551,7 @@ impl Surface {
         *self.anim.borrow_mut() = UiAnimation::default();
         self.nav.borrow_mut().reset();
         crate::input::reset(self);
+        crate::text_input::stopped(self);
         crate::keymap::clear(self);
         self.js_frame.set(false);
         self.resize_late.set(false);
