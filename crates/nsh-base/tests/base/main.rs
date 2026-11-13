@@ -16,6 +16,7 @@ mod date_picker;
 mod dialog;
 mod diff;
 mod dock;
+mod dropdown_presence;
 mod editor;
 mod editor_completion;
 mod editor_definition;
