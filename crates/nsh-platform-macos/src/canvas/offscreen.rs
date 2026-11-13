@@ -10,7 +10,10 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 use dispatch2::DispatchQueue;
 use nsh_core::{
     EventKind, EventPayload, ROOT_ID,
-    canvas::{Drawing, render::ImageFormat},
+    canvas::{
+        Drawing,
+        render::{ImageFormat, RenderFailure},
+    },
 };
 use nsh_platform_apple::canvas_image::{bitmap_context, encode};
 use objc2_core_foundation::{CFRetained, CGFloat, CGPoint, CGRect, CGSize};
@@ -55,10 +58,7 @@ pub(crate) fn render(
                     surface.event(
                         ROOT_ID,
                         EventKind::CanvasImage,
-                        EventPayload::CanvasImage {
-                            id,
-                            result: result.map_err(Into::into),
-                        },
+                        EventPayload::CanvasImage { id, result },
                     );
                 }
             });
@@ -107,15 +107,15 @@ struct Job {
 unsafe impl Send for Job {}
 
 impl Job {
-    fn encode(self) -> Result<Vec<u8>, String> {
+    fn encode(self) -> Result<Vec<u8>, RenderFailure> {
         let format = self.format;
-        let image = self.paint().ok_or("the canvas could not be drawn")?;
+        let image = self.paint()?;
         encode(&image, format)
     }
 
     /// The drawing replayed into a transparent bitmap, y down, `scale`
     /// pixels per point.
-    fn paint(self) -> Option<CFRetained<CGImage>> {
+    fn paint(self) -> Result<CFRetained<CGImage>, RenderFailure> {
         let (pw, ph) = (self.width as usize, self.height as usize);
         let scale = CGFloat::from(self.scale);
         let canvas = CanvasState {
@@ -138,7 +138,7 @@ impl Job {
             false,
             base,
         );
-        CGBitmapContextCreateImage(Some(&cx))
+        CGBitmapContextCreateImage(Some(&cx)).ok_or_else(|| "the canvas could not be drawn".into())
     }
 }
 
@@ -214,5 +214,19 @@ mod tests {
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
         // IHDR: width and height, big-endian.
         assert_eq!(&png[16..24], &[0, 0, 0, 3, 0, 0, 0, 2]);
+    }
+
+    #[test]
+    fn a_bitmap_past_the_systems_limits_is_too_large() {
+        // Rows whose byte length overflows, and 4 EiB no allocator gives.
+        for (width, height) in [(usize::MAX, 1), (1 << 40, 1 << 20)] {
+            assert!(
+                matches!(
+                    bitmap_context(width, height),
+                    Err(RenderFailure::TooLarge(_))
+                ),
+                "{width}×{height}"
+            );
+        }
     }
 }

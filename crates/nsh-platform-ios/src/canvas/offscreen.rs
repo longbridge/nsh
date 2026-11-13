@@ -11,7 +11,10 @@ use std::sync::Arc;
 use dispatch2::{DispatchQueue, DispatchQueueGlobalPriority, GlobalQueueIdentifier};
 use nsh_core::{
     EventKind, EventPayload, ROOT_ID,
-    canvas::{Drawing, render::ImageFormat},
+    canvas::{
+        Drawing,
+        render::{ImageFormat, RenderFailure},
+    },
 };
 use nsh_engine::EngineControl;
 use nsh_platform_apple::canvas_image::{bitmap_context, encode};
@@ -151,23 +154,20 @@ impl Job {
             control.dispatch_event(
                 ROOT_ID,
                 EventKind::CanvasImage,
-                EventPayload::CanvasImage {
-                    id,
-                    result: result.map_err(Into::into),
-                },
+                EventPayload::CanvasImage { id, result },
             );
         });
     }
 
-    fn encode(self) -> Result<Vec<u8>, String> {
+    fn encode(self) -> Result<Vec<u8>, RenderFailure> {
         let format = self.format;
-        let image = self.paint().ok_or("the canvas could not be drawn")?;
+        let image = self.paint()?;
         encode(&image, format)
     }
 
     /// The drawing replayed into a transparent bitmap, y down, `scale`
     /// pixels per point, its animated values at 0.
-    fn paint(&self) -> Option<CFRetained<CGImage>> {
+    fn paint(&self) -> Result<CFRetained<CGImage>, RenderFailure> {
         let (pw, ph) = (self.width as usize, self.height as usize);
         let scale = CGFloat::from(self.scale);
         let cx = bitmap_context(pw, ph)?;
@@ -178,7 +178,7 @@ impl Job {
         // where shadows are cast.
         let base = CGContext::ctm(Some(&cx));
         super::paint(&cx, &self.drawing, &[], &self.images, base);
-        CGBitmapContextCreateImage(Some(&cx))
+        CGBitmapContextCreateImage(Some(&cx)).ok_or_else(|| "the canvas could not be drawn".into())
     }
 }
 
