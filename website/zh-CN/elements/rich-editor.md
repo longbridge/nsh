@@ -97,6 +97,13 @@ const box = editor.nodeRect(blockStart);
 />
 ```
 
+### 复制和粘贴
+
+复制或剪切时，选区以两种形式放到剪贴板上，和 ProseMirror 一样：纯文本（启用 `markdown` 扩展的 `copyAsMarkdown` 时为
+Markdown），以及按 schema 的 `renderHTML` 写出的 HTML，邮件、文档和其他编辑器粘贴时会保留格式。HTML 上标记了复制的切片
+（`data-pm-slice`），所以粘贴回 `RichEditor` 时得到同样的节点：提及等行内节点保留，列表项的一部分仍是列表项的一部分，空格
+也保留。其他来源的 HTML 按 schema 的解析规则读取。Rust 插件可以用 `transform_copied` 修改复制的内容。
+
 ### 粘贴和拖入的文件
 
 文件交给应用，由应用决定它们变成什么（图片节点、附件、指向上传副本的链接）；编辑器不为它们插入任何内容，选区保持不变，应用在选区处插入自己生成的内容。粘贴图片或在文件管理器中复制的文件时调用 `onPasteFiles`，参数为 `{ files, uris }`：`files` 是带字节的图片，`uris` 是被复制文件的 `file:` URL。在桌面平台上，从其他应用拖到编辑器上的文件调用它的 `onFileDrop`，参数为 `{ uris, mimeTypes }`，与[视图的文件拖放](./view.md#桌面文件拖放)相同；`onFileDragEnter` / `onFileDragLeave` 跟随拖动，可用于显示「松开以添加附件」之类的提示。没有 `onFileDrop` 时，拖入的文件交给外层监听的视图。

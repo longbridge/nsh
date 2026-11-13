@@ -42,6 +42,11 @@ fn a_long_press_selects_a_word_and_its_menu_copies_and_cuts_it() {
     assert_eq!(labels(&app), ["Cut", "Copy", "Select All"]);
     app.choose_menu_item("Copy").unwrap();
     assert_eq!(app.screen().clipboard(), Some("beta"));
+    // With its HTML, as a keyboard copy writes it.
+    assert_eq!(
+        app.screen().clipboard_html(),
+        Some(r#"<p data-pm-slice="1 1 []">beta</p>"#)
+    );
     assert!(app.menu().is_none());
     // Cut, then undo: the word comes back.
     app.long_press(&format!("text:{LINE}")).unwrap();
