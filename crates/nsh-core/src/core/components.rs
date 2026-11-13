@@ -1159,10 +1159,10 @@ impl<M: TextEngine> Core<M> {
         self.components.runtime.set_perf_monitor(enabled);
     }
 
-    /// The performance monitor's last frame rate reading (`fpsReading()`;
-    /// `None` while it does not measure): what read it runs again.
-    pub fn set_fps_reading(&mut self, fps: Option<f32>) {
-        self.components.runtime.set_fps_reading(fps);
+    /// What the performance monitor measured last (`perfStats()`; `None`
+    /// while it does not measure): what read it runs again.
+    pub fn set_perf_stats(&mut self, stats: Option<crate::platform::PerfStats>) {
+        self.components.runtime.set_perf_stats(stats);
     }
 
     /// The displays components read ([`crate::element::desktop::displays`]),

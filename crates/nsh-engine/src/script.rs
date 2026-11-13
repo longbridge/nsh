@@ -330,8 +330,8 @@ mod imp {
             self.host.set_fps_enabled(enabled);
         }
 
-        pub(crate) fn set_fps_reading(&self, fps: Option<f32>) {
-            self.host.set_fps_reading(fps);
+        pub(crate) fn set_perf_stats(&self, stats: Option<&nsh_core::platform::PerfStats>) {
+            self.host.set_perf_stats(stats);
         }
 
         pub(crate) fn set_tokens(&self, tokens: Arc<nsh_core::element::Tokens>) {
@@ -511,7 +511,7 @@ mod stub {
             match *self {}
         }
 
-        pub(crate) fn set_fps_reading(&self, _: Option<f32>) {
+        pub(crate) fn set_perf_stats(&self, _: Option<&nsh_core::platform::PerfStats>) {
             match *self {}
         }
 

@@ -1,4 +1,4 @@
-import { fpsEnabled, fpsReading, mount, setFpsEnabled, Text, View } from "nsh";
+import { fpsEnabled, mount, perfStats, setFpsEnabled, Text, View } from "nsh";
 
 // The performance monitor turned on and off by the app, and what it reads:
 // whether it measures, and its frame rate, once a second.
@@ -12,7 +12,7 @@ function App() {
         <Text class="text-foreground">Stop</Text>
       </View>
       <Text class="text-foreground">{`Enabled ${fpsEnabled()}`}</Text>
-      <Text class="text-foreground">{`Reading ${fpsReading() ?? "none"}`}</Text>
+      <Text class="text-foreground">{`Reading ${perfStats()?.fps ?? "none"}`}</Text>
     </View>
   );
 }

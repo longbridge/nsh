@@ -51,9 +51,9 @@ export function createEnvironment(reactive, invoke, dom) {
     // The engine's count; a page has no system sleep to hear, so it stays 0.
     wakeCount: () => fields.wakeCount(),
     // A browser page has no performance monitor (its developer tools measure it),
-    // so no reading either.
+    // so no stats either.
     fpsEnabled: () => false,
-    fpsReading: () => null,
+    perfStats: () => null,
   };
   const accessibility = { reduceMotion: () => fields.reduceMotion(), screenReaderEnabled: () => fields.screenReader() };
   // nsh-js's `appInfo` (`env.rs`): what the build wrote, handed over by

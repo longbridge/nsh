@@ -1085,13 +1085,13 @@ impl Host {
         });
     }
 
-    /// Publishes the performance monitor's last reading of the frame rate to
-    /// JS (`nsh`'s `fpsReading()`): `None` while it does not measure.
-    pub fn set_fps_reading(&self, fps: Option<f32>) {
+    /// Publishes what the performance monitor measured last to JS (`nsh`'s
+    /// `perfStats()`): `None` while it does not measure.
+    pub fn set_perf_stats(&self, stats: Option<&nsh_core::platform::PerfStats>) {
         self.guarded(Phase::Call, || {
             self.cx.with(|cx| {
                 let raw = cx.as_raw().as_ptr();
-                let result = match crate::env::set_fps_reading(raw, fps) {
+                let result = match crate::env::set_perf_stats(raw, stats) {
                     Ok(()) => Ok(()),
                     Err(()) => Err(rquickjs::Error::Exception),
                 };

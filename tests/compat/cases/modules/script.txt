@@ -341,8 +341,8 @@ expect Calls: done
 expect Fps enabled: false
 covers [nsh] fpsEnabled
 covers [nsh] setFpsEnabled
-# mod-fps-reading
-tap id:case-mod-fps-reading
-# no reading until the monitor measured a second.
-expect Reading: none
-covers [nsh] fpsReading
+# mod-perf-stats
+tap id:case-mod-perf-stats
+# no stats until the monitor measured a second.
+expect Fps: none
+covers [nsh] perfStats

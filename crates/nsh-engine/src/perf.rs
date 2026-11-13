@@ -187,6 +187,16 @@ pub struct PerfSnapshot {
     pub memory: Option<MemorySample>,
 }
 
+impl PerfSnapshot {
+    /// What apps read of it (`perfStats()`, [`nsh_core::element::perf_stats`]).
+    pub fn stats(&self) -> nsh_core::platform::PerfStats {
+        let mut stats = nsh_core::platform::PerfStats::new(self.fps);
+        stats.refresh_rate = self.refresh_rate;
+        stats.dropped = nsh_core::geometry::Percentage(self.dropped);
+        stats
+    }
+}
+
 /// Collects a surface's frame and commit timings. Shared by its engine
 /// thread and its main thread (`Arc`); see the module documentation.
 #[derive(Debug)]

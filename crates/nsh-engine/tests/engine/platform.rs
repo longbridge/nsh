@@ -373,14 +373,14 @@ fn js_turns_the_performance_monitor_on_and_follows_it() {
 }
 
 #[test]
-fn the_performance_monitor_reports_its_frame_rate_once_a_second() {
-    let dir = std::env::temp_dir().join(format!("nsh-fps-reading-{}", std::process::id()));
+fn the_performance_monitor_reports_its_stats_once_a_second() {
+    let dir = std::env::temp_dir().join(format!("nsh-perf-stats-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let entry = dir.join("App.tsx");
     std::fs::write(
         &entry,
-        r#"import { fpsReading, mount, Text } from "nsh";
-mount(() => <Text>{`reading ${fpsReading() ?? "none"}`}</Text>);
+        r#"import { mount, perfStats, Text } from "nsh";
+mount(() => <Text>{`reading ${perfStats()?.fps ?? "none"}`}</Text>);
 "#,
     )
     .unwrap();

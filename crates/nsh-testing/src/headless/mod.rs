@@ -998,7 +998,7 @@ impl Headless {
                     command: Command::SetAppUrl(url),
                 } => self.set_page_url(url, false),
                 // `setFpsEnabled`: a performance monitor for the engine, as
-                // a platform's. It draws no frames: its frame rate reads 0.
+                // a platform's. It draws no frames: `perfStats()` reads 0 fps.
                 MountItem::Command {
                     id: ROOT_ID,
                     command: Command::PerfMonitor(on),

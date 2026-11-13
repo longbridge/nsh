@@ -323,8 +323,8 @@ impl Script {
     /// A browser page has no performance monitor: `fpsEnabled()` stays
     /// false.
     pub(crate) fn set_fps_enabled(&self, _: bool) {}
-    /// Nor a reading: `fpsReading()` stays null.
-    pub(crate) fn set_fps_reading(&self, _: Option<f32>) {}
+    /// Nor its stats: `perfStats()` stays null.
+    pub(crate) fn set_perf_stats(&self, _: Option<&nsh_core::platform::PerfStats>) {}
     pub(crate) fn set_tokens(&self, value: Arc<Tokens>) {
         self.0.set_tokens(value);
     }

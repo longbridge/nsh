@@ -97,7 +97,6 @@ canvas::hit::point_in_stroke(slot)                               # a generic num
 core::Core::scroll_listener ->                                   # time and a zoom scale factor (the sizes it gives are typed)
 core::Core::set_font_scale(scale)                                # a font scale factor
 core::Core::set_zoom(scale)                                      # a zoom scale factor
-core::components::Core::set_fps_reading(fps)                     # a frame rate (frames per second)
 css::Color::with_alpha(factor)                                   # an opacity factor
 desktop::menu_icon::fade(opacity)                                # an opacity factor
 desktop::menu_icon::want(scale)                                  # device pixels per point, a ratio
@@ -125,7 +124,6 @@ effects::Transition.duration                                     # time
 effects::Transition.easing                                       # easing curve coordinates (unit square)
 effects::Transition::EASE                                        # easing curve coordinates (unit square)
 effects::compose_color_matrices ->                               # color components
-element::ambient::fps_reading ->                                 # a frame rate (frames per second)
 filesystem::FileMetadata.atime_ms                                # time (milliseconds since the epoch)
 filesystem::FileMetadata.birthtime_ms                            # time (milliseconds since the epoch)
 filesystem::FileMetadata.mtime_ms                                # time (milliseconds since the epoch)
@@ -205,6 +203,9 @@ platform::Environment.font_scale                                 # a font scale 
 platform::Environment.keyboard_duration                          # time
 platform::Environment.pixel_ratio                                # device pixels per point
 platform::HostEnvironment.font_scale                             # a font scale factor
+platform::PerfStats.fps                                          # a frame rate (frames per second)
+platform::PerfStats.refresh_rate                                 # a refresh rate (Hz)
+platform::PerfStats::new(fps)                                    # a frame rate (frames per second)
 props::AccessibilityValue.max                                    # an app-defined value
 props::AccessibilityValue.min                                    # an app-defined value
 props::AccessibilityValue.now                                    # an app-defined value

@@ -52,7 +52,7 @@ enum Part {
     WindowState,
     Displays,
     Fps,
-    FpsReading,
+    PerfStats,
     Shaders,
     WakeCount,
 }
@@ -194,8 +194,8 @@ pub(crate) fn init(cx: *mut JsContext) {
         } else if i == Part::Fps as usize {
             // No performance monitor until the platform installs one.
             boolean(false)
-        } else if i == Part::FpsReading as usize {
-            // No reading until the monitor measured a second.
+        } else if i == Part::PerfStats as usize {
+            // No stats until the monitor measured a second.
             qjs::JS_NULL
         } else {
             UNDEFINED
@@ -649,14 +649,14 @@ pub(crate) fn set_fps_enabled(cx: *mut JsContext, enabled: bool) -> Result<(), (
     }
 }
 
-/// Takes in the performance monitor's last reading of the frame rate
-/// (`fpsReading()`): `None` while it does not measure.
-pub(crate) fn set_fps_reading(cx: *mut JsContext, fps: Option<f32>) -> Result<(), ()> {
-    reactive::set_signal(
-        cx,
-        env(cx).signals[Part::FpsReading as usize].get(),
-        fps.map_or(qjs::JS_NULL, number),
-    );
+/// Takes in what the performance monitor measured last (`perfStats()`):
+/// `None` while it does not measure.
+pub(crate) fn set_perf_stats(
+    cx: *mut JsContext,
+    stats: Option<&nsh_core::platform::PerfStats>,
+) -> Result<(), ()> {
+    let value = stats.map_or(qjs::JS_NULL, |stats| to_js(cx, stats));
+    reactive::set_signal(cx, env(cx).signals[Part::PerfStats as usize].get(), value);
     let failed = reactive::finish_value(cx, UNDEFINED);
     // SAFETY: an inline tag check.
     if unsafe { qjs::JS_IsException(failed) } {
@@ -964,11 +964,11 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         ),
     ),
     (
-        "fpsReading",
-        Export::Value(|cx| accessor(cx, Part::FpsReading)),
+        "perfStats",
+        Export::Value(|cx| accessor(cx, Part::PerfStats)),
         Ts::value(
-            "The performance monitor's frame rate (reactive): frames shown over the\nlast second, read once a second while it measures (`fpsEnabled()`), `null`\nwhile it does not. An idle app reads low, which is not slowness.",
-            "Accessor<number | null>",
+            "What the performance monitor measured over the last second (reactive):\nits frame rate and more, read once a second while it measures\n(`fpsEnabled()`), `null` while it does not and until its first second.",
+            "Accessor<PerfStats | null>",
         ),
     ),
     (
@@ -1054,6 +1054,20 @@ pub(crate) const DEVICE_TYPES: &str = r#"export interface PlatformSelectSpec<T> 
   /** Every platform but the web. */
   native?: T;
   default?: T;
+}
+
+/** What the performance monitor measured over the last second
+ * (`perfStats()`). */
+export interface PerfStats {
+  /** Frames shown per second: display refreshes in which the app changed
+   * something. An idle app reads low, which is not slowness. */
+  readonly fps: number;
+  /** The rate the display refreshes at (Hz), once the monitor saw it
+   * refresh. */
+  readonly refreshRate: number | null;
+  /** The share of recent frames that took longer than one refresh, from 0
+   * to 1. */
+  readonly dropped: number;
 }
 
 /** The user's locale settings beside the locale (`localeSettings()`). */

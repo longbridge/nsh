@@ -55,9 +55,9 @@ pub(crate) struct Ambient {
     /// Whether the performance monitor measures, as the platform reports
     /// it.
     perf_monitor: Option<Signal<bool>>,
-    /// The performance monitor's last frame rate reading, as the engine
-    /// reports it ([`fps_reading`]).
-    fps_reading: Option<Signal<Option<f32>>>,
+    /// What the performance monitor measured last, as the engine reports
+    /// it ([`perf_stats`]).
+    perf_stats: Option<Signal<Option<crate::platform::PerfStats>>>,
     /// The main window's close presses: how many, and the last one's
     /// reason ([`crate::element::desktop::WindowRef::on_close_press`]).
     main_close_press: Option<Signal<(u64, crate::desktop::CloseReason)>>,
@@ -195,13 +195,13 @@ impl super::Runtime {
         }
     }
 
-    /// The performance monitor's last frame rate reading (`None`: it does
-    /// not measure): what read it runs again.
-    pub(crate) fn set_fps_reading(&self, fps: Option<f32>) {
+    /// What the performance monitor measured last (`None`: it does not
+    /// measure): what read it runs again.
+    pub(crate) fn set_perf_stats(&self, stats: Option<crate::platform::PerfStats>) {
         let _entered = self.enter();
-        let signal = fps_reading_signal();
-        if signal.get_untracked() != fps {
-            signal.set(fps);
+        let signal = perf_stats_signal();
+        if signal.get_untracked() != stats {
+            signal.set(stats);
         }
     }
 
@@ -1860,21 +1860,21 @@ pub fn set_fps_enabled(enabled: bool) {
     act(super::services::perf_monitor(enabled));
 }
 
-/// The performance monitor's frame rate (TS: `fpsReading()`): frames shown
-/// over the last second, read once a second while it measures
-/// ([`fps_enabled`]), `None` while it does not. Reading it in a binding
-/// subscribes it. An idle app reads low, which is not slowness.
-pub fn fps_reading() -> Option<f32> {
-    fps_reading_signal().get()
+/// What the performance monitor measured over the last second (TS:
+/// `perfStats()`): its frame rate and more, read once a second while it
+/// measures ([`fps_enabled`]), `None` while it does not (and until its first
+/// second). Reading it in a binding subscribes it.
+pub fn perf_stats() -> Option<crate::platform::PerfStats> {
+    perf_stats_signal().get()
 }
 
-/// The frame rate reading's signal, none until the engine reports one.
-fn fps_reading_signal() -> Signal<Option<f32>> {
-    if let Some(signal) = with_data(|d| d.ambient.fps_reading) {
+/// The performance stats' signal, none until the engine reports some.
+fn perf_stats_signal() -> Signal<Option<crate::platform::PerfStats>> {
+    if let Some(signal) = with_data(|d| d.ambient.perf_stats) {
         return signal;
     }
     let signal = Owner::detached().run(|| super::signal(None));
-    with_data(|d| d.ambient.fps_reading = Some(signal));
+    with_data(|d| d.ambient.perf_stats = Some(signal));
     signal
 }
 

@@ -1076,16 +1076,24 @@ function setFpsEnabled(enabled: boolean): void;
 <Switch checked={fpsEnabled()} onChange={({ checked }) => setFpsEnabled(checked)} />
 ```
 
-### fpsReading
+### perfStats
 
 ```ts
-const fpsReading: Accessor<number | null>;
+const perfStats: Accessor<PerfStats | null>;
+
+interface PerfStats {
+  readonly fps: number;
+  readonly refreshRate: number | null;
+  readonly dropped: number;
+}
 ```
 
-监视器读到的帧率：最近一秒显示的帧数，监视器测量时（`fpsEnabled()`）每秒读一次，不测量时为 `null`，应用可以按自己的样式显示它。空闲的应用读数偏低，这不代表慢（只有应用有变化的屏幕刷新才计数）。无头测试也会测量，但不绘制帧，读数为 0。Rust：`fps_reading() -> Option<f32>`。
+监视器最近一秒测得的数据：监视器测量时（`fpsEnabled()`）每秒读一次，不测量时以及测满第一秒之前为 `null`，应用可以按自己的样式显示它。`fps` 是每秒显示的帧数：空闲的应用读数偏低，这不代表慢（只有应用有变化的屏幕刷新才计数）。`refreshRate` 是屏幕的刷新率（Hz），监视器见到刷新之前为 `null`；`dropped` 是最近的帧里耗时超过一次刷新的比例，0 到 1。无头测试也会测量，但不绘制帧，读数为 0 fps。Rust：`perf_stats() -> Option<PerfStats>`。
 
 ```tsx
-<Text>{fpsReading() === null ? "" : `${Math.round(fpsReading()!)} FPS`}</Text>
+<If when={perfStats()}>
+  <Text>{`${Math.round(perfStats()!.fps)} FPS`}</Text>
+</If>
 ```
 
 ### shadersAvailable
