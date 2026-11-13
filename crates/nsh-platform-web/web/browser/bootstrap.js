@@ -2946,6 +2946,7 @@
 							type: this.get(c),
 							lastModified: Number.isNaN(number) ? Date.now() : number
 						}));
+						case 51: return this.put(new Blob([this.get(a)], { type: this.get(b) }));
 						case 43: return this.put(String(this.get(a)));
 						case 45: return Number(this.hasError);
 						case 46:
@@ -3329,6 +3330,14 @@
 			/** `ref.measure()`, or with `"scrollPosition"` a list's `ref.measureScrollPosition()`. */
 			measure(node, what) {
 				return call(315, [], node, what ? [what] : [], true, false);
+			},
+			/** Runtime op `op` on `receiver` and `args` answered by a reply: its promise, which rejects for what the op refuses. */
+			request(op, receiver, args) {
+				try {
+					return call(op, [], receiver, args, true);
+				} catch (error) {
+					return Promise.reject(error);
+				}
 			},
 			reply(id, ok, value) {
 				const waiter = pending.get(id);
@@ -4091,7 +4100,7 @@
 
 //#endregion
 //#region ../nsh-platform-web/web/browser/canvas.js
-	function createCanvas(invoke, reactive, dom, live, wake) {
+	function createCanvas(invoke, reactive, dom, live, wake, request = () => Promise.reject(/* @__PURE__ */ new Error("offscreen canvases are not available here"))) {
 		const recordings = /* @__PURE__ */ new WeakMap(), retained = /* @__PURE__ */ new WeakMap();
 		const call = (op, args) => {
 			if (!live()) throw new Error("the app was disposed");
@@ -4395,11 +4404,61 @@
 			});
 			return node;
 		}
+		const offscreens = /* @__PURE__ */ new WeakMap();
+		const offscreen = (object) => {
+			const o = offscreens.get(object);
+			if (!o) throw new TypeError("Illegal invocation");
+			return o;
+		};
+		const dimension = (value, name) => {
+			const n = Number(value);
+			if (!Number.isFinite(n) || n < 0) throw new TypeError(`OffscreenCanvas: ${name} must be a finite number not below 0`);
+			return Math.trunc(n);
+		};
+		class OffscreenCanvas {
+			constructor(width, height) {
+				offscreens.set(this, {
+					width: dimension(width, "width"),
+					height: dimension(height, "height"),
+					context: null
+				});
+			}
+			get width() {
+				return offscreens.get(this)?.width;
+			}
+			get height() {
+				return offscreens.get(this)?.height;
+			}
+			getContext(kind) {
+				const o = offscreen(this);
+				if (String(kind) !== "2d") return null;
+				return o.context ??= make(CanvasRenderingContext2D.prototype, "context", {
+					width: o.width,
+					height: o.height
+				});
+			}
+			convertToBlob(options) {
+				try {
+					const o = offscreen(this);
+					const type = options?.type === void 0 ? "" : String(options.type);
+					const scale = options?.scale === void 0 ? null : Number(options.scale);
+					return request(604, o.context ? data(o.context).out : [], [
+						o.width,
+						o.height,
+						type,
+						scale
+					]);
+				} catch (error) {
+					return Promise.reject(error);
+				}
+			}
+		}
 		return {
 			Canvas,
 			Path2D,
 			CanvasRenderingContext2D,
-			CanvasGradient
+			CanvasGradient,
+			OffscreenCanvas
 		};
 	}
 

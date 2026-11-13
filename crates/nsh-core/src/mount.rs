@@ -854,7 +854,8 @@ pub enum MountItem {
     Keymap(std::sync::Arc<crate::keymap::Keymap>),
     /// The sticky cells of a list (replaces the previous set): each one
     /// is translated along the main axis by `clamp(offset - start, 0,
-    /// end - start)` on every scroll, natively.
+    /// end - start)` on every scroll, natively. The set is in the order
+    /// the cells stack, bottom to top (a built-in scroll bar last).
     StickyCells {
         /// The list.
         id: NodeId,

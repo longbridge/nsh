@@ -705,11 +705,7 @@ fn walk(
         if part == Part::Hidden {
             continue;
         }
-        let (x, y) = view.state().child_origin(s.frame, s.shift);
-        let mut local = Mat4::new().translate(x, y);
-        if let Some(t) = s.transform() {
-            local = Mat4::mul(&t, &local);
-        }
+        let local = view.state().child_matrix(&s);
         let cm = Mat4::mul(&local, m);
         let live = match s.props.accessibility.live_region {
             LiveRegion::None => live,

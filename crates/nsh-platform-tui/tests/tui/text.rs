@@ -284,3 +284,48 @@ fn aligned_attachments_grow_the_line_above_and_below_its_cell_baseline() {
         );
     }
 }
+
+/// A text's first baseline is the bottom of its first row's Cells, what
+/// the row's attachments reach above it included, at the width it wraps
+/// to.
+#[test]
+fn the_first_baseline_is_the_bottom_of_the_first_rows_cells() {
+    use nsh_core::{AttachmentAlignments, Size, VerticalAlign};
+    let engine = CellTextEngine::default();
+    let mut text = AttributedText::default();
+    text.push("ab cd", Default::default());
+    let prepared = engine.prepare(&text);
+    assert_eq!(
+        engine.first_baseline(&prepared, Points(200.0)),
+        Some(Points(16.0))
+    );
+    // Wrapped to two rows: still the first one's.
+    assert_eq!(
+        engine.first_baseline(&prepared, Points(32.0)),
+        Some(Points(16.0))
+    );
+    // A 48 pt attachment on the baseline: three Cells above it; in the
+    // middle, two.
+    for (align, baseline) in [
+        (VerticalAlign::Baseline, 48.0),
+        (VerticalAlign::Middle, 32.0),
+    ] {
+        let mut text = AttributedText::default();
+        text.push("A", Default::default());
+        text.push_attachment(Size::new(Points(16.0), Points(48.0)), Default::default());
+        let mut alignments = AttachmentAlignments::default();
+        alignments.set(1, align);
+        let prepared = engine.prepare_aligned(&text, &alignments);
+        assert_eq!(
+            engine.first_baseline(&prepared, Points(200.0)),
+            Some(Points(baseline)),
+            "{align:?}"
+        );
+        let layout = engine.layout(&prepared, engine.measure(&prepared, None));
+        assert_eq!(
+            engine.lines(&layout)[0].ascender,
+            Points(baseline),
+            "{align:?}"
+        );
+    }
+}

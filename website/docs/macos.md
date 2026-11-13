@@ -91,6 +91,14 @@ Linux backend's shape with macOS's frame phases `tick`, `drain` and `canvas`; mi
 `nsh test --fps -v` shows and `examples/gallery/tools/perf.py` reads. Measure release builds; the monitor costs nothing
 while it is off.
 
+A click on the panel collapses it to a pill with the frame rate alone, green, amber or red as the frames' 95th percentile
+main-thread time is within half of one refresh, within it, or over it (the bars' colors); another click expands it.
+VoiceOver reads it as a button with that value and presses it the same way. The panel takes the clicks on it and no
+others: the rest of the app gets the mouse as it does without it. The app sets how it shows with `setFpsMode`
+(`"expanded"`, `"collapsed"`, or `"hidden"`, which shows nothing while it still measures and logs; Rust:
+`set_fps_mode(FpsMode::Collapsed)`, `AppView::set_fps_mode` when embedding), now and whenever it shows later;
+`NSH_FPS=collapsed` or `NSH_FPS=hidden` start it so.
+
 ## Packaging
 
 ```sh
