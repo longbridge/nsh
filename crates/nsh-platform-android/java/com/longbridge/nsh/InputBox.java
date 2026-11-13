@@ -188,6 +188,7 @@ final class InputBox extends FrameLayout implements Node {
         // fallback fonts' taller metrics (HyperOS's sans-serif has them) would
         // put the centered text above the middle of the field.
         if (Build.VERSION.SDK_INT >= 28) edit.setFallbackLineSpacing(false);
+        if (Build.VERSION.SDK_INT >= 35) edit.setLocalePreferredLineHeightForMinimumUsed(false);
         defaultVerticalBar = edit.isVerticalScrollBarEnabled();
         edit.addTextChangedListener(new TextWatcher() {
             @Override

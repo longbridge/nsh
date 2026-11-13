@@ -986,6 +986,29 @@ fn drop_quietly(surface: &Surface, field: &NshView) {
     blink::update();
 }
 
+/// The surface stopped (its views are detached): its focused field goes
+/// now, while the thread is alive, rather than with the thread's locals,
+/// whose destruction order is undefined (#1767).
+pub(crate) fn stopped(surface: &Surface) {
+    let view = FOCUS.with(|f| {
+        f.borrow_mut()
+            .get_mut(&surface.key())
+            .and_then(|f| f.view.take())
+    });
+    if let Some(input) = view.as_ref().and_then(input_of) {
+        input.focused.set(false);
+    }
+    // Dropped outside the borrow: the field's editor drops with it.
+    drop(view);
+    blink::update();
+}
+
+/// The surface's window was destroyed: forgets its focus entirely.
+pub(crate) fn destroyed(surface: &Surface) {
+    stopped(surface);
+    FOCUS.with(|f| f.borrow_mut().remove(&surface.key()));
+}
+
 fn window_active(surface: &Surface) -> bool {
     FOCUS.with(|f| f.borrow().get(&surface.key()).is_none_or(|f| !f.inactive))
 }
@@ -2061,6 +2084,18 @@ mod blink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stop_and_destroy_forget_the_focus() {
+        let surface = Surface::new(Default::default());
+        FOCUS.with(|f| f.borrow_mut().entry(surface.key()).or_default().inactive = true);
+        stopped(&surface);
+        // Stopping keeps whether the window is active (the app may restart).
+        assert!(!window_active(&surface));
+        destroyed(&surface);
+        assert!(FOCUS.with(|f| !f.borrow().contains_key(&surface.key())));
+        assert!(window_active(&surface));
+    }
 
     #[test]
     fn alignment() {

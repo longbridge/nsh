@@ -245,6 +245,11 @@ inside it, so the views around the one under the mouse hear `onMouseEnter` too (
 from the inside out). The events come after the fact and never on touches. A view removed from under the mouse hears
 `onMouseLeave`, on Linux and Windows at the next mouse move.
 
+Every component takes these events, those of `nsh/base` and of an app's own crate alike: `<Button onMouseEnter>`,
+`<Switch onMouseMove>`, `<Avatar onMouseUp>`, `button().on_mouse_enter(..)` in Rust. They report the mouse over the
+component's root with the same `MouseEvent`, after the component's own handling, and the component listens only while
+the app does.
+
 `MouseEvent` says where the mouse is, as GPUI's `MouseMoveEvent` does: `position` in the view (a `Point` in points, its
 transforms undone), `pagePosition` in the root view it is in, as touches give it, the `modifiers` held (`control`,
 `alt`, `shift`, `platform`: Command on Apple platforms, the Windows key elsewhere), `pressedButton`, the button held
@@ -443,6 +448,10 @@ selectable text with an edit menu (Windows, the GPUI backend, browsers), nearer 
 instead. The platform decides this as the button goes down, from what is mounted, so the handler is told after the fact
 and nothing has to be cancelled. A `disabled` view leaves the click to the nearest enabled listener around it. On
 touchscreens, a long press opens menus: handle `onLongPress` with the same function.
+
+Every component takes `onContextMenu` too (`<Button onContextMenu>`, `button().on_context_menu(..)`), with the same
+`ContextMenuEvent` for its root. A component that shows a menu of its own there (a `ContextMenu` trigger) keeps the
+event.
 
 ### Keyboard focus
 

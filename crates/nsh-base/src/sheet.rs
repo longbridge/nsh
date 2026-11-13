@@ -4,7 +4,9 @@
 use nsh_core::{element::Style, prelude::*};
 
 use crate::{
-    popup::{OpenChangeReason, OpenState, SheetMotion, lifecycle},
+    popup::{
+        OpenChangeReason, OpenState, SheetMotion, bottom_panel_max_height, keyboard_lift, lifecycle,
+    },
     roving::leave_bar,
 };
 
@@ -132,11 +134,24 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
                 }
             });
         let mut panel = overlay()
-            .style_with(move |s| match props.side.get() {
-                Placement::Bottom => s.left_0().right_0().bottom_0(),
-                Placement::Top => s.left_0().right_0().top_0(),
-                Placement::Left => s.top_0().bottom_0().left_0(),
-                Placement::Right => s.top_0().bottom_0().right_0(),
+            // What reaches the bottom of the screen ends above the
+            // keyboard. A bottom sheet the keyboard lifts stays below the
+            // status bar; otherwise its height is the app's (a web sheet's
+            // presented surface may be taller than the window).
+            .style_with(move |s| {
+                let lift = keyboard_lift();
+                let above = Length::from(lift);
+                match props.side.get() {
+                    Placement::Bottom if lift > Points::ZERO => s
+                        .left_0()
+                        .right_0()
+                        .bottom(above)
+                        .max_h(bottom_panel_max_height()),
+                    Placement::Bottom => s.left_0().right_0().bottom_0(),
+                    Placement::Top => s.left_0().right_0().top_0(),
+                    Placement::Left => s.top_0().bottom(above).left_0(),
+                    Placement::Right => s.top_0().bottom(above).right_0(),
+                }
             })
             .app_class(props.popup_class)
             .inline_style(props.popup_style)

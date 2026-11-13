@@ -80,6 +80,7 @@ fn first_frame_of(app: &str, tag: &str, os: Os, idiom: Idiom) -> Vec<MountItem> 
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     rx.recv_timeout(Duration::from_secs(5))

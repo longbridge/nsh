@@ -10,7 +10,8 @@
 //! whose [`WindowRef::set`] changes its attributes and whose requests
 //! ([`WindowRef::set_mode`], [`WindowRef::minimize`], ...) the
 //! platform carries out, reporting what happened in
-//! [`WindowRef::state`]. [`quit`] and [`restart`] are `Application`'s.
+//! [`WindowRef::state`]. [`quit`], [`restart`], [`launch_at_login`] and
+//! [`set_launch_at_login`] are `Application`'s.
 //!
 //! A custom title bar hides the system's (`TitleBarOptions` with
 //! [`TitleBarStyle::Hidden`](crate::desktop::TitleBarStyle::Hidden)),
@@ -54,10 +55,10 @@ use super::{
 use crate::{
     Command, EventKind, EventPayload,
     desktop::{
-        self, CloseReason, DesktopCommand, Display, DisplayId, MenuAction, MenuBarMode, MenuRole,
-        Shortcut, TrayTitlePlacement, TrayTitleRun, WindowAttributes, WindowCloseCause,
-        WindowEvent, WindowFrame, WindowKind, WindowMode, WindowOptions, WindowPlacement,
-        WindowPosition, WindowRequest, WindowState,
+        self, CloseReason, DesktopCommand, Display, DisplayId, LaunchAtLoginError, MenuAction,
+        MenuBarMode, MenuRole, Shortcut, TrayTitlePlacement, TrayTitleRun, WindowAttributes,
+        WindowCloseCause, WindowEvent, WindowFrame, WindowKind, WindowMode, WindowOptions,
+        WindowPlacement, WindowPosition, WindowRequest, WindowState,
     },
     geometry::{Bounds, Edges, Point, Points, Size},
     keymap::When,
@@ -1039,6 +1040,41 @@ pub(crate) fn add_quit_listener(
 /// that app, and on other platforms this has no effect.
 pub fn restart() {
     super::desktop_command(DesktopCommand::Restart);
+}
+
+/// Whether the system opens the app when the user logs in (TS:
+/// `Application.launchAtLogin()`), as the system has it now: ask again when
+/// the app shows it, as the user may change it in the system's settings.
+/// To await in a task. `false` wherever the app cannot launch at login (a
+/// view embedded in another app, `nsh run`, iOS, Android, the web), while
+/// macOS waits for the user to approve it in Login Items, and when the
+/// system cannot be read (logged). On macOS it is the app's bundle id's, the
+/// same for every copy of the app; on Windows and Linux it is this copy's.
+pub fn launch_at_login() -> impl Future<Output = bool> + 'static {
+    let answer = super::login_item_request(None);
+    async move {
+        answer.await.unwrap_or_else(|error| {
+            log::warn!("{error}");
+            false
+        })
+    }
+}
+
+/// Turns launching at login on or off (TS:
+/// `Application.setLaunchAtLogin(enabled)`): turning on what is on and off
+/// what is off succeed. Call it when the user turns the app's own setting on
+/// or off, never on the app's own (at every start, say): what the user
+/// chose in the system's settings stands. The changes run in the order the
+/// app makes them. On macOS the system may then wait for the user's
+/// approval, and [`launch_at_login`] reads `false` until they give it.
+/// Fails with [`LaunchAtLoginError::Unavailable`] where the app cannot
+/// launch at login and with the system's error when it refuses.
+pub fn set_launch_at_login(
+    enabled: bool,
+) -> impl Future<Output = Result<(), LaunchAtLoginError>> + 'static {
+    // Asked now, so the changes keep the order of the calls.
+    let answer = super::login_item_request(Some(enabled));
+    async move { answer.await.map(|_| ()) }
 }
 
 /// An item of a menu (TS: `nsh/desktop`'s `MenuItem`): an item that runs

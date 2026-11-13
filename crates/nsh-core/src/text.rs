@@ -1359,6 +1359,11 @@ impl TextEngine for ApproxTextEngine {
         )
     }
 
+    /// The bottom of the first line: the font's ascent is the line.
+    fn first_baseline(&self, &(_, font, ..): &Self::Prepared, _: Points) -> Option<Points> {
+        Some(font * 1.2)
+    }
+
     fn measure(
         &self,
         &(chars, font, max_lines, _, _, ref breaks): &Self::Prepared,
@@ -1931,6 +1936,31 @@ mod tests {
             small.extent(font, VerticalAlign::TextBottom),
             (px(0.0), px(3.0))
         );
+    }
+
+    /// The headless engine's first baseline is the bottom of its first
+    /// line, where it draws it, at any width.
+    #[test]
+    fn approx_engine_has_its_first_baseline_at_its_first_lines_bottom() {
+        let engine = ApproxTextEngine;
+        let mut t = AttributedText::default();
+        t.push(
+            "a long line\nand another",
+            ResolvedTextStyle {
+                font_size: px(10.0),
+                ..ResolvedTextStyle::default()
+            },
+        );
+        let prepared = engine.prepare(&t);
+        let layout = engine.layout(&prepared, engine.measure(&prepared, None));
+        let line = engine.lines(&layout).remove(0);
+        for width in [px(20.0), px(1000.0)] {
+            assert_eq!(
+                engine.first_baseline(&prepared, width),
+                Some(line.y + line.ascender)
+            );
+        }
+        assert_eq!(engine.first_baseline(&prepared, px(20.0)), Some(px(12.0)));
     }
 
     #[test]

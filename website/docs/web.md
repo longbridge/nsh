@@ -521,6 +521,22 @@ import { Head } from "nsh/web";
 </NavPage>
 ```
 
+The main window's title is the page's title too, which is how an app written in Rust titles its tab: set it as the
+desktops do (`currentWindow().set({ title })` in TSX), and a mounted `Head`'s title wins over it. An empty title brings
+back the page's own `<title>`. A Rust app's nsh.json `window.title` titles its tab from launch, as it titles its window
+on the desktops. Each entry of the browser's history keeps the title its page had, so set the title in the same turn as
+the page or address it belongs to.
+
+```rust
+use nsh_core::{desktop::WindowAttributes, element::desktop::main_window};
+
+fn show_title(title: &str) {
+    let mut attributes = WindowAttributes::default();
+    attributes.title = Some(format!("{title} · Market Notes"));
+    main_window().set(attributes);
+}
+```
+
 ## Limits
 
 The browser decides these, and the web backend follows it:

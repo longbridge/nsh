@@ -6432,29 +6432,41 @@ fn backdrop_material_survives_restyling_and_resets() {
     assert!(!mounted.effects.unwrap().backdrop_filters.is_empty());
 }
 
-/// `supportedOrientations` names a dialog's prop and a page's: each element
-/// decodes its own, so a dialog's is not taken for a page's.
 #[test]
 fn supported_orientations_decode_per_element() {
-    use crate::js::host::{HostCx, HostProps};
+    use crate::{
+        ModalConfig, ModalProp, ScreenProp,
+        js::host::{HostCx, HostProps},
+    };
+    // Pages and dialogs share the name: each element decodes it as its own
+    // prop, never the other's (a dialog's went to the page's before).
     let value = HostTestValue::Array(vec![
         HostTestValue::String("portrait"),
         HostTestValue::String("landscape-left"),
     ]);
-    let bits = crate::ModalConfig::PORTRAIT | crate::ModalConfig::LANDSCAPE_LEFT;
-    let decode = |tag| {
+    let bits = ModalConfig::PORTRAIT | ModalConfig::LANDSCAPE_LEFT;
+    let decode = |tag: Tag| {
         let mut cx = HostCx::for_element(tag);
         <Prop as HostProps>::decode("supportedOrientations", &value, &mut cx)
-            .expect("an orientations prop")
+            .expect("a supportedOrientations prop")
             .expect("a value")
     };
     assert_eq!(
-        decode(Tag::Modal),
-        Prop::Modal(crate::ModalProp::Orientations(bits))
+        decode(Tag::Screen),
+        Prop::Screen(ScreenProp::Orientations(bits))
     );
     assert_eq!(
-        decode(Tag::Screen),
-        Prop::Screen(crate::ScreenProp::Orientations(bits))
+        decode(Tag::Modal),
+        Prop::Modal(ModalProp::Orientations(bits))
+    );
+    // Cleared from JS, each resets to its own element's "none".
+    assert_eq!(
+        Prop::Screen(ScreenProp::Orientations(bits)).reset(),
+        Some(Prop::Screen(ScreenProp::Orientations(0)))
+    );
+    assert_eq!(
+        Prop::Modal(ModalProp::Orientations(bits)).reset(),
+        Some(Prop::Modal(ModalProp::Orientations(0)))
     );
 }
 
@@ -11986,6 +11998,284 @@ mod components {
         assert_eq!(child_ids(&c, 2).len(), 2, "and shows again");
     }
 
+    /// Counts the mouse coming over its root, which hears it itself.
+    #[component]
+    fn OwnHover() -> impl IntoElement {
+        let n = signal(0_u32);
+        view()
+            .on_mouse_enter(move |_: &MouseEvent| n.update(|n| *n += 1))
+            .child(text(move || format!("own {}", n.get())))
+    }
+
+    /// Places an `OwnHover` and counts the mouse coming over it too.
+    #[component]
+    fn GivenHover() -> impl IntoElement {
+        let n = signal(0_u32);
+        view()
+            .child(own_hover().on_mouse_enter(move |e: &MouseEvent| {
+                assert_eq!(e.position.x, px(3.0));
+                n.update(|n| *n += 1)
+            }))
+            .child(text(move || format!("given {}", n.get())))
+    }
+
+    fn mouse_at(x: f32) -> EventPayload {
+        EventPayload::Mouse(crate::MouseEvent::new(
+            crate::geometry::point(px(x), px(1.0)),
+            crate::geometry::point(px(x), px(1.0)),
+            crate::keymap::Modifiers::default(),
+            None,
+        ))
+    }
+
+    #[test]
+    fn js_on_a_host_hears_the_mouse_its_root_hears_as_well() {
+        let mut c = mount_host::<OwnHover>();
+        // Only the root listens: the component handles it.
+        assert!(c.component_event(2, EventKind::MouseEnter, &mouse_at(3.0)));
+        apply(
+            &mut c,
+            vec![Op::Listen {
+                id: 2,
+                event: EventKind::MouseEnter,
+                enabled: true,
+            }],
+        );
+        // JS listens too: the root hears it, then JS.
+        assert!(!c.component_event(2, EventKind::MouseEnter, &mouse_at(3.0)));
+        let batch = c.commit().unwrap();
+        assert!(
+            texts(&batch).iter().any(|t| t == "own 2"),
+            "{:?}",
+            texts(&batch)
+        );
+        // JS stops: the root still listens.
+        apply(
+            &mut c,
+            vec![Op::Listen {
+                id: 2,
+                event: EventKind::MouseEnter,
+                enabled: false,
+            }],
+        );
+        c.commit();
+        assert!(events_of(&c, 2).contains(EventKind::MouseEnter));
+    }
+
+    #[test]
+    fn a_view_hears_the_mouse_over_a_component_it_places() {
+        let mut c = mount_host::<GivenHover>();
+        let nested = child_ids(&c, 2)[0];
+        assert!(events_of(&c, nested).contains(EventKind::MouseEnter));
+        // Its root hears it, then the view that placed it; JS does not.
+        assert!(c.component_event(nested, EventKind::MouseEnter, &mouse_at(3.0)));
+        let batch = c.commit().unwrap();
+        let shown = texts(&batch);
+        assert!(shown.iter().any(|t| t == "own 1"), "{shown:?}");
+        assert!(shown.iter().any(|t| t == "given 1"), "{shown:?}");
+    }
+
+    /// Places an `OwnHover` and hears the mouse moving over it until its
+    /// button is pressed.
+    #[component]
+    fn MaybeGiven() -> impl IntoElement {
+        let listen = signal(true);
+        let n = signal(0_u32);
+        view()
+            .child(dynamic(move || {
+                let el = own_hover();
+                if listen.get() {
+                    el.on_mouse_move(move |_: &MouseEvent| n.update(|n| *n += 1))
+                } else {
+                    el
+                }
+            }))
+            .child(
+                view()
+                    .on_press(move || listen.set(false))
+                    .child(text(move || format!("moves {}", n.get()))),
+            )
+    }
+
+    #[test]
+    fn a_component_stops_listening_when_the_view_stops_giving_a_listener() {
+        let mut c = mount_host::<MaybeGiven>();
+        let nested = child_ids(&c, 2)[0];
+        assert!(events_of(&c, nested).contains(EventKind::MouseMove));
+        assert!(c.component_event(nested, EventKind::MouseMove, &mouse_at(3.0)));
+        let batch = c.commit().unwrap();
+        assert!(texts(&batch).iter().any(|t| t == "moves 1"));
+        let button = child_ids(&c, 2)[1];
+        c.component_event(button, EventKind::Press, &EventPayload::None);
+        c.commit();
+        let nested = child_ids(&c, 2)[0];
+        assert!(!events_of(&c, nested).contains(EventKind::MouseMove));
+        // Its root's own stay.
+        assert!(events_of(&c, nested).contains(EventKind::MouseEnter));
+    }
+
+    /// Shows a menu of its own on a context menu when `own` is set.
+    #[derive(Clone, PartialEq, Props)]
+    struct MenuOwnerProps {
+        #[prop(default)]
+        own: crate::element::Prop<bool>,
+    }
+
+    #[component]
+    fn MenuOwner(props: MenuOwnerProps) -> impl IntoElement {
+        let n = signal(0_u32);
+        let el = view()
+            .h(px(20.0))
+            .child(text(move || format!("own menus {}", n.get())));
+        if props.own.get() {
+            el.on_context_menu(move |_: &crate::ContextMenuEvent| n.update(|n| *n += 1))
+        } else {
+            el
+        }
+    }
+
+    /// Places two `MenuOwner`s, one with a menu of its own, and listens to
+    /// both: their context menus, frames, and the mouse released.
+    #[component]
+    fn GivenMenus() -> impl IntoElement {
+        let menus = signal(Vec::<&'static str>::new());
+        let width = signal(0.0_f32);
+        let ups = signal(0_u32);
+        let given = move |name: &'static str| {
+            move |_: &crate::ContextMenuEvent| menus.update(|m| m.push(name))
+        };
+        view()
+            .child(
+                menu_owner()
+                    .own(true)
+                    .test_id("mine")
+                    .on_context_menu(given("mine")),
+            )
+            .child(
+                menu_owner()
+                    .on_context_menu(given("plain"))
+                    .on_layout(move |b: &Bounds<Points>| width.set(b.size.width.0))
+                    .on_mouse_up(move |e: &MouseEvent| {
+                        assert_eq!(e.button, Some(crate::MouseButton::Right));
+                        ups.update(|n| *n += 1)
+                    }),
+            )
+            .child(text(move || {
+                format!(
+                    "menus {} width {} ups {}",
+                    menus.with(|m| m.join(",")),
+                    width.get(),
+                    ups.get()
+                )
+            }))
+    }
+
+    #[test]
+    fn a_view_hears_a_components_context_menu_unless_it_shows_its_own() {
+        let mut c = mount_host::<GivenMenus>();
+        let [mine, plain, ..] = child_ids(&c, 2)[..] else {
+            panic!("two components")
+        };
+        assert!(events_of(&c, mine).contains(EventKind::ContextMenu));
+        assert!(events_of(&c, plain).contains(EventKind::ContextMenu));
+        let menu = EventPayload::ContextMenu(crate::ContextMenuEvent::default());
+        // The component's own menu keeps it.
+        assert!(c.component_event(mine, EventKind::ContextMenu, &menu));
+        // One with none: the view placing it hears it.
+        assert!(c.component_event(plain, EventKind::ContextMenu, &menu));
+        let mut up = crate::MouseEvent::new(
+            crate::geometry::point(px(1.0), px(1.0)),
+            crate::geometry::point(px(1.0), px(1.0)),
+            crate::keymap::Modifiers::default(),
+            None,
+        );
+        up.button = Some(crate::MouseButton::Right);
+        assert!(c.component_event(plain, EventKind::MouseUp, &EventPayload::Mouse(up)));
+        let mut shown = Vec::new();
+        for _ in 0..4 {
+            for (id, kind, payload) in js_events(&mut c) {
+                c.component_event(id, kind, &payload);
+            }
+            if let Some(batch) = c.commit() {
+                shown.extend(texts(&batch));
+            }
+        }
+        assert!(shown.iter().any(|t| t == "own menus 1"), "{shown:?}");
+        assert_eq!(
+            shown
+                .iter()
+                .rev()
+                .find(|t| t.starts_with("menus"))
+                .map(String::as_str),
+            Some("menus plain width 320 ups 1"),
+        );
+        // The test id given it names its root.
+        let key = c.key(mine).unwrap() as usize;
+        assert_eq!(
+            c.nodes[key]
+                .props
+                .as_ref()
+                .and_then(|p| p.test_id.as_deref()),
+            Some("mine")
+        );
+    }
+
+    /// Measures its own root.
+    #[component]
+    fn Measured() -> impl IntoElement {
+        let w = signal(0.0_f32);
+        view()
+            .h(px(10.0))
+            .on_layout(move |b: &Bounds<Points>| w.set(b.size.width.0))
+            .child(text(move || format!("own width {}", w.get())))
+    }
+
+    /// Places a `Measured` and measures it too once its button is pressed.
+    #[component]
+    fn LateMeasure() -> impl IntoElement {
+        let on = signal(false);
+        let w = signal(0.0_f32);
+        view()
+            .child(dynamic(move || {
+                let el = measured();
+                if on.get() {
+                    el.on_layout(move |b: &Bounds<Points>| w.set(b.size.width.0))
+                } else {
+                    el
+                }
+            }))
+            .child(
+                view()
+                    .on_press(move || on.set(true))
+                    .child(text(move || format!("given width {}", w.get()))),
+            )
+    }
+
+    /// The listener comes with the element made again, whose node reports
+    /// its frame on listening, after its root's own listener.
+    #[test]
+    fn a_layout_listener_given_later_gets_the_frame_at_once() {
+        let mut c = mount_host::<LateMeasure>();
+        let settle = |c: &mut Core<FakeEngine>| {
+            let mut shown = Vec::new();
+            for _ in 0..4 {
+                for (id, kind, payload) in js_events(c) {
+                    c.component_event(id, kind, &payload);
+                }
+                if let Some(batch) = c.commit() {
+                    shown.extend(texts(&batch));
+                }
+            }
+            shown
+        };
+        let shown = settle(&mut c);
+        assert!(shown.iter().any(|t| t == "own width 320"), "{shown:?}");
+        let button = child_ids(&c, 2)[1];
+        c.component_event(button, EventKind::Press, &EventPayload::None);
+        let shown = settle(&mut c);
+        assert!(shown.iter().any(|t| t == "given width 320"), "{shown:?}");
+    }
+
     #[component]
     fn SlotLayoutRerun(props: PanelProps) -> impl IntoElement {
         let count = signal(0_u32);
@@ -15150,6 +15440,190 @@ mod components {
         );
     }
 
+    /// Renders a drawing offscreen when pressed (`Painter::render`).
+    #[component]
+    fn OffscreenRenderer() -> impl IntoElement {
+        let shown = signal(String::new());
+        view()
+            .child(text(move || format!("render {}", shown.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let image = crate::element::Painter::new()
+                    .fill_color(crate::Color(0xff00_00ff))
+                    .fill_rect(0.0, 0.0, 30.0, 20.0)
+                    .render(
+                        crate::Size::new(px(30.0), px(20.0)),
+                        crate::canvas::render::RenderOptions {
+                            scale: Some(2.0),
+                            ..Default::default()
+                        },
+                    );
+                spawn(async move {
+                    shown.set(match image.await {
+                        Ok(bytes) => format!("ok {}", bytes.len()),
+                        Err(e) => format!("failed {}", e.code().unwrap_or("")),
+                    });
+                });
+            }))
+    }
+
+    fn press_offscreen_renderer(canvas_render: bool) -> (Core<FakeEngine>, Vec<Command>) {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            canvas_render,
+            ..Default::default()
+        });
+        c.mount_root(&crate::element::Root::new::<OffscreenRenderer>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let renders = c
+            .commit()
+            .map(|b| b.items)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: command @ Command::RenderCanvas { .. },
+                } => Some(command),
+                _ => None,
+            })
+            .collect();
+        (c, renders)
+    }
+
+    #[test]
+    fn components_render_drawings_offscreen() {
+        let (mut c, renders) = press_offscreen_renderer(true);
+        let [
+            Command::RenderCanvas {
+                id,
+                drawing,
+                width,
+                height,
+                scale,
+                ..
+            },
+        ] = &renders[..]
+        else {
+            panic!("one render: {renders:?}");
+        };
+        assert_eq!((*width, *height, *scale), (60, 40, 2.0));
+        assert!(
+            drawing
+                .ops
+                .iter()
+                .any(|op| matches!(op, crate::canvas::CanvasOp::FillRect(_)))
+        );
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id: *id,
+                result: Ok(vec![1, 2, 3, 4])
+            },
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render ok")));
+        assert_eq!(shown.last().unwrap(), "render ok 4");
+    }
+
+    fn render_id(renders: &[Command]) -> u32 {
+        match renders {
+            [Command::RenderCanvas { id, .. }] => *id,
+            _ => panic!("one render: {renders:?}"),
+        }
+    }
+
+    #[test]
+    fn offscreen_renders_take_ids_unique_in_the_process() {
+        // A replaced core's render may still be answered: the new core's
+        // requests must not share its number.
+        let (_old, old) = press_offscreen_renderer(true);
+        let (mut c, renders) = press_offscreen_renderer(true);
+        let (old, id) = (render_id(&old), render_id(&renders));
+        assert_ne!(old, id);
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id: old,
+                result: Ok(vec![9]),
+            },
+        ));
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id,
+                result: Ok(vec![1, 2]),
+            },
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render ok")));
+        assert_eq!(shown.last().unwrap(), "render ok 2");
+    }
+
+    #[test]
+    fn offscreen_renders_too_large_for_the_platform_fail_with_the_quota_code() {
+        let (mut c, renders) = press_offscreen_renderer(true);
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id: render_id(&renders),
+                result: Err(crate::canvas::render::RenderFailure::TooLarge(
+                    "over the device's bitmap limit".into()
+                )),
+            },
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render failed")));
+        assert_eq!(
+            shown.last().unwrap(),
+            "render failed ERR_NSH_QUOTA_EXCEEDED"
+        );
+    }
+
+    #[test]
+    fn offscreen_renders_fail_by_their_deadline_and_drop_late_answers() {
+        let (mut c, renders) = press_offscreen_renderer(true);
+        let id = render_id(&renders);
+        c.timeout_canvas_render(id);
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render failed")));
+        assert_eq!(shown.last().unwrap(), "render failed ETIMEDOUT");
+        assert!(c.components.canvas_renders.is_empty());
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::CanvasImage,
+            &EventPayload::CanvasImage {
+                id,
+                result: Ok(vec![1]),
+            },
+        ));
+        c.run_component_tasks();
+        let shown = c.commit().map(|b| texts(&b)).unwrap_or_default();
+        assert!(
+            !shown.iter().any(|t| t.starts_with("render ok")),
+            "{shown:?}"
+        );
+    }
+
+    #[test]
+    fn components_render_nothing_offscreen_where_the_platform_renders_none() {
+        let (mut c, renders) = press_offscreen_renderer(false);
+        assert!(renders.is_empty(), "{renders:?}");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("render failed")));
+        assert_eq!(
+            shown.last().unwrap(),
+            "render failed ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"
+        );
+    }
+
     #[test]
     fn components_read_images_over_the_limit_as_none() {
         let mut c = core();
@@ -15345,6 +15819,159 @@ mod components {
         );
         let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("picked 0")));
         assert_eq!(shown.last().unwrap(), "picked 0 []");
+    }
+
+    /// Turns launching at login on, reads it, turns it off and reads it
+    /// again when its button is pressed, all asked at once; shows each
+    /// answer in the order it was asked.
+    #[component]
+    fn LoginSwitch() -> impl IntoElement {
+        use crate::{
+            desktop::LaunchAtLoginError,
+            element::desktop::{launch_at_login, set_launch_at_login},
+        };
+        let shown = signal(String::new());
+        let add = move |line: String| shown.set(format!("{} {line}", untracked(|| shown.get())));
+        let said = |answer: Result<(), LaunchAtLoginError>| match answer {
+            Ok(()) => "ok".to_owned(),
+            Err(LaunchAtLoginError::System(e)) => {
+                format!("failed-{}", crate::element::io_code(&e).unwrap_or("none"))
+            }
+            Err(e) => format!("{e:?}"),
+        };
+        view()
+            .child(text(move || format!("login{}", shown.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let on = set_launch_at_login(true);
+                let read = launch_at_login();
+                let off = set_launch_at_login(false);
+                let again = launch_at_login();
+                spawn(async move {
+                    add(said(on.await));
+                    add(read.await.to_string());
+                    add(said(off.await));
+                    add(again.await.to_string());
+                });
+            }))
+    }
+
+    /// The login item of a test: the calls it got, in order.
+    #[derive(Default)]
+    struct FakeLoginItem {
+        calls: std::sync::Mutex<Vec<Option<bool>>>,
+        enabled: std::sync::Mutex<bool>,
+        /// Changes fail as the system's refusal does.
+        refuses: bool,
+        /// The platform has no login item for the app (a sandbox).
+        sandboxed: bool,
+    }
+
+    impl crate::desktop::LoginItemBackend for FakeLoginItem {
+        fn status(&self) -> std::io::Result<crate::desktop::LoginItemStatus> {
+            use crate::desktop::LoginItemStatus;
+            self.calls.lock().unwrap().push(None);
+            Ok(if self.sandboxed {
+                LoginItemStatus::Unavailable
+            } else if *self.enabled.lock().unwrap() {
+                LoginItemStatus::Enabled
+            } else {
+                LoginItemStatus::Disabled
+            })
+        }
+
+        fn set(&self, enabled: bool) -> std::io::Result<crate::desktop::LoginItemStatus> {
+            if self.refuses {
+                return Err(std::io::ErrorKind::PermissionDenied.into());
+            }
+            // A slow registration: what was asked after it still waits.
+            if enabled {
+                std::thread::sleep(std::time::Duration::from_millis(30));
+            }
+            if !self.sandboxed {
+                *self.enabled.lock().unwrap() = enabled;
+            }
+            self.calls.lock().unwrap().push(Some(enabled));
+            self.status()
+        }
+    }
+
+    /// Mounts [`LoginSwitch`] in `c`, presses it and gives what it showed
+    /// once the four answers came.
+    fn switch_login_item(
+        c: &mut Core<FakeEngine>,
+        backend: Option<std::sync::Arc<FakeLoginItem>>,
+    ) -> String {
+        c.set_login_item(
+            backend.map(|b| b as std::sync::Arc<dyn crate::desktop::LoginItemBackend>),
+        );
+        c.mount_root(&crate::element::Root::new::<LoginSwitch>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let shown = run_until(c, |s| {
+            s.last()
+                .is_some_and(|t| t.starts_with("login") && t.split(' ').count() == 5)
+        });
+        shown.last().unwrap().clone()
+    }
+
+    #[test]
+    fn launch_at_login_needs_no_capability() {
+        // Apps without a declaration (the legacy set) use it as Rust apps
+        // do: it is the app's own lifecycle, as quit and restart are.
+        let backend = std::sync::Arc::new(FakeLoginItem::default());
+        let mut c = core();
+        c.set_access(std::sync::Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
+            granted: None,
+        }));
+        let shown = switch_login_item(&mut c, Some(backend.clone()));
+        assert_eq!(shown, "login ok true ok false");
+    }
+
+    #[test]
+    fn without_a_backend_the_app_has_no_login_item() {
+        // Reading answers `false`; changing it fails.
+        let shown = switch_login_item(&mut core(), None);
+        assert_eq!(shown, "login Unavailable false Unavailable false");
+    }
+
+    #[test]
+    fn the_backend_reads_and_changes_the_login_item_in_order() {
+        let backend = std::sync::Arc::new(FakeLoginItem::default());
+        let shown = switch_login_item(&mut core(), Some(backend.clone()));
+        assert_eq!(shown, "login ok true ok false");
+        // Each change reads the status after it; the slow registration ran
+        // before what was asked after it.
+        assert_eq!(
+            *backend.calls.lock().unwrap(),
+            [Some(true), None, None, Some(false), None, None]
+        );
+    }
+
+    #[test]
+    fn the_systems_refusal_and_a_sandbox_reach_the_app() {
+        let refuses = std::sync::Arc::new(FakeLoginItem {
+            refuses: true,
+            ..Default::default()
+        });
+        let shown = switch_login_item(&mut core(), Some(refuses));
+        assert_eq!(shown, "login failed-EACCES false failed-EACCES false");
+        // Where the platform has no login item for the app, a change fails
+        // as without a backend.
+        let sandboxed = std::sync::Arc::new(FakeLoginItem {
+            sandboxed: true,
+            ..Default::default()
+        });
+        let shown = switch_login_item(&mut core(), Some(sandboxed));
+        assert_eq!(shown, "login Unavailable false Unavailable false");
     }
 
     /// Starts a speech session when its first button is pressed (a new
@@ -16572,6 +17199,107 @@ mod components {
             "{:?}",
             batch.items
         );
+    }
+
+    /// A sentence whose spans style their hover and press, a link and a
+    /// span that takes no presses, and one inside the link.
+    #[component]
+    fn StatefulSpans() -> impl IntoElement {
+        view().child(
+            text("Read ")
+                .child(
+                    text("the docs")
+                        .on_press(|_: &()| {})
+                        .hover(|s| s.underline())
+                        .active(|s| s.text_color(rgb(0xff0000))),
+                )
+                .child(" or ")
+                .child(text("this").hover(|s| s.underline()))
+                .child(" and ")
+                .child(
+                    text("pressed ")
+                        .on_press(|_: &()| {})
+                        .child(text("inner").hover(|s| s.underline())),
+                ),
+        )
+    }
+
+    #[test]
+    fn a_span_takes_its_hover_and_press_styles_where_the_pointer_is() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            idiom: crate::platform::Idiom::Desktop,
+            ..crate::element::Environment::default()
+        });
+        c.mount_root(&crate::element::Root::new::<StatefulSpans>(|| ()));
+        let paragraph = |c: &mut Core<_>| {
+            let batch = c.commit()?;
+            batch.items.iter().find_map(|i| match i {
+                MountItem::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+        };
+        let style_at = |t: &crate::AttributedText, at: u32| {
+            t.spans
+                .iter()
+                .find(|s| s.start <= at && at < s.end)
+                .expect("a run there")
+                .style
+        };
+        let t = paragraph(&mut c).expect("the paragraph");
+        assert_eq!(t.text, "Read the docs or this and pressed inner");
+        let docs = *t.link_at(5).expect("the link");
+        let this = *t
+            .link_at(17)
+            .expect("a span with hover styles hears the pointer");
+        // The platforms tell a span when the pointer comes over its
+        // characters and leaves them, and when a press goes in and out.
+        for link in [docs, this] {
+            assert!(link.events.contains(EventKind::MouseEnter), "{link:?}");
+            assert!(link.events.contains(EventKind::MouseLeave), "{link:?}");
+        }
+        assert!(docs.events.contains(EventKind::PressDown));
+        assert!(docs.events.contains(EventKind::PressUp));
+        // A span that only hovers takes no press and no stop of Tab.
+        assert!(!this.events.contains(EventKind::Press));
+        assert!(!this.events.contains(EventKind::PressDown));
+        assert!(!this.focus_stop);
+        // Inside a span taking presses, the pressable one stays the link.
+        let inner = t.link_at(34).expect("a link there");
+        assert_eq!((inner.start, inner.end), (26, 39));
+        assert!(!style_at(&t, 5).decoration.underline);
+        let color = style_at(&t, 5).color;
+
+        let mouse = EventPayload::Mouse(crate::MouseEvent::new(
+            crate::geometry::point(px(20.0), px(8.0)),
+            crate::geometry::point(px(60.0), px(8.0)),
+            crate::keymap::Modifiers::default(),
+            None,
+        ));
+        c.component_event(docs.node, EventKind::MouseEnter, &mouse);
+        let t = paragraph(&mut c).expect("the span hovered");
+        assert!(style_at(&t, 5).decoration.underline);
+        assert!(!style_at(&t, 4).decoration.underline, "only the span's run");
+        assert!(!style_at(&t, 17).decoration.underline);
+
+        let press = EventPayload::Press(crate::PressEvent::default());
+        c.component_event(docs.node, EventKind::PressDown, &press);
+        let t = paragraph(&mut c).expect("the span pressed");
+        assert_ne!(style_at(&t, 5).color, color);
+        assert!(style_at(&t, 5).decoration.underline);
+        c.component_event(docs.node, EventKind::PressUp, &press);
+        let t = paragraph(&mut c).expect("the press ended");
+        assert_eq!(style_at(&t, 5).color, color);
+
+        c.component_event(docs.node, EventKind::MouseLeave, &mouse);
+        c.component_event(this.node, EventKind::MouseEnter, &mouse);
+        let t = paragraph(&mut c).expect("the pointer moved on");
+        assert!(!style_at(&t, 5).decoration.underline);
+        assert!(style_at(&t, 17).decoration.underline);
+        c.component_event(this.node, EventKind::MouseLeave, &mouse);
+        let t = paragraph(&mut c).expect("the pointer left");
+        assert!(!style_at(&t, 17).decoration.underline);
     }
 }
 
@@ -19548,6 +20276,116 @@ mod views {
         std::thread::sleep(due.saturating_duration_since(std::time::Instant::now()));
         c.run_component_tasks();
         assert_eq!(texts(&c.commit().unwrap()), ["late"]);
+        assert_eq!(c.next_task_timer(), None);
+    }
+
+    /// A timeout days away, cleared by a press.
+    #[component]
+    fn Reminder() -> impl IntoElement {
+        let pending = stored(Some(set_timeout(
+            std::time::Duration::from_secs(3 * 24 * 60 * 60),
+            || {},
+        )));
+        view().size_10().on_press(move |_: &()| {
+            if let Some(timeout) = pending.with(Option::take) {
+                timeout.cancel();
+            }
+        })
+    }
+
+    #[test]
+    fn a_cleared_timeout_leaves_the_cores_timers() {
+        // The engine would otherwise wake for it days later, and an app that
+        // keeps setting and clearing such timeouts would pile them up.
+        let mut c = core();
+        c.mount_root(&Root::new::<Reminder>(|| ()));
+        let host = root_host(&c.commit().unwrap());
+        c.run_component_tasks();
+        assert!(c.next_task_timer().is_some());
+        assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        assert_eq!(c.next_task_timer(), None);
+    }
+
+    /// A waker that counts its wakes.
+    #[derive(Default)]
+    struct Probe(std::sync::atomic::AtomicU32);
+
+    impl Probe {
+        fn wakes(&self) -> u32 {
+            self.0.load(std::sync::atomic::Ordering::Relaxed)
+        }
+    }
+
+    impl std::task::Wake for Probe {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn a_dropped_delay_lets_go_of_its_waker() {
+        use std::{future::Future, sync::Arc, task::Context};
+
+        let c = core();
+        let _entered = c.components.runtime.enter();
+        let first = Arc::new(Probe::default());
+        let second = Arc::new(Probe::default());
+        let mut delay = Box::pin(timer(std::time::Duration::from_secs(3 * 24 * 60 * 60)));
+        let waker = std::task::Waker::from(first.clone());
+        assert!(
+            delay
+                .as_mut()
+                .poll(&mut Context::from_waker(&waker))
+                .is_pending()
+        );
+        drop(waker);
+        let due = c.next_task_timer().expect("the delay waits");
+        assert_eq!(Arc::strong_count(&first), 2);
+        // Polled again by another waker (a `select`): that one is woken.
+        let waker = std::task::Waker::from(second.clone());
+        assert!(
+            delay
+                .as_mut()
+                .poll(&mut Context::from_waker(&waker))
+                .is_pending()
+        );
+        drop(waker);
+        assert_eq!(Arc::strong_count(&first), 1);
+        assert_eq!(Arc::strong_count(&second), 2);
+        assert_eq!(c.next_task_timer(), Some(due));
+        drop(delay);
+        assert_eq!(c.next_task_timer(), None);
+        assert_eq!(Arc::strong_count(&second), 1);
+        // Nothing is left to wake when its time comes.
+        c.components.executor.fire_timers(due);
+        assert_eq!((first.wakes(), second.wakes()), (0, 0));
+        // Still awaited in `background` too.
+        fn send<T: Send>() {}
+        send::<crate::element::Delay>();
+    }
+
+    #[test]
+    fn a_delay_wakes_the_last_waker_it_was_polled_with() {
+        use std::{future::Future, sync::Arc, task::Context};
+
+        let c = core();
+        let _entered = c.components.runtime.enter();
+        let first = Arc::new(Probe::default());
+        let second = Arc::new(Probe::default());
+        let mut delay = Box::pin(timer(std::time::Duration::from_secs(60)));
+        for probe in [&first, &second] {
+            let waker = std::task::Waker::from(probe.clone());
+            assert!(
+                delay
+                    .as_mut()
+                    .poll(&mut Context::from_waker(&waker))
+                    .is_pending()
+            );
+        }
+        let due = c.next_task_timer().expect("the delay waits");
+        c.components.executor.fire_timers(due);
+        assert_eq!((first.wakes(), second.wakes()), (0, 1));
         assert_eq!(c.next_task_timer(), None);
     }
 
@@ -33051,6 +33889,136 @@ mod built_in_scrollbars {
             _ => None,
         });
         assert_eq!(before, Some(Some(bar)), "the bar draws above it");
+    }
+
+    /// The views of list 2, bottom to top, as the platforms stack them:
+    /// in the order inserted, then the sticky cells raised on every
+    /// `StickyCells` and insert. `in_order` raises them in the order the
+    /// item lists them (iOS, Android), otherwise in the order they are
+    /// among the children (the desktops), when not all of them are last.
+    struct Stack {
+        views: Vec<NodeId>,
+        sticky: Vec<NodeId>,
+        in_order: bool,
+    }
+
+    impl Stack {
+        fn apply(&mut self, batch: &MountBatch) {
+            for item in &batch.items {
+                match item {
+                    MountItem::Insert {
+                        parent: 2,
+                        child,
+                        before,
+                    } => {
+                        self.views.retain(|v| v != child);
+                        let at = before
+                            .and_then(|b| self.views.iter().position(|&v| v == b))
+                            .unwrap_or(self.views.len());
+                        self.views.insert(at, *child);
+                        self.raise();
+                    }
+                    MountItem::Remove { id } => self.views.retain(|v| v != id),
+                    MountItem::StickyCells { id: 2, cells } => {
+                        self.sticky = cells.iter().map(|c| c.cell).collect();
+                        self.raise();
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        fn raise(&mut self) {
+            let sticky = |v: &NodeId| self.sticky.contains(v);
+            let cells: Vec<NodeId> = if self.in_order {
+                self.sticky.clone()
+            } else {
+                let at_end = self.views.iter().rev().take_while(|v| sticky(v)).count();
+                let cells: Vec<NodeId> = self.views.iter().copied().filter(sticky).collect();
+                if at_end == cells.len() {
+                    return;
+                }
+                cells
+            };
+            for cell in cells {
+                if self.views.contains(&cell) {
+                    self.views.retain(|&v| v != cell);
+                    self.views.push(cell);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_lists_sticky_rows_go_below_its_bar() {
+        for in_order in [false, true] {
+            let mut c = core();
+            let mut registry = Registry::new();
+            registry.scrollbars_from(bars);
+            c.set_components(registry);
+            c.set_builtin_scrollbars(Some(app_theme()));
+            apply(
+                &mut c,
+                vec![
+                    Op::Create {
+                        id: 2,
+                        tag: Tag::List,
+                    },
+                    style_op(2, &[("height", StyleValue::Number(400.0))]),
+                    Op::SetProp {
+                        id: 2,
+                        prop: Prop::EstimatedItemSize(px(50.0)),
+                    },
+                    Op::SetProp {
+                        id: 2,
+                        prop: Prop::Count(100),
+                    },
+                    Op::SetProp {
+                        id: 2,
+                        prop: Prop::StickyIndices(vec![0, 10]),
+                    },
+                    Op::Insert {
+                        parent: ROOT_ID,
+                        child: 2,
+                        before: None,
+                    },
+                ],
+            );
+            let mut stack = Stack {
+                views: Vec::new(),
+                sticky: Vec::new(),
+                in_order,
+            };
+            let batch = c.commit().unwrap();
+            stack.apply(&batch);
+            let [bar] = bars_in(&batch)[..] else {
+                panic!("one bar: {:?}", batch.items)
+            };
+            let (mut next_id, mut cells) = (100, Vec::new());
+            for offset in [0.0, 300.0, 600.0, 2000.0, 0.0] {
+                c.set_scroll_offset(2, point(px(0.0), px(offset)), u32::MAX);
+                if let Some(batch) = c.commit() {
+                    stack.apply(&batch);
+                }
+                render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+                let batch = c.commit().unwrap();
+                // Every set the list pins keeps its bar, last (on top).
+                for item in &batch.items {
+                    if let MountItem::StickyCells { id: 2, cells } = item {
+                        assert_eq!(cells.last().map(|c| c.cell), Some(bar), "{cells:?}");
+                    }
+                }
+                stack.apply(&batch);
+                assert_eq!(
+                    stack.views.last(),
+                    Some(&bar),
+                    "at {offset}, raised in order: {in_order}: {:?} (sticky {:?})",
+                    stack.views,
+                    stack.sticky
+                );
+                assert!(stack.sticky.len() > 1, "a row sticks: {:?}", stack.sticky);
+            }
+        }
     }
 
     /// A core drawing every bar with `bars`: in a view 2, a multiline (or
