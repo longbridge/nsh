@@ -5344,7 +5344,29 @@ fn accessibility_described_by_describes_a_view_with_another_ones_text() {
     // platform reads stays the named view's text.
     apply(&mut c, vec![description("Your name")]);
     assert_eq!(c.commit().and_then(|b| described_in(&b, 2)), None);
-    // The error line goes: its own description is back.
+    // The error line leaves the tree (not released yet, as a region
+    // keeps what it removes until it lets it go): its own description
+    // is back.
+    apply(
+        &mut c,
+        vec![Op::Remove {
+            parent: 1,
+            child: 4,
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        described_in(&batch, 2),
+        Some((Some("Your name".into()), None))
+    );
+    // Back in the tree: described again.
+    apply(&mut c, vec![insert(1, 4)]);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        described_in(&batch, 2),
+        Some((Some("Error Enter a name. Use letters only".into()), Some(4)))
+    );
+    // Gone for good.
     apply(
         &mut c,
         vec![

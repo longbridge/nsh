@@ -172,7 +172,9 @@ impl<M: TextEngine> Core<M> {
                 .and_then(|t| self.key(t.node()?).ok())
                 .map(|k| (k, self.nodes[k as usize].id))
         };
-        let describing = named(&r.described_by);
+        // Only while it is on screen: a region keeps an element it took
+        // out until it lets it go, and its text is no longer there.
+        let describing = named(&r.described_by).filter(|&(k, _)| self.in_tree(k));
         Resolved {
             active_descendant: named(&r.active_descendant).map(|(_, id)| id),
             controls: named(&r.controls).map(|(_, id)| id),
