@@ -429,7 +429,10 @@ impl Editor {
 impl Drop for Editor {
     fn drop(&mut self) {
         let host = self.host;
-        TIMERS.with(|t| {
+        // `try_with`: an editor dropped during thread teardown, after the
+        // timers' list, must not abort the process (#1767); the thread's
+        // timers go with it.
+        let _ = TIMERS.try_with(|t| {
             t.borrow_mut().retain(|&(id, h, _)| {
                 if h == host {
                     // SAFETY: a thread timer we set.
