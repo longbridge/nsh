@@ -254,6 +254,8 @@ input()
 
 自动填充（`.auto_fill(AutoFill::Email)`，TSX 的 `autoComplete`）告诉系统字段里装的是什么，系统就能提供已保存的姓名、地址、密码以及短信中的验证码。Rust 的 `AutoFill` 每种内容一个变体（`Name`、`GivenName`、`FamilyName`、`Email`、`Tel`、`Username`、`Password`、`NewPassword`、`OneTimeCode`、`StreetAddress`、`PostalCode`、`Country`、`CreditCardNumber`、`Url`、`Birthdate` 等，以及 `Off`）。TSX 接受以下取值：`"name"`、`"given-name"`、`"family-name"`、`"email"`、`"tel"`、`"username"`、`"current-password"`、`"new-password"`、`"one-time-code"`、`"street-address"`、`"postal-code"`、`"country"`、`"cc-number"`、`"cc-exp"`、`"cc-csc"`、`"url"`、`"birthdate-full"` 等，或 `"off"`。iOS 自己的名字（`"emailAddress"`、`"oneTimeCode"` 等）也可以用在 `autoComplete` 或 `ios={{ textContentType }}` 中。
 
+未开启 `masked` 的密码框（例如点了“显示密码”之后）就是以明文显示的密码：`autoComplete` 为 `"current-password"` 或 `"new-password"`（`AutoFill::Password`、`AutoFill::NewPassword`）且 `masked` 关闭时，Android 使用可见密码键盘，iOS 使用 ASCII 键盘，各平台都不会自动大写、提供建议或自动更正，无论 `autoCapitalize` 和 `autoCorrect` 如何设置。显示/隐藏按钮只需切换 `masked`。
+
 ```rust tabs
 use nsh_core::element::AutoFill;
 

@@ -274,6 +274,17 @@ impl Editor {
     }
 }
 
+/// A pad hosted above the transforms around its input ([`lifted`]): the
+/// view it is hosted on, the frame it takes there and the opacity the
+/// views it left give it.
+struct Lift {
+    host: objc2::rc::Weak<NSView>,
+    /// The child the pad is raised above (its transformed ancestor).
+    anchor: objc2::rc::Weak<NSView>,
+    rect: Bounds<Points>,
+    alpha: f32,
+}
+
 /// The native side of an input view ([`crate::view::ViewState::input`]).
 pub(crate) struct InputState {
     editor: RefCell<Editor>,
@@ -290,6 +301,10 @@ pub(crate) struct InputState {
     configured: Cell<bool>,
     /// Content box; the whole view until the core sends one.
     content: Cell<Option<Bounds<Points>>>,
+    /// Where the pad is hosted while the transforms above the input cannot
+    /// show an AppKit view where it is ([`lifted`]); `None` while it is
+    /// hosted on the input's own view.
+    lift: RefCell<Option<Lift>>,
     /// User edits reported to the engine.
     count: Cell<u32>,
     /// A change made here, not by the user, is being applied.
@@ -516,7 +531,9 @@ impl Ctx {
             return;
         }
         let editor = input.editor.borrow().clone();
-        let Some(caret) = editor.caret(view.ns()) else {
+        // The pad's space is the input view's, while the pad may be hosted
+        // above the transforms around it.
+        let Some(caret) = editor.caret(&input.pad) else {
             return;
         };
         if input.caret.replace(caret) != caret {
@@ -1904,6 +1921,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
             config: RefCell::new(InputConfig::default()),
             configured: Cell::new(false),
             content: Cell::new(None),
+            lift: RefCell::new(None),
             count: Cell::new(0),
             applying: Cell::new(false),
             clipping: Cell::new(false),
@@ -2038,7 +2056,27 @@ impl Drop for InputState {
     fn drop(&mut self) {
         let fallback = self.undo_manager.get_mut().clone();
         self.editor.get_mut().clear_undo(fallback.as_ref());
+        // A pad hosted above the transforms around its input would outlive
+        // it there.
+        if let Some(lift) = self.lift.get_mut().take()
+            && let Some(host) = lift.host.load()
+            && let Some(host) = NshView::from_ns(&host)
+            && !host.forget_native(&self.pad)
+        {
+            // This drop runs inside a state update; the host's own state is
+            // in use, so its tracked entry is removed at the next sync.
+            FORGOTTEN.with(|q| {
+                q.borrow_mut().push((host, Retained::from(&*self.pad)));
+            });
+        }
+        self.pad.removeFromSuperview();
     }
+}
+
+thread_local! {
+    /// Pads dropped while their host's state was in use ([`InputState`]'s
+    /// drop): their tracked entries are removed at the next [`sync`].
+    static FORGOTTEN: RefCell<Vec<(NshView, Retained<NSView>)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// `Input`.
@@ -2115,8 +2153,10 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
             text.setBaseWritingDirection(direction);
             text.setEditable(config.editable);
             text.setSelectable(true);
-            text.setContinuousSpellCheckingEnabled(config.auto_correct);
-            text.setAutomaticSpellingCorrectionEnabled(config.auto_correct);
+            // Never in a password shown as plain text.
+            let correct = config.auto_correct && !config.visible_password();
+            text.setContinuousSpellCheckingEnabled(correct);
+            text.setAutomaticSpellingCorrectionEnabled(correct);
             let line = LineBox::new(config.style.line_height.0 as CGFloat, natural_height(&font));
             text.setDefaultParagraphStyle(Some(&paragraph(line, align)));
             // The space above the first line and below the last.
@@ -2368,6 +2408,125 @@ pub(crate) fn resized(view: &NshView) {
     place(view, &input);
 }
 
+/// One display frame: the views above an input can move, scale or fade (a
+/// camera, an animation, a layout) without the input's own frame changing,
+/// and the pad is hosted above them ([`lifted`]). Walks only the branches
+/// that hold inputs.
+pub(crate) fn sync(surface: &Rc<Surface>) {
+    let forgotten = FORGOTTEN.with(|q| std::mem::take(&mut *q.borrow_mut()));
+    if !forgotten.is_empty() {
+        let mut again = Vec::new();
+        for (host, view) in forgotten {
+            if !host.forget_native(&view) {
+                again.push((host, view));
+            }
+        }
+        if !again.is_empty() {
+            FORGOTTEN.with(|q| q.borrow_mut().extend(again));
+        }
+    }
+    let roots = std::iter::once(surface.root.clone()).chain(crate::window::roots(surface));
+    for root in roots {
+        sync_view(&root);
+    }
+}
+
+fn sync_view(view: &NshView) {
+    // Clone before placing: hosting the pad reaches AppKit, which may end
+    // an edit (and change this view's state) before it returns.
+    let input = view.state().input.clone();
+    if let Some(input) = input {
+        let bounds = bounds_of(view.state().frame);
+        let content = input.content.get().unwrap_or(bounds);
+        let around = surroundings(view, bounds, content);
+        set_hidden(&input, around.hidden);
+        if !around.hidden {
+            place_pad(view, &input, bounds, around.lifted);
+        }
+    }
+    if view.state().input_count == 0 {
+        return;
+    }
+    for child in view.child_views() {
+        sync_view(&child);
+    }
+}
+
+/// The view's own box (its content space starts at its top left).
+fn bounds_of(frame: Bounds<Points>) -> Bounds<Points> {
+    Bounds {
+        origin: Point::new(Points(0.0), Points(0.0)),
+        size: frame.size,
+    }
+}
+
+/// What the views around an input say about its pad, from one walk of its
+/// ancestors: whether it should not show (no area, its window or `hidden`
+/// anywhere above it, since the pad is hosted above those layers and AppKit
+/// hides nothing for it), and the lift its transforms ask for, if any.
+struct Surroundings {
+    hidden: bool,
+    lifted: Option<Lifted>,
+}
+
+fn surroundings(view: &NshView, bounds: Bounds<Points>, content: Bounds<Points>) -> Surroundings {
+    let empty = |r: Bounds<Points>| r.size.width.0 <= 0.0 || r.size.height.0 <= 0.0;
+    if empty(bounds) || empty(content) {
+        return Surroundings {
+            hidden: true,
+            lifted: None,
+        };
+    }
+    if view.ns().window().is_none() || view.ns().isHiddenOrHasHiddenAncestor() {
+        return Surroundings {
+            hidden: true,
+            lifted: None,
+        };
+    }
+    let mut hidden = false;
+    let mut host = None;
+    let mut anchor = None;
+    let mut at = Some(view.clone());
+    while let Some(v) = at {
+        if v.state().style.hidden {
+            hidden = true;
+        }
+        if v.state().transform().is_some() {
+            host = v.parent_view();
+            anchor = Some(v.clone());
+        }
+        at = v.parent_view();
+    }
+    let lifted = match (host, anchor) {
+        (Some(host), Some(anchor)) => lifted(view, host, anchor),
+        _ => None,
+    };
+    Surroundings { hidden, lifted }
+}
+
+fn set_hidden(input: &InputState, hidden: bool) {
+    if input.pad.isHidden() != hidden {
+        input.pad.setHidden(hidden);
+    }
+}
+
+/// `view` is leaving its parent (`crate::view::NshView::unparent`): a pad
+/// hosted above it is not in its subtree and would stay where it was, so
+/// hide it. A sync places it again once it is attached somewhere.
+pub(crate) fn left(view: &NshView) {
+    // Hiding reaches AppKit, which may end the edit before it returns.
+    let input = view.state().input.clone();
+    if let Some(input) = input {
+        set_hidden(&input, true);
+    }
+    if view.state().input_count == 0 {
+        return;
+    }
+    for child in view.child_views() {
+        left(&child);
+    }
+}
+
 /// Places the pad over the whole view and the editor (and a text view's
 /// placeholder) in it at the content box (`crate::native::resized` keeps
 /// the pad at the view's size). While the view or its content box has no
@@ -2375,27 +2534,18 @@ pub(crate) fn resized(view: &NshView) {
 /// pad is hidden: it does not clip, so the editor would keep drawing at its
 /// last frame.
 fn place(view: &NshView, input: &InputState) {
-    let frame = view.state().frame;
-    let bounds = Bounds {
-        origin: Point {
-            x: Points(0.0),
-            y: Points(0.0),
-        },
-        size: Size {
-            width: frame.size.width,
-            height: frame.size.height,
-        },
-    };
+    let bounds = bounds_of(view.state().frame);
     let content = input.content.get().unwrap_or(bounds);
+    let around = surroundings(view, bounds, content);
+    set_hidden(input, around.hidden);
+    // Only zero area skips hosting (a `display: none` subtree lays its
+    // views out at a zero frame). A view that only hides keeps its editor
+    // hosted, so showing it again needs no new frame or content.
     let empty = |r: Bounds<Points>| r.size.width.0 <= 0.0 || r.size.height.0 <= 0.0;
-    let hidden = empty(bounds) || empty(content);
-    if input.pad.isHidden() != hidden {
-        input.pad.setHidden(hidden);
-    }
-    if hidden {
+    if empty(bounds) || empty(content) {
         return;
     }
-    view.set_native(&input.pad, bounds);
+    place_pad(view, input, bounds, around.lifted);
     let pad = &input.pad;
     let host = |sub: &NSView, r: Bounds<Points>| {
         if crate::view::superview(sub).as_deref() != Some(&**pad) {
@@ -2476,6 +2626,243 @@ fn reveal_caret_later(view: &NSTextView) {
             withObject: std::ptr::null::<AnyObject>(),
             afterDelay: 0.0f64
         ];
+    }
+}
+
+/// A pad's place above the transforms around its input ([`lifted`]).
+struct Lifted {
+    host: NshView,
+    /// The transformed ancestor the pad is raised directly above.
+    anchor: NshView,
+    rect: Bounds<Points>,
+    /// The opacity the views it left give it.
+    alpha: f32,
+}
+
+/// The pad's host and frame while the transforms around the input make
+/// AppKit's own geometry wrong, or `None` while they do not. `host` and
+/// `anchor` are the parent and the highest transformed view around the
+/// input, found by [`surroundings`].
+///
+/// AppKit places a hosted view from its superview's geometry and ignores
+/// the layer transforms above it: under a scaled or translated ancestor
+/// the field editor draws at the untransformed place (the box stays blank
+/// when that is off the window) and a press there misses. Hosting the pad
+/// directly above the highest transformed view, in its parent's container,
+/// at the box those transforms show and with its natural bounds, gives
+/// AppKit geometry that already carries the scale: text rasterizes at the
+/// scale it shows at, the field editor and the caret follow, and presses
+/// land where they show. Siblings stacked over that view stay over the pad.
+fn lifted(view: &NshView, host: NshView, anchor: NshView) -> Option<Lifted> {
+    // A view that clips between the input and the host would clip the pad
+    // there; above it the pad would draw outside the clip. The input's own
+    // view is not counted: the pad fills it.
+    let mut alpha = 1.0;
+    let mut at = Some(view.clone());
+    loop {
+        let v = at?;
+        if v == host {
+            break;
+        }
+        if v != *view && v.state().clips() {
+            return None;
+        }
+        // Picking a pad above the input would skip what gates it where it
+        // was: `pointerEvents: none`, `visibility: hidden`, an animating-out
+        // view or a screen under the top one.
+        if !v.can_target() {
+            return None;
+        }
+        alpha *= v.state().opacity();
+        at = v.parent_view();
+    }
+    // A host that clips its children in a container would not clip the pad,
+    // which is a subview of the host itself.
+    if host.container_view().is_some() && host.state().clips() {
+        return None;
+    }
+    // Where it draws, from the frames, transforms and scroll offsets
+    // between it and the host, animated ones included.
+    let size = view.state().frame.size;
+    let (w, h) = (size.width.0 as f64, size.height.0 as f64);
+    if !(w > 0.0 && h > 0.0) {
+        return None;
+    }
+    let m = map_of(view, &host)?;
+    let w_scale = m[2][2];
+    if !w_scale.is_finite() || w_scale.abs() < 1e-9 {
+        return None;
+    }
+    // Only a scale and a translation: a rotated or skewed box is not what a
+    // bounds/frame pair shows, and a perspective one is not a rectangle at
+    // all.
+    let tolerance = 1e-4 * (m[0][0].abs().max(m[1][1].abs()) * w_scale.abs()).max(1e-4);
+    if m[0][1].abs() > tolerance
+        || m[1][0].abs() > tolerance
+        || m[0][2].abs() > 1e-6
+        || m[1][2].abs() > 1e-6
+    {
+        return None;
+    }
+    let (sx, sy) = (m[0][0] / w_scale, m[1][1] / w_scale);
+    let (x, y) = (m[2][0] / w_scale, m[2][1] / w_scale);
+    if !(sx > 0.0 && sy > 0.0) || !sx.is_finite() || !sy.is_finite() {
+        return None;
+    }
+    Some(Lifted {
+        host,
+        anchor,
+        rect: Bounds {
+            origin: Point::new(px(x as f32), px(y as f32)),
+            size: Size::new(px((sx * w) as f32), px((sy * h) as f32)),
+        },
+        alpha,
+    })
+}
+
+/// The 2D transform from `view`'s content space to `host`'s: frames,
+/// transforms and the scroll offsets and zooms of the containers between
+/// them, composed as a row-vector projective matrix (`[x y 1] · m`).
+fn map_of(view: &NshView, host: &NshView) -> Option<[[f64; 3]; 3]> {
+    type Map = [[f64; 3]; 3];
+    fn mul(a: &Map, b: &Map) -> Map {
+        let mut m = [[0.0; 3]; 3];
+        for (i, row) in m.iter_mut().enumerate() {
+            for (j, slot) in row.iter_mut().enumerate() {
+                *slot = (0..3).map(|k| a[i][k] * b[k][j]).sum();
+            }
+        }
+        m
+    }
+    let mut total: Map = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut at = view.clone();
+    while at != *host {
+        if let Some(transform) = at.state().transform() {
+            let m = &transform.0;
+            total = mul(
+                &total,
+                &[
+                    [m[0], m[1], m[3]],
+                    [m[4], m[5], m[7]],
+                    [m[12], m[13], m[15]],
+                ],
+            );
+        }
+        let frame = at.ns().frame();
+        total = mul(
+            &total,
+            &[
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [frame.origin.x, frame.origin.y, 1.0],
+            ],
+        );
+        let parent = at.parent_view()?;
+        // A child's frame is in its parent's container; a scroll view's
+        // offset and zoom put the container in the parent's space.
+        let (offset, zoom) = crate::input::container_offset(&parent);
+        let (z, ox, oy) = (zoom as f64, offset.0 as f64, offset.1 as f64);
+        total = mul(
+            &total,
+            &[[z, 0.0, 0.0], [0.0, z, 0.0], [-ox * z, -oy * z, 1.0]],
+        );
+        at = parent;
+    }
+    Some(total)
+}
+
+/// Places the pad itself: over the input's view, or above the transforms
+/// around it ([`lifted`]). Moving it between superviews keeps the focus
+/// and the selection: a camera that starts or stops transforming must not
+/// end the edit.
+fn place_pad(view: &NshView, input: &InputState, bounds: Bounds<Points>, target: Option<Lifted>) {
+    // The pad's bounds are the input view's space, so its editor and
+    // placeholder stay at the core's content box whatever the transforms
+    // above show.
+    let size = input.pad.bounds().size;
+    if size.width != bounds.size.width.0 as CGFloat
+        || size.height != bounds.size.height.0 as CGFloat
+    {
+        input
+            .pad
+            .setBounds(ns_rect(0.0, 0.0, bounds.size.width.0, bounds.size.height.0));
+    }
+    let (host, rect, alpha) = match &target {
+        Some(l) => (l.host.clone(), l.rect, l.alpha),
+        None => (view.clone(), bounds, 1.0),
+    };
+    let same = {
+        let current = input.lift.borrow();
+        match (&*current, &target) {
+            (None, None) => true,
+            (Some(l), Some(lifted)) => {
+                l.host
+                    .load()
+                    .is_some_and(|v| std::ptr::eq(&*v, lifted.host.ns()))
+                    && l.anchor
+                        .load()
+                        .is_some_and(|v| std::ptr::eq(&*v, lifted.anchor.ns()))
+            }
+            _ => false,
+        }
+    };
+    if same {
+        if let Some(lifted) = &target {
+            let mut current = input.lift.borrow_mut();
+            if let Some(current) = current.as_mut() {
+                if current.rect != rect {
+                    host.set_raised(&input.pad, rect, lifted.anchor.ns());
+                    current.rect = rect;
+                }
+                if (current.alpha - alpha).abs() > 1e-4 {
+                    input.pad.setAlphaValue(alpha as CGFloat);
+                    current.alpha = alpha;
+                }
+            }
+        } else {
+            let frame = input.pad.frame();
+            let placed = crate::view::superview(&input.pad).as_deref() == Some(view.ns())
+                && frame.origin.x == bounds.origin.x.0 as CGFloat
+                && frame.origin.y == bounds.origin.y.0 as CGFloat
+                && frame.size.width == bounds.size.width.0 as CGFloat
+                && frame.size.height == bounds.size.height.0 as CGFloat;
+            if !placed {
+                view.set_native(&input.pad, bounds);
+            }
+            if input.pad.alphaValue() != 1.0 {
+                input.pad.setAlphaValue(1.0);
+            }
+        }
+        return;
+    }
+    // Another host: move it, and put the field editor back if the move
+    // took the focus off the window.
+    let (focused, selection) = {
+        let editor = input.editor.borrow();
+        (editor.focused(), editor.selection())
+    };
+    if let Some(old) = input.lift.borrow_mut().take()
+        && let Some(old) = old.host.load().and_then(|v| NshView::from_ns(&v))
+    {
+        old.remove_native(&input.pad);
+    }
+    match &target {
+        Some(l) => host.set_raised(&input.pad, rect, l.anchor.ns()),
+        None => host.set_native(&input.pad, rect),
+    }
+    input.pad.setAlphaValue(alpha as CGFloat);
+    *input.lift.borrow_mut() = target.map(|l| Lift {
+        host: objc2::rc::Weak::new(l.host.ns()),
+        anchor: objc2::rc::Weak::new(l.anchor.ns()),
+        rect: l.rect,
+        alpha: l.alpha,
+    });
+    let editor = input.editor.borrow().clone();
+    if focused && !editor.focused() {
+        editor.focus();
+        if let Some((start, end)) = selection {
+            editor.select(start, end);
+        }
     }
 }
 
