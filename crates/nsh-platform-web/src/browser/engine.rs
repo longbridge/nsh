@@ -212,6 +212,7 @@ impl Host for Runtime {
         self.bindings.posts.borrow().has_calls()
     }
     fn set_environment(&self, e: &Environment) {
+        super::set_apple_keyboard(e.apple_keyboard);
         let data = serde_json::json!({
             "window":{"width":e.window.width.0,"height":e.window.height.0},
             "safeArea":{"top":e.safe_area.top.0,"right":e.safe_area.right.0,"bottom":e.safe_area.bottom.0,"left":e.safe_area.left.0},
@@ -220,7 +221,7 @@ impl Host for Runtime {
             "colorScheme":if e.color_scheme==nsh_engine::ColorScheme::Dark {"dark"}else{"light"},
             "fontScale":e.font_scale,"rtl":e.rtl,"reduceMotion":e.reduce_motion,"pixelRatio":e.pixel_ratio,
             "screenReader":e.screen_reader,"locale":e.locale.as_str(),"host":e.host,"lifecycle":e.lifecycle.name(),
-            "shaders":e.shaders,
+            "shaders":e.shaders,"wakeCount":e.wake_count,
             "localeSettings":{
                 "languages":e.locale_settings.languages.iter().map(|l| l.as_str().to_owned()).collect::<Vec<_>>(),
                 "timeZone":e.locale_settings.time_zone.as_str(),

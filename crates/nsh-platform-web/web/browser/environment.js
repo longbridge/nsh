@@ -23,7 +23,7 @@ export function createEnvironment(reactive, invoke, dom) {
   const initial = { window: { width: 0, height: 0 }, safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
     titleBar: { height: 0, left: 0, right: 0 }, keyboard: { height: 0, duration: 0.25 },
     colorScheme: "light", fontScale: 1, pixelRatio: 1, locale: "en-US", reduceMotion: false, screenReader: false, host: false,
-    lifecycle: "active", shaders: true,
+    lifecycle: "active", shaders: true, wakeCount: 0,
     localeSettings: { languages: ["en-US"], timeZone: "UTC", hourCycle: "h12", firstDayOfWeek: 7,
       measurementSystem: "us", temperatureUnit: "fahrenheit" } };
   const fields = Object.fromEntries(Object.entries(initial).map(([name, value]) => [name, reactive.signal(value)]));
@@ -48,8 +48,12 @@ export function createEnvironment(reactive, invoke, dom) {
     fontScale: () => fields.fontScale(), pixelRatio: () => fields.pixelRatio(), locale: () => fields.locale(),
     localeSettings: () => fields.localeSettings(), lifecycle: () => fields.lifecycle(), platform,
     shadersAvailable: () => fields.shaders(),
-    // A browser page has no performance monitor (its developer tools measure it).
+    // The engine's count; a page has no system sleep to hear, so it stays 0.
+    wakeCount: () => fields.wakeCount(),
+    // A browser page has no performance monitor (its developer tools measure it),
+    // so no stats either.
     fpsEnabled: () => false,
+    perfStats: () => null,
   };
   const accessibility = { reduceMotion: () => fields.reduceMotion(), screenReaderEnabled: () => fields.screenReader() };
   // nsh-js's `appInfo` (`env.rs`): what the build wrote, handed over by

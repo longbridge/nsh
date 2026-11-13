@@ -48,7 +48,15 @@
 //!   the window (an embedded surface's root window) is minimized or hidden,
 //!   active while the app is the active one (its windows get
 //!   `WM_ACTIVATEAPP`; before the first, the foreground window is the
-//!   process's), inactive otherwise;
+//!   process's), inactive otherwise; background too while the user cannot
+//!   see it: the session locked or without a display, the display off, the
+//!   window on another virtual desktop ([`crate::presence`], followed from
+//!   the system's notifications), and from the moment the session may end
+//!   (signing out, shutting down: [`crate::session`]);
+//! - the wake count (`wakeCount()`): one more on every
+//!   `WM_POWERBROADCAST` with `PBT_APMRESUMEAUTOMATIC` ([`woke`]), which
+//!   top-level windows get on every resume (an embedded surface's root
+//!   window passes it on);
 //! - the time zone (`localeSettings()`'s): the zone of the system's setting
 //!   (`GetDynamicTimeZoneInformation`, its Windows key name) by its IANA
 //!   name, which the ICU Windows ships knows
@@ -370,6 +378,13 @@ pub(crate) fn lifecycle_changed(surface: &Surface) {
     surface.set_environment(env);
 }
 
+/// The system woke from sleep: `surface` counts it (`wakeCount()`).
+pub(crate) fn woke(surface: &Surface) {
+    let mut env: Environment = surface.environment.get();
+    env.wake_count = env.wake_count.wrapping_add(1);
+    surface.set_environment(env);
+}
+
 /// The app's state as `surface` sees it; `current` before its window
 /// exists.
 fn lifecycle(surface: &Surface, current: Lifecycle) -> Lifecycle {
@@ -380,10 +395,24 @@ fn lifecycle(surface: &Surface, current: Lifecycle) -> Lifecycle {
     // SAFETY: plain calls on a window handle.
     let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
     // SAFETY: as above.
-    let shown = unsafe { IsWindowVisible(root).as_bool() && !IsIconic(root).as_bool() };
-    if !shown {
+    let shown = unsafe { IsWindowVisible(root).as_bool() && !IsIconic(root).as_bool() }
+        && !crate::presence::cloaked(root);
+    // A test's app runs as it does on screen whatever the screen shows (a
+    // locked or remote session), so its tests see what they see unlocked.
+    let seen = surface.testing() || crate::presence::screen_seen();
+    lifecycle_of(shown, seen, crate::session::ending(), || {
+        ACTIVE.with(Cell::get).unwrap_or_else(foreground_is_ours)
+    })
+}
+
+/// The app's state with its window `shown` (not minimized, hidden or on
+/// another virtual desktop), the screen `seen` (the session unlocked and
+/// connected, the display on: [`crate::presence`]), the session `ending`
+/// ([`crate::session`]) and whether it is the `active` app.
+fn lifecycle_of(shown: bool, seen: bool, ending: bool, active: impl FnOnce() -> bool) -> Lifecycle {
+    if !shown || !seen || ending {
         Lifecycle::Background
-    } else if ACTIVE.with(Cell::get).unwrap_or_else(foreground_is_ours) {
+    } else if active() {
         Lifecycle::Active
     } else {
         Lifecycle::Inactive
@@ -731,6 +760,21 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::FileRequest { id, request } => {
             crate::file_requests::request(surface, *id, request)
         }
+        Command::RenderCanvas {
+            id,
+            drawing,
+            width,
+            height,
+            scale,
+            format,
+        } => crate::canvas::render_offscreen(
+            surface,
+            *id,
+            drawing.clone(),
+            (*width, *height),
+            *scale,
+            *format,
+        ),
         Command::OpenUrl { id, url } => {
             let opened = open_url(url);
             surface.event(
@@ -2001,6 +2045,17 @@ pub(crate) fn dialog_point(
     }
 }
 
+/// Whether a dialog shows over the app: it owns the keyboard, so a view
+/// under it hears no key releases either.
+pub(crate) fn dialog_shown(surface: &Surface) -> bool {
+    OVERLAYS.with(|overlays| {
+        overlays.borrow().iter().any(|overlay| {
+            overlay.key == surface.key()
+                && matches!(&overlay.kind, OverlayKind::Dialog(d) if !d.closing.get())
+        })
+    })
+}
+
 /// Keys while a dialog shows over the app (it is modal: every key goes to
 /// it). Enter and Space press the focused button (the default action at
 /// first), Escape cancels, Tab and the arrows move between the buttons.
@@ -2270,6 +2325,46 @@ pub(crate) fn clipboard_has_text() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_ending_session_puts_the_app_in_the_background() {
+        assert_eq!(lifecycle_of(true, true, false, || true), Lifecycle::Active);
+        assert_eq!(
+            lifecycle_of(true, true, false, || false),
+            Lifecycle::Inactive
+        );
+        assert_eq!(
+            lifecycle_of(false, true, false, || true),
+            Lifecycle::Background
+        );
+        assert_eq!(
+            lifecycle_of(true, true, true, || true),
+            Lifecycle::Background
+        );
+        assert_eq!(
+            lifecycle_of(true, true, true, || false),
+            Lifecycle::Background
+        );
+    }
+
+    #[test]
+    fn a_screen_the_user_cannot_see_puts_the_app_in_the_background() {
+        // Locked, disconnected or turned off: active or not, nothing shows.
+        assert_eq!(
+            lifecycle_of(true, false, false, || true),
+            Lifecycle::Background
+        );
+        assert_eq!(
+            lifecycle_of(true, false, false, || false),
+            Lifecycle::Background
+        );
+        let locked = crate::presence::Screen::default()
+            .session_changed(windows::Win32::UI::WindowsAndMessaging::WTS_SESSION_LOCK);
+        assert_eq!(
+            lifecycle_of(true, locked.seen(), false, || true),
+            Lifecycle::Background
+        );
+    }
 
     #[test]
     fn bitmaps_become_bmp_files() {

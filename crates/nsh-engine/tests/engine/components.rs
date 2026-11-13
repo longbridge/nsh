@@ -111,6 +111,7 @@ fn app_config(
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     }
 }
 
@@ -1697,6 +1698,64 @@ fn picked_files_reach_js_with_their_names_and_bytes() {
     assert_eq!(asked.filters[0].extensions, ["pdf", "md"]);
 }
 
+const FILE_PICKER_LIMIT: &str = r#"import { mount, signal, Text } from "nsh";
+import { Picker } from "nsh";
+
+const shown = signal("");
+setTimeout(async () => {
+  const refused = await Picker.pickFiles({ maxSize: -1 }).catch((e) => e.name);
+  const files = await Picker.pickFiles({ multiple: true, maxSize: 4 });
+  shown.set(
+    `${refused} ` +
+      files.map((f) => `${f.name}:${f.type}:${f.size}:${f.status}:${f.file === null ? "none" : f.file.size}`).join(" "),
+  );
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn picked_files_past_the_apps_limit_reach_js_unread() {
+    let (engine, rx) = start(FILE_PICKER_LIMIT);
+    let control = engine.control();
+    let mut asked = None;
+    until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::PickFiles { id, request },
+            } = item
+            {
+                asked = Some(request.clone());
+                let read = |name: &str, bytes: &[u8]| {
+                    let mut file = nsh_core::picker::PickedFile::default();
+                    file.name = name.into();
+                    file.data = nsh_core::ImageData::new(bytes.to_vec());
+                    file
+                };
+                // Read, read but past the limit (a platform that could not
+                // tell its size first), and not read.
+                let files = vec![
+                    read("a.txt", b"abcd"),
+                    read("b.txt", b"abcde"),
+                    nsh_core::picker::PickedFile::too_large("clip.mp4", "", 400_000_000),
+                ];
+                control.dispatch_event(
+                    ROOT_ID,
+                    EventKind::Pick,
+                    EventPayload::Picked { id: *id, files },
+                );
+            }
+        }
+        shows(
+            batch,
+            "RangeError a.txt:text/plain:4:read:4 b.txt:text/plain:5:tooLarge:none \
+             clip.mp4:video/mp4:400000000:tooLarge:none",
+        )
+    });
+    assert_eq!(asked.expect("a pick").max_size, Some(4));
+}
+
 const PICK: &str = r#"import { mount, signal, Text } from "nsh";
 import { Picker } from "nsh";
 
@@ -1954,6 +2013,84 @@ mount(() => (
 ));
 "##;
 
+const ORIENTATIONS: &str = r##"import { signal, mount, View } from "nsh";
+import { NavPage, NavStack, createNavStack } from "nsh/base";
+
+type Route = { name: string };
+const a = createNavStack<Route>([{ name: "home" }]);
+const b = createNavStack<Route>([{ name: "more" }]);
+const tab = signal<"a" | "b">("b");
+setTimeout(() => b.push({ name: "viewer" }), 30);
+setTimeout(() => tab.set("a"), 60);
+setTimeout(() => tab.set("b"), 90);
+setTimeout(() => b.pop(), 120);
+
+const page = (route: Route) => (
+  <NavPage
+    title={route.name}
+    android={{
+      supportedOrientations:
+        route.name === "home" ? ["portrait"] : route.name === "viewer" ? ["landscape"] : undefined,
+    }}
+  >
+    <View />
+  </NavPage>
+);
+
+mount(() => (
+  <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, display: tab() === "a" ? "flex" : "none" }}>
+      <NavStack state={a} style={{ flex: 1 }}>{page}</NavStack>
+    </View>
+    <View style={{ flex: 1, display: tab() === "b" ? "flex" : "none" }}>
+      <NavStack state={b} style={{ flex: 1 }}>{page}</NavStack>
+    </View>
+  </View>
+));
+"##;
+
+/// A page's `supportedOrientations` decide while it is the most recently
+/// shown one with a setting that is displayed: a page kept in a tab that
+/// is not shown (`display: none`) does not.
+#[test]
+fn the_page_shown_decides_the_orientations() {
+    use nsh_core::{ModalConfig as M, platform::Os};
+
+    let (_engine, rx) = start_in(
+        ORIENTATIONS,
+        Environment {
+            os: Os::Android,
+            ..Environment::default()
+        },
+    );
+    let mut sent = Vec::new();
+    until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::Orientations(bits),
+            } = item
+            {
+                sent.push(*bits);
+            }
+        }
+        sent.len() >= 4
+    });
+    // Tab b shows a page with none (the home page with portrait is in the
+    // hidden tab): nothing sent. The viewer pushed: landscape. Tab a shown:
+    // its home page's portrait. Tab b again: the viewer's. Popped, with tab
+    // a hidden: the app's own.
+    assert_eq!(
+        sent,
+        [
+            M::LANDSCAPE_LEFT | M::LANDSCAPE_RIGHT,
+            M::PORTRAIT,
+            M::LANDSCAPE_LEFT | M::LANDSCAPE_RIGHT,
+            0,
+        ]
+    );
+}
+
 const BACK: &str = r#"import { mount, signal, Text } from "nsh";
 import { BackHandler } from "nsh/mobile";
 
@@ -2109,6 +2246,61 @@ try {
 mount(() => <Text>{wrong}</Text>);
 "#;
 
+const MENU_CYCLES: &str = r#"import { mount, Text } from "nsh";
+import { Menu, Tray } from "nsh/desktop";
+
+function attempt(items: unknown, set = (items: unknown) => Menu.setApplicationMenu(items as never)) {
+  try {
+    set(items);
+    return "accepted";
+  } catch (e) {
+    const message = (e as Error).message;
+    return message.includes("cannot be read") ? "too many" : message;
+  }
+}
+// A menu that is its own submenu.
+const own: any[] = [{ label: "Again", submenu: null }];
+own[0].submenu = own;
+// Three levels of 1000 items sharing their submenus: no cycle, but 10 ** 9
+// items to read without a total.
+const leaves = new Array(1000).fill({ label: "Leaf" });
+const middle = new Array(1000).fill({ label: "Middle", submenu: leaves });
+const wide = new Array(1000).fill({ label: "Top", submenu: middle });
+const results = [
+  `sparse:${attempt(new Array(2 ** 32 - 1))}`,
+  `own:${attempt(own)}`,
+  `wide:${attempt(wide)}`,
+  `fine:${attempt([{ label: "File", submenu: [{ label: "Open", submenu: [{ label: "Recent" }] }] }])}`,
+  `tray:${attempt(new Array(2 ** 20 + 1).fill({ text: "a" }), (title) => Tray.set({ title } as never))}`,
+];
+mount(() => <Text>{results.join(" ")}</Text>);
+"#;
+
+/// Menus are read natively, where neither the time budget nor the
+/// interpreter's stack limit applies: one that says it has billions of
+/// items, one that is its own submenu (which overflowed the engine
+/// thread's stack) and one whose shared submenus hold 10^9 items in all
+/// are refused, and a menu nested as menus are is accepted. So is a
+/// tray's title read: one of more than 2^20 runs is refused.
+#[test]
+fn menus_too_long_or_nested_in_themselves_are_refused() {
+    let (_engine, rx) = start_in(
+        MENU_CYCLES,
+        Environment {
+            os: nsh_engine::Os::MacOs,
+            ..Environment::default()
+        },
+    );
+    let expected = "sparse:too many own:nsh/desktop: submenus nested too deeply \
+                    wide:too many fine:accepted tray:too many";
+    // The app reads a million items before its first frame, longer than
+    // `until`'s wait between frames on a loaded machine.
+    let first = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("first frame");
+    assert!(shows(&first, expected), "{first:?}");
+}
+
 /// An item's `icon` reaches the platform as `<Image>`'s `src` does: a `data:`
 /// URI or a blob's bytes in hand under a short key, an imported image with its
 /// size and scales; nothing for an empty string, and a throw for what is no
@@ -2244,6 +2436,8 @@ fn menus_reach_the_platform_and_call_back() {
         role: None,
         when: nsh_core::keymap::When::Always,
         icon: None,
+        symbol: None,
+        destructive: false,
     };
     let quit = MenuAction {
         id: 0,
@@ -2254,6 +2448,8 @@ fn menus_reach_the_platform_and_call_back() {
         role: Some(MenuRole::Quit),
         when: nsh_core::keymap::When::Always,
         icon: None,
+        symbol: None,
+        destructive: false,
     };
     assert_eq!(
         &*menu,
@@ -2266,6 +2462,8 @@ fn menus_reach_the_platform_and_call_back() {
                 MenuItem::Action(quit)
             ],
             icon: None,
+            symbol: None,
+            inline: false,
         }]
     );
     engine.control().dispatch_event(
@@ -2548,6 +2746,79 @@ fn app_quit_reaches_the_platform() {
             "{expected:?}: {batches:?}"
         );
     }
+}
+
+const QUIT_REQUEST: &str = r#"import { mount, signal, Text } from "nsh";
+import { Application } from "nsh/desktop";
+
+const requests = signal(0);
+const stop = Application.on("quitRequest", () => {
+  requests.set(requests() + 1);
+  if (requests() === 2) {
+    stop();
+    Application.quit();
+  }
+});
+mount(() => <Text>{`requests ${requests()}`}</Text>);
+"#;
+
+/// While the app listens to `quitRequest`, the platform's quit requests go
+/// to it: the first one only reaches the listener and nothing quits; the
+/// app quits when it decides to, and once it stops listening quit
+/// requests quit again.
+#[test]
+fn quit_requests_reach_the_app_and_it_decides() {
+    use nsh_core::desktop::{DesktopCommand, WindowEvent};
+
+    let (engine, rx) = start_in(
+        QUIT_REQUEST,
+        Environment {
+            os: nsh_engine::Os::Linux,
+            ..Environment::default()
+        },
+    );
+    let app_commands = |batches: &[MountBatch]| -> Vec<DesktopCommand> {
+        batches
+            .iter()
+            .flat_map(|b| &b.items)
+            .filter_map(|item| match item {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::Desktop(command),
+                } => Some((**command).clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let first = until(&rx, |b| {
+        app_commands(std::slice::from_ref(b)).contains(&DesktopCommand::SetQuitOnRequest(false))
+    });
+    assert!(
+        !app_commands(&first).contains(&DesktopCommand::Quit),
+        "{first:?}"
+    );
+    let request = || {
+        engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::Window,
+            EventPayload::Window(Box::new(WindowEvent::QuitRequest)),
+        );
+    };
+    request();
+    let heard = until(&rx, |b| shows(b, "requests 1"));
+    assert!(
+        !app_commands(&heard).contains(&DesktopCommand::Quit),
+        "the app decides: {heard:?}"
+    );
+    request();
+    let quit = until(&rx, |b| {
+        app_commands(std::slice::from_ref(b)).contains(&DesktopCommand::Quit)
+    });
+    let commands = app_commands(&quit);
+    assert!(
+        commands.contains(&DesktopCommand::SetQuitOnRequest(true)),
+        "no listener left: {commands:?}"
+    );
 }
 
 /// German's data stands for what the bundle of an app listing it carries.
@@ -3176,7 +3447,7 @@ function App() {
   );
   return (
     <View>
-      <Tabs testID="sections" class="flex-row">
+      <Tabs testID="sections" class="flex-row" accessibilityLabel="Sections">
         {tab("a", "Overview")}
         {tab("b", "Activity")}
         {tab("c", "Billing", true)}
@@ -3189,11 +3460,11 @@ function App() {
 mount(App);
 "##;
 
-/// `nsh/base`'s `Tab` in `Tabs`: the tab list role on the list, the tab
-/// role and its selected state on each tab alone, a press reported with
-/// `onPress` (the selected tab's too) while the app owns which tab is
-/// selected, a disabled tab reporting nothing, and the app's content
-/// inside following the tab with `group-selected:`.
+/// `nsh/base`'s `Tab` in `Tabs`: the tab list role and the app's name on
+/// the list, the tab role and its selected state on each tab alone, a
+/// press reported with `onPress` (the selected tab's too) while the app
+/// owns which tab is selected, a disabled tab reporting nothing, and the
+/// app's content inside following the tab with `group-selected:`.
 #[test]
 fn a_base_tab_reports_presses_and_its_list_holds_no_value() {
     use nsh_core::{AccessibilityRole, ViewProps};
@@ -3260,10 +3531,11 @@ fn a_base_tab_reports_presses_and_its_list_holds_no_value() {
     let (marker_a, marker_b) = (marker(a), marker(b));
     let initial = std::slice::from_ref(&first);
 
-    // The list: a tab list for screen readers, laid out by the app.
+    // The list: a tab list for screen readers, named by the app
+    // (`accessibilityLabel`) and laid out by it.
     let list = view_props(&first, sections).unwrap();
     assert_eq!(list.accessibility.role, AccessibilityRole::Tablist);
-    assert_eq!(list.accessibility.label, None);
+    assert_eq!(list.accessibility.label.as_deref(), Some("Sections"));
 
     // The selected tab: selected for screen readers, its `selectedStyle`,
     // and the app's marker `group-selected:`.
@@ -6151,7 +6423,8 @@ function App() {
     <TabBar
       items={[
         { title: "Records", icon: "list.bullet" },
-        { title: "Stats", icon: "chart.bar" },
+        { title: "Stats", icon: "chart.bar", badge: "3" },
+        { title: "Brain", badge: "" },
       ]}
       selectedIndex={selected()}
       onChange={({ index }: { index: number }) => selected.set(index)}
@@ -6168,7 +6441,7 @@ fn is_tab_bar(item: &MountItem) -> bool {
 }
 
 /// `nsh/mobile`'s `TabBar` is the system's component on iOS and Android,
-/// given the tabs as the app wrote them.
+/// given the tabs as the app wrote them, badges included.
 #[test]
 fn the_tab_bar_is_the_systems_component_on_ios_and_android() {
     use nsh_core::platform::Os;
@@ -6199,7 +6472,8 @@ fn the_tab_bar_is_the_systems_component_on_ios_and_android() {
             value("items"),
             Some(serde_json::json!([
                 { "title": "Records", "icon": "list.bullet" },
-                { "title": "Stats", "icon": "chart.bar" },
+                { "title": "Stats", "icon": "chart.bar", "badge": "3" },
+                { "title": "Brain", "badge": "" },
             ])),
             "{os:?}"
         );
@@ -11317,4 +11591,228 @@ fn base_plot_treemap_lays_out_hovers_and_steps() {
     all.extend(until(&rx, |b| shows(b, "hover 4")));
     press(&all, "left");
     all.extend(until(&rx, |b| shows(b, "hover 2") || shows(b, "hover 3")));
+}
+
+fn is_component(item: &MountItem, component: &str) -> bool {
+    matches!(item, MountItem::Component { name, .. } if &**name == component)
+}
+
+/// The first id of `component` mounted in `batches`.
+fn component_id(batches: &[MountBatch], component: &str) -> Option<u32> {
+    batches
+        .iter()
+        .flat_map(|batch| &batch.items)
+        .find_map(|item| match item {
+            MountItem::Component { id, name } if &**name == component => Some(*id),
+            _ => None,
+        })
+}
+
+/// The values the props of element `id` last took in `batches`.
+fn component_prop(batches: &[MountBatch], id: u32, key: &str) -> Option<serde_json::Value> {
+    batches
+        .iter()
+        .flat_map(|batch| &batch.items)
+        .filter_map(|item| match item {
+            MountItem::ComponentProps { id: c, props } if *c == id => Some(props),
+            _ => None,
+        })
+        .flatten()
+        .rfind(|(name, _)| &**name == key)
+        .and_then(|(_, value)| value.clone())
+}
+
+const SEGMENTED_CONTROL: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { SegmentedControl } from "nsh/mobile";
+const selected = signal(0);
+const items = signal([{ title: "Light", icon: "sun.max" }, { title: "Dark" }]);
+mount(() => <View>
+  <SegmentedControl items={items()} selectedIndex={selected()}
+    onChange={({ index }) => {
+      selected.set(index);
+      items.set([{ title: "Light", icon: "sun.max" }, { title: "Dark", disabled: true }]);
+    }} />
+  <Text>{`Selected: ${selected()}`}</Text>
+</View>);
+"#;
+
+/// `nsh/mobile`'s `SegmentedControl` is the system's control on iOS: its
+/// segments and selection reach it, the user's choice comes back as
+/// `onChange({ index })` and the app's new props reach the same control.
+#[test]
+fn the_segmented_control_is_the_systems_on_ios_and_reports_the_choice() {
+    use nsh_core::platform::{Os, SEGMENTED_CONTROL_COMPONENT};
+
+    let (engine, rx) = start_in(
+        SEGMENTED_CONTROL,
+        Environment {
+            os: Os::Ios,
+            ..Environment::default()
+        },
+    );
+    let initial = until(&rx, |batch| shows(batch, "Selected: 0"));
+    let control = component_id(&initial, SEGMENTED_CONTROL_COMPONENT).expect("the control");
+    assert_eq!(
+        component_prop(&initial, control, "items"),
+        Some(serde_json::json!([{ "title": "Light", "icon": "sun.max" }, { "title": "Dark" }]))
+    );
+    assert_eq!(
+        component_prop(&initial, control, "selectedIndex"),
+        Some(serde_json::json!(0))
+    );
+    assert_eq!(
+        component_prop(&initial, control, "disabled"),
+        Some(serde_json::json!(false))
+    );
+    engine.control().dispatch_event(
+        control,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "change".into(),
+            data: serde_json::json!(1),
+        },
+    );
+    let updates = until(&rx, |batch| shows(batch, "Selected: 1"));
+    assert_eq!(
+        component_prop(&updates, control, "selectedIndex"),
+        Some(serde_json::json!(1))
+    );
+    assert_eq!(
+        component_prop(&updates, control, "items"),
+        Some(serde_json::json!([
+            { "title": "Light", "icon": "sun.max" },
+            { "title": "Dark", "disabled": true },
+        ]))
+    );
+}
+
+/// Elsewhere the segmented control takes no room and makes no component.
+#[test]
+fn the_segmented_control_shows_nothing_off_ios() {
+    use nsh_core::platform::{Os, SEGMENTED_CONTROL_COMPONENT};
+
+    for os in [Os::Android, Os::MacOs] {
+        let (_engine, rx) = start_in(
+            SEGMENTED_CONTROL,
+            Environment {
+                os,
+                ..Environment::default()
+            },
+        );
+        let batches = until(&rx, |batch| shows(batch, "Selected: 0"));
+        assert!(
+            !batches.iter().any(|b| b
+                .items
+                .iter()
+                .any(|i| is_component(i, SEGMENTED_CONTROL_COMPONENT))),
+            "{os:?}"
+        );
+    }
+}
+
+const MENU_BUTTON: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { MenuButton } from "nsh/base";
+const chosen = signal("none");
+const dark = signal(false);
+mount(() => <View>
+  <MenuButton accessibilityLabel="Account" title="me@example.com"
+    items={[
+      { id: "settings", label: "Settings", icon: "gearshape" },
+      { id: "", label: "Appearance", inline: true, items: [
+        { id: "light", label: "Light", checked: !dark() },
+        { id: "dark", label: "Dark", checked: dark() },
+      ] },
+    ]}
+    onSelect={({ id }) => { chosen.set(id); if (id === "dark") dark.set(true); }}>
+    <Text>Account</Text>
+  </MenuButton>
+  <Text>{`Chosen: ${chosen()}`}</Text>
+</View>);
+"#;
+
+/// `nsh/base`'s `MenuButton` covers its content with the system's button on
+/// iOS: the menu's items, title and label reach it as data, a chosen item
+/// comes back as `onSelect({ id })`, and the new checks reach the same
+/// button.
+#[test]
+fn the_menu_button_gives_ios_its_menu_and_reports_the_choice() {
+    use nsh_core::platform::{MENU_BUTTON_COMPONENT, Os};
+
+    let (engine, rx) = start_in(
+        MENU_BUTTON,
+        Environment {
+            os: Os::Ios,
+            ..Environment::default()
+        },
+    );
+    let initial = until(&rx, |batch| shows(batch, "Chosen: none"));
+    assert!(
+        initial.iter().any(|batch| shows(batch, "Account")),
+        "the content shows"
+    );
+    let button = component_id(&initial, MENU_BUTTON_COMPONENT).expect("the system's button");
+    let appearance = |dark: bool| {
+        serde_json::json!([
+            { "id": "settings", "label": "Settings", "icon": "gearshape" },
+            { "id": "", "label": "Appearance", "inline": true, "items": [
+                { "id": "light", "label": "Light", "checked": !dark },
+                { "id": "dark", "label": "Dark", "checked": dark },
+            ] },
+        ])
+    };
+    assert_eq!(
+        component_prop(&initial, button, "items"),
+        Some(appearance(false))
+    );
+    assert_eq!(
+        component_prop(&initial, button, "title"),
+        Some(serde_json::json!("me@example.com"))
+    );
+    assert_eq!(
+        component_prop(&initial, button, "accessibilityLabel"),
+        Some(serde_json::json!("Account"))
+    );
+    engine.control().dispatch_event(
+        button,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "select".into(),
+            data: serde_json::json!("dark"),
+        },
+    );
+    let updates = until(&rx, |batch| shows(batch, "Chosen: dark"));
+    assert_eq!(
+        component_prop(&updates, button, "items"),
+        Some(appearance(true))
+    );
+}
+
+/// On the desktops and Android the content is a button of its own (the
+/// desktops show the items as the platform's context menu when it is
+/// pressed): no iOS component.
+#[test]
+fn the_menu_button_is_a_plain_button_off_ios() {
+    use nsh_core::platform::{MENU_BUTTON_COMPONENT, Os};
+
+    for os in [Os::MacOs, Os::Android] {
+        let (_engine, rx) = start_in(
+            MENU_BUTTON,
+            Environment {
+                os,
+                ..Environment::default()
+            },
+        );
+        let batches = until(&rx, |batch| shows(batch, "Chosen: none"));
+        assert!(
+            batches.iter().any(|batch| shows(batch, "Account")),
+            "{os:?}"
+        );
+        assert!(
+            !batches.iter().any(|b| b
+                .items
+                .iter()
+                .any(|i| is_component(i, MENU_BUTTON_COMPONENT))),
+            "{os:?}"
+        );
+    }
 }

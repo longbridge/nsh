@@ -120,6 +120,38 @@ const inLink = () => (revision(), editor.isActive("link"));
 A link menu edits the link under the caret with `chain([extendMarkRange("link"), command("setLink", { href })])`
 and removes it with `command("unsetLink")` after the same `extendMarkRange`.
 
+`contentLayer` is the app's own layer over the document, inside the box that scrolls: what it holds moves with
+the text in the same frame. Place its children in the content box's points, where `editor.nodeRect(pos)` (the box
+of the block starting at `pos`) and `editor.coordsAtPos(pos)` answer: a handle in a block's margin, a marker beside
+a node. The layer itself takes no press; its children do.
+
+```tsx
+const box = editor.nodeRect(blockStart);
+
+<RichEditor
+  editor={editor}
+  contentLayer={box ? <Handle style={{ position: "absolute", left: box.x - 28, top: box.y }} /> : undefined}
+/>
+```
+
+### Pasted and dropped files
+
+Files reach the app, which decides what they become (an image node, an attachment, a link to an uploaded copy); the
+editor inserts nothing for them and keeps its selection, where the app inserts what it makes of them. A paste of
+images or of files copied in a file manager calls `onPasteFiles` with `{ files, uris }`: `files` the images with
+their bytes, `uris` the copied files' `file:` URLs. On the desktops, files dragged from another application onto
+the editor call its `onFileDrop` with `{ uris, mimeTypes }`, as a [view's file drops](./view.md#desktop-file-drops)
+do, and `onFileDragEnter` / `onFileDragLeave` follow the drag, for a hint such as "Release to attach". Without
+`onFileDrop` the editor leaves dropped files to the view around it that listens.
+
+```tsx
+<RichEditor
+  editor={editor}
+  onPasteFiles={({ files }) => attach(files)}
+  onFileDrop={({ uris, mimeTypes }) => attachFiles(uris, mimeTypes)}
+/>
+```
+
 ## Schemas
 
 `defineSchema(spec)` reads a schema in ProseMirror's shape and throws with what is wrong in it. Node types name their
@@ -342,21 +374,25 @@ editor.setDecorations("suggestions", [{ from: 5, to: 9, kind: "inline", attrs: {
 Three plugins carry Tiptap's Link, CharacterCount and Suggestion behavior, all of it native:
 
 ```tsx
-import { RichEditor, characterCount, createRichEditor, insertMention, link, starterKit, starterSchema, suggestion, withMention } from "nsh/base";
+import { RichEditor, characterCount, createRichEditor, insertMention, link, setSuggestionOpen, starterKit, starterSchema, suggestion, withMention } from "nsh/base";
 
 const editor = createRichEditor({
   schema: withMention(starterSchema()),
   plugins: [
+    suggestion({ key: "mention", char: "@", decorationClass: "text-primary", captureKeys: ["ArrowUp", "ArrowDown", "Enter"] }),
     starterKit(),
     link({ defaultProtocol: "https" }),
     characterCount({ limit: 280 }),
-    suggestion({ key: "mention", char: "@", decorationClass: "text-primary", captureKeys: ["ArrowUp", "ArrowDown", "Enter"] }),
   ],
 });
 
 editor.on("transaction", () => {
   const s = editor.suggestion("mention");
-  if (s?.active) showPeople(s.query, editor.coordsAtPos(s.range.from), s.lastKey);
+  if (s?.active) {
+    const people = peopleMatching(s.query);
+    editor.run(setSuggestionOpen(people.length > 0, "mention"));
+    showPeople(people, editor.coordsAtPos(s.range.from), s.lastKey);
+  }
   setCount(`${editor.characters()} / ${editor.characterLimit}`);
 });
 
@@ -383,10 +419,16 @@ editor.run(insertMention(editor.suggestion("mention")!.range, "u1", "Joan"));
 - `suggestion(options?)`: follows a trigger (`char`, `@` by default) typed before the cursor. `allowSpaces` lets the
   query hold spaces, `allowedPrefixes` lists what may precede the trigger (a space by default; `anyPrefix` takes
   anything), `startOfLine` asks for it at the line's start (a `/` command menu). `editor.suggestion(key)` gives
-  `{ active, range, query, text, lastKey, keyCount }`; the active range carries the app's `decorationClass` (and
+  `{ active, range, query, text, lastKey, keyCount, open }`; the active range carries the app's `decorationClass` (and
   `decorationEmptyClass` while the query is empty). While a suggestion is active the keys in `captureKeys` belong
   to the app's list: the editor takes them and records the last one in the state, and Escape dismisses the
-  suggestion (`exitSuggestion(key)` does too). `replaceSuggestion(content, key?)` replaces the trigger and the query
+  suggestion (`exitSuggestion(key)` does too). `setSuggestionOpen(open, key?)` tells the suggestion whether the
+  list shows for the query (its state's `open`): closed, the keys in `captureKeys` go on to the editor, so Enter
+  sends or starts a new line when nothing matches, and Escape still dismisses. It holds for the query it was said
+  for, so say it each time the query changes; until then the list is open and the keys are its own. A list that
+  loads its items (a remote people search) closes only once it knows the list is empty, not while the results are
+  still loading, or Enter would act before they arrive.
+  A suggestion comes before `starterKit()` and the app's own keys in `plugins`, so its keys reach it first. `replaceSuggestion(content, key?)` replaces the trigger and the query
   with text or JSON content.
 - `withMention(schema, { name?, char? })` adds Tiptap's mention node: an inline atom with `id`, `label` and its
   trigger, written as `@label` in text and as `<span data-type="mention">` in HTML. `insertMention(range, id, label?)`
@@ -394,6 +436,36 @@ editor.run(insertMention(editor.suggestion("mention")!.range, "u1", "Joan"));
 
 The popup is the app's: it reads the suggestion's state, places itself at `coordsAtPos(range.from)` and draws the
 items its own way.
+
+## A block editor
+
+A Notion-style editor is made of the pieces above, with the UI around the document the app's own. The gallery's Block editor demo (`examples/gallery/demos/BlockEditorDemo.tsx`) is one: a `/` menu of blocks, a handle on each block and a toolbar over a selection.
+
+```tsx
+import { Overlay } from "nsh";
+import { RichEditor, StarterKit, chain, command, createRichEditor, defineExtension, deleteRange, suggestion } from "nsh/base";
+
+// An extension ranks above the keymap, so Enter picks an item before it splits the paragraph.
+const slash = defineExtension({
+  name: "slashCommand",
+  priority: 1000,
+  addProseMirrorPlugins: () => [suggestion({ key: "slash", char: "/", captureKeys: ["ArrowUp", "ArrowDown", "Enter"] })],
+});
+const editor = createRichEditor({ extensions: [StarterKit, slash] });
+
+// The menu goes in `bubbleMenu` while `editor.suggestion("slash")?.active`; a pick replaces the trigger and the query.
+const { range } = editor.suggestion("slash")!;
+editor.run(chain([deleteRange({ from: range.from, to: range.to }), command("toggleBulletList")]));
+
+// A handle: the block under the pointer, and where it is on the page for an `Overlay` anchored there.
+const start = editor.posAtPageCoords(event.pagePosition);
+const rect = editor.pageNodeRect(start!);
+editor.dragBlock(start!, { x: e.pageX, y: e.pageY }); // then dragTo(point) while moving, endDrag() on release
+```
+
+- The plugins of `createRichEditor`'s own `plugins` come after the extensions' and the keymap; a plugin whose keys must come first (a suggestion's Enter) is an extension with a high `priority`.
+- `pageNodeRect(pos)` and `posAtPageCoords(point)` answer in page points, the coordinates of `Overlay`'s `anchor` and of pointer events, so a handle sits in the editor's margin as an overlay that follows the block.
+- `dragBlock(pos, point)`, `dragTo(point)` and `endDrag()` move a block with the pointer: the drop line follows it and the drop is one undo step. A handle that also opens a menu on a tap claims the pointer only once it has moved (`onMoveShouldSetResponder`), so the tap keeps its `onPress`; a `Button` takes its own presses and passes the drag no responder.
 
 ## Tables
 

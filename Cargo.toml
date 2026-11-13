@@ -63,6 +63,9 @@ log = "0.4"
 ordered-float = { version = "5", default-features = false }
 env_logger = "0.11"
 libc = "0.2"
+# `RUST_LOG` filters of the desktop release runners' logger (`nsh_engine::logging`):
+# env_logger's filter alone, without regular expressions.
+env_filter = { version = "2", default-features = false }
 # C functions over macros Rust cannot call (`nsh-platform-apple`'s `os_log_with_type`).
 cc = "1.8"
 imagesize = "0.15"
@@ -194,7 +197,9 @@ windows = { version = "0.62", features = [
   "Win32_System_Memory",
   "Win32_System_Ole",
   "Win32_System_Performance",
+  "Win32_System_Power",
   "Win32_System_Registry",
+  "Win32_System_RemoteDesktop",
   "Win32_System_SystemInformation",
   "Win32_System_SystemServices",
   "Win32_System_Threading",
@@ -322,6 +327,11 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
   "UIViewControllerTransitionCoordinator",
   "UIAccessibility",
   "UIAccessibilityConstants",
+  "UIAction",
+  "UIButton",
+  "UIMenu",
+  "UIMenuElement",
+  "UISegmentedControl",
   "UIAlertController",
   "UIPopoverPresentationController",
   "UIPopoverSupport",
@@ -355,7 +365,10 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
   "UILabel",
   "UILayoutGuide",
   "UILongPressGestureRecognizer",
+  "UIMenu",
   "UIMenuController",
+  "UIMenuElement",
+  "UIAction",
   "UIPasteboard",
   "UIPanGestureRecognizer",
   "UIRefreshControl",
@@ -380,6 +393,9 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
   "UIViewController",
   "UIWindow",
   "UIWindowScene",
+  "UIWindowSceneGeometry",
+  "UIWindowSceneGeometryPreferences",
+  "UIWindowSceneGeometryPreferencesIOS",
   "UIBlurEffect",
   "UIHoverGestureRecognizer",
   "UIHoverStyle",

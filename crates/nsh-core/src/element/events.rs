@@ -387,6 +387,14 @@ pub(crate) fn unavailable(p: &EventPayload) -> Option<Cow<'_, str>> {
         .flatten()
 }
 
+/// An error's message when its `code` says the web view's web content
+/// process ended (`ERR_NSH_WEBVIEW_TERMINATED`).
+pub(crate) fn terminated(p: &EventPayload) -> Option<Cow<'_, str>> {
+    (string(p, "code") == Some(crate::element::codes::WEBVIEW_TERMINATED))
+        .then(|| message(p))
+        .flatten()
+}
+
 pub(crate) fn selection(p: &EventPayload) -> Option<Cow<'_, Selection>> {
     Some(Cow::Owned(Selection {
         start: number(p, "start") as u32,
@@ -609,6 +617,12 @@ pub(crate) fn touchpad_pinch(p: &EventPayload) -> Option<Cow<'_, PinchEvent>> {
     }
 }
 
+pub(crate) fn key_event(p: &EventPayload) -> Option<Cow<'_, crate::KeyEvent>> {
+    match p {
+        EventPayload::Key(event) => Some(Cow::Borrowed(event)),
+        _ => None,
+    }
+}
 pub(crate) fn wheel(p: &EventPayload) -> Option<Cow<'_, WheelEvent>> {
     match p {
         EventPayload::Wheel(e) => Some(Cow::Borrowed(e)),

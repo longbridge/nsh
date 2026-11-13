@@ -243,7 +243,7 @@ reasons: `reactive-components.md`.
   presses of their own, strings, inline views and images, regions; the core merges them into one paragraph),
   `image(..)`, the other host elements (`input()`, `scroll()`, `nsh_base`'s `nav_stack()` of `nav_page()`s and
   `dialog()`, `canvas(painter)`, `svg(src)` (an SVG drawn as authored, from an `ImageSrc` as `image`'s or `ImageSrc::svg_markup(text)`: `docs/dev/canvas.md` "SVGs"), `web_view(url)` / `web_view_html(html, base_url)`, `video(url)`,
-  `input_accessory_view(native_id)` (iOS's bar over the keyboard; empty on Android), `native(name)` for the
+  `input_accessory_view(native_id)` (iOS's bar over the keyboard; empty off iOS), `native(name)` for the
   embedder's components; `element/host.rs`), strings (as texts) and other components, made as primitives are
   (`chip().label("New").on_press(move || ..)`, below). `.child(..)` (an element, or
   an `Option`, a `Vec`, an array or an iterator of them: `IntoChild<M>`, its marker telling an element from what holds
@@ -326,7 +326,7 @@ reasons: `reactive-components.md`.
   | `fetch(url)` | `fetch(url).await` / `fetch(HttpRequest::post(url, body).header(..)).await` in a task: an `HttpResponse` (`status()`, `ok()`, `header(..)`, `text()`, `body`) or the error; the engine's network stack and capability checks, as JS's, so it works on the web too; the request is cancelled with its task. `asset:/` URLs (`FileAsset::uri`, `assets!()`), from both, are the app's bundled files, the scheme in any case: the engine's `Net` answers them from `EngineConfig::assets` on the runtime's blocking pool (in WebAssembly in the turn), with no capability, and downloads what the host serves at `Assets::url` (the web page's files it did not preload); hosts are asked for the file by its path alone, `asset:/<path>` with the scheme in lower case and no query or fragment (`asset_file`: one file on every host, as a web server serves it); either way the response answers at the URL asked for, its scheme in lower case and without its fragment (`asset_response_url`), with the type its extension gives (`nsh_core::platform::content_type`, which the dev server serves files with too); a file the host does not have fails as a network error, and so do a path that would leave the host's directory (an empty, `.` or `..` segment, encoded or not, a backslash, a NUL or a colon: `is_inside_assets`; hosts join the path to their directory as it comes) and a method other than `GET` or `HEAD`, refused in `Net::asset` before any host reads the file or is asked where it serves it |
   | `cleanup` | `cleanup(f)` (runs before the owner runs again or goes) |
   | `windowSize()`, `safeArea()`, `keyboardFrame()`, `colorScheme()`, `localeSettings()`, `lifecycle()`, ... | `window()`, `safe_area()`, `keyboard_height()`, `dark()`, `font_scale()`, `locale_settings()`, `lifecycle()`, `reduce_motion()`, `screen_reader()`: reading subscribes (`layout_rtl()`, the surface's direction, is a hidden accessor for `nsh-base`'s controls only, which trade Left and Right by it: Rust's `rtl()` is dropped, apps set a view's `direction`) |
-  | `<Window>`, `Window.open`, `currentWindow()`, `WindowRef`'s `set({ title, titleBar, … })`, `setMode`, `setBounds`, `setPlacement`, `close()`, `on(..)`, `titleBar()`, `windowState()`, `displays()`, `Menu.setMenuBar`, `Application.quit()`, `Application.restart()` (`nsh/desktop`) | `element::desktop::window()` (a builder: `.id()`, `.kind()`, `.title()`, `.attributes(..)`, `.open(..)`, `.on_open_change(..)`, `.content(..)`), `current_window()` / `main_window()` (a `WindowRef`: `set(WindowAttributes)`, `set_mode(..)`, `set_bounds(..)`, `set_placement(..)`, `close()`, `state()`, `on_close_press(..)`, `on_focus_change(..)`, …), `title_bar()`, `displays()`, `set_menu_bar(..)`, `quit()`, `restart()`; the same window commands and native controls, with title-bar insets forwarded through `element::Environment`; `.window_drag(bool)`, `.window_control(..)` and `.window_resize(..)` on any interactive element mark native title bar regions |
+  | `<Window>`, `Window.open`, `currentWindow()`, `WindowRef`'s `set({ title, titleBar, … })`, `setMode`, `setBounds`, `setPlacement`, `close()`, `on(..)`, `titleBar()`, `windowState()`, `displays()`, `Menu.setMenuBar`, `Application.quit()`, `Application.restart()`, `Application.launchAtLogin()`, `Application.setLaunchAtLogin(enabled)` (`nsh/desktop`) | `element::desktop::window()` (a builder: `.id()`, `.kind()`, `.title()`, `.attributes(..)`, `.open(..)`, `.on_open_change(..)`, `.content(..)`), `current_window()` / `main_window()` (a `WindowRef`: `set(WindowAttributes)`, `set_mode(..)`, `set_bounds(..)`, `set_placement(..)`, `close()`, `state()`, `on_close_press(..)`, `on_focus_change(..)`, …), `title_bar()`, `displays()`, `set_menu_bar(..)`, `quit()`, `restart()`, `launch_at_login().await` (a `bool`) / `set_launch_at_login(true).await` (a `Result<(), LaunchAtLoginError>`) in a task (`Action::LoginItem` and the core's backend thread, as JS's); the same window commands and native controls, with title-bar insets forwarded through `element::Environment`; `.window_drag(bool)`, `.window_control(..)` and `.window_resize(..)` on any interactive element mark native title bar regions |
   | `Menu.setApplicationMenu(items)`, `Menu.popup(items, at)` (`nsh/desktop`) | `element::desktop::set_application_menu(vec![MenuItem::submenu(..)])` (`None`: the default menu), `popup_menu(items)` / `popup_menu_at(items, at)` (an `Answer<()>` once it closes); `MenuItem::new(label).shortcut("mod+n").icon(asset!("new.svg")).on_select(f)`, `::role(..)`, `::separator()`, `::submenu(..)`. The same `DesktopCommand`s as JS's; a view's item ids start at 2^31, above JS's, and the core runs a view's handler (under the owner that set the menu, while it lives) when the root's `Menu` event reports it; a context menu closing goes to both sides (`element/menus.rs`) |
   | `pixelRatio()`, `Math.round(x * pixelRatio()) / pixelRatio()`, `platform.os` / `version` / `idiom` / `desktop` / `catalyst` | `pixel_ratio()`, `round_to_nearest_pixel(v)`, `os()`, `os_version()`, `idiom()`, `is_desktop()`, `is_catalyst()` |
   | `Intl.NumberFormat()`, `toLocaleString()` (the user's locale) | `locale()` (a `Locale`: `de-DE`; reading subscribes), formatted with a Rust crate: `Intl` and the locale-aware `toLocale*String`s are JS globals of TS apps |
@@ -342,7 +342,7 @@ reasons: `reactive-components.md`.
   | `context(default)` / `<Ctx.Provider value>` / `Ctx()` | `provide_context(value)` in the body; `use_context::<T>()` below it (through the app's elements too: a component JS made among another's JS children is under where that one places them); provide a signal to change what readers see |
   | `createAnimatedValue`, `Animated.spring`, `interpolate` | `animated_value(0.0)` (`Copy`, kept by the current owner); `.bind_translate_y(&v)` / `.bind_opacity(..)` / `.bind_background(..)` / `.bind_border_color(..)` / `.bind_color(..)` / `.bind_scale(..)` / `.bind_rotate(..)`, `.pan_values(..)` (drags move it natively), `.pinch_value(&scale)` / `.rotation_value(&angle)` (TS `pinch={{ scale }}`, `rotation={{ angle }}`), `scroll().scroll_value(&v)`, canvas arguments (`Painter::new().fill_rect(0.0, 0.0, &v, 4.0)`); `v.spring(to, Spring::default())` / `.timing(to, ms, easing)` / `.timing_with(to, Timing { delay_ms, .. })` / `.decay(..)` / `.decay_within(.., (min, max), bounce)` return an `AnimationEnd` to await; `v.value()` (`getValue()`; after `v.stop()`, the `{ value }` of `stop()`'s promise) an `Answer<f32>`; `v.set_offset(..)` / `.flatten_offset()` / `.extract_offset()`; `element::sample_easing` / `sample_spring` / `sample_decay` (`Easing.sample`, `Animated.sampleSpring` / `sampleDecay`) the curves, to draw them; `v.interpolate(..)`, `.interpolate_with(.., Interpolation { extrapolate_left, extrapolate_right, easing })`, `.add(..)`, `.diff_clamp(..)` derive nodes |
   | `Animated.sequence / parallel / stagger / delay / loop`, `.start(cb)` / `.stop()` / `.reset()` | `Animation::sequence([Animation::timing(&v, to, Timing::new(ms, easing)), Animation::delay(ms), Animation::spring(..)])`, `::parallel(..)` (`.stop_together(false)`), `::stagger(ms, ..)`, `.looped(iterations)` (`.reset_before_iteration(false)`); `a.start()` returns an `AnimationEnd`, `a.stop()`, `a.reset()` |
-  | `keymap.bind("mod+k", f, { when, repeat, passThrough })`, `keymap.label("mod+k")` (`nsh`'s `keymap`) | `on_key("mod+k", \|keystroke\| ..)` / `on_key_with(k, KeyOptions { when, repeat, pass_through }, f)`, bound while the current owner lives and only in the window bound in (`current_window`: a binding fires only for keys pressed in that window, `KeyBinding::window`; JS's belong to no window); `key_label("mod+k")` (`⌘K`, `Ctrl+K`). The core joins the views' bindings to JS's in the root's one table (a view's after JS's: it wins on the same keystroke) and runs a view's handler itself when the root's `KeyCommand` reports it; their ids start at 2^31, above JS's (`element/keys.rs`) |
+  | `keymap.bind("mod+k", f, { when, repeat, passThrough, forFocus })`, `keymap.label("mod+k")` (`nsh`'s `keymap`) | `on_key("mod+k", \|keystroke\| ..)` / `on_key_with(k, KeyOptions { when, repeat, pass_through, for_focus }, f)`, bound while the current owner lives and only in the window bound in (`current_window`: a binding fires only for keys pressed in that window, `KeyBinding::window`; JS's belong to no window); `key_label("mod+k")` (`⌘K`, `Ctrl+K`). The core joins the views' bindings to JS's in the root's one table (a view's after JS's: it wins on the same keystroke) and runs a view's handler itself when the root's `KeyCommand` reports it; their ids start at 2^31, above JS's (`element/keys.rs`) |
   | (none: a JS app's scroll view or list is its own; Rust views watch one they did not make) | `watch_scroll(target, \|e: &ScrollEvent\| ..)` (offset, content size and viewport, when first found and on every change, whoever listens to its `on_scroll`), while the current owner lives; `target` (`\|\| r.node()`) is resolved again in every commit, so a ref set later in the render is found; `NodeRef(id).scroll_to(offset, animated)` scrolls a node such a target names. The core runs a scroll watch at the end of the commit round that changed what it reports, and another round sends what it changed; a hover watch has the node listen to the pointer, as a hint's anchor (`element/watch.rs`, `core/watch.rs`; `nsh_base::Scrollbar`) |
   | (none: JS's elements are in the order JS makes them) | `nsh_core::element::watch_order(\|\| refs, \|order: &[usize]\| ..)` (`#[doc(hidden)]`, for `nsh-base`'s roving focus; not in the prelude), while the current owner lives: the order the tree has the elements in, as indices into the list `refs` gives (those no node in the tree carries last), heard only when it differs from the list's; the core looks at the end of the commit round the watch is made in, of one after the returned `OrderWatch` is `invalidate()`d (an item came) and of one that moved a node inside the subtree the elements share (`Core::insert` of a node with a parent notes the parents it left and joined; a watch looks again when its elements' nearest common ancestor at its last look is one of them or above one: an app's keyed reorder of its elements, never a list of rows each with a group of its own reordered), and another round sends what the handler changed. A round that moved nothing there and invalidated nothing costs nothing (`element/watch.rs`, `core/watch.rs`) |
   | `BackHandler.on("press", f)`, the function it returns | `on_back_press(\|\| -> bool)`: registered while the current owner lives (only while a signal holds: inside an `effect`). After modals and before stacks, the views' listeners run newest first, then JS's; when none returns true the core sends `Command::Back`: the top stack pops, else the app exits (`element/back.rs`) |
@@ -809,7 +809,21 @@ intercepts the ops on the host (`intercept`): the host is the root of the compon
 root become nodes the core creates itself. Apps without components pay one check per op. The root can be any
 element: at the view's first mount, before the host's native view is sent, the core gives the host the root's kind
 (`Core::retag`: a text, a screen, a modal, a list), so the root's props and children apply to it; a root that is a
-region goes in the host view.
+region goes in the host view. Besides the component's own props, JS sets a view's props on the host
+(`nsh_core::element::HOST_PROPS`, declared as `ComponentHostProps`): classes, styles, `testID`, `tooltip`,
+`onLayout`, the desktop file drops (`onFileDragEnter`, `onFileDragLeave`, `onFileDrop`), the mouse over it
+(`onMouseEnter`, `onMouseMove`, `onMouseLeave`, `onMouseUp`) and `onContextMenu`, so a component is a drop
+destination, and hears the mouse, only where the app listens. A component's own prop or event of one of these names
+takes its place (`ComponentSpec::host_props`: JS sets the rest on the host, in QuickJS and in the browser, and its
+declaration omits it from `ComponentHostProps`): `DataTable`'s and `Editor`'s `onContextMenu` report a row and column
+or a text position. A Rust view gives a nested component's element the
+same through `ComponentBuilder` (`test_id`, `on_layout`, `on_mouse_*`, `on_context_menu`, `on_file_*`; the
+listeners kept as the instance's `given_handlers` and run by the view that gave them). The host's node listens to the
+union of its root's events, JS's and those given (`Core::host_listen`); an event on it reaches the root's listeners,
+then the given ones, then JS's (`dispatch_event`: a host JS listens on is never reported handled), except a context
+menu, which has one listener: a root that handles it keeps it. Wheels, pinches, presses, touches, gestures and focus
+stay a component's own: on its host they would take the wheel from its scroll views, or mean what its own events
+mean.
 
 A root that is a component (a view that is `press()`) is made on the same host, as a TSX function component returning
 another is that one: the nested instance's host is an alias of the host's node (`Core::alias`: another id naming the
@@ -1138,7 +1152,8 @@ reach (`crates/nsh-base/tests/base/menu_list.rs`).
 **Presence.** A popup's entrance and exit are the app's transitions between its look and its states' looks, as a
 toast's `transitionStatus` and Base UI's `data-starting-style` / `data-ending-style` (gpui-kit's popups have no exit):
 `Popover`'s, `HoverCard`'s, `Menu`'s and `ContextMenu`'s `popupStartingClass` / `popupStartingStyle` and `popupEndingClass` /
-`popupEndingStyle` (a desktop menu's `Submenu`s take its menu's), `Tooltip`'s `startingClass` / `startingStyle` and
+`popupEndingStyle` (a desktop menu's `Submenu`s take its menu's; `Select`'s, `Combobox`'s and `DatePicker`'s desktop
+popups the same, through `popup::dropdown`), `Tooltip`'s `startingClass` / `startingStyle` and
 `endingClass` / `endingStyle` (its own `class` / `style` are the bubble's). `popup.rs`' `PopupPresence` follows the
 open state: opened, the popup is made with its starting look, which it keeps until the next display frame (or 50 ms
 where none comes, as `Toast`'s), so `transition-*` classes run from it; closed, it stays mounted with its ending look
@@ -1150,14 +1165,19 @@ waits that long, then unmounts, and `onClose` follows. A generation counter keep
 a newer change: opened again on its way out, the popup goes back to its look (its transitions run back) and was
 never gone, so neither `onClose` nor `onOpen` fires. On its way out it takes no keys either: the keyboard focus inside
 goes back to the trigger as it closes, not once it is gone (`PopupPresence::focus_back_on_close`, `Popover`'s and a
-desktop menu's), and a menu's items neither move the focus nor choose while their level is closed, so a key pressed
+desktop menu's; a dropdown's `Presence::back`), and a menu's items neither move the focus nor choose while their level is closed, so a key pressed
 during the exit is the trigger's (Return opens it again, taking it back). Without a look for a state, or while the user asks for less
 motion, it skips that state: a popup with no ending look is gone in the turn that closed it, and nothing more is sent
 for one with no looks. The state's classes are important (`!`) over the part's `class` and `style`, as a toast's; its
 style comes after the part's (`Style::then`), applied with `Element::state_inline_style`, which follows the typed
 styles a Rust app's state style has even when the part's has none. Closing a desktop menu closes its submenus, and
-closing a submenu its own, each with its exit. A sheet (`Sheet`, menus on touch screens, `Select`'s list) keeps
-`SheetMotion`.
+closing a submenu its own, each with its exit. A sheet (`Sheet`, menus on touch screens, the dropdowns' sheets) keeps
+`SheetMotion`; a dropdown's sheet on its way out takes no attempt to close it either (its backdrop or back pressed
+again sends no second `onCancel`). A searchable list (`Select`'s, `Combobox`'s) keeps its query and rows until its popup
+or sheet is gone, and each opening starts from the default query again. A panel that reaches the bottom of the screen
+(those sheets, `Sheet`'s side drawers, `DockArea`'s compact panels) ends above the software keyboard
+(`popup::keyboard_lift`: the keyboard's height past the bottom safe area, which the app's panel pads as without a
+keyboard), a reactive style the core animates with the keyboard.
 
 How a popup presents itself follows the device (`is_desktop()`; one presentation, `auto`, for now), by what the popup
 is for, never by replacing one popup with another everywhere:
@@ -1166,11 +1186,19 @@ is for, never by replacing one popup with another everywhere:
 |---|---|---|
 | `Popover` | anchored to its trigger; a press outside closes it and goes on to what is under the pointer | anchored to its trigger (what it shows belongs next to it); a press outside only closes it (a transparent backdrop overlay takes it) |
 | `Menu` | a popup at its trigger (`placement`, `align`, `offset`, `margin`), never taller than the room on its side (`onPosition`'s `available`), its items scrolling inside it; `Submenu`s cascade beside their item, on hover or press, or Right / Return on it (Left / Escape go back to it), each held to its own room, and close once the menu scrolls their item out of view; opened by a press (or the secondary button, a `ContextMenu`) with no item focused, Down / Home focus its first enabled item and Up / End its last; the keys bring the item they reach into view and page by the viewport | a sheet at the bottom over a backdrop, below the status bar at most, its items scrolling; a `Submenu` shows its items in place of its menu's, with its `back` row (the app's: no built-in strings); Escape / back return a level |
-| `ContextMenu` | the secondary button opens it at the pointer (`onContextMenu`'s `page`) with no item focused; Shift+F10 and the Menu key on the focused trigger (the web) and a screen reader's "show menu" action (macOS VoiceOver's VO-Shift-M, Windows UI Automation) open it below the trigger (`pointerType: null`, the trigger's bottom-start corner) with the keyboard focus on its first enabled item, as WAI-ARIA has it | a finger held 400 ms on the trigger opens it as the menu's sheet (observed touches: the trigger's own presses and the scroll views around it go on; 10 points of movement cancel) |
-| `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms), and at once when the keyboard moves the focus to it (Tab, an arrow, a shortcut, the app's `focus()` after a key; a click that focuses it leaves it to the pointer); leaving or pressing hides it, and so do the focus leaving and Escape (resting on it again while it goes takes it back) | while the focus a hardware keyboard moved is on the trigger, else only when the app opens it (`open`, `defaultOpen`): no pointer to rest |
+| `ContextMenu` | the secondary button opens it at the pointer (`onContextMenu`'s `page`) with no item focused; Shift+F10 and the Menu key on the focused trigger (the web) and a screen reader's "show menu" action (macOS VoiceOver's VO-Shift-M, Windows UI Automation) open it below the trigger (`pointerType: null`, the trigger's bottom-start corner) with the keyboard focus on its first enabled item, as WAI-ARIA has it; so does the app setting `open` itself (no request from the trigger: the popup goes against the trigger's box, and back to a point if the secondary button asks again) | a finger held 400 ms on the trigger opens it as the menu's sheet (observed touches: the trigger's own presses and the scroll views around it go on; 10 points of movement cancel) |
+| `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms); at once when the pointer comes to it within 300 ms after leaving a trigger whose tooltip it showed, or while that one is still up, so a toolbar's tools read in turn (a press on a trigger or Escape ends the period); and at once when the keyboard moves the focus to it (Tab, an arrow, a shortcut, the app's `focus()` after a key; a click that focuses it leaves it to the pointer); leaving or pressing hides it, and so do the focus leaving and Escape (resting on it again while it goes takes it back) | while the focus a hardware keyboard moved is on the trigger, else only when the app opens it (`open`, `defaultOpen`): no pointer to rest |
 | `HoverCard` | anchored to its trigger; opens after the pointer rests on the trigger for `openDelay` (600 ms) or the keyboard focus comes to it, stays while the pointer moves between the trigger and the card, closes `closeDelay` (300 ms) after the pointer left both or the focus left the trigger; Escape and a press outside close it at once | anchored to its trigger; a press on the trigger opens and closes it (`gpui-base`'s), a press outside closes it and goes on |
 | `Sheet` | an edge panel (`side`) over a backdrop | the same |
 | `Select`, `Combobox`, `DatePicker` | a popup at its trigger (`placement`, `align`, `offset`, `margin`), at least as wide as the trigger and never taller than the room on its side (`onPosition`'s `available`); a press outside closes it and goes on, leaving the keyboard focus where it went (any other close gives it back to the trigger) | a sheet at the bottom over a backdrop, below the status bar at most, with `Menu`'s motion; its search field takes the keyboard only when pressed |
+
+**The system's menu.** `MenuButton` (`menu_button.rs`) is no popup of the core's: its items are data and the system
+draws the menu. On iOS the app's content is covered by the native component `nsh/menu-button`
+(`nsh-platform-ios`'s `system_menu_button.rs`): a transparent `UIButton` whose `UIMenu`, made from the mounted items,
+is its primary action, so the tap is answered natively; the button sets itself as the element's only accessibility
+element, and an action emits `select` with the app's id. On a desktop OS a press shows the same items with
+`popup_menu`; elsewhere the content opens nothing. `nsh/mobile`'s `SegmentedControl` is the same kind of native
+component, `nsh/segmented-control` (`system_segmented_control.rs`), built as `TabBar` is.
 
 `HoverCard` (`hover_card.rs`) is `gpui-base`'s `HoverCard` on `Popover`'s overlay and presence. On the desktops the
 pointer is followed by Rust listeners, `onMouseEnter` / `onMouseLeave` on the `trigger` slot (the app's element) and on
@@ -1279,9 +1307,11 @@ the level's open submenu), so the app arranges them freely. Every item of a shee
 (its content is not placed), so screen readers and tests see only the shown level. `Dialog` stays the modal
 presented by the platform (`navigation.rs`); `AlertDialog` and `nsh/desktop`'s menus stay the system's.
 
-`Tooltip` is a hint overlay of the core (`elements.md` "Overlays": `overlay().hint(delay).hint_open(..)`) as its
-view's root, so the component's host is the overlay. It is given as an element's `tooltip` (as GPUI's
-`.tooltip(..)`), never placed among children: the core takes such an element as the hint overlay itself, in the
+`Tooltip` is a hint overlay of the core (`elements.md` "Overlays":
+`overlay().hint(delay).hint_open(..)`) as its view's root, so the component's host is the
+overlay; it takes the core's fixed 300 ms grace period (none while its `delay` never ends). It is given as an
+element's `tooltip` (as GPUI's `.tooltip(..)`), never placed among children: the core takes such an element as the
+hint overlay itself, in the
 element (`Core::adopt_hint_tooltips` once its view made it one; Rust: `IntoTooltip for TooltipElement`), so the
 element is what the pointer rests on and what it is placed against. The core follows the pointer and the focus the
 keyboard moves to it (`focus-visible:`'s rule: a press that focuses it asks nothing) and asks (`on_hint_show` /
@@ -1396,7 +1426,9 @@ its own, a child of the view marked `decoration`: last among the children, so it
 appends goes before it; out of what counts as the view's children (`first:`, `last:`, `space-*`); a layout root of
 its own, sized to the view's frame after the views' and the lists' layout; and pinned over the viewport by a sticky
 range across all of the content, which the platforms apply on the main thread as they pin sticky cells, so it never
-waits for the engine while the content scrolls. The view's `ScrollConfig` turns the indicator off and says the bar
+waits for the engine while the content scrolls. A view sends its sticky cells in one set (its list's rows, its
+`position: sticky` views and its bar), the bar last: the platforms raise the cells in that order, so a list's sticky
+headers stay below the bar. The view's `ScrollConfig` turns the indicator off and says the bar
 `replaced` it. A new theme makes every bar
 made for `true` again. A component's given class (`app_class`) now reaches its root, which the bar's size relies on.
 A multiline input scrolls its text natively, so its bar is a sibling instead (`Node::beside`): inserted just after the

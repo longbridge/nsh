@@ -64,9 +64,9 @@ use std::{
     },
 };
 
-use nsh_core::access::WebMedia;
 use nsh_core::{
     Color, Command, EventKind, EventPayload, NodeId, PayloadValue, ROOT_ID, WebProps, WebSource,
+    access::WebMedia,
 };
 use webview2_com::{
     AddScriptToExecuteOnDocumentCreatedCompletedHandler,
@@ -660,6 +660,11 @@ impl WebItem {
                 // responder.
                 if let Some(surface) = item.surface.upgrade() {
                     crate::text_input::blur_all(&surface);
+                    // A custom view of the page's window gives it its keys
+                    // too.
+                    if let Some((window, _)) = item.host.get() {
+                        crate::keyboard::blur_window(&surface, window);
+                    }
                 }
             }
             Ok(())

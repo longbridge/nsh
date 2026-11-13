@@ -189,6 +189,52 @@ pub trait HostValue: Sized {
     fn ts_type(types: &mut TsTypes) -> String;
 }
 
+/// Decodes a view's `captureKeys` (`"none"`, `"all"`, or an array of
+/// keystroke strings) with the platform's `mod` convention: `apple` says
+/// `mod` is Command ([`crate::keymap::apple_keys`]).
+///
+/// [`HostValue`]'s decoder for [`crate::KeyCapture`] reads the convention
+/// from the engine's ambient environment. A JS host decodes outside one (the
+/// native JS runtime while it renders, the browser's bridge), so it resolves
+/// the convention from the environment it has and calls this. Backend-only
+/// (`#[doc(hidden)]`), never an app-facing key conversion API.
+#[doc(hidden)]
+pub fn decode_capture_keys<I: HostInput>(
+    input: &I,
+    cx: &mut HostCx,
+    apple: bool,
+) -> Option<crate::KeyCapture> {
+    use crate::{KeyCapture, keymap::Keystroke};
+    if let Some(text) = input.as_string() {
+        return match text.as_str() {
+            "none" => Some(KeyCapture::None),
+            "all" => Some(KeyCapture::All),
+            other => {
+                cx.warn(format!(
+                    "captureKeys: expected \"none\", \"all\" or keystrokes, got {other:?}"
+                ));
+                None
+            }
+        };
+    }
+    let list = input.as_list()?;
+    let mut keys = Vec::with_capacity(list.len());
+    for index in 0..list.len() {
+        let Some(item) = list.item(index) else {
+            continue;
+        };
+        let Some(text) = item.as_string() else {
+            cx.warn(format!("captureKeys[{index}]: expected a keystroke string"));
+            continue;
+        };
+        match Keystroke::parse_with(&text, apple) {
+            Ok(keystroke) => keys.push(keystroke),
+            Err(error) => cx.warn(format!("captureKeys: {error}")),
+        }
+    }
+    Some(KeyCapture::Keys(keys.into()))
+}
+
 /// Where a host prop applies, for the generated element types.
 pub mod on {
     /// Every element.
@@ -489,6 +535,19 @@ export interface Modifiers {
   shift: boolean;
   /** Command on Apple platforms, the Windows / Super key elsewhere. */
   platform: boolean;
+}
+
+/** A hardware key transition on the focused view: the payload of `onKeyDown` and `onKeyUp` (`nsh_core::KeyEvent`). */
+export interface KeyEvent {
+  /** The source's logical key: the DOM's spelling for named keys (`"Enter"`, `"ArrowLeft"`), else the character the key reports, in its case and layout. `"Unidentified"` when the source names none. */
+  key: string;
+  /** The key's physical identity as the DOM's `KeyboardEvent.code` spells it (`"KeyA"`, `"ArrowLeft"`, `"ShiftLeft"`); `""` when the source has none (GPUI, synthetic input), never guessed from `key`. */
+  code: string;
+  modifiers: Modifiers;
+  /** An auto-repeat of a held key (the press itself is not one). */
+  repeat: boolean;
+  /** The mounted `captureKeys` policy decided this transition: the platform runs no native default and types no text. It is this transition's decision, observed as the DOM's `defaultPrevented` is; a listener cannot veto handling after the fact. */
+  defaultPrevented: boolean;
 }
 
 /** Where the core placed an overlay: the payload of `onPosition`. */
@@ -829,7 +888,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         EventKind::Error,
         on::IMAGE | on::WEBVIEW | on::VIDEO,
         "(e: { message: string; code?: string }) => void",
-        "The source failed to load. `code` is `\"ERR_ACCESS_DENIED\"` when the app's capabilities do not grant it (an image's or video's URL: `network`; a web view's page or `html`: `webview`), and `\"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM\"` for a web view where the platform shows none (`WebView.available()`).",
+        "The source failed to load. `code` is `\"ERR_ACCESS_DENIED\"` when the app's capabilities do not grant it (an image's or video's URL: `network`; a web view's page or `html`: `webview`), `\"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM\"` for a web view where the platform shows none (`WebView.available()`), and `\"ERR_NSH_WEBVIEW_TERMINATED\"` when a web view's web content process ended (it shows no page until `reload()`, `load()` or a new source).",
     ),
     (
         EventKind::LoadEnd,
@@ -936,6 +995,18 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         "Before the text changes: `key` is the typed text, `Backspace` or `Enter`.",
     ),
     (
+        EventKind::KeyDown,
+        on::ALL,
+        "(e: KeyEvent) => void",
+        "A hardware key went down on the focused view or a view inside it on desktop and Web. It bubbles to enabled listening ancestors within the same native window. `defaultPrevented` is the mounted `captureKeys` decision for this transition.",
+    ),
+    (
+        EventKind::KeyUp,
+        on::ALL,
+        "(e: KeyEvent) => void",
+        "A hardware key came up on the focused view, with this transition's `defaultPrevented` decision; it bubbles as `onKeyDown` does. A window that loses the focus invents no releases.",
+    ),
+    (
         EventKind::CompositionChange,
         on::INPUT,
         "(e: { composing: boolean; text: string }) => void",
@@ -1009,6 +1080,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::Pick,
     EventKind::OpenUrl,
     EventKind::ScreenColor,
+    EventKind::CanvasImage,
     EventKind::FileRequest,
     EventKind::Speech,
     EventKind::Notification,
