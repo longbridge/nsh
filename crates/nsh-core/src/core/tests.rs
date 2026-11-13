@@ -6432,29 +6432,41 @@ fn backdrop_material_survives_restyling_and_resets() {
     assert!(!mounted.effects.unwrap().backdrop_filters.is_empty());
 }
 
-/// `supportedOrientations` names a dialog's prop and a page's: each element
-/// decodes its own, so a dialog's is not taken for a page's.
 #[test]
 fn supported_orientations_decode_per_element() {
-    use crate::js::host::{HostCx, HostProps};
+    use crate::{
+        ModalConfig, ModalProp, ScreenProp,
+        js::host::{HostCx, HostProps},
+    };
+    // Pages and dialogs share the name: each element decodes it as its own
+    // prop, never the other's (a dialog's went to the page's before).
     let value = HostTestValue::Array(vec![
         HostTestValue::String("portrait"),
         HostTestValue::String("landscape-left"),
     ]);
-    let bits = crate::ModalConfig::PORTRAIT | crate::ModalConfig::LANDSCAPE_LEFT;
-    let decode = |tag| {
+    let bits = ModalConfig::PORTRAIT | ModalConfig::LANDSCAPE_LEFT;
+    let decode = |tag: Tag| {
         let mut cx = HostCx::for_element(tag);
         <Prop as HostProps>::decode("supportedOrientations", &value, &mut cx)
-            .expect("an orientations prop")
+            .expect("a supportedOrientations prop")
             .expect("a value")
     };
     assert_eq!(
-        decode(Tag::Modal),
-        Prop::Modal(crate::ModalProp::Orientations(bits))
+        decode(Tag::Screen),
+        Prop::Screen(ScreenProp::Orientations(bits))
     );
     assert_eq!(
-        decode(Tag::Screen),
-        Prop::Screen(crate::ScreenProp::Orientations(bits))
+        decode(Tag::Modal),
+        Prop::Modal(ModalProp::Orientations(bits))
+    );
+    // Cleared from JS, each resets to its own element's "none".
+    assert_eq!(
+        Prop::Screen(ScreenProp::Orientations(bits)).reset(),
+        Some(Prop::Screen(ScreenProp::Orientations(0)))
+    );
+    assert_eq!(
+        Prop::Modal(ModalProp::Orientations(bits)).reset(),
+        Some(Prop::Modal(ModalProp::Orientations(0)))
     );
 }
 
@@ -16572,6 +16584,107 @@ mod components {
             "{:?}",
             batch.items
         );
+    }
+
+    /// A sentence whose spans style their hover and press, a link and a
+    /// span that takes no presses, and one inside the link.
+    #[component]
+    fn StatefulSpans() -> impl IntoElement {
+        view().child(
+            text("Read ")
+                .child(
+                    text("the docs")
+                        .on_press(|_: &()| {})
+                        .hover(|s| s.underline())
+                        .active(|s| s.text_color(rgb(0xff0000))),
+                )
+                .child(" or ")
+                .child(text("this").hover(|s| s.underline()))
+                .child(" and ")
+                .child(
+                    text("pressed ")
+                        .on_press(|_: &()| {})
+                        .child(text("inner").hover(|s| s.underline())),
+                ),
+        )
+    }
+
+    #[test]
+    fn a_span_takes_its_hover_and_press_styles_where_the_pointer_is() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            idiom: crate::platform::Idiom::Desktop,
+            ..crate::element::Environment::default()
+        });
+        c.mount_root(&crate::element::Root::new::<StatefulSpans>(|| ()));
+        let paragraph = |c: &mut Core<_>| {
+            let batch = c.commit()?;
+            batch.items.iter().find_map(|i| match i {
+                MountItem::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+        };
+        let style_at = |t: &crate::AttributedText, at: u32| {
+            t.spans
+                .iter()
+                .find(|s| s.start <= at && at < s.end)
+                .expect("a run there")
+                .style
+        };
+        let t = paragraph(&mut c).expect("the paragraph");
+        assert_eq!(t.text, "Read the docs or this and pressed inner");
+        let docs = *t.link_at(5).expect("the link");
+        let this = *t
+            .link_at(17)
+            .expect("a span with hover styles hears the pointer");
+        // The platforms tell a span when the pointer comes over its
+        // characters and leaves them, and when a press goes in and out.
+        for link in [docs, this] {
+            assert!(link.events.contains(EventKind::MouseEnter), "{link:?}");
+            assert!(link.events.contains(EventKind::MouseLeave), "{link:?}");
+        }
+        assert!(docs.events.contains(EventKind::PressDown));
+        assert!(docs.events.contains(EventKind::PressUp));
+        // A span that only hovers takes no press and no stop of Tab.
+        assert!(!this.events.contains(EventKind::Press));
+        assert!(!this.events.contains(EventKind::PressDown));
+        assert!(!this.focus_stop);
+        // Inside a span taking presses, the pressable one stays the link.
+        let inner = t.link_at(34).expect("a link there");
+        assert_eq!((inner.start, inner.end), (26, 39));
+        assert!(!style_at(&t, 5).decoration.underline);
+        let color = style_at(&t, 5).color;
+
+        let mouse = EventPayload::Mouse(crate::MouseEvent::new(
+            crate::geometry::point(px(20.0), px(8.0)),
+            crate::geometry::point(px(60.0), px(8.0)),
+            crate::keymap::Modifiers::default(),
+            None,
+        ));
+        c.component_event(docs.node, EventKind::MouseEnter, &mouse);
+        let t = paragraph(&mut c).expect("the span hovered");
+        assert!(style_at(&t, 5).decoration.underline);
+        assert!(!style_at(&t, 4).decoration.underline, "only the span's run");
+        assert!(!style_at(&t, 17).decoration.underline);
+
+        let press = EventPayload::Press(crate::PressEvent::default());
+        c.component_event(docs.node, EventKind::PressDown, &press);
+        let t = paragraph(&mut c).expect("the span pressed");
+        assert_ne!(style_at(&t, 5).color, color);
+        assert!(style_at(&t, 5).decoration.underline);
+        c.component_event(docs.node, EventKind::PressUp, &press);
+        let t = paragraph(&mut c).expect("the press ended");
+        assert_eq!(style_at(&t, 5).color, color);
+
+        c.component_event(docs.node, EventKind::MouseLeave, &mouse);
+        c.component_event(this.node, EventKind::MouseEnter, &mouse);
+        let t = paragraph(&mut c).expect("the pointer moved on");
+        assert!(!style_at(&t, 5).decoration.underline);
+        assert!(style_at(&t, 17).decoration.underline);
+        c.component_event(this.node, EventKind::MouseLeave, &mouse);
+        let t = paragraph(&mut c).expect("the pointer left");
+        assert!(!style_at(&t, 17).decoration.underline);
     }
 }
 
@@ -40362,5 +40475,232 @@ mod part_class_tokens {
         c.set_tokens(tokens);
         c.commit();
         assert_eq!(padding(&c), (px(20.0), px(8.0)));
+    }
+}
+
+/// A style set on a view whose layout style stays what it was (a change
+/// of colors: a token, the appearance, a state) lays nothing out again;
+/// one that changes the layout style still does.
+mod layout_kept_by_restyle {
+    use super::*;
+
+    /// View 2 with `classes` holding the text 3 (`hello`, classes
+    /// `text_classes`), committed.
+    fn card(classes: &str, text_classes: &str) -> Core<FakeEngine> {
+        let mut c = core();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                class_op(2, classes),
+                Op::Create {
+                    id: 3,
+                    tag: Tag::Text,
+                },
+                class_op(3, text_classes),
+                Op::CreateText {
+                    id: 4,
+                    text: "hello".into(),
+                },
+                Op::Insert {
+                    parent: 3,
+                    child: 4,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 3,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit().unwrap();
+        assert!(!c.needs_layout);
+        c
+    }
+
+    fn frames(batch: &MountBatch) -> Vec<NodeId> {
+        batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Frame { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_change_of_colors_asks_for_no_layout() {
+        let mut c = card("w-20 p-2 bg-red-500", "text-black");
+        apply(&mut c, vec![class_op(2, "w-20 p-2 bg-blue-500")]);
+        assert!(!c.needs_layout);
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            view_style_of(&batch, 2).unwrap().background_color,
+            Color::from(crate::element::palette::BLUE.shade(500))
+        );
+        assert_eq!(frames(&batch), [] as [NodeId; 0]);
+    }
+
+    #[test]
+    fn a_text_color_is_drawn_again_without_a_layout() {
+        let mut c = card("w-20 p-2", "text-black");
+        apply(&mut c, vec![class_op(3, "text-red-500")]);
+        assert!(!c.needs_layout);
+        let batch = c.commit().unwrap();
+        let color = batch.items.iter().find_map(|i| match i {
+            MountItem::Text { id: 3, text, .. } => Some(text.spans[0].style.color),
+            _ => None,
+        });
+        assert_eq!(
+            color,
+            Some(Color::from(crate::element::palette::RED.shade(500)))
+        );
+        assert_eq!(frames(&batch), [] as [NodeId; 0]);
+    }
+
+    #[test]
+    fn an_inline_color_asks_for_no_layout() {
+        let mut c = card("w-20 p-2", "text-black");
+        apply(
+            &mut c,
+            vec![style_op(
+                2,
+                &[("backgroundColor", StyleValue::Str("#0000ff"))],
+            )],
+        );
+        assert!(!c.needs_layout);
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            view_style_of(&batch, 2).unwrap().background_color,
+            Color(0x0000_ffff)
+        );
+        assert_eq!(frames(&batch), [] as [NodeId; 0]);
+    }
+
+    #[test]
+    fn a_change_of_the_layout_style_still_lays_out() {
+        let mut c = card("w-20 p-2 bg-red-500", "text-black");
+        apply(&mut c, vec![class_op(2, "w-40 p-2 bg-red-500")]);
+        assert!(c.needs_layout);
+        let batch = c.commit().unwrap();
+        let frame = frame_of(&batch, 2).expect("a new frame");
+        assert_eq!(frame.size.width.0, 160.0);
+        // And back, with another color in the same change.
+        apply(&mut c, vec![class_op(2, "w-20 p-4 bg-blue-500")]);
+        assert!(c.needs_layout);
+        let batch = c.commit().unwrap();
+        assert_eq!(frame_of(&batch, 2).unwrap().size.width.0, 80.0);
+        // The padding moved the text.
+        assert!(frames(&batch).contains(&3));
+    }
+
+    /// 300 cards, each a text and a row of three boxes, every box given
+    /// another background: the restyle and its commit.
+    /// `cargo test --release -p nsh-core bench_restyle_colors -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_restyle_colors() {
+        const CARDS: u32 = 300;
+        let mut c = core();
+        let mut ops = Vec::new();
+        let mut boxes = Vec::new();
+        for card in 0..CARDS {
+            let id = 10 + card * 10;
+            let (text, raw, row) = (id + 1, id + 2, id + 3);
+            ops.extend([
+                Op::Create { id, tag: Tag::View },
+                class_op(
+                    id,
+                    "p-4 gap-2 rounded-lg border border-neutral-200 bg-white",
+                ),
+                Op::Create {
+                    id: text,
+                    tag: Tag::Text,
+                },
+                class_op(text, "text-base font-semibold text-neutral-950"),
+                Op::CreateText {
+                    id: raw,
+                    text: format!("Card {card}"),
+                },
+                Op::Insert {
+                    parent: text,
+                    child: raw,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: id,
+                    child: text,
+                    before: None,
+                },
+                Op::Create {
+                    id: row,
+                    tag: Tag::View,
+                },
+                class_op(row, "flex-row gap-2"),
+            ]);
+            for k in 0..3 {
+                let b = id + 4 + k;
+                boxes.push(b);
+                ops.extend([
+                    Op::Create {
+                        id: b,
+                        tag: Tag::View,
+                    },
+                    class_op(b, "px-3 py-2 rounded-md bg-neutral-100"),
+                    Op::Insert {
+                        parent: row,
+                        child: b,
+                        before: None,
+                    },
+                ]);
+            }
+            ops.extend([
+                Op::Insert {
+                    parent: id,
+                    child: row,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: id,
+                    before: None,
+                },
+            ]);
+        }
+        apply(&mut c, ops);
+        c.commit().unwrap();
+        let mut times = Vec::new();
+        let mut frames_sent = 0;
+        for round in 0..400 {
+            let class = if round % 2 == 0 {
+                "px-3 py-2 rounded-md bg-blue-600"
+            } else {
+                "px-3 py-2 rounded-md bg-neutral-100"
+            };
+            let ops: Vec<Op> = boxes.iter().map(|&b| class_op(b, class)).collect();
+            let start = std::time::Instant::now();
+            apply(&mut c, ops);
+            let batch = c.commit().unwrap();
+            times.push(start.elapsed());
+            frames_sent += frames(&batch).len();
+            assert!(view_style_of(&batch, boxes[0]).is_some());
+        }
+        times.sort();
+        println!(
+            "{} boxes given another background: {:.0} us (median {:.0} us), {frames_sent} frames sent",
+            boxes.len(),
+            times[0].as_secs_f64() * 1e6,
+            times[times.len() / 2].as_secs_f64() * 1e6,
+        );
     }
 }

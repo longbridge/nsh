@@ -58,6 +58,9 @@ const HOST_PROPS: &[&str] = &[
     "testID",
     "tooltip",
     "onLayout",
+    "onFileDragEnter",
+    "onFileDragLeave",
+    "onFileDrop",
 ];
 
 /// The components' part of a context's state.

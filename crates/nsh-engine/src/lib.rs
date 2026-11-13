@@ -3352,12 +3352,19 @@ impl<M: TextEngine> State<M> {
             // the core).
             let binds = self.binds.drain(..);
             if let Some(script) = script {
+                // What JS queued before this round (a timer, a handler) may
+                // change a list's items, and the core works out the overscan
+                // left to bind from the items it has: it applies those ops
+                // first, and the overscan waits for the next round, or a
+                // cell would be bound to an item that is gone.
+                script.take_ops(&mut self.ops);
+                let unapplied = !self.ops.is_empty();
                 for bind in binds {
                     script.bind_list(bind.list, &bind.binds);
                 }
                 script.take_ops(&mut self.ops);
                 let mut binds = Vec::new();
-                while paced.left() && self.core.has_paced_list_binds() {
+                while !unapplied && paced.left() && self.core.has_paced_list_binds() {
                     let start = Instant::now();
                     let ops = self.ops.len();
                     self.core.take_paced_list_binds(1, &mut binds);
