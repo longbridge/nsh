@@ -85,8 +85,12 @@ fn unix_time(ms: f64) -> std::time::SystemTime {
 const CLOCK_TIMEOUT: Duration = Duration::from_secs(60);
 /// A long press's hold when the view does not say (`delayLongPress`).
 const LONG_PRESS: Duration = Duration::from_millis(500);
-/// How many gestures scrolling a view into view takes at most.
-const SCROLLS_INTO_VIEW: usize = 20;
+/// How many gestures scrolling a view into view takes at most: only a
+/// guard against a view that keeps moving without ever arriving. Gestures
+/// that move nothing end it sooner ([`anchor`]), and each moves at most
+/// part of its scroll view, so a row far down a long list in a small window
+/// (the gallery's home at 640x480 needs about 30) takes many.
+const SCROLLS_INTO_VIEW: usize = 100;
 
 /// What a host's app shows, as test steps see it: the batches the host
 /// applied and the errors the app reported.
