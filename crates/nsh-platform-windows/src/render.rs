@@ -1884,6 +1884,25 @@ fn draw_into(
         // kept.
         Some(areas) => {
             cx.set_transform(Mat4::new());
+            // Several areas are drawn through a layer (a clip of their
+            // rectangles), and the `Clear` below fills that layer, which is
+            // then blended over the back buffer: a background that is not
+            // opaque (a transparent window's, over its backdrop) would leave
+            // what was there showing under the views drawn again. So each
+            // area of such a window is first cleared on the back buffer
+            // itself, under an axis-aligned clip; an opaque one's layer
+            // covers what was there as it is.
+            if areas.len() > 1 && background.a < 1.0 {
+                for a in areas {
+                    // SAFETY: COM calls between BeginDraw and EndDraw, each
+                    // push popped at once.
+                    unsafe {
+                        dc.PushAxisAlignedClip(a, D2D1_ANTIALIAS_MODE_ALIASED);
+                        dc.Clear(Some(&background));
+                        dc.PopAxisAlignedClip();
+                    }
+                }
+            }
             match areas {
                 [a] => cx.push_clip_rect(a.left, a.top, a.right - a.left, a.bottom - a.top),
                 _ => match rects_geometry(gfx, areas) {
@@ -2267,6 +2286,52 @@ mod tests {
         assert!(read(&gfx, &back, size) == read(&gfx, &fresh, size));
         // Nothing changed since: nothing to draw.
         assert!(surface.take_damage().is_none_or(|d| d.is_empty()));
+    }
+
+    /// A see-through window (a system backdrop behind it) clears to
+    /// transparent: a partial frame of two areas apart must replace what
+    /// was in them, not draw its translucent views over it.
+    #[test]
+    fn a_partial_frame_of_a_transparent_window_replaces_its_areas() {
+        let Ok(gfx) = gfx::get() else {
+            return;
+        };
+        let app = crate::app::AppView::new(
+            None,
+            crate::app::AppOptions {
+                size: (240, 140),
+                transparent: true,
+                skip_taskbar: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let surface = app.surface().clone();
+        assert!(surface.transparent());
+        let size = (240, 140);
+        surface.resized(size, 1.0);
+        let root = surface.root.clone();
+        let boxed = |id, frame, color| {
+            let v = view(Some(&root), id, ViewKind::View, frame);
+            v.state_mut().style.background_color = Color(color);
+            v
+        };
+        // Translucent, as a glass ground over the backdrop.
+        let a = boxed(2, rect(10.0, 10.0, 50.0, 30.0), 0x2244cc80);
+        let b = boxed(4, rect(170.0, 90.0, 50.0, 30.0), 0xcc224480);
+        let back = target(&gfx, size);
+        draw_into(&surface, &gfx, &back, 1.0, false, None, None, None).unwrap();
+        let _ = surface.take_damage();
+
+        a.state_mut().style.background_color = Color(0x22cc4440);
+        a.changed();
+        b.state_mut().style.background_color = Color(0x88888840);
+        b.changed();
+        let areas = changed_areas(&surface, size);
+        assert_eq!(areas.len(), 2, "two areas apart: {areas:?}");
+        fill_with_damage_and_compare_whole(&surface, &gfx, &back, size, &areas);
+        // SAFETY: the test's own window.
+        let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::DestroyWindow(app.hwnd()) };
     }
 
     /// A uniform background fill draws a rounded rectangle and makes no
