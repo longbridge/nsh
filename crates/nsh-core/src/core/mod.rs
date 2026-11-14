@@ -1225,6 +1225,8 @@ pub struct Core<M: TextEngine> {
     /// The warning about animated insets of views that are not sticky, or
     /// on the axis their scroll view does not scroll, was logged.
     inset_warned: bool,
+    /// The warning about padding on a span was logged.
+    span_padding_warned: bool,
     /// Compiled shaders by the hash of their source, with their errors
     /// (an app setting the same source again compiles it once).
     shaders: rustc_hash::FxHashMap<u64, Result<crate::shader::Shader, crate::shader::ShaderError>>,
@@ -1550,6 +1552,7 @@ impl<M: TextEngine> Core<M> {
             follow_changed: false,
             sticky_warned: false,
             inset_warned: false,
+            span_padding_warned: false,
             shaders: Default::default(),
             transition_starts: Vec::new(),
             pictured: Default::default(),
@@ -4064,6 +4067,9 @@ impl<M: TextEngine> Core<M> {
         let rtl = self.resolved_rtl(key);
         crate::style::resolve_normal_alignment(&mut layout);
         crate::style::apply_direction(&mut layout, &mut view, &logical, rtl);
+        if self.nodes[key as usize].inline && padded_inline(&layout) {
+            self.warn_span_padding(key);
+        }
         // A sticky box's insets say where it sticks, not where it is laid
         // out.
         let sticky = pending.sticky_position.then(|| Box::new(layout.inset));
@@ -6760,6 +6766,22 @@ impl<M: TextEngine> Core<M> {
             .count() as u32
     }
 
+    /// Warns once of horizontal padding on a span (`key`): its characters
+    /// flow in its block's lines, so it has no box to pad (#1902); space
+    /// characters at its ends pad it instead.
+    fn warn_span_padding(&mut self, key: Key) {
+        let node = &self.nodes[key as usize];
+        if self.span_padding_warned || node.kind != Kind::Text {
+            return;
+        }
+        self.span_padding_warned = true;
+        log::warn!(
+            target: "js",
+            "padding on a nested <Text> is ignored (view {}): its characters flow in the text's lines; put spaces (U+202F, U+2009) at its ends to pad its background",
+            node.id
+        );
+    }
+
     /// Moves `key` (and its subtree) into or out of an inline context.
     fn set_inline(&mut self, key: Key, inline: bool) {
         let node = &mut self.nodes[key as usize];
@@ -6774,15 +6796,20 @@ impl<M: TextEngine> Core<M> {
         if inline {
             // Block -> span: spans have no layout node or native view; the
             // span keeps the style for when it is a block again.
+            let mut padded = false;
             if let Some(l) = node.layout.take() {
                 if node.base_layout.is_none() {
                     node.base_layout = Some(Box::new(self.layout.style(l).clone()));
                 }
+                padded = node.base_layout.as_deref().is_some_and(padded_inline);
                 self.layout.remove(l);
             }
             if node.created {
                 node.created = false;
                 self.mount.push(MountItem::Delete { id: node.id });
+            }
+            if padded {
+                self.warn_span_padding(key);
             }
         } else {
             // A fixed text keeps its style: the layout node takes it with
@@ -10657,6 +10684,12 @@ const DISABLED_OFF: [EventKind; 8] = [
 /// Whether `disabled` changes what a view with `events` mounts.
 fn disabling_changes(events: EventMask) -> bool {
     DISABLED_OFF.iter().any(|&e| events.contains(e))
+}
+
+/// Whether `layout` pads its left or right side (a span cannot).
+fn padded_inline(layout: &taffy::Style) -> bool {
+    let zero = taffy::LengthPercentage::length(0.0);
+    layout.padding.left != zero || layout.padding.right != zero
 }
 
 /// The background a nested text's view style gives its characters.
