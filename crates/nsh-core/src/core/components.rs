@@ -590,6 +590,15 @@ pub(super) struct Components {
     pub(super) instances: FxHashMap<NodeId, Box<Instance>>,
     /// Expanded node -> the host of the component whose view made it.
     pub(super) owners: FxHashMap<NodeId, NodeId>,
+    /// Changes when reconciliation releases an expanded element or raw
+    /// node. A region that only populates or retains nodes needs no sweep
+    /// of its host's listeners and bindings.
+    pub(super) release_generation: u64,
+    /// Region hosts to clean before the next binding/event round. Several
+    /// regions of one view can release nodes in the same patch batch.
+    pub(super) released_hosts: FxHashSet<NodeId>,
+    #[cfg(test)]
+    pub(super) cleanup_work: super::views::CleanupWork,
     /// Slot nodes (`componentSlot`) -> their slot's name.
     slot_names: FxHashMap<NodeId, Arc<str>>,
     /// Slot nodes in a host -> the host.
@@ -767,6 +776,10 @@ impl Default for Components {
             host_tokens: None,
             instances: FxHashMap::default(),
             owners: FxHashMap::default(),
+            release_generation: 0,
+            released_hosts: FxHashSet::default(),
+            #[cfg(test)]
+            cleanup_work: Default::default(),
             slot_names: FxHashMap::default(),
             slot_hosts: FxHashMap::default(),
             slot_targets: FxHashMap::default(),
@@ -4950,7 +4963,13 @@ impl<M: TextEngine> Core<M> {
     }
 
     fn release_id(&mut self, id: NodeId) {
-        self.components.owners.remove(&id);
+        self.components.release_generation = self.components.release_generation.wrapping_add(1);
+        if let Some(host) = self.components.owners.remove(&id) {
+            // Cells can replace/empty their static root outside a region's
+            // matching pass. Their released bindings need the same sweep
+            // even if the next region only populates new nodes.
+            self.components.released_hosts.insert(host);
+        }
         self.forget_node_extras(id);
         // A root component's host is its view's: only the name goes.
         if self.is_alias(id) {
@@ -4977,6 +4996,9 @@ impl<M: TextEngine> Core<M> {
     /// Frees an expanded element and what it rendered (a slot's node is
     /// JS's: it only leaves the tree).
     pub(super) fn release_expanded(&mut self, e: Expanded) {
+        // Slot/JS nodes can lose this view's part without being deleted or
+        // leaving `owners`, so count expanded releases as well as raw IDs.
+        self.components.release_generation = self.components.release_generation.wrapping_add(1);
         match e.part {
             Part::Slot => {
                 self.drop_slot_target(e.id);
