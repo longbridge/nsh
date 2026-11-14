@@ -3,7 +3,8 @@
 //! reports the modifier keys held.
 
 use nsh_base::{
-    TextViewClasses, TextViewLinkPressEvent, TextViewPart, TextViewParts, TextViewStyles, text_view,
+    TextViewClasses, TextViewLinkPressEvent, TextViewPart, TextViewParts, TextViewStyles,
+    TextViewTaskPressEvent, text_view,
 };
 use nsh_core::{
     StyleKey,
@@ -478,4 +479,64 @@ fn a_wide_image_on_its_own_is_at_most_as_wide_as_the_text() {
         px(75.0),
         "the aspect ratio kept: {bounds:?}"
     );
+}
+
+const TASKS: &str = "- [ ] first\n- [x] second\n  - [ ] nested\n\n<details>\n<summary>More</summary>\n\n\
+                     - [x] hidden\n\n</details>\n\n> - [ ] last";
+
+/// Task items at the top, nested, in a closed disclosure and in a quote
+/// after it; what their boxes' presses reported.
+fn tasks(pressable: bool) -> impl IntoElement {
+    let pressed = signal(Vec::<String>::new());
+    view()
+        .child(
+            text_view()
+                .markdown(TASKS)
+                .pressable_tasks(pressable)
+                .on_task_press(move |e: &TextViewTaskPressEvent| {
+                    let report = format!("{}:{}", e.index, e.checked);
+                    pressed.update(|p| p.push(report));
+                }),
+        )
+        .child(text(move || {
+            format!("Pressed: {}", pressed.get().join(" "))
+        }))
+}
+
+#[component]
+fn PressableTasks() -> impl IntoElement {
+    tasks(true)
+}
+
+#[component]
+fn ShownTasks() -> impl IntoElement {
+    tasks(false)
+}
+
+#[test]
+fn a_pressed_task_box_reports_its_place_in_the_document_and_the_state_asked_for() {
+    let mut app = Headless::start(EngineConfig::new(Root::of::<PressableTasks>())).unwrap();
+    app.wait_for("first").unwrap();
+    app.press("label:second").unwrap();
+    app.press("label:nested").unwrap();
+    // The closed disclosure's task keeps its place before the one after it.
+    app.press("label:last").unwrap();
+    app.wait_for("Pressed: 1:false 2:true 4:true").unwrap();
+    // Opened, closed and opened again, its task is counted from the same place.
+    app.press("More").unwrap();
+    app.press("label:hidden").unwrap();
+    app.press("More").unwrap();
+    app.press("More").unwrap();
+    app.press("label:hidden").unwrap();
+    app.press("label:first").unwrap();
+    app.wait_for("Pressed: 1:false 2:true 4:true 3:false 3:false 0:true")
+        .unwrap();
+}
+
+#[test]
+fn task_boxes_only_show_their_state_unless_made_pressable() {
+    let mut app = Headless::start(EngineConfig::new(Root::of::<ShownTasks>())).unwrap();
+    app.wait_for("first").unwrap();
+    assert!(app.press("label:first").is_err());
+    assert!(!app.shows("0:true"));
 }

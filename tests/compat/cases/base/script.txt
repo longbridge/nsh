@@ -653,6 +653,13 @@ style text:"First item" color #0000ffff
 expect Link: none
 tap span:the guide
 expect Link: https://example.com/guide (Command: false)
+# A press on a task's box reports which task of the document it is and
+# the state asked for; the document stays as it was.
+expect Task: none
+tap label:Ship it
+expect Task: 1 true
+tap label:Draft it
+expect Task: 0 false
 # HTML.
 expect From HTML
 expect An hypertext paragraph.

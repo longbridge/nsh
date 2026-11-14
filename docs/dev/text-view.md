@@ -294,6 +294,7 @@ module, which has everything.
 | `MarkdownPlugin` | `MarkdownPlugin` (Rust) and `MarkdownExtension` (declared, from TS too) |
 | `image_source` / image loading | `renderImage`; the default loads the URL with the runtime's image loader |
 | Link clicks | `onLinkPress({ url })` |
+| Task box presses | `pressableTasks` + `onTaskPress({ index, checked })`: the task's place in the document, counted by structure (`Block::tasks`) so a closed disclosure's tasks keep theirs |
 | Streaming fade / motion | The app's: the blocks are views it styles and animates (`nsh`'s `Animated`, layout animation) |
 
 ## Limits

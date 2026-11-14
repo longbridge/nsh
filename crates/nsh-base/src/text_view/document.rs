@@ -133,6 +133,21 @@ fn one() -> u32 {
 }
 
 impl Block {
+    /// How many task items it holds, at any depth.
+    pub(crate) fn tasks(&self) -> u32 {
+        let within = |blocks: &[Block]| blocks.iter().map(Block::tasks).sum::<u32>();
+        match self {
+            Block::List { items, .. } => items
+                .iter()
+                .map(|item| u32::from(item.checked.is_some()) + within(&item.children))
+                .sum(),
+            Block::Blockquote { children, .. } | Block::Details { children, .. } => {
+                within(children)
+            }
+            _ => 0,
+        }
+    }
+
     /// A paragraph of `content`.
     pub fn paragraph(content: Vec<Inline>) -> Self {
         Block::Paragraph { content }
