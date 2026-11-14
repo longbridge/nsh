@@ -48,10 +48,11 @@
 //! It checks the reported key, DOM code, modifiers, single press and
 //! release of a focusable view, a mounted capture taking a key before its
 //! default, Tab / Shift+Tab traversal (a captured or app-bound Tab stays),
-//! a scroll ancestor and an overlay's logical ancestors, and that a tap
-//! focuses a view without press handlers. UIKit sends a held key's press
-//! once and reports no auto-repeat, so `repeat` is false; an app that
-//! wants repeats starts its own timer from the press.
+//! a scroll ancestor and an overlay's logical ancestors, that a tap
+//! focuses a view without press handlers, and that the views inside such a
+//! view keep their presses. UIKit sends a held key's press once and reports
+//! no auto-repeat, so `repeat` is false; an app that wants repeats starts
+//! its own timer from the press.
 
 #![cfg(target_os = "ios")]
 

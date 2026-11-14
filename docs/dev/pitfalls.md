@@ -277,6 +277,12 @@ Things that were found the hard way. Read the section of the area you change bef
   prevented every press there, so a navigation bar's back button did nothing (seen on an iPhone foldable simulator; a
   real tap through XCUITest reproduced it). `PressRecognizer` is not preventable by tap recognizers on a `UIWindow`
   (`press.rs`, `is_window_tap`); edge-gesture gates are not taps and still cancel presses.
+- **iOS, a tap recognizer on a view around pressables**: a `UITapGestureRecognizer` recognizes on release, where a
+  press ends too, and prevents the `PressRecognizer`s of the views inside its view: `cancelsTouchesInView = false`
+  leaves the views their touches, not the other recognizers their turn. The tap that focuses a `focusable` view
+  that takes no presses took every press inside it that way (a row's ⋯ button opened no menu, for a real tap on the
+  simulator as for a test's). `FocusTap` (`native_view.rs`) prevents no recognizer
+  (`canPreventGestureRecognizer:`), and fails on a touch on a stop inside its view, which takes the focus itself.
 - **iOS, a hardware keyboard's keys** reach the first responder as presses (`pressesBegan:withEvent:`) before
   UIKit's text system acts on them: a text input that does not call `super` for a press neither moves its caret,
   inserts a line break nor types it, and must not call `super` for that key's release either. A held key's press
