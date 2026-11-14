@@ -373,6 +373,10 @@ Things that were found the hard way. Read the section of the area you change bef
   whether a rectangle is visible. `NshView` is a scroll container (`setScrollContainer(true)`) so that windows without a soft
   input mode resize instead of panning: the system picks the mode at the first layout, before the app's content is mounted,
   and a mode set from code afterwards is overridden. Windows that ask for `adjustPan` are left to the system.
+- **Android, the keyboard a gesture drives has no duration**: the back swipe that dismisses the keyboard (predictive back,
+  seen on Android 16) moves it by hand, and its `WindowInsetsAnimation` reports `getDurationMillis()` as -1. `KeyboardAnimation` takes the
+  keyboard's curve and duration from timed moves only: -1 kept as the duration makes `ValueAnimator.setDuration` throw
+  when the next input is focused in a scroll view (`Mounter.revealFocused`).
 - **Android, passive press feedback**: `activeStyle` / `active:` and `android.ripple` observe a touch without
   consuming it. The root's `TouchTracker` feeds style-only views through `Pressable`; `Box` and leaf views take
   clicks for their press handlers or text spans. Feedback is cancelled when scrolling, panning, pinching or rotation
