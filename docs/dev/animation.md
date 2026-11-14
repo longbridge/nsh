@@ -2,7 +2,7 @@
 
 - **Animation**: `createAnimatedValue()` → `timing` / `spring` / `decay` (return a Promise), `interpolate` (numbers, colors or
   `"deg"` / `"rad"` angles; `extrapolate` / `extrapolateLeft` / `extrapolateRight`: `clamp` (default) / `extend` / `identity`;
-  `easing`), `add/sub/mul/div/mod`, `diffClamp(min, max, { snap })`. A snapping `diffClamp` settles at its nearer bound
+  `easing`), `add/sub/mul/div/mod`, `diffClamp(min, max, { snap })` (bounds numbers or nodes, read each evaluation). A snapping `diffClamp` settles at its nearer bound
   in 200 ms, easing out, when the scroll view whose scroll value it follows (through any nodes) comes to rest
   (`Graph::settle`), at `max` only once its input reached `max`; scrolling that view again ends the settling where it
   is, and a snapping `diffClamp` it reads, settling too, moves its input without ending it. A snapping dependent
