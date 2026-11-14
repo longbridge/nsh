@@ -29,7 +29,7 @@ use objc2_ui_kit::{
     NSFontAttributeName, NSForegroundColorAttributeName, NSTextAlignment, UIColor, UIControl,
     UIControlEvents, UIEdgeInsets, UIKeyboardAppearance, UIKeyboardType, UILabel, UIResponder,
     UIReturnKeyType, UITextAutocapitalizationType, UITextAutocorrectionType, UITextField,
-    UITextView, UIView, UIViewAutoresizing,
+    UITextSmartDashesType, UITextSmartQuotesType, UITextView, UIView, UIViewAutoresizing,
 };
 
 use crate::{target::EventTarget, text};
@@ -1321,6 +1321,7 @@ unsafe fn send<A: Copy>(view: &AnyObject, sel: Sel, value: A) {
 
 fn traits(view: &AnyObject, config: &InputConfig) {
     let keyboard = match config.keyboard {
+        KeyboardType::Default if config.visible_password() => UIKeyboardType::ASCIICapable,
         KeyboardType::Default => UIKeyboardType::Default,
         KeyboardType::Number => UIKeyboardType::NumberPad,
         // React Native's `numeric`: digits and a decimal separator.
@@ -1338,7 +1339,10 @@ fn traits(view: &AnyObject, config: &InputConfig) {
         ReturnKeyType::Search => UIReturnKeyType::Search,
         ReturnKeyType::Send => UIReturnKeyType::Send,
     };
+    // A visible password is typed as it is: never capitalized or corrected.
+    let password = config.visible_password();
     let capitalize = match config.auto_capitalize {
+        _ if password => UITextAutocapitalizationType::None,
         AutoCapitalize::None => UITextAutocapitalizationType::None,
         AutoCapitalize::Sentences => UITextAutocapitalizationType::Sentences,
         AutoCapitalize::Words => UITextAutocapitalizationType::Words,
@@ -1349,10 +1353,19 @@ fn traits(view: &AnyObject, config: &InputConfig) {
         KeyboardAppearance::Light => UIKeyboardAppearance::Light,
         KeyboardAppearance::Dark => UIKeyboardAppearance::Dark,
     };
-    let correct = if config.auto_correct {
+    let correct = if config.auto_correct && !password {
         UITextAutocorrectionType::Default
     } else {
         UITextAutocorrectionType::No
+    };
+    // Smart quotes and dashes are corrections too: off with `autoCorrect`.
+    let smart = if config.auto_correct && !password {
+        (
+            UITextSmartQuotesType::Default.0,
+            UITextSmartDashesType::Default.0,
+        )
+    } else {
+        (UITextSmartQuotesType::No.0, UITextSmartDashesType::No.0)
     };
     // SAFETY: UITextField and UITextView adopt UITextInputTraits; each
     // setter takes the NSInteger-backed enum (BOOL, or string) passed here.
@@ -1363,6 +1376,8 @@ fn traits(view: &AnyObject, config: &InputConfig) {
         send(view, sel!(setReturnKeyType:), return_key.0);
         send(view, sel!(setAutocapitalizationType:), capitalize.0);
         send(view, sel!(setAutocorrectionType:), correct.0);
+        send(view, sel!(setSmartQuotesType:), smart.0);
+        send(view, sel!(setSmartDashesType:), smart.1);
         let content_type =
             content_type(config.auto_fill).map_or(std::ptr::null(), |t| t as *const NSString);
         send(view, sel!(setTextContentType:), content_type);

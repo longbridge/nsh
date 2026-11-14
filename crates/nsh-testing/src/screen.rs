@@ -1205,6 +1205,29 @@ impl Screen {
             .unwrap_or_default()
     }
 
+    /// Whether view `id` is on a stack's page that does not show: one a
+    /// newer page covers, or one a back popped.
+    pub(crate) fn on_covered_page(&self, id: NodeId) -> bool {
+        let mut at = id;
+        while let Some(parent) = self.nodes.get(&at).and_then(|v| v.parent) {
+            if self.kind(parent) == Some(ViewKind::Stack)
+                && self.screens(parent).last() != Some(&at)
+            {
+                return true;
+            }
+            at = parent;
+        }
+        false
+    }
+
+    /// Whether view `id` is inside the newest modal over its window, or
+    /// no modal is over it: where the desktops and the web keep the
+    /// keyboard's reach ([`Self::focus_scope`]).
+    pub(crate) fn in_focus_scope(&self, id: NodeId) -> bool {
+        self.focus_scope(self.window_of(id))
+            .is_none_or(|scope| self.within(id, scope))
+    }
+
     /// What going back does now, as a platform's back does it: in the
     /// newest modal (else the whole screen) the innermost stack that can go
     /// back and is laid out with a size (`shown_in_layout`) pops its top

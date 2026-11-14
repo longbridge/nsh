@@ -683,8 +683,12 @@ impl NshView {
     /// Takes this view out of its parent.
     pub(crate) fn unparent(&self) {
         // Where it was drawn is drawn again: queued while it can still
-        // reach its surface.
+        // reach its surface. Where its subtree was drawn is kept with it
+        // now: a subtree is taken out from its top and then torn down, and
+        // the views in it leave it before the frame asks where it was (they
+        // can no longer reach the surface to say so themselves).
         if self.parent_view().is_some() {
+            self.set_painted(self.painted_subtree());
             self.changed();
         }
         let parent = self.0.parent.replace(Weak::new()).upgrade();

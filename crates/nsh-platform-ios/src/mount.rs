@@ -1471,6 +1471,7 @@ impl Mounter {
                     scroll.setDecelerationRate(rate as CGFloat);
                     scroll.setScrollEnabled(b.enabled);
                     scroll.setBounces(b.bounces);
+                    scroll.setScrollsToTop(b.scrolls_to_top);
                     scroll.setAlwaysBounceVertical(b.bounces && !s.horizontal);
                     scroll.setAlwaysBounceHorizontal(b.bounces && s.horizontal);
                     // The keyboard and refreshing add to the content inset.
@@ -1747,6 +1748,7 @@ impl Mounter {
                 | Command::Load(_)),
                 Native::Web(web),
             ) => web.command(&c),
+            (Command::WebViewRequest(request), Native::Web(web)) => web.web_request(&request),
             (Command::Seek(seconds), Native::Video(video)) => video.seek(seconds),
             (Command::Focus, Native::Input(input)) => {
                 input.editor_view().becomeFirstResponder();
@@ -1902,13 +1904,16 @@ impl Mounter {
             },
             (Command::OpenUrl { id, url }, _) => crate::system::open_url(id, &url, &self.control),
             (Command::ReadClipboard { id, has_only }, _) => {
-                let (has, text) = crate::system::read_clipboard(has_only);
+                let (has, text, denied) = crate::system::read_clipboard(has_only);
                 let mut fields = vec![
                     ("id", PayloadValue::Number(id as f64)),
                     ("has", PayloadValue::Bool(has)),
                 ];
                 if let Some(text) = text {
                     fields.push(("text", PayloadValue::Str(text)));
+                }
+                if denied {
+                    fields.push(("denied", PayloadValue::Bool(true)));
                 }
                 self.control.dispatch_event(
                     nsh_core::ROOT_ID,
@@ -3140,6 +3145,9 @@ impl Mounter {
             return;
         };
         slot.events = events;
+        if let Native::Web(web) = &slot.native {
+            web.set_events(events);
+        }
         if let Native::Input(input) = &mut slot.native {
             input.set_paste_listens(events.contains(EventKind::Paste));
         }

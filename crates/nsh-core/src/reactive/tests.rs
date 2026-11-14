@@ -530,3 +530,44 @@ fn compacting_gives_back_the_slots_of_a_tree_that_is_gone() {
     assert!(!graph().live(last, last_generation, u32::MAX));
     check_links();
 }
+
+/// A root made under an owner that is disposed before it keeps naming the
+/// owner's slot; once the slot is reused by a node made under the root, the
+/// root's `owner` link closes a loop. A write then must not hang `runTop`.
+#[test]
+fn a_root_whose_owner_went_does_not_loop_through_its_reused_slot() {
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = done.clone();
+    std::thread::spawn(move || {
+        let tick = signal(0);
+        let mut root = NONE;
+        // The owner: a computation the root is made under (not owned by it).
+        let owner = render_effect(|| {});
+        with_owner(Test, owner, || {
+            root = with_root(Test, || ()).0;
+        });
+        // The owner goes; the root does not.
+        dispose(Test, owner);
+        // A computation made under the root takes the owner's freed slot.
+        let effect = with_owner(Test, root, || {
+            render_effect(move || {
+                get(tick);
+            })
+        });
+        assert_eq!(effect, owner, "the freed slot is reused");
+        assert_eq!(
+            graph().parent(effect),
+            root,
+            "the slot's new node is under the root"
+        );
+        set(tick, 1);
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
+    for _ in 0..50 {
+        if done.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    panic!("runTop looped through the root's stale owner");
+}

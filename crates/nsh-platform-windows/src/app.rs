@@ -458,17 +458,6 @@ impl AppView {
         };
         self.surface.native.set_access(Arc::new(access));
         let options = self.options.borrow();
-        // Its web views save downloads in `<data dir>/<app id>/downloads`,
-        // as macOS's do.
-        let downloads = options
-            .data_dir
-            .clone()
-            .or_else(nsh_engine::data_dir)
-            .map(|root| {
-                root.join(nsh_engine::app_dir_name(app.app_id()))
-                    .join("downloads")
-            });
-        self.surface.native.set_downloads(downloads);
         let config = EngineConfig {
             app,
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),
@@ -602,15 +591,18 @@ fn initial_environment() -> Environment {
     }
 }
 
-/// Runs `source` in a window until it is closed.
+/// Runs `source` in a window until it is closed, then ends the process.
 ///
-/// The window and its message loop run on a thread of their own, which this
-/// one joins: when it ends, its thread-locals (the graphics devices, font
-/// faces, bitmaps and the other device resources cached per thread) are
-/// released at a plain thread exit. Released by the main thread's
-/// thread-local destructors instead, they would run inside `ExitProcess`,
-/// after the graphics DLLs and their driver threads are gone, and the
-/// process would end with a stray exit code.
+/// The window and its message loop run on a thread of their own. When its
+/// run ends, this thread ends the process while that thread waits, so its
+/// thread-locals (the graphics devices, font faces, bitmaps and the other
+/// device resources cached per thread) are never destroyed. Destroyed when
+/// that thread exits, they are released under the loader lock, where a
+/// driver that waits for its own threads to release a device (NVIDIA's
+/// does) never returns, and the process stays behind without a window.
+/// Destroyed by the main thread's thread-local destructors instead, they
+/// would run inside `ExitProcess`, after the graphics DLLs and their driver
+/// threads are gone, and the process would end with a stray exit code.
 pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::ExitCode {
     wait_for_replaced_process();
     options.notifications = true;
@@ -618,27 +610,35 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     struct Job(AppSource, AppOptions);
     // SAFETY: the options hold `Rc`s (the native components), so they are
     // not `Send`. They move to the UI thread whole while this thread waits
-    // in `join` and never touches them; clones the caller kept are only
-    // used again after `join` returns, once the UI thread has ended, so
-    // the reference counts are never changed from two threads at once.
+    // for its run to end and never touches them; the process ends then,
+    // so clones the caller kept are never used again and the reference
+    // counts are never changed from two threads at once.
     unsafe impl Send for Job {}
     let job = Job(source, options);
+    let (done, ended) = std::sync::mpsc::channel();
     let ui = std::thread::Builder::new()
         .name("nsh-ui".into())
         // Deep view trees recurse in drawing and hit testing.
         .stack_size(8 << 20)
         .spawn(move || {
             let job = job;
-            run_on_this_thread(job.0, job.1)
+            let code = run_on_this_thread(job.0, job.1);
+            let _ = done.send(code);
+            // The process ends while this thread waits (below).
+            loop {
+                std::thread::park();
+            }
         });
-    match ui.map(std::thread::JoinHandle::join) {
-        Ok(Ok(code)) => code,
-        Ok(Err(_)) => std::process::ExitCode::FAILURE,
-        Err(err) => {
-            fatal_error(&format!("Cannot start the UI thread: {err}"));
-            std::process::ExitCode::FAILURE
-        }
+    if let Err(err) = ui {
+        fatal_error(&format!("Cannot start the UI thread: {err}"));
+        return std::process::ExitCode::FAILURE;
     }
+    // The run has ended (or the UI thread panicked, dropping `done`): the
+    // process ends with the UI thread still waiting, as the doc above says.
+    let succeeded = ended
+        .recv()
+        .is_ok_and(|code| code == std::process::ExitCode::SUCCESS);
+    std::process::exit(if succeeded { 0 } else { 1 })
 }
 
 thread_local! {

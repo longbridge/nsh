@@ -215,6 +215,11 @@ The page's own subresources (its scripts, images, XHRs) are the web content's bu
 allows them without allowing any remote page. A `baseUrl` gives inline HTML that URL's origin in the native
 web views, so the base URL needs the grant a page there would: its host in `hosts`.
 
+A page may show and download a `blob:` URL it made (`URL.createObjectURL`, a `<a download>` link): a blob URL
+embeds the origin of the document that made it, so it is allowed when that origin is a host in `hosts`, and a
+blob of a host the page may not show — or an opaque one (`blob:null/…`) — is not. Every platform checks this
+the same way.
+
 `input` is separate from `hosts` because trusted input carries user activation, which `injectJavaScript` never gets:
 the page may then open windows, write the clipboard, open the system's file panel, start WebAuthn or permission prompts
 and press any button that checks `isTrusted`. Without it the core drops `sendInput` and logs which key to add.

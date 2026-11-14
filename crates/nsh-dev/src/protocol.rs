@@ -29,6 +29,15 @@ pub const WS_PATH: &str = "/ws";
 /// Default dev-server port.
 pub const DEFAULT_PORT: u16 = 8790;
 
+/// A build a host runs ([`ClientMessage::Hello`]).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunningBuild {
+    /// The server run it came from ([`ServerMessage::Hello`]).
+    pub session: u64,
+    /// Its build number.
+    pub version: u64,
+}
+
 /// Messages from a dev host to the server.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -56,6 +65,13 @@ pub enum ClientMessage {
         /// The host takes test steps ([`ServerMessage::Step`]).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         tests: bool,
+        /// The build the host's app runs, when it reconnects: a server of
+        /// the same run sends the hot updates it missed
+        /// ([`ServerMessage::Patch`]) before the latest bundle, so the app
+        /// keeps its state. `None`: a first connection, or a host that does
+        /// not say.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        running: Option<RunningBuild>,
     },
     /// The outcome of the [`ServerMessage::Step`] with this id.
     StepDone {
