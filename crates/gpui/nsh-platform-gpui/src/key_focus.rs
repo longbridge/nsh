@@ -49,6 +49,14 @@ pub(crate) fn focused(surface: &Surface) -> Option<NshView> {
     FOCUSED.with_borrow(|f| f.get(&surface.key()).cloned())
 }
 
+/// Whether the keyboard focus is on a stop the newest modal covers: a
+/// focus the app left there (a popup closing gave it back to its trigger
+/// as a dialog opened). That stop's own bindings take no keys
+/// ([`nsh_core::keymap::KeyFocus::covered`]).
+pub(crate) fn covered(surface: &Surface) -> bool {
+    focused(surface).is_some_and(|view| !crate::navigation::in_focus_scope(surface, &view))
+}
+
 /// `focus()` on a view that is not an input: it takes the keyboard focus
 /// if it is a stop (a field that had it lets go).
 pub(crate) fn focus(surface: &Rc<Surface>, view: &NshView) {
