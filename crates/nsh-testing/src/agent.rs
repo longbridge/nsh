@@ -1185,11 +1185,11 @@ pub trait Native: Send + Sync {
     /// Holds modifier keys down (`down`) or lets go of them: the presses,
     /// drags and hovers until then carry them. One that cannot refuses it.
     fn hold_keys(&self, keys: &str, down: bool) -> Result<(), String> {
-        let _ = (keys, down);
-        Err(
-            "holding keys (`keyboard.down` / `keyboard.up`) runs headless and on Linux for now"
-                .into(),
-        )
+        let _ = keys;
+        Err(crate::failure::unsupported_here(
+            if down { "keyboard.down" } else { "keyboard.up" },
+            "holding keys runs headless and on Linux for now",
+        ))
     }
     /// Types `text` into the focused input, key by key.
     fn type_text(&self, text: &str);

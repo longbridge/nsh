@@ -49,8 +49,12 @@ pub(crate) trait Driver: Send {
     fn press_key(&mut self, keys: &str) -> Result<(), String>;
     /// Holds (`down`) or lets go of modifier keys for the pointer's steps.
     fn hold_keys(&mut self, keys: &str, down: bool) -> Result<(), String> {
-        let _ = (keys, down);
-        Err("holding keys (`keyboard.down` / `keyboard.up`) runs headless only for now: run the test without `--target`".into())
+        let _ = keys;
+        Err(headless_only(if down {
+            "keyboard.down"
+        } else {
+            "keyboard.up"
+        }))
     }
     fn hover(&mut self, selector: &str) -> Result<(), String>;
     fn right_click(&mut self, selector: &str) -> Result<(), String>;
@@ -540,7 +544,10 @@ fn step_name(step: &TestStep) -> Option<String> {
 
 /// What a test asks of a real platform that only headless runs do.
 pub(crate) fn headless_only(what: &str) -> String {
-    format!("{what} runs headless only for now: run the test without `--target`")
+    crate::failure::unsupported_here(
+        what,
+        "it runs headless only for now; run the test without `--target`",
+    )
 }
 
 fn ms(time: Duration) -> u64 {

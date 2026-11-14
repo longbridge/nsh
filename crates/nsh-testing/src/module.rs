@@ -1890,7 +1890,8 @@ impl Keyboard {
 
     /// Holds modifier keys down (`"mod"`, `"shift"`, `"alt"`, `"ctrl"`,
     /// `"meta"`, joined by `+`) until `up`: the presses, drags and hovers
-    /// meanwhile carry them (a Mod-click, a Shift-drag). Headless and on Linux.
+    /// meanwhile carry them (a Mod-click, a Shift-drag). Headless and on Linux;
+    /// elsewhere it rejects (`ERR_NSH_TEST_UNSUPPORTED`).
     pub async fn down(this: Instance<Self>, keys: String) -> Result<(), JsError> {
         let steps = this.with(|k| k.steps.clone());
         steps.run(move |app| app.hold_keys(&keys, true)).await
