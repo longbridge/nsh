@@ -693,6 +693,41 @@ fn children_beside_a_branch_leave_their_siblings() {
     assert!(remade.is_empty(), "{remade:#?}");
 }
 
+const IF_ELSE_EXPRESSION: &str = r#"
+import { mount, signal, Text, View } from "nsh";
+
+const shown = signal(false);
+const label = signal("first label");
+mount(() => (
+  <View>
+    <Text>
+      <If when={shown()} else={label()}>shown</If>
+    </Text>
+    <Text onPress={() => label.set("second label")}>change</Text>
+  </View>
+));
+"#;
+
+/// `<If>`'s `else` that is an expression, not an element, follows what it
+/// reads, as the same expression among the children does.
+#[test]
+fn an_if_else_expression_follows_its_reads() {
+    let (engine, rx) = start_app(IF_ELSE_EXPRESSION);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(
+        texts(&first).contains(&"first label".to_owned()),
+        "{:?}",
+        texts(&first)
+    );
+    let change = text_id(&first, "change").expect("the change text");
+    engine
+        .control()
+        .dispatch_event(change, EventKind::Press, EventPayload::None);
+    next(&rx, |b| texts(b).iter().any(|t| t == "second label"));
+}
+
 const BRANCH_EXPRESSION: &str = r#"
 import { mount, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
