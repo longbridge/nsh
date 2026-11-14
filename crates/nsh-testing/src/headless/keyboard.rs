@@ -4,8 +4,9 @@
 //! The app's shortcuts (`nsh/keymap`) take it first, as the platforms'
 //! keymaps do: the newest binding of the keystroke that fires where the
 //! focus is reports `onKeyCommand`; Return and Space on a focused control
-//! fire only the focus' own bindings (`KeyOptions::for_focus`), else they
-//! press the control. Then, on Linux (the simulated backend whose raw path
+//! (in the newest modal over its window, if one shows) fire only the
+//! focus' own bindings (`KeyOptions::for_focus`), else they press the
+//! control. Then, on Linux (the simulated backend whose raw path
 //! delivers input), a view that has the keyboard focus hears the press
 //! (its `on_key_down` and its ancestors'), the capture rule of it or of an
 //! enabled view around it deciding whether the platform keeps it
@@ -69,7 +70,8 @@ impl Headless {
     /// The app's shortcuts take the key first (`onKeyCommand`), as the
     /// platforms' keymaps do: those of the focused window and those of no
     /// window, and one that passes the key through lets it go on. Return and
-    /// Space on a focused control fire only the focus' own bindings
+    /// Space on a focused control (in the newest modal over its window, if
+    /// one shows) fire only the focus' own bindings
     /// (`KeyOptions::for_focus`), else they press the control. Then, on
     /// Linux, a view that has the keyboard focus (`focusable(true)`) hears
     /// the press, and so do its ancestors (`on_key_down`); a capture rule of
@@ -114,11 +116,15 @@ impl Headless {
         let editing = self.screen.focused().is_some();
         // The control with the keyboard focus, which Return and Space press
         // (a stop that takes no presses, a `focusable` chart, hears its keys
-        // through the keymap only).
-        let control = self
-            .screen
-            .key_focus()
-            .filter(|&view| !editing && self.screen.hears(view, EventKind::Press));
+        // through the keymap only). Only one in the newest modal over its
+        // window counts, as on macOS: a focus the app left under a dialog
+        // leaves the keys to the bindings (Linux and the web never let it
+        // go there).
+        let control = self.screen.key_focus().filter(|&view| {
+            !editing
+                && self.screen.hears(view, EventKind::Press)
+                && self.screen.in_focus_scope(view)
+        });
         // The window the key is pressed in: the focused one, as the
         // desktops match their bindings.
         let window = self
@@ -427,6 +433,18 @@ impl Headless {
             if back.is_some() || current.is_some() {
                 self.move_focus(back);
             }
+        }
+    }
+
+    /// The keyboard focus on a stack's page that no longer shows (a newer
+    /// page covers it, a back popped it) leaves it, as the platforms hand it
+    /// to the window before they hide or take away the page: the view
+    /// hears its blur and loses its `focus:` state, and with it what the
+    /// focus showed (a tooltip). Nothing gets it instead.
+    pub(super) fn leave_covered_pages(&mut self) {
+        let current = self.screen.focused().or(self.screen.key_focus());
+        if current.is_some_and(|id| self.screen.on_covered_page(id)) {
+            self.move_focus(None);
         }
     }
 
