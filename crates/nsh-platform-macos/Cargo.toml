@@ -89,6 +89,10 @@ libc.workspace = true
 nsh-dev = { workspace = true, features = ["client"], optional = true }
 nsh-testing = { workspace = true, features = ["agent"], optional = true }
 
+[dev-dependencies]
+# Exercise standalone engine replacement through a real development session.
+nsh-dev = { workspace = true, features = ["server"] }
+
 [[test]]
 name = "accessibility"
 harness = false

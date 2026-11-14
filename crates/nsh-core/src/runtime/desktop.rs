@@ -10,7 +10,7 @@ use std::{
 
 use crate::{
     Command, ROOT_ID,
-    desktop::{DesktopCommand, LaunchAtLoginError},
+    desktop::{DesktopCommand, LaunchAtLoginError, QuitRequestOptions},
     element::{
         CallCx, Callback, JsError, JsHost, JsIn, JsObject, JsOwned, JsValue, Local, ModuleCx,
         PropEnum, PropError, Ret, Stop, System, TsTypes, codes, io_code, module,
@@ -60,6 +60,30 @@ impl Application {
     /// without a question.
     pub(crate) fn quit(cx: &mut ModuleCx) {
         desktop(cx, DesktopCommand::Quit);
+    }
+
+    /// Sets the additional sources of `quitRequest` on standalone macOS
+    /// apps. `system` includes logout, restart and shutdown;
+    /// `mainWindowClose` includes a user closing the main window when that
+    /// would end the app. Both default to false, and each call replaces
+    /// them. A window with `closeOnPress: false` keeps its own close
+    /// handler; a window kept alive on close still hides. Requires a
+    /// `quitRequest` listener. Changing the options cancels a pending
+    /// request. Replacing the app cancels its request and restores the
+    /// default options. Other platforms and embedded views ignore it.
+    pub(crate) fn set_quit_request_options(options: QuitRequestOptions, cx: &mut ModuleCx) {
+        desktop(cx, DesktopCommand::SetQuitRequestOptions(options));
+    }
+
+    /// Cancels the pending quit request on standalone macOS apps,
+    /// including an intercepted logout or shutdown. Call `quit()` to
+    /// approve instead. Repeated requests share the pending confirmation
+    /// until answered. An unanswered system request is cancelled after
+    /// 110 seconds, before AppKit's logout timeout. Removing the last
+    /// listener also cancels it. Does nothing without a pending request
+    /// or on other platforms.
+    pub(crate) fn cancel_quit_request(cx: &mut ModuleCx) {
+        desktop(cx, DesktopCommand::CancelQuitRequest);
     }
 
     /// Restarts the app: it quits as `quit` does, and once the app has
@@ -126,8 +150,11 @@ impl Application {
     /// `applicationShouldTerminate:`. While anything listens, these no
     /// longer quit: the app decides (it asks the user, saves, waits for work
     /// to finish), then calls `quit()`. The system ending the app (logging
-    /// out, shutting down) never asks. Standalone apps on macOS, Windows and
-    /// Linux; on the web, the user leaving the page (closing its tab,
+    /// out, shutting down) does not ask by default. On macOS,
+    /// `setQuitRequestOptions` includes system requests and main-window
+    /// closes; answer with `quit()` or `cancelQuitRequest()`.
+    /// Standalone apps on macOS, Windows and Linux; on the web, the user
+    /// leaving the page (closing its tab,
     /// reloading) is the request: a `quit()` the listener calls at once lets
     /// the page go without a question, otherwise the browser asks the user
     /// whether to leave; `quit` listeners run once the page is gone.

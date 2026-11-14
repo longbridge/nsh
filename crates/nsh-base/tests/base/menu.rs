@@ -780,6 +780,7 @@ fn hold_row(app: &mut App, pointer_type: nsh_core::PointerType) {
                 changed: true,
                 pointer_type,
             }],
+            modifiers: Default::default(),
             activated: None,
         }))
     };

@@ -506,14 +506,20 @@ impl CoreTextEngine {
         let string =
             CFMutableAttributedString::new(None, 0).expect("CFAttributedStringCreateMutable");
         let s = Some(&*string);
-        // SAFETY: valid mutable string and range.
-        unsafe {
-            CFMutableAttributedString::replace_string(
-                s,
-                WHOLE,
-                Some(&CFString::from_str(&text.text)),
-            )
+        // CFString's UTF-8 decoder consumes a leading BOM, even when the
+        // input is not an external representation. Keep it as a character:
+        // the spans and attachments count it in their UTF-16 offsets.
+        let content = if text.text.starts_with('\u{feff}') {
+            let utf16: Vec<u16> = text.text.encode_utf16().collect();
+            // SAFETY: a live buffer of exactly `utf16.len()` UTF-16 units;
+            // CFStringCreateWithCharacters copies it.
+            unsafe { CFString::with_characters(None, utf16.as_ptr(), utf16.len() as CFIndex) }
+                .expect("CFStringCreateWithCharacters")
+        } else {
+            CFString::from_str(&text.text)
         };
+        // SAFETY: valid mutable string and range.
+        unsafe { CFMutableAttributedString::replace_string(s, WHOLE, Some(&content)) };
         let length = text.spans.last().map_or(0, |span| span.end as CFIndex);
         CFMutableAttributedString::begin_editing(s);
         let set = |range: CFRange, key: &CFString, value: &CFType| {
@@ -3000,6 +3006,49 @@ mod tests {
     use nsh_core::{AttributedText, Points, ResolvedTextStyle, Size, TextEngine, VerticalAlign};
 
     use super::CoreTextEngine;
+
+    #[test]
+    fn measurement_preserves_a_leading_bom() {
+        let engine = CoreTextEngine::default();
+        for content in [
+            "",
+            "Hello",
+            "\u{feff}",
+            "\u{feff}Hello",
+            "\u{feff}中文 👩‍💻",
+            "\u{feff}\u{feff}text",
+        ] {
+            let mut text = AttributedText::default();
+            text.push(content, ResolvedTextStyle::default());
+            text.push(
+                " tail",
+                ResolvedTextStyle {
+                    font_weight: 700,
+                    ..Default::default()
+                },
+            );
+            text.push_attachment(
+                Size::new(Points(12.0), Points(10.0)),
+                ResolvedTextStyle::default(),
+            );
+            let string = engine.attributed_string(&text, &Default::default());
+            assert_eq!(
+                super::CFAttributedString::length(&string) as usize,
+                text.text.encode_utf16().count()
+            );
+            assert_eq!(
+                super::CFAttributedString::string(&string)
+                    .unwrap()
+                    .to_string(),
+                text.text
+            );
+            let prepared = engine.prepare(&text);
+            let size = engine.measure(&prepared, Some(Points(320.0)));
+            assert!(size.width.0.is_finite() && size.height.0 > 0.0);
+            let layout = engine.layout(&prepared, size);
+            assert!(!engine.lines(&layout).is_empty());
+        }
+    }
 
     /// A `fontFamily` list sets text in the first family the Mac has, the
     /// others it has its fallbacks for characters the first lacks; a list

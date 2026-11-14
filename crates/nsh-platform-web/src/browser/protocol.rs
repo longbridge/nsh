@@ -859,8 +859,8 @@ fn decode_animation(r: &mut Reader<'_, '_>) -> compat::Result<AnimationOp> {
         ANIMATION_DIFF_CLAMP => AnimationOp::CreateDiffClamp {
             node,
             input: r.int()? as nsh_core::animation::NodeId,
-            min: r.number()?,
-            max: r.number()?,
+            min: r.operand()?,
+            max: r.operand()?,
             snap: r.value()?.as_bool().unwrap_or(false),
         },
         ANIMATION_START_COMPOSITE => {

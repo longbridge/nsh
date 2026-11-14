@@ -244,6 +244,10 @@ function Pad() {
 Linux 桌面模式的无界面驱动也会执行这一 Rust API；Rust UI 集可以向 TSX 暴露应用专用组件及事件。
 不同输入源的能力不同：只报告击键的旧式终端不会产生释放、重复或物理键码；支持 kitty 键盘协议的终端会为以转义序列
 发送的按键报告释放与自动重复，同样没有物理键码（`code` 为 `""`），GPUI 的逻辑事件也没有。
+Android 根据硬件键盘实际输入的字符（没有字符时用键码的 DOM 名称）报告 `key`，只有拿到真实扫描码时才报告 `code`，所以
+合成事件（`adb shell input keyevent`）的 `code` 为 `""`。系统键（Back、Home、音量、媒体、相机、通话）即使设置
+`captureKeys="all"` 也不会被捕获，但仍会到达监听函数。`focusable` 视图可获得硬件键盘焦点；Tab 和 Shift+Tab 在停靠点之间
+移动，在第一个和最后一个停靠点交给嵌入它的 Android 宿主。
 各平台输入源报告的字段见 `docs/dev/tooling.md` 及各平台的开发文档。
 
 iOS 上，硬件键盘以 `UIKey.characters` 作为 `key`（保留大小写与布局），并把 `UIKey.keyCode` 的 USB HID 用途码映射为 DOM 的 `code`。

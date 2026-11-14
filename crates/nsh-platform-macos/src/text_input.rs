@@ -15,6 +15,12 @@
 //! configured line height, its extra space split above and below the text
 //! ([`LineBox`]), as the caret is as tall as a line fragment.
 //!
+//! A scaled or translated ancestor requires hosting the pad above its
+//! layer transform so AppKit's geometry matches the drawn editor. Rounded
+//! clips from intervening ancestors are copied into the pad's coordinates
+//! for drawing and picking. Placement and clips follow scrolling and zoom
+//! without ending the edit ([`sync`]).
+//!
 //! The fields are subclasses ([`define_field!`]) only to hear what AppKit
 //! tells a field's delegate's delegate: AppKit edits a field with the
 //! window's shared field editor, whose delegate is the field, so the
@@ -75,11 +81,13 @@ use objc2_app_kit::{
     NSTextInputClient, NSTextStorage, NSTextView, NSTextViewDelegate, NSValidatedUserInterfaceItem,
     NSView, NSWritingDirection,
 };
-use objc2_core_foundation::{CGFloat, CGSize};
+use objc2_core_foundation::{CGAffineTransform, CGFloat, CGPoint, CGRect, CGSize};
+use objc2_core_graphics::CGPath;
 use objc2_foundation::{
     NSArray, NSAttributedString, NSDictionary, NSNotification, NSObject, NSObjectProtocol, NSPoint,
     NSRange, NSRect, NSString, NSUndoManager,
 };
+use objc2_quartz_core::{CALayer, CAShapeLayer};
 
 use crate::{
     surface::Surface,
@@ -305,6 +313,8 @@ pub(crate) struct InputState {
     /// show an AppKit view where it is ([`lifted`]); `None` while it is
     /// hosted on the input's own view.
     lift: RefCell<Option<Lift>>,
+    /// Clips copied from the ancestors the lifted pad left behind.
+    clips: RefCell<Vec<PadClip>>,
     /// User edits reported to the engine.
     count: Cell<u32>,
     /// A change made here, not by the user, is being applied.
@@ -1922,6 +1932,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
             configured: Cell::new(false),
             content: Cell::new(None),
             lift: RefCell::new(None),
+            clips: RefCell::new(Vec::new()),
             count: Cell::new(0),
             applying: Cell::new(false),
             clipping: Cell::new(false),
@@ -2649,6 +2660,15 @@ struct Lifted {
     rect: Bounds<Points>,
     /// The opacity the views it left give it.
     alpha: f32,
+    clips: Vec<PadClip>,
+}
+
+/// One ancestor's rounded clip, mapped into the pad's natural space.
+#[derive(PartialEq)]
+struct PadClip {
+    size: Size<Points>,
+    radii: nsh_core::CornerRadii,
+    transform: CGAffineTransform,
 }
 
 /// The pad's host and frame while the transforms around the input make
@@ -2666,18 +2686,12 @@ struct Lifted {
 /// scale it shows at, the field editor and the caret follow, and presses
 /// land where they show. Siblings stacked over that view stay over the pad.
 fn lifted(view: &NshView, host: NshView, anchor: NshView) -> Option<Lifted> {
-    // A view that clips between the input and the host would clip the pad
-    // there; above it the pad would draw outside the clip. The input's own
-    // view is not counted: the pad fills it.
     let mut alpha = 1.0;
     let mut at = Some(view.clone());
     loop {
         let v = at?;
         if v == host {
             break;
-        }
-        if v != *view && v.state().clips() {
-            return None;
         }
         // Picking a pad above the input would skip what gates it where it
         // was: `pointerEvents: none`, `visibility: hidden`, an animating-out
@@ -2687,11 +2701,6 @@ fn lifted(view: &NshView, host: NshView, anchor: NshView) -> Option<Lifted> {
         }
         alpha *= v.state().opacity();
         at = v.parent_view();
-    }
-    // A host that clips its children in a container would not clip the pad,
-    // which is a subview of the host itself.
-    if host.container_view().is_some() && host.state().clips() {
-        return None;
     }
     // Where it draws, from the frames, transforms and scroll offsets
     // between it and the host, animated ones included.
@@ -2721,6 +2730,39 @@ fn lifted(view: &NshView, host: NshView, anchor: NshView) -> Option<Lifted> {
     if !(sx > 0.0 && sy > 0.0) || !sx.is_finite() || !sy.is_finite() {
         return None;
     }
+    // The relocated pad no longer inherits these masks. Carry each rounded
+    // viewport into its natural coordinates; nested masks intersect without
+    // flattening rounded corners to a bounding rectangle. The host's own
+    // clip still applies because the pad lives in its container.
+    let mut clips = Vec::new();
+    let mut at = view.parent_view();
+    while let Some(v) = at {
+        if v == host {
+            break;
+        }
+        let s = v.state();
+        if s.clips() {
+            let c = map_of(&v, &host)?;
+            if c[0][2].abs() > 1e-6 || c[1][2].abs() > 1e-6 || c[2][2].abs() < 1e-9 {
+                return None;
+            }
+            let cw = c[2][2];
+            clips.push(PadClip {
+                size: s.frame.size,
+                radii: s.style.radii().fit(s.frame.size),
+                transform: CGAffineTransform {
+                    a: c[0][0] / cw / sx,
+                    b: c[0][1] / cw / sy,
+                    c: c[1][0] / cw / sx,
+                    d: c[1][1] / cw / sy,
+                    tx: (c[2][0] / cw - x) / sx,
+                    ty: (c[2][1] / cw - y) / sy,
+                },
+            });
+        }
+        drop(s);
+        at = v.parent_view();
+    }
     Some(Lifted {
         host,
         anchor,
@@ -2729,7 +2771,57 @@ fn lifted(view: &NshView, host: NshView, anchor: NshView) -> Option<Lifted> {
             size: Size::new(px((sx * w) as f32), px((sy * h) as f32)),
         },
         alpha,
+        clips,
     })
+}
+
+/// Rebuilds masks only when clipping geometry changes, not on idle frames.
+fn clip_pad(input: &InputState, clips: Vec<PadClip>) {
+    if *input.clips.borrow() == clips {
+        return;
+    }
+    input.pad.setWantsLayer(true);
+    let layer = input.pad.layer().expect("a layer-backed input pad");
+    let mut mask: Option<Retained<CALayer>> = None;
+    for clip in &clips {
+        let path = crate::decor::rounded(
+            CGRect::new(
+                CGPoint::ZERO,
+                CGSize::new(clip.size.width.0 as f64, clip.size.height.0 as f64),
+            ),
+            clip.radii,
+        );
+        // SAFETY: the path and affine transform live through the copy.
+        let path = unsafe { CGPath::new_copy_by_transforming_path(Some(&path), &clip.transform) };
+        let shape = CAShapeLayer::new();
+        shape.setPath(path.as_deref());
+        // SAFETY: fresh layers, retained by their mask owner, without a superlayer.
+        unsafe { shape.setMask(mask.as_deref()) };
+        mask = Some(Retained::into_super(shape));
+    }
+    // SAFETY: mask layers belong only to this pad.
+    unsafe { layer.setMask(mask.as_deref()) };
+    *input.clips.borrow_mut() = clips;
+}
+
+/// A lifted pad's copied clips also gate picking; Core Animation masks do
+/// not participate in AppKit hit testing.
+pub(crate) fn pad_contains(view: &NSView, point: NSPoint) -> bool {
+    if view.downcast_ref::<InputPad>().is_none() {
+        return true;
+    }
+    let mut mask = view.layer().and_then(|l| l.mask());
+    while let Some(layer) = mask {
+        if let Some(shape) = layer.downcast_ref::<CAShapeLayer>() {
+            let path = shape.path();
+            // SAFETY: a retained path and no additional transform.
+            if !unsafe { CGPath::contains_point(path.as_deref(), std::ptr::null(), point, false) } {
+                return false;
+            }
+        }
+        mask = layer.mask();
+    }
+    true
 }
 
 /// The 2D transform from `view`'s content space to `host`'s: frames,
@@ -2787,7 +2879,17 @@ fn map_of(view: &NshView, host: &NshView) -> Option<[[f64; 3]; 3]> {
 /// around it ([`lifted`]). Moving it between superviews keeps the focus
 /// and the selection: a camera that starts or stops transforming must not
 /// end the edit.
-fn place_pad(view: &NshView, input: &InputState, bounds: Bounds<Points>, target: Option<Lifted>) {
+fn place_pad(
+    view: &NshView,
+    input: &InputState,
+    bounds: Bounds<Points>,
+    mut target: Option<Lifted>,
+) {
+    let clips = target
+        .as_mut()
+        .map(|l| std::mem::take(&mut l.clips))
+        .unwrap_or_default();
+    clip_pad(input, clips);
     // The pad's bounds are the input view's space, so its editor and
     // placeholder stay at the core's content box whatever the transforms
     // above show.

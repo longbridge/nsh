@@ -11,7 +11,11 @@
 //! through context, so the app arranges them freely (groups, labels,
 //! conditions). An item with `checked` is checkable (a setting, or one
 //! choice of a group by its `role`): the value is the app's, its indicator
-//! a part that takes the item's state.
+//! a part that takes the item's state. A submenu keeps its own state, one
+//! open per level, or with `open` asks the app, which owns it: a submenu
+//! the app makes again (its row among items made from changing data)
+//! opens as the app has it, and takes the keyboard focus back to where it
+//! was in the one it replaces.
 //!
 //! Each level's items are in a scroll view inside its popup, which is held
 //! to the room its overlay is told on its side (`onPosition`'s
@@ -62,7 +66,8 @@ struct MenuContext {
     path: Signal<Vec<u32>>,
     /// The submenu the items under this context are in (0: the menu).
     level: u32,
-    /// Desktops: the submenu of this level that is open.
+    /// Desktops: the submenu of this level that is open, of the ones that
+    /// keep their own state.
     open_sub: Signal<Option<u32>>,
     /// Desktops: this level's popup is open (the menu's, or the
     /// submenu's while every level around it is), which its submenus'
@@ -83,6 +88,109 @@ struct MenuContext {
     leave: Option<Rc<dyn Fn()>>,
     /// Why its submenus open or close, as the user asked.
     why: Why,
+    /// The menu's controlled submenus, whose openings and closings the
+    /// user asks of the app.
+    asks: Asks,
+    /// Desktops: where the keyboard focus was in an open submenu that went
+    /// while the level it is in stayed open (made again with its row): that
+    /// level and the item's place, which the submenu made in its place,
+    /// open, focuses.
+    regain: Signal<Option<(u32, usize)>>,
+    /// Desktops: the submenu whose items have the keyboard focus and the
+    /// focused item's place among them, kept by the menu: a submenu's own
+    /// state goes with it, before it could tell.
+    focus_place: Stored<Option<(u32, usize)>>,
+}
+
+impl MenuContext {
+    /// Its level, as its items and submenus close the others.
+    fn this_level(&self) -> Level {
+        Level {
+            level: self.level,
+            open_sub: self.open_sub,
+            why: self.why,
+            asks: self.asks,
+        }
+    }
+}
+
+/// A controlled submenu's request to the app: to be open or closed, with
+/// why.
+type Ask = Rc<dyn Fn(bool, OpenChangeReason)>;
+
+/// A submenu, which asks the app for what the user wants of it while it is
+/// controlled.
+#[derive(Clone)]
+struct Controlled {
+    id: u32,
+    /// The level it is in.
+    level: u32,
+    /// The app's value, when the app controls it.
+    controlled: Prop<Option<bool>>,
+    /// Open as asked (and every level around it is).
+    open: Memo<bool>,
+    ask: Ask,
+}
+
+impl Controlled {
+    fn is_controlled(&self) -> bool {
+        self.controlled.get_untracked().is_some()
+    }
+}
+
+/// A menu's submenus, for the requests of the controlled ones.
+#[derive(Clone, Copy)]
+struct Asks(Stored<Vec<Controlled>>);
+
+impl Asks {
+    fn new() -> Self {
+        Self(stored(Vec::new()))
+    }
+
+    /// Adds one, removed when it goes.
+    fn add(self, controlled: Controlled) {
+        let id = controlled.id;
+        self.0.with(|c| c.push(controlled));
+        let all = self.0;
+        // The menu's own state may go before a submenu inside it.
+        cleanup(move || {
+            all.try_with(|c| c.retain(|c| c.id != id));
+        });
+    }
+
+    /// Submenu `id`'s request, while it is controlled.
+    fn of(self, id: u32) -> Option<Ask> {
+        self.0.with(|c| {
+            c.iter()
+                .find(|c| c.id == id && c.is_controlled())
+                .map(|c| c.ask.clone())
+        })
+    }
+
+    /// The requests of the controlled submenus open in `level` but `keep`.
+    fn open_in(self, level: u32, keep: Option<u32>) -> Vec<Ask> {
+        self.0.with(|c| {
+            c.iter()
+                .filter(|c| {
+                    c.level == level
+                        && Some(c.id) != keep
+                        && c.is_controlled()
+                        && c.open.get_untracked()
+                })
+                .map(|c| c.ask.clone())
+                .collect()
+        })
+    }
+}
+
+/// A level of a menu: the submenu open in it that keeps its own state, and
+/// the menu's controlled ones.
+#[derive(Clone, Copy)]
+struct Level {
+    level: u32,
+    open_sub: Signal<Option<u32>>,
+    why: Why,
+    asks: Asks,
 }
 
 /// Why a menu's submenus last opened or closed as the user asked: each
@@ -100,6 +208,9 @@ struct MenuContext {
 #[derive(Clone, Copy)]
 struct Why {
     stamp: Stored<(u64, OpenChangeReason)>,
+    /// The last stamp that is the app's own change of a controlled
+    /// submenu, no request: what it opens or closes is not reported.
+    quiet: Stored<u64>,
     /// Each submenu's report of a change not reported yet, by id, in the
     /// order they were made (a submenu after the ones around it).
     reports: Stored<Vec<(u32, Report)>>,
@@ -113,6 +224,7 @@ impl Why {
     fn new() -> Self {
         Self {
             stamp: stored((0, OpenChangeReason::TriggerPress)),
+            quiet: stored(0),
             reports: stored(Vec::new()),
         }
     }
@@ -123,6 +235,21 @@ impl Why {
             *stamp += 1;
             *why = reason;
         });
+    }
+
+    /// The app changed a controlled submenu's value itself: what that opens
+    /// or closes is no request.
+    fn app_change(self) {
+        let stamp = self.stamp.with(|(stamp, _)| {
+            *stamp += 1;
+            *stamp
+        });
+        self.quiet.replace(stamp);
+    }
+
+    /// Whether `stamp` is a request of the user's.
+    fn asked(self, stamp: u64) -> bool {
+        self.quiet.get() != stamp
     }
 
     fn get(self) -> (u64, OpenChangeReason) {
@@ -158,12 +285,15 @@ impl Why {
 /// Which item an opening from the keyboard focuses, as WAI-ARIA's menu
 /// button and `gpui-base`'s menus do: the first enabled one (Return,
 /// Space, Down on the trigger) or the last (Up); for a submenu opened from
-/// its trigger (Right, Return, Space), the first enabled one of its items.
+/// its trigger (Right, Return, Space), the first enabled one of its items;
+/// for a submenu made again open, the item at the place the focus was in
+/// the one it replaces (the next enabled one from there).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Keyed {
     First,
     Last,
     Submenu(u32),
+    At(u32, usize),
 }
 
 /// What a submenu trigger's keys do while it has the keyboard focus.
@@ -616,12 +746,13 @@ impl Items {
     /// not call its change handler).
     fn focus_pending(&self) {
         if let Some(how) = self.keyed.get() {
-            let (level, dir) = match how {
-                Keyed::First => (0, Dir::Forward),
-                Keyed::Last => (0, Dir::Backward),
-                Keyed::Submenu(level) => (level, Dir::Forward),
+            let (level, start, dir) = match how {
+                Keyed::First => (0, Start::Outside, Dir::Forward),
+                Keyed::Last => (0, Start::Outside, Dir::Backward),
+                Keyed::Submenu(level) => (level, Start::Outside, Dir::Forward),
+                Keyed::At(level, place) => (level, Start::On(place), Dir::Forward),
             };
-            if self.walk_from(level, Start::Outside, dir, usize::MAX) {
+            if self.walk_from(level, start, dir, usize::MAX) {
                 self.keyed.replace(None);
             }
         }
@@ -867,8 +998,14 @@ impl Items {
     /// Focuses the first enabled item of submenu `level` once its items
     /// are there (now, when they already are).
     fn focus_first(&self, level: u32) {
+        self.focus_keyed(Keyed::Submenu(level));
+    }
+
+    /// Focuses what `how` names once its items are there (now, when they
+    /// already are).
+    fn focus_keyed(&self, how: Keyed) {
         self.pending.replace(None);
-        self.keyed.replace(Some(Keyed::Submenu(level)));
+        self.keyed.replace(Some(how));
         self.order.invalidate();
         self.focus_pending();
     }
@@ -1174,21 +1311,19 @@ impl MenuContext {
     }
 }
 
-/// Closes the submenu of a level that is open unless it is `keep` (the
+/// Closes the submenus of a level that are open unless one is `keep` (the
 /// submenu whose trigger the pointer or the keyboard focus came to): the
 /// pointer over another item of the level closes it, and so does the
 /// keyboard focus moving to one, as the desktops' menus do, so one item of
-/// the level is highlighted at a time.
-fn close_other_submenu(
-    open_sub: Signal<Option<u32>>,
-    why: Why,
-    keep: Option<u32>,
-    reason: OpenChangeReason,
-) {
-    let open = open_sub.get_untracked();
+/// the level is highlighted at a time. A controlled one is asked to close.
+fn close_other_submenu(level: Level, keep: Option<u32>, reason: OpenChangeReason) {
+    let open = level.open_sub.get_untracked();
     if open.is_some() && open != keep {
-        why.stamp(reason);
-        open_sub.set(None);
+        level.why.stamp(reason);
+        level.open_sub.set(None);
+    }
+    for ask in level.asks.open_in(level.level, keep) {
+        ask(false, reason);
     }
 }
 
@@ -1295,6 +1430,17 @@ fn surface(
     if !sheet {
         items.bind_entry_keys(move || presence.mounted() && open.get());
     }
+    let (asks, regain) = (Asks::new(), signal(None::<(u32, usize)>));
+    // A place to regain is only for the submenu made in place of the one it
+    // was in: the focus anywhere else drops it.
+    {
+        let focused = items.focused;
+        effect(move || {
+            if focused.get().is_some() {
+                untracked(|| regain.set(None));
+            }
+        });
+    }
     provide_context(MenuContext {
         close,
         sheet,
@@ -1308,6 +1454,9 @@ fn surface(
         items: items.clone(),
         leave: None,
         why,
+        asks,
+        regain,
+        focus_place: stored(None),
     });
     // An attempt to close it: reported, then it closes (none while it
     // goes).
@@ -1321,18 +1470,21 @@ fn surface(
             change(false, reason);
         })
     };
-    // Escape and back leave the innermost submenu of a sheet first.
+    // Escape and back leave the innermost submenu of a sheet first (a
+    // controlled one asks the app).
     let cancel = {
         let dismiss = dismiss.clone();
-        move || {
-            if !path.with_untracked(|p| p.is_empty()) {
-                why.stamp(OpenChangeReason::Cancel);
-                path.update(|p| {
-                    p.pop();
-                });
-            } else {
-                dismiss(OpenChangeReason::Cancel);
-            }
+        move || match path.with_untracked(|p| p.last().copied()) {
+            Some(inner) => match asks.of(inner) {
+                Some(ask) => ask(false, OpenChangeReason::Cancel),
+                None => {
+                    why.stamp(OpenChangeReason::Cancel);
+                    path.update(|p| {
+                        p.pop();
+                    });
+                }
+            },
+            None => dismiss(OpenChangeReason::Cancel),
         }
     };
     // A sheet comes in and goes with its motion; a popup with the app's
@@ -2083,7 +2235,7 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
             // The keyboard on another item of its level closes a submenu
             // of the level the pointer opened.
             if let Some(m) = &moved {
-                close_other_submenu(m.open_sub, m.why, None, OpenChangeReason::Focus);
+                close_other_submenu(m.this_level(), None, OpenChangeReason::Focus);
             }
         })
         .on_blur(move || focused.set(false))
@@ -2094,7 +2246,7 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
         // Over another item, a submenu of its level closes.
         .on_mouse_enter(move |_: &MouseEvent| {
             if let Some(m) = &hover {
-                close_other_submenu(m.open_sub, m.why, None, OpenChangeReason::Hover);
+                close_other_submenu(m.this_level(), None, OpenChangeReason::Hover);
             }
         })
         .when_some(moved_over, |v, (items, key)| {
@@ -2238,6 +2390,13 @@ pub fn MenuList(props: MenuListProps, cx: Scope<NoEvent>) -> impl IntoElement {
 /// The props of [`Submenu`].
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct SubmenuProps {
+    /// Open (controlled): the app owns the value and changes it in
+    /// `onOpenChange`, which asks for each opening and closing the user
+    /// wants. A submenu made again (its row among items the app makes
+    /// again) opens as the app has it, with the keyboard focus back on
+    /// its items when it was in the one it replaces. Without it the
+    /// submenu keeps its own state, which starts closed.
+    pub open: Prop<Option<bool>>,
     /// It does not open.
     #[prop(default)]
     pub disabled: Prop<bool>,
@@ -2264,7 +2423,8 @@ pub enum SubmenuEvent {
     /// Escape, back or its `back` row (`"cancel"`); the whole menu closing
     /// (the menu's reason: `"select"`, `"pressOutside"`, ...). Its items
     /// are made as it opens, so an app can load them here the first time.
-    /// Not when the app closes the menu itself.
+    /// Not when the app closes the menu itself, nor when it changes `open`
+    /// itself. With `open` set it asks: set `open` to follow it.
     #[args(open, reason)]
     OpenChange(bool, OpenChangeReason),
 }
@@ -2281,7 +2441,9 @@ pub enum SubmenuEvent {
 /// focused trigger open it with the keyboard focus on its first enabled
 /// item; Left on one of its items, or Escape, closes it with the focus
 /// back on its trigger, as WAI-ARIA's menus do. `onOpenChange` reports its
-/// openings and closings, as `Menu`'s reports the menu's.
+/// openings and closings, as `Menu`'s reports the menu's, and with `open`
+/// the app owns them, as `Menu`'s `open` does: a menu whose items the app
+/// makes again keeps the submenu the user is in open.
 #[component]
 pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement {
     let Some(menu) = use_context::<MenuContext>() else {
@@ -2293,76 +2455,171 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
         *n
     });
     let (path, open_sub, around, why) = (menu.path, menu.open_sub, menu.open, menu.why);
-    // Open while chosen at its level and every level around it is open:
-    // closing the menu closes it, no state written.
-    let sub_open = computed(move || around.get() && open_sub.get() == Some(id));
+    let (controlled, sheet, level) = (props.open, menu.sheet, menu.level);
+    // Desktops: a controlled one whose trigger the menu's items scrolled
+    // out of view: open still, its popup hidden until the trigger is back.
+    let away = signal(false);
+    // Open as asked: while chosen at its level (the app's value, when it
+    // controls it) and every level around it is open: closing the menu
+    // closes it, no state written.
+    let wanted = computed(move || {
+        around.get()
+            && match controlled.get() {
+                Some(open) => open,
+                None => open_sub.get() == Some(id),
+            }
+    });
+    let sub_open = computed(move || wanted.get() && !away.get());
     let presence = PopupPresence::new(move || sub_open.get(), menu.looks);
     // A sheet's: while its items are on the path.
-    let open = match menu.sheet {
+    let open = match sheet {
         true => computed(move || around.get() && path.with(|p| p.contains(&id))),
         false => sub_open,
     };
+    // What its reports follow: hidden while scrolled away is no closing.
+    let asked_open = match sheet {
+        true => open,
+        false => wanted,
+    };
     // Each change the user asked for, once; an opening after the closings
     // of the others.
+    let reported = stored(why.get().0);
     {
-        let (was, reported) = (stored(false), stored(why.get().0));
+        let was = stored(false);
         let report = Rc::new(move |closing_only: bool| {
-            let now = open.get_untracked();
+            let now = asked_open.get_untracked();
             if (closing_only && now) || was.get() == now {
                 return;
             }
             was.replace(now);
             let (stamp, reason) = why.get();
-            if reported.replace(stamp) != stamp {
+            // A controlled one asked as the user did ([`Ask`]): what it
+            // does while the levels around it stay open is the app's.
+            let the_apps = controlled.get_untracked().is_some() && around.get_untracked();
+            if reported.replace(stamp) != stamp && why.asked(stamp) && !the_apps {
                 cx.emit(SubmenuEvent::OpenChange(now, reason));
             }
         });
         why.add(id, report.clone());
         effect(move || {
-            if open.get() {
+            if asked_open.get() {
                 untracked(|| why.report_closings(id));
             }
             untracked(|| report(false));
         });
     }
+    // Controlled, the user's request goes to the app, once until it
+    // answered.
+    let ask: Ask = {
+        let (owner, asked) = (Owner::current(), stored(None::<bool>));
+        Rc::new(move |next: bool, reason: OpenChangeReason| {
+            if asked.get().unwrap_or_else(|| asked_open.get_untracked()) == next {
+                return;
+            }
+            why.stamp(reason);
+            reported.replace(why.get().0);
+            cx.emit(SubmenuEvent::OpenChange(next, reason));
+            asked.replace(Some(next));
+            owner.run(|| {
+                after_answer(move || {
+                    asked.replace(None);
+                })
+            });
+        })
+    };
+    menu.asks.add(Controlled {
+        id,
+        level,
+        controlled,
+        open: asked_open,
+        ask: ask.clone(),
+    });
+    // The user asks for it open or closed: the app when it controls it,
+    // else its own state.
+    let request: Ask = Rc::new(move |next: bool, reason: OpenChangeReason| {
+        if controlled.get_untracked().is_some() {
+            return ask(next, reason);
+        }
+        if sheet {
+            if path.with_untracked(|p| p.contains(&id)) == next {
+                return;
+            }
+            why.stamp(reason);
+            path.update(|p| match next {
+                true => p.push(id),
+                false => {
+                    if let Some(at) = p.iter().position(|&l| l == id) {
+                        p.truncate(at);
+                    }
+                }
+            });
+        } else if (open_sub.get_untracked() == Some(id)) != next {
+            why.stamp(reason);
+            open_sub.set(next.then_some(id));
+        }
+    });
     let anchor = element_ref();
     // Left on one of its items, or Escape: it closes and the keyboard
     // focus goes back to its trigger, as WAI-ARIA's menus do.
-    let leave: Rc<dyn Fn()> = Rc::new(move || {
-        why.stamp(OpenChangeReason::Cancel);
-        open_sub.set(None);
-        anchor.focus();
-    });
+    let leave: Rc<dyn Fn()> = {
+        let request = request.clone();
+        Rc::new(move || {
+            request(false, OpenChangeReason::Cancel);
+            anchor.focus();
+        })
+    };
     let inner = MenuContext {
         level: id,
         popup: presence.popup(),
         open_sub: signal(None),
         open,
-        leave: (!menu.sheet).then(|| leave.clone()),
+        leave: (!sheet).then(|| leave.clone()),
         ..menu.clone()
     };
     provide_context(inner.clone());
-    if menu.sheet {
+    if sheet {
+        // The app's value is the path's: a submenu it opens shows its
+        // items in place of the ones around it.
+        effect(move || {
+            let Some(want) = controlled.get() else {
+                return;
+            };
+            untracked(|| {
+                if path.with(|p| p.contains(&id)) == want {
+                    return;
+                }
+                why.app_change();
+                path.update(|p| {
+                    if want {
+                        match p.iter().position(|&l| l == level) {
+                            Some(at) => p.truncate(at + 1),
+                            None => p.clear(),
+                        }
+                        p.push(id);
+                    } else if let Some(at) = p.iter().position(|&l| l == id) {
+                        p.truncate(at);
+                    }
+                });
+            });
+        });
         let shown = menu.clone();
-        let into = move || {
-            if !props.disabled.get_untracked() {
-                why.stamp(OpenChangeReason::TriggerPress);
-                path.update(|p| p.push(id));
+        let into = {
+            let request = request.clone();
+            move || {
+                if !props.disabled.get_untracked() {
+                    request(true, OpenChangeReason::TriggerPress);
+                }
             }
         };
-        let back = move || {
-            why.stamp(OpenChangeReason::Cancel);
-            path.update(|p| {
-                p.pop();
-            });
-        };
+        let back = move || request(false, OpenChangeReason::Cancel);
         return view()
             .child(when(
                 move || shown.shown(),
                 move || {
+                    let into = into.clone();
                     props
                         .trigger
-                        .place(move |t| t.role(AccessibilityRole::Menuitem).on_press(into))
+                        .place(move |t| t.role(AccessibilityRole::Menuitem).on_press(into.clone()))
                 },
             ))
             .child(when(
@@ -2370,10 +2627,14 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
                 // own items in place of these, which hide themselves.
                 move || path.with(|p| p.contains(&id)),
                 move || {
+                    let back = back.clone();
                     vec![
                         when(
                             move || path.with(|p| p.last() == Some(&id)),
-                            move || props.back.place(move |b| b.on_press(back)),
+                            move || {
+                                let back = back.clone();
+                                props.back.place(move |b| b.on_press(back.clone()))
+                            },
                         )
                         .into_element(),
                         props.children.into_element(),
@@ -2382,13 +2643,29 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
             ))
             .into_element();
     }
+    // A controlled one the app opens closes the one of its level that keeps
+    // its own state (the user's openings closed it already).
+    effect(move || {
+        if controlled.get().is_some() && wanted.get() {
+            untracked(|| {
+                if open_sub.get().is_some() {
+                    why.app_change();
+                    open_sub.set(None);
+                }
+            });
+        }
+    });
+    let this_level = menu.this_level();
     let item_key = menu.items.add(anchor, menu.level, props.disabled);
     let edges = menu.popup;
-    let open_by = move |reason: OpenChangeReason| {
-        if !props.disabled.get_untracked() && open_sub.get_untracked() != Some(id) {
-            why.stamp(reason);
-            open_sub.set(Some(id));
-        }
+    let open_by: Rc<dyn Fn(OpenChangeReason)> = {
+        let request = request.clone();
+        Rc::new(move |reason: OpenChangeReason| {
+            if !props.disabled.get_untracked() {
+                close_other_submenu(this_level, Some(id), reason);
+                request(true, reason);
+            }
+        })
     };
     // The trigger's keys while it has the keyboard focus: Right, Return
     // and Space open it with the focus on its first enabled item (it may
@@ -2400,10 +2677,10 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
     // that the pointer opened; its own stays as it is.
     let focus_in = move || {
         focused.set(true);
-        close_other_submenu(open_sub, why, Some(id), OpenChangeReason::Focus);
+        close_other_submenu(this_level, Some(id), OpenChangeReason::Focus);
     };
     {
-        let (items, up) = (menu.items.clone(), menu.leave.clone());
+        let (items, up, open_by) = (menu.items.clone(), menu.leave.clone(), open_by.clone());
         crate::keys::bind_while(
             move || focused.get() && around.get(),
             &[
@@ -2439,10 +2716,66 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
         if inside.replace(false) {
             leave();
         } else {
-            why.stamp(OpenChangeReason::Cancel);
-            open_sub.set(None);
+            request(false, OpenChangeReason::Cancel);
         }
     };
+    // Where the keyboard focus is among its items, and the submenu made in
+    // its place (its row made again by the app) opening where it was.
+    {
+        let (items, regain, focus_place) = (menu.items.clone(), menu.regain, menu.focus_place);
+        {
+            let items = items.clone();
+            effect(move || {
+                let Some(key) = items.focused.get() else {
+                    // The item went (or the focus left the menu): what was
+                    // last kept stays, for the cleanup below.
+                    return;
+                };
+                untracked(|| {
+                    let at = items.walk(id).place_of(key);
+                    focus_place.with(|p| match at {
+                        Some(at) => *p = Some((id, at)),
+                        None if p.is_some_and(|(sub, _)| sub == id) => *p = None,
+                        None => {}
+                    });
+                });
+            });
+        }
+        cleanup(move || {
+            // Gone with the focus in it, while its level stays open.
+            let stays = untracked(|| around.try_get()).unwrap_or(false);
+            let at = focus_place
+                .try_with(|p| match *p {
+                    Some((sub, at)) if sub == id => {
+                        *p = None;
+                        Some(at)
+                    }
+                    _ => None,
+                })
+                .flatten();
+            if let Some(at) = at
+                && stays
+            {
+                regain.try_set(Some((level, at)));
+            }
+        });
+        // Made open by the app: where the one it replaces had the focus.
+        if controlled.get_untracked() == Some(true) {
+            effect(move || {
+                if !sub_open.get() {
+                    return;
+                }
+                if let Some((at_level, at)) = regain.get()
+                    && at_level == level
+                {
+                    untracked(|| {
+                        regain.set(None);
+                        items.focus_keyed(Keyed::At(id, at));
+                    });
+                }
+            });
+        }
+    }
     // The pointer moving over its trigger gives the trigger the keyboard
     // focus, as over any item of its menu.
     let pointed = {
@@ -2457,6 +2790,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
         let items = menu.items.clone();
         Rc::new(move |_: &MouseEvent| items.unpoint(item_key, anchor))
     };
+    let (hovered, pressed) = (open_by.clone(), open_by);
     let trigger = match is_terminal() {
         // The terminal's item: the trigger's content, then ` ›` at the
         // row's end, one item.
@@ -2465,45 +2799,48 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
             .element_ref(&anchor)
             .role(AccessibilityRole::Menuitem)
             .accessibility_state(move || AccessibilityState {
-                expanded: Some(open_sub.get() == Some(id)),
+                expanded: Some(sub_open.get()),
                 has_popup: true,
                 ..AccessibilityState::default()
             })
             .on_focus(focus_in)
             .on_blur(move || focused.set(false))
-            .on_mouse_enter(move |_: &MouseEvent| open_by(OpenChangeReason::Hover))
+            .on_mouse_enter(move |_: &MouseEvent| hovered(OpenChangeReason::Hover))
             .on_mouse_move(move |e: &MouseEvent| pointed(e))
             .on_mouse_leave(move |e: &MouseEvent| unpointed(e))
-            .on_press(move || open_by(OpenChangeReason::TriggerPress))
+            .on_press(move || pressed(OpenChangeReason::TriggerPress))
             .child(props.trigger.place(|t| t.flex_grow(1.0)))
             .child(text(SUBMENU_ARROW).text_color(move || crate::theme::theme().muted_foreground))
             .into_element(),
         false => props.trigger.place(move |t| {
             let (pointed, unpointed) = (pointed.clone(), unpointed.clone());
+            let (hovered, pressed) = (hovered.clone(), pressed.clone());
             t.element_ref(&anchor)
                 .role(AccessibilityRole::Menuitem)
                 .accessibility_state(move || AccessibilityState {
-                    expanded: Some(open_sub.get() == Some(id)),
+                    expanded: Some(sub_open.get()),
                     has_popup: true,
                     ..AccessibilityState::default()
                 })
                 .on_focus(focus_in)
                 .on_blur(move || focused.set(false))
-                .on_mouse_enter(move |_: &MouseEvent| open_by(OpenChangeReason::Hover))
+                .on_mouse_enter(move |_: &MouseEvent| hovered(OpenChangeReason::Hover))
                 .on_mouse_move(move |e: &MouseEvent| pointed(e))
                 .on_mouse_leave(move |e: &MouseEvent| unpointed(e))
-                .on_press(move || open_by(OpenChangeReason::TriggerPress))
+                .on_press(move || pressed(OpenChangeReason::TriggerPress))
         }),
     };
     let items = menu.items.clone();
     // Open, it closes once the menu's items scroll its trigger out of
     // view, as a `MenuList` row's does when the list scrolls the row away:
     // its popup stays beside nothing. Measured as the menu scrolls, only
-    // while it is open.
+    // while it is open. A controlled one stays open, its popup hidden until
+    // the trigger is back.
     {
-        let (items, level) = (items.clone(), menu.level);
+        let items = items.clone();
         effect(move || {
-            if !sub_open.get() {
+            if !wanted.get() {
+                untracked(|| away.set(false));
                 return;
             }
             let Some(scroll) = items.scroll_of(level) else {
@@ -2519,7 +2856,9 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
                 let top = trigger.page.y - port.page.y;
                 let gone = top + trigger.frame.size.height <= Points::ZERO
                     || top >= port.frame.size.height;
-                if gone && open_sub.get_untracked() == Some(id) {
+                if controlled.get_untracked().is_some() {
+                    away.set(gone);
+                } else if gone && open_sub.get_untracked() == Some(id) {
                     open_sub.set(None);
                 }
             });

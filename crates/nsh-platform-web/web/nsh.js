@@ -2294,12 +2294,38 @@ class Player {
     const host = parent._layer ?? parent;
     // Appended children stay under a border drawn over them.
     const last = host._borderOver && host._border?.parentNode === host ? host._border : null;
-    host.insertBefore(child, before && before.parentNode === host ? before : last);
+    this.placeChild(host, child, before && before.parentNode === host ? before : last);
     this.showHosted(child);
     this.readingChanged(host);
     if (parent._kind === "stack") {
       this.changedStacks.add(parent);
       this.stackChanged(parent, child);
+    }
+  }
+
+  /// Puts `child` before `ref` in `host`. A restack (`zIndex` changed)
+  /// re-inserts a view already there; moving the node holding the focus
+  /// would drop it (and fire blur), so its siblings move around it instead.
+  placeChild(host, child, ref) {
+    const active = document.activeElement;
+    if (child.parentNode !== host || !active || active === document.body || !child.contains(active)) {
+      host.insertBefore(child, ref);
+      return;
+    }
+    if (child === ref || child.nextSibling === ref) return;
+    const moved = [];
+    let forward = false;
+    for (let n = child.nextSibling; n; n = n.nextSibling) {
+      if (n === ref) { forward = true; break; }
+    }
+    if (ref === null) forward = true;
+    if (forward) {
+      for (let n = child.nextSibling; n && n !== ref; n = n.nextSibling) moved.push(n);
+      for (const n of moved) host.insertBefore(n, child);
+    } else {
+      for (let n = ref; n && n !== child; n = n.nextSibling) moved.push(n);
+      const anchor = child.nextSibling;
+      for (const n of moved) host.insertBefore(n, anchor);
     }
   }
 
@@ -2532,6 +2558,16 @@ class Player {
   op_a([, id, prop, value]) {
     const el = this.view(id);
     if (!el) return;
+    // A view that left the page keeps its bindings until its node is
+    // collected (`op_d`), which may be long after: a view mounted and
+    // removed again and again (a looping pulse inside a condition) would
+    // have every batch write many views no one sees. One that was on the
+    // page and is off it now is skipped; it is written again with the
+    // batch that inserts it again (every batch writes every bound value,
+    // after its inserts). One never on the page yet is written, so it
+    // shows its values once it is; one animating out is still on it.
+    if (el.isConnected) el._onPage = true;
+    else if (el._onPage) return;
     if (prop.startsWith("canvas:") && el._shader) {
       this.shaderSlot(el, Number(prop.slice(7)), value);
       return;
@@ -2591,10 +2627,12 @@ class Player {
   }
 
   /**
-   * A text whose plain runs are as many as before (a cell's new value, a
-   * counter): its spans take the new texts and places in place, so a text
-   * that changes often makes and removes no nodes. False when the runs
-   * cannot be updated so (backgrounds, links, another count).
+   * A text of plain runs that had plain runs (a cell's new value, a
+   * counter, an answer streamed in): its spans take the new texts and
+   * places in place, and only the runs it gained or lost are made or
+   * removed, so a text that changes often remakes no nodes for the lines
+   * that stayed. False when the runs cannot be updated so (backgrounds,
+   * links, runs of parts).
    */
   updateRuns(el, cx, cy, runs, styles, backgrounds, links) {
     if (backgrounds?.length || links?.length || !runs.length) return false;
@@ -2603,12 +2641,26 @@ class Player {
       if (child.classList.contains("nsh-run-bg")) return false;
       if (child.classList.contains("nsh-run")) spans.push(child);
     }
-    if (spans.length !== runs.length) return false;
+    if (!spans.length) return false;
     for (let i = 0; i < runs.length; i++) {
       const [, , text, , , parts] = runs[i];
+      if (parts || !text) return false;
+      if (i >= spans.length) continue;
       const node = spans[i].firstChild;
       // Only a span holding one text node, as `fillRun` leaves plain text.
-      if (parts || !text || !node || node.nodeType !== 3 || node.nextSibling) return false;
+      if (!node || node.nodeType !== 3 || node.nextSibling) return false;
+    }
+    // The runs it lost go; those it gained follow the last span kept (past
+    // its line's break, which `lineBreaks` keeps).
+    for (const span of spans.splice(runs.length)) span.remove();
+    let before = spans[spans.length - 1]?.nextSibling;
+    if (before?.nodeType === 3) before = before.nextSibling;
+    while (spans.length < runs.length) {
+      const span = document.createElement("span");
+      span.append(document.createTextNode(""));
+      if (el._animation.color) span.style.color = el._animation.color;
+      el.insertBefore(span, before ?? null);
+      spans.push(span);
     }
     runs.forEach(([x, y, text, style, start, , after], i) => {
       const span = spans[i];
@@ -2636,9 +2688,15 @@ class Player {
    * shows of them.
    */
   lineBreaks(el) {
-    for (const node of [...el.childNodes]) if (node.nodeType === 3) node.remove();
+    // A break already in its place stays: a text that changes often (an
+    // answer streamed in) moves no nodes for the lines it did not change.
+    for (const node of [...el.childNodes]) {
+      if (node.nodeType !== 3) continue;
+      const span = node.previousSibling;
+      if (!span?.classList?.contains("nsh-run") || span._after !== node.data) node.remove();
+    }
     for (const span of el.querySelectorAll(":scope > .nsh-run")) {
-      if (span._after) span.after(span._after);
+      if (span._after && span.nextSibling?.nodeType !== 3) span.after(span._after);
     }
   }
 
@@ -8690,6 +8748,7 @@ class Player {
       takes = true;
     } else {
       [el, takes] = this.wheelListenerOf(e.target) ?? [null, false];
+      if (takes && !e.ctrlKey) takes = this.wheelAlong(el, e);
       const lock = this.wheelLock;
       if (takes && lock && now - lock.t <= 200 && lock.el.isConnected) takes = false;
     }
@@ -8706,6 +8765,22 @@ class Player {
       modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
     });
     return takes;
+  }
+
+  /** Whether listener `el` takes wheel `e` along its axis
+   * (`input::wheel_along`): a `panActivation` naming one axis takes only
+   * wheels along it (Ctrl + wheel is checked by the caller); the others
+   * reach the scroll views around it. */
+  wheelAlong(el, e) {
+    const a = el._props?.panActivation;
+    if (!a) return true;
+    const [ax, ay, fx, fy] = a;
+    const x = ax != null || fy != null;
+    const y = ay != null || fx != null;
+    if (x === y) return true;
+    let [dx, dy] = [e.deltaX, e.deltaY];
+    if (e.shiftKey && !dx) [dx, dy] = [dy, 0];
+    return (Math.abs(dx) > Math.abs(dy)) === x;
   }
 
   /** The nearest view around `target` listening to `onWheel`, and whether
@@ -8947,7 +9022,9 @@ class Player {
       });
     }
     if (!points.length) return;
-    const json = JSON.stringify({ phase, time: performance.now(), points, activated });
+    // The keys held when the changed pointer went down, as its press's.
+    const modifiers = this.pointers.get(changedId)?.modifiers;
+    const json = JSON.stringify({ phase, time: performance.now(), points, activated, modifiers });
     this.call(() => this.withStrings([json], (p, l) => this.wasm.nsh_touch(p, l)));
   }
 

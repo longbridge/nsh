@@ -586,6 +586,7 @@ impl Curve {
             }
             LayoutCurve::FittedSpring { damping_ratio } => Curve::Spring(damping_ratio),
             LayoutCurve::Spring(spring) => Curve::Physical(spring),
+            LayoutCurve::Bezier(points) => Curve::Bezier(points),
         }
     }
 
