@@ -97,7 +97,8 @@ pub(crate) struct Host {
     /// The embedding app's channel with the apps (`nsh/host`; Java
     /// `NshView.setParams`, `send`, `handle`).
     host: nsh_engine::HostChannel,
-    /// The app's keyboard shortcuts, matched on the UI thread.
+    /// The app's keyboard shortcuts, and the keys consumed by them or by
+    /// a capture rule, matched on the UI thread.
     pub(crate) keymap: Mutex<crate::keymap::KeymapState>,
     #[cfg(feature = "dev")]
     pub(crate) dev: Mutex<Option<crate::dev::DevSession>>,

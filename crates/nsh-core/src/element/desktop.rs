@@ -950,6 +950,27 @@ pub fn quit() {
     super::desktop_command(DesktopCommand::Quit);
 }
 
+/// Sets which additional requests go to [`on_quit_request`] on standalone
+/// macOS apps (TS: `Application.setQuitRequestOptions`). Both options
+/// default to false; each call replaces them. Without a listener the app
+/// still quits as before. Changing the options cancels a pending request.
+/// Replacing the app cancels its request and restores the default options.
+/// Other platforms and embedded views ignore it.
+pub fn set_quit_request_options(options: desktop::QuitRequestOptions) {
+    super::desktop_command(DesktopCommand::SetQuitRequestOptions(options));
+}
+
+/// Cancels the pending quit request on standalone macOS apps (TS:
+/// `Application.cancelQuitRequest`). For an intercepted system request,
+/// this cancels logout or shutdown too. Call [`quit`] to approve instead.
+/// Repeated requests share the pending confirmation until answered.
+/// System requests left unanswered are cancelled after 110 seconds, before
+/// AppKit's logout timeout. Removing the last listener also cancels them.
+/// Nothing happens without a pending request or on other platforms.
+pub fn cancel_quit_request() {
+    super::desktop_command(DesktopCommand::CancelQuitRequest);
+}
+
 pub use super::quit::QUIT_TIMEOUT;
 
 /// Runs `f` as the app quits, for its cleanup (TS: `Application.on("quit",
@@ -991,9 +1012,11 @@ where
 /// item and the platform's quit key (Command-Q, Ctrl+Q) no longer quit, and
 /// the app decides: it asks the user, saves, or waits for work to finish,
 /// then calls [`quit`]. Without one they quit as before. The system ending
-/// the app (logging out, shutting down) never asks: [`on_app_quit`] runs
-/// then. Standalone apps on macOS, Windows and Linux; a view embedded in
-/// another app leaves the app's lifecycle to that app. On the web, the
+/// the app (logging out, shutting down) runs [`on_app_quit`] without asking
+/// by default. On macOS, [`set_quit_request_options`] can include system
+/// requests and main-window closes; answer with [`quit`] or
+/// [`cancel_quit_request`]. Standalone apps on macOS, Windows and Linux;
+/// a view embedded in another app leaves the app's lifecycle to that app. On the web, the
 /// user leaving the page (closing its tab, reloading) is the request: `f`
 /// runs then, and a [`quit`] it calls at once lets the page go without a
 /// question; otherwise the browser asks the user whether to leave. The

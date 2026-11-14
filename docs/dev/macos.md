@@ -522,6 +522,44 @@ delegate and event loop. This change still needs native close, minimized-close,
 Command-Q, a test's quit, process-exit status and restart validation. No tests
 were run for this change at the user's request.
 
+Apps can opt additional exit sources into their existing quit request listener
+with `Application.setQuitRequestOptions` (Rust: `set_quit_request_options` and
+`desktop::QuitRequestOptions`). Both `system` and `mainWindowClose` default to
+false. `app.rs` keeps one pending confirmation for the standalone runner. A
+system quit returns `NSTerminateLater`; `Application.cancelQuitRequest()` replies
+false and keeps the engine and window alive. `Application.quit()` stops the
+engine, including its bounded quit cleanup and storage writes, then replies true.
+AppKit owns process termination for that approved system request, so hosts put
+cleanup in `on_app_quit` rather than after `run_app`. Unanswered system requests
+are cancelled after 110 seconds, before AppKit's two-minute logout timeout.
+Removing the last listener or changing the options also cancels a pending request.
+`Surface::stop` cancels the outgoing engine's confirmation and restores the
+default policy, so a replacement engine starts with its own quit listener.
+Deferred listener-removal cancellation checks the request serial, so it cannot
+cancel a later confirmation from a replacement listener on the same surface.
+
+For `mainWindowClose`, `window.rs` routes a main-window close to that confirmation
+only when the window's close policy permits closing and it would end the runner.
+A `closeOnPress: false` guard still uses `closePress`; `keep_alive_on_close` still
+hides the window, including while a quit confirmation is pending. The request is
+intercepted before `closePress` is sent, so one close uses one handler.
+Repeated Quit or eligible close requests share the pending
+confirmation. A system quit arriving during it uses the same confirmation and
+adds the AppKit reply. Explicit window closes keep their existing behavior, and
+embedded views leave the lifecycle to their host.
+
+The native test's `quit_requests` cases exercise these paths in child processes.
+Run `NSH_QUIT_CHECK_ONLY=1 cargo test -p nsh-platform-macos --test native --features dev -- --ignored`
+in a desktop session. The system cases send a quit Apple event with `keyAEQuitReason`
+to the child process itself, without ending the user's session. The reload cases
+replace the engine through a local development server, then check that the new
+listener receives Quit and the options have returned to their defaults.
+The listener replacement cases arrange overlapping main-queue callbacks and
+check that repeated closes still share the new confirmation. Add
+`NSH_QUIT_TIMEOUT_CHECK=1` to include the slow timeout case: it checks that a
+close joins the pending request before 110 seconds and a system request can be
+retried after the timeout, with the window still alive.
+
 ### Retained standalone session design
 
 A standalone host chooses its close policy through

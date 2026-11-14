@@ -269,7 +269,12 @@ The Rust API is also exercised by the Linux-desktop headless driver; Rust UI set
 components and events to TSX. Input sources differ: a terminal that reports only strokes (legacy terminals) sends
 no synthetic releases, repeats or codes; a terminal speaking the kitty keyboard protocol reports releases and
 auto-repeats for the keys it sends as escape codes, and still no physical code (`code` is `""`), as GPUI's logical
-events have none either. See `docs/dev/tooling.md` and each platform's development page for what its source reports.
+events have none either. Android reports `key` from the character the hardware keyboard types (else the key code's
+DOM name) and `code` only from a real scan code, so a synthetic `adb shell input keyevent` has `""`. A system key
+(Back, Home, volume, media, camera, call) is never captured, even by `captureKeys="all"`, and still reaches listeners.
+A `focusable` view takes the hardware keyboard's focus; Tab and Shift+Tab move between the stops and go to the
+embedding Android host at the first and last one. See `docs/dev/tooling.md` and each platform's development page
+for what its source reports.
 
 On iOS, a hardware keyboard reports `UIKey.characters` as `key` (its case and layout kept) and maps
 `UIKey.keyCode`'s USB HID usage to the DOM `code`. UIKit sends a held key's press once, so `repeat` is false. A Tab
