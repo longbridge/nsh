@@ -1,7 +1,6 @@
-#![allow(dead_code)] // Prototype: reports only, not wired into packaging yet.
-//! Prototype (#1878): the Cargo features of a native runner that an app
-//! needs, worked out from what its bundle imports ([`web::linked_gates`]).
-//! Not wired into `nsh package` yet: it only reports.
+//! The Cargo features of a native release runner that an app needs,
+//! worked out from what its bundle imports ([`linked_gates`]): `nsh
+//! package` builds an app's own runner with them (#1878).
 
 use crate::web::linked_gates;
 
@@ -26,7 +25,12 @@ const BY_GATE: &[(&str, &[&str])] = &[
     // that renders Markdown or code keeps them.
     (
         "highlight",
-        &["nsh_part_text_view", "nsh_part_editor", "nsh_part_diff", "nsh_part_rich_editor"],
+        &[
+            "nsh_part_text_view",
+            "nsh_part_editor",
+            "nsh_part_diff",
+            "nsh_part_rich_editor",
+        ],
     ),
     ("math", &["nsh_part_text_view", "nsh_part_rich_editor"]),
     ("zlib", &["nsh_std_zlib"]),
@@ -40,7 +44,10 @@ const BY_MODULE: &[(&str, &str)] = &[("websocket", "websocket"), ("updater", "ns
 /// from data, so nothing proves them unused.
 const ALWAYS: &[(&str, &str)] = &[
     ("js", "the app has a JS bundle"),
-    ("net", "`fetch` and remote images depend on data, not imports"),
+    (
+        "net",
+        "`fetch` and remote images depend on data, not imports",
+    ),
     ("svg", "an image's format depends on data, not imports"),
 ];
 
@@ -52,25 +59,57 @@ pub(crate) fn choose(uses: Option<&nsh_bundler::NativeUse>, keep: &[String]) -> 
     let named = |f: &str| keep.iter().any(|k| k == f);
     let mut out = Vec::new();
     for (feature, why) in ALWAYS {
-        out.push(Choice { feature, keep: true, why: (*why).into() });
+        out.push(Choice {
+            feature,
+            keep: true,
+            why: (*why).into(),
+        });
     }
     for (feature, need) in BY_GATE {
         let hit = need.iter().find(|g| gates.iter().any(|x| x == *g));
         out.push(match (hit, named(feature), uses.is_none()) {
-            (_, _, true) => Choice { feature, keep: true, why: "the bundle was not analyzed".into() },
-            (Some(g), _, _) => Choice { feature, keep: true, why: format!("the app links `{g}`") },
-            (None, true, _) => Choice { feature, keep: true, why: "the app keeps it".into() },
-            (None, false, _) => Choice { feature, keep: false, why: "nothing reachable uses it".into() },
+            (_, _, true) => Choice {
+                feature,
+                keep: true,
+                why: "the bundle was not analyzed".into(),
+            },
+            (Some(g), _, _) => Choice {
+                feature,
+                keep: true,
+                why: format!("the app links `{g}`"),
+            },
+            (None, true, _) => Choice {
+                feature,
+                keep: true,
+                why: "the app keeps it".into(),
+            },
+            (None, false, _) => Choice {
+                feature,
+                keep: false,
+                why: "nothing reachable uses it".into(),
+            },
         });
     }
     for (feature, module) in BY_MODULE {
         let imported = uses.is_none_or(|u| u.computed_import || u.imports.contains_key(*module));
         out.push(if imported {
-            Choice { feature, keep: true, why: format!("the app may import `{module}`") }
+            Choice {
+                feature,
+                keep: true,
+                why: format!("the app may import `{module}`"),
+            }
         } else if named(feature) {
-            Choice { feature, keep: true, why: "the app keeps it".into() }
+            Choice {
+                feature,
+                keep: true,
+                why: "the app keeps it".into(),
+            }
         } else {
-            Choice { feature, keep: false, why: format!("nothing imports `{module}`") }
+            Choice {
+                feature,
+                keep: false,
+                why: format!("nothing imports `{module}`"),
+            }
         });
     }
     out
@@ -82,12 +121,18 @@ mod tests {
 
     fn bundle(code: &str) -> nsh_bundler::NativeUse {
         let mut uses = nsh_bundler::NativeUse::default();
-        uses.add(code, |s| s == "nsh" || s.starts_with("nsh/") || s == "websocket");
+        uses.add(code, |s| {
+            s == "nsh" || s.starts_with("nsh/") || s == "websocket"
+        });
         uses
     }
 
     fn kept(choices: &[Choice]) -> Vec<&'static str> {
-        choices.iter().filter(|c| c.keep).map(|c| c.feature).collect()
+        choices
+            .iter()
+            .filter(|c| c.keep)
+            .map(|c| c.feature)
+            .collect()
     }
 
     #[test]
@@ -101,13 +146,19 @@ mod tests {
         let with = bundle("import { Editor } from 'nsh/base'; Editor;");
         let k = kept(&choose(Some(&with), &[]));
         assert!(k.contains(&"editor") && k.contains(&"highlight"), "{k:?}");
-        let k = kept(&choose(Some(&bundle("import { Button } from 'nsh/base'; Button;")), &[]));
+        let k = kept(&choose(
+            Some(&bundle("import { Button } from 'nsh/base'; Button;")),
+            &[],
+        ));
         assert!(!k.contains(&"editor"), "{k:?}");
     }
 
     #[test]
     fn text_view_keeps_highlight_and_math() {
-        let k = kept(&choose(Some(&bundle("import { TextView } from 'nsh/base'; TextView;")), &[]));
+        let k = kept(&choose(
+            Some(&bundle("import { TextView } from 'nsh/base'; TextView;")),
+            &[],
+        ));
         assert!(k.contains(&"highlight") && k.contains(&"math"), "{k:?}");
     }
 
@@ -122,6 +173,9 @@ mod tests {
     fn modules_and_named_features_are_kept() {
         let uses = bundle("import { connect } from 'websocket'; connect;");
         let k = kept(&choose(Some(&uses), &["plot".into()]));
-        assert!(k.contains(&"websocket") && k.contains(&"plot") && !k.contains(&"updater"), "{k:?}");
+        assert!(
+            k.contains(&"websocket") && k.contains(&"plot") && !k.contains(&"updater"),
+            "{k:?}"
+        );
     }
 }

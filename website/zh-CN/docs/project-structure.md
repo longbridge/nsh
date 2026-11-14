@@ -129,6 +129,7 @@ mount(App);
 | `schemes` | string[] | `package`、`run` | 打开应用的 URL scheme，例如 `["myapp"]` 对应 `myapp://…` 链接，由 [`UrlScheme`](../modules/nsh.md#urlscheme) 接收。只含小写字母、数字、`+`、`-` 和 `.`；不能是系统或浏览器占用的（`https`、`file` 等）。 |
 | `fileTypes` | object[] | `package`、`run` | 应用打开的文件类型，`[{ "name": "Video", "extensions": ["mp4"], "mimeTypes": ["video/mp4"] }]`，由包声明给系统；文件送到 [`Application.on("openFiles")`](../modules/nsh-desktop.md#打开文件)。 |
 | `singleInstance` | boolean | `package` | `true`：应用在 Windows 和 Linux 上只运行一份；第二次启动把参数和工作目录交给正在运行的应用后退出（[单实例](../modules/nsh-desktop.md#单实例)）。 |
+| `features` | string[] | `package` | 带 Rust crate 的应用打包时始终保留的原生功能，如 `["plot"]`：只有 Rust 代码或动态 import 才用到的功能写在这里。其余功能中，bundle 用不到的（`shader`、`editor`、`plot` 等）`package` 会去掉，并输出原因。 |
 | `icon` | string \| object | `package` | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`；也可按平台分别提供（`{ "macos": "…", "windows": "…" }`，[打包](./packaging.md#图标)）。 |
 | `tailwind` | object | 每次构建 | 扩展 `class` 字符串所依据的 Tailwind 主题（[Tailwind](./tailwind.md)）。 |
 | `locales` | string[] | 每次构建 | 应用除英语外格式化数字和日期所用的语言（`["de", "zh-CN"]`），bundle 会携带它们的数据。默认：`locales/` 中翻译所包含的语言（[I18n](./i18n.md#数字和日期)）。 |
