@@ -38,6 +38,7 @@ import BaseTable from "./base-table";
 import BaseRadio from "./base-radio";
 import BaseResizable from "./base-resizable";
 import BaseRichEditorExtensions from "./base-rich-editor-extensions";
+import BaseRichEditorComposition from "./base-rich-editor-composition";
 import BaseRichEditorKit from "./base-rich-editor-kit";
 import BaseRichEditorSession from "./base-rich-editor-session";
 import BaseRichEditorTables from "./base-rich-editor-tables";
@@ -95,6 +96,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-radio": BaseRadio,
   "base-resizable": BaseResizable,
   "base-rich-editor-extensions": BaseRichEditorExtensions,
+  "base-rich-editor-composition": BaseRichEditorComposition,
   "base-rich-editor-kit": BaseRichEditorKit,
   "base-rich-editor-session": BaseRichEditorSession,
   "base-rich-editor-view": BaseRichEditorView,

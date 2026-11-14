@@ -661,15 +661,16 @@ impl Rv {
     /// shows at the caret, the document waits for the commit (one
     /// transaction, grouped in the history with the composition's).
     pub(crate) fn composition_changed(&self, composing: bool, text: &str) {
-        let held = {
+        let (held, changed) = {
             let mut sink = self.sink.borrow_mut();
+            let changed = sink.composing != composing;
             if composing && sink.composition.is_none() {
                 let id = self.next_composition.get();
                 self.next_composition.set(id + 1);
                 sink.composition = Some(id);
             }
             sink.composing = composing;
-            if composing { None } else { sink.held.take() }
+            (if composing { None } else { sink.held.take() }, changed)
         };
         self.session.set_composing(composing);
         if let Some(held) = held {
@@ -677,6 +678,11 @@ impl Rv {
         }
         self.composition
             .set((composing && !text.is_empty()).then(|| text.to_owned()));
+        // Observers can unmount the editor, so publish the transition only
+        // after its sink and composition state have reached their final values.
+        if changed {
+            self.cx.emit(RichEditorEvent::CompositionChange(composing));
+        }
     }
 
     /// A key the sink reports itself (soft keyboards: Backspace in an

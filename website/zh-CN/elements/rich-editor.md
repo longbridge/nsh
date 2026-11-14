@@ -39,6 +39,8 @@ mount(App);
 
 省略 `schema` 时编辑器使用起步 schema（`starterSchema()`）；省略 `plugins` 时它得到起步套件（`starterKit()`：起步的输入规则和键位绑定、基础键位绑定和历史）。空的 `plugins` 数组创建一个完全没有插件的编辑器。
 
+`onCompositionChange({ composing })` 在此视图开始输入法组合输入时报告 `true`，结束时报告 `false`，取消也会报告结束。组合中的文本更新保持当前状态。回调执行时，会话的 `composing` 值和已提交文本已经更新，应用可以在组合输入期间保留编辑器视图，在结束时释放它。开始或取消组合输入可以保持文档及其修订号不变；`onChange` 报告文档修改。
+
 ## 样式
 
 编辑器以应用的外观绘制文档：`classes` 和 `styles` 设置它的各个部件（`root`、`content`、`caret`、`selection`、`placeholder`、`composition`、`selectedNode`、`listMarker`、触摸选区的手柄 `selectionHandle`、`selectionHandleStart`、`selectionHandleEnd`，以及表格的 `selectedCell`、`tableGrip`、`tableResizeHandle`、`tableDropIndicator`），按类型设置节点（`nodes: { heading: "text-2xl font-bold", "heading[level=2]": "text-xl" }`），以及设置标记（`marks: { bold: "font-bold" }`）。节点规格把 `extra.listMarker` 设为 `"bullet"` 或 `"ordered"` 的列表（starter schema 的列表）中，每一项都在 `listMarker` 部件中显示标记：按层级显示 `•`、`◦`、`▪`，或从列表的 `start` 开始编号，放在列表项之前、列表的缩进中（如浏览器缩进 `ul`，在列表上设置 `pl-6`）。

@@ -50,6 +50,12 @@ Without `schema` an editor uses the starter schema (`starterSchema()`); without 
 (`starterKit()`: the starter's input rules and key bindings, the base key bindings and the history). An empty
 `plugins` array makes an editor with no plugins at all.
 
+`onCompositionChange({ composing })` reports `true` when this view starts input-method composition and `false`
+when it ends, including cancellation. Updates to the text being composed keep the current state. The callback
+observes the session's updated `composing` value and any committed text, so an app can retain the editor view
+while composition is active and release it when it ends. Starting or canceling composition can keep the document
+and its revision unchanged; `onChange` reports document edits.
+
 ## Styling
 
 The editor draws the document with the app's look: `classes` and `styles` style its parts (`root`, `content`, `caret`,

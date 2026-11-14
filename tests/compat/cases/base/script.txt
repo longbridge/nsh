@@ -4446,6 +4446,31 @@ covers [nsh/base] createRichEditor
 covers [nsh/base] defineExtension
 covers [nsh/base] richExtension
 
+# base-rich-editor-composition
+tap id:case-base-rich-editor-composition
+expect Observed: none
+# Drive the native input sink, so the generated RichEditor event observes
+# the session after the platform's composition transition has settled.
+listens label:CompositionSink onCompositionChange
+event label:CompositionSink onCompositionChange composing=true text=n
+expect Transitions: true
+expect Observed: true 0 Seed
+event label:CompositionSink onCompositionChange composing=true text=ni
+expect Transitions: true
+event label:CompositionSink onCompositionChange composing=false text=""
+expect Transitions: true,false
+expect Observed: true 0 Seed
+event label:CompositionSink onCompositionChange composing=false text=""
+expect Transitions: true,false
+# A later composition's held text commits before its end observer runs.
+event label:CompositionSink onCompositionChange composing=true text=ri
+expect Transitions: true,false,true
+event label:CompositionSink onChange text=日
+event label:CompositionSink onCompositionChange composing=false text=""
+expect Transitions: true,false,true,false
+expect Observed: true 1 日Seed
+covers [events] RichEditor.onCompositionChange
+
 # base-rich-editor-view
 tap id:case-base-rich-editor-view
 expect BubbleMenu

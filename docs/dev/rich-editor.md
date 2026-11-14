@@ -151,7 +151,12 @@ Input (`controller.rs`): as the code `Editor`, an invisible native input at the 
 and input methods. Typed text goes to plugins' `handle_text_input` (input rules), else is inserted with the stored
 marks (origin `Input`). While an input method composes, its text shows in the line at the caret with the block's
 typography, and the document waits; the commit is one transaction tagged with the composition's id (`composition`
-meta, which the history groups). Keys: the view binds, while focused, every keystroke a keymap could use (`keys.rs`)
+meta, which the history groups). `RichEditorEvent::CompositionChange(bool)` (Rust
+`.on_composition_change`, JS `onCompositionChange({ composing })`) reports each view's start/end transitions,
+including cancellation, after its session flag, held input and composition signal are updated. Updates within an
+active composition keep the same state and emit no further transition. Starting and canceling composition leave
+the document and transaction revision unchanged; a text commit remains a normal transaction. Observers can retain
+the view while composing and release it on the end notification. Keys: the view binds, while focused, every keystroke a keymap could use (`keys.rs`)
 and offers each as a `KeyEvent` to the selected node's view, the plugins' `handle_key_down`, the base keymap, then
 copy / cut / select all and the caret movement (graphemes, words, line ends, lines and pages by geometry, keeping the
 goal x, the document's ends). An Escape none of them takes collapses a selection to its head; with nothing selected,

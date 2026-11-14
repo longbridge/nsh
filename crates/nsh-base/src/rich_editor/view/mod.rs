@@ -211,6 +211,11 @@ pub enum RichEditorEvent {
     Focus,
     /// The editor lost the focus.
     Blur,
+    /// An input method started or ended composition in this view. Reports
+    /// only state transitions, after the session and composition are
+    /// updated; a cancel can end composition without a document change.
+    #[args(composing)]
+    CompositionChange(bool),
 }
 
 /// The methods of a [`RichEditor`]'s ref.
