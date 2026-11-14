@@ -937,6 +937,8 @@ tap text:OpenSheet
 expect SheetBody
 expect Life: sheet open
 frame parent:text:SheetBody 0 0 390 50
+# A dialog for screen readers, named by its `accessibilityLabel`.
+prop label:"Top sheet" role dialog
 style parent:text:SheetBody backgroundColor #abcdefff
 style below:parent:text:SheetBody backgroundColor #111111ff
 style below:parent:text:SheetBody opacity 0.75
@@ -967,6 +969,7 @@ covers [props] Sheet.popupClass
 covers [props] Sheet.popupStyle
 covers [props] Sheet.backdropClass
 covers [props] Sheet.backdropStyle
+covers [props] Sheet.accessibilityLabel
 covers [events] Sheet.onOpenChange
 covers [events] Sheet.onCancel
 # base-menu-checked

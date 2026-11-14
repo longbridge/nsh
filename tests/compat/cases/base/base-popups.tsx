@@ -154,6 +154,7 @@ function App() {
         onClose={() => life.set("Life: sheet closed")}
         onCancel={() => log.set("Log: sheet cancel")}
         side="top"
+        accessibilityLabel="Top sheet"
         closeOnEscape={false}
         popupClass="bg-[#abcdef]"
         popupStyle={{ height: 50 }}
