@@ -445,6 +445,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.texts()` | The texts on screen now, in order. |
 | `app.value(selector)` | The text of an input, `null` when none matches. |
 | `app.spanStyle(selector)` | The first matched character’s resolved style, headless and on every `--target`: `color`, optional `backgroundColor`, `fontSize`, `fontWeight`, `italic`, `underline`, and `lineThrough`. Colors are `#rrggbbaa`; sizes are in points. |
+| `app.viewStyle(selector)` | The matched view’s style as the app set it, headless and on every `--target`: optional `backgroundColor` (absent when transparent), its own `opacity`, and `effectiveOpacity` (its opacity times every ancestor’s). Colors are `#rrggbbaa`. Returns `null` when nothing matches; reports an error for an ambiguous selector. |
 | `app.storage()` | What the app's storage holds now. |
 | `await app.back()` | Goes back as the user does (a header's back button, swiping a sheet down): the innermost stack of the newest modal, else of the screen, that is laid out with a size (not in a tab laid out at no size) pops its top screen (`onDismiss`), or asks it (`onBackRequest`) when it has `preventBack`; without one, the newest modal asks to close (`onRequestClose`). Rejects when there is nothing to go back from. |
 | `await app.forward()` | Goes forward in the browser's history, as its forward button does. With `--target web` only; elsewhere it rejects with `ERR_NSH_TEST_UNSUPPORTED`. |
@@ -504,6 +505,8 @@ a test matches the code:
 ```tsx
 await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
 ```
+
+`app.viewStyle("id:card")` checks that a view is dimmed or highlighted without a screenshot. It reads the values the app set: while an animation runs it reports the animation’s end value, not the frame on screen. Backgrounds a native control paints by itself are not reported; check those with `app.screenshot`.
 
 `app.spanStyle("id:guide")` reads a nested `<Text testID="guide">`; `text:word` reads the first character
 of that match. Scope queries with `id:note >> text:word` and select repeated matches with `>> nth=0`.
