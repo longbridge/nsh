@@ -1207,6 +1207,43 @@ function HidingHeader() {
   );
 }
 
+/** A drag within a range that changes while dragging: `diffClamp` with an
+ * animated bound clamps at once when the range shrinks, and the knob moves
+ * back as soon as the drag reverses at an edge. */
+function BoundedDrag() {
+  const KNOB = 44;
+  const ranges = { wide: 240, narrow: 96 } as const;
+  const range = signal<keyof typeof ranges>("wide");
+  const drag = createAnimatedValue(0);
+  const max = createAnimatedValue(ranges.wide);
+  const knob = drag.diffClamp(0, max);
+  return (
+    <Card icon="gestures" title="Bounded drag" subtitle="A range that changes while dragging, clamped natively">
+      <Segmented
+        size="small"
+        options={[
+          { value: "wide", label: "Wide" },
+          { value: "narrow", label: "Narrow" },
+        ]}
+        value={range()}
+        onChange={(v) => {
+          range.set(v);
+          max.spring(ranges[v]);
+        }}
+      />
+      <View pan={{ x: drag }} style={{ height: 72, justifyContent: "center", paddingHorizontal: 14, borderRadius: radius.control, backgroundColor: colors.background, ...finish.track }}>
+        <View style={{ position: "absolute", left: 14, width: KNOB + ranges.wide, height: 4, borderRadius: 2, backgroundColor: colors.raised }} />
+        <View style={{ position: "absolute", left: 14 + KNOB - 1, top: 12, bottom: 12, width: 2, borderRadius: 1, backgroundColor: colors.faint, transform: [{ translateX: max }] }} />
+        <View
+          testID="bounded-knob"
+          style={{ width: KNOB, height: KNOB, borderRadius: KNOB / 2, backgroundColor: colors.accent, transform: [{ translateX: knob }] }}
+        />
+      </View>
+      <Text style={{ fontSize: 12, fontFamily: mono, color: colors.faint }}>drag.diffClamp(0, max)</Text>
+    </Card>
+  );
+}
+
 // --- Layout animation -------------------------------------------------------
 
 const presets: Record<"spring" | "ease" | "linear", LayoutAnimationConfig> = {
@@ -1282,5 +1319,5 @@ function Layout() {
 }
 
 export function Animations() {
-  return <DemoPage cards={[Hero, MotionPresets, StaggeredEntrance, Keyframes, Aurora, EasingPlot, EasingRace, Composition, Springs, Interpolations, HidingHeader, Layout]} />;
+  return <DemoPage cards={[Hero, MotionPresets, StaggeredEntrance, Keyframes, Aurora, EasingPlot, EasingRace, Composition, Springs, Interpolations, HidingHeader, BoundedDrag, Layout]} />;
 }
