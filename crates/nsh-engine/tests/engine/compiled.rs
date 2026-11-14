@@ -635,6 +635,64 @@ fn a_changing_child_leaves_its_siblings() {
     assert!(remade.is_empty(), "{remade:#?}");
 }
 
+const CHILDREN_BESIDE_A_BRANCH: &str = r#"
+import { mount, signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
+
+const open = signal(true);
+function Card(props: { children?: any }) {
+  return (
+    <View>
+      {open() ? <Text>open</Text> : <Text>closed</Text>}
+      {props.children}
+    </View>
+  );
+}
+
+const saved = signal(false);
+mount(() => (
+  <View>
+    <Card>
+      {open() ? <Input testID="a" /> : null}
+      {saved() ? <Text>saved</Text> : null}
+    </Card>
+    <Text onPress={() => saved.set(true)}>save</Text>
+  </View>
+));
+"#;
+
+/// The same when the component shows its children beside a branch of its
+/// own (`{cond ? a : b}{props.children}`): each of the children's
+/// functions keeps a memo of its own, so `saved` changing runs only the
+/// child that reads it, and the input beside it is not made again.
+#[test]
+fn children_beside_a_branch_leave_their_siblings() {
+    let (engine, rx) = start_app(CHILDREN_BESIDE_A_BRANCH);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let save = text_id(&first, "save").expect("the save text");
+    engine
+        .control()
+        .dispatch_event(save, EventKind::Press, EventPayload::None);
+    let batch = next(&rx, |b| texts(b).iter().any(|t| t == "saved"));
+    let remade: Vec<&MountItem> = batch
+        .items
+        .iter()
+        .filter(|i| {
+            matches!(
+                i,
+                MountItem::Create {
+                    kind: nsh_core::ViewKind::Input,
+                    ..
+                } | MountItem::Remove { .. }
+                    | MountItem::Delete { .. }
+            )
+        })
+        .collect();
+    assert!(remade.is_empty(), "{remade:#?}");
+}
+
 const BRANCH_EXPRESSION: &str = r#"
 import { mount, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
