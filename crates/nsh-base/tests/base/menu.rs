@@ -18,7 +18,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use nsh_base::{MenuEvent, context_menu, menu, menu_item};
+use nsh_base::{MenuEvent, context_menu, input, menu, menu_item};
 use nsh_core::{
     Checked, MountItem, NodeId, Size,
     element::Root,
@@ -480,11 +480,13 @@ fn after_a_press_and_an_arrow_escape_gives_the_focus_to_the_trigger() {
 struct RenameMenuProps {
     /// The app owns `open`, following `onOpenChange`.
     controlled: bool,
+    /// The field is a text input, not a view that takes the focus.
+    input: bool,
 }
 
 #[component]
 fn RenameMenu(props: RenameMenuProps) -> impl IntoElement {
-    let controlled = props.controlled;
+    let (controlled, is_input) = (props.controlled, props.input);
     let log = signal(String::from("focus"));
     let note = move |what: &'static str| log.update(|log| log.push_str(what));
     let field = element_ref();
@@ -519,24 +521,41 @@ fn RenameMenu(props: RenameMenuProps) -> impl IntoElement {
             )
             .child(menu_item().child(text("Copy"))),
         )
-        .child(
+        .child(if is_input {
+            input()
+                .element_ref(&field)
+                .test_id("field")
+                .w(px(120.0))
+                .h(px(30.0))
+                .on_focus(move |_: &()| note(" field"))
+                .into_element()
+        } else {
             view()
                 .element_ref(&field)
                 .test_id("field")
                 .focusable(true)
                 .w(px(120.0))
                 .h(px(30.0))
-                .on_focus(move |_: &()| note(" field")),
-        )
+                .on_focus(move |_: &()| note(" field"))
+                .into_element()
+        })
         .child(text(move || log.get()))
 }
 
 #[test]
 fn a_choice_that_moves_the_focus_out_of_the_menu_keeps_it_there() {
-    for controlled in [false, true] {
-        let mut app = start_with(Root::new::<RenameMenu>(move || RenameMenuProps {
-            controlled,
-        }));
+    for (controlled, input, os) in [
+        (false, false, Os::MacOs),
+        (true, false, Os::MacOs),
+        (true, true, Os::MacOs),
+        (true, true, Os::Linux),
+        (false, true, Os::Linux),
+    ] {
+        let case = format!("controlled {controlled}, input {input}, {os:?}");
+        let mut app = start_on(
+            Root::new::<RenameMenu>(move || RenameMenuProps { controlled, input }),
+            os,
+        );
         app.app.press_key("tab").unwrap();
         app.app.wait_for("text:focus trigger").unwrap();
         app.app.press_key("enter").unwrap();
@@ -544,27 +563,31 @@ fn a_choice_that_moves_the_focus_out_of_the_menu_keeps_it_there() {
         // Rename has the focus: choosing it moves the focus to the field,
         // and the menu closing leaves it there instead of taking it back
         // to its trigger.
-        app.app.press_key("space").unwrap();
+        app.app.press_key("enter").unwrap();
         app.app
             .wait_for_gone("Rename", std::time::Duration::from_secs(2))
             .unwrap();
-        app.app.wait(std::time::Duration::from_millis(100)).unwrap();
+        app.app.wait(std::time::Duration::from_millis(300)).unwrap();
         assert!(
             app.app.shows("focus trigger field"),
-            "controlled {controlled}: the focus stayed on the field: {:?}",
+            "{case}: the focus stayed on the field: {:?}",
             app.app.screen().texts()
         );
         // A choice that moves nothing still gives it back to the trigger.
-        app.app.press("id:actions").unwrap();
+        app.app.press_key("shift+tab").unwrap();
+        app.app
+            .wait_for("text:focus trigger field trigger")
+            .unwrap_or_else(|e| panic!("{case}: {e}"));
+        app.app.press_key("enter").unwrap();
         app.app.wait_for("Copy").unwrap();
-        app.app.press_key("end").unwrap();
-        app.app.press_key("space").unwrap();
+        app.app.press_key("down").unwrap();
+        app.app.press_key("enter").unwrap();
         app.app
             .wait_for_gone("Copy", std::time::Duration::from_secs(2))
             .unwrap();
         app.app
-            .wait_for("text:focus trigger field trigger")
-            .unwrap_or_else(|e| panic!("controlled {controlled}: {e}"));
+            .wait_for("text:focus trigger field trigger trigger")
+            .unwrap_or_else(|e| panic!("{case}: {e}"));
     }
 }
 
