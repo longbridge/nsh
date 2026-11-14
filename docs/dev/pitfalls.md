@@ -188,6 +188,10 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Styles arrive before frames** (new views have a zero size): a shared radius goes straight to the layer (Core Animation clamps it itself);
   only paths, shadow paths, the content view and the image layer depend on the size, and they are rebuilt on `Frame` while `Decor::sized()`
   is true. Scaling radii by the CSS rule at a zero size once turned every rounded corner square.
+- **An input's insertion precedes its first frame and content box in a mount batch**: UIKit may draw an inserted
+  `UITextField` before the later `InputContent` sets its text insets, briefly placing text against the leading edge.
+  The iOS mounter pre-reads a newly created input's `Frame` and `InputContent` from that batch and applies both while
+  its container is still detached; do not defer or reorder its `Insert`, which would break `autoFocus`.
 - **A view's first style does not transition**: a mounting tree's views are styled after they are added to the window, so
   `window().is_some()` alone animates the first style from the defaults (a pill's corners growing out of a square). The
   mounter only transitions a view it has styled before (`Slot::styled`), as `nsh_core`'s `transition::restyle` and
