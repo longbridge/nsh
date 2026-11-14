@@ -258,13 +258,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   that takes presses, plain Return and Space fire only the focus' own bindings (`KeyOptions::for_focus`, TS's `forFocus`: a
   component's keys while its part has the focus or its popup is open, a menu button's Return opening its menu), else they press
   it; an app's other bindings of those keys (a dialog's Return for its main action) give way to the control the user
-  moved the focus to, on every platform (`Keymap::find_at`, `input::presses_focused_control`). Only a stop in the newest
-  modal over its window is pressed: the app's `focus()` may leave the focus under a dialog on macOS, where Return and
-  Space then go to the keymap (`input::control_activation_target`); Linux and the web keep the focus out of what a
-  modal covers. A page a newer one covers, or a back pops, gives the focus it holds to the window before it is hidden
-  or taken away (the view hears `onBlur`, its `focus:` state and the tooltip its focus showed go): macOS, Windows,
-  Linux, GPUI and the headless driver (`leave_covered_pages`); the web hides the covered page once its slide ends and
-  gives the focus back to it when the page above goes.
+  moved the focus to, on every platform (`Keymap::find_at`, `input::presses_focused_control`). Return and Space press
+  only a focused stop inside the newest modal. A page a newer one covers, or a back pops, gives the focus back to the
+  window (the view hears `onBlur`); the headless driver does the same.
   A stop the keyboard or `focus()` reaches scrolls into view in the scroll views around it, as a focused field does
   (macOS `scroll::reveal` unless a click focused it, Linux on any focus widget, the browser's own `focus()`, the
   headless driver's Tab at once); a list keeps the rows beside the focused one rendered, so Tab walks all its rows
