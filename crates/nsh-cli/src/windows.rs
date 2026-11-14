@@ -92,7 +92,7 @@ pub(crate) fn package(
     }
     let archive = options.out.join(format!("{name}.zip"));
     zip_dir(&dir, name, &archive).with_context(|| format!("create {}", archive.display()))?;
-    crate::updater::copy_archive(config, name, &archive, options.out)?;
+    crate::updater::copy_archive(config, name, &update_platform(), &archive, options.out)?;
     step.done(format!(
         "packaged {} and {}",
         ui::path(&dir),
@@ -547,9 +547,32 @@ fn zip_dir(dir: &Path, root: &str, archive: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The updater's name of the platform a Windows package runs on: the runner
+/// is built for this machine on Windows, else cross-compiled for
+/// `x86_64-pc-windows-msvc`, whose archive must not be named after the
+/// machine that built it.
+fn update_platform() -> String {
+    if cfg!(windows) {
+        nsh_updater::platform()
+    } else {
+        "windows-x86_64".to_owned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A package cross-built on Linux or macOS is the update of Windows, not
+    /// of the machine that built it.
+    #[test]
+    fn update_archives_are_named_for_windows() {
+        assert!(
+            update_platform().starts_with("windows-"),
+            "{}",
+            update_platform()
+        );
+    }
 
     #[test]
     fn installer_scripts_install_per_user_and_upgrade_by_id() {

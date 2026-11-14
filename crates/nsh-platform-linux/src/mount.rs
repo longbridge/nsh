@@ -448,7 +448,7 @@ impl Mounter {
             // mounter again while a batch is applied.
             Command::AccessibilityFocus => {
                 if let Some(view) = view {
-                    view.grab_focus();
+                    crate::access::focus(surface, view);
                 }
             }
             Command::ImageInfo { .. } => crate::image::command(surface, id, command),

@@ -179,6 +179,21 @@ pub(crate) struct Notes {
     pub(crate) composition_end: bool,
 }
 
+impl Notes {
+    /// Nothing was noted.
+    fn is_empty(&self) -> bool {
+        !self.changed
+            && !self.selection
+            && self.composition_start.is_none()
+            && !self.composition_end
+    }
+}
+
+/// The services' id of the timer that hands the field the notifications
+/// they sent outside its messages ([`notes_later`]); their own ids are
+/// small.
+const NOTES_LATER: u32 = u32::MAX;
+
 /// Our `ITextHost2`.
 #[repr(C)]
 struct Host {
@@ -199,7 +214,8 @@ struct Host {
     /// Asks the field to draw again.
     invalidate: Box<dyn Fn()>,
     /// Called after a timer's message, which may have changed the
-    /// selection (a drag scrolling).
+    /// selection (a drag scrolling), and once the services noted a change
+    /// outside the field's messages ([`notes_later`]).
     after_timer: Box<dyn Fn()>,
 }
 
@@ -373,6 +389,37 @@ impl Editor {
         (min, max, pos, page)
     }
 
+    /// The height of the text laid out `width` pixels wide (pixels).
+    pub(crate) fn text_height(&self, width: i32) -> Option<i32> {
+        use windows::Win32::{
+            Foundation::SIZE,
+            Graphics::Gdi::{GetDC, ReleaseDC},
+            UI::Controls::RichEdit::{TXTNS_FITTOCONTENT, TXTNS_INCLUDELASTLINE},
+        };
+        let (mut w, mut h) = (width.max(1), 1);
+        // The extent (HIMETRIC) sets the width to fit the text in.
+        let extent = SIZE {
+            cx: w * 2540 / 96,
+            cy: 2540 / 96,
+        };
+        // SAFETY: the screen's DC, released below; local out values.
+        unsafe {
+            let dc = GetDC(None);
+            let done = self.services.TxGetNaturalSize(
+                1, // DVASPECT_CONTENT
+                dc,
+                Default::default(),
+                std::ptr::null_mut(),
+                (TXTNS_FITTOCONTENT.0 | TXTNS_INCLUDELASTLINE.0) as u32,
+                &extent,
+                &mut w,
+                &mut h,
+            );
+            ReleaseDC(None, dc);
+            done.ok().map(|_| h)
+        }
+    }
+
     /// Draws the text into `target` (an `ID2D1RenderTarget` whose
     /// transform maps client pixels), in `bounds`. False when the services
     /// would not draw: while an input method's edit holds the text (the
@@ -429,7 +476,10 @@ impl Editor {
 impl Drop for Editor {
     fn drop(&mut self) {
         let host = self.host;
-        TIMERS.with(|t| {
+        // `try_with`: an editor dropped during thread teardown, after the
+        // timers' list, must not abort the process (#1767); the thread's
+        // timers go with it.
+        let _ = TIMERS.try_with(|t| {
             t.borrow_mut().retain(|&(id, h, _)| {
                 if h == host {
                     // SAFETY: a thread timer we set.
@@ -726,6 +776,17 @@ unsafe extern "system" fn timer_proc(_: HWND, _: u32, id: usize, _: u32) {
     unsafe {
         let host = &*host;
         let services = host.services.get();
+        if re_id == NOTES_LATER {
+            // Once: the notes are the field's to take from here.
+            TIMERS.with(|t| t.borrow_mut().retain(|e| e.0 != id));
+            let _ = KillTimer(None, id);
+            // Nothing left when the field took them after a message of its
+            // own meanwhile.
+            if !services.is_null() && !host.notes.get().is_empty() {
+                (host.after_timer)();
+            }
+            return;
+        }
         if services.is_null() {
             return;
         }
@@ -748,6 +809,31 @@ unsafe extern "system" fn tx_set_timer(this: This, id: u32, ms: u32) -> BOOL {
     }
     TIMERS.with(|t| t.borrow_mut().push((sys, host, id)));
     BOOL(1)
+}
+
+/// Hands the field `host`'s notes once the thread is back in its message
+/// loop, unless it took them by then. The field takes them after each
+/// message it sends the services, but an input method that writes through
+/// Text Services Framework (Microsoft Pinyin, the other built-in ones)
+/// edits their text from the thread's message loop, in no message of the
+/// field's: its composition, and the text it commits, waited for the next
+/// key the field sent (a commit showed only once another key was typed).
+fn notes_later(host: *const Host) {
+    // `try_with`: none during thread teardown (#1767).
+    let pending = TIMERS.try_with(|t| {
+        t.borrow()
+            .iter()
+            .any(|&(_, h, re)| h == host && re == NOTES_LATER)
+    });
+    if !matches!(pending, Ok(false)) {
+        return;
+    }
+    // SAFETY: a thread timer with a TIMERPROC that lives for the program;
+    // `Editor`'s drop kills it with the services' timers.
+    let sys = unsafe { SetTimer(None, 0, 0, Some(timer_proc)) };
+    if sys != 0 {
+        let _ = TIMERS.try_with(|t| t.borrow_mut().push((sys, host, NOTES_LATER)));
+    }
 }
 
 unsafe extern "system" fn tx_kill_timer(this: This, id: u32) {
@@ -939,9 +1025,14 @@ unsafe extern "system" fn tx_notify(this: This, code: u32, _: *mut c_void) -> HR
             }
         }
         EN_ENDCOMPOSITION => notes.composition_end = true,
-        _ => {}
+        _ => return S_OK,
     }
     host.notes.set(notes);
+    // Not while drawing, nor once the editor is going (its timers are
+    // killed before the services are deactivated, which may notify).
+    if !host.drawing.get() && !host.services.get().is_null() {
+        notes_later(host);
+    }
     S_OK
 }
 
@@ -1037,5 +1128,90 @@ pub(crate) fn dpi(hwnd: HWND) -> f32 {
         let dpi = GetDeviceCaps(Some(dc), LOGPIXELSY);
         ReleaseDC(Some(hwnd), dc);
         if dpi > 0 { dpi as f32 } else { 96.0 }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use windows::Win32::UI::{
+        Controls::RichEdit::{EM_SETEVENTMASK, ENM_CHANGE, ENM_SELCHANGE},
+        WindowsAndMessaging::{DispatchMessageW, MSG, PM_REMOVE, PeekMessageW},
+    };
+
+    use super::*;
+
+    /// `EM_REPLACESEL`.
+    const EM_REPLACESEL: u32 = 0x00C2;
+
+    /// Runs the thread's message loop for `ms`.
+    fn pump(ms: u64) {
+        let until = std::time::Instant::now() + std::time::Duration::from_millis(ms);
+        while std::time::Instant::now() < until {
+            let mut msg = MSG::default();
+            // SAFETY: the thread's own queue.
+            unsafe {
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    DispatchMessageW(&msg);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
+    /// An editor that counts the times it hands its notes on, with no
+    /// notes left.
+    fn editor() -> (Editor, Rc<Cell<u32>>) {
+        let handed = Rc::new(Cell::new(0));
+        let count = handed.clone();
+        let e = Editor::new(
+            HWND::default(),
+            Props::default(),
+            Box::new(|| {}),
+            Box::new(move || count.set(count.get() + 1)),
+        )
+        .expect("RichEdit");
+        e.send(EM_SETEVENTMASK, 0, (ENM_CHANGE | ENM_SELCHANGE) as isize);
+        pump(30);
+        e.take_notes();
+        handed.set(0);
+        (e, handed)
+    }
+
+    fn type_in(e: &Editor, text: &str) {
+        let wide: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
+        e.send(EM_REPLACESEL, 1, wide.as_ptr() as isize);
+    }
+
+    #[test]
+    fn notes_left_untaken_reach_the_field_from_the_loop() {
+        // As an input method's commit through Text Services Framework,
+        // which is in no message of the field's.
+        let (e, handed) = editor();
+        type_in(&e, "你好");
+        assert_eq!(handed.get(), 0, "not from inside the services");
+        pump(60);
+        assert_eq!(handed.get(), 1, "handed on once");
+        assert!(e.take_notes().changed, "the notes stay for the field");
+    }
+
+    #[test]
+    fn notes_the_field_took_are_not_handed_again() {
+        let (e, handed) = editor();
+        type_in(&e, "a");
+        assert!(e.take_notes().changed);
+        pump(60);
+        assert_eq!(handed.get(), 0);
+    }
+
+    #[test]
+    fn a_gone_editor_hands_nothing_on() {
+        let (e, handed) = editor();
+        type_in(&e, "a");
+        drop(e);
+        pump(60);
+        assert_eq!(handed.get(), 0);
+        assert!(TIMERS.with(|t| t.borrow().is_empty()));
     }
 }

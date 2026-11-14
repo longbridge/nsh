@@ -1230,15 +1230,31 @@ driver_fn!(animated_decay, "decay");
 fn group(cx: *mut JsContext, kind: &str, list: JsValue, extra: Vec<(&CStr, JsValue)>) -> JsValue {
     let mut specs = Vec::new();
     let mut values = Vec::new();
-    let mut len: i64 = 0;
+    // The values the children keep alive, each kept once: a child placed
+    // many times (`sequence(new Array(1000).fill(s))`, nested) would
+    // otherwise be kept once per place, 1000^n values for n levels.
+    let mut kept = rustc_hash::FxHashSet::default();
     // SAFETY: reads of a live array; values got are freed.
     unsafe {
-        if qjs::JS_IsArray(list) && qjs::JS_GetLength(cx, list, &mut len) == 0 {
-            for i in 0..len.max(0) {
-                let c = qjs::JS_GetPropertyInt64(cx, list, i);
+        if qjs::JS_IsArray(list) {
+            // Read natively: a sparse array is as long as it says.
+            let Some(len) = crate::dom::checked_len(cx, list) else {
+                for (_, v) in extra {
+                    qjs::JS_FreeValue(cx, v);
+                }
+                return qjs::JS_EXCEPTION;
+            };
+            for i in 0..len {
+                let c = qjs::JS_GetPropertyUint32(cx, list, i);
                 if let Some((spec, v)) = parts(cx, c) {
                     specs.push(spec);
-                    values.extend(v);
+                    for v in v {
+                        if !qjs::JS_IsObject(v) || kept.insert(qjs::JS_VALUE_GET_PTR(v) as usize) {
+                            values.push(v);
+                        } else {
+                            qjs::JS_FreeValue(cx, v);
+                        }
+                    }
                 }
                 qjs::JS_FreeValue(cx, c);
             }
@@ -1308,11 +1324,14 @@ unsafe extern "C" fn animated_stagger(
     unsafe { qjs::JS_ToFloat64(cx, &mut ms, arg(argc, argv, 0)) };
     let list = arg(argc, argv, 1);
     let from = stagger_from(cx, arg(argc, argv, 2));
-    let mut len: i64 = 0;
     let mut staged = Vec::new();
     unsafe {
-        if qjs::JS_IsArray(list) && qjs::JS_GetLength(cx, list, &mut len) == 0 {
-            let count = len.max(0) as usize;
+        if qjs::JS_IsArray(list) {
+            // Read natively: a sparse array is as long as it says.
+            let Some(len) = crate::dom::checked_len(cx, list) else {
+                return qjs::JS_EXCEPTION;
+            };
+            let count = len as usize;
             for i in 0..count {
                 let a = qjs::JS_GetPropertyInt64(cx, list, i as i64);
                 let steps = nsh_core::animation::stagger_delay(i, count, from) as f64;

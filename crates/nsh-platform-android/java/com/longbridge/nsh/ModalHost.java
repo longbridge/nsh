@@ -315,6 +315,9 @@ final class ModalHost {
 
         Container(Context context) {
             super(context);
+            // Holds focus when no input does (see InputBox.blur), as NshView does.
+            setFocusable(true);
+            setFocusableInTouchMode(true);
             touches = new TouchTracker(mounter, this);
             mounter.touchTrackers.add(touches);
             // The core places the root (`Box.place`) inside it.
@@ -338,8 +341,11 @@ final class ModalHost {
 
         @Override
         public boolean dispatchTouchEvent(android.view.MotionEvent e) {
-            boolean tracking = touches.onTouch(e);
-            return super.dispatchTouchEvent(e) || tracking;
+            android.view.MotionEvent t = mounter.keyboardTap(e);
+            boolean tracking = touches.onTouch(t);
+            boolean handled = super.dispatchTouchEvent(t) || tracking;
+            if (t != e) t.recycle();
+            return handled;
         }
 
         /** Holds the root where the content starts (below the status bar unless translucent). */
@@ -372,22 +378,43 @@ final class ModalHost {
 
         @Override
         public WindowInsets onApplyWindowInsets(WindowInsets insets) {
-            report();
-            if (Build.VERSION.SDK_INT >= 30) {
-                int ime = insets.getInsets(WindowInsets.Type.ime()).bottom;
-                if (ime != keyboard) {
-                    keyboard = ime;
-                    int[] at = new int[2];
-                    getLocationOnScreen(at);
-                    mounter.keyboard(ime > 0 ? at[1] + getHeight() - ime : Integer.MAX_VALUE);
-                }
+            int ime = keyboardHeight(insets);
+            if (ime != keyboard) {
+                keyboard = ime;
+                int[] at = new int[2];
+                getLocationOnScreen(at);
+                mounter.keyboard(ime > 0 ? at[1] + getHeight() - ime : Integer.MAX_VALUE);
+                // Shrink / grow the modal's layout area above the IME (see report).
+                requestLayout();
             }
+            report();
             return super.onApplyWindowInsets(insets);
+        }
+
+        /**
+         * How far the software keyboard reaches into this dialog. Below
+         * Android 11 it shares the bottom system inset with the navigation
+         * bar (same split as {@link NshView}).
+         */
+        private int keyboardHeight(WindowInsets insets) {
+            if (insets == null) return 0;
+            if (Build.VERSION.SDK_INT >= 30) {
+                return insets.getInsets(WindowInsets.Type.ime()).bottom;
+            }
+            int bottom = insets.getSystemWindowInsetBottom();
+            int navigation = navigationBarHeight();
+            return bottom > navigation ? bottom : 0;
+        }
+
+        private int navigationBarHeight() {
+            int res = getResources().getIdentifier("navigation_bar_height", "dimen", "android");
+            return res == 0 ? 0 : getResources().getDimensionPixelSize(res);
         }
 
         private void report() {
             WindowInsets insets = getRootWindowInsets();
             int top = 0, right = 0, bottom = 0, left = 0;
+            int ime = 0;
             if (insets != null) {
                 if (Build.VERSION.SDK_INT >= 30) {
                     android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
@@ -395,16 +422,27 @@ final class ModalHost {
                     right = bars.right;
                     bottom = bars.bottom;
                     left = bars.left;
+                    ime = insets.getInsets(WindowInsets.Type.ime()).bottom;
                 } else {
                     top = insets.getSystemWindowInsetTop();
                     right = insets.getSystemWindowInsetRight();
                     bottom = insets.getSystemWindowInsetBottom();
                     left = insets.getSystemWindowInsetLeft();
+                    // Bottom inset taller than the nav bar is the keyboard: keep
+                    // only the bar as a safe-area inset and shrink the height.
+                    int navigation = navigationBarHeight();
+                    if (bottom > navigation) {
+                        ime = bottom;
+                        bottom = navigation;
+                    }
                 }
             }
             int below = statusBar();
             top = Math.max(0, top - below);
-            int[] now = {getWidth(), getHeight() - below, top, right, bottom, left};
+            // Lay the dialog out above the IME so centered cards stay visible
+            // (the activity's keyboard-inset env often stays 0 while a dialog
+            // holds the soft keyboard).
+            int[] now = {getWidth(), Math.max(0, getHeight() - below - ime), top, right, bottom, left};
             if (now[0] == 0 || java.util.Arrays.equals(now, reported)) return;
             reported = now;
             float d = mounter.density;

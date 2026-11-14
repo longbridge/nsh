@@ -248,8 +248,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   pressable view responds. Children placed outside their parent (`position: "absolute"`, `overflow` visible: a
   dropdown under its field) can be touched where they are drawn: UIKit and Android only look for a touch's target
   inside a view's bounds, so the core mounts, for each view whose descendants reach outside it, the area they cover
-  (`MountItem::Overflow`, in the view's coordinates, from the layout frames, only when it changes; clipping views,
-  scroll views, lists and stacks have none). `NshView`'s `hitTest` looks in its subviews when the point is outside its
+  (`MountItem::Overflow`, in the view's coordinates, from the layout frames and the descendants' `hitSlop`, only
+  when it changes; clipping views, scroll views, lists and stacks have none). A child's slop reaching out of its parent
+  so takes touches through every view around it that does not clip; siblings keep their order (the topmost first). `NshView`'s `hitTest` looks in its subviews when the point is outside its
   bounds (and hit slop) but in that area, and never returns the view itself there; Android's `Box` delivers the touch
   (and the rest of the gesture) to the child whose area holds it, which passes it on to its children only, and the touch
   tracker's hit test (`TouchTracker.deepest`) descends the same way. `pointerEvents` keeps its meaning (`box-only` and
@@ -283,7 +284,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   it must wait for it to fail (`shouldBeRequiredToFailByGestureRecognizer:`), so a vertical drag scrolls once it passes
   `failOffsetY` and a horizontal one never scrolls. Android: the root's `TouchTracker` decides on each move before the
   views below see it and, on activation, blocks the `ScrollBox`es around (`gateBlocked`) and disallows their
-  interception; a scroll view that intercepts first (past its touch slop) wins as before. Web: `nsh.js` defers its
+  interception; a scroll view that intercepts first (past its touch slop) wins as before. The gated `Box` takes the
+  touches that go down on it, so a scroll view it lies over (a sibling under it) never gets them, and hands a tap
+  (no activation, within the touch slop) to the nearest pressable `Box` around it. Web: `nsh.js` defers its
   drag scrolling while the gate is undecided. The activation travels with the touches (`TouchEvent::activated`; the
   iOS gate hands it to the root's tracker, which reports it with these touches or the next), and the gated view
   becomes the responder (its termination request is honored as for any claim). Its own `…ShouldSetResponder`
@@ -486,19 +489,24 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   where, and moves their views (`Insert` / `Remove`), so the platforms need nothing of their own: they draw and
   hit-test it as any view of the root, with the views' own z order.
 - **Layout**: a layout root of its own, laid out in a box the size of its root view (`position: fixed`: its insets,
-  size and margins are against that box; `inset-0` covers the root view). With `anchor` (a ref of a view,
-  `{ x, y }` in the root view's coordinates, touches' `pageX` / `pageY`, or a `Bounds` there, an input's
-  caret, `onCaretMove`'s `pageBounds`: `OverlayAnchor::Bounds`) the core places it on a side of the anchor's
-  frame (`nsh_core::overlay::place`): `placement` (`"top"`, `"bottom"` (default), `"left"`, `"right"`), on the other
+  size and margins are against that box; `inset-0` covers the root view), or with an anchor in the root view's safe
+  area less `margin` (below), which its insets, percentage sizes and margins are against then. With `anchor` (a ref
+  of a view, `{ x, y }` in the root view's coordinates, touches' `pageX` / `pageY`, or a `Bounds` there, an input's
+  caret, `onCaretMove`'s `pageBounds`: `OverlayAnchor::Bounds`) the core places it on a side of the anchor's frame
+  (`nsh_core::overlay::place`): `placement` (`"top"`, `"bottom"` (default), `"left"`, `"right"`), on the other
   side when only that one has room, the side with more room when neither has; `align` along it (`"start"`,
   `"center"` (default), `"end"`; start and end follow the direction above and below); `offset` from the anchor; then
-  moved along the side to stay inside the root view's safe area less `margin`. Rust's `anchor_beside(row, menu)`
-  (`OverlayAnchor::Beside`, a submenu's) lines it up with the row along its side and places it outside the menu
-  around the row across it, so `offset` is a gap from the menu's edge, not from the row inside its padding. Rust's
-  `anchor_content(r)` (`OverlayAnchor::Content`, `Popover`'s, `HoverCard`'s and a desktop `Menu`'s) places it against
-  what the view draws: the box around its children with its padding and border, along an axis its style leaves `auto`
-  (a wrapper its parent stretches); the element that takes a component's slot goes by its own box, whether a TSX or a
-  Rust app passed it (`Core::content_anchor`: the slot's holder is that wrapper). The anchor's frame is
+  moved along the side to stay inside the root view's safe area less `margin`. An anchored overlay is laid out in
+  that area rather than the whole root view, so content wider than it (a paragraph) wraps within it; in a terminal,
+  within that area less the frame drawn a Cell outside its box. A side placement (`"left"`, `"right"`) is laid out in
+  the whole area too: the side's room is the `available` of `onPosition`, which an overlay follows to fit it. Rust's
+  `anchor_beside(row, menu)` (`OverlayAnchor::Beside`, a submenu's) lines its content (inside its own padding and
+  border) up with the row along its side, so a submenu's first item is level with its trigger, and places it outside
+  the menu around the row across it, so `offset` is a gap from the menu's edge, not from the row inside its padding.
+  Rust's `anchor_content(r)` (`OverlayAnchor::Content`, `Popover`'s, `HoverCard`'s and a desktop `Menu`'s) places it
+  against what the view draws: the box around its children with its padding and border, along an axis its style leaves
+  `auto` (a wrapper its parent stretches); the element that takes a component's slot goes by its own box, whether a
+  TSX or a Rust app passed it (`Core::content_anchor`: the slot's holder is that wrapper). The anchor's frame is
   `Core::measure`'s (scroll offsets and zoom applied, transforms not), so the overlay follows it as it scrolls and moves:
   `place_overlays` places anchored overlays again at the end of every commit (after the lists and the scroll offsets
   the platform reported). `onPosition` reports where it went (`placement`, the frame as `bounds`, `available`:

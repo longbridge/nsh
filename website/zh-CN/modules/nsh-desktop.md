@@ -272,7 +272,7 @@ Rust 列给出 `WindowRef` 的方法。
 | `state()` | `state()` | 平台报告的它的状态（响应式；[见下](#窗口状态与显示器)）。在非桌面平台上、显示之前和关闭之后为 `null`。 |
 | `titleBar()` | `title_bar()` | 它隐藏的标题栏的区域（[见下](#titlebar)）。 |
 | `set(attributes)` | `set(WindowAttributes)` | 修改给出的[属性](#属性)；其他保持原值。应用的权限不允许的属性保持不变，并给出警告。 |
-| `show()`、`hide()` | `show()`、`hide()` | 显示它（最小化时还原），或隐藏它。 |
+| `show()`、`hide()` | `show()`、`hide()` | 显示它（最小化时还原），或隐藏它。macOS 上全屏窗口会先退出全屏再隐藏（与 macOS 应用的窗口一致），再次显示时是普通窗口。 |
 | `focus()` | `focus()` | 显示它，提到所在层级的最前并给它键盘焦点；应用随之激活。窗口保持原有层级。 |
 | `close()` | `close()` | 关闭它，不论 `closeOnPress` 如何。应用自己的窗口卸载其内容（`<Window>`：`reason` 为 `"close"` 的 `onOpenChange`）；主窗口像用户关闭它那样关闭，最后一个窗口关闭时应用结束。 |
 | `minimize()`、`restore()` | `minimize()`、`restore()` | 最小化它，或按原来的模式还原：最大化的窗口最小化后还原时仍是最大化。 |

@@ -310,6 +310,9 @@ pub(crate) struct Input {
     next_id: Cell<u32>,
     /// Next press generation (invalidates callbacks of earlier ones).
     next_gen: Cell<u64>,
+    /// A press on a view that drags the window, held until it becomes a
+    /// click or the window's move ([`crate::chrome::WindowPress`]).
+    pub(crate) window_press: RefCell<Option<crate::chrome::WindowPress>>,
 }
 
 /// What a pointer is doing.
@@ -488,6 +491,7 @@ unsafe extern "system" fn on_timer(
 pub(crate) fn reset(surface: &Surface) {
     crate::file_drop::reset(surface);
     let input = &surface.input;
+    input.window_press.borrow_mut().take();
     input.pointers.borrow_mut().clear();
     input.two.borrow_mut().take();
     input.zoom.borrow_mut().take();
@@ -742,22 +746,33 @@ pub(crate) enum WindowPart {
 /// text field, a hosted item (editors, web views) or a view with press or
 /// touch handlers is nearer.
 pub(crate) fn window_part(surface: &Surface, x: f32, y: f32) -> Option<WindowPart> {
+    window_part_at(surface, x, y).map(|(_, part)| part)
+}
+
+/// The innermost view at `(x, y)` (the input root's coordinates) when
+/// pressing there drags the window ([`WindowPart::Drag`]).
+pub(crate) fn drag_view(surface: &Surface, x: f32, y: f32) -> Option<NshView> {
+    let (view, part) = window_part_at(surface, x, y)?;
+    (part == WindowPart::Drag).then_some(view)
+}
+
+fn window_part_at(surface: &Surface, x: f32, y: f32) -> Option<(NshView, WindowPart)> {
     let hit = pick(&surface.input_root(), x, y, true)?;
     if hit.item.is_some() {
         return None;
     }
-    let mut view = Some(hit.view);
+    let mut view = Some(hit.view.clone());
     while let Some(v) = view {
         {
             let s = v.state();
             if let Some(edge) = s.props.window_resize {
-                return Some(WindowPart::Resize(edge));
+                return Some((hit.view, WindowPart::Resize(edge)));
             }
             if let Some(control) = s.props.window_control {
-                return Some(WindowPart::Control(control));
+                return Some((hit.view, WindowPart::Control(control)));
             }
             if let Some(drag) = s.props.window_drag {
-                return drag.then_some(WindowPart::Drag);
+                return drag.then_some((hit.view, WindowPart::Drag));
             }
             if s.kind == ViewKind::Input
                 || has_press(s.events)
@@ -2472,9 +2487,27 @@ fn scroll_target(surface: &Surface, x: f32, y: f32, dx: f32, dy: f32) -> Option<
         chain(&hit.view),
         Points(dx),
         Points(dy),
-        |v| v.state().scroll.as_ref().map(|s| s.horizontal),
-        |v| v.kind() == ViewKind::Scroll && crate::scroll::can_scroll(v, dx, dy),
+        // A multiline input scrolls its text vertically, before the
+        // scroll views around it (a textarea in browsers).
+        |v| match v.state().scroll.as_ref() {
+            Some(s) => Some(s.horizontal),
+            None => crate::text_input::scrolls_text(v).then_some(false),
+        },
+        |v| {
+            (v.kind() == ViewKind::Scroll && crate::scroll::can_scroll(v, dx, dy))
+                || (dx.abs() <= dy.abs() && crate::text_input::can_wheel(v, dy))
+        },
     )
+}
+
+/// Scrolls `view` (a scroll view, or a multiline input scrolling its own
+/// text) by a wheel's `(dx, dy)`.
+fn scroll_wheel(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32) {
+    if view.kind() == ViewKind::Scroll {
+        crate::scroll::wheel(surface, view, dx, dy);
+    } else {
+        crate::text_input::wheel(view, dy);
+    }
 }
 
 /// Whether `view` is still shown in its surface.
@@ -2531,7 +2564,7 @@ fn wheel_input(
             *input.latch.borrow_mut() = Some((view.clone(), horizontal, time));
             // Without a begin, the scroll module takes it as a mouse wheel:
             // it settles (and snaps) by itself once the notches stop.
-            crate::scroll::wheel(surface, &view, dx, dy);
+            scroll_wheel(surface, &view, dx, dy);
             true
         }
         WheelInput::Touchpad => {
@@ -2546,7 +2579,9 @@ fn wheel_input(
                     view: view.clone(),
                     last: time,
                 });
-                crate::scroll::wheel_begin(surface, &view);
+                if view.kind() == ViewKind::Scroll {
+                    crate::scroll::wheel_begin(surface, &view);
+                }
                 watch_touchpad(surface);
             }
             let view = {
@@ -2557,7 +2592,7 @@ fn wheel_input(
                 w.last = time;
                 w.view.clone()
             };
-            crate::scroll::wheel(surface, &view, dx, dy);
+            scroll_wheel(surface, &view, dx, dy);
             true
         }
         WheelInput::Stop => {
@@ -2566,7 +2601,9 @@ fn wheel_input(
             };
             // The system glides on by itself (its inertia comes as more
             // deltas, which this scroll took): no velocity to add.
-            crate::scroll::wheel_end(surface, &w.view, 0.0, 0.0);
+            if w.view.kind() == ViewKind::Scroll {
+                crate::scroll::wheel_end(surface, &w.view, 0.0, 0.0);
+            }
             true
         }
     }
@@ -2912,5 +2949,31 @@ mod tests {
     fn ctrl_wheel_zooms_by_notches() {
         assert!((zoom_factor(-ZOOM_NOTCH.0) - 1.1).abs() < 1e-5);
         assert!((zoom_factor(2.0 * ZOOM_NOTCH.0) - 1.0 / 1.21).abs() < 1e-5);
+    }
+
+    #[test]
+    fn drag_view_picks_the_innermost_view_in_a_drag_region() {
+        let surface = Surface::new(Default::default());
+        surface.root.state_mut().frame = rect(0.0, 0.0, 200.0, 100.0);
+        let bar = view(
+            &surface.root,
+            2,
+            ViewKind::View,
+            rect(0.0, 0.0, 200.0, 40.0),
+        );
+        bar.state_mut().props.window_drag = Some(true);
+        let child = view(&bar, 4, ViewKind::View, rect(10.0, 5.0, 50.0, 30.0));
+        let excluded = view(&bar, 6, ViewKind::View, rect(70.0, 5.0, 50.0, 30.0));
+        excluded.state_mut().props.window_drag = Some(false);
+        let button = view(&bar, 8, ViewKind::View, rect(130.0, 5.0, 50.0, 30.0));
+        button.state_mut().events.set(EventKind::Press, true);
+
+        assert_eq!(window_part(&surface, 5.0, 5.0), Some(WindowPart::Drag));
+        assert_eq!(drag_view(&surface, 5.0, 5.0), Some(bar));
+        assert_eq!(drag_view(&surface, 20.0, 15.0), Some(child));
+        assert_eq!(window_part(&surface, 80.0, 15.0), None);
+        assert_eq!(drag_view(&surface, 80.0, 15.0), None);
+        assert_eq!(window_part(&surface, 140.0, 15.0), None);
+        assert_eq!(drag_view(&surface, 140.0, 15.0), None);
     }
 }

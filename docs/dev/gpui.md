@@ -129,7 +129,12 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
   opacity, so `DrawCx` keeps the current transform (`geom::Mat4`) and applies opacity and color filters
   (`push_color_matrix`) to every color, as GPUI's own element opacity does. Axis-aligned rectangles are GPUI's quads,
   exact; under a rotation, skew or perspective they are filled as paths whose points are mapped one by one
-  (`fill_contours`), so they turn and project with the view; glyphs are placed at their mapped origins, upright. Clips
+  (`fill_contours`), so they turn and project with the view; glyphs are placed at their mapped origins, upright.
+  Images turn too (`image/turn.rs`): a one-color SVG (tinted, or of one color) under an affine transform is a GPUI
+  monochrome sprite carrying the transform (`paint_svg` with a `TransformationMatrix`, fed a generated SVG of the
+  picture's alpha, never the app's SVG); any other picture is resampled on the CPU through the whole transform into a
+  bitmap of the device pixels it covers, cut to the view's box and the clip polygon, kept while the transform's linear
+  part stays. Clips
   are rectangles in window coordinates (GPUI's content masks), intersected as they nest; a rounded or rotated clip is
   also kept as a convex polygon paths are cut to, and the innermost rounded clip rounds the corners of the quads and
   images reaching into its corners (`clip_rounded`). `paint(|window, app| …)` paints inside the current clip.
@@ -145,9 +150,11 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
   the main thread paints with). GPUI shapes one line of one font size at a time and leaves breaking, bidi, line
   heights and ellipses to its callers, so each paragraph is shaped once, in segments of one bidi level and font size,
   into clusters; measuring at another width only re-breaks them (UAX #14, `unicode-linebreak`), and the final layout
-  orders each line's clusters by their bidi levels (`unicode-bidi`). Line heights follow Pango's model, as on Linux
-  and Windows. The final layout is plain data (lines, cluster boxes, positioned glyphs); the main thread paints the
-  glyphs (`paint_glyph`, `paint_emoji`) and reads colors and decorations from the spans, as the Linux backend does.
+  orders each line's clusters by their bidi levels (`unicode-bidi`). The last line a line clamp shows holds the rest of
+  its paragraph and is cut at the box for the ellipsis, inside a word if need be, as CoreText, Pango and StaticLayout
+  cut it. Line heights follow Pango's model, as on Linux and Windows. The final layout is plain data (lines, cluster
+  boxes, positioned glyphs); the main thread paints the glyphs (`paint_glyph`, `paint_emoji`) and reads colors and
+  decorations from the spans, as the Linux backend does.
 - **Frames**: native animations (`nsh_core::animation::Animator`), JS frame requests, transitions (`transition.rs`
   over `nsh_core::transition`), scroll glides and navigation transitions tick on the window's frames (`Surface::tick`,
   called while drawing; `window.request_animation_frame()` while something animates), and nothing is drawn otherwise.
@@ -199,7 +206,7 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
 |---|---|---|
 | Text | `text.rs` | GPUI's text system on the engine thread, lines broken and ordered by NSH, glyphs painted on the main thread (above). selectable text has the desktop range selection of Windows and Linux (Cmd instead of Ctrl on macOS) and a right-click menu (Copy, Select All). A blurred text shadow is the glyphs painted faintly around the blur radius. GPUI loads variable fonts at their default weight only: on Linux the UI font is the first of a list GPUI can set in bold (Adwaita Sans is variable; Noto Sans or DejaVu Sans take its place); `fontFamily` lists: the first installed candidate is the font's family, the others its `FontFallbacks`, before `TEXT_FALLBACKS` |
 | Decoration | `decor.rs` | CSS painting order. Axis-aligned views: GPUI's blurred rounded-box shadows (`paint_drop_shadows`, `paint_inset_shadows`), quads for the background and one-color borders (per-side widths, per-corner radii, dashes), gradients (`decor/gradient.rs`). Paths of polygons for what quads cannot draw: borders whose sides differ in color, dotted lines, and every decoration of a rotated, skewed or projected view (a rotated view's shadow is a stack of translucent outlines). A `drop-shadow()` filter's content shadow is the shadows of the filled descendants' boxes and the glyphs. Color filters are color matrices on every color the subtree draws |
-| Images | `image.rs` | Loaded through the core's shared loader and decoded images (`docs/dev/images.md` "Loading and memory"): decoded at the view's size bucket (the `image` crate: PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, EXIF orientation, which `getSize` reads from the header too, so a photo taken sideways reports its upright size) into `RenderImage`s (straight BGRA, a frame per animation frame) in the process's image budget, leased by the views showing them, their atlas copies and variants counted there too; drawn with `paint_image`. GPUI has no color matrix, blur, mipmaps or sprite opacity: a picture keeps variants made on the workers (halved when drawn small, blurred, filtered, tinted, opacity in 16 steps) and draws the closest ready one meanwhile. Animated GIF / WebP advance on timers at their delays, paused while not drawn |
+| Images | `image.rs` | Loaded through the core's shared loader and decoded images (`docs/dev/images.md` "Loading and memory"): decoded at the view's size bucket (the `image` crate: PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, EXIF orientation, which `getSize` reads from the header too, so a photo taken sideways reports its upright size) into `RenderImage`s (straight BGRA, a frame per animation frame) in the process's image budget, leased by the views showing them, their atlas copies and variants counted there too; drawn with `paint_image` (turned: `image/turn.rs`, see `DrawCx` above). GPUI has no color matrix, blur, mipmaps or sprite opacity: a picture keeps variants made on the workers (halved when drawn small, blurred, filtered, tinted, opacity in 16 steps) and draws the closest ready one meanwhile. Animated GIF / WebP advance on timers at their delays, paused while not drawn |
 | Canvas | `canvas.rs` | Rasterized with tiny-skia at the window's resolution of the view's whole transform (made again when its linear part changes, moved along with translations), uploaded as a GPUI image; canvas' model kept as on Windows (paths, strokes, anti-aliased clip masks, exact linear / radial / conic gradients, box-blurred shadows, composite operations in layers). Text is GPUI glyphs above the pixmap (GPUI gives no outlines), in the fonts `measureText` uses |
 | Shaders | `shader.rs` | `nsh_engine::shader`'s frames as GPUI images under the children (`docs/dev/shaders.md`); fills only (below) |
 | Scroll views | `scroll.rs` | The Windows backend's, on `nsh_core::scroll` (the state, physics and gestures; `scroll.rs` draws the indicator and finds the views keys move): offsets of their own, UIKit-like deceleration, snapping, paging, sticky cells, rubber banding for touch drags (mouse drags never scroll: they are the app's), the keyboard, mirrored horizontal lists, the indicator dragged as a scroll bar, shown while the mouse moves over the view, run along the part of the view the scroll views and clips around it leave in sight (`NshView::visible_bounds`); touchpad scrolls carry GPUI's phases, touchpad pinches go to pinch gestures |
@@ -273,9 +280,10 @@ and Windows.
 
 ## Not implemented, or different
 
-- **Transforms**: rotated, skewed and projected views turn as paths (backgrounds, borders, shadows), but glyphs stay
-  upright at their mapped origins, and images, videos and canvases draw at their bounds (GPUI has no transform for
-  sprites or glyphs).
+- **Transforms**: rotated, skewed and projected views turn as paths (backgrounds, borders, shadows) and turn their
+  images (one-color SVGs on the GPU, other pictures resampled on the CPU at each new angle, on the main thread),
+  canvases follow rotations and skews, but glyphs stay upright at their mapped origins and videos draw at their bounds
+  (GPUI has no transform for glyphs or color sprites).
 - **Opacity** is applied to each color rather than to a group, so overlapping translucent children show through each
   other; an image's opacity (a view's, a fade-in) steps in sixteenths, each step a variant of its pixels.
 - **Clips** are rectangles (GPUI's content masks): a rounded clip rounds the backgrounds and images that reach into its

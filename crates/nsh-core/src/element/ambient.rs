@@ -1320,7 +1320,7 @@ pub fn timer(delay: Duration) -> Delay {
 pub fn timer_until(at: Instant) -> Delay {
     Delay {
         at,
-        registered: false,
+        timer: None,
         #[cfg(not(target_arch = "wasm32"))]
         elsewhere: None,
     }
@@ -1333,8 +1333,9 @@ pub fn timer_until(at: Instant) -> Delay {
 #[derive(Debug)]
 pub struct Delay {
     at: Instant,
-    /// The core keeps it.
-    registered: bool,
+    /// Its timer in the core, which dropping the delay takes back (a task
+    /// cancelled before its time).
+    timer: Option<task::TimerKey>,
     #[cfg(not(target_arch = "wasm32"))]
     elsewhere: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
 }
@@ -1351,15 +1352,18 @@ impl Future for Delay {
             return sleep.as_mut().poll(cx);
         }
         if crate::time::now() >= self.at {
+            // Its timer goes too if it has not fired yet (the task was
+            // polled for something else).
+            self.timer = None;
             return std::task::Poll::Ready(());
         }
-        if self.registered {
+        if let Some(timer) = &self.timer {
+            timer.set_waker(cx.waker());
             return std::task::Poll::Pending;
         }
         match super::reactive::try_with_data(|d| d.ambient.executor.clone()).flatten() {
             Some(executor) => {
-                executor.add_timer(self.at, cx.waker().clone());
-                self.registered = true;
+                self.timer = Some(executor.add_timer(self.at, cx.waker().clone()));
                 std::task::Poll::Pending
             }
             #[cfg(not(target_arch = "wasm32"))]
@@ -1614,7 +1618,10 @@ impl super::ElementRef {
 
     /// Listens to the keyboard focus leaving the element: going from it
     /// or an element inside it to one outside, or to none (GPUI's
-    /// `on_focus_out`; the element leaves `focus-within`). As
+    /// `on_focus_out`; the element leaves `focus-within`). An element
+    /// removed with the focus inside it, or one that stops carrying the
+    /// ref, is left too, and the focus coming into the next element that
+    /// carries the ref is heard by [`Self::on_focus_in`]. As
     /// [`Self::on_focus_in`] otherwise.
     pub fn on_focus_out(&self, listener: impl Fn() + 'static) {
         let element = *self;

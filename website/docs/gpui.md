@@ -174,8 +174,9 @@ so only load it from your own app's files.
 
 What draws or behaves differently from the native desktop backends:
 
-- **Transforms**: rotated, skewed and projected views turn their backgrounds, borders and shadows, but text stays
-  upright, and images, videos and canvases draw at their bounds.
+- **Transforms**: rotated, skewed and projected views turn their backgrounds, borders, shadows and images (a turning
+  photo is redrawn at each new angle, a one-color SVG icon is turned by the GPU), and canvases follow rotations and
+  skews; text stays upright and videos draw at their bounds.
 - **Opacity** applies to each color rather than to a group, so overlapping children of a translucent view show
   through each other; an image's opacity (a fade-in, a translucent view) changes in sixteenths.
 - **Rounded clips** (`overflow: "hidden"` with a radius) round the backgrounds and images of the children, but text,

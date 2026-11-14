@@ -407,6 +407,19 @@ pub(crate) struct NavIvars {
     applying: Cell<bool>,
 }
 
+/// The recognizers of `nav`'s swipe back: the screen edge's and, since
+/// iOS 26, the content's, which can take an edge drag too.
+pub(crate) fn back_swipes(nav: &UINavigationController) -> Vec<Retained<UIGestureRecognizer>> {
+    let content = nav
+        .respondsToSelector(objc2::sel!(interactiveContentPopGestureRecognizer))
+        .then(|| nav.interactiveContentPopGestureRecognizer())
+        .flatten();
+    nav.interactivePopGestureRecognizer()
+        .into_iter()
+        .chain(content)
+        .collect()
+}
+
 /// A drag that starts at the screen's edge belongs to the stack: the top
 /// screen's scroll views wait for the back gesture to fail before they pan,
 /// so a swipe at the edge goes back instead of scrolling the page. The
@@ -511,6 +524,38 @@ fn clip_side_safe_area(nav: &UINavigationController) {
             right,
             ..current
         });
+    }
+}
+
+/// Gives the bar of `nav` the height of the large title its top screen asks
+/// for, when UIKit left it lower and the screen's content rests at its top.
+///
+/// A stack laid out in the frame its first screen arrives shows that screen
+/// with the bar at the height of an inline title (`sizeThatFits` already
+/// gives the large title's): the screen's safe area and its scroll view's
+/// offset follow that height, and UIKit then reads the content as scrolled
+/// under a collapsed large title, which stays collapsed. Sized here, the
+/// bar grows the safe area, UIKit keeps the scroll view at its top, and the
+/// title shows large. Content the user scrolled keeps its collapsed title.
+fn fit_large_title(nav: &UINavigationController) {
+    let bar = nav.navigationBar();
+    if nav.isNavigationBarHidden() || !bar.prefersLargeTitles() {
+        return;
+    }
+    let Some(top) = nav.topViewController() else {
+        return;
+    };
+    if top.navigationItem().largeTitleDisplayMode() != UINavigationItemLargeTitleDisplayMode::Always
+    {
+        return;
+    }
+    let scrolled = top
+        .viewIfLoaded()
+        .and_then(|view| crate::mount::first_scroll_view(&view))
+        .is_some_and(|s| s.contentOffset().y > -s.adjustedContentInset().top);
+    let size = bar.frame().size;
+    if !scrolled && bar.sizeThatFits(size).height > size.height {
+        bar.sizeToFit();
     }
 }
 
@@ -667,6 +712,16 @@ define_class!(
             // it brought in is only reachable here.
             size_screens(nav);
             defer_to_back_swipe(nav);
+            fit_large_title(nav);
+            // A bar that comes back with the transition (the screen that
+            // left hid the header) is put at the top of a stack that starts
+            // below the top of the window, above where UIKit keeps it at
+            // rest, and nothing lays the screen out again once the
+            // transition is over: this pass moves the bar to its place and
+            // reports the header the screen's content starts below.
+            if let Some(view) = controller.viewIfLoaded() {
+                view.setNeedsLayout();
+            }
             // Safety net: whatever the transition did, the bar ends where the
             // stack says it goes.
             slide_bottom_bar(nav, bottom_bar_hidden(nav));
@@ -894,12 +949,7 @@ impl StackHost {
         // Apply our permission delegate afterwards, to both recognizers:
         // on iOS 26 even an edge drag can use the content recognizer, whose
         // default delegate prevents popping with a hidden navigation bar.
-        if let Some(pop) = nav.interactivePopGestureRecognizer() {
-            pop.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-        }
-        if nav.respondsToSelector(objc2::sel!(interactiveContentPopGestureRecognizer))
-            && let Some(pop) = nav.interactiveContentPopGestureRecognizer()
-        {
+        for pop in back_swipes(&nav) {
             pop.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
         }
         Self {

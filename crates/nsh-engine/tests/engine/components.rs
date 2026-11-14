@@ -2109,6 +2109,61 @@ try {
 mount(() => <Text>{wrong}</Text>);
 "#;
 
+const MENU_CYCLES: &str = r#"import { mount, Text } from "nsh";
+import { Menu, Tray } from "nsh/desktop";
+
+function attempt(items: unknown, set = (items: unknown) => Menu.setApplicationMenu(items as never)) {
+  try {
+    set(items);
+    return "accepted";
+  } catch (e) {
+    const message = (e as Error).message;
+    return message.includes("cannot be read") ? "too many" : message;
+  }
+}
+// A menu that is its own submenu.
+const own: any[] = [{ label: "Again", submenu: null }];
+own[0].submenu = own;
+// Three levels of 1000 items sharing their submenus: no cycle, but 10 ** 9
+// items to read without a total.
+const leaves = new Array(1000).fill({ label: "Leaf" });
+const middle = new Array(1000).fill({ label: "Middle", submenu: leaves });
+const wide = new Array(1000).fill({ label: "Top", submenu: middle });
+const results = [
+  `sparse:${attempt(new Array(2 ** 32 - 1))}`,
+  `own:${attempt(own)}`,
+  `wide:${attempt(wide)}`,
+  `fine:${attempt([{ label: "File", submenu: [{ label: "Open", submenu: [{ label: "Recent" }] }] }])}`,
+  `tray:${attempt(new Array(2 ** 20 + 1).fill({ text: "a" }), (title) => Tray.set({ title } as never))}`,
+];
+mount(() => <Text>{results.join(" ")}</Text>);
+"#;
+
+/// Menus are read natively, where neither the time budget nor the
+/// interpreter's stack limit applies: one that says it has billions of
+/// items, one that is its own submenu (which overflowed the engine
+/// thread's stack) and one whose shared submenus hold 10^9 items in all
+/// are refused, and a menu nested as menus are is accepted. So is a
+/// tray's title read: one of more than 2^20 runs is refused.
+#[test]
+fn menus_too_long_or_nested_in_themselves_are_refused() {
+    let (_engine, rx) = start_in(
+        MENU_CYCLES,
+        Environment {
+            os: nsh_engine::Os::MacOs,
+            ..Environment::default()
+        },
+    );
+    let expected = "sparse:too many own:nsh/desktop: submenus nested too deeply \
+                    wide:too many fine:accepted tray:too many";
+    // The app reads a million items before its first frame, longer than
+    // `until`'s wait between frames on a loaded machine.
+    let first = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("first frame");
+    assert!(shows(&first, expected), "{first:?}");
+}
+
 /// An item's `icon` reaches the platform as `<Image>`'s `src` does: a `data:`
 /// URI or a blob's bytes in hand under a short key, an imported image with its
 /// size and scales; nothing for an empty string, and a throw for what is no

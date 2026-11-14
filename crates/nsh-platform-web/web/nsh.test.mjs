@@ -159,6 +159,30 @@ test("input autofill hints are set, changed and cleared on both field kinds", ()
   }
 });
 
+test("input autoCorrect sets spellcheck and the autocorrect attribute on both field kinds", () => {
+  const { player } = fakePlayer();
+  const attrs = new Map();
+  const field = {
+    classList: { toggle() {} },
+    setAttribute: (name, value) => attrs.set(name, value),
+    removeAttribute: (name) => attrs.delete(name),
+  };
+  const el = { _field: field, removeAttribute() {} };
+  player.view = () => el;
+  for (const multiline of [false, true]) {
+    field.tagName = multiline ? "TEXTAREA" : "INPUT";
+    for (const autoCorrect of [true, false, true]) {
+      player.op_in(["in", 1, { multiline, autoCorrect }, null]);
+      assert.equal(field.spellcheck, autoCorrect);
+      assert.equal(attrs.get("autocorrect"), autoCorrect ? "on" : "off");
+    }
+    // A password shown as plain text is never corrected, whatever autoCorrect says.
+    player.op_in(["in", 1, { multiline, autoCorrect: true, autoComplete: "current-password" }, null]);
+    assert.equal(field.spellcheck, false);
+    assert.equal(attrs.get("autocorrect"), "off");
+  }
+});
+
 test("an invalid view is aria-invalid, and so is the field of an input", () => {
   const { player } = fakePlayer();
   const element = () => {
@@ -499,6 +523,62 @@ test("Tab stops are the pressables and the focusable views, pressable or not", (
   assert.equal(chart.hasAttribute("tabindex"), false);
   assert.equal(chart.blurred, true);
   delete globalThis.document;
+});
+
+test("setAccessibilityFocus leaves the keyboard focus in a field the user is typing in", async () => {
+  const { player } = fakePlayer();
+  player.live = { textContent: "" };
+  const focusable = (attrs = {}) => {
+    const el = {
+      attrs: new Map(Object.entries(attrs)),
+      focused: false,
+      isConnected: true,
+      closest: () => null,
+      hasAttribute(name) { return this.attrs.has(name); },
+      getAttribute(name) { return this.attrs.get(name) ?? null; },
+      set tabIndex(v) { this.attrs.set("tabindex", String(v)); },
+      focus() { this.focused = true; globalThis.document.activeElement = this; },
+    };
+    return el;
+  };
+  const field = Object.assign(focusable(), { tagName: "INPUT", type: "search" });
+  const title = Object.assign(focusable({ "aria-label": "Search" }), { textContent: "Search" });
+  const input = { _field: field };
+  const views = new Map([[2, title], [4, input]]);
+  player.view = (id) => views.get(id);
+  const a11yFocus = (id) => player.op_cmd([0, id, "a11yFocus"]);
+  try {
+    // Typing in the search field: the title is read out, the field keeps
+    // the keyboard focus.
+    globalThis.document = { activeElement: field };
+    a11yFocus(2);
+    assert.equal(title.focused, false);
+    assert.equal(document.activeElement, field);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(player.live.textContent, "Search");
+    // Nothing typed into: the title takes the focus, as before.
+    globalThis.document = { activeElement: null };
+    a11yFocus(2);
+    assert.equal(title.focused, true);
+    assert.equal(title.getAttribute("tabindex"), "-1");
+    // An input takes it into its field.
+    a11yFocus(4);
+    assert.equal(field.focused, true);
+    assert.equal(document.activeElement, field);
+    // A field that no longer takes input (under a dialog) keeps nothing.
+    title.focused = false;
+    field.closest = (selector) => (selector === "[inert]" ? {} : null);
+    a11yFocus(2);
+    assert.equal(title.focused, true);
+    // Nor does a checkbox, which takes no typing.
+    title.focused = false;
+    field.closest = () => null;
+    globalThis.document = { activeElement: Object.assign(focusable(), { tagName: "INPUT", type: "checkbox" }) };
+    a11yFocus(2);
+    assert.equal(title.focused, true);
+  } finally {
+    delete globalThis.document;
+  }
 });
 
 test("a touch whose press focused a field leaves the focus there", () => {

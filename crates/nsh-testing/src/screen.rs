@@ -154,6 +154,9 @@ pub struct Screen {
     /// The views under the mouse that care (`input::hoverable`), innermost
     /// first.
     hovered: Vec<NodeId>,
+    /// Views a removal took out of the hover or the keyboard focus, with
+    /// their states since, for the engine ([`Screen::take_restated`]).
+    restated: Vec<(NodeId, u16)>,
     /// The context menu the app showed (`Menu.popup`), until it is chosen
     /// from or closed.
     menu: Option<Arc<[nsh_core::desktop::MenuItem]>>,
@@ -443,12 +446,14 @@ impl Screen {
                 }
             }
             MountItem::Remove { id } => {
+                self.taken_out(*id);
                 self.detach(*id);
                 self.popped.remove(id);
                 self.closed.remove(id);
                 self.forget_window(*id);
             }
             MountItem::Delete { id } => {
+                self.taken_out(*id);
                 self.drop_spans(*id);
                 self.canvas(*id, &[]);
                 self.detach(*id);
@@ -457,9 +462,6 @@ impl Screen {
                 self.popped.remove(id);
                 self.closed.remove(id);
                 self.forget_window(*id);
-                if self.focused == Some(*id) {
-                    self.focused = None;
-                }
             }
             MountItem::ScreenConfig { id, config } => {
                 self.nodes.entry(*id).or_default().prevent_back = config.prevent_back;
@@ -850,6 +852,44 @@ impl Screen {
             .ok_or_else(|| crate::failure::not_found("span", selector))
     }
 
+    /// View `id` leaves the tree with what it holds: none of it is under
+    /// the mouse or has the focus any more, and it hears no leave or blur
+    /// for that, as a removed DOM element does not. A removed view may live
+    /// on (a JS cycle keeps it until a collection) while its component is
+    /// gone, whose handlers must not run.
+    fn taken_out(&mut self, id: NodeId) {
+        let mut hovered = std::mem::take(&mut self.hovered);
+        hovered.retain(|&v| {
+            let inside = self.within(v, id);
+            if inside {
+                self.clear_state(v, nsh_core::tailwind::state::HOVERED);
+            }
+            !inside
+        });
+        self.hovered = hovered;
+        if self.focused.is_some_and(|v| self.within(v, id)) {
+            self.focused = None;
+        }
+        if let Some(key) = self.key_focus.filter(|&v| self.within(v, id)) {
+            self.key_focus = None;
+            self.clear_state(key, nsh_core::tailwind::state::FOCUSED);
+        }
+    }
+
+    fn clear_state(&mut self, id: NodeId, bit: u16) {
+        if let Some(states) = self.set_state(id, bit, false) {
+            self.restated.push((id, states));
+        }
+    }
+
+    /// The views a removal took out of the hover or the keyboard focus
+    /// since the last call, still alive, with their states now.
+    pub(crate) fn take_restated(&mut self) -> Vec<(NodeId, u16)> {
+        let mut restated = std::mem::take(&mut self.restated);
+        restated.retain(|(id, _)| self.nodes.contains_key(id));
+        restated
+    }
+
     fn detach(&mut self, id: NodeId) {
         if let Some(parent) = self.nodes.get_mut(&id).and_then(|v| v.parent.take())
             && let Some(siblings) = self.children.get_mut(&parent)
@@ -1196,6 +1236,31 @@ impl Screen {
         let mut presented = std::mem::take(&mut self.presented);
         presented.retain(|id| !self.is_window(*id));
         presented
+    }
+
+    /// The modals presented since the last [`Screen::take_presented`],
+    /// which it leaves for that call.
+    pub(crate) fn presenting(&self) -> Vec<NodeId> {
+        let mut presented = self.presented.clone();
+        presented.retain(|id| !self.is_window(*id));
+        presented
+    }
+
+    /// Whether view `id` is still in the tree: attached up to the root,
+    /// with nothing on the way a back closed natively.
+    pub(crate) fn in_tree(&self, mut id: NodeId) -> bool {
+        loop {
+            if id == ROOT {
+                return true;
+            }
+            if self.closed.contains(&id) {
+                return false;
+            }
+            match self.nodes.get(&id).and_then(|v| v.parent) {
+                Some(parent) => id = parent,
+                None => return false,
+            }
+        }
     }
 
     /// Whether `id` is the root of a window of the app's own.
@@ -1812,7 +1877,13 @@ impl Screen {
                 .filter(|c| placed(c))
                 .chain(children.iter().rev().filter(|c| !placed(c)));
             for &child in order {
-                let node = self.nodes.get(&child).is_some_and(|v| v.canvas_node);
+                // A span has its text's bounds here, not its characters':
+                // the pointer reaches the text, or the last span would
+                // cover its siblings.
+                let node = self
+                    .nodes
+                    .get(&child)
+                    .is_some_and(|v| v.canvas_node || v.span.is_some());
                 // Windows are windows of their own; dialogs were tried
                 // first ([`Screen::hit_pointer`]).
                 if node || !attached.contains(&child) || self.kind(child) == Some(ViewKind::Modal) {
@@ -2169,7 +2240,6 @@ impl Screen {
 
     /// View `id`'s interaction states with `bit` set (or cleared), when it
     /// tracks it and they change.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn set_state(&mut self, id: NodeId, bit: u16, on: bool) -> Option<u16> {
         let view = self.nodes.get_mut(&id)?;
         let next = nsh_core::input::next_states(view.tracked, view.states, bit, on)?;
@@ -2269,7 +2339,9 @@ impl Screen {
     /// [`nsh_core::ApproxTextEngine`] lays the text out: characters `0.55 ×`
     /// the font size wide, lines `1.2 ×` it tall, wrapped at the content
     /// box's width when multiline; a single line is centered in the box and
-    /// keeps the caret inside it.
+    /// keeps the caret inside it. A multiline input taller in text than its
+    /// box scrolls it to keep the caret's line in view, as the platforms'
+    /// do while the user edits: the line at the bottom of the box.
     pub(crate) fn input_caret(&self, id: NodeId) -> Option<Bounds<Points>> {
         let view = self.nodes.get(&id)?;
         let input = view.input.as_ref()?;
@@ -2296,7 +2368,9 @@ impl Screen {
         };
         let mut x = content.origin.x.0 + column as f32 * advance;
         let y = if input.config.multiline {
-            content.origin.y.0 + row as f32 * line
+            let at = row as f32 * line;
+            let scrolled = (at + line - content.size.height.0).max(0.0);
+            content.origin.y.0 + at - scrolled
         } else {
             x = x.min(content.origin.x.0 + (content.size.width.0 - 1.0).max(0.0));
             content.origin.y.0 + (content.size.height.0 - line) / 2.0
@@ -2369,6 +2443,22 @@ impl Screen {
             props.focus_stop(v.events.contains(EventKind::Press)) && !self.disabled_from(id, None)
         })
         .collect()
+    }
+
+    /// The newest modal shown over `window` (the root of a window of the
+    /// app's own, else the main window's): the desktops and the web keep
+    /// Tab inside it, its views the only stops while it is shown.
+    pub(crate) fn focus_scope(&self, window: NodeId) -> Option<NodeId> {
+        self.shown().into_iter().rev().find(|&id| {
+            self.kind(id) == Some(ViewKind::Modal)
+                && !self.is_window(id)
+                && self.window_of(id) == window
+        })
+    }
+
+    /// Whether view `id` is `scope` or inside it.
+    pub(crate) fn within(&self, id: NodeId, scope: NodeId) -> bool {
+        id == scope || self.is_inside(id, scope)
     }
 
     /// The stop a press on `id` gives the focus to in a terminal: `id` or
@@ -2634,6 +2724,40 @@ mod tests {
     }
 
     #[test]
+    fn a_multiline_input_taller_in_text_than_its_box_keeps_its_caret_in_view() {
+        let mut screen = Screen::default();
+        let mut config = nsh_core::InputConfig::default();
+        config.style.font_size = Points(10.0);
+        config.multiline = true;
+        screen.apply(&batch(vec![
+            create(2, ViewKind::Input),
+            frame(2, 0.0, 0.0, 60.0, 40.0),
+            MountItem::Input {
+                id: 2,
+                config: Box::new(config),
+            },
+            MountItem::InputContent {
+                id: 2,
+                content: Bounds::new(
+                    Point::new(Points(4.0), Points(6.0)),
+                    Size::new(Points(55.0), Points(28.0)),
+                ),
+            },
+            insert(1, 2),
+        ]));
+        // Five lines of 12 in a box of 28: the last line at its bottom.
+        screen.input_mut(2).unwrap().text = "a\nb\nc\nd\ne".into();
+        let caret = screen.input_caret(2).unwrap();
+        assert_eq!(
+            (caret.origin.y.0, caret.size.height.0),
+            (6.0 + 28.0 - 12.0, 12.0)
+        );
+        // One line: where it is.
+        screen.input_mut(2).unwrap().text = "a".into();
+        assert_eq!(screen.input_caret(2).unwrap().origin.y.0, 6.0);
+    }
+
+    #[test]
     fn an_input_caret_follows_its_text_as_the_approximate_engine_lays_it_out() {
         let mut screen = Screen::default();
         let mut config = nsh_core::InputConfig::default();
@@ -2789,6 +2913,44 @@ mod tests {
         // Popped: the screen under it is the one laid out.
         screen.apply(&batch(vec![MountItem::Remove { id: 8 }]));
         assert_eq!(ids(&screen), [2, 4, 6]);
+    }
+
+    #[test]
+    fn a_removed_subtree_leaves_the_hover_and_the_focus_without_a_word() {
+        use nsh_core::tailwind::state::{FOCUSED, HOVERED};
+        let mut screen = Screen::default();
+        screen.apply(&batch(vec![
+            create(2, ViewKind::View),
+            create(4, ViewKind::View),
+            create(6, ViewKind::Input),
+            create(8, ViewKind::View),
+            MountItem::TrackStates {
+                id: 4,
+                states: HOVERED,
+            },
+            insert(1, 2),
+            insert(2, 4),
+            insert(4, 6),
+            insert(4, 8),
+        ]));
+        screen.set_hovered(vec![4, 2]);
+        screen.set_state(4, HOVERED, true);
+        screen.set_focused(Some(6));
+        screen.set_key_focus(Some(8));
+        screen.set_state(8, FOCUSED, true);
+        // Removed, kept alive (a JS cycle holds it): it and what it holds
+        // leave the hover and the focus, their states cleared.
+        screen.apply(&batch(vec![MountItem::Remove { id: 4 }]));
+        assert_eq!(screen.set_hovered(vec![2]), [2]);
+        assert_eq!(screen.focused(), None);
+        assert_eq!(screen.key_focus(), None);
+        assert_eq!(screen.take_restated(), [(4, 0), (8, 0)]);
+        assert!(!screen.in_tree(6));
+        assert!(screen.in_tree(2));
+        // Deleted: nothing left to report on.
+        screen.apply(&batch(vec![MountItem::Delete { id: 2 }]));
+        assert_eq!(screen.set_hovered(Vec::new()), Vec::<NodeId>::new());
+        assert_eq!(screen.take_restated(), []);
     }
 
     #[test]
@@ -2979,6 +3141,23 @@ mod tests {
         assert_eq!(pick(&screen, "Privacy"), Pick::One(102));
         assert_eq!(pick(&screen, "text:Terms 🙂"), Pick::One(100));
         assert_eq!(screen.span(102), Some((4, 26, 33)));
+        // A span after it that only hears the pointer (its `hover:`
+        // styles) covers no press on it.
+        let mut hovers = EventMask::default();
+        hovers.set(EventKind::MouseEnter, true);
+        hovers.set(EventKind::MouseLeave, true);
+        screen.apply(&batch(vec![linked(vec![
+            link(13, 21, 100),
+            nsh_core::TextLink {
+                events: hovers,
+                focus_stop: false,
+                ..link(26, 33, 102)
+            },
+        ])]));
+        assert_eq!(
+            screen.covering(100, Point::new(Points(150.0), Points(20.0))),
+            None
+        );
         // They are not texts of their own.
         assert_eq!(screen.texts(), ["Agree to the Terms 🙂 and Privacy"]);
         screen.apply(&batch(vec![linked(Vec::new())]));

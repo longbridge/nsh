@@ -481,6 +481,19 @@ impl InputState {
         ((self.size.get().1 - self.line_height()) / 2.0).max(0.0)
     }
 
+    /// A multiline field's vertical scroll in pixels: where it is and the
+    /// farthest it goes (the last line at the content box's bottom).
+    /// RichEdit keeps no scroll range without a scroll bar and scrolls on
+    /// past its text, so the end comes from the text's height.
+    fn text_scroll(&self) -> Option<(i32, i32)> {
+        let e = self.editor.as_ref()?;
+        let mut at = windows::Win32::Foundation::POINT::default();
+        e.send(EM_GETSCROLLPOS, 0, &mut at as *mut _ as isize);
+        let client = self.client();
+        let height = e.text_height(client.right - client.left)?;
+        Some((at.y, (height - (client.bottom - client.top)).max(0)))
+    }
+
     /// RichEdit's client rectangle: the content box in the window's client
     /// pixels (one line centered).
     fn client(&self) -> RECT {
@@ -608,8 +621,9 @@ impl InputState {
                 | TXTBIT_SCROLLBARCHANGE,
         );
         // Spelling (and the touch keyboard's suggestions) where the app
-        // wants corrections: never in a password.
-        let spell = config.auto_correct && !config.secure && config.editable;
+        // wants corrections: never in a password, shown or not.
+        let spell =
+            config.auto_correct && !config.secure && !config.visible_password() && config.editable;
         drop(config);
         let (options, _) = self.send(EM_GETLANGOPTIONS, 0, 0);
         let flags = IMF_SPELLCHECKING | IMF_TKBPREDICTION;
@@ -697,11 +711,10 @@ impl InputState {
                 dc.SetTarget(&list);
                 dc.SetDpi(96.0 * s, 96.0 * s);
                 dc.BeginDraw();
-                // RichEdit draws in the window's client pixels.
-                dc.SetTransform(
-                    &(Matrix3x2::translation(-ox as f32, -oy as f32)
-                        * Matrix3x2::scale(1.0 / s, 1.0 / s)),
-                );
+                // RichEdit maps its client rectangle through the target's
+                // DPI and draws in DIPs: only the origin comes back to the
+                // view's points (the scale is the DPI's already).
+                dc.SetTransform(&Matrix3x2::translation(-ox as f32 / s, -oy as f32 / s));
                 let drawn = e.draw(dc.as_raw(), bounds);
                 let ended = dc.EndDraw(None, None);
                 dc.SetTarget(None);
@@ -968,6 +981,29 @@ pub(crate) fn focused(surface: &Surface) -> Option<NshView> {
     update_ime(surface);
     blink::update();
     None
+}
+
+/// The surface stopped (its views are detached): its focused field goes
+/// now, while the thread is alive, rather than with the thread's locals,
+/// whose destruction order is undefined (#1767).
+pub(crate) fn stopped(surface: &Surface) {
+    let view = FOCUS.with(|f| {
+        f.borrow_mut()
+            .get_mut(&surface.key())
+            .and_then(|f| f.view.take())
+    });
+    if let Some(input) = view.as_ref().and_then(input_of) {
+        input.focused.set(false);
+    }
+    // Dropped outside the borrow: the field's editor drops with it.
+    drop(view);
+    blink::update();
+}
+
+/// The surface's window was destroyed: forgets its focus entirely.
+pub(crate) fn destroyed(surface: &Surface) {
+    stopped(surface);
+    FOCUS.with(|f| f.borrow_mut().remove(&surface.key()));
 }
 
 fn window_active(surface: &Surface) -> bool {
@@ -1617,7 +1653,6 @@ pub(crate) fn pointer(surface: &Rc<Surface>, view: &NshView, event: &ItemPointer
 
 /// A wheel over input `view`: scrolls the lines of a multiline field that
 /// do not fit. True when it scrolled (an outer scroll view does not).
-#[allow(dead_code)] // For `crate::input`'s wheel routing.
 pub(crate) fn wheel(view: &NshView, dy: f32) -> bool {
     let Some(input) = input_of(view) else {
         return false;
@@ -1625,25 +1660,51 @@ pub(crate) fn wheel(view: &NshView, dy: f32) -> bool {
     if !input.multiline() {
         return false;
     }
+    let Some((before, max)) = input.text_scroll() else {
+        return false;
+    };
     let s = input.scale.get().max(0.01);
-    let mut at = windows::Win32::Foundation::POINT::default();
-    input.send(EM_GETSCROLLPOS, 0, &mut at as *mut _ as isize);
-    let before = at.y;
-    at.y = (at.y as f32 + dy * s).round().max(0.0) as i32;
-    input.send(EM_SETSCROLLPOS, 0, &mut at as *mut _ as isize);
-    let mut now = windows::Win32::Foundation::POINT::default();
-    input.send(EM_GETSCROLLPOS, 0, &mut now as *mut _ as isize);
-    let moved = now.y != before;
-    if moved {
-        view.changed();
-        input.report_scroll();
-        if input.focused.get()
-            && let Some(surface) = surface_of(view)
-        {
-            report_caret(&surface, view, &input);
-        }
+    let to = (before as f32 + dy * s).round() as i32;
+    // Up to the top; down to the last line, never further than it is.
+    let y = if dy > 0.0 {
+        to.min(max).max(before)
+    } else {
+        to.max(0)
+    };
+    if y == before {
+        return false;
     }
-    moved
+    let mut at = windows::Win32::Foundation::POINT { x: 0, y };
+    input.send(EM_SETSCROLLPOS, 0, &mut at as *mut _ as isize);
+    view.changed();
+    input.report_scroll();
+    if input.focused.get()
+        && let Some(surface) = surface_of(view)
+    {
+        report_caret(&surface, view, &input);
+    }
+    true
+}
+
+/// Whether `view` is a multiline input, which scrolls its own text under
+/// a vertical wheel ([`can_wheel`]).
+pub(crate) fn scrolls_text(view: &NshView) -> bool {
+    input_of(view).is_some_and(|i| i.multiline())
+}
+
+/// Whether multiline input `view` has lines left to scroll towards `dy`
+/// (down when positive): a wheel over it scrolls its text before the
+/// scroll views around it, as a textarea does in browsers and on macOS.
+pub(crate) fn can_wheel(view: &NshView, dy: f32) -> bool {
+    let Some(input) = input_of(view) else {
+        return false;
+    };
+    if dy == 0.0 || !input.multiline() {
+        return false;
+    }
+    input
+        .text_scroll()
+        .is_some_and(|(at, max)| if dy > 0.0 { at < max } else { at > 0 })
 }
 
 /// `Command::ScrollTo` for a multiline input: scrolls its text to `y`,
@@ -2045,6 +2106,18 @@ mod blink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stop_and_destroy_forget_the_focus() {
+        let surface = Surface::new(Default::default());
+        FOCUS.with(|f| f.borrow_mut().entry(surface.key()).or_default().inactive = true);
+        stopped(&surface);
+        // Stopping keeps whether the window is active (the app may restart).
+        assert!(!window_active(&surface));
+        destroyed(&surface);
+        assert!(FOCUS.with(|f| !f.borrow().contains_key(&surface.key())));
+        assert!(window_active(&surface));
+    }
 
     #[test]
     fn alignment() {

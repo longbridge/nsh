@@ -89,7 +89,8 @@ pub(crate) fn add_config(
 }
 
 /// `<name>-<version>-<os>-<arch>.<extension>`: what a release publishes, one
-/// per platform (desktop packages are built on the platform they are for).
+/// per platform, for this machine's.
+#[cfg(test)]
 fn archive_name(name: &str, version: &str, extension: &str) -> String {
     platform_archive_name(name, version, &nsh_updater::platform(), extension)
 }
@@ -104,11 +105,13 @@ fn platform_archive_name(name: &str, version: &str, platform: &str, extension: &
     format!("{name}-{version}-{platform}.{extension}")
 }
 
-/// Copies the package's archive under its release name, for an app with
-/// `"updater"`.
+/// Copies the package's archive under its release name for `platform` (the
+/// updater's name of the platform it runs on, `windows-x86_64`), for an app
+/// with `"updater"`.
 pub(crate) fn copy_archive(
     config: &AppConfig,
     name: &str,
+    platform: &str,
     archive: &Path,
     out: &Path,
 ) -> anyhow::Result<()> {
@@ -119,7 +122,12 @@ pub(crate) fn copy_archive(
         Some("zip") => "zip",
         _ => "tar.gz",
     };
-    let release = out.join(archive_name(name, version(config), extension));
+    let release = out.join(platform_archive_name(
+        name,
+        version(config),
+        platform,
+        extension,
+    ));
     fs::copy(archive, &release).with_context(|| format!("copy {}", archive.display()))?;
     ui::done(format!("update archive {}", ui::path(&release)));
     Ok(())

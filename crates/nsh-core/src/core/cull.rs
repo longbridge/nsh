@@ -6,7 +6,7 @@
 
 use taffy::Position;
 
-use super::{Core, Key, Kind, NO_KEY, rounded, span};
+use super::{Core, Key, Kind, NO_KEY, rounded, scroll_extent, span};
 use crate::{geometry::Bounds, mount::MountItem, ops::EventKind, text::TextEngine};
 
 /// How far around its viewport a scroll view mounts its content, in
@@ -38,6 +38,13 @@ impl<M: TextEngine> Core<M> {
         while key != NO_KEY {
             let node = &self.nodes[key as usize];
             if node.list.is_some() || node.kind == Kind::Cell || node.is_layout_root() {
+                return None;
+            }
+            // A view inside a text (an attachment) is laid out on its own
+            // and placed by its text, which makes it with its view:
+            // culling's walk never reaches into it, so what it holds
+            // would wait for good.
+            if node.inline && node.kind != Kind::Text && node.layout.is_some() {
                 return None;
             }
             if node.kind == Kind::Scroll {
@@ -130,6 +137,14 @@ impl<M: TextEngine> Core<M> {
                 l.size.width,
                 l.size.height,
             );
+            // A scroll view's content size, sent with the frame when it is
+            // made (a list's view in its parent's viewport has none).
+            let node = &mut self.nodes[key as usize];
+            if node.kind == Kind::Scroll
+                && let Some(scroll) = node.scroll.as_mut()
+            {
+                scroll.culled_content = Some(scroll_extent(&l));
+            }
             if let Some(parent) = self.nodes.get(self.nodes[key as usize].parent as usize)
                 && parent.rtl
                 && parent.kind == Kind::Scroll
@@ -407,6 +422,13 @@ impl<M: TextEngine> Core<M> {
         if let Some((key, _)) = self.focus {
             holders.push(key);
         }
+        // A reveal is resolved after layout; its target must survive the
+        // culling pass until that command has its text attachment's position.
+        holders.extend(self.commands.iter().filter_map(|(id, command)| {
+            matches!(command, crate::Command::Reveal(_))
+                .then(|| self.key(*id).ok())
+                .flatten()
+        }));
         holders.extend(
             self.overlays
                 .iter()

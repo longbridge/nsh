@@ -1529,6 +1529,8 @@ fn input(e: &mut Encoded, c: &InputConfig) {
     e.int(c.placeholder_color.map_or(0, argb));
     e.bool(c.secure);
     e.int(match c.keyboard {
+        // A password shown as plain text gets the visible password keyboard.
+        KeyboardType::Default if c.visible_password() => 8,
         KeyboardType::Default => 0,
         KeyboardType::Number => 1,
         KeyboardType::Decimal => 2,

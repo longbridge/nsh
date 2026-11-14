@@ -474,6 +474,58 @@ fn removed_modal_hears_its_dismissal() {
     assert!(text_id(&batch, "dismissed").is_some());
 }
 
+const REPLACED_WITH_OPEN_DIALOG: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { createNavStack, Dialog, NavPage, NavStack } from "nsh/base";
+
+const nav = createNavStack<{ name: string }>([{ name: "list" }]);
+const sheet = signal(true);
+
+// Garbage with cycles, so QuickJS collects them.
+function churn() {
+  for (let i = 0; i < 200000; i++) {
+    const a: { b?: unknown } = {};
+    a.b = { a };
+  }
+}
+
+setTimeout(() => {
+  nav.setRoutes([{ name: "list" }, { name: "item" }]);
+  churn();
+  setTimeout(() => churn(), 0);
+}, 0);
+
+mount(() => (
+  <NavStack state={nav} style={{ flex: 1 }}>
+    {(route) =>
+      route.name === "list" ? (
+        <NavPage title="List">
+          <View style={{ flex: 1 }}>
+            <Dialog open={sheet()} presentation="pageSheet" onOpenChange={({ open }) => sheet.set(open)}>
+              <Text>in the sheet</Text>
+            </Dialog>
+          </View>
+        </NavPage>
+      ) : (
+        <NavPage title="Item">
+          <Text>item</Text>
+        </NavPage>
+      )
+    }
+  </NavStack>
+));
+"#;
+
+/// Routes replaced under a page with an open dialog, then cycles
+/// collected: the dialog's dismissal handler is freed once, not again
+/// when the engine stops (#1643).
+#[test]
+fn replacing_a_page_with_an_open_dialog_survives_collection() {
+    let (engine, rx) = start_app(REPLACED_WITH_OPEN_DIALOG);
+    next(&rx, |b| text_id(b, "item").is_some());
+    while rx.recv_timeout(Duration::from_millis(300)).is_ok() {}
+    drop(engine);
+}
+
 const BUILT_ONCE: &str = r#"import { mount, signal, Text, View } from "nsh";
 import { Dialog, NavPage, NavStack, createNavStack } from "nsh/base";
 
@@ -579,6 +631,99 @@ fn a_changing_child_leaves_its_siblings() {
         })
         .collect();
     assert!(remade.is_empty(), "{remade:#?}");
+}
+
+const CHILDREN_BESIDE_A_BRANCH: &str = r#"
+import { mount, signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
+
+const open = signal(true);
+function Card(props: { children?: any }) {
+  return (
+    <View>
+      {open() ? <Text>open</Text> : <Text>closed</Text>}
+      {props.children}
+    </View>
+  );
+}
+
+const saved = signal(false);
+mount(() => (
+  <View>
+    <Card>
+      {open() ? <Input testID="a" /> : null}
+      {saved() ? <Text>saved</Text> : null}
+    </Card>
+    <Text onPress={() => saved.set(true)}>save</Text>
+  </View>
+));
+"#;
+
+/// The same when the component shows its children beside a branch of its
+/// own (`{cond ? a : b}{props.children}`): each of the children's
+/// functions keeps a memo of its own, so `saved` changing runs only the
+/// child that reads it, and the input beside it is not made again.
+#[test]
+fn children_beside_a_branch_leave_their_siblings() {
+    let (engine, rx) = start_app(CHILDREN_BESIDE_A_BRANCH);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let save = text_id(&first, "save").expect("the save text");
+    engine
+        .control()
+        .dispatch_event(save, EventKind::Press, EventPayload::None);
+    let batch = next(&rx, |b| texts(b).iter().any(|t| t == "saved"));
+    let remade: Vec<&MountItem> = batch
+        .items
+        .iter()
+        .filter(|i| {
+            matches!(
+                i,
+                MountItem::Create {
+                    kind: nsh_core::ViewKind::Input,
+                    ..
+                } | MountItem::Remove { .. }
+                    | MountItem::Delete { .. }
+            )
+        })
+        .collect();
+    assert!(remade.is_empty(), "{remade:#?}");
+}
+
+const IF_ELSE_EXPRESSION: &str = r#"
+import { mount, signal, Text, View } from "nsh";
+
+const shown = signal(false);
+const label = signal("first label");
+mount(() => (
+  <View>
+    <Text>
+      <If when={shown()} else={label()}>shown</If>
+    </Text>
+    <Text onPress={() => label.set("second label")}>change</Text>
+  </View>
+));
+"#;
+
+/// `<If>`'s `else` that is an expression, not an element, follows what it
+/// reads, as the same expression among the children does.
+#[test]
+fn an_if_else_expression_follows_its_reads() {
+    let (engine, rx) = start_app(IF_ELSE_EXPRESSION);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(
+        texts(&first).contains(&"first label".to_owned()),
+        "{:?}",
+        texts(&first)
+    );
+    let change = text_id(&first, "change").expect("the change text");
+    engine
+        .control()
+        .dispatch_event(change, EventKind::Press, EventPayload::None);
+    next(&rx, |b| texts(b).iter().any(|t| t == "second label"));
 }
 
 const BRANCH_EXPRESSION: &str = r#"
@@ -1452,4 +1597,254 @@ fn set_routes_keeps_pages_that_stay_and_parts_take_test_ids() {
             _ => None,
         });
     assert_eq!(backdrop, Some(Some(false)), "the backdrop is no Tab stop");
+}
+
+const SET_ROUTES_KINDS: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { NavPage, NavStack, createNavStack } from "nsh/base";
+
+const page = { name: "page" };
+const name = (route: unknown) => (typeof route === "object" ? (route as { name: string }).name : String(route));
+const nav = createNavStack<unknown>(["a", "a", 1, page, NaN]);
+const made = signal<string[]>([]);
+setTimeout(() => nav.setRoutes(["a", 1, page, "a", "b", 1, NaN]), 0);
+
+mount(() => (
+  <View style={{ flex: 1 }}>
+    <Text>{`made ${made().join(" ")}`}</Text>
+    <NavStack state={nav} style={{ flex: 1 }}>
+      {(route) => {
+        made.update((all) => [...all, name(route)]);
+        return <NavPage title={name(route)}><Text>{name(route)}</Text></NavPage>;
+      }}
+    </NavStack>
+  </View>
+));
+"#;
+
+/// `setRoutes` keeps, for each route that stays, the first page of that
+/// route not kept yet, routes compared as `===` does: strings by content,
+/// objects by identity, numbers by value (`NaN` never), however many.
+#[test]
+fn set_routes_keeps_the_pages_of_routes_of_every_kind() {
+    let (_engine, rx) = start_app(SET_ROUTES_KINDS);
+    let mut all = Vec::new();
+    while let Ok(b) = rx.recv_timeout(Duration::from_millis(500)) {
+        all.extend(texts(&b));
+    }
+    // The five pages, then only those of "b", the second 1 and NaN: the
+    // first "a", 1, `page` and the second "a" keep theirs.
+    let last = all.iter().rev().find(|t| t.starts_with("made"));
+    assert_eq!(
+        last.map(String::as_str),
+        Some("made a a 1 page NaN b 1 NaN"),
+        "{all:?}"
+    );
+}
+
+const SPARSE_ARRAYS: &str = r#"
+import { Animated, mount, nativeComponent, PanResponder, Path2D, split, Text, View } from "nsh";
+import { createNavStack } from "nsh/base";
+
+const huge = () => new Array(2 ** 32 - 1);
+function Children() {
+  return <View>{huge()}</View>;
+}
+function Rows() {
+  return <View><Each of={huge()}>{() => <Text>row</Text>}</Each></View>;
+}
+function attempt(render: () => unknown) {
+  try {
+    render();
+    return "rendered";
+  } catch (e) {
+    const error = e as Error;
+    return `${error.name}${error.message.includes("cannot be read") ? "" : `(${error.message})`}`;
+  }
+}
+function AtTheBound() {
+  return <View>{new Array(2 ** 20)}</View>;
+}
+function JustOver() {
+  return <View>{new Array(2 ** 20 + 1)}</View>;
+}
+// Each array is short; nested in itself they hold 1000 ** 64 items. Reading
+// it depth first ends at the nesting bound, and checking whether it holds
+// functions (first) ends at the item budget.
+function Cycle() {
+  const a: unknown[] = new Array(1000).fill(0);
+  a.fill(a);
+  return <View>{a}</View>;
+}
+// A proxy whose length grows after it was checked.
+function Growing() {
+  let reads = 0;
+  const array = new Proxy([1, 2, 3], {
+    get: (target, key, receiver) =>
+      key === "length" ? (++reads > 1 ? 2 ** 32 - 1 : 3) : Reflect.get(target, key, receiver),
+  });
+  return <View><Each of={array}>{() => <Text>row</Text>}</Each></View>;
+}
+const Native = nativeComponent("Probe", { props: huge() as never[] });
+const pan = PanResponder.create({});
+// Within the bound, but read pairwise or nested: on `main` each of these
+// ran for far longer than the frame is waited for (from 1.6 s for 2 ** 13
+// routes, quadratic; 4.4 s for 2 ** 20 keys of 2 ** 10 props, a product;
+// 8 s and 3.7 GB for a canvas argument eight wide).
+const names = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => `${prefix}${i}`);
+function Nested() {
+  const a: unknown[] = new Array(1000).fill(0);
+  return a.fill(a);
+}
+// A stack at the bound refuses another screen and can still be popped.
+function Full() {
+  const stack = createNavStack(new Array(2 ** 20).fill("a"));
+  const pushed = attempt(() => stack.push("b"));
+  stack.pop();
+  return `${pushed},${stack.routes().length}`;
+}
+const results = [
+  `children:${attempt(Children)}`,
+  `at:${attempt(AtTheBound)}`,
+  `each:${attempt(Rows)}`,
+  `over:${attempt(JustOver)}`,
+  `cycle:${attempt(Cycle)}`,
+  `growing:${attempt(Growing)}`,
+  `stagger:${attempt(() => Animated.stagger(10, huge()))}`,
+  `sequence:${attempt(() => Animated.sequence(huge()))}`,
+  `split:${attempt(() => split({}, huge() as string[]))}`,
+  `stack:${attempt(() => createNavStack(huge()))}`,
+  `setRoutes:${attempt(() => createNavStack([]).setRoutes(huge()))}`,
+  `native:${attempt(() => <Native />)}`,
+  `grant:${attempt(() => pan.panHandlers.onResponderGrant({ touches: huge() } as never))}`,
+  `move:${attempt(() => pan.panHandlers.onResponderMove({ touches: huge() } as never))}`,
+  `canvas:${attempt(() => new Path2D().moveTo(Nested() as never, 0))}`,
+  `routes:${attempt(() => createNavStack(names("a", 2 ** 15)).setRoutes(names("b", 2 ** 15)))}`,
+  `keys:${attempt(() => split(Object.fromEntries(names("p", 2 ** 15).map((k) => [k, 0])), names("k", 2 ** 17)))}`,
+  `full:${Full()}`,
+];
+mount(() => <Text>{results.join(" ")}</Text>);
+"#;
+
+/// A sparse array is as long as it says, and the renderer reads arrays
+/// natively, where the time budget cannot interrupt: one that says it has
+/// billions of items is refused with a `RangeError` instead of holding the
+/// engine thread for billions of reads.
+#[test]
+fn arrays_too_long_to_render_are_refused() {
+    let (_engine, rx) = start_app(SPARSE_ARRAYS);
+    let first = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("first frame");
+    assert_eq!(
+        texts(&first),
+        [
+            "children:RangeError at:rendered each:RangeError over:RangeError \
+             cycle:TypeError(nsh: children nested too deeply) growing:rendered \
+             stagger:RangeError sequence:RangeError split:RangeError \
+             stack:RangeError setRoutes:RangeError native:RangeError \
+             grant:RangeError move:RangeError canvas:rendered routes:rendered \
+             keys:rendered full:RangeError(nsh: a navigation stack holds at most \
+             1048576 screens),1048575"
+        ],
+        "{:?}",
+        texts(&first)
+    );
+}
+
+const DECODED_VALUES: &str = r#"
+import { Animated, createAnimatedValue, mount, nativeComponent, Scroll, Text, View } from "nsh";
+import { List } from "nsh";
+
+function attempt(render: () => unknown) {
+  try {
+    render();
+    return "rendered";
+  } catch (e) {
+    const error = e as Error;
+    return `${error.name}${error.message.includes("cannot be read") ? "" : `(${error.message})`}`;
+  }
+}
+// As long as an array can be: its length is a float past 2 ** 31, which
+// rquickjs's `Array::len` asserted is an integer, aborting the process.
+const huge = () => new Array(2 ** 32 - 1);
+const self: unknown[] = [];
+self.push(self);
+const theme: Record<string, unknown> = {};
+theme.theme = theme;
+const keys: Record<string, number> = {};
+for (let i = 0; i < 2 ** 16; i++) keys[`k${i}`] = i;
+const outputs = huge();
+outputs[0] = "red";
+const Probe = nativeComponent("Probe", { props: ["data"] } as never) as never as (props: { data: unknown }) => never;
+const value = createAnimatedValue(0);
+let shared: any = Animated.timing(value, { toValue: 1, duration: 10 });
+for (let i = 0; i < 63; i++) shared = Animated.sequence(new Array(1000).fill(shared));
+// Within the bound alone, over it four times: a composite's keyframes are
+// counted with the rest of what it runs.
+const frames = Animated.keyframes(value, { keyframes: new Array(2 ** 19).fill(0), duration: 10 });
+const sharedFrames = Animated.sequence(new Array(4).fill(frames));
+const results = [
+  `styleSelf:${attempt(() => <View style={self as never} />)}`,
+  `styleSparse:${attempt(() => <View style={huge() as never} />)}`,
+  `styleKeys:${attempt(() => <View style={keys as never} />)}`,
+  `fontVariant:${attempt(() => <Text style={{ fontVariant: huge() as never }}>x</Text>)}`,
+  `boxShadow:${attempt(() => <View style={{ boxShadow: huge() as never }} />)}`,
+  `transform:${attempt(() => <View style={{ transform: huge() as never }} />)}`,
+  `translate:${attempt(() => <View style={{ translate: huge() as never }} />)}`,
+  `outputRange:${attempt(() => value.interpolate({ inputRange: [0, 1], outputRange: outputs }))}`,
+  `inputRange:${attempt(() => value.interpolate({ inputRange: huge(), outputRange: [0, 1] }))}`,
+  `native:${attempt(() => <Probe data={huge()} />)}`,
+  `scrollbar:${attempt(() => <Scroll scrollbar={theme as never}><Text>x</Text></Scroll>)}`,
+  `sticky:${attempt(() => <List each={[1]} stickyHeaderIndices={huge() as never}>{() => <Text>x</Text>}</List>)}`,
+];
+// A start returns a promise: what it cannot decode rejects it.
+const settled = (start: () => Promise<unknown>) =>
+  start().then(
+    () => "resolved",
+    (e: Error) => `${e.name}${e.message.includes("cannot be read") ? "" : `(${e.message})`}`,
+  );
+Promise.all([
+  settled(() => Animated.timing(value, { toValue: 1, easing: huge() as never }).start()),
+  settled(() => Animated.decay(value, { velocity: 1, clamp: huge() as never }).start()),
+  settled(() => shared.start()),
+  settled(() => sharedFrames.start()),
+]).then(([easing, clamp, sharedRuns, sharedKeyframes]) => {
+  results.push(`easing:${easing}`, `clamp:${clamp}`, `shared:${sharedRuns}`, `keyframes:${sharedKeyframes}`);
+  mount(() => <Text>{results.join(" ")}</Text>);
+});
+"#;
+
+/// What the decoders read of the values apps pass natively, where neither
+/// the time budget nor the interpreter's stack limit applies: an array as
+/// long as an array can be (which aborted the process), one holding itself
+/// (which overflowed the engine thread's stack) and composites sharing
+/// their children (10^189 runs) are refused; a style of 2^16 keys and a
+/// theme holding itself are read.
+#[test]
+fn values_too_long_or_nested_in_themselves_are_refused_when_decoded() {
+    let (_engine, rx) = start_app(DECODED_VALUES);
+    // The results are mounted once the starts settled: a start that did not
+    // reject would run its animation, and frames of it come first.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let mut shown = Vec::new();
+    while let Ok(batch) = rx.recv_deadline(deadline) {
+        shown = texts(&batch);
+        if shown.iter().any(|t| t.starts_with("styleSelf:")) {
+            break;
+        }
+    }
+    assert_eq!(
+        shown,
+        [
+            "styleSelf:TypeError(nsh: styles nested too deeply) styleSparse:RangeError \
+             styleKeys:rendered fontVariant:RangeError boxShadow:RangeError \
+             transform:RangeError translate:RangeError outputRange:RangeError \
+             inputRange:RangeError native:RangeError(a native component value is nested \
+             deeper than 64 or has more than 1048576 entries) scrollbar:rendered \
+             sticky:RangeError easing:RangeError clamp:TypeError(decay: `clamp` must be \
+             [min, max]) shared:RangeError keyframes:RangeError"
+        ],
+        "{:?}",
+        shown
+    );
 }

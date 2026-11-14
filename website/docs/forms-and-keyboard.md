@@ -176,7 +176,7 @@ In Rust, each prop is a method of `input()` named in snake case (`.placeholder(.
 | `keyboardType` | `KeyboardType` | `"default"` | The keyboard layout. |
 | `returnKeyType` | `ReturnKeyType` | `"default"` | The return key's label. |
 | `autoCapitalize` | `"none" \| "sentences" \| "words" \| "characters"` | `"sentences"` | Automatic capitalization. |
-| `autoCorrect` | `boolean` | `true` | The system's corrections. |
+| `autoCorrect` | `boolean` | `true` | The system's corrections: spelling and, on iOS and macOS, smart quotes, dashes and text replacement. Turn it off for code and identifiers. |
 | `autoComplete` | `AutoComplete` | | What the input holds, for autofill. |
 | `multiline` | `boolean` | `false` | Several lines; return inserts a line break unless `submitBehavior` says otherwise. |
 | `maxLength` | `number` | | The most characters the user can enter. A longer paste goes in cut to what fits, as in a browser. |
@@ -249,6 +249,8 @@ The keyboard type (`.keyboard_type(..)`, TSX `keyboardType`) picks the layout:
 On iOS, `.keyboard_appearance(KeyboardAppearance::Dark)` (TSX `ios={{ keyboardAppearance: "dark" }}`; or light, default) gives the keyboard a light or dark look regardless of the system's appearance, for a dark app in light mode. Android's keyboards always follow the system's theme.
 
 Autofill (`.auto_fill(AutoFill::Email)`, TSX `autoComplete`) tells the system what the field holds, so it can offer saved names, addresses, passwords and one-time codes from messages. Rust's `AutoFill` has a variant per kind (`Name`, `GivenName`, `FamilyName`, `Email`, `Tel`, `Username`, `Password`, `NewPassword`, `OneTimeCode`, `StreetAddress`, `PostalCode`, `Country`, `CreditCardNumber`, `Url`, `Birthdate`, ..., and `Off`). TSX takes these values: `"name"`, `"given-name"`, `"family-name"`, `"email"`, `"tel"`, `"username"`, `"current-password"`, `"new-password"`, `"one-time-code"`, `"street-address"`, `"postal-code"`, `"country"`, `"cc-number"`, `"cc-exp"`, `"cc-csc"`, `"url"`, `"birthdate-full"` and others, or `"off"`; iOS's own names (`"emailAddress"`, `"oneTimeCode"`, ...) are accepted too, in `autoComplete` or `ios={{ textContentType }}`.
+
+A password field that is not masked, as after a "show password" toggle, is a password shown as plain text: with `autoComplete` `"current-password"` or `"new-password"` (`AutoFill::Password`, `AutoFill::NewPassword`) and `masked` off, it gets Android's visible password keyboard and iOS's ASCII keyboard, and no platform capitalizes, suggests or corrects it, whatever `autoCapitalize` and `autoCorrect` say. Toggling `masked` is all a reveal button needs.
 
 ```rust tabs
 use nsh_core::element::AutoFill;
@@ -743,6 +745,9 @@ function ChatScreen() {
 Padding (`.pb_keyboard()`) shrinks the content above while the background reaches the bottom of the screen; a bottom margin (`marginBottom: "env(keyboard-inset-height)"`, `.mb_keyboard()`) ends the whole view at the top of the keyboard. `calc(env(keyboard-inset-height) + <length>)` (Rust `.pb_keyboard_plus(..)`, `.mb_keyboard_plus(..)`) adds a length, such as minus the height of a tab bar below the view.
 
 The full height suits a view that reaches the bottom of the surface, as a screen's content does. On an Android host whose window resizes for the keyboard, the window itself shrinks and the variable is 0. See [Keyboard](../elements/keyboard.md).
+
+Overlays keep clear of the keyboard on their own: a [Sheet](../elements/sheet.md#the-software-keyboard) at the bottom,
+a drawer, and the menus, selects and date pickers a phone shows as sheets end at the keyboard's top and move with it.
 
 ### The keyboard accessor
 

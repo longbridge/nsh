@@ -3582,6 +3582,7 @@ tap id:case-base-set-theme
 expect theme up #138a5aff
 expect theme radius-card 14
 style id:themed backgroundColor #138a5aff
+prop id:page headerStyle backgroundColor=#138a5aff
 # `token()` reads it at once and classes follow. nsh.json's theme is not
 # under it (`radius-card` is gone), the default is (`primary`).
 tap id:set
@@ -3590,10 +3591,12 @@ expect theme up #2563ebff
 expect theme radius-card undefined
 expect theme primary #171717ff
 style id:themed backgroundColor #2563ebff
+prop id:page headerStyle backgroundColor=#2563ebff
 # Its dark value in the dark appearance.
 tap id:dark
 expect theme up #93c5fdff
 style id:themed backgroundColor #93c5fdff
+prop id:page headerStyle backgroundColor=#93c5fdff
 tap id:system
 expect theme up #2563ebff
 # A theme with a value NSH cannot read (no color in the dark appearance):
@@ -4382,6 +4385,11 @@ expect BubbleMenu
 covers [props] RichEditor.bubbleMenu
 expect CellA
 expect CellD
+# An editor without a height is as tall as its two lines; one with a
+# `maxHeight` stops there.
+expect AutoTwo
+frame id:rich-auto 20 329 370 34
+frame id:rich-capped 20 367 370 40
 # base-transition-shader
 tap id:case-base-transition-shader
 # Pages and a dialog with a `transitionShader` come and go as without one:

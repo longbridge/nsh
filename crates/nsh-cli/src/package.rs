@@ -576,6 +576,9 @@ pub(crate) struct PackageOptions<'a> {
     pub(crate) run: bool,
     /// The web: the URL the site's files are served from (`--asset-url`).
     pub(crate) asset_url: Option<&'a str>,
+    /// A development build for `nsh run`. Android: the APK is debuggable,
+    /// so `AppActivity` takes the environment `nsh run` passes it.
+    pub(crate) development: bool,
 }
 
 /// `nsh.json` `"icon"`: one PNG for every target, or one per platform
@@ -1228,7 +1231,7 @@ fn package_android(
             version_code: config.build.unwrap_or(1),
             target_sdk,
             activity: "com.longbridge.nsh.AppActivity",
-            dev: false,
+            dev: options.development,
             cleartext: config.android.uses_cleartext_traffic,
             notifications: config.notifications(),
             microphone: config.web_media("microphone"),
@@ -1350,7 +1353,13 @@ fn package_linux(
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    crate::updater::copy_archive(config, name, &archive, options.out)?;
+    crate::updater::copy_archive(
+        config,
+        name,
+        &nsh_updater::platform(),
+        &archive,
+        options.out,
+    )?;
     step.done(format!(
         "packaged {} and {}",
         ui::path(&dir),
@@ -2078,6 +2087,7 @@ mod tests {
                 arch: Some(Arch::X86_64),
                 run: false,
                 asset_url: None,
+                development: false,
             })
             .unwrap_err();
             assert_eq!(

@@ -178,7 +178,7 @@ view()
 |---|---|---|
 | `.hit_slop(EdgeInsets)` | `hitSlop: number \| { top?, right?, bottom?, left? }` | Points added around the bounds. `EdgeInsets::all(..)` and a TSX number apply to all four sides. |
 
-Keep the extended area inside the parent's bounds (give the small view some margin or padding around it): hit testing reaches a child through its parent, so a touch outside the parent never gets to the child's slop.
+The extended area takes touches even where it reaches outside the parent and the views above it, as a child placed outside its parent does (below): a 24-point button in a row of the same height with a slop of 10 takes touches 10 points above and below the row. Where views overlap, the one on top still wins, slop or not. A view that clips its overflow (`overflow: hidden`, a scroll view, a list) also clips the slop of what it holds: a touch outside it, where nothing shows, does not reach in.
 
 ## Children outside their parent
 
@@ -439,7 +439,7 @@ While responding:
 
 | Rust | TSX | Description |
 |---|---|---|
-| `.on_responder_grant(..)` | `onResponderGrant` | This view is now the responder. Rust keeps native scroll views from taking the touches by default (`TouchClaim::block_native(false)` lets them); in TSX, return `true` for that. |
+| `.on_responder_grant(..)` | `onResponderGrant` | This view is now the responder. Rust keeps native scroll views, and on iOS the swipe back of the navigation stacks around it, from taking the touches by default (`TouchClaim::block_native(false)` lets them); in TSX, return `true` for that. |
 | `.on_responder_reject(..)` | `onResponderReject` | Another view is the responder and would not let go. |
 | `.on_responder_start(..)` | `onResponderStart` | Another finger went down. |
 | `.on_responder_move(..)` | `onResponderMove` | A finger moved. |

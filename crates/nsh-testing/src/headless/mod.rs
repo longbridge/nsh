@@ -314,6 +314,11 @@ pub struct Headless {
     /// The modifier keys held down (`keyboard.down`), which presses,
     /// drags and hovers carry.
     held: nsh_core::keymap::Modifiers,
+    /// The modals presented on a desktop or the web, oldest first, each
+    /// with the input or Tab stop that had the keyboard focus under it
+    /// when it came, which gets it back when the modal goes
+    /// ([`Headless::modals_closed`]).
+    focus_before: Vec<(NodeId, Option<NodeId>)>,
     /// The finger a `dragAndHold` left down, until `drop()`.
     finger: Option<pointer::Finger>,
     screen: Screen,
@@ -453,6 +458,7 @@ impl Headless {
             errors,
             seen: Vec::new(),
             held: nsh_core::keymap::Modifiers::default(),
+            focus_before: Vec::new(),
             finger: None,
             screen,
             animator: Animator::new(clock.clone()),
@@ -894,8 +900,14 @@ impl Headless {
 
     fn apply(&mut self, batch: &MountBatch) {
         let focused = self.screen.focused();
+        let before = focused.or(self.screen.key_focus());
         self.screen.apply(batch);
+        for (id, states) in self.screen.take_restated() {
+            self.engine.control().set_states(id, states);
+        }
         self.focus_calls(batch, focused);
+        self.modals_presented(before);
+        self.modals_closed();
         self.exited |= batch.items.iter().any(|item| {
             matches!(
                 item,
@@ -1280,15 +1292,36 @@ impl Headless {
 
     /// Applies batches until the app is done with a step, or for 2 s at
     /// most (an app updating all the time never is): false if the limit
-    /// ended it. On the system's clock it is done when no batch came for
-    /// 100 ms and no native animation that ends by itself runs; on a
-    /// manual clock, as soon as the engine says it is idle
+    /// ended it. On the system's clock it is done once the engine has
+    /// handled what the step sent ([`Headless::caught_up`]) and then no
+    /// batch came for 100 ms and no native animation that ends by itself
+    /// runs; on a manual clock, as soon as the engine says it is idle
     /// ([`EngineControl::flush`]), without waiting.
     pub fn settle(&mut self) -> bool {
         if self.clock.is_manual() {
             self.idle_on_manual_clock(SETTLE)
         } else {
-            self.quiet(QUIET, SETTLE)
+            let end = Instant::now() + SETTLE;
+            self.caught_up(end);
+            self.quiet(QUIET, end.saturating_duration_since(Instant::now()))
+        }
+    }
+
+    /// On the system's clock: has the engine run what was sent to it
+    /// ([`EngineControl::flush`]) and applies the batches that brought,
+    /// again while they bring more (what applying them sends back: a
+    /// scroll reported, a focus moved), until `end` at most. The quiet
+    /// that ends a step is then counted from there, so an engine taking
+    /// longer than [`QUIET`] over a step does not end it early, with the
+    /// next step acting on the screen as it was before.
+    fn caught_up(&mut self, end: Instant) {
+        while !self.exited && self.errors.is_empty() && Instant::now() < end {
+            let applied = self.applied;
+            self.flush(end);
+            self.drain();
+            if self.applied == applied {
+                return;
+            }
         }
     }
 
@@ -1441,6 +1474,7 @@ impl Headless {
                 control.dispatch_event(modal, EventKind::RequestClose, reason);
                 if close_on_escape {
                     self.screen.close(modal);
+                    self.modals_closed();
                     control.dispatch_event(modal, EventKind::Dismiss, EventPayload::None);
                 }
             }
@@ -1678,14 +1712,17 @@ impl Headless {
                 .screen
                 .press_point(&parsed, id)
                 .map_or(target.center(), |p| target.origin + p);
-            let point = match self.screen.visible_bounds_in_root(id) {
+            let visible = self.screen.visible_bounds_in_root(id);
+            let point = match visible {
                 Some(visible) if visible.contains(&point) => point,
                 Some(visible) => visible.center(),
                 None => point,
             };
             if let Some((to, inside)) = self.screen.routed_press(id, point) {
                 (id, routed) = (to, Some(inside));
-            } else if let Some(cover) = self.screen.covering(id, point) {
+            } else if (visible.is_some() || target.is_empty())
+                && let Some(cover) = self.screen.covering(id, point)
+            {
                 return Err(format!(
                     "{}; {}",
                     failure::covered(selector, &self.screen.selector_of(cover)),
@@ -2361,6 +2398,42 @@ mod tests {
             .child(text(move || format!("seen: {}", seen.get())))
     }
 
+    #[component]
+    fn EmptyCovered() -> impl IntoElement {
+        view()
+            .w(px(390.0))
+            .h(px(844.0))
+            .child(
+                view()
+                    .w(px(0.0))
+                    .h(px(0.0))
+                    .on_press(|| {})
+                    .child(text("Zero").w(px(120.0)).h(px(20.0))),
+            )
+            .child(
+                view()
+                    .absolute()
+                    .left(px(0.0))
+                    .top(px(0.0))
+                    .w(px(200.0))
+                    .h(px(70.0)),
+            )
+    }
+
+    #[test]
+    fn an_empty_press_target_keeps_its_covering_check() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<EmptyCovered>())).unwrap();
+        app.first_render().unwrap();
+        let target = app.screen().press_target("Zero").unwrap().unwrap();
+        assert!(app.screen().bounds_in_root(target).unwrap().is_empty());
+        assert!(app.screen().visible_bounds_in_root(target).is_none());
+        assert!(
+            app.press("Zero")
+                .unwrap_err()
+                .starts_with("`Zero` is covered:")
+        );
+    }
+
     #[test]
     fn presses_carry_where_the_pointer_was() {
         let mut app = Headless::start(EngineConfig::new(Root::of::<PressPoint>())).unwrap();
@@ -2805,6 +2878,54 @@ mod tests {
         );
     }
 
+    /// A chat composer: a multiline input that submits on return, and a
+    /// single-line one beside it.
+    #[component]
+    fn Composer() -> impl IntoElement {
+        let draft = signal(String::new());
+        let sent = signal(String::new());
+        let title = signal(String::new());
+        view()
+            .child(
+                input()
+                    .test_id("draft")
+                    .multiline(true)
+                    .submit_behavior(SubmitBehavior::Submit)
+                    .value(move || draft.get())
+                    .on_change(move |text: &str| draft.set(text.to_owned()))
+                    .on_submit(move |text: &str| sent.set(text.to_owned())),
+            )
+            .child(
+                input()
+                    .test_id("title")
+                    .on_submit(move |text: &str| title.set(text.to_owned())),
+            )
+            .child(text(move || format!("Draft: {:?}", draft.get())))
+            .child(text(move || format!("Sent: {:?}", sent.get())))
+            .child(text(move || format!("Title: {:?}", title.get())))
+    }
+
+    #[test]
+    fn shift_or_alt_return_breaks_the_line_of_a_multiline_input_that_submits() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Composer>())).unwrap();
+        app.first_render().unwrap();
+        app.type_text("id:draft", "Hi").unwrap();
+        // Shift+Return and Alt (Option)+Return break the line, as on every
+        // platform; Return sends.
+        app.press_key("shift+enter").unwrap();
+        app.type_text("id:draft", "there").unwrap();
+        app.press_key("alt+enter").unwrap();
+        app.type_text("id:draft", "!").unwrap();
+        app.wait_for(r#"Draft: "Hi\nthere\n!""#).unwrap();
+        assert!(app.shows(r#"Sent: """#));
+        app.press_key("enter").unwrap();
+        app.wait_for(r#"Sent: "Hi\nthere\n!""#).unwrap();
+        // A single line holds no line break: Shift+Return submits it.
+        app.type_text("id:title", "Plan").unwrap();
+        app.press_key("shift+enter").unwrap();
+        app.wait_for(r#"Title: "Plan""#).unwrap();
+    }
+
     /// A list of rows taller than the screen, saying where it is.
     #[component]
     fn Rows() -> impl IntoElement {
@@ -3066,6 +3187,138 @@ mod tests {
             }))
     }
 
+    /// A page with two buttons and a dialog over it, open at first, with
+    /// two buttons of its own.
+    #[component]
+    fn PageUnderDialog() -> impl IntoElement {
+        let open = signal(true);
+        let button = move |id: &'static str| {
+            view()
+                .test_id(id)
+                .on_press(move || {
+                    if id == "close" {
+                        open.set(false);
+                    }
+                })
+                .child(text(id))
+        };
+        view()
+            .flex_1()
+            .child(button("settings"))
+            .child(button("help"))
+            .child(dynamic(move || {
+                open.get().then(|| {
+                    nsh_base::dialog()
+                        .child(button("confirm"))
+                        .child(button("close"))
+                })
+            }))
+    }
+
+    #[test]
+    fn tab_stays_in_the_newest_dialog_as_on_the_desktops() {
+        let mut config = EngineConfig::new(Root::of::<PageUnderDialog>());
+        config.environment.os = Os::MacOs;
+        config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+        let mut app = Headless::start(config).unwrap();
+        app.first_render().unwrap();
+        let id = |app: &Headless, s: &str| match app.screen().view(&Selector::parse(s).unwrap()) {
+            crate::screen::Pick::One(id) => id,
+            _ => panic!("{s} is shown"),
+        };
+        let (confirm, close) = (id(&app, "id:confirm"), id(&app, "id:close"));
+        // Into the dialog, around inside it, never to the page under it.
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(confirm));
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(close));
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(confirm));
+        app.press_key("shift+tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(close));
+        // Closed: Tab goes through the page again.
+        app.press_key("return").unwrap();
+        app.wait_for_gone("id:close", Duration::from_secs(2))
+            .unwrap();
+        let (settings, help) = (id(&app, "id:settings"), id(&app, "id:help"));
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(settings));
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(help));
+    }
+
+    /// A page with a button before the one that opens a dialog, which
+    /// closes on Escape or on its own `close` button.
+    #[component]
+    fn DialogFromButton() -> impl IntoElement {
+        let open = signal(false);
+        let button = move |id: &'static str| {
+            view()
+                .test_id(id)
+                .on_press(move || open.set(id == "open"))
+                .child(text(id))
+        };
+        view()
+            .flex_1()
+            .child(button("other"))
+            .child(button("open"))
+            .child(dynamic(move || {
+                open.get().then(|| {
+                    nsh_base::dialog()
+                        .close_on_escape(true)
+                        .on_close(move || open.set(false))
+                        .child(button("confirm"))
+                        .child(button("close"))
+                })
+            }))
+    }
+
+    #[test]
+    fn a_closed_dialog_gives_the_focus_back_as_on_the_desktops() {
+        for os in [Os::MacOs, Os::Linux, Os::Web] {
+            let mut config = EngineConfig::new(Root::of::<DialogFromButton>());
+            config.environment.os = os;
+            config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+            let mut app = Headless::start(config).unwrap();
+            app.first_render().unwrap();
+            let id = |app: &Headless, s: &str| match app.screen().view(&Selector::parse(s).unwrap())
+            {
+                crate::screen::Pick::One(id) => id,
+                _ => panic!("{s} is shown"),
+            };
+            let opener = id(&app, "id:open");
+            app.press_key("tab").unwrap();
+            app.press_key("tab").unwrap();
+            for close in ["escape", "app"] {
+                assert_eq!(app.screen().key_focus(), Some(opener), "{os:?}");
+                app.press_key("return").unwrap();
+                app.wait_for("id:close").unwrap();
+                // The focus leaves the page under the dialog: Return
+                // presses nothing there.
+                assert_eq!(app.screen().key_focus(), None, "{os:?}");
+                let (confirm, closer) = (id(&app, "id:confirm"), id(&app, "id:close"));
+                app.press_key("tab").unwrap();
+                assert_eq!(app.screen().key_focus(), Some(confirm), "{os:?}");
+                app.press_key("tab").unwrap();
+                assert_eq!(app.screen().key_focus(), Some(closer), "{os:?}");
+                app.press_key("tab").unwrap();
+                assert_eq!(app.screen().key_focus(), Some(confirm), "{os:?}");
+                app.press_key("shift+tab").unwrap();
+                assert_eq!(app.screen().key_focus(), Some(closer), "{os:?}");
+                if close == "escape" {
+                    app.press_key("escape").unwrap();
+                } else {
+                    app.press_key("return").unwrap();
+                }
+                app.wait_for_gone("id:close", Duration::from_secs(2))
+                    .unwrap();
+                // Back on the button that opened it, whichever way it
+                // closed.
+                assert_eq!(app.screen().key_focus(), Some(opener), "{os:?} {close}");
+            }
+        }
+    }
+
     #[test]
     fn tab_stops_at_a_focusable_view_that_takes_no_presses() {
         let mut config = EngineConfig::new(Root::of::<FocusStops>());
@@ -3269,6 +3522,169 @@ mod tests {
         app.press_key("tab").unwrap();
         app.wait_for("Focused row 1.").unwrap();
         assert!(shows(&app), "row 1 is scrolled into view");
+    }
+
+    /// A card's height once its content is loaded: never the list's
+    /// estimate, cards before the 50th growing by `grown` once "Grow" is
+    /// pressed. Before, a placeholder of 30 points.
+    fn card_height(i: usize, loaded: bool, grown: f32) -> f32 {
+        if !loaded {
+            return 30.0;
+        }
+        60.0 + (i % 4) as f32 * 50.0 + if i < 50 { grown } else { 0.0 }
+    }
+
+    /// 200 cards estimated at 40 points, placeholders until "Load" is
+    /// pressed, in a list of its own or in a page's viewport (below a
+    /// header); "Go" scrolls the list to card 50, "Grow" makes the cards
+    /// before it taller.
+    fn cards(viewport: nsh_core::ListViewport, alignment: nsh_core::ListAlignment) -> AnyElement {
+        let list = element_ref();
+        let loaded = signal(false);
+        let grown = signal(0.0f32);
+        let cards = virtual_list(200, move |at| {
+            view()
+                .h(move || Length::from(px(card_height(at.index(), loaded.get(), grown.get()))))
+                .child(text(move || format!("Card {}", at.index())))
+        })
+        .element_ref(&list)
+        .estimated_item_size(px(40.0))
+        .viewport(viewport)
+        .alignment(alignment);
+        let controls =
+            view()
+                .flex_row()
+                .child(text("Go").on_press(move |_: &()| {
+                    list.scroll_to_index(50, percentage(0.0), px(0.0), false)
+                }))
+                .child(text("Load").on_press(move |_: &()| loaded.set(true)))
+                .child(text("Grow").on_press(move |_: &()| grown.set(40.0)));
+        match viewport {
+            nsh_core::ListViewport::Own => view()
+                .flex_1()
+                .child(controls)
+                .child(cards.test_id("viewport").flex_1())
+                .into_element(),
+            _ => view()
+                .flex_1()
+                .child(controls)
+                .child(
+                    scroll()
+                        .test_id("viewport")
+                        .flex_1()
+                        .child(text("Header").h(px(120.0)))
+                        .child(cards),
+                )
+                .into_element(),
+        }
+    }
+
+    #[component]
+    fn OwnCards() -> impl IntoElement {
+        cards(nsh_core::ListViewport::Own, nsh_core::ListAlignment::Top)
+    }
+
+    #[component]
+    fn PageCards() -> impl IntoElement {
+        cards(nsh_core::ListViewport::Parent, nsh_core::ListAlignment::Top)
+    }
+
+    #[component]
+    fn BottomCards() -> impl IntoElement {
+        cards(nsh_core::ListViewport::Own, nsh_core::ListAlignment::Bottom)
+    }
+
+    /// The distance from the top of the viewport to the top of `label`'s
+    /// text, `None` while it is not shown.
+    fn from_top(app: &Headless, label: &str) -> Option<f32> {
+        let pick = |s: &str| match app.screen().view(&Selector::parse(s).unwrap()) {
+            crate::screen::Pick::One(id) => app.screen().bounds_in_root(id),
+            _ => None,
+        };
+        let viewport = pick("id:viewport")?;
+        let card = pick(label)?;
+        Some(card.origin.y.0 - viewport.origin.y.0)
+    }
+
+    /// Scrolled to a card, a list keeps it at the top of its viewport as
+    /// the cards above it are measured at heights other than the estimate,
+    /// as their content loads after the scroll (all the cards around the
+    /// viewport changing in one layout) and as they grow later: the rows
+    /// above the viewport anchor the visible ones, whether the list scrolls
+    /// itself or its page does.
+    #[test]
+    fn rows_measured_above_the_viewport_keep_the_visible_row_in_place() {
+        let at_top = |app: &Headless, by: f32, what: &str| {
+            let at = from_top(app, "Card 50");
+            assert!(
+                at.is_some_and(|y| (y + by).abs() < 1.0),
+                "{what}: card 50 at {at:?}"
+            );
+        };
+        for (name, root) in [
+            ("own", Root::of::<OwnCards> as fn() -> Root),
+            ("page", Root::of::<PageCards>),
+        ] {
+            // Measured from the estimate.
+            let mut app = Headless::start(EngineConfig::new(root())).unwrap();
+            app.first_render().unwrap();
+            app.press("Load").unwrap();
+            app.press("Go").unwrap();
+            app.wait(Duration::from_millis(500)).unwrap();
+            at_top(&app, 0.0, &format!("{name}, measured"));
+
+            // Placeholders, then content.
+            let mut app = Headless::start(EngineConfig::new(root())).unwrap();
+            app.first_render().unwrap();
+            app.press("Go").unwrap();
+            app.wait(Duration::from_millis(500)).unwrap();
+            at_top(&app, 0.0, &format!("{name}, placeholders"));
+            // Scrolled a little, the scroll command's target is let go.
+            app.scroll("id:viewport", px(10.0)).unwrap();
+            app.wait(Duration::from_millis(200)).unwrap();
+            at_top(&app, 10.0, &format!("{name}, scrolled"));
+            app.press("Load").unwrap();
+            app.wait(Duration::from_millis(500)).unwrap();
+            at_top(&app, 10.0, &format!("{name}, loaded"));
+            // The cards above it grow: it stays where it is.
+            app.press("Grow").unwrap();
+            app.wait(Duration::from_millis(500)).unwrap();
+            at_top(&app, 10.0, &format!("{name}, grown"));
+        }
+    }
+
+    /// A bottom-aligned list rests at its end while the cards above the
+    /// viewport are measured and their content loads: it anchors to its
+    /// end, not to its first visible row.
+    #[test]
+    fn a_bottom_aligned_list_stays_at_its_end_as_rows_above_are_measured() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<BottomCards>())).unwrap();
+        app.first_render().unwrap();
+        app.wait(Duration::from_millis(500)).unwrap();
+        // How far above the viewport's end card 199's text starts: at the
+        // top of its card.
+        let from_end = |app: &Headless| {
+            let pick = |s: &str| match app.screen().view(&Selector::parse(s).unwrap()) {
+                crate::screen::Pick::One(id) => app.screen().bounds_in_root(id),
+                _ => None,
+            };
+            let viewport = pick("id:viewport")?;
+            let card = pick("Card 199")?;
+            Some(viewport.origin.y.0 + viewport.size.height.0 - card.origin.y.0)
+        };
+        let at = from_end(&app);
+        assert!(
+            at.is_some_and(|d| (d - 30.0).abs() < 1.0),
+            "placeholder {at:?} above the end"
+        );
+        app.press("Load").unwrap();
+        app.wait(Duration::from_millis(500)).unwrap();
+        // 210 points tall loaded.
+        let at = from_end(&app);
+        assert!(
+            at.is_some_and(|d| (d - 210.0).abs() < 1.0),
+            "card 199 {at:?} above the end"
+        );
     }
 
     #[cfg(feature = "js")]

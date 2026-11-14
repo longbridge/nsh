@@ -277,9 +277,12 @@ Selectable text is selected by dragging, double- and triple-clicking, and copied
 Cmd+[ and the mouse's back button close the newest dialog or go back in a stack (Escape in a focused field or web page
 only leaves it; a page gets these keys first, and keeps those it uses); a `Dialog` is a layer over the whole window
 that shows the app's popup and backdrop. Pages show their `header` at the top. A click anywhere in an `Input`, its padding too, puts the caret at the nearest
-point. `AlertDialog` shows an `NSAlert` sheet on the window: up to two alert actions in a row (the cancel
-action leftmost, the last regular one the default for Return), more actions and an action sheet's actions stacked in
-their order with the cancel action last and no default; Escape chooses the cancel action.
+point. `AlertDialog` shows an `NSAlert`: a sheet of the window the user is in, and, while that window is out of sight
+(a tray app's hidden main window, the app hidden, the window minimized or off every screen), an alert of its own in
+front of every window, which takes the app's input until it is answered while the app goes on running. Up to two alert
+actions show in a row
+(the cancel action leftmost, the last regular one the default for Return), more actions and an action sheet's actions
+stacked in their order with the cancel action last and no default; Escape chooses the cancel action.
 
 ### Table accessibility
 

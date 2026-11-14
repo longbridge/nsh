@@ -2172,6 +2172,8 @@ class Player {
     const child = this.view(childId);
     if (!parent || !child) return;
     if (child._kind === "modal") {
+      child._host = parent;
+      this.goneModals?.delete(child);
       this.present(child);
       return;
     }
@@ -2189,6 +2191,7 @@ class Player {
     // Appended children stay under a border drawn over them.
     const last = host._borderOver && host._border?.parentNode === host ? host._border : null;
     host.insertBefore(child, before && before.parentNode === host ? before : last);
+    this.showHosted(child);
     this.readingChanged(host);
     if (parent._kind === "stack") {
       this.changedStacks.add(parent);
@@ -2199,7 +2202,9 @@ class Player {
   op_r([, id]) {
     const el = this.view(id);
     if (!el) return;
+    this.hideHosted(el);
     if (el._kind === "modal") {
+      this.goneModals?.delete(el);
       this.dismiss(el);
       return;
     }
@@ -2208,6 +2213,31 @@ class Player {
     this.detach(el, parent);
     if (parent?._kind === "stack") this.stackChanged(parent);
     this.screenGone(el, focused);
+  }
+
+  /** Modals presented from inside `el`, which leaves the tree, go with it:
+   * they are the root's children, out of `el`'s subtree, and the browser's
+   * graph deletes them only once their nodes are collected. */
+  hideHosted(el) {
+    for (const modal of [...this.root.children]) {
+      const host = modal._host;
+      if (modal._kind !== "modal" || modal._leaving || !host || (host !== el && !el.contains(host))) continue;
+      (this.goneModals ??= new Set()).add(modal);
+      this.dismiss(modal, true);
+      this.hideHosted(modal);
+    }
+  }
+
+  /** `el` is back in the tree: the modals that went with it come back. */
+  showHosted(el) {
+    if (!this.goneModals?.size) return;
+    for (const modal of this.goneModals) {
+      const host = modal._host;
+      if ((host !== el && !el.contains(host)) || !this.root.contains(host)) continue;
+      this.goneModals.delete(modal);
+      this.present(modal);
+      this.showHosted(modal);
+    }
   }
 
   /** Takes `el` out of `parent`: a screen once its stack is reconciled
@@ -2242,6 +2272,7 @@ class Player {
       el._video.load();
     }
     if (el._kind === "modal") {
+      this.goneModals?.delete(el);
       this.dismiss(el);
       return;
     }
@@ -4899,8 +4930,16 @@ class Player {
       field.enterKeyHint = { done: "done", go: "go", next: "next", search: "search", send: "send" }[config.returnKey] ?? "enter";
     } else field.removeAttribute("enterkeyhint");
     field.readOnly = !config.editable;
-    field.autocapitalize = config.autoCapitalize === "none" ? "off" : config.autoCapitalize;
-    field.spellcheck = config.autoCorrect;
+    // A password shown as plain text (a password field that is not secure)
+    // is never capitalized or checked (the closest the browser has to
+    // Android's visible password keyboard).
+    const password = !config.secure && (config.autoComplete === "current-password" || config.autoComplete === "new-password");
+    const correct = config.autoCorrect && !password;
+    field.autocapitalize = password || config.autoCapitalize === "none" ? "off" : config.autoCapitalize;
+    field.spellcheck = correct;
+    // `spellcheck` alone only stops suggestions: Chrome on Android still asks
+    // the keyboard to autocorrect unless this attribute is off.
+    field.setAttribute("autocorrect", correct ? "on" : "off");
     if (config.autoComplete != null) field.setAttribute("autocomplete", config.autoComplete);
     else field.removeAttribute("autocomplete");
     if (config.maxLength != null) field.maxLength = config.maxLength;
@@ -6268,12 +6307,23 @@ class Player {
         break;
       }
       case "announce":
-        // Cleared first: the same text again is announced again.
-        this.live.textContent = "";
-        setTimeout(() => { this.live.textContent = args[0]; }, 50);
+        this.announce(args[0]);
         break;
       case "a11yFocus":
         if (!el) break;
+        // An input: its field, as `focus` gives it.
+        if (el._field) {
+          el._field.focus();
+          break;
+        }
+        // A page moves a screen reader only with the keyboard focus: a
+        // field the user is typing in keeps it, and the view is read out
+        // instead, as the screen reader would read it there.
+        if (this.typing(el)) {
+          const text = (el.getAttribute("aria-label") || el.textContent || "").trim();
+          if (text) this.announce(text);
+          break;
+        }
         if (!el.hasAttribute("tabindex")) {
           el.tabIndex = -1;
           el._a11yFocus = true;
@@ -6285,6 +6335,23 @@ class Player {
   }
 
 
+
+  /** Has screen readers read `text` (`announce`), through the live region. */
+  announce(text) {
+    // Cleared first: the same text again is announced again.
+    this.live.textContent = "";
+    setTimeout(() => { this.live.textContent = text; }, 50);
+  }
+
+  /** Whether the keyboard focus is in a text field, other than `el`, that
+   * the user may be typing in (`setAccessibilityFocus` leaves it there). */
+  typing(el) {
+    const a = document.activeElement;
+    if (!a || a === el || !a.isConnected || a.closest?.("[inert]")) return false;
+    if (a.isContentEditable) return true;
+    if (a.tagName === "TEXTAREA") return true;
+    return a.tagName === "INPUT" && !/^(button|checkbox|color|file|hidden|image|radio|range|reset|submit)$/.test(a.type);
+  }
 
   /**
    * `Clipboard.writeText`. The async Clipboard API needs a secure context
@@ -8462,7 +8529,9 @@ class Player {
         this.call((w) => w.nsh_pan(p.pan._id, 0, 0, 0, 0, 0));
       } else if (p.scroll && !gated) {
         p.mode = "scroll";
-        p.scrollStart = [p.scroll.scrollLeft, p.scroll.scrollTop];
+        p.at = [p.scroll.scrollLeft, p.scroll.scrollTop];
+        p.dragged = [0, 0];
+        p.handoff = [null, null];
         cancelAnimationFrame(p.scroll._zoomAnimation);
         this.drive(p.scroll, 1);
         this.scrollEvent(p.scroll, "onScrollDragStart");
@@ -8478,11 +8547,90 @@ class Player {
       this.call((w) => w.nsh_pan(p.pan._id, 1, tx, ty, vx, vy));
     } else if (p.mode === "scroll") {
       e.preventDefault();
-      const s = p.scroll;
-      s.scrollLeft = p.scrollStart[0] - tx;
-      s.scrollTop = p.scrollStart[1] - ty;
+      const d = [p.dragged[0] - tx, p.dragged[1] - ty];
+      p.dragged = [tx, ty];
+      for (const axis of [0, 1]) this.chainDrag(p, axis, d[axis]);
     }
     void dx;
+  }
+
+  /**
+   * Moves the zoomable view pointer `p` pans by `d` along `axis` (0: x),
+   * and what it cannot take the nearest scroll view around it that can
+   * move that way, as UIKit's nested scroll views do: a pager pages from
+   * an image not zoomed in, or panned to its edge. Turning back, that view
+   * goes back to where it was before the image pans again.
+   */
+  chainDrag(p, axis, d) {
+    if (!d) return;
+    const pos = (el) => (axis ? el.scrollTop : el.scrollLeft);
+    const max = (el) => Math.max(0, axis ? el.scrollHeight - el.clientHeight : el.scrollWidth - el.clientWidth);
+    const set = (el, v) => (axis ? (el.scrollTop = v) : (el.scrollLeft = v));
+    let h = p.handoff[axis];
+    if (h && (h.at - h.start) * d < 0) {
+      const back = Math.abs(d) < Math.abs(h.at - h.start) ? d : h.start - h.at;
+      h.at += back;
+      set(h.el, h.at);
+      d -= back;
+    }
+    const s = p.scroll;
+    const at = Math.min(Math.max(p.at[axis] + d, 0), max(s));
+    d -= at - p.at[axis];
+    p.at[axis] = at;
+    set(s, at);
+    if (Math.abs(d) < 0.01) return;
+    if (!h) {
+      const el = this.ancestors(s).slice(1).find((v) => v._kind === "scroll" && v._behavior?.enabled !== false
+        && (this.zooms(v) || !!v._horizontal === !axis) && (d < 0 ? pos(v) > 0.5 : pos(v) < max(v) - 0.5));
+      if (!el) return;
+      h = p.handoff[axis] = { el, start: pos(el), at: pos(el) };
+      // It snaps once released (`releaseHandoff`), not under the finger.
+      el.style.scrollSnapType = "none";
+      if (el._momentum) {
+        el._momentum = false;
+        this.scrollEvent(el, "onMomentumEnd");
+      }
+      this.drive(el, 1);
+      this.scrollEvent(el, "onScrollDragStart");
+    }
+    h.at = Math.min(Math.max(h.at + d, 0), max(h.el));
+    set(h.el, h.at);
+  }
+
+  /** Ends the part of a drag scroll view `el` took along `axis`
+   * (`chainDrag`), released at `v` points per second: a snapping view
+   * settles on a snap point, another glides. */
+  releaseHandoff(el, axis, v) {
+    this.scrollEvent(el, "onScrollDragEnd");
+    if (el._snapPoints) {
+      this.drive(el, -1);
+      el._restoreSnap = true;
+      if (!this.snapTo(el, this.releaseSnap(el, v / 1000))) {
+        el._restoreSnap = false;
+        el.style.scrollSnapType = "";
+        this.ownEnd(el);
+      }
+    } else {
+      el.style.scrollSnapType = "";
+      // Its end undoes `drive`.
+      this.glide(el, axis ? 0 : v, axis ? v : 0);
+    }
+  }
+
+  /** The snap point a snapping view released at `v` (points per ms)
+   * settles on, as the core's `snap_target` picks it: faster than 0.3,
+   * pages and snap intervals (one stop per scroll here) move one point,
+   * other snap points round where the glide would go that way; slower,
+   * the nearest. */
+  releaseSnap(el, v) {
+    const b = el._behavior;
+    const dir = v > 0.3 ? 1 : v < -0.3 ? -1 : 0;
+    if (!dir || b.paging || b.snapInterval > 0) return this.snapPoint(el, dir);
+    // Snapping glides decelerate by 0.99 per ms (`scroll::rate`).
+    const projected = (el._horizontal ? el.scrollLeft : el.scrollTop) - v / Math.log(0.99);
+    const points = el._snapPoints;
+    return (dir > 0 ? points.find((q) => q >= projected - 0.5) : [...points].reverse().find((q) => q <= projected + 0.5))
+      ?? this.snapPoint(el, dir);
   }
 
   /** The gate's node id when its pan activates with this move (else undefined). */
@@ -8530,7 +8678,16 @@ class Player {
       this.call((w) => w.nsh_pan(p.pan._id, cancelled ? 3 : 2, p.x - p.startX, p.y - p.startY, vx, vy));
     } else if (p.mode === "scroll") {
       this.scrollEvent(p.scroll, "onScrollDragEnd");
-      this.glide(p.scroll, -p.vx, -p.vy);
+      this.track(p, performance.now());
+      const [vx, vy] = cancelled ? [0, 0] : this.velocity(p);
+      const glide = [-p.vx, -p.vy];
+      for (const axis of [0, 1]) {
+        if (!p.handoff[axis]) continue;
+        // The image stays at its edge; the view around goes on.
+        glide[axis] = 0;
+        this.releaseHandoff(p.handoff[axis].el, axis, axis ? -vy : -vx);
+      }
+      this.glide(p.scroll, glide[0], glide[1]);
     } else if (p.press) {
       if (!cancelled) [p.x, p.y] = this.point(e, p.layer);
       const rect = p.press.getBoundingClientRect();
@@ -8599,6 +8756,12 @@ class Player {
 
   startTwoFinger() {
     const [a, b] = [...this.pointers.values()];
+    // A pinch takes over from a pan that moved a scroll view around.
+    for (const p of [a, b]) {
+      if (!p.handoff) continue;
+      for (const axis of [0, 1]) if (p.handoff[axis]) this.releaseHandoff(p.handoff[axis].el, axis, 0);
+      p.handoff = [null, null];
+    }
     const el = a.pinch ?? b.pinch;
     if (!el) {
       const zoom = a.zoom ?? b.zoom;

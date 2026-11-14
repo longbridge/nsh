@@ -103,10 +103,13 @@ public class NshView extends FrameLayout {
 
     @Override
     public boolean dispatchTouchEvent(android.view.MotionEvent e) {
-        boolean tracking = touches.onTouch(e);
+        android.view.MotionEvent t = mounter.keyboardTap(e);
+        boolean tracking = touches.onTouch(t);
         // A tracked finger went down: hear the rest of the gesture even if
         // no view takes it.
-        return super.dispatchTouchEvent(e) || tracking;
+        boolean handled = super.dispatchTouchEvent(t) || tracking;
+        if (t != e) t.recycle();
+        return handled;
     }
 
     /**
@@ -1215,6 +1218,36 @@ public class NshView extends FrameLayout {
         }
     }
 
+    /**
+     * How far the system bars and the display cutout reach into this view
+     * (px: top, right, bottom, left), as {@link #publishEnvironment} measures
+     * them, without the host's additional insets.
+     */
+    private int[] barsInView(WindowInsets insets) {
+        int top, right, bottom, left;
+        if (Build.VERSION.SDK_INT >= 30) {
+            android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            top = bars.top;
+            right = bars.right;
+            bottom = bars.bottom;
+            left = bars.left;
+        } else {
+            top = insets.getSystemWindowInsetTop();
+            right = insets.getSystemWindowInsetRight();
+            bottom = insets.getSystemWindowInsetBottom();
+            left = insets.getSystemWindowInsetLeft();
+        }
+        View window = getRootView();
+        int[] at = new int[2];
+        getLocationInWindow(at);
+        return new int[] {
+            Math.max(0, top - at[1]),
+            Math.max(0, right - (window.getWidth() - at[0] - getWidth())),
+            Math.max(0, bottom - (window.getHeight() - at[1] - getHeight())),
+            Math.max(0, left - at[0]),
+        };
+    }
+
     /** How far the system bars reach into this view from the top (0 when embedded below them). */
     private int topInset() {
         WindowInsets insets = getRootWindowInsets();
@@ -1297,14 +1330,16 @@ public class NshView extends FrameLayout {
             view.setBackgroundColor(0xfa1e1f22);
             view.addView(scroll, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
             view.addView(copy, at);
-            // Clear of the status and navigation bars, also when the screen shows
-            // before the window has its insets.
+            // Clear of the system bars and the display cutout on every side (a
+            // landscape navigation bar or cutout is at a side), also when the
+            // screen shows before the window has its insets. The sides pad the
+            // scroll view, so lines scrolled sideways stay clear too.
             view.setOnApplyWindowInsetsListener((v, insets) -> {
-                int[] where = new int[2];
-                getLocationInWindow(where);
-                int top = Math.max(0, insets.getSystemWindowInsetTop() - where[1]);
-                text.setPadding(pad, top + pad, pad, insets.getSystemWindowInsetBottom() + pad);
-                at.topMargin = top + Math.round(12 * density);
+                int[] bars = barsInView(insets);
+                scroll.setPadding(bars[3], 0, bars[1], 0);
+                text.setPadding(pad, bars[0] + pad, pad, bars[2] + pad);
+                at.topMargin = bars[0] + Math.round(12 * density);
+                at.rightMargin = bars[1] + pad;
                 copy.setLayoutParams(at);
                 return insets;
             });

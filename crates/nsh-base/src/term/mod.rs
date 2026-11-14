@@ -19,7 +19,11 @@ mod emulator;
 mod keys;
 mod vt;
 
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::Rc,
+};
 
 use nsh_core::{
     element::{Style, measure_text},
@@ -114,7 +118,8 @@ impl TerminalApi {
 #[derive(Clone)]
 struct Term {
     emu: Rc<RefCell<Box<dyn TerminalEmulator>>>,
-    size: Rc<RefCell<TerminalSize>>,
+    /// The size in cells the last layout gave, `None` before the first.
+    size: Rc<Cell<Option<TerminalSize>>>,
     rev: Signal<u64>,
     cx: Scope<TerminalEvent>,
     sink: ElementRef,
@@ -151,10 +156,12 @@ impl Term {
     }
 
     fn resize(&self, size: TerminalSize) {
-        if *self.size.borrow() == size {
+        // The first layout reports its size even when it is the one the
+        // emulator starts at.
+        if self.size.get() == Some(size) {
             return;
         }
-        *self.size.borrow_mut() = size;
+        self.size.set(Some(size));
         self.emu.borrow_mut().resize(size);
         self.rev.update(|r| *r += 1);
         self.cx
@@ -253,7 +260,7 @@ pub fn Terminal(props: TerminalProps, cx: Scope<TerminalEvent>) -> impl IntoElem
     };
     let term = Term {
         emu: Rc::new(RefCell::new(emu)),
-        size: Rc::new(RefCell::new(size)),
+        size: Rc::new(Cell::new(None)),
         rev: signal(0),
         cx,
         sink: element_ref(),
@@ -265,6 +272,7 @@ pub fn Terminal(props: TerminalProps, cx: Scope<TerminalEvent>) -> impl IntoElem
     term.bind_keys();
 
     let family = move || font_family(props.font_family.get());
+    let font = computed(move || font_css(&family(), props.font_size.get()));
     let cell_width = computed(move || {
         let css = font_css(&family(), props.font_size.get());
         measure_text(&css, "0000000000") / 10.0
@@ -280,7 +288,7 @@ pub fn Terminal(props: TerminalProps, cx: Scope<TerminalEvent>) -> impl IntoElem
     };
     let row_term = term.clone();
     let rows = virtual_list(count, move |at| {
-        row(row_term.clone(), props, cell_width, at)
+        row(row_term.clone(), props, font, cell_width, at)
     })
     .alignment(ListAlignment::Bottom)
     .estimated_item_size(props.line_height.get_untracked());
@@ -318,6 +326,7 @@ pub fn Terminal(props: TerminalProps, cx: Scope<TerminalEvent>) -> impl IntoElem
 fn row(
     term: Term,
     props: TerminalProps,
+    font: Memo<String>,
     cell_width: Memo<Points>,
     at: Position,
 ) -> impl IntoElement {
@@ -331,7 +340,8 @@ fn row(
     let cursor = computed(move || {
         term.rev.get();
         let emu = term.emu.borrow();
-        let first_screen = emu.line_count() - term.size.borrow().rows as usize;
+        let rows = term.size.get().unwrap_or_default().rows;
+        let first_screen = emu.line_count() - rows as usize;
         let cursor = emu.cursor()?;
         (at.index() == first_screen + cursor.row as usize).then_some(cursor.col)
     });
@@ -370,14 +380,45 @@ fn row(
                 .pointer_events(PointerEvents::None)
                 .children(boxes)
         }))
+        // The text, placed by cell as the backgrounds and the cursor are:
+        // a font's own advances drift off the grid (a wide character's is
+        // rarely two cells, and the text engine spaces CJK from Latin), so
+        // the line is drawn as segments, each at its column. One selection
+        // runs across them, and a copy gives the line whole.
         .child(dynamic(move || {
-            text("").select_text().children(
-                line.get()
-                    .runs
-                    .into_iter()
-                    .map(run_view)
-                    .collect::<Vec<_>>(),
-            )
+            let cw = cell_width.get().0;
+            let font = font.get();
+            let line = line.get();
+            let parts = segments(&line, cw, |g| advance(&font, g));
+            if parts.is_empty() {
+                // An empty line keeps its empty text: a blank line stays in
+                // a copy.
+                return text("").select_text().into_element();
+            }
+            view()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left_0()
+                .right_0()
+                .justify_center()
+                .children(
+                    parts
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, part)| {
+                            text("")
+                                .select_text()
+                                .when(i > 0, |t| t.continues_text(true))
+                                .absolute()
+                                .left(px(part.x))
+                                .when(part.spacing != 0.0, |t| t.letter_spacing(px(part.spacing)))
+                                .children(part.runs.into_iter().map(run_view).collect::<Vec<_>>())
+                                .into_element()
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .into_element()
         }))
         .child(when(
             move || cursor.get().is_some(),
@@ -393,6 +434,106 @@ fn row(
                     .inline_style(props.cursor_style)
             },
         ))
+}
+
+/// A piece of a line drawn as one text, at `x` in the row.
+#[derive(Debug, PartialEq)]
+struct Segment {
+    /// Where it starts, in points from the row's start.
+    x: f32,
+    /// Letter spacing that makes each of its characters as wide as its
+    /// cells (wide characters), else none.
+    spacing: f32,
+    /// Its runs, in the line's styles.
+    runs: Vec<TerminalRun>,
+}
+
+/// `line` as segments placed by cell, `cell` points wide. A cell's text
+/// is a character with a width and the zero-width ones after it (as
+/// [`text_width`] counts the line's columns): the cells one wide go in one
+/// segment from where they start (in whatever styles), and each stretch of
+/// wide cells of one advance (as `advance` measures a cell's text) in a
+/// segment of its own, letter-spaced to two cells a character and centered
+/// in them. A cell ending in a zero-width joiner ends its segment, so
+/// characters the font would join into one glyph keep the cells the
+/// emulator gave them.
+fn segments(line: &TerminalLine, cell: f32, mut advance: impl FnMut(&str) -> f32) -> Vec<Segment> {
+    use unicode_width::UnicodeWidthChar;
+    // A segment's kind: narrow, or wide of one advance (in hundredths of
+    // a point, so equal advances compare equal).
+    #[derive(PartialEq, Clone, Copy)]
+    enum Kind {
+        Narrow,
+        Wide(i32),
+    }
+    let mut out: Vec<(Kind, bool, Segment)> = Vec::new();
+    let mut col = 0usize;
+    for run in &line.runs {
+        // The run's cells: each character with a width, and the zero-width
+        // ones after it.
+        let mut cells: Vec<&str> = Vec::new();
+        let mut start = 0;
+        for (i, c) in run.text.char_indices() {
+            if i > start && c.width().unwrap_or(0) > 0 {
+                cells.push(&run.text[start..i]);
+                start = i;
+            }
+        }
+        if start < run.text.len() {
+            cells.push(&run.text[start..]);
+        }
+        for g in cells {
+            let width = text_width(g);
+            let kind = match width >= 2 {
+                true => Kind::Wide((advance(g) * 100.0).round() as i32),
+                false => Kind::Narrow,
+            };
+            let open = matches!(out.last(), Some((k, closed, _)) if *k == kind && !closed);
+            if !open {
+                let (x, spacing) = match kind {
+                    Kind::Narrow => (cell * col as f32, 0.0),
+                    Kind::Wide(adv) => {
+                        let spacing = 2.0 * cell - adv as f32 / 100.0;
+                        (cell * col as f32 + spacing / 2.0, spacing)
+                    }
+                };
+                out.push((
+                    kind,
+                    false,
+                    Segment {
+                        x,
+                        spacing,
+                        runs: Vec::new(),
+                    },
+                ));
+            }
+            let (_, closed, segment) = out.last_mut().expect("a segment");
+            match segment.runs.last_mut() {
+                Some(last) if last.style == run.style => last.text.push_str(g),
+                _ => segment.runs.push(TerminalRun::new(g, run.style)),
+            }
+            *closed = kind != Kind::Narrow && g.ends_with('\u{200D}');
+            col += width;
+        }
+    }
+    out.into_iter().map(|(_, _, segment)| segment).collect()
+}
+
+thread_local! {
+    /// Graphemes' advances by font, as the platform's text engine measures
+    /// them.
+    static ADVANCES: RefCell<HashMap<(String, String), f32>> = RefCell::new(HashMap::new());
+}
+
+/// How wide `font` draws `grapheme`, in points (measured once).
+fn advance(font: &str, grapheme: &str) -> f32 {
+    let key = (font.to_owned(), grapheme.to_owned());
+    if let Some(width) = ADVANCES.with_borrow(|a| a.get(&key).copied()) {
+        return width;
+    }
+    let width = measure_text(font, grapheme).0;
+    ADVANCES.with_borrow_mut(|a| a.insert(key, width));
+    width
 }
 
 /// How many cells `text` takes (a wide character two).
@@ -506,6 +647,67 @@ fn sink(term: Term, props: TerminalProps, lh: impl Fn() -> Points + 'static) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn red() -> TerminalStyle {
+        TerminalStyle {
+            fg: Some(TerminalColor::Indexed(1)),
+            ..TerminalStyle::default()
+        }
+    }
+
+    fn texts(segments: &[Segment]) -> Vec<(f32, f32, String)> {
+        segments
+            .iter()
+            .map(|s| {
+                (
+                    s.x,
+                    s.spacing,
+                    s.runs.iter().map(|r| r.text.as_str()).collect(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_line_is_placed_by_cell_its_narrow_text_together_and_wide_characters_spaced_to_two_cells() {
+        let plain = TerminalStyle::default();
+        let line = TerminalLine::new(vec![
+            TerminalRun::new("ab", plain),
+            TerminalRun::new("c", red()),
+            TerminalRun::new("中文d|", plain),
+        ]);
+        // Cells 8 wide; the font draws a CJK character 13 wide.
+        let segments = segments(&line, 8.0, |_| 13.0);
+        assert_eq!(
+            texts(&segments),
+            [
+                (0.0, 0.0, "abc".into()),
+                // Columns 3 to 6: three more a character, half of it before.
+                (24.0 + 1.5, 3.0, "中文".into()),
+                (56.0, 0.0, "d|".into()),
+            ]
+        );
+        assert_eq!(segments[0].runs.len(), 2, "its styles stay runs");
+    }
+
+    #[test]
+    fn wide_characters_of_another_advance_or_after_a_joiner_start_a_segment() {
+        let plain = TerminalStyle::default();
+        let line = TerminalLine::new(vec![TerminalRun::new(
+            "中\u{1F44D}\u{1F468}\u{200D}\u{1F469}",
+            plain,
+        )]);
+        let advance = |g: &str| if g == "中" { 13.0 } else { 15.0 };
+        let at: Vec<f32> = segments(&line, 8.0, advance).iter().map(|s| s.x).collect();
+        // 中 at 0; the thumb (another advance) at 2, the man and his joiner
+        // with it; the woman, after the joiner, at 6.
+        assert_eq!(at, [1.5, 16.5, 48.5]);
+    }
+
+    #[test]
+    fn an_empty_line_has_no_segments() {
+        assert!(segments(&TerminalLine::default(), 8.0, |_| 13.0).is_empty());
+    }
 
     #[test]
     fn palette() {

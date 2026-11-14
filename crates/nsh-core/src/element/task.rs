@@ -11,8 +11,7 @@
 
 use std::{
     cell::RefCell,
-    cmp::Reverse,
-    collections::{BinaryHeap, VecDeque},
+    collections::{BTreeMap, VecDeque},
     future::Future,
     pin::Pin,
     rc::{Rc, Weak},
@@ -433,11 +432,10 @@ pub(crate) struct Executor {
     pub(crate) menus: Rc<RefCell<super::menus::ViewMenus>>,
     /// The views' watches of nodes they did not make.
     pub(crate) watches: Rc<RefCell<super::watch::Watches>>,
-    /// The timers tasks wait for ([`super::timer`]), soonest first: the core
-    /// fires them as they come due, and the engine's loop wakes for the
-    /// soonest, as it does for JS's timers.
-    timers: RefCell<BinaryHeap<Reverse<Timer>>>,
-    next_timer_seq: std::cell::Cell<u64>,
+    /// The timers tasks wait for ([`super::timer`]): the core fires them as
+    /// they come due, and the engine's loop wakes for the soonest, as it does
+    /// for JS's timers.
+    timers: Arc<Timers>,
     /// What waits for the app to answer the events emitted before it
     /// ([`super::after_answer`]).
     answers: RefCell<Answers>,
@@ -461,31 +459,63 @@ pub(crate) struct AfterAnswer {
     pub(crate) f: Box<dyn FnOnce()>,
 }
 
-/// A task's timer: when, and whom to wake (in the order they were made
-/// among timers due at once).
-struct Timer {
-    at: Instant,
-    seq: u64,
-    waker: Waker,
+/// The timers tasks wait for, soonest first (in the order they were made
+/// among timers due at once). Shared with the [`TimerKey`]s of the delays
+/// waiting (which are `Send`, as delays are), so a delay dropped before its
+/// time takes its timer and waker back at once, wherever it is dropped.
+#[derive(Default)]
+struct Timers(Mutex<TimerQueue>);
+
+#[derive(Default)]
+struct TimerQueue {
+    next_seq: u64,
+    wakers: BTreeMap<(Instant, u64), Waker>,
 }
 
-impl PartialEq for Timer {
-    fn eq(&self, other: &Self) -> bool {
-        (self.at, self.seq) == (other.at, other.seq)
+impl Timers {
+    fn queue(&self) -> std::sync::MutexGuard<'_, TimerQueue> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
-impl Eq for Timer {}
+/// A timer waiting in the executor ([`Executor::add_timer`]); dropping it
+/// takes the timer back.
+#[derive(Debug)]
+pub(crate) struct TimerKey {
+    timers: std::sync::Weak<Timers>,
+    key: (Instant, u64),
+}
 
-impl PartialOrd for Timer {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
+impl TimerKey {
+    /// Wakes `waker` instead when the timer fires (the delay was polled
+    /// again by another task's waker).
+    pub(crate) fn set_waker(&self, waker: &Waker) {
+        let Some(timers) = self.timers.upgrade() else {
+            return;
+        };
+        let old = {
+            let mut queue = timers.queue();
+            match queue.wakers.get_mut(&self.key) {
+                Some(kept) if !kept.will_wake(waker) => {
+                    Some(std::mem::replace(kept, waker.clone()))
+                }
+                _ => None,
+            }
+        };
+        // Dropped outside the lock.
+        drop(old);
     }
 }
 
-impl Ord for Timer {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        (self.at, self.seq).cmp(&(other.at, other.seq))
+impl Drop for TimerKey {
+    fn drop(&mut self) {
+        let Some(timers) = self.timers.upgrade() else {
+            return;
+        };
+        let waker = timers.queue().wakers.remove(&self.key);
+        drop(waker);
     }
 }
 
@@ -495,31 +525,39 @@ impl Executor {
         self.derived.borrow_mut()
     }
 
-    /// Wakes `waker` at `at`.
-    pub(crate) fn add_timer(&self, at: Instant, waker: Waker) {
-        let seq = self.next_timer_seq.get();
-        self.next_timer_seq.set(seq + 1);
-        self.timers
-            .borrow_mut()
-            .push(Reverse(Timer { at, seq, waker }));
+    /// Wakes `waker` at `at`, unless the key is dropped first.
+    pub(crate) fn add_timer(&self, at: Instant, waker: Waker) -> TimerKey {
+        let mut queue = self.timers.queue();
+        let key = (at, queue.next_seq);
+        queue.next_seq += 1;
+        queue.wakers.insert(key, waker);
+        TimerKey {
+            timers: Arc::downgrade(&self.timers),
+            key,
+        }
     }
 
     /// When the soonest timer is due.
     pub(crate) fn next_timer(&self) -> Option<Instant> {
-        self.timers.borrow().peek().map(|Reverse(t)| t.at)
+        self.timers
+            .queue()
+            .wakers
+            .first_key_value()
+            .map(|(&(at, _), _)| at)
     }
 
     /// Wakes the timers due at `now`.
     pub(crate) fn fire_timers(&self, now: Instant) {
         let mut due = Vec::new();
         {
-            let mut timers = self.timers.borrow_mut();
-            while timers.peek().is_some_and(|Reverse(t)| t.at <= now) {
-                if let Some(Reverse(timer)) = timers.pop() {
-                    due.push(timer.waker);
-                }
+            let mut queue = self.timers.queue();
+            while let Some(timer) = queue.wakers.first_entry()
+                && timer.key().0 <= now
+            {
+                due.push(timer.remove());
             }
         }
+        // Woken outside the lock: a waker may drop delays.
         for waker in due {
             waker.wake();
         }

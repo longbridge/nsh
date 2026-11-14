@@ -40,8 +40,8 @@ pub enum OpenChangeReason {
     /// The pointer rested on its trigger, or left or pressed it (a
     /// tooltip's); left its trigger and itself (a hover card's).
     Hover,
-    /// The keyboard focus came to its trigger, or left it (a hover
-    /// card's); moved to another item of its menu (a submenu's); Tab or
+    /// The keyboard focus moved to another item of its menu (a
+    /// submenu's); Tab or
     /// Shift+Tab moved it on from a select or combobox whose list was open
     /// (the focus goes where Tab takes it).
     Focus,
@@ -403,7 +403,7 @@ impl PopupPresence {
         effect(move || {
             let now = open();
             // Not cleared here: the focus watch says when the focus leaves,
-            // and keeps its own record of where it is across openings.
+            // the popup part's removal on close included.
             if was.replace(now) && !now && inside.get() {
                 untracked(&back);
             }
@@ -440,6 +440,24 @@ impl PopupPresence {
             Status::Ending => own.then(&self.looks.ending_style.get()),
         }
     }
+}
+
+/// How far a panel docked to the bottom of the screen (a sheet, a drawer,
+/// a menu or a list shown as a sheet) stands above it while the software
+/// keyboard is up: as far as the keyboard reaches past the bottom safe
+/// area, which its height includes. The panel pads its bottom by the safe
+/// area with or without a keyboard, so its content ends right above the
+/// keyboard, as a page padded by the larger of `env(safe-area-inset-bottom)`
+/// and `env(keyboard-inset-height)` does. Read in a style: a change of the
+/// keyboard's height moves the panel with the keyboard's own motion.
+pub(crate) fn keyboard_lift() -> Points {
+    (keyboard_height() - safe_area().bottom).max(Points::ZERO)
+}
+
+/// The tallest a panel docked to the bottom of the screen gets: below the
+/// status bar, above the keyboard ([`keyboard_lift`]).
+pub(crate) fn bottom_panel_max_height() -> Length {
+    Length::from(window().height - safe_area().top - keyboard_lift())
 }
 
 /// How long a sheet takes to come in and to go, in milliseconds.
@@ -776,9 +794,10 @@ pub(crate) fn dropdown(
             let panel = overlay()
                 .left_0()
                 .right_0()
-                .bottom_0()
-                // Below the status bar, whatever the rows.
-                .max_h(move || Length::from(window().height - safe_area().top))
+                // Above the keyboard, below the status bar, whatever the
+                // rows.
+                .bottom(move || Length::from(keyboard_lift()))
+                .max_h(bottom_panel_max_height)
                 .app_class(frame.popup_class)
                 .inline_style(frame.popup_style)
                 .bind_translate_y(&motion.y)

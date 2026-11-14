@@ -221,6 +221,7 @@ impl Mounter {
         self.deleting.clear();
         self.layout_animation = None;
         crate::navigation::end_batch(surface);
+        crate::input::release_hidden_focus(surface);
         crate::system::end_batch(surface);
         crate::input::content_moved(surface, false);
         crate::selectable_view::end_batch(surface);
@@ -306,6 +307,7 @@ impl Mounter {
             MountItem::Delete { id } => {
                 crate::file_drop::deleted(surface, *id);
                 if let Some(view) = self.views.remove(id) {
+                    crate::text_input::deleted(&view);
                     crate::native::deleted(surface, &view);
                     crate::shader::deleted(surface, &view);
                     // A view whose parent the batch deletes too stays in it:

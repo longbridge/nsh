@@ -497,6 +497,7 @@ fn quit_application(app: &gtk::Application) {
 pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
     options.notifications = true;
     prefer_gl_on_nvidia();
+    fill_data_dirs();
     // X11's WM_CLASS comes from the program name: the app's id, as the
     // `StartupWMClass` of the `.desktop` file `nsh package` writes (Wayland's
     // app id is the application id).
@@ -729,6 +730,54 @@ fn prefer_gl_on_nvidia() {
     unsafe { std::env::set_var("GSK_RENDERER", "ngl") };
 }
 
+/// Gives the app the `XDG_DATA_DIRS` a desktop session would when whatever
+/// launched it passed none (a panel, a systemd user service, `env -i`):
+/// GIO finds the handler of a URL or file (`GtkUriLauncher`, `open_url`)
+/// in the `applications` directories under these, and a browser installed
+/// with Flatpak or Snap has its `.desktop` file only in their export
+/// directories, which the session's own environment scripts add.
+fn fill_data_dirs() {
+    let current = std::env::var_os("XDG_DATA_DIRS");
+    let Some(dirs) = data_dirs_to_fill(current.as_deref(), &glib::user_data_dir(), |dir| {
+        dir.is_dir()
+    }) else {
+        return;
+    };
+    // SAFETY: called before GTK starts, while this thread is the process'
+    // only one reading the environment (the engine and the dev client start
+    // with the window), as `prefer_gl_on_nvidia`.
+    unsafe { std::env::set_var("XDG_DATA_DIRS", dirs) };
+}
+
+/// The `XDG_DATA_DIRS` to set when `current` is missing or empty (`None`
+/// when it has a value, which stays): the XDG Base Directory
+/// specification's default, `/usr/local/share:/usr/share`, between the
+/// export directories Flatpak's and snapd's environment scripts put before
+/// and after it, those that exist (`exists`): Flatpak's per user (under
+/// `data_home`, `XDG_DATA_HOME`) and system wide first, snapd's last.
+fn data_dirs_to_fill(
+    current: Option<&std::ffi::OsStr>,
+    data_home: &std::path::Path,
+    exists: impl Fn(&std::path::Path) -> bool,
+) -> Option<std::ffi::OsString> {
+    if current.is_some_and(|value| !value.is_empty()) {
+        return None;
+    }
+    let user_flatpak = data_home.join("flatpak/exports/share");
+    let before = [
+        user_flatpak.as_path(),
+        "/var/lib/flatpak/exports/share".as_ref(),
+    ];
+    let defaults = ["/usr/local/share", "/usr/share"].map(std::path::Path::new);
+    let after = [std::path::Path::new("/var/lib/snapd/desktop")];
+    let dirs = before
+        .into_iter()
+        .filter(|dir| exists(dir))
+        .chain(defaults)
+        .chain(after.into_iter().filter(|dir| exists(dir)));
+    std::env::join_paths(dirs).ok()
+}
+
 /// GNOME's window shortcuts: Ctrl+W closes the window, Ctrl+Q quits, F11
 /// toggles full screen. Accelerators also match the keys of the layout's
 /// Latin group, so they work under Cyrillic or Greek layouts too.
@@ -765,4 +814,60 @@ fn unsafe_keep(window: &gtk::ApplicationWindow, view: Rc<AppView>) {
             view.stop();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{ffi::OsStr, path::Path};
+
+    use super::*;
+
+    const HOME_DATA: &str = "/home/user/.local/share";
+
+    #[test]
+    fn data_dirs_keep_a_value_the_launcher_passed() {
+        let current = OsStr::new("/opt/share:/usr/share");
+        assert_eq!(
+            data_dirs_to_fill(Some(current), Path::new(HOME_DATA), |_| true),
+            None
+        );
+    }
+
+    #[test]
+    fn missing_data_dirs_get_the_specification_default() {
+        let dirs = data_dirs_to_fill(None, Path::new(HOME_DATA), |_| false);
+        assert_eq!(
+            dirs.as_deref(),
+            Some(OsStr::new("/usr/local/share:/usr/share"))
+        );
+    }
+
+    #[test]
+    fn empty_data_dirs_are_filled_as_missing_ones() {
+        let dirs = data_dirs_to_fill(Some(OsStr::new("")), Path::new(HOME_DATA), |_| false);
+        assert_eq!(
+            dirs.as_deref(),
+            Some(OsStr::new("/usr/local/share:/usr/share"))
+        );
+    }
+
+    #[test]
+    fn data_dirs_add_the_flatpak_and_snap_exports_that_exist() {
+        let dirs = data_dirs_to_fill(None, Path::new(HOME_DATA), |_| true);
+        assert_eq!(
+            dirs.as_deref(),
+            Some(OsStr::new(
+                "/home/user/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/usr/local/share:/usr/share:/var/lib/snapd/desktop"
+            ))
+        );
+        let snap_only = data_dirs_to_fill(None, Path::new(HOME_DATA), |dir| {
+            dir.starts_with("/var/lib/snapd")
+        });
+        assert_eq!(
+            snap_only.as_deref(),
+            Some(OsStr::new(
+                "/usr/local/share:/usr/share:/var/lib/snapd/desktop"
+            ))
+        );
+    }
 }

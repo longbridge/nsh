@@ -163,6 +163,10 @@ define_class!(
 
         #[unsafe(method(sendEvent:))]
         fn send_event(&self, event: &NSEvent) {
+            #[cfg(feature = "dev")]
+            if let Some(placed) = crate::synth::placed(event) {
+                return self.sendEvent(&placed);
+            }
             if !self.ivars().background.get() || !self.pass_title_bar_press(event) {
                 // SAFETY: NSWindow's own dispatch of the event.
                 unsafe { msg_send![super(self), sendEvent: event] }
@@ -244,6 +248,17 @@ define_class!(
         #[unsafe(method(canBecomeMainWindow))]
         fn can_become_main(&self) -> bool {
             false
+        }
+
+        #[unsafe(method(sendEvent:))]
+        fn send_event(&self, event: &NSEvent) {
+            // The test agent's events where it made them, as in NshWindow.
+            #[cfg(feature = "dev")]
+            if let Some(placed) = crate::synth::placed(event) {
+                return self.sendEvent(&placed);
+            }
+            // SAFETY: NSWindow's own dispatch of the event.
+            unsafe { msg_send![super(self), sendEvent: event] }
         }
     }
 );
@@ -482,13 +497,13 @@ pub(crate) fn sheet_window(surface: &Surface) -> Option<Retained<NSWindow>> {
     own.or_else(|| surface.root.ns().window())
 }
 
-/// The window an open or save panel slides down from: the
-/// [`sheet_window`] while the user sees it ([`panel_placement`]). A sheet
-/// of a window out of sight (a tray app's hidden main window, a minimized
-/// one, one kept off every screen) stays out of sight with it, so the
-/// panel shows in a window of its own instead (`None`), the app activated
-/// first as `focus()` activates it: a panel of an inactive app opens
-/// behind the front app's windows.
+/// The window an open or save panel, or an alert ([`crate::system`]),
+/// slides down from: the [`sheet_window`] while the user sees it
+/// ([`panel_placement`]). A sheet of a window out of sight (a tray app's
+/// hidden main window, a minimized one, one kept off every screen) stays
+/// out of sight with it, so the panel shows in a window of its own instead
+/// (`None`), the app activated first as `focus()` activates it: a panel of
+/// an inactive app opens behind the front app's windows.
 pub(crate) fn panel_window(surface: &Surface) -> Option<Retained<NSWindow>> {
     let window = sheet_window(surface);
     let app = NSApplication::sharedApplication(surface.mtm);
@@ -1121,13 +1136,7 @@ fn request(surface: &Rc<Surface>, id: NodeId, request: &WindowRequest) {
     let mtm = surface.mtm;
     match request {
         WindowRequest::Show => show(surface, id, &window, false),
-        WindowRequest::Hide => {
-            if let Some(w) = surface.windows.borrow().get(&id) {
-                w.showing.set(Showing::Done);
-            }
-            window.orderOut(None);
-            lost_key(surface, &window);
-        }
+        WindowRequest::Hide => hide(surface, id, &window),
         WindowRequest::Focus => show(surface, id, &window, true),
         WindowRequest::Close => close_request(surface, id, &window),
         WindowRequest::Minimize => {
@@ -1198,6 +1207,42 @@ fn request(surface: &Rc<Surface>, id: NodeId, request: &WindowRequest) {
     report(surface, id);
 }
 
+/// `hide()` (and the main window's close with `keepAliveOnClose`): window
+/// `id` is ordered out, one in full screen once it has left full screen
+/// ([`crate::window_state::hide`]), so its space does not stay behind.
+pub(crate) fn hide(surface: &Surface, id: NodeId, window: &NSWindow) {
+    if let Some(w) = surface.windows.borrow().get(&id) {
+        w.showing.set(Showing::Done);
+    }
+    let now = if id == ROOT_ID {
+        crate::window_state::hide(&surface.window, window)
+    } else {
+        with_watch(surface, id, |watch| {
+            crate::window_state::hide(watch, window)
+        })
+        .unwrap_or(true)
+    };
+    if now {
+        window.orderOut(None);
+        lost_key(surface, window);
+    }
+}
+
+/// A window the app hid in full screen is back on its desktop: it is
+/// ordered out.
+pub(crate) fn hidden_after_full_screen(surface: &Surface, target: Target) {
+    let id = match target {
+        Target::Main => ROOT_ID,
+        Target::Own(id) => id,
+    };
+    let Some(window) = window_of(surface, id) else {
+        return;
+    };
+    window.orderOut(None);
+    lost_key(surface, &window);
+    report(surface, id);
+}
+
 /// `f` with the watch of window `id` (the main window's for the root).
 fn with_target_watch(surface: &Surface, id: NodeId, f: impl FnOnce(&Watch)) {
     if id == ROOT_ID {
@@ -1210,6 +1255,8 @@ fn with_target_watch(surface: &Surface, id: NodeId, f: impl FnOnce(&Watch)) {
 /// Shows window `id` (`focus`: and makes it key); a new window waiting for
 /// its first frame shows with it.
 fn show(surface: &Surface, id: NodeId, window: &NSWindow, focus: bool) {
+    // Shown again while it leaves full screen: it stays.
+    with_target_watch(surface, id, crate::window_state::shown);
     if let Some(w) = surface.windows.borrow().get(&id)
         && let Showing::Waiting(_) = w.showing.get()
     {
@@ -1256,7 +1303,7 @@ fn order_front(surface: &Surface, window: &NSWindow, activate: bool, key: bool, 
 }
 
 /// How [`order_front`] activates the app (and [`panel_window`], for an
-/// open or save panel shown alone).
+/// open or save panel or an alert shown alone).
 #[derive(Debug, PartialEq, Eq)]
 enum Activation {
     /// Not at all: it is active, the window does not activate it (a panel),
@@ -1266,7 +1313,8 @@ enum Activation {
     /// new window) stays out of the way of the app the user is in.
     Ask,
     /// It takes the keyboard from the app in front (`focus()`, an open or
-    /// save panel shown alone), as other toolkits' focus calls do.
+    /// save panel or an alert shown alone), as other toolkits' focus calls
+    /// do.
     Take,
 }
 
@@ -1653,6 +1701,9 @@ pub(crate) fn launched_main(surface: &Surface, mode: Option<WindowMode>, shown: 
 /// The standalone app's main window shows: the first time, it takes the
 /// mode it opens in.
 pub(crate) fn main_shown(surface: &Surface) {
+    // Shown again while it leaves full screen (the Dock icon, a link):
+    // it stays.
+    crate::window_state::shown(&surface.window);
     if let Some(mode) = surface.main_open_mode.take()
         && let Some(window) = surface.root.ns().window()
     {

@@ -176,7 +176,7 @@ let composing = false;
 | `keyboardType` | `KeyboardType` | `"default"` | 键盘布局。 |
 | `returnKeyType` | `ReturnKeyType` | `"default"` | 回车键上的文字。 |
 | `autoCapitalize` | `"none" \| "sentences" \| "words" \| "characters"` | `"sentences"` | 自动大写。 |
-| `autoCorrect` | `boolean` | `true` | 系统的自动更正。 |
+| `autoCorrect` | `boolean` | `true` | 系统的自动更正：拼写，以及 iOS、macOS 上的智能引号、破折号和文本替换。输入代码或标识符时关掉它。 |
 | `autoComplete` | `AutoComplete` | | 输入框内容的类型，用于自动填充。 |
 | `multiline` | `boolean` | `false` | 多行；回车插入换行（`submitBehavior` 另有设置时除外）。 |
 | `maxLength` | `number` | | 用户最多能输入的字符数。超出的粘贴只插入放得下的部分，与浏览器一致。 |
@@ -247,6 +247,8 @@ input()
 在 iOS 上，`.keyboard_appearance(KeyboardAppearance::Dark)`（TSX 的 `ios={{ keyboardAppearance: "dark" }}`；或浅色、默认）让键盘使用浅色或深色外观而不随系统外观变化，适合在浅色模式下运行的深色应用。Android 的键盘始终跟随系统主题。
 
 自动填充（`.auto_fill(AutoFill::Email)`，TSX 的 `autoComplete`）告诉系统字段里装的是什么，系统就能提供已保存的姓名、地址、密码以及短信中的验证码。Rust 的 `AutoFill` 每种内容一个变体（`Name`、`GivenName`、`FamilyName`、`Email`、`Tel`、`Username`、`Password`、`NewPassword`、`OneTimeCode`、`StreetAddress`、`PostalCode`、`Country`、`CreditCardNumber`、`Url`、`Birthdate` 等，以及 `Off`）。TSX 接受以下取值：`"name"`、`"given-name"`、`"family-name"`、`"email"`、`"tel"`、`"username"`、`"current-password"`、`"new-password"`、`"one-time-code"`、`"street-address"`、`"postal-code"`、`"country"`、`"cc-number"`、`"cc-exp"`、`"cc-csc"`、`"url"`、`"birthdate-full"` 等，或 `"off"`。iOS 自己的名字（`"emailAddress"`、`"oneTimeCode"` 等）也可以用在 `autoComplete` 或 `ios={{ textContentType }}` 中。
+
+未开启 `masked` 的密码框（例如点了“显示密码”之后）就是以明文显示的密码：`autoComplete` 为 `"current-password"` 或 `"new-password"`（`AutoFill::Password`、`AutoFill::NewPassword`）且 `masked` 关闭时，Android 使用可见密码键盘，iOS 使用 ASCII 键盘，各平台都不会自动大写、提供建议或自动更正，无论 `autoCapitalize` 和 `autoCorrect` 如何设置。显示/隐藏按钮只需切换 `masked`。
 
 ```rust tabs
 use nsh_core::element::AutoFill;
@@ -716,6 +718,8 @@ function ChatScreen() {
 内边距（`.pb_keyboard()`）让上方内容缩小，背景仍延伸到屏幕底部；底部外边距（`marginBottom: "env(keyboard-inset-height)"`、`.mb_keyboard()`）让整个视图止于键盘顶部。`calc(env(keyboard-inset-height) + <length>)`（Rust `.pb_keyboard_plus(..)`、`.mb_keyboard_plus(..)`）再加一段长度，例如减去视图下方标签栏的高度。
 
 完整的键盘高度适合延伸到 surface 底部的视图，页面内容通常如此。在会为键盘缩小窗口的 Android 宿主上，窗口本身已经变小，该变量为 0。见[键盘](../elements/keyboard.md)。
+
+浮层自己会避开键盘：底部的 [Sheet](../elements/sheet.md#the-software-keyboard)、抽屉，以及手机上以 sheet 呈现的菜单、选择器和日期选择器都贴在键盘上沿，并随键盘移动。
 
 ### 键盘访问器
 

@@ -35,7 +35,10 @@ use nsh_core::{
 };
 
 use crate::{
-    popup::{OpenChangeReason, OpenState, PopupPresence, SheetMotion, StateLooks, lifecycle},
+    popup::{
+        OpenChangeReason, OpenState, PopupPresence, SheetMotion, StateLooks,
+        bottom_panel_max_height, keyboard_lift, lifecycle,
+    },
     roving::{bar_trigger, leave_bar, popup_bar},
     terminal::{MENU_CHECK, MENU_RADIO, MENU_UNCHECKED, SUBMENU_ARROW, is_terminal, line, rule},
 };
@@ -1247,9 +1250,10 @@ fn surface(
                 let panel = overlay()
                     .left_0()
                     .right_0()
-                    .bottom_0()
-                    // Below the status bar, whatever the items.
-                    .max_h(move || Length::from(window().height - safe_area().top))
+                    // Above the keyboard, below the status bar, whatever
+                    // the items.
+                    .bottom(move || Length::from(keyboard_lift()))
+                    .max_h(bottom_panel_max_height)
                     .role(AccessibilityRole::Menu)
                     .app_class(parts.popup_class)
                     .inline_style(parts.popup_style)
@@ -2061,10 +2065,11 @@ pub enum SubmenuEvent {
 }
 
 /// A menu inside a menu: on the desktops its items are a popup beside its
-/// trigger, opened as the pointer comes over the trigger or presses it; on
-/// touch screens pressing the trigger shows its items in the sheet instead
-/// of the ones around it, with its `back` row first. Its popups take the
-/// menu's `popupClass` / `popupStyle` and its states' looks
+/// trigger, its first item level with the trigger (inside the popup's
+/// padding and border), opened as the pointer comes over the trigger or
+/// presses it; on touch screens pressing the trigger shows its items in
+/// the sheet instead of the ones around it, with its `back` row first. Its
+/// popups take the menu's `popupClass` / `popupStyle` and its states' looks
 /// (`popupStartingClass`, `popupEndingClass`, ...). In a terminal its
 /// trigger is a row that ends with ` ›` ([`crate::terminal`]).
 /// On the desktops and in a terminal, Right, Return or Space on its

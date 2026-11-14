@@ -45,6 +45,10 @@ mod slider;
 mod submenu;
 mod switch;
 mod tabs;
+#[cfg(feature = "term")]
+mod term;
+#[cfg(feature = "term")]
+mod term_cells;
 mod terminal;
 mod text_view;
 mod time_field;
