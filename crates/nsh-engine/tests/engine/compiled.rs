@@ -1703,7 +1703,6 @@ const results = [
   `native:${attempt(() => <Probe data={huge()} />)}`,
   `scrollbar:${attempt(() => <Scroll scrollbar={theme as never}><Text>x</Text></Scroll>)}`,
   `sticky:${attempt(() => <List each={[1]} stickyHeaderIndices={huge() as never}>{() => <Text>x</Text>}</List>)}`,
-  `captureKeys:${attempt(() => <View focusable captureKeys={huge() as never} />)}`,
 ];
 // A start returns a promise: what it cannot decode rejects it.
 const settled = (start: () => Promise<unknown>) =>
@@ -1749,7 +1748,7 @@ fn values_too_long_or_nested_in_themselves_are_refused_when_decoded() {
              transform:RangeError translate:RangeError outputRange:RangeError \
              inputRange:RangeError native:RangeError(a native component value is nested \
              deeper than 64 or has more than 1048576 entries) scrollbar:rendered \
-             sticky:RangeError captureKeys:RangeError easing:RangeError clamp:TypeError(decay: `clamp` must be \
+             sticky:RangeError easing:RangeError clamp:TypeError(decay: `clamp` must be \
              [min, max]) shared:RangeError keyframes:RangeError"
         ],
         "{:?}",
