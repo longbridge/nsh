@@ -1165,7 +1165,8 @@ waits that long, then unmounts, and `onClose` follows. A generation counter keep
 a newer change: opened again on its way out, the popup goes back to its look (its transitions run back) and was
 never gone, so neither `onClose` nor `onOpen` fires. On its way out it takes no keys either: the keyboard focus inside
 goes back to the trigger as it closes, not once it is gone (`PopupPresence::focus_back_on_close`, `Popover`'s and a
-desktop menu's; a dropdown's `Presence::back`), and a menu's items neither move the focus nor choose while their level is closed, so a key pressed
+desktop menu's; a dropdown's `Presence::back`), unless the choice that closed it moved the focus elsewhere in the
+same turn (`ElementRef::focus_back` yields to any `focus()` in its commit), and a menu's items neither move the focus nor choose while their level is closed, so a key pressed
 during the exit is the trigger's (Return opens it again, taking it back). Without a look for a state, or while the user asks for less
 motion, it skips that state: a popup with no ending look is gone in the turn that closed it, and nothing more is sent
 for one with no looks. The state's classes are important (`!`) over the part's `class` and `style`, as a toast's; its

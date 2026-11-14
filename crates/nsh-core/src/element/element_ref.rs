@@ -188,6 +188,16 @@ impl ElementRef {
         self.send(Command::Focus);
     }
 
+    /// [`Self::focus`], given way to any other move of the focus in the
+    /// same commit (a `focus()` from Rust or JS): a popup closing gives the
+    /// keyboard focus back to its trigger, but not over the focus the
+    /// choice that closed it moved elsewhere (an item that starts editing
+    /// a field). The last one asked for in a commit is the one that counts.
+    #[doc(hidden)]
+    pub fn focus_back(&self) {
+        self.reach(|node, executor| executor.act(Action::FocusBack(node)));
+    }
+
     /// Ends the press going on in the element (or inside it) without its
     /// release: no `on_press_up` or `on_press` follow, and its `active:`
     /// styles reset (`nsh-base`'s context menu opened by a held finger).

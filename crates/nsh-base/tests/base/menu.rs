@@ -471,6 +471,103 @@ fn after_a_press_and_an_arrow_escape_gives_the_focus_to_the_trigger() {
     app.app.wait_for("text:chose:Quit").unwrap();
 }
 
+/// A menu whose Rename item moves the keyboard focus to a field outside
+/// it, as a choice that starts editing in place does, and a Copy item that
+/// moves nothing; its `open` the app's when `controlled` (the choice's
+/// focus and the closing then come in one turn). The trigger and the field
+/// log the focus they take.
+#[derive(Clone, PartialEq, Props)]
+struct RenameMenuProps {
+    /// The app owns `open`, following `onOpenChange`.
+    controlled: bool,
+}
+
+#[component]
+fn RenameMenu(props: RenameMenuProps) -> impl IntoElement {
+    let controlled = props.controlled;
+    let log = signal(String::from("focus"));
+    let note = move |what: &'static str| log.update(|log| log.push_str(what));
+    let field = element_ref();
+    let open = signal(false);
+    let menu = menu();
+    let menu = if controlled {
+        menu.open(move || Some(open.get()))
+            .on_open_change(move |e: &MenuEvent| {
+                if let MenuEvent::OpenChange(next, _) = e {
+                    open.set(*next);
+                }
+            })
+    } else {
+        menu
+    };
+    view()
+        .pt(px(100.0))
+        .pl(px(40.0))
+        .child(
+            menu.trigger(
+                view()
+                    .test_id("actions")
+                    .w(px(80.0))
+                    .h(px(30.0))
+                    .on_focus(move |_: &()| note(" trigger"))
+                    .child(text("Actions")),
+            )
+            .child(
+                menu_item()
+                    .on_select(move || field.focus())
+                    .child(text("Rename")),
+            )
+            .child(menu_item().child(text("Copy"))),
+        )
+        .child(
+            view()
+                .element_ref(&field)
+                .test_id("field")
+                .focusable(true)
+                .w(px(120.0))
+                .h(px(30.0))
+                .on_focus(move |_: &()| note(" field")),
+        )
+        .child(text(move || log.get()))
+}
+
+#[test]
+fn a_choice_that_moves_the_focus_out_of_the_menu_keeps_it_there() {
+    for controlled in [false, true] {
+        let mut app = start_with(Root::new::<RenameMenu>(move || RenameMenuProps {
+            controlled,
+        }));
+        app.app.press_key("tab").unwrap();
+        app.app.wait_for("text:focus trigger").unwrap();
+        app.app.press_key("enter").unwrap();
+        app.app.wait_for("Rename").unwrap();
+        // Rename has the focus: choosing it moves the focus to the field,
+        // and the menu closing leaves it there instead of taking it back
+        // to its trigger.
+        app.app.press_key("space").unwrap();
+        app.app
+            .wait_for_gone("Rename", std::time::Duration::from_secs(2))
+            .unwrap();
+        app.app.wait(std::time::Duration::from_millis(100)).unwrap();
+        assert!(
+            app.app.shows("focus trigger field"),
+            "controlled {controlled}: the focus stayed on the field: {:?}",
+            app.app.screen().texts()
+        );
+        // A choice that moves nothing still gives it back to the trigger.
+        app.app.press("id:actions").unwrap();
+        app.app.wait_for("Copy").unwrap();
+        app.app.press_key("end").unwrap();
+        app.app.press_key("space").unwrap();
+        app.app
+            .wait_for_gone("Copy", std::time::Duration::from_secs(2))
+            .unwrap();
+        app.app
+            .wait_for("text:focus trigger field trigger")
+            .unwrap_or_else(|e| panic!("controlled {controlled}: {e}"));
+    }
+}
+
 #[test]
 fn page_down_and_page_up_go_to_the_last_and_first_enabled_items_and_stop() {
     // Every item is in view: a page is all of them. New is disabled, so

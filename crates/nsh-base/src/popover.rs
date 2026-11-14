@@ -145,7 +145,7 @@ pub fn Popover(props: PopoverProps, cx: Scope<PopoverEvent>) -> impl IntoElement
             move || open.get(),
             move || {
                 if closed_by.get() != Some(OpenChangeReason::PressOutside) {
-                    anchor.focus();
+                    anchor.focus_back();
                 }
             },
         );
