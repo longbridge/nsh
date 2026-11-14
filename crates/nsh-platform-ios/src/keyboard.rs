@@ -92,7 +92,7 @@ use objc2::{
 use objc2_foundation::{NSArray, NSSet, NSString};
 use objc2_ui_kit::{
     UIFocusEnvironment, UIFocusSystem, UIFocusUpdateContext, UIKey, UIKeyCommand,
-    UIKeyModifierFlags, UIPress, UIView, UIWindow,
+    UIKeyModifierFlags, UIPress, UITouch, UIView, UIWindow,
 };
 
 use crate::{
@@ -825,6 +825,22 @@ fn collect_stops(view: &UIView, stops: &mut Vec<Retained<UIView>>) {
         }
         collect_stops(&sub, stops);
     }
+}
+
+/// Whether `touch` is on a stop inside `view` (`view` itself is not asked):
+/// the keyboard focus a touch moves goes to the innermost stop under it.
+pub(crate) fn stop_inside(touch: &UITouch, view: &UIView) -> bool {
+    let mut current = touch.view();
+    while let Some(v) = current {
+        if std::ptr::eq::<UIView>(&*v, view) {
+            return false;
+        }
+        if is_stop(&v) {
+            return true;
+        }
+        current = v.superview();
+    }
+    false
 }
 
 fn is_stop(view: &UIView) -> bool {
