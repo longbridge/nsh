@@ -1923,6 +1923,9 @@ fn draw_into(
                 },
             }
             cx.clip_skip = 1;
+            // SAFETY: a COM call between BeginDraw and EndDraw: clears what
+            // the clip leaves.
+            unsafe { dc.Clear(Some(&background)) };
             cx.damage = Some(areas.to_vec());
             draw_view(&mut cx, &root, Mat4::new(), (0.0, 0.0));
             crate::chrome::draw(surface, hwnd, dc, scale, w);
