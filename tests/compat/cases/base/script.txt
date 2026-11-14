@@ -1024,9 +1024,9 @@ covers [props] MenuItem.checked
 covers [props] MenuItem.indicator
 covers [props] MenuItem.indicatorClass
 covers [props] MenuItem.indicatorStyle
-covers [props] MenuItem.accessibilityDescription
 covers [props] MenuItem.closeOnSelect
 covers [props] checkedStyle
+covers [props] accessibilityDescription
 covers [props] role
 covers [events] MenuItem.onSelect
 # base-switch
