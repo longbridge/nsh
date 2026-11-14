@@ -1579,6 +1579,60 @@ fn clipboard_images_are_unavailable_where_the_clipboard_holds_text_only() {
     assert_eq!(commands, 0, "an image call reached the platform");
 }
 
+const CLIPBOARD_REFUSED: &str = r#"import { mount, signal, Text } from "nsh";
+import { Clipboard } from "nsh";
+
+const shown = signal("waiting");
+setTimeout(async () => {
+  const read = () =>
+    Clipboard.readText().then(
+      (text) => `resolved "${text}"`,
+      (e) => `${e.name} ${e.code} ${e.permission}`,
+    );
+  const refused = await read();
+  const empty = await read();
+  shown.set(`${refused} | ${empty}`);
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn clipboard_text_the_person_refuses_rejects() {
+    // iOS's paste prompt answered with Don't Allow Paste: the board holds
+    // text, none was read. Then an empty board, which still reads "".
+    let (engine, rx) = start(CLIPBOARD_REFUSED);
+    let control = engine.control();
+    let wanted = r#"Error ERR_ACCESS_DENIED clipboard | resolved """#;
+    let mut reads = 0;
+    let batches = until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command:
+                    Command::ReadClipboard {
+                        id,
+                        has_only: false,
+                    },
+            } = item
+            {
+                reads += 1;
+                let mut payload = vec![
+                    ("id", PayloadValue::Number(*id as f64)),
+                    ("has", PayloadValue::Bool(false)),
+                ];
+                if reads == 1 {
+                    payload.push(("denied", PayloadValue::Bool(true)));
+                }
+                control.dispatch_event(ROOT_ID, EventKind::Clipboard, EventPayload::Map(payload));
+            }
+        }
+        shows(batch, wanted)
+    });
+    assert!(batches.iter().any(|b| shows(b, wanted)), "{wanted}");
+    assert_eq!(reads, 2);
+}
+
 const CLIPBOARD_IMAGE_TOO_LARGE: &str = r#"import { mount, signal, Text } from "nsh";
 import { Clipboard } from "nsh";
 

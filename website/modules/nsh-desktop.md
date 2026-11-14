@@ -757,10 +757,17 @@ interface Display {
   primary: boolean;
   scaleFactor: number;
   refreshRate: number | null;  // in hertz
+  cutouts: Bounds[];           // what a camera housing hides: a MacBook's notch
 }
 ```
 
 `win.state()` is a window as the platform reports it, `windowState()` the current window's, and `displays()` the displays, the primary one first; all are reactive. Every rectangle is in points, in screen coordinates: from the primary display's top left corner, with `y` growing down, as `setBounds` takes them. A change of mode, of display, of focus, or of being minimized or visible is reported at once; a move or a resize once the window stops for a moment, so what reads them runs once per move rather than at every step. Rust: `WindowRef::state() -> Option<WindowState>` and `displays() -> Vec<Display>` (`nsh_core::desktop`'s types); reading them subscribes to changes.
+
+A display's `cutouts` are the parts of it a camera housing covers, in the same screen coordinates: on a MacBook with a notch, one rectangle at the top's middle, as tall as the menu bar. A window can sit beside the notch, or show content that grows out of it; on every other display the list is empty.
+
+```tsx
+const notch = () => displays().flatMap((d) => d.cutouts)[0] ?? null;
+```
 
 While the window is on the screen, [`lifecycle()`](./nsh.md#device) reporting `"background"` means other windows cover it.
 

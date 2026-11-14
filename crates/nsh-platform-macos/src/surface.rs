@@ -553,6 +553,13 @@ impl Surface {
         }
     }
 
+    /// A handle to the engine's events that stays usable after this surface
+    /// is gone: a download's stop confirmation must reach the core after
+    /// the view is released.
+    pub(crate) fn event_control(&self) -> Option<EngineControl> {
+        self.control.borrow().clone()
+    }
+
     /// Sends an event to JS.
     pub(crate) fn event(&self, id: NodeId, kind: EventKind, payload: EventPayload) {
         self.control(|c| c.dispatch_event(id, kind, payload));

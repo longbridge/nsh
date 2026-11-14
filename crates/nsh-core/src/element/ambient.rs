@@ -679,6 +679,15 @@ pub fn clipboard_string() -> Answer<String> {
     answer
 }
 
+/// The text on the system clipboard for `Clipboard.readText`: `""` when
+/// it holds none, `None` when the person refused the read (iOS's paste
+/// prompt).
+pub(crate) fn clipboard_checked_string() -> Answer<Option<String>> {
+    let (answer, action) = super::services::clipboard_checked_string();
+    act(action);
+    answer
+}
+
 /// Whether the system clipboard holds text (TS: `Clipboard.hasText`).
 pub fn clipboard_has_string() -> Answer<bool> {
     let (answer, action) = super::services::clipboard_has_string();

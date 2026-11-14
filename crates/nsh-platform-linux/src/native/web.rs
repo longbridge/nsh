@@ -28,6 +28,12 @@
 //! stays empty), where iOS and macOS only check the main frame's.
 //! Responses WebKit cannot show are refused rather than downloaded.
 //!
+//! A download is a transport: WebKit holds it without a destination and
+//! the core hears its offer (`DownloadOffer`), chooses the staging path
+//! (`StartDownload`) or cancels it. This backend never picks a destination,
+//! publishes a file or removes one; it only writes where the core says
+//! and reports the writer's end.
+//!
 //! Props: `injectedJavaScriptBeforeContentLoaded` and `injectedJavaScript`
 //! are user scripts of the top frame (at the document's start and end);
 //! `javaScriptEnabled` is WebKit's `enable-javascript-markup` (the page's
@@ -72,15 +78,17 @@ use std::{
     path::{Path, PathBuf},
     rc::Rc,
     sync::Arc,
-    time::Duration,
 };
 
 use gtk4::{self as gtk, gdk, gio, glib, prelude::*};
 use nsh_core::{
     Command, EventKind, EventPayload, JsonValue, PayloadValue, WebProps, WebSource,
-    webview::{self, WebViewOperation, WebViewRequest},
+    webview::{
+        self, DownloadEnd, DownloadOffer, DownloadOutcome, WebDownloadSource, WebViewOperation,
+        WebViewRequest,
+    },
 };
-use nsh_engine::Access;
+use nsh_engine::{Access, EngineControl};
 use webkit6::{
     CookiePersistentStorage, Download, DownloadError, LoadEvent, NavigationPolicyDecision,
     NetworkError, NetworkSession, PolicyDecisionType, PolicyError, ResponsePolicyDecision,
@@ -100,12 +108,15 @@ const BRIDGE: &str = "window.nsh = window.nsh || { postMessage: function (data) 
 /// `scrollable: false`: the top document does not scroll.
 const NO_SCROLL: &str = "html, body { overflow: hidden !important; }";
 
-/// How long a manual download waits for the app's destination.
-const PENDING_TIMEOUT: Duration = Duration::from_secs(60);
-
 /// What a web view's signal handlers share.
 pub(super) struct Shared {
     emitter: Emitter,
+    /// The engine's control, captured when the view was made: the internal
+    /// download events (offers, ends, replies) go through it, so a writer's
+    /// stop confirmation still reaches the core after the surface (and this
+    /// view) is gone. UI events keep [`Self::emit`]'s surface-bound
+    /// lifetime.
+    control: Option<EngineControl>,
     /// Async callbacks may outlive this view or the engine it belonged to.
     live: Cell<bool>,
     /// What the app may show (its `webview` capability); `None`: nothing
@@ -113,9 +124,9 @@ pub(super) struct Shared {
     access: Option<Arc<Access>>,
     /// The current navigation failed (WebKit still finishes it).
     failed: Cell<bool>,
-    /// Where automatic downloads are saved (the app's data directory's
-    /// `downloads`); `None`: nothing is downloaded.
-    downloads_root: Option<PathBuf>,
+    /// The core asked this view to hold downloads (`defer_downloads`);
+    /// an app listener asks for the same.
+    defer_downloads: Cell<bool>,
     /// Downloads WebKit started for this page, by their id.
     downloads: RefCell<HashMap<String, Rc<DownloadState>>>,
     /// The id the next download is reported with.
@@ -129,80 +140,72 @@ impl Shared {
         }
     }
 
+    /// Reports a transport event to the core, whether or not the app
+    /// listens for it: the core decides what the app hears. The node may
+    /// be gone already (teardown); the captured control still delivers it.
+    fn report(&self, kind: EventKind, payload: EventPayload) {
+        self.dispatch(kind, payload);
+    }
+
     /// Answers a [`Command::WebViewRequest`] `id`: its value, or the
-    /// error. Sent even when nothing listens: the core is waiting.
+    /// error. Sent even when nothing listens: the core is waiting. A
+    /// teardown cancellation is answered too, so the core knows the
+    /// native writer stopped before it removes anything.
     fn reply(&self, id: u64, result: Result<JsonValue, String>) {
-        if !self.live.get() {
-            return;
-        }
-        if let Some(surface) = self.emitter.surface.upgrade() {
-            surface.event(
-                self.emitter.id,
-                EventKind::WebViewReply,
-                webview::reply(id, result),
-            );
+        self.dispatch(EventKind::WebViewReply, webview::reply(id, result));
+    }
+
+    /// Sends an internal download event (offer, end, reply) to the core.
+    /// The engine control was captured with this view: it outlives the
+    /// surface, so the last stop acknowledgement is not lost when the view
+    /// is disposed (the core then cleans its staging directory). UI events
+    /// keep [`Self::emit`] and drop with the surface.
+    fn dispatch(&self, kind: EventKind, payload: EventPayload) {
+        if let Some(control) = &self.control {
+            control.dispatch_event(self.emitter.id, kind, payload);
+        } else if let Some(surface) = self.emitter.surface.upgrade() {
+            // No engine ran when the view was made: the surface may still
+            // take the event (a test host, for instance).
+            surface.event(self.emitter.id, kind, payload);
         }
     }
 
-    /// Whether this page's downloads are wanted: an `onDownloadPending`
-    /// listener (the app chooses every destination), or an `onDownload`
-    /// listener with a directory to save automatic downloads in.
-    fn wants_downloads(&self) -> bool {
-        self.emitter.listens(EventKind::DownloadPending)
-            || (self.downloads_root.is_some() && self.emitter.listens(EventKind::Download))
-    }
-
-    /// Whether this page's downloads wait for the app's destination.
-    fn manual_downloads(&self) -> bool {
-        self.emitter.listens(EventKind::DownloadPending)
+    /// Whether this page's downloads are wanted at all: the core's
+    /// `defer_downloads` prop (the Rust `onDownload`/`onDownloadPending`
+    /// builders set it) or an app listener for either lifecycle event. The
+    /// core decides which mode applies; without either, WebKit's default
+    /// (nothing written) stands.
+    fn offers_downloads(&self) -> bool {
+        self.defer_downloads.get()
+            || self.emitter.listens(EventKind::DownloadPending)
+            || self.emitter.listens(EventKind::Download)
     }
 }
 
-/// A download WebKit started for a page: reported, then either saved to a
-/// directory of its own (automatic) or held without one (nothing is
-/// written) until the app accepts a destination or cancels.
+/// A download WebKit holds for a page: reported to the core, which
+/// chooses its staging path or cancels it.
 ///
-/// A manual download writes to a staging file of its own beside the app's
-/// destination and is published there only once it finished; a cancel or a
-/// failure removes the staging file, never the destination (which may hold
-/// an older file of the app's).
+/// WebKit creates the destination file itself; nothing is written before
+/// the core's `StartDownload`. This backend keeps no file policy of its
+/// own: the core stages, publishes and cleans up.
 struct DownloadState {
     download: Download,
     /// Handlers on `download`, disconnected when it ends.
     handlers: RefCell<Vec<glib::SignalHandlerId>>,
     /// The id its events use.
     id: String,
-    url: String,
-    /// The name WebKit suggested, sanitized.
-    filename: RefCell<String>,
-    /// Where it is reported: the app's destination once accepted (manual)
-    /// or its file in the app's data directory (automatic).
-    path: RefCell<Option<PathBuf>>,
-    /// What WebKit writes: `path` itself for an automatic download, a
-    /// hidden file beside it for a manual one until it is published.
-    staging: RefCell<Option<PathBuf>>,
-    /// The app's destination is a staging file to publish (manual).
-    manual: Cell<bool>,
-    /// The app asked to replace the destination's file.
-    overwrite: Cell<bool>,
-    /// The `AcceptDownload` request (its core id) waiting for WebKit to
+    /// Whether the offer was reported (WebKit asks once).
+    offered: Cell<bool>,
+    /// The `StartDownload` request (its core id) waiting for WebKit to
     /// create the destination file.
-    accepting: Cell<Option<u64>>,
-    /// The `CancelDownload` request (its core id) waiting for the transfer
-    /// to stop, so it can answer once what was written is gone.
+    starting: Cell<Option<u64>>,
+    /// The `CancelDownload` request (its core id) waiting for the writer
+    /// to stop, so it is answered only then.
     cancelling: Cell<Option<u64>>,
-    /// A destination was accepted (it cannot be chosen twice).
-    accepted: Cell<bool>,
-    /// WebKit finished it: it can no longer be accepted.
-    finished: Cell<bool>,
-    /// A manual decision was reported (once).
-    pending: Cell<bool>,
-    /// Its `started` event was reported.
+    /// WebKit created the destination: the transfer writes.
     started: Cell<bool>,
-    /// A terminal `onDownload` event was reported (at most one).
-    terminal: Cell<bool>,
-    /// The timeout that withdraws an unanswered manual decision.
-    expiry: RefCell<Option<glib::SourceId>>,
+    /// WebKit reported its end: nothing is answered or reported twice.
+    ended: Cell<bool>,
 }
 
 impl DownloadState {
@@ -214,18 +217,13 @@ impl DownloadState {
         }
     }
 
-    fn clear_expiry(&self) {
-        if let Some(source) = self.expiry.borrow_mut().take() {
-            source.remove();
-        }
-    }
-
-    /// Cancels the download for teardown, keeping its terminal callbacks
-    /// connected: what it wrote (a staging file, or the backend's own
-    /// directory) goes only once WebKit reports the transfer stopped.
+    /// Stops the transfer for teardown, keeping its callbacks connected
+    /// until WebKit reports that writing stopped (a pending core request
+    /// is answered then).
     fn cancel_for_cleanup(&self) {
-        self.clear_expiry();
-        if !self.finished.get() {
+        // CancelDownload may already precede Delete in the same mount batch.
+        // A second WebKit cancel can deliver an IPC reply after its download client was retired.
+        if !self.ended.get() && self.cancelling.get().is_none() {
             self.download.cancel();
         }
     }
@@ -262,16 +260,21 @@ impl WebHost {
     /// schemes.
     pub(super) fn new(surface: &Rc<Surface>, view: &NshView, p: &WebProps) -> Self {
         let incognito = p.incognito;
+        // Internal download events must outlive this view, so capture the
+        // engine's handle now, while the app that mounts the view runs.
+        let mut control = None;
+        surface.control(|c| control = Some(c.clone()));
         let shared = Rc::new(Shared {
             emitter: Emitter {
                 surface: Rc::downgrade(surface),
                 view: view.downgrade(),
                 id: view.id(),
             },
+            control,
             live: Cell::new(true),
             access: surface.native.access.borrow().clone(),
             failed: Cell::new(false),
-            downloads_root: surface.native.downloads.borrow().clone(),
+            defer_downloads: Cell::new(p.defer_downloads),
             downloads: RefCell::default(),
             next_download: Cell::new(0),
         });
@@ -377,6 +380,7 @@ impl WebHost {
 
     pub(super) fn set(&mut self, view: &NshView, p: &WebProps) {
         let web = &self.web;
+        self.shared.defer_downloads.set(p.defer_downloads);
         let old = self.props.take();
         let first = old.is_none();
         let old = old.unwrap_or_default();
@@ -475,11 +479,11 @@ impl Drop for WebHost {
         if let Some(id) = self.download_started.take() {
             self.session.disconnect(id);
         }
-        // Downloads of this page still under way: cancelled. Their
-        // terminal callbacks stay connected (they only clean up now): what
-        // an automatic one wrote in the backend's own directory, or a
-        // manual one's staging file, goes once WebKit reports the transfer
-        // stopped. The app's destinations are never touched.
+        // Downloads of this page still under way: their native writers are
+        // cancelled, and their callbacks stay connected until WebKit
+        // reports the write stopped: a `CancelDownload` already waiting is
+        // answered then, and nothing else (the core owns the staging
+        // directory).
         let downloads = std::mem::take(&mut *self.shared.downloads.borrow_mut());
         for download in downloads.into_values() {
             download.cancel_for_cleanup();
@@ -563,9 +567,9 @@ fn decide_policy(web: &WebView, shared: &Rc<Shared>) -> glib::SignalHandlerId {
         }
         PolicyDecisionType::Response => match decision.downcast_ref::<ResponsePolicyDecision>() {
             Some(response) if is_download(response) => {
-                if shared.wants_downloads() {
+                if shared.offers_downloads() {
                     // WebKit hands it to the session's downloads, which
-                    // hold it for the destination the host decides.
+                    // hold it for the core's decision.
                     decision.download();
                 } else {
                     // Nothing listens: refused like a page WebKit cannot
@@ -689,17 +693,11 @@ fn load_failed(web: &WebView, shared: &Rc<Shared>) -> glib::SignalHandlerId {
 pub(super) fn web_request(web: &WebView, shared: &Rc<Shared>, request: &WebViewRequest) {
     let id = request.id;
     match &request.operation {
-        WebViewOperation::AcceptDownload {
+        WebViewOperation::StartDownload {
             id: download,
-            destination,
+            staging,
         } => {
-            accept_download(
-                shared,
-                download,
-                id,
-                &destination.path,
-                destination.overwrite,
-            );
+            start_download(shared, download, id, staging);
         }
         WebViewOperation::CancelDownload { id: download } => {
             cancel_download(shared, download, id);
@@ -712,9 +710,9 @@ pub(super) fn web_request(web: &WebView, shared: &Rc<Shared>, request: &WebViewR
     }
 }
 
-/// WebKit reported a download of this page: reported and either saved
-/// (automatic) or held without a destination (manual) until the app
-/// decides.
+/// WebKit reported a download of this page: held without a destination
+/// (nothing is written) and reported to the core, which chooses the
+/// staging path or cancels it.
 fn started_download(shared: &Rc<Shared>, download: &Download) {
     let n = shared.next_download.get();
     shared.next_download.set(n + 1);
@@ -725,24 +723,11 @@ fn started_download(shared: &Rc<Shared>, download: &Download) {
         download: download.clone(),
         handlers: RefCell::default(),
         id: download_id(at, n),
-        url: download
-            .request()
-            .and_then(|request| request.uri())
-            .map(|uri| uri.to_string())
-            .unwrap_or_default(),
-        filename: RefCell::default(),
-        path: RefCell::default(),
-        staging: RefCell::default(),
-        manual: Cell::new(false),
-        overwrite: Cell::new(false),
-        accepting: Cell::new(None),
+        offered: Cell::new(false),
+        starting: Cell::new(None),
         cancelling: Cell::new(None),
-        accepted: Cell::new(false),
-        finished: Cell::new(false),
-        pending: Cell::new(false),
         started: Cell::new(false),
-        terminal: Cell::new(false),
-        expiry: RefCell::default(),
+        ended: Cell::new(false),
     });
     shared
         .downloads
@@ -753,10 +738,23 @@ fn started_download(shared: &Rc<Shared>, download: &Download) {
         let shared = shared.clone();
         let state = state.clone();
         handlers.push(
-            download.connect_decide_destination(move |download, suggested| {
+            download.connect_decide_destination(move |download, _suggested| {
                 // `true` in every case: WebKit never chooses a destination of
-                // its own (`~/Downloads`); the host does, or cancels.
-                decide_destination(&shared, &state, download, suggested);
+                // its own (`~/Downloads`); the core picks one or cancels.
+                if !state.offered.replace(true) {
+                    // A view being torn down offers nothing: the core has no
+                    // session for it, and nothing may be written.
+                    if shared.live.get() && shared.offers_downloads() {
+                        let offer = offer_of(&state, download);
+                        shared.report(EventKind::DownloadOffer, webview::download_offer(&offer));
+                    } else {
+                        // Nothing holds it: nothing may be written.
+                        state.ended.set(true);
+                        state.disconnect();
+                        shared.downloads.borrow_mut().remove(&state.id);
+                        download.cancel();
+                    }
+                }
                 true
             }),
         );
@@ -765,15 +763,11 @@ fn started_download(shared: &Rc<Shared>, download: &Download) {
         let shared = shared.clone();
         let state = state.clone();
         handlers.push(download.connect_created_destination(move |_, _| {
-            // The app's destination is created: answer its request, then
-            // report the download as started.
-            let Some(request) = state.accepting.take() else {
-                return;
-            };
-            shared.reply(request, Ok(JsonValue::Null));
-            if !state.started.replace(true) {
-                let started = download_event("started", &state, None);
-                shared.emit(EventKind::Download, || started);
+            // The core's staging file exists now and WebKit writes it: its
+            // `StartDownload` is answered, never a later completion.
+            state.started.set(true);
+            if let Some(request) = state.starting.take() {
+                shared.reply(request, Ok(JsonValue::Null));
             }
         }));
     }
@@ -782,272 +776,243 @@ fn started_download(shared: &Rc<Shared>, download: &Download) {
         let state = state.clone();
         handlers.push(download.connect_failed(move |_, err| {
             let cancelled = err.matches(DownloadError::CancelledByUser);
-            state.finished.set(true);
-            state.clear_expiry();
+            state.ended.set(true);
             state.disconnect();
             shared.downloads.borrow_mut().remove(&state.id);
-            // The transfer stopped: what it wrote is gone (a staging file,
-            // or the backend's own directory).
-            cleanup(&shared, &state);
-            if let Some(request) = state.accepting.take() {
+            let starting = state.starting.take();
+            let cancelling = state.cancelling.take();
+            if let Some(request) = starting {
+                // The transfer stopped before it could write: the start
+                // fails with WebKit's error.
                 shared.reply(
                     request,
                     Err(if cancelled {
-                        "download cancelled".into()
+                        "the download was cancelled".into()
                     } else {
                         err.message().to_owned()
                     }),
                 );
-            }
-            if let Some(request) = state.cancelling.take() {
-                // Cleanup happened above, before the acknowledgement and
-                // the lifecycle event. A started download has a terminal
-                // `failed` event even when the platform calls it a user
-                // cancellation; a pending one never started.
-                if take_terminal(state.started.get(), &state.terminal) {
-                    let failed = failed_event(&state, err.message().to_owned());
-                    shared.emit(EventKind::Download, || failed);
+                if let Some(request) = cancelling {
+                    // A cancel was already waiting: writing stopped, so the
+                    // core may clean its staging directory. The start's
+                    // failure is settled above; no `DownloadEnd` follows.
+                    shared.reply(request, Ok(JsonValue::Null));
+                    return;
                 }
+                // The core settles the start's failure and then asks for the
+                // stop the ended transfer already made: this end is that
+                // acknowledgement, so its staging directory is cleaned.
+                let end = DownloadEnd {
+                    id: state.id.clone(),
+                    outcome: DownloadOutcome::Failed {
+                        code: teardown_code(&shared),
+                        message: err.message().to_owned(),
+                    },
+                };
+                shared.report(EventKind::DownloadEnd, webview::download_end(&end));
+                return;
+            }
+            if let Some(request) = cancelling {
+                // Native writing stopped: the core may now clean its staging
+                // directory. A cancellation is settled by the core, so no
+                // `DownloadEnd` follows.
                 shared.reply(request, Ok(JsonValue::Null));
                 return;
             }
-            if cancelled {
-                // A cancellation with no request (teardown): a started
-                // download still reaches its terminal state exactly once.
-                if take_terminal(state.started.get(), &state.terminal) {
-                    let failed = failed_event(&state, err.message().to_owned());
-                    shared.emit(EventKind::Download, || failed);
-                }
-                return;
-            }
-            log::warn!("web view: download failed: {err}");
-            if !state.terminal.replace(true) {
-                let failed = failed_event(&state, err.message().to_owned());
-                shared.emit(EventKind::Download, || failed);
-            }
+            // No request is waiting: this is the transfer's own end. The
+            // core settles what it had for the id, or drops an unknown one.
+            let end = DownloadEnd {
+                id: state.id.clone(),
+                outcome: DownloadOutcome::Failed {
+                    code: teardown_code(&shared),
+                    message: err.message().to_owned(),
+                },
+            };
+            shared.report(EventKind::DownloadEnd, webview::download_end(&end));
         }));
     }
     {
         let shared = shared.clone();
         let state = state.clone();
-        handlers.push(download.connect_finished(move |_| {
-            state.finished.set(true);
-            state.clear_expiry();
+        handlers.push(download.connect_finished(move |download| {
+            state.ended.set(true);
             state.disconnect();
             shared.downloads.borrow_mut().remove(&state.id);
-            if let Some(request) = state.cancelling.take() {
-                // A cancel arrived before the last bytes were taken: what
-                // it wrote is discarded, nothing is published, and a
-                // started download reports `failed` rather than `finished`.
-                cleanup(&shared, &state);
-                if let Some(accepting) = state.accepting.take() {
-                    shared.reply(accepting, Err("download cancelled".into()));
-                }
-                if take_terminal(state.started.get(), &state.terminal) {
-                    let failed = failed_event(&state, "download cancelled".into());
-                    shared.emit(EventKind::Download, || failed);
-                }
+            // A transfer the core asked to write finished, whether or not
+            // `created-destination` was seen.
+            let started = state.started.get() || state.starting.get().is_some();
+            let starting = state.starting.take();
+            let cancelling = state.cancelling.take();
+            if let Some(request) = starting {
+                shared.reply(request, Ok(JsonValue::Null));
+            }
+            if let Some(request) = cancelling {
+                // A cancel arrived before the last bytes were taken: writing
+                // has stopped, and the core settles `cancelled`.
                 shared.reply(request, Ok(JsonValue::Null));
                 return;
             }
-            // A manual download's staging file becomes the app's file
-            // only now; an automatic one is already at its path.
-            if state.manual.get() {
-                let staging = state.staging.borrow().clone();
-                let destination = state.path.borrow().clone();
-                if let (Some(staging), Some(destination)) = (staging, destination)
-                    && let Err(error) = publish(&staging, &destination, state.overwrite.get())
-                {
-                    cleanup(&shared, &state);
-                    if let Some(request) = state.accepting.take() {
-                        shared.reply(request, Err(error.clone()));
-                    }
-                    if take_terminal(state.started.get(), &state.terminal) {
-                        let failed = failed_event(&state, error);
-                        shared.emit(EventKind::Download, || failed);
-                    }
-                    return;
-                }
-                state.staging.borrow_mut().take();
-            }
-            // WebKit creates the destination before it finishes; a reply
-            // still waiting resolves here anyway.
-            if let Some(request) = state.accepting.take() {
-                shared.reply(request, Ok(JsonValue::Null));
-            }
-            if !state.started.get() {
+            if !started {
                 return;
             }
-            state.terminal.set(true);
-            let bytes = state
-                .path
-                .borrow()
-                .as_ref()
-                .and_then(|path| std::fs::metadata(path).ok())
-                .map(|meta| meta.len());
-            let finished = download_event("finished", &state, bytes);
-            shared.emit(EventKind::Download, || finished);
+            // The staging file WebKit wrote: the core publishes it. Even
+            // after the view went away the file is complete, and the core
+            // still owns the staging directory it made.
+            let bytes = download
+                .destination()
+                .and_then(|path| std::fs::metadata(path.as_str()).ok())
+                .map_or(0, |meta| meta.len());
+            let end = DownloadEnd {
+                id: state.id.clone(),
+                outcome: DownloadOutcome::Finished { bytes },
+            };
+            shared.report(EventKind::DownloadEnd, webview::download_end(&end));
         }));
     }
     *state.handlers.borrow_mut() = handlers;
 }
 
-/// WebKit asks where a download goes: an automatic one is saved in the
-/// app's data directory, a manual one reports the choice and holds it.
-fn decide_destination(
-    shared: &Rc<Shared>,
-    state: &Rc<DownloadState>,
-    download: &Download,
-    suggested: &str,
-) {
-    if !shared.wants_downloads() {
-        // No one could accept it: nothing may be written.
-        state.finished.set(true);
-        state.clear_expiry();
-        state.disconnect();
-        shared.downloads.borrow_mut().remove(&state.id);
-        download.cancel();
-        return;
-    }
-    let filename = file_name(suggested);
-    *state.filename.borrow_mut() = filename.clone();
-    if shared.manual_downloads() {
-        // Reported once; the app answers with AcceptDownload or
-        // CancelDownload. An unanswered one is withdrawn.
-        if state.pending.replace(true) {
-            return;
-        }
-        let pending = webview::download_pending_payload(&state.id, &state.url, &filename);
-        shared.emit(EventKind::DownloadPending, || pending);
-        let shared = shared.clone();
-        let pending_state = state.clone();
-        let expiry = glib::timeout_add_local_once(PENDING_TIMEOUT, move || {
-            expire_pending(&shared, &pending_state);
-        });
-        *state.expiry.borrow_mut() = Some(expiry);
-        return;
-    }
-    let Some(root) = shared.downloads_root.clone() else {
-        // No directory to save in (the app started without one).
-        state.finished.set(true);
-        state.disconnect();
-        shared.downloads.borrow_mut().remove(&state.id);
-        download.cancel();
-        return;
-    };
-    // A directory of its own: two files of the same name never meet, and a
-    // failed one takes its partial file with it.
-    let dir = root.join(&state.id);
-    let path = dir.join(&filename);
-    if let Err(err) = std::fs::create_dir_all(&dir) {
-        log::warn!("web view download into {}: {err}", dir.display());
-        let _ = std::fs::remove_dir_all(&dir);
-        state.finished.set(true);
-        state.disconnect();
-        shared.downloads.borrow_mut().remove(&state.id);
-        let failed = failed_event(state, err.to_string());
-        shared.emit(EventKind::Download, || failed);
-        download.cancel();
-        return;
-    }
-    *state.path.borrow_mut() = Some(path.clone());
-    *state.staging.borrow_mut() = Some(path.clone());
-    state.started.set(true);
-    let started = download_event("started", state, None);
-    shared.emit(EventKind::Download, || started);
-    download.set_destination(&path.to_string_lossy());
-}
-
-/// A manual download nobody chose a destination for: cancelled, and
-/// reported as failed (nothing was written, so there is nothing to
-/// remove).
-fn expire_pending(shared: &Rc<Shared>, state: &Rc<DownloadState>) {
-    state.clear_expiry();
-    if state.accepted.get() || state.finished.get() {
-        return;
-    }
-    // Nothing was accepted yet: WebKit holds it without a destination, so
-    // the terminal `failed` removes only the tracked state.
-    state.download.cancel();
-    shared.downloads.borrow_mut().remove(&state.id);
-    let failed = failed_event(state, "no download destination was accepted in time".into());
-    shared.emit(EventKind::Download, || failed);
-}
-
-/// Writes download `id` to the app's chosen `path`, through a staging
-/// file of its own that only a finished transfer publishes there.
-fn accept_download(shared: &Rc<Shared>, id: &str, request: u64, path: &Path, overwrite: bool) {
+/// Writes the download `id` at the core's staging path: WebKit creates
+/// the leaf itself (it must not exist), inside the core's private
+/// directory. The answer waits only for that file, never for the transfer.
+fn start_download(shared: &Rc<Shared>, id: &str, request: u64, staging: &Path) {
     let Some(state) = shared.downloads.borrow().get(id).cloned() else {
         shared.reply(request, Err(format!("unknown download {id}")));
         return;
     };
-    if state.finished.get() {
+    if state.ended.get() {
         shared.reply(request, Err(format!("download {id} already finished")));
         return;
     }
-    if state.accepted.get() {
-        shared.reply(request, Err(format!("download {id} is already accepted")));
+    if state.started.get() || state.starting.get().is_some() {
+        shared.reply(request, Err(format!("download {id} already started")));
         return;
     }
     if state.cancelling.get().is_some() {
         shared.reply(request, Err(format!("download {id} is being cancelled")));
         return;
     }
-    if state.started.get() {
-        // An automatic download already writes where the platform chose.
-        shared.reply(
-            request,
-            Err(format!("download {id} is already writing its file")),
-        );
-        return;
-    }
-    if let Err(error) = check_destination(path, overwrite) {
-        shared.reply(request, Err(error));
-        return;
-    }
-    let staging = match stage_path(path, id) {
-        Ok(staging) => staging,
+    let destination = match staging_destination(staging) {
+        Ok(destination) => destination,
         Err(error) => {
+            // Nothing was set: the transfer stays held for the core's
+            // cancellation (a lossy path would write another file).
             shared.reply(request, Err(error));
             return;
         }
     };
-    state.manual.set(true);
-    state.overwrite.set(overwrite);
-    state.accepted.set(true);
-    state.clear_expiry();
-    *state.path.borrow_mut() = Some(path.to_path_buf());
-    *state.staging.borrow_mut() = Some(staging.clone());
-    state.accepting.set(Some(request));
-    // The staging file is new, so it must not be replaced: only the
-    // finished file goes to `path`, where `overwrite` decides.
+    state.starting.set(Some(request));
+    // The core's leaf does not exist: WebKit creates it, inside the core's
+    // private directory. Only the answer waits, never the transfer.
     state.download.set_allow_overwrite(false);
-    // The answer waits for WebKit: `created-destination` (ok) or `failed`
-    // (its error). `set_destination` may call back at once.
-    state.download.set_destination(&staging.to_string_lossy());
+    state.download.set_destination(destination);
 }
 
-/// Cancels download `id`: answered once WebKit reports the transfer
-/// stopped and what it wrote is gone.
+/// The path WebKitGTK may be given for a download's `staging` file.
+///
+/// WebKitGTK 6 takes an absolute path in the GLib file name encoding
+/// (UTF-8): not a file URL, and not bytes. A path it cannot represent must
+/// be refused here, or a lossy conversion would make WebKit write another
+/// file than the core named. (The core's leaf is ASCII, but the destination
+/// folder it stages in need not be UTF-8.)
+fn staging_destination(staging: &Path) -> Result<&str, String> {
+    if !staging.is_absolute() {
+        return Err(format!(
+            "the staging path {} is not absolute",
+            staging.display()
+        ));
+    }
+    staging
+        .to_str()
+        .filter(|path| !path.contains('\0'))
+        .ok_or_else(|| {
+            format!(
+                "the staging path {} is not a UTF-8 path WebKitGTK can write",
+                staging.display()
+            )
+        })
+}
+
+/// Stops download `id`: answered only once WebKit reports its writer
+/// stopped, so the core may then clean the staging directory safely.
 fn cancel_download(shared: &Rc<Shared>, id: &str, request: u64) {
     let Some(state) = shared.downloads.borrow().get(id).cloned() else {
         shared.reply(request, Err(format!("unknown download {id}")));
         return;
     };
-    if state.finished.get() {
+    if state.ended.get() {
         shared.reply(request, Err(format!("download {id} already finished")));
         return;
     }
     if state.cancelling.get().is_some() {
-        shared.reply(request, Err(format!("download {id} is being cancelled")));
+        shared.reply(
+            request,
+            Err(format!("download {id} is already being cancelled")),
+        );
         return;
     }
-    state.clear_expiry();
+    // The answer waits for WebKit's `failed`/`finished`: only then has the
+    // writer stopped, and only then may the core clean the staging path.
     state.cancelling.set(Some(request));
-    // The terminal `failed` (or a race's `finished`) removes the staging
-    // file or the backend's directory, then answers both this request and
-    // a waiting acceptance.
     state.download.cancel();
+}
+
+/// What the core hears about a download WebKit holds: the final URL, the
+/// server's file name (made safe), the type and declared size, and the
+/// method WebKit actually used. WebKit owns the bytes, so its source is
+/// `Transfer`.
+fn offer_of(state: &DownloadState, download: &Download) -> DownloadOffer {
+    let response = download.response();
+    let request = download.request();
+    let url = response
+        .as_ref()
+        .and_then(|response| response.uri())
+        .or_else(|| request.as_ref().and_then(|request| request.uri()))
+        .map(|uri| uri.to_string())
+        .unwrap_or_default();
+    let suggested = response
+        .as_ref()
+        .and_then(|response| response.suggested_filename());
+    DownloadOffer {
+        id: state.id.clone(),
+        filename: download_name(suggested.as_deref().unwrap_or_default(), &url),
+        mime_type: response
+            .as_ref()
+            .and_then(|response| response.mime_type())
+            .map(|mime| mime.to_string()),
+        bytes: response.as_ref().and_then(declared_bytes),
+        method: request
+            .as_ref()
+            .and_then(|request| request.http_method())
+            .map(|method| method.to_string()),
+        url,
+        source: WebDownloadSource::Transfer,
+    }
+}
+
+/// The size the response declares, when it describes the bytes the file
+/// receives: a `Content-Encoding` other than `identity` makes
+/// `Content-Length` the encoded body's size, not the file's.
+fn declared_bytes(response: &webkit6::URIResponse) -> Option<u64> {
+    if response
+        .http_headers()
+        .and_then(|headers| headers.one("content-encoding"))
+        .is_some_and(|encoding| !encoding.trim().eq_ignore_ascii_case("identity"))
+    {
+        return None;
+    }
+    let length = response.content_length();
+    (length > 0).then_some(length)
+}
+
+/// A safe file name for a download: the server's suggested one, else the
+/// URL's last segment.
+fn download_name(suggested: &str, url: &str) -> String {
+    if !suggested.trim().is_empty() {
+        return file_name(suggested);
+    }
+    let path = url.split(['?', '#']).next().unwrap_or_default();
+    file_name(path.rsplit('/').next().unwrap_or_default())
 }
 
 /// A safe id for a download: hex digits only, so it names a directory
@@ -1055,6 +1020,13 @@ fn cancel_download(shared: &Rc<Shared>, id: &str, request: u64) {
 /// clock's digits end.
 fn download_id(at: u128, n: u64) -> String {
     format!("{at:032x}{n:016x}")
+}
+
+/// The code a failed end carries once the view went away first (`None`
+/// when the transfer failed on its own): the core still hears that
+/// writing stopped, and only then may it remove the staging directory.
+fn teardown_code(shared: &Shared) -> Option<String> {
+    (!shared.live.get()).then(|| "ERR_NSH_DOWNLOAD_TEARDOWN".to_owned())
 }
 
 /// A file name for a server's suggested one: its last component, without
@@ -1095,167 +1067,6 @@ fn file_name(suggested: &str) -> String {
     } else {
         name
     }
-}
-
-/// Whether `path` may be a download's destination: absolute, in an
-/// existing folder, a file (replaced only when `overwrite` says so).
-fn check_destination(path: &Path, overwrite: bool) -> Result<(), String> {
-    let Some(text) = path.to_str() else {
-        return Err("a download destination must be a UTF-8 path".into());
-    };
-    if text.is_empty() || text.contains('\0') {
-        return Err("a download destination must be a valid path".into());
-    }
-    if !path.is_absolute() {
-        return Err(format!("download destination {text} is not absolute"));
-    }
-    if path.file_name().is_none() {
-        return Err(format!("download destination {text} has no file name"));
-    }
-    let Some(parent) = path.parent() else {
-        return Err(format!("download destination {text} has no folder"));
-    };
-    if !parent.is_dir() {
-        return Err(format!(
-            "the download destination's folder {} does not exist",
-            parent.display()
-        ));
-    }
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.is_dir() => {
-            Err(format!("download destination {text} is a folder"))
-        }
-        Ok(_) if !overwrite => Err(format!(
-            "download destination {text} exists (accept with overwrite to replace it)"
-        )),
-        Ok(_) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(format!("cannot use download destination {text}: {err}")),
-    }
-}
-
-/// Where a manual download writes before it is published: a hidden file
-/// of its own beside the app's destination, so a cancel or a failure
-/// never leaves a part of it there.
-fn stage_path(destination: &Path, id: &str) -> Result<PathBuf, String> {
-    let Some(parent) = destination.parent() else {
-        return Err(format!(
-            "download destination {} has no folder",
-            destination.display()
-        ));
-    };
-    let mut staging = parent.join(format!(".nsh-download-{id}.part"));
-    if staging == destination {
-        staging = parent.join(format!(".nsh-download-{id}.part.tmp"));
-    }
-    match std::fs::symlink_metadata(&staging) {
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(staging),
-        Ok(_) => Err(format!(
-            "the download's staging file {} exists",
-            staging.display()
-        )),
-        Err(err) => Err(format!("cannot use {}: {err}", staging.display())),
-    }
-}
-
-/// Moves a finished manual download from its staging file to the app's
-/// destination: replacing it only when the app said so (`overwrite`), else
-/// never clobbering a file that appeared meanwhile.
-fn publish(staging: &Path, destination: &Path, overwrite: bool) -> Result<(), String> {
-    if overwrite {
-        return std::fs::rename(staging, destination)
-            .map_err(|err| format!("cannot replace {}: {err}", destination.display()));
-    }
-    match std::fs::hard_link(staging, destination) {
-        Ok(()) => {
-            if let Err(err) = std::fs::remove_file(staging) {
-                log::warn!("web view: cannot remove {}: {err}", staging.display());
-            }
-            Ok(())
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Err(format!(
-            "{} exists (accept with overwrite to replace it)",
-            destination.display()
-        )),
-        Err(err) => Err(format!(
-            "cannot publish {} without replacing an existing file: {err}",
-            destination.display()
-        )),
-    }
-}
-
-/// Removes what a failed or cancelled download wrote: its staging file,
-/// or the backend's own directory in the app's data directory. Never the
-/// app's destination, which may hold an older file of its own.
-fn cleanup(shared: &Shared, state: &DownloadState) {
-    let dir = automatic_dir(shared, state);
-    let staging = state.staging.borrow_mut().take();
-    cleanup_output(state.manual.get(), staging.as_deref(), dir.as_deref());
-}
-
-/// Removes what the download owns: its staging file, or the automatic
-/// directory this backend made. Never the app's destination.
-fn cleanup_output(manual: bool, staging: Option<&Path>, automatic_dir: Option<&Path>) {
-    if manual {
-        if let Some(staging) = staging {
-            let _ = std::fs::remove_file(staging);
-        }
-    } else if let Some(dir) = automatic_dir {
-        let _ = std::fs::remove_dir_all(dir);
-    }
-}
-
-/// The folder an automatic download made for itself (`downloads/<id>`),
-/// which only this backend writes in; `None` for a manual download.
-fn automatic_dir(shared: &Shared, state: &DownloadState) -> Option<PathBuf> {
-    if state.manual.get() {
-        return None;
-    }
-    let root = shared.downloads_root.as_ref()?;
-    let staging = state.staging.borrow();
-    let dir = staging.as_ref()?.parent()?;
-    (dir == root.join(&state.id)).then(|| dir.to_path_buf())
-}
-
-/// Takes a download's one terminal event. A pending download never
-/// started, so a cancellation before acceptance reports no lifecycle; a
-/// started one reports `failed` once, never a later `finished`.
-fn take_terminal(started: bool, terminal: &Cell<bool>) -> bool {
-    started && !terminal.replace(true)
-}
-
-/// `onDownload`'s payload for a download that failed, with why.
-fn failed_event(state: &DownloadState, message: String) -> EventPayload {
-    let mut event = download_event("failed", state, None);
-    if let EventPayload::Map(fields) = &mut event {
-        fields.push(("message", PayloadValue::Str(message)));
-    }
-    event
-}
-
-/// `onDownload`'s payload: `state`, `id`, `url`, `filename`, `path` and,
-/// once finished, `bytes`.
-fn download_event(state: &str, download: &DownloadState, bytes: Option<u64>) -> EventPayload {
-    let path = download
-        .path
-        .borrow()
-        .as_ref()
-        .map(|path| path.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let mut fields = vec![
-        ("state", PayloadValue::Str(state.to_owned())),
-        ("id", PayloadValue::Str(download.id.clone())),
-        ("url", PayloadValue::Str(download.url.clone())),
-        (
-            "filename",
-            PayloadValue::Str(download.filename.borrow().clone()),
-        ),
-        ("path", PayloadValue::Str(path)),
-    ];
-    if let Some(bytes) = bytes {
-        fields.push(("bytes", PayloadValue::Number(bytes as f64)));
-    }
-    EventPayload::Map(fields)
 }
 
 /// `{ url, title, loading, canGoBack, canGoForward }` of a page.
@@ -1529,13 +1340,6 @@ mod tests {
             Some(History::Back)
         );
     }
-    fn download_scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("nsh-webview-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("a temporary directory");
-        dir
-    }
-
     #[test]
     fn names_download_file_names_safely() {
         assert_eq!(file_name("report.pdf"), "report.pdf");
@@ -1565,96 +1369,33 @@ mod tests {
     }
 
     #[test]
-    fn checks_download_destinations() {
-        let dir = download_scratch("destinations");
-        let target = dir.join("file.txt");
-        assert!(check_destination(Path::new("relative.txt"), false).is_err());
-        assert!(check_destination(Path::new(""), false).is_err());
-        assert!(check_destination(&dir.join("missing").join("file"), false).is_err());
-        assert!(check_destination(&target, false).is_ok());
-        std::fs::write(&target, b"kept").unwrap();
-        assert!(check_destination(&target, false).is_err());
-        assert!(check_destination(&target, true).is_ok());
-        assert!(check_destination(&dir, true).is_err());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn publishes_staged_downloads_without_clobbering() {
-        let dir = download_scratch("publish");
-        let destination = dir.join("file.txt");
-        let staging = stage_path(&destination, "abc123").unwrap();
+    fn refuses_staging_paths_webkit_cannot_name() {
         assert_eq!(
-            staging.file_name().and_then(|name| name.to_str()),
-            Some(".nsh-download-abc123.part")
+            staging_destination(Path::new("/tmp/.nsh-download-1/x.bin")),
+            Ok("/tmp/.nsh-download-1/x.bin")
         );
-        assert_eq!(staging.parent(), Some(dir.as_path()));
-        // A fresh destination: the staged bytes become the file.
-        std::fs::write(&staging, b"new").unwrap();
-        assert!(publish(&staging, &destination, false).is_ok());
-        assert_eq!(std::fs::read(&destination).unwrap(), b"new");
-        assert!(!staging.exists());
-        // A file that appeared meanwhile is never replaced without
-        // `overwrite`, and the staging file stays for cleanup.
-        std::fs::write(&staging, b"newer").unwrap();
-        assert!(publish(&staging, &destination, false).is_err());
-        assert_eq!(std::fs::read(&destination).unwrap(), b"new");
-        assert_eq!(std::fs::read(&staging).unwrap(), b"newer");
-        // Only the staging file belongs to the download.
-        cleanup_output(true, Some(&staging), None);
-        assert!(!staging.exists());
-        assert_eq!(std::fs::read(&destination).unwrap(), b"new");
-        // With overwrite, the staged file replaces the destination.
-        std::fs::write(&staging, b"newer").unwrap();
-        assert!(publish(&staging, &destination, true).is_ok());
-        assert_eq!(std::fs::read(&destination).unwrap(), b"newer");
-        assert!(!staging.exists());
-        // A legitimate destination can itself use the usual staging name.
-        let collision = dir.join(".nsh-download-collision.part");
-        let separate = stage_path(&collision, "collision").unwrap();
-        assert_ne!(separate, collision);
-        std::fs::write(&separate, b"complete").unwrap();
-        assert!(!collision.exists());
-        publish(&separate, &collision, false).unwrap();
-        assert_eq!(std::fs::read(&collision).unwrap(), b"complete");
-        assert!(!separate.exists());
-        // A staging file is never reused, and each download has its own.
-        std::fs::write(&staging, b"x").unwrap();
-        assert!(stage_path(&destination, "abc123").is_err());
-        assert_ne!(stage_path(&destination, "def456").unwrap(), staging);
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(staging_destination(Path::new("downloads/x.bin")).is_err());
+        // A NUL would end the C string: never a path WebKit could write.
+        assert!(staging_destination(Path::new("/tmp/a\0b")).is_err());
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let not_utf8 = std::ffi::OsStr::from_bytes(b"/tmp/\xff/x.bin");
+            assert!(staging_destination(Path::new(not_utf8)).is_err());
+        }
     }
 
     #[test]
-    fn cleanup_removes_owned_output_only() {
-        let dir = download_scratch("cleanup");
-        let keep = dir.join("file.txt");
-        std::fs::write(&keep, b"completed").unwrap();
-        // A manual download owns its staging file.
-        let staging = dir.join(".nsh-download-id.part");
-        std::fs::write(&staging, b"partial").unwrap();
-        cleanup_output(true, Some(&staging), Some(&dir.join("unused")));
-        assert!(!staging.exists());
-        assert_eq!(std::fs::read(&keep).unwrap(), b"completed");
-        // An automatic download owns its directory of its own.
-        let owned = dir.join("id");
-        std::fs::create_dir_all(&owned).unwrap();
-        std::fs::write(owned.join("file.txt"), b"partial").unwrap();
-        cleanup_output(false, Some(&owned.join("file.txt")), Some(&owned));
-        assert!(!owned.exists());
-        assert_eq!(std::fs::read(&keep).unwrap(), b"completed");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn cancellation_reports_one_failed_terminal_only_after_start() {
-        let terminal = Cell::new(false);
-        // A pending download never started: cancelling it has no lifecycle.
-        assert!(!take_terminal(false, &terminal));
-        assert!(!take_terminal(false, &terminal));
-        assert!(!terminal.get());
-        // A started download fails once; no later event is reported.
-        assert!(take_terminal(true, &terminal));
-        assert!(!take_terminal(true, &terminal));
+    fn names_downloads_from_the_url_when_the_server_suggests_nothing() {
+        assert_eq!(
+            download_name("", "https://example.test/files/report.pdf?token=1#page"),
+            "report.pdf"
+        );
+        assert_eq!(download_name("", "https://example.test/"), "download");
+        assert_eq!(
+            download_name("../../etc/passwd", "https://example.test/"),
+            "passwd"
+        );
+        assert_eq!(download_name("", "https://example.test/a/b/"), "download");
     }
 }

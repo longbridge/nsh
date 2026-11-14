@@ -71,9 +71,9 @@ use objc2_app_kit::{
     NSDraggingInfo, NSEvent, NSEventModifierFlags, NSEventType, NSFocusRingType,
     NSFontAttributeName, NSForegroundColorAttributeName, NSLineBreakMode, NSMutableParagraphStyle,
     NSParagraphStyleAttributeName, NSPasteboard, NSResponder, NSScrollView, NSSecureTextField,
-    NSText, NSTextAlignment, NSTextDelegate, NSTextField, NSTextFieldDelegate, NSTextInputClient,
-    NSTextStorage, NSTextView, NSTextViewDelegate, NSValidatedUserInterfaceItem, NSView,
-    NSWritingDirection,
+    NSSpellChecker, NSText, NSTextAlignment, NSTextDelegate, NSTextField, NSTextFieldDelegate,
+    NSTextInputClient, NSTextStorage, NSTextView, NSTextViewDelegate, NSValidatedUserInterfaceItem,
+    NSView, NSWritingDirection,
 };
 use objc2_core_foundation::{CGFloat, CGSize};
 use objc2_foundation::{
@@ -2157,6 +2157,18 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
             let correct = config.auto_correct && !config.visible_password();
             text.setContinuousSpellCheckingEnabled(correct);
             text.setAutomaticSpellingCorrectionEnabled(correct);
+            // Smart quotes, dashes and text replacement are the system's
+            // corrections too: off with `autoCorrect`, else the user's
+            // settings (Keyboard › Text Input), so typed code stays as typed.
+            text.setAutomaticQuoteSubstitutionEnabled(
+                correct && NSSpellChecker::isAutomaticQuoteSubstitutionEnabled(),
+            );
+            text.setAutomaticDashSubstitutionEnabled(
+                correct && NSSpellChecker::isAutomaticDashSubstitutionEnabled(),
+            );
+            text.setAutomaticTextReplacementEnabled(
+                correct && NSSpellChecker::isAutomaticTextReplacementEnabled(),
+            );
             let line = LineBox::new(config.style.line_height.0 as CGFloat, natural_height(&font));
             text.setDefaultParagraphStyle(Some(&paragraph(line, align)));
             // The space above the first line and below the last.

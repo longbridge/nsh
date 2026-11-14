@@ -731,10 +731,17 @@ interface Display {
   primary: boolean;
   scaleFactor: number;
   refreshRate: number | null;  // 单位为赫兹
+  cutouts: Bounds[];           // 摄像头外壳挡住的区域：MacBook 的刘海
 }
 ```
 
 `win.state()` 是平台报告的一个窗口的状态，`windowState()` 是当前窗口的，`displays()` 是各个显示器，主显示器排在最前；它们都是响应式的。所有矩形的单位都是点，使用屏幕坐标：从主显示器的左上角量起，`y` 向下增长，与 `setBounds` 相同。模式、所在显示器、焦点、最小化或可见状态的变化立即报告；移动和调整大小在窗口停下片刻后报告，读取它们的代码每次移动只运行一次，而不是每一步都运行。Rust：`WindowRef::state() -> Option<WindowState>` 和 `displays() -> Vec<Display>`（类型在 `nsh_core::desktop` 中）；读取即订阅变化。
+
+显示器的 `cutouts` 是摄像头外壳挡住的区域，使用同样的屏幕坐标：在有刘海的 MacBook 上，是屏幕顶部正中的一个矩形，高度与菜单栏相同。窗口可以据此贴在刘海旁边，或者让内容从刘海里展开；其他显示器上这个列表为空。
+
+```tsx
+const notch = () => displays().flatMap((d) => d.cutouts)[0] ?? null;
+```
 
 窗口在屏上而 [`lifecycle()`](./nsh.md#device) 报告 `"background"` 时，说明它被别的窗口挡住了。
 
