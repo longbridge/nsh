@@ -7,16 +7,16 @@ use std::cell::RefCell;
 
 use block2::RcBlock;
 use nsh_core::{
-    Accessibility, AccessibilityCurrent, AccessibilityRole, Checked, EventKind, EventPayload,
-    NodeId, PayloadValue, PointerEvents, ViewProps,
+    Accessibility, AccessibilityCurrent, AccessibilityRole, Checked, EventKind, EventMask,
+    EventPayload, NodeId, PayloadValue, PointerEvents, ViewProps, keymap::Keystroke,
 };
 use nsh_engine::EngineControl;
 use objc2::{
     ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
-    rc::Retained,
+    rc::{Retained, Weak},
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-use objc2_foundation::{NSArray, NSObject, NSString};
+use objc2_foundation::{NSArray, NSObject, NSSet, NSString};
 use objc2_ui_kit::{
     NSLayoutConstraint, UIAccessibilityContainerType, UIAccessibilityCustomAction,
     UIAccessibilityTraitAdjustable, UIAccessibilityTraitButton, UIAccessibilityTraitHeader,
@@ -24,14 +24,26 @@ use objc2_ui_kit::{
     UIAccessibilityTraitNone, UIAccessibilityTraitNotEnabled, UIAccessibilityTraitSearchField,
     UIAccessibilityTraitSelected, UIAccessibilityTraitStaticText,
     UIAccessibilityTraitSummaryElement, UIAccessibilityTraitUpdatesFrequently,
-    UIAccessibilityTraits, UIEvent, UIResponder, UIView,
+    UIAccessibilityTraits, UIEvent, UIFocusAnimationCoordinator, UIFocusUpdateContext,
+    UIKeyCommand, UIPress, UIPressesEvent, UIResponder, UITapGestureRecognizer, UIView,
 };
+
+use crate::target::EventTarget;
 
 #[derive(Default)]
 pub(crate) struct NshViewIvars {
     props: RefCell<ViewProps>,
     /// Where accessibility actions are reported (set once the view is mounted).
     control: RefCell<Option<EngineControl>>,
+    /// The surface's target, for raw keys and focus (set once mounted). A
+    /// weak reference: the target's mounter owns this view.
+    target: RefCell<Option<Weak<EventTarget>>>,
+    /// The events the app listens to, which key handling reads without the
+    /// mounter (`key_capture` and `on_key_down` / `on_key_up`).
+    events: std::cell::Cell<EventMask>,
+    /// A tap that focuses this view when it is `focusable` without taking
+    /// presses (it neither claims nor cancels touches).
+    focus_tap: RefCell<Option<Retained<UITapGestureRecognizer>>>,
     /// The view handles presses: an accessibility element by default, and
     /// "activate" presses it.
     pressable: std::cell::Cell<bool>,
@@ -146,6 +158,136 @@ define_class!(
         #[unsafe(method(accessibilityDecrement))]
         fn accessibility_decrement(&self) {
             self.standard_action("decrement");
+        }
+
+        /// A `focusable` view is a stop of the keyboard focus (`focusable`,
+        /// or taking presses), as Tab and `ref.focus()` move it there.
+        #[unsafe(method(canBecomeFirstResponder))]
+        fn can_become_first_responder(&self) -> bool {
+            self.is_focus_stop() && crate::keyboard::visible(self)
+        }
+
+        /// The same stop is a UIKit focus item, so the system's own Tab
+        /// traversal reaches it from the window's initial focus (where
+        /// available) and the focus engine stays on the responder.
+        #[unsafe(method(canBecomeFocused))]
+        fn can_become_focused(&self) -> bool {
+            self.is_focus_stop() && crate::keyboard::visible(self)
+        }
+
+        /// UIKit focus entered or left this item: the first responder
+        /// follows, so hardware keys go to the view the system focused.
+        #[allow(deprecated)]
+        #[unsafe(method(didUpdateFocusInContext:withAnimationCoordinator:))]
+        fn did_update_focus(
+            &self,
+            context: &UIFocusUpdateContext,
+            coordinator: &UIFocusAnimationCoordinator,
+        ) {
+            // SAFETY: calling the superclass implementation.
+            let _: () = unsafe {
+                msg_send![
+                    super(self),
+                    didUpdateFocusInContext: context,
+                    withAnimationCoordinator: coordinator
+                ]
+            };
+            crate::keyboard::adopt_focus(context);
+        }
+
+        /// Key commands of a focused stop: a Tab an app shortcut binds or a
+        /// mounted capture takes gets a `UIKeyCommand` with priority, so
+        /// UIKit's focus traversal does not take it first. A normal
+        /// (unbound, uncaptured) Tab gets none and follows the focus engine.
+        #[unsafe(method_id(keyCommands))]
+        fn key_commands(&self) -> Option<Retained<NSArray<UIKeyCommand>>> {
+            // SAFETY: calling the superclass implementation.
+            let inherited: Option<Retained<NSArray<UIKeyCommand>>> =
+                unsafe { msg_send![super(self), keyCommands] };
+            if self.isFirstResponder() && self.is_focus_stop() {
+                crate::keyboard::tab_key_commands(self, inherited)
+            } else {
+                inherited
+            }
+        }
+
+        /// `nshTabKeyCommand:`: a bound or captured Tab delivered with
+        /// priority.
+        #[unsafe(method(nshTabKeyCommand:))]
+        fn nsh_tab_key_command(&self, command: &UIKeyCommand) {
+            crate::keyboard::tab_command(self, command);
+        }
+
+        /// The keyboard focus moved to the view: its `focus:` styles and
+        /// `onFocus` report it, as an input's do.
+        #[unsafe(method(becomeFirstResponder))]
+        fn become_first_responder(&self) -> bool {
+            let was = self.isFirstResponder();
+            // SAFETY: calling the superclass implementation.
+            let accepted: bool = unsafe { msg_send![super(self), becomeFirstResponder] };
+            if accepted && !was {
+                self.focus_changed(true);
+            }
+            accepted
+        }
+
+        /// The keyboard focus left the view: no key release is invented for
+        /// the keys it held, and its `onBlur` reports the move.
+        #[unsafe(method(resignFirstResponder))]
+        fn resign_first_responder(&self) -> bool {
+            // SAFETY: calling the superclass implementation.
+            let resigned: bool = unsafe { msg_send![super(self), resignFirstResponder] };
+            if resigned {
+                self.focus_changed(false);
+                if let Some(target) = self.keyboard_target() {
+                    // On the next turn the root takes the keys back only if
+                    // nothing (an input, a hosted view, another custom view)
+                    // took the focus meanwhile.
+                    target.restore_root_focus_for(self);
+                }
+            }
+            resigned
+        }
+
+        /// Hardware keys on a focused view: the app's shortcuts, then the
+        /// raw notifications and the capture rules
+        /// ([`crate::keyboard::began`]).
+        #[unsafe(method(pressesBegan:withEvent:))]
+        fn presses_began(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
+            if !crate::keyboard::began(self, presses) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), pressesBegan: presses, withEvent: event] };
+            }
+        }
+
+        /// UIKit reports no keyboard transition through it: the press goes
+        /// on unchanged (`crate::keyboard::changed`).
+        #[unsafe(method(pressesChanged:withEvent:))]
+        fn presses_changed(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
+            if !crate::keyboard::changed(self, presses) {
+                // SAFETY: calling the superclass implementation.
+                let _: () =
+                    unsafe { msg_send![super(self), pressesChanged: presses, withEvent: event] };
+            }
+        }
+
+        /// A key's release, if this view has the keyboard focus now.
+        #[unsafe(method(pressesEnded:withEvent:))]
+        fn presses_ended(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
+            if !crate::keyboard::ended(self, presses) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), pressesEnded: presses, withEvent: event] };
+            }
+        }
+
+        /// A key's press was cancelled: no release is synthesized.
+        #[unsafe(method(pressesCancelled:withEvent:))]
+        fn presses_cancelled(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
+            if !crate::keyboard::cancelled(self, presses) {
+                // SAFETY: calling the superclass implementation.
+                let _: () =
+                    unsafe { msg_send![super(self), pressesCancelled: presses, withEvent: event] };
+            }
         }
     }
 );
@@ -362,6 +504,106 @@ impl NshView {
         if let Some(value) = late {
             crate::system::announce(&value);
         }
+    }
+
+    /// Remembers the surface's target, for raw keys and focus. Weak: the
+    /// target's mounter owns this view, so a strong reference would keep
+    /// both alive.
+    pub(crate) fn set_target(&self, target: &EventTarget) {
+        *self.ivars().target.borrow_mut() = Some(Weak::new(target));
+    }
+
+    /// The events the app listens to (`MountItem::Events`).
+    pub(crate) fn set_events(&self, events: EventMask) {
+        self.ivars().events.set(events);
+    }
+
+    /// A `focusable` view that takes no presses has no `PressRecognizer` to
+    /// focus it: a tap recognizer that neither claims nor cancels touches
+    /// gives it the keyboard focus. It is removed once the view stops being
+    /// such a stop (or starts taking presses, which focuses it already).
+    pub(crate) fn update_focus_tap(&self, target: &EventTarget) {
+        let wants = self.is_focus_stop() && !self.takes_presses();
+        let mut kept = self.ivars().focus_tap.borrow_mut();
+        match (&*kept, wants) {
+            (Some(_), true) | (None, false) => {}
+            (None, true) => {
+                // SAFETY: `handleFocusTap:` is implemented by `EventTarget`,
+                // which the mounter keeps alive as long as this view.
+                let tap = unsafe {
+                    UITapGestureRecognizer::initWithTarget_action(
+                        UITapGestureRecognizer::alloc(self.mtm()),
+                        Some(target),
+                        Some(objc2::sel!(handleFocusTap:)),
+                    )
+                };
+                // The view's own press handlers still hear the touches.
+                tap.setCancelsTouchesInView(false);
+                tap.setDelaysTouchesBegan(false);
+                tap.setDelaysTouchesEnded(false);
+                self.addGestureRecognizer(&tap);
+                *kept = Some(tap);
+            }
+            (Some(tap), false) => {
+                self.removeGestureRecognizer(tap);
+                *kept = None;
+            }
+        }
+    }
+
+    /// The events the app listens to.
+    pub(crate) fn events(&self) -> EventMask {
+        self.ivars().events.get()
+    }
+
+    /// The view handles presses (`onPress`), so Return and Space press it
+    /// and, unless `focusable` says otherwise, Tab stops at it.
+    pub(crate) fn takes_presses(&self) -> bool {
+        self.ivars().pressable.get()
+    }
+
+    /// Whether the view is a stop of the keyboard focus
+    /// ([`ViewProps::focus_stop`]): it shows, is not disabled and is
+    /// `focusable` or takes presses.
+    pub(crate) fn is_focus_stop(&self) -> bool {
+        let props = self.ivars().props.borrow();
+        props.focus_stop(self.ivars().pressable.get())
+    }
+
+    /// Whether this view's ancestry needs raw key notifications: a
+    /// `on_key_down` / `on_key_up` listener or a capture rule.
+    pub(crate) fn listens_key(&self) -> bool {
+        let events = self.ivars().events.get();
+        events.contains(EventKind::KeyDown)
+            || events.contains(EventKind::KeyUp)
+            || !self.ivars().props.borrow().key_capture.is_none()
+    }
+
+    /// Whether this view's mounted capture rule captures `stroke` (`None`
+    /// for a key no keystroke names: only `KeyCapture::All` captures it).
+    pub(crate) fn captures_key(&self, stroke: Option<&Keystroke>) -> bool {
+        let props = self.ivars().props.borrow();
+        !props.accessibility.state.disabled && props.key_capture.captures_key(stroke)
+    }
+
+    /// The surface's target, once the view is mounted.
+    pub(crate) fn keyboard_target(&self) -> Option<Retained<EventTarget>> {
+        self.ivars().target.borrow().as_ref().and_then(Weak::load)
+    }
+
+    /// The node id the view stands for.
+    pub(crate) fn id(&self) -> NodeId {
+        self.tag() as NodeId
+    }
+
+    /// The keyboard focus entered or left the view: its `focus:` styles and
+    /// `onFocus` / `onBlur` follow, and a loss clears the keys held (no
+    /// release is invented).
+    fn focus_changed(&self, focused: bool) {
+        let Some(target) = self.keyboard_target() else {
+            return;
+        };
+        target.view_focused(self.id(), focused, self.events());
     }
 
     /// The value an `increment` / `decrement` led to, when it arrives after

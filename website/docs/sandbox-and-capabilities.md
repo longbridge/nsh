@@ -63,12 +63,14 @@ not cover: without them, an app could exhaust the device's memory through the UI
 
 **Arrays NSH reads natively hold up to 2^20 (1 048 576) items, in every app.** Children (nested arrays counted
 together), `<Each>`'s items, menus (submenus counted together), a tray's title, `Animated.sequence` / `parallel` /
-`stagger`, `split`'s keys, a navigation stack's routes, a native component's `props` and `events`, a pan's `touches`
-and a canvas call's arguments (counted together) are read in native code, beyond the call budget's reach, and an array
-is as long as it says, empty or not (`new Array(2 ** 32 - 1)`). A longer one throws an error the app can catch: a
-`RangeError`, a `TypeError` for a menu or the tray; a canvas call ignores it with a warning. A navigation stack holds
-up to as many screens: `push` beyond that throws a `RangeError`. Children and submenus nested more than 64 levels deep
-throw a `TypeError`. A `<List>`'s `each` takes any number of rows.
+`stagger`, `split`'s keys, a navigation stack's routes, a native component's `props` and `events` and the values it
+is given, a pan's `touches`, a canvas call's arguments, a style (its nested styles, shadows and transforms), a
+prop's lists, an animation's ranges and easing and the animations a composite runs (each counted together) are read
+in native code, beyond the call budget's reach, and an array is as long as it says, empty or not
+(`new Array(2 ** 32 - 1)`). A longer one throws an error the app can catch: a `RangeError`, a `TypeError` for a menu
+or the tray; an animation's `start` rejects its promise; a canvas call ignores it with a warning. A navigation stack
+holds up to as many screens: `push` beyond that throws a `RangeError`. Children, submenus and styles nested more than
+64 levels deep throw a `TypeError`. A `<List>`'s `each` takes any number of rows.
 
 > [!TIP]
 > These limits are generous for normal apps. If you hit the 2 s call budget, the work is too long for one event
@@ -214,6 +216,11 @@ The page's own subresources (its scripts, images, XHRs) are the web content's bu
 `about:blank` and inline HTML (`html`) need only web views to be granted at all: `"webview": { "hosts": [] }`
 allows them without allowing any remote page. A `baseUrl` gives inline HTML that URL's origin in the native
 web views, so the base URL needs the grant a page there would: its host in `hosts`.
+
+A page may show and download a `blob:` URL it made (`URL.createObjectURL`, a `<a download>` link): a blob URL
+embeds the origin of the document that made it, so it is allowed when that origin is a host in `hosts`, and a
+blob of a host the page may not show — or an opaque one (`blob:null/…`) — is not. Every platform checks this
+the same way.
 
 `input` is separate from `hosts` because trusted input carries user activation, which `injectJavaScript` never gets:
 the page may then open windows, write the clipboard, open the system's file panel, start WebAuthn or permission prompts

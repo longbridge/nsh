@@ -553,6 +553,13 @@ impl Surface {
         }
     }
 
+    /// A handle to the engine's events that stays usable after this surface
+    /// is gone: a download's stop confirmation must reach the core after
+    /// the view is released.
+    pub(crate) fn event_control(&self) -> Option<EngineControl> {
+        self.control.borrow().clone()
+    }
+
     /// Sends an event to JS.
     pub(crate) fn event(&self, id: NodeId, kind: EventKind, payload: EventPayload) {
         self.control(|c| c.dispatch_event(id, kind, payload));
@@ -642,6 +649,7 @@ impl Surface {
                 if applied {
                     self.write_animations();
                     self.revisit();
+                    crate::text_input::sync(self);
                 }
             })
         });
@@ -713,6 +721,9 @@ impl Surface {
                 crate::fps::drained(cost);
             }
         }
+        // The frames may carry no animation, but a pad hosted above its
+        // input's transforms follows what the batch moved or scaled.
+        crate::text_input::sync(self);
         self.ensure_ticking();
     }
 
@@ -1251,6 +1262,9 @@ impl Surface {
         if applied || crate::sight::moves() != self.revisited.get() {
             self.revisit();
         }
+        // A pad hosted above its input's transforms takes the place those
+        // transforms show, so it follows them this frame.
+        crate::text_input::sync(self);
     }
 
     /// Applies the batches that waited for this frame, in order, until

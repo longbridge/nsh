@@ -87,10 +87,9 @@ pub struct WebProps {
     /// ([`crate::web_resource`]). Read when the platform makes the web
     /// view, as `incognito`.
     pub url_schemes: Vec<crate::web_resource::WebUrlScheme>,
-    /// Internal: an `on_download_pending` listener asks the platform to
-    /// defer every download for the app's destination. A platform without
-    /// web view requests cannot honor it, so the core gives it an inert
-    /// page instead of letting it download automatically.
+    /// Internal: an `on_download` or `on_download_pending` listener asks
+    /// the platform to hold every download for the core. Read by the
+    /// web view's backend.
     #[doc(hidden)]
     pub defer_downloads: bool,
 }
@@ -203,6 +202,9 @@ pub struct ScrollBehavior {
     pub enabled: bool,
     /// It overscrolls past its edges.
     pub bounces: bool,
+    /// A tap at the top of the window scrolls it to its top (iOS:
+    /// `UIScrollView.scrollsToTop`).
+    pub scrolls_to_top: bool,
     /// Room around the content.
     pub content_inset: EdgeInsets,
     /// Whether taps dismiss the keyboard.
@@ -243,6 +245,7 @@ impl Default for ScrollBehavior {
             deceleration: 0.0,
             enabled: true,
             bounces: true,
+            scrolls_to_top: true,
             content_inset: EdgeInsets::default(),
             keyboard_taps: KeyboardTaps::Never,
             one_step: false,
@@ -574,7 +577,8 @@ pub struct InputConfig {
     pub return_key: ReturnKeyType,
     /// Automatic capitalization.
     pub auto_capitalize: AutoCapitalize,
-    /// Autocorrection.
+    /// The system's corrections: spelling, smart quotes and dashes, text
+    /// replacement.
     pub auto_correct: bool,
     /// Several lines (return inserts a line break).
     pub multiline: bool,
@@ -628,6 +632,19 @@ impl InputConfig {
             None if self.blur_on_submit => SubmitBehavior::BlurAndSubmit,
             None => SubmitBehavior::Submit,
         }
+    }
+
+    /// A password shown as plain text: the input holds a password
+    /// ([`InputConfig::auto_fill`] `current-password` or `new-password`)
+    /// but is not `secure`, as after a "show password" toggle. Platforms
+    /// type it as it is: Android's visible password keyboard, iOS's ASCII
+    /// keyboard, never capitalized, suggested or corrected.
+    pub fn visible_password(&self) -> bool {
+        !self.secure
+            && matches!(
+                self.auto_fill,
+                crate::ops::AutoFill::Password | crate::ops::AutoFill::NewPassword
+            )
     }
 }
 

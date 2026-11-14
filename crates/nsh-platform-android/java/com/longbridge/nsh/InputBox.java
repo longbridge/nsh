@@ -328,16 +328,20 @@ final class InputBox extends FrameLayout implements Node {
             case 3: type = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS; break;
             case 4: type = InputType.TYPE_CLASS_PHONE; break;
             case 5: type = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI; break;
+            case 8: type = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD; break;
             default: type = InputType.TYPE_CLASS_TEXT;
         }
         if ((type & InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_TEXT) {
-            switch (capitalize) {
+            // A visible password is typed as it is: never capitalized,
+            // suggested or corrected.
+            switch (keyboard == 8 ? 0 : capitalize) {
                 case 1: type |= InputType.TYPE_TEXT_FLAG_CAP_SENTENCES; break;
                 case 2: type |= InputType.TYPE_TEXT_FLAG_CAP_WORDS; break;
                 case 3: type |= InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS; break;
                 default: break;
             }
-            type |= autoCorrect ? InputType.TYPE_TEXT_FLAG_AUTO_CORRECT : InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
+            type |= autoCorrect && keyboard != 8
+                    ? InputType.TYPE_TEXT_FLAG_AUTO_CORRECT : InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
             if (multiline) type |= InputType.TYPE_TEXT_FLAG_MULTI_LINE;
             if (secure) type = (type & ~InputType.TYPE_MASK_VARIATION) | InputType.TYPE_TEXT_VARIATION_PASSWORD;
         } else if (secure && (type & InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_NUMBER) {
@@ -372,6 +376,8 @@ final class InputBox extends FrameLayout implements Node {
         } else if (edit.isTextSelectable()) {
             edit.setTextIsSelectable(false);
             edit.setInputType(type);
+            // As above: a password type set again resets the typeface.
+            edit.setTypeface(TextLayouts.typeface(family, weight, italic));
             edit.setMovementMethod(ArrowKeyMovementMethod.getInstance());
             edit.setFocusableInTouchMode(true);
         }
@@ -760,16 +766,43 @@ final class InputBox extends FrameLayout implements Node {
 
     void focus() {
         edit.requestFocus();
+        showKeyboard();
+    }
+
+    /**
+     * Shows the software keyboard for this field. {@code autoFocus} and
+     * {@code focus()} after a dialog opens often run before the window can
+     * take the IME; {@link InputMethodManager#SHOW_IMPLICIT} then returns
+     * false and nothing comes up. Ask again once the view is ready, with
+     * no show flags (as React Native does), so the keyboard still rises.
+     */
+    private void showKeyboard() {
         InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
-        imm.showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT);
+        if (imm == null) return;
+        if (imm.showSoftInput(edit, 0)) return;
+        edit.post(() -> {
+            if (!edit.hasFocus()) return;
+            InputMethodManager again = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (again != null) again.showSoftInput(edit, 0);
+        });
     }
 
     void blur() {
         if (!edit.hasFocus()) return;
         hideKeyboard();
-        // To the (focusable) root: clearFocus() would hand focus to the first
-        // focusable view, often another field.
-        mounter.host.requestFocus();
+        // Prefer this field's window (a dialog's), not the activity host:
+        // host.requestFocus() cannot take focus out of another window, so the
+        // EditText would keep focus and the IME would stay / come back.
+        View root = getRootView();
+        if (root != null && root != mounter.host.getRootView()) {
+            root.setFocusable(true);
+            root.setFocusableInTouchMode(true);
+            root.requestFocus();
+        } else {
+            // clearFocus() would hand focus to the first focusable view, often
+            // another field; the (focusable) host holds it instead.
+            mounter.host.requestFocus();
+        }
     }
 
     private void hideKeyboard() {

@@ -166,19 +166,19 @@ pub(crate) enum Action {
     /// Whether a web view shows a page here: the platform shows web views
     /// and the app holds `webview`; the answer resolves the slot.
     WebViewAvailable(AnswerSlot<bool>),
-    /// A request on a web view ([`crate::webview`]) the core sends to the
-    /// platform once the target is known to be a mounted, granted web
-    /// view; its reply resolves `answer`.
-    WebViewRequest {
+    /// A decision on a download ([`crate::webview::downloads`]): the
+    /// destination to accept, a cancel, or a hand-over; its answer resolves
+    /// the slot.
+    DownloadDecision {
         /// The web view's node.
         node: NodeId,
-        /// What to do on it.
-        operation: crate::webview::WebViewOperation,
-        /// Where the platform's reply goes.
+        /// The download's id.
+        id: String,
+        /// What the app decided.
+        decision: crate::webview::downloads::Decision,
+        /// Where the decision's answer goes.
         answer: AnswerSlot<Result<(), String>>,
     },
-    /// Web view request `id` waited too long for the platform's answer.
-    WebViewTimeout(u64),
     /// A request on local paths for the platform
     /// ([`crate::file_dialog`]); its answer resolves the slot.
     FileRequest(crate::file_dialog::FileRequest, FileAnswer),
@@ -341,6 +341,9 @@ impl FileAnswer {
 pub(crate) enum ClipboardRead {
     /// The text (`""` when it holds none).
     Text(AnswerSlot<String>),
+    /// The text for `Clipboard.readText`: `None` when the person refused
+    /// the read (iOS's paste prompt answered with Don't Allow Paste).
+    CheckedText(AnswerSlot<Option<String>>),
     /// Whether it holds text.
     Has(AnswerSlot<bool>),
     /// The image (`None` when it holds none, or one over

@@ -209,10 +209,6 @@ pub(crate) struct NativeState {
     /// The application id: web views keep their data under it.
     #[cfg(feature = "webview")]
     app_id: RefCell<String>,
-    /// Where the running app's web views save automatic downloads (its
-    /// data directory's `<app id>/downloads`); `None` before an app starts.
-    #[cfg(feature = "webview")]
-    downloads: RefCell<Option<std::path::PathBuf>>,
     /// The controls, by node.
     hosts: RefCell<FxHashMap<NodeId, Host>>,
 }
@@ -255,17 +251,6 @@ impl NativeState {
     /// The application id (nothing to keep without web views).
     #[cfg(not(feature = "webview"))]
     pub(crate) fn set_app_id(&self, _app_id: &str) {}
-
-    /// Where the app that starts saves its web views' automatic downloads:
-    /// its data directory's `<app id>/downloads`.
-    #[cfg(feature = "webview")]
-    pub(crate) fn set_downloads(&self, downloads: Option<std::path::PathBuf>) {
-        *self.downloads.borrow_mut() = downloads;
-    }
-
-    /// Where automatic downloads go (nothing to save without web views).
-    #[cfg(not(feature = "webview"))]
-    pub(crate) fn set_downloads(&self, _downloads: Option<std::path::PathBuf>) {}
 
     /// Whether any web view is mounted (input then keeps pointer events
     /// from the parts of pages nsh clips off).

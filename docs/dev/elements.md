@@ -18,7 +18,7 @@ Every tag is a component in scope (`native-pipeline.md`): the primitives `View`,
 | `<Dialog>` | presented UIViewController | `open` (default true), `animation`, `onOpen`, `onClose`, `onCancel` (every close attempt), `onOpenChange({ open, reason })` (`"cancel"` / `"backdropPress"` / `"swipe"`); `closeOnEscape` / `closeOnBackdropPress` / `closeOnSwipe` (default true; iOS sheets swipe away, Escape and Android back close natively, then `onCancel` + `onOpenChange({ open: false, reason })` + `onClose`; the renderer keeps a removed dialog's `onClose` until the platform reports it, `dom.rs` `dismissed`); `class` / `style` style the popup (the view holding the children), `backdropClass` / `backdropStyle` add a backdrop part behind it (none otherwise) whose presses are close attempts; `presentation` (iOS: `fullScreen` over a clear background, `pageSheet` / `formSheet` keep the system's sheet background; ignored on Android, the desktops and the web, where a dialog is a transparent layer over the whole window); `statusBar` (below); `ios={{ supportedOrientations }}`, `android={{ statusBarTranslucent }}` (otherwise the content starts below the status bar) |
 | `<Overlay>` | a `NshView` in the root view (the surface's, or the dialog's around it) | its children on top of that root view, outside the parent's layout and clipping; `anchor` (a ref, `{ x, y }` or `{ origin, size }`), `placement`, `align`, `offset`, `margin`, `onPosition`, `onPressOutside`, `onCancel` ("Overlays" below) |
 | `<InputAccessoryView>` | a NshView set as `inputAccessoryView` | `nativeID`; inputs name it with `ios={{ inputAccessoryViewID }}`. A layout root as wide as the window and as tall as its content; the core resolves the id (`InputConfig::accessory`). Renders nothing on Android |
-| `<WebView>` | WKWebView (WebKit loaded on first use) | `src` (a URL) or `html` (inline HTML, shown instead of `src`) + `baseUrl`, `injectedJavaScript(BeforeContentLoaded)`, `onMessage` (pages call `window.nsh.postMessage`), `onLoad*`, `onNavigationStateChange`, `onDownload` (macOS's `WKDownload`, WebKitGTK's session downloads or WebView2's `DownloadStarting` into the app's data directory's `downloads/<id>/`, only with a listener; a Rust `onDownloadPending` listener chooses destinations instead), `incognito` (website data of its own, in memory: each platform makes the web view from its first props, and the core keeps the prop from changing afterwards), Rust's `url_scheme(scheme, handler)` (URL schemes the page loads from the app, `nsh_core::web_resource`: the handler is called on the main thread with a request answered once, from any thread; read when the web view is made, as `incognito`; iOS and macOS `WKURLSchemeHandler` in `nsh-platform-apple`, Linux `webkit_web_context_register_uri_scheme`); ref: `reload()`, `goBack()`, `goForward()`, `postMessage(data)`, `injectJavaScript(js)`, `load({ src, headers })` (headers on the document request only: `NSMutableURLRequest` + `loadRequest`) |
+| `<WebView>` | WKWebView (WebKit loaded on first use) | `src` (a URL) or `html` (inline HTML, shown instead of `src`) + `baseUrl`, `injectedJavaScript(BeforeContentLoaded)`, `onMessage` (pages call `window.nsh.postMessage`), `onLoad*`, `onNavigationStateChange`, `onDownload` (iOS/macOS's `WKDownload`, WebKitGTK's session downloads or WebView2's `DownloadStarting` into the app's data directory's `downloads/<id>/`, only with a listener; a Rust `onDownloadPending` listener chooses destinations instead), `incognito` (website data of its own, in memory: each platform makes the web view from its first props, and the core keeps the prop from changing afterwards), Rust's `url_scheme(scheme, handler)` (URL schemes the page loads from the app, `nsh_core::web_resource`: the handler is called on the main thread with a request answered once, from any thread; read when the web view is made, as `incognito`; iOS and macOS `WKURLSchemeHandler` in `nsh-platform-apple`, Linux `webkit_web_context_register_uri_scheme`); ref: `reload()`, `goBack()`, `goForward()`, `postMessage(data)`, `injectJavaScript(js)`, `load({ src, headers })` (headers on the document request only: `NSMutableURLRequest` + `loadRequest`) |
 | `nativeComponent` (`nsh`'s `nativeComponent`) | a `NshView` box filled by the registered component's view; own props may be bound to animated values | see [embedding.md](embedding.md) |
 | `<Video>` | AVPlayerLayer / AVPlayerViewController (AVFoundation loaded on first use) | `src` (a URL), `paused`, `muted`, `volume`, `rate`, `repeat`, the `objectFit` style (`object-*`), `controls`, `onLoad` / `onProgress` / `onEnd` / `onBuffer` / `onError`; ref: `seek(seconds)` |
 
@@ -60,39 +60,56 @@ of what is in scope: a host element's primitive is imported from its home (`impo
 in place, a component is imported (`import { Chart } from "app/native"`) or local; lowercase tags are errors
 (`native-pipeline.md`).
 
-## Desktop WebView downloads
+## WebView downloads
 
-`nsh_core::webview` defines the download decision protocol. A Rust host registers `WebView::on_download_pending`;
-that registration alone opts into manual destinations, so there is no separate behavior prop. The platform emits
-`DownloadPending` with the download's `id`, `url` and `filename`; the core's typed listener wraps it in
-`WebDownloadPending`, whose private handle binds the original web view's node, executor and download id. The app
-calls `accept(impl Into<DownloadDestination>)` or `cancel()` and awaits `Answer<Result<(), String>>`: it settles
-the decision, not the transfer. Clones share the decision; a handle cannot be forged for another view or download.
+`nsh_core::webview::downloads` owns download sessions, exposed through `nsh_core::webview`. A Rust host registers
+`WebView::on_download_pending` for manual decisions, or `on_download` alone for automatic app-data downloads.
+Without either listener the platform retains its normal behavior. There is no separate public behavior prop.
+`WebDownloadPending` has inherent `accept(impl Into<DownloadDestination>)` and `cancel()` methods;
+`WebDownload` has an inherent `cancel()` for an active transfer. Each returns `Answer<Result<(), String>>`.
+The private handle binds the original executor, node and download identity; public metadata, clones and unbound
+defaults cannot retarget it.
 
-The core assigns a request id, keeps its target node and answer, and sends `Command::WebViewRequest` with the mount
-batch. The platform answers with `WebViewReply` on that node. Only a matching pending request is settled; replies
-from another node, duplicates and late replies are dropped, and unmount, unsupported hosts and `REPLY_TIMEOUT`
-settle with an error.
+Backends offer a held transfer with internal `DownloadOffer` metadata, report `DownloadProgress`, and report
+`DownloadEnd` after their writer stops. They receive `StartDownload { id, staging }` and `CancelDownload { id }`
+through `Command::WebViewRequest`. `WebViewReply` acknowledges that command; its request id is separate from the
+download id. Backends hold native objects and streams; the common coordinator
+decides app-facing `DownloadPending` and `Download` events, destinations, publication and terminal outcomes.
 
-A `DownloadDestination` is absolute, names a file, and its parent must exist. A `PathBuf` refuses an existing file;
-`DownloadDestination::default().path(..).overwrite(true)` replaces one. Platforms write an owned staging file beside
-the destination and publish atomically only on completion: failure, cancellation and teardown remove only that
-output, never the app's existing or completed file. Native deferrals are bounded; a pending decision the app never
-answers is cancelled. An unknown, duplicate or already-finished decision errors without touching another download.
+`source` records where the bytes come from: `Transfer` is a held browser response, `Request` a request NSH owns,
+`None` metadata after the engine released the response, and `Page` the reserved page-data source. Optional
+`method`, `mime_type` and expected `bytes` are observations, not guesses. In particular, a URL-to-method cache
+cannot correlate concurrent requests or redirected POSTs to Android's `DownloadListener`.
+NSH does not silently re-request a released response.
 
-The handler registration alone sets the internal `WebProps::defer_downloads` flag (Rust-only, hidden, reset when the
-handler goes). On a platform where `Environment::webview_requests` is false, that request cannot be honored: the
-core mounts an inert empty document with JavaScript, injected scripts, source/base URL and back/forward gestures
-disabled, reports `onError`, and refuses app-driven `load`, `reload`, back, forward, `injectJavaScript` and
-`Evaluate` (the evaluation answer settles with an error). Removing the handler resets the flag and restores the
-app's page and automatic downloads. No public behavior enum or config exists for this.
+The start acknowledgement settles acceptance, while `Finished` is emitted only after successful publication.
+`Cancelled` carries `CancelReason::{App, Timeout, Teardown, NoListener}`; network and file failures remain
+`Failed`. A 60-second offer deadline bounds unanswered manual decisions. The separate 30-second reply deadline
+bounds waiting for a command acknowledgement; a missing acknowledgement does not prove that a writer stopped.
+The cancellation path therefore retains cleanup ownership until stopping is established, including callbacks
+arriving after the UI node is released. A completed destination is never removed by a late cancellation.
+Removing the last download listener cancels in-flight sessions with `NoListener` while keeping the WebView mounted.
+The commit's final event mask decides this: removing and readding a listener within one turn does not cancel it.
 
-Without an `onDownloadPending` listener the platform keeps its automatic behavior: an `onDownload` listener saves
-into `<data dir>/<app id>/downloads/<id>/<sanitized filename>` (macOS, Windows and Linux). Every platform removes
-path separators, control characters, bidi controls and leading dots, and caps names at 200 bytes; Windows also
-refuses reserved device names (including `CONIN$`/`CONOUT$`, `COM`/`LPT` 0-9 and superscripts) and trailing dots or
-spaces. Downloads are Rust-only; TSX keeps the existing `onDownload` lifecycle and gains no path-writing API.
-Host authority stays with the app: it chooses the path, and capabilities continue to govern which pages load.
+`DownloadDestination` is an absolute file path with an existing parent; overwrite is opt-in. The core allocates an
+owned private sibling staging directory with a nonexistent leaf, accommodating engines that create their output
+themselves. Filesystem work runs outside the engine's UI/JS turn. Publication without overwrite must preserve a
+destination created in the meantime; replacement happens only on successful completion. Cleanup touches only owned
+staging after the producer stops. Expected size checks use the representation written to the file: an encoded
+HTTP Content-Length cannot be compared to decoded output without accounting for that difference.
+Linux and Android use `renameat2(RENAME_NOREPLACE)` for atomic no-overwrite publication, with an atomic hard-link
+fallback only when that operation is unavailable. They never replace this with an existence check followed by an
+overwrite-capable rename. Android app storage can reject hard links even when the staged file is writable.
+
+Automatic output remains under the app's `downloads/<id>/<sanitized filename>`. Pending decisions and arbitrary
+host destinations stay Rust-only; TSX observes `onDownload` with the widened source, terminal state and diagnostics.
+The adapters cover iOS, macOS, Linux and Windows. Android's download transport is a separate follow-up;
+its platform behavior is unchanged here. Browser and native adapter capabilities must be documented as observed,
+rather than inferred from shared method signatures.
+
+WebKit destination callbacks are answered with no destination when a held transfer fails, before releasing the
+callback. A failed cancellation keeps its request registered with the detached cleanup sink: a later stop reply
+must still clean owned staging after the engine has gone. Neither failure authorizes deleting a published file.
 
 ## The main thread never waits for JS
 
@@ -241,7 +258,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   that takes presses, plain Return and Space fire only the focus' own bindings (`KeyOptions::for_focus`, TS's `forFocus`: a
   component's keys while its part has the focus or its popup is open, a menu button's Return opening its menu), else they press
   it; an app's other bindings of those keys (a dialog's Return for its main action) give way to the control the user
-  moved the focus to, on every platform (`Keymap::find_at`, `input::presses_focused_control`).
+  moved the focus to, on every platform (`Keymap::find_at`, `input::presses_focused_control`). Return and Space press
+  only a focused stop inside the newest modal. A page a newer one covers, or a back pops, gives the focus back to the
+  window (the view hears `onBlur`); the headless driver does the same.
   A stop the keyboard or `focus()` reaches scrolls into view in the scroll views around it, as a focused field does
   (macOS `scroll::reveal` unless a click focused it, Linux on any focus widget, the browser's own `focus()`, the
   headless driver's Tab at once); a list keeps the rows beside the focused one rendered, so Tab walks all its rows
@@ -403,10 +422,12 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `KeyCommand` (the binding's id), so the main thread never waits for JS (`docs/dev/js-modules.md`, the macOS and
   Linux pages' "Keyboard"). A binding that passes its key through (`passThrough`, Rust's
   `KeyOptions::pass_through`; `KeyMatch::Notify`) is reported and the key goes on as if nothing were bound: Tab
-  still moves the focus, which is how `Select` and `Combobox` close an open list on Tab. iOS and Android match a hardware keyboard's keys: iOS in `pressesBegan:` of its text
-  inputs (before UIKit's text system) and of the root view (presses nothing inside handled), keys named by their HID
-  usage (`Key::from_hid_usage`) and the character they type, a `repeat` binding firing on a timer of its own while
-  the key is held (UIKit sends a held key's press once); Android in `NshView.dispatchKeyEvent` (before the focused
+  still moves the focus, which is how `Select` and `Combobox` close an open list on Tab. iOS and Android match a hardware keyboard's keys: iOS in `pressesBegan:` of a focused
+  focusable view (before its raw keys), of its text inputs (before UIKit's text system) and of the root view
+  (presses nothing inside handled), keys named by their HID usage (`Key::from_hid_usage`) and the character they
+  type, a `repeat` binding firing on a timer of its own while the key is held (UIKit sends a held key's press once);
+  a Tab the table binds, or a mounted capture takes, becomes a prioritized `UIKeyCommand` so UIKit's focus traversal
+  does not take it first (Command+Tab stays the system's); Android in `NshView.dispatchKeyEvent` (before the focused
   view, after the input method) through `Native.keyDown` / `keyUp`, the table kept in Rust (`keymap.rs`), never
   encoded for Java. Both leave a composing input method its keys and consume a taken key's release too. Rust views' bindings (`on_key`) join JS's in that one table, and the core runs
   their handlers (`docs/dev/components.md`).
@@ -435,7 +456,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   core from what is mounted; native focus, hit testing and layout keep the platform parent. Native backends decide
   the capture before defaults and set `default_prevented` on the event they send; an in-process host (the browser)
   calls `LocalEngine::key_event`, which computes the same decision and returns it for the host's own
-  `preventDefault`. A focused native text input keeps the keys that edit it (nothing an ancestor captures
+  `preventDefault`. iOS reports `UIKey.keyCode`'s USB HID usage as the DOM `code` and `UIKey.characters` as `key`
+  (case and layout kept, the unmodified character only for a nonprinting control chord); UIKit sends a held key's
+  press once, so `repeat` is false, and a Tab delivered as a prioritized `UIKeyCommand` has no `code` and no invented
+  release. A focused native text input keeps the keys that edit it (nothing an ancestor captures
   intercepts its typing, caret or editing, and input methods own their composition). A legacy terminal reports
   only strokes: no invented releases, repeats or codes. Losing the window's focus clears held state and synthesizes
   nothing; a real release is reported where the focus is, as the DOM does.

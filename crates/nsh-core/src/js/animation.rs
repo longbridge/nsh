@@ -222,10 +222,12 @@ pub fn motion_spec<I: HostInput>(input: &I) -> Option<MotionSpec> {
     }
     let mut spec = MotionSpec::new(keyframe_timing(input));
     let frames = input.field("keyframes")?;
-    if frames.as_list().is_some() {
+    if let Some(list) = frames.as_list() {
         // Frames of channels: each channel's keyframes are the frames that
-        // name it, with the frame's offset and easing.
-        let items = frames.items();
+        // name it, with the frame's offset and easing. The list is taken
+        // once: reading it again could see another length, or count its
+        // items against a budget twice.
+        let items: Vec<_> = (0..list.len()).filter_map(|i| list.item(i)).collect();
         let count = items.len();
         for channel in MotionChannel::ALL {
             let mut track = Vec::new();

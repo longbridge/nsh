@@ -58,7 +58,7 @@ gpui_platform = { package = "gpui-fast-platform", version = "0.1.13", default-fe
 raw-window-handle = "0.6"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSView", "NSWindow", "NSResponder", "NSAppearance", "NSApplication", "NSButton", "NSControl", "NSGraphics", "NSScreen"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSGeometry", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSGeometry", "NSString", "NSValue", "objc2-core-foundation"] }
 x11rb = { version = "0.13", default-features = false, features = ["composite", "dri3", "present"] }
 # The canvas rasterizer (already in GPUI's tree through resvg).
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }

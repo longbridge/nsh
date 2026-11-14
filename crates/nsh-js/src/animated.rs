@@ -1230,6 +1230,10 @@ driver_fn!(animated_decay, "decay");
 fn group(cx: *mut JsContext, kind: &str, list: JsValue, extra: Vec<(&CStr, JsValue)>) -> JsValue {
     let mut specs = Vec::new();
     let mut values = Vec::new();
+    // The values the children keep alive, each kept once: a child placed
+    // many times (`sequence(new Array(1000).fill(s))`, nested) would
+    // otherwise be kept once per place, 1000^n values for n levels.
+    let mut kept = rustc_hash::FxHashSet::default();
     // SAFETY: reads of a live array; values got are freed.
     unsafe {
         if qjs::JS_IsArray(list) {
@@ -1244,7 +1248,13 @@ fn group(cx: *mut JsContext, kind: &str, list: JsValue, extra: Vec<(&CStr, JsVal
                 let c = qjs::JS_GetPropertyUint32(cx, list, i);
                 if let Some((spec, v)) = parts(cx, c) {
                     specs.push(spec);
-                    values.extend(v);
+                    for v in v {
+                        if !qjs::JS_IsObject(v) || kept.insert(qjs::JS_VALUE_GET_PTR(v) as usize) {
+                            values.push(v);
+                        } else {
+                            qjs::JS_FreeValue(cx, v);
+                        }
+                    }
                 }
                 qjs::JS_FreeValue(cx, c);
             }

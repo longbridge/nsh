@@ -101,6 +101,15 @@ pub trait Scrollable: Element {
         self
     }
 
+    /// A tap at the top of the window (the status bar's) scrolls it to its
+    /// top (default yes; iOS and Mac Catalyst only; TS: `scrollsToTop`).
+    fn scrolls_to_top(mut self, on: impl IntoReactive<bool>) -> Self {
+        host::bind_prop(self.node(), on, |on| {
+            Prop::Scroll(ScrollProp::ScrollsToTop(on))
+        });
+        self
+    }
+
     /// Space around the content that scrolls with it.
     fn content_inset(mut self, insets: impl IntoReactive<EdgeInsets>) -> Self {
         host::bind_prop(self.node(), insets, |insets| {

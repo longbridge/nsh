@@ -267,8 +267,13 @@ function Pad() {
 
 The Rust API is also exercised by the Linux-desktop headless driver; Rust UI sets can expose app-specific
 components and events to TSX. Input sources differ: a terminal that reports only strokes (legacy terminals) sends
-no synthetic releases, repeats or codes, and GPUI's logical events have no physical code (`code` is `""`). See
-`docs/dev/tooling.md` and each platform's development page for what its source reports.
+no synthetic releases, repeats or codes; a terminal speaking the kitty keyboard protocol reports releases and
+auto-repeats for the keys it sends as escape codes, and still no physical code (`code` is `""`), as GPUI's logical
+events have none either. See `docs/dev/tooling.md` and each platform's development page for what its source reports.
+
+On iOS, a hardware keyboard reports `UIKey.characters` as `key` (its case and layout kept) and maps
+`UIKey.keyCode`'s USB HID usage to the DOM `code`. UIKit sends a held key's press once, so `repeat` is false. A Tab
+captured by `captureKeys` or bound in `keymap` arrives as a key command: its `code` is `""` and no release is invented.
 
 ## Platform notes
 

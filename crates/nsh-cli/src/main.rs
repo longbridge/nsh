@@ -15,6 +15,7 @@ mod dev_port;
 mod entry;
 mod init;
 mod logger;
+mod native_features;
 mod package;
 mod platforms;
 mod play;

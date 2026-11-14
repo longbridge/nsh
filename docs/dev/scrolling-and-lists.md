@@ -8,7 +8,9 @@
 - **Scrolling**: `pagingEnabled`, `snapToInterval` / `snapToOffsets` / `snapToAlignment`, `disableIntervalMomentum`,
   `decelerationRate`, `scrollable`, `bounces`, `contentInset`, `contentOffset`, `keyboardShouldPersistTaps`
   (`never` / `handled` / `always`), `onScroll` (+ `scrollEventThrottle`; at most once per engine turn), `onScrollDragStart` /
-  `EndDrag`, `onMomentumStart` / `End` (a glide caught by a new drag ends with `onMomentumEnd`). Snapping is decided
+  `EndDrag`, `onMomentumStart` / `End` (a glide caught by a new drag ends with `onMomentumEnd`). `scrollsToTop`
+  (default true) is UIKit's: a tap at the top of the window scrolls the scroll view under it to its top; `false` turns
+  that off for it (a chat thread that keeps the reader's place). iOS and Mac Catalyst only. Snapping is decided
   by `ScrollBehavior::snap_target` (core) on iOS and its Java port on Android, from the release offset, the projected glide and
   the velocity. Lists scrolled past their start keep the visible rows in place when items are inserted above them
   (`splice`), as a browser's scroll anchoring does; at their start the rows that arrive show, unless the list loads

@@ -1522,6 +1522,22 @@ pub(crate) fn frame(surface: &Rc<Surface>) -> bool {
     false
 }
 
+/// Clears `areas` (DIPs, on pixels) of the target to `background`, each
+/// under an axis-aligned clip. A clear under the layer that clips several
+/// areas clears the layer, which is then blended over the old pixels: with a
+/// transparent background (a system backdrop behind the window) what was
+/// there stays.
+fn clear_areas(dc: &ID2D1DeviceContext, areas: &[D2D_RECT_F], background: &D2D1_COLOR_F) {
+    for area in areas {
+        // SAFETY: COM calls between BeginDraw and EndDraw; the clip is popped.
+        unsafe {
+            dc.PushAxisAlignedClip(area, D2D1_ANTIALIAS_MODE_ALIASED);
+            dc.Clear(Some(background));
+            dc.PopAxisAlignedClip();
+        }
+    }
+}
+
 /// The union of `rects` as one geometry.
 fn rects_geometry(gfx: &Gfx, rects: &[D2D_RECT_F]) -> windows::core::Result<ID2D1Geometry> {
     // SAFETY: COM calls on the live factory.
@@ -1884,6 +1900,17 @@ fn draw_into(
         // kept.
         Some(areas) => {
             cx.set_transform(Mat4::new());
+            // Several areas are drawn through a layer (a clip of their
+            // rectangles), and the `Clear` below fills that layer, which is
+            // then blended over the back buffer: a background that is not
+            // opaque (a transparent window's, over its backdrop) would leave
+            // what was there showing under the views drawn again. So each
+            // area of such a window is first cleared on the back buffer
+            // itself, under an axis-aligned clip; an opaque one's layer
+            // covers what was there as it is.
+            if areas.len() > 1 && background.a < 1.0 {
+                clear_areas(dc, areas, &background);
+            }
             match areas {
                 [a] => cx.push_clip_rect(a.left, a.top, a.right - a.left, a.bottom - a.top),
                 _ => match rects_geometry(gfx, areas) {
@@ -1896,9 +1923,6 @@ fn draw_into(
                 },
             }
             cx.clip_skip = 1;
-            // SAFETY: a COM call between BeginDraw and EndDraw: clears what
-            // the clip leaves.
-            unsafe { dc.Clear(Some(&background)) };
             cx.damage = Some(areas.to_vec());
             draw_view(&mut cx, &root, Mat4::new(), (0.0, 0.0));
             crate::chrome::draw(surface, hwnd, dc, scale, w);
@@ -2267,6 +2291,144 @@ mod tests {
         assert!(read(&gfx, &back, size) == read(&gfx, &fresh, size));
         // Nothing changed since: nothing to draw.
         assert!(surface.take_damage().is_none_or(|d| d.is_empty()));
+    }
+
+    /// Clears the areas of an opaque red bitmap to transparent: under the
+    /// layer of a clip of several areas (`old_way`) or with [`clear_areas`].
+    fn cleared(gfx: &Gfx, size: (u32, u32), areas: &[D2D_RECT_F], old_way: bool) -> Vec<u8> {
+        let back = target(gfx, size);
+        let transparent = color_f(Color::TRANSPARENT);
+        // SAFETY: COM calls on the live context; `EndDraw` follows `BeginDraw`.
+        unsafe {
+            gfx.dc.SetTarget(&back);
+            gfx.dc.BeginDraw();
+            gfx.dc.SetTransform(&Matrix3x2::identity());
+            gfx.dc.Clear(Some(&color_f(Color(0xff00_00ff))));
+            if old_way {
+                let mut cx = DrawCx::new(gfx, 1.0, false, 0.0).unwrap();
+                cx.push_clip_geometry(&rects_geometry(gfx, areas).unwrap());
+                gfx.dc.Clear(Some(&transparent));
+                cx.pop();
+            } else {
+                clear_areas(&gfx.dc, areas, &transparent);
+            }
+            gfx.dc.EndDraw(None, None).unwrap();
+            gfx.dc.SetTarget(None);
+        }
+        read(gfx, &back, size)
+    }
+
+    /// A partial frame of several areas over a transparent background (a
+    /// window over Mica or Acrylic) erases what they showed: a view that
+    /// left one is not drawn there any more.
+    #[test]
+    fn several_areas_clear_to_a_transparent_background() {
+        let Ok(gfx) = gfx::get() else {
+            // No Direct3D device, not even WARP.
+            return;
+        };
+        let size = (40, 40);
+        let areas = [rect_f(0.0, 0.0, 10.0, 10.0), rect_f(20.0, 20.0, 10.0, 10.0)];
+        let pixel = |data: &[u8], x: usize, y: usize| {
+            let at = (y * size.0 as usize + x) * 4;
+            data[at..at + 4].to_vec()
+        };
+        let old = cleared(&gfx, size, &areas, true);
+        assert_eq!(
+            pixel(&old, 5, 5),
+            [0, 0, 255, 255],
+            "a clear under the layer keeps the old pixels"
+        );
+        let new = cleared(&gfx, size, &areas, false);
+        assert_eq!(pixel(&new, 5, 5), [0, 0, 0, 0]);
+        assert_eq!(pixel(&new, 25, 25), [0, 0, 0, 0]);
+        assert_eq!(pixel(&new, 15, 15), [0, 0, 255, 255], "outside the areas");
+    }
+
+    /// A subtree taken out from its top and then torn down (an overlay
+    /// closing: its host leaves the root, then the views in it leave the
+    /// host) is drawn again wherever it was, the shadow of a view inside
+    /// it too, though only the host was still in the window when it left.
+    #[test]
+    fn a_subtree_torn_down_from_its_top_is_drawn_again_where_it_was() {
+        let Ok(gfx) = gfx::get() else {
+            return;
+        };
+        let size = (240, 160);
+        let surface = Surface::new(Default::default());
+        surface.resized(size, 1.0);
+        let root = surface.root.clone();
+        let host = view(
+            Some(&root),
+            2,
+            ViewKind::View,
+            rect(60.0, 40.0, 100.0, 60.0),
+        );
+        let menu = view(Some(&host), 4, ViewKind::View, rect(0.0, 0.0, 100.0, 60.0));
+        menu.state_mut().style.background_color = Color(0x2244ccff);
+        menu.state_mut().style.effects = Some(std::sync::Arc::new(Effects {
+            box_shadows: vec![BoxShadow {
+                blur: Points(16.0),
+                offset_y: Points(8.0),
+                color: Color(0x0000_00cc),
+                ..BoxShadow::default()
+            }],
+            ..Effects::default()
+        }));
+        let back = target(&gfx, size);
+        draw_into(&surface, &gfx, &back, 1.0, false, None, None, None).unwrap();
+        let _ = surface.take_damage();
+
+        host.unparent();
+        menu.unparent();
+        let areas = changed_areas(&surface, size);
+        fill_with_damage_and_compare_whole(&surface, &gfx, &back, size, &areas);
+    }
+
+    /// A see-through window (a system backdrop behind it) clears to
+    /// transparent: a partial frame of two areas apart must replace what
+    /// was in them, not draw its translucent views over it.
+    #[test]
+    fn a_partial_frame_of_a_transparent_window_replaces_its_areas() {
+        let Ok(gfx) = gfx::get() else {
+            return;
+        };
+        let app = crate::app::AppView::new(
+            None,
+            crate::app::AppOptions {
+                size: (240, 140),
+                transparent: true,
+                skip_taskbar: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let surface = app.surface().clone();
+        assert!(surface.transparent());
+        let size = (240, 140);
+        surface.resized(size, 1.0);
+        let root = surface.root.clone();
+        let boxed = |id, frame, color| {
+            let v = view(Some(&root), id, ViewKind::View, frame);
+            v.state_mut().style.background_color = Color(color);
+            v
+        };
+        // Translucent, as a glass ground over the backdrop.
+        let a = boxed(2, rect(10.0, 10.0, 50.0, 30.0), 0x2244cc80);
+        let b = boxed(4, rect(170.0, 90.0, 50.0, 30.0), 0xcc224480);
+        let back = target(&gfx, size);
+        draw_into(&surface, &gfx, &back, 1.0, false, None, None, None).unwrap();
+        let _ = surface.take_damage();
+
+        a.state_mut().style.background_color = Color(0x22cc4440);
+        a.changed();
+        b.state_mut().style.background_color = Color(0x88888840);
+        b.changed();
+        let areas = changed_areas(&surface, size);
+        assert_eq!(areas.len(), 2, "two areas apart: {areas:?}");
+        fill_with_damage_and_compare_whole(&surface, &gfx, &back, size, &areas);
+        // SAFETY: the test's own window.
+        let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::DestroyWindow(app.hwnd()) };
     }
 
     /// A uniform background fill draws a rounded rectangle and makes no
