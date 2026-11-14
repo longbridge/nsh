@@ -1,4 +1,4 @@
-import { type Bounds, Canvas, type CanvasRenderingContext2D, cleanup, type JSX, Scroll, signal, Text, View } from "nsh";
+import { type Bounds, Canvas, type CanvasRenderingContext2D, cleanup, type JSX, Scroll, signal, Text, View, type ViewRef } from "nsh";
 import { Animated, type AnimatedNode, type CompositeAnimation, createAnimatedValue, createMotion, Easing, LayoutAnimation, type LayoutAnimationConfig, type MotionName, type MotionPreset, type MotionSpec, motions } from "nsh";
 import { Button as BaseButton, Tab, Tabs } from "nsh/base";
 import { Icon } from "../icons";
@@ -1281,6 +1281,43 @@ function Layout() {
   );
 }
 
+/** One element's change animated, with a design curve, over a list that
+ * keeps updating at once (`ref.animateLayout`). */
+function ScopedLayout() {
+  let header: ViewRef | undefined;
+  const compact = signal(false);
+  let next = 4;
+  const rows = signal([3, 2, 1]);
+  const timer = setInterval(() => rows.set([next++, ...rows()].slice(0, 6)), 900);
+  cleanup(() => clearInterval(timer));
+  const toggle = () => {
+    header?.animateLayout({ type: "bezier", bezier: [0.2, 0, 0, 1], duration: 320 });
+    compact.set(!compact());
+  };
+  return (
+    <Card icon="mobile" title="Scoped layout animation" subtitle="The header animates; the live list changes at once" right={<Badge label="bezier(0.2, 0, 0, 1)" />}>
+      <View style={{ height: 260, gap: 8, overflow: "hidden" }}>
+        <View
+          ref={(r) => (header = r)}
+          style={{ height: compact() ? 44 : 104, borderRadius: 12, borderCurve: "continuous", paddingHorizontal: 14, justifyContent: "center", ...toneFill(colors.accent) }}
+        >
+          <Text style={{ fontSize: compact() ? 15 : 22, fontWeight: "700", color: onTone() }}>Inbox</Text>
+        </View>
+        <View style={{ flex: 1, gap: 6 }}>
+          <Each of={rows()}>
+            {(id) => (
+              <View style={{ height: 30, borderRadius: 8, paddingHorizontal: 10, justifyContent: "center", backgroundColor: alpha(tones()[id() % tones().length], 0.18) }}>
+                <Text style={{ fontSize: 13, fontVariant: ["tabular-nums"], color: colors.text }}>{`Message ${id()}`}</Text>
+              </View>
+            )}
+          </Each>
+        </View>
+      </View>
+      <Button label={compact() ? "Expand header" : "Collapse header"} onPress={toggle} />
+    </Card>
+  );
+}
+
 export function Animations() {
-  return <DemoPage cards={[Hero, MotionPresets, StaggeredEntrance, Keyframes, Aurora, EasingPlot, EasingRace, Composition, Springs, Interpolations, HidingHeader, Layout]} />;
+  return <DemoPage cards={[Hero, MotionPresets, StaggeredEntrance, Keyframes, Aurora, EasingPlot, EasingRace, Composition, Springs, Interpolations, HidingHeader, Layout, ScopedLayout]} />;
 }

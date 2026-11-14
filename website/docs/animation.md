@@ -787,7 +787,7 @@ const remove = () => {
 | `easeInEaseOut(onEnd?)`, `linear(onEnd?)`, `spring(onEnd?)` | `animate_layout` with a preset | `configureNext` with a preset. |
 | `Types`, `Properties` | `LayoutCurve`, `LayoutProperty` | The names, for building configs. |
 
-A config is `{ duration, create?, update?, delete? }` (`LayoutAnimation { create, update, delete }` in Rust): `create` for inserted views, `update` for moved or resized ones, `delete` for removed ones. Each phase is `{ type?, property?, duration?, delay?, springDamping? }` (`LayoutTransition { curve, property, duration_ms, delay_ms }`), where `type` is `"easeInEaseOut"`, `"spring"`, `"linear"`, `"easeIn"`, `"easeOut"` or `"keyboard"` (the software keyboard's own curve, timed from when the keyboard started to move, so that what makes room for it moves with it; `LayoutCurve::Keyboard`), `property` is what appearing and disappearing views animate (`"opacity"`, `"scaleXY"`, `"scale"`), and `springDamping` (0..1, 0.7 by default; `LayoutCurve::FittedSpring { damping_ratio }`) sets the spring's overshoot.
+A config is `{ duration, create?, update?, delete? }` (`LayoutAnimation { create, update, delete }` in Rust): `create` for inserted views, `update` for moved or resized ones, `delete` for removed ones. Each phase is `{ type?, property?, duration?, delay?, springDamping?, bezier? }` (`LayoutTransition { curve, property, duration_ms, delay_ms }`), where `type` is `"easeInEaseOut"`, `"spring"`, `"linear"`, `"easeIn"`, `"easeOut"`, `"bezier"` (a cubic Bézier: the phase's `bezier: [x1, y1, x2, y2]`, as CSS `cubic-bezier()`, each `x` clamped to 0..1; `LayoutCurve::bezier(x1, y1, x2, y2)`) or `"keyboard"` (the software keyboard's own curve, timed from when the keyboard started to move, so that what makes room for it moves with it; `LayoutCurve::Keyboard`), `property` is what appearing and disappearing views animate (`"opacity"`, `"scaleXY"`, `"scale"`), and `springDamping` (0..1, 0.7 by default; `LayoutCurve::FittedSpring { damping_ratio }`) sets the spring's overshoot.
 
 ```rust tabs
 use nsh_core::element::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition};
@@ -813,7 +813,7 @@ LayoutAnimation.configureNext({
 
 A layout animation covers every frame the update changes, anywhere on the screen: a list that refreshes or live data that lands in the same update moves with it.
 
-In a `List`, the rows already shown slide to their new places and a row that comes in appears in its own, as UIKit's batch updates do: a chat's new message at the bottom of an `inverted` list pushes the messages above it up, while the list keeps its distance from the end. A new row that takes a recycled cell shows at its place at once. In a Rust component, animate only what one element's change moves with `ElementRef::animate_layout(transition)`: the element's own frame and its content's, and those of the views its size pushes along (its siblings and theirs, up to the screen). The update's other frames change at once. This is how `nsh/base`'s `Collapsible` and `AccordionPanel` reveal their content.
+In a `List`, the rows already shown slide to their new places and a row that comes in appears in its own, as UIKit's batch updates do: a chat's new message at the bottom of an `inverted` list pushes the messages above it up, while the list keeps its distance from the end. A new row that takes a recycled cell shows at its place at once. To animate only what one element's change moves, call `ElementRef::animate_layout(transition)` in Rust or `ref.animateLayout(transition)` in TSX (`transition` is a phase as above; easing in and out over 300 ms without one): the element's own frame and its content's, and those of the views its size pushes along (its siblings and theirs, up to the screen, and the content of those it resizes). The update's other frames change at once: a list that gains or loses rows in the same update does not move its rows with it, even when it grows with the change. Insertions and removals are not animated, and a `configureNext` in the same update animates every frame instead. This is how `nsh/base`'s `Collapsible` and `AccordionPanel` reveal their content, and how a header collapses over a list that keeps updating.
 
 ```rust
 use nsh_core::element::{LayoutTransition, Spring};
@@ -828,6 +828,20 @@ view()
     .element_ref(&region)
     .overflow_hidden()
     .style_with(move |s| if open.get() { s } else { s.h(px(0.0)) })
+```
+
+```tsx
+import { signal, View } from "nsh";
+import type { ViewRef } from "nsh";
+
+let header: ViewRef | undefined;
+const compact = signal(false);
+const collapse = () => {
+  header?.animateLayout({ type: "bezier", bezier: [0.2, 0, 0, 1], duration: 250 });
+  compact.set(true);
+};
+
+<View ref={(r) => (header = r)} style={{ height: compact() ? 56 : 120 }} />;
 ```
 
 A spring given by its physics, as design systems give theirs, is `LayoutTransition::spring(spring)` with gpui-base's `Spring`: `Spring::new(response_ms)` (the period of the undamped spring, critically damped) or `Spring::from_stiffness(stiffness)` (a mass of 1), each shaped by `.damping_ratio(ζ)`. The animation lasts until the spring stays within a thousandth of its target (`Spring::settle_ms`), whatever duration the transition was given, and moves by the same physics on every platform (`LayoutCurve::Spring`). A `LayoutCurve::FittedSpring { damping_ratio }` is the spring JS configs name (`type: "spring"`): its stiffness is fitted to the transition's duration.

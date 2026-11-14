@@ -1294,6 +1294,8 @@ pub struct Core<M: TextEngine> {
     scoped_layout: Vec<(NodeId, crate::LayoutTransition, bool)>,
     /// Nodes that changed size while `scoped_layout` waits.
     resized: Vec<Key>,
+    /// Nodes that lost a child while `scoped_layout` waits.
+    restructured: Vec<Key>,
     /// The nodes whose padding or margin uses `env()` (`Node::env`).
     env_styled: rustc_hash::FxHashSet<NodeId>,
     /// Scratch of [`Core::sync_env`].
@@ -1578,6 +1580,7 @@ impl<M: TextEngine> Core<M> {
             layout_animation: None,
             scoped_layout: Vec::new(),
             resized: Vec::new(),
+            restructured: Vec::new(),
             env_styled: Default::default(),
             env_scratch: Vec::new(),
             keyboard_moved: false,
@@ -6417,6 +6420,7 @@ impl<M: TextEngine> Core<M> {
                 && !self.nodes[key as usize].is_overlay()
             {
                 self.mount.push(MountItem::Remove { id });
+                self.note_restructured(parent);
             }
         }
     }

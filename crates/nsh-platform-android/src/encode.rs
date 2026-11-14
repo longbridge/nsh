@@ -1562,6 +1562,7 @@ fn layout_transition(e: &mut Encoded, t: Option<LayoutTransition>) {
         LayoutCurve::FittedSpring { damping_ratio } => (4, damping_ratio),
         LayoutCurve::Keyboard => (5, 0.0),
         LayoutCurve::Spring(_) => (6, 0.0),
+        LayoutCurve::Bezier(_) => (7, 0.0),
     };
     e.int(curve);
     e.float(damping);
@@ -1575,6 +1576,12 @@ fn layout_transition(e: &mut Encoded, t: Option<LayoutTransition>) {
             } else {
                 spring.progress(spring.settle_ms() * i as f32 / SPRING_SAMPLES as f32)
             });
+        }
+    }
+    if let LayoutCurve::Bezier(points) = t.curve {
+        // Java's `PathInterpolator` of the same control points.
+        for p in points {
+            e.float(p);
         }
     }
     e.int(match t.property {

@@ -18,6 +18,7 @@ import android.view.animation.AccelerateInterpolator;
 import android.view.animation.AnimationUtils;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.LinearInterpolator;
+import android.view.animation.PathInterpolator;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.ViewParent;
@@ -107,10 +108,12 @@ final class Mounter {
 
     /** One part of a layout animation (`encode.rs` `layout_transition`). */
     private static final class Transition {
-        int curve; // 0 linear, 1 ease in, 2 ease out, 3 ease in-out, 4 fitted spring, 5 the keyboard's, 6 spring
+        int curve; // 0 linear, 1 ease in, 2 ease out, 3 ease in-out, 4 fitted spring, 5 the keyboard's, 6 spring, 7 cubic Bézier
         float damping;
         /** A spring's progress (6), sampled evenly over the time it settles in (the duration), ending at 1. */
         float[] samples;
+        /** A cubic Bézier's control points (7): x1, y1, x2, y2. */
+        float[] bezier;
         int property; // 0 opacity, 1 scale
         long duration, delay;
 
@@ -135,6 +138,7 @@ final class Mounter {
                         return p[i] + (p[i + 1] - p[i]) * (x - i);
                     };
                 }
+                case 7: return new PathInterpolator(bezier[0], bezier[1], bezier[2], bezier[3]);
                 default: return new AccelerateDecelerateInterpolator();
             }
         }
@@ -711,6 +715,10 @@ final class Mounter {
         if (t.curve == 6) {
             t.samples = new float[b.getInt()];
             for (int i = 0; i < t.samples.length; i++) t.samples[i] = b.getFloat();
+        }
+        if (t.curve == 7) {
+            t.bezier = new float[4];
+            for (int i = 0; i < 4; i++) t.bezier[i] = b.getFloat();
         }
         t.property = b.getInt();
         t.duration = (long) b.getFloat();

@@ -787,7 +787,7 @@ const remove = () => {
 | `easeInEaseOut(onEnd?)`、`linear(onEnd?)`、`spring(onEnd?)` | 用预设调用 `animate_layout` | 使用预设调用 `configureNext`。 |
 | `Types`、`Properties` | `LayoutCurve`、`LayoutProperty` | 构造配置时用的名称。 |
 
-配置为 `{ duration, create?, update?, delete? }`（Rust 中为 `LayoutAnimation { create, update, delete }`）：`create` 用于插入的视图，`update` 用于移动或改变尺寸的视图，`delete` 用于删除的视图。每个阶段为 `{ type?, property?, duration?, delay?, springDamping? }`（`LayoutTransition { curve, property, duration_ms, delay_ms }`），其中 `type` 为 `"easeInEaseOut"`、`"spring"`、`"linear"`、`"easeIn"`、`"easeOut"` 或 `"keyboard"`（软键盘自己的曲线，从键盘开始移动时算起，让为它让位的内容与它一起移动；`LayoutCurve::Keyboard`）；`property` 是出现和消失的视图做什么动画（`"opacity"`、`"scaleXY"`、`"scale"`）；`springDamping`（0..1，默认 0.7；`LayoutCurve::FittedSpring { damping_ratio }`）决定弹簧的过冲程度。
+配置为 `{ duration, create?, update?, delete? }`（Rust 中为 `LayoutAnimation { create, update, delete }`）：`create` 用于插入的视图，`update` 用于移动或改变尺寸的视图，`delete` 用于删除的视图。每个阶段为 `{ type?, property?, duration?, delay?, springDamping?, bezier? }`（`LayoutTransition { curve, property, duration_ms, delay_ms }`），其中 `type` 为 `"easeInEaseOut"`、`"spring"`、`"linear"`、`"easeIn"`、`"easeOut"`、`"bezier"`（三次贝塞尔曲线：取该阶段的 `bezier: [x1, y1, x2, y2]`，同 CSS `cubic-bezier()`，每个 `x` 限制在 0..1；`LayoutCurve::bezier(x1, y1, x2, y2)`）或 `"keyboard"`（软键盘自己的曲线，从键盘开始移动时算起，让为它让位的内容与它一起移动；`LayoutCurve::Keyboard`）；`property` 是出现和消失的视图做什么动画（`"opacity"`、`"scaleXY"`、`"scale"`）；`springDamping`（0..1，默认 0.7；`LayoutCurve::FittedSpring { damping_ratio }`）决定弹簧的过冲程度。
 
 ```rust tabs
 use nsh_core::element::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition};
@@ -813,7 +813,7 @@ LayoutAnimation.configureNext({
 
 布局动画覆盖这次更新改变的所有帧，无论它们在屏幕上的什么位置：同一次更新中刷新的列表或到达的实时数据也会随之动画。
 
-在 `List` 中，已经显示的行滑到新位置，新来的行出现在它自己的位置，和 UIKit 的批量更新一样：`inverted` 列表底部来了一条新消息，它上面的消息被推上去，列表同时保持与末尾的距离。使用回收单元格的新行直接显示在它的位置。在 Rust 组件中，用 `ElementRef::animate_layout(transition)` 只为一个元素的变化所移动的内容做动画：元素自己和其内容的帧，以及被它的尺寸推动的视图（它的兄弟视图，以及各级祖先的兄弟视图）的帧。这次更新的其他帧立即变化。`nsh/base` 的 `Collapsible` 和 `AccordionPanel` 就是这样展开内容的。
+在 `List` 中，已经显示的行滑到新位置，新来的行出现在它自己的位置，和 UIKit 的批量更新一样：`inverted` 列表底部来了一条新消息，它上面的消息被推上去，列表同时保持与末尾的距离。使用回收单元格的新行直接显示在它的位置。要只为一个元素的变化所移动的内容做动画，Rust 用 `ElementRef::animate_layout(transition)`，TSX 用 `ref.animateLayout(transition)`（`transition` 是上面的一个阶段；不传时 300 ms 缓入缓出）：元素自己和其内容的帧，被它的尺寸推动的视图（它的兄弟视图，以及各级祖先的兄弟视图）的帧，以及被它改变尺寸的视图的内容。这次更新的其他帧立即变化：同一次更新中增删行的列表，即使跟着变高，它的行也不会一起动画。插入和删除不做动画；同一次更新里调用了 `configureNext` 时，改为所有帧一起动画。`nsh/base` 的 `Collapsible` 和 `AccordionPanel` 就是这样展开内容的，header 在持续更新的列表上方折叠也是这样。
 
 ```rust
 use nsh_core::element::{LayoutTransition, Spring};
@@ -828,6 +828,20 @@ view()
     .element_ref(&region)
     .overflow_hidden()
     .style_with(move |s| if open.get() { s } else { s.h(px(0.0)) })
+```
+
+```tsx
+import { signal, View } from "nsh";
+import type { ViewRef } from "nsh";
+
+let header: ViewRef | undefined;
+const compact = signal(false);
+const collapse = () => {
+  header?.animateLayout({ type: "bezier", bezier: [0.2, 0, 0, 1], duration: 250 });
+  compact.set(true);
+};
+
+<View ref={(r) => (header = r)} style={{ height: compact() ? 56 : 120 }} />;
 ```
 
 按物理参数给出的弹簧（设计系统通常这样给出）为 `LayoutTransition::spring(spring)`，其中 `Spring` 与 gpui-base 的一致：`Spring::new(response_ms)`（无阻尼时的周期，临界阻尼）或 `Spring::from_stiffness(stiffness)`（质量为 1），再用 `.damping_ratio(ζ)` 调整阻尼比。动画持续到弹簧停留在目标的千分之一以内为止（`Spring::settle_ms`），与过渡给定的时长无关，并在每个平台上都按同样的物理规律运动（`LayoutCurve::Spring`）。`LayoutCurve::FittedSpring { damping_ratio }` 是 JS 配置所指的弹簧（`type: "spring"`）：它的刚度按过渡的时长拟合。

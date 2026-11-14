@@ -23,13 +23,14 @@ use objc2::{
 use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize, CGVector};
 use objc2_quartz_core::{CAAnimation, CALayer, CAMediaTiming, CATransform3D};
 use objc2_ui_kit::{
-    UIActivityIndicatorView, UIActivityIndicatorViewStyle, UIControlEvents, UIDevice,
-    UIGestureRecognizer, UIGestureRecognizerState, UINavigationController, UIPanGestureRecognizer,
-    UIPinchGestureRecognizer, UIRefreshControl, UIRotationGestureRecognizer, UIScrollView,
-    UIScrollViewContentInsetAdjustmentBehavior, UIScrollViewKeyboardDismissMode,
-    UISpringTimingParameters, UITraitEnvironment, UIUserInterfaceIdiom, UIView, UIViewAnimating,
-    UIViewAnimationOptions, UIViewControllerTransitionCoordinator,
-    UIViewControllerTransitionCoordinatorContext, UIViewPropertyAnimator,
+    UIActivityIndicatorView, UIActivityIndicatorViewStyle, UIControlEvents,
+    UICubicTimingParameters, UIDevice, UIGestureRecognizer, UIGestureRecognizerState,
+    UINavigationController, UIPanGestureRecognizer, UIPinchGestureRecognizer, UIRefreshControl,
+    UIRotationGestureRecognizer, UIScrollView, UIScrollViewContentInsetAdjustmentBehavior,
+    UIScrollViewKeyboardDismissMode, UISpringTimingParameters, UITraitEnvironment,
+    UIUserInterfaceIdiom, UIView, UIViewAnimating, UIViewAnimationOptions,
+    UIViewControllerTransitionCoordinator, UIViewControllerTransitionCoordinatorContext,
+    UIViewPropertyAnimator,
 };
 
 use crate::{
@@ -5238,6 +5239,21 @@ fn animate(
                 spring.stiffness as CGFloat,
                 spring.damping as CGFloat,
                 CGVector { dx: 0.0, dy: 0.0 },
+            );
+            let animator = UIViewPropertyAnimator::initWithDuration_timingParameters(
+                UIViewPropertyAnimator::alloc(mtm),
+                duration,
+                ProtocolObject::from_ref(&*timing),
+            );
+            animator.addAnimations(&block);
+            animator.startAnimationAfterDelay(delay);
+        }
+        // UIKit's cubic timing of the same control points.
+        LayoutCurve::Bezier([x1, y1, x2, y2]) => {
+            let timing = UICubicTimingParameters::initWithControlPoint1_controlPoint2(
+                UICubicTimingParameters::alloc(mtm),
+                CGPoint::new(x1 as CGFloat, y1 as CGFloat),
+                CGPoint::new(x2 as CGFloat, y2 as CGFloat),
             );
             let animator = UIViewPropertyAnimator::initWithDuration_timingParameters(
                 UIViewPropertyAnimator::alloc(mtm),
