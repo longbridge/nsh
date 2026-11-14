@@ -426,6 +426,9 @@ pub(crate) struct Ivars {
     /// A subview that may not stay ours ([`stays_ours`]) can have come in
     /// since a scan of its subviews last found none ([`first_foreign`]).
     foreign: Cell<bool>,
+    /// `drawLayer:inContext:` returned while `state` was borrowed, leaving
+    /// Core Animation's cleared region unpainted.
+    dropped_draw: Cell<bool>,
     /// Deferred drawing and placement marks in this subtree, including
     /// this view. Only their transforms can reveal deferred work.
     waiting: Cell<usize>,
@@ -455,6 +458,7 @@ define_class!(
                 return;
             };
             let Ok(state) = view.ivars().state.try_borrow() else {
+                view.ivars().dropped_draw.set(true);
                 return;
             };
             let c = Some(cx);
@@ -1735,6 +1739,7 @@ impl NshView {
             unplaced: Cell::new(false),
             // Not known until a first scan.
             foreign: Cell::new(true),
+            dropped_draw: Cell::new(false),
             waiting: Cell::new(0),
             sharpened: Cell::new(0.0),
         });
@@ -1998,8 +2003,41 @@ impl NshView {
         }
         if let Some(layer) = self.content_layer() {
             self.update_canvas_overlay();
+            self.clear_canvas_painted();
             layer.setNeedsDisplay();
         }
+    }
+
+    /// Forgets what its canvas's content layer painted when the whole layer
+    /// is invalidated.
+    fn clear_canvas_painted(&self) {
+        if let Ok(state) = self.0.ivars().state.try_borrow()
+            && let Some(canvas) = &state.canvas
+        {
+            canvas.clear_painted();
+        }
+    }
+
+    /// Whether `drawLayer:inContext:` returned while `state` was borrowed,
+    /// clearing the flag.
+    pub(crate) fn take_dropped_draw(&self) -> bool {
+        self.ivars().dropped_draw.replace(false)
+    }
+
+    /// What its content layer must hold for a partial canvas redraw
+    /// (`setNeedsDisplayInRect`) to keep the rest of the picture.
+    pub(crate) fn canvas_painted(&self) -> Option<crate::canvas::Painted> {
+        let content = self.ivars().content.borrow();
+        let (layer, _) = content.as_ref()?;
+        let size = layer.bounds().size;
+        if size.width <= 0.0 || size.height <= 0.0 {
+            return None;
+        }
+        Some(crate::canvas::Painted {
+            size,
+            scale: layer.contentsScale(),
+            prefix_only: self.ivars().overlay.borrow().is_some(),
+        })
     }
 
     /// Updates the small animated surface and reports a partition change.
@@ -2189,10 +2227,16 @@ impl NshView {
     /// scale of the transforms above it, or a zoomable scroll view's zoom.
     /// Never below the backing scale and at most 4096 pixels a side.
     pub(crate) fn draw_zoomed(&self, scale: CGFloat, zoom: CGFloat) {
-        for surface in [&self.ivars().content, &self.ivars().overlay] {
+        for (i, surface) in [&self.ivars().content, &self.ivars().overlay]
+            .into_iter()
+            .enumerate()
+        {
             if let Some((layer, _)) = &*surface.borrow() {
                 let factor = content_density(scale, zoom, layer.bounds().size);
                 if layer.contentsScale() != factor {
+                    if i == 0 {
+                        self.clear_canvas_painted();
+                    }
                     layer.setContentsScale(factor);
                     layer.setNeedsDisplay();
                 }
@@ -2205,14 +2249,16 @@ impl NshView {
     /// text's recolored lines).
     pub(crate) fn redraw_rect(&self, rect: nsh_core::Bounds<nsh_core::Points>) {
         crate::shader::ui_changed(self);
+        let fresh = self.ivars().content.borrow().is_none();
         let Some(layer) = self.content_layer() else {
             return;
         };
         let changed = self.update_canvas_overlay();
-        if changed {
+        if fresh || changed {
+            self.clear_canvas_painted();
             layer.setNeedsDisplay();
         }
-        if self.ivars().overlay.borrow().is_some() || changed {
+        if fresh || self.ivars().overlay.borrow().is_some() || changed {
             return;
         }
         // Layer space is y up unless its contents are flipped
