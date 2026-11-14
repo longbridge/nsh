@@ -62,6 +62,7 @@ impl Gestures {
             phase: TouchPhase::Move,
             timestamp: event.get("timestamp")?.as_number().unwrap_or(0.0),
             points: list,
+            modifiers: Default::default(),
             activated: None,
         };
         let reset = args.index(2)?.truthy();

@@ -244,6 +244,7 @@ impl TouchTracker {
             phase,
             timestamp,
             points,
+            modifiers: Default::default(),
             activated: self.ivars().activated.take(),
         }));
     }

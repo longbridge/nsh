@@ -1566,6 +1566,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
                 phase,
                 timestamp: time as f64,
                 points,
+                modifiers: Default::default(),
                 activated: (activated >= 0).then_some(activated as NodeId),
             })),
         );

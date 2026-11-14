@@ -8947,7 +8947,9 @@ class Player {
       });
     }
     if (!points.length) return;
-    const json = JSON.stringify({ phase, time: performance.now(), points, activated });
+    // The keys held when the changed pointer went down, as its press's.
+    const modifiers = this.pointers.get(changedId)?.modifiers;
+    const json = JSON.stringify({ phase, time: performance.now(), points, activated, modifiers });
     this.call(() => this.withStrings([json], (p, l) => this.wasm.nsh_touch(p, l)));
   }
 

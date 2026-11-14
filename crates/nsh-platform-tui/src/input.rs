@@ -175,6 +175,8 @@ struct Drag {
     velocity: nsh_core::input::VelocityTracker,
     activated: Option<NodeId>,
     scroll_start: Points,
+    /// The modifier keys held when the button went down.
+    modifiers: Modifiers,
 }
 
 impl Drag {
@@ -188,6 +190,7 @@ impl Drag {
             EventPayload::Touch(Box::new(nsh_core::TouchEvent {
                 phase,
                 timestamp: self.started.elapsed().as_secs_f64() * 1000.0,
+                modifiers: self.modifiers,
                 activated: self.activated,
                 points: vec![nsh_core::TouchPoint {
                     id: 0,
@@ -268,6 +271,7 @@ impl Pointer {
             velocity: Default::default(),
             activated: None,
             scroll_start: Points::ZERO,
+            modifiers: mouse.modifiers,
         };
         touch.report(cx.control, nsh_core::TouchPhase::Start);
         touch.report(cx.control, nsh_core::TouchPhase::Cancel);
@@ -735,6 +739,7 @@ impl Pointer {
                             velocity: Default::default(),
                             activated: None,
                             scroll_start: Points::ZERO,
+                            modifiers: mouse.modifiers,
                         };
                         drag.velocity.add(0.0, page);
                         drag.report(control, nsh_core::TouchPhase::Start);

@@ -360,6 +360,7 @@ view()
 | `timestamp` | 毫秒。 |
 | `touches` | 所有按下的手指。 |
 | `changedTouches` | 本次事件涉及的手指。 |
+| `modifiers` | 手指或鼠标按键按下时按住的修饰键（`{ control, alt, shift, platform }`，与按压事件相同）：Alt 拖动或 Shift 点击可以在 grant 里读取。在所有平台上，触摸事件和 grant 都先于同一次按压的 `onPressDown`。 |
 | `nativeEvent` | 事件本身，因此 `e.nativeEvent.locationX` 也可用。 |
 | `stopPropagation()` | 外层视图不再收到这次触摸事件。 |
 
@@ -452,7 +453,7 @@ let origin = 0;
 
 Rust 组件的响应者从成为响应者起一直保持按下状态，直到它的触摸结束，无论手指或指针移到哪里，就像 CSS 的 `:active` 会保持到按钮松开：它的 `.active(..)` 样式和其中的 `group-active:` 类在整个拖动过程中保持不变（例如拖出条带的调整大小手柄）。
 
-Rust 处理函数收到一个 `ResponderEvent`：手指在它按下的视图中的位置 `location`、page 坐标 `page`、`timestamp`，以及自成为响应者以来的手势 `gesture`。
+Rust 处理函数收到一个 `ResponderEvent`：手指在它按下的视图中的位置 `location`、page 坐标 `page`、`timestamp`、按下时按住的修饰键 `modifiers`，以及自成为响应者以来的手势 `gesture`。
 
 ```rust tabs
 use nsh_core::prelude::*;

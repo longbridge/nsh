@@ -2183,6 +2183,7 @@ impl Headless {
                 changed: true,
                 pointer_type: nsh_core::PointerType::Touch,
             }],
+            modifiers: self.held,
             activated: None,
         };
         self.engine.control().dispatch_event(
