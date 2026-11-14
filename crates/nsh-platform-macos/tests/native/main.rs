@@ -81,6 +81,8 @@ fn main() {
                 || std::env::var_os("NSH_ZOOM_PINCH_CHECK_ONLY").is_some()
             {
                 zoom::run();
+            } else if std::env::var_os("NSH_IME_CHECK_ONLY").is_some() {
+                ime::run();
             } else if std::env::var_os("NSH_KEYBOARD_CHECK_ONLY").is_some() {
                 window_press::run();
                 keyboard::run();
