@@ -238,11 +238,12 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   positions are the view's bottom-start corner (`nsh_core::input::context_menu_anchor`, by the surface's direction),
   so a menu opened below it starts where the view does; `ContextMenu` puts the keyboard focus on its first enabled
   item then.
-- **Keyboard focus**: on macOS, the web and Linux, Tab (the keyboard focus) moves between stops, in tree order; a click
-  presses without focusing, so a stop's `FOCUSED` state (`focus:` classes, `.focus(..)`) is keyboard focus; it
-  shows (`FOCUS_VISIBLE`: `focus-visible:`, `focusVisibleStyle`, `.focus_visible(..)`) when the keyboard moved it
-  there, or the app moved it after a key rather than a press (`docs/dev/styles.md`); a part projected focused (a
-  tree's or a list's cursor) shows it too while the control's focus shows. Focus and presses are separate: `ViewProps::focus_stop` decides, from
+- **Keyboard focus**: on macOS, the web, Linux and Android, Tab (the keyboard focus) moves between stops, in tree
+  order; a click presses without focusing, so a stop's `FOCUSED` state (`focus:` classes, `.focus(..)`) is
+  keyboard focus; it shows (`FOCUS_VISIBLE`: `focus-visible:`, `focusVisibleStyle`, `.focus_visible(..)`) when
+  the keyboard moved it there, or the app moved it after a key rather than a press (`docs/dev/styles.md`); a
+  part projected focused (a tree's or a list's cursor) shows it too while the control's focus shows.
+  Focus and presses are separate: `ViewProps::focus_stop` decides, from
   `focusable` (`Prop::Focusable`, `ViewProps::focusable`; Rust `.focusable(..)`) and whether the view takes presses,
   and every platform that moves the focus between views asks it (macOS `input::is_key_stop`, the web's
   `updateFocusable`, the headless driver's `Screen::tab_stops`). Unset, the views that take presses are stops.
@@ -267,7 +268,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   ("Kept rows" in `scrolling-and-lists.md`).
   (`focusable={true}` on a view that takes no presses made nothing focusable before 2026-10-26; with no release
   recorded, it now means what React Native's `focusable` and the web's `tabIndex={0}` mean.) Windows and GPUI
-  move the focus between fields and native components only so far; iOS and Android move it between inputs.
+  move the focus between fields and native components only so far; iOS moves it between inputs; Android moves it
+  between inputs and the views `focusable` or presses make stops (`Mounter.updateFocusable`, `TabOrder` in
+  `nsh-platform-android`), and at its first and last stop Tab and Shift+Tab go to the embedding Android host
+  instead of wrapping. Android's Tab walks the native view tree (a portaled overlay is reached where it is
+  inserted, not by `ViewProps::tab_after`).
   A shown overlay's content is in the Tab order where the app put the overlay, not where its native view is (at the
   end of its root view), as WAI-ARIA's non-modal popups have it: a popover's content right after its trigger, so
   Shift+Tab from it goes back to the trigger and Tab past its last stop goes on to what follows the popover. A list
@@ -291,8 +296,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   the view first responder (`input::focus_control`, past a field that edits), the browser focuses the element with
   `focusVisible` and treats it as keyboard focus whatever its heuristics say after a click (`focusPressable`), the
   headless driver moves its focus (`focus_calls`); on a view that is not a stop it does nothing. Linux grabs the
-  stop's widget (`key_focus::focus`). Windows and
-  GPUI leave `focus()` on views to them; iOS and Android focus inputs only.
+  stop's widget (`key_focus::focus`), Android requests the native focus on a managed stop
+  (`Mounter.focusManaged`, focusable in touch mode for that session). Windows and GPUI leave `focus()` on views to
+  them; iOS focuses inputs only.
 - **`onPanEnd` / `onPanStart`** carry `value` (`{ x?, y? }`, the axes `pan` binds): the bound pan values at that moment (a drag may grab a value mid
   animation), for snapping.
 - **Imperative calls**: nodes have `focus()`, `blur()` (inputs, and views that take presses where they are stops of
@@ -427,10 +433,12 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   (presses nothing inside handled), keys named by their HID usage (`Key::from_hid_usage`) and the character they
   type, a `repeat` binding firing on a timer of its own while the key is held (UIKit sends a held key's press once);
   a Tab the table binds, or a mounted capture takes, becomes a prioritized `UIKeyCommand` so UIKit's focus traversal
-  does not take it first (Command+Tab stays the system's); Android in `NshView.dispatchKeyEvent` (before the focused
-  view, after the input method) through `Native.keyDown` / `keyUp`, the table kept in Rust (`keymap.rs`), never
-  encoded for Java. Both leave a composing input method its keys and consume a taken key's release too. Rust views' bindings (`on_key`) join JS's in that one table, and the core runs
-  their handlers (`docs/dev/components.md`).
+  does not take it first (Command+Tab stays the system's); Android in `NshView.dispatchKeyEvent` and a modal's
+  container (one `KeyDispatch` per window, before the focused view, after the input method) through `Native.keyDown`
+  / `keyUp` / `keyShortcut`, with the table kept in Rust (`keymap.rs`) and each view's `captureKeys` rule encoded in
+  its `ViewProps` for `Mounter.java` / `KeyCaptures.java`, which decides on the UI thread. Both leave a composing
+  input method its keys and consume a taken key's release too. Rust views' bindings (`on_key`) join JS's in that one
+  table, and the core runs their handlers (`docs/dev/components.md`).
 - **Raw key notifications** (`onKeyDown` / `onKeyUp`, Rust `Interactive::on_key_down` / `on_key_up`): a platform
   sends ONE `EventPayload::Key` at the focused view. The engine's common routing takes the core's window-bounded,
   enabled path (`Core::key_path`) and notifies Rust component listeners and JS listeners once each per view, for
@@ -462,7 +470,14 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   release. A focused native text input keeps the keys that edit it (nothing an ancestor captures
   intercepts its typing, caret or editing, and input methods own their composition). A legacy terminal reports
   only strokes: no invented releases, repeats or codes. Losing the window's focus clears held state and synthesizes
-  nothing; a real release is reported where the focus is, as the DOM does.
+  nothing; a real release is reported where the focus is, as the DOM does. Android builds the event from
+  `KeyEvent`: `key` is the printable character the source reports with its modifiers, else the key code's DOM name,
+  else `"Unidentified"` (never the US layout's character in its place); `code` is the DOM `KeyboardEvent.code` of
+  `KeyEvent.getScanCode()` (the kernel's evdev code), so a synthetic `adb shell input keyevent` has `""`, and an
+  unknown code is never derived from the key code; `repeat` is `getRepeatCount() > 0`; and `default_prevented` is
+  the rule `KeyCaptures.java` matched before Android's defaults. A system key (Back, Home, volume, media, camera,
+  call) is never captured, not even by `all`, and is still notified; a `KeyUp` is notified at the focus that has it
+  now, even when the app's shortcuts owned the press.
   The generated props are common host props, as `focusable` is: a `Scroll`, `List` or `Overlay` can listen or
   capture for a focused descendant with the same typed Rust and TSX interface as `View`.
 - **System UI**: the status bar follows UIKit, where the topmost view controller's `preferredStatusBarStyle` decides
