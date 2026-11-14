@@ -146,7 +146,7 @@ mount(App);
 
 ## 出现与离开
 
-在桌面平台上，弹出层像 [Popover](./popover.md#entrance-and-exit) 一样随你的过渡出现和离开：`popupStartingClass` 是它第一帧的外观，`popupClass` 里的 `transition-*` 类把它过渡到自己的外观；`popupEndingClass` 是关闭后的外观，在这些过渡播放期间它会保留、不接受按压，随后触发 `onClose`。关闭时键盘焦点就回到输入框。在离开途中再次打开时，它从当前状态回到自己的外观。`popupStartingStyle` 和 `popupEndingStyle` 以内联样式做同样的事。用户要求减少动态效果时，它立即出现、立即离开；触摸屏上的 sheet 自带滑入和滑出的动作。
+在桌面平台上，弹出层像 [Popover](./popover.md#entrance-and-exit) 一样随你的过渡出现和离开：`popupStartingClass` 是它第一帧的外观，`popupClass` 里的 `transition-*` 类把它过渡到自己的外观；`popupEndingClass` 是关闭后的外观，在这些过渡播放期间它会保留、不接受按压，随后触发 `onClose`。关闭时键盘焦点就回到输入框，除非选择的 `onChange` 把焦点移到了别的视图（比如表单的下一个输入框），那样焦点就留在那里。在离开途中再次打开时，它从当前状态回到自己的外观。`popupStartingStyle` 和 `popupEndingStyle` 以内联样式做同样的事。用户要求减少动态效果时，它立即出现、立即离开；触摸屏上的 sheet 自带滑入和滑出的动作。
 
 ```tsx
 <Combobox
@@ -236,7 +236,7 @@ mount(App);
 
 ## 键盘
 
-输入框保持焦点时，按键与选择框的相同（见[键盘](./select.md#keyboard)），区别在于：字母和数字输入到输入框中并筛选列表，而不是输入跳转；Down 和 Up 打开关闭着的列表；在 `multiple` 时，Return 切换高亮的条目并保持列表打开；Mac 上的 Cmd+Return（其他平台为 Ctrl+Return）关闭列表并确认。Tab 和 Shift+Tab 关闭打开的列表，焦点移到下一个或上一个控件。在桌面平台上列表以其他方式关闭时，焦点留在输入框。
+输入框保持焦点时，按键与选择框的相同（见[键盘](./select.md#keyboard)），区别在于：字母和数字输入到输入框中并筛选列表，而不是输入跳转；Down 和 Up 打开关闭着的列表；在 `multiple` 时，Return 切换高亮的条目并保持列表打开；Mac 上的 Cmd+Return（其他平台为 Ctrl+Return）关闭列表并确认。Tab 和 Shift+Tab 关闭打开的列表，焦点移到下一个或上一个控件。在桌面平台上列表以其他方式关闭时，焦点留在输入框，除非选择的 `onChange` 把它移到了别的视图。
 
 <a id="accessibility"></a>
 

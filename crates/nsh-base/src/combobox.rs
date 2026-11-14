@@ -502,15 +502,15 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
             }
             cx.emit(ComboboxEvent::Close);
         }),
-        // Back to the input, unless a press outside or Tab took the
-        // keyboard somewhere else.
-        back: Rc::new(move || {
+        // Back to the input, unless a press outside, Tab or the app's
+        // `onChange` took the keyboard somewhere else.
+        back: Rc::new(move |popup| {
             let by = closed_by.replace(None);
             if !matches!(
                 by,
                 Some(OpenChangeReason::PressOutside | OpenChangeReason::Focus)
             ) {
-                field.focus();
+                field.focus_back(popup);
             }
         }),
     };
