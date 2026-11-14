@@ -104,7 +104,7 @@ export function Sheets() {
             <Trigger label="Filters" icon="list-filter" open={open()} onPress={show} />
             <Text style={{ flex: 1, fontSize: pointer ? 13 : 15, color: colors.muted, fontVariant: ["tabular-nums"] }}>{results(applied())} results</Text>
           </View>
-          <Sheet open={open()} side={side} closeOnSwipe={side === "bottom"} onOpenChange={changed("filters", (v) => open.set(v))} popupStyle={sheetPanel(side)} backdropStyle={backdrop()}>
+          <Sheet open={open()} side={side} accessibilityLabel="Filters" closeOnSwipe={side === "bottom"} onOpenChange={changed("filters", (v) => open.set(v))} popupStyle={sheetPanel(side)} backdropStyle={backdrop()}>
             <Head side={side} title="Filters" right={<If when={active(draft()).length > 0}><Badge label={`${active(draft()).length}`} tone="accent" /></If>} onClose={() => open.set(false)} />
             <Group title="Sort by">
               <Segmented
@@ -182,7 +182,7 @@ export function Sheets() {
             </View>
             <Button label="Edit profile" variant="secondary" selected={open()} onPress={show} />
           </View>
-          <Sheet open={open()} side={side} closeOnSwipe={side === "bottom"} onOpenChange={changed("profile", (v) => open.set(v))} popupStyle={sheetPanel(side)} backdropStyle={backdrop()}>
+          <Sheet open={open()} side={side} accessibilityLabel="Edit profile" closeOnSwipe={side === "bottom"} onOpenChange={changed("profile", (v) => open.set(v))} popupStyle={sheetPanel(side)} backdropStyle={backdrop()}>
             <Head side={side} title="Edit profile" onClose={() => open.set(false)} />
             <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
               <Avatar name={name() || "?"} size={52} />
@@ -223,7 +223,7 @@ export function Sheets() {
             <Trigger label={current().label} icon="panel-left" open={open()} onPress={() => open.set(true)} />
             <Caption label={current().count ? `${current().count} unread` : "All read"} />
           </View>
-          <Sheet open={open()} side="left" onOpenChange={changed("drawer", (v) => open.set(v))} popupStyle={{ ...sheetPanel("left"), width: Math.min(280, windowSize().width - 64), paddingHorizontal: 10, gap: 2 }} backdropStyle={backdrop()}>
+          <Sheet open={open()} side="left" accessibilityLabel="Mailboxes" onOpenChange={changed("drawer", (v) => open.set(v))} popupStyle={{ ...sheetPanel("left"), width: Math.min(280, windowSize().width - 64), paddingHorizontal: 10, gap: 2 }} backdropStyle={backdrop()}>
             <Text style={{ fontSize: pointer ? 12 : 13, fontWeight: "600", color: colors.faint, paddingHorizontal: 10, paddingBottom: 6 }}>Mailboxes</Text>
             <Each of={mailboxes}>
               {(m, i) => (

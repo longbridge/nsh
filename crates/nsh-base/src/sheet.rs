@@ -46,6 +46,8 @@ pub struct SheetProps {
     /// The inline style of the backdrop, over its classes.
     #[prop(default)]
     pub backdrop_style: Prop<Style>,
+    /// What screen readers call the sheet, a dialog: its title.
+    pub accessibility_label: Prop<Option<SharedString>>,
     /// The content, made on each opening.
     #[prop(lazy)]
     pub children: Prop<Children>,
@@ -77,6 +79,12 @@ pub enum SheetEvent {
 /// Android back button close it. It looks like nothing: style the panel
 /// with `popupClass` / `popupStyle` and the backdrop with `backdropClass`
 /// / `backdropStyle` (a translucent color).
+///
+/// It is a modal dialog, as [`crate::dialog`] is, on every platform: screen
+/// readers hear a dialog named by `accessibilityLabel` and keep to it, the
+/// keyboard focus leaves what is under it and Tab goes round its stops
+/// (where the keyboard moves between views), and the focus goes back where
+/// it was as it goes.
 #[component]
 pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
     let open = OpenState::new(props.open, props.default_open);
@@ -161,12 +169,6 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
                 height.set(frame.size.height.0.max(1.0));
                 motion.laid_out(frame.size);
             })
-            .on_cancel(move || {
-                cx.emit(SheetEvent::Cancel);
-                if props.close_on_escape.get_untracked() {
-                    change(false, OpenChangeReason::Cancel);
-                }
-            })
             .child(props.children);
         panel = panel
             .pan_values(None, Some(&motion.drag_y))
@@ -200,26 +202,26 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
         // children and scroll positions keep their state.
         panel = panel.bind_translate_y(&dragged_y);
         let layers = vec![backdrop.into_element(), panel.into_element()];
-        if nsh_core::element::os() == nsh_core::platform::Os::Web {
-            // A web modal is a separately sized surface. The player's host
-            // can present it over the viewport, including outside an iframe,
-            // while the sheet keeps its own motion and controlled lifetime.
-            vec![
-                nsh_core::element::modal()
-                    .animation(nsh_core::ModalAnimation::None)
-                    .close_on_escape(false)
-                    .close_on_swipe(false)
-                    .on_cancel(move || {
-                        cx.emit(SheetEvent::Cancel);
-                        if props.close_on_escape.get_untracked() {
-                            change(false, OpenChangeReason::Cancel);
-                        }
-                    })
-                    .children(layers)
-                    .into_element(),
-            ]
-        } else {
-            layers
-        }
+        // A dialog's modal root around both, with no motion or closing of
+        // its own: the sheet's are `SheetMotion`'s and its props'. It keeps
+        // screen readers and the keyboard focus to the sheet as a dialog
+        // does; on the web it is also a separately sized surface, which
+        // the player's host can present over the viewport, including
+        // outside an iframe.
+        vec![
+            crate::dialog()
+                .optional_label(props.accessibility_label)
+                .animation(nsh_core::ModalAnimation::None)
+                .close_on_escape(false)
+                .close_on_swipe(false)
+                .on_cancel(move || {
+                    cx.emit(SheetEvent::Cancel);
+                    if props.close_on_escape.get_untracked() {
+                        change(false, OpenChangeReason::Cancel);
+                    }
+                })
+                .children(layers)
+                .into_element(),
+        ]
     })
 }

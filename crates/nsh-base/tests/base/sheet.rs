@@ -1,7 +1,10 @@
 //! `Sheet`: it comes in when opened and goes once its slide-out ends, also
 //! on a manual clock that only the test moves (its end is the motion's,
 //! not a timer of the app's clock). A bottom sheet, and a menu a phone
-//! shows as one, stays above the software keyboard.
+//! shows as one, stays above the software keyboard. On every platform it
+//! is a modal dialog named by its `accessibilityLabel`: where the keyboard
+//! moves between views, the focus leaves what is under it, Tab goes round
+//! its stops and the focus goes back as it closes.
 
 use nsh_base::sheet;
 use nsh_core::{Size, element::Root, prelude::*};
@@ -782,4 +785,113 @@ fn a_menu_sheet_opened_with_the_keyboard_up_is_above_it() {
         px(844.0 - 336.0),
         "the last item right above the keyboard"
     );
+}
+
+/// A Settings sheet the app opens with a button, two buttons in its panel
+/// and a stop after it all, logging the focus they take.
+#[component]
+fn FocusSheet() -> impl IntoElement {
+    let open = signal(false);
+    let closes = signal(0);
+    let log = signal(String::from("focus"));
+    let note = move |what: &'static str| log.update(|log| *log = format!("{log} {what}"));
+    let stop = move |id: &'static str| {
+        view()
+            .test_id(id)
+            .focusable(true)
+            .h(px(44.0))
+            .on_focus(move |_: &()| note(id))
+            .child(text(id))
+    };
+    view()
+        .child(text(move || log.get()))
+        .child(text(move || format!("closes:{}", closes.get())))
+        .child(stop("open").on_press(move || open.set(true)))
+        .child(
+            sheet()
+                .open(move || Some(open.get()))
+                .accessibility_label("Settings")
+                .on_open_change(move |e: &nsh_base::SheetEvent| {
+                    if let nsh_base::SheetEvent::OpenChange(next, _) = e {
+                        open.set(*next);
+                        closes.update(|n| *n += 1);
+                    }
+                })
+                .child(
+                    view()
+                        .h(px(200.0))
+                        .child(stop("first"))
+                        .child(stop("second")),
+                ),
+        )
+        .child(stop("after"))
+}
+
+fn start_on<C: Component<Props = ()>>(os: nsh_core::platform::Os) -> Headless {
+    use nsh_core::platform::Idiom;
+
+    let mut config = EngineConfig {
+        viewport: Size::new(px(390.0), px(844.0)),
+        ..EngineConfig::new(Root::of::<C>())
+    };
+    config.environment.os = os;
+    config.environment.idiom = if matches!(os, nsh_core::platform::Os::Ios) {
+        Idiom::Phone
+    } else {
+        Idiom::Desktop
+    };
+    let mut app = Headless::start(config).unwrap();
+    app.first_render().unwrap();
+    app
+}
+
+#[test]
+fn a_sheet_is_a_dialog_named_by_its_label_everywhere() {
+    use nsh_core::platform::Os;
+
+    for os in [
+        Os::Ios,
+        Os::Android,
+        Os::MacOs,
+        Os::Windows,
+        Os::Linux,
+        Os::Web,
+    ] {
+        let mut app = start_on::<FocusSheet>(os);
+        app.press("id:open").unwrap();
+        app.wait_for("first").unwrap();
+        let screen = app.screen();
+        assert_eq!(screen.count("role:dialog[Settings]"), Ok(1), "{os:?}");
+        assert_eq!(screen.count("role:dialog >> id:second"), Ok(1), "{os:?}");
+    }
+}
+
+#[test]
+fn a_sheet_keeps_the_keyboard_focus_while_it_shows_and_gives_it_back() {
+    use nsh_core::platform::Os;
+
+    for os in [Os::MacOs, Os::Windows, Os::Linux, Os::Web] {
+        let mut app = start_on::<FocusSheet>(os);
+        app.press_key("tab").unwrap();
+        app.wait_for("text:focus open").unwrap();
+        // Opened from the keyboard: the focus leaves the button under it,
+        // and Tab goes round the panel's stops, never out to the rest.
+        app.press_key("enter").unwrap();
+        app.wait_for("first").unwrap();
+        app.wait(std::time::Duration::from_millis(400)).unwrap();
+        for _ in 0..3 {
+            app.press_key("tab").unwrap();
+        }
+        app.wait_for("text:focus open first second first")
+            .unwrap_or_else(|e| panic!("{os:?}: {e}"));
+        // Escape closes it, and the focus is the button's again.
+        app.press_key("escape").unwrap();
+        app.wait_for_gone("first", std::time::Duration::from_secs(2))
+            .unwrap();
+        app.wait_for("text:focus open first second first open")
+            .unwrap_or_else(|e| panic!("{os:?}: {e}"));
+        // Escape asked to close it once.
+        app.wait_for("text:closes:1")
+            .unwrap_or_else(|e| panic!("{os:?}: {e}"));
+    }
 }

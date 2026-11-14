@@ -1281,9 +1281,11 @@ transparent native text field, as `OtpInput`'s (its `diff` / `echoed`): what the
 selected segment, then the field holds the time again; a value the app sets is shown unless it is the user's change
 coming back.
 
-On the web, `Sheet` wraps its two overlays in a modal root with no platform animation. The embedding player
-reports that root’s presentation size independently of the app, so both the backdrop and panel follow
-`dialogs: "viewport"`. SheetMotion retains ownership of entering, leaving and controlled close requests.
+`Sheet` wraps its two overlays in a dialog's modal root (`nsh_base::dialog()`, named by `accessibilityLabel`) with no
+platform animation, closing or swipe of its own, on every platform: screen readers and the keyboard focus keep to it
+as to a `Dialog` (the newest modal is the focus scope), and it closes through its own `onCancel`. On the web the
+embedding player reports that root's presentation size independently of the app, so both the backdrop and panel
+follow `dialogs: "viewport"`. SheetMotion retains ownership of entering, leaving and controlled close requests.
 
 `Sheet` opts into downward dragging with `closeOnSwipe` (default false, bottom side). Its pan updates
 `SheetMotion.drag_y` on the platform's animation graph; a clamped fraction of the measured panel height drives both
