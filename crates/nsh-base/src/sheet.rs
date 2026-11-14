@@ -207,10 +207,14 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
         // screen readers and the keyboard focus to the sheet as a dialog
         // does; on the web it is also a separately sized surface, which
         // the player's host can present over the viewport, including
-        // outside an iframe.
+        // outside an iframe. On Android it reaches under the status bar,
+        // as the root view's overlays did: the backdrop covers the whole
+        // screen and a top or side panel starts at its top edge, padded by
+        // the safe area the app reads.
         vec![
             crate::dialog()
                 .optional_label(props.accessibility_label)
+                .status_bar_translucent(true)
                 .animation(nsh_core::ModalAnimation::None)
                 .close_on_escape(false)
                 .close_on_swipe(false)

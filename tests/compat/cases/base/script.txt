@@ -939,6 +939,8 @@ expect Life: sheet open
 frame parent:text:SheetBody 0 0 390 50
 # A dialog for screen readers, named by its `accessibilityLabel`.
 prop label:"Top sheet" role dialog
+# It covers the whole screen, under an Android status bar too.
+prop label:"Top sheet" statusBarTranslucent true
 style parent:text:SheetBody backgroundColor #abcdefff
 style below:parent:text:SheetBody backgroundColor #111111ff
 style below:parent:text:SheetBody opacity 0.75
