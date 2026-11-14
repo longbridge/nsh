@@ -96,8 +96,8 @@ fn part<E: Element>(el: E, props: DataTableProps, which: DataTablePart) -> E {
 
 /// `parts` with the column's own classes after the parts', which are the
 /// more specific: a title's `headerClass` (`row` is `None`), a cell's
-/// `cellClass` and the `positiveClass` or `negativeClass` its value calls
-/// for.
+/// `cellClass`, the `positiveClass` or `negativeClass` its value calls
+/// for, then the cell's `cellClasses` entry.
 fn column_parts<E: Element>(
     el: E,
     dt: &Dt,
@@ -114,25 +114,42 @@ fn column_parts<E: Element>(
         let (own, positive, negative) = {
             let st = dt.st.borrow();
             let column = st.defs.get(def)?;
+            // A title: `row` is absent. A cell whose row is not known yet
+            // keeps the column's cell class only when it has no rise or
+            // fall class, and skips the value.
             if row.is_none() {
                 return column.header_class.clone();
             }
-            let own = column.cell_class.clone();
-            if column.positive_class.is_none() && column.negative_class.is_none() {
-                return own;
-            }
             (
-                own,
+                column.cell_class.clone(),
                 column.positive_class.clone(),
                 column.negative_class.clone(),
             )
         };
-        let tone = match dt.cell_sign(row?.get()?, def) {
-            Some(true) => positive,
-            Some(false) => negative,
-            None => None,
+        let Some(row_index) = row.and_then(|row| row.get()) else {
+            return if positive.is_none() && negative.is_none() {
+                own
+            } else {
+                None
+            };
         };
-        match (own, tone) {
+        // A column with no rise or fall class skips reading the cell.
+        let tone = if positive.is_none() && negative.is_none() {
+            None
+        } else {
+            match dt.cell_sign(row_index, def) {
+                Some(true) => positive,
+                Some(false) => negative,
+                None => None,
+            }
+        };
+        let own = match (own, tone) {
+            (Some(a), Some(b)) => Some(format!("{a} {b}").into()),
+            (a, b) => a.or(b),
+        };
+        // After the column's classes: the app's mark for this one cell.
+        let marked = dt.cell_class(row_index, def);
+        match (own, marked) {
             (Some(a), Some(b)) => Some(format!("{a} {b}").into()),
             (a, b) => a.or(b),
         }
@@ -1532,11 +1549,11 @@ fn title(dt: Dt, def: usize, which: Region, w: Windows, custom: bool) -> impl In
                 if up_moved.replace(false) {
                     return;
                 }
-                let clicks = match p {
-                    EventPayload::Press(e) => e.clicks,
-                    _ => 1,
+                let (clicks, modifiers) = match p {
+                    EventPayload::Press(e) => (e.clicks, e.modifiers),
+                    _ => (1, Default::default()),
                 };
-                press_dt.header_press(def, clicks);
+                press_dt.header_press(def, clicks, modifiers);
             })
             .on_context_menu(move |e: &ContextMenuEvent| {
                 header_menu_dt.header_context_menu(def, e.page_position)

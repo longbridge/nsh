@@ -4205,6 +4205,12 @@ expect Selected: row 2 column 2
 tap id:read
 expect Read: 2:1 0-5
 tap id:scroll
+# A title press reports its column. The name cell of row 1 carries the
+# class from `cellClasses`. The rendered text sits in the render's holder,
+# in the placeholder, in that cell.
+style parent:parent:parent:text:"Cell 1:name fig" backgroundColor #00ff00ff
+tap text:Name
+expect Column: 0 1
 # A sortable column's sort button reports the next sort, which the app
 # sets (`sort`): from it, the next press goes on to descending, then
 # clears it.
@@ -4215,6 +4221,8 @@ expect Sorted: name descending
 tap id:sort:name
 expect Sorted: cleared
 covers [events] DataTable.onRowPress
+covers [events] DataTable.onColumnPress
+covers [props] DataTable.cellClasses
 covers [nsh/base] DataTable
 covers [props] DataTable.columns
 covers [props] DataTable.data
