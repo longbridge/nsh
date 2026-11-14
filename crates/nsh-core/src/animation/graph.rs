@@ -1,4 +1,6 @@
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
+
+use rustc_hash::FxHashMap;
 
 use super::{
     driver::{Running, ease},
@@ -69,7 +71,7 @@ enum Node {
         running: Option<Running>,
     },
     Interpolate {
-        input: NodeId,
+        input: Input,
         input_range: Vec<f32>,
         output: Output,
         extrapolate: (Extrapolate, Extrapolate),
@@ -79,7 +81,7 @@ enum Node {
         ascending: bool,
     },
     DiffClamp {
-        input: NodeId,
+        input: Input,
         min: f32,
         max: f32,
         /// The input and output at the last evaluation.
@@ -91,9 +93,43 @@ enum Node {
     },
     Math {
         op: MathOp,
-        a: Operand,
-        b: Operand,
+        a: Arg,
+        b: Arg,
     },
+}
+
+/// A node another node reads: its id, and the slot it was last found in,
+/// so that evaluating reads it there without looking the id up (checked
+/// against the id: a slot is taken again once its node is released).
+#[derive(Debug, Clone)]
+struct Input {
+    id: NodeId,
+    slot: Cell<u32>,
+}
+
+impl Input {
+    fn new(id: NodeId) -> Input {
+        Input {
+            id,
+            slot: Cell::new(u32::MAX),
+        }
+    }
+}
+
+/// An operand of a math node: [`Operand`], its node an [`Input`].
+#[derive(Debug, Clone)]
+enum Arg {
+    Node(Input),
+    Const(f32),
+}
+
+impl From<Operand> for Arg {
+    fn from(operand: Operand) -> Arg {
+        match operand {
+            Operand::Node(id) => Arg::Node(Input::new(id)),
+            Operand::Const(c) => Arg::Const(c),
+        }
+    }
 }
 
 /// A `diffClamp` moving to a bound after its scroll view came to rest.
@@ -120,8 +156,14 @@ const MAX_DEPTH: u32 = 64;
 /// All animation nodes of one surface.
 #[derive(Debug, Default, Clone)]
 pub struct Graph {
-    /// Indexed by node id (dense, assigned by JS).
-    nodes: Vec<Option<Node>>,
+    /// The live nodes, each in a slot of its own: as many slots as nodes
+    /// lived at once, not as ids were ever made (JS and the core each
+    /// count theirs up and never reuse one).
+    slots: Vec<Option<Slot>>,
+    /// The slots of the nodes, by id.
+    index: FxHashMap<NodeId, u32>,
+    /// Slots of released nodes, for the next nodes made.
+    free: Vec<u32>,
     /// Value nodes with a running animation.
     animating: Vec<NodeId>,
     /// Running composite animations.
@@ -135,16 +177,23 @@ pub struct Graph {
     baselines: Vec<(u32, Vec<(NodeId, f32)>)>,
     /// `diffClamp` nodes settling at a bound.
     snaps: Vec<NodeId>,
-    /// Which state of the graph the values in `values` are of: a change to
+    /// Which state of the graph the nodes' evaluated values are of: a change to
     /// the graph (an op, a value set, a frame) moves on to the next.
     generation: u64,
-    /// Nodes' values as evaluated, by node id, each with the generation it
-    /// is of: a node read by many (the time, a shared track) is evaluated
-    /// once a frame, not once for each reader.
-    values: RefCell<Vec<(u64, AnimationValue)>>,
     /// The evaluation under way reached a node deeper than `MAX_DEPTH`:
     /// what it gave stands for a cycle, not for a value to keep.
     cut: Cell<bool>,
+}
+
+/// A node and its value as last evaluated.
+#[derive(Debug, Clone)]
+struct Slot {
+    id: NodeId,
+    node: Node,
+    /// The value evaluated, with the generation of the graph it is of: a
+    /// node read by many (the time, a shared track) is evaluated once a
+    /// frame, not once for each reader.
+    value: Cell<(u64, AnimationValue)>,
 }
 
 /// A running composite animation.
@@ -518,7 +567,7 @@ impl Graph {
             } => self.insert(
                 node,
                 Node::Interpolate {
-                    input,
+                    input: Input::new(input),
                     ascending: input_range.windows(2).all(|w| w[0] <= w[1]),
                     input_range,
                     output,
@@ -535,7 +584,7 @@ impl Graph {
             } => self.insert(
                 node,
                 Node::DiffClamp {
-                    input,
+                    input: Input::new(input),
                     min,
                     max: max.max(min),
                     state: Cell::new(None),
@@ -543,16 +592,21 @@ impl Graph {
                     snapping: Cell::new(None),
                 },
             ),
-            AnimationOp::CreateMath { node, op, a, b } => {
-                self.insert(node, Node::Math { op, a, b })
-            }
+            AnimationOp::CreateMath { node, op, a, b } => self.insert(
+                node,
+                Node::Math {
+                    op,
+                    a: a.into(),
+                    b: b.into(),
+                },
+            ),
             AnimationOp::Set { node, value } => self.set(node, value, finished),
             AnimationOp::SetOutput { node, output } => {
-                if let Some(Some(Node::Interpolate {
+                if let Some(Node::Interpolate {
                     input_range,
                     output: current,
                     ..
-                })) = self.nodes.get_mut(node as usize)
+                }) = self.node_mut(node)
                     && output_len(&output) == input_range.len()
                 {
                     *current = output;
@@ -619,26 +673,20 @@ impl Graph {
             }
             AnimationOp::Release { node } => {
                 self.stop(node, finished);
-                if let Some(slot) = self.nodes.get_mut(node as usize) {
-                    *slot = None;
-                }
+                self.remove(node);
             }
             AnimationOp::SetOffset { node, offset: new } => {
-                if let Some(Some(Node::Value { offset, .. })) = self.nodes.get_mut(node as usize) {
+                if let Some(Node::Value { offset, .. }) = self.node_mut(node) {
                     *offset = new;
                 }
             }
             AnimationOp::FlattenOffset { node } => {
-                if let Some(Some(Node::Value { value, offset, .. })) =
-                    self.nodes.get_mut(node as usize)
-                {
+                if let Some(Node::Value { value, offset, .. }) = self.node_mut(node) {
                     *value += std::mem::take(offset);
                 }
             }
             AnimationOp::ExtractOffset { node } => {
-                if let Some(Some(Node::Value { value, offset, .. })) =
-                    self.nodes.get_mut(node as usize)
-                {
+                if let Some(Node::Value { value, offset, .. }) = self.node_mut(node) {
                     *offset += std::mem::take(value);
                 }
             }
@@ -660,12 +708,12 @@ impl Graph {
         start: Option<f64>,
         finished: &mut Vec<Finished>,
     ) -> bool {
-        let Some(Some(Node::Value {
+        let Some(Node::Value {
             value,
             velocity,
             running,
             ..
-        })) = self.nodes.get_mut(node as usize)
+        }) = self.node_mut(node)
         else {
             return false;
         };
@@ -692,7 +740,7 @@ impl Graph {
 
     /// The animation running on value `node`.
     fn running_id(&self, node: NodeId) -> Option<AnimationId> {
-        match self.nodes.get(node as usize)? {
+        match self.node(node) {
             Some(Node::Value {
                 running: Some(r), ..
             }) => Some(r.id),
@@ -701,12 +749,88 @@ impl Graph {
     }
 
     fn insert(&mut self, id: NodeId, node: Node) {
-        let idx = id as usize;
-        if idx >= self.nodes.len() {
-            self.nodes
-                .resize_with((idx + 1).next_power_of_two(), || None);
+        let slot = Slot {
+            id,
+            node,
+            value: Cell::new((u64::MAX, AnimationValue::Number(0.0))),
+        };
+        if let Some(&i) = self.index.get(&id) {
+            self.slots[i as usize] = Some(slot);
+            return;
         }
-        self.nodes[idx] = Some(node);
+        let i = match self.free.pop() {
+            Some(i) => {
+                self.slots[i as usize] = Some(slot);
+                i
+            }
+            None => {
+                self.slots.push(Some(slot));
+                (self.slots.len() - 1) as u32
+            }
+        };
+        self.index.insert(id, i);
+    }
+
+    /// Releases node `id`; once most slots are free, the nodes move
+    /// together and give back what a crowd of nodes, since released, took.
+    fn remove(&mut self, id: NodeId) {
+        let Some(i) = self.index.remove(&id) else {
+            return;
+        };
+        self.slots[i as usize] = None;
+        self.free.push(i);
+        let live = self.index.len();
+        if self.slots.len() > 4 * live.max(16) {
+            // Readers find a moved input by its id, once, on their next
+            // evaluation.
+            self.slots.retain(Option::is_some);
+            self.slots.shrink_to(2 * live);
+            self.free.clear();
+            self.free.shrink_to(live);
+            for (i, slot) in self.slots.iter().enumerate() {
+                if let Some(slot) = slot {
+                    self.index.insert(slot.id, i as u32);
+                }
+            }
+            self.index.shrink_to(2 * live);
+        }
+    }
+
+    /// The slot of node `id`.
+    fn slot(&self, id: NodeId) -> Option<&Slot> {
+        let &i = self.index.get(&id)?;
+        self.slots[i as usize].as_ref()
+    }
+
+    /// The slot of the node `input` reads: where it was last, or found by
+    /// its id.
+    fn find(&self, input: &Input) -> Option<&Slot> {
+        if let Some(Some(slot)) = self.slots.get(input.slot.get() as usize)
+            && slot.id == input.id
+        {
+            return Some(slot);
+        }
+        let &i = self.index.get(&input.id)?;
+        input.slot.set(i);
+        self.slots[i as usize].as_ref()
+    }
+
+    fn node(&self, id: NodeId) -> Option<&Node> {
+        self.slot(id).map(|slot| &slot.node)
+    }
+
+    fn node_mut(&mut self, id: NodeId) -> Option<&mut Node> {
+        let &i = self.index.get(&id)?;
+        self.slots[i as usize].as_mut().map(|slot| &mut slot.node)
+    }
+
+    /// How many nodes the graph has room for, live or not.
+    #[cfg(test)]
+    fn storage(&self) -> usize {
+        self.slots
+            .capacity()
+            .max(self.index.capacity())
+            .max(self.free.capacity())
     }
 
     /// Sets a value directly (gestures, scroll offsets, JS `set`), stopping
@@ -715,9 +839,9 @@ impl Graph {
         self.changed();
         self.stop(node, finished);
         self.route_leaf_ends(finished);
-        if let Some(Some(Node::Value {
+        if let Some(Node::Value {
             value, velocity, ..
-        })) = self.nodes.get_mut(node as usize)
+        }) = self.node_mut(node)
         {
             *value = new;
             *velocity = 0.0;
@@ -725,9 +849,9 @@ impl Graph {
     }
 
     fn stop(&mut self, node: NodeId, finished: &mut Vec<Finished>) {
-        if let Some(Some(Node::Value {
+        if let Some(Node::Value {
             running, velocity, ..
-        })) = self.nodes.get_mut(node as usize)
+        }) = self.node_mut(node)
             && let Some(old) = running.take()
         {
             *velocity = 0.0;
@@ -742,7 +866,7 @@ impl Graph {
 
     /// The current value of a value node.
     pub fn value(&self, node: NodeId) -> Option<f32> {
-        match self.nodes.get(node as usize)? {
+        match self.node(node) {
             Some(Node::Value { value, .. }) => Some(*value),
             _ => None,
         }
@@ -763,15 +887,12 @@ impl Graph {
         if !self.snaps.is_empty() {
             return None;
         }
-        let drivers = self
-            .animating
-            .iter()
-            .map(|&node| match self.nodes.get(node as usize) {
-                Some(Some(Node::Value {
-                    running: Some(r), ..
-                })) => r.frame_rate(),
-                _ => None,
-            });
+        let drivers = self.animating.iter().map(|&node| match self.node(node) {
+            Some(Node::Value {
+                running: Some(r), ..
+            }) => r.frame_rate(),
+            _ => None,
+        });
         let programs = self.programs.iter().map(|p| p.frame_rate);
         drivers.chain(programs).reduce(highest_frame_rate).flatten()
     }
@@ -812,16 +933,13 @@ impl Graph {
                 None => Some(now),
                 Some(_) => p.root.deadline(self, now),
             });
-        let snaps = self
-            .snaps
-            .iter()
-            .filter_map(|&node| match self.nodes.get(node as usize) {
-                Some(Some(Node::DiffClamp { snapping, .. })) => {
-                    let snap = snapping.get()?;
-                    Some(snap.start.map_or(now, |start| start + SNAP_SECONDS))
-                }
-                _ => None,
-            });
+        let snaps = self.snaps.iter().filter_map(|&node| match self.node(node) {
+            Some(Node::DiffClamp { snapping, .. }) => {
+                let snap = snapping.get()?;
+                Some(snap.start.map_or(now, |start| start + SNAP_SECONDS))
+            }
+            _ => None,
+        });
         // A millisecond past it: a step there finds it ended whatever the
         // rounding of the time elapsed.
         leaves
@@ -833,8 +951,8 @@ impl Graph {
 
     /// The animation running on value `node`.
     fn running(&self, node: NodeId) -> Option<&Running> {
-        match self.nodes.get(node as usize) {
-            Some(Some(Node::Value { running, .. })) => running.as_ref(),
+        match self.node(node) {
+            Some(Node::Value { running, .. }) => running.as_ref(),
             _ => None,
         }
     }
@@ -848,29 +966,37 @@ impl Graph {
         self.changed();
         let mut started = false;
         let at = self.eval(source).number();
+        // In the order of their ids, as they were made.
+        let mut clamps: Vec<NodeId> = self
+            .slots
+            .iter()
+            .flatten()
+            .filter(|slot| matches!(slot.node, Node::DiffClamp { snap: true, .. }))
+            .map(|slot| slot.id)
+            .collect();
+        clamps.sort_unstable();
         // Register moving nodes first, independent of their ids. Bound
         // dependents then hold their output while those inputs settle.
         for hold_bounds in [false, true] {
             if hold_bounds && !started {
                 break;
             }
-            for i in 0..self.nodes.len() {
-                let Some(Node::DiffClamp {
-                    input,
+            for &i in &clamps {
+                let Some(&Node::DiffClamp {
+                    ref input,
                     min,
                     max,
-                    snap: true,
                     ..
-                }) = &self.nodes[i]
+                }) = self.node(i)
                 else {
                     continue;
                 };
-                let (input, min, max) = (*input, *min, *max);
+                let input = input.id;
                 if !self.depends(input, source, 0) {
                     continue;
                 }
                 // Brings its output up to the input.
-                let out = self.eval(i as NodeId).number();
+                let out = self.eval(i).number();
                 let x = self.eval(input).number();
                 let bounded = out <= min || out >= max;
                 if bounded != hold_bounds {
@@ -886,7 +1012,7 @@ impl Graph {
                 } else {
                     min
                 };
-                if let Some(Node::DiffClamp { snapping, .. }) = &self.nodes[i] {
+                if let Some(Node::DiffClamp { snapping, .. }) = self.node(i) {
                     snapping.set(Some(Snap {
                         from: out,
                         to,
@@ -899,8 +1025,8 @@ impl Graph {
                 }
                 // Read from now on as settling.
                 self.changed();
-                if !self.snaps.contains(&(i as NodeId)) {
-                    self.snaps.push(i as NodeId);
+                if !self.snaps.contains(&i) {
+                    self.snaps.push(i);
                 }
                 started = true;
             }
@@ -916,13 +1042,13 @@ impl Graph {
         if depth > MAX_DEPTH {
             return false;
         }
-        match self.nodes.get(node as usize) {
-            Some(Some(Node::Interpolate { input, .. } | Node::DiffClamp { input, .. })) => {
-                self.depends(*input, source, depth + 1)
+        match self.node(node) {
+            Some(Node::Interpolate { input, .. } | Node::DiffClamp { input, .. }) => {
+                self.depends(input.id, source, depth + 1)
             }
-            Some(Some(Node::Math { a, b, .. })) => [a, b].into_iter().any(|o| match *o {
-                Operand::Node(n) => self.depends(n, source, depth + 1),
-                Operand::Const(_) => false,
+            Some(Node::Math { a, b, .. }) => [a, b].into_iter().any(|o| match o {
+                Arg::Node(n) => self.depends(n.id, source, depth + 1),
+                Arg::Const(_) => false,
             }),
             _ => false,
         }
@@ -931,11 +1057,14 @@ impl Graph {
     /// Moves the settling `diffClamp` nodes to `now`. True if one moved.
     fn run_snaps(&mut self, now: f64) -> bool {
         let mut changed = false;
-        let nodes = &self.nodes;
+        let (index, slots) = (&self.index, &self.slots);
         self.snaps.retain(|&node| {
-            let Some(Some(Node::DiffClamp {
-                state, snapping, ..
-            })) = nodes.get(node as usize)
+            let Some(Some(Slot {
+                node: Node::DiffClamp {
+                    state, snapping, ..
+                },
+                ..
+            })) = index.get(&node).map(|&i| &slots[i as usize])
             else {
                 return false;
             };
@@ -984,12 +1113,16 @@ impl Graph {
     /// Steps the animation of `node` to `now`: `(value changed, ended)`.
     /// Ends of composite steps go to `leaf_ends`, with their exact time.
     fn step_node(&mut self, node: NodeId, now: f64, finished: &mut Vec<Finished>) -> (bool, bool) {
-        let Some(Some(Node::Value {
+        let Some(Node::Value {
             value,
             velocity,
             running: running @ Some(_),
             ..
-        })) = self.nodes.get_mut(node as usize)
+        }) = self
+            .index
+            .get(&node)
+            .and_then(|&i| self.slots[i as usize].as_mut())
+            .map(|slot| &mut slot.node)
         else {
             return (false, true);
         };
@@ -1062,65 +1195,74 @@ impl Graph {
         self.eval_depth(node, 0)
     }
 
-    /// The value of `node`, evaluated once for this generation of the
-    /// graph and kept (unless a cycle cut it short).
+    /// The value of `node` ([`Graph::eval_slot`]'s).
     fn eval_depth(&self, node: NodeId, depth: u32) -> AnimationValue {
         if depth > MAX_DEPTH {
             self.cut.set(true);
             return AnimationValue::Number(0.0);
         }
-        let i = node as usize;
-        if let Some(&(generation, value)) = self.values.borrow().get(i)
-            && generation == self.generation
-        {
+        match self.slot(node) {
+            Some(slot) => self.eval_slot(slot, depth),
+            None => AnimationValue::Number(0.0),
+        }
+    }
+
+    /// The value of the node `input` reads ([`Graph::eval_slot`]'s).
+    fn eval_input(&self, input: &Input, depth: u32) -> AnimationValue {
+        if depth > MAX_DEPTH {
+            self.cut.set(true);
+            return AnimationValue::Number(0.0);
+        }
+        match self.find(input) {
+            Some(slot) => self.eval_slot(slot, depth),
+            None => AnimationValue::Number(0.0),
+        }
+    }
+
+    /// The value of the node in `slot`, evaluated once for this generation
+    /// of the graph and kept (unless a cycle cut it short).
+    fn eval_slot(&self, slot: &Slot, depth: u32) -> AnimationValue {
+        let (generation, value) = slot.value.get();
+        if generation == self.generation {
             return value;
         }
         let outer = self.cut.replace(false);
-        let value = self.compute(node, depth);
+        let value = self.compute(&slot.node, depth);
         if !self.cut.get() {
-            let mut values = self.values.borrow_mut();
-            if i >= values.len() {
-                values.resize(
-                    self.nodes.len().max(i + 1),
-                    (u64::MAX, AnimationValue::Number(0.0)),
-                );
-            }
-            values[i] = (self.generation, value);
+            slot.value.set((self.generation, value));
         }
         self.cut.set(outer || self.cut.get());
         value
     }
 
-    /// `node`'s value from its inputs' (`eval_depth`'s).
-    fn compute(&self, node: NodeId, depth: u32) -> AnimationValue {
-        match self.nodes.get(node as usize) {
-            Some(Some(Node::Value { value, offset, .. })) => {
-                AnimationValue::Number(*value + *offset)
-            }
-            Some(Some(Node::Interpolate {
+    /// `node`'s value from its inputs' (`eval_input`'s).
+    fn compute(&self, node: &Node, depth: u32) -> AnimationValue {
+        match node {
+            Node::Value { value, offset, .. } => AnimationValue::Number(*value + *offset),
+            Node::Interpolate {
                 input,
                 input_range,
                 output,
                 extrapolate,
                 easing,
                 ascending,
-            })) => interpolate(
-                self.eval_depth(*input, depth + 1).number(),
+            } => interpolate(
+                self.eval_input(input, depth + 1).number(),
                 input_range,
                 output,
                 *extrapolate,
                 *easing,
                 *ascending,
             ),
-            Some(Some(Node::DiffClamp {
+            Node::DiffClamp {
                 input,
                 min,
                 max,
                 state,
                 snapping,
                 ..
-            })) => {
-                let x = self.eval_depth(*input, depth + 1).number();
+            } => {
+                let x = self.eval_input(input, depth + 1).number();
                 if let Some(mut snap) = snapping.get() {
                     if self.eval_depth(snap.source, depth + 1).number() != snap.at {
                         // Scrolled again: it follows the input from where
@@ -1143,10 +1285,10 @@ impl Graph {
                 state.set(Some((x, out)));
                 AnimationValue::Number(out)
             }
-            Some(Some(Node::Math { op, a, b })) => {
-                let operand = |o: &Operand| match *o {
-                    Operand::Node(n) => self.eval_depth(n, depth + 1).number(),
-                    Operand::Const(c) => c,
+            Node::Math { op, a, b } => {
+                let operand = |o: &Arg| match o {
+                    Arg::Node(n) => self.eval_input(n, depth + 1).number(),
+                    Arg::Const(c) => *c,
                 };
                 let (a, b) = (operand(a), operand(b));
                 AnimationValue::Number(match op {
@@ -1159,7 +1301,6 @@ impl Graph {
                     MathOp::Div => 0.0,
                 })
             }
-            _ => AnimationValue::Number(0.0),
         }
     }
 }
@@ -1453,6 +1594,65 @@ mod tests {
         assert_eq!(g.eval(3 + 2 * 79), AnimationValue::Number(0.0));
         assert_eq!(g.eval(3 + 2 * 10), AnimationValue::Number(5.0));
         assert_eq!(g.eval(3 + 2 * 79), AnimationValue::Number(0.0));
+    }
+
+    #[test]
+    fn storage_follows_the_live_nodes_not_every_id_ever_made() {
+        // Ids are never reused: a long session makes and releases nodes
+        // under ever larger ids while few live at once, one of them (the
+        // value at 1) for the whole session.
+        let mut g = graph_of(7.0, []);
+        let mut f = Vec::new();
+        let mut live = std::collections::VecDeque::new();
+        let mut next: NodeId = 3;
+        let mut peak = 0;
+        for i in 0..50_000 {
+            g.apply(
+                AnimationOp::CreateValue {
+                    node: next,
+                    value: i as f32,
+                },
+                &mut f,
+            );
+            g.apply(add(next + 2, next, Operand::Node(1)), &mut f);
+            assert_eq!(g.eval(next + 2), AnimationValue::Number(i as f32 + 7.0));
+            live.push_back(next);
+            next += 4;
+            while live.len() > 8 {
+                let old = live.pop_front().unwrap();
+                g.apply(AnimationOp::Release { node: old + 2 }, &mut f);
+                g.apply(AnimationOp::Release { node: old }, &mut f);
+            }
+            peak = peak.max(1 + 2 * live.len());
+        }
+        assert!(
+            g.storage() <= 8 * peak,
+            "{} slots for at most {peak} live nodes",
+            g.storage()
+        );
+        assert_eq!(g.eval(1), AnimationValue::Number(7.0));
+        // Released nodes are gone, a live one still reads its inputs.
+        assert_eq!(g.value(3), None);
+        let last = *live.back().unwrap();
+        assert_eq!(g.eval(last + 2), AnimationValue::Number(49_999.0 + 7.0));
+    }
+
+    #[test]
+    fn a_reader_of_a_released_node_does_not_read_the_node_made_after_it() {
+        let mut g = graph_of(5.0, [add(3, 1, Operand::Const(1.0))]);
+        let mut f = Vec::new();
+        assert_eq!(g.eval(3), AnimationValue::Number(6.0));
+        g.apply(AnimationOp::Release { node: 1 }, &mut f);
+        // Made where the released one was.
+        g.apply(
+            AnimationOp::CreateValue {
+                node: 5,
+                value: 100.0,
+            },
+            &mut f,
+        );
+        assert_eq!(g.eval(3), AnimationValue::Number(1.0));
+        assert_eq!(g.eval(5), AnimationValue::Number(100.0));
     }
 
     /// A frame of many readers of shared inputs, as a vector animation's
