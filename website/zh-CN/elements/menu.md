@@ -232,7 +232,7 @@ function ViewMenu() {
 
 没有 `open` 时，菜单自己保存状态（`Menu` 的初始值为 `defaultOpen`）。有 `open` 时，状态由应用持有，并在 `onOpenChange({ open, reason })` 中修改它，原因为 `"triggerPress"`、`"select"`、`"pressOutside"`、`"backdropPress"`、`"cancel"`、`"contextMenu"` 或 `"longPress"`。
 
-`Submenu` 自己保存状态，并在 `onOpenChange({ open, reason })` 中报告用户引起的每次打开和关闭：`"hover"`（指针移到它的条目上，或移到所在菜单的另一个条目上）、`"focus"`（键盘焦点移到所在菜单的另一个条目上）、`"triggerPress"`（按下它的条目，或在条目上按右方向键、Return 或空格）、`"cancel"`（左方向键、Escape、返回键或它的 `back` 行），整个菜单关闭时则是菜单的原因（`"select"`、`"pressOutside"` 等）。它的条目在打开时才创建，因此应用可以在第一次打开时才开始加载条目，加载到后再显示。应用自己关闭菜单时不会报告。
+`Submenu` 在应用没有设置它的 `open` 时自己保存状态，并在 `onOpenChange({ open, reason })` 中报告用户引起的每次打开和关闭：`"hover"`（指针移到它的条目上，或移到所在菜单的另一个条目上）、`"focus"`（键盘焦点移到所在菜单的另一个条目上）、`"triggerPress"`（按下它的条目，或在条目上按右方向键、Return 或空格）、`"cancel"`（左方向键、Escape、返回键或它的 `back` 行），整个菜单关闭时则是菜单的原因（`"select"`、`"pressOutside"` 等）。它的条目在打开时才创建，因此应用可以在第一次打开时才开始加载条目，加载到后再显示。应用自己关闭菜单时不会报告。
 
 ```tsx
 const recent = signal<string[] | null>(null);
@@ -246,6 +246,20 @@ const recent = signal<string[] | null>(null);
   <Each of={recent() ?? []}>
     {(name) => <MenuItem onSelect={() => openFile(name())}><Text>{name()}</Text></MenuItem>}
   </Each>
+</Submenu>
+```
+
+设置了 `open` 的 `Submenu` 和 `Menu` 一样是受控的：`onOpenChange` 提出请求，显示的是应用设置的值。应用按数据重新建出的条目（菜单打开时会变化的列表）也会重新建出其中的子菜单；受控的子菜单按应用的值重新打开，键盘焦点回到原来所在的条目，用户停在原处。
+
+```tsx
+const modelsOpen = signal(false);
+
+<Submenu
+  open={modelsOpen()}
+  onOpenChange={({ open }) => modelsOpen.set(open)}
+  trigger={<Text>Model</Text>}
+>
+  <Each of={models()}>{(m) => <MenuItem onSelect={() => pick(m())}><Text>{m().name}</Text></MenuItem>}</Each>
 </Submenu>
 ```
 
@@ -367,6 +381,7 @@ import { MenuButton } from "nsh/base";
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
 | `trigger` | `.trigger(..)` | `JSX.Element` | 无 | 打开它的条目。 |
+| `open` | `.open(..)` | `boolean` | 无 | 是否打开，由应用持有（在 `onOpenChange` 中修改）；不设置时子菜单自己保存状态。 |
 | `back` | `.back(..)` | `JSX.Element` | 无 | 手机：它的条目上方返回上一级条目的那一行。 |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 它不会打开。 |
 | `offset` | `.offset(..)` | `number` | `0` | 桌面端：它的弹出层与外层菜单之间的间距。 |

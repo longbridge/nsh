@@ -818,6 +818,16 @@ expect Log: share false cancel
 tap text:LockedItem
 absent HiddenItem
 expect NewItem
+# A controlled one asks, and shows its items as the app opens it; its
+# back row asks to close it.
+tap text:ToolsItem
+expect Log: tools true triggerPress
+expect RulerItem
+absent NewItem
+tap text:ToolsBack
+expect Log: tools false cancel
+expect NewItem
+absent RulerItem
 # Choosing an item closes the menu.
 tap text:NewItem
 expect Log: menu false select
@@ -845,6 +855,7 @@ covers [events] Menu.onOpenChange
 covers [props] MenuItem.closeOnSelect
 covers [events] MenuItem.onSelect
 covers [props] Submenu.trigger
+covers [props] Submenu.open
 covers [props] Submenu.back
 covers [events] Submenu.onOpenChange
 # The context menu: a finger held on its trigger.
