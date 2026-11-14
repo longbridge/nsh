@@ -3673,3 +3673,37 @@ test("restacking a view that holds the focus moves its siblings, not it", () => 
     globalThis.document = previous;
   }
 });
+
+test("animated values skip a view that left the page until it is back, and reach one not on it yet", () => {
+  const { player } = fakePlayer();
+  let reads = 0;
+  const inline = new Map();
+  const el = {
+    isConnected: false,
+    _animation: {},
+    style: {
+      getPropertyValue: (name) => (reads++, inline.get(name) ?? ""),
+      setProperty: (name, value) => inline.set(name, value),
+    },
+  };
+  player.views = new Map([[2, el]]);
+  // Made and bound before it is inserted: it shows its value once it is.
+  player.op_a(["a", 2, "opacity", "0.1"]);
+  assert.equal(inline.get("opacity"), "0.1");
+  el.isConnected = true;
+  player.op_a(["a", 2, "opacity", "0.2"]);
+  assert.equal(inline.get("opacity"), "0.2");
+  // Removed: its node lives on until it is collected, and its looping
+  // value comes with every batch, touching it no more.
+  el.isConnected = false;
+  reads = 0;
+  for (const value of ["0.3", "0.4", "0.5"]) player.op_a(["a", 2, "opacity", value]);
+  player.op_a(["a", 2, "transform", "scale(2)"]);
+  assert.equal(reads, 0);
+  assert.equal(inline.get("opacity"), "0.2");
+  assert.equal(inline.get("transform"), undefined);
+  // Inserted again: the batch that inserts it writes it.
+  el.isConnected = true;
+  player.op_a(["a", 2, "opacity", "0.6"]);
+  assert.equal(inline.get("opacity"), "0.6");
+});

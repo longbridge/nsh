@@ -2558,6 +2558,16 @@ class Player {
   op_a([, id, prop, value]) {
     const el = this.view(id);
     if (!el) return;
+    // A view that left the page keeps its bindings until its node is
+    // collected (`op_d`), which may be long after: a view mounted and
+    // removed again and again (a looping pulse inside a condition) would
+    // have every batch write many views no one sees. One that was on the
+    // page and is off it now is skipped; it is written again with the
+    // batch that inserts it again (every batch writes every bound value,
+    // after its inserts). One never on the page yet is written, so it
+    // shows its values once it is; one animating out is still on it.
+    if (el.isConnected) el._onPage = true;
+    else if (el._onPage) return;
     if (prop.startsWith("canvas:") && el._shader) {
       this.shaderSlot(el, Number(prop.slice(7)), value);
       return;
