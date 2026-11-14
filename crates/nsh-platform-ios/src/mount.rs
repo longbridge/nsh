@@ -1471,6 +1471,7 @@ impl Mounter {
                     scroll.setDecelerationRate(rate as CGFloat);
                     scroll.setScrollEnabled(b.enabled);
                     scroll.setBounces(b.bounces);
+                    scroll.setScrollsToTop(b.scrolls_to_top);
                     scroll.setAlwaysBounceVertical(b.bounces && !s.horizontal);
                     scroll.setAlwaysBounceHorizontal(b.bounces && s.horizontal);
                     // The keyboard and refreshing add to the content inset.
