@@ -38,8 +38,6 @@ animation::motion::MotionSpec::start_values ->                   # a motion chan
 animation::motion::MotionSpec::values(values)                    # a motion channel's value (an opacity, points or degrees by channel)
 animation::motion::keyframe_ends ->                              # a generic animated value (any prop: opacity, a color channel, a length)
 animation::motion::stagger_delay ->                              # a count of intervals
-animation::ops::AnimationOp::CreateDiffClamp.max                 # a generic animated value (any prop: opacity, a color channel, a length)
-animation::ops::AnimationOp::CreateDiffClamp.min                 # a generic animated value (any prop: opacity, a color channel, a length)
 animation::ops::AnimationOp::CreateInterpolate.input_range       # interpolation input stops (generic animated values)
 animation::ops::AnimationOp::CreateValue.value                   # a generic animated value (any prop: opacity, a color channel, a length)
 animation::ops::AnimationOp::Set.value                           # a generic animated value (any prop: opacity, a color channel, a length)
@@ -294,10 +292,6 @@ element::ambient::animated_value(value)                               # an anima
 element::ambient::font_scale ->                                       # a font scale factor
 element::ambient::keyboard_duration ->                                # time
 element::ambient::pixel_ratio ->                                      # device pixels per point
-element::animated::AnimatedNode::diff_clamp(max)                      # an animated value (any quantity)
-element::animated::AnimatedNode::diff_clamp(min)                      # an animated value (any quantity)
-element::animated::AnimatedNode::diff_clamp_with(max)                 # an animated value (any quantity)
-element::animated::AnimatedNode::diff_clamp_with(min)                 # an animated value (any quantity)
 element::animated::AnimatedNode::interpolate(input)                   # an animated value (any quantity)
 element::animated::AnimatedNode::interpolate(output)                  # an animated value (any quantity)
 element::animated::AnimatedNode::interpolate_colors(input)            # an animated value (any quantity)
@@ -308,10 +302,6 @@ element::animated::AnimatedValue::decay_within(_)                     # an anima
 element::animated::AnimatedValue::decay_within(bounce)                # a rate or a physical constant of an animation
 element::animated::AnimatedValue::decay_within(deceleration)          # a rate or a physical constant of an animation
 element::animated::AnimatedValue::decay_within(velocity)              # a rate or a physical constant of an animation
-element::animated::AnimatedValue::diff_clamp(max)                     # an animated value (any quantity)
-element::animated::AnimatedValue::diff_clamp(min)                     # an animated value (any quantity)
-element::animated::AnimatedValue::diff_clamp_with(max)                # an animated value (any quantity)
-element::animated::AnimatedValue::diff_clamp_with(min)                # an animated value (any quantity)
 element::animated::AnimatedValue::interpolate(input)                  # an animated value (any quantity)
 element::animated::AnimatedValue::interpolate(output)                 # an animated value (any quantity)
 element::animated::AnimatedValue::interpolate_colors(input)           # an animated value (any quantity)
