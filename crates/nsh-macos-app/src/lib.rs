@@ -102,6 +102,11 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     if field("activationPolicy").as_deref() == Some("accessory") {
         options.activation_policy = ActivationPolicy::Accessory;
     }
+    // `nsh run` of a Rust app runs the runner outside an app bundle and
+    // names the app's icon; a packaged app's bundle has its own.
+    if developing {
+        options.icon = field("icon").map(std::path::PathBuf::from);
+    }
     // `open -a <App> --args --fps` shows the performance monitor, and so
     // does `NSHPerformanceMonitor` (a boolean) in the bundle's Info.plist:
     // a build that opens with it however it is launched (the Dock, Finder,

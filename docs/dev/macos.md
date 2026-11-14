@@ -180,7 +180,11 @@ belong to the app, which owns retention and its storage budget.
   Full Screen, Close: items of those roles, `chrome::role_item`, labelled in the language the app
   shows, as its role-only menu items are; the core sends `DesktopCommand::SetMenuLabels` when that language changes
   (`nsh/i18n`), rebuilding both and the tray menu (`chrome::relabel`)), titled with `AppOptions::title`: `name_app` sets the main bundle's `CFBundleName` to it, as the
-  menu bar shows that (the development host has no bundle; `nsh run` passes it the app's name with `--name`). The window
+  menu bar shows that (the development host has no bundle; `nsh run` passes it the app's name with `--name`). For the
+  same reason the host has no icon of its own: `AppOptions::icon` (`--icon <png>`, which `nsh run` and `nsh test` pass
+  from nsh.json `"icon"` for macOS; for a Rust app, which `nsh run` runs with the release runner in place, its
+  `app.json` `icon`, read only then) becomes `applicationIconImage` before the window shows, so the Dock, the app
+  switcher and the notifications show the app's (`set_app_icon`); a packaged app's bundle carries its own. The window
   opens centered where AppKit centers a new one, or on `AppOptions::display`: a `WindowDisplay::Index` of
   `NSScreen.screens` (the host's one-based `--display <n>`) or `WindowDisplay::Secondary` (`--display secondary`,
   `nsh test`'s default: the first display besides the primary one whose frame is not the primary's, as a mirror's
