@@ -766,6 +766,10 @@ pub struct TouchEvent {
     /// A view around the fingers whose `panActivation` the platform
     /// activated with this event: it becomes the responder.
     pub activated: Option<NodeId>,
+    /// The modifier keys held when the changed pointer went down, as a
+    /// press's [`PressEvent::modifiers`] (none for a finger on a touch
+    /// screen).
+    pub modifiers: crate::keymap::Modifiers,
 }
 
 /// What the user pasted into an input ([`EventKind::Paste`]): what the

@@ -25,6 +25,8 @@ final class ModalHost {
     /** The modal's root view, placed by the core. */
     final Box root;
     private final Container container;
+    /** This dialog window's shortcuts, raw keys, capture rules and Tab traversal. */
+    private final KeyDispatch keys;
     private Dialog dialog;
     int animation; // 0 slide, 1 fade, 2 none
     /** `closeOnEscape`: the back button (Android's Escape) closes it here, then tells JS. */
@@ -44,6 +46,7 @@ final class ModalHost {
         this.id = id;
         root = new Box(context, mounter, id);
         container = new Container(context);
+        keys = new KeyDispatch(mounter, container, id);
         container.content.addView(root);
         mirror(mounter.rtl);
     }
@@ -87,6 +90,11 @@ final class ModalHost {
         return shown() && dialog.isShowing() ? dialog.getWindow() : null;
     }
 
+    /** Holds focus after an input blurs, so this window still receives hardware keys. */
+    void focusRoot() {
+        container.requestFocus();
+    }
+
     void show() {
         if (dialog != null && !closing) return;
         // A dismissal through the shader still running ends first: its
@@ -128,6 +136,12 @@ final class ModalHost {
                     android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::backPressed);
         }
         dialog.show();
+        // The dialog's own root takes the fallback focus (its id is the modal's).
+        if (!container.hasFocus()) container.requestFocus();
+        container.post(() -> {
+            if (closing || dialog == null) return;
+            if (container.findFocus() == null) container.requestFocus();
+        });
         matchSystemBars(window);
         Runnable animateIn = () -> {
             if (animation == 2) {
@@ -259,6 +273,8 @@ final class ModalHost {
         // dialog shows and `onShow` goes out before it goes.
         finishChange();
         closing = true;
+        keys.focusLost();
+        if (mounter.handle() != 0) Native.keyReset(mounter.handle());
         // Its keyboard hides with it, not once the dialog's window is gone.
         mounter.hideKeyboardIn(container);
         Dialog d = dialog;
@@ -315,9 +331,10 @@ final class ModalHost {
 
         Container(Context context) {
             super(context);
-            // Holds focus when no input does (see InputBox.blur), as NshView does.
             setFocusable(true);
             setFocusableInTouchMode(true);
+            setDescendantFocusability(FOCUS_BEFORE_DESCENDANTS);
+            if (Build.VERSION.SDK_INT >= 26) setDefaultFocusHighlightEnabled(false);
             touches = new TouchTracker(mounter, this);
             mounter.touchTrackers.add(touches);
             // The core places the root (`Box.place`) inside it.
@@ -346,6 +363,27 @@ final class ModalHost {
             boolean handled = super.dispatchTouchEvent(t) || tracking;
             if (t != e) t.recycle();
             return handled;
+        }
+
+        @Override
+        public boolean dispatchKeyEvent(KeyEvent e) {
+            return keys.dispatchKeyEvent(e) || super.dispatchKeyEvent(e);
+        }
+
+        @Override
+        public boolean dispatchKeyShortcutEvent(KeyEvent e) {
+            return keys.dispatchKeyShortcutEvent(e) || super.dispatchKeyShortcutEvent(e);
+        }
+
+        @Override
+        public void onWindowFocusChanged(boolean hasWindowFocus) {
+            super.onWindowFocusChanged(hasWindowFocus);
+            if (!hasWindowFocus) {
+                keys.focusLost();
+                if (mounter.handle() != 0) Native.keyReset(mounter.handle());
+            } else if (findFocus() == null) {
+                requestFocus();
+            }
         }
 
         /** Holds the root where the content starts (below the status bar unless translucent). */

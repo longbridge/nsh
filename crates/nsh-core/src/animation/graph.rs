@@ -82,8 +82,10 @@ enum Node {
     },
     DiffClamp {
         input: Input,
-        min: f32,
-        max: f32,
+        /// Bounds, read at each evaluation (an upper bound below the lower
+        /// one is the lower one).
+        min: Arg,
+        max: Arg,
         /// The input and output at the last evaluation.
         state: Cell<Option<(f32, f32)>>,
         /// Settles at the nearer bound when its scroll view rests.
@@ -585,8 +587,8 @@ impl Graph {
                 node,
                 Node::DiffClamp {
                     input: Input::new(input),
-                    min,
-                    max: max.max(min),
+                    min: min.into(),
+                    max: max.into(),
                     state: Cell::new(None),
                     snap,
                     snapping: Cell::new(None),
@@ -982,11 +984,8 @@ impl Graph {
                 break;
             }
             for &i in &clamps {
-                let Some(&Node::DiffClamp {
-                    ref input,
-                    min,
-                    max,
-                    ..
+                let Some(Node::DiffClamp {
+                    input, min, max, ..
                 }) = self.node(i)
                 else {
                     continue;
@@ -995,6 +994,7 @@ impl Graph {
                 if !self.depends(input, source, 0) {
                     continue;
                 }
+                let (min, max) = self.bounds(min, max, 0);
                 // Brings its output up to the input.
                 let out = self.eval(i).number();
                 let x = self.eval(input).number();
@@ -1032,6 +1032,16 @@ impl Graph {
             }
         }
         started
+    }
+
+    /// The current `min..=max` of a `diffClamp` (`max` no lower than `min`).
+    fn bounds(&self, min: &Arg, max: &Arg, depth: u32) -> (f32, f32) {
+        let value = |o: &Arg| match o {
+            Arg::Node(n) => self.eval_input(n, depth + 1).number(),
+            Arg::Const(c) => *c,
+        };
+        let min = value(min);
+        (min, value(max).max(min))
     }
 
     /// Whether `node` reads `source`, directly or through other nodes.
@@ -1278,9 +1288,10 @@ impl Graph {
                         snapping.set((!snap.done).then_some(snap));
                     }
                 }
+                let (min, max) = self.bounds(min, max, depth);
                 let out = match state.get() {
-                    None => x.clamp(*min, *max),
-                    Some((last, out)) => (out + x - last).clamp(*min, *max),
+                    None => x.clamp(min, max),
+                    Some((last, out)) => (out + x - last).clamp(min, max),
                 };
                 state.set(Some((x, out)));
                 AnimationValue::Number(out)
@@ -2526,8 +2537,8 @@ mod tests {
             AnimationOp::CreateDiffClamp {
                 node: 2,
                 input: 1,
-                min: 0.0,
-                max: 50.0,
+                min: Operand::Const(0.0),
+                max: Operand::Const(50.0),
                 snap: false,
             },
             &mut f,
@@ -2555,6 +2566,45 @@ mod tests {
         assert_eq!(g.eval(3).number(), 330.0);
     }
 
+    /// A `diffClamp` whose bounds are nodes clamps at their current values
+    /// and moves back right away when its input reverses at a bound
+    /// (#2033: a drag range that shrinks while dragging).
+    #[test]
+    fn diff_clamp_follows_dynamic_bounds() {
+        let mut g = Graph::default();
+        let mut f = Vec::new();
+        // 1: the drag, 2: min, 3: max.
+        values(&mut g, &mut f, &[1, 2, 3]);
+        g.set(3, 100.0, &mut f);
+        g.apply(
+            AnimationOp::CreateDiffClamp {
+                node: 4,
+                input: 1,
+                min: Operand::Node(2),
+                max: Operand::Node(3),
+                snap: false,
+            },
+            &mut f,
+        );
+        let drag = |g: &mut Graph, f: &mut Vec<Finished>, v: f32| {
+            g.set(1, v, f);
+            g.eval(4).number()
+        };
+        assert_eq!(drag(&mut g, &mut f, 80.0), 80.0);
+        // The range shrinks to 0..=60 while dragging: it clamps at once.
+        g.set(3, 60.0, &mut f);
+        assert_eq!(g.eval(4).number(), 60.0);
+        assert_eq!(drag(&mut g, &mut f, 120.0), 60.0);
+        // Dragging back moves back right away, by the drag's change.
+        assert_eq!(drag(&mut g, &mut f, 110.0), 50.0);
+        // A lower bound that rises clamps too.
+        g.set(2, 55.0, &mut f);
+        assert_eq!(g.eval(4).number(), 55.0);
+        // An upper bound below the lower one is the lower one.
+        g.set(3, 10.0, &mut f);
+        assert_eq!(drag(&mut g, &mut f, 200.0), 55.0);
+    }
+
     /// A snapping `diffClamp` of value 1 in `0..=50` (node 2).
     fn snapping(g: &mut Graph, f: &mut Vec<Finished>) {
         values(g, f, &[1]);
@@ -2562,8 +2612,8 @@ mod tests {
             AnimationOp::CreateDiffClamp {
                 node: 2,
                 input: 1,
-                min: 0.0,
-                max: 50.0,
+                min: Operand::Const(0.0),
+                max: Operand::Const(50.0),
                 snap: true,
             },
             f,
@@ -2647,8 +2697,8 @@ mod tests {
             AnimationOp::CreateDiffClamp {
                 node: 3,
                 input: 2,
-                min: 0.0,
-                max: 100.0,
+                min: Operand::Const(0.0),
+                max: Operand::Const(100.0),
                 snap: true,
             },
             &mut f,
@@ -2703,8 +2753,8 @@ mod tests {
                     AnimationOp::CreateDiffClamp {
                         node,
                         input,
-                        min: 0.0,
-                        max,
+                        min: Operand::Const(0.0),
+                        max: Operand::Const(max),
                         snap: true,
                     },
                     &mut f,
@@ -2743,8 +2793,8 @@ mod tests {
             AnimationOp::CreateDiffClamp {
                 node: 4,
                 input: 1,
-                min: 0.0,
-                max: 50.0,
+                min: Operand::Const(0.0),
+                max: Operand::Const(50.0),
                 snap: false,
             },
             &mut f,
@@ -2762,8 +2812,8 @@ mod tests {
             AnimationOp::CreateDiffClamp {
                 node: 6,
                 input: 5,
-                min: 0.0,
-                max: 50.0,
+                min: Operand::Const(0.0),
+                max: Operand::Const(50.0),
                 snap: true,
             },
             &mut f,

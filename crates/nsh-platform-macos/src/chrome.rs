@@ -155,7 +155,7 @@ pub(crate) struct Chrome {
     /// The app listens to quit requests
     /// (`DesktopCommand::SetQuitOnRequest(false)`): the Quit item and
     /// Command-Q ask it ([`ask_quit`]).
-    asks_quit: Cell<bool>,
+    pub(crate) asks_quit: Cell<bool>,
 }
 
 /// A window's title bar as the app set it (`titleBar`).
@@ -551,7 +551,30 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         // with its window kept hidden; an embedding app keeps its own
         // lifecycle.
         DesktopCommand::Quit => crate::app::quit_app(),
-        DesktopCommand::SetQuitOnRequest(quit) => surface.chrome.asks_quit.set(!quit),
+        DesktopCommand::SetQuitOnRequest(quit) => {
+            surface.chrome.asks_quit.set(!quit);
+            if *quit {
+                // A listener can remove itself and approve in one batch.
+                // Let that batch's queued Quit take the system request
+                // before cancelling an unanswered one.
+                let key = surface.key();
+                if let Some(request) = crate::app::pending_quit_request(key) {
+                    dispatch2::DispatchQueue::main().exec_async(move || {
+                        dispatch2::DispatchQueue::main().exec_async(move || {
+                            // A replacement listener may already have a
+                            // different confirmation on the same surface.
+                            if crate::app::pending_quit_request(key) == Some(request) {
+                                crate::app::cancel_quit_request(key);
+                            }
+                        });
+                    });
+                }
+            }
+        }
+        DesktopCommand::SetQuitRequestOptions(options) => {
+            crate::app::set_quit_request_options(surface.key(), *options);
+        }
+        DesktopCommand::CancelQuitRequest => crate::app::cancel_quit_request(surface.key()),
         // Quits as above, then the runner starts the app again.
         DesktopCommand::Restart => crate::app::restart_app(),
         DesktopCommand::SetMenu(items) => set_menu(surface, items.clone()),

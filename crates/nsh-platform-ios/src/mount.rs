@@ -23,13 +23,14 @@ use objc2::{
 use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize, CGVector};
 use objc2_quartz_core::{CAAnimation, CALayer, CAMediaTiming, CATransform3D};
 use objc2_ui_kit::{
-    UIActivityIndicatorView, UIActivityIndicatorViewStyle, UIControlEvents, UIDevice,
-    UIGestureRecognizer, UIGestureRecognizerState, UINavigationController, UIPanGestureRecognizer,
-    UIPinchGestureRecognizer, UIRefreshControl, UIRotationGestureRecognizer, UIScrollView,
-    UIScrollViewContentInsetAdjustmentBehavior, UIScrollViewKeyboardDismissMode,
-    UISpringTimingParameters, UITraitEnvironment, UIUserInterfaceIdiom, UIView, UIViewAnimating,
-    UIViewAnimationOptions, UIViewControllerTransitionCoordinator,
-    UIViewControllerTransitionCoordinatorContext, UIViewPropertyAnimator,
+    UIActivityIndicatorView, UIActivityIndicatorViewStyle, UIControlEvents,
+    UICubicTimingParameters, UIDevice, UIGestureRecognizer, UIGestureRecognizerState,
+    UINavigationController, UIPanGestureRecognizer, UIPinchGestureRecognizer, UIRefreshControl,
+    UIRotationGestureRecognizer, UIScrollView, UIScrollViewContentInsetAdjustmentBehavior,
+    UIScrollViewKeyboardDismissMode, UISpringTimingParameters, UITraitEnvironment,
+    UIUserInterfaceIdiom, UIView, UIViewAnimating, UIViewAnimationOptions,
+    UIViewControllerTransitionCoordinator, UIViewControllerTransitionCoordinatorContext,
+    UIViewPropertyAnimator,
 };
 
 use crate::{
@@ -69,6 +70,44 @@ enum Native {
     Video(Box<VideoHost>),
     /// A registered native component in its container.
     Component(Box<crate::component::ComponentHost>),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct InitialInputLayout {
+    frame: Option<Bounds<Points>>,
+    content: Option<Bounds<Points>>,
+}
+
+/// The geometry a new input receives later in this batch. Inputs are inserted
+/// before layout emits their frame and content box, but UIKit may draw an
+/// inserted text field immediately; creating it with this geometry keeps that
+/// first draw from using zero text insets.
+fn initial_input_layouts(items: &[MountItem]) -> rustc_hash::FxHashMap<NodeId, InitialInputLayout> {
+    let mut inputs = rustc_hash::FxHashMap::default();
+    for item in items {
+        if let MountItem::Create {
+            id,
+            kind: ViewKind::Input,
+        } = item
+        {
+            inputs.insert(*id, InitialInputLayout::default());
+        }
+    }
+    if inputs.is_empty() {
+        return inputs;
+    }
+    for item in items {
+        let (id, frame, content) = match item {
+            MountItem::Frame { id, frame } => (*id, Some(*frame), None),
+            MountItem::InputContent { id, content } => (*id, None, Some(*content)),
+            _ => continue,
+        };
+        if let Some(layout) = inputs.get_mut(&id) {
+            layout.frame = frame.or(layout.frame);
+            layout.content = content.or(layout.content);
+        }
+    }
+    inputs
 }
 
 impl Native {
@@ -853,9 +892,10 @@ impl Mounter {
     }
 
     fn apply_batch(&mut self, batch: MountBatch) {
+        let initial_inputs = initial_input_layouts(&batch.items);
         let mut animation_changed = false;
         for item in batch.items {
-            animation_changed |= self.apply_item(item);
+            animation_changed |= self.apply_item(item, &initial_inputs);
         }
         if let Some(animation) = self.layout_animation.take() {
             self.animate_appearing(&animation);
@@ -1067,7 +1107,11 @@ impl Mounter {
     }
 
     /// Returns true if animation values or bindings changed.
-    fn apply_item(&mut self, item: MountItem) -> bool {
+    fn apply_item(
+        &mut self,
+        item: MountItem,
+        initial_inputs: &rustc_hash::FxHashMap<NodeId, InitialInputLayout>,
+    ) -> bool {
         match item {
             MountItem::Create { id, kind } => {
                 let native = match kind {
@@ -1075,7 +1119,16 @@ impl Mounter {
                     ViewKind::Text => Native::Text(TextView::new(self.mtm)),
                     ViewKind::Image => Native::Image(NshView::new(self.mtm)),
                     ViewKind::Input => {
-                        Native::Input(Box::new(Input::new(self.mtm, id, &self.target)))
+                        let mut input = Box::new(Input::new(self.mtm, id, &self.target));
+                        if let Some(initial) = initial_inputs.get(&id) {
+                            if let Some(frame) = initial.frame {
+                                set_frame(input.view(), frame);
+                            }
+                            if let Some(content) = initial.content {
+                                input.set_content(content);
+                            }
+                        }
+                        Native::Input(input)
                     }
                     ViewKind::Stack => {
                         Native::Stack(Box::new(StackHost::new(self.mtm, id, self.shared.clone())))
@@ -5247,6 +5300,21 @@ fn animate(
             animator.addAnimations(&block);
             animator.startAnimationAfterDelay(delay);
         }
+        // UIKit's cubic timing of the same control points.
+        LayoutCurve::Bezier([x1, y1, x2, y2]) => {
+            let timing = UICubicTimingParameters::initWithControlPoint1_controlPoint2(
+                UICubicTimingParameters::alloc(mtm),
+                CGPoint::new(x1 as CGFloat, y1 as CGFloat),
+                CGPoint::new(x2 as CGFloat, y2 as CGFloat),
+            );
+            let animator = UIViewPropertyAnimator::initWithDuration_timingParameters(
+                UIViewPropertyAnimator::alloc(mtm),
+                duration,
+                ProtocolObject::from_ref(&*timing),
+            );
+            animator.addAnimations(&block);
+            animator.startAnimationAfterDelay(delay);
+        }
         curve => {
             let curve = match curve {
                 LayoutCurve::Linear => UIViewAnimationOptions::CurveLinear,
@@ -5309,7 +5377,36 @@ fn reduce_motion() -> bool {
 
 #[cfg(test)]
 mod tests {
+    use nsh_core::geometry::px;
+
     use super::*;
+
+    #[test]
+    fn a_new_input_has_its_layout_before_insertion() {
+        let frame = Bounds::new(point(px(12.0), px(20.0)), size(px(240.0), px(36.0)));
+        let content = Bounds::new(point(px(12.0), px(8.0)), size(px(216.0), px(20.0)));
+        let items = vec![
+            MountItem::Create {
+                id: 2,
+                kind: ViewKind::Input,
+            },
+            MountItem::Insert {
+                parent: nsh_core::ROOT_ID,
+                child: 2,
+                before: None,
+            },
+            MountItem::Frame { id: 2, frame },
+            MountItem::InputContent { id: 2, content },
+        ];
+
+        assert_eq!(
+            initial_input_layouts(&items).get(&2),
+            Some(&InitialInputLayout {
+                frame: Some(frame),
+                content: Some(content),
+            })
+        );
+    }
 
     /// A first mount's children arrive after the content size does; judged
     /// once they are in place, a row wider than the viewport keeps its width.

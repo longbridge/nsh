@@ -790,19 +790,9 @@ final class InputBox extends FrameLayout implements Node {
     void blur() {
         if (!edit.hasFocus()) return;
         hideKeyboard();
-        // Prefer this field's window (a dialog's), not the activity host:
-        // host.requestFocus() cannot take focus out of another window, so the
-        // EditText would keep focus and the IME would stay / come back.
-        View root = getRootView();
-        if (root != null && root != mounter.host.getRootView()) {
-            root.setFocusable(true);
-            root.setFocusableInTouchMode(true);
-            root.requestFocus();
-        } else {
-            // clearFocus() would hand focus to the first focusable view, often
-            // another field; the (focusable) host holds it instead.
-            mounter.host.requestFocus();
-        }
+        // Keep focus in this window without selecting another input, and
+        // leave subsequent hardware keys on the window's dispatch path.
+        mounter.releaseFocusOf(this);
     }
 
     private void hideKeyboard() {
