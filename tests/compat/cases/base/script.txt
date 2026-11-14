@@ -969,7 +969,7 @@ covers [props] Sheet.popupClass
 covers [props] Sheet.popupStyle
 covers [props] Sheet.backdropClass
 covers [props] Sheet.backdropStyle
-covers [props] Sheet.accessibilityLabel
+covers [props] accessibilityLabel
 covers [events] Sheet.onOpenChange
 covers [events] Sheet.onCancel
 # base-menu-checked
