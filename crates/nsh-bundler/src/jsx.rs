@@ -1244,7 +1244,7 @@ impl<'a> Compiler<'a, '_> {
     fn if_(&mut self, el: JSXElement<'a>, g: &mut Gen<'a>) -> String {
         let span = el.span;
         let opening = el.opening_element.unbox();
-        let attrs = self.flow_attrs("If", opening.attributes, &["when", "else", "keyed"], g);
+        let attrs = self.flow_attrs("If", opening.attributes, &["when", "else"], g);
         let get = |name: &str| {
             attrs
                 .iter()
@@ -1256,43 +1256,6 @@ impl<'a> Compiler<'a, '_> {
             return "undefined".to_owned();
         };
         let cond = self.use_helper("cond");
-        // `<If keyed>`: the branch is made again whenever `when`'s value
-        // changes (objects by identity) and a function child is handed the
-        // value itself (Solid's `<Show keyed>`): a one-row keyed `Each`.
-        if let Some(keyed) = get("keyed") {
-            if keyed != "true" {
-                self.error("<If> takes `keyed` with no value", span);
-                return "undefined".to_owned();
-            }
-            let render = if lone_function_child(&el.children) {
-                let mut render = String::new();
-                for child in el.children {
-                    if let JSXChild::ExpressionContainer(c) = child
-                        && let Some(e) = self.expression(c.unbox().expression)
-                    {
-                        render = g.hole(e);
-                    }
-                }
-                format!("({HOLE}k) => ({render})({HOLE}k())")
-            } else {
-                let values = self.children(el.children, g, Mode::Value);
-                let then = match values.as_slice() {
-                    [] => "undefined".to_owned(),
-                    [one] => one.clone(),
-                    many => format!("[{}]", many.join(", ")),
-                };
-                format!("() => {then}")
-            };
-            let each = self.use_helper("each");
-            let then = format!(
-                "() => {each}(() => {{ const {HOLE}k = {HOLE}w(); return {HOLE}k ? [{HOLE}k] : []; }}, {render}, ({HOLE}k) => {HOLE}k)"
-            );
-            let branches = match get("else") {
-                Some(otherwise) => format!("{then}, () => {otherwise}"),
-                None => then,
-            };
-            return format!("(({HOLE}w) => {cond}({HOLE}w, {branches}))(() => {when})");
-        }
         // `{(user) => …}`: the child is called with an accessor of `when`'s
         // value, truthy while the branch shows (Solid's `<Show>`); `when`
         // is read through it, once per read.
@@ -1842,32 +1805,6 @@ mod tests {
             code.contains("_$cond(() => on(), () => \"on\", () => (() => {"),
             "{code}"
         );
-    }
-
-    #[test]
-    fn a_keyed_if_is_a_one_row_keyed_each() {
-        let code = flat(
-            &compile(
-                r#"import { Text } from "nsh";
-            declare const user: () => { name: string } | null;
-            export const a = <If keyed when={user()} else={<Text>out</Text>}>
-              {(u) => <Text>{u.name}</Text>}
-            </If>;
-            export const b = <If keyed when={user()}>x</If>;"#,
-            )
-            .unwrap(),
-        );
-        assert!(
-            code.contains("((__nsh_hw) => _$cond(__nsh_hw, () => _$each(() => { const __nsh_hk = __nsh_hw(); return __nsh_hk ? [__nsh_hk] : []; }, (__nsh_hk) => ((u) => (() => {"),
-            "{code}"
-        );
-        assert!(
-            code.contains("})())(__nsh_hk()), (__nsh_hk) => __nsh_hk), () => (() => {"),
-            "{code}"
-        );
-        assert!(code.contains("return __nsh_hk ? [__nsh_hk] : []; }, () => \"x\", (__nsh_hk) => __nsh_hk)))(() => user());"), "{code}");
-        let err = compile("export const a = <If keyed={on} when={1}>x</If>;").unwrap_err();
-        assert!(err.contains("`keyed` with no value"), "{err}");
     }
 
     #[test]

@@ -728,55 +728,6 @@ fn an_if_else_expression_follows_its_reads() {
     next(&rx, |b| texts(b).iter().any(|t| t == "second label"));
 }
 
-const IF_KEYED: &str = r#"
-import { mount, signal, Text, View } from "nsh";
-
-const user = signal<{ name: string } | null>({ name: "Ada" });
-function Greeting(props: { name: string }) {
-  const name = props.name; // read once
-  return <Text>{`Hello ${name}`}</Text>;
-}
-mount(() => (
-  <View>
-    <If keyed when={user()} else={<Text>nobody</Text>}>
-      {(u) => <Greeting name={u.name} />}
-    </If>
-    <Text onPress={() => user.set({ name: "Grace" })}>grace</Text>
-    <Text onPress={() => user.set(null)}>clear</Text>
-  </View>
-));
-"#;
-
-/// A keyed `<If>` makes its branch again when `when`'s value changes, so a
-/// component that reads its props once shows the new value (issue #1951).
-#[test]
-fn a_keyed_if_makes_its_branch_again_per_value() {
-    let (engine, rx) = start_app(IF_KEYED);
-    let first = rx
-        .recv_timeout(Duration::from_secs(5))
-        .expect("first frame");
-    assert!(
-        texts(&first).contains(&"Hello Ada".to_owned()),
-        "{:?}",
-        texts(&first)
-    );
-    let grace = text_id(&first, "grace").expect("the grace text");
-    let clear = text_id(&first, "clear").expect("the clear text");
-    engine
-        .control()
-        .dispatch_event(grace, EventKind::Press, EventPayload::None);
-    let b = next(&rx, |b| texts(b).iter().any(|t| t == "Hello Grace"));
-    assert!(
-        !texts(&b).contains(&"Hello Ada".to_owned()),
-        "{:?}",
-        texts(&b)
-    );
-    engine
-        .control()
-        .dispatch_event(clear, EventKind::Press, EventPayload::None);
-    next(&rx, |b| texts(b).iter().any(|t| t == "nobody"));
-}
-
 const BRANCH_EXPRESSION: &str = r#"
 import { mount, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";

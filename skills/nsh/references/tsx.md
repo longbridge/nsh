@@ -105,7 +105,7 @@ export function Home() {
 ```
 
 - `If` builds a branch only when truthiness flips. A function child gets an accessor of `when`'s value without `null`.
-- `<If keyed when={file()}>{(f) => <Reader file={f} />}</If>` builds the branch again whenever `when`'s value changes (objects by identity); the function child gets the value itself. Use it when the branch reads its value once at setup.
+- To build a branch again for each new value (a component that reads a prop once at setup), use the ternary form, which rebuilds whenever what it reads changes: `{file() ? <Reader file={file()!} /> : null}`. Better, read the prop where it is used (`props.file`) so the existing branch follows it.
 - `cond() && <A />` and `cond() ? <A /> : <B />` work, but rebuild the branch each time anything they read changes, losing its state. Fine for a leaf; use `If` for more.
 - `Each` keeps rows by `key`, by default the item (objects by identity, primitives by value). The row gets **accessors**, so read `todo().title`. Give a `key` whenever items get replaced by new objects, or rows rebuild.
 - `items().map(...)` compiles, and rebuilds every row on any change. Use `Each`.
