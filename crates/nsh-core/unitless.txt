@@ -262,6 +262,7 @@ style::PropertyValue::Easing.0                                   # easing curve 
 style::PropertyValue::Flex.0                                     # a flex grow factor
 style::PropertyValue::Flex.1                                     # a flex shrink factor
 style::PropertyValue::LetterSpacing.1                            # ems of the font size
+style::PropertyValue::FontSize.1                                 # a multiple of the inherited font size (em)
 style::PropertyValue::Ms.0                                       # time
 style::PropertyValue::Number.0                                   # a unitless style number (a flex factor, an opacity, a z-index)
 style::PropertyValue::OptNumber.0                                # an aspect ratio
@@ -272,6 +273,7 @@ style::StyleDecl::SetTransform.1                                 # transform ope
 style::Style::set_transform(steps)                               # transform operands (any of their kinds' units)
 style::StyleValue::Number.0                                      # a generic number (a JS value, a recorded slot)
 style::TextStyle.letter_spacing_em                               # a multiple of the font size (em)
+style::TextStyle.font_size_em                                    # a multiple of the inherited font size (em)
 style::TextStyle.line_height_multiple                            # a multiple of the font's line height
 style::ViewStyle.opacity                                         # an opacity, 0..1
 svg::rasterize_scaled(scale)                                     # a scale factor (device pixels per point)

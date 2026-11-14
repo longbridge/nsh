@@ -1252,6 +1252,9 @@ fn valid(decls: Vec<Decl>) -> Option<Vec<Decl>> {
         PropertyValue::Number(n) => n.0 < 0.0,
         PropertyValue::Points(p) => p.0 < 0.0,
         PropertyValue::OptPoints(p) => p.is_some_and(|p| p.0 < 0.0),
+        PropertyValue::FontSize(p, em) => {
+            p.is_some_and(|p| p.0 < 0.0) || em.is_some_and(|e| e.0 < 0.0)
+        }
         PropertyValue::Dimension(d) => d.into_raw().value() < 0.0,
         PropertyValue::Lpa(d) => d.into_raw().value() < 0.0,
         PropertyValue::Lp(d) => d.into_raw().value() < 0.0,
