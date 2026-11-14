@@ -158,6 +158,7 @@ pub(crate) trait Driver: Send {
     fn shows(&mut self, selector: &str) -> Result<bool, String>;
     fn value(&mut self, selector: &str) -> Result<Option<String>, String>;
     fn span_style(&mut self, selector: &str) -> Result<ResolvedTextStyle, String>;
+    fn view_style(&mut self, selector: &str) -> Result<Option<crate::screen::ViewStyle>, String>;
     fn dialogs(&mut self) -> Result<Vec<Dialog>, String>;
     /// The open context menu's actions, `None` when none is open.
     fn menu(&mut self) -> Result<Option<Vec<crate::menu::Entry>>, String>;
@@ -370,6 +371,10 @@ impl Driver for Headless {
     fn span_style(&mut self, selector: &str) -> Result<ResolvedTextStyle, String> {
         self.catch_up();
         self.screen().span_style(selector)
+    }
+    fn view_style(&mut self, selector: &str) -> Result<Option<crate::screen::ViewStyle>, String> {
+        self.catch_up();
+        self.screen().view_style(selector)
     }
     fn dialogs(&mut self) -> Result<Vec<Dialog>, String> {
         self.catch_up();
@@ -759,6 +764,16 @@ impl Driver for Remote {
         self.query(TestStep::Value {
             selector: selector.into(),
         })
+    }
+    fn view_style(&mut self, selector: &str) -> Result<Option<crate::screen::ViewStyle>, String> {
+        let style: Option<nsh_dev::protocol::ViewStyle> = self.query(TestStep::ViewStyle {
+            selector: selector.into(),
+        })?;
+        Ok(style.map(|s| crate::screen::ViewStyle {
+            background_color: s.background_color,
+            opacity: s.opacity,
+            effective_opacity: s.effective_opacity,
+        }))
     }
     fn span_style(&mut self, selector: &str) -> Result<ResolvedTextStyle, String> {
         let span: nsh_dev::protocol::SpanStyle = self.query(TestStep::SpanStyle {

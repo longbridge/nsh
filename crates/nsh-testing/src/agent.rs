@@ -27,7 +27,7 @@ use nsh_core::{
     MountBatch, NodeId,
     geometry::{Bounds, Point, Points, Size, point},
 };
-use nsh_dev::protocol::{PickTarget, SceneQuery, SpanStyle, StepOutcome, TestStep};
+use nsh_dev::protocol::{PickTarget, SceneQuery, SpanStyle, StepOutcome, TestStep, ViewStyle};
 
 mod forward;
 
@@ -464,6 +464,8 @@ pub trait Scene: Send + Sync {
     fn enabled(&self, selector: &str) -> Result<bool, String>;
     /// The resolved style of the first character `selector` names.
     fn span_style(&self, selector: &str) -> Result<SpanStyle, String>;
+    /// The style of the view `selector` names, `None` when none matches.
+    fn view_style(&self, selector: &str) -> Result<Option<ViewStyle>, String>;
     /// The input `selector` names.
     fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String>;
     /// The dialogs the app showed.
@@ -611,6 +613,15 @@ impl Scene for Model {
         span.underline = style.decoration.underline;
         span.line_through = style.decoration.line_through;
         Ok(span)
+    }
+    fn view_style(&self, selector: &str) -> Result<Option<ViewStyle>, String> {
+        Ok(self.lock().screen.view_style(selector)?.map(|s| {
+            let mut style = ViewStyle::default();
+            style.background_color = s.background_color;
+            style.opacity = s.opacity;
+            style.effective_opacity = s.effective_opacity;
+            style
+        }))
     }
     fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String> {
         self.lock().screen.input_id(selector)
@@ -785,6 +796,9 @@ pub fn answer(model: &Model, step: &TestStep) -> Option<Result<serde_json::Value
         TestStep::SpanStyle { selector } => {
             model.span_style(selector).and_then(|s| json(to_value(s)))
         }
+        TestStep::ViewStyle { selector } => {
+            model.view_style(selector).and_then(|s| json(to_value(s)))
+        }
         TestStep::Dialogs => model.dialogs().and_then(|d| json(to_value(d))),
         TestStep::PendingDialog => model.pending_dialog().and_then(|d| json(to_value(d))),
         TestStep::Scene { query } => match query {
@@ -939,6 +953,11 @@ impl Scene for RemoteScene {
     }
     fn span_style(&self, selector: &str) -> Result<SpanStyle, String> {
         self.get(TestStep::SpanStyle {
+            selector: selector.into(),
+        })
+    }
+    fn view_style(&self, selector: &str) -> Result<Option<ViewStyle>, String> {
+        self.get(TestStep::ViewStyle {
             selector: selector.into(),
         })
     }
@@ -1569,6 +1588,9 @@ impl Agent {
             TestStep::Enabled { selector } => Ok(Value::from(self.scene.enabled(&selector)?)),
             TestStep::SpanStyle { selector } => {
                 serde_json::to_value(self.scene.span_style(&selector)?).map_err(|e| e.to_string())
+            }
+            TestStep::ViewStyle { selector } => {
+                serde_json::to_value(self.scene.view_style(&selector)?).map_err(|e| e.to_string())
             }
             TestStep::Value { selector } => {
                 let id = self.scene.input_id(&selector)?;
