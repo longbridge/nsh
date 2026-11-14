@@ -2085,7 +2085,17 @@ impl Screen {
             return Pick::Disabled;
         }
         self.pick(selector, |id| {
-            let target = self.up_to(id, |v| v.events.contains(EventKind::Press))?;
+            let pressable = |v: &View| v.events.contains(EventKind::Press);
+            // A view in no pressable one that holds a combobox (a
+            // `Select`'s root, which its `testID` names): its trigger, as
+            // a `Button`'s `testID` names what the user presses.
+            let id = match self.up_to(id, pressable) {
+                Some(_) => id,
+                None => self.down_to(id, |v| {
+                    v.role == AccessibilityRole::Combobox && pressable(v)
+                })?,
+            };
+            let target = self.up_to(id, pressable)?;
             (!self.disabled_from(id, Some(target))).then_some(target)
         })
     }
