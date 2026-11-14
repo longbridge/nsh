@@ -1900,6 +1900,15 @@ fn send_key(input: &InputState, vk: u16, modifiers: Modifiers) {
     });
 }
 
+/// True when a Copy key (Ctrl+C, Ctrl+Insert) is for a selection outside the
+/// field: it selects nothing itself, and a text or a selectable view of the
+/// surface selects something.
+fn copy_is_elsewhere(surface: &Surface, input: &InputState) -> bool {
+    let (start, end) = input.selection();
+    start == end
+        && (crate::text::has_selection(surface) || crate::selectable_view::has_selection(surface))
+}
+
 /// A key for the focused field; true when handled.
 pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     if !event.down {
@@ -1984,6 +1993,13 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
             false
         }
         _ if m.ctrl && !m.alt => match vk {
+            // A copy with nothing selected in the field is for the selection
+            // of the text around it, which goes on to `text::key` and
+            // `selectable_view::key`: a chat's composer keeps the focus
+            // while the messages above it are selected. What the field
+            // selects itself still copies first.
+            0x43 if copy_is_elsewhere(surface, &input) => false,
+            _ if vk == VK_INSERT.0 && !m.shift && copy_is_elsewhere(surface, &input) => false,
             // Select all, copy, cut, undo: RichEdit's (a password copies
             // and cuts nothing).
             0x41 | 0x43 | 0x58 => forward(&input),
