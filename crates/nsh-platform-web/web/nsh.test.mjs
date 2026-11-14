@@ -3619,3 +3619,57 @@ test("prefetching skips on-demand side modules, and a failed prefetch leaves the
   assert.deepEqual(compiled, ["editor.wasm", "editor.wasm", "fields.wasm"]);
   assert.deepEqual(gates, ["g", "g"]);
 });
+
+/** A minimal DOM parent with ordered children, recording every node moved. */
+function fakeHost() {
+  const host = { kids: [], moved: [] };
+  const node = (name) => {
+    const n = {
+      name,
+      get parentNode() { return host.kids.includes(n) ? host : null; },
+      get nextSibling() { return host.kids[host.kids.indexOf(n) + 1] ?? null; },
+      contains: (other) => other === n || other?.owner === n,
+    };
+    return n;
+  };
+  host.insertBefore = (child, ref) => {
+    host.moved.push(child.name);
+    const at = host.kids.indexOf(child);
+    if (at >= 0) host.kids.splice(at, 1);
+    const to = ref ? host.kids.indexOf(ref) : host.kids.length;
+    host.kids.splice(to, 0, child);
+  };
+  host.add = (...names) => names.map((name) => { const n = node(name); host.kids.push(n); return n; });
+  return host;
+}
+
+test("restacking a view that holds the focus moves its siblings, not it", () => {
+  const previous = globalThis.document;
+  try {
+    const player = Object.create(Player.prototype);
+    for (const [from, ref, order] of [
+      // Raised to the top: the views above move below it.
+      ["a", null, "b c a"],
+      // Lowered to the bottom.
+      ["c", "a", "c a b"],
+      // Into the middle.
+      ["a", "c", "b a c"],
+    ]) {
+      const host = fakeHost();
+      const nodes = Object.fromEntries(host.add("a", "b", "c").map((n) => [n.name, n]));
+      const input = { owner: nodes[from] };
+      globalThis.document = { activeElement: input, body: {} };
+      player.placeChild(host, nodes[from], ref && nodes[ref]);
+      assert.equal(host.kids.map((n) => n.name).join(" "), order);
+      assert.ok(!host.moved.includes(from), `${from} itself was moved`);
+    }
+    // Without the focus inside, the view itself moves.
+    const host = fakeHost();
+    const [a] = host.add("a", "b");
+    globalThis.document = { activeElement: {}, body: {} };
+    player.placeChild(host, a, null);
+    assert.deepEqual(host.moved, ["a"]);
+  } finally {
+    globalThis.document = previous;
+  }
+});
