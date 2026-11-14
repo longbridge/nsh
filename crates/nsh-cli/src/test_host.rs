@@ -230,7 +230,7 @@ fn start(
         // test runs as a regular app when `nsh.json` does not read (the
         // keys only packages use are checked there too).
         let config = crate::package::read_config(&entry).unwrap_or_default();
-        command.args(config.macos.host_args());
+        command.args(config.macos_host_args());
     }
     if opens_on_a_display(target) {
         // Off the main screen, which the user works on: the display

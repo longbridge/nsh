@@ -7,6 +7,7 @@
 //! embedding in GPUI apps and has no package of its own.
 
 use std::{
+    ffi::OsString,
     fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -626,6 +627,19 @@ impl AppConfig {
     /// The app's icon for `target` (`nsh.json` `"icon"`, or `--icon`).
     pub(crate) fn icon(&self, target: PackageTarget) -> Option<&Path> {
         self.icon.as_ref()?.of(target)
+    }
+
+    /// The macOS development host's arguments for the app (`nsh run`,
+    /// `nsh test`): its activation policy ([`MacosConfig::host_args`]) and
+    /// its icon. The host is an executable without an app bundle around it,
+    /// so the Dock and the app switcher show the app's icon only when the
+    /// host is given it.
+    pub(crate) fn macos_host_args(&self) -> Vec<OsString> {
+        let mut args: Vec<OsString> = self.macos.host_args().into_iter().map(Into::into).collect();
+        if let Some(icon) = self.icon(PackageTarget::Macos) {
+            args.extend(["--icon".into(), icon.into()]);
+        }
+        args
     }
 }
 
@@ -2606,6 +2620,39 @@ mod tests {
                 ]
                 .into()
             ))
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The macOS development host gets the app's macOS icon, after its
+    /// activation policy; an app without one gets none.
+    #[test]
+    fn the_macos_host_gets_the_apps_icon() {
+        let dir = std::env::temp_dir().join(format!("nsh-macos-host-icon-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let entry = dir.join("app.tsx");
+        let args = |json: &str| {
+            fs::write(dir.join("nsh.json"), json).unwrap();
+            read_config(&entry).unwrap().macos_host_args()
+        };
+        let icon = |name: &str| OsString::from(dir.join(name));
+        assert!(args("{}").is_empty());
+        assert!(args(r#"{ "icon": { "windows": "win.png" } }"#).is_empty());
+        assert_eq!(
+            args(r#"{ "icon": "icon.png" }"#),
+            [OsString::from("--icon"), icon("icon.png")]
+        );
+        assert_eq!(
+            args(
+                r#"{ "icon": { "macos": "mac.png", "windows": "win.png" },
+                     "macos": { "activationPolicy": "accessory" } }"#
+            ),
+            [
+                OsString::from("--activation-policy"),
+                "accessory".into(),
+                "--icon".into(),
+                icon("mac.png"),
+            ]
         );
         fs::remove_dir_all(&dir).unwrap();
     }

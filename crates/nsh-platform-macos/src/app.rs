@@ -139,6 +139,13 @@ pub struct AppOptions {
     pub app_id: String,
     /// The window title.
     pub title: String,
+    /// The app's icon, an image file (a PNG, say): [`run_app`] makes it the
+    /// application's icon, which the Dock, the app switcher and its
+    /// notifications show. For a process without an app bundle of its own
+    /// (the development host: `nsh run` passes `nsh.json` `"icon"`); a
+    /// packaged app's bundle has its icon (`CFBundleIconFile`) and leaves
+    /// this `None`.
+    pub icon: Option<PathBuf>,
     /// The initial window size in points.
     pub size: (i32, i32),
     /// The display [`run_app`]'s window opens on, centered. `None` (the
@@ -245,6 +252,7 @@ impl Default for AppOptions {
             chunks: None,
             app_id: "com.longbridge.nsh.host".to_owned(),
             title: "nsh".to_owned(),
+            icon: None,
             size: (1200, 800),
             display: None,
             keep_size: false,
@@ -1173,6 +1181,22 @@ fn stop_running() {
     }
 }
 
+/// Makes the image file `path` the application's icon ([`AppOptions::icon`]);
+/// one that does not load leaves the icon it has, with a warning.
+fn set_app_icon(app: &NSApplication, path: &std::path::Path) {
+    use objc2::AnyThread as _;
+    let Some(image) = objc2_app_kit::NSImage::initWithContentsOfFile(
+        objc2_app_kit::NSImage::alloc(),
+        &NSString::from_str(&path.to_string_lossy()),
+    ) else {
+        log::warn!("the app's icon {} is not an image", path.display());
+        return;
+    };
+    // SAFETY: the setter is unsafe only because it might not take `None`;
+    // this passes an image.
+    unsafe { app.setApplicationIconImage(Some(&image)) };
+}
+
 /// Names the app `name` in the menu bar, which shows the bundle's name
 /// as the app menu's title: an executable without a bundle (the
 /// development host) would show its file's name. Before the app finishes
@@ -1206,6 +1230,9 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(activation_policy(&options));
+    if let Some(icon) = &options.icon {
+        set_app_icon(&app, icon);
+    }
     name_app(&options.title);
     crate::chrome::set_app_name(&options.title);
     let delegate: Retained<Delegate> = unsafe { msg_send![Delegate::alloc(mtm), init] };
