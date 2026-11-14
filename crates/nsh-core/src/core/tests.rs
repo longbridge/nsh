@@ -5771,6 +5771,134 @@ fn a_drawn_header_is_as_wide_as_the_screen() {
     }
 }
 
+/// With a native header, a title view is as wide as its content, at most
+/// the room the bar leaves between its items: a long one-line title shrinks
+/// instead of running under the trailing item (#1895), a short one keeps
+/// its width.
+#[test]
+fn a_native_title_view_fits_between_the_header_items() {
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let build = |title: &str| {
+        let mut c = core();
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Stack,
+            },
+            style_op(2, &[("flex", StyleValue::Number(1.0))]),
+            Op::Create {
+                id: 3,
+                tag: Tag::Screen,
+            },
+            // The title view: a clamped text, then a button.
+            Op::Create {
+                id: 4,
+                tag: Tag::HeaderItem,
+            },
+            Op::SetProp {
+                id: 4,
+                prop: Prop::HeaderSlot(crate::HeaderSlot::Title),
+            },
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            style_op(6, &[("flexDirection", StyleValue::Str("row"))]),
+            Op::Create {
+                id: 10,
+                tag: Tag::View,
+            },
+            style_op(
+                10,
+                &[
+                    ("flex", StyleValue::Number(1.0)),
+                    ("minWidth", StyleValue::Number(0.0)),
+                ],
+            ),
+            Op::Create {
+                id: 12,
+                tag: Tag::Text,
+            },
+            style_op(12, &[("numberOfLines", StyleValue::Number(1.0))]),
+            Op::CreateText {
+                id: 13,
+                text: title.to_string(),
+            },
+            Op::Create {
+                id: 14,
+                tag: Tag::View,
+            },
+            style_op(
+                14,
+                &[
+                    ("width", StyleValue::Number(40.0)),
+                    ("height", StyleValue::Number(40.0)),
+                    ("flexShrink", StyleValue::Number(0.0)),
+                ],
+            ),
+            // The trailing item, 60 wide.
+            Op::Create {
+                id: 20,
+                tag: Tag::HeaderItem,
+            },
+            Op::SetProp {
+                id: 20,
+                prop: Prop::HeaderSlot(crate::HeaderSlot::Right),
+            },
+            Op::Create {
+                id: 22,
+                tag: Tag::View,
+            },
+            style_op(
+                22,
+                &[
+                    ("width", StyleValue::Number(60.0)),
+                    ("height", StyleValue::Number(40.0)),
+                ],
+            ),
+        ];
+        ops.extend([
+            insert(12, 13),
+            insert(10, 12),
+            insert(6, 10),
+            insert(6, 14),
+            insert(4, 6),
+            insert(20, 22),
+            insert(3, 4),
+            insert(3, 20),
+            insert(2, 3),
+            insert(ROOT_ID, 2),
+        ]);
+        apply(&mut c, ops);
+        let mut frames = std::collections::HashMap::new();
+        let batch = c.commit().unwrap();
+        for item in &batch.items {
+            if let MountItem::Frame { id, frame } = item {
+                frames.insert(*id, *frame);
+            }
+        }
+        frames
+    };
+    // 320 wide: the room is 320 - 2 * 16 (insets) - (60 + 16) (the item).
+    let frames = build(&"a title far too long to fit on one line of the header".repeat(2));
+    assert_eq!(frames[&4].size.width, px(212.0));
+    let button = frames[&14];
+    assert_eq!(
+        button.origin.x + button.size.width,
+        px(212.0),
+        "the button in the title"
+    );
+    let frames = build("Hi");
+    assert!(
+        frames[&4].size.width < px(100.0),
+        "a short title keeps its width"
+    );
+}
+
 #[test]
 fn a_screen_keeps_the_bottom_bar_unless_it_says_otherwise() {
     let mut c = core();
