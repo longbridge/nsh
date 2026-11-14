@@ -44,6 +44,24 @@ key tab
 key space
 expect Opens: 1 Flips: 1
 covers [nsh] keymap
+# mod-keymap-covered-focus
+tap id:case-mod-keymap-covered-focus
+# Tab to the trigger, Return opens the menu, Return chooses Delete: the
+# dialog shows and the focus is back on the trigger under it.
+key tab
+key enter
+expect Delete
+key enter
+expect Really delete?
+wait 300
+absent Rename
+# Return is the dialog's: it confirms, and the menu stays closed.
+key enter
+expect Confirms: 1
+wait 300
+absent Really delete?
+absent Rename
+covers [nsh] keymap
 # mod-standard-system
 tap id:case-mod-standard-system
 expect console.identity=true
