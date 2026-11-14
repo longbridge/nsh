@@ -486,7 +486,9 @@ unsafe extern "C" fn items_run(
             // splice each, not one over every row between, so the rows
             // both share keep their measurements and the viewport its rows.
             let splices = if removed > 0 && inserted > 0 {
-                let mut atoms = Vec::new();
+                // The keys stay alive until they are compared: an object's
+                // is its address, which a freed key's memory could reuse.
+                let (mut atoms, mut held) = (Vec::new(), Vec::new());
                 let mut keys = |array: JsValue, from: i64, to: i64| {
                     (from..to)
                         .map(|i| {
@@ -501,7 +503,7 @@ unsafe extern "C" fn items_run(
                             if qjs::JS_IsException(k) {
                                 qjs::JS_FreeValue(cx, qjs::JS_GetException(cx));
                             } else {
-                                qjs::JS_FreeValue(cx, k);
+                                held.push(k);
                             }
                             if let Some(ItemKey::Atom(atom)) = token {
                                 atoms.push(atom);
@@ -516,6 +518,9 @@ unsafe extern "C" fn items_run(
                 narrow_splices(&old_keys, &next_keys, start as u32, 0, &mut splices);
                 for atom in atoms {
                     qjs::JS_FreeAtom(cx, atom);
+                }
+                for k in held {
+                    qjs::JS_FreeValue(cx, k);
                 }
                 splices
             } else {
@@ -556,9 +561,10 @@ unsafe extern "C" fn items_run(
 }
 
 /// What `===` compares a row's key by, where it can be looked up: a string
-/// by its atom (one per content), an object by identity, a number by its
-/// value. Other keys (a symbol, `NaN`) are never found again: such rows
-/// change as one splice, as before.
+/// by its atom (one per content), an object by identity (its address: the
+/// key must stay alive while it is compared), a number by its value. Other
+/// keys (a symbol, `NaN`) are never found again: such rows change as one
+/// splice, as before.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum ItemKey {
     Atom(qjs::JSAtom),
@@ -1748,6 +1754,46 @@ mod tests {
         assert_eq!(splices.len(), 2, "{splices:?}");
         assert!(splices[0].contains("Splice(240, 0, 1)"), "{splices:?}");
         assert!(splices[1].contains("Splice(0, 1, 0)"), "{splices:?}");
+    }
+
+    /// Keys that are new objects each time are never `===`: such rows are
+    /// one splice, as before, however the engine reuses the memory of the
+    /// keys it has read.
+    #[test]
+    fn keys_made_anew_as_objects_never_match() {
+        let host = Host::with_options(HostOptions::default()).unwrap();
+        host.eval_source(
+            r#"
+            import { List, mount, signal } from "nsh";
+            import { text } from "nsh:rt";
+            const items = signal(Array.from({ length: 240 }, (_, i) => ({ id: `r${i}` })));
+            globalThis.window = { items, next: 240 };
+            mount(() => List({
+                get each() { return items(); },
+                keyExtractor: item => ({ id: item.id }),
+                children: item => text(item().id),
+            }));
+            "#,
+        )
+        .unwrap();
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        ops.clear();
+        assert!(
+            host.eval_script(
+                "object-keys-slide",
+                "window.items.set([...window.items().slice(1), {id: `r${window.next++}`}]); true",
+            )
+            .unwrap()
+        );
+        host.take_ops(&mut ops);
+        let splices: Vec<String> = ops
+            .iter()
+            .map(|op| format!("{op:?}"))
+            .filter(|op| op.contains("Splice"))
+            .collect();
+        assert_eq!(splices.len(), 1, "{splices:?}");
+        assert!(splices[0].contains("Splice(0, 240, 240)"), "{splices:?}");
     }
 
     fn narrow(old: &[u32], new: &[u32]) -> Vec<[u32; 3]> {
