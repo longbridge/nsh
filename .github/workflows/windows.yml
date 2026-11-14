@@ -84,7 +84,7 @@ jobs:
       # bindings (STATUS_STACK_BUFFER_OVERRUN).
       RUST_MIN_STACK: "268435456"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

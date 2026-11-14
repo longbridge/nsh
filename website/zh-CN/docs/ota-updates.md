@@ -138,7 +138,7 @@ jobs:
       # 构建线上应用所用的 nsh，例如 v0.5.0（仓库变量）；为空时用最新版
       NSH_VERSION: ${{ vars.NSH_VERSION }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install nsh
         run: |
