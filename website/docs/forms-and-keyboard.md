@@ -372,7 +372,7 @@ An input's ref has:
 | `set_selection(start, end)` | `setSelection(start, end?)` | Selects `start..end` (UTF-16 units); a caret when they are equal (TSX: without `end`). |
 | `insert_text(text)` | `insertText(text)` | Inserts `text` in place of the selection as the user's edit: one step of the input's undo history, reported by `onChange`; Linux, the web and headless tests only ([pasting](#pasting-images-and-files)). |
 
-On macOS and the web, `focus()` and `blur()` on the ref of a view that takes presses move the keyboard focus as Tab does ([keyboard focus](../elements/index.md#keyboard-focus)).
+On macOS, the web and Android, `focus()` and `blur()` on the ref of a view that takes presses move the keyboard focus as Tab does ([keyboard focus](../elements/index.md#keyboard-focus)); on Android the view is focusable in touch mode for that focus session, and a default button is touch-neutral again once it blurs.
 
 `dismiss_keyboard()` in Rust and `Keyboard.dismiss()` from `nsh` in TSX unfocus whichever input has focus:
 

@@ -146,6 +146,54 @@ final class Mounter {
     final Context context;
     final Images images;
     final SparseArray<View> views = new SparseArray<>();
+    /** The `captureKeys` policy of each view, as `KeyCaptures.java` reads it (`encode.rs` `key_capture`). */
+    private final SparseArray<int[]> keyCaptures = new SparseArray<>();
+    /** `focusable`: -1 unset, 0 false, 1 true (`encode.rs` `view_props`). */
+    private final android.util.SparseIntArray focusProps = new android.util.SparseIntArray();
+    /** A portaled view's logical keyboard parent (`ViewProps::key_parent`); absent: ordinary. */
+    private final android.util.SparseIntArray keyParents = new android.util.SparseIntArray();
+    /**
+     * A managed view took or lost the focus: the core styles it (`FOCUSED`),
+     * and its `onFocus` / `onBlur` listeners hear it as an input's do.
+     */
+    private final View.OnFocusChangeListener focusChange = (view, focused) -> {
+        if (!(view instanceof Node)) return;
+        int id = ((Node) view).nodeId();
+        // A programmatic focus only opts this focus session into touch
+        // mode. Once it ends, default buttons must remain touch-neutral.
+        if (!focused && !Focusable.touch(focusProps.get(id, -1))) {
+            view.setFocusableInTouchMode(false);
+        }
+        if (handle() == 0) return;
+        reportState(id, STATE_FOCUSED, focused);
+        if (wants(id, focused ? Native.FOCUS : Native.BLUR)) {
+            event(id, focused ? Native.FOCUS : Native.BLUR);
+        }
+    };
+    /**
+     * A press on a managed stop focuses it before its press handlers run
+     * (the focus-a-visible-control behavior the contract asks for), where
+     * the focus can go: an explicit `focusable` takes it anywhere,
+     * including touch mode; a default pressable only outside touch mode,
+     * and never from a text input or hosted native view (only an explicit
+     * `focusable` does). A touch-mode tap therefore leaves an input
+     * editing and its keyboard up.
+     */
+    private final View.OnTouchListener pointerFocus = (view, e) -> {
+        if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN && view instanceof Node) {
+            int id = ((Node) view).nodeId();
+            int prop = focusProps.get(id, -1);
+            boolean nativeFocused = keyNode(view.getRootView().findFocus(), 1) == 0;
+            boolean touchMode = view.getRootView().isInTouchMode();
+            if (Focusable.pointer(prop, nativeFocused, touchMode) && focusStop(id) && !view.isFocused()) {
+                // requestFocus invokes focusChange synchronously. Mark the
+                // pointer modality first so focus-visible is not keyboard's.
+                if (handle() != 0) Native.pointerInput(handle());
+                view.requestFocus();
+            }
+        }
+        return false;
+    };
     private final SparseArray<Dynamic> statics = new SparseArray<>();
     /** The events each view listens to: kinds below 64 here, ... */
     private final SparseLongArray events = new SparseLongArray();
@@ -354,6 +402,7 @@ final class Mounter {
                     if (v instanceof TextBox || v instanceof ImageBox) {
                         v.setClickable(presses || (v instanceof TextBox && ((TextBox) v).hasLinks()));
                     }
+                    updateFocusable(id, v);
                     break;
                 }
                 case IMAGE: {
@@ -719,6 +768,7 @@ final class Mounter {
             default: v = new Box(context, this, id);
         }
         views.put(id, v);
+        updateFocusable(id, v);
         if (layoutAnimation != null) created.add(id);
     }
 
@@ -950,6 +1000,12 @@ final class Mounter {
     }
 
     private void delete(int id) {
+        View v = views.get(id);
+        if (v != null && managed(v) && v.isFocused()) {
+            // The view goes away: report its blur before it leaves the tree.
+            v.setOnFocusChangeListener(focusChange);
+            releaseFocus(v);
+        }
         removeHosted(id);
         ModalHost modal = modals.get(id);
         if (modal != null) {
@@ -959,7 +1015,6 @@ final class Mounter {
             modals.remove(id);
             touchTrackers.remove(modal.touches());
         }
-        View v = views.get(id);
         if (v instanceof StackBox) stacks.remove(v);
         SelectableView area = selectableViews.get(id);
         if (area != null) {
@@ -991,6 +1046,9 @@ final class Mounter {
         if ((events.get(id) & (1L << Native.TOUCH)) != 0) touchListeners--;
         events.delete(id);
         eventsHigh.delete(id);
+        keyCaptures.remove(id);
+        focusProps.delete(id);
+        keyParents.delete(id);
         slops.remove(id);
         a11y.remove(id);
     }
@@ -1647,6 +1705,29 @@ final class Mounter {
         }
         boolean selectableView = b.getInt() != 0;
         boolean continuesText = b.getInt() != 0;
+        // `captureKeys` (`encode.rs` `key_capture`): mode, then for keys
+        // the count and each canonical key id and modifiers.
+        int captureMode = b.getInt();
+        if (captureMode == KeyCaptures.KEYS) {
+            int count = b.getInt();
+            int[] policy = new int[2 + count * 2];
+            policy[0] = KeyCaptures.KEYS;
+            policy[1] = count;
+            for (int i = 0; i < count; i++) {
+                policy[2 + i * 2] = b.getInt();
+                policy[3 + i * 2] = b.getInt();
+            }
+            keyCaptures.put(id, policy);
+        } else if (captureMode == KeyCaptures.ALL) {
+            keyCaptures.put(id, new int[] {KeyCaptures.ALL});
+        } else {
+            keyCaptures.remove(id);
+        }
+        int focusable = b.getInt();
+        focusProps.put(id, focusable);
+        int keyParent = b.getInt();
+        if (keyParent >= 0) keyParents.put(id, keyParent);
+        else keyParents.delete(id);
         if (v == null) return;
         if (v instanceof TextBox) ((TextBox) v).continuesText = continuesText;
         SelectableView area = selectableViews.get(id);
@@ -1671,6 +1752,7 @@ final class Mounter {
         if (v instanceof TextBox) ((TextBox) v).a11y = a;
         a11y.put(id, a);
         a.apply(v);
+        updateFocusable(id, v);
         if (v instanceof ScrollBox) keyScroll((ScrollBox) v, nativeId);
     }
 
@@ -2255,10 +2337,26 @@ final class Mounter {
         switch (kind) {
             case 0:
                 if (v instanceof InputBox) ((InputBox) v).focus();
+                else focusManaged(id);
                 break;
             case 1:
                 if (v instanceof InputBox) {
                     ((InputBox) v).blur();
+                } else if (v != null && managed(v) && v.isFocused()) {
+                    releaseFocus(v);
+                } else if (modals.get(id) != null) {
+                    // Blur whatever the dialog window has focused and hide its keyboard.
+                    View window = v != null ? v.getRootView() : null;
+                    if (window != null) {
+                        View f = window.findFocus();
+                        if (f != null && f != window) {
+                            InputBox input = inputOf(f);
+                            if (input != null) input.blur();
+                            else releaseFocus(f);
+                        }
+                        InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+                        imm.hideSoftInputFromWindow(window.getWindowToken(), 0);
+                    }
                 } else if (id == 1) {
                     // Keyboard.dismiss(): prefer the tracked field (a dialog's
                     // EditText lives in another window, so host.findFocus()
@@ -2277,14 +2375,7 @@ final class Mounter {
                     InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
                     if (f != null) {
                         imm.hideSoftInputFromWindow(f.getWindowToken(), 0);
-                        View root = f.getRootView();
-                        if (root != null && root != host.getRootView()) {
-                            root.setFocusable(true);
-                            root.setFocusableInTouchMode(true);
-                            root.requestFocus();
-                        } else if (f != host) {
-                            host.requestFocus();
-                        }
+                        if (f != host) releaseFocus(f);
                     } else {
                         // Field gone: hide with the host token unless another
                         // editor outside the host still has the IME (#714).
@@ -2706,6 +2797,315 @@ final class Mounter {
     boolean wants(int id, int kind) {
         if (kind >= 64) return (eventsHigh.get(id) & (1L << (kind - 64))) != 0;
         return (events.get(id) & (1L << kind)) != 0;
+    }
+
+    /** Whether `id`'s own state lets it hear keys (a disabled view captures and listens to none). */
+    private boolean keyEnabled(int id) {
+        A11y a = a11y.get(id);
+        return a == null || (a.state & 1) == 0;
+    }
+
+    /** A view the keyboard manager focuses: not an input and not hosted native content. */
+    private static boolean managed(View v) {
+        return v instanceof Node && !(v instanceof InputBox)
+                && !(v instanceof WidgetBox) && !(v instanceof ComponentBox);
+    }
+
+    /**
+     * Whether `id` is a Tab stop: {@code focusable} (true, or unset and the
+     * view takes presses) and enabled. Inputs are stops of their own (their
+     * EditText is the native focus target) and the root is the host itself.
+     */
+    private boolean focusStop(int id) {
+        if (id <= 1) return false;
+        View v = views.get(id);
+        if (v == null) return false;
+        return Focusable.stop(focusProps.get(id, -1), wants(id, Native.PRESS), keyEnabled(id));
+    }
+
+    /** Releases focus to the same window's keyboard root, without focusing another field. */
+    private void releaseFocus(View v) {
+        View window = v.getRootView();
+        if (window == host.getRootView()) {
+            host.requestFocus();
+            return;
+        }
+        for (int i = 0; i < modals.size(); i++) {
+            ModalHost modal = modals.valueAt(i);
+            if (modal.window() == window) {
+                modal.focusRoot();
+                return;
+            }
+        }
+        v.clearFocus();
+    }
+
+    /** An input blurring: the focus leaves its own window, not another window's. */
+    void releaseFocusOf(View v) {
+        releaseFocus(v);
+    }
+
+    /** The input whose EditText contains `v`, if any. */
+    private static InputBox inputOf(View v) {
+        for (View cur = v; cur != null; ) {
+            if (cur instanceof InputBox) return (InputBox) cur;
+            ViewParent parent = cur.getParent();
+            cur = parent instanceof View ? (View) parent : null;
+        }
+        return null;
+    }
+
+    /**
+     * Applies `focusable` (and whether the view takes presses) to a managed
+     * view: Android's own focus carries it, so Tab/Shift+Tab and
+     * `requestFocus` work, and the focus listeners report `FOCUSED`,
+     * `onFocus` and `onBlur` to the core. Only an explicit `focusable` is
+     * focusable in touch mode; a default pressable is a hardware/Tab stop
+     * whose keyboard focus still reveals it in its scroll view, but which
+     * never takes a touch-mode focus.
+     */
+    private void updateFocusable(int id, View v) {
+        if (v == null || id <= 1 || !managed(v)) return;
+        boolean stop = focusStop(id);
+        // Our paired focus/touch listeners mark an installed stop. Unlike
+        // the setters, this getter never creates View.ListenerInfo.
+        boolean listening = v.getOnFocusChangeListener() == focusChange;
+        if (!stop && v.isFocused()) {
+            // Report the blur before focusability is dropped.
+            if (!listening) {
+                v.setOnFocusChangeListener(focusChange);
+                listening = true;
+            }
+            releaseFocus(v);
+        }
+        if (v.isFocusable() != stop) v.setFocusable(stop);
+        // Only an explicit `focusable` (or a programmatic `ref.focus()`,
+        // which sets this itself) opts into touch-mode focus. A default
+        // pressable stays a hardware/Tab stop, so Android's touch-mode
+        // focus path never pulls the focus out of an input or hosted view
+        // on a tap. Keep the flag while the view holds the focus: a props
+        // update must not blur a `ref.focus()` on a default pressable.
+        boolean touch = stop && Focusable.touch(focusProps.get(id, -1));
+        if (touch) {
+            if (!v.isFocusableInTouchMode()) v.setFocusableInTouchMode(true);
+        } else if ((!stop || !v.isFocused()) && v.isFocusableInTouchMode()) {
+            v.setFocusableInTouchMode(false);
+        }
+        if (Build.VERSION.SDK_INT >= 26) v.setDefaultFocusHighlightEnabled(false);
+        // Only change listeners when entering/leaving the stop set. Even
+        // setting a null listener allocates ListenerInfo on an untouched view.
+        if (listening != stop) {
+            v.setOnFocusChangeListener(stop ? focusChange : null);
+            v.setOnTouchListener(stop ? pointerFocus : null);
+        }
+    }
+
+    /**
+     * `ref.focus()` on a managed stop: makes it focusable and focuses it.
+     * The request is explicit, so it opts into touch-mode focus as an
+     * explicit `focusable` does; `updateFocusable` keeps that while the
+     * view holds the focus.
+     */
+    void focusManaged(int id) {
+        View v = views.get(id);
+        if (v == null || !v.isShown() || !focusStop(id)) return;
+        if (!v.isFocusable()) v.setFocusable(true);
+        if (!v.isFocusableInTouchMode()) v.setFocusableInTouchMode(true);
+        v.requestFocus();
+    }
+
+    /**
+     * The node a key event belongs to: the focused managed view's id, the
+     * window's `fallback` root node when nothing in it has a focus, or
+     * `0` for an {@code EditText} or hosted native view, which owns its
+     * keys.
+     */
+    int keyNode(View focus, int fallback) {
+        if (focus == null || focus == host) return fallback;
+        View v = focus;
+        while (v != null && v != host) {
+            if (v instanceof InputBox || v instanceof WidgetBox || v instanceof ComponentBox) return 0;
+            if (v instanceof Node) return ((Node) v).nodeId();
+            ViewParent parent = v.getParent();
+            v = parent instanceof View ? (View) parent : null;
+        }
+        return fallback;
+    }
+
+    /** Whether the focused node is a managed control (a view that takes presses, not an input or root). */
+    boolean control(int node) {
+        return node > 1 && keyEnabled(node) && wants(node, Native.PRESS);
+    }
+
+    /** Whether `focus` is in hosted native content (not an input), which keeps Tab for itself. */
+    private boolean hostedFocus(View focus) {
+        View v = focus;
+        while (v != null && v != host) {
+            if (v instanceof WidgetBox || v instanceof ComponentBox) return true;
+            if (v instanceof Node) return false;
+            ViewParent parent = v.getParent();
+            v = parent instanceof View ? (View) parent : null;
+        }
+        return false;
+    }
+
+    /**
+     * The logical keyboard parent of `id`: a portaled view's mounted
+     * `key_parent` override first (its native Insert parent is not its
+     * logical one), then a screen/header's host parent, else its native
+     * parent.
+     */
+    private int logicalParent(int id) {
+        int keyParent = keyParents.get(id, -1);
+        int hosted = hosts.get(id, -1);
+        if (keyParent >= 0 || hosted >= 0) {
+            return KeyAncestry.parent(keyParent, hosted, -1);
+        }
+        return KeyAncestry.parent(-1, -1, nativeParent(id));
+    }
+
+    /** The nearest mounted ancestor node, as a native Insert put it. */
+    private int nativeParent(int id) {
+        View v = views.get(id);
+        if (v == null) return -1;
+        ViewParent parent = v.getParent();
+        while (parent != null) {
+            if (parent instanceof View) {
+                View view = (View) parent;
+                if (view == host) return -1;
+                if (view instanceof Node) return ((Node) view).nodeId();
+            }
+            parent = parent.getParent();
+        }
+        return -1;
+    }
+
+    /** Whether nodes `id` and `window` are in the same native window (a keyboard boundary). */
+    private boolean sameWindow(int id, int window) {
+        View a = views.get(id), b = views.get(window);
+        return a != null && b != null && a.getRootView() == b.getRootView();
+    }
+
+    /**
+     * Whether the focused node or an enabled ancestor hears raw keys
+     * (`onKeyDown` / `onKeyUp`) or mounts a `captureKeys` policy: only then
+     * does a key need a native {@code KeyEvent} and its capture rules. A
+     * view that hears nothing takes the existing fast path.
+     */
+    boolean keyListens(int focused, int window) {
+        int id = focused;
+        while (id > 0) {
+            if (keyEnabled(id)
+                    && (wants(id, Native.KEY_DOWN) || wants(id, Native.KEY_UP)
+                            || KeyCaptures.capturesAnything(keyCaptures.get(id)))) {
+                return true;
+            }
+            if (id == window || id == 1) break;
+            int next = logicalParent(id);
+            if (next <= 0 || !sameWindow(next, window)) break;
+            id = next;
+        }
+        return false;
+    }
+
+    /**
+     * Whether a mounted {@code captureKeys} rule of the focused view or an
+     * enabled ancestor captures {@code e}: the same canonical shortcut key
+     * as `keymap.rs`, on the UI thread, before Android's defaults. A
+     * system key ({@code KeyEvent.isSystem}: Back, Home, volume, media,
+     * camera, call) is never captured, not even by {@code all}; Android
+     * keeps its default. The raw notification is a separate decision and
+     * still reaches the listeners ({@link #keyListens}), with
+     * {@code defaultPrevented: false}.
+     */
+    boolean keyCaptured(int focused, int window, android.view.KeyEvent e) {
+        int key = KeyCaptures.eventKey(e.getKeyCode(), e.getUnicodeChar(0));
+        int modifiers = KeyCaptures.modifiers(e.getMetaState());
+        boolean system = e.isSystem();
+        int id = focused;
+        while (id > 0) {
+            if (keyEnabled(id) && KeyCaptures.captured(keyCaptures.get(id), key, modifiers, system)) {
+                return true;
+            }
+            if (id == window || id == 1) break;
+            int next = logicalParent(id);
+            if (next <= 0 || !sameWindow(next, window)) break;
+            id = next;
+        }
+        return false;
+    }
+
+    /**
+     * Tab or Shift+Tab from `focus`: the next managed stop or input in
+     * native tree order. The first and last stop yield ({@code false}) to
+     * the embedding Android host instead of wrapping, so Android's own
+     * focus search and defaults get that Tab. Hosted native content keeps
+     * Tab for itself ({@code false}).
+     */
+    boolean moveFocus(View windowRoot, View focus, boolean forward) {
+        if (hostedFocus(focus)) return false;
+        java.util.ArrayList<View> stops = new java.util.ArrayList<>();
+        collectFocusStops(windowRoot, stops);
+        if (stops.isEmpty()) return false;
+        int index = -1;
+        if (focus != null && focus != host) {
+            int holder = -1;
+            for (int i = 0; i < stops.size(); i++) {
+                if (stops.get(i) == focus) {
+                    index = i;
+                    break;
+                }
+                if (holder < 0 && holds(stops.get(i), focus)) holder = i;
+            }
+            if (index < 0) index = holder;
+        }
+        index = TabOrder.next(index, stops.size(), forward);
+        if (index < 0) return false;
+        View next = stops.get(index);
+        if (next instanceof InputBox) {
+            ((InputBox) next).focus();
+            return true;
+        }
+        // A Tab is a keyboard transition: leave touch mode as a hardware
+        // key does, so a default pressable (not focusable in touch mode)
+        // takes the focus from a real or a synthetic Tab alike. The
+        // enclosing scroll view still reveals the stop (ScrollView's
+        // requestChildFocus), as for any keyboard focus.
+        return next.requestFocusFromTouch();
+    }
+
+    /** Collects the Tab stops under `view` in tree order. */
+    private void collectFocusStops(View view, java.util.ArrayList<View> stops) {
+        if (view == null || view == host || view.getVisibility() != View.VISIBLE || !view.isShown()) return;
+        if (view instanceof InputBox) {
+            if (keyEnabled(((InputBox) view).nodeId())) stops.add(view);
+            return;
+        }
+        // Hosted native content owns its internal focus.
+        if (view instanceof WidgetBox || view instanceof ComponentBox) return;
+        if (view instanceof Node) {
+            int id = ((Node) view).nodeId();
+            // A split's content wrapper shares its outer box's id; only the
+            // mapped view is the stop.
+            if (id != 1 && views.get(id) == view && managed(view) && focusStop(id)) {
+                stops.add(view);
+            }
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                collectFocusStops(group.getChildAt(i), stops);
+            }
+        }
+    }
+
+    private static boolean holds(View ancestor, View view) {
+        for (View v = view; v != null; ) {
+            if (v == ancestor) return true;
+            ViewParent parent = v.getParent();
+            v = parent instanceof View ? (View) parent : null;
+        }
+        return false;
     }
 
     /** Press callbacks claim a touch; visual feedback alone only observes it. */
