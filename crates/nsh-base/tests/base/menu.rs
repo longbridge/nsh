@@ -18,7 +18,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use nsh_base::{MenuEvent, context_menu, menu, menu_item};
+use nsh_base::{MenuEvent, context_menu, dialog, menu, menu_item};
 use nsh_core::{
     Checked, MountItem, NodeId, Size,
     element::Root,
@@ -469,6 +469,69 @@ fn after_a_press_and_an_arrow_escape_gives_the_focus_to_the_trigger() {
     app.app.wait_for("Quit").unwrap();
     app.app.press_key("space").unwrap();
     app.app.wait_for("text:chose:Quit").unwrap();
+}
+
+/// A More menu whose Delete item opens a dialog confirming with Return,
+/// as a destructive choice asks first. The text logs what was done.
+#[component]
+fn DeleteMenu() -> impl IntoElement {
+    let confirming = signal(false);
+    let log = signal(String::from("log"));
+    view()
+        .pt(px(100.0))
+        .pl(px(40.0))
+        .child(
+            menu()
+                .trigger(
+                    view()
+                        .test_id("more")
+                        .w(px(80.0))
+                        .h(px(30.0))
+                        .child(text("More")),
+                )
+                .child(
+                    menu_item()
+                        .on_select(move || confirming.set(true))
+                        .child(text("Delete")),
+                )
+                .child(menu_item().child(text("Rename"))),
+        )
+        .child(text(move || log.get()))
+        .child(when(
+            move || confirming.get(),
+            move || {
+                on_key("enter", move |_| {
+                    log.update(|log| log.push_str(" confirmed"));
+                    confirming.set(false);
+                });
+                dialog()
+                    .label("Delete the file?")
+                    .child(view().child(text("Really delete?")))
+            },
+        ))
+}
+
+#[test]
+fn return_confirms_a_dialog_a_keyboard_menu_opened() {
+    let mut app = start_with(Root::of::<DeleteMenu>());
+    app.app.press_key("tab").unwrap();
+    app.app.press_key("enter").unwrap();
+    app.app.wait_for("Delete").unwrap();
+    // Delete has the focus: choosing it opens the dialog as the menu
+    // closes, its focus going back to the trigger under the dialog.
+    app.app.press_key("enter").unwrap();
+    app.app.wait_for("Really delete?").unwrap();
+    app.app
+        .wait_for_gone("Rename", std::time::Duration::from_secs(2))
+        .unwrap();
+    // Return is the dialog's, not the menu button's under it.
+    app.app.press_key("enter").unwrap();
+    app.app.wait_for("text:log confirmed").unwrap();
+    app.app
+        .wait_for_gone("Really delete?", std::time::Duration::from_secs(2))
+        .unwrap();
+    app.app.wait(std::time::Duration::from_millis(300)).unwrap();
+    assert!(!app.app.shows("Rename"), "the menu did not open again");
 }
 
 #[test]

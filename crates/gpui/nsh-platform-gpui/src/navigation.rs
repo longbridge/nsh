@@ -1403,6 +1403,12 @@ pub(crate) fn focus_scope(surface: &Surface) -> NshView {
     surface.nav.borrow().focus_scope(surface, window)
 }
 
+/// Whether `view` is in the focus scope ([`focus_scope`]): not under the
+/// newest modal.
+pub(crate) fn in_focus_scope(surface: &Surface, view: &NshView) -> bool {
+    is_ancestor(&focus_scope(surface), view)
+}
+
 /// Modal `view` is shown in a window of its own (`crate::window`): it
 /// leaves the main window's modals and tree, and shows at once (no
 /// presenting fade).

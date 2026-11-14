@@ -27,7 +27,7 @@ use nsh_core::{
     desktop::{MenuItem, Shortcut},
     element::SharedString,
     geometry::Points,
-    keymap::{self, KeyMatch, Keystroke},
+    keymap::{self, KeyFocus, KeyMatch, Keystroke},
     platform::Os,
     tailwind::state::FOCUSED,
 };
@@ -137,8 +137,17 @@ impl Headless {
         // desktops match them. Return and Space on a focused control fire
         // only the focus' own bindings. A binding that passes the key
         // through leaves it to the view and the defaults below.
+        // A focus the newest modal covers (a popup gave it back to its
+        // trigger under a dialog) has no keys of its own, as on macOS.
+        let mut focus = KeyFocus::default();
+        focus.editing = editing;
+        focus.control = control.is_some();
+        focus.covered = self
+            .screen
+            .key_focus()
+            .is_some_and(|view| !self.screen.in_focus_scope(view));
         let found = match self.screen.keymap() {
-            Some(keymap) => keymap.find_at(window, stroke, editing, control.is_some(), false),
+            Some(keymap) => keymap.find_with(window, stroke, focus, false),
             None => KeyMatch::None,
         };
         if let Some(id) = found.fired() {
