@@ -767,6 +767,15 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, area: &NshView) {
     );
 }
 
+/// True when the current area of `surface` has a selection, which [`key`]
+/// copies. Only looks: nothing is taken out or reported.
+pub(crate) fn has_selection(surface: &Surface) -> bool {
+    CURRENT.with_borrow(|c| {
+        c.as_ref()
+            .is_some_and(|c| c.surface == surface.key() && c.area.attached() && !c.model.is_empty())
+    })
+}
+
 /// Keys for the current area's selection (Ctrl+C / Ctrl+Insert, Ctrl+A,
 /// Escape); true when handled.
 pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
