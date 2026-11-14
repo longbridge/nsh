@@ -300,9 +300,6 @@ impl AppView {
         let transparent = options.transparent && parent.is_none();
         let composed = (composed || transparent) && parent.is_none();
         let hwnd = crate::window::create(&surface, &options.title, options.size, parent, composed)?;
-        if composed {
-            *surface.base.borrow_mut() = Some(crate::compose::Composition::new(hwnd)?);
-        }
         if parent.is_none() {
             crate::window::set_icon(hwnd, options.icon.as_deref());
             // The main window's attributes: a normal window's, with the
