@@ -24,9 +24,13 @@ An app turns them off with `default-features = false` on the platform crate and 
 on `nsh-base` must also say `default-features = false`, or Cargo turns its defaults back on.
 
 A project building its own executable with Cargo (an embedder, or its own `main` on `nsh_*_app`) chooses them itself.
-The prebuilt runners have everything. For an app with Rust crates, `nsh package` (Linux, macOS, Windows, iOS) builds the
-release runner with only the features its bundle can reach (`crates/nsh-cli/src/native_features.rs`, on the gates of
-`linked_gates`), and prints why each is kept or left out:
+The prebuilt runners have everything. `nsh package` (Linux, macOS, Windows; iOS too for an app with Rust crates) builds
+the release runner with only the features its bundle can reach (`crates/nsh-cli/src/native_features.rs`, on the gates
+of `linked_gates`), and prints why each is kept or left out. A TSX app gets this too when `cargo` is installed: its
+runner builds in `.nsh/rust` from nsh's crates (the CLI's checkout, else crates.io at the CLI's version), so the first
+package takes a minute or two longer; without `cargo`, or with `NSH_RUNTIME` set, it ships the prebuilt runner.
+
+What is kept:
 
 - `shader`, `editor`, `rich-editor`, `plot`, `term`, `emoji-picker`: kept when a reachable import links their part;
   `highlight` and `math` also by `TextView` (Markdown shows code and formulas);

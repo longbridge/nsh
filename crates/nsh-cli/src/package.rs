@@ -907,6 +907,44 @@ pub(crate) fn release_name_and_id(
     Ok(name_and_id(entry, config))
 }
 
+/// Whether the TSX app at `entry` builds its own release runner for
+/// `target` (`rust_app::runner_only`): a desktop target, with cargo here
+/// and no prebuilt runtime asked for (`NSH_RUNTIME`). It is then the app
+/// of this command ([`crate::rust_app::current`]).
+fn trimmed_runner(entry: &Path, target: PackageTarget) -> bool {
+    if !matches!(
+        target,
+        PackageTarget::Linux | PackageTarget::Macos | PackageTarget::Windows
+    ) || std::env::var_os("NSH_RUNTIME").is_some()
+    {
+        return false;
+    }
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let has_cargo = std::process::Command::new(cargo)
+        .arg("--version")
+        .output()
+        .is_ok_and(|out| out.status.success());
+    if !has_cargo {
+        ui::note(
+            "no cargo here: the package has the prebuilt runner, with every native feature; \
+             install Rust (rustup.rs) to build one with only those the app uses",
+        );
+        return false;
+    }
+    match crate::rust_app::runner_only(entry) {
+        Ok(app) => {
+            crate::rust_app::set_current(app);
+            true
+        }
+        Err(e) => {
+            ui::warn(format!(
+                "the prebuilt runner it is, with every native feature: {e:#}"
+            ));
+            false
+        }
+    }
+}
+
 pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     if options.asset_url.is_some() && options.target != PackageTarget::Web {
         bail!("--asset-url is where a web site's files are served from: package with --target web");
@@ -972,11 +1010,12 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     if options.target != PackageTarget::Web {
         crate::updater::add_config(config, &id, options.out, &mut built)?;
     }
-    // An app with Rust crates builds its own release runner: with only the
-    // native features its bundle can reach, and those `nsh.json` keeps.
+    // An app builds its own release runner: with only the native features
+    // its bundle can reach, and those `nsh.json` keeps. A TSX app does too
+    // where cargo is, else it ships the prebuilt runner, which has all.
     if !matches!(options.target, PackageTarget::Web | PackageTarget::Android)
-        && crate::rust_app::current().is_some()
         && !crate::rust_app::is_root(&entry)
+        && (crate::rust_app::current().is_some() || trimmed_runner(&entry, options.target))
     {
         let choices = crate::native_features::choose(built.native_use.as_ref(), &config.features);
         for c in &choices {

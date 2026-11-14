@@ -793,6 +793,30 @@ pub(crate) fn is_root(entry: &Path) -> bool {
         .is_some_and(|name| name.eq_ignore_ascii_case("nsh.json"))
 }
 
+/// A workspace with no crates of the app's, for `nsh package` of a TSX
+/// app: its release runner built here with only the native features its
+/// bundle reaches, instead of the prebuilt one that has all of them. nsh's
+/// crates come from the checkout this CLI was built in, else from
+/// crates.io at this CLI's version.
+pub(crate) fn runner_only(entry: &Path) -> anyhow::Result<RustApp> {
+    let entry = dunce::canonicalize(entry)
+        .with_context(|| format!("entry not found: {}", entry.display()))?;
+    let dir = entry.parent().context("entry has no directory")?;
+    let nsh = crate::runtime::cli_checkout().map_or(Nsh::Registry, Nsh::Source);
+    let watched = watched(&[], nsh.source());
+    let app = RustApp {
+        workspace: dir.join(".nsh/rust"),
+        nsh,
+        crates: Vec::new(),
+        watched,
+        root: None,
+        retargeted: false,
+        unify: true,
+    };
+    app.write_workspace()?;
+    Ok(app)
+}
+
 /// The `"rust"` crates of the app whose entry is `entry`, if it has any.
 /// `unify`: the command builds programs for this machine besides the
 /// describing one ([`RustApp::unify_features`]).
