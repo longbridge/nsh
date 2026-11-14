@@ -213,6 +213,11 @@ pub(crate) struct AppConfig {
     /// release runner reads it; macOS runs one instance of an app already.
     #[serde(default)]
     pub(crate) single_instance: bool,
+    /// Native features a package always includes (`"features": ["plot"]`),
+    /// which nothing in the bundle shows it uses: what its Rust code or a
+    /// computed import needs (`native_features`).
+    #[serde(default)]
+    pub(crate) features: Vec<String>,
     /// The file types the app opens (`"fileTypes"`: `[{ "name": "Video",
     /// "extensions": ["mp4"] }]`), which packages declare to the system;
     /// the app hears the files through `Application.on("openFiles", ...)`
@@ -966,6 +971,25 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     };
     if options.target != PackageTarget::Web {
         crate::updater::add_config(config, &id, options.out, &mut built)?;
+    }
+    // An app with Rust crates builds its own release runner: with only the
+    // native features its bundle can reach, and those `nsh.json` keeps.
+    if !matches!(options.target, PackageTarget::Web | PackageTarget::Android)
+        && crate::rust_app::current().is_some()
+        && !crate::rust_app::is_root(&entry)
+    {
+        let choices = crate::native_features::choose(built.native_use.as_ref(), &config.features);
+        for c in &choices {
+            let mark = if c.keep { "keep" } else { "leave out" };
+            ui::note(format!("{mark} `{}`: {}", c.feature, c.why));
+        }
+        crate::rust_app::set_runner_features(
+            choices
+                .into_iter()
+                .filter(|c| c.keep)
+                .map(|c| c.feature.to_owned())
+                .collect(),
+        );
     }
     let platform = match options.target {
         PackageTarget::Ios => Platform::IphoneOs,
