@@ -1634,9 +1634,19 @@ declare function btoa(data: string): string;
 /** `<If when={…} else={…}>…</If>`: renders its children while `when` is
  * truthy, else `else`. A function child gets an accessor of `when`'s value,
  * which is set while it shows: `<If when={user()}>{(u) => <Text>{u().name}</Text>}</If>`.
+ * With `keyed`, the branch is made again whenever `when`'s value changes
+ * (objects by identity) and a function child gets the value itself:
+ * `<If keyed when={file()}>{(f) => <Reader file={f} />}</If>`.
  * A global (no import), like `Each`. */
 declare function If<T>(props: {
   when: T;
+  keyed: true;
+  else?: import("./types").JSX.Element;
+  children?: import("./types").JSX.Element | ((value: NonNullable<T>) => import("./types").JSX.Element);
+}): import("./types").JSX.Element;
+declare function If<T>(props: {
+  when: T;
+  keyed?: false;
   else?: import("./types").JSX.Element;
   children?: import("./types").JSX.Element | ((value: () => NonNullable<T>) => import("./types").JSX.Element);
 }): import("./types").JSX.Element;
