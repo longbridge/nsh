@@ -464,7 +464,7 @@ fn selection_boxes_are_drawn_in_task_items_and_code_blocks() {
         true,
     );
     app.type_text("id:editor", "").unwrap();
-    keys(&mut app, &["ctrl+a"]);
+    keys(&mut app, &["ctrl+home", "ctrl+shift+end"]);
     app.wait(Duration::from_millis(100)).unwrap();
     // A code block's own background would hide boxes drawn under the
     // blocks: each textblock draws its own under its text.
