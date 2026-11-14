@@ -70,7 +70,12 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   view makes a DirectComposition target on the window that layers each web view's visual between swap-chain layers
   of what NSH paints before and after it, so later siblings, dialogs and the dev overlay draw above web views, for
   any number of them. Windows without web views pay nothing for it; the composition lives as long as a web view
-  holds it (`Surface::compose`).
+  holds it (`Surface::compose`). A registered native component may bring a visual of its own the same way
+  (`NativeComponent::composed` / `visual`, `native.rs`): content another device draws, such as a swap chain of
+  the app's own. The first frame that draws its view in a window asks it for the visual on that window's
+  composition device; the composition stacks it in paint order like a web view's page and hands the component its
+  `ComposedAt` (transform, size, clip, corner radii, opacity) every frame, which the component applies to its
+  visual before the window commits. Unlike a child window, it is covered by what NSH draws after it.
 - **Drawing a view** (`render::draw_view`): shadows and background (`decor.rs`), the content clipped to the bounds
   (text, image, canvas), the children (clipped to the rounded bounds when the view clips), the items the view hosts
   (`ViewState::natives`: text editors, alerts, overlays, videos — the `Hosted` trait), the scroll

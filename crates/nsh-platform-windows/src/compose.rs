@@ -1,5 +1,7 @@
-//! Window composition: web views between the content nsh draws below them
-//! and the content it draws above them.
+//! Window composition: web views, and native components that bring a
+//! visual of their own (`crate::native`), between the content nsh draws
+//! below them and the content it draws above them. A component's visual
+//! takes a web view's place below: it is stacked and placed the same way.
 //!
 //! A window without web views draws its whole tree into its flip-model
 //! swap chain ([`crate::render::frame`]) and has no composition at all.
@@ -66,21 +68,22 @@ use windows_numerics::Matrix3x2;
 
 use crate::gfx::{self, Gfx};
 
-/// Where a frame put a web view: what its visuals are set to.
+/// Where a frame put a composed item (a web view, a component's visual,
+/// [`crate::ComposedAt`]): what its visuals are set to.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Placement {
-    /// The web view's pixels (its own coordinates times the window's
-    /// scale) to window pixels.
-    pub(crate) matrix: Matrix3x2,
+pub struct Placement {
+    /// The item's pixels (its own coordinates times the window's scale) to
+    /// window pixels.
+    pub matrix: Matrix3x2,
     /// Its size in pixels.
-    pub(crate) size: (i32, i32),
+    pub size: (i32, i32),
     /// What its clipping ancestors leave visible (window pixels).
-    pub(crate) clip: D2D_RECT_F,
+    pub clip: D2D_RECT_F,
     /// Its own corner radii in pixels (clockwise from the top left) when
     /// it clips its content, else zeros.
-    pub(crate) radii: [f32; 4],
+    pub radii: [f32; 4],
     /// The opacity it is drawn with (its own and its ancestors').
-    pub(crate) alpha: f32,
+    pub alpha: f32,
 }
 
 impl Placement {
@@ -222,6 +225,11 @@ impl Composition {
         };
         layer.target = Some(bitmap.clone());
         Ok(bitmap)
+    }
+
+    /// Its device, on which composed components make their visuals.
+    pub(crate) fn device(&self) -> &IDCompositionDesktopDevice {
+        &self.device
     }
 
     /// Shows what was drawn into the first `used` layers.

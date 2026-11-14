@@ -91,6 +91,6 @@ pub use crate::{
         set_ui_sets,
     },
     image::AssetBase,
-    native::{ComponentContext, ComponentFactory, Components, NativeComponent, Wheel},
+    native::{ComponentContext, ComponentFactory, Components, ComposedAt, NativeComponent, Wheel},
     text::DWriteTextEngine,
 };

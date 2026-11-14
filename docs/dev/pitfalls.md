@@ -772,7 +772,8 @@ Things that were found the hard way. Read the section of the area you change bef
   need slack.
 - **Child windows cover everything a window draws** (the "airspace" limit): web views are WebView2 composition
   controllers in the window's DirectComposition tree for this reason (`compose.rs`); native components that bring an
-  `HWND` of their own still cover NSH content. Offscreen drawings of the window have no web views: the test
+  `HWND` of their own still cover NSH content (one that brings a composition visual instead,
+  `NativeComponent::visual`, is stacked in order). Offscreen drawings of the window have no web views: the test
   agent's screenshots capture them (`PrintWindow` with `PW_RENDERFULLCONTENT`).
 - **`IDCompositionVisual::AddVisual(visual, TRUE, NULL)` puts the visual below all its siblings**, not on top: to
   stack bottom to top, insert each one above the one added before it (`compose.rs`).
