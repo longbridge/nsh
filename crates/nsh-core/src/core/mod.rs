@@ -1287,6 +1287,9 @@ pub struct Core<M: TextEngine> {
     batches: u64,
     /// Imperative calls, run after everything else in the batch.
     commands: Vec<(NodeId, Command)>,
+    /// Where the keyboard focus goes back to in this commit unless a
+    /// `focus()` moves it ([`crate::element::ElementRef::focus_back`]).
+    focus_back: Option<NodeId>,
     /// Animates the layout changes of the next commit.
     layout_animation: Option<LayoutAnimation>,
     /// Nodes whose change animates the frames it moves in the next commit,
@@ -1577,6 +1580,7 @@ impl<M: TextEngine> Core<M> {
             mount_projected: false,
             batches: 0,
             commands: Vec::new(),
+            focus_back: None,
             layout_animation: None,
             scoped_layout: Vec::new(),
             resized: Vec::new(),
@@ -3237,6 +3241,26 @@ impl<M: TextEngine> Core<M> {
         // a web view left with neither of them cancels what it holds, and
         // the cancel commands go out with this batch.
         self.sync_download_listeners();
+        // A focus given back yields to one moved anywhere in this commit
+        // (in this round, or an earlier one's items), whichever came
+        // first: the app's choice outranks a popup's closing.
+        if let Some(id) = self.focus_back.take()
+            && !self
+                .commands
+                .iter()
+                .any(|(_, c)| matches!(c, Command::Focus))
+            && !self.mount.iter().any(|m| {
+                matches!(
+                    m,
+                    MountItem::Command {
+                        command: Command::Focus,
+                        ..
+                    }
+                )
+            })
+        {
+            self.commands.push((id, Command::Focus));
+        }
         // On laid out views; dropped for views that were never shown.
         let mut kept = Vec::new();
         for (id, mut command) in std::mem::take(&mut self.commands) {
