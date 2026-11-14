@@ -1522,6 +1522,22 @@ pub(crate) fn frame(surface: &Rc<Surface>) -> bool {
     false
 }
 
+/// Clears `areas` (DIPs, on pixels) of the target to `background`, each
+/// under an axis-aligned clip. A clear under the layer that clips several
+/// areas clears the layer, which is then blended over the old pixels: with a
+/// transparent background (a system backdrop behind the window) what was
+/// there stays.
+fn clear_areas(dc: &ID2D1DeviceContext, areas: &[D2D_RECT_F], background: &D2D1_COLOR_F) {
+    for area in areas {
+        // SAFETY: COM calls between BeginDraw and EndDraw; the clip is popped.
+        unsafe {
+            dc.PushAxisAlignedClip(area, D2D1_ANTIALIAS_MODE_ALIASED);
+            dc.Clear(Some(background));
+            dc.PopAxisAlignedClip();
+        }
+    }
+}
+
 /// The union of `rects` as one geometry.
 fn rects_geometry(gfx: &Gfx, rects: &[D2D_RECT_F]) -> windows::core::Result<ID2D1Geometry> {
     // SAFETY: COM calls on the live factory.
@@ -1893,15 +1909,7 @@ fn draw_into(
             // itself, under an axis-aligned clip; an opaque one's layer
             // covers what was there as it is.
             if areas.len() > 1 && background.a < 1.0 {
-                for a in areas {
-                    // SAFETY: COM calls between BeginDraw and EndDraw, each
-                    // push popped at once.
-                    unsafe {
-                        dc.PushAxisAlignedClip(a, D2D1_ANTIALIAS_MODE_ALIASED);
-                        dc.Clear(Some(&background));
-                        dc.PopAxisAlignedClip();
-                    }
-                }
+                clear_areas(dc, areas, &background);
             }
             match areas {
                 [a] => cx.push_clip_rect(a.left, a.top, a.right - a.left, a.bottom - a.top),
@@ -1915,9 +1923,6 @@ fn draw_into(
                 },
             }
             cx.clip_skip = 1;
-            // SAFETY: a COM call between BeginDraw and EndDraw: clears what
-            // the clip leaves.
-            unsafe { dc.Clear(Some(&background)) };
             cx.damage = Some(areas.to_vec());
             draw_view(&mut cx, &root, Mat4::new(), (0.0, 0.0));
             crate::chrome::draw(surface, hwnd, dc, scale, w);
@@ -2286,6 +2291,58 @@ mod tests {
         assert!(read(&gfx, &back, size) == read(&gfx, &fresh, size));
         // Nothing changed since: nothing to draw.
         assert!(surface.take_damage().is_none_or(|d| d.is_empty()));
+    }
+
+    /// Clears the areas of an opaque red bitmap to transparent: under the
+    /// layer of a clip of several areas (`old_way`) or with [`clear_areas`].
+    fn cleared(gfx: &Gfx, size: (u32, u32), areas: &[D2D_RECT_F], old_way: bool) -> Vec<u8> {
+        let back = target(gfx, size);
+        let transparent = color_f(Color::TRANSPARENT);
+        // SAFETY: COM calls on the live context; `EndDraw` follows `BeginDraw`.
+        unsafe {
+            gfx.dc.SetTarget(&back);
+            gfx.dc.BeginDraw();
+            gfx.dc.SetTransform(&Matrix3x2::identity());
+            gfx.dc.Clear(Some(&color_f(Color(0xff00_00ff))));
+            if old_way {
+                let mut cx = DrawCx::new(gfx, 1.0, false, 0.0).unwrap();
+                cx.push_clip_geometry(&rects_geometry(gfx, areas).unwrap());
+                gfx.dc.Clear(Some(&transparent));
+                cx.pop();
+            } else {
+                clear_areas(&gfx.dc, areas, &transparent);
+            }
+            gfx.dc.EndDraw(None, None).unwrap();
+            gfx.dc.SetTarget(None);
+        }
+        read(gfx, &back, size)
+    }
+
+    /// A partial frame of several areas over a transparent background (a
+    /// window over Mica or Acrylic) erases what they showed: a view that
+    /// left one is not drawn there any more.
+    #[test]
+    fn several_areas_clear_to_a_transparent_background() {
+        let Ok(gfx) = gfx::get() else {
+            // No Direct3D device, not even WARP.
+            return;
+        };
+        let size = (40, 40);
+        let areas = [rect_f(0.0, 0.0, 10.0, 10.0), rect_f(20.0, 20.0, 10.0, 10.0)];
+        let pixel = |data: &[u8], x: usize, y: usize| {
+            let at = (y * size.0 as usize + x) * 4;
+            data[at..at + 4].to_vec()
+        };
+        let old = cleared(&gfx, size, &areas, true);
+        assert_eq!(
+            pixel(&old, 5, 5),
+            [0, 0, 255, 255],
+            "a clear under the layer keeps the old pixels"
+        );
+        let new = cleared(&gfx, size, &areas, false);
+        assert_eq!(pixel(&new, 5, 5), [0, 0, 0, 0]);
+        assert_eq!(pixel(&new, 25, 25), [0, 0, 0, 0]);
+        assert_eq!(pixel(&new, 15, 15), [0, 0, 255, 255], "outside the areas");
     }
 
     /// A subtree taken out from its top and then torn down (an overlay
