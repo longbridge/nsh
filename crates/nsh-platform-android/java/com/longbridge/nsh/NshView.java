@@ -17,6 +17,7 @@ import android.util.TypedValue;
 import android.view.Choreographer;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowManager;
@@ -102,6 +103,9 @@ public class NshView extends FrameLayout {
     private final TouchTracker touches;
     /** This window's shortcuts, raw keys, capture rules and Tab traversal. */
     private final KeyDispatch keys;
+    private final ViewTreeObserver.OnTouchModeChangeListener keyboardFocus = inTouchMode -> {
+        if (!inTouchMode) focusForKeyboard();
+    };
 
     @Override
     public boolean dispatchTouchEvent(android.view.MotionEvent e) {
@@ -145,11 +149,14 @@ public class NshView extends FrameLayout {
             // The releases of the keys held may never come.
             keys.focusLost();
             if (handle != 0) Native.keyReset(handle);
-        } else if (getRootView().findFocus() == null) {
-            // The surface holds the focus when nothing in the window does:
-            // the key path starts at the focused view, so without this the
-            // first key of a fresh window never reaches `dispatchKeyEvent`.
-            // A focused view elsewhere in an embedding window keeps it.
+        } else {
+            focusForKeyboard();
+        }
+    }
+
+    /** Fill an empty keyboard focus path, never scroll a touch-only embedding host into view. */
+    private void focusForKeyboard() {
+        if (hasWindowFocus() && !isInTouchMode() && getRootView().findFocus() == null) {
             requestFocus();
         }
     }
@@ -1062,6 +1069,7 @@ public class NshView extends FrameLayout {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        getViewTreeObserver().addOnTouchModeChangeListener(keyboardFocus);
         accessibility().addTouchExplorationStateChangeListener(screenReader);
         Activity activity = activity(getContext());
         if (activity != null) {
@@ -1079,13 +1087,14 @@ public class NshView extends FrameLayout {
         getContext().registerReceiver(timeChanged, time);
         // The dispatcher exists once attached.
         if (handle != 0) mounter.updateBack();
-        // An embedding window may already have the focus, so its
-        // `onWindowFocusChanged(true)` came before this surface was added.
-        if (hasWindowFocus() && getRootView().findFocus() == null) requestFocus();
+        // The window may already be active when an embedder attaches us.
+        // A real key leaving touch mode also enters through keyboardFocus.
+        focusForKeyboard();
     }
 
     @Override
     protected void onDetachedFromWindow() {
+        getViewTreeObserver().removeOnTouchModeChangeListener(keyboardFocus);
         super.onDetachedFromWindow();
         keys.focusLost();
         if (handle != 0) Native.keyReset(handle);

@@ -2867,9 +2867,15 @@ final class Mounter {
     private void updateFocusable(int id, View v) {
         if (v == null || id <= 1 || !managed(v)) return;
         boolean stop = focusStop(id);
+        // Our paired focus/touch listeners mark an installed stop. Unlike
+        // the setters, this getter never creates View.ListenerInfo.
+        boolean listening = v.getOnFocusChangeListener() == focusChange;
         if (!stop && v.isFocused()) {
             // Report the blur before focusability is dropped.
-            v.setOnFocusChangeListener(focusChange);
+            if (!listening) {
+                v.setOnFocusChangeListener(focusChange);
+                listening = true;
+            }
             releaseFocus(v);
         }
         if (v.isFocusable() != stop) v.setFocusable(stop);
@@ -2886,12 +2892,12 @@ final class Mounter {
             v.setFocusableInTouchMode(false);
         }
         if (Build.VERSION.SDK_INT >= 26) v.setDefaultFocusHighlightEnabled(false);
-        v.setOnFocusChangeListener(stop ? focusChange : null);
-        // A press focuses a managed stop where the focus can go: an
-        // explicit `focusable` in touch mode too, a default pressable only
-        // outside it, and never from a text input or hosted native view
-        // that has the focus.
-        v.setOnTouchListener(stop ? pointerFocus : null);
+        // Only change listeners when entering/leaving the stop set. Even
+        // setting a null listener allocates ListenerInfo on an untouched view.
+        if (listening != stop) {
+            v.setOnFocusChangeListener(stop ? focusChange : null);
+            v.setOnTouchListener(stop ? pointerFocus : null);
+        }
     }
 
     /**
