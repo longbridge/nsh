@@ -367,7 +367,8 @@ report it:
   window's and those of no window (`Keymap::find_in`), and the root hears `KeyCommand`; then, on a desktop, the
   application menu (`DesktopCommand::SetMenu`, `Screen::app_menu`) chooses its item with that shortcut
   (`MenuItem::find_shortcut`, keeping `MenuAction::fires_while_editing` while an input has the focus) and the root
-  hears `Menu`, as the platforms' menus do after the keymap; else, on macOS and the web, Tab / Shift+Tab move the keyboard focus between the stops
+  hears `Menu`, as the platforms' menus do after the keymap; else, on the desktops (macOS, Windows, Linux), the web and in a
+  terminal, Tab / Shift+Tab move the keyboard focus between the stops
   (`Screen::tab_stops`: editable inputs and the views `ViewProps::focus_stop` takes, pressables not
   `focusable={false}` and `focusable={true}` views that take no presses, in tree order, around; only the newest
   dialog's while one is shown over the focus' window, `Screen::focus_scope`, as the platforms keep Tab inside it; on the
@@ -375,7 +376,7 @@ report it:
   `Headless::modals_closed`), telling the
   views `Blur` / `Focus` and the view its `FOCUSED` state, and Return or Space presses the view it is on when it takes
   presses (a press of the pointer takes it off; on such a view they reach only the focus' own bindings in the keymap
-  above, `Keymap::find_at`, and the application menu not at all), and on the web Shift+F10 raises `ContextMenu` with no pointer on
+  above, `Keymap::find_at`, and the application menu not at all), and on the web and Linux Shift+F10 raises `ContextMenu` with no pointer on
   the nearest view around it that listens (`pointerType: null`, at its bottom-start corner); else the focused input takes a character, Backspace or the return key, else
   Escape goes back when there is something to go back from;
 - `wait`, `wait_for` / `wait_for_gone` / `wait_until` (until a selector matches, matches no more, a condition on the
