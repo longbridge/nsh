@@ -1787,5 +1787,41 @@ mod tests {
         let tables = nsh_core::js::animation::tables();
         let spring = tables["presets"]["spring"].to_string();
         assert_eq!(layout(&spring), LayoutAnimation::SPRING);
+        // A cubic Bézier: its control points, each `x` held to 0..1;
+        // without them (or with too few), it eases in and out.
+        let c = layout("{ update: { type: 'bezier', bezier: [0.2, 0, 1.4, 1.2] } }");
+        assert_eq!(
+            c.update.map(|u| u.curve),
+            Some(LayoutCurve::Bezier([0.2, 0.0, 1.0, 1.2]))
+        );
+        let d = layout("{ update: { type: 'bezier', bezier: [0.2, 0] } }");
+        assert_eq!(d.update.map(|u| u.curve), Some(LayoutCurve::EaseInEaseOut));
+    }
+
+    /// `ViewRef.animateLayout(transition)`: a layout animation sent to the
+    /// node, `transition` its `update`; without one, easing in and out.
+    #[test]
+    fn animate_layout_is_a_layout_animation_of_the_node() {
+        let rt = Runtime::new().unwrap();
+        let cx = Context::full(&rt).unwrap();
+        cx.with(|cx| {
+            let arg = cx
+                .eval("({ update: { type: 'bezier', bezier: [0.3, 0, 0, 1], duration: 200 } })")
+                .unwrap();
+            let Some(Command::LayoutAnimation(a)) = decode_command("layoutAnimation", arg).unwrap()
+            else {
+                panic!("not a layout animation");
+            };
+            assert_eq!(
+                a.update,
+                Some(LayoutTransition {
+                    curve: LayoutCurve::Bezier([0.3, 0.0, 0.0, 1.0]),
+                    property: LayoutProperty::Opacity,
+                    duration_ms: 200.0,
+                    delay_ms: 0.0,
+                })
+            );
+            assert_eq!((a.create, a.delete), (None, None));
+        });
     }
 }

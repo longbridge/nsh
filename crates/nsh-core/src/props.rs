@@ -648,6 +648,19 @@ pub enum LayoutCurve {
     /// duration is the keyboard's, `keyboard_duration`). Where there is no
     /// software keyboard, or nothing moved it, it eases in and out.
     Keyboard,
+    /// A cubic Bézier `[x1, y1, x2, y2]` over the transition's duration,
+    /// as CSS `cubic-bezier()` (`type: "bezier"` with `bezier` in JS):
+    /// the curve an app's design names. The `x` of each control point is
+    /// clamped to 0..1.
+    Bezier([f32; 4]),
+}
+
+impl LayoutCurve {
+    /// A cubic Bézier `[x1, y1, x2, y2]` ([`LayoutCurve::Bezier`]), each
+    /// control point's `x` clamped to 0..1.
+    pub fn bezier(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
+        Self::Bezier([x1.clamp(0.0, 1.0), y1, x2.clamp(0.0, 1.0), y2])
+    }
 }
 
 /// The property animated when views appear or disappear.

@@ -961,6 +961,9 @@ fn transition_json(t: &Option<LayoutTransition>) -> String {
                 LayoutCurve::EaseOut => "ease-out".to_owned(),
                 LayoutCurve::EaseInEaseOut | LayoutCurve::Keyboard => "ease-in-out".to_owned(),
                 LayoutCurve::FittedSpring { damping_ratio } => spring_easing(damping_ratio),
+                LayoutCurve::Bezier([x1, y1, x2, y2]) => {
+                    format!("cubic-bezier({x1}, {y1}, {x2}, {y2})")
+                }
                 // It times itself: its progress over the time it settles in,
                 // ending on its place.
                 LayoutCurve::Spring(spring) => sampled_easing(|x| {

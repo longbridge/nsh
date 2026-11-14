@@ -5134,6 +5134,83 @@ fn a_layout_animation_on_a_node_animates_the_frames_it_moves() {
     );
 }
 
+/// A header (2) that collapses with a scoped layout animation over a
+/// `flex-1` list (4) that gains a row (12) at its top in the same commit:
+/// the list grows along with the header, but its rows move because of the
+/// new row, so they change at once (#1952).
+#[test]
+fn a_layout_animation_does_not_carry_into_a_list_that_updates() {
+    let mut c = core();
+    let mut ops = Vec::new();
+    for (id, parent, style) in [
+        (2, 1, ("height", StyleValue::Number(100.0))),
+        (4, 1, ("flexGrow", StyleValue::Number(1.0))),
+        (8, 4, ("height", StyleValue::Number(20.0))),
+        (10, 4, ("height", StyleValue::Number(20.0))),
+    ] {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(style_op(id, &[style]));
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    apply(&mut c, ops);
+    c.commit().unwrap();
+    let spring = crate::LayoutTransition::new(
+        crate::LayoutCurve::FittedSpring { damping_ratio: 1.0 },
+        265.0,
+    );
+    apply(
+        &mut c,
+        vec![
+            style_op(2, &[("height", StyleValue::Number(56.0))]),
+            Op::Command {
+                id: 2,
+                command: Command::LayoutAnimation(crate::LayoutAnimation {
+                    update: Some(spring),
+                    ..Default::default()
+                }),
+            },
+            Op::Create {
+                id: 12,
+                tag: Tag::View,
+            },
+            style_op(12, &[("height", StyleValue::Number(20.0))]),
+            Op::Insert {
+                parent: 4,
+                child: 12,
+                before: Some(8),
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let mut current = None;
+    let mut frames = Vec::new();
+    for item in &batch.items {
+        match item {
+            MountItem::LayoutAnimation(a) => current = a.update,
+            MountItem::Frame { id, .. } => frames.push((*id, current)),
+            _ => {}
+        }
+    }
+    let animated = |id| frames.iter().find(|f| f.0 == id).map(|f| f.1.is_some());
+    assert_eq!(animated(2), Some(true), "the header collapses: {frames:?}");
+    assert_eq!(
+        animated(4),
+        Some(true),
+        "the list grows with it: {frames:?}"
+    );
+    for row in [8, 10, 12] {
+        assert_ne!(
+            animated(row),
+            Some(true),
+            "row {row} changes at once: {frames:?}"
+        );
+    }
+}
+
 #[test]
 fn a_layout_animation_on_the_root_still_animates_every_frame() {
     let frames = scoped_layout_commit(true);
