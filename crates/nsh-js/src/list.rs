@@ -9,6 +9,7 @@
 use std::{
     cell::RefCell,
     ffi::{CStr, CString, c_int},
+    hash::Hash,
     ptr,
 };
 
@@ -478,17 +479,61 @@ unsafe extern "C" fn items_run(
             while end < max - start && same(old_len - 1 - end, next_len - 1 - end) {
                 end += 1;
             }
-            qjs::JS_FreeValue(cx, key_of);
             let removed = old_len - start - end;
             let inserted = next_len - start - end;
+            // Rows that went on one side and came on the other (a window of
+            // rows that slides: the first dropped, one appended) are a
+            // splice each, not one over every row between, so the rows
+            // both share keep their measurements and the viewport its rows.
+            let splices = if removed > 0 && inserted > 0 {
+                // The keys stay alive until they are compared: an object's
+                // is its address, which a freed key's memory could reuse.
+                let (mut atoms, mut held) = (Vec::new(), Vec::new());
+                let mut keys = |array: JsValue, from: i64, to: i64| {
+                    (from..to)
+                        .map(|i| {
+                            let item = qjs::JS_GetPropertyInt64(cx, array, i);
+                            let k = if keyed {
+                                key(item, i)
+                            } else {
+                                qjs::JS_DupValue(cx, item)
+                            };
+                            qjs::JS_FreeValue(cx, item);
+                            let token = item_key(cx, k);
+                            if qjs::JS_IsException(k) {
+                                qjs::JS_FreeValue(cx, qjs::JS_GetException(cx));
+                            } else {
+                                held.push(k);
+                            }
+                            if let Some(ItemKey::Atom(atom)) = token {
+                                atoms.push(atom);
+                            }
+                            token
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let old_keys = keys(old, start, old_len - end);
+                let next_keys = keys(next, start, next_len - end);
+                let mut splices = Vec::new();
+                narrow_splices(&old_keys, &next_keys, start as u32, 0, &mut splices);
+                for atom in atoms {
+                    qjs::JS_FreeAtom(cx, atom);
+                }
+                for k in held {
+                    qjs::JS_FreeValue(cx, k);
+                }
+                splices
+            } else {
+                vec![[start as u32, removed as u32, inserted as u32]]
+            };
+            qjs::JS_FreeValue(cx, key_of);
             if removed > 0 || inserted > 0 {
                 let mut id = 0f64;
                 qjs::JS_ToFloat64(cx, &mut id, list);
                 let indices: Vec<JsValue> =
                     match lists(cx).map.borrow_mut().get_mut(&(id as NodeId)) {
                         Some(d) => {
-                            d.splices
-                                .push([start as u32, removed as u32, inserted as u32]);
+                            d.splices.extend_from_slice(&splices);
                             d.cells
                                 .iter()
                                 .flatten()
@@ -498,11 +543,14 @@ unsafe extern "C" fn items_run(
                         None => Vec::new(),
                     };
                 for index in indices {
+                    // Where the cell's row is after the splices, in order (a
+                    // removed row's cell keeps its index until it is bound).
                     if let Some(i) = reactive::peek_number(cx, index)
-                        && i as i64 >= start + removed
+                        && i >= 0.0
+                        && let Some(moved) = moved_index(i as u32, &splices)
+                        && moved != i as u32
                     {
-                        let moved = i + (inserted - removed) as f64;
-                        reactive::set_signal(cx, index, qjs::JS_NewFloat64(moved));
+                        reactive::set_signal(cx, index, qjs::JS_NewFloat64(moved as f64));
                     }
                     qjs::JS_FreeValue(cx, index);
                 }
@@ -510,6 +558,128 @@ unsafe extern "C" fn items_run(
         }
         next
     }
+}
+
+/// What `===` compares a row's key by, where it can be looked up: a string
+/// by its atom (one per content), an object by identity (its address: the
+/// key must stay alive while it is compared), a number by its value. Other
+/// keys (a symbol, `NaN`) are never found again: such rows change as one
+/// splice, as before.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum ItemKey {
+    Atom(qjs::JSAtom),
+    Object(usize),
+    Number(u64),
+}
+
+/// `key`'s [`ItemKey`] (borrowed; an atom made is the caller's).
+fn item_key(cx: *mut JsContext, key: JsValue) -> Option<ItemKey> {
+    // SAFETY: inline tag and pointer reads of a live value, an atom made of
+    // a string (owned by the caller) or a pending exception cleared.
+    unsafe {
+        if qjs::JS_IsObject(key) {
+            return Some(ItemKey::Object(qjs::JS_VALUE_GET_PTR(key) as usize));
+        }
+        if qjs::JS_IsString(key) {
+            let atom = qjs::JS_ValueToAtom(cx, key);
+            if atom != qjs::JS_ATOM_NULL {
+                return Some(ItemKey::Atom(atom));
+            }
+            qjs::JS_FreeValue(cx, qjs::JS_GetException(cx));
+            return None;
+        }
+        if qjs::JS_IsNumber(key) {
+            let mut n = 0f64;
+            qjs::JS_ToFloat64(cx, &mut n, key);
+            // `===`: NaN is no row's key twice; 0 and -0 are one.
+            return (!n.is_nan()).then(|| ItemKey::Number(if n == 0.0 { 0 } else { n.to_bits() }));
+        }
+    }
+    None
+}
+
+/// How deep [`narrow_splices`] splits a change: each level is one pass over
+/// it, and past this the rest is one splice.
+const NARROW_DEPTH: u32 = 4;
+
+/// The splices that turn the rows `old` into `new` (by key; `None` matches
+/// nothing), at index `at`, appended to `out` back to front, so each one's
+/// index holds when they apply in order. A change is split at the longest
+/// run of rows both share: the rows of the run stay, and what changed
+/// before and after it are splices of their own.
+fn narrow_splices<K: Copy + Eq + Hash>(
+    old: &[Option<K>],
+    new: &[Option<K>],
+    at: u32,
+    depth: u32,
+    out: &mut Vec<[u32; 3]>,
+) {
+    let same = |a: &Option<K>, b: &Option<K>| a.is_some() && a == b;
+    let start = old.iter().zip(new).take_while(|(a, b)| same(a, b)).count();
+    let (old, new) = (&old[start..], &new[start..]);
+    let end = old
+        .iter()
+        .rev()
+        .zip(new.iter().rev())
+        .take_while(|(a, b)| same(a, b))
+        .count();
+    let (old, new) = (&old[..old.len() - end], &new[..new.len() - end]);
+    let at = at + start as u32;
+    if old.is_empty() && new.is_empty() {
+        return;
+    }
+    let whole = [at, old.len() as u32, new.len() as u32];
+    if old.is_empty() || new.is_empty() || depth >= NARROW_DEPTH {
+        return out.push(whole);
+    }
+    let mut found: FxHashMap<K, usize> = FxHashMap::default();
+    for (j, key) in new.iter().enumerate().rev() {
+        if let Some(key) = key {
+            found.insert(*key, j);
+        }
+    }
+    // The longest run `old[i..i + len] == new[j..j + len]`.
+    let (mut run, mut i) = ((0, 0, 0), 0);
+    while i < old.len() {
+        let Some(j) = old[i].and_then(|key| found.get(&key).copied()) else {
+            i += 1;
+            continue;
+        };
+        let len = old[i..]
+            .iter()
+            .zip(&new[j..])
+            .take_while(|(a, b)| same(a, b))
+            .count();
+        if len > run.2 {
+            run = (i, j, len);
+        }
+        i += len;
+    }
+    let (i, j, len) = run;
+    if len == 0 {
+        return out.push(whole);
+    }
+    narrow_splices(
+        &old[i + len..],
+        &new[j + len..],
+        at + (i + len) as u32,
+        depth + 1,
+        out,
+    );
+    narrow_splices(&old[..i], &new[..j], at, depth + 1, out);
+}
+
+/// Where the row at `index` is after `splices` apply in order; `None` when
+/// one of them removes it.
+fn moved_index(mut index: u32, splices: &[[u32; 3]]) -> Option<u32> {
+    for &[at, removed, inserted] in splices {
+        if index >= at + removed {
+            index = index + inserted - removed;
+        } else if index >= at {
+            return None;
+        }
+    }
+    Some(index)
 }
 
 /// A run of the items effect: tells the core how the items changed and
@@ -1543,5 +1713,154 @@ mod tests {
             .collect();
         assert_eq!(splices.len(), 1, "{splices:?}");
         assert!(splices[0].contains("Splice(3, 0, 1)"), "{splices:?}");
+    }
+
+    /// A window of rows that slides (the first dropped, one appended, rows
+    /// rebuilt with the same keys) is two splices, the end first, not one
+    /// over every row.
+    #[test]
+    fn a_sliding_window_of_keyed_rows_splices_each_end() {
+        let host = Host::with_options(HostOptions::default()).unwrap();
+        host.eval_source(
+            r#"
+            import { List, mount, signal } from "nsh";
+            import { text } from "nsh:rt";
+            const items = signal(Array.from({ length: 240 }, (_, i) => ({ id: `r${i}` })));
+            globalThis.window = { items, next: 240 };
+            mount(() => List({
+                get each() { return items(); },
+                keyExtractor: item => item.id,
+                children: item => text(item().id),
+            }));
+            "#,
+        )
+        .unwrap();
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        ops.clear();
+        assert!(
+            host.eval_script(
+                "keyed-slide",
+                "window.items.set([...window.items().slice(1).map(i => ({...i})), {id: `r${window.next++}`}]); true",
+            )
+            .unwrap()
+        );
+        host.take_ops(&mut ops);
+        let splices: Vec<String> = ops
+            .iter()
+            .map(|op| format!("{op:?}"))
+            .filter(|op| op.contains("Splice"))
+            .collect();
+        assert_eq!(splices.len(), 2, "{splices:?}");
+        assert!(splices[0].contains("Splice(240, 0, 1)"), "{splices:?}");
+        assert!(splices[1].contains("Splice(0, 1, 0)"), "{splices:?}");
+    }
+
+    /// Keys that are new objects each time are never `===`: such rows are
+    /// one splice, as before, however the engine reuses the memory of the
+    /// keys it has read.
+    #[test]
+    fn keys_made_anew_as_objects_never_match() {
+        let host = Host::with_options(HostOptions::default()).unwrap();
+        host.eval_source(
+            r#"
+            import { List, mount, signal } from "nsh";
+            import { text } from "nsh:rt";
+            const items = signal(Array.from({ length: 240 }, (_, i) => ({ id: `r${i}` })));
+            globalThis.window = { items, next: 240 };
+            mount(() => List({
+                get each() { return items(); },
+                keyExtractor: item => ({ id: item.id }),
+                children: item => text(item().id),
+            }));
+            "#,
+        )
+        .unwrap();
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        ops.clear();
+        assert!(
+            host.eval_script(
+                "object-keys-slide",
+                "window.items.set([...window.items().slice(1), {id: `r${window.next++}`}]); true",
+            )
+            .unwrap()
+        );
+        host.take_ops(&mut ops);
+        let splices: Vec<String> = ops
+            .iter()
+            .map(|op| format!("{op:?}"))
+            .filter(|op| op.contains("Splice"))
+            .collect();
+        assert_eq!(splices.len(), 1, "{splices:?}");
+        assert!(splices[0].contains("Splice(0, 240, 240)"), "{splices:?}");
+    }
+
+    fn narrow(old: &[u32], new: &[u32]) -> Vec<[u32; 3]> {
+        let keys = |rows: &[u32]| rows.iter().map(|&k| Some(k)).collect::<Vec<_>>();
+        let mut out = Vec::new();
+        super::narrow_splices(&keys(old), &keys(new), 0, 0, &mut out);
+        out
+    }
+
+    /// Applies `splices` in order to `old`'s keys, new rows taken from `new`
+    /// at the indices they end up at.
+    fn apply(old: &[u32], new: &[u32], splices: &[[u32; 3]]) -> Vec<u32> {
+        let mut rows = old.to_vec();
+        for &[at, removed, inserted] in splices {
+            rows.splice(
+                at as usize..(at + removed) as usize,
+                std::iter::repeat_n(u32::MAX, inserted as usize),
+            );
+        }
+        rows.iter()
+            .zip(new)
+            .map(|(&row, &key)| if row == u32::MAX { key } else { row })
+            .collect()
+    }
+
+    #[test]
+    fn changes_split_at_the_rows_both_lists_share() {
+        let range = |from: u32, to: u32| (from..to).collect::<Vec<_>>();
+        // A window that slides by one and by several.
+        assert_eq!(
+            narrow(&range(0, 240), &range(1, 241)),
+            [[240, 0, 1], [0, 1, 0]]
+        );
+        assert_eq!(
+            narrow(&range(0, 240), &range(7, 247)),
+            [[240, 0, 7], [0, 7, 0]]
+        );
+        // Rows prepended while the last row changes.
+        assert_eq!(
+            narrow(&[5, 6, 7, 9], &[1, 2, 5, 6, 7, 8]),
+            [[3, 1, 1], [0, 0, 2]]
+        );
+        // Nothing shared: one splice, as before.
+        assert_eq!(narrow(&[1, 2], &[3, 4, 5]), [[0, 2, 3]]);
+        // Every result applies in order to the new rows, the shared ones kept.
+        for (old, new) in [
+            (range(0, 240), range(1, 241)),
+            (vec![1, 2, 3, 4, 5, 6, 7, 8], vec![9, 2, 3, 10, 5, 6, 7, 11]),
+            (vec![1, 2, 3, 4], vec![4, 3, 2, 1]),
+            (vec![1, 2, 3], vec![2, 3, 1]),
+        ] {
+            let splices = narrow(&old, &new);
+            assert_eq!(apply(&old, &new, &splices), new, "{splices:?}");
+            let mut ats: Vec<u32> = splices.iter().map(|s| s[0]).collect();
+            ats.dedup();
+            assert!(
+                ats.windows(2).all(|w| w[0] > w[1]),
+                "back to front: {splices:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_rows_index_follows_the_splices() {
+        let splices = [[240, 0, 1], [0, 1, 0]];
+        assert_eq!(super::moved_index(190, &splices), Some(189));
+        assert_eq!(super::moved_index(0, &splices), None);
+        assert_eq!(super::moved_index(239, &splices), Some(238));
     }
 }
