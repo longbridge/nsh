@@ -2294,12 +2294,38 @@ class Player {
     const host = parent._layer ?? parent;
     // Appended children stay under a border drawn over them.
     const last = host._borderOver && host._border?.parentNode === host ? host._border : null;
-    host.insertBefore(child, before && before.parentNode === host ? before : last);
+    this.placeChild(host, child, before && before.parentNode === host ? before : last);
     this.showHosted(child);
     this.readingChanged(host);
     if (parent._kind === "stack") {
       this.changedStacks.add(parent);
       this.stackChanged(parent, child);
+    }
+  }
+
+  /// Puts `child` before `ref` in `host`. A restack (`zIndex` changed)
+  /// re-inserts a view already there; moving the node holding the focus
+  /// would drop it (and fire blur), so its siblings move around it instead.
+  placeChild(host, child, ref) {
+    const active = document.activeElement;
+    if (child.parentNode !== host || !active || active === document.body || !child.contains(active)) {
+      host.insertBefore(child, ref);
+      return;
+    }
+    if (child === ref || child.nextSibling === ref) return;
+    const moved = [];
+    let forward = false;
+    for (let n = child.nextSibling; n; n = n.nextSibling) {
+      if (n === ref) { forward = true; break; }
+    }
+    if (ref === null) forward = true;
+    if (forward) {
+      for (let n = child.nextSibling; n && n !== ref; n = n.nextSibling) moved.push(n);
+      for (const n of moved) host.insertBefore(n, child);
+    } else {
+      for (let n = ref; n && n !== child; n = n.nextSibling) moved.push(n);
+      const anchor = child.nextSibling;
+      for (const n of moved) host.insertBefore(n, anchor);
     }
   }
 
