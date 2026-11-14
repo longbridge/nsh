@@ -411,6 +411,7 @@ shown in place under its `label`. The children, `class` and `style` are the trig
 | `indicator` | `.indicator(..)` | `JSX.Element` | none | The mark inside the indicator. |
 | `closeOnSelect` | `.close_on_select(..)` | `boolean` | `true` | Choosing it closes the menu. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say, when the content is not enough. |
+| `accessibilityDescription` | `.accessibility_description(..)` | `string` | none | More about it than its name, which screen readers read after it: what a choice does. |
 | `children`, `class`, `style` | `.child(..)`, style methods | | none | Its content and look, with `hover:`, `active:` and `checked:` states. |
 
 ### Submenu
@@ -449,5 +450,6 @@ shown in place under its `label`. The children, `class` and `style` are the trig
 
 The popup or sheet is a menu and its items menu items for screen readers; the trigger tells whether the menu is
 expanded. A checkable item is a checkbox or radio menu item, read as checked or not checked; its indicator is part of
-the item. In TSX the trigger is the element you pass, a `Button` or a view of your own: it takes the presses and the
+the item. An item's `accessibilityDescription` is read after its name, so a short label can stay short; a
+submenu's trigger is your element and takes its own. In TSX the trigger is the element you pass, a `Button` or a view of your own: it takes the presses and the
 expanded state itself, so its own `active:` classes and `activeStyle` show while it is pressed, and its own `onPress` runs too. Only the items of the level shown are on screen, so screen readers read what is there.

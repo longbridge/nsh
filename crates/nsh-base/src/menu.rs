@@ -1915,6 +1915,10 @@ pub struct MenuItemProps {
     pub close_on_select: Prop<bool>,
     /// What screen readers say, when its content is not enough.
     pub accessibility_label: Prop<Option<SharedString>>,
+    /// More about it than its name, which screen readers read after a
+    /// pause, and a user can skip: what a choice does, how a mode differs
+    /// from the others.
+    pub accessibility_description: Prop<Option<SharedString>>,
     /// The Tailwind classes of the indicator, the part around the mark
     /// before the content; `checked:` and `disabled:` follow the item, and
     /// with `group` the mark's `group-checked:` classes do too.
@@ -2078,6 +2082,7 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
         .checked_style(props.checked_style)
         .disabled(disabled)
         .optional_label(props.accessibility_label)
+        .optional_accessibility_description(props.accessibility_description)
         .on_focus(move || {
             focused.set(true);
             // The keyboard on another item of its level closes a submenu

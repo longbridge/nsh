@@ -993,6 +993,9 @@ prop id:sort-name role menuitemradio
 prop id:sort-name accessibilityState checked=true
 prop id:sort-size role menuitemradio
 prop id:sort-size accessibilityState checked=false
+# A description, read after the item's name; an item without one has none.
+prop id:sort-name accessibilityDescription Sorts by file name
+noprop id:plain accessibilityDescription
 # A plain item stays a menuitem with no checked state.
 prop id:plain role menuitem
 prop id:plain accessibilityState {}
@@ -1010,6 +1013,7 @@ covers [props] MenuItem.checked
 covers [props] MenuItem.indicator
 covers [props] MenuItem.indicatorClass
 covers [props] MenuItem.indicatorStyle
+covers [props] MenuItem.accessibilityDescription
 covers [props] MenuItem.closeOnSelect
 covers [props] checkedStyle
 covers [props] role
