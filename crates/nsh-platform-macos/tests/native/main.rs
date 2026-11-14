@@ -29,6 +29,8 @@ mod mount;
 #[cfg(target_os = "macos")]
 mod press_momentum;
 #[cfg(target_os = "macos")]
+mod quit_requests;
+#[cfg(target_os = "macos")]
 mod scaled_input;
 #[cfg(target_os = "macos")]
 mod title_bar;
@@ -50,7 +52,11 @@ fn main() {
     } else {
         #[cfg(target_os = "macos")]
         {
-            if std::env::var_os("NSH_TITLE_BAR_CHECK_ONLY").is_some() {
+            if std::env::var_os("NSH_QUIT_CHECK_CASE").is_some() {
+                quit_requests::run_case();
+            } else if std::env::var_os("NSH_QUIT_CHECK_ONLY").is_some() {
+                quit_requests::run();
+            } else if std::env::var_os("NSH_TITLE_BAR_CHECK_ONLY").is_some() {
                 title_bar::run();
             } else if mount::bench_only() {
                 mount::bench_alone();
@@ -83,6 +89,7 @@ fn main() {
             } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
                 press_momentum::run();
             } else {
+                quit_requests::run();
                 window_press::run();
                 window_hover::run();
                 title_bar::run();

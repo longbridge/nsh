@@ -522,6 +522,10 @@ impl Surface {
 
     /// Stops the app and removes its views.
     pub(crate) fn stop(&self) {
+        // The confirmation and policy belong to the engine being replaced,
+        // not its successor. Approval takes the request before stopping.
+        crate::app::set_quit_request_options(self.key, Default::default());
+        self.chrome.asks_quit.set(false);
         // Dropping the engine joins its thread.
         self.control.borrow_mut().take();
         self.engine.borrow_mut().take();

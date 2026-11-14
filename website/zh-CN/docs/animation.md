@@ -620,6 +620,30 @@ let header = offset.diff_clamp_with(0.0, 56.0, DiffClamp::snapping());
 const header = scroll.diffClamp(0, 56, { snap: true });
 ```
 
+上下限都可以是动画值，由 UI 线程每帧读取。拖动范围会随内容或布局变化时（时间轴、画布），把范围作为动画值传入：范围缩小时结果立即被限制，在边缘反向拖动时结果马上跟着移动，没有空行程：
+
+```rust tabs
+let drag = animated_value(0.0);
+let max = animated_value(240.0);
+let knob = drag.diff_clamp(0.0, &max);
+
+view().pan_values(Some(&drag), None).child(view().size(px(44.0)).bind_translate_x(&knob))
+// 之后布局变化时：
+max.set(96.0);
+```
+
+```tsx tabs
+const drag = createAnimatedValue(0);
+const max = createAnimatedValue(240);
+const knob = drag.diffClamp(0, max);
+
+<View pan={{ x: drag }}>
+  <View style={{ width: 44, height: 44, translate: [knob, 0] }} />
+</View>
+// 之后布局变化时：
+max.set(96);
+```
+
 ## 组合动画
 
 动画由步骤搭建（Rust 中的 `Animation`，TSX 中 `nsh` 的 `Animated`），整棵动画树在原生端运行：每个步骤在上一步结束的那一刻就在 UI 线程上开始，没有间隙，中间也不运行你的代码。

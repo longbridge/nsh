@@ -418,6 +418,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Quit => quit(surface),
         DesktopCommand::SetQuitOnRequest(quit) => c.asks_quit.set(!quit),
+        // Additional quit request sources are currently macOS-only.
+        DesktopCommand::SetQuitRequestOptions(_) | DesktopCommand::CancelQuitRequest => {}
         // Quits as above, then the runner starts the app again; an
         // embedding app's window is its own.
         DesktopCommand::Restart => {

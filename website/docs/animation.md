@@ -620,6 +620,30 @@ let header = offset.diff_clamp_with(0.0, 56.0, DiffClamp::snapping());
 const header = scroll.diffClamp(0, 56, { snap: true });
 ```
 
+Either bound can be an animated value, read on the UI thread every frame. A drag limited to a range that changes as the content or layout does (a timeline, a canvas) passes the range as a value: when it shrinks, the result clamps at once, and when the drag reverses at an edge, the result moves back immediately, with no dead zone:
+
+```rust tabs
+let drag = animated_value(0.0);
+let max = animated_value(240.0);
+let knob = drag.diff_clamp(0.0, &max);
+
+view().pan_values(Some(&drag), None).child(view().size(px(44.0)).bind_translate_x(&knob))
+// Later, as the layout changes:
+max.set(96.0);
+```
+
+```tsx tabs
+const drag = createAnimatedValue(0);
+const max = createAnimatedValue(240);
+const knob = drag.diffClamp(0, max);
+
+<View pan={{ x: drag }}>
+  <View style={{ width: 44, height: 44, translate: [knob, 0] }} />
+</View>
+// Later, as the layout changes:
+max.set(96);
+```
+
 ## Composite animations
 
 Animations are built out of steps (`Animation` in Rust, `Animated` from `nsh` in TSX) and the whole tree runs natively: each step starts on the UI thread the moment the previous one ends, with no gap and none of your code in between.
