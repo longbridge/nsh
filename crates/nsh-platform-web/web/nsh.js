@@ -2617,10 +2617,12 @@ class Player {
   }
 
   /**
-   * A text whose plain runs are as many as before (a cell's new value, a
-   * counter): its spans take the new texts and places in place, so a text
-   * that changes often makes and removes no nodes. False when the runs
-   * cannot be updated so (backgrounds, links, another count).
+   * A text of plain runs that had plain runs (a cell's new value, a
+   * counter, an answer streamed in): its spans take the new texts and
+   * places in place, and only the runs it gained or lost are made or
+   * removed, so a text that changes often remakes no nodes for the lines
+   * that stayed. False when the runs cannot be updated so (backgrounds,
+   * links, runs of parts).
    */
   updateRuns(el, cx, cy, runs, styles, backgrounds, links) {
     if (backgrounds?.length || links?.length || !runs.length) return false;
@@ -2629,12 +2631,26 @@ class Player {
       if (child.classList.contains("nsh-run-bg")) return false;
       if (child.classList.contains("nsh-run")) spans.push(child);
     }
-    if (spans.length !== runs.length) return false;
+    if (!spans.length) return false;
     for (let i = 0; i < runs.length; i++) {
       const [, , text, , , parts] = runs[i];
+      if (parts || !text) return false;
+      if (i >= spans.length) continue;
       const node = spans[i].firstChild;
       // Only a span holding one text node, as `fillRun` leaves plain text.
-      if (parts || !text || !node || node.nodeType !== 3 || node.nextSibling) return false;
+      if (!node || node.nodeType !== 3 || node.nextSibling) return false;
+    }
+    // The runs it lost go; those it gained follow the last span kept (past
+    // its line's break, which `lineBreaks` keeps).
+    for (const span of spans.splice(runs.length)) span.remove();
+    let before = spans[spans.length - 1]?.nextSibling;
+    if (before?.nodeType === 3) before = before.nextSibling;
+    while (spans.length < runs.length) {
+      const span = document.createElement("span");
+      span.append(document.createTextNode(""));
+      if (el._animation.color) span.style.color = el._animation.color;
+      el.insertBefore(span, before ?? null);
+      spans.push(span);
     }
     runs.forEach(([x, y, text, style, start, , after], i) => {
       const span = spans[i];
@@ -2662,9 +2678,15 @@ class Player {
    * shows of them.
    */
   lineBreaks(el) {
-    for (const node of [...el.childNodes]) if (node.nodeType === 3) node.remove();
+    // A break already in its place stays: a text that changes often (an
+    // answer streamed in) moves no nodes for the lines it did not change.
+    for (const node of [...el.childNodes]) {
+      if (node.nodeType !== 3) continue;
+      const span = node.previousSibling;
+      if (!span?.classList?.contains("nsh-run") || span._after !== node.data) node.remove();
+    }
     for (const span of el.querySelectorAll(":scope > .nsh-run")) {
-      if (span._after) span.after(span._after);
+      if (span._after && span.nextSibling?.nodeType !== 3) span.after(span._after);
     }
   }
 
