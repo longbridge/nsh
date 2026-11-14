@@ -1481,6 +1481,20 @@ pub unsafe extern "C" fn nsh_touch(ptr: *const u8, len: usize) -> f64 {
         phase,
         timestamp: f(&value, "time"),
         points,
+        modifiers: {
+            let m = value.get("modifiers");
+            let on = |k: &str| {
+                m.and_then(|m| m.get(k))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            };
+            Modifiers {
+                ctrl: on("control"),
+                alt: on("alt"),
+                shift: on("shift"),
+                cmd: on("platform"),
+            }
+        },
         activated: value
             .get("activated")
             .and_then(|v| v.as_u64())

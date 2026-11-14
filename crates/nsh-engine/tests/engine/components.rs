@@ -5671,6 +5671,7 @@ fn a_base_slider_moves_the_nearer_thumb_and_tells_screen_readers_each_value() {
         EventPayload::Touch(Box::new(TouchEvent {
             phase,
             timestamp: 0.0,
+            modifiers: Default::default(),
             activated: None,
             points: vec![TouchPoint {
                 id: 1,
@@ -5790,6 +5791,7 @@ fn a_base_sliders_drag_ends_on_the_apps_answer_to_its_last_move() {
         EventPayload::Touch(Box::new(TouchEvent {
             phase,
             timestamp,
+            modifiers: Default::default(),
             activated: None,
             points: vec![TouchPoint {
                 id: 1,

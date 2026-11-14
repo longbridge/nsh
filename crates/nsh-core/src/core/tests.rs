@@ -17724,6 +17724,7 @@ mod touch {
         EventPayload::Touch(Box::new(TouchEvent {
             phase,
             timestamp: t,
+            modifiers: Default::default(),
             activated: None,
             points: vec![TouchPoint {
                 id: 7,
@@ -29016,6 +29017,7 @@ fn touch_down(path: Vec<NodeId>) -> EventPayload {
             changed: true,
             pointer_type: crate::PointerType::Touch,
         }],
+        modifiers: Default::default(),
         activated: None,
     }))
 }
