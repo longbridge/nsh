@@ -222,7 +222,26 @@ fn content(rv: Rv) -> impl IntoElement {
         true => end.release(),
         false => end.end_sweep(),
     })
-    .child(blocks(rv.clone(), DOC))
+    // Keep the intrinsic extent separate from the content box, whose
+    // min-height fills the viewport. In particular, a parent must be able
+    // to shrink an overestimated height and discover offscreen blocks
+    // without progressively enlarging the editor.
+    .child(
+        view()
+            .flex_shrink_0()
+            .on_layout({
+                let extent = rv.clone();
+                move |bounds: &Bounds<Points>| {
+                    // Root blocks are now relative to this wrapper, including
+                    // padding on Part::Content, rather than directly to content.
+                    extent.set_inset(DOC, bounds.origin);
+                    if extent.document_size.get_untracked() != bounds.size {
+                        extent.document_size.set(bounds.size);
+                    }
+                }
+            })
+            .child(blocks(rv.clone(), DOC)),
+    )
     .child(table::controls(rv.clone()))
     .child(gap_cursor(rv.clone()))
     .child(drop_cursor(rv.clone()))

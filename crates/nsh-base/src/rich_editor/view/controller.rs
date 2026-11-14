@@ -20,8 +20,8 @@ use serde_json::Value;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
-    RichEditorChange, RichEditorEvent, RichEditorFile, RichEditorPastedFiles, RichEditorProps,
-    RichEditorSelection,
+    RichEditorChange, RichEditorEvent, RichEditorFile, RichEditorGeometry, RichEditorPastedFiles,
+    RichEditorProps, RichEditorSelection,
     geometry::{DOC, Geometry, Hit},
     keys::{self, Move, Unit},
     node_view::{NodeView, NodeViewEvent},
@@ -189,6 +189,8 @@ pub(crate) struct Rv {
     pub(crate) viewport: Signal<Size<Points>>,
     /// The content box's height, how far the scroll view scrolls.
     pub(crate) content_height: Signal<Points>,
+    /// Intrinsic flow extent, without the content box's minimum viewport height.
+    pub(crate) document_size: Signal<Size<Points>>,
     /// A drag scrolling on its own past the viewport's edge.
     autoscroll: Rc<RefCell<AutoScroll>>,
     /// The state's scroll request was not carried out yet.
@@ -249,6 +251,7 @@ impl Rv {
             scrolled: Rc::default(),
             viewport: signal(Size::default()),
             content_height: signal(px(0.0)),
+            document_size: signal(Size::default()),
             autoscroll: Rc::default(),
             scroll_pending: Rc::default(),
             blink_task: Rc::default(),
@@ -363,6 +366,39 @@ impl Rv {
             if rv.scroll_pending.get() {
                 untracked(|| rv.scroll_into_view());
             }
+        });
+        // Native layout reports many block/text frames in one commit. Apps
+        // need a settled extent, not an event (or a measurement task) per
+        // paragraph. The owner cancels the pending frame on unmount.
+        let rv = self.clone();
+        let pending = Rc::new(Cell::new(false));
+        let owner = Owner::current();
+        effect(move || {
+            rv.layout_rev.get();
+            rv.document_size.get();
+            rv.scroll_y.get();
+            rv.doc_rev.get();
+            if pending.replace(true) {
+                return;
+            }
+            let (rv, pending) = (rv.clone(), pending.clone());
+            owner.run(|| {
+                spawn(async move {
+                    next_frame().await;
+                    pending.set(false);
+                    let size = rv.document_size.get_untracked();
+                    if size.width.0 <= 0.0 || size.height.0 <= 0.0 {
+                        return;
+                    }
+                    rv.cx
+                        .emit(RichEditorEvent::GeometryChange(RichEditorGeometry {
+                            content_size: size,
+                            scroll_offset: rv.scroll_y.get_untracked(),
+                            generation: rv.layout_rev.get_untracked(),
+                            document_revision: rv.doc_rev.get_untracked(),
+                        }));
+                })
+            });
         });
     }
 
@@ -1680,15 +1716,23 @@ impl Rv {
         let pointer = self.pointer.clone();
         let scroll = self.scroll_y;
         let drag = self.drag.clone();
+        let layout = self.layout_rev;
         spawn(async move {
             if let Some(m) = content.measure().await {
                 let at = scroll.get_untracked();
                 let shift = Point::new(-m.page.x, -m.page.y);
-                pointer.set(Some((shift, at)));
+                let placed = Some((shift, at));
+                let changed = pointer.replace(placed) != placed;
                 // A drag begun on an older offset (the content moved on the
                 // page without a layout of its own) maps by the new one.
                 if let Some(drag) = drag.borrow_mut().as_mut() {
                     drag.shift = Point::new(shift.x, shift.y - (at - drag.scroll));
+                }
+                if changed {
+                    // Page-coordinate consumers must observe placement
+                    // after its asynchronous measurement completed, even
+                    // when every local block frame stayed unchanged.
+                    layout.update(|revision| *revision += 1);
                 }
             }
         });

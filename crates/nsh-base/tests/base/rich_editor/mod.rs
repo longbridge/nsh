@@ -6,6 +6,7 @@
 
 mod commands;
 mod extensions;
+mod geometry_events;
 mod marks_clipboard_history;
 mod selection;
 mod sizing;

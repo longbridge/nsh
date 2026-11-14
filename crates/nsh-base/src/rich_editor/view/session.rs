@@ -551,10 +551,19 @@ impl EditorSession {
         self.geometry()?.selection_rect()
     }
 
+    /// Measures the views' content placement again after an enclosing
+    /// scroll view or layout moved the editor. Local coordinates stay the
+    /// same; page queries use the new placement after measurement and the
+    /// view reports `GeometryChange` if placement changed. Requests end
+    /// with the mounted view.
+    pub fn refresh_geometry(&self) {
+        self.request(ViewRequest::Place);
+    }
+
     /// The caret's box at `pos` in the root view (page coordinates, as
     /// ProseMirror's `coordsAtPos` gives the window's). The view measures
-    /// where it is as it lays out and when asked here, so the answer
-    /// follows a move of what is around it a frame later.
+    /// where it is as it lays out and on [`Self::refresh_geometry`], so the
+    /// answer follows enclosing scroll/layout changes after measurement.
     pub fn page_coords_at_pos(&self, pos: usize) -> Option<Bounds<Points>> {
         let geometry = self.geometry()?;
         let shift = geometry.page_shift()?;

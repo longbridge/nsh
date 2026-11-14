@@ -138,6 +138,23 @@ pub struct RichEditorChange {
     pub revision: u64,
 }
 
+/// The editor's laid-out document, independent of its viewport height.
+/// Delivered at most once per engine frame when layout or scrolling
+/// changes. A parent scroll view can use the intrinsic content extent
+/// without repeatedly increasing the editor's viewport to discover it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct RichEditorGeometry {
+    /// The flow content's full size, including blocks outside the viewport.
+    pub content_size: Size<Points>,
+    /// The editor's vertical scroll offset, independent of enclosing scroll views.
+    pub scroll_offset: Points,
+    /// The geometry generation, including text and node-view layout.
+    pub generation: u64,
+    /// Document changes since mounting; selection-only changes leave it unchanged.
+    pub document_revision: u64,
+}
+
 /// A file pasted into a `RichEditor` with its bytes (an image, a screenshot).
 #[derive(Debug, Clone, Default, PartialEq, JsObject)]
 #[non_exhaustive]
@@ -197,6 +214,9 @@ impl RichEditorSelection {
 /// The events of a [`RichEditor`].
 #[derive(Debug, Clone, PartialEq, Event)]
 pub enum RichEditorEvent {
+    /// The document's intrinsic extent, block layout or scroll offset changed.
+    #[args(geometry)]
+    GeometryChange(RichEditorGeometry),
     /// The document changed.
     #[args(change)]
     Change(RichEditorChange),

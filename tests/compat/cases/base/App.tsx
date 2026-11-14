@@ -42,6 +42,7 @@ import BaseRichEditorKit from "./base-rich-editor-kit";
 import BaseRichEditorSession from "./base-rich-editor-session";
 import BaseRichEditorTables from "./base-rich-editor-tables";
 import BaseRichEditorView from "./base-rich-editor-view";
+import BaseRichEditorGeometry from "./base-rich-editor-geometry";
 import BaseSafeAreaKeyboard from "./base-safe-area-keyboard";
 import BaseCombobox from "./base-combobox";
 import BaseCommand from "./base-command";
@@ -98,6 +99,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-rich-editor-kit": BaseRichEditorKit,
   "base-rich-editor-session": BaseRichEditorSession,
   "base-rich-editor-view": BaseRichEditorView,
+  "base-rich-editor-geometry": BaseRichEditorGeometry,
   "base-rich-editor-tables": BaseRichEditorTables,
   "base-tabs": BaseTabs,
   "base-toggle": BaseToggle,
