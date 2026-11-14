@@ -186,6 +186,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             crate::app::quit();
         }
         DesktopCommand::SetQuitOnRequest(quit) => c.asks_quit.set(!quit),
+        // Additional quit request sources are currently macOS-only.
+        DesktopCommand::SetQuitRequestOptions(_) | DesktopCommand::CancelQuitRequest => {}
         // Quits as above, then the runner starts the app again.
         DesktopCommand::Restart => crate::app::restart(),
         // Addressed to a dialog root ([`crate::window`]).

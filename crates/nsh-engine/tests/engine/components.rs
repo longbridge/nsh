@@ -2853,10 +2853,14 @@ fn app_quit_reaches_the_platform() {
 const QUIT_REQUEST: &str = r#"import { mount, signal, Text } from "nsh";
 import { Application } from "nsh/desktop";
 
+Application.setQuitRequestOptions({ system: true });
 const requests = signal(0);
 const stop = Application.on("quitRequest", () => {
   requests.set(requests() + 1);
-  if (requests() === 2) {
+  if (requests() === 1) {
+    Application.cancelQuitRequest();
+  } else if (requests() === 2) {
+    Application.setQuitRequestOptions({});
     stop();
     Application.quit();
   }
@@ -2899,6 +2903,12 @@ fn quit_requests_reach_the_app_and_it_decides() {
         !app_commands(&first).contains(&DesktopCommand::Quit),
         "{first:?}"
     );
+    let mut options = nsh_core::desktop::QuitRequestOptions::default();
+    options.system = true;
+    assert!(
+        app_commands(&first).contains(&DesktopCommand::SetQuitRequestOptions(options)),
+        "the omitted mainWindowClose defaults to false: {first:?}"
+    );
     let request = || {
         engine.control().dispatch_event(
             ROOT_ID,
@@ -2912,6 +2922,7 @@ fn quit_requests_reach_the_app_and_it_decides() {
         !app_commands(&heard).contains(&DesktopCommand::Quit),
         "the app decides: {heard:?}"
     );
+    assert!(app_commands(&heard).contains(&DesktopCommand::CancelQuitRequest));
     request();
     let quit = until(&rx, |b| {
         app_commands(std::slice::from_ref(b)).contains(&DesktopCommand::Quit)
@@ -2921,6 +2932,7 @@ fn quit_requests_reach_the_app_and_it_decides() {
         commands.contains(&DesktopCommand::SetQuitOnRequest(true)),
         "no listener left: {commands:?}"
     );
+    assert!(commands.contains(&DesktopCommand::SetQuitRequestOptions(Default::default())));
 }
 
 const QUIT_AT_ONCE: &str = r#"import { mount, signal, Text } from "nsh";
