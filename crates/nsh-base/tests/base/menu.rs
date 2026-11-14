@@ -1063,3 +1063,28 @@ fn a_secondary_click_moves_a_context_menu_the_app_opened_to_the_pointer() {
     app.app.press("id:show").unwrap();
     app.app.wait_for("text:at:40 140").unwrap();
 }
+
+/// A `flex-1` canvas-like view as a context menu's trigger, in a column
+/// that fills the window (#2008).
+#[component]
+fn FillingTrigger() -> impl IntoElement {
+    view().flex_1().child(
+        context_menu()
+            .trigger(view().test_id("fill").flex_1())
+            .child(menu_item().child(text("Copy"))),
+    )
+}
+
+#[test]
+fn a_flex_1_trigger_fills_its_parent_as_without_the_menu() {
+    let app = start_with(Root::of::<FillingTrigger>());
+    let fill = app
+        .app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|n| n.test_id.as_deref() == Some("fill"))
+        .expect("the trigger is laid out");
+    assert_eq!(fill.bounds.size.height, px(844.0));
+    assert_eq!(fill.bounds.size.width, px(390.0));
+}
