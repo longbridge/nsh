@@ -944,7 +944,7 @@ const once = platform.select({
 });
 
 const exact = platform.select({
-  harmonyos: "h",
+  example: "e",
   miniprogram: "mp",
   android: "a",
   ios: "i",
@@ -953,7 +953,7 @@ const exact = platform.select({
   default: "d",
 });
 const osFallback = platform.select({
-  harmonyos: undefined,
+  example: undefined,
   android: "a",
   ios: "i",
   mobile: "m",
@@ -1010,11 +1010,11 @@ fn platform_select_matches_the_platform_name_before_the_os() {
     assert_eq!(
         run(Environment {
             os: Os::Android,
-            platform: Some("harmonyos"),
+            platform: Some("example"),
             idiom: Idiom::Phone,
             ..Environment::default()
         }),
-        vec!["harmonyos android h a m n fallback:0"]
+        vec!["example android e a m n fallback:0"]
     );
     assert_eq!(
         run(Environment {
