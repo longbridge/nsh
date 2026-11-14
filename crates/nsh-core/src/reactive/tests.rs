@@ -571,3 +571,51 @@ fn a_root_whose_owner_went_does_not_loop_through_its_reused_slot() {
     }
     panic!("runTop looped through the root's stale owner");
 }
+
+/// A memo whose function fails, as an effect's: what reads it hears of the
+/// next change of what it read, and keeps the last value meanwhile.
+#[test]
+fn a_memo_that_failed_once_still_tells_its_readers_of_changes() {
+    let a = signal(0);
+    let m = memo(
+        Test,
+        Rc::new(move |_| {
+            let v = get(a);
+            (v != 1).then_some(v * 10)
+        }),
+        0,
+        Equals::Default,
+        false,
+    );
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let log = seen.clone();
+    render_effect(move || log.borrow_mut().push(get(m)));
+    set(a, 1);
+    assert_eq!(get(m), 0, "a failed run keeps the last value");
+    set(a, 2);
+    set(a, 3);
+    assert_eq!(*seen.borrow(), vec![0, 20, 30]);
+}
+
+/// The same through a memo that reads the failed one.
+#[test]
+fn a_memo_that_failed_once_still_updates_the_memos_that_read_it() {
+    let a = signal(0);
+    let m = memo(
+        Test,
+        Rc::new(move |_| {
+            let v = get(a);
+            (v != 1).then_some(v)
+        }),
+        0,
+        Equals::Default,
+        false,
+    );
+    let n = computed(move || get(m) + 100);
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let log = seen.clone();
+    user_effect(move || log.borrow_mut().push(get(n)));
+    set(a, 1);
+    set(a, 2);
+    assert_eq!(*seen.borrow(), vec![100, 102]);
+}

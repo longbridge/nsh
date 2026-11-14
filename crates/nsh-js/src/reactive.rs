@@ -1449,6 +1449,27 @@ mod tests {
     }
 
     #[test]
+    fn a_memo_that_threw_once_still_tells_its_readers_of_changes() {
+        // The round's error is thrown from the write that started it.
+        assert_eq!(
+            run(r#"
+                const [a, setA] = R.createSignal(0);
+                const m = R.createMemo(() => {
+                    if (a() === 1) throw new Error("failed once");
+                    return a() * 10;
+                });
+                const log = [];
+                R.createRoot(() => R.createRenderEffect(() => log.push(m())));
+                for (const v of [1, 2, 3]) {
+                    try { setA(v); } catch (e) { log.push(e.message); }
+                }
+                return log;
+            "#),
+            r#"[0,"failed once",20,30]"#
+        );
+    }
+
+    #[test]
     fn batch_untrack_and_equality() {
         assert_eq!(
             run(r#"
