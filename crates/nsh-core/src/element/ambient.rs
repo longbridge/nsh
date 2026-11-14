@@ -679,6 +679,15 @@ pub fn clipboard_string() -> Answer<String> {
     answer
 }
 
+/// The text on the system clipboard for `Clipboard.readText`: `""` when
+/// it holds none, `None` when the person refused the read (iOS's paste
+/// prompt).
+pub(crate) fn clipboard_checked_string() -> Answer<Option<String>> {
+    let (answer, action) = super::services::clipboard_checked_string();
+    act(action);
+    answer
+}
+
 /// Whether the system clipboard holds text (TS: `Clipboard.hasText`).
 pub fn clipboard_has_string() -> Answer<bool> {
     let (answer, action) = super::services::clipboard_has_string();
@@ -1705,7 +1714,10 @@ impl super::ElementRef {
 
     /// Listens to the keyboard focus leaving the element: going from it
     /// or an element inside it to one outside, or to none (GPUI's
-    /// `on_focus_out`; the element leaves `focus-within`). As
+    /// `on_focus_out`; the element leaves `focus-within`). An element
+    /// removed with the focus inside it, or one that stops carrying the
+    /// ref, is left too, and the focus coming into the next element that
+    /// carries the ref is heard by [`Self::on_focus_in`]. As
     /// [`Self::on_focus_in`] otherwise.
     pub fn on_focus_out(&self, listener: impl Fn() + 'static) {
         let element = *self;

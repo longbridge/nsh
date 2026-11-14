@@ -687,8 +687,8 @@ fn the_keyboard_asks_for_a_menu_at_the_bottom_start_corner_with_no_pointer() {
 
 #[test]
 fn shift_f10_opens_no_context_menu_elsewhere() {
-    // macOS has no such key; Windows gives views no keyboard focus to
-    // start from.
+    // macOS has no such key; Windows asks for a view's context menu
+    // through UI Automation only.
     for os in [Os::MacOs, Os::Windows] {
         let mut app = start_on(Root::of::<DocumentMenu>(), os);
         app.app.press_key("tab").unwrap();
@@ -1026,10 +1026,6 @@ fn a_context_menu_the_app_opens_is_below_its_trigger_at_its_first_enabled_item()
         app.app
             .wait_for("text:at:40 140")
             .unwrap_or_else(|e| panic!("{os:?}: {e}"));
-        // Windows gives views no keyboard focus, the menu's items none.
-        if os == Os::Windows {
-            continue;
-        }
         app.app.press_key("space").unwrap();
         app.app
             .wait_for("text:chose:Rename")

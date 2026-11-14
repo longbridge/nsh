@@ -361,6 +361,7 @@ impl AppView {
             .detach();
         bind_keys(cx);
         let surface = Surface::new(initial_environment());
+        crate::chrome::set_app_name(&surface, &options.title);
         surface.appearance.set(options.appearance);
         surface.transparent.set(options.transparent);
         if options.fps || nsh_engine::perf::enabled_by_env() {
