@@ -264,7 +264,7 @@ Without `open`, a menu keeps its own state (from `defaultOpen` for `Menu`). With
 it in `onOpenChange({ open, reason })`: `"triggerPress"`, `"select"`, `"pressOutside"`, `"backdropPress"`, `"cancel"`,
 `"contextMenu"` or `"longPress"`.
 
-A `Submenu` keeps its own state, and reports each opening and closing the user asks for in `onOpenChange({ open,
+A `Submenu` keeps its own state unless the app sets its `open`, and reports each opening and closing the user asks for in `onOpenChange({ open,
 reason })`: `"hover"` (its item hovered, or another item of its menu), `"focus"` (the keyboard focus moved to another item of its
 menu), `"triggerPress"` (its item pressed, or Right, Return or Space on it), `"cancel"` (Left, Escape, back or its `back` row), or the menu's reason when the whole menu
 closes (`"select"`, `"pressOutside"`, ...). Its items are made as it opens, so an app can start loading them there the
@@ -282,6 +282,23 @@ const recent = signal<string[] | null>(null);
   <Each of={recent() ?? []}>
     {(name) => <MenuItem onSelect={() => openFile(name())}><Text>{name()}</Text></MenuItem>}
   </Each>
+</Submenu>
+```
+
+With `open`, a `Submenu` is controlled as a `Menu` is: `onOpenChange` asks, and it shows what the app sets. Items the
+app makes again from its data (a list that changes while the menu is open) make their submenus again too; a controlled
+one opens again as the app has it, with the keyboard focus back on the item it was on, so the user stays where they
+were.
+
+```tsx
+const modelsOpen = signal(false);
+
+<Submenu
+  open={modelsOpen()}
+  onOpenChange={({ open }) => modelsOpen.set(open)}
+  trigger={<Text>Model</Text>}
+>
+  <Each of={models()}>{(m) => <MenuItem onSelect={() => pick(m())}><Text>{m().name}</Text></MenuItem>}</Each>
 </Submenu>
 ```
 
@@ -418,6 +435,7 @@ shown in place under its `label`. The children, `class` and `style` are the trig
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
 | `trigger` | `.trigger(..)` | `JSX.Element` | none | The item that opens it. |
+| `open` | `.open(..)` | `boolean` | none | Open, owned by the app (changed in `onOpenChange`); without it the submenu keeps its own state. |
 | `back` | `.back(..)` | `JSX.Element` | none | Phones: the row above its items that returns to the items around it. |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | It does not open. |
 | `offset` | `.offset(..)` | `number` | `0` | Desktops: the gap between the menu around it and its popup. |
