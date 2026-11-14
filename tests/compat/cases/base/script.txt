@@ -4469,7 +4469,9 @@ event label:CompositionSink onChange text=日
 event label:CompositionSink onCompositionChange composing=false text=""
 expect Transitions: true,false,true,false
 expect Observed: true 1 日Seed
-covers [events] RichEditor.onCompositionChange
+# Host event names have one shared coverage key, including a component
+# that emits its own payload under that name.
+covers [events] onCompositionChange
 
 # base-rich-editor-view
 tap id:case-base-rich-editor-view
