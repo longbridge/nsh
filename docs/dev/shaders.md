@@ -117,9 +117,11 @@ changes) or an animated value (`&AnimatedValue`, `&AnimatedNode`), whose node it
 uniforms) and the render pipelines by source hash (`None` for one the device refused, reported once with a `js`
 warning). A backend opens it the first time a shader is mounted on a surface (Android: on the `NshView`, kept across
 app loads), so an app without shaders opens no device. `Renderer::new` requests a low-power adapter with WebGL 2's
-downlevel limits backend by backend (Linux: GL, then the primary ones; elsewhere the primary ones and GL at once;
-no setting chooses one) and keeps the first whose device opens, so an adapter that refuses its device gives the
-next backend its turn; where none opens it is `None` and shader views show their background and children. Uncaptured device errors are warnings, never panics.
+downlevel limits backend by backend (Linux: GL, then the primary ones; Windows: Direct3D 12, then every backend at
+once; elsewhere the primary ones and GL at once; no setting chooses one) and keeps the first whose device opens, so
+an adapter that refuses its device gives the next backend its turn; on Windows a software adapter (Direct3D 12's
+WARP, its only one on Haswell's integrated GPUs and in many virtual machines) is tried only from the last entry, where
+a hardware Vulkan or GL adapter sorts ahead of it (`takes`); where none opens it is `None` and shader views show their background and children. Uncaptured device errors are warnings, never panics.
 
 `nsh_engine::shader::ShaderView` is one view's state on the main thread: the layer, its uniforms, size and scale, the
 clock of `nsh.time` (kept while paused), and its frames.
