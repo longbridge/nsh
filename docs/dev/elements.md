@@ -191,7 +191,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   thread, before it scrolls, from the mounted event masks (`input::wheel_listener`): walking out from the view under
   the pointer, the first view that listens hears it; it takes the wheel (no native scroll, Ctrl + wheel zoom or pinch)
   when no scroll view (nor a multiline field on Windows / GPUI, nor a hosted widget scrolling itself on Linux / macOS)
-  is nearer or is the listener itself. A listening scroll view, or a listener around one, only observes. One scroll
+  is nearer or is the listener itself, and, when its `panActivation` names one axis (`PanActivation::axis`), the
+  wheel goes along that axis or Ctrl is held (`input::wheel_along`); otherwise the scroll views around it take it. A listening scroll view, or a listener around one, only observes. One scroll
   stays where it went, as a scroll view's does (`input::WheelLatch`, every backend's `wheel_event`): a view that took
   it keeps the rest of it wherever the pointer goes, a trackpad gesture from its first move through the system's
   momentum (macOS, GPUI), steps while they keep coming (`WHEEL_LATCH`; mouse notches along their axis, a touchpad's

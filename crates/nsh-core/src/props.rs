@@ -559,6 +559,21 @@ impl PanActivation {
         }
     }
 
+    /// The one axis this pan is for, when its offsets name one: `Some(true)`
+    /// horizontal (an active offset along x, or a fail offset along y),
+    /// `Some(false)` vertical, `None` either. A view listening to `onWheel`
+    /// with a pan along one axis takes only the wheels along it
+    /// ([`crate::input::wheel_along`]).
+    pub fn axis(&self) -> Option<bool> {
+        let x = self.active_offset_x.is_some() || self.fail_offset_y.is_some();
+        let y = self.active_offset_y.is_some() || self.fail_offset_x.is_some();
+        match (x, y) {
+            (true, false) => Some(true),
+            (false, true) => Some(false),
+            _ => None,
+        }
+    }
+
     /// The decision once the finger moved by (`dx`, `dy`) since it went
     /// down: `Some(true)` activates, `Some(false)` fails (a fail offset
     /// passed wins over an active one passed by the same move), `None`
