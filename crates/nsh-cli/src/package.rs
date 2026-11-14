@@ -908,15 +908,18 @@ pub(crate) fn release_name_and_id(
 }
 
 /// Whether the TSX app at `entry` builds its own release runner for
-/// `target` (`rust_app::runner_only`): a desktop target, with cargo here
-/// and no prebuilt runtime asked for (`NSH_RUNTIME`). It is then the app
-/// of this command ([`crate::rust_app::current`]).
+/// `target` (`rust_app::runner_only`): this machine's desktop, with cargo
+/// here and no prebuilt runtime asked for (`NSH_RUNTIME`). It is then the
+/// app of this command ([`crate::rust_app::current`]). Another OS's
+/// package keeps the prebuilt runner, which needs no cross toolchain.
 fn trimmed_runner(entry: &Path, target: PackageTarget) -> bool {
-    if !matches!(
-        target,
-        PackageTarget::Linux | PackageTarget::Macos | PackageTarget::Windows
-    ) || std::env::var_os("NSH_RUNTIME").is_some()
-    {
+    let this_machine = match target {
+        PackageTarget::Linux => cfg!(target_os = "linux"),
+        PackageTarget::Macos => cfg!(target_os = "macos"),
+        PackageTarget::Windows => cfg!(windows),
+        _ => false,
+    };
+    if !this_machine || std::env::var_os("NSH_RUNTIME").is_some() {
         return false;
     }
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
@@ -1013,9 +1016,10 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     // An app builds its own release runner: with only the native features
     // its bundle can reach, and those `nsh.json` keeps. A TSX app does too
     // where cargo is, else it ships the prebuilt runner, which has all.
+    let has_crates = crate::rust_app::current().is_some();
     if !matches!(options.target, PackageTarget::Web | PackageTarget::Android)
         && !crate::rust_app::is_root(&entry)
-        && (crate::rust_app::current().is_some() || trimmed_runner(&entry, options.target))
+        && (has_crates || trimmed_runner(&entry, options.target))
     {
         let choices = crate::native_features::choose(built.native_use.as_ref(), &config.features);
         for c in &choices {
@@ -1029,6 +1033,23 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
                 .map(|c| c.feature.to_owned())
                 .collect(),
         );
+        // A TSX app's own runner is a saving, never a requirement: built
+        // now, so a failure (system libraries, a Rust target, crates.io)
+        // leaves it the prebuilt runner as before, not a failed package.
+        // The packaging below finds the runner built.
+        if !has_crates {
+            let built = match options.target {
+                PackageTarget::Macos => macos_runners(options.arch).map(drop),
+                PackageTarget::Linux => runtime::file(Platform::Linux, true).map(drop),
+                _ => runtime::file(Platform::Windows, true).map(drop),
+            };
+            if let Err(e) = built {
+                crate::rust_app::clear_current();
+                ui::warn(format!(
+                    "the app's own runner did not build, so it has the prebuilt one, with every native feature: {e:#}"
+                ));
+            }
+        }
     }
     let platform = match options.target {
         PackageTarget::Ios => Platform::IphoneOs,

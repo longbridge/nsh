@@ -191,6 +191,12 @@ pub(crate) fn set_current(app: RustApp) {
     *CURRENT.lock().unwrap_or_else(|e| e.into_inner()) = Some(app);
 }
 
+/// Forgets the app of this command: a TSX app whose own runner could not
+/// be built ([`runner_only`]) ships the prebuilt one instead.
+pub(crate) fn clear_current() {
+    *CURRENT.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
 /// The app of this command, if it has Rust crates of its own.
 pub(crate) fn current() -> Option<RustApp> {
     CURRENT.lock().unwrap_or_else(|e| e.into_inner()).clone()
