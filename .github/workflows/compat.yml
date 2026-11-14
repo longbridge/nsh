@@ -110,6 +110,8 @@ jobs:
         if: steps.run.outputs.check == 'true'
         with:
           repository: longbridge/nsh-compat
+          # The last nsh-compat before v0.5.0: later ones use main's API.
+          ref: 714e6fd8bdf0cc1ea54e924456aec2f013d3751c
           path: nsh-compat
 
       # QuickJS is C (bindgen needs libclang).
