@@ -20,8 +20,8 @@ use serde_json::Value;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
-    RichEditorChange, RichEditorEvent, RichEditorFile, RichEditorGeometry, RichEditorPastedFiles,
-    RichEditorProps, RichEditorSelection,
+    RichEditorChange, RichEditorEvent, RichEditorFile, RichEditorPastedFiles, RichEditorProps,
+    RichEditorSelection,
     geometry::{DOC, Geometry, Hit},
     keys::{self, Move, Unit},
     node_view::{NodeView, NodeViewEvent},
@@ -390,13 +390,10 @@ impl Rv {
                     if size.width.0 <= 0.0 || size.height.0 <= 0.0 {
                         return;
                     }
-                    rv.cx
-                        .emit(RichEditorEvent::GeometryChange(RichEditorGeometry {
-                            content_size: size,
-                            scroll_offset: rv.scroll_y.get_untracked(),
-                            generation: rv.layout_rev.get_untracked(),
-                            document_revision: rv.doc_rev.get_untracked(),
-                        }));
+                    rv.cx.emit(RichEditorEvent::GeometryChange {
+                        content_size: size,
+                        scroll_offset: rv.scroll_y.get_untracked(),
+                    });
                 })
             });
         });

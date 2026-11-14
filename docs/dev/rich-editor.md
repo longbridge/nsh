@@ -146,13 +146,12 @@ restyles.
 Geometry (`geometry.rs`): maps document positions to the laid-out text's lines and back from the blocks' and texts'
 layouts, so the caret and hit tests follow the app's fonts (classes included). A position at a wrap shows at the
 upper line's end with `Affinity::Upstream`.
-The view reports `geometryChange({ geometry })` after layout, document or internal-scroll changes, coalesced
-once per engine frame. `geometry.contentSize` is the full flow extent in points, including offscreen blocks and
-independent of the viewport's minimum height; it excludes the `content` part's padding. `scrollOffset` is the
-editor's vertical scroll offset, `generation` its layout generation and `documentRevision` its document-change
-counter since mounting (selection-only transactions leave it unchanged). The event stops at idle and its pending
-task is canceled with the view. Rust uses `RichEditor::on_geometry_change` and `RichEditorGeometry`.
-
+The view reports `geometryChange({ contentSize, scrollOffset })` after layout, document or internal-scroll
+changes, coalesced once per engine frame. `contentSize` is the full flow extent in points, including offscreen
+blocks and independent of the viewport's minimum height; it excludes the `content` part's padding.
+`scrollOffset` is the editor's vertical scroll offset. The event stops at idle and its pending task is canceled
+with the view. Rust uses `RichEditor::on_geometry_change`, whose listener receives
+`RichEditorEvent::GeometryChange { content_size, scroll_offset }`.
 
 Input (`controller.rs`): as the code `Editor`, an invisible native input at the caret (the sink) takes typed text
 and input methods. Typed text goes to plugins' `handle_text_input` (input rules), else is inserted with the stored
@@ -325,10 +324,11 @@ JS describes.
   nothing. `pageCoordsAtPos` / `posAtPageCoords` answer the same in page (root) points, for UI an app places
   outside the editor (a block handle): the view keeps the content's page offset, measured after each layout of the
   content and as a handle drag starts, and moved by the scroll since.
-  After an enclosing scroll view or layout moves the editor, `refreshGeometry()` (`EditorSession::refresh_geometry`
-  in Rust) requests a fresh placement measurement. Read the updated page queries from `onGeometryChange` after
-  it completes; local coordinates, the document and selection remain unchanged. A request with no mounted view
-  has no effect.
+  A Rust app whose editor sits in an outer scroll view calls `EditorSession::refresh_geometry` from its
+  coalesced scroll/layout invalidation. Scrolling an ancestor can leave every editor-local frame unchanged,
+  so the content's own layout event alone cannot refresh its page placement. The geometry event reports a
+  completed placement change; read the updated page queries there. Local coordinates, document and selection
+  remain unchanged. A request with no mounted view has no effect.
   A query's position outside `0..=doc.content.size` throws a `RangeError` (ProseMirror's `resolve`;
   `RichEditorSession::check_pos`), never a `null`: `null` is an answer (no node after the position, no view, no
   such parent). `run` / `can` throw a `TypeError` for a command, node or mark type the editor does not know.

@@ -64,7 +64,7 @@ mount(App);
 <RichEditor editor={editor} class="max-h-40 px-3 py-2" />
 ```
 
-`onGeometryChange={({ geometry }) => …}` 在布局、编辑或内部滚动后报告已排版文档的信息，每个引擎帧合并为一次通知。`geometry.contentSize` 是完整内容流的尺寸，单位为点，包含视口外的块，不含 `content` 部件的内边距，且独立于固定的视口高度。`scrollOffset` 是编辑器内部的垂直滚动偏移；`generation` 是布局代数，`documentRevision` 是视图挂载以来的文档修改次数，仅修改选区的事务不增加它。几何信息稳定后停止通知，移除视图会取消待发通知。
+`onGeometryChange={({ contentSize, scrollOffset }) => …}` 在布局、编辑或内部滚动后报告已排版文档的信息，每个引擎帧合并为一次通知。`contentSize` 是完整内容流的尺寸，单位为点，包含视口外的块，不含 `content` 部件的内边距，且独立于固定的视口高度。`scrollOffset` 是编辑器内部的垂直滚动偏移。几何信息稳定后停止通知，移除视图会取消待发通知。
 
 ### 触摸选区
 
@@ -351,7 +351,6 @@ editor.dragBlock(start!, { x: e.pageX, y: e.pageY }); // 移动时 dragTo(point)
 
 - `createRichEditor` 自己的 `plugins` 排在扩展和键位之后；键要先处理的插件（建议菜单的回车）写成 `priority` 较高的扩展。
 - `pageNodeRect(pos)` 和 `posAtPageCoords(point)` 用页面点作答，与 `Overlay` 的 `anchor` 和指针事件的坐标相同，所以手柄可以作为跟随块的浮层放在编辑器的边距里。
-- 外层布局或滚动移动编辑器后，调用 `editor.refreshGeometry()`。位置变化会在测量完成后触发 `onGeometryChange`，此时页面坐标查询给出更新后的位置；局部坐标、内容和选区保持不变。
 - `dragBlock(pos, point)`、`dragTo(point)` 和 `endDrag()` 随指针移动一个块：落点线跟着指针，放下是一步撤销。点一下还要打开菜单的手柄，在指针移动之后才认领指针（`onMoveShouldSetResponder`），点按仍走 `onPress`；`Button` 自己处理按压，不会把拖动交给响应器。
 
 ## 表格

@@ -87,12 +87,11 @@ document scrolls in. A chat composer is an editor with a `maxHeight` and no heig
 <RichEditor editor={editor} class="max-h-40 px-3 py-2" />
 ```
 
-`onGeometryChange={({ geometry }) => …}` reports the laid-out document after layout, edits or internal
-scrolling, coalesced once per engine frame. `geometry.contentSize` is its full flow size in points, including
-blocks outside the viewport and excluding the `content` part's padding. It stays independent of a fixed viewport
-height. `scrollOffset` is the editor's vertical scroll offset; `generation` counts layout changes and
-`documentRevision` counts document changes since the view mounted. A selection-only transaction keeps that
-counter. Notifications stop once geometry settles and when the view is removed.
+`onGeometryChange={({ contentSize, scrollOffset }) => …}` reports the laid-out document after layout,
+edits or internal scrolling, coalesced once per engine frame. `contentSize` is its full flow size in points,
+including blocks outside the viewport and excluding the `content` part's padding. It stays independent of a
+fixed viewport height. `scrollOffset` is the editor's vertical scroll offset. Notifications stop once geometry
+settles and when the view is removed.
 
 ### Touch selection
 
@@ -481,9 +480,6 @@ editor.dragBlock(start!, { x: e.pageX, y: e.pageY }); // then dragTo(point) whil
 
 - The plugins of `createRichEditor`'s own `plugins` come after the extensions' and the keymap; a plugin whose keys must come first (a suggestion's Enter) is an extension with a high `priority`.
 - `pageNodeRect(pos)` and `posAtPageCoords(point)` answer in page points, the coordinates of `Overlay`'s `anchor` and of pointer events, so a handle sits in the editor's margin as an overlay that follows the block.
-- After enclosing layout or scrolling moves the editor, call `editor.refreshGeometry()`. A changed placement
-  triggers `onGeometryChange` after measurement, where the page queries give the updated coordinates. Local
-  coordinates, content and selection stay the same.
 - `dragBlock(pos, point)`, `dragTo(point)` and `endDrag()` move a block with the pointer: the drop line follows it and the drop is one undo step. A handle that also opens a menu on a tap claims the pointer only once it has moved (`onMoveShouldSetResponder`), so the tap keeps its `onPress`; a `Button` takes its own presses and passes the drag no responder.
 
 ## Tables

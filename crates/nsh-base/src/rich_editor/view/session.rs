@@ -551,11 +551,13 @@ impl EditorSession {
         self.geometry()?.selection_rect()
     }
 
-    /// Measures the views' content placement again after an enclosing
-    /// scroll view or layout moved the editor. Local coordinates stay the
-    /// same; page queries use the new placement after measurement and the
-    /// view reports `GeometryChange` if placement changed. Requests end
-    /// with the mounted view.
+    /// Measures the view's placement after an enclosing scroll view or
+    /// layout moved it. A sectioned editor in an outer scroll view calls
+    /// this from its coalesced scroll/layout invalidation: its local block
+    /// frames can stay unchanged while their page coordinates move.
+    /// Local coordinates and editor state stay the same; page queries use
+    /// the new placement after measurement, reported by `GeometryChange`
+    /// if placement changed. Requests end with the mounted view.
     pub fn refresh_geometry(&self) {
         self.request(ViewRequest::Place);
     }

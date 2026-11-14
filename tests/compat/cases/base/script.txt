@@ -4569,11 +4569,11 @@ covers [events] Terminal.onResize
 covers [events] Terminal.onTitleChange
 
 # base-rich-editor-geometry
-# The extent excludes the viewport's minimum height; enclosing layout
-# changes refresh page coordinates without an editor transaction.
+# The extent excludes the viewport's minimum height and follows width.
 tap id:case-base-rich-editor-geometry
-expect Extent: true true true true true
-tap id:move-editor
-expect Placement: true
+expect Extent: true true true
+expect Width: false
+tap id:geometry-narrow
+expect Width: true
 covers [events] RichEditor.onGeometryChange
 covers [nsh/base] createRichEditor

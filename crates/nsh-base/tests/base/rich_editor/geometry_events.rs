@@ -3,14 +3,14 @@
 
 use std::sync::Mutex;
 
-use nsh_base::rich_editor::view::{RichEditorClasses, RichEditorGeometry};
+use nsh_base::rich_editor::view::{RichEditorClasses, RichEditorEvent};
 use nsh_core::element::{EngineContext, engine_context};
 
 use super::*;
 
 struct Probe {
     editor: EditorSession,
-    events: Mutex<Vec<RichEditorGeometry>>,
+    events: Mutex<Vec<(Size<Points>, Points)>>,
     caret: Mutex<Option<Bounds<Points>>>,
     tail: Mutex<Option<Bounds<Points>>>,
     local: Mutex<(Option<Bounds<Points>>, Option<Bounds<Points>>)>,
@@ -97,7 +97,14 @@ fn GeometryProbe() -> impl IntoElement {
                                 );
                                 classes
                             })
-                            .on_geometry_change(move |event: &RichEditorGeometry| {
+                            .on_geometry_change(move |event: &RichEditorEvent| {
+                                let RichEditorEvent::GeometryChange {
+                                    content_size,
+                                    scroll_offset,
+                                } = event
+                                else {
+                                    return;
+                                };
                                 *events.caret.lock().unwrap() = events.editor.page_coords_at_pos(1);
                                 let state = events.editor.state();
                                 *events.local.lock().unwrap() = (
@@ -110,7 +117,11 @@ fn GeometryProbe() -> impl IntoElement {
                                 *events.tail.lock().unwrap() = events.editor.page_node_rect(
                                     state.doc().content().size() - last.node_size(),
                                 );
-                                events.events.lock().unwrap().push(*event);
+                                events
+                                    .events
+                                    .lock()
+                                    .unwrap()
+                                    .push((*content_size, *scroll_offset));
                                 // A UI witness wakes Headless::wait_until even
                                 // when the event itself changes no native frame.
                                 reports.update(|count| *count += 1);
@@ -128,6 +139,7 @@ fn placement_refresh_updates_page_coordinates_without_changing_local_coordinates
     let local = *probe.local.lock().unwrap();
     let extent = *probe.events.lock().unwrap().last().unwrap();
     let revision = probe.editor.state().revision();
+    let reports = probe.events.lock().unwrap().len();
     app.press("id:move-parent").unwrap();
     app.wait_until(
         "page geometry follows enclosing layout",
@@ -143,17 +155,13 @@ fn placement_refresh_updates_page_coordinates_without_changing_local_coordinates
     .unwrap();
     assert_eq!(*probe.local.lock().unwrap(), local);
     assert_eq!(
-        probe
-            .events
-            .lock()
-            .unwrap()
-            .last()
-            .unwrap()
-            .content_size
-            .height,
-        extent.content_size.height
+        probe.events.lock().unwrap().last().unwrap().0.height,
+        extent.0.height
     );
-    assert!(probe.events.lock().unwrap().last().unwrap().generation > extent.generation);
+    assert!(
+        probe.events.lock().unwrap().len() > reports,
+        "a completed placement change notifies page-coordinate consumers"
+    );
     assert_eq!(
         probe.editor.state().revision(),
         revision,
@@ -176,7 +184,7 @@ fn start_probe() -> (Headless, Arc<Probe>) {
         ..EngineConfig::new(Root::of::<GeometryProbe>())
     })
     .unwrap();
-    app.wait_until("full offscreen extent and block geometry", Duration::from_secs(5), |_| probe.events.lock().unwrap().last().is_some_and(|event| event.content_size.height.0 > 1_000.0) && probe.caret.lock().unwrap().is_some() && probe.tail.lock().unwrap().is_some()).unwrap_or_else(|error| {
+    app.wait_until("full offscreen extent and block geometry", Duration::from_secs(5), |_| probe.events.lock().unwrap().last().is_some_and(|event| event.0.height.0 > 1_000.0) && probe.caret.lock().unwrap().is_some() && probe.tail.lock().unwrap().is_some()).unwrap_or_else(|error| {
         let layout = app.screen().layout_nodes().into_iter().filter(|node| node.test_id.is_some() || node.scroll.is_some() || node.text.as_ref().is_some_and(|text| text.text.text.starts_with("Paragraph 0:") || text.text.text.starts_with("Paragraph 79:"))).map(|node| (node.id, node.test_id, node.bounds, node.scroll)).collect::<Vec<_>>();
         panic!("{error}; geometry_events={:?}; caret={:?}; tail={:?}; local_first_and_last_caret={:?}; selected_layout={layout:?}", probe.events.lock().unwrap(), probe.caret.lock().unwrap(), probe.tail.lock().unwrap(), probe.local.lock().unwrap());
     });
@@ -186,15 +194,7 @@ fn start_probe() -> (Headless, Arc<Probe>) {
 #[test]
 fn geometry_exposes_offscreen_content_and_shrinks_an_overestimated_viewport() {
     let (mut app, probe) = start_probe();
-    let height = probe
-        .events
-        .lock()
-        .unwrap()
-        .last()
-        .unwrap()
-        .content_size
-        .height
-        .0;
+    let height = probe.events.lock().unwrap().last().unwrap().0.height.0;
     assert!(
         height > 120.0,
         "the complete document is measured, not the visible part"
@@ -235,15 +235,7 @@ fn geometry_exposes_offscreen_content_and_shrinks_an_overestimated_viewport() {
         },
     )
     .unwrap();
-    let measured = probe
-        .events
-        .lock()
-        .unwrap()
-        .last()
-        .unwrap()
-        .content_size
-        .height
-        .0;
+    let measured = probe.events.lock().unwrap().last().unwrap().0.height.0;
     assert!(
         (measured - height).abs() < 1.0,
         "intrinsic {measured}, previous {height}; viewport minimum must not become document height"
@@ -253,6 +245,7 @@ fn geometry_exposes_offscreen_content_and_shrinks_an_overestimated_viewport() {
 #[test]
 fn geometry_updates_for_width_font_and_scroll_then_stops_at_idle_and_unmount() {
     let (mut app, probe) = start_probe();
+    let document_revision = probe.editor.state().revision();
     let initial = *probe.events.lock().unwrap().last().unwrap();
     let selected = (
         probe.editor.state().selection().anchor(),
@@ -264,8 +257,7 @@ fn geometry_updates_for_width_font_and_scroll_then_stops_at_idle_and_unmount() {
         Duration::from_secs(5),
         |_| {
             probe.events.lock().unwrap().last().is_some_and(|event| {
-                event.content_size.width < initial.content_size.width
-                    && event.content_size.height > initial.content_size.height
+                event.0.width < initial.0.width && event.0.height > initial.0.height
             })
         },
     )
@@ -278,7 +270,7 @@ fn geometry_updates_for_width_font_and_scroll_then_stops_at_idle_and_unmount() {
             .lock()
             .unwrap()
             .last()
-            .is_some_and(|event| event.content_size.height > narrow.content_size.height)
+            .is_some_and(|event| event.0.height > narrow.0.height)
     })
     .unwrap();
     let larger = *probe.events.lock().unwrap().last().unwrap();
@@ -295,19 +287,13 @@ fn geometry_updates_for_width_font_and_scroll_then_stops_at_idle_and_unmount() {
                 .lock()
                 .unwrap()
                 .last()
-                .is_some_and(|event| event.content_size.height > larger.content_size.height)
+                .is_some_and(|event| event.0.height > larger.0.height)
         },
     )
     .unwrap();
     assert_eq!(
-        probe
-            .events
-            .lock()
-            .unwrap()
-            .last()
-            .unwrap()
-            .document_revision,
-        initial.document_revision,
+        probe.editor.state().revision(),
+        document_revision,
         "typography need not edit the document"
     );
     app.scroll("id:geometry-editor", px(200.0)).unwrap();
@@ -320,7 +306,7 @@ fn geometry_updates_for_width_font_and_scroll_then_stops_at_idle_and_unmount() {
                 .lock()
                 .unwrap()
                 .last()
-                .is_some_and(|event| event.scroll_offset.0 > 0.0)
+                .is_some_and(|event| event.1.0 > 0.0)
         },
     )
     .unwrap();
@@ -347,5 +333,18 @@ fn geometry_updates_for_width_font_and_scroll_then_stops_at_idle_and_unmount() {
         probe.events.lock().unwrap().len(),
         removed,
         "unmount cancels pending geometry work"
+    );
+}
+
+#[test]
+fn geometry_event_declares_only_content_size_and_scroll_offset() {
+    let mut registry = nsh_core::element::Registry::new();
+    registry.register::<nsh_base::rich_editor::view::RichEditor>();
+    let declarations = nsh_core::element::declarations(&registry, &[]);
+    assert!(
+        declarations.contains(
+            "onGeometryChange?: (event: { contentSize: Size; scrollOffset: number }) => void;"
+        ),
+        "{declarations}",
     );
 }

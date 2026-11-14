@@ -669,13 +669,6 @@ impl RichEditorSession {
             .pos_at_coords(nsh_core::prelude::point(px(x), px(y)))
     }
 
-    /// Requests fresh page coordinates after enclosing layout or scrolling
-    /// moved the view. A changed placement triggers `onGeometryChange`
-    /// after measurement.
-    pub(crate) fn refresh_geometry(&self) {
-        self.session.refresh_geometry();
-    }
-
     /// The caret's box `{ x, y, width, height }` at `pos` in page
     /// coordinates (the root view's, as `onHoverMove`'s `pagePosition` and
     /// a responder's `pageX` / `pageY`; ProseMirror's `coordsAtPos` in the
