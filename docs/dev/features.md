@@ -24,10 +24,10 @@ An app turns them off with `default-features = false` on the platform crate and 
 on `nsh-base` must also say `default-features = false`, or Cargo turns its defaults back on.
 
 A project building its own executable with Cargo (an embedder, or its own `main` on `nsh_*_app`) chooses them itself.
-The prebuilt runners have everything. `nsh package` (Linux, macOS, Windows; iOS too for an app with Rust crates) builds
+The prebuilt runners have everything. `nsh package` (Linux, macOS, Windows, Android; iOS too for an app with Rust crates) builds
 the release runner with only the features its bundle can reach (`crates/nsh-cli/src/native_features.rs`, on the gates
 of `linked_gates`), and prints why each is kept or left out. A TSX app gets this too when it packages for this machine's
-OS with `cargo` installed: its runner builds in `.nsh/rust` from nsh's crates (the CLI's checkout, else crates.io at
+OS, or for Android, with `cargo` installed (Android's `libnsh.so` cross-compiles with the NDK): its runner builds in `.nsh/rust` from nsh's crates (the CLI's checkout, else crates.io at
 the CLI's version), so the first package compiles nsh's crates once (`package.rs` `trimmed_runner`). It ships the
 prebuilt runner instead, as before, when there is no `cargo`, `NSH_RUNTIME` is set, the package is for another OS (no
 cross toolchain needed), or the runner does not build (missing system libraries or Rust target, crates.io out of
