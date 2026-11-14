@@ -745,7 +745,10 @@ fn wait_disconnected(rx: &mpsc::Receiver<DevEvent>, server: &DevServer) {
     }
     let deadline = std::time::Instant::now() + TIMEOUT;
     while server.clients() > 0 {
-        assert!(std::time::Instant::now() < deadline, "server still counts it");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "server still counts it"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
 }
