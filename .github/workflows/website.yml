@@ -93,7 +93,7 @@ jobs:
       deployment: false
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # The releases' tags and content (`website/scripts/versions.js`).
           fetch-depth: 0
@@ -197,7 +197,7 @@ jobs:
 
       # The published site requires the catalog (NSH_REQUIRE_SHOWCASES).
       - name: Check out the App Stories catalog
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: longbridge/nsh-showcases
           ref: main

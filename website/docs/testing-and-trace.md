@@ -834,7 +834,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: cargo test                            # a Rust app's tests
       - run: nsh test --junit test-results.xml     # its TypeScript tests, or a TSX app's
 ```

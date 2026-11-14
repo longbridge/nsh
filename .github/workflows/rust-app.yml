@@ -92,7 +92,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Set up temporary files
         run: |
           mkdir -p "$RUNNER_TEMP/nsh-test-tmp"
@@ -161,7 +161,7 @@ jobs:
       deployment: false
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Set up temporary files
         run: |
           mkdir -p "$RUNNER_TEMP/nsh-test-tmp"

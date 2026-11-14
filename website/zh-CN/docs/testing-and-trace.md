@@ -758,7 +758,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: cargo test                            # Rust 应用的测试
       - run: nsh test --junit test-results.xml     # 它的 TypeScript 测试，或 TSX 应用的测试
 ```

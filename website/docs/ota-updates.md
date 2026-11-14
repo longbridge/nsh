@@ -166,7 +166,7 @@ jobs:
       # The nsh the apps in the field were built with, such as v0.5.0 (a repository variable); empty: the latest.
       NSH_VERSION: ${{ vars.NSH_VERSION }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install nsh
         run: |
