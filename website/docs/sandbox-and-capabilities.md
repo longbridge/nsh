@@ -63,12 +63,14 @@ not cover: without them, an app could exhaust the device's memory through the UI
 
 **Arrays NSH reads natively hold up to 2^20 (1 048 576) items, in every app.** Children (nested arrays counted
 together), `<Each>`'s items, menus (submenus counted together), a tray's title, `Animated.sequence` / `parallel` /
-`stagger`, `split`'s keys, a navigation stack's routes, a native component's `props` and `events`, a pan's `touches`
-and a canvas call's arguments (counted together) are read in native code, beyond the call budget's reach, and an array
-is as long as it says, empty or not (`new Array(2 ** 32 - 1)`). A longer one throws an error the app can catch: a
-`RangeError`, a `TypeError` for a menu or the tray; a canvas call ignores it with a warning. A navigation stack holds
-up to as many screens: `push` beyond that throws a `RangeError`. Children and submenus nested more than 64 levels deep
-throw a `TypeError`. A `<List>`'s `each` takes any number of rows.
+`stagger`, `split`'s keys, a navigation stack's routes, a native component's `props` and `events` and the values it
+is given, a pan's `touches`, a canvas call's arguments, a style (its nested styles, shadows and transforms), a
+prop's lists, an animation's ranges and easing and the animations a composite runs (each counted together) are read
+in native code, beyond the call budget's reach, and an array is as long as it says, empty or not
+(`new Array(2 ** 32 - 1)`). A longer one throws an error the app can catch: a `RangeError`, a `TypeError` for a menu
+or the tray; an animation's `start` rejects its promise; a canvas call ignores it with a warning. A navigation stack
+holds up to as many screens: `push` beyond that throws a `RangeError`. Children, submenus and styles nested more than
+64 levels deep throw a `TypeError`. A `<List>`'s `each` takes any number of rows.
 
 > [!TIP]
 > These limits are generous for normal apps. If you hit the 2 s call budget, the work is too long for one event
