@@ -8,9 +8,15 @@
 //! pictures changed, it reads `nsh.time`, or a transition runs), at the
 //! window's scale; a frame that comes back is copied into the view's
 //! Direct2D bitmap when the view is drawn (made again after a device loss)
-//! and the view draws again. A view out of sight (hidden, on a concealed
-//! screen, detached) stops rendering until a frame of its window finds it
-//! in sight again ([`reveal`]).
+//! and the view draws again. Where the GPU device is Direct3D 12's, on the
+//! adapter of the window's Direct3D 11 device, frames are rendered into
+//! textures the two devices share instead
+//! ([`ShaderView::show_on_surfaces`]) and drawn as they are, no pixel
+//! leaving the GPU ([`Opened`]); a texture that cannot be opened (another
+//! adapter after a device loss, a driver without shared fences) sends the
+//! view back to reading its frames back. A view out of sight (hidden, on a
+//! concealed screen, detached) stops rendering until a frame of its window
+//! finds it in sight again ([`reveal`]).
 //!
 //! What the layer draws decides where its frames show
 //! ([`ShaderRole`]):
@@ -62,18 +68,24 @@ use nsh_core::{
     geometry::{Size, size},
     shader::{ShaderInput, ShaderLayer, ShaderRole},
 };
-use nsh_engine::shader::{Renderer, ShaderView};
+use nsh_engine::shader::{Renderer, ShaderView, SharedTexture};
 use windows::{
-    Win32::Graphics::{
-        Direct2D::{
-            Common::{
-                D2D_RECT_F, D2D_RECT_U, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED,
-                D2D1_COMPOSITE_MODE_SOURCE_OVER, D2D1_PIXEL_FORMAT,
+    Win32::{
+        Foundation::{E_POINTER, HANDLE},
+        Graphics::{
+            Direct2D::{
+                Common::{
+                    D2D_RECT_F, D2D_RECT_U, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED,
+                    D2D1_COMPOSITE_MODE_SOURCE_OVER, D2D1_PIXEL_FORMAT,
+                },
+                D2D1_BITMAP_OPTIONS_NONE, D2D1_BITMAP_PROPERTIES1, D2D1_INTERPOLATION_MODE_LINEAR,
+                ID2D1Bitmap1, ID2D1DeviceContext, ID2D1Image,
             },
-            D2D1_BITMAP_OPTIONS_NONE, D2D1_BITMAP_PROPERTIES1, D2D1_INTERPOLATION_MODE_LINEAR,
-            ID2D1Bitmap1, ID2D1DeviceContext, ID2D1Image,
+            Direct3D11::{
+                ID3D11Device1, ID3D11Device5, ID3D11DeviceContext4, ID3D11Fence, ID3D11Texture2D,
+            },
+            Dxgi::{Common::DXGI_FORMAT_B8G8R8A8_UNORM, IDXGISurface},
         },
-        Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
     },
     core::Interface,
 };
@@ -81,6 +93,7 @@ use windows_numerics::Matrix3x2;
 
 use crate::{
     geom::Mat4,
+    gfx::Gfx,
     render::{DrawCx, Pixels, Readback, rect_f},
     surface::Surface,
     view::{NshView, ViewState},
@@ -100,6 +113,9 @@ pub(crate) struct ShaderState {
     /// The bitmap of the last frame (made while drawing, which only sees
     /// the state).
     drawn: RefCell<Option<Drawn>>,
+    /// Its shared textures opened on the window's device, while its frames
+    /// go to them.
+    opened: RefCell<Option<Opened>>,
     /// The view that mounted the layer the root draws (a screen effect's or
     /// transition's).
     owner: Option<NodeId>,
@@ -133,6 +149,109 @@ struct Drawn {
     serial: u64,
     /// The device generation it was made in.
     generation: u64,
+}
+
+/// A view's textures shared with the shader's device
+/// ([`ShaderView::shared_texture`]), opened on the window's Direct3D 11
+/// device as Direct2D bitmaps, and the fence that tells the shader's device
+/// when a frame that drew them was submitted.
+struct Opened {
+    /// The textures of this size ([`SharedTexture::set`]).
+    set: u64,
+    /// The device generation they were opened in.
+    generation: u64,
+    fence: ID3D11Fence,
+    /// The bitmaps by texture handle.
+    bitmaps: Vec<(usize, ID2D1Bitmap1)>,
+}
+
+/// `shared`'s texture as a bitmap on `dc`'s device: opened into `opened`
+/// on first use, for a new size and after a device loss. The fence value
+/// is signalled after the frame that draws it ([`signal_drawn`]).
+fn open(
+    dc: &ID2D1DeviceContext,
+    opened: &mut Option<Opened>,
+    shared: &SharedTexture,
+) -> windows::core::Result<ID2D1Bitmap1> {
+    let generation = crate::gfx::generation();
+    let d3d = crate::gfx::get()?.d3d.clone();
+    let current = match opened.take() {
+        Some(o) if o.set == shared.set && o.generation == generation => o,
+        _ => {
+            let device: ID3D11Device5 = d3d.cast()?;
+            let mut fence: Option<ID3D11Fence> = None;
+            // SAFETY: the view's live fence, by the handle it shared, written
+            // to a local.
+            unsafe { device.OpenSharedFence(HANDLE(shared.fence), &mut fence) }?;
+            let fence = fence.ok_or_else(|| windows::core::Error::from(E_POINTER))?;
+            Opened {
+                set: shared.set,
+                generation,
+                fence,
+                bitmaps: Vec::new(),
+            }
+        }
+    };
+    let opened = opened.insert(current);
+    let key = shared.texture as usize;
+    let bitmap = match opened.bitmaps.iter().find(|(k, _)| *k == key) {
+        Some((_, bitmap)) => bitmap.clone(),
+        None => {
+            let device: ID3D11Device1 = d3d.cast()?;
+            // SAFETY: the view's live texture, by the handle it shared.
+            let texture: ID3D11Texture2D =
+                unsafe { device.OpenSharedResource1(HANDLE(shared.texture)) }?;
+            let surface: IDXGISurface = texture.cast()?;
+            let props = D2D1_BITMAP_PROPERTIES1 {
+                pixelFormat: D2D1_PIXEL_FORMAT {
+                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                    alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                },
+                dpiX: 96.0,
+                dpiY: 96.0,
+                bitmapOptions: D2D1_BITMAP_OPTIONS_NONE,
+                colorContext: std::mem::ManuallyDrop::new(None),
+            };
+            // SAFETY: a surface of `dc`'s device, with valid properties.
+            let bitmap = unsafe { dc.CreateBitmapFromDxgiSurface(&surface, Some(&props)) }?;
+            opened.bitmaps.push((key, bitmap.clone()));
+            bitmap
+        }
+    };
+    SIGNALS.with(|s| {
+        s.borrow_mut()
+            .push((opened.fence.clone(), shared.value, generation))
+    });
+    Ok(bitmap)
+}
+
+/// Signals the fences of the shared textures drawn since the last call, on
+/// `gfx`'s device once `EndDraw` submitted what drew them: the shader's
+/// device renders into them again only after.
+pub(crate) fn signal_drawn(gfx: &Gfx) {
+    let signals = SIGNALS.with(|s| std::mem::take(&mut *s.borrow_mut()));
+    if signals.is_empty() {
+        return;
+    }
+    // SAFETY: a COM call on the live device.
+    let context =
+        unsafe { gfx.d3d.GetImmediateContext() }.and_then(|c| c.cast::<ID3D11DeviceContext4>());
+    let context = match context {
+        Ok(context) => context,
+        Err(e) => {
+            log::debug!("shader: cannot signal the shared textures' fences: {e}");
+            return;
+        }
+    };
+    let generation = crate::gfx::generation();
+    // One of an older device is dropped: a later value, signalled once its
+    // texture is opened again on this one, releases its textures.
+    for (fence, value, _) in signals.into_iter().filter(|s| s.2 == generation) {
+        // SAFETY: a fence opened on this device.
+        if let Err(e) = unsafe { context.Signal(&fence, value) } {
+            log::debug!("shader: cannot signal a shared texture's fence: {e}");
+        }
+    }
 }
 
 /// `pixels` (`height` rows `stride` bytes apart) as a bitmap on `dc`'s
@@ -210,12 +329,37 @@ fn upload(
 
 impl ShaderState {
     /// The bitmap of the last frame on `dc`'s device (what a transition
-    /// started from, until its first frame).
-    fn bitmap(&self, dc: &ID2D1DeviceContext) -> Option<ID2D1Bitmap1> {
+    /// started from, until its first frame). A shared texture that cannot
+    /// be opened sends view `id` back to reading its frames back.
+    fn bitmap(&self, dc: &ID2D1DeviceContext, id: NodeId) -> Option<ID2D1Bitmap1> {
         let frame = self.view.frame();
+        let starting = (self.start.as_ref()).is_some_and(|(serial, _)| *serial == frame.serial);
+        if !starting {
+            // Each call is a draw: the fence value it takes is signalled
+            // once this frame is submitted.
+            if let Some(shared) = self.view.shared_texture() {
+                return match open(dc, &mut self.opened.borrow_mut(), &shared) {
+                    Ok(bitmap) => Some(bitmap),
+                    Err(e) => {
+                        log::debug!(
+                            "shader: cannot open a shared frame ({e}); reading frames back"
+                        );
+                        UNSHARED.with(|u| u.borrow_mut().push((self.surface.clone(), id)));
+                        // The switch happens before the next frame: ask for it.
+                        if let Some(surface) = self.surface.upgrade() {
+                            surface.invalidate();
+                        }
+                        None
+                    }
+                };
+            }
+            // Read back (the engine may have gone back on its own): the
+            // textures opened go.
+            *self.opened.borrow_mut() = None;
+        }
         let mut drawn = self.drawn.borrow_mut();
         match &self.start {
-            Some((serial, from)) if *serial == frame.serial => upload(
+            Some((_, from)) if starting => upload(
                 dc,
                 &mut drawn,
                 &from.data,
@@ -283,6 +427,12 @@ impl ShaderState {
 thread_local! {
     /// Shader views out of sight with a frame to render.
     static HIDDEN: RefCell<Vec<(Weak<Surface>, NodeId)>> = RefCell::default();
+    /// Shader views whose shared texture could not be opened: they read
+    /// their frames back from the next frame of their window ([`reveal`]).
+    static UNSHARED: RefCell<Vec<(Weak<Surface>, NodeId)>> = RefCell::default();
+    /// The fences of shared textures drawn, and the values to signal once
+    /// the frame that drew them is submitted ([`signal_drawn`]).
+    static SIGNALS: RefCell<Vec<(ID3D11Fence, u64, u64)>> = RefCell::default();
     /// Shader views whose animated uniforms changed while they were not
     /// rendering ([`set_args`]).
     static PENDING: RefCell<Vec<NshView>> = RefCell::default();
@@ -351,9 +501,17 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
         shader.surface = Rc::downgrade(surface);
         if layer.is_some() && shader.renderer.is_none() {
             shader.renderer = surface.shader_renderer();
+            let luid = shader.renderer.as_ref().and_then(|r| r.adapter_luid());
+            let ours = crate::gfx::get().ok().and_then(|g| g.adapter_luid());
+            if let (Some(luid), Some(ours)) = (luid, ours)
+                && (luid.LowPart, luid.HighPart) == (ours.LowPart, ours.HighPart)
+            {
+                shader.view.show_on_surfaces();
+            }
         }
         if layer.is_none() {
             *shader.drawn.get_mut() = None;
+            *shader.opened.get_mut() = None;
             shader.until = None;
             shader.start = None;
         }
@@ -459,17 +617,11 @@ pub(crate) fn start_transition(surface: &Rc<Surface>, view: &NshView, duration: 
         }
         (shader.replaces(), shader.view.overflow().0, s.frame.size)
     };
-    // A running transition goes on from what it shows; otherwise it starts
-    // from the children as they are.
+    // A running transition goes on from what it shows (its last frame,
+    // copied on the GPU where it is on a shared texture); otherwise it
+    // starts from the children as they are.
     let from = if running {
-        view.state().shader.as_ref().and_then(|s| {
-            let f = s.view.frame();
-            (f.width > 0 && f.height > 0).then(|| Pixels {
-                width: f.width,
-                height: f.height,
-                data: f.tight().into_owned(),
-            })
-        })
+        None
     } else {
         offscreen_children(surface, &view, o, frame, scale)
     };
@@ -481,6 +633,11 @@ pub(crate) fn start_transition(surface: &Rc<Surface>, view: &NshView, duration: 
         let Some(renderer) = shader.renderer.clone() else {
             return;
         };
+        if running {
+            shader
+                .view
+                .set_input_from_frame(&renderer, ShaderInput::From);
+        }
         if let Some(from) = from {
             shader.view.set_input(
                 &renderer,
@@ -638,8 +795,19 @@ fn in_sight(view: &NshView) -> bool {
 }
 
 /// Starts the shader views that came into sight (before every frame of a
-/// window is drawn).
+/// window is drawn), and sends those whose shared texture could not be
+/// opened back to reading their frames back.
 pub(crate) fn reveal() {
+    for (surface, id) in UNSHARED.with(|u| std::mem::take(&mut *u.borrow_mut())) {
+        let Some(view) = surface.upgrade().and_then(|s| s.view(id)) else {
+            continue;
+        };
+        if let Some(shader) = view.state_mut().shader.as_mut() {
+            shader.view.read_back();
+            *shader.opened.get_mut() = None;
+        }
+        tick(&view);
+    }
     if HIDDEN.with(|h| h.borrow().is_empty()) {
         return;
     }
@@ -698,7 +866,7 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
     if w <= 0.0 || h <= 0.0 {
         return;
     }
-    let Some(bitmap) = shader.bitmap(cx.dc) else {
+    let Some(bitmap) = shader.bitmap(cx.dc, state.id) else {
         return;
     };
     cx.push_clip_rounded(crate::geom::rect(0.0, 0.0, w, h), state.radii());
@@ -763,7 +931,11 @@ pub(crate) fn draw_effect(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) -> b
     }
     cx.set_transform(world);
     let state = view.state();
-    let Some(bitmap) = state.shader.as_ref().and_then(|s| s.bitmap(cx.dc)) else {
+    let Some(bitmap) = state
+        .shader
+        .as_ref()
+        .and_then(|s| s.bitmap(cx.dc, view.id()))
+    else {
         return false;
     };
     draw_bitmap(cx, &bitmap, frame, o);

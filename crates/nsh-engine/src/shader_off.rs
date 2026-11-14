@@ -14,6 +14,8 @@ use nsh_core::{
     shader::{ShaderInput, ShaderLayer},
 };
 
+#[cfg(windows)]
+pub use crate::shader_frame::SharedTexture;
 pub use crate::shader_frame::{Frame, MAX_SIDE, PixelFormat};
 
 /// This build has no renderer: a platform reports `Environment::shaders`
@@ -45,6 +47,12 @@ impl Renderer {
     pub fn when_done(&self, f: impl FnOnce() + Send + 'static) -> bool {
         drop(f);
         false
+    }
+
+    /// `None`: this build has no device.
+    #[cfg(windows)]
+    pub fn adapter_luid(&self) -> Option<windows_sys::Win32::Foundation::LUID> {
+        None
     }
 }
 
@@ -138,8 +146,18 @@ impl ShaderView {
     }
 
     /// Does nothing: there are no frames.
-    #[cfg(target_vendor = "apple")]
+    #[cfg(any(target_vendor = "apple", windows))]
     pub fn show_on_surfaces(&mut self) {}
+
+    /// Does nothing: there are no frames.
+    #[cfg(windows)]
+    pub fn read_back(&mut self) {}
+
+    /// `None`: there are no frames.
+    #[cfg(windows)]
+    pub fn shared_texture(&self) -> Option<SharedTexture> {
+        None
+    }
 
     /// `None`: there are no frames.
     #[cfg(target_vendor = "apple")]
