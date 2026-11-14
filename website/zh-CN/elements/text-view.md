@@ -742,6 +742,7 @@ fn chat() -> impl IntoElement {
 | `links` | `.links(..)` | `"report" \| "open"` | `"report"` | 按下链接时的行为：报告它（`onLinkPress`），设为 `"open"` 时还会在应用之外打开指向其他网站或应用的链接（[链接](#链接)）。 |
 | `codeBlockScrollbar` | `.code_block_scrollbar(..)` | `boolean` | `true` | 代码块显示其水平滚动指示器。 |
 | `tableScrollbar` | `.table_scrollbar(..)` | `boolean` | `true` | 表格显示其水平滚动指示器。 |
+| `pressableTasks` | `.pressable_tasks(..)` | `boolean` | `false` | 点击任务项的方框时报告它（`onTaskPress`）；否则方框只显示其状态。 |
 | `streamingCaret` | `.streaming_caret(..)` | `JSX.Element` | | 显示在文档末尾：在最后一段文本之后以行内方式显示，否则单独一行。 |
 | `renderCustom` | `.render_custom(\|node\| ..)` | `(node: TextViewCustomNode) => JSX.Element` | | 显示自定义节点。 |
 | `renderCodeBlock` | `.render_code_block(\|code\| ..)` | `(code: TextViewCodeBlock) => JSX.Element` | | 显示代码块。 |
@@ -772,6 +773,7 @@ fn chat() -> impl IntoElement {
 |---|---|---|
 | `selectedText({ format? })` | `selected_text(Option<TextSelectionOptions>)` | 读取 `selectable` 视图的选区：`format` 为 `"plain"`（默认，与复制相同）、`"markdown"` 或 `"html"`，由选中的节点重新生成；选中全部时返回原样的源文（[读取为 Markdown 或 HTML](./text-selection.md#读取为-markdown-或-html)）。没有选中内容时返回 `""`。 |
 | `onImagePress` | `.on_image_press(\|image: &Image\| ..)` | 不在链接中的图片被点击：`{ image }` 是该图片，由应用放大显示（应用自己的可缩放查看器）。 |
+| `onTaskPress` | `.on_task_press(\|event: &TextViewTaskPressEvent\| ..)` | 设置 `pressableTasks` 后，任务项的方框被点击：`{ index, checked }`，即文档中的第几个任务（从 0 开始，按阅读顺序）以及这次点击要求的状态。文档本身不会改变：由应用把修改后的源文本交给视图。 |
 
 <a id="accessibility"></a>
 

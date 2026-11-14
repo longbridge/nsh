@@ -70,6 +70,11 @@ pub struct TextViewProps {
     /// view (default true).
     #[prop(default = true)]
     pub table_scrollbar: Prop<bool>,
+    /// Whether a press on a task item's box reports it (`onTaskPress`), for
+    /// an app that edits the document's source (default false: the boxes
+    /// only show their state).
+    #[prop(default)]
+    pub pressable_tasks: Prop<bool>,
     /// Shown inline at the end of the last block (a streaming reply's
     /// caret).
     pub streaming_caret: Prop<Option<Slot>>,
@@ -142,6 +147,11 @@ pub enum TextViewEvent {
     /// viewer of its own).
     #[args(image)]
     ImagePress(Image),
+    /// The box of a task item was pressed (`pressableTasks`): which task of
+    /// the document, and the state the press asks for. The document does
+    /// not change: the app gives the view its edited source.
+    #[args(event)]
+    TaskPress(TextViewTaskPressEvent),
     /// An action of a code block was pressed (after the built-in `copy`
     /// copied): its id and the code block.
     #[args(event)]
@@ -241,6 +251,17 @@ pub struct TextViewLinkPressEvent {
     /// The modifier keys held when the press began: none when the
     /// keyboard or an assistive technology pressed the link.
     pub modifiers: Modifiers,
+}
+
+/// A press on a task item's box of a [`TextView`] (`onTaskPress`).
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct TextViewTaskPressEvent {
+    /// Which task item of the document, counted from 0 in reading order
+    /// (its footnotes' after its blocks').
+    pub index: u32,
+    /// The state the press asks for: the opposite of the one shown.
+    pub checked: bool,
 }
 
 /// A press on a code block's action (`onCodeBlockAction`).
@@ -357,8 +378,13 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
                 });
                 // A node as the row's root: an `Each` keeps rows by their
                 // root's key, which a region has none of.
+                let tasks_before = computed(move || {
+                    let i = index.get();
+                    blocks.with(|b| b[..i.min(b.len())].iter().map(|(_, b)| b.tasks()).sum())
+                });
                 view().child(dynamic(move || {
                     let cx = Cx::read(&props, cx, plugins.clone(), math_loaded);
+                    cx.task.set(tasks_before.get());
                     let (i, block) = item.get();
                     cx.block(&block, &i.to_string(), last.get(), before.get())
                 }))
@@ -370,6 +396,8 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
                 return None;
             }
             let cx = Cx::read(&props, cx, plugins.clone(), math_loaded);
+            cx.task
+                .set(blocks.with(|b| b.iter().map(|(_, b)| b.tasks()).sum()));
             // A terminal's blank row before them, as before a block.
             let footnotes = view()
                 .flex_col()
@@ -465,6 +493,7 @@ struct Cx {
     selectable: bool,
     code_scroll_indicator: bool,
     table_scrollbar: bool,
+    pressable_tasks: bool,
     caret: Option<Slot>,
     render_custom: Option<Renderer<CustomNode>>,
     render_code_block: Option<Renderer<CodeBlock>>,
@@ -482,6 +511,9 @@ struct Cx {
     /// How many lists the blocks being made are in (a copy keeps the depth
     /// it was made at, for content made later).
     list_depth: std::cell::Cell<u8>,
+    /// Which task item of the document the next one made is (a copy keeps
+    /// its place, for content made later).
+    task: std::cell::Cell<u32>,
     /// The line height of the text being made, which images in it are
     /// sized by.
     line: std::cell::Cell<f32>,
@@ -506,6 +538,7 @@ impl Cx {
             selectable: props.selectable.get(),
             code_scroll_indicator: props.code_block_scrollbar.get(),
             table_scrollbar: props.table_scrollbar.get(),
+            pressable_tasks: props.pressable_tasks.get(),
             caret: props.streaming_caret.get(),
             render_custom: props.render_custom.get(),
             render_code_block: props.render_code_block.get(),
@@ -520,6 +553,7 @@ impl Cx {
             highlighter: use_context::<CodeHighlighter>(),
             caret_placed: Rc::default(),
             list_depth: std::cell::Cell::new(0),
+            task: std::cell::Cell::new(0),
             line: std::cell::Cell::new(BODY_SIZE * BODY_LINE),
             link: std::cell::RefCell::new(None),
             links: props.links.get(),
@@ -876,6 +910,33 @@ impl Cx {
         let digits = (start as usize + n.saturating_sub(1)).to_string().len();
         let rows = items.iter().enumerate().map(|(i, item)| {
             let key = format!("{key}.{i}");
+            // A press on a task's box reports it; the item's first line
+            // names the box to an assistive technology.
+            let press = item
+                .checked
+                .filter(|_| self.pressable_tasks)
+                .map(|checked| {
+                    let index = self.task.get();
+                    let scope = self.scope;
+                    let mut label = String::new();
+                    if let Some(Block::Paragraph { content }) = item.children.first() {
+                        super::document::inline_text(content, &mut label);
+                    }
+                    let press = move || {
+                        scope.emit(TextViewEvent::TaskPress(TextViewTaskPressEvent {
+                            index,
+                            checked: !checked,
+                        }))
+                    };
+                    (label, press)
+                });
+            if item.checked.is_some() {
+                self.task.set(self.task.get() + 1);
+            }
+            let pressable = move |marker: View| match press.clone() {
+                Some((label, press)) => marker.label(label).on_press(press),
+                None => marker,
+            };
             let marker = match item.checked {
                 // A ballot box and a space before the content.
                 Some(checked) if terminal => {
@@ -950,7 +1011,7 @@ impl Cx {
                     } else {
                         marker.border_color(move || theme().muted_foreground)
                     };
-                    self.parts(marker, &parts).into_element()
+                    self.parts(pressable(marker), &parts).into_element()
                 }
                 None => {
                     let marker = if ordered {
@@ -1555,11 +1616,18 @@ impl Cx {
                 .child(self.paragraph(summary, &format!("{key}.s"), false).flex_1()),
             Part::Summary,
         );
-        // The content is made each time it opens.
+        // The content is made each time it opens, its tasks counted from
+        // the same place each time; what follows counts on after them.
         let cx = self.clone();
+        let first_task = self.task.get();
+        self.task
+            .set(first_task + children.iter().map(Block::tasks).sum::<u32>());
         let children = children.to_vec();
         let key = key.to_owned();
-        let body = move || cx.blocks(view().flex_col().gap(px(BLOCK_GAP)), &children, &key, tail);
+        let body = move || {
+            cx.task.set(first_task);
+            cx.blocks(view().flex_col().gap(px(BLOCK_GAP)), &children, &key, tail)
+        };
         self.part(view().flex_col().gap(px(ITEM_GAP * 2.0)), Part::Details)
             .child(summary)
             .child(when(move || shown.get(), body))
