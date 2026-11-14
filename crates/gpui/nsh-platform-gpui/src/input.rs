@@ -1313,7 +1313,7 @@ pub(crate) fn wheel_event(
 }
 
 /// A wheel event from the window.
-pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
+pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) -> bool {
     let (x, y) = (event.x, event.y);
     surface.input.last.set(Some((x, y)));
     surface
@@ -1325,7 +1325,7 @@ pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
     // Mice have no pinch: Ctrl + wheel pinches, as it zooms on desktops
     // (precision touchpads pinch this way too).
     if event.modifiers.ctrl && dy != 0.0 && wheel_zoom(surface, x, y, dy) {
-        return;
+        return true;
     }
     if !event.precise && dx == 0.0 && event.modifiers.shift {
         (dx, dy) = (dy, dx);
@@ -1339,14 +1339,14 @@ pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
             .find(|v| v.kind() == ViewKind::Input)
         && crate::text_input::wheel(&field, dy)
     {
-        return;
+        return true;
     }
     let kind = if event.precise {
         WheelInput::Touchpad { phased: false }
     } else {
         WheelInput::Step
     };
-    wheel_input(surface, x, y, dx, dy, event.time * 1000.0, kind);
+    wheel_input(surface, x, y, dx, dy, event.time * 1000.0, kind)
 }
 
 /// A key the surface synthesized (a menu role's edit key, the window's own
@@ -1691,6 +1691,23 @@ fn collect_stops(surface: &Surface, view: &NshView, out: &mut Vec<NshView>) {
             _ => s.props.focus_stop(s.events.contains(EventKind::Press)),
         }
     }));
+}
+
+/// Whether a press at `(x, y)` (root coordinates) lands on a view that
+/// takes the keyboard: an enabled field, a native component that does, or
+/// a view marked focusable.
+pub(crate) fn focusable_at(surface: &Surface, x: f32, y: f32) -> bool {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
+        return false;
+    };
+    chain(&hit.view).iter().any(|view| {
+        let s = view.state();
+        match s.kind {
+            ViewKind::Input => !s.props.accessibility.state.disabled,
+            ViewKind::Native => crate::native::focusable(surface, s.id),
+            _ => s.props.focusable == Some(true),
+        }
+    })
 }
 
 // --- Hit testing --------------------------------------------------------------------
@@ -3202,7 +3219,7 @@ pub(crate) enum GesturePhase {
 /// and end. Fingers resting on the touchpad stop a glide; lifting them
 /// glides on with the gesture's velocity. Touchpads whose events have no
 /// phases (every event [`GesturePhase::Moved`]) end once they pause.
-pub(crate) fn touchpad(surface: &Rc<Surface>, event: WheelEvent, phase: GesturePhase) {
+pub(crate) fn touchpad(surface: &Rc<Surface>, event: WheelEvent, phase: GesturePhase) -> bool {
     let input = &surface.input;
     let time = event.time * 1000.0;
     let (x, y) = (event.x, event.y);
@@ -3220,7 +3237,7 @@ pub(crate) fn touchpad(surface: &Rc<Surface>, event: WheelEvent, phase: GestureP
             );
             if event.dx == 0.0 && event.dy == 0.0 {
                 touchpad_hold(surface, x, y, time);
-                return;
+                return input.wheel.borrow().is_some();
             }
         }
         GesturePhase::Moved => {
@@ -3237,7 +3254,7 @@ pub(crate) fn touchpad(surface: &Rc<Surface>, event: WheelEvent, phase: GestureP
                     time,
                     WheelInput::Stop { fling: false },
                 );
-                return;
+                return true;
             }
         }
         GesturePhase::Ended | GesturePhase::Cancelled => {}
@@ -3245,9 +3262,10 @@ pub(crate) fn touchpad(surface: &Rc<Surface>, event: WheelEvent, phase: GestureP
     let phased =
         phase != GesturePhase::Moved || input.wheel.borrow().as_ref().is_some_and(|w| w.phased);
     if event.modifiers.ctrl && event.dy != 0.0 && wheel_zoom(surface, x, y, event.dy) {
-        return;
+        return true;
     }
-    wheel_input(
+    let ongoing = input.wheel.borrow().is_some();
+    let handled = wheel_input(
         surface,
         x,
         y,
@@ -3260,6 +3278,7 @@ pub(crate) fn touchpad(surface: &Rc<Surface>, event: WheelEvent, phase: GestureP
         let fling = phase == GesturePhase::Ended;
         wheel_input(surface, x, y, 0.0, 0.0, time, WheelInput::Stop { fling });
     }
+    handled || ongoing
 }
 
 /// A touchpad pinch event in `phase` at `(x, y)`: `delta` is GPUI's (the

@@ -808,7 +808,10 @@ impl Element for SurfaceElement {
         surface.drawing();
         crate::access::prepaint(surface, &self.focus, window, cx);
         window.set_focus_handle(&self.focus, cx);
-        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::BlockMouse);
+        // Scrolls NSH leaves (nothing under the pointer scrolls that way)
+        // go on to the host's scrollable ancestors, as nested scroll views
+        // hand them over in GPUI (#1927).
+        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::BlockMouseExceptScroll);
         // Native components and web views take the input over their boxes.
         surface.main_window.set(Some(window.window_handle()));
         crate::native::prepaint(surface, window, cx);
