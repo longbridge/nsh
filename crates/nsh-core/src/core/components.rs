@@ -2070,6 +2070,13 @@ impl<M: TextEngine> Core<M> {
         let instance = Instance::new(inner, spec, Vec::new(), app_style);
         self.components.instances.insert(host, Box::new(instance));
         self.components.mark(host);
+        // No box of its own while its view styles none of its layout and
+        // holds one node: that node is laid out in its place, so an app's
+        // `flex-1` on a component's slot (a menu's trigger) fills the
+        // component's parent (#2008).
+        if let Ok(k) = self.key(host) {
+            self.lay_out_through(k);
+        }
     }
 
     /// `$name` on a host: a prop of its component.
