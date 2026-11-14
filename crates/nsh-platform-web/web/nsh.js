@@ -8748,6 +8748,7 @@ class Player {
       takes = true;
     } else {
       [el, takes] = this.wheelListenerOf(e.target) ?? [null, false];
+      if (takes && !e.ctrlKey) takes = this.wheelAlong(el, e);
       const lock = this.wheelLock;
       if (takes && lock && now - lock.t <= 200 && lock.el.isConnected) takes = false;
     }
@@ -8764,6 +8765,22 @@ class Player {
       modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
     });
     return takes;
+  }
+
+  /** Whether listener `el` takes wheel `e` along its axis
+   * (`input::wheel_along`): a `panActivation` naming one axis takes only
+   * wheels along it (Ctrl + wheel is checked by the caller); the others
+   * reach the scroll views around it. */
+  wheelAlong(el, e) {
+    const a = el._props?.panActivation;
+    if (!a) return true;
+    const [ax, ay, fx, fy] = a;
+    const x = ax != null || fy != null;
+    const y = ay != null || fx != null;
+    if (x === y) return true;
+    let [dx, dy] = [e.deltaX, e.deltaY];
+    if (e.shiftKey && !dx) [dx, dy] = [dy, 0];
+    return (Math.abs(dx) > Math.abs(dy)) === x;
   }
 
   /** The nearest view around `target` listening to `onWheel`, and whether

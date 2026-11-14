@@ -1208,12 +1208,18 @@ fn wheel_event(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
         |v| shown(v) && v.state().events.contains(EventKind::Wheel),
         || {
             let hit = pick(&surface.input_root(), x, y, true)?;
-            input::wheel_listener(
+            let (view, takes) = input::wheel_listener(
                 chain(&hit.view),
                 |v| v.state().events.contains(EventKind::Wheel),
                 // A multiline field scrolls its own lines.
                 |v| matches!(v.kind(), ViewKind::Scroll | ViewKind::Input),
-            )
+            )?;
+            let along = input::wheel_along(
+                view.state().props.pan_activation,
+                horizontal,
+                event.modifiers.ctrl,
+            );
+            Some((view, takes && along))
         },
     );
     let Some((view, takes)) = routed else {

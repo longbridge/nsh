@@ -2412,7 +2412,7 @@ impl Headless {
         if matches!(
             self.environment.os,
             Os::MacOs | Os::Windows | Os::Linux | Os::Web
-        ) && let Some((listener, takes)) = self.screen.wheel_listener(hit)
+        ) && let Some((listener, takes)) = self.screen.wheel_listener(hit, delta, self.held.ctrl)
         {
             let local = self
                 .screen
@@ -5210,6 +5210,57 @@ mod tests {
         // No listener around Row 3: the nearest scroll view scrolls.
         app.wheel("Row 3", point(px(0.0), px(120.0))).unwrap();
         assert_eq!(app.screen().scroll(rows).unwrap().y, px(120.0));
+    }
+
+    /// A horizontal timeline (a wheel listener with a horizontal pan) in a
+    /// scroll view of tall rows.
+    #[component]
+    fn WheeledTimeline() -> impl IntoElement {
+        let wheel = signal(String::from("none"));
+        view()
+            .flex_1()
+            .child(text(move || format!("wheel {}", wheel.get())))
+            .child(
+                scroll()
+                    .test_id("rows")
+                    .flex_1()
+                    .child(
+                        view()
+                            .test_id("timeline")
+                            .h(px(40.0))
+                            .claim_touches(TouchClaim::on_pan(PanActivation::horizontal(
+                                px(10.0),
+                                px(10.0),
+                            )))
+                            .on_wheel(move |e: &WheelEvent| {
+                                let WheelDelta::Points(delta) = &e.delta else {
+                                    return;
+                                };
+                                wheel.set(format!("{:.0} {:.0}", delta.x.0, delta.y.0));
+                            }),
+                    )
+                    .children((0..100).map(|i| view().h(px(50.0)).child(text(format!("Row {i}"))))),
+            )
+    }
+
+    #[test]
+    fn a_listener_with_a_pan_axis_takes_only_wheels_along_it() {
+        let mut app = start_linux(Root::of::<WheeledTimeline>());
+        app.first_render().unwrap();
+        let Pick::One(rows) = app
+            .screen()
+            .scroll_view(&Selector::parse("id:rows").unwrap())
+        else {
+            panic!("one scroll view");
+        };
+        // A horizontal wheel is the timeline's: the page stays.
+        app.wheel("id:timeline", point(px(30.0), px(0.0))).unwrap();
+        app.wait_for("wheel 30 0").unwrap();
+        assert_eq!(app.screen().scroll(rows).unwrap().y, Points::ZERO);
+        // A vertical one scrolls the page; the timeline only hears it.
+        app.wheel("id:timeline", point(px(0.0), px(40.0))).unwrap();
+        app.wait_for("wheel 0 40").unwrap();
+        assert_eq!(app.screen().scroll(rows).unwrap().y, px(40.0));
     }
 
     /// A root that listens to the wheel around a scroll view of tall rows.

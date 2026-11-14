@@ -2777,14 +2777,25 @@ impl Screen {
     /// ([`nsh_core::input::wheel_listener`], as the platforms share it). A
     /// view that takes it keeps the scroll views around it from scrolling;
     /// one that only observes (a scroll view, or a view around one) lets
-    /// them scroll.
-    pub(crate) fn wheel_listener(&self, id: NodeId) -> Option<(NodeId, bool)> {
+    /// them scroll. A listener whose `panActivation` names one axis takes
+    /// only wheels by `delta` along it, or with `control` held
+    /// ([`nsh_core::input::wheel_along`]).
+    pub(crate) fn wheel_listener(
+        &self,
+        id: NodeId,
+        delta: Point<Points>,
+        control: bool,
+    ) -> Option<(NodeId, bool)> {
         let window = self.window_of(id);
-        nsh_core::input::wheel_listener(
+        let (view, takes) = nsh_core::input::wheel_listener(
             self.window_chain(id),
             |&id| self.hears(id, EventKind::Wheel) && !self.disabled_from(id, Some(window)),
             |&id| self.kind(id) == Some(ViewKind::Scroll),
-        )
+        )?;
+        let activation = self.nodes.get(&view).and_then(|v| v.pan_activation);
+        let horizontal = delta.x.0.abs() > delta.y.0.abs();
+        let along = nsh_core::input::wheel_along(activation, horizontal, control);
+        Some((view, takes && along))
     }
 
     /// The innermost view at `id` or around it that hosts native content of

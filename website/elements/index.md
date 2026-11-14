@@ -296,7 +296,10 @@ const at = signal<number | null>(null);
 `onWheel` hears a mouse wheel or touchpad scroll over a view, on macOS, Windows, Linux, the GPUI backend and the web
 (the DOM's `wheel`, GPUI's `ScrollWheelEvent`). The nearest view around the one under the pointer that listens hears
 it. When that view is nearer than every scroll view under the pointer, it takes the wheel: nothing scrolls, zooms or
-pinches natively, so a canvas inside a page can zoom on Control + wheel and pan otherwise. A scroll view that listens,
+pinches natively, so a canvas inside a page can zoom on Control + wheel and pan otherwise. A listener whose
+`panActivation` names one axis (`{ activeOffsetX, failOffsetY }`, Rust `PanActivation::horizontal(..)`) takes only the wheels along that
+axis, and Control + wheel: the others reach the scroll views around it, as a horizontal scroll view lets vertical
+wheels scroll the page. A timeline in a vertical page hears horizontal wheels while vertical ones scroll the page. A scroll view that listens,
 or a view around one, only observes: the scroll view still scrolls. One scroll stays where it went, as a scroll
 view's does: a view that took it keeps the rest of it (a touchpad gesture and its momentum, notches while they keep
 coming) even when the pointer leaves it, and a scroll a scroll view has started is never taken over halfway by a
