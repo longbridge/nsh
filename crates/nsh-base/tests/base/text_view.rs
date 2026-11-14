@@ -298,7 +298,14 @@ fn WrappedInlineImage() -> impl IntoElement {
 fn an_image_in_a_wrapped_line_is_inside_the_column() {
     let mut app = Headless::start(EngineConfig::new(Root::of::<WrappedInlineImage>())).unwrap();
     app.wait_for("label:Dot").unwrap();
-    let id = app.screen().id("label:Dot").unwrap();
+    // The text's only image.
+    let id = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|n| n.kind == nsh_core::ViewKind::Image)
+        .unwrap()
+        .id;
     let nodes = app.screen().layout_nodes();
     let dot = nodes.iter().find(|n| n.id == id).unwrap().bounds;
     let text = nodes
@@ -398,7 +405,14 @@ fn an_apps_image_on_its_own_is_at_most_as_wide_as_the_text() {
 fn a_wide_image_on_its_own_is_at_most_as_wide_as_the_text() {
     let mut app = Headless::start(EngineConfig::new(Root::of::<WideImage>())).unwrap();
     app.wait_for("label:Wide").unwrap();
-    let id = app.screen().id("label:Wide").unwrap();
+    // The text's only image.
+    let id = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|n| n.kind == nsh_core::ViewKind::Image)
+        .unwrap()
+        .id;
     let bounds = app
         .screen()
         .layout_nodes()

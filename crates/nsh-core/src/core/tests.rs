@@ -39954,7 +39954,6 @@ fn a_list_bound_after_the_mount_budget_makes_the_rows_that_show_at_once() {
     assert_eq!(frames("label"), vec![Some(size_pt(40.0, 20.0)); 3]);
 }
 
-
 /// A part's classes (a page's `headerClass`, a list's `contentClass`) that
 /// name design tokens follow the tokens, as a view's `class` does.
 mod part_class_tokens {
@@ -40156,4 +40155,3 @@ fn multiline_inputs_stop_at_their_max_height_and_so_do_their_parents() {
     });
     assert_eq!(content, Some(88.0));
 }
-
