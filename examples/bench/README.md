@@ -10,6 +10,13 @@ Button of the benchmark's own UI set, `test/ui`, with the default theme):
 time of each screen with both Buttons; `nsh test examples/bench/GridTs.tsx --trace` shows the mount items. Results:
 `docs/dev/performance.md`.
 
+`PositionalClasses.tsx` mounts 1,000 real siblings with `odd:` classes:
+`nsh test examples/bench/PositionalClasses.tsx --trace`. Change `COUNT` to compare sizes,
+`CLASSES` to compare ordinary styles or `first:` / `last:`, and `EACH` to exercise deferred row
+creation. Its plain View has no Scroll viewport, so Each eventually creates every row.
+The Core benchmark isolates operation application and commit:
+`cargo test -p nsh-core bench_positional_mount -- --ignored --nocapture --test-threads=1`.
+
 `Inputs.tsx` holds the input controls' hot paths: a searchable Select of 10 000 items, a TimeField, a NumberInput and
 an OtpInput. Steps on standard input drive them, `--trace` shows each keystroke's commit, e.g.
 `echo 'await app.press("Pick"); await app.type("Search", "4"); await app.type("text:4", "2")' | nsh test examples/bench/Inputs.tsx --trace`.

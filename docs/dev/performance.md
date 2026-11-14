@@ -4,6 +4,37 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Sibling position classes (`core/classes.rs`, 2026-11-09, Linux x86_64, Ryzen 9 7950X, against
+`f0f0d107`; dev/test profile with `nsh-core` at `opt-level=3`, `FakeEngine`). The ignored
+`bench_positional_mount` times operation application and layout/commit, excluding operation
+construction and validation. Five alternating runs per version on one CPU, medians:
+
+| Siblings / classes | Before (ms) | After (ms) |
+|---|---|---|
+| 300, `odd:` | 38.59 | 15.21 |
+| 1,000, `odd:` | 817.66 | 166.26 |
+| 1,000, `first:` + `last:` | 800.68 | 168.67 |
+
+`positions_changed` counts the element siblings once and carries their ordinal through the immediate
+restyling pass. Mounting rows that all read their position still performs quadratically many restyles.
+Order, colors, frames and complete mount batches match; 1,000 rows keep 3,001 ops / 4,004 items /
+1,002 nodes. Ordinary classes take 2.01 → 1.99 ms (five alternating process pairs, medians of process
+medians; 25 mounts per process, the first five discarded). These Core timings exclude QuickJS and
+native text shaping, mounting and drawing.
+
+Headless `nsh test examples/bench/PositionalClasses.tsx --trace` (same baseline and Core optimization,
+other crates at their dev defaults, three alternating runs per version on one CPU): initial commit
+medians for 500 eager rows with `odd:` / `first:` + `last:` are 1291.92 / 1284.82 → 205.49 / 204.47 ms;
+500 rows through Each with `odd:` take 1274.47 → 204.70 ms. All three keep 1,504 ops / 2,005 items /
+502 nodes. At 300 eager `odd:` rows, 317.56 → 74.73 ms, keeping 904 / 1,205 / 302. Every ordered
+trace batch matches. The entry's `COUNT`, `CLASSES` and `EACH` select these workloads; baseline
+structural mounts at 1,000 rows exceed the driver's five-second first-render deadline, while the
+Rust benchmark above covers complete 1,000-row batches. Commit times exclude script evaluation
+and native input, mounting and drawing.
+
+The ordinary-class trace control at 1,000 rows takes 12.45 → 12.83 ms. The counter keeps
+56 ops / 50 items / 21 nodes initially and 10 / 7 / 24 after `+1`, summed commit medians
+539 → 530 µs. These short controls establish unchanged work counts rather than a speedup.
 Cross-platform keyboard integration (2026-11-12, macOS arm64, debug, upstream `9fd11f836` against the core at
 `c46f72f8c`): one fresh process per version running the same counter command below on the same machine.
 

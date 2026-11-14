@@ -2,6 +2,8 @@
 //! `style` applied on top) and resolving them again when what they depend
 //! on changes: the appearance, the window size, the layout direction, the
 //! node's interaction states, its group's states or its sibling position.
+//! A sibling-position change shares one element count across the immediate
+//! restyling pass (`positions_changed`); ordinary restyling queries its position.
 
 use super::{Core, Key, Kind, NO_KEY, dirty, disabling_changes};
 use crate::{
@@ -1158,13 +1160,26 @@ impl<M: TextEngine> Core<M> {
     /// Restyles the children of `parent` that depend on their position.
     pub(super) fn positions_changed(&mut self, parent: Key) {
         let children = self.nodes[parent as usize].children.clone();
+        let count = children
+            .iter()
+            .filter(|&&c| self.is_element_child(c))
+            .count();
+        let mut next = 0;
         for c in children {
+            let index = if self.is_element_child(c) {
+                let index = next;
+                next += 1;
+                index
+            } else {
+                // Keep position_bits' fallback for a child that does not count.
+                0
+            };
             if self.nodes[c as usize]
                 .classes
                 .as_ref()
                 .is_some_and(|c| c.deps() & deps::POSITION != 0)
             {
-                self.restyle(c);
+                self.restyle_at(c, Some(Self::position_at(index, count)));
             }
         }
     }
@@ -1190,8 +1205,11 @@ impl<M: TextEngine> Core<M> {
             .filter(|&c| self.is_element_child(c))
             .collect();
         let i = siblings.iter().position(|&c| c == key).unwrap_or(0);
-        let n = siblings.len();
-        let mut bits = if i % 2 == 0 {
+        Self::position_at(i, siblings.len())
+    }
+
+    fn position_at(i: usize, n: usize) -> u8 {
+        let mut bits = if i.is_multiple_of(2) {
             position::ODD
         } else {
             position::EVEN
@@ -1305,6 +1323,11 @@ impl<M: TextEngine> Core<M> {
 
     /// Resolves `key`'s style from its classes and inline style.
     pub(super) fn restyle(&mut self, key: Key) {
+        self.restyle_at(key, None);
+    }
+
+    /// Styles siblings with positions computed once for their shared parent.
+    fn restyle_at(&mut self, key: Key, position: Option<u8>) {
         let mut base = Style::default();
         // Under its own classes and style, as `:where()` is in CSS.
         let space = self.space_of(key);
@@ -1342,13 +1365,13 @@ impl<M: TextEngine> Core<M> {
             None => {
                 style = base;
                 props = ClassProps::default();
-                self.resolve_classes(key, ch, &mut style, &mut props);
+                self.resolve_classes(key, ch, position, &mut style, &mut props);
             }
             // Again with its own font's, once its classes set one.
             Some(inherited) => loop {
                 style = base.clone();
                 props = ClassProps::default();
-                self.resolve_classes(key, ch, &mut style, &mut props);
+                self.resolve_classes(key, ch, position, &mut style, &mut props);
                 let own = self.zero_advance(inherited.inherit(&style.text));
                 if own == ch {
                     break;
@@ -1454,7 +1477,14 @@ impl<M: TextEngine> Core<M> {
 
     /// `key`'s classes and inline style over `style`, `ch` the advance of
     /// its font's `0`.
-    fn resolve_classes(&mut self, key: Key, ch: f32, style: &mut Style, props: &mut ClassProps) {
+    fn resolve_classes(
+        &mut self,
+        key: Key,
+        ch: f32,
+        position: Option<u8>,
+        style: &mut Style,
+        props: &mut ClassProps,
+    ) {
         let node = &self.nodes[key as usize];
         if let Some(classes) = node.classes.clone() {
             let group = |name: &str| self.group_states(key, name);
@@ -1463,7 +1493,7 @@ impl<M: TextEngine> Core<M> {
                 Some(group) => self.group_data(key, group).contains(&name),
             };
             let pos = if classes.deps() & deps::POSITION != 0 {
-                self.position_bits(key)
+                position.unwrap_or_else(|| self.position_bits(key))
             } else {
                 0
             };
