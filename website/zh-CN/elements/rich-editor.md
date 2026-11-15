@@ -229,6 +229,32 @@ const editor = createRichEditor({ extensions: [StarterKit, Signature.configure({
 
 `node` 或 `mark`（`defineSchema` 的写法）使它成为节点或标记扩展；`addGlobalAttributes` 为其他类型添加属性；`addProseMirrorPlugins` 返回插件，包括 `RichEditorPlugin`；`addPasteRules` 返回作用于粘贴文本的 `textRule` 与 `markRule` 规则。内置类的 `extend({...})` 替换所给的部分：`Underline.extend({ addKeyboardShortcuts: () => ({ "Mod-Alt-u": toggleMark("underline") }) })`。
 
+### 节点视图
+
+`addNodeView` 返回一个组件，由它渲染该扩展节点类型的每个节点：正文里的股票标签、段落之间的卡片、@ 提及、嵌入内容。节点类型必须是原子节点（`atom: true` 或叶子节点）：光标把它当作一个字符或一个块跳过，Backspace 删除它。有内容的节点会被拒绝。
+
+```tsx
+import { RichEditor, StarterKit, createRichEditor, defineExtension, type RichNodeViewProps } from "nsh/base";
+
+function StockTag(props: RichNodeViewProps) {
+  return (
+    <View class={props.selected ? "rounded border border-primary px-1" : "rounded border border-transparent px-1"}>
+      <Text>{`$${props.node.attrs.symbol}`}</Text>
+    </View>
+  );
+}
+
+const Stock = defineExtension({
+  name: "stock",
+  node: { group: "inline", inline: true, atom: true, attrs: { symbol: { default: "AAPL" } } },
+  addNodeView: () => StockTag,
+});
+
+const editor = createRichEditor({ extensions: [StarterKit, Stock] });
+```
+
+组件对每个节点只运行一次。它的 props 跟随节点：在 JSX 或 effect 中读取时，节点的属性或选中状态变化，`node`（`{ type, attrs, textContent }`）与 `selected` 就地更新；在节点前后输入不会调用组件。`editor` 是节点所在的编辑器，`extension` 是 `{ name, options }`。`getPos()` 返回节点当前的起始位置（节点删除后为 `null`）；`updateAttributes(attrs)` 设置部分属性，`deleteNode()` 删除节点，两者都是经由编辑器（及其 `dispatchTransaction`）的一次可撤销修改。
+
 应用的 crate 通过其 UI 集注册用 Rust 编写的扩展，JS 按名称取用：
 
 ```rust

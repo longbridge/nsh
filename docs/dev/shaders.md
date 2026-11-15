@@ -126,6 +126,10 @@ clock of `nsh.time` (kept while paused), and its frames.
 
 - **Rendering never waits for the GPU.** Frames are read back asynchronously; a slow GPU drops frames instead of
   stalling the main thread.
+- **Memory.** The device asks for wgpu's `MemoryUsage` hints: on Direct3D 12 and Vulkan its allocator takes blocks of
+  8 MB and more where the default (`Performance`) takes 128 MB, which a few views' targets and read-back buffers never
+  fill. Metal and OpenGL do not read the hints. It asks for room for 65,536 live bindings, not wgpu's million, which
+  Direct3D 12 allocates as a descriptor heap when the device opens; the other backends report no limit there.
 - **Frames on IOSurfaces (Apple).** After `show_on_surfaces`, a view renders into one of three IOSurfaces of its frame's
   size (`shader_surfaces.rs`), tagged sRGB, instead of reading pixels back: `surface()` is the frame to show, which the
   backend sets as its layer's `contents`, and the window server matches its colours to the display on the GPU. A

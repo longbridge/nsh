@@ -3,7 +3,9 @@
 //! and the web. A focused stop reports `FOCUSED`, `onFocus` and `onBlur`;
 //! its keys reach the app's keymap (bound while it has the focus) as with
 //! no field focused, but for Return and Space, which only the focus' own
-//! bindings take (`Keymap::find_at`); else they press it.
+//! bindings take (`Keymap::find_at`); else they press it. A stop the newest
+//! modal covers (the app left the focus there) is never pressed, and its
+//! own bindings give way to the others (`Keymap::find_with`).
 //!
 //! The focus leaves the stop when a field takes it, on `blur()`, when the
 //! pointer goes down outside the stop, or when the stop goes away.
@@ -47,6 +49,14 @@ fn is_stop(view: &NshView) -> bool {
 /// The stop that has the keyboard focus on `surface`.
 pub(crate) fn focused(surface: &Surface) -> Option<NshView> {
     FOCUSED.with_borrow(|f| f.get(&surface.key()).cloned())
+}
+
+/// Whether the keyboard focus is on a stop the newest modal covers: a
+/// focus the app left there (a popup closing gave it back to its trigger
+/// as a dialog opened). That stop's own bindings take no keys
+/// ([`nsh_core::keymap::KeyFocus::covered`]).
+pub(crate) fn covered(surface: &Surface) -> bool {
+    focused(surface).is_some_and(|view| !crate::navigation::in_focus_scope(surface, &view))
 }
 
 /// `focus()` on a view that is not an input: it takes the keyboard focus
@@ -126,7 +136,18 @@ pub(crate) fn detached(surface: &Surface, view: &NshView) {
 /// takes presses): the app's bindings of those keys then give way to it,
 /// but for the focus' own (`Keymap::find_at`).
 pub(crate) fn on_control(surface: &Surface) -> bool {
-    focused(surface).is_some_and(|view| view.state().events.contains(EventKind::Press))
+    control(surface).is_some()
+}
+
+/// The focused stop if Return and Space press it: it takes presses and is
+/// in the newest modal over its window. One the modal covers is not
+/// pressed, and the app's bindings (the dialog's Return) keep those keys,
+/// as on macOS.
+fn control(surface: &Surface) -> Option<NshView> {
+    focused(surface).filter(|view| {
+        view.state().events.contains(EventKind::Press)
+            && crate::navigation::in_focus_scope(surface, view)
+    })
 }
 
 /// Return or Space press the focused stop when it takes presses
@@ -152,12 +173,9 @@ pub(crate) fn key(surface: &Surface, event: &KeyEvent) -> bool {
     if !event.down || !nsh_core::input::presses_focused_control(key, held) {
         return false;
     }
-    let Some(view) = focused(surface) else {
+    let Some(view) = control(surface) else {
         return false;
     };
-    if !view.state().events.contains(EventKind::Press) {
-        return false;
-    }
     surface.event(view.id(), EventKind::Press, EventPayload::None);
     true
 }

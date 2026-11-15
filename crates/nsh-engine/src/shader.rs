@@ -140,10 +140,19 @@ impl Renderer {
                         continue;
                     }
                 };
+            // Direct3D 12 allocates a descriptor heap this large when the
+            // device opens (default: a million); other backends ignore it.
+            let required_limits = wgpu::Limits {
+                max_non_sampler_bindings: 65_536,
+                ..wgpu::Limits::downlevel_webgl2_defaults()
+            }
+            .using_resolution(adapter.limits());
             match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("nsh shaders"),
-                required_limits:
-                    wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()),
+                required_limits,
+                // The default (`Performance`) allocates blocks of 128 MB and
+                // more, which a few views' textures and buffers never fill.
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
                 ..Default::default()
             })) {
                 Ok((device, queue)) => {

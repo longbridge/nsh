@@ -26,6 +26,21 @@ simultaneous removals from 200 / 400 regions scan 1,200 / 2,400 entries in one s
 echo 'await app.press("+1"); await app.wait(50)' | nsh test examples/counter/App.tsx --trace
 ```
 
+Sibling position classes (`core/classes.rs`, 2026-11-15, Linux x86_64, Intel Core Ultra 7 270K Plus, dev/test profile, `FakeEngine`).
+`positions_changed` counts the element siblings once per pass and restyles only the children whose
+`first:` / `last:` / `odd:` / `even:` / `only:` bits differ from the bits they were last resolved with
+(`position_used`), so appending a row restyles the previous last row and the new one instead of every
+sibling. Mounting N rows with `odd:` + `last:` classes, one insert per row, then one commit:
+
+| Rows | Before (ms) | After (ms) |
+|---|---|---|
+| 500 | 277.0 | 18.6 |
+| 2,000 | 4109.1 | 98.5 |
+
+Mounting is now linear in the row count. Results match a full per-child restyle after every tree edit
+(`positional_regressions`). `examples/bench/PositionalClasses.tsx` (`COUNT`, `CLASSES`, `EACH`) reproduces
+the workload headless with `nsh test --trace`; these Core timings exclude QuickJS and native mounting and drawing.
+
 Cross-platform keyboard integration (2026-11-12, macOS arm64, debug, upstream `9fd11f836` against the core at
 `c46f72f8c`): one fresh process per version running the same counter command below on the same machine.
 

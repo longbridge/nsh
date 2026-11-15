@@ -1494,7 +1494,8 @@ fn surface(
     // item chosen) goes back to the trigger as the popup starts to go, as
     // a select's does: a key pressed during its exit is the trigger's, not
     // the item's it was on. Not after a press outside, which put the focus
-    // where it pressed.
+    // where it pressed, nor over a focus the choice moved elsewhere in the
+    // same turn (an item that starts editing a field).
     let trigger = match &at {
         At::Trigger(anchor) | At::Pointer(_, anchor) if !sheet => Some(*anchor),
         _ => None,
@@ -1504,7 +1505,7 @@ fn surface(
             move || open.get(),
             move || {
                 if closed_by.get() != Some(OpenChangeReason::PressOutside) {
-                    anchor.focus();
+                    anchor.focus_back();
                 }
             },
         );
@@ -2067,6 +2068,10 @@ pub struct MenuItemProps {
     pub close_on_select: Prop<bool>,
     /// What screen readers say, when its content is not enough.
     pub accessibility_label: Prop<Option<SharedString>>,
+    /// More about it than its name, which screen readers read after a
+    /// pause, and a user can skip: what a choice does, how a mode differs
+    /// from the others.
+    pub accessibility_description: Prop<Option<SharedString>>,
     /// The Tailwind classes of the indicator, the part around the mark
     /// before the content; `checked:` and `disabled:` follow the item, and
     /// with `group` the mark's `group-checked:` classes do too.
@@ -2230,6 +2235,7 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
         .checked_style(props.checked_style)
         .disabled(disabled)
         .optional_label(props.accessibility_label)
+        .optional_accessibility_description(props.accessibility_description)
         .on_focus(move || {
             focused.set(true);
             // The keyboard on another item of its level closes a submenu

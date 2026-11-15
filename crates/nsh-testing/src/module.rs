@@ -1205,6 +1205,32 @@ impl From<nsh_core::ResolvedTextStyle> for SpanStyle {
     }
 }
 
+/// The style of a view as the app set it (`app.viewStyle`). Colors are
+/// `#rrggbbaa`. The values are those the app set last: while an animation
+/// runs, its end value. A background the platform draws itself (a native
+/// control's) is not here; check it with a screenshot.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct ViewStyle {
+    /// Its `backgroundColor`, absent when transparent.
+    #[prop(skip_none)]
+    pub background_color: Option<String>,
+    /// Its own `opacity`.
+    pub opacity: f64,
+    /// The opacity it shows with: its own times every view's around it.
+    pub effective_opacity: f64,
+}
+
+impl From<crate::screen::ViewStyle> for ViewStyle {
+    fn from(style: crate::screen::ViewStyle) -> Self {
+        ViewStyle {
+            background_color: style.background_color.map(|c| format!("#{c:08x}")),
+            opacity: f64::from(style.opacity),
+            effective_opacity: f64::from(style.effective_opacity),
+        }
+    }
+}
+
 /// What [`WaitOptions`] waits for.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PropEnum)]
 pub enum WaitState {
@@ -2194,6 +2220,14 @@ impl App {
     /// an empty span reports an error because it has no first character.
     pub fn span_style(&self, selector: String) -> Result<SpanStyle, JsError> {
         self.with(|app| app.span_style(&selector).map(SpanStyle::from))
+    }
+
+    /// The style of the view `selector` names: `backgroundColor` (absent
+    /// when transparent), its own `opacity` and `effectiveOpacity` (times
+    /// every view's around it); `null` when none matches. The values are
+    /// those the app set last, an animation's end value while it runs.
+    pub fn view_style(&self, selector: String) -> Result<Option<ViewStyle>, JsError> {
+        self.with(|app| app.view_style(&selector).map(|s| s.map(ViewStyle::from)))
     }
 
     /// What the app's storage holds now.

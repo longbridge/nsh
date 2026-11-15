@@ -1224,6 +1224,22 @@ pub(crate) fn control_activation_target(surface: &Surface, event: &NSEvent) -> O
     NshView::from_ns(native).filter(is_key_control)
 }
 
+/// Whether the keyboard focus is on a view of the window the newest modal
+/// over it covers: a focus the app left there (a popup closing gave it
+/// back to its trigger as a dialog opened). That view's own bindings take
+/// no keys ([`nsh_core::keymap::KeyFocus::covered`]).
+pub(crate) fn focus_covered(surface: &Surface) -> bool {
+    let root = event_root(surface);
+    let Some(responder) = root.ns().window().and_then(|w| w.firstResponder()) else {
+        return false;
+    };
+    let Some(native) = responder.downcast_ref::<objc2_app_kit::NSView>() else {
+        return false;
+    };
+    native.isDescendantOf(root.ns())
+        && !native.isDescendantOf(&crate::navigation::focus_scope(surface))
+}
+
 /// Presses `view` with no pointer to report, as Return and Space press a
 /// focused control and `AXPress` presses any: its `onPressDown`,
 /// `onPressUp` and `onPress`. `from` names the source in the log.
