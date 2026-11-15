@@ -525,6 +525,81 @@ fn frame_of(batch: &MountBatch, id: NodeId) -> Option<Bounds<Points>> {
     })
 }
 
+/// A text stretched across a column wraps at its content box: its padding
+/// and border are not room for its lines. Measured at the width of its
+/// border box, it got the height of fewer lines than its content box
+/// holds, and the platforms cut the lines left over with an ellipsis.
+#[test]
+fn a_stretched_text_wraps_at_its_content_box() {
+    for (padding, border) in [(10.0, 0.0), (0.0, 10.0), (6.0, 4.0)] {
+        let mut c = core();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::Create {
+                    id: 3,
+                    tag: Tag::Text,
+                },
+                // 11 characters, 88pt: one line in the column's 100pt, two
+                // in the text's 80pt content box.
+                Op::CreateText {
+                    id: 4,
+                    text: "hello world".into(),
+                },
+                Op::Insert {
+                    parent: 3,
+                    child: 4,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 3,
+                    before: None,
+                },
+                style_op(2, &[("width", StyleValue::Number(100.0))]),
+                style_op(
+                    3,
+                    &[
+                        ("paddingHorizontal", StyleValue::Number(padding)),
+                        ("borderWidth", StyleValue::Number(border)),
+                    ],
+                ),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        let content = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Text { id: 3, content, .. } => Some(*content),
+                _ => None,
+            })
+            .expect("the text mounted");
+        let inset = padding + border;
+        assert_eq!(
+            content,
+            Bounds::new(
+                Point::new(Points(inset), Points(border)),
+                size_pt(100.0 - 2.0 * inset, 32.0)
+            ),
+            "padding {padding}, border {border}"
+        );
+        assert_eq!(
+            frame_of(&batch, 3).map(|f| f.size),
+            Some(size_pt(100.0, 32.0 + 2.0 * border))
+        );
+    }
+}
+
 #[test]
 fn mounts_subtree_built_detached() {
     let mut c = core();
