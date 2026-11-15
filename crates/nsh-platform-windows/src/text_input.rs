@@ -95,7 +95,7 @@ use windows::{
                 DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_JUSTIFIED,
                 DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TEXT_METRICS,
                 DWRITE_TRIMMING, DWRITE_TRIMMING_GRANULARITY_CHARACTER,
-                DWRITE_WORD_WRAPPING_NO_WRAP, DWRITE_WORD_WRAPPING_WRAP, IDWriteTextFormat,
+                DWRITE_WORD_WRAPPING_EMERGENCY_BREAK, DWRITE_WORD_WRAPPING_NO_WRAP, IDWriteTextFormat,
                 IDWriteTextLayout,
             },
         },
@@ -422,7 +422,7 @@ impl InputState {
                 .CreateTextLayout(text, &format, if multiline { width } else { 1.0e6 }, 1.0e6)
                 .ok()?;
             let _ = layout.SetWordWrapping(if multiline {
-                DWRITE_WORD_WRAPPING_WRAP
+                DWRITE_WORD_WRAPPING_EMERGENCY_BREAK
             } else {
                 DWRITE_WORD_WRAPPING_NO_WRAP
             });
