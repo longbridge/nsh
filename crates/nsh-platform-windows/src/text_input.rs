@@ -526,6 +526,9 @@ impl InputState {
         self.set_size((content.size.width.0, content.size.height.0));
         let scale_changed = self.scale.replace(s) != s;
         self.origin.set(origin);
+        if let Some(e) = &self.editor {
+            e.show_in(crate::app_window::hwnd_showing(&surface, view));
+        }
         if scale_changed {
             self.apply_formats();
         }
