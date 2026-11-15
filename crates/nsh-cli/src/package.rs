@@ -931,6 +931,8 @@ fn trimmed_runner(entry: &Path, target: PackageTarget) -> bool {
         PackageTarget::Linux => cfg!(target_os = "linux"),
         PackageTarget::Macos => cfg!(target_os = "macos"),
         PackageTarget::Windows => cfg!(windows),
+        // iOS's runner builds with Xcode's SDK, so only on macOS.
+        PackageTarget::Ios | PackageTarget::IosSimulator => cfg!(target_os = "macos"),
         // Android's library is cross-compiled with the NDK on any OS;
         // without it (or the Rust target) the build fails and the package
         // gets the prebuilt library.
@@ -1063,6 +1065,10 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
             let built = match options.target {
                 PackageTarget::Macos => macos_runners(options.arch).map(drop),
                 PackageTarget::Linux => runtime::file(Platform::Linux, true).map(drop),
+                PackageTarget::Ios => runtime::file(Platform::IphoneOs, true).map(drop),
+                PackageTarget::IosSimulator => {
+                    runtime::file(Platform::IphoneSimulator, true).map(drop)
+                }
                 _ => runtime::file(Platform::Windows, true).map(drop),
             };
             if let Err(e) = built {

@@ -4132,7 +4132,10 @@ mod tests {
         // default, so `nsh package` can turn off those it does not use.
         let lib = read("android/Cargo.toml");
         assert_eq!(lib.matches("default-features = false").count(), 2, "{lib}");
-        assert!(lib.contains("plot = [\"nsh-platform-android/plot\"]"), "{lib}");
+        assert!(
+            lib.contains("plot = [\"nsh-platform-android/plot\"]"),
+            "{lib}"
+        );
         assert!(lib.contains("default = [\"js\", \"shader\""), "{lib}");
         let web = read("rust-web/lib.rs");
         // Only `nsh/base`'s core part: the root makes the components it uses
