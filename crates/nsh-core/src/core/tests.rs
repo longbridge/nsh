@@ -25097,6 +25097,7 @@ mod rust_desktop {
         let mut c = core();
         READS.set(0);
         c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
             title_bar: Edges {
                 top: Points(42.0),
                 left: Points(78.0),
@@ -25274,6 +25275,10 @@ mod rust_windows {
     #[test]
     fn a_window_shown_in_a_commit_gets_its_attributes_first() {
         let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
         let desktop = |command| Op::Command {
             id: crate::ROOT_ID,
             command: Command::Desktop(Box::new(command)),
@@ -26188,6 +26193,82 @@ mod rust_windows {
         let hidden = state(80.0, WindowMode::Normal, false);
         report(&mut c, hidden);
         assert_eq!(kept(&c), Some(hidden.placement));
+    }
+
+    /// `nsh.json`'s `"window"` and the app's own `set` reach the main
+    /// window where the surface has one: the desktops', and a browser's
+    /// page (its title). A phone's surface is a view in its app's screen:
+    /// nothing is sent there for its platform to refuse.
+    #[test]
+    fn main_window_attributes_go_where_the_surface_has_a_window() {
+        use crate::{
+            desktop::{MainWindowOptions, TitleBarStyle},
+            platform::Os,
+        };
+        let options = MainWindowOptions::from_json(
+            &serde_json::from_str::<crate::JsonValue>(
+                r#"{"title":"Notes","titleBar":{"style":"hidden","height":40},"minSize":{"width":360,"height":480},"restoreBounds":true}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let sent = |c: &mut Core<FakeEngine>| -> Vec<WindowAttributes> {
+            c.commit()
+                .map(|batch| batch.items)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|item| match item {
+                    MountItem::Command {
+                        id: ROOT_ID,
+                        command: Command::Desktop(command),
+                    } => match *command {
+                        DesktopCommand::SetAttributes(attributes) => Some(*attributes),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .collect()
+        };
+        for os in [
+            Os::MacOs,
+            Os::Windows,
+            Os::Linux,
+            Os::Web,
+            Os::Ios,
+            Os::Android,
+        ] {
+            let mut c = core();
+            c.set_environment(crate::element::Environment {
+                os,
+                ..Default::default()
+            });
+            c.set_main_window(&options);
+            let launch = sent(&mut c);
+            let title = WindowAttributes {
+                title: Some("Inbox".to_owned()),
+                ..Default::default()
+            };
+            let _ = c.apply_op(Op::Command {
+                id: ROOT_ID,
+                command: Command::Desktop(Box::new(DesktopCommand::SetAttributes(Box::new(title)))),
+            });
+            let set = sent(&mut c);
+            if os.is_desktop() || os == Os::Web {
+                assert_eq!(launch.len(), 1, "{os:?}");
+                assert_eq!(launch[0].title.as_deref(), Some("Notes"), "{os:?}");
+                assert!(
+                    launch[0]
+                        .title_bar
+                        .is_some_and(|t| t.style == TitleBarStyle::Hidden),
+                    "{os:?}"
+                );
+                assert_eq!(set.len(), 1, "{os:?}");
+                assert_eq!(set[0].title.as_deref(), Some("Inbox"), "{os:?}");
+            } else {
+                assert!(launch.is_empty(), "{os:?}: {launch:?}");
+                assert!(set.is_empty(), "{os:?}: {set:?}");
+            }
+        }
     }
 
     /// A window with no size of the app's, and one with a `defaultSize`,
