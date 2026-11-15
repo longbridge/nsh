@@ -77,7 +77,8 @@ draws no line until the pointer is on it (`PointerOnly`), so columns stand apart
 
 ## Columns' own classes, fitting, bounce
 
-A column's `cellClass` and `headerClass` come after the part's classes (`column_parts`, `view.rs`). Two presses of a
+A column's `cellClass` and `headerClass` come after the part's classes (`column_parts`, `view.rs`), and a
+`cellClasses` entry for that cell comes after those. Two presses of a
 resize handle that moved less than `MOVE_SLOP`, within `DOUBLE_PRESS` (400 ms), fit the column (`Dt::resize_end`).
 `bounces` sets the bounce of both scroll views.
 
@@ -146,8 +147,11 @@ methods the ref's. Deliberate differences:
 - No strings and no fixed look: the empty and loading slots are the app's, and every part (the sort button
   among them) takes the app's classes for its appearance (gpui-component draws an inbox icon, a skeleton
   and a translated "Sort by" label).
-- `onRowPress` is gpui-component's `render_tr` click handler, for the app's own selections of several rows;
-  `rowClasses`, data beside `data`, is `render_tr`'s per-row look without a call into JS per row.
+- `onRowPress` and `onColumnPress` are where an app keeps its own selection of several rows, cells or columns.
+  With `selectOnModifierPress` false, a press with Shift or the secondary modifier leaves the table's selection,
+  on a row, a cell or a title. `cellClasses` paints one cell by its data row and column index, after the part's
+  classes and the column's `cellClass`, and the text stays the table's. A column's `headerClass` and `cellClass`
+  paint that column. `rowClasses`, data beside `data`, is the per-row look without a call into JS per row.
 - A fit measures the cells' texts natively; `fitPadding` adds what the app's drawing adds to them (gpui-component
   asks its delegate to measure).
 
