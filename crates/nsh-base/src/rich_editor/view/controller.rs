@@ -51,6 +51,10 @@ use crate::{
 /// is in progress).
 const SINK_LIMIT: usize = 256;
 
+/// The meta prosemirror-view sets on a selection the pointer made (a
+/// press, a drag, a touch), which plugins tell it from the keyboard's by.
+const POINTER_META: &str = "pointer";
+
 /// How much nearer a drop place that takes a block as it is counts than
 /// one that takes it wrapped, between blocks.
 const DIRECT_SLACK: f32 = 6.0;
@@ -1505,11 +1509,24 @@ impl Rv {
 
     /// Selects `selection` (a move: it scrolls into view).
     pub(crate) fn set_selection(&self, selection: Selection, scroll: bool) {
+        self.select(selection, scroll, false);
+    }
+
+    /// Selects `selection`, which the pointer made: with the `pointer`
+    /// meta.
+    pub(crate) fn set_pointer_selection(&self, selection: Selection, scroll: bool) {
+        self.select(selection, scroll, true);
+    }
+
+    fn select(&self, selection: Selection, scroll: bool, pointer: bool) {
         let state = self.session.state();
         let mut tr = state.tr();
         tr.set_selection(selection);
         if scroll {
             tr.scroll_into_view();
+        }
+        if pointer {
+            tr.set_meta(POINTER_META, Value::Bool(true));
         }
         self.dispatch(tr);
         self.empty_sink();
@@ -1833,7 +1850,7 @@ impl Rv {
             && let Some((selection, click_sel)) = self.drag_source(&state, hit)
         {
             if !selection.eq(state.selection()) {
-                self.set_selection(selection.clone(), false);
+                self.set_pointer_selection(selection.clone(), false);
             }
             let copy = if apple_keys() {
                 modifiers.alt
@@ -1863,7 +1880,7 @@ impl Rv {
             && NodeSelection::is_selectable(&node)
             && table_role(node.ty()).is_none()
         {
-            self.set_selection(NodeSelection::create(&doc, p), false);
+            self.set_pointer_selection(NodeSelection::create(&doc, p), false);
             return;
         }
         let selection = match (hit, clicks) {
@@ -1898,7 +1915,7 @@ impl Rv {
             }
         };
         let anchor = selection.anchor();
-        self.set_selection(selection, false);
+        self.set_pointer_selection(selection, false);
         *self.drag.borrow_mut() = Some(Drag {
             anchor,
             shift,
@@ -2147,7 +2164,7 @@ impl Rv {
         // The handle owns the pointer: a table's grip under it (a row's,
         // on the table's left border) does not drag along.
         self.table_gesture.borrow_mut().take();
-        self.set_selection(selection.clone(), false);
+        self.set_pointer_selection(selection.clone(), false);
         // The press is where the pointer is now; the scroll since the
         // offset was noted moves the content under it.
         let scrolled = self.scroll_y.get_untracked() - scroll;
@@ -2273,6 +2290,7 @@ impl Rv {
         }
         let mut tr = state.tr();
         tr.set_selection(selection);
+        tr.set_meta(POINTER_META, Value::Bool(true));
         self.dispatch(tr);
     }
 
@@ -2381,7 +2399,7 @@ impl Rv {
             Some(target) => self.drop(&moving.slice, target, moving.moved, moving.source),
             None => {
                 if let Some(click) = moving.click {
-                    self.set_selection(click, false);
+                    self.set_pointer_selection(click, false);
                 }
             }
         }
@@ -2393,6 +2411,7 @@ impl Rv {
         if let Some(selection) = blocks_selection(state.doc(), state.selection()) {
             let mut tr = state.tr();
             tr.set_selection(selection);
+            tr.set_meta(POINTER_META, Value::Bool(true));
             self.dispatch(tr);
         }
     }
