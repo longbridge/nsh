@@ -4827,7 +4827,8 @@ impl Mounter {
     /// keyboard focus without claiming the touch. The pressable path
     /// ([`Mounter::press_changed`]) focuses those with press handlers.
     pub(crate) fn focus_node(&mut self, id: NodeId) {
-        if let Some(view) = self.slot(id).and_then(|s| s.native.focus_view())
+        if !self.typing()
+            && let Some(view) = self.slot(id).and_then(|s| s.native.focus_view())
             && view.is_focus_stop()
             && view.becomeFirstResponder()
         {
@@ -4839,8 +4840,10 @@ impl Mounter {
     pub(crate) fn press_changed(&mut self, id: NodeId, pressed: bool, at: PressAt) {
         // A press on a focusable view gives it the keyboard focus, as a
         // click does on the desktops (and a tap on an iPad with a hardware
-        // keyboard should).
+        // keyboard should). Not while the software keyboard types into an
+        // input: as with UIKit's controls, the input keeps it.
         if pressed
+            && !self.typing()
             && let Some(view) = self.slot(id).and_then(|s| s.native.focus_view())
             && view.is_focus_stop()
             && view.becomeFirstResponder()
@@ -4858,6 +4861,13 @@ impl Mounter {
             let payload = self.press_payload(id, at);
             self.control.dispatch_event(id, event, payload);
         }
+    }
+
+    /// Whether the software keyboard is up for the focused input: a touch
+    /// on a control leaves it there, as UIKit's controls do, so the
+    /// keyboard stays and the layout does not move under the finger.
+    fn typing(&self) -> bool {
+        self.focused.is_some() && self.keyboard > 0.0
     }
 
     /// A press event on pressable text span `node` of text view `view`.
