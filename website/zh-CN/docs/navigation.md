@@ -245,8 +245,8 @@ export const nav = createNavStack<Route>([{ name: "home" }]);
 | `headerStyle` | `{ backgroundColor?, color?, tintColor? }` | | iOS 和 Android：标题栏背景色、标题颜色（`color`）和按钮颜色（`tintColor`）。 |
 | `headerClass` | `string` | | 用类名设置同样的颜色：`bg-*`、标题用 `text-*`、按钮用 `tint-*`；`headerStyle` 优先。 |
 | `headerBackVisible` | `boolean` | `true` | iOS 和 Android：显示返回按钮。 |
-| `headerLeft` | `JSX.Element` | | iOS 和 Android：标题栏开头的视图（替换返回按钮）。 |
-| `headerRight` | `JSX.Element` | | iOS 和 Android：标题栏末尾的视图。 |
+| `headerLeft` | `JSX.Element` | | iOS 和 Android：标题栏开头的视图（替换返回按钮）。它们什么都不显示（宽度为 0）时，标题栏那里没有按钮。 |
+| `headerRight` | `JSX.Element` | | iOS 和 Android：标题栏末尾的视图。它们什么都不显示（宽度为 0）时，标题栏那里没有按钮，内容回来时按钮也回来。 |
 | `ios={{ headerRightSystemItem }}` | `"add" \| "done" \| "close" \| "edit" \| "compose" \| "search" \| "share" \| "trash" \| "save" \| "cancel"` | | iOS：在标题栏末尾显示 UIKit 自带的按钮（系统的外观、图标或文字），代替 `headerRight` 的视图；按下它就是按下 `headerRight` 里第一个可按的视图，所以那里要放一个。Android 照常显示 `headerRight`。 |
 | `ios={{ headerLeftSystemItem }}` | 同 `headerRightSystemItem` | | iOS：同上，放在标题栏开头，按下即按下 `headerLeft`。 |
 | `ios={{ headerRightSymbol }}` | `string` | | iOS：在标题栏末尾显示 UIKit 自带的按钮，图标是该名称的 SF Symbol（如 `"slider.horizontal.3"`），代替 `headerRight` 的视图；按下它就是按下 `headerRight` 里第一个可按的视图，VoiceOver 读的也是那个视图的标签。`headerRightSystemItem` 优先；SF Symbols 里没有的名称照常显示 `headerRight`。Android 照常显示 `headerRight`。 |
