@@ -1128,6 +1128,9 @@ fn placeholder_text(rv: &Rv, it: &BlockItem) -> Option<String> {
 /// The spans of a textblock's pieces (textblock `id`, `item`).
 fn spans(rv: &Rv, pieces: Vec<Piece>, id: u64, item: ReadSignal<BlockItem>) -> Vec<AnyElement> {
     let props = rv.props;
+    // Inline leaves by their order in the block: a node view's key that
+    // typing before it does not change.
+    let mut leaves = 0usize;
     pieces
         .into_iter()
         .map(|piece| match piece {
@@ -1183,7 +1186,11 @@ fn spans(rv: &Rv, pieces: Vec<Piece>, id: u64, item: ReadSignal<BlockItem>) -> V
                     .when_some(hint, |t, hint| t.child(hint))
                     .into_element()
             }
-            Piece::Leaf { node, offset, text } => leaf(rv, node, (id, offset), item, text),
+            Piece::Leaf { node, offset, text } => {
+                leaves += 1;
+                let key = SharedString::from(format!("i{id}.{leaves}"));
+                leaf(rv, node, (id, offset), item, text, key)
+            }
             Piece::Widget { class } => view()
                 .app_class(class.map(SharedString::from))
                 .into_element(),
@@ -1228,6 +1235,7 @@ fn leaf(
     at: (u64, usize),
     item: ReadSignal<BlockItem>,
     drawn: Option<String>,
+    key: SharedString,
 ) -> AnyElement {
     let props = rv.props;
     let classes_node = node.clone();
@@ -1271,7 +1279,8 @@ fn leaf(
             selected.read_only(),
             signal(Vec::new()).read_only(),
             None,
-        );
+        )
+        .rendered_at(rv.cx.__host(), key, item);
         let el = view.create(&cx, &node);
         cleanup(move || view.destroy());
         return inline_box(rv, styled(view_box()), at)
@@ -1373,7 +1382,8 @@ fn node_view_block(rv: Rv, item: ReadSignal<BlockItem>, view: Arc<dyn NodeView>)
                 selected.read_only(),
                 decorations.read_only(),
                 content,
-            );
+            )
+            .rendered_at(rv.cx.__host(), SharedString::from(format!("b{id}")), item);
             let el = view.create(&cx, &current);
             let destroyed = view.clone();
             cleanup(move || destroyed.destroy());
@@ -1678,7 +1688,17 @@ impl Rv {
         }
         text.widths.insert(offset, width);
         drop(geo);
-        self.layout_rev.update(|r| *r += 1);
+        // Every inline view of a block reports its width as an edit before
+        // them moves them (their offsets are new): the geometry follows once
+        // for all of them, not once per view.
+        if self.widths_pending.replace(true) {
+            return;
+        }
+        let (pending, layout_rev) = (self.widths_pending.clone(), self.layout_rev);
+        spawn(async move {
+            pending.set(false);
+            layout_rev.update(|r| *r += 1);
+        });
     }
 
     /// Where block `id`'s children start in its box (see

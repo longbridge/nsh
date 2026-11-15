@@ -82,6 +82,7 @@ const components: DemoEntry[] = [
   { name: "Radio", detail: "Plans, delivery options as cards, a reading preference", icon: "radio", screen: lazy(() => import("./demos/Controls").then((m) => m.RadioDemo)) },
   { name: "Resizable", detail: "Panels resized by dragging the lines between them, within their ranges", icon: "sidebar", screen: lazy(() => import("./demos/Resizable").then((m) => m.Resizable)) },
   { name: "RichEditor", detail: "A document editor on Tiptap's extensions: lists, links, tables, Markdown shortcuts, undo and redo", icon: "richtext", screen: lazy(() => import("./demos/RichEditorDemo").then((m) => m.RichEditorDemo)) },
+  { name: "Node views", detail: "The app's components as nodes of a document: stock tags in the text, a stock card between paragraphs (addNodeView)", icon: "richtext", screen: lazy(() => import("./demos/NodeViewDemo").then((m) => m.NodeViewDemo)) },
   { name: "Select", detail: "A sort order, fonts in sections with search, a disabled language", icon: "select", screen: lazy(() => import("./demos/Controls").then((m) => m.SelectDemo)) },
   { name: "Sheet", detail: "A panel at an edge, over a backdrop; a swipe, the backdrop, Escape or back closes it", icon: "sheet", screen: lazy(() => import("./demos/Overlays").then((m) => m.SheetDemo)) },
   { name: "Slider", detail: "A level and a price range the app owns", icon: "sliders", screen: lazy(() => import("./demos/Controls").then((m) => m.SliderDemo)) },
