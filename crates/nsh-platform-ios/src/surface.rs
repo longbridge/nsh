@@ -911,9 +911,13 @@ impl RootView {
         *mounter.get(mtm).borrow_mut() = Some(installed);
         *self.ivars().running.borrow_mut() = Some(Running { engine, mounter });
         self.ivars().environment.set(Some(self.environment()));
-        // The root owns hardware keys until a view or input takes the focus
-        // (an `autoFocus` input still becomes first responder after this).
-        let _ = self.becomeFirstResponder();
+        // Take hardware keys only if the host has no focused responder.
+        // Defer so an autoFocus input mounted this turn keeps its focus.
+        if let Some(target) = self.target()
+            && let Some(window) = self.window()
+        {
+            target.restore_root_focus(Retained::into_super(self.retain()), window);
+        }
     }
 
     /// Stops the engine and removes all native views.
