@@ -282,7 +282,11 @@ Things that were found the hard way. Read the section of the area you change bef
   real tap through XCUITest reproduced it). The navigation bar has one of its own (iOS 27 simulator): it prevented
   every press of the views an app puts in the header's slots, which the bar wraps in custom bar button items.
   `PressRecognizer` is not preventable by tap recognizers on a `UIWindow` or a `UINavigationBar` (`press.rs`,
-  `is_system_tap`); edge-gesture gates are not taps and still cancel presses.
+  `is_system_tap`); edge-gesture gates are not taps and still cancel presses. That interaction is also the status bar's
+  tap, which scrolls the scroll views under it to their top: a press it did not prevent still scrolled the page back
+  to its top (opening a menu from the header did). Those taps wait for the press to fail
+  (`shouldBeRequiredToFailByGestureRecognizer:`), so a press takes its tap and a tap where nothing is pressed still
+  scrolls to the top.
 - **iOS, a tap recognizer on a view around pressables**: a `UITapGestureRecognizer` recognizes on release, where a
   press ends too, and prevents the `PressRecognizer`s of the views inside its view: `cancelsTouchesInView = false`
   leaves the views their touches, not the other recognizers their turn. The tap that focuses a `focusable` view
