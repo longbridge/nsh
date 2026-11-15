@@ -194,6 +194,16 @@ define_class!(
             !is_system_tap(other)
         }
 
+        #[unsafe(method(shouldBeRequiredToFailByGestureRecognizer:))]
+        fn required_to_fail_by(&self, other: &UIGestureRecognizer) -> bool {
+            // That tap interaction also acts on the tap: it is the status
+            // bar's tap, which scrolls the scroll views under it to their
+            // top. It skips `UIControl`s, so it waits for the press: a press
+            // that ends takes the tap, one that fails (nothing to press)
+            // leaves it to the system.
+            is_system_tap(other)
+        }
+
         #[unsafe(method(canPreventGestureRecognizer:))]
         fn can_prevent(&self, other: &UIGestureRecognizer) -> bool {
             // Never block scroll views or pans: they start before a press ends.
