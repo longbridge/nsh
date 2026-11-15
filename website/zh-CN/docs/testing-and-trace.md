@@ -408,6 +408,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.texts()` | 当前屏幕上的文字，按顺序排列。 |
 | `app.value(selector)` | 输入框的内容，没有匹配时为 `null`。 |
 | `app.spanStyle(selector)` | 返回匹配到的第一个字符的解析样式（无界面测试和各个 `--target` 都支持）：`color`、可选的 `backgroundColor`、`fontSize`、`fontWeight`、`italic`、`underline` 和 `lineThrough`。颜色为 `#rrggbbaa`，字号单位为 pt。 |
+| `app.viewStyle(selector)` | 返回匹配视图由应用设置的样式（无界面测试和各个 `--target` 都支持）：可选的 `backgroundColor`（透明时不返回）、自身的 `opacity`，以及 `effectiveOpacity`（自身透明度乘以所有祖先视图的透明度）。颜色为 `#rrggbbaa`。没有匹配时返回 `null`，匹配不唯一时报错。 |
 | `app.storage()` | 应用存储当前保存的内容。 |
 | `await app.back()` | 像用户那样返回（导航栏的返回按钮、下滑关闭弹出页）：最新的模态窗口里（没有模态窗口时就在整个屏幕上）最内层、布局尺寸不为零（不在尺寸为零的标签页里）的导航栈弹出栈顶页面（`onDismiss`），栈顶页面设置了 `preventBack` 时改为询问它（`onBackRequest`）；没有可返回的栈时，最新的模态窗口请求关闭（`onRequestClose`）。没有可返回的内容时 reject。 |
 | `await app.forward()` | 像浏览器的前进按钮那样在浏览器历史中前进。仅限 `--target web`；其他情况下以 `ERR_NSH_TEST_UNSUPPORTED` reject。 |
@@ -463,6 +464,8 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 ```tsx
 await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
 ```
+
+`app.viewStyle("id:card")` 可以不截图就检查视图是否变暗或高亮。它读取的是应用设置的值：动画进行中返回动画的终值，而不是屏幕上的当前帧。原生控件自己绘制的默认背景不在结果里，需要用 `app.screenshot` 检查。
 
 `app.spanStyle("id:guide")` 读取嵌套的 `<Text testID="guide">`；`text:word` 读取匹配文字的第一个字符。
 用 `id:note >> text:word` 限定范围，用 `>> nth=0` 选择重复匹配中的一个。
