@@ -44471,6 +44471,9 @@ mod download_decisions {
     }
 }
 
+#[path = "reconciliation_tests.rs"]
+mod reconciliation_cleanup;
+
 // Structural variants share positions without changing immediate restyling.
 mod positional_regressions {
     use super::*;

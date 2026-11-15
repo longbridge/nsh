@@ -270,8 +270,8 @@ reasons: `reactive-components.md`.
   `Owner::scope`, no batch, so writes notify as they happen), so the signals, animated values, refs and tasks it
   makes are that owner's and go with it rather than living as long as the surface. Once that owner is disposed the
   listener no longer runs (its view is gone), events already queued for its node included: a region that runs again
-  disposes its last run's owner at once, while the core drops that run's handlers only when it reconciles the region,
-  in the commit. A node made again that goes on listening to its layout reports its frame to the new run's listener,
+  disposes its last run's owner at once, while the core drops that run's handlers at the end of the binding batch,
+  before the next event round in the commit. A node made again that goes on listening to its layout reports its frame to the new run's listener,
   as a listener added after layout learns it. This initialization targets the new run's listeners alone; listeners
   retained from outside the region and JS handlers keep receiving frame changes. The same rule applies to a
   placed slot: initialization uses the app element that receives the slot's handlers, while retained listeners stay installed. When the owner is disposed while a listener or task runs under it (a
@@ -294,7 +294,9 @@ reasons: `reactive-components.md`.
   the host itself (no view of its own); a region as the root goes in the host view.
   The core reuses retained `each` rows in the same key order while their item bindings update the content
   (`core/components.rs`). Region placement checks the actual child order before moving nodes
-  (`core/views.rs`), after updating anchors and slots.
+  (`core/views.rs`), after updating anchors and slots. Regions that only populate or retain nodes skip listener and
+  binding cleanup. When nodes leave, affected views are cleaned once per binding batch; recycled list cells use the
+  same boundary when their static children leave.
 - **Canvases** draw what a `Painter` recorded (the Canvas 2D operations: `.fill_style(..)` / `.stroke_style(..)` take
   colors, `CanvasGradient::linear` / `radial` / `conic` and animated values; `.stroke_path(&canvas::svg_path(d))`;
   `measure_text(font, text)` is `measureText`; `.fill_style_from_view(initial)`, `.stroke_style_from_view(initial)`,

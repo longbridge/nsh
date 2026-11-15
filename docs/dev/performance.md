@@ -4,6 +4,28 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Batched region cleanup (2026-11-15, macOS arm64, Apple M4 Pro, against `9efc3a2c`): three interleaved before / after
+pairs, a fresh headless CLI process per sample. Both builds use the workspace's development profile with
+`CARGO_PROFILE_DEV_DEBUG=line-tables-only` and incremental compilation disabled. The 200-paragraph reproduction is
+`nsh test examples/bench/RichEditorMount.tsx --trace`, with `await app.wait(150)` on standard input.
+
+| Phase | Before (µs/commit, median) | After (µs/commit, median) | Ops | Mount items | Nodes |
+|---|---:|---:|---:|---:|---:|
+| RichEditor initial population | 3,710,044 | 292,158 | 10 | 2,644 | 1,009 |
+| Counter initial frame | 273 | 281 | 57 | 51 | 21 |
+| Counter press `+1` | 847 | 878 | 10 | 7 | 24 |
+
+Every sample passes and all work counts match. The RichEditor commit includes Rust view expansion, layout and
+mount-batch construction, excluding native input, mounting and drawing. The counter uses the command below and
+establishes unchanged work; three pairs do not establish a timing regression or speedup for its sub-millisecond commits.
+Initial region population skips listener/binding cleanup, and regions that release nodes share one sweep per
+affected view before the next event round. The core regression counts zero initial sweeps for 50–800 bound rows;
+simultaneous removals from 200 / 400 regions scan 1,200 / 2,400 entries in one sweep each.
+
+```sh
+echo 'await app.press("+1"); await app.wait(50)' | nsh test examples/counter/App.tsx --trace
+```
+
 Sibling position classes (`core/classes.rs`, 2026-11-15, Linux x86_64, Intel Core Ultra 7 270K Plus, dev/test profile, `FakeEngine`).
 `positions_changed` counts the element siblings once per pass and restyles only the children whose
 `first:` / `last:` / `odd:` / `even:` / `only:` bits differ from the bits they were last resolved with
