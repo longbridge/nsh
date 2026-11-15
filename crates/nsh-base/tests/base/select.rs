@@ -713,6 +713,11 @@ fn tab_closes_it_and_the_focus_moves_on() {
             !app.sent(trigger, &Command::Focus),
             "searchable {searchable}: the focus is not taken back"
         );
+        if searchable {
+            // The search field had the keyboard (`autoFocus`): Tab left
+            // it, not the trigger.
+            continue;
+        }
         // It went on: the trigger's keys open nothing.
         app.key("down");
         app.wait(Duration::from_millis(100)).unwrap();
