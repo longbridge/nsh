@@ -110,7 +110,8 @@ An app's TS extension renders its atoms with `addNodeView` (`js/node_views.rs`).
 registers a `JsNodeView` for the type; the JS function cannot live in a `Send + Sync` node view, so it stays in a
 thread-local table the view indexes. Its element is a `Renderer` the editor's host renders with the function itself
 (`Renderer::__js_fn`): unlike a prop's function, it is called once per key with props reading the latest value (a
-signal behind a `Proxy`), and a value that differs is set in place, nothing is made again. The value is the node's
+signal behind a `Proxy`), and a value that differs is set in place, nothing is made again. Both runtimes render it
+under the owner the editor's host was made under, so a node view sees the context around the `RichEditor`. The value is the node's
 JSON and whether it is selected, never its position, and an element made again for the same node (every span of a
 block is, as text is typed before it) shares the props' state through its key (`b<block>` or `i<block>.<leaf>`), so
 its value stays equal and no JS runs. `getPos` reads a position a Rust effect keeps (JS reads no Rust signal);

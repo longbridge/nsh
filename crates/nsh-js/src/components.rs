@@ -417,7 +417,8 @@ fn render_data(ctx: *mut JsContext, prop: &str, key: &str) -> JsValue {
 /// Renders `value` (owned) with `func`, a function component host `host`
 /// holds itself, for `slot`: the first time, `func` gets props reading
 /// the value's signal, its content goes into a new holder inserted into
-/// the host; after that the signal takes the value (nothing is made
+/// the host (rendered under the owner the host was made under, so it
+/// sees the context around the host, as on the web); after that the signal takes the value (nothing is made
 /// again).
 fn fn_render(
     cx: *mut JsContext,
@@ -439,8 +440,11 @@ fn fn_render(
     let f = Owned(cx, crate::classes::from_raw(f));
     let props_of = props_of(cx)?;
     let signal = Owned(cx, reactive::new_signal(cx, value.1));
+    // Under the owner the host was made under: the content sees the
+    // context around the component, as its children would.
+    let owner = dom::owner_of_node(cx, host);
     let (root, made) = reactive::untracked_with(cx, || {
-        reactive::with_root(cx, || -> Result<Owned, JsValue> {
+        reactive::with_root_under(cx, owner, || -> Result<Owned, JsValue> {
             let props = Owned(
                 cx,
                 crate::web::js::call(cx, props_of, UNDEFINED, &[signal.1])
