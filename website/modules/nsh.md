@@ -3129,6 +3129,8 @@ on_key_with("space", KeyOptions { for_focus: true, ..KeyOptions::default() }, mo
 />
 ```
 
+The keys belong to the newest dialog: when the focus stays on a view a dialog covers (a menu gives it back to its trigger as its item opens a dialog), Return and Space go to the dialog's bindings, and that view's `forFocus` bindings and its press wait until the dialog closes.
+
 Menu shortcuts give way to a binding of the same keystroke: the application menu's ([`nsh/desktop`](./nsh-desktop)) on every desktop, and on macOS the built-in menus' too (Cmd+W, Cmd+C, ...). While you develop with `nsh run`, Cmd+R / Ctrl+R always reloads the app, even if it binds `mod+r`; a packaged app can bind it.
 
 ## nativeComponent and nativeModule
