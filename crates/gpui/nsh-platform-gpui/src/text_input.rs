@@ -1946,6 +1946,20 @@ pub(crate) fn pointer(surface: &Rc<Surface>, view: &NshView, event: &ItemPointer
     }
 }
 
+/// Whether a multiline field can move in the requested direction.
+/// Target selection must not move the text before the gesture is latched.
+pub(crate) fn can_scroll(view: &NshView, dy: f32) -> bool {
+    let Some(input) = input_of(view).filter(|input| input.multiline()) else {
+        return false;
+    };
+    let Some(layout) = input.layout() else {
+        return false;
+    };
+    let max = (layout.height - input.size.get().1).max(0.0);
+    let before = input.scroll.get().clamp(0.0, max);
+    (before + dy).clamp(0.0, max) != before
+}
+
 /// A wheel over input `view`: scrolls the lines of a multiline field that
 /// do not fit. True when it scrolled (an outer scroll view does not).
 pub(crate) fn wheel(view: &NshView, dy: f32) -> bool {
@@ -2553,6 +2567,193 @@ mod blink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Use a cached layout so routing tests need neither a window nor fonts.
+    fn scrolling_field() -> (Rc<Surface>, NshView, Rc<InputState>, NshView) {
+        let surface = Surface::new(nsh_engine::Environment::default());
+        surface.root.state_mut().frame = crate::geom::rect(0.0, 0.0, 400.0, 400.0);
+        let outer = NshView::new(2, nsh_core::ViewKind::Scroll);
+        outer.state_mut().frame = crate::geom::rect(0.0, 0.0, 400.0, 400.0);
+        {
+            let mut state = outer.state_mut();
+            let scroll = state.scroll.as_mut().unwrap();
+            scroll.content = nsh_core::geometry::size(Points(400.0), Points(2000.0));
+            scroll.behavior.enabled = true;
+        }
+        outer.insert_before(&surface.root, None);
+        let field = NshView::new(4, nsh_core::ViewKind::Input);
+        field.state_mut().frame = crate::geom::rect(0.0, 0.0, 200.0, 100.0);
+        field.insert_before(&outer, None);
+        let input = Rc::new(InputState::new(0, 4, None));
+        input.config.borrow_mut().multiline = true;
+        input.size.set((200.0, 100.0));
+        *input.layout.borrow_mut() = Some(Rc::new(Layout {
+            lines: vec![],
+            glyphs: vec![],
+            size: 14.0,
+            width: 200.0,
+            height: 500.0,
+        }));
+        field.state_mut().input = Some(input.clone());
+        (surface, field, input, outer)
+    }
+
+    fn scroll_event(x: f32, dy: f32, time: f64, precise: bool) -> crate::input::WheelEvent {
+        crate::input::WheelEvent {
+            x,
+            y: 50.0,
+            dx: 0.0,
+            dy,
+            time,
+            precise,
+            modifiers: Modifiers::default(),
+        }
+    }
+
+    fn outer_offset(outer: &NshView) -> f32 {
+        outer.state().scroll.as_ref().unwrap().y.0
+    }
+
+    #[test]
+    fn multiline_touchpad_keeps_the_field_through_edges_and_momentum() {
+        use crate::input::{GesturePhase::*, touchpad};
+        let (surface, _, input, outer) = scrolling_field();
+        // Resting fingers hold the field until movement selects its axis.
+        touchpad(&surface, scroll_event(50.0, 0.0, 1.0, true), Began);
+        touchpad(&surface, scroll_event(50.0, 30.0, 1.016, true), Moved);
+        assert_eq!(input.scroll.get(), 30.0);
+        // Moving the pointer outside the field does not retarget the gesture.
+        touchpad(&surface, scroll_event(300.0, 500.0, 1.032, true), Moved);
+        assert_eq!(input.scroll.get(), 400.0);
+        touchpad(&surface, scroll_event(300.0, 0.0, 1.040, true), Ended);
+        touchpad(&surface, scroll_event(300.0, 20.0, 1.056, true), Moved);
+        assert_eq!(outer_offset(&outer), 0.0);
+        // Native inertia really moves the text, rather than being swallowed.
+        touchpad(&surface, scroll_event(300.0, -15.0, 1.072, true), Moved);
+        assert_eq!(input.scroll.get(), 385.0);
+        touchpad(&surface, scroll_event(300.0, 10.0, 2.0, true), Moved);
+        assert_eq!(outer_offset(&outer), 10.0);
+    }
+
+    #[test]
+    fn multiline_wheel_latches_until_idle_and_falls_through_at_an_initial_edge() {
+        let (surface, _, input, outer) = scrolling_field();
+        crate::input::wheel(&surface, scroll_event(50.0, 500.0, 1.0, false));
+        assert_eq!(input.scroll.get(), 400.0);
+        crate::input::wheel(&surface, scroll_event(300.0, 20.0, 1.016, false));
+        assert_eq!(outer_offset(&outer), 0.0);
+        crate::input::wheel(&surface, scroll_event(50.0, 20.0, 2.0, false));
+        assert!(outer_offset(&outer) > 0.0);
+    }
+
+    #[test]
+    fn multiline_touchpad_does_not_steal_an_outer_gesture() {
+        use crate::input::{GesturePhase::*, touchpad};
+        let (surface, _, input, outer) = scrolling_field();
+        touchpad(&surface, scroll_event(300.0, 10.0, 1.0, true), Began);
+        touchpad(&surface, scroll_event(50.0, 10.0, 1.016, true), Moved);
+        assert_eq!(input.scroll.get(), 0.0);
+        assert_eq!(outer_offset(&outer), 20.0);
+    }
+
+    #[test]
+    fn multiline_touchpad_new_begin_and_cancel_release_the_field() {
+        use crate::input::{GesturePhase::*, touchpad};
+        for end in [Ended, Cancelled] {
+            let (surface, _, input, outer) = scrolling_field();
+            touchpad(&surface, scroll_event(50.0, 10.0, 1.0, true), Began);
+            touchpad(&surface, scroll_event(50.0, 0.0, 1.016, true), end);
+            let next = if end == Cancelled { Moved } else { Began };
+            touchpad(&surface, scroll_event(300.0, 10.0, 1.032, true), next);
+            assert_eq!(input.scroll.get(), 10.0);
+            assert_eq!(outer_offset(&outer), 10.0);
+        }
+    }
+
+    #[test]
+    fn multiline_phaseless_pixels_scroll_and_do_not_leak_at_the_edge() {
+        use crate::input::{GesturePhase::Moved, touchpad};
+        let (surface, _, input, outer) = scrolling_field();
+        touchpad(&surface, scroll_event(50.0, 500.0, 1.0, true), Moved);
+        touchpad(&surface, scroll_event(50.0, 20.0, 1.016, true), Moved);
+        assert_eq!(input.scroll.get(), 400.0);
+        assert_eq!(outer_offset(&outer), 0.0);
+        touchpad(&surface, scroll_event(50.0, 20.0, 2.0, true), Moved);
+        assert_eq!(outer_offset(&outer), 20.0);
+    }
+
+    #[test]
+    fn single_line_and_fitting_fields_leave_scroll_to_the_parent() {
+        use crate::input::{GesturePhase::Began, touchpad};
+        for multiline in [true, false] {
+            let (surface, _, input, outer) = scrolling_field();
+            input.config.borrow_mut().multiline = multiline;
+            if multiline {
+                input.size.set((200.0, 600.0));
+            }
+            touchpad(&surface, scroll_event(50.0, 20.0, 1.0, true), Began);
+            assert_eq!(input.scroll.get(), 0.0);
+            assert_eq!(outer_offset(&outer), 20.0);
+        }
+    }
+
+    #[test]
+    fn multiline_scroll_respects_horizontal_and_shift_wheels() {
+        for precise in [true, false] {
+            let (surface, _, input, outer) = scrolling_field();
+            {
+                let mut state = outer.state_mut();
+                let scroll = state.scroll.as_mut().unwrap();
+                scroll.horizontal = true;
+                scroll.content = nsh_core::geometry::size(Points(2000.0), Points(400.0));
+            }
+            let mut event = scroll_event(50.0, 20.0, 1.0, precise);
+            if precise {
+                event.dx = 30.0;
+                crate::input::touchpad(&surface, event, crate::input::GesturePhase::Began);
+            } else {
+                event.modifiers.shift = true;
+                crate::input::wheel(&surface, event);
+            }
+            assert_eq!(input.scroll.get(), 0.0);
+            assert!(outer.state().scroll.as_ref().unwrap().x.0 > 0.0);
+        }
+    }
+
+    #[test]
+    fn multiline_top_edge_can_start_on_the_parent() {
+        let (surface, field, input, outer) = scrolling_field();
+        // Put the parent partway down and keep the field under the pointer.
+        outer.state_mut().scroll.as_mut().unwrap().y = Points(100.0);
+        field.state_mut().frame.origin.y = Points(100.0);
+        crate::input::touchpad(
+            &surface,
+            scroll_event(50.0, -20.0, 1.0, true),
+            crate::input::GesturePhase::Began,
+        );
+        assert_eq!(input.scroll.get(), 0.0);
+        assert_eq!(outer_offset(&outer), 80.0);
+    }
+
+    #[test]
+    fn multiline_standalone_field_handles_resting_fingers_and_pixels() {
+        use crate::input::{GesturePhase::*, touchpad};
+        let (surface, field, input, outer) = scrolling_field();
+        field.insert_before(&surface.root, None);
+        // The field is a sibling, not inside the scroll view.
+        assert!(touchpad(
+            &surface,
+            scroll_event(50.0, 0.0, 1.0, true),
+            Began
+        ));
+        assert!(touchpad(
+            &surface,
+            scroll_event(50.0, 20.0, 1.016, true),
+            Moved
+        ));
+        assert_eq!(input.scroll.get(), 20.0);
+        assert_eq!(outer_offset(&outer), 0.0);
+    }
 
     #[test]
     fn alignment() {
