@@ -25,7 +25,8 @@ use objc2_ui_kit::{
     UIAccessibilityTraitSelected, UIAccessibilityTraitStaticText,
     UIAccessibilityTraitSummaryElement, UIAccessibilityTraitUpdatesFrequently,
     UIAccessibilityTraits, UIEvent, UIFocusAnimationCoordinator, UIFocusUpdateContext,
-    UIKeyCommand, UIPress, UIPressesEvent, UIResponder, UITapGestureRecognizer, UIView,
+    UIGestureRecognizer, UIGestureRecognizerState, UIKeyCommand, UIPress, UIPressesEvent,
+    UIResponder, UITapGestureRecognizer, UITouch, UIView,
 };
 
 use crate::target::EventTarget;
@@ -43,7 +44,7 @@ pub(crate) struct NshViewIvars {
     events: std::cell::Cell<EventMask>,
     /// A tap that focuses this view when it is `focusable` without taking
     /// presses (it neither claims nor cancels touches).
-    focus_tap: RefCell<Option<Retained<UITapGestureRecognizer>>>,
+    focus_tap: RefCell<Option<Retained<FocusTap>>>,
     /// The view handles presses: an accessibility element by default, and
     /// "activate" presses it.
     pressable: std::cell::Cell<bool>,
@@ -292,6 +293,59 @@ define_class!(
     }
 );
 
+define_class!(
+    /// The tap that gives a `focusable` view without press handlers the
+    /// keyboard focus ([`NshView::update_focus_tap`]). It only watches the
+    /// touch: a tap recognizer otherwise claims it on release, before the
+    /// press of a pressable view inside the focusable one ends, and that
+    /// press never arrives.
+    #[unsafe(super(UITapGestureRecognizer, UIGestureRecognizer, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    pub(crate) struct FocusTap;
+
+    impl FocusTap {
+        /// A touch on a stop inside the view is that stop's: its own press
+        /// or tap focuses it, and an input focuses itself.
+        #[unsafe(method(touchesBegan:withEvent:))]
+        fn touches_began(&self, touches: &NSSet<UITouch>, event: &UIEvent) {
+            if let (Some(view), Some(touch)) = (self.view(), touches.anyObject())
+                && crate::keyboard::stop_inside(&touch, &view)
+            {
+                // SAFETY: `setState:` is the subclass API of
+                // UIGestureRecognizer.
+                let _: () = unsafe { msg_send![self, setState: UIGestureRecognizerState::Failed] };
+                return;
+            }
+            // SAFETY: calling the superclass implementation.
+            let _: () = unsafe { msg_send![super(self), touchesBegan: touches, withEvent: event] };
+        }
+
+        /// The recognizers of the views inside (a press, another gesture)
+        /// recognize the same touch.
+        #[unsafe(method(canPreventGestureRecognizer:))]
+        fn can_prevent(&self, _other: &UIGestureRecognizer) -> bool {
+            false
+        }
+    }
+);
+
+impl FocusTap {
+    fn new(mtm: MainThreadMarker, target: &EventTarget) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(());
+        // SAFETY: the designated initializer; `handleFocusTap:` is
+        // implemented by `EventTarget`, which the mounter keeps alive as
+        // long as the recognizer's view.
+        let this: Retained<Self> = unsafe {
+            msg_send![super(this), initWithTarget: target, action: objc2::sel!(handleFocusTap:)]
+        };
+        // The view's own press handlers still hear the touches.
+        this.setCancelsTouchesInView(false);
+        this.setDelaysTouchesBegan(false);
+        this.setDelaysTouchesEnded(false);
+        this
+    }
+}
+
 impl NshView {
     /// `pointerEvents`.
     pub(crate) fn pointer_events(&self) -> PointerEvents {
@@ -528,19 +582,7 @@ impl NshView {
         match (&*kept, wants) {
             (Some(_), true) | (None, false) => {}
             (None, true) => {
-                // SAFETY: `handleFocusTap:` is implemented by `EventTarget`,
-                // which the mounter keeps alive as long as this view.
-                let tap = unsafe {
-                    UITapGestureRecognizer::initWithTarget_action(
-                        UITapGestureRecognizer::alloc(self.mtm()),
-                        Some(target),
-                        Some(objc2::sel!(handleFocusTap:)),
-                    )
-                };
-                // The view's own press handlers still hear the touches.
-                tap.setCancelsTouchesInView(false);
-                tap.setDelaysTouchesBegan(false);
-                tap.setDelaysTouchesEnded(false);
+                let tap = FocusTap::new(self.mtm(), target);
                 self.addGestureRecognizer(&tap);
                 *kept = Some(tap);
             }

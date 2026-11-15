@@ -63,6 +63,9 @@ impl Wake for TaskWaker {
 /// What a component or a task asks of the platform, applied by the core.
 pub(crate) enum Action {
     Command(NodeId, Command),
+    /// The keyboard focus back to the node, unless the commit it goes out
+    /// with moves it anywhere else ([`super::ElementRef::focus_back`]).
+    FocusBack(NodeId),
     /// A dialog; its answer resolves the slot.
     Dialog(Dialog, Rc<RefCell<Output<i32>>>),
     /// The result of a module function JS waits for.

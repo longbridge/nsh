@@ -101,12 +101,12 @@ jobs:
         run: echo "check=${{ github.event_name != 'pull_request' || steps.changes.outputs.compat == 'true' }}" >> "$GITHUB_OUTPUT"
 
       # Side by side: nsh-compat's crates depend on `../nsh`.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         if: steps.run.outputs.check == 'true'
         with:
           path: nsh
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         if: steps.run.outputs.check == 'true'
         with:
           repository: longbridge/nsh-compat

@@ -27,6 +27,9 @@
 //!   `--background` takes precedence.
 //! - `--name <name>` names the app (the menu bar, the window title; `nsh
 //!   run` passes the app's name), "nsh" by default.
+//! - `--icon <png>` gives the app its icon in the Dock and the app switcher
+//!   (`nsh run` and `nsh test` pass the app's `nsh.json` `"icon"` for
+//!   macOS); the executable's own otherwise.
 //! - `--app-id <id>` sets the application id (`com.example.app`); `nsh run`
 //!   passes the app's (`nsh.json` `"id"`). The app's data (`Storage` of `nsh`)
 //!   is kept under the id its bundle carries, in the system's data
@@ -91,6 +94,7 @@ pub fn main() -> std::process::ExitCode {
                     options.title = name;
                 }
             }
+            "--icon" => options.icon = args.next().map(PathBuf::from),
             // The performance monitor over the app.
             "--fps" => options.fps = true,
             // Where apps keep their data (`nsh test --target` gives each app

@@ -7,6 +7,7 @@
 //! embedding in GPUI apps and has no package of its own.
 
 use std::{
+    ffi::OsString,
     fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -627,6 +628,19 @@ impl AppConfig {
     pub(crate) fn icon(&self, target: PackageTarget) -> Option<&Path> {
         self.icon.as_ref()?.of(target)
     }
+
+    /// The macOS development host's arguments for the app (`nsh run`,
+    /// `nsh test`): its activation policy ([`MacosConfig::host_args`]) and
+    /// its icon. The host is an executable without an app bundle around it,
+    /// so the Dock and the app switcher show the app's icon only when the
+    /// host is given it.
+    pub(crate) fn macos_host_args(&self) -> Vec<OsString> {
+        let mut args: Vec<OsString> = self.macos.host_args().into_iter().map(Into::into).collect();
+        if let Some(icon) = self.icon(PackageTarget::Macos) {
+            args.extend(["--icon".into(), icon.into()]);
+        }
+        args
+    }
 }
 
 /// Reads `nsh.json` next to `entry`, if any; relative paths become absolute.
@@ -917,6 +931,10 @@ fn trimmed_runner(entry: &Path, target: PackageTarget) -> bool {
         PackageTarget::Linux => cfg!(target_os = "linux"),
         PackageTarget::Macos => cfg!(target_os = "macos"),
         PackageTarget::Windows => cfg!(windows),
+        // Android's library is cross-compiled with the NDK on any OS;
+        // without it (or the Rust target) the build fails and the package
+        // gets the prebuilt library.
+        PackageTarget::Android => true,
         _ => false,
     };
     if !this_machine || std::env::var_os("NSH_RUNTIME").is_some() {
@@ -1017,10 +1035,12 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     // its bundle can reach, and those `nsh.json` keeps. A TSX app does too
     // where cargo is, else it ships the prebuilt runner, which has all.
     let has_crates = crate::rust_app::current().is_some();
-    if !matches!(options.target, PackageTarget::Web | PackageTarget::Android)
+    let mut own_runner = false;
+    if options.target != PackageTarget::Web
         && !crate::rust_app::is_root(&entry)
         && (has_crates || trimmed_runner(&entry, options.target))
     {
+        own_runner = !has_crates;
         let choices = crate::native_features::choose(built.native_use.as_ref(), &config.features);
         for c in &choices {
             let mark = if c.keep { "keep" } else { "leave out" };
@@ -1037,7 +1057,9 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         // now, so a failure (system libraries, a Rust target, crates.io)
         // leaves it the prebuilt runner as before, not a failed package.
         // The packaging below finds the runner built.
-        if !has_crates {
+        // Android's is built when packaging, for the APK's ABIs
+        // (`package_android`), which falls back the same way.
+        if !has_crates && options.target != PackageTarget::Android {
             let built = match options.target {
                 PackageTarget::Macos => macos_runners(options.arch).map(drop),
                 PackageTarget::Linux => runtime::file(Platform::Linux, true).map(drop),
@@ -1055,7 +1077,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         PackageTarget::Ios => Platform::IphoneOs,
         PackageTarget::IosSimulator => Platform::IphoneSimulator,
         PackageTarget::Android => {
-            return package_android(&options, config, &name, &id, &built);
+            return package_android(&options, config, &name, &id, &built, own_runner);
         }
         PackageTarget::Linux => {
             let app = App {
@@ -1251,6 +1273,7 @@ fn package_android(
     name: &str,
     id: &str,
     built: &crate::build::Built,
+    own_runner: bool,
 ) -> anyhow::Result<()> {
     use crate::android::{self, Apk, Signing};
     let sdk = android::Sdk::find()?;
@@ -1264,7 +1287,19 @@ fn package_android(
         None => None,
     };
     let abis = apk_abis(options.abis, device.as_deref())?;
-    let runtime = runtime::android(false, &abis)?;
+    // A TSX app's own library is a saving, never a requirement
+    // (`trimmed_runner`): a failure (no NDK, a Rust target, crates.io)
+    // leaves it the prebuilt library, with every native feature.
+    let runtime = match runtime::android(false, &abis) {
+        Err(e) if own_runner => {
+            crate::rust_app::clear_current();
+            ui::warn(format!(
+                "the app's own library did not build, so it has the prebuilt one, with every native feature: {e:#}"
+            ));
+            runtime::android(false, &abis)?
+        }
+        runtime => runtime?,
+    };
     // A Rust app has no bundle: `AppActivity` runs its root (the
     // manifest's `com.longbridge.nsh.RUST`).
     let mut assets = Vec::new();
@@ -2606,6 +2641,39 @@ mod tests {
                 ]
                 .into()
             ))
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The macOS development host gets the app's macOS icon, after its
+    /// activation policy; an app without one gets none.
+    #[test]
+    fn the_macos_host_gets_the_apps_icon() {
+        let dir = std::env::temp_dir().join(format!("nsh-macos-host-icon-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let entry = dir.join("app.tsx");
+        let args = |json: &str| {
+            fs::write(dir.join("nsh.json"), json).unwrap();
+            read_config(&entry).unwrap().macos_host_args()
+        };
+        let icon = |name: &str| OsString::from(dir.join(name));
+        assert!(args("{}").is_empty());
+        assert!(args(r#"{ "icon": { "windows": "win.png" } }"#).is_empty());
+        assert_eq!(
+            args(r#"{ "icon": "icon.png" }"#),
+            [OsString::from("--icon"), icon("icon.png")]
+        );
+        assert_eq!(
+            args(
+                r#"{ "icon": { "macos": "mac.png", "windows": "win.png" },
+                     "macos": { "activationPolicy": "accessory" } }"#
+            ),
+            [
+                OsString::from("--activation-policy"),
+                "accessory".into(),
+                "--icon".into(),
+                icon("mac.png"),
+            ]
         );
         fs::remove_dir_all(&dir).unwrap();
     }

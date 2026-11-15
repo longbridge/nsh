@@ -962,9 +962,13 @@ fn run_computation<H: Host>(h: H, id: u32, time: u64) {
     graph.listener = listener;
     graph.leave_owner(owner);
     let Some(next) = result else {
+        // A failed run keeps the last value and stays clean, as an effect's
+        // does: a write to what it read before failing queues it again and
+        // marks what reads it. Left stale, it was never queued again (`write`
+        // and `mark_downstream` take only clean observers), so what read it
+        // stopped hearing of changes.
         let n = &mut graph.nodes[id as usize];
         if n.kind == Kind::Memo {
-            n.state = STALE;
             let owned = std::mem::take(&mut n.owned);
             for c in owned {
                 dispose(h, c);
