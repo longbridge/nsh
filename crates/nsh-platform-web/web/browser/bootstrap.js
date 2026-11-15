@@ -5373,6 +5373,8 @@
 			lifecycle: "active",
 			shaders: true,
 			wakeCount: 0,
+			horizontalSizeClass: "compact",
+			verticalSizeClass: "compact",
 			localeSettings: {
 				languages: ["en-US"],
 				timeZone: "UTC",
@@ -5415,6 +5417,8 @@
 			fields.colorScheme.set(scheme === "system" ? systemScheme : scheme);
 		};
 		const device = {
+			horizontalSizeClass: () => fields.horizontalSizeClass(),
+			verticalSizeClass: () => fields.verticalSizeClass(),
 			windowSize: () => fields.window(),
 			colorScheme: () => fields.colorScheme(),
 			setColorScheme,

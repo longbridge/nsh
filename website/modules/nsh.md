@@ -963,6 +963,24 @@ const wide = () => windowSize().width >= 600;
 <View style={{ flexDirection: wide() ? "row" : "column" }}>{/* ... */}</View>
 ```
 
+### horizontalSizeClass / verticalSizeClass
+
+```ts
+export type SizeClass = "compact" | "regular";
+const horizontalSizeClass: Accessor<SizeClass>;
+const verticalSizeClass: Accessor<SizeClass>;
+```
+
+Reactive classifications of the window's horizontal and vertical space. iOS reads the view's UIKit trait collection, following rotation and multitasking; an unspecified trait falls back to the window dimension. Other platforms (including desktops, Android and Web) use width and height respectively: below 600pt is `compact`, at least 600pt is `regular`. The horizontal breakpoint matches DockArea; points correspond to dp on Android and CSS pixels on the web. Readers are notified only when their class changes.
+
+Rust: `horizontal_size_class()` / `vertical_size_class()` return `SizeClass::Compact` or `SizeClass::Regular`, exported from `nsh_core::prelude`.
+
+```tsx
+import { horizontalSizeClass, Text } from "nsh";
+
+<Text>{horizontalSizeClass() === "compact" ? "Compact layout" : "Expanded layout"}</Text>
+```
+
 ### colorScheme
 
 ```ts
