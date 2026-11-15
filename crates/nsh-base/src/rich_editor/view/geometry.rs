@@ -122,7 +122,8 @@ pub(crate) struct Geometry {
     pub(crate) frames: HashMap<u64, (Option<u64>, Bounds<Points>)>,
     /// Where a block's children start in its box, when they sit in a
     /// holder that is not the block's own origin (a task item's content,
-    /// after its checkbox): their frames are in the holder, not the block.
+    /// after its checkbox; a node view's content slot, after what the view
+    /// shows before it): their frames are in the holder, not the block.
     pub(crate) insets: HashMap<u64, Point<Points>>,
     /// The textblocks, by block id.
     pub(crate) texts: HashMap<u64, TextGeo>,
@@ -159,7 +160,8 @@ impl Geometry {
     }
 
     /// Whether the content point `at` is in a block's box before where its
-    /// children start: on a task item's checkbox, or under it.
+    /// children start: on a task item's checkbox or what a node view shows
+    /// before its content, or under it.
     pub(crate) fn before_holder(&self, at: Point<Points>) -> bool {
         self.insets.iter().any(|(id, inset)| {
             let (Some(origin), Some((_, frame))) = (self.origin(*id), self.frames.get(id)) else {

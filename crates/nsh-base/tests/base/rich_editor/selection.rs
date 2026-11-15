@@ -248,6 +248,30 @@ fn a_triple_press_selects_a_block_text() {
     see(&mut app, "Sel 8-23");
 }
 
+/// A paragraph in an `aside`, whose label takes the 40pt before it: its
+/// text is 2..13.
+fn aside() -> Value {
+    json!({"type": "doc", "content": [
+        {"type": "aside", "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "hello world"}]}
+        ]}
+    ]})
+}
+
+#[test]
+fn a_press_on_what_a_node_view_shows_before_its_content_is_its_own() {
+    let mut app = start(aside());
+    app.press_at("text:hello world", Point::new(px(1.0), px(1.0)))
+        .unwrap();
+    see(&mut app, "Sel 2-2");
+    keys(&mut app, &["end"]);
+    see(&mut app, "Sel 13-13");
+    // The label is the node view's: a press there leaves the caret.
+    app.press("text:Aside").unwrap();
+    app.wait(Duration::from_millis(50)).unwrap();
+    see(&mut app, "Sel 13-13");
+}
+
 #[test]
 #[ignore = "the headless drag is a finger, which presses inside a scroll view only once it rests; a mouse drag is checked in a real window"]
 fn a_drag_selects_across_blocks() {
