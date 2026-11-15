@@ -482,6 +482,12 @@ pub struct ViewProps {
     /// selection, from text to text ([`crate::selection`]); an area inside
     /// another is part of the outer one. Texts outside areas select alone.
     pub selectable_view: bool,
+    /// The app's items of a selectable view's selection menu, after the
+    /// system's (`selectionMenu`): plain items and separators, each
+    /// action's `id` reported as the root's `Menu` event when chosen. The
+    /// selection's menu takes the items of the outermost selectable view
+    /// around it ([`crate::desktop::MenuItem::selection_menu`]).
+    pub selection_menu: Arc<[crate::desktop::MenuItem]>,
     /// The text continues the text before it in document order, as a long
     /// line's next wrapped part (`Element::continues_text`): in a
     /// selectable view a copy joins the two with nothing between them,
@@ -559,6 +565,21 @@ impl PanActivation {
         }
     }
 
+    /// The one axis this pan is for, when its offsets name one: `Some(true)`
+    /// horizontal (an active offset along x, or a fail offset along y),
+    /// `Some(false)` vertical, `None` either. A view listening to `onWheel`
+    /// with a pan along one axis takes only the wheels along it
+    /// ([`crate::input::wheel_along`]).
+    pub fn axis(&self) -> Option<bool> {
+        let x = self.active_offset_x.is_some() || self.fail_offset_y.is_some();
+        let y = self.active_offset_y.is_some() || self.fail_offset_x.is_some();
+        match (x, y) {
+            (true, false) => Some(true),
+            (false, true) => Some(false),
+            _ => None,
+        }
+    }
+
     /// The decision once the finger moved by (`dx`, `dy`) since it went
     /// down: `Some(true)` activates, `Some(false)` fails (a fail offset
     /// passed wins over an active one passed by the same move), `None`
@@ -633,6 +654,19 @@ pub enum LayoutCurve {
     /// duration is the keyboard's, `keyboard_duration`). Where there is no
     /// software keyboard, or nothing moved it, it eases in and out.
     Keyboard,
+    /// A cubic Bézier `[x1, y1, x2, y2]` over the transition's duration,
+    /// as CSS `cubic-bezier()` (`type: "bezier"` with `bezier` in JS):
+    /// the curve an app's design names. The `x` of each control point is
+    /// clamped to 0..1.
+    Bezier([f32; 4]),
+}
+
+impl LayoutCurve {
+    /// A cubic Bézier `[x1, y1, x2, y2]` ([`LayoutCurve::Bezier`]), each
+    /// control point's `x` clamped to 0..1.
+    pub fn bezier(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
+        Self::Bezier([x1.clamp(0.0, 1.0), y1, x2.clamp(0.0, 1.0), y2])
+    }
 }
 
 /// The property animated when views appear or disappear.

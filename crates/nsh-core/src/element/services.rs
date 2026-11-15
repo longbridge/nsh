@@ -158,6 +158,16 @@ pub(crate) fn clipboard_string() -> (Answer<String>, Action) {
     (answer, Action::ReadClipboard(ClipboardRead::Text(slot)))
 }
 
+/// The text on the system clipboard for `Clipboard.readText` (`""` when
+/// it holds none; `None` when the person refused the read).
+pub(crate) fn clipboard_checked_string() -> (Answer<Option<String>>, Action) {
+    let (answer, slot) = Answer::new();
+    (
+        answer,
+        Action::ReadClipboard(ClipboardRead::CheckedText(slot)),
+    )
+}
+
 /// Whether the system clipboard holds text (without reading it).
 pub(crate) fn clipboard_has_string() -> (Answer<bool>, Action) {
     let (answer, slot) = Answer::new();

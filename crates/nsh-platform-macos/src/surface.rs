@@ -522,6 +522,10 @@ impl Surface {
 
     /// Stops the app and removes its views.
     pub(crate) fn stop(&self) {
+        // The confirmation and policy belong to the engine being replaced,
+        // not its successor. Approval takes the request before stopping.
+        crate::app::set_quit_request_options(self.key, Default::default());
+        self.chrome.asks_quit.set(false);
         // Dropping the engine joins its thread.
         self.control.borrow_mut().take();
         self.engine.borrow_mut().take();
@@ -551,6 +555,13 @@ impl Surface {
         if let Some(control) = &*self.control.borrow() {
             f(control);
         }
+    }
+
+    /// A handle to the engine's events that stays usable after this surface
+    /// is gone: a download's stop confirmation must reach the core after
+    /// the view is released.
+    pub(crate) fn event_control(&self) -> Option<EngineControl> {
+        self.control.borrow().clone()
     }
 
     /// Sends an event to JS.

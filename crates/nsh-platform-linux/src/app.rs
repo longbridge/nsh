@@ -350,15 +350,6 @@ impl AppView {
         };
         self.surface.native.set_access(Arc::new(access));
         let options = self.options.borrow();
-        let data_dir = options.data_dir.clone().or_else(nsh_engine::data_dir);
-        // Automatic web view downloads go to the app's data directory,
-        // `<app id>/downloads`, as on macOS.
-        self.surface
-            .native
-            .set_downloads(data_dir.as_ref().map(|root| {
-                root.join(nsh_engine::app_dir_name(app.app_id()))
-                    .join("downloads")
-            }));
         let config = EngineConfig {
             app,
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),

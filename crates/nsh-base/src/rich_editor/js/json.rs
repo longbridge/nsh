@@ -119,6 +119,14 @@ json_type!(
     TransactionJson => "RichTransactionJSON"
 );
 json_type!(
+    /// A node as a node view's props show it.
+    NodeViewNodeJson => "{ readonly type: string; readonly attrs: Record<string, any>; readonly textContent: string }"
+);
+json_type!(
+    /// The extension a node view came from.
+    NodeViewExtensionJson => "{ readonly name: string; readonly options: Record<string, any> }"
+);
+json_type!(
     /// TS: `Record<string, unknown>`: a node's or mark's attributes.
     AttrsJson => "Record<string, unknown>"
 );

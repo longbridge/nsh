@@ -473,7 +473,7 @@ import type {
 
 ### DataTable
 
-`DataTable` 显示行和列，并向两个方向滚动，行数和列数不限，只创建视野中的单元格。行、列或单元格可以选择；列可以调整宽度、移动、固定和排序（由应用排序）；行由应用分页提供，单元格和标题可以由应用绘制。见 [DataTable](../elements/data-table.md)。
+`DataTable` 显示行和列，并向两个方向滚动，行数和列数不限，只创建视野中的单元格。行、列或单元格可以选择；应用也可以自己保存多个单元格或列的选择（`selectOnModifierPress`、`onRowPress`、`onColumnPress`、`cellClasses`）。列可以调整宽度、移动、固定和排序（由应用排序）；行由应用分页提供，单元格和标题可以由应用绘制。见 [DataTable](../elements/data-table.md)。
 
 <a id="selection"></a>
 

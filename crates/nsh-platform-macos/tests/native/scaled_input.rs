@@ -42,6 +42,9 @@ const COVER: (f32, f32, f32, f32) = (200.0, 120.0, 100.0, 60.0);
 /// Presses of the view covering the field's right half.
 static COVER_PRESSES: AtomicUsize = AtomicUsize::new(0);
 
+/// Changes zoom and scroll while the cell editor keeps focus.
+static CLIPPED_STEP: AtomicUsize = AtomicUsize::new(0);
+
 /// A field at [`FIELD`] under a view scaled [`SCALE`] times about its top
 /// left corner, with a view stacked over its right half.
 #[component]
@@ -81,6 +84,52 @@ fn Page() -> impl IntoElement {
                     COVER_PRESSES.fetch_add(1, Ordering::SeqCst);
                 }),
         )
+}
+
+/// A scrolling viewport between a downscaled pane and its cell editor.
+#[component]
+fn ClippedPage() -> impl IntoElement {
+    let scale = signal(0.6);
+    let viewport = element_ref();
+    set_interval(Duration::from_millis(5), move || {
+        match CLIPPED_STEP.swap(0, Ordering::SeqCst) {
+            1 => scale.set(1.0),
+            2 => scale.set(1.4),
+            3 => viewport.scroll_to(Point::new(px(0.0), px(70.0)), false),
+            4 => viewport.scroll_to(Point::new(px(0.0), px(150.0)), false),
+            5 => viewport.scroll_to(Point::new(px(0.0), px(0.0)), false),
+            _ => {}
+        }
+    });
+    view().size_full().child(
+        view()
+            .absolute()
+            .left(px(40.0))
+            .top(px(30.0))
+            .w(px(500.0))
+            .h(px(400.0))
+            .origin_top_left()
+            .style_with(move |s| s.scale(scale.get()))
+            .child(
+                scroll()
+                    .element_ref(&viewport)
+                    .w(px(240.0))
+                    .h(px(100.0))
+                    .rounded(px(16.0))
+                    .child(
+                        view().w(px(180.0)).h(px(300.0)).overflow_hidden().child(
+                            input()
+                                .absolute()
+                                .left(px(0.0))
+                                .top(px(70.0))
+                                .w(px(200.0))
+                                .h(px(60.0))
+                                .test_id("clipped-field")
+                                .default_value("Clipped editor"),
+                        ),
+                    ),
+            ),
+    )
 }
 
 /// The first view under `view` (itself included) that `matches`.
@@ -406,9 +455,89 @@ pub(super) fn run() {
         ));
     }
 
+    surface.load(platform::App::Rust(platform::Root::of::<ClippedPage>()));
+    until("the clipped field", || {
+        view_with_id(&root, "clipped-field").is_some()
+    });
+    pump(100);
+    let field = self::editor(&root).expect("the clipped editor");
+    let input = view_with_id(&root, "clipped-field").unwrap();
+    let box_rect = drawn(&window, &input);
+    let native_rect = field.convertRect_toView(field.bounds(), None);
+    near(
+        native_rect.size.width,
+        (200.0 + 4.0) * 0.6,
+        "clipped native width",
+    );
+    click(&window, box_rect.origin.x + 2.0, box_rect.origin.y + 3.0);
+    until("the clipped editor's focus", || {
+        field.currentEditor().is_some()
+    });
+    type_text(&window, "X");
+    assert_eq!(field.stringValue().to_string(), "XClipped editor");
+
+    let pad = self::pad(&field).unwrap();
+    let hits_pad = |x, y| {
+        let p = root.convertPoint_fromView(to_window(&window, x, y), None);
+        root.hitTest(p).is_some_and(|hit| hit.isDescendantOf(&pad))
+    };
+    for (step, scale) in [(0, 0.6), (1, 1.0), (2, 1.4)] {
+        CLIPPED_STEP.store(step, Ordering::SeqCst);
+        pump(150);
+        near(
+            field.convertRect_toView(field.bounds(), None).size.width,
+            204.0 * scale,
+            "native width after zoom",
+        );
+        near(
+            field.convertRect_toView(field.bounds(), None).origin.x,
+            40.0 - 2.0 * scale,
+            "native position after zoom",
+        );
+        // AppKit insets the accessible frame from the field's native edge.
+        // It must still have the drawn field's center and scale.
+        let accessible = field.accessibilityFrame();
+        let native = window.convertRectToScreen(field.convertRect_toView(field.bounds(), None));
+        near(
+            accessible.origin.x + accessible.size.width / 2.0,
+            native.origin.x + native.size.width / 2.0,
+            "accessible center after zoom",
+        );
+        assert!((accessible.size.width - 204.0 * scale).abs() < 4.0);
+        assert!(field.currentEditor().is_some(), "zoom lost the edit");
+        assert!(hits_pad(40.0 + 30.0 * scale, 30.0 + 80.0 * scale));
+        assert!(
+            !hits_pad(40.0 + 190.0 * scale, 30.0 + 80.0 * scale),
+            "nested clip leaked a hit"
+        );
+        assert!(
+            !hits_pad(40.0 + 30.0 * scale, 30.0 + 110.0 * scale),
+            "viewport clip leaked a hit"
+        );
+    }
+    CLIPPED_STEP.store(3, Ordering::SeqCst);
+    pump(200);
+    near(drawn(&window, &input).origin.y, 30.0, "scrolled editor y");
+    assert!(hits_pad(40.0 + 30.0 * 1.4, 30.0 + 10.0 * 1.4));
+    assert!(
+        !hits_pad(40.0 + 1.4, 30.0 + 1.4),
+        "rounded viewport corner leaked a hit"
+    );
+    CLIPPED_STEP.store(4, Ordering::SeqCst);
+    pump(200);
+    assert!(!hits_pad(60.0, 40.0), "fully clipped editor leaked a hit");
+    CLIPPED_STEP.store(5, Ordering::SeqCst);
+    pump(200);
+    assert!(field.currentEditor().is_some(), "scrolling lost the edit");
+    type_text(&window, "Y");
+    assert_eq!(field.stringValue().to_string(), "XYClipped editor");
+
     surface.stop();
     window.close();
     let failures = failures.into_inner();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     println!("scaled_input: the field under a scaled view draws and edits where it shows");
+    println!(
+        "scaled_input: nested and rounded clips, scrolling, focus and accessibility checked at 0.6, 1.0 and 1.4"
+    );
 }

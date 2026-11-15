@@ -163,7 +163,9 @@
   surface, no globals.
   - *Launch parameters*: `set_params(map)` before a load; the engine snapshots them when it starts (`HostChannel::bridge`)
     and `host.params` reads them synchronously (a JSON object, `{}` without any), fixed for the app's life. Later
-    requests ("open conversation X" from a notification) are events.
+    requests ("open conversation X" from a notification) are events. Parameters alone leave the channel unconfigured
+    (`HostBridge::available`): a handler or an event configures it, so the web page's `runModule({ params })` keeps
+    the app's calls on the page's host.
   - *Events* (`send(name, data)`, any thread, never waiting): `Message::HostEvent` on the attached engine
     (`HostChannel::attach`: an engine attaches when it starts and detaches when it goes, by id, so a reload's new engine
     is not detached by the old one). While no engine runs, the channel keeps them for the next (`HostInbox`, 256, the

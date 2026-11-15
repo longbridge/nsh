@@ -429,9 +429,38 @@ platform's quit key (Cmd+Q, Ctrl+Q) quit at once while nothing listens to `quitR
 (unsaved changes, a running upload) listens to it with `Application.on("quitRequest", listener)` (Rust:
 `on_quit_request`), as AppKit's `applicationShouldTerminate:`: the Quit item, the quit key and the Dock's Quit then
 reach the listener and nothing quits; the app asks, then calls `quit()`, which always quits. Once the last listener
-stops, the Quit item and the key quit at once again. The system ending the app (the user logging out, the machine
-shutting down) never asks. It applies to standalone apps on macOS, Windows and Linux; a GPUI app that owns the window
+stops, the Quit item and the key quit at once again. By default, the system ending the app (the user logging out, the machine
+shutting down) runs the app's cleanup and quits. It applies to standalone apps on macOS, Windows and Linux; a GPUI app that owns the window
 gets the request as `CloseRequest::Quit`.
+
+Standalone macOS apps can include system requests and main-window closes in the same confirmation:
+
+```tsx
+Application.setQuitRequestOptions({ system: true, mainWindowClose: true });
+Application.on("quitRequest", async () => {
+  if (await confirmSaveAndQuit()) Application.quit();
+  else Application.cancelQuitRequest();
+});
+```
+
+Both options default to `false`, and each `setQuitRequestOptions` call replaces them. Rust uses
+`set_quit_request_options(QuitRequestOptions)` and `cancel_quit_request()` from `nsh_core::element::desktop`;
+`QuitRequestOptions` is in `nsh_core::desktop`. The options apply while a quit request listener is registered.
+Rust callers can build the options with `QuitRequestOptions::default().system(true).main_window_close(true)`.
+Replacing the app cancels its pending confirmation and restores the default options.
+
+With `system: true`, logout, restart and shutdown wait for the app's answer. `quit()` approves the request after the
+app's cleanup runs, then AppKit terminates the process. Rust hosts put that cleanup in `on_app_quit`, rather than
+after `run_app`. `cancelQuitRequest()` cancels the system request and keeps the app running. An unanswered system
+request is cancelled after 110 seconds, before AppKit's logout timeout. Removing the last listener or changing the
+options also cancels a pending request.
+
+With `mainWindowClose: true`, a user closing the main window asks the quit listener when that close would end the
+app. A window configured to stay running on close still hides. A window with `closeOnPress: false` keeps using
+`closePress` instead, so one close uses one confirmation handler. Closing the main window, rather than counting
+every window, follows the standalone runner's existing exit rule. An explicit `WindowRef.close()` keeps its existing
+behavior. While a confirmation is pending, repeated Quit or eligible main-window close requests share it. If a system request arrives
+during that confirmation, the same answer also approves or cancels the system request.
 
 On the web, the user leaving the page (closing its tab, reloading, going to another site) is the quit request: it
 reaches the listener as the user leaves, so the example below works there as it is. A listener that calls `quit()` right
@@ -757,10 +786,17 @@ interface Display {
   primary: boolean;
   scaleFactor: number;
   refreshRate: number | null;  // in hertz
+  cutouts: Bounds[];           // what a camera housing hides: a MacBook's notch
 }
 ```
 
 `win.state()` is a window as the platform reports it, `windowState()` the current window's, and `displays()` the displays, the primary one first; all are reactive. Every rectangle is in points, in screen coordinates: from the primary display's top left corner, with `y` growing down, as `setBounds` takes them. A change of mode, of display, of focus, or of being minimized or visible is reported at once; a move or a resize once the window stops for a moment, so what reads them runs once per move rather than at every step. Rust: `WindowRef::state() -> Option<WindowState>` and `displays() -> Vec<Display>` (`nsh_core::desktop`'s types); reading them subscribes to changes.
+
+A display's `cutouts` are the parts of it a camera housing covers, in the same screen coordinates: on a MacBook with a notch, one rectangle at the top's middle, as tall as the menu bar. A window can sit beside the notch, or show content that grows out of it; on every other display the list is empty.
+
+```tsx
+const notch = () => displays().flatMap((d) => d.cutouts)[0] ?? null;
+```
 
 While the window is on the screen, [`lifecycle()`](./nsh.md#device) reporting `"background"` means other windows cover it.
 

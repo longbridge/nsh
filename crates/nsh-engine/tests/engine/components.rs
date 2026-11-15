@@ -1579,6 +1579,60 @@ fn clipboard_images_are_unavailable_where_the_clipboard_holds_text_only() {
     assert_eq!(commands, 0, "an image call reached the platform");
 }
 
+const CLIPBOARD_REFUSED: &str = r#"import { mount, signal, Text } from "nsh";
+import { Clipboard } from "nsh";
+
+const shown = signal("waiting");
+setTimeout(async () => {
+  const read = () =>
+    Clipboard.readText().then(
+      (text) => `resolved "${text}"`,
+      (e) => `${e.name} ${e.code} ${e.permission}`,
+    );
+  const refused = await read();
+  const empty = await read();
+  shown.set(`${refused} | ${empty}`);
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn clipboard_text_the_person_refuses_rejects() {
+    // iOS's paste prompt answered with Don't Allow Paste: the board holds
+    // text, none was read. Then an empty board, which still reads "".
+    let (engine, rx) = start(CLIPBOARD_REFUSED);
+    let control = engine.control();
+    let wanted = r#"Error ERR_ACCESS_DENIED clipboard | resolved """#;
+    let mut reads = 0;
+    let batches = until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command:
+                    Command::ReadClipboard {
+                        id,
+                        has_only: false,
+                    },
+            } = item
+            {
+                reads += 1;
+                let mut payload = vec![
+                    ("id", PayloadValue::Number(*id as f64)),
+                    ("has", PayloadValue::Bool(false)),
+                ];
+                if reads == 1 {
+                    payload.push(("denied", PayloadValue::Bool(true)));
+                }
+                control.dispatch_event(ROOT_ID, EventKind::Clipboard, EventPayload::Map(payload));
+            }
+        }
+        shows(batch, wanted)
+    });
+    assert!(batches.iter().any(|b| shows(b, wanted)), "{wanted}");
+    assert_eq!(reads, 2);
+}
+
 const CLIPBOARD_IMAGE_TOO_LARGE: &str = r#"import { mount, signal, Text } from "nsh";
 import { Clipboard } from "nsh";
 
@@ -2799,10 +2853,14 @@ fn app_quit_reaches_the_platform() {
 const QUIT_REQUEST: &str = r#"import { mount, signal, Text } from "nsh";
 import { Application } from "nsh/desktop";
 
+Application.setQuitRequestOptions({ system: true });
 const requests = signal(0);
 const stop = Application.on("quitRequest", () => {
   requests.set(requests() + 1);
-  if (requests() === 2) {
+  if (requests() === 1) {
+    Application.cancelQuitRequest();
+  } else if (requests() === 2) {
+    Application.setQuitRequestOptions({});
     stop();
     Application.quit();
   }
@@ -2845,6 +2903,12 @@ fn quit_requests_reach_the_app_and_it_decides() {
         !app_commands(&first).contains(&DesktopCommand::Quit),
         "{first:?}"
     );
+    let mut options = nsh_core::desktop::QuitRequestOptions::default();
+    options.system = true;
+    assert!(
+        app_commands(&first).contains(&DesktopCommand::SetQuitRequestOptions(options)),
+        "the omitted mainWindowClose defaults to false: {first:?}"
+    );
     let request = || {
         engine.control().dispatch_event(
             ROOT_ID,
@@ -2858,6 +2922,7 @@ fn quit_requests_reach_the_app_and_it_decides() {
         !app_commands(&heard).contains(&DesktopCommand::Quit),
         "the app decides: {heard:?}"
     );
+    assert!(app_commands(&heard).contains(&DesktopCommand::CancelQuitRequest));
     request();
     let quit = until(&rx, |b| {
         app_commands(std::slice::from_ref(b)).contains(&DesktopCommand::Quit)
@@ -2867,6 +2932,7 @@ fn quit_requests_reach_the_app_and_it_decides() {
         commands.contains(&DesktopCommand::SetQuitOnRequest(true)),
         "no listener left: {commands:?}"
     );
+    assert!(commands.contains(&DesktopCommand::SetQuitRequestOptions(Default::default())));
 }
 
 const QUIT_AT_ONCE: &str = r#"import { mount, signal, Text } from "nsh";
@@ -5617,6 +5683,7 @@ fn a_base_slider_moves_the_nearer_thumb_and_tells_screen_readers_each_value() {
         EventPayload::Touch(Box::new(TouchEvent {
             phase,
             timestamp: 0.0,
+            modifiers: Default::default(),
             activated: None,
             points: vec![TouchPoint {
                 id: 1,
@@ -5736,6 +5803,7 @@ fn a_base_sliders_drag_ends_on_the_apps_answer_to_its_last_move() {
         EventPayload::Touch(Box::new(TouchEvent {
             phase,
             timestamp,
+            modifiers: Default::default(),
             activated: None,
             points: vec![TouchPoint {
                 id: 1,

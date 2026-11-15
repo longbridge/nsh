@@ -1055,8 +1055,8 @@ pub(crate) struct Hooks {
     /// It is all there (`true`) or all gone (`false`).
     pub(crate) shown: Rc<dyn Fn(bool)>,
     /// The desktops: it closed and starts to go; where the keyboard focus
-    /// goes ([`Presence::back`]).
-    pub(crate) back: Rc<dyn Fn()>,
+    /// goes from the popup it is given ([`Presence::back`]).
+    pub(crate) back: Rc<dyn Fn(ElementRef)>,
 }
 
 /// The list while it is open, in its component's dropdown
@@ -1380,7 +1380,7 @@ fn item_row(lb: Listbox, entry: Memo<Option<Row>>, parts: Parts, hooks: Hooks) -
         // popup lays over the trigger.
         .when_some(parts.cover, |row, cover| {
             row.child(when(
-                move || selected.get(),
+                move || selected.get() && cover.on.get(),
                 move || {
                     view()
                         .absolute()

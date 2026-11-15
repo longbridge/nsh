@@ -360,6 +360,7 @@ Each TSX handler gets a `GestureResponderEvent`:
 | `timestamp` | Milliseconds. |
 | `touches` | Every finger that is down. |
 | `changedTouches` | The fingers this event is about. |
+| `modifiers` | The modifier keys held when the finger or mouse button went down (`{ control, alt, shift, platform }`, as a press event's): an Alt-drag or a Shift-click reads them in the grant. The touch events and the grant come before the same press's `onPressDown` on every target. |
 | `nativeEvent` | The event itself, so `e.nativeEvent.locationX` works too. |
 | `stopPropagation()` | Views further out do not see this touch event. |
 
@@ -452,7 +453,7 @@ While responding:
 
 A Rust component's responder stays pressed from its grant until its touches end, wherever the finger or pointer goes, as CSS's `:active` holds until the button is released: its `.active(..)` styles and the `group-active:` classes inside it keep their look for the whole drag (a resize handle dragged off its band).
 
-The Rust handlers get a `ResponderEvent`: the finger's `location` in the view it went down on, its `page` position, the `timestamp` and the `gesture` since the grant.
+The Rust handlers get a `ResponderEvent`: the finger's `location` in the view it went down on, its `page` position, the `timestamp`, the `modifiers` held when it went down and the `gesture` since the grant.
 
 ```rust tabs
 use nsh_core::prelude::*;

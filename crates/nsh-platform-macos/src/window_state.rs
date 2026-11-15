@@ -30,7 +30,7 @@ use std::{
 use block2::RcBlock;
 use nsh_core::{
     NodeId,
-    desktop::{Display, DisplayId, WindowMode, WindowPlacement, WindowState},
+    desktop::{self, Display, DisplayId, WindowMode, WindowPlacement, WindowState},
     geometry::{Bounds, Points, point, px, size},
 };
 use objc2::{
@@ -598,7 +598,36 @@ fn display(screen: &NSScreen, primary_height: f64) -> Display {
     display.scale_factor = screen.backingScaleFactor() as f32;
     let rate = screen.maximumFramesPerSecond();
     display.refresh_rate = (rate > 0).then_some(rate as f32);
+    display.cutouts = notch(
+        screen.auxiliaryTopLeftArea(),
+        screen.auxiliaryTopRightArea(),
+        screen.safeAreaInsets().top,
+        frame,
+        primary_height,
+    )
+    .into_iter()
+    .collect();
     display
+}
+
+/// The notch of a screen of `frame` (Cocoa coordinates), in NSH's, from
+/// `NSScreen`'s auxiliary top areas (`left`, `right`) and its safe area's
+/// top inset: [`nsh_core::desktop::notch`], which the GPUI backend computes
+/// it with too.
+fn notch(
+    left: NSRect,
+    right: NSRect,
+    safe_top: f64,
+    frame: NSRect,
+    primary_height: f64,
+) -> Option<Bounds<Points>> {
+    let area = |r: NSRect| size(px(r.size.width as f32), px(r.size.height as f32));
+    desktop::notch(
+        to_bounds(frame, primary_height),
+        area(left),
+        area(right),
+        px(safe_top as f32),
+    )
 }
 
 /// The screen's display id (`CGDirectDisplayID`).
@@ -651,6 +680,30 @@ pub(crate) fn from_bounds(bounds: Bounds<Points>, primary_height: f64) -> NSRect
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rect(x: f64, y: f64, width: f64, height: f64) -> NSRect {
+        NSRect::new(NSPoint::new(x, y), NSSize::new(width, height))
+    }
+
+    fn bounds(x: f32, y: f32, width: f32, height: f32) -> Bounds<Points> {
+        Bounds::new(point(px(x), px(y)), size(px(width), px(height)))
+    }
+
+    #[test]
+    fn a_screens_notch_is_read_in_screen_coordinates() {
+        // The built-in screen right of a 2560 × 1440 primary display, its
+        // bottom 200 points below the primary's (Cocoa's y grows up), its
+        // auxiliary areas in Cocoa coordinates.
+        let frame = rect(2560.0, -200.0, 1512.0, 982.0);
+        let left = rect(2560.0, 750.0, 664.0, 32.0);
+        let right = rect(3409.0, 750.0, 663.0, 32.0);
+        // Its top is 1440 - 782 = 658 points below the primary's.
+        assert_eq!(
+            notch(left, right, 32.0, frame, 1440.0),
+            Some(bounds(3224.0, 658.0, 185.0, 32.0)),
+        );
+        assert_eq!(notch(NSRect::ZERO, NSRect::ZERO, 0.0, frame, 1440.0), None);
+    }
 
     #[test]
     fn a_window_hides_at_once_out_of_full_screen() {

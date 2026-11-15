@@ -2983,6 +2983,14 @@ fn selected_text(view: &NshView) -> Option<String> {
     Some(state.text.as_ref()?.text.copied_text(a..b)).filter(|t| !t.is_empty())
 }
 
+/// True when a text of `surface` has a selection, which [`key`] copies.
+pub(crate) fn has_selection(surface: &crate::surface::Surface) -> bool {
+    SELECTED.with_borrow(|s| {
+        s.as_ref()
+            .is_some_and(|(key, v)| *key == surface.key() && v.attached())
+    })
+}
+
 /// Keys for the text selection (Ctrl+C, Ctrl+A, Escape); true when
 /// handled.
 pub(crate) fn key(

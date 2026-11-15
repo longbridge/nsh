@@ -522,7 +522,7 @@ class AnimatedNode {
     extrapolateRight?: Extrapolation;
     easing?: Easing;
   }): AnimatedNode;
-  diffClamp(min: number, max: number, options?: { snap?: boolean }): AnimatedNode;
+  diffClamp(min: number | AnimatedNode, max: number | AnimatedNode, options?: { snap?: boolean }): AnimatedNode;
   add(b: AnimatedNode | number): AnimatedNode;
   sub(b: AnimatedNode | number): AnimatedNode;
   mul(b: AnimatedNode | number): AnimatedNode;
@@ -538,7 +538,7 @@ type Extrapolation = "extend" | "clamp" | "identity";
 | 方法 | Rust | 说明 |
 |---|---|---|
 | `interpolate(config)` | `interpolate(&input, &output)`、`interpolate_colors(&input, &colors)`、`interpolate_with(&input, output, Interpolation { … })` | 按分段区间映射输入。`outputRange` 可以是数字、颜色（`"#ff0000"`、`"rgba(…)"`）或角度（`"45deg"`、`"1rad"`）。超出 `inputRange` 时默认钳制（clamp）；`extrapolate`（或 `extrapolateLeft` / `extrapolateRight`）可以是 `"extend"`（沿直线延伸）、`"clamp"` 或 `"identity"`（直接输出输入值）。`easing` 决定每一段的曲线。Rust 接受数字、主题颜色（跟随外观）以及供 `bind_rotate` 使用的角度（度）。 |
-| `diffClamp(min, max, options?)` | `diff_clamp(min, max)`、`diff_clamp_with(min, max, DiffClamp::snapping())` | 跟随输入的变化量，但把结果限制在 `min..max` 内：内容向上滚动时隐藏、一旦向下滚动就重新出现的标题栏。`snap: true` 让它在滚动视图停下时用 200 ms 停到较近的一端；只有输入达到 `max` 后才会停在 `max`。 |
+| `diffClamp(min, max, options?)` | `diff_clamp(min, max)`、`diff_clamp_with(min, max, DiffClamp::snapping())` | 跟随输入的变化量，但把结果限制在 `min..max` 内：内容向上滚动时隐藏、一旦向下滚动就重新出现的标题栏。`snap: true` 让它在滚动视图停下时用 200 ms 停到较近的一端；只有输入达到 `max` 后才会停在 `max`。上下限可以是数字或动画值。 |
 | `add`、`sub`、`mul`、`div` | `add`、`sub`、`mul`、`div` | 与另一个节点或常量做算术运算。 |
 | `mod(b)` | `modulo(b)` | 取模，`b` 为正时结果不会为负（比如把角度保持在 0..360）。 |
 
@@ -944,6 +944,24 @@ view().style_when(wide, |s| s.flex_row())
 const wide = () => windowSize().width >= 600;
 
 <View style={{ flexDirection: wide() ? "row" : "column" }}>{/* ... */}</View>
+```
+
+### horizontalSizeClass / verticalSizeClass
+
+```ts
+export type SizeClass = "compact" | "regular";
+const horizontalSizeClass: Accessor<SizeClass>;
+const verticalSizeClass: Accessor<SizeClass>;
+```
+
+读取窗口横向和纵向可用空间的响应式分类。iOS 使用当前视图的 UIKit trait collection，随旋转和分屏变化；系统尚未提供分类时按窗口尺寸回退。其他平台（含桌面、Android 和 Web）分别按窗口的宽、高判断：小于 600pt 为 `compact`，600pt 及以上为 `regular`。横向阈值与 DockArea 一致；Android 的点对应 dp，Web 对应 CSS 像素。分类变化时才通知读取者。
+
+Rust：`horizontal_size_class()` / `vertical_size_class()` 返回 `SizeClass::Compact` 或 `SizeClass::Regular`，由 `nsh_core::prelude` 导出。
+
+```tsx
+import { horizontalSizeClass, Text } from "nsh";
+
+<Text>{horizontalSizeClass() === "compact" ? "Compact layout" : "Expanded layout"}</Text>
 ```
 
 ### colorScheme
@@ -2990,6 +3008,8 @@ on_key_with("space", KeyOptions { for_focus: true, ..KeyOptions::default() }, mo
   onBlur={() => unbind?.()}
 />
 ```
+
+按键归最新的对话框：焦点留在被对话框盖住的视图上时（菜单项打开对话框，菜单关闭时把焦点还给触发器），回车和空格交给对话框的绑定，这个视图的 `forFocus` 绑定和按下都要等对话框关闭后才生效。
 
 菜单快捷键会让位给相同按键组合的绑定：所有桌面平台上的应用菜单（[`nsh/desktop`](./nsh-desktop)），以及 macOS 上的内置菜单（Cmd+W、Cmd+C 等）。使用 `nsh run` 开发时，即使应用绑定了 `mod+r`，Cmd+R / Ctrl+R 也总是重新加载应用；打包后的应用可以绑定它。
 

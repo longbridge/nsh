@@ -176,7 +176,7 @@ fn walk(view: &NshView, origin: (f32, f32), zoom: f32, out: &mut Texts) {
 
 /// The selectable view `view` is in: its outermost ancestor (or itself)
 /// that is one.
-fn area_of(view: &NshView) -> Option<NshView> {
+pub(crate) fn area_of(view: &NshView) -> Option<NshView> {
     let mut found = None;
     let mut current = Some(view.clone());
     while let Some(v) = current {

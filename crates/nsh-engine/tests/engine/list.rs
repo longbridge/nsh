@@ -683,6 +683,61 @@ fn prepending_a_row_never_shows_a_cell_with_its_neighbours_row() {
     assert_eq!(paced.errors(), Vec::<String>::new());
 }
 
+/// A window of rows that slides (a chat keeping its newest messages): one
+/// update drops the first row and appends one, rows rebuilt as new objects
+/// with the same keys. The rows read far down stay on screen, though rows
+/// are taller than estimated: the change at each end is its own splice,
+/// so the rows between keep their measured sizes and the viewport keeps
+/// its rows in place.
+#[test]
+fn a_sliding_window_of_rows_keeps_the_rows_on_screen() {
+    let app = r#"
+import { List, mount, signal, Text, View } from "nsh";
+const rows = signal(Array.from({ length: 240 }, (_, i) => ({ label: `row ${i}` })));
+const first = signal("");
+let next = 240;
+function App() {
+  return (
+    <View style={{ flex: 1 }}>
+      <View onPress={() => rows.update((r) => [...r.slice(1).map((row) => ({ ...row })), { label: `row ${next++}` }])} style={{ height: 0 }} />
+      <Text>{`first ${first()}`}</Text>
+      <List each={rows()} keyExtractor={(row) => row.label} estimatedItemSize={50} style={{ flex: 1 }}
+            onViewableItemsChange={({ viewableItems }) => first.set(viewableItems.filter((t) => t.isViewable).sort((a, b) => a.index - b.index)[0]?.key ?? "")}>
+        {(row) => <View style={{ height: 80 }}><Text>{row().label}</Text></View>}
+      </List>
+    </View>
+  );
+}
+mount(App);
+"#;
+    let mut paced = Paced::start(app);
+    paced.settle(|_, _| {});
+    // Down to row 190, a step at a time, so the rows on the way are measured.
+    for y in (0..=190 * 80).step_by(400) {
+        paced.scroll_to(y as f32);
+        paced.settle(|_, _| {});
+    }
+    let first = |paced: &Paced| {
+        paced
+            .texts
+            .values()
+            .find(|t| t.starts_with("first "))
+            .cloned()
+    };
+    let read = first(&paced);
+    assert_eq!(read.as_deref(), Some("first row 190"));
+    for _ in 0..3 {
+        paced.engine.control().dispatch_event(
+            paced.pressable.expect("the pressable view"),
+            nsh_core::EventKind::Press,
+            nsh_core::EventPayload::None,
+        );
+        paced.settle(|_, _| {});
+        assert_eq!(first(&paced), read);
+    }
+    assert_eq!(paced.errors(), Vec::<String>::new());
+}
+
 /// A row added at the start of an inverted list (a chat's new message)
 /// leaves the other cells on their rows: rows made again by key
 /// (`<Each of={[key]}>`) are not made again, only the new one is made.
@@ -1037,4 +1092,67 @@ mount(App);
         .collect();
     assert!(shown.iter().any(|t| t == "at 8 40"), "{shown:?}");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The empty cell goes with its list: a list taken away while it shows
+/// its `empty` slot disposes what the slot made. It used to stay alive
+/// under a root no one disposed, its effects still running, its owner's
+/// freed slot taken by later nodes (#1984).
+#[test]
+fn the_empty_cell_goes_with_its_list() {
+    let app = r#"
+import { effect, List, mount, signal, Text, untracked, View } from "nsh";
+const shown = signal(true);
+const tick = signal(0);
+const runs = signal(0);
+const steps = [() => shown.set(false), () => tick.set(1)];
+function Empty() {
+  effect(() => {
+    tick();
+    untracked(() => runs.set(runs() + 1));
+  });
+  return <Text>empty</Text>;
+}
+function App() {
+  return (
+    <View style={{ flex: 1 }}>
+      <View onPress={() => steps.shift()?.()} style={{ height: 0 }} />
+      <Text>{`runs ${runs()}`}</Text>
+      <If when={shown()}>
+        <List each={[] as string[]} style={{ flex: 1 }} empty={<Empty />}>
+          {(row) => <Text>{row()}</Text>}
+        </List>
+      </If>
+    </View>
+  );
+}
+mount(App);
+"#;
+    let mut paced = Paced::start(app);
+    paced.settle(|_, _| {});
+    let has = |paced: &Paced, text: &str| paced.texts.values().any(|t| t == text);
+    let runs = |paced: &Paced| {
+        paced
+            .texts
+            .values()
+            .find(|t| t.starts_with("runs "))
+            .cloned()
+    };
+    assert!(has(&paced, "empty"), "{:?}", paced.texts);
+    let before = runs(&paced);
+    for _ in 0..2 {
+        paced.engine.control().dispatch_event(
+            paced.pressable.expect("the pressable view"),
+            nsh_core::EventKind::Press,
+            nsh_core::EventPayload::None,
+        );
+        paced.settle(|_, _| {});
+    }
+    assert_eq!(
+        runs(&paced),
+        before,
+        "the empty cell's effect ran after its list went: {:?}",
+        paced.texts
+    );
+    assert_eq!(paced.errors(), Vec::<String>::new());
 }

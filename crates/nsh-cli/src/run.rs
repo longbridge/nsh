@@ -293,7 +293,7 @@ pub(crate) fn run(
                 .args(&args)
                 .args(["--name", name, "--app-id", &id])
                 .args(["-ApplePersistenceIgnoreState", "YES"])
-                .args(config.macos.host_args())
+                .args(config.macos_host_args())
                 .args(window.args());
             run_local(&session, &mut command, "the macOS host")
         }
@@ -399,6 +399,13 @@ fn run_rust_app(
         }
         // A menu bar app on macOS (the other runners leave it).
         config.macos.add_to_app_json(&mut info);
+        // The runner runs in place, outside an app bundle: the Dock shows
+        // the app's icon only when the runner is given it.
+        if target == Target::Macos
+            && let Some(icon) = config.icon(crate::package::PackageTarget::Macos)
+        {
+            info["icon"] = icon.to_string_lossy().as_ref().into();
+        }
         config.add_file_types_to_app_json(&mut info);
         // The main window's launch options, as a package's `app.json`.
         if let Some(window) = &config.window {

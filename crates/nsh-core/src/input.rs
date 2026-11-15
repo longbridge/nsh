@@ -669,6 +669,20 @@ pub fn wheel_listener<V>(
     None
 }
 
+/// Whether a listener that [`wheel_listener`] found taking the wheel takes
+/// one mostly along the `horizontal` axis, `control` held: a view whose
+/// `panActivation` names one axis ([`PanActivation::axis`]) takes only the
+/// wheels along it and Ctrl + wheel (zoom), and lets the others reach the
+/// scroll views around it, as a horizontal scroll view does: a timeline in
+/// a page takes horizontal wheels while vertical ones scroll the page.
+/// Views without one take every wheel.
+pub fn wheel_along(activation: Option<PanActivation>, horizontal: bool, control: bool) -> bool {
+    control
+        || activation
+            .and_then(|a| a.axis())
+            .is_none_or(|axis| axis == horizontal)
+}
+
 /// Where a wheel or touchpad event is in a scroll, for [`WheelLatch`].
 /// Plumbing of the backends, not an API for apps.
 #[doc(hidden)]
@@ -1427,6 +1441,25 @@ mod tests {
         );
         // No listener.
         assert_eq!(pick(&[(2, false, true), (1, false, false)]), None);
+    }
+
+    #[test]
+    fn wheel_listener_with_a_pan_axis_takes_only_wheels_along_it() {
+        let horizontal = Some(PanActivation::horizontal(Points(6.0), Points(8.0)));
+        let vertical = Some(PanActivation::vertical(Points(6.0), Points(8.0)));
+        // A timeline in a page: horizontal wheels are its own, vertical ones
+        // scroll the page.
+        assert!(wheel_along(horizontal, true, false));
+        assert!(!wheel_along(horizontal, false, false));
+        // A picker in a horizontal pager.
+        assert!(wheel_along(vertical, false, false));
+        assert!(!wheel_along(vertical, true, false));
+        // Ctrl + wheel zooms whichever way.
+        assert!(wheel_along(horizontal, false, true));
+        // Without a pan axis, every wheel (#1567).
+        assert!(wheel_along(None, false, false));
+        assert!(wheel_along(Some(PanActivation::default()), true, false));
+        assert_eq!(PanActivation::default().axis(), None);
     }
 
     #[test]

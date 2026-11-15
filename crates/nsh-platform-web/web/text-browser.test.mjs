@@ -304,3 +304,55 @@ test('the characters lines broke at stand between the runs, read but never drawn
     assert.equal(html.match(/data-result="([^"]*)"/)?.[1], 'passed');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('a text streamed in keeps the spans and breaks of the lines it already had', { skip: !chromium }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'nsh-text-stream-'));
+  try {
+    const source = await readFile(new URL('./nsh.js', import.meta.url), 'utf8');
+    const module = 'data:text/javascript;base64,' + Buffer.from(source + '\nexport { Player };').toString('base64');
+    await writeFile(join(dir, 'index.html'), `<!doctype html><meta charset="utf-8">
+    <body><script type="module">
+      import { Player } from '${module}';
+      try {
+        const player = Object.create(Player.prototype);
+        player.styleClass = () => '';
+        const el = document.createElement('div');
+        el._animation = {};
+        el.style.cssText = 'position:absolute;left:0;top:0;font:400 20px Arial';
+        document.body.append(el);
+        // [x, y, text, style, start, parts, after]: one run per line, each
+        // line but the last broken at the space it ate.
+        const lines = (...texts) => texts.map((text, i) => [0, 24 * i, text, 0, 0, null, i < texts.length - 1 ? ' ' : null]);
+        player.replaceRuns(el, 0, 0, lines('one two', 'three'), [{}], null, null);
+        const [first, firstBreak] = el.childNodes;
+        let added = 0, removed = 0;
+        new MutationObserver((records) => {
+          for (const r of records) { added += r.addedNodes.length; removed += r.removedNodes.length; }
+        }).observe(el, { childList: true });
+        const settle = () => new Promise((resolve) => setTimeout(resolve));
+        // The last line grows, then a line is added: only the new line's
+        // span and the break before it come.
+        if (!player.updateRuns(el, 0, 0, lines('one two', 'three four'), [{}], null, null)) throw Error('made again');
+        if (!player.updateRuns(el, 0, 0, lines('one two', 'three four', 'five'), [{}], null, null)) throw Error('made again with a line more');
+        await settle();
+        if (el.textContent !== 'one two three four five') throw Error('textContent: ' + JSON.stringify(el.textContent));
+        if (el.childNodes[0] !== first || el.childNodes[1] !== firstBreak) throw Error('the first line was made again');
+        if (added !== 2 || removed !== 0) throw Error('nodes added ' + added + ', removed ' + removed);
+        const third = el.querySelectorAll(':scope > .nsh-run')[2];
+        if (third.style.top !== '48px' || third.className !== 'nsh-run') throw Error('the new line: ' + third.outerHTML);
+        // A line less: its span and the break before it go.
+        added = removed = 0;
+        if (!player.updateRuns(el, 0, 0, lines('one two', 'three four'), [{}], null, null)) throw Error('made again with a line less');
+        await settle();
+        if (el.textContent !== 'one two three four') throw Error('shrunk: ' + JSON.stringify(el.textContent));
+        if (added !== 0 || removed !== 2) throw Error('shrinking added ' + added + ', removed ' + removed);
+        document.body.dataset.result = 'passed';
+      } catch (e) { document.body.dataset.result = 'failed: ' + e.message; }
+    </script>`);
+    const html = execFileSync(chromium, ['--headless', '--no-sandbox', '--disable-dev-shm-usage',
+      '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--virtual-time-budget=1000',
+      '--user-data-dir=' + join(dir, 'profile'), '--dump-dom', pathToFileURL(join(dir, 'index.html')).href],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20000, maxBuffer: 1024 * 1024 });
+    assert.equal(html.match(/data-result="([^"]*)"/)?.[1], 'passed');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

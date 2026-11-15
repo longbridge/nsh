@@ -766,16 +766,33 @@ final class InputBox extends FrameLayout implements Node {
 
     void focus() {
         edit.requestFocus();
+        showKeyboard();
+    }
+
+    /**
+     * Shows the software keyboard for this field. {@code autoFocus} and
+     * {@code focus()} after a dialog opens often run before the window can
+     * take the IME; {@link InputMethodManager#SHOW_IMPLICIT} then returns
+     * false and nothing comes up. Ask again once the view is ready, with
+     * no show flags (as React Native does), so the keyboard still rises.
+     */
+    private void showKeyboard() {
         InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
-        imm.showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT);
+        if (imm == null) return;
+        if (imm.showSoftInput(edit, 0)) return;
+        edit.post(() -> {
+            if (!edit.hasFocus()) return;
+            InputMethodManager again = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (again != null) again.showSoftInput(edit, 0);
+        });
     }
 
     void blur() {
         if (!edit.hasFocus()) return;
         hideKeyboard();
-        // To the (focusable) root: clearFocus() would hand focus to the first
-        // focusable view, often another field.
-        mounter.host.requestFocus();
+        // Keep focus in this window without selecting another input, and
+        // leave subsequent hardware keys on the window's dispatch path.
+        mounter.releaseFocusOf(this);
     }
 
     private void hideKeyboard() {

@@ -80,6 +80,8 @@ impl Ambient {
 struct EnvSignals {
     env: Signal<Environment>,
     window: Memo<Size<Points>>,
+    horizontal_size_class: Memo<crate::platform::SizeClass>,
+    vertical_size_class: Memo<crate::platform::SizeClass>,
     safe_area: Memo<EdgeInsets>,
     title_bar: Memo<crate::geometry::Edges<crate::geometry::Points>>,
     window_state: Memo<Option<crate::desktop::WindowState>>,
@@ -111,6 +113,20 @@ impl EnvSignals {
             Self {
                 env: signal,
                 window: part!(window),
+                horizontal_size_class: computed(move || {
+                    signal.with(|e| {
+                        e.horizontal_size_class.unwrap_or_else(|| {
+                            crate::platform::SizeClass::from_length(e.window.width)
+                        })
+                    })
+                }),
+                vertical_size_class: computed(move || {
+                    signal.with(|e| {
+                        e.vertical_size_class.unwrap_or_else(|| {
+                            crate::platform::SizeClass::from_length(e.window.height)
+                        })
+                    })
+                }),
                 safe_area: part!(safe_area),
                 title_bar: part!(title_bar),
                 window_state: part!(window_state),
@@ -280,6 +296,18 @@ fn act(action: Action) {
 /// The surface's size in points (TS: `windowSize()`).
 pub fn window() -> Size<Points> {
     env(|e| e.window)
+}
+
+/// The horizontal size class (reactive; TS: `horizontalSizeClass()`).
+/// iOS uses UIKit traits; elsewhere widths below 600pt are compact.
+pub fn horizontal_size_class() -> crate::platform::SizeClass {
+    env(|e| e.horizontal_size_class)
+}
+
+/// The vertical size class (reactive; TS: `verticalSizeClass()`).
+/// iOS uses UIKit traits; elsewhere heights below 600pt are compact.
+pub fn vertical_size_class() -> crate::platform::SizeClass {
+    env(|e| e.vertical_size_class)
 }
 
 /// The edges system UI covers: notch, home indicator (TS: `safeArea()`).
@@ -675,6 +703,15 @@ pub fn set_clipboard_item(item: ClipboardItem) {
 /// `Clipboard.readText`), to await in a task.
 pub fn clipboard_string() -> Answer<String> {
     let (answer, action) = super::services::clipboard_string();
+    act(action);
+    answer
+}
+
+/// The text on the system clipboard for `Clipboard.readText`: `""` when
+/// it holds none, `None` when the person refused the read (iOS's paste
+/// prompt).
+pub(crate) fn clipboard_checked_string() -> Answer<Option<String>> {
+    let (answer, action) = super::services::clipboard_checked_string();
     act(action);
     answer
 }

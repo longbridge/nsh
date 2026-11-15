@@ -258,6 +258,10 @@ struct View {
     hidden: bool,
     /// It clips what it holds to its bounds (`overflow: hidden`).
     clips: bool,
+    /// Its own `opacity`, `None` until its style arrives (fully opaque).
+    opacity: Option<f32>,
+    /// Its `backgroundColor`, `0xRRGGBBAA`; transparent is `0`.
+    background: u32,
     /// A span of a text that takes presses (a nested `<Text onPress>`):
     /// not a view of its own, its parent is the text view showing it, or
     /// the span around it.
@@ -277,6 +281,17 @@ struct View {
     screen_order: Option<nsh_core::geometry::Axis>,
     /// A node of a canvas's drawing, not a view of its own.
     canvas_node: bool,
+}
+
+/// A view's style as the app set it ([`Screen::view_style`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ViewStyle {
+    /// Its `backgroundColor`, `0xRRGGBBAA`; `None` when transparent.
+    pub background_color: Option<u32>,
+    /// Its own `opacity`.
+    pub opacity: f32,
+    /// The opacity it shows with: its own times every view's around it.
+    pub effective_opacity: f32,
 }
 
 /// A link of a text view's text ([`nsh_core::TextLink`]): a span that takes
@@ -509,6 +524,8 @@ impl Screen {
                 let view = self.nodes.entry(*id).or_default();
                 view.hidden = style.hidden;
                 view.clips = style.overflow_hidden;
+                view.opacity = Some(style.opacity);
+                view.background = style.background_color.0;
             }
             MountItem::ScrollBehavior { id, behavior } => {
                 if let Some(scroll) = self.scroll_mut(*id) {
@@ -892,6 +909,34 @@ impl Screen {
             .ok_or_else(|| crate::failure::not_found("span", selector))
     }
 
+    /// The style of the view `selector` names: its `backgroundColor` (when
+    /// not transparent), its own `opacity`, and the opacity it shows with
+    /// (its own times every view's around it). The values are those the
+    /// app set last, an animation's end value while it runs. `None` when no
+    /// view matches; an error when several do.
+    pub fn view_style(&self, selector: &str) -> Result<Option<ViewStyle>, String> {
+        let parsed = Selector::parse(selector)?;
+        let id = match self.resolve(&parsed)[..] {
+            [id] => id,
+            [] => return Ok(None),
+            ref all => return Err(format!("`{selector}` matches {} views", all.len())),
+        };
+        let view = self.nodes.get(&id);
+        let opacity = view.and_then(|v| v.opacity).unwrap_or(1.0);
+        let mut effective = opacity;
+        let mut parent = view.and_then(|v| v.parent);
+        while let Some(p) = parent {
+            let Some(v) = self.nodes.get(&p) else { break };
+            effective *= v.opacity.unwrap_or(1.0);
+            parent = v.parent;
+        }
+        Ok(Some(ViewStyle {
+            background_color: view.map(|v| v.background).filter(|c| c & 0xff != 0),
+            opacity,
+            effective_opacity: effective,
+        }))
+    }
+
     /// View `id` leaves the tree with what it holds: none of it is under
     /// the mouse or has the focus any more, and it hears no leave or blur
     /// for that, as a removed DOM element does not. A removed view may live
@@ -1203,6 +1248,29 @@ impl Screen {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Whether view `id` is on a stack's page that does not show: one a
+    /// newer page covers, or one a back popped.
+    pub(crate) fn on_covered_page(&self, id: NodeId) -> bool {
+        let mut at = id;
+        while let Some(parent) = self.nodes.get(&at).and_then(|v| v.parent) {
+            if self.kind(parent) == Some(ViewKind::Stack)
+                && self.screens(parent).last() != Some(&at)
+            {
+                return true;
+            }
+            at = parent;
+        }
+        false
+    }
+
+    /// Whether view `id` is inside the newest modal over its window, or
+    /// no modal is over it: where the desktops and the web keep the
+    /// keyboard's reach ([`Self::focus_scope`]).
+    pub(crate) fn in_focus_scope(&self, id: NodeId) -> bool {
+        self.focus_scope(self.window_of(id))
+            .is_none_or(|scope| self.within(id, scope))
     }
 
     /// What going back does now, as a platform's back does it: in the
@@ -2062,7 +2130,17 @@ impl Screen {
             return Pick::Disabled;
         }
         self.pick(selector, |id| {
-            let target = self.up_to(id, |v| v.events.contains(EventKind::Press))?;
+            let pressable = |v: &View| v.events.contains(EventKind::Press);
+            // A view in no pressable one that holds a combobox (a
+            // `Select`'s root, which its `testID` names): its trigger, as
+            // a `Button`'s `testID` names what the user presses.
+            let id = match self.up_to(id, pressable) {
+                Some(_) => id,
+                None => self.down_to(id, |v| {
+                    v.role == AccessibilityRole::Combobox && pressable(v)
+                })?,
+            };
+            let target = self.up_to(id, pressable)?;
             (!self.disabled_from(id, Some(target))).then_some(target)
         })
     }
@@ -2744,14 +2822,25 @@ impl Screen {
     /// ([`nsh_core::input::wheel_listener`], as the platforms share it). A
     /// view that takes it keeps the scroll views around it from scrolling;
     /// one that only observes (a scroll view, or a view around one) lets
-    /// them scroll.
-    pub(crate) fn wheel_listener(&self, id: NodeId) -> Option<(NodeId, bool)> {
+    /// them scroll. A listener whose `panActivation` names one axis takes
+    /// only wheels by `delta` along it, or with `control` held
+    /// ([`nsh_core::input::wheel_along`]).
+    pub(crate) fn wheel_listener(
+        &self,
+        id: NodeId,
+        delta: Point<Points>,
+        control: bool,
+    ) -> Option<(NodeId, bool)> {
         let window = self.window_of(id);
-        nsh_core::input::wheel_listener(
+        let (view, takes) = nsh_core::input::wheel_listener(
             self.window_chain(id),
             |&id| self.hears(id, EventKind::Wheel) && !self.disabled_from(id, Some(window)),
             |&id| self.kind(id) == Some(ViewKind::Scroll),
-        )
+        )?;
+        let activation = self.nodes.get(&view).and_then(|v| v.pan_activation);
+        let horizontal = delta.x.0.abs() > delta.y.0.abs();
+        let along = nsh_core::input::wheel_along(activation, horizontal, control);
+        Some((view, takes && along))
     }
 
     /// The innermost view at `id` or around it that hosts native content of

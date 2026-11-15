@@ -13,7 +13,7 @@ use std::sync::Arc;
 use crate::{
     ImageSource,
     color::Hsla,
-    element::{JsHost, JsIn, JsKind, JsOwned, JsValue, PropEnum, PropError, TsTypes},
+    element::{JsHost, JsIn, JsKind, JsObject, JsOwned, JsValue, PropEnum, PropError, TsTypes},
     geometry::{Point, Points},
     keymap::{self, Keystroke, Modifiers, When},
     platform::Os,
@@ -33,7 +33,39 @@ pub use window::{
     WindowKind, WindowMode, WindowOptions, WindowPointerEvents, WindowPosition, WindowProgress,
     WindowRequest, Workspaces,
 };
-pub use window_state::{Display, DisplayId, WindowPlacement, WindowState};
+pub use window_state::{Display, DisplayId, WindowPlacement, WindowState, notch};
+
+/// Additional sources of quit requests on standalone macOS apps. Both
+/// options default to false and require a quit request listener. Other
+/// platforms and embedded views keep their existing lifecycle.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, JsObject)]
+#[non_exhaustive]
+pub struct QuitRequestOptions {
+    /// Asks the app before logout, restart or shutdown. Call `quit()` to
+    /// approve, or `cancel_quit_request()` to cancel the system request.
+    #[prop(default)]
+    pub system: bool,
+    /// Asks before a user closes the main window when that would end the
+    /// app. A window with `close_on_press: false` uses its close handler
+    /// instead; a window kept alive on close still hides as before.
+    #[prop(default)]
+    pub main_window_close: bool,
+}
+
+impl QuitRequestOptions {
+    /// Whether logout, restart and shutdown ask the quit listener.
+    pub fn system(mut self, system: bool) -> Self {
+        self.system = system;
+        self
+    }
+
+    /// Whether closing the main window asks the quit listener when that
+    /// close would end the app.
+    pub fn main_window_close(mut self, main_window_close: bool) -> Self {
+        self.main_window_close = main_window_close;
+        self
+    }
+}
 
 /// How a window's title bar looks ([`TitleBarOptions::style`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
@@ -821,6 +853,38 @@ pub enum MenuItem {
 }
 
 impl MenuItem {
+    /// The items of a selection menu (`selectionMenu`), as the platforms
+    /// show them after the system's own: plain items and separators.
+    /// Inline sections are expanded ([`Self::with_inline_expanded`]);
+    /// submenus, roles (the system's items are there already), shortcuts
+    /// and check marks are left out, as are items with no label and
+    /// separators that separate nothing.
+    pub fn selection_menu(items: &[MenuItem]) -> Vec<MenuItem> {
+        let mut out: Vec<MenuItem> = Vec::new();
+        for item in Self::with_inline_expanded(items) {
+            match item {
+                MenuItem::Separator => {
+                    if matches!(out.last(), Some(MenuItem::Action(_))) {
+                        out.push(MenuItem::Separator);
+                    }
+                }
+                MenuItem::Action(action) if action.role.is_none() && !action.label.is_empty() => {
+                    out.push(MenuItem::Action(MenuAction {
+                        shortcut: None,
+                        checked: None,
+                        when: When::Always,
+                        ..action
+                    }));
+                }
+                MenuItem::Action(_) | MenuItem::Submenu { .. } => {}
+            }
+        }
+        if matches!(out.last(), Some(MenuItem::Separator)) {
+            out.pop();
+        }
+        out
+    }
+
     /// Expands [`inline`](Self::Submenu::inline) submenus into their items
     /// between separators (no leading or trailing separator, label not
     /// shown), for the desktops. Nested non-inline submenus are kept;
@@ -1014,10 +1078,17 @@ pub enum DesktopCommand {
     /// listens to them ([`crate::element::desktop::on_quit_request`]): the
     /// platform reports them on the root ([`WindowEvent::QuitRequest`])
     /// instead, and the app sends [`DesktopCommand::Quit`] when it is
-    /// ready. The system ending the app (logging out, shutting down) quits
-    /// either way. Sent when it changes; `true` until the first. On the
+    /// ready. The system ending the app quits either way by default;
+    /// macOS can include it with [`DesktopCommand::SetQuitRequestOptions`].
+    /// Sent when it changes; `true` until the first. On the
     /// web, while it is `false`, the user leaving the page is the request.
     SetQuitOnRequest(bool),
+    /// Sets the additional macOS quit request sources. Both default to
+    /// false. Other platforms ignore this command.
+    SetQuitRequestOptions(QuitRequestOptions),
+    /// Cancels a pending macOS quit request, including the system's
+    /// logout or shutdown. Nothing happens without a pending request.
+    CancelQuitRequest,
     /// The application menu (macOS's menu bar, the window's menu bar on
     /// Windows and Linux; not shown there while the title bar is hidden,
     /// its shortcuts still work); `None` restores the platform's default.

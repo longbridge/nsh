@@ -18,7 +18,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use nsh_base::{MenuEvent, context_menu, menu, menu_item};
+use nsh_base::{MenuEvent, context_menu, dialog, input, menu, menu_item};
 use nsh_core::{
     Checked, MountItem, NodeId, Size,
     element::Root,
@@ -196,6 +196,7 @@ fn ViewMenu() -> impl IntoElement {
                 .child(
                     menu_item()
                         .accessibility_label("About")
+                        .accessibility_description("Version and license")
                         .child(view().test_id("about").child(text("About"))),
                 ),
         )
@@ -238,6 +239,23 @@ fn checkable_items_are_heard_checked_or_not() {
             .enabled("role:menuitemcheckbox[Show minimap]")
             .unwrap(),
         "a disabled setting"
+    );
+}
+
+#[test]
+fn an_item_hands_its_description_to_screen_readers() {
+    let mut app = start();
+    app.app.press("id:view").unwrap();
+    app.app.wait_for("Show sidebar").unwrap();
+    let screen = app.app.screen();
+    assert_eq!(
+        screen.accessibility_description("role:menuitem[About]"),
+        Ok(Some("Version and license".to_owned()))
+    );
+    assert_eq!(
+        screen.accessibility_description("role:menuitemradio[Name]"),
+        Ok(None),
+        "an item without one has none"
     );
 }
 
@@ -471,6 +489,217 @@ fn after_a_press_and_an_arrow_escape_gives_the_focus_to_the_trigger() {
     app.app.wait_for("text:chose:Quit").unwrap();
 }
 
+/// A menu whose Rename item moves the keyboard focus to a field outside
+/// it, as a choice that starts editing in place does, and a Copy item that
+/// moves nothing; its `open` the app's when `controlled` (the choice's
+/// focus and the closing then come in one turn). The trigger and the field
+/// log the focus they take.
+#[derive(Clone, PartialEq, Props)]
+struct RenameMenuProps {
+    /// The app owns `open`, following `onOpenChange`.
+    controlled: bool,
+    /// The field is a text input, not a view that takes the focus.
+    input: bool,
+}
+
+#[component]
+fn RenameMenu(props: RenameMenuProps) -> impl IntoElement {
+    let (controlled, is_input) = (props.controlled, props.input);
+    let log = signal(String::from("focus"));
+    let note = move |what: &'static str| log.update(|log| log.push_str(what));
+    let field = element_ref();
+    let open = signal(false);
+    let menu = menu();
+    let menu = if controlled {
+        menu.open(move || Some(open.get()))
+            .on_open_change(move |e: &MenuEvent| {
+                if let MenuEvent::OpenChange(next, _) = e {
+                    open.set(*next);
+                }
+            })
+    } else {
+        menu
+    };
+    view()
+        .pt(px(100.0))
+        .pl(px(40.0))
+        .child(
+            menu.trigger(
+                view()
+                    .test_id("actions")
+                    .w(px(80.0))
+                    .h(px(30.0))
+                    .on_focus(move |_: &()| note(" trigger"))
+                    .child(text("Actions")),
+            )
+            .child(
+                menu_item()
+                    .on_select(move || field.focus())
+                    .child(text("Rename")),
+            )
+            .child(menu_item().child(text("Copy"))),
+        )
+        .child(if is_input {
+            input()
+                .element_ref(&field)
+                .test_id("field")
+                .w(px(120.0))
+                .h(px(30.0))
+                .on_focus(move |_: &()| note(" field"))
+                .into_element()
+        } else {
+            view()
+                .element_ref(&field)
+                .test_id("field")
+                .focusable(true)
+                .w(px(120.0))
+                .h(px(30.0))
+                .on_focus(move |_: &()| note(" field"))
+                .into_element()
+        })
+        .child(text(move || log.get()))
+}
+
+#[test]
+fn a_choice_that_moves_the_focus_out_of_the_menu_keeps_it_there() {
+    for (controlled, input, os) in [
+        (false, false, Os::MacOs),
+        (true, false, Os::MacOs),
+        (true, true, Os::MacOs),
+        (true, true, Os::Linux),
+        (false, true, Os::Linux),
+    ] {
+        let case = format!("controlled {controlled}, input {input}, {os:?}");
+        let mut app = start_on(
+            Root::new::<RenameMenu>(move || RenameMenuProps { controlled, input }),
+            os,
+        );
+        app.app.press_key("tab").unwrap();
+        app.app.wait_for("text:focus trigger").unwrap();
+        app.app.press_key("enter").unwrap();
+        app.app.wait_for("Rename").unwrap();
+        // Rename has the focus: choosing it moves the focus to the field,
+        // and the menu closing leaves it there instead of taking it back
+        // to its trigger.
+        app.app.press_key("enter").unwrap();
+        app.app
+            .wait_for_gone("Rename", std::time::Duration::from_secs(2))
+            .unwrap();
+        app.app.wait(std::time::Duration::from_millis(300)).unwrap();
+        assert!(
+            app.app.shows("focus trigger field"),
+            "{case}: the focus stayed on the field: {:?}",
+            app.app.screen().texts()
+        );
+        // A choice that moves nothing still gives it back to the trigger.
+        app.app.press_key("shift+tab").unwrap();
+        app.app
+            .wait_for("text:focus trigger field trigger")
+            .unwrap_or_else(|e| panic!("{case}: {e}"));
+        app.app.press_key("enter").unwrap();
+        app.app.wait_for("Copy").unwrap();
+        app.app.press_key("down").unwrap();
+        app.app.press_key("enter").unwrap();
+        app.app
+            .wait_for_gone("Copy", std::time::Duration::from_secs(2))
+            .unwrap();
+        app.app
+            .wait_for("text:focus trigger field trigger trigger")
+            .unwrap_or_else(|e| panic!("{case}: {e}"));
+    }
+}
+
+/// A More menu whose Delete item opens a dialog confirming with Return,
+/// as a destructive choice asks first. The text logs what was done.
+#[component]
+fn DeleteMenu() -> impl IntoElement {
+    let confirming = signal(false);
+    let log = signal(String::from("log"));
+    view()
+        .pt(px(100.0))
+        .pl(px(40.0))
+        .child(
+            menu()
+                .trigger(
+                    view()
+                        .test_id("more")
+                        .w(px(80.0))
+                        .h(px(30.0))
+                        .child(text("More")),
+                )
+                .child(
+                    menu_item()
+                        .on_select(move || confirming.set(true))
+                        .child(text("Delete")),
+                )
+                .child(menu_item().child(text("Rename"))),
+        )
+        .child(text(move || log.get()))
+        .child(when(
+            move || confirming.get(),
+            move || {
+                on_key("enter", move |_| {
+                    log.update(|log| log.push_str(" confirmed"));
+                    confirming.set(false);
+                });
+                dialog()
+                    .label("Delete the file?")
+                    .child(view().child(text("Really delete?")))
+            },
+        ))
+}
+
+#[test]
+fn return_confirms_a_dialog_a_keyboard_menu_opened() {
+    let mut app = start_with(Root::of::<DeleteMenu>());
+    app.app.press_key("tab").unwrap();
+    app.app.press_key("enter").unwrap();
+    app.app.wait_for("Delete").unwrap();
+    // Delete has the focus: choosing it opens the dialog as the menu
+    // closes, its focus going back to the trigger under the dialog.
+    app.app.press_key("enter").unwrap();
+    app.app.wait_for("Really delete?").unwrap();
+    app.app
+        .wait_for_gone("Rename", std::time::Duration::from_secs(2))
+        .unwrap();
+    // Return is the dialog's, not the menu button's under it.
+    app.app.press_key("enter").unwrap();
+    app.app.wait_for("text:log confirmed").unwrap();
+    app.app
+        .wait_for_gone("Really delete?", std::time::Duration::from_secs(2))
+        .unwrap();
+    app.app.wait(std::time::Duration::from_millis(300)).unwrap();
+    assert!(!app.app.shows("Rename"), "the menu did not open again");
+}
+
+#[test]
+fn a_choice_typed_ahead_of_a_key_move_still_gives_the_focus_back_to_the_trigger() {
+    // Down and Return in one batch: Down moves the focus to Copy, Return
+    // chooses it, and the menu closes, all in one commit. The move into
+    // the closing menu is not the app's: the focus goes back to the
+    // trigger, not to an item on its way out.
+    for controlled in [false, true] {
+        let mut app = start_on(
+            Root::new::<RenameMenu>(move || RenameMenuProps {
+                controlled,
+                input: false,
+            }),
+            Os::MacOs,
+        );
+        app.app.press_key("tab").unwrap();
+        app.app.wait_for("text:focus trigger").unwrap();
+        app.app.press_key("enter").unwrap();
+        app.app.wait_for("Rename").unwrap();
+        app.app.press_keys(&["down", "enter"]).unwrap();
+        app.app
+            .wait_for_gone("Copy", std::time::Duration::from_secs(2))
+            .unwrap();
+        app.app
+            .wait_for("text:focus trigger trigger")
+            .unwrap_or_else(|e| panic!("controlled {controlled}: {e}"));
+    }
+}
+
 #[test]
 fn page_down_and_page_up_go_to_the_last_and_first_enabled_items_and_stop() {
     // Every item is in view: a page is all of them. New is disabled, so
@@ -687,8 +916,8 @@ fn the_keyboard_asks_for_a_menu_at_the_bottom_start_corner_with_no_pointer() {
 
 #[test]
 fn shift_f10_opens_no_context_menu_elsewhere() {
-    // macOS has no such key; Windows gives views no keyboard focus to
-    // start from.
+    // macOS has no such key; Windows asks for a view's context menu
+    // through UI Automation only.
     for os in [Os::MacOs, Os::Windows] {
         let mut app = start_on(Root::of::<DocumentMenu>(), os);
         app.app.press_key("tab").unwrap();
@@ -780,6 +1009,7 @@ fn hold_row(app: &mut App, pointer_type: nsh_core::PointerType) {
                 changed: true,
                 pointer_type,
             }],
+            modifiers: Default::default(),
             activated: None,
         }))
     };
@@ -1026,10 +1256,6 @@ fn a_context_menu_the_app_opens_is_below_its_trigger_at_its_first_enabled_item()
         app.app
             .wait_for("text:at:40 140")
             .unwrap_or_else(|e| panic!("{os:?}: {e}"));
-        // Windows gives views no keyboard focus, the menu's items none.
-        if os == Os::Windows {
-            continue;
-        }
         app.app.press_key("space").unwrap();
         app.app
             .wait_for("text:chose:Rename")
@@ -1066,4 +1292,29 @@ fn a_secondary_click_moves_a_context_menu_the_app_opened_to_the_pointer() {
         .unwrap();
     app.app.press("id:show").unwrap();
     app.app.wait_for("text:at:40 140").unwrap();
+}
+
+/// A `flex-1` canvas-like view as a context menu's trigger, in a column
+/// that fills the window (#2008).
+#[component]
+fn FillingTrigger() -> impl IntoElement {
+    view().flex_1().child(
+        context_menu()
+            .trigger(view().test_id("fill").flex_1())
+            .child(menu_item().child(text("Copy"))),
+    )
+}
+
+#[test]
+fn a_flex_1_trigger_fills_its_parent_as_without_the_menu() {
+    let app = start_with(Root::of::<FillingTrigger>());
+    let fill = app
+        .app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|n| n.test_id.as_deref() == Some("fill"))
+        .expect("the trigger is laid out");
+    assert_eq!(fill.bounds.size.height, px(844.0));
+    assert_eq!(fill.bounds.size.width, px(390.0));
 }

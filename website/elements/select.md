@@ -14,8 +14,8 @@ opens the list, presented as each device expects:
   width sets another, as `gpui-component`'s `menu_width`) and as tall as its rows up to the room on the screen. On
   macOS it opens with the selected row laid over the trigger, so the chosen title stays where it was, as the
   system's pop-up buttons do (shadcn/ui's `item-aligned` position); with nothing selected it opens below the
-  trigger. On Windows, Linux and in browsers it opens below the trigger, as their drop-down lists do. The keyboard
-  moves through the items and chooses one.
+  trigger. On Windows, Linux and in browsers it opens below the trigger, as their drop-down lists do; `cover` chooses
+  one way on every desktop. The keyboard moves through the items and chooses one.
 - On phones and tablets, a sheet at the bottom of the screen over a backdrop.
 
 The select owns the behavior: the value (the app's, or its own), the open state, the keyboard, typeahead, search,
@@ -194,11 +194,12 @@ shown and gone (a sheet once it came in and once it went), `onCancel` that the u
 ## Entrance and exit
 
 On the desktops the popup comes and goes with your transitions, as a [Popover](./popover.md#entrance-and-exit)'s:
-`popupStartingClass` is its look in its first frame, and the `transition-*` classes of `popupClass` carry it to its
-own look; `popupEndingClass` is its look once closed, which it keeps, taking no presses, while those transitions run,
-and `onClose` follows. The keyboard focus is back on the trigger as it closes. Opened again on its way out, it returns to
-its look from where it is. `popupStartingStyle` and `popupEndingStyle` do the same with inline styles. When the user
-asks for less motion it appears and goes at once; the sheet of touch screens slides in and out on its own.
+`popupStartingClass` is its look in its first frame, and the `transition-*` classes of `popupClass` carry it to its own
+look; `popupEndingClass` is its look once closed, which it keeps, taking no presses, while those transitions run, and
+`onClose` follows. The keyboard focus is back on the trigger as it closes, unless the choice's `onChange` focused
+another view (the next field of a form), which keeps it. Opened again on its way out, it returns to its look from where
+it is. `popupStartingStyle` and `popupEndingStyle` do the same with inline styles. When the user asks for less motion it
+appears and goes at once; the sheet of touch screens slides in and out on its own.
 
 ```tsx
 <Select
@@ -276,6 +277,7 @@ choice draws nothing again. `renderGroup` draws a section's header the same way:
 | `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"start"` | Desktops: how it lines up with the trigger. |
 | `offset` | `.offset(..)` | `number` | `0` | Desktops: the gap between the trigger and the list. |
 | `margin` | `.margin(..)` | `number` | `0` | Desktops: the distance it keeps from the edges of the safe area. |
+| `cover` | `.cover(..)` | `boolean` | `true` on macOS, `false` elsewhere | Desktops: the list opens with the chosen row over the trigger (`true`) or on the `placement` side of it (`false`), so a select can open the same way on every desktop. With nothing chosen it opens on the side. |
 | `popupClass`, `popupStyle` | `.popup_class(..)`, `.popup_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The popup (desktops) or the sheet (touch screens) the list is in. |
 | `popupStartingClass`, `popupStartingStyle` | `.popup_starting_class(..)`, `.popup_starting_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Desktops: the popup's look in its first frame, over its own: its transitions run from it. |
 | `popupEndingClass`, `popupEndingStyle` | `.popup_ending_class(..)`, `.popup_ending_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Desktops: the popup's look once closed, over its own: it stays while its transitions run. |
@@ -358,14 +360,14 @@ open:
 | Escape | Closes the list without choosing. |
 | Tab, Shift+Tab | Closes the list (`reason: "focus"`) and moves the focus to the next or previous control. |
 
-Once the list closes, the keyboard focus returns to the trigger, unless a press outside or Tab took it elsewhere. The
-pointer highlights the row it moves over; the highlighted row is revealed as the keys move to it.
+Once the list closes, the keyboard focus returns to the trigger, unless a press outside, Tab or the choice's `onChange`
+took it elsewhere. The pointer highlights the row it moves over; the highlighted row is revealed as the keys move to it.
 
 ## On each device
 
 | | Desktops and desktop browsers | Phones and tablets |
 | --- | --- | --- |
-| The list | a popup over the trigger with the selected row on it on macOS (below it while none is), below the trigger on Windows, Linux and in browsers, as wide as the trigger unless `popupStyle` sets a width, as tall as its rows up to the room on the screen | a sheet at the bottom over a backdrop, as tall as its rows up to the status bar |
+| The list | a popup over the trigger with the selected row on it on macOS (below it while none is), below the trigger on Windows, Linux and in browsers (`cover` chooses), as wide as the trigger unless `popupStyle` sets a width, as tall as its rows up to the room on the screen | a sheet at the bottom over a backdrop, as tall as its rows up to the status bar |
 | Closing it | a choice, Escape, a press outside (which goes on to what is under the pointer) | a choice, the backdrop, the Android back button |
 | Search | the field takes the keyboard as the list opens | the keyboard comes up when the field is pressed |
 | A choice | the press going down chooses, so the search field keeps the keyboard | a tap |

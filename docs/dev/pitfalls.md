@@ -188,6 +188,10 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Styles arrive before frames** (new views have a zero size): a shared radius goes straight to the layer (Core Animation clamps it itself);
   only paths, shadow paths, the content view and the image layer depend on the size, and they are rebuilt on `Frame` while `Decor::sized()`
   is true. Scaling radii by the CSS rule at a zero size once turned every rounded corner square.
+- **An input's insertion precedes its first frame and content box in a mount batch**: UIKit may draw an inserted
+  `UITextField` before the later `InputContent` sets its text insets, briefly placing text against the leading edge.
+  The iOS mounter pre-reads a newly created input's `Frame` and `InputContent` from that batch and applies both while
+  its container is still detached; do not defer or reorder its `Insert`, which would break `autoFocus`.
 - **A view's first style does not transition**: a mounting tree's views are styled after they are added to the window, so
   `window().is_some()` alone animates the first style from the defaults (a pill's corners growing out of a square). The
   mounter only transitions a view it has styled before (`Slot::styled`), as `nsh_core`'s `transition::restyle` and
@@ -277,6 +281,12 @@ Things that were found the hard way. Read the section of the area you change bef
   prevented every press there, so a navigation bar's back button did nothing (seen on an iPhone foldable simulator; a
   real tap through XCUITest reproduced it). `PressRecognizer` is not preventable by tap recognizers on a `UIWindow`
   (`press.rs`, `is_window_tap`); edge-gesture gates are not taps and still cancel presses.
+- **iOS, a tap recognizer on a view around pressables**: a `UITapGestureRecognizer` recognizes on release, where a
+  press ends too, and prevents the `PressRecognizer`s of the views inside its view: `cancelsTouchesInView = false`
+  leaves the views their touches, not the other recognizers their turn. The tap that focuses a `focusable` view
+  that takes no presses took every press inside it that way (a row's ⋯ button opened no menu, for a real tap on the
+  simulator as for a test's). `FocusTap` (`native_view.rs`) prevents no recognizer
+  (`canPreventGestureRecognizer:`), and fails on a touch on a stop inside its view, which takes the focus itself.
 - **iOS, a hardware keyboard's keys** reach the first responder as presses (`pressesBegan:withEvent:`) before
   UIKit's text system acts on them: a text input that does not call `super` for a press neither moves its caret,
   inserts a line break nor types it, and must not call `super` for that key's release either. A held key's press
@@ -373,6 +383,10 @@ Things that were found the hard way. Read the section of the area you change bef
   whether a rectangle is visible. `NshView` is a scroll container (`setScrollContainer(true)`) so that windows without a soft
   input mode resize instead of panning: the system picks the mode at the first layout, before the app's content is mounted,
   and a mode set from code afterwards is overridden. Windows that ask for `adjustPan` are left to the system.
+- **Android, the keyboard a gesture drives has no duration**: the back swipe that dismisses the keyboard (predictive back,
+  seen on Android 16) moves it by hand, and its `WindowInsetsAnimation` reports `getDurationMillis()` as -1. `KeyboardAnimation` takes the
+  keyboard's curve and duration from timed moves only: -1 kept as the duration makes `ValueAnimator.setDuration` throw
+  when the next input is focused in a scroll view (`Mounter.revealFocused`).
 - **Android, passive press feedback**: `activeStyle` / `active:` and `android.ripple` observe a touch without
   consuming it. The root's `TouchTracker` feeds style-only views through `Pressable`; `Box` and leaf views take
   clicks for their press handlers or text spans. Feedback is cancelled when scrolling, panning, pinching or rotation

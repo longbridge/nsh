@@ -222,6 +222,34 @@ function CustomHeader() {
   );
 }
 
+/** A custom title longer than the bar: it shrinks and clamps between the
+ * back button and the trailing item, which stay on the bar. */
+function LongTitle() {
+  const title = "A session title long enough to need more than one phone's width";
+  const center = () => (
+    <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <Text style={{ numberOfLines: 1, flex: 1, minWidth: 0, fontSize: 17, fontWeight: "600", color: colors.text }}>
+        {title}
+      </Text>
+      <Icon name="chevron-down" size={18} tint={colors.muted} />
+    </View>
+  );
+  const right = () => (
+    <Text hitSlop={10} style={{ color: colors.accent, fontSize: 17, fontWeight: "500" }}>
+      Edit
+    </Text>
+  );
+  return (
+    <NavPage title="Long title" headerTitle={center()} headerRight={right()} header={<PageHeader title="Long title" center={center()} right={right()} />}>
+      <Page intro="The title view takes the room between the bar's items: a long title clamps to one line, and the chevron and Edit stay visible.">
+        <Section title="Header" note="headerTitle">
+          <Text style={{ color: colors.muted }}>{title}</Text>
+        </Section>
+      </Page>
+    </NavPage>
+  );
+}
+
 /** Trailing iOS bar buttons with a native menu; other platforms keep the
  * `headerRight` views. */
 function NativeBarButtons() {
@@ -651,6 +679,7 @@ export function Navigation() {
               <LinkRow icon="lists" title="Large title list" note="headerLargeTitle, List" onPress={push(LargeTitleList)} />
               <LinkRow icon="styles" title="Transparent header" note="headerTransparent" onPress={push(Transparent)} />
               <LinkRow icon="star" title="Custom header items" note="headerLeft / Title / Right" onPress={push(CustomHeader)} />
+              <LinkRow icon="text" title="Long custom title" note="headerTitle, clamped" onPress={push(LongTitle)} />
               <LinkRow icon="sliders" title="Native bar buttons" note="ios.headerRightItems" onPress={push(NativeBarButtons)} />
               <LinkRow icon="mobile" title="No header" note="headerVisible={false}" onPress={push(Headerless)} />
               <LinkRow icon="spark" title="Fade in" note='animation="fade"' onPress={push(Faded)} />

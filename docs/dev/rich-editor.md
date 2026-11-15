@@ -106,6 +106,18 @@ a task item). Its contract:
 A node view never mutates its node: an attribute change (a resized image, a toggled checkbox) is a transaction
 (`set_node_attribute`), so it is undoable, mapped, collaborated and checked like any other change.
 
+An app's TS extension renders its atoms with `addNodeView` (`js/node_views.rs`). `createRichEditor` calls it once and
+registers a `JsNodeView` for the type; the JS function cannot live in a `Send + Sync` node view, so it stays in a
+thread-local table the view indexes. Its element is a `Renderer` the editor's host renders with the function itself
+(`Renderer::__js_fn`): unlike a prop's function, it is called once per key with props reading the latest value (a
+signal behind a `Proxy`), and a value that differs is set in place, nothing is made again. Both runtimes render it
+under the owner the editor's host was made under, so a node view sees the context around the `RichEditor`. The value is the node's
+JSON and whether it is selected, never its position, and an element made again for the same node (every span of a
+block is, as text is typed before it) shares the props' state through its key (`b<block>` or `i<block>.<leaf>`), so
+its value stays equal and no JS runs. `getPos` reads a position a Rust effect keeps (JS reads no Rust signal);
+`updateAttributes` and `deleteNode` dispatch transactions. Inline views report their widths for the geometry; an
+edit before them moves them all, and `layout_rev` goes up once for all of them, in a task.
+
 ## The native view (`rich_editor/view/`)
 
 `RichEditor` (`nsh/base`) is a Rust component over an `EditorSession` (`view/session.rs`): the one live editor the
@@ -340,7 +352,7 @@ JS describes.
   function's `name`). `RichExtension` (what they make) has `name`, `type`, `priority`, `options`, `configure` and
   `extend`. Tiptap's `Image` is `RichImage` (`Image` is the core's), `Link` is `RichLink` (`Link` is `nsh/base`'s component), `TextStyle` is `RichTextStyle` (`TextStyle` is the style type; a test of `nsh-js`'s declarations keeps exports from shadowing shared types) and `Text` is `richExtension("text")`.
   `defineExtension({ name, priority, node | mark, topNode, addOptions, addKeyboardShortcuts, addCommands,
-  addInputRules, addPasteRules, addProseMirrorPlugins, addGlobalAttributes, addStorage })` declares the app's: its
+  addInputRules, addPasteRules, addProseMirrorPlugins, addGlobalAttributes, addStorage, addNodeView })` declares the app's: its
   functions run once, in `createRichEditor` (a synchronous call, where JS runs anyway), with the extension's options,
   and return data (commands, rules and plugins as data, `RichEditorPlugin`s), which `to_extension` turns into a Rust
   `Extension`. Errors found when the schema is known (an unknown type in a binding) collect in `Diagnostics` and

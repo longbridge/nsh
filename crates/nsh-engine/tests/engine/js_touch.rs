@@ -133,6 +133,7 @@ fn touch(
     EventPayload::Touch(Box::new(TouchEvent {
         phase,
         timestamp: t,
+        modifiers: Default::default(),
         activated,
         points: vec![TouchPoint {
             id: 1,
