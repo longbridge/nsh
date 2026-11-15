@@ -404,6 +404,7 @@ and `Input`'s React Native names follow the rules as well.
 | `createNavigator`, `Navigator<R>` | `createNavStack(routes: R[])`, `NavStackState<R>` | `NavStackState::new` | |
 | `Modal`, `ModalProps` | `Dialog`, `DialogProps` | `dialog.rs` `Dialog` ("a modal surface") | One component, `presentation` picks the native form; `Sheet` stays the name of a future edge panel drawn with primitives (`sheet.rs`) |
 | `Alert`, `ActionSheet` | `AlertDialog` | `alert_dialog.rs` `AlertDialog` | Below |
+| (new) | `SplitView`: `sidebar`, `content`, `detail` (slots), `columnVisibility` (`"automatic" \| "all" \| "doubleColumn" \| "detailOnly"`), `onColumnVisibilityChange({ columnVisibility })` | none in `gpui-base`; SwiftUI's `NavigationSplitView` (`sidebar` / `content` / `detail`, `NavigationSplitViewVisibility`) | The columns are named for what they hold, where UIKit's `primary` / `supplementary` / `secondary` name where they are; which columns show is one controlled value, in place of UIKit's `show(_:)` / `hide(_:)` and a ref's methods. No width props: the platform's widths (UIKit's on iOS, iPadOS's defaults elsewhere) |
 | **Modal** | | | |
 | `visible` | `open` (default `true`) | `dialog.rs` `Dialog::open` (default `true` in `Dialog::new`) | |
 | `onRequestClose` | `onCancel()` (the attempt) + `onOpenChange({ open: false, reason })` (it closed) | `Dialog::on_cancel`, `Dialog::on_open_change`, `DialogChangeReason` | `reason`: `"backdropPress" \| "cancel" \| "swipe"`; `"swipe"` (an iOS / phone browser sheet pulled down) has no precedent |

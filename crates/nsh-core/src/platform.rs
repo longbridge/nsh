@@ -21,6 +21,11 @@ pub const SEGMENTED_CONTROL_COMPONENT: &str = "nsh/segmented-control";
 /// action).
 pub const MENU_BUTTON_COMPONENT: &str = "nsh/menu-button";
 
+/// The native component of `nsh/base`'s `SplitView`, which the iOS backend
+/// makes itself (a `UISplitViewController` whose columns are the
+/// navigation controllers of the stacks the view places before it).
+pub const SPLIT_VIEW_COMPONENT: &str = "nsh/split-view";
+
 /// Whether native component `name` is NSH's own: names under `nsh/` are, and
 /// an embedding app's registration of one is refused, so it can never
 /// replace what NSH's exports render.

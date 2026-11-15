@@ -43,6 +43,7 @@ mod scrollbar;
 mod select;
 mod sheet;
 mod slider;
+mod split_view;
 mod submenu;
 mod switch;
 mod tabs;

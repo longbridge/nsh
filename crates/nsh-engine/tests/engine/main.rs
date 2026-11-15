@@ -64,6 +64,7 @@ mod rust_touch;
 mod shader;
 mod shutdown;
 mod split;
+mod split_view;
 mod storage;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod system;

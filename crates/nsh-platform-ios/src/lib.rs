@@ -84,6 +84,7 @@ mod press;
 mod scroll_watch;
 mod selectable_view;
 mod shader;
+mod split;
 // Sound (`Sound`, `AudioPlayer`), the Speech framework's recognizer and the
 // notification center, shared with macOS.
 use nsh_platform_apple::{audio, notifications, speech};

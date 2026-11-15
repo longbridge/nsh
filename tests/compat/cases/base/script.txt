@@ -3835,6 +3835,18 @@ covers [props] DockArea.defaultLayout
 covers [props] DockArea.drawerClass
 covers [props] DockArea.backdropClass
 covers [events] DockArea.onDockOpenChange
+# base-split-view
+tap id:case-base-split-view
+# iOS: the split is the system's; each column's stack is laid out at the
+# view's size until the split reports its columns, its page placed. The
+# app's change of visibility goes to the split; nothing is reported.
+expect Sidebar column
+expect Detail column
+frame id:split 0 20 390 300
+expect Visibility all reported none
+tap id:detail-only
+expect Visibility detailOnly reported none
+covers [nsh/base] SplitView
 
 # base-toast
 tap id:case-base-toast
