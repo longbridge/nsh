@@ -38,14 +38,14 @@ function Ticker(props: RichNodeViewProps) {
   );
 }
 
-const TickerTag = defineExtension({
-  name: "ticker",
-  addOptions: () => ({ exchange: "NYSE" }),
-  node: { group: "inline", inline: true, atom: true, attrs: { symbol: { default: "" } } },
-  addNodeView: () => Ticker,
-});
-
 export default function BaseRichEditorNodeView() {
+  // Made when the case runs, so a check that drops `name` breaks only this case.
+  const TickerTag = defineExtension({
+    name: "ticker",
+    addOptions: () => ({ exchange: "NYSE" }),
+    node: { group: "inline", inline: true, atom: true, attrs: { symbol: { default: "" } } },
+    addNodeView: () => Ticker,
+  });
   const editor = createRichEditor({
     extensions: [StarterKit, TickerTag],
     doc: {
