@@ -25132,6 +25132,36 @@ mod rust_windows {
         )
     }
 
+    #[test]
+    fn a_window_shown_in_a_commit_gets_its_attributes_first() {
+        let mut c = core();
+        let desktop = |command| Op::Command {
+            id: crate::ROOT_ID,
+            command: Command::Desktop(Box::new(command)),
+        };
+        c.apply(desktop(DesktopCommand::Request(WindowRequest::Show)))
+            .unwrap();
+        c.apply(desktop(DesktopCommand::SetAttributes(Box::new(
+            WindowAttributes {
+                activate: Some(false),
+                ..Default::default()
+            },
+        ))))
+        .unwrap();
+        let batch = c.commit().unwrap();
+        let commands = window_commands(&batch);
+        assert!(
+            matches!(
+                &commands[..],
+                [
+                    (_, DesktopCommand::SetAttributes(a)),
+                    (_, DesktopCommand::Request(WindowRequest::Show)),
+                ] if a.activate == Some(false)
+            ),
+            "{commands:?}"
+        );
+    }
+
     fn window_commands(batch: &MountBatch) -> Vec<(NodeId, DesktopCommand)> {
         batch
             .items
