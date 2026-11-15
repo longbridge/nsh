@@ -2840,12 +2840,26 @@ impl<M: TextEngine> Core<M> {
             let Some(diff) = self.windows.get_mut(&id).and_then(|r| r.take_diff()) else {
                 continue;
             };
-            self.commands.push((
-                id,
-                Command::Desktop(Box::new(crate::desktop::DesktopCommand::SetAttributes(
-                    Box::new(diff),
-                ))),
-            ));
+            // Before the commit's first request to the window, so a window
+            // shown in the commit that set `activate: false` is not activated.
+            let at = self
+                .commands
+                .iter()
+                .position(|(to, c)| {
+                    *to == id
+                        && matches!(c, Command::Desktop(d)
+                            if matches!(**d, crate::desktop::DesktopCommand::Request(_)))
+                })
+                .unwrap_or(self.commands.len());
+            self.commands.insert(
+                at,
+                (
+                    id,
+                    Command::Desktop(Box::new(crate::desktop::DesktopCommand::SetAttributes(
+                        Box::new(diff),
+                    ))),
+                ),
+            );
         }
     }
 
@@ -5368,6 +5382,13 @@ impl<M: TextEngine> Core<M> {
                 if let Some(list) = node.list.as_mut() {
                     list.loads_at_start = loads_at_start;
                     list.splice(at, removed, inserted);
+                }
+            }
+            Prop::ListDiff(diff) => {
+                let loads_at_start = node.events.contains(EventKind::LoadMoreAtStart);
+                if let Some(list) = node.list.as_mut() {
+                    list.loads_at_start = loads_at_start;
+                    list.reorder(&diff);
                 }
             }
             Prop::Columns(columns) => {
