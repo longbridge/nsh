@@ -1340,6 +1340,10 @@ fn items_scroll(items: &Items, level: u32, children: Prop<Children>) -> AnyEleme
         .element_ref(&me)
         .flex_shrink(1.0)
         .min_h(px(0.0))
+        // An item acts on the first tap while the software keyboard is up
+        // for an input the menu opened beside (a composer's): the input
+        // keeps it, as with UIKit's menus.
+        .keyboard_taps(KeyboardTaps::Handled)
         .on_scroll(move |e: &ScrollEvent| {
             reported.set(e.offset.y);
             offset.set(e.offset.y);

@@ -246,6 +246,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   keyboard focus; it shows (`FOCUS_VISIBLE`: `focus-visible:`, `focusVisibleStyle`, `.focus_visible(..)`) when
   the keyboard moved it there, or the app moved it after a key rather than a press (`docs/dev/styles.md`); a
   part projected focused (a tree's or a list's cursor) shows it too while the control's focus shows.
+  On iOS a tap on a stop makes it the first responder, so a hardware keyboard's keys reach it, except while the
+  software keyboard is up for an input: the input keeps it, as it does when a UIKit control is tapped, so the
+  keyboard stays and the layout does not move under the finger (`Mounter::press_changed`).
   Focus and presses are separate: `ViewProps::focus_stop` decides, from
   `focusable` (`Prop::Focusable`, `ViewProps::focusable`; Rust `.focusable(..)`) and whether the view takes presses,
   and every platform that moves the focus between views asks it (macOS `input::is_key_stop`, the web's
