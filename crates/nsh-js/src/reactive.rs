@@ -341,6 +341,21 @@ pub(crate) fn owner_handle(cx: *mut JsContext) -> (u32, u32) {
     }
 }
 
+/// No owner ([`live_owner`] of a gone one).
+pub(crate) const NONE_OWNER: u32 = r::NONE;
+
+/// Owner `owner` (from [`owner_handle`]) if it is still live, else
+/// [`NONE_OWNER`].
+pub(crate) fn live_owner(cx: *mut JsContext, (owner, generation): (u32, u32)) -> u32 {
+    // SAFETY: a short borrow.
+    let g = unsafe { graph(cx) };
+    if g.is_live_owner(owner) && g.live(owner, generation, u32::MAX) {
+        owner
+    } else {
+        r::NONE
+    }
+}
+
 /// Hands the pending exception to the error boundary of owner `owner`
 /// (from [`owner_handle`]): whether one caught it (else it stays pending).
 /// A listener's failure goes there, as one of a computation does.

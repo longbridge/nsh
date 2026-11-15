@@ -1,4 +1,4 @@
-import { mount, signal, Text, View } from "nsh";
+import { context, mount, signal, Text, View } from "nsh";
 import {
   RichEditor, StarterKit, chain, createRichEditor, defineExtension, insertText, setNodeSelection, setTextSelection, undo,
   type RichNodeViewProps,
@@ -12,6 +12,8 @@ const mounts = signal(0);
 let calls = 0;
 const pressedAt = signal<number | null>(null);
 let shown: RichNodeViewProps | undefined;
+// Provided around the editor: its node views read it as any child would.
+const Market = context("none");
 
 function Stock(props: RichNodeViewProps) {
   mounts.set(++calls);
@@ -22,7 +24,7 @@ function Stock(props: RichNodeViewProps) {
   };
   return (
     <View testID="stock" onPress={press}>
-      <Text>{`Tag ${props.node.attrs.symbol}${props.selected ? " selected" : ""} of ${props.extension.name}`}</Text>
+      <Text>{`Tag ${props.node.attrs.symbol}${props.selected ? " selected" : ""} of ${props.extension.name} in ${Market()}`}</Text>
     </View>
   );
 }
@@ -57,7 +59,9 @@ function App() {
       <Text testID="select" onPress={() => editor.run(setNodeSelection(shown?.getPos() ?? 0))}>SelectTag</Text>
       <Text testID="delete" onPress={() => shown?.deleteNode()}>DeleteTag</Text>
       <Text testID="undo" onPress={() => editor.run(undo())}>Undo</Text>
-      <RichEditor editor={editor} testID="editor" class="h-40 text-foreground" />
+      <Market.Provider value="NASDAQ">
+        <RichEditor editor={editor} testID="editor" class="h-40 text-foreground" />
+      </Market.Provider>
     </View>
   );
 }

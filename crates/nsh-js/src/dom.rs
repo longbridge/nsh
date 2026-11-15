@@ -3894,6 +3894,17 @@ unsafe extern "C" fn each_component(
     }
 }
 
+/// The owner node `id` was made under, if it is still live: what is
+/// rendered into the node later sees that owner's context.
+pub(crate) fn owner_of_node(cx: *mut JsContext, id: NodeId) -> u32 {
+    let p = dom(cx).by_id(id);
+    if p.is_null() {
+        return reactive::NONE_OWNER;
+    }
+    // SAFETY: live node data.
+    reactive::live_owner(cx, unsafe { (*p).owner })
+}
+
 /// Hands the pending exception of a listener of node `id` to the error
 /// boundary the node was made under: whether one caught it (else it stays
 /// pending, as before).
