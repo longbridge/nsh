@@ -44345,3 +44345,44 @@ mod download_decisions {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+#[test]
+fn padding_on_a_span_is_warned_once() {
+    let mut c = core();
+    let span = |id, padding: f32| {
+        [
+            Op::Create { id, tag: Tag::Text },
+            style_op(id, &[("paddingLeft", StyleValue::Number(padding))]),
+        ]
+    };
+    let mut ops = vec![Op::Create {
+        id: 2,
+        tag: Tag::Text,
+    }];
+    ops.extend(span(3, 0.0));
+    ops.extend([
+        Op::Insert {
+            parent: 2,
+            child: 3,
+            before: None,
+        },
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ]);
+    apply(&mut c, ops);
+    let _ = c.commit();
+    assert!(!c.span_padding_warned);
+    // Styled before it is inserted into its text, then made a span.
+    let mut ops: Vec<Op> = span(4, 4.0).into();
+    ops.push(Op::Insert {
+        parent: 2,
+        child: 4,
+        before: None,
+    });
+    apply(&mut c, ops);
+    let _ = c.commit();
+    assert!(c.span_padding_warned);
+}
