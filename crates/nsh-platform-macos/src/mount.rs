@@ -467,7 +467,11 @@ impl Mounter {
                 }
                 match view.kind() {
                     ViewKind::Stack => crate::navigation::stack_resized(surface, view),
-                    ViewKind::Canvas => view.changed(),
+                    ViewKind::Canvas => {
+                        if old.size != frame.size && crate::canvas::has_drawing(view) {
+                            self.draw_when_shown(view, Damage::All);
+                        }
+                    }
                     _ => crate::shader::resized(surface, view),
                 }
             }
