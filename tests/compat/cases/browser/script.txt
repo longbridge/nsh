@@ -55,6 +55,12 @@ covers [props] Menu.placement
 covers [props] Menu.align
 covers [props] Menu.offset
 covers [props] Menu.margin
+# Opened by a press, no item has the focus: a letter moves it to the item
+# it starts, which Return chooses.
+key d
+key enter
+expect Log: chose DeskItem
+absent DeskItem
 # A context menu where the secondary button went down, 3 points below it,
 # kept 9 points from the right edge.
 event text:RightClickArea onContextMenu pageX=390 pageY=200
