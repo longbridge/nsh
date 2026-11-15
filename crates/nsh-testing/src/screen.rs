@@ -106,6 +106,9 @@ pub struct Screen {
     /// The view that takes presses Tab gave the keyboard focus to (macOS,
     /// the web).
     key_focus: Option<NodeId>,
+    /// Inputs configured to take the focus when they mount (`autoFocus`)
+    /// that are not in a window yet, in the order they were configured.
+    auto_focus: Vec<NodeId>,
     /// Scroll views a command moved, whose offset the engine is told
     /// ([`Screen::take_scrolled`]), as a platform reports it.
     scrolled: Vec<NodeId>,
@@ -430,6 +433,9 @@ pub(crate) struct Input {
     /// Where its text goes in the view (inside padding and border); the
     /// whole view until the core says.
     pub(crate) content: Option<Bounds<Points>>,
+    /// Whether it was configured: only its first configuration asks for
+    /// the focus.
+    configured: bool,
 }
 
 /// Where a scroll view is, as its platform view keeps it.
@@ -453,6 +459,45 @@ impl Screen {
     pub fn apply(&mut self, batch: &MountBatch) {
         for item in &batch.items {
             self.apply_item(item);
+        }
+        self.auto_focus();
+    }
+
+    /// Gives the focus to the inputs that asked for it when they mounted
+    /// (`autoFocus`) once they are in a window, as the platforms do after
+    /// the batch that made them: whatever had it before, a `focus()` of
+    /// the same batch included; the last one configured keeps it. One not
+    /// in a window yet waits for it.
+    fn auto_focus(&mut self) {
+        let mut pending = std::mem::take(&mut self.auto_focus);
+        pending.retain(|&id| {
+            if self.input(id).is_none() {
+                return false;
+            }
+            if !self.in_window(id) {
+                return true;
+            }
+            self.focused = Some(id);
+            false
+        });
+        self.auto_focus = pending;
+    }
+
+    /// Whether view `id` is in a window: the main window's root or the
+    /// root of one of the app's own is around it, with nothing on the way
+    /// a back closed natively ([`Screen::in_tree`], windows included).
+    fn in_window(&self, mut id: NodeId) -> bool {
+        loop {
+            if id == ROOT || self.is_window(id) {
+                return true;
+            }
+            if self.closed.contains(&id) {
+                return false;
+            }
+            match self.nodes.get(&id).and_then(|v| v.parent) {
+                Some(parent) => id = parent,
+                None => return false,
+            }
         }
     }
 
@@ -583,6 +628,10 @@ impl Screen {
             MountItem::Input { id, config } => {
                 if let Some(input) = self.input_mut(*id) {
                     input.config = config.clone();
+                    let first = !std::mem::replace(&mut input.configured, true);
+                    if first && config.auto_focus {
+                        self.auto_focus.push(*id);
+                    }
                 }
             }
             MountItem::InputContent { id, content } => {
@@ -3386,6 +3435,65 @@ mod tests {
         // Popped: the screen under it is the one laid out.
         screen.apply(&batch(vec![MountItem::Remove { id: 8 }]));
         assert_eq!(ids(&screen), [2, 4, 6]);
+    }
+
+    fn input_config(id: NodeId, auto_focus: bool) -> MountItem {
+        MountItem::Input {
+            id,
+            config: Box::new(nsh_core::InputConfig {
+                auto_focus,
+                ..Default::default()
+            }),
+        }
+    }
+
+    #[test]
+    fn inputs_that_ask_for_the_focus_take_it_once_in_a_window() {
+        let mut screen = Screen::default();
+        // Several in one batch, around one that does not ask: the last
+        // configured keeps it, over a `focus()` of the same batch.
+        screen.apply(&batch(vec![
+            create(2, ViewKind::Input),
+            create(4, ViewKind::Input),
+            create(6, ViewKind::Input),
+            input_config(2, true),
+            input_config(4, true),
+            input_config(6, false),
+            insert(1, 2),
+            insert(1, 4),
+            insert(1, 6),
+            MountItem::Command {
+                id: 6,
+                command: Command::Focus,
+            },
+        ]));
+        assert_eq!(screen.focused(), Some(4));
+        // Configured again (a prop changed), it does not ask again.
+        screen.apply(&batch(vec![MountItem::Command {
+            id: 6,
+            command: Command::Focus,
+        }]));
+        screen.apply(&batch(vec![input_config(4, true)]));
+        assert_eq!(screen.focused(), Some(6));
+        // One not in a window waits for it, and takes the focus from the
+        // input that has it then.
+        screen.apply(&batch(vec![
+            create(8, ViewKind::View),
+            create(10, ViewKind::Input),
+            input_config(10, true),
+            insert(8, 10),
+        ]));
+        assert_eq!(screen.focused(), Some(6));
+        screen.apply(&batch(vec![insert(1, 8)]));
+        assert_eq!(screen.focused(), Some(10));
+        // Deleted before it was ever shown, it asks for nothing.
+        screen.apply(&batch(vec![
+            create(12, ViewKind::Input),
+            input_config(12, true),
+        ]));
+        screen.apply(&batch(vec![MountItem::Delete { id: 12 }]));
+        screen.apply(&batch(vec![create(12, ViewKind::Input), insert(1, 12)]));
+        assert_eq!(screen.focused(), Some(10));
     }
 
     #[test]

@@ -315,8 +315,10 @@ queries report an error, including bare selectors whose test id matches an empty
 are mapped to what the step acts on (`Screen::pick`: the pressable ancestor, the input inside, the scroll view around)
 and more than one fails the step; a press whose match, or a view between it and its pressable ancestor, is disabled
 (the accessibility state) fails too. When the app moves the focus (`focus()`, `blur()`), the input it left gets
-`Blur` and the one it went to `Focus`, as on a platform. Each step sends what a platform would, to the views that
-report it:
+`Blur` and the one it went to `Focus`, as on a platform; an input whose first configuration asks for the focus
+(`autoFocus`) takes it after the batch that puts it in a window, from whatever had it, the last such input winning
+(`Screen::auto_focus`, as the platforms focus it once it is on screen). Each step sends what a platform would, to the
+views that report it:
 
 - `press`: the match or its nearest pressable ancestor gets `PressIn`, `PressOut`, `Press`, at the match's center
   (a press of a text inside a pressable view lands on the text, as a finger does); presses of one view within
