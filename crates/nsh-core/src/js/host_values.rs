@@ -613,6 +613,23 @@ fn menu_role(name: &str) -> Option<crate::desktop::MenuRole> {
 
 // --- Whole variants ---------------------------------------------------------
 
+/// `selectionMenu`: `nsh/desktop`'s `MenuItem` items. Handlers (`onSelect`)
+/// are taken by the JS runtime when it sets the prop; this decode leaves
+/// their ids at 0.
+pub(crate) fn selection_menu<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Prop> {
+    if input.is_nullish() {
+        return Some(Prop::SelectionMenu(Vec::new()));
+    }
+    input.as_list()?;
+    Some(Prop::SelectionMenu(
+        input
+            .items()
+            .iter()
+            .filter_map(|item| decode_menu_item(item, cx))
+            .collect(),
+    ))
+}
+
 /// `slot`: a recycling slot (a number) or a role.
 pub(crate) fn slot<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
     Some(Prop::Slot(match input.as_string() {

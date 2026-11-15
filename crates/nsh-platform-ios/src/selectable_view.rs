@@ -25,8 +25,12 @@
 //! is part of the outer one: its own gestures never begin. Becoming first
 //! responder resigns any other selection, so a surface shows one.
 
-use std::cell::{Cell, RefCell};
+use std::{
+    cell::{Cell, RefCell},
+    ptr::NonNull,
+};
 
+use block2::RcBlock;
 use nsh_core::{
     AttributedText, Bounds, Color, EventKind, EventPayload, NodeId, PayloadValue, Point, Points,
     geometry::{bounds, point, px, size},
@@ -42,11 +46,11 @@ use objc2::{
     sel,
 };
 use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
-use objc2_foundation::{NSArray, NSNumber, NSObject};
+use objc2_foundation::{NSArray, NSNumber, NSObject, NSString};
 use objc2_ui_kit::{
     UIGestureRecognizer, UIGestureRecognizerDelegate, UIGestureRecognizerState,
-    UILongPressGestureRecognizer, UIPanGestureRecognizer, UIResponder, UIScrollView,
-    UITapGestureRecognizer, UITouch, UITraitEnvironment, UIView,
+    UILongPressGestureRecognizer, UIMenu, UIMenuElement, UIPanGestureRecognizer, UIResponder,
+    UIScrollView, UITapGestureRecognizer, UITouch, UITraitEnvironment, UIView,
 };
 
 use crate::{native_view::NshView, text_view::TextView};
@@ -498,6 +502,18 @@ define_class!(
         fn edit_menu_target_rect(&self, _interaction: &AnyObject, _configuration: &AnyObject) -> CGRect {
             self.selection_rect()
                 .unwrap_or(CGRect::new(CGPoint::ZERO, CGSize::ZERO))
+        }
+
+        /// `UIEditMenuInteractionDelegate`: the system's actions, then the
+        /// area's own (`selectionMenu`).
+        #[unsafe(method_id(editMenuInteraction:menuForConfiguration:suggestedActions:))]
+        fn edit_menu_for_configuration(
+            &self,
+            _interaction: &AnyObject,
+            _configuration: &AnyObject,
+            suggested: &NSArray<UIMenuElement>,
+        ) -> Option<Retained<UIMenu>> {
+            Some(self.menu_with(suggested))
         }
 
         #[unsafe(method(editMenuInteraction:willPresentMenuForConfiguration:animator:))]
@@ -1048,6 +1064,79 @@ impl AreaResponder {
                         && local.y <= r.origin.y + r.size.height
                 })
         })
+    }
+
+    /// The edit menu: the system's `suggested` actions, then the area's
+    /// items (`selectionMenu`), each group between separators an inline
+    /// section; a chosen item reports its id as the root's `Menu` event.
+    fn menu_with(&self, suggested: &NSArray<UIMenuElement>) -> Retained<UIMenu> {
+        use nsh_core::desktop::MenuItem;
+        use objc2_ui_kit::{UIAction, UIMenuElementAttributes, UIMenuOptions};
+
+        let mtm = self.mtm();
+        let items = self
+            .superview()
+            .and_then(|area| area.downcast_ref::<NshView>().map(NshView::selection_menu))
+            .unwrap_or_default();
+        let mut children: Vec<Retained<UIMenuElement>> = suggested.to_vec();
+        let mut group: Vec<Retained<UIMenuElement>> = Vec::new();
+        let flush = |group: &mut Vec<Retained<UIMenuElement>>,
+                     children: &mut Vec<Retained<UIMenuElement>>| {
+            if group.is_empty() {
+                return;
+            }
+            let section = UIMenu::menuWithTitle_image_identifier_options_children(
+                &NSString::from_str(""),
+                None,
+                None,
+                UIMenuOptions::DisplayInline,
+                &NSArray::from_retained_slice(group),
+                mtm,
+            );
+            children.push(Retained::into_super(section));
+            group.clear();
+        };
+        for item in items.iter() {
+            match item {
+                MenuItem::Action(action) => {
+                    let (id, control) = (action.id, self.ivars().control.borrow().clone());
+                    let handler = RcBlock::new(move |_: NonNull<UIAction>| {
+                        if let Some(control) = control.as_ref().filter(|_| id != 0) {
+                            control.dispatch_event(
+                                nsh_core::ROOT_ID,
+                                EventKind::Menu,
+                                EventPayload::Map(vec![(
+                                    "id",
+                                    PayloadValue::Number(f64::from(id)),
+                                )]),
+                            );
+                        }
+                    });
+                    let image = action.symbol.as_deref().and_then(|name| {
+                        objc2_ui_kit::UIImage::systemImageNamed(&NSString::from_str(name))
+                    });
+                    // SAFETY: UIKit copies the handler; the block stays while
+                    // the action does.
+                    let element = unsafe {
+                        UIAction::actionWithTitle_image_identifier_handler(
+                            &NSString::from_str(&action.label),
+                            image.as_deref(),
+                            None,
+                            (&*handler as *const block2::DynBlock<_>).cast_mut(),
+                            mtm,
+                        )
+                    };
+                    if !action.enabled {
+                        element.setAttributes(UIMenuElementAttributes::Disabled);
+                    }
+                    group.push(Retained::into_super(element));
+                }
+                MenuItem::Separator => flush(&mut group, &mut children),
+                MenuItem::Submenu { .. } => {}
+            }
+        }
+        flush(&mut group, &mut children);
+        UIMenu::menuWithChildren(&NSArray::from_retained_slice(&children), mtm)
     }
 
     /// `UIEditMenuInteraction` on the responder, if the system has it
