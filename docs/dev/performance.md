@@ -108,8 +108,9 @@ before / after rounds on one CPU, warmed and batched; medians, input constructio
 | 10,000 | 96.966 → 0.0914 ms | 100.688 → 8.911 ms |
 
 The ordered code spans are consumed with a cursor instead of searched from the start at
-each byte. With streaming repair enabled, the complete 10,000-span parse takes
-544.17 → 453.83 ms; other scans still contribute. A 35,200-byte control of 200 short
+each byte. With streaming repair enabled, the complete 10,000-span parse took
+544.17 → 453.83 ms; the repair's own scans made up the rest, until they got the same
+cursor (Markdown streaming repair, below). A 35,200-byte control of 200 short
 paragraphs takes 74.45 → 79.69 µs in TeX rewriting (about 5 µs more), while its complete
 parse stays around 5.2 ms. Short Markdown and code spans without TeX delimiters have
 unchanged complete-parse timings. These parser measurements exclude layout and drawing.
@@ -120,6 +121,28 @@ version, the same paragraphs in a mounted `TextView`): first-commit medians for 
 16 mount items, with 3,007 / 30,007 nodes respectively. The counter control keeps
 56 ops / 50 items / 21 nodes initially and 10 ops / 7 items / 24 nodes after `+1`;
 commit medians 497 / 379 → 500 / 310 µs, noisy samples establishing stable work counts.
+
+Markdown streaming repair (`text_view/markdown/streaming.rs`, 2026-11-15, Linux x86_64,
+release, against `32f16354`): the paragraph ``"`a` x ".repeat(k)`` and a 600-row table with
+three code spans per row (26,950 bytes), timed in `repair_streaming` alone and in a complete
+parse with `streaming: true` (math enabled, the default). Eleven alternating before / after
+rounds on one CPU, warmed and batched (at least 100 ms a sample); medians, input construction
+excluded:
+
+| Input | `repair_streaming`, before → after | Complete parse, streaming on, before → after |
+|---|---|---|
+| 1,000 spans | 3.893 → 0.0276 ms | 4.738 → 0.833 ms |
+| 5,000 spans | 96.628 → 0.138 ms | 100.681 → 4.154 ms |
+| 10,000 spans | 385.147 → 0.275 ms | 393.600 → 8.908 ms |
+| 600-row table | 26.785 → 0.0947 ms | 37.992 → 10.835 ms |
+
+The repair's TeX, link and closing scans carry a cursor into the ordered code spans instead
+of searching all of them at each byte, so the repair grows with the text, not with the
+square of its spans, and the complete 10,000-span parse is back at its time with streaming
+off (8.911 ms in the entry above). Streaming the table's first 400 rows in 24-byte updates
+(748 parses) takes 4.94 → 1.78 s in all, 6.60 → 2.38 ms an update. A 20,000-byte reply of
+short blocks is unchanged (0.018 ms of repair, 5.65 ms parsed). The repaired text equals the
+old scans' on 400,000 random inputs.
 
 Terminal `TextView` tables (2026-11-08, Linux x86_64, debug hosts,
 `nsh test <entry> --target tui --trace`, against `71aeb06a`, seven alternating runs per version, medians):
