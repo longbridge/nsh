@@ -120,6 +120,7 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | `<Select>` | `nsh_base::select()` | 从一组条目中选出一个值，支持键盘、搜索和分组 | [Select](./select.md) |
 | `<Sheet>` | `nsh_base::sheet()` | 位于屏幕一侧边缘、覆盖在背景层之上的面板 | [Sheet](./sheet.md) |
 | `<Slider>` | `nsh_base::slider()` | 沿轨道选取一个值或两个值组成的范围 | [Slider](./slider.md) |
+| `<SplitView>` | `nsh_base::split_view()` | 并排显示的导航栈分栏，空间紧凑时一次显示一栏：iOS 上是 `UISplitViewController` | [SplitView](./split-view.md) |
 | `<Switch>` | `nsh_base::switch()` | 带轨道和滑块的开 / 关控件 | [Switch](./switch.md) |
 | `<Table>` 及其部件 | `nsh_base::table()`、`table_row()` 等 | 由应用写出行和单元格的表格，带有表格的角色 | [Table](./table.md) |
 | `<Tab>`、`<Tabs>` | `nsh_base::tab()`、`tabs()` | 标签列表中的一个标签页，以及这个列表 | [Tabs](./tabs.md) |
@@ -251,7 +252,7 @@ const at = signal<number | null>(null);
 
 ### 滚轮
 
-`onWheel` 在鼠标滚轮或触控板在视图上滚动时触发：macOS、Windows、Linux、GPUI 后端和 Web 都支持（DOM 的 `wheel`、GPUI 的 `ScrollWheelEvent`）。指针下方视图及其外层中，最近的监听者收到它。若该视图比指针下方所有滚动视图都更近，它就接管这次滚轮：系统不再滚动、缩放或捏合，因此页面里的画布可以在 Control + 滚轮时缩放、其他时候平移。监听的滚动视图，或包着滚动视图的外层视图，只是旁观：滚动视图照常滚动。一次滚动始终留在它去的地方，与滚动视图相同：接管了它的视图会收到这次滚动剩下的部分（触控板手势及其惯性、连续滚动的滚轮），即使指针离开了它；滚动视图已经开始的滚动，也不会被中途移到指针下的监听者抢走，那个监听者只是旁观。JS 无法事后取消原生滚动（主线程不等待 JS），所以是否接管由挂载的内容决定，与 `onContextMenu` 相同。
+`onWheel` 在鼠标滚轮或触控板在视图上滚动时触发：macOS、Windows、Linux、GPUI 后端和 Web 都支持（DOM 的 `wheel`、GPUI 的 `ScrollWheelEvent`）。指针下方视图及其外层中，最近的监听者收到它。若该视图比指针下方所有滚动视图都更近，它就接管这次滚轮：系统不再滚动、缩放或捏合，因此页面里的画布可以在 Control + 滚轮时缩放、其他时候平移。若监听者的 `panActivation` 只指定了一个方向（如 `{ activeOffsetX, failOffsetY }`，Rust 为 `PanActivation::horizontal(..)`），它只接管这个方向的滚轮和 Control + 滚轮，其他方向交给外层的滚动视图，与横向滚动视图让纵向滚轮滚动页面相同：纵向页面里的时间轴接管横向滚轮，纵向滚轮照常滚动页面。监听的滚动视图，或包着滚动视图的外层视图，只是旁观：滚动视图照常滚动。一次滚动始终留在它去的地方，与滚动视图相同：接管了它的视图会收到这次滚动剩下的部分（触控板手势及其惯性、连续滚动的滚轮），即使指针离开了它；滚动视图已经开始的滚动，也不会被中途移到指针下的监听者抢走，那个监听者只是旁观。JS 无法事后取消原生滚动（主线程不等待 JS），所以是否接管由挂载的内容决定，与 `onContextMenu` 相同。
 
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
@@ -375,7 +376,7 @@ import { Menu } from "nsh/desktop";
 
 ### 键盘焦点
 
-在 macOS 和 Web 上，Tab 按视图树的顺序在停靠点之间移动键盘焦点：输入框、可按压的视图，以及所有设置了 `focusable` 的视图。焦点样式（`focus:`、`.focus(..)`）为获得焦点的视图设置样式；它可按压时，按 Return 或空格会按下它。点击会按下视图但不让它获得焦点，所以焦点样式只在键盘聚焦时生效。
+在 macOS、Web 和 Android 上，Tab 按视图树的顺序在停靠点之间移动键盘焦点：输入框、可按压的视图，以及所有设置了 `focusable` 的视图。焦点样式（`focus:`、`.focus(..)`）为获得焦点的视图设置样式；它可按压时，按 Return 或空格会按下它。点击会按下视图但不让它获得焦点，所以焦点样式只在键盘聚焦时生效。在 Android 上，可按压的视图是硬件键盘的停靠点，而触摸模式下的点击只会聚焦显式设置了 `focusable` 的视图（或由 ref 聚焦的视图），所以点按钮不会让正在编辑的输入框失去焦点；在第一个和最后一个停靠点上，Tab 和 Shift+Tab 会交给嵌入它的 Android 宿主，而不是绕回。
 
 焦点到达的视图会在外层的滚动视图和列表里滚进视野。Tab 会走遍列表的每一行，包括还没渲染的行：焦点到达时列表渲染出下一行，走过最后一行后焦点才离开列表。
 

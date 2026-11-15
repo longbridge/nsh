@@ -49,8 +49,12 @@ pub(crate) trait Driver: Send {
     fn press_key(&mut self, keys: &str) -> Result<(), String>;
     /// Holds (`down`) or lets go of modifier keys for the pointer's steps.
     fn hold_keys(&mut self, keys: &str, down: bool) -> Result<(), String> {
-        let _ = (keys, down);
-        Err("holding keys (`keyboard.down` / `keyboard.up`) runs headless only for now: run the test without `--target`".into())
+        let _ = keys;
+        Err(headless_only(if down {
+            "keyboard.down"
+        } else {
+            "keyboard.up"
+        }))
     }
     fn hover(&mut self, selector: &str) -> Result<(), String>;
     fn right_click(&mut self, selector: &str) -> Result<(), String>;
@@ -154,6 +158,7 @@ pub(crate) trait Driver: Send {
     fn shows(&mut self, selector: &str) -> Result<bool, String>;
     fn value(&mut self, selector: &str) -> Result<Option<String>, String>;
     fn span_style(&mut self, selector: &str) -> Result<ResolvedTextStyle, String>;
+    fn view_style(&mut self, selector: &str) -> Result<Option<crate::screen::ViewStyle>, String>;
     fn dialogs(&mut self) -> Result<Vec<Dialog>, String>;
     /// The open context menu's actions, `None` when none is open.
     fn menu(&mut self) -> Result<Option<Vec<crate::menu::Entry>>, String>;
@@ -367,6 +372,10 @@ impl Driver for Headless {
         self.catch_up();
         self.screen().span_style(selector)
     }
+    fn view_style(&mut self, selector: &str) -> Result<Option<crate::screen::ViewStyle>, String> {
+        self.catch_up();
+        self.screen().view_style(selector)
+    }
     fn dialogs(&mut self) -> Result<Vec<Dialog>, String> {
         self.catch_up();
         Ok(self.screen().dialogs().to_vec())
@@ -540,7 +549,10 @@ fn step_name(step: &TestStep) -> Option<String> {
 
 /// What a test asks of a real platform that only headless runs do.
 pub(crate) fn headless_only(what: &str) -> String {
-    format!("{what} runs headless only for now: run the test without `--target`")
+    crate::failure::unsupported_here(
+        what,
+        "it runs headless only for now; run the test without `--target`",
+    )
 }
 
 fn ms(time: Duration) -> u64 {
@@ -752,6 +764,16 @@ impl Driver for Remote {
         self.query(TestStep::Value {
             selector: selector.into(),
         })
+    }
+    fn view_style(&mut self, selector: &str) -> Result<Option<crate::screen::ViewStyle>, String> {
+        let style: Option<nsh_dev::protocol::ViewStyle> = self.query(TestStep::ViewStyle {
+            selector: selector.into(),
+        })?;
+        Ok(style.map(|s| crate::screen::ViewStyle {
+            background_color: s.background_color,
+            opacity: s.opacity,
+            effective_opacity: s.effective_opacity,
+        }))
     }
     fn span_style(&mut self, selector: &str) -> Result<ResolvedTextStyle, String> {
         let span: nsh_dev::protocol::SpanStyle = self.query(TestStep::SpanStyle {

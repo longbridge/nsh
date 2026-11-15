@@ -9,6 +9,7 @@ use std::{
 };
 
 use nsh_core::{
+    desktop::QuitRequestOptions,
     geometry::{Size, px},
     platform::{Appearance, Locale},
 };
@@ -138,6 +139,13 @@ pub struct AppOptions {
     pub app_id: String,
     /// The window title.
     pub title: String,
+    /// The app's icon, an image file (a PNG, say): [`run_app`] makes it the
+    /// application's icon, which the Dock, the app switcher and its
+    /// notifications show. For a process without an app bundle of its own
+    /// (the development host: `nsh run` passes `nsh.json` `"icon"`); a
+    /// packaged app's bundle has its icon (`CFBundleIconFile`) and leaves
+    /// this `None`.
+    pub icon: Option<PathBuf>,
     /// The initial window size in points.
     pub size: (i32, i32),
     /// The display [`run_app`]'s window opens on, centered. `None` (the
@@ -244,6 +252,7 @@ impl Default for AppOptions {
             chunks: None,
             app_id: "com.longbridge.nsh.host".to_owned(),
             title: "nsh".to_owned(),
+            icon: None,
             size: (1200, 800),
             display: None,
             keep_size: false,
@@ -608,6 +617,8 @@ struct Running {
     window: Retained<NSWindow>,
     view: Rc<AppView>,
     keep_alive_on_close: bool,
+    quit_options: QuitRequestOptions,
+    quit_requests: QuitRequests,
     /// It runs in the background ([`AppOptions::background`]).
     #[cfg(feature = "dev")]
     background: bool,
@@ -616,6 +627,33 @@ struct Running {
     /// error does ([`dev_app_came`], [`dev_error_shown`]).
     #[cfg(feature = "dev")]
     held: Cell<bool>,
+}
+
+/// A confirmation is shared by all exit sources. A system request can
+/// join a confirmation already shown for Quit or the main window.
+#[derive(Default)]
+struct QuitRequests {
+    /// `Some(true)` also owes AppKit a termination reply.
+    pending: Option<bool>,
+    serial: u64,
+}
+
+impl QuitRequests {
+    /// Whether a new confirmation is needed. Starting a system request
+    /// changes the serial so an old timeout cannot cancel a later one.
+    fn request(&mut self, system: bool) -> bool {
+        let notify = self.pending.is_none();
+        if notify || (system && self.pending != Some(true)) {
+            self.serial += 1;
+            self.pending = Some(system);
+        }
+        notify
+    }
+
+    /// Clears the confirmation; whether AppKit needs an answer.
+    fn take(&mut self) -> bool {
+        self.pending.take() == Some(true)
+    }
 }
 
 /// Shows the standalone app's window as it launches: key, the app active,
@@ -816,10 +854,8 @@ define_class!(
 
         #[unsafe(method(applicationShouldTerminate:))]
         fn should_terminate(&self, app: &NSApplication) -> NSApplicationTerminateReply {
-            // The user asked while the app listens to quit requests: it
-            // decides, and quits with `quit()` ([`quit_app`]).
-            if !system_quit() && ask_quit() {
-                return NSApplicationTerminateReply::TerminateCancel;
+            if let Some(reply) = ask_quit(system_quit()) {
+                return reply;
             }
             finish_running(app);
             // The caller owns process termination after run_app returns.
@@ -932,12 +968,26 @@ pub(crate) fn close_main_window(key: u64) -> bool {
 /// Stops its engine and returns from [`run_app`]. May be called from any thread;
 /// the request is dispatched to AppKit's main thread. With no standalone runner
 /// this has no effect; embedded hosts own their application lifecycle.
+/// With an intercepted system quit pending, runs the engine's cleanup
+/// first, then approves AppKit's process termination instead of returning.
 pub fn quit_app() {
     dispatch2::DispatchQueue::main().exec_async(|| {
         if RUNNING.with(|running| running.borrow().is_some())
             && let Some(mtm) = MainThreadMarker::new()
         {
-            finish_running(&NSApplication::sharedApplication(mtm));
+            let app = NSApplication::sharedApplication(mtm);
+            let system =
+                RUNNING.with(|running| running.borrow_mut().as_mut().unwrap().quit_requests.take());
+            // Stop the engine and flush storage before AppKit can exit
+            // the process. Only a system request uses AppKit termination;
+            // ordinary Quit still returns ownership to run_app's caller.
+            if system {
+                // Keep AppKit's event loop running to finish termination.
+                stop_running();
+                app.replyToApplicationShouldTerminate(true);
+            } else {
+                finish_running(&app);
+            }
         }
     });
 }
@@ -956,16 +1006,96 @@ pub(crate) fn restart_app() {
     });
 }
 
-/// The standalone app's quit request goes to the app, when it listens
-/// ([`crate::chrome::ask_quit`]).
-fn ask_quit() -> bool {
-    let surface = RUNNING.with(|running| {
-        running
-            .borrow()
-            .as_ref()
-            .map(|running| running.view.surface().clone())
+/// Reports a standalone quit request without waiting for the engine.
+/// System requests keep AppKit's termination pending until answered.
+fn ask_quit(system: bool) -> Option<NSApplicationTerminateReply> {
+    let request = RUNNING.with(|running| {
+        let mut running = running.borrow_mut();
+        let running = running.as_mut()?;
+        let surface = running.view.surface();
+        if !surface.chrome.asks_quit.get() || (system && !running.quit_options.system) {
+            return None;
+        }
+        let extended = running.quit_options.system || running.quit_options.main_window_close;
+        let notify = !extended || running.quit_requests.request(system);
+        Some((surface.clone(), notify, running.quit_requests.serial))
     });
-    surface.is_some_and(|surface| crate::chrome::ask_quit(&surface))
+    let (surface, notify, serial) = request?;
+    if notify {
+        crate::chrome::ask_quit(&surface);
+    }
+    if system {
+        // AppKit gives logout two minutes. Explicitly cancel before that
+        // deadline rather than leaving our pending state behind.
+        let key = surface.key();
+        crate::surface::after(110_000, move || {
+            let expired = RUNNING.with(|running| {
+                running.borrow().as_ref().is_some_and(|running| {
+                    running.view.surface().key() == key
+                        && running.quit_requests.serial == serial
+                        && running.quit_requests.pending == Some(true)
+                })
+            });
+            if expired {
+                cancel_quit_request(key);
+            }
+        });
+        Some(NSApplicationTerminateReply::TerminateLater)
+    } else {
+        Some(NSApplicationTerminateReply::TerminateCancel)
+    }
+}
+
+/// The main close uses either the window's guard or the shared quit
+/// confirmation, never both. A retained window still hides on close.
+pub(crate) fn ask_main_window_quit(key: u64, close_on_press: bool) -> bool {
+    let ask = RUNNING.with(|running| {
+        running.borrow().as_ref().is_some_and(|running| {
+            running.view.surface().key() == key
+                && close_on_press
+                && !running.keep_alive_on_close
+                && running.quit_options.main_window_close
+        })
+    });
+    ask && ask_quit(false).is_some()
+}
+
+/// Configures only the standalone runner owning this surface.
+pub(crate) fn set_quit_request_options(key: u64, options: QuitRequestOptions) {
+    RUNNING.with(|running| {
+        if let Some(running) = running.borrow_mut().as_mut()
+            && running.view.surface().key() == key
+        {
+            running.quit_options = options;
+        }
+    });
+    cancel_quit_request(key);
+}
+
+/// Identifies the confirmation a deferred listener removal may cancel.
+pub(crate) fn pending_quit_request(key: u64) -> Option<u64> {
+    RUNNING.with(|running| {
+        let running = running.borrow();
+        let running = running.as_ref()?;
+        (running.view.surface().key() == key && running.quit_requests.pending.is_some())
+            .then_some(running.quit_requests.serial)
+    })
+}
+
+/// Resolves AppKit's pending request outside a mount or delegate callback.
+pub(crate) fn cancel_quit_request(key: u64) {
+    let system = RUNNING.with(|running| {
+        let mut running = running.borrow_mut();
+        running.as_mut().is_some_and(|running| {
+            running.view.surface().key() == key && running.quit_requests.take()
+        })
+    });
+    if system {
+        dispatch2::DispatchQueue::main().exec_async(move || {
+            let mtm = MainThreadMarker::new().unwrap();
+            NSApplication::sharedApplication(mtm).replyToApplicationShouldTerminate(false);
+        });
+    }
 }
 
 /// Whether the quit AppKit asks about is the system's: logging out,
@@ -1042,9 +1172,29 @@ fn stop_event_loop(app: &NSApplication) {
 /// Stops the standalone app's engine (its window closes).
 fn stop_running() {
     if let Some(running) = RUNNING.with(|r| r.borrow_mut().take()) {
+        if running.quit_requests.pending == Some(true) {
+            NSApplication::sharedApplication(running.view.surface().mtm)
+                .replyToApplicationShouldTerminate(false);
+        }
         running.view.stop();
         drop(running.window);
     }
+}
+
+/// Makes the image file `path` the application's icon ([`AppOptions::icon`]);
+/// one that does not load leaves the icon it has, with a warning.
+fn set_app_icon(app: &NSApplication, path: &std::path::Path) {
+    use objc2::AnyThread as _;
+    let Some(image) = objc2_app_kit::NSImage::initWithContentsOfFile(
+        objc2_app_kit::NSImage::alloc(),
+        &NSString::from_str(&path.to_string_lossy()),
+    ) else {
+        log::warn!("the app's icon {} is not an image", path.display());
+        return;
+    };
+    // SAFETY: the setter is unsafe only because it might not take `None`;
+    // this passes an image.
+    unsafe { app.setApplicationIconImage(Some(&image)) };
 }
 
 /// Names the app `name` in the menu bar, which shows the bundle's name
@@ -1080,6 +1230,9 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(activation_policy(&options));
+    if let Some(icon) = &options.icon {
+        set_app_icon(&app, icon);
+    }
     name_app(&options.title);
     crate::chrome::set_app_name(&options.title);
     let delegate: Retained<Delegate> = unsafe { msg_send![Delegate::alloc(mtm), init] };
@@ -1192,6 +1345,8 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
             window,
             view,
             keep_alive_on_close: options.keep_alive_on_close,
+            quit_options: QuitRequestOptions::default(),
+            quit_requests: QuitRequests::default(),
             #[cfg(feature = "dev")]
             background: options.background,
             #[cfg(feature = "dev")]

@@ -765,8 +765,47 @@ final class InputBox extends FrameLayout implements Node {
     }
 
     void focus() {
-        edit.requestFocus();
-        showKeyboard();
+        if (edit.isShown() && edit.hasWindowFocus() && edit.getWidth() > 0) {
+            edit.requestFocus();
+            showKeyboard();
+            return;
+        }
+        // A field focused as it mounts (`autoFocus`, or `ref.focus()` from a
+        // mount effect) is not laid out yet, or its window has no focus: the
+        // focus request fails, or the IME does not serve the field and drops
+        // the keyboard request. Wait until it is shown in a focused window.
+        if (pendingFocus != null) return;
+        pendingFocus = new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override
+            public void onGlobalLayout() {
+                if (!edit.isShown() || !edit.hasWindowFocus() || edit.getWidth() <= 0) return;
+                cancelPendingFocus();
+                edit.requestFocus();
+                // The IME serves the field once the focus change is dispatched.
+                edit.post(InputBox.this::showKeyboard);
+            }
+        };
+        getViewTreeObserver().addOnGlobalLayoutListener(pendingFocus);
+        getViewTreeObserver().addOnWindowFocusChangeListener(pendingWindowFocus);
+    }
+
+    /** {@link #focus()} waiting for the field to be shown in a focused window. */
+    private android.view.ViewTreeObserver.OnGlobalLayoutListener pendingFocus;
+    private final android.view.ViewTreeObserver.OnWindowFocusChangeListener pendingWindowFocus = focused -> {
+        if (focused && pendingFocus != null) pendingFocus.onGlobalLayout();
+    };
+
+    private void cancelPendingFocus() {
+        if (pendingFocus == null) return;
+        getViewTreeObserver().removeOnGlobalLayoutListener(pendingFocus);
+        getViewTreeObserver().removeOnWindowFocusChangeListener(pendingWindowFocus);
+        pendingFocus = null;
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        cancelPendingFocus();
+        super.onDetachedFromWindow();
     }
 
     /**
@@ -788,21 +827,12 @@ final class InputBox extends FrameLayout implements Node {
     }
 
     void blur() {
+        cancelPendingFocus();
         if (!edit.hasFocus()) return;
         hideKeyboard();
-        // Prefer this field's window (a dialog's), not the activity host:
-        // host.requestFocus() cannot take focus out of another window, so the
-        // EditText would keep focus and the IME would stay / come back.
-        View root = getRootView();
-        if (root != null && root != mounter.host.getRootView()) {
-            root.setFocusable(true);
-            root.setFocusableInTouchMode(true);
-            root.requestFocus();
-        } else {
-            // clearFocus() would hand focus to the first focusable view, often
-            // another field; the (focusable) host holds it instead.
-            mounter.host.requestFocus();
-        }
+        // Keep focus in this window without selecting another input, and
+        // leave subsequent hardware keys on the window's dispatch path.
+        mounter.releaseFocusOf(this);
     }
 
     private void hideKeyboard() {

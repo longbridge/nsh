@@ -134,6 +134,7 @@ and take their look from the app.
 | `<Select>` | `nsh_base::select()` | One value chosen from a list of items, with the keyboard, search and sections | [Select](./select.md) |
 | `<Sheet>` | `nsh_base::sheet()` | A panel at an edge of the screen over a backdrop | [Sheet](./sheet.md) |
 | `<Slider>` | `nsh_base::slider()` | A value, or a range of two, picked along a track | [Slider](./slider.md) |
+| `<SplitView>` | `nsh_base::split_view()` | Columns of navigation stacks side by side that show one at a time where the room is compact: `UISplitViewController` on iOS | [SplitView](./split-view.md) |
 | `<Switch>` | `nsh_base::switch()` | An on / off control with a track and a thumb | [Switch](./switch.md) |
 | `<Table>` and its parts | `nsh_base::table()`, `table_row()`, ... | A table of the app's own rows and cells, with a table's roles | [Table](./table.md) |
 | `<Tab>`, `<Tabs>` | `nsh_base::tab()`, `tabs()` | One tab of a tab list, and the list | [Tabs](./tabs.md) |
@@ -296,7 +297,10 @@ const at = signal<number | null>(null);
 `onWheel` hears a mouse wheel or touchpad scroll over a view, on macOS, Windows, Linux, the GPUI backend and the web
 (the DOM's `wheel`, GPUI's `ScrollWheelEvent`). The nearest view around the one under the pointer that listens hears
 it. When that view is nearer than every scroll view under the pointer, it takes the wheel: nothing scrolls, zooms or
-pinches natively, so a canvas inside a page can zoom on Control + wheel and pan otherwise. A scroll view that listens,
+pinches natively, so a canvas inside a page can zoom on Control + wheel and pan otherwise. A listener whose
+`panActivation` names one axis (`{ activeOffsetX, failOffsetY }`, Rust `PanActivation::horizontal(..)`) takes only the wheels along that
+axis, and Control + wheel: the others reach the scroll views around it, as a horizontal scroll view lets vertical
+wheels scroll the page. A timeline in a vertical page hears horizontal wheels while vertical ones scroll the page. A scroll view that listens,
 or a view around one, only observes: the scroll view still scrolls. One scroll stays where it went, as a scroll
 view's does: a view that took it keeps the rest of it (a touchpad gesture and its momentum, notches while they keep
 coming) even when the pointer leaves it, and a scroll a scroll view has started is never taken over halfway by a
@@ -456,10 +460,12 @@ position in the text.
 
 ### Keyboard focus
 
-On macOS and the web, Tab moves the keyboard focus between its stops in tree order: the inputs, the views that take
-presses, and every `focusable` view. Focus styles (`focus:`, `.focus(..)`) style the focused view, and Return or Space
-presses it when it takes presses. A click presses a view without focusing it, so focus styles show for keyboard focus
-only.
+On macOS, the web and Android, Tab moves the keyboard focus between its stops in tree order: the inputs, the views
+that take presses, and every `focusable` view. Focus styles (`focus:`, `.focus(..)`) style the focused view, and
+Return or Space presses it when it takes presses. A click presses a view without focusing it, so focus styles show
+for keyboard focus only. On Android a pressable view is a hardware-keyboard stop, while a touch-mode tap focuses
+only an explicit `focusable` view (or one a ref focused), so tapping a button leaves a field editing; at the first
+and last stop Tab and Shift+Tab go to the embedding Android host instead of wrapping.
 
 The view the focus reaches scrolls into view in the scroll views and lists around it. Tab walks every row of a list,
 the rows not rendered yet included: the list renders the next row as the focus reaches it, and the focus leaves the

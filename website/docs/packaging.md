@@ -357,7 +357,8 @@ Give one square PNG, ideally 1024×1024, in `nsh.json` (`"icon": "icon.png"`) or
 - **iOS:** compiled by Xcode's `actool` into the app's asset catalog (`Assets.car`), which derives every size iOS
   needs.
 - **Android:** resized to 192×192 and used as the launcher icon (`mipmap-xxxhdpi`).
-- **macOS:** converted by `sips` to `AppIcon.icns`.
+- **macOS:** converted by `sips` to `AppIcon.icns`. `nsh run --target macos` and `nsh test --target macos` show the
+  PNG in the Dock and the app switcher.
 - **Linux:** copied as `<id>.png`, which the `.desktop` file names as its `Icon`.
 - **Windows:** resized to 16 to 64 pixels and 256 pixels and embedded in the executable as its icon, which the window,
   Explorer and the taskbar show, and written beside the bundle as `nsh\icon.ico`, which notifications show. Packaged on

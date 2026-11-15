@@ -33,6 +33,7 @@ const settings = (changes = {}) => ({
 
 /** What the engine sends (`set_environment` in `src/browser/engine.rs`). */
 const engine = (changes = {}) => ({
+  horizontalSizeClass: "compact", verticalSizeClass: "regular",
   window: { width: 390, height: 844 }, safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
   titleBar: { height: 0, left: 0, right: 0 }, keyboard: { height: 0, duration: 250 },
   colorScheme: "light", fontScale: 1, rtl: false, reduceMotion: false, pixelRatio: 2, screenReader: false,
@@ -179,4 +180,18 @@ test("platform.select checks platform.name before platform.os and reads a built-
   assert.equal(env.api.platform.select({ miniprogram: undefined, ios: "i", mobile: "m", default: "d" }), "i");
   assert.equal(env.api.platform.select({ web: "w", mobile: "m", default: "d" }), "m");
   assert.equal(env.api.platform.select({ web: "w", native: "n", default: "d" }), "n");
+});
+
+
+test("size classes follow the engine, with no write for a resize inside one class", () => {
+  const { env, writes } = environment();
+  env.update(engine());
+  assert.equal(env.api.horizontalSizeClass(), "compact");
+  assert.equal(env.api.verticalSizeClass(), "regular");
+  writes.length = 0;
+  env.update(engine({ window: { width: 599, height: 844 } }));
+  assert.deepEqual(writes, [{ width: 599, height: 844 }]);
+  env.update(engine({ window: { width: 844, height: 390 }, horizontalSizeClass: "regular", verticalSizeClass: "compact" }));
+  assert.equal(env.api.horizontalSizeClass(), "regular");
+  assert.equal(env.api.verticalSizeClass(), "compact");
 });

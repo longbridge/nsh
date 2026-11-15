@@ -1900,17 +1900,14 @@ fn draw_into(
         // kept.
         Some(areas) => {
             cx.set_transform(Mat4::new());
-            // Several areas are drawn through a layer (a clip of their
-            // rectangles), and the `Clear` below fills that layer, which is
-            // then blended over the back buffer: a background that is not
-            // opaque (a transparent window's, over its backdrop) would leave
-            // what was there showing under the views drawn again. So each
-            // area of such a window is first cleared on the back buffer
-            // itself, under an axis-aligned clip; an opaque one's layer
-            // covers what was there as it is.
-            if areas.len() > 1 && background.a < 1.0 {
-                clear_areas(dc, areas, &background);
-            }
+            // Each area is first cleared to the background on the back
+            // buffer itself, under an axis-aligned clip, so nothing drawn
+            // there before shows under the views drawn again. A `Clear`
+            // under the layer that clips several areas would only fill that
+            // layer, which is then blended over the back buffer: a
+            // background that is not opaque (a transparent window's, over
+            // its backdrop) would leave what was there showing.
+            clear_areas(dc, areas, &background);
             match areas {
                 [a] => cx.push_clip_rect(a.left, a.top, a.right - a.left, a.bottom - a.top),
                 _ => match rects_geometry(gfx, areas) {
@@ -1923,6 +1920,9 @@ fn draw_into(
                 },
             }
             cx.clip_skip = 1;
+            // SAFETY: a COM call between BeginDraw and EndDraw: clears what
+            // the clip leaves.
+            unsafe { dc.Clear(Some(&background)) };
             cx.damage = Some(areas.to_vec());
             draw_view(&mut cx, &root, Mat4::new(), (0.0, 0.0));
             crate::chrome::draw(surface, hwnd, dc, scale, w);

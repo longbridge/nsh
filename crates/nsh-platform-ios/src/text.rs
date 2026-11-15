@@ -757,14 +757,20 @@ impl CoreTextEngine {
         let string =
             CFMutableAttributedString::new(None, 0).expect("CFAttributedStringCreateMutable");
         let s = Some(&*string);
-        // SAFETY: valid mutable string and range.
-        unsafe {
-            CFMutableAttributedString::replace_string(
-                s,
-                WHOLE,
-                Some(&CFString::from_str(&text.text)),
-            )
+        // CFString's UTF-8 decoder consumes a leading BOM, even when the
+        // input is not an external representation. Keep it as a character:
+        // the spans and attachments count it in their UTF-16 offsets.
+        let content = if text.text.starts_with('\u{feff}') {
+            let utf16: Vec<u16> = text.text.encode_utf16().collect();
+            // SAFETY: a live buffer of exactly `utf16.len()` UTF-16 units;
+            // CFStringCreateWithCharacters copies it.
+            unsafe { CFString::with_characters(None, utf16.as_ptr(), utf16.len() as CFIndex) }
+                .expect("CFStringCreateWithCharacters")
+        } else {
+            CFString::from_str(&text.text)
         };
+        // SAFETY: valid mutable string and range.
+        unsafe { CFMutableAttributedString::replace_string(s, WHOLE, Some(&content)) };
         let length = text.spans.last().map_or(0, |span| span.end as CFIndex);
         CFMutableAttributedString::begin_editing(s);
         let set = |range: CFRange, key: &CFString, value: &CFType| {

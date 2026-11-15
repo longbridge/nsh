@@ -155,15 +155,22 @@ impl Host for Runtime {
                 prop,
                 key,
                 value,
+                func,
             } => self.event(
                 "render",
                 (|| {
-                    Ok(vec![
+                    let mut args = vec![
                         Value::number(host.into()),
                         Value::string(prop)?,
                         Value::string(&key)?,
                         Value(value.render_js(&*self.bindings)?.into_raw().0[0] as u32),
-                    ])
+                    ];
+                    // The function the component holds itself, else none
+                    // (JS calls the prop's).
+                    if let Some(f) = func.and_then(|f| f.value(&*self.bindings)) {
+                        args.push(Value(f.0[0] as u32));
+                    }
+                    Ok(args)
                 })(),
             ),
             // Only for a lazy `<Each>`, which the web's renderer never is
@@ -222,6 +229,8 @@ impl Host for Runtime {
             "fontScale":e.font_scale,"rtl":e.rtl,"reduceMotion":e.reduce_motion,"pixelRatio":e.pixel_ratio,
             "screenReader":e.screen_reader,"locale":e.locale.as_str(),"host":e.host,"lifecycle":e.lifecycle.name(),
             "shaders":e.shaders,"wakeCount":e.wake_count,
+            "horizontalSizeClass":e.horizontal_size_class().name(),
+            "verticalSizeClass":e.vertical_size_class().name(),
             "localeSettings":{
                 "languages":e.locale_settings.languages.iter().map(|l| l.as_str().to_owned()).collect::<Vec<_>>(),
                 "timeZone":e.locale_settings.time_zone.as_str(),

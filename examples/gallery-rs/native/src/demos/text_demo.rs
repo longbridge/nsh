@@ -4,7 +4,7 @@
 //! on a card (as the TSX gallery's `demos/TextDemo.tsx`).
 
 use nsh_core::{
-    element::{EllipsizeMode, WritingDirection},
+    element::{EllipsizeMode, TextSelectionEvent, WritingDirection, desktop::MenuItem},
     prelude::*,
 };
 
@@ -104,6 +104,38 @@ fn links(tapped: Signal<&'static str>) -> Card {
                 .child("."),
         )
         .child(caption("Pressed", Some(move || tapped.get())))
+}
+
+/// A selectable view whose selection menu has the app's own items after
+/// the system's: Highlight and Define say what they were chosen on.
+fn selection_menu() -> Card {
+    let selected = signal(String::new());
+    let chosen = signal(String::from("nothing yet"));
+    let act = move |action: &'static str| {
+        move || chosen.set(format!("{action} \u{201c}{}\u{201d}", selected.get()))
+    };
+    Card::new()
+        .icon(IconName::Text)
+        .title("Selection menu")
+        .subtitle("The app's actions after Copy and Select All")
+        .child(
+            view()
+                .selectable(true)
+                .on_text_selection_change(move |e: &TextSelectionEvent| {
+                    selected.set(e.text.clone())
+                })
+                .selection_menu(vec![
+                    MenuItem::new("Highlight").on_select(act("Highlight")),
+                    MenuItem::separator(),
+                    MenuItem::new("Define").on_select(act("Define")),
+                ])
+                .child(body(LOREM)),
+        )
+        .child(caption(
+            "Select some words, then open the selection menu",
+            None::<&str>,
+        ))
+        .child(caption("Chosen", Some(move || chosen.get())))
 }
 
 /// A sentence with an image, a badge and a button in it counting
@@ -497,6 +529,7 @@ pub(crate) fn TextDemo() -> impl IntoElement {
     let likes = signal(3_u32);
     DemoPage::new()
         .card(move || links(tapped))
+        .card(selection_menu)
         .card(move || inline(likes))
         .card(fonts)
         .card(scaling)

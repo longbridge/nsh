@@ -3677,6 +3677,8 @@ fn insets(env: &Environment) -> EdgeInsets {
 fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element::Environment {
     nsh_core::element::Environment {
         window,
+        horizontal_size_class: env.horizontal_size_class,
+        vertical_size_class: env.vertical_size_class,
         safe_area: insets(env),
         title_bar: env.title_bar,
         window_state: env.window_state,

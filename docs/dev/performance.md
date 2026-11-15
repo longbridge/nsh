@@ -4,6 +4,43 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Batched region cleanup (2026-11-15, macOS arm64, Apple M4 Pro, against `9efc3a2c`): three interleaved before / after
+pairs, a fresh headless CLI process per sample. Both builds use the workspace's development profile with
+`CARGO_PROFILE_DEV_DEBUG=line-tables-only` and incremental compilation disabled. The 200-paragraph reproduction is
+`nsh test examples/bench/RichEditorMount.tsx --trace`, with `await app.wait(150)` on standard input.
+
+| Phase | Before (µs/commit, median) | After (µs/commit, median) | Ops | Mount items | Nodes |
+|---|---:|---:|---:|---:|---:|
+| RichEditor initial population | 3,710,044 | 292,158 | 10 | 2,644 | 1,009 |
+| Counter initial frame | 273 | 281 | 57 | 51 | 21 |
+| Counter press `+1` | 847 | 878 | 10 | 7 | 24 |
+
+Every sample passes and all work counts match. The RichEditor commit includes Rust view expansion, layout and
+mount-batch construction, excluding native input, mounting and drawing. The counter uses the command below and
+establishes unchanged work; three pairs do not establish a timing regression or speedup for its sub-millisecond commits.
+Initial region population skips listener/binding cleanup, and regions that release nodes share one sweep per
+affected view before the next event round. The core regression counts zero initial sweeps for 50–800 bound rows;
+simultaneous removals from 200 / 400 regions scan 1,200 / 2,400 entries in one sweep each.
+
+```sh
+echo 'await app.press("+1"); await app.wait(50)' | nsh test examples/counter/App.tsx --trace
+```
+
+Sibling position classes (`core/classes.rs`, 2026-11-15, Linux x86_64, Intel Core Ultra 7 270K Plus, dev/test profile, `FakeEngine`).
+`positions_changed` counts the element siblings once per pass and restyles only the children whose
+`first:` / `last:` / `odd:` / `even:` / `only:` bits differ from the bits they were last resolved with
+(`position_used`), so appending a row restyles the previous last row and the new one instead of every
+sibling. Mounting N rows with `odd:` + `last:` classes, one insert per row, then one commit:
+
+| Rows | Before (ms) | After (ms) |
+|---|---|---|
+| 500 | 277.0 | 18.6 |
+| 2,000 | 4109.1 | 98.5 |
+
+Mounting is now linear in the row count. Results match a full per-child restyle after every tree edit
+(`positional_regressions`). `examples/bench/PositionalClasses.tsx` (`COUNT`, `CLASSES`, `EACH`) reproduces
+the workload headless with `nsh test --trace`; these Core timings exclude QuickJS and native mounting and drawing.
+
 Cross-platform keyboard integration (2026-11-12, macOS arm64, debug, upstream `9fd11f836` against the core at
 `c46f72f8c`): one fresh process per version running the same counter command below on the same machine.
 
@@ -71,8 +108,9 @@ before / after rounds on one CPU, warmed and batched; medians, input constructio
 | 10,000 | 96.966 → 0.0914 ms | 100.688 → 8.911 ms |
 
 The ordered code spans are consumed with a cursor instead of searched from the start at
-each byte. With streaming repair enabled, the complete 10,000-span parse takes
-544.17 → 453.83 ms; other scans still contribute. A 35,200-byte control of 200 short
+each byte. With streaming repair enabled, the complete 10,000-span parse took
+544.17 → 453.83 ms; the repair's own scans made up the rest, until they got the same
+cursor (Markdown streaming repair, below). A 35,200-byte control of 200 short
 paragraphs takes 74.45 → 79.69 µs in TeX rewriting (about 5 µs more), while its complete
 parse stays around 5.2 ms. Short Markdown and code spans without TeX delimiters have
 unchanged complete-parse timings. These parser measurements exclude layout and drawing.
@@ -83,6 +121,28 @@ version, the same paragraphs in a mounted `TextView`): first-commit medians for 
 16 mount items, with 3,007 / 30,007 nodes respectively. The counter control keeps
 56 ops / 50 items / 21 nodes initially and 10 ops / 7 items / 24 nodes after `+1`;
 commit medians 497 / 379 → 500 / 310 µs, noisy samples establishing stable work counts.
+
+Markdown streaming repair (`text_view/markdown/streaming.rs`, 2026-11-15, Linux x86_64,
+release, against `32f16354`): the paragraph ``"`a` x ".repeat(k)`` and a 600-row table with
+three code spans per row (26,950 bytes), timed in `repair_streaming` alone and in a complete
+parse with `streaming: true` (math enabled, the default). Eleven alternating before / after
+rounds on one CPU, warmed and batched (at least 100 ms a sample); medians, input construction
+excluded:
+
+| Input | `repair_streaming`, before → after | Complete parse, streaming on, before → after |
+|---|---|---|
+| 1,000 spans | 3.893 → 0.0276 ms | 4.738 → 0.833 ms |
+| 5,000 spans | 96.628 → 0.138 ms | 100.681 → 4.154 ms |
+| 10,000 spans | 385.147 → 0.275 ms | 393.600 → 8.908 ms |
+| 600-row table | 26.785 → 0.0947 ms | 37.992 → 10.835 ms |
+
+The repair's TeX, link and closing scans carry a cursor into the ordered code spans instead
+of searching all of them at each byte, so the repair grows with the text, not with the
+square of its spans, and the complete 10,000-span parse is back at its time with streaming
+off (8.911 ms in the entry above). Streaming the table's first 400 rows in 24-byte updates
+(748 parses) takes 4.94 → 1.78 s in all, 6.60 → 2.38 ms an update. A 20,000-byte reply of
+short blocks is unchanged (0.018 ms of repair, 5.65 ms parsed). The repaired text equals the
+old scans' on 400,000 random inputs.
 
 Terminal `TextView` tables (2026-11-08, Linux x86_64, debug hosts,
 `nsh test <entry> --target tui --trace`, against `71aeb06a`, seven alternating runs per version, medians):

@@ -1035,3 +1035,63 @@ fn platform_select_matches_the_platform_name_before_the_os() {
         vec!["ios ios i i m n fallback:1"]
     );
 }
+
+#[test]
+fn size_classes_react_to_resize_and_native_traits_in_js() {
+    use nsh_core::platform::SizeClass;
+    let dir = std::env::temp_dir().join(format!("nsh-size-classes-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("App.tsx");
+    std::fs::write(
+        &entry,
+        r#"
+import { mount, Text, horizontalSizeClass, verticalSizeClass } from "nsh";
+mount(() => <Text>{`${horizontalSizeClass()} ${verticalSizeClass()}`}</Text>);
+"#,
+    )
+    .unwrap();
+    let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry,
+        minify: false,
+        split: false,
+        ..Default::default()
+    })
+    .unwrap();
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut environment = Environment {
+        window: Size::new(px(390.0), px(844.0)),
+        os: Os::Android,
+        ..Default::default()
+    };
+    let config = EngineConfig {
+        viewport: environment.window,
+        environment,
+        ..EngineConfig::new(nsh_engine::App::Js(Bundle::source(bundle.code)))
+    };
+    let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
+    let read =
+        |expected: &str| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while let Ok(batch) = rx.recv_deadline(deadline) {
+                if batch.items.iter().any(
+                    |item| matches!(item, MountItem::Text { text, .. } if text.text == expected),
+                ) {
+                    return;
+                }
+            }
+            panic!("no text {expected:?}");
+        };
+    read("compact regular");
+    environment.window = Size::new(px(600.0), px(599.0));
+    engine.control().set_environment(environment);
+    read("regular compact");
+    environment.os = Os::Ios;
+    environment.horizontal_size_class = Some(SizeClass::Compact);
+    environment.vertical_size_class = Some(SizeClass::Regular);
+    engine.control().set_environment(environment);
+    read("compact regular");
+    environment.horizontal_size_class = None;
+    environment.vertical_size_class = None;
+    engine.control().set_environment(environment);
+    read("regular compact");
+}

@@ -752,9 +752,10 @@ pub(crate) struct Presence {
     /// It is all there (`true`) or all gone (`false`).
     pub(crate) shown: Rc<dyn Fn(bool)>,
     /// The desktops: it closed and starts to go (a popup that was made);
-    /// the keyboard focus goes where the component puts it (its trigger,
-    /// unless what closed it took the focus elsewhere).
-    pub(crate) back: Rc<dyn Fn()>,
+    /// the keyboard focus goes from the popup it is given where the
+    /// component puts it (its trigger, unless what closed it took the
+    /// focus elsewhere: [`ElementRef::focus_back`]).
+    pub(crate) back: Rc<dyn Fn(ElementRef)>,
 }
 
 /// A dropdown while it is open (`Select`'s list, `DatePicker`'s calendar):
@@ -823,7 +824,7 @@ pub(crate) fn dropdown(
                     made.replace(true);
                 }
             } else if made.replace(false) {
-                untracked(|| back());
+                untracked(|| back(popup.popup()));
             }
         });
     }

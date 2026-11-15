@@ -644,6 +644,10 @@ A listener made in an effect lasts until the effect runs again or its component 
 
 A tab bar is your own UI, drawn from primitives: a row of pressable views and a signal holding the selected tab; render the selected tab's content with [`when` / `<If>`](../elements/control-flow.md) (or a function child in TSX). To keep each tab's state while switching, give each tab its own stack and routes and keep all of them mounted, hiding the inactive ones with `display: none`.
 
+Columns of stacks, a sidebar beside a list and its detail as in Mail or Settings on iPad, are a
+[`SplitView`](../elements/split-view.md): each column is a `NavStack` of its own, a `UISplitViewController` on iOS
+and iPadOS, and where the window is compact one column shows at a time.
+
 ## Related
 
 - [`nsh/base`](../modules/nsh-base.md): the `nav_stack`, `nav_page`, `dialog`, `createNavStack`, `NavStack`, `NavPage` and `Dialog` reference; [Safe area](../elements/safe-area.md) for the insets.

@@ -438,7 +438,7 @@ fn report(
 /// or unparented: GTK would hand it to the parent, which (not focusable)
 /// gives it to its first focusable descendant, the field of another
 /// screen (selecting all its text).
-fn drop_focus(widget: &impl IsA<gtk::Widget>) {
+pub(crate) fn drop_focus(widget: &impl IsA<gtk::Widget>) {
     let widget = widget.as_ref();
     if let Some(root) = widget.root()
         && root

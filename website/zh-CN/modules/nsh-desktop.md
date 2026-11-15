@@ -420,8 +420,33 @@ async function changeLanguage(language: string) {
 项和平台的退出快捷键（Cmd+Q、Ctrl+Q）会立即退出。需要先询问用户的应用（有未保存的修改、正在上传）用
 `Application.on("quitRequest", listener)`（Rust：`on_quit_request`）监听它，与 AppKit 的 `applicationShouldTerminate:`
 相同：此后「退出」项、退出快捷键和 Dock 的「退出」都交给 listener，应用不会退出；应用询问之后调用 `quit()`，`quit()`
-总会退出。最后一个 listener 停止后，「退出」项和快捷键恢复立即退出。系统结束应用（用户注销、关机）时不会询问。
+总会退出。最后一个 listener 停止后，「退出」项和快捷键恢复立即退出。默认情况下，系统结束应用（用户注销、关机）时会先执行清理，再退出。
 它适用于 macOS、Windows 和 Linux 的独立应用；拥有窗口的 GPUI 应用以 `CloseRequest::Quit` 收到这个请求。
+
+macOS 独立应用可以让系统退出请求和主窗口关闭使用同一个确认流程：
+
+```tsx
+Application.setQuitRequestOptions({ system: true, mainWindowClose: true });
+Application.on("quitRequest", async () => {
+  if (await confirmSaveAndQuit()) Application.quit();
+  else Application.cancelQuitRequest();
+});
+```
+
+两个选项都默认为 `false`，每次调用 `setQuitRequestOptions` 都会替换它们。Rust 使用
+`nsh_core::element::desktop` 的 `set_quit_request_options(QuitRequestOptions)` 和 `cancel_quit_request()`，
+`QuitRequestOptions` 位于 `nsh_core::desktop`。这些选项在注册了退出请求 listener 时生效。
+Rust 调用方可以用 `QuitRequestOptions::default().system(true).main_window_close(true)` 构造选项。
+替换应用时会取消其待处理的确认，并将选项恢复为默认值。
+
+`system: true` 让注销、重新启动和关机等待应用的答复。`quit()` 会先运行应用的清理，再由 AppKit 结束进程。
+Rust 宿主把这类清理放在 `on_app_quit` 中，而不是 `run_app` 返回之后。`cancelQuitRequest()` 会取消系统请求，
+让应用继续运行。未答复的系统请求会在 110 秒后取消，早于 AppKit 的注销超时。移除最后一个 listener 或更改选项也会取消待处理的请求。
+
+`mainWindowClose: true` 让用户关闭主窗口时，在该关闭会结束应用的情况下询问退出 listener。
+配置为关闭后继续运行的窗口仍会隐藏。设置了 `closeOnPress: false` 的窗口仍使用 `closePress`，因此一次关闭只使用一个确认 handler。
+此处遵循独立运行器原有的退出规则，以主窗口关闭为准，而不是统计全部窗口。显式调用 `WindowRef.close()` 保持原有行为。
+确认尚未答复时，重复的退出请求或符合上述条件的主窗口关闭请求共用该确认。如果此时收到系统退出请求，同一个答复也会批准或取消系统请求。
 
 在 Web 上，用户离开页面（关闭标签页、刷新、前往其他网站）就是退出请求：它在用户离开时交给 listener，所以下面的示例在
 Web 上原样可用。listener 立即调用 `quit()` 时，页面直接离开，不会询问。先询问的 listener（这里是 `askToSave()`）让浏览器

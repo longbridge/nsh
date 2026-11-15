@@ -274,6 +274,11 @@ pub(crate) fn create(
         )?
     };
     surface.set_hwnd(hwnd);
+    if transparent && parent.is_none() {
+        // SetWindowPos can synchronously paint through WM_SIZE. Composition
+        // must exist before that first frame chooses its swap chain.
+        *surface.base.borrow_mut() = Some(crate::compose::Composition::new(hwnd)?);
+    }
     if let Some(window) = self::data(hwnd) {
         if parent.is_some() {
             window.root.set(observe_root(hwnd));
