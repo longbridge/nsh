@@ -1792,16 +1792,32 @@ panic = \"abort\"
         if let Some(root) = &self.root {
             self.write_rust_runners(ws, root)?;
         }
+        // Its features forward to the platform crate's, with no crate's
+        // defaults, so `nsh package` can build the release library with
+        // only those the app uses ([`runner_feature_args`]); by default,
+        // and for development (`dev`), all of them.
+        let all = runner_features("nsh-platform-android");
+        let forward: String = all
+            .iter()
+            .map(|f| format!("{f} = [\"nsh-platform-android/{f}\"]\n"))
+            .collect();
+        let default = all
+            .iter()
+            .map(|f| format!("{f:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let off = ", default-features = false";
         write(
             &ws.join("android/Cargo.toml"),
             &format!(
-                "{}\n[lib]\nname = {:?}\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n[features]\ndev = [\"nsh-platform-android/dev\"]\n\n\
+                "{}\n[lib]\nname = {:?}\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n\
+                 [features]\ndefault = [{default}]\ndev = [\"nsh-platform-android/dev\"]\n{forward}\n\
                  [dependencies]\nnsh-core = {}\nnsh-platform-android = {}\nnsh-base = {}\n{app}\n",
                 package("android"),
                 self.android_lib(false),
                 src("nsh-core"),
-                src("nsh-platform-android"),
-                self.nsh.dep("nsh-base", HIGHLIGHT),
+                self.nsh.dep("nsh-platform-android", off),
+                self.nsh.dep("nsh-base", off),
             ),
         )?;
         write(&ws.join("android/build.rs"), ANDROID_BUILD_RS)?;
@@ -2998,10 +3014,18 @@ opt-level = \"s\"
             };
             // A Rust app's library has no development support (it has no
             // JS to reload): `nsh run` builds it in debug.
+            // A TSX app's release library has only the features `nsh package`
+            // chose ([`set_runner_features`]).
+            let trimmed = if !dev && !rust {
+                runner_feature_args("nsh-platform-android")
+            } else {
+                Vec::new()
+            };
+            let trimmed: Vec<&str> = trimmed.iter().map(String::as_str).collect();
             let features: &[&str] = if dev && !rust {
                 &["--features", "dev"]
             } else {
-                &[]
+                &trimmed
             };
             let package = self.bin(if rust { "rust-android" } else { "android" });
             let artifact = format!("lib{}.so", self.android_lib(rust));
@@ -3013,7 +3037,11 @@ opt-level = \"s\"
                 profile: None,
                 extra: features,
                 artifact: &artifact,
-                what: &format!("libnsh.so of {} for {abi}", self.packages()),
+                what: &match self.packages() {
+                    // A TSX app's own library (`runner_only`) has no crates.
+                    p if p.is_empty() => format!("libnsh.so for {abi}"),
+                    p => format!("libnsh.so of {p} for {abi}"),
+                },
             };
             let lib = self.build_with(sdk.ndk_cargo(triple)?, &build)?;
             let dir = out.join("lib").join(&abi);
@@ -3499,6 +3527,11 @@ mod tests {
         assert_eq!(
             super::runner_feature_args("nsh-platform-linux")[2],
             "js,plot,webview,svg,net,sound"
+        );
+        // Android: a TSX app's own library, trimmed the same way.
+        assert_eq!(
+            super::runner_feature_args("nsh-platform-android")[2],
+            "js,plot,svg"
         );
         *super::RUNNER_FEATURES.lock().unwrap() = None;
     }
@@ -4095,6 +4128,12 @@ mod tests {
         let android = read("rust-android/lib.rs");
         assert!(android.contains("nsh::main!(app_root());"), "{android}");
         assert!(read("rust-android/Cargo.toml").contains("default-features = false"));
+        // A TSX app's Android library names its features itself: all by
+        // default, so `nsh package` can turn off those it does not use.
+        let lib = read("android/Cargo.toml");
+        assert_eq!(lib.matches("default-features = false").count(), 2, "{lib}");
+        assert!(lib.contains("plot = [\"nsh-platform-android/plot\"]"), "{lib}");
+        assert!(lib.contains("default = [\"js\", \"shader\""), "{lib}");
         let web = read("rust-web/lib.rs");
         // Only `nsh/base`'s core part: the root makes the components it uses
         // by type, so the module links those and no others.
