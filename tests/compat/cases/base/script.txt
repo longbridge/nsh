@@ -4463,6 +4463,30 @@ covers [nsh/base] createRichEditor
 covers [nsh/base] defineExtension
 covers [nsh/base] richExtension
 
+# base-rich-editor-node-view
+tap id:case-base-rich-editor-node-view
+# The app's component renders the atom with its props, once.
+expect Ticker IBM
+expect NodeViewFacts: true true ticker NYSE ticker true
+expect NodeViewMounts: 1 tickers 1 pos none content refused
+# An edit before it moves it: its position follows, its component is not called again.
+tap text:TypeBeforeTicker
+tap text:ReadTickerPos
+expect NodeViewMounts: 1 tickers 1 pos 8 content refused
+# updateAttributes and a node selection change its props in place.
+tap id:ticker
+expect Ticker IBMX
+tap text:SelectTicker
+expect Ticker IBMX selected
+expect NodeViewMounts: 1 tickers 1 pos 8 content refused
+# deleteNode is one undoable change.
+tap text:DeleteTicker
+expect NodeViewMounts: 1 tickers 0 pos 8 content refused
+absent Ticker IBMX selected
+tap text:UndoTicker
+expect Ticker IBMX selected
+covers [nsh/base] RichNodeViewProps
+
 # base-rich-editor-view
 tap id:case-base-rich-editor-view
 expect BubbleMenu

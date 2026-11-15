@@ -36,3 +36,11 @@ echo 'for (let i = 0; i < 8; i++) await app.press("id:edit");' | nsh test exampl
 
 Compare the final four edits after four warmups. Headless runs keep the complete document mounted; the trace
 includes selection geometry as well as the changed text. Results: `docs/dev/performance.md`.
+
+`RichEditorNodeViews.tsx` holds one paragraph with 300 inline stock tags, each rendered by the app's component
+(`addNodeView`). Each press inserts or removes one character before them: every tag moves, none of their values
+changes, so no JS runs for them (a runtime without `addNodeView` draws them as plain atoms):
+
+```sh
+echo 'for (let i = 0; i < 8; i++) await app.press("id:edit");' | nsh test examples/bench/RichEditorNodeViews.tsx --trace
+```

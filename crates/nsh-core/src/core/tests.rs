@@ -118,6 +118,7 @@ fn js_events<M: TextEngine>(c: &mut Core<M>) -> Vec<(NodeId, EventKind, EventPay
                     prop,
                     key,
                     value,
+                    ..
                 } => native(
                     host,
                     "$render",

@@ -155,15 +155,22 @@ impl Host for Runtime {
                 prop,
                 key,
                 value,
+                func,
             } => self.event(
                 "render",
                 (|| {
-                    Ok(vec![
+                    let mut args = vec![
                         Value::number(host.into()),
                         Value::string(prop)?,
                         Value::string(&key)?,
                         Value(value.render_js(&*self.bindings)?.into_raw().0[0] as u32),
-                    ])
+                    ];
+                    // The function the component holds itself, else none
+                    // (JS calls the prop's).
+                    if let Some(f) = func.and_then(|f| f.value(&*self.bindings)) {
+                        args.push(Value(f.0[0] as u32));
+                    }
+                    Ok(args)
                 })(),
             ),
             // Only for a lazy `<Each>`, which the web's renderer never is
