@@ -595,8 +595,9 @@ rows, column headers and cells. Every part takes the app's look. See [Table](../
 ### DataTable
 
 `DataTable` shows rows and columns and scrolls both ways over any number of either, making only the cells in view. Rows,
-columns or cells select; columns resize, move, stay fixed and sort (the app sorts); the app serves rows a page at a time
-and can draw cells and titles. See [DataTable](../elements/data-table.md).
+columns or cells select, and an app can keep its own selection of several cells or columns (`selectOnModifierPress`,
+`onRowPress`, `onColumnPress`, `cellClasses`). Columns resize, move, stay fixed and sort (the app sorts); the app serves
+rows a page at a time and can draw cells and titles. See [DataTable](../elements/data-table.md).
 
 ## Navigation
 

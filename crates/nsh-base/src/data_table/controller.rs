@@ -12,9 +12,9 @@ use nsh_core::{
 };
 
 use super::{
-    DataTableColumn, DataTableContextMenu, DataTableDump, DataTableEvent, DataTablePress,
-    DataTableProps, DataTableRange, DataTableSelection, DataTableSort, DataTableSortDirection,
-    DataTableTarget,
+    DataTableColumn, DataTableColumnPress, DataTableContextMenu, DataTableDump, DataTableEvent,
+    DataTablePress, DataTableProps, DataTableRange, DataTableSelection, DataTableSort,
+    DataTableSortDirection, DataTableTarget,
     axis::{Anchor, Axis},
     columns::{Columns, Spec},
     selection::{self, Move, Nav, Selectable, Selection},
@@ -384,6 +384,18 @@ impl Dt {
         self.props
             .row_classes
             .with(|c| c.get(at).filter(|c| !c.is_empty()).cloned())
+    }
+
+    /// The class `cellClasses` gives the cell of data row `row` in column
+    /// `def` (tracked). The list is the app's, and only cells on screen ask.
+    pub(crate) fn cell_class(&self, row: usize, def: usize) -> Option<SharedString> {
+        let row = u32::try_from(row).ok()?;
+        let def = u32::try_from(def).ok()?;
+        self.props.cell_classes.with(|list| {
+            list.iter()
+                .find(|c| c.row == row && c.column == def && !c.class.is_empty())
+                .map(|c| c.class.clone())
+        })
     }
 
     /// Whether the cell holds a rise or a fall (tracked).
@@ -1125,8 +1137,8 @@ impl Dt {
         }
     }
 
-    /// Whether a press with `modifiers` held selects a row
-    /// (`selectOnModifierPress`).
+    /// Whether a press with `modifiers` held selects (`selectOnModifierPress`):
+    /// a row, a cell or a title.
     fn selects_on(&self, modifiers: Modifiers) -> bool {
         let secondary = if matches!(os(), Os::Ios | Os::MacOs) {
             modifiers.cmd
@@ -1139,8 +1151,8 @@ impl Dt {
     /// What a press selects, as gpui-component's table: a cell when cells
     /// select (the selected cell again, without a row header, its row); a
     /// row when rows select, of a press of its row header or of a row whose
-    /// cells do not select; with Shift or the secondary modifier only when
-    /// `selectOnModifierPress`.
+    /// cells do not select. Shift or the secondary modifier selects only
+    /// when `selectOnModifierPress`; the press is reported either way.
     fn press_hit(&self, hit: Hit, clicks: u32, modifiers: Modifiers) {
         self.set_focus(true);
         self.st.borrow_mut().active = None;
@@ -1154,6 +1166,8 @@ impl Dt {
         let next = match cell {
             // A cell of a column that does not select: nothing.
             Some(c) if !self.selectable(c) => None,
+            // Shift or the secondary modifier, left for the app.
+            Some(_) if !self.selects_on(modifiers) => None,
             Some(c) => {
                 let again = self.st.borrow().selection == Selection::Cell(row, c);
                 let escalate = !untracked(|| self.row_header_shown())
@@ -1249,12 +1263,26 @@ impl Dt {
     }
 
     /// A title was pressed: it selects its column when columns select and
-    /// the column does (sorting is the sort button's).
-    pub(crate) fn header_press(&self, def: usize, clicks: u32) {
+    /// the column does, and the press carries no modifier the app kept
+    /// (`selectOnModifierPress`). Sorting is the sort button's. The press
+    /// is reported either way (`onColumnPress`).
+    pub(crate) fn header_press(&self, def: usize, clicks: u32, modifiers: Modifiers) {
         self.set_focus(true);
-        if self.props.column_selectable.get_untracked() && self.selectable(def) {
+        if self.props.column_selectable.get_untracked()
+            && self.selectable(def)
+            && self.selects_on(modifiers)
+        {
             self.set_selection(Selection::Column(def), true);
         }
+        self.cx
+            .emit(DataTableEvent::ColumnPress(DataTableColumnPress {
+                column: def as u32,
+                clicks,
+                shift: modifiers.shift,
+                control: modifiers.ctrl,
+                alt: modifiers.alt,
+                platform: modifiers.cmd,
+            }));
         if clicks == 2 {
             self.cx.emit(DataTableEvent::DoublePress(DataTableTarget {
                 row: None,
