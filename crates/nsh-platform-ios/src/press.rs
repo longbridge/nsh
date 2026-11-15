@@ -18,8 +18,8 @@ use objc2::{
 use objc2_core_foundation::CGPoint;
 use objc2_foundation::{NSObject, NSObjectProtocol, NSSet};
 use objc2_ui_kit::{
-    UIControl, UIEvent, UIGestureRecognizer, UIGestureRecognizerState, UIScrollView,
-    UITapGestureRecognizer, UITouch, UIView, UIWindow,
+    UIControl, UIEvent, UIGestureRecognizer, UIGestureRecognizerState, UINavigationBar,
+    UIScrollView, UITapGestureRecognizer, UITouch, UIView, UIWindow,
 };
 
 use crate::{target::EventTarget, text_view::TextView};
@@ -199,12 +199,13 @@ define_class!(
 
         #[unsafe(method(canBePreventedByGestureRecognizer:))]
         fn can_be_prevented(&self, other: &UIGestureRecognizer) -> bool {
-            // Taps UIKit attaches to the window skip `UIControl`s, and a
-            // press stands in for one: on iOS 26+ the window's top-edge tap
-            // interaction (`_UIDoubleTapInteraction`, top 64 pt, cancels
+            // Taps UIKit attaches to the window and the navigation bar skip
+            // `UIControl`s, and a press stands in for one: on iOS 26+ their
+            // top-edge tap interaction (`_UIDoubleTapInteraction`, cancels
             // touches, never simultaneous) would otherwise swallow every
-            // press near the top, such as a navigation bar's back button.
-            !is_window_tap(other)
+            // press near the top, such as a navigation bar's back button or
+            // a view the app put in the header.
+            !is_system_tap(other)
         }
 
         #[unsafe(method(canPreventGestureRecognizer:))]
@@ -409,14 +410,15 @@ impl PressRecognizer {
     }
 }
 
-/// A tap recognizer UIKit attaches to a window (the top-edge tap
-/// interaction, keyboard dismissal): it ignores controls, so it must not
-/// prevent a press either. Edge-gesture gates are not taps and still do.
-fn is_window_tap(recognizer: &UIGestureRecognizer) -> bool {
+/// A tap recognizer UIKit attaches to a window or a navigation bar (the
+/// top-edge tap interaction, keyboard dismissal): it ignores controls, so it
+/// must not prevent a press either. Edge-gesture gates are not taps and
+/// still do.
+fn is_system_tap(recognizer: &UIGestureRecognizer) -> bool {
     recognizer.isKindOfClass(UITapGestureRecognizer::class())
-        && recognizer
-            .view()
-            .is_some_and(|view| view.isKindOfClass(UIWindow::class()))
+        && recognizer.view().is_some_and(|view| {
+            view.isKindOfClass(UIWindow::class()) || view.isKindOfClass(UINavigationBar::class())
+        })
 }
 
 fn inside_scroll_view(view: &UIView) -> bool {

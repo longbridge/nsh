@@ -279,8 +279,10 @@ Things that were found the hard way. Read the section of the area you change bef
   press is a gesture recognizer, not a control. On iOS 26+ the window's `_UIDoubleTapInteraction` (a single-tap
   recognizer over the top 64 pt, `cancelsTouchesInView`, never simultaneous, action disabled) recognized first and
   prevented every press there, so a navigation bar's back button did nothing (seen on an iPhone foldable simulator; a
-  real tap through XCUITest reproduced it). `PressRecognizer` is not preventable by tap recognizers on a `UIWindow`
-  (`press.rs`, `is_window_tap`); edge-gesture gates are not taps and still cancel presses.
+  real tap through XCUITest reproduced it). The navigation bar has one of its own (iOS 27 simulator): it prevented
+  every press of the views an app puts in the header's slots, which the bar wraps in custom bar button items.
+  `PressRecognizer` is not preventable by tap recognizers on a `UIWindow` or a `UINavigationBar` (`press.rs`,
+  `is_system_tap`); edge-gesture gates are not taps and still cancel presses.
 - **iOS, a tap recognizer on a view around pressables**: a `UITapGestureRecognizer` recognizes on release, where a
   press ends too, and prevents the `PressRecognizer`s of the views inside its view: `cancelsTouchesInView = false`
   leaves the views their touches, not the other recognizers their turn. The tap that focuses a `focusable` view
