@@ -119,6 +119,22 @@ impl SelectionTexts for AreaTexts {
         e.view.closest_offset(local) as u32
     }
 
+    fn range_bounds(&self, i: usize, range: std::ops::Range<u32>) -> Option<Bounds<Points>> {
+        let e = self.entries.get(i)?;
+        let area = self.area.as_ref()?;
+        e.view
+            .range_rects(range.start as usize, range.end as usize)
+            .into_iter()
+            .map(|(rect, ..)| {
+                let r = e.view.convertRect_toView(rect, Some(area));
+                bounds(
+                    pt(r.origin),
+                    size(px(r.size.width as f32), px(r.size.height as f32)),
+                )
+            })
+            .reduce(|a, b| a.union(&b))
+    }
+
     fn key(&self, i: usize) -> u64 {
         // The text's node id.
         self.entries[i].view.tag() as u64
@@ -246,6 +262,16 @@ fn faded(color: Color, alpha: f64) -> Color {
     Color((color.0 & !0xff) | a.round().clamp(0.0, 255.0) as u32)
 }
 
+/// The last callback's selection and its position, including ancestor scrolling.
+#[derive(Clone, Default, PartialEq)]
+struct Selected {
+    text: String,
+    start: u32,
+    bounds: Option<Bounds<Points>>,
+    /// Only for change detection; the core computes the callback's page bounds.
+    origin: Point<Points>,
+}
+
 #[derive(Default)]
 pub(crate) struct AreaIvars {
     model: RefCell<SelectionModel>,
@@ -275,8 +301,8 @@ pub(crate) struct AreaIvars {
     id: Cell<NodeId>,
     /// JS listens to the area's `onSelectionChange`.
     listens: Cell<bool>,
-    /// The selected text last reported to `onSelectionChange`.
-    reported: RefCell<String>,
+    /// The selection last reported to `onSelectionChange`.
+    reported: RefCell<Selected>,
 }
 
 define_class!(
@@ -688,6 +714,7 @@ impl AreaResponder {
         if !self.ivars().model.borrow().is_empty() {
             self.refresh_texts();
             self.place_handles();
+            self.report();
         }
     }
 
@@ -865,34 +892,45 @@ impl AreaResponder {
     }
 
     /// Reports the selected text (`""` once nothing is) to the area's
-    /// `onSelectionChange` when it changed and JS listens.
+    /// `onSelectionChange` when it or its position changed and JS listens.
     fn report(&self) {
         if !self.ivars().listens.get() {
             return;
         }
-        let (text, start) = {
+        let selected = {
             let model = self.ivars().model.borrow();
             if model.is_empty() {
-                (String::new(), 0)
+                Selected::default()
             } else {
                 let texts = self.ivars().texts.borrow();
-                (model.text(&*texts), model.start_offset(&*texts))
+                Selected {
+                    text: model.text(&*texts),
+                    start: model.start_offset(&*texts),
+                    bounds: model.selected_bounds(&*texts),
+                    origin: texts.area.as_ref().map_or(Point::default(), |area| {
+                        pt(area.convertPoint_toView(CGPoint::ZERO, None))
+                    }),
+                }
             }
         };
-        if *self.ivars().reported.borrow() == text {
+        if *self.ivars().reported.borrow() == selected {
             return;
         }
-        *self.ivars().reported.borrow_mut() = text.clone();
+        self.ivars().reported.borrow_mut().clone_from(&selected);
+        let mut fields = vec![
+            ("text", PayloadValue::Str(selected.text)),
+            ("start", PayloadValue::Number(f64::from(selected.start))),
+        ];
+        if let Some(bounds) = selected.bounds {
+            fields.push(("bounds", PayloadValue::Bounds(bounds)));
+        }
         // Not borrowed while the handler runs: it may detach the area.
         let control = self.ivars().control.borrow().clone();
         if let Some(control) = control {
             control.dispatch_event(
                 self.ivars().id.get(),
                 EventKind::SelectionChange,
-                EventPayload::Map(vec![
-                    ("text", PayloadValue::Str(text)),
-                    ("start", PayloadValue::Number(f64::from(start))),
-                ]),
+                EventPayload::Map(fields),
             );
         }
     }
