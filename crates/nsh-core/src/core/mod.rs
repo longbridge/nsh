@@ -1821,6 +1821,8 @@ impl<M: TextEngine> Core<M> {
     /// `restoreBounds` its placement is kept from then on as the platform
     /// reports it (the environment's window state), for the next launch
     /// to open it there ([`crate::desktop::MainWindowOptions::kept_placement`]).
+    /// Set it after the environment ([`Core::set_environment`]): a surface
+    /// without a window, a phone's, takes no attributes.
     pub fn set_main_window(&mut self, options: &crate::desktop::MainWindowOptions) {
         self.keep_main_placement = options.restore_bounds;
         self.main_shown |= options.visible_at_launch();
@@ -2739,6 +2741,9 @@ impl<M: TextEngine> Core<M> {
             window::{WindowRecord, placement_key},
         };
         match command {
+            DesktopCommand::SetAttributes(_) if !self.has_window() => {
+                log::debug!("window attributes of view {id}: the surface has no window");
+            }
             DesktopCommand::SetAttributes(mut attributes) => {
                 attributes.sanitize();
                 let denied = self.access.deny_window_attributes(&mut attributes);
@@ -2933,6 +2938,16 @@ impl<M: TextEngine> Core<M> {
             k = n.parent;
         }
         crate::ROOT_ID
+    }
+
+    /// The surface is in a window whose attributes its platform applies: a
+    /// desktop's (the OSes `nsh/desktop`'s `isAvailable` answers for), or
+    /// a browser's page, whose title is the main window's. A mobile surface
+    /// is a view in its app's screen: window attributes have nothing to
+    /// apply to there, so none are kept or sent.
+    fn has_window(&self) -> bool {
+        let os = self.components.environment.os;
+        os.is_desktop() || os == crate::platform::Os::Web
     }
 
     /// Keeps the placement of window `id` (its root node) a platform

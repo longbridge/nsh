@@ -982,12 +982,13 @@ fn components_turn_the_performance_monitor_on_and_follow_it() {
 
 /// A Rust app's `nsh.json` `"window"` (its root's, as the generated code
 /// sets it) reaches the main window as a TSX app's bundle's does: its
-/// attributes with the first frame, the options for the runners.
+/// attributes with the first frame, the options for the runners. A phone's
+/// surface has no window: nothing is sent there.
 #[test]
 fn a_rust_apps_main_window_takes_its_launch_options() {
     use nsh_core::desktop::DesktopCommand;
     let root = Root::of::<Label>().main_window_json(
-        r#"{"title":"Notes","defaultSize":{"width":900,"height":600},"restoreBounds":true}"#,
+        r#"{"title":"Notes","titleBar":{"style":"hidden","height":40},"defaultSize":{"width":900,"height":600},"restoreBounds":true}"#,
     );
     let options = root
         .main_window_ref()
@@ -995,32 +996,37 @@ fn a_rust_apps_main_window_takes_its_launch_options() {
         .expect("the window's options");
     assert_eq!(options.attributes.title.as_deref(), Some("Notes"));
     assert!(options.restore_bounds);
-    let config = EngineConfig {
-        environment: Environment {
-            os: Os::MacOs,
-            idiom: Idiom::Desktop,
-            ..Environment::default()
-        },
-        ..config(App::Rust(root))
-    };
-    // What the runners read before they make the window.
-    assert_eq!(config.app.main_window(), Some(&options));
-    let (tx, rx) = crossbeam_channel::unbounded();
-    let _engine = Engine::start(
-        config,
-        || ApproxTextEngine,
-        FrameSink {
-            batches: tx,
-            frames: Arc::default(),
-        },
-    )
-    .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let mut set = None;
-    while set.is_none()
-        && let Ok(batch) = rx.recv_deadline(deadline)
-    {
-        set = batch.items.into_iter().find_map(|item| match item {
+    for (os, idiom) in [
+        (Os::MacOs, Idiom::Desktop),
+        (Os::Web, Idiom::Desktop),
+        (Os::Ios, Idiom::Phone),
+        (Os::Android, Idiom::Phone),
+    ] {
+        let config = EngineConfig {
+            environment: Environment {
+                os,
+                idiom,
+                ..Environment::default()
+            },
+            ..config(App::Rust(root.clone()))
+        };
+        // What the runners read before they make the window.
+        assert_eq!(config.app.main_window(), Some(&options));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let _engine = Engine::start(
+            config,
+            || ApproxTextEngine,
+            FrameSink {
+                batches: tx,
+                frames: Arc::default(),
+            },
+        )
+        .unwrap();
+        // The first frame: the label, and the attributes where they go.
+        let batch = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the first frame");
+        let set = batch.items.into_iter().find_map(|item| match item {
             MountItem::Command {
                 id: ROOT_ID,
                 command: Command::Desktop(command),
@@ -1030,7 +1036,11 @@ fn a_rust_apps_main_window_takes_its_launch_options() {
             },
             _ => None,
         });
+        if os.is_desktop() || os == Os::Web {
+            let set = set.unwrap_or_else(|| panic!("{os:?}: the main window's attributes"));
+            assert_eq!(set.title.as_deref(), Some("Notes"), "{os:?}");
+        } else {
+            assert_eq!(set, None, "{os:?}");
+        }
     }
-    let set = set.expect("the main window's attributes");
-    assert_eq!(set.title.as_deref(), Some("Notes"));
 }
