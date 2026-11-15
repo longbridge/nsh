@@ -764,3 +764,13 @@ next `reload()`, `load()` or new source shows a page again. Android's `WebBox` h
 `onRenderProcessGone` and makes a new WebView for it; the WebKit backends reload the
 same web view.
 
+
+
+### Size classes
+
+`horizontal_size_class()` and `vertical_size_class()` (`horizontalSizeClass()` and
+`verticalSizeClass()` in TS) report `SizeClass::Compact` / `Regular` through the
+existing environment signals. iOS supplies the surface's UIKit traits; unspecified
+traits and other platforms classify the corresponding window dimension at 600pt.
+Each axis notifies readers only when its class changes. The gallery's System demo
+shows both values while resizing or rotating.

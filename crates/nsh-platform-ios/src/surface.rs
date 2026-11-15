@@ -384,15 +384,28 @@ impl RootView {
         let insets = self.safeAreaInsets();
         let (keyboard_height, keyboard_duration) = self.ivars().keyboard.get();
         // SAFETY: plain getters.
-        let (style, body, scale) = unsafe {
+        let (style, body, scale, horizontal, vertical) = unsafe {
             let traits = self.traitCollection();
             (
                 traits.userInterfaceStyle(),
                 UIFont::preferredFontForTextStyle(UIFontTextStyleBody).pointSize(),
                 traits.displayScale(),
+                traits.horizontalSizeClass(),
+                traits.verticalSizeClass(),
             )
         };
+        let size_class = |value| match value {
+            objc2_ui_kit::UIUserInterfaceSizeClass::Compact => {
+                Some(nsh_core::platform::SizeClass::Compact)
+            }
+            objc2_ui_kit::UIUserInterfaceSizeClass::Regular => {
+                Some(nsh_core::platform::SizeClass::Regular)
+            }
+            _ => None,
+        };
         let mut env = Environment {
+            horizontal_size_class: size_class(horizontal),
+            vertical_size_class: size_class(vertical),
             window: Size::new(Points(size.width as f32), Points(size.height as f32)),
             safe_area: Edges {
                 top: Points(insets.top as f32),

@@ -20,3 +20,11 @@ test("the safe area is the test's", async () => {
   expect(after(app.texts(), "Top")).toBe("47");
   expect(after(app.texts(), "Bottom")).toBe("34");
 });
+
+test("size classes use each window dimension", async () => {
+  const app = await open("../App.tsx", { width: 599, height: 600 });
+  await app.press("role:button[System]");
+  await app.waitFor("Size classes");
+  expect(after(app.texts(), "Horizontal")).toBe("Compact");
+  expect(after(app.texts(), "Vertical")).toBe("Regular");
+});

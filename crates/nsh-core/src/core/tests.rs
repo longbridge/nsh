@@ -20841,6 +20841,52 @@ mod views {
     }
 
     thread_local! {
+        static SIZE_CLASS_RUNS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    #[component]
+    fn SizeClasses() -> impl IntoElement {
+        effect(move || {
+            horizontal_size_class();
+            SIZE_CLASS_RUNS.with(|n| n.set(n.get() + 1));
+        });
+        text(move || format!("{:?} {:?}", horizontal_size_class(), vertical_size_class()))
+    }
+
+    #[test]
+    fn size_classes_follow_each_axis_and_native_traits_without_redundant_notifications() {
+        SIZE_CLASS_RUNS.with(|n| n.set(0));
+        let mut c = core();
+        let mut environment = crate::element::Environment {
+            window: crate::geometry::size_pt(390.0, 844.0),
+            ..Default::default()
+        };
+        c.set_environment(environment);
+        c.mount_root(&Root::new::<SizeClasses>(|| ()));
+        assert_eq!(texts(&c.commit().unwrap()), ["Compact Regular"]);
+        environment.window.width = px(599.0);
+        c.set_environment(environment);
+        c.commit();
+        assert_eq!(SIZE_CLASS_RUNS.with(Cell::get), 1);
+        environment.window = crate::geometry::size_pt(600.0, 599.0);
+        c.set_environment(environment);
+        assert_eq!(texts(&c.commit().unwrap()), ["Regular Compact"]);
+        assert_eq!(SIZE_CLASS_RUNS.with(Cell::get), 2);
+        // UIKit's classes win even when the size would classify differently.
+        environment.horizontal_size_class = Some(SizeClass::Compact);
+        environment.vertical_size_class = Some(SizeClass::Regular);
+        c.set_environment(environment);
+        assert_eq!(texts(&c.commit().unwrap()), ["Compact Regular"]);
+        environment.window = crate::geometry::size_pt(900.0, 900.0);
+        c.set_environment(environment);
+        c.commit();
+        assert_eq!(SIZE_CLASS_RUNS.with(Cell::get), 3);
+        environment.horizontal_size_class = None;
+        c.set_environment(environment);
+        assert_eq!(texts(&c.commit().unwrap()), ["Regular Regular"]);
+    }
+
+    thread_local! {
         static WAKE_RUNS: Cell<u32> = const { Cell::new(0) };
     }
 
