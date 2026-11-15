@@ -753,7 +753,7 @@ fn app_items(area: &NshView, out: &mut Vec<crate::chrome::LocalItem>) {
                 let id = action.id;
                 out.push(LocalItem::Item {
                     role: None,
-                    label: action.label.clone().into(),
+                    label: action.label.clone(),
                     enabled: action.enabled,
                     action: Rc::new(move |s| {
                         if id != 0 {
