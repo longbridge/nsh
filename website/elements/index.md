@@ -134,6 +134,7 @@ and take their look from the app.
 | `<Select>` | `nsh_base::select()` | One value chosen from a list of items, with the keyboard, search and sections | [Select](./select.md) |
 | `<Sheet>` | `nsh_base::sheet()` | A panel at an edge of the screen over a backdrop | [Sheet](./sheet.md) |
 | `<Slider>` | `nsh_base::slider()` | A value, or a range of two, picked along a track | [Slider](./slider.md) |
+| `<SplitView>` | `nsh_base::split_view()` | Columns of navigation stacks side by side that show one at a time where the room is compact: `UISplitViewController` on iOS | [SplitView](./split-view.md) |
 | `<Switch>` | `nsh_base::switch()` | An on / off control with a track and a thumb | [Switch](./switch.md) |
 | `<Table>` and its parts | `nsh_base::table()`, `table_row()`, ... | A table of the app's own rows and cells, with a table's roles | [Table](./table.md) |
 | `<Tab>`, `<Tabs>` | `nsh_base::tab()`, `tabs()` | One tab of a tab list, and the list | [Tabs](./tabs.md) |

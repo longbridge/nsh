@@ -120,6 +120,7 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | `<Select>` | `nsh_base::select()` | 从一组条目中选出一个值，支持键盘、搜索和分组 | [Select](./select.md) |
 | `<Sheet>` | `nsh_base::sheet()` | 位于屏幕一侧边缘、覆盖在背景层之上的面板 | [Sheet](./sheet.md) |
 | `<Slider>` | `nsh_base::slider()` | 沿轨道选取一个值或两个值组成的范围 | [Slider](./slider.md) |
+| `<SplitView>` | `nsh_base::split_view()` | 并排显示的导航栈分栏，空间紧凑时一次显示一栏：iOS 上是 `UISplitViewController` | [SplitView](./split-view.md) |
 | `<Switch>` | `nsh_base::switch()` | 带轨道和滑块的开 / 关控件 | [Switch](./switch.md) |
 | `<Table>` 及其部件 | `nsh_base::table()`、`table_row()` 等 | 由应用写出行和单元格的表格，带有表格的角色 | [Table](./table.md) |
 | `<Tab>`、`<Tabs>` | `nsh_base::tab()`、`tabs()` | 标签列表中的一个标签页，以及这个列表 | [Tabs](./tabs.md) |

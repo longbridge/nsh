@@ -395,6 +395,9 @@ fn a_locked_area_moves_nothing() {
     app.drag("id:tab-a", point(px(560.0), px(288.0))).unwrap();
     app.wait(std::time::Duration::from_millis(200)).unwrap();
     assert!(app.shows("Layout h([*a b]:400 [*c])"));
+    // Its split's boundary is still a handle the user resizes it by (only
+    // `SplitView`'s columns have none).
+    assert_eq!(app.screen().count("role:adjustable").unwrap(), 1);
     app.press("id:close-c").unwrap();
     app.wait(std::time::Duration::from_millis(100)).unwrap();
     assert!(app.shows("Removed none"));

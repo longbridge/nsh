@@ -649,6 +649,8 @@ function Editor() {
 
 标签栏是应用自己的界面，用基础元素绘制：一排可按压的视图加一个保存当前标签的 signal；用 [`when` / `<If>`](../elements/control-flow.md)（或 TSX 中的函数子元素）渲染选中标签的内容。要在切换时保留每个标签的状态，给每个标签一个独立的栈和路由，并让它们都保持挂载，用 `display: none` 隐藏未选中的标签。
 
+由多个栈组成的分栏，比如 iPad 上的“邮件”或“设置”那样把侧边栏、列表和详情并排显示，使用 [`SplitView`](../elements/split-view.md)：每一栏都是一个独立的 `NavStack`，在 iOS 和 iPadOS 上是 `UISplitViewController`，窗口紧凑时一次只显示一栏。
+
 ## 相关内容
 
 - [`nsh/base`](../modules/nsh-base.md)：`nav_stack`、`nav_page`、`dialog`、`createNavStack`、`NavStack`、`NavPage` 和 `Dialog` 参考；inset 见[安全区域](../elements/safe-area.md)。
