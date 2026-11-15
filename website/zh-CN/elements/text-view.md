@@ -417,6 +417,8 @@ import { Image, View } from "nsh";
 />
 ```
 
+单独成段的图片（一段或一个表格单元格里只有图片）放在与正文同宽的框里：`w-full` 填满这个宽度，`max-w-full` 让更宽的图片收在其中，固定宽度的图片保持自己的宽度，靠行首排列。位于一行文字中的图片保持它要求的尺寸。
+
 `Highlighted` 和 `MathView`（Rust 中是 `highlighted` 和 `math_view`）代表应用自己的组件（高亮器、公式渲染器，或应用 Rust crate 中的组件）。没有 `renderMath` 时，`TextView` 自己排版公式（`math` 和 `mathBlock` 部件）：支持 KaTeX 的 TeX 语法并使用 KaTeX 字体，颜色跟随文本，在各平台上效果一致；无法解析的 TeX 以等宽字体显示其源码。
 
 <a id="markdown-extensions"></a>
@@ -570,7 +572,7 @@ function Custom(props: { node: TextViewCustomNode }) {
 | `heading` | `level`（1–6）、`content`、`anchor?` |
 | `blockquote` | `children`、`alert?`（`"note"`、`"tip"`、`"important"`、`"warning"`、`"caution"`） |
 | `list` | `ordered?`、`start?`、`loose?`、`items`（`{ checked?, children }`） |
-| `codeBlock` | `language?`、`meta?`、`code` |
+| `codeBlock` | `language?`、`meta?`、`code`、`id?`、`content?`、`wrap?` |
 | `math` | `tex` |
 | `table` | `align?`（每列 `"none"`、`"left"`、`"center"`、`"right"`）、`head`（单元格）、`rows?`（由单元格组成的行）；单元格是 `{ content }` |
 | `rule` | |
@@ -591,6 +593,8 @@ function Custom(props: { node: TextViewCustomNode }) {
 | `custom` | 同块节点 |
 
 文档还可以有 `footnotes?`：`{ label, index, children }`，按首次引用的顺序显示在文档块之后。应用可以把回复存成文档、用自己的数据构建文档，或者混入由 `renderCustom` 显示的自定义节点。
+
+代码块的 `id` 由应用设定：`onCodeBlockAction` 会连同它把代码块交回，操作由此知道作用于哪一块。`wrap: true` 让代码在视图宽度内换行，而不是横向滚动。`content` 是以行内内容表示的代码（应用的标注：强调、高亮，以及在 `custom` 部件中显示为其内容的自定义节点）；其纯文本与 `code` 相同时代替高亮后的代码显示，因此显示的就是复制得到的文本。
 
 <a id="parsing-and-plain-text"></a>
 

@@ -101,7 +101,7 @@ text("The answer is ")
 
 ### 链接
 
-带按压处理函数的片段就是链接：按在它的字符上由该片段处理，按在其他位置则由段落处理。在终端里，每个链接也是一个键盘焦点停靠点：Tab 依次到达段落里的链接，Return 按下获得焦点的那一个。
+带按压处理函数的片段就是链接：按在它的字符上由该片段处理，按在其他位置则由段落处理。鼠标停在片段的字符上时，片段采用它的悬停样式（`hoverStyle`、`hover:`、`.hover(..)`）；按住链接时，链接采用它的按下样式（`activeStyle`、`active:`、`.active(..)`）；段落其余部分保持原样。鼠标停在链接里的片段上时，悬停的是链接：把样式写在链接上。在终端里，每个链接也是一个键盘焦点停靠点：Tab 依次到达段落里的链接，Return 按下获得焦点的那一个。
 
 ```rust tabs
 text("继续即表示你同意")
@@ -110,7 +110,7 @@ text("继续即表示你同意")
     .child(
         text("服务条款")
             .text_color(rgb(0x0969da))
-            .underline()
+            .hover(|s| s.underline())
             .on_press(move || open("terms")),
     )
     .child("。")
@@ -119,7 +119,11 @@ text("继续即表示你同意")
 ```tsx tabs
 <Text style={{ fontSize: 15 }} onPress={() => log("整句话")}>
   {"继续即表示你同意"}
-  <Text style={{ color: "#0969da", textDecorationLine: "underline" }} onPress={() => open("terms")}>
+  <Text
+    style={{ color: "#0969da" }}
+    hoverStyle={{ textDecorationLine: "underline" }}
+    onPress={() => open("terms")}
+  >
     服务条款
   </Text>
   。

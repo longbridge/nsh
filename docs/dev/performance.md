@@ -4,6 +4,67 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Batched region cleanup (2026-11-15, macOS arm64, Apple M4 Pro, against `9efc3a2c`): three interleaved before / after
+pairs, a fresh headless CLI process per sample. Both builds use the workspace's development profile with
+`CARGO_PROFILE_DEV_DEBUG=line-tables-only` and incremental compilation disabled. The 200-paragraph reproduction is
+`nsh test examples/bench/RichEditorMount.tsx --trace`, with `await app.wait(150)` on standard input.
+
+| Phase | Before (µs/commit, median) | After (µs/commit, median) | Ops | Mount items | Nodes |
+|---|---:|---:|---:|---:|---:|
+| RichEditor initial population | 3,710,044 | 292,158 | 10 | 2,644 | 1,009 |
+| Counter initial frame | 273 | 281 | 57 | 51 | 21 |
+| Counter press `+1` | 847 | 878 | 10 | 7 | 24 |
+
+Every sample passes and all work counts match. The RichEditor commit includes Rust view expansion, layout and
+mount-batch construction, excluding native input, mounting and drawing. The counter uses the command below and
+establishes unchanged work; three pairs do not establish a timing regression or speedup for its sub-millisecond commits.
+Initial region population skips listener/binding cleanup, and regions that release nodes share one sweep per
+affected view before the next event round. The core regression counts zero initial sweeps for 50–800 bound rows;
+simultaneous removals from 200 / 400 regions scan 1,200 / 2,400 entries in one sweep each.
+
+```sh
+echo 'await app.press("+1"); await app.wait(50)' | nsh test examples/counter/App.tsx --trace
+```
+
+Sibling position classes (`core/classes.rs`, 2026-11-15, Linux x86_64, Intel Core Ultra 7 270K Plus, dev/test profile, `FakeEngine`).
+`positions_changed` counts the element siblings once per pass and restyles only the children whose
+`first:` / `last:` / `odd:` / `even:` / `only:` bits differ from the bits they were last resolved with
+(`position_used`), so appending a row restyles the previous last row and the new one instead of every
+sibling. Mounting N rows with `odd:` + `last:` classes, one insert per row, then one commit:
+
+| Rows | Before (ms) | After (ms) |
+|---|---|---|
+| 500 | 277.0 | 18.6 |
+| 2,000 | 4109.1 | 98.5 |
+
+Mounting is now linear in the row count. Results match a full per-child restyle after every tree edit
+(`positional_regressions`). `examples/bench/PositionalClasses.tsx` (`COUNT`, `CLASSES`, `EACH`) reproduces
+the workload headless with `nsh test --trace`; these Core timings exclude QuickJS and native mounting and drawing.
+
+Cross-platform keyboard integration (2026-11-12, macOS arm64, debug, upstream `9fd11f836` against the core at
+`c46f72f8c`): one fresh process per version running the same counter command below on the same machine.
+
+| Phase | Before (µs/commit) | After (µs/commit) | Ops | Mount items | Nodes |
+|---|---:|---:|---:|---:|---:|
+| Initial frame | 681 | 744 | 57 | 51 | 21 |
+| Press `+1` | 765 | 918 | 10 | 7 | 24 |
+
+Both runs passed. Ordinary views emitted the same work; these single-run smoke timings are not a speed benchmark.
+Native GTK, AppKit, Android and browser checks separately exercised actual key delivery and capture.
+
+Focused-view keyboard input (Linux x86_64, debug, against `a44d5628b`): one fresh process per version running
+`printf 'await app.press("+1");\n' | target/debug/nsh test examples/counter/App.tsx --trace`.
+The counter has no raw key listeners; its work counts stay unchanged.
+
+| Phase | Before (µs/commit) | After (µs/commit) | Ops | Mount items | Nodes |
+|---|---:|---:|---:|---:|---:|
+| Initial frame | 524 | 507 | 57 | 51 | 21 |
+| Press `+1` | 392 | 568 | 10 | 7 | 24 |
+
+These are single-run smoke timings, not a speed benchmark. Native XTest checks separately cover capture before
+defaults, menu ordering, popup-held releases and NumLock. In the native smoke app, a 1,250 ms key callback left
+the GTK 100 ms timer running (12 ticks); capture never waits for that callback.
+
 Retained RichEditor rows (2026-11-08 audit, Linux x86_64, against `058a745a`; dev/test profile with
 `nsh-core` and `nsh-base` at `opt-level=3`, `ApproxTextEngine`). Editing the visible first paragraph with content
 culling enabled, 80 ASCII characters per paragraph, both Core order checks applied together:
@@ -47,8 +108,9 @@ before / after rounds on one CPU, warmed and batched; medians, input constructio
 | 10,000 | 96.966 → 0.0914 ms | 100.688 → 8.911 ms |
 
 The ordered code spans are consumed with a cursor instead of searched from the start at
-each byte. With streaming repair enabled, the complete 10,000-span parse takes
-544.17 → 453.83 ms; other scans still contribute. A 35,200-byte control of 200 short
+each byte. With streaming repair enabled, the complete 10,000-span parse took
+544.17 → 453.83 ms; the repair's own scans made up the rest, until they got the same
+cursor (Markdown streaming repair, below). A 35,200-byte control of 200 short
 paragraphs takes 74.45 → 79.69 µs in TeX rewriting (about 5 µs more), while its complete
 parse stays around 5.2 ms. Short Markdown and code spans without TeX delimiters have
 unchanged complete-parse timings. These parser measurements exclude layout and drawing.
@@ -59,6 +121,28 @@ version, the same paragraphs in a mounted `TextView`): first-commit medians for 
 16 mount items, with 3,007 / 30,007 nodes respectively. The counter control keeps
 56 ops / 50 items / 21 nodes initially and 10 ops / 7 items / 24 nodes after `+1`;
 commit medians 497 / 379 → 500 / 310 µs, noisy samples establishing stable work counts.
+
+Markdown streaming repair (`text_view/markdown/streaming.rs`, 2026-11-15, Linux x86_64,
+release, against `32f16354`): the paragraph ``"`a` x ".repeat(k)`` and a 600-row table with
+three code spans per row (26,950 bytes), timed in `repair_streaming` alone and in a complete
+parse with `streaming: true` (math enabled, the default). Eleven alternating before / after
+rounds on one CPU, warmed and batched (at least 100 ms a sample); medians, input construction
+excluded:
+
+| Input | `repair_streaming`, before → after | Complete parse, streaming on, before → after |
+|---|---|---|
+| 1,000 spans | 3.893 → 0.0276 ms | 4.738 → 0.833 ms |
+| 5,000 spans | 96.628 → 0.138 ms | 100.681 → 4.154 ms |
+| 10,000 spans | 385.147 → 0.275 ms | 393.600 → 8.908 ms |
+| 600-row table | 26.785 → 0.0947 ms | 37.992 → 10.835 ms |
+
+The repair's TeX, link and closing scans carry a cursor into the ordered code spans instead
+of searching all of them at each byte, so the repair grows with the text, not with the
+square of its spans, and the complete 10,000-span parse is back at its time with streaming
+off (8.911 ms in the entry above). Streaming the table's first 400 rows in 24-byte updates
+(748 parses) takes 4.94 → 1.78 s in all, 6.60 → 2.38 ms an update. A 20,000-byte reply of
+short blocks is unchanged (0.018 ms of repair, 5.65 ms parsed). The repaired text equals the
+old scans' on 400,000 random inputs.
 
 Terminal `TextView` tables (2026-11-08, Linux x86_64, debug hosts,
 `nsh test <entry> --target tui --trace`, against `71aeb06a`, seven alternating runs per version, medians):
@@ -328,6 +412,9 @@ sends 2631 mount items instead of 2885 (no `ViewProps` set and set back in one c
   it replaced did (0.57ms).
   The native context records into a Rust list (`nsh-js` `canvas.rs`): the same 17 500 calls take ~1.0–1.1ms
   (~1.7ms in the former JS runtime, measured A/B), and 12 of them plus decoding one commit 21–22ms (61ms).
+- `OffscreenCanvas` on Windows: the UI thread records, submits the drawing and its copy, and maps the read-back
+  bitmap once a Direct3D event query polled every timer tick says the GPU is done, so a large image costs it the
+  recording and one copy of its rows, never a wait for the GPU; unpremultiplying and PNG encoding run on a thread.
 
 - Where JS time went in the former JS runtime (release `nsh trace`, which logs `event js` per dispatched event;
   2026-10-16, before the runtime went native): with Solid in JS, the empty app's eval was ~250µs (all of it the
@@ -634,6 +721,35 @@ draw a panel.
   on the main thread (18 ms of every frame: ~190 new drawings a second). After: no cap in NSH's windows, canvases
   rasterized on two workers and only what animates in place (`canvas.rs`).
 
+  Canvas animated argument batches (`canvas.rs`, 2026-11-12, Linux x86_64, Ryzen 9 7950X, against
+  `9fd11f83`): the before / after setters and unchanged `DamageScan`, extracted into an isolated harness.
+  Rust 1.99.1, opt-level 3, fat LTO, one codegen unit, pinned to CPU 2, no concurrent builds; four warmup
+  updates, three processes with seven alternating pairs each, medians of all 21 samples per implementation:
+
+  | Static path points | Changed slots | Argument update, before → after |
+  |---|---|---|
+  | 0 | 64 | 16.157 → 1.311 µs |
+  | 400 | 64 | 272.069 → 5.407 µs |
+  | 4,000 | 8 | 316.143 → 41.026 µs |
+  | 4,000 | 32 | 1,263.803 → 41.492 µs |
+  | 4,000 | 64 | 2,526.364 → 42.080 µs |
+  | 4,000 | 256 | 10,262.553 → 46.824 µs |
+
+  A canvas's animated values are applied together: at most two whole-drawing damage scans and one
+  `view.changed()`, instead of up to two scans and one call per changed slot. Changed-slot storage is reused;
+  one changed slot keeps a scalar predicate. Controls with one slot and 0 / 400 / 4,000 static points take
+  0.0566 / 4.048 / 39.514 → 0.0563 / 3.986 / 39.279 µs (medians within 1.6%). The harness includes input
+  preparation, state borrowing and slot writes, with a notification counter and supporting type shims. It
+  excludes the actual invalidation walk, rasterization, workers, uploads, GPU work and presentation.
+
+  Headless `nsh test <entry> --trace` (debug, three alternating runs per version): a canvas of 256 animated
+  rectangles after 4,000 static path points keeps 287 ops / 284 mount items / 10 nodes initially, then
+  0 ops / 6 items / 10 nodes and 0 ops / 5 items / 10 nodes when resized to 760×420 and 920×540. Commit
+  medians are 2448 / 185 / 127 → 2490 / 171 / 140 µs. The counter control keeps 57 ops / 51 items / 21 nodes
+  initially and 10 ops / 7 items / 24 nodes after `+1` (395 / 276 → 410 / 305 µs). Every mount item matches
+  between versions. These are smoke checks of unchanged engine work; the optimization is in GPUI's animated
+  argument writes. Native frame-time and process CPU/GPU changes have not been measured.
+
 The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so debug timings are meaningful too; release uses fat LTO (the published distribution thin LTO over 16 codegen units: `docs/dev/tooling.md` "Releases").
 
 - Linux (GTK 4, release; a 1896×1030 window on a 120 Hz headless Hyprland output, NVIDIA; `--fps` readings and the
@@ -881,3 +997,28 @@ native hierarchy. At 8,600 rows it showed no improvement: release 3903.0 → 396
 18103.7 → 17985.3 ms (three-run medians). Most initial insertions specify a sibling and do not
 use the append path. These are not first-paint timings. GPU/power and engine trace item counts
 were not measured; interactive-priority execution was unavailable in this session.
+
+## Windows painter culling
+
+Measured on Windows 11 on 2026-11-13, release, Intel Core Ultra X9 388H, Intel Arc B390 at 60 Hz;
+v0.5.0 `f4d68f7f` against the Windows painter culling change (each view culled by its own area
+against what the window and the clips of the views around it leave visible, `display: none`
+subtrees left out at their top, paint records of left-out subtrees forgotten). `nsh test --fps`
+readings once a second, two runs each. The scenario's 1200 × 800 window holds a 1500-row column
+that does not clip, two panels of 1000 rows kept mounted with `display: none`, and a clipping
+scroll view of 1500 rows, scrolled 3000 points down and back. Fields are milliseconds (mean of
+the readings' means; median of the p95s; largest max); CPU is the process' share sampled once a
+second.
+
+| Revision | Readings | Paint mean | Paint p95 | Frame mean | Frame p95 | Frame max | CPU |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| v0.5.0 | 16 | 4.17 | 4.93 | 3.62 | 4.89 | 7.34 | 21% |
+| This change | 16 | 2.71 | 3.58 | 2.33 | 3.57 | 4.45 | 16% |
+
+The two runs of each revision agree within 0.2 ms. fps reads 57–60 on both while scrolling, so
+it does not separate them: at 60 Hz this scenario's frames fit either way; the cost per frame
+does. The `display: none` part measured alone reads 3.83 / 3.15 (paint / frame mean); the
+stale-records part was not measured alone, as what it fixes shows when panels move or shrink
+and this scenario moves nothing. CPU differs by −4.5 points between revisions, about one
+standard error of its own spread (3–37% within one run): this bench shows no CPU difference
+either way; paint and frame times are what it resolves.

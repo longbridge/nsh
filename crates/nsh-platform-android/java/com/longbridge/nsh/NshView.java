@@ -17,6 +17,7 @@ import android.util.TypedValue;
 import android.view.Choreographer;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowManager;
@@ -100,30 +101,36 @@ public class NshView extends FrameLayout {
     final android.util.SparseArray<ShaderFrames> navFrames = new android.util.SparseArray<>();
     private final Mounter mounter;
     private final TouchTracker touches;
+    /** This window's shortcuts, raw keys, capture rules and Tab traversal. */
+    private final KeyDispatch keys;
+    private final ViewTreeObserver.OnTouchModeChangeListener keyboardFocus = inTouchMode -> {
+        if (!inTouchMode) focusForKeyboard();
+    };
 
     @Override
     public boolean dispatchTouchEvent(android.view.MotionEvent e) {
-        boolean tracking = touches.onTouch(e);
+        android.view.MotionEvent t = mounter.keyboardTap(e);
+        boolean tracking = touches.onTouch(t);
         // A tracked finger went down: hear the rest of the gesture even if
         // no view takes it.
-        return super.dispatchTouchEvent(e) || tracking;
+        boolean handled = super.dispatchTouchEvent(t) || tracking;
+        if (t != e) t.recycle();
+        return handled;
     }
 
     /**
-     * A hardware keyboard's keys go to the app's shortcuts ({@code nsh/keymap}) before the focused view
-     * gets them: a key a binding takes is consumed, with its release (the input never sees it).
+     * A hardware keyboard's keys go to the app's shortcuts ({@code nsh/keymap}) and the focused
+     * view's {@code captureKeys} rules before it gets them: a key a binding or a capture takes is
+     * consumed, with its release (the input never sees it). A system key (Back, Home, volume,
+     * media, camera, call) is never captured, even by {@code all}, and its raw notification is
+     * unaffected. A
+     * view with no raw listener and no capture leaves the key to Android; Tab and Shift+Tab then
+     * move the focus between managed stops and inputs, yielding to Android at the first and last
+     * stop.
      */
     @Override
     public boolean dispatchKeyEvent(android.view.KeyEvent e) {
-        if (handle != 0) {
-            int action = e.getAction();
-            if (action == android.view.KeyEvent.ACTION_DOWN && keymapKey(e)) {
-                return true;
-            } else if (action == android.view.KeyEvent.ACTION_UP && Native.keyUp(handle, e.getKeyCode())) {
-                return true;
-            }
-        }
-        return super.dispatchKeyEvent(e);
+        return keys.dispatchKeyEvent(e) || super.dispatchKeyEvent(e);
     }
 
     /**
@@ -132,19 +139,26 @@ public class NshView extends FrameLayout {
      */
     @Override
     public boolean dispatchKeyShortcutEvent(android.view.KeyEvent e) {
-        if (handle != 0 && e.getAction() == android.view.KeyEvent.ACTION_DOWN && keymapKey(e)) {
-            return true;
-        }
-        return super.dispatchKeyShortcutEvent(e);
+        return keys.dispatchKeyShortcutEvent(e) || super.dispatchKeyShortcutEvent(e);
     }
 
-    /** Whether the app's shortcuts take key press {@code e}. */
-    private boolean keymapKey(android.view.KeyEvent e) {
-        // An input or hosted view (a web view, a native component) has the focus: in text.
-        View focus = findFocus();
-        boolean editing = focus != null && focus != this;
-        return Native.keyDown(handle, e.getKeyCode(), e.getUnicodeChar(0), e.getMetaState(),
-                e.getRepeatCount() > 0, editing);
+    @Override
+    public void onWindowFocusChanged(boolean hasWindowFocus) {
+        super.onWindowFocusChanged(hasWindowFocus);
+        if (!hasWindowFocus) {
+            // The releases of the keys held may never come.
+            keys.focusLost();
+            if (handle != 0) Native.keyReset(handle);
+        } else {
+            focusForKeyboard();
+        }
+    }
+
+    /** Fill an empty keyboard focus path, never scroll a touch-only embedding host into view. */
+    private void focusForKeyboard() {
+        if (hasWindowFocus() && !isInTouchMode() && getRootView().findFocus() == null) {
+            requestFocus();
+        }
     }
 
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -188,6 +202,7 @@ public class NshView extends FrameLayout {
         addView(root, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         touches = new TouchTracker(mounter, this);
         mounter.touchTrackers.add(touches);
+        keys = new KeyDispatch(mounter, root, 1);
         setClipChildren(false);
         // Holds focus when no input does (see InputBox.blur).
         setFocusable(true);
@@ -361,6 +376,25 @@ public class NshView extends FrameLayout {
      */
     public void setFontScale(float scale) {
         hostFontScale = scale;
+        publishEnvironment(getRootWindowInsets());
+    }
+
+    /**
+     * Insets the host app adds to the safe area, like UIKit's
+     * {@code additionalSafeAreaInsets}: for its own UI that floats over this
+     * view, such as a tab bar drawn over the content. They add to the parts
+     * of the system bars the view sits under, and {@code safeAreaInsets()}
+     * reads the sum, so content can scroll under that UI and still end
+     * clear of it. Pages already shown follow a change. Call it on the UI
+     * thread.
+     *
+     * @param left   pixels added on the left
+     * @param top    pixels added at the top
+     * @param right  pixels added on the right
+     * @param bottom pixels added at the bottom
+     */
+    public void setAdditionalSafeAreaInsets(int left, int top, int right, int bottom) {
+        additional = new int[] {Math.max(0, top), Math.max(0, right), Math.max(0, bottom), Math.max(0, left)};
         publishEnvironment(getRootWindowInsets());
     }
 
@@ -830,8 +864,15 @@ public class NshView extends FrameLayout {
             mounter.keyboard(ime > 0 && !systemPans()
                     ? at[1] + getHeight() - Math.round(ime) : Integer.MAX_VALUE);
         }
+        // The host's own floating UI (setAdditionalSafeAreaInsets), on top of
+        // the system bars'; the keyboard keeps measuring from the view's edge.
+        top += additional[0];
+        right += additional[1];
+        bottom += additional[2];
+        left += additional[3];
         Configuration c = getResources().getConfiguration();
         boolean dark = (c.uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        float[] previous = safe;
         safe = new float[] {top / density, right / density, bottom / density, left / density};
         java.util.Locale locale = hostLocale != null ? hostLocale : java.util.Locale.getDefault();
         float fontScale = hostFontScale > 0 && !Float.isInfinite(hostFontScale) ? hostFontScale : c.fontScale;
@@ -857,6 +898,9 @@ public class NshView extends FrameLayout {
                 // 14 keeps the first day of the week and the temperature unit
                 // in its extension.
                 java.util.Locale.getDefault(java.util.Locale.Category.FORMAT).toLanguageTag());
+        // Screens report their own insets only when their options change, so
+        // a page already shown would keep the old safe area.
+        if (!java.util.Arrays.equals(previous, safe)) mounter.reportAllScreenInsets();
     }
 
     /** The system's time zone's ID (`localeSettings()`'s `timeZone`). */
@@ -930,6 +974,9 @@ public class NshView extends FrameLayout {
     /** TalkBack turning on or off: `screenReaderEnabled()`. */
     private final android.view.accessibility.AccessibilityManager.TouchExplorationStateChangeListener screenReader =
             enabled -> publishEnvironment(getRootWindowInsets());
+
+    /** The host's additional safe-area insets (px: top, right, bottom, left). */
+    private int[] additional = new int[4];
 
     /** The safe-area insets last published (dp: top, right, bottom, left). */
     private float[] safe = new float[4];
@@ -1022,6 +1069,7 @@ public class NshView extends FrameLayout {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        getViewTreeObserver().addOnTouchModeChangeListener(keyboardFocus);
         accessibility().addTouchExplorationStateChangeListener(screenReader);
         Activity activity = activity(getContext());
         if (activity != null) {
@@ -1039,11 +1087,17 @@ public class NshView extends FrameLayout {
         getContext().registerReceiver(timeChanged, time);
         // The dispatcher exists once attached.
         if (handle != 0) mounter.updateBack();
+        // The window may already be active when an embedder attaches us.
+        // A real key leaving touch mode also enters through keyboardFocus.
+        focusForKeyboard();
     }
 
     @Override
     protected void onDetachedFromWindow() {
+        getViewTreeObserver().removeOnTouchModeChangeListener(keyboardFocus);
         super.onDetachedFromWindow();
+        keys.focusLost();
+        if (handle != 0) Native.keyReset(handle);
         accessibility().removeTouchExplorationStateChangeListener(screenReader);
         if (Lifecycles.registered != null) Lifecycles.registered.views.remove(this);
         getContext().unregisterReceiver(timeChanged);
@@ -1215,6 +1269,36 @@ public class NshView extends FrameLayout {
         }
     }
 
+    /**
+     * How far the system bars and the display cutout reach into this view
+     * (px: top, right, bottom, left), as {@link #publishEnvironment} measures
+     * them, without the host's additional insets.
+     */
+    private int[] barsInView(WindowInsets insets) {
+        int top, right, bottom, left;
+        if (Build.VERSION.SDK_INT >= 30) {
+            android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            top = bars.top;
+            right = bars.right;
+            bottom = bars.bottom;
+            left = bars.left;
+        } else {
+            top = insets.getSystemWindowInsetTop();
+            right = insets.getSystemWindowInsetRight();
+            bottom = insets.getSystemWindowInsetBottom();
+            left = insets.getSystemWindowInsetLeft();
+        }
+        View window = getRootView();
+        int[] at = new int[2];
+        getLocationInWindow(at);
+        return new int[] {
+            Math.max(0, top - at[1]),
+            Math.max(0, right - (window.getWidth() - at[0] - getWidth())),
+            Math.max(0, bottom - (window.getHeight() - at[1] - getHeight())),
+            Math.max(0, left - at[0]),
+        };
+    }
+
     /** How far the system bars reach into this view from the top (0 when embedded below them). */
     private int topInset() {
         WindowInsets insets = getRootWindowInsets();
@@ -1297,14 +1381,16 @@ public class NshView extends FrameLayout {
             view.setBackgroundColor(0xfa1e1f22);
             view.addView(scroll, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
             view.addView(copy, at);
-            // Clear of the status and navigation bars, also when the screen shows
-            // before the window has its insets.
+            // Clear of the system bars and the display cutout on every side (a
+            // landscape navigation bar or cutout is at a side), also when the
+            // screen shows before the window has its insets. The sides pad the
+            // scroll view, so lines scrolled sideways stay clear too.
             view.setOnApplyWindowInsetsListener((v, insets) -> {
-                int[] where = new int[2];
-                getLocationInWindow(where);
-                int top = Math.max(0, insets.getSystemWindowInsetTop() - where[1]);
-                text.setPadding(pad, top + pad, pad, insets.getSystemWindowInsetBottom() + pad);
-                at.topMargin = top + Math.round(12 * density);
+                int[] bars = barsInView(insets);
+                scroll.setPadding(bars[3], 0, bars[1], 0);
+                text.setPadding(pad, bars[0] + pad, pad, bars[2] + pad);
+                at.topMargin = bars[0] + Math.round(12 * density);
+                at.rightMargin = bars[1] + pad;
                 copy.setLayoutParams(at);
                 return insets;
             });

@@ -117,15 +117,21 @@ changes) or an animated value (`&AnimatedValue`, `&AnimatedNode`), whose node it
 uniforms) and the render pipelines by source hash (`None` for one the device refused, reported once with a `js`
 warning). A backend opens it the first time a shader is mounted on a surface (Android: on the `NshView`, kept across
 app loads), so an app without shaders opens no device. `Renderer::new` requests a low-power adapter with WebGL 2's
-downlevel limits backend by backend (Linux: GL, then the primary ones; elsewhere the primary ones and GL at once;
-no setting chooses one) and keeps the first whose device opens, so an adapter that refuses its device gives the
-next backend its turn; where none opens it is `None` and shader views show their background and children. Uncaptured device errors are warnings, never panics.
+downlevel limits backend by backend (Linux: GL, then the primary ones; Windows: Direct3D 12, then every backend at
+once; elsewhere the primary ones and GL at once; no setting chooses one) and keeps the first whose device opens, so
+an adapter that refuses its device gives the next backend its turn; on Windows a software adapter (Direct3D 12's
+WARP, its only one on Haswell's integrated GPUs and in many virtual machines) is tried only from the last entry, where
+a hardware Vulkan or GL adapter sorts ahead of it (`takes`); where none opens it is `None` and shader views show their background and children. Uncaptured device errors are warnings, never panics.
 
 `nsh_engine::shader::ShaderView` is one view's state on the main thread: the layer, its uniforms, size and scale, the
 clock of `nsh.time` (kept while paused), and its frames.
 
 - **Rendering never waits for the GPU.** Frames are read back asynchronously; a slow GPU drops frames instead of
   stalling the main thread.
+- **Memory.** The device asks for wgpu's `MemoryUsage` hints: on Direct3D 12 and Vulkan its allocator takes blocks of
+  8 MB and more where the default (`Performance`) takes 128 MB, which a few views' targets and read-back buffers never
+  fill. Metal and OpenGL do not read the hints. It asks for room for 65,536 live bindings, not wgpu's million, which
+  Direct3D 12 allocates as a descriptor heap when the device opens; the other backends report no limit there.
 - **Frames on IOSurfaces (Apple).** After `show_on_surfaces`, a view renders into one of three IOSurfaces of its frame's
   size (`shader_surfaces.rs`), tagged sRGB, instead of reading pixels back: `surface()` is the frame to show, which the
   backend sets as its layer's `contents`, and the window server matches its colours to the display on the GPU. A

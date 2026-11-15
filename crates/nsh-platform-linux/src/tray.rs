@@ -719,6 +719,8 @@ mod tests {
             role: None,
             when: nsh_core::keymap::When::Always,
             icon: None,
+            symbol: None,
+            destructive: false,
         })
     }
 
@@ -777,6 +779,8 @@ mod tests {
                 enabled: true,
                 items: vec![action(8, "Inner")],
                 icon: None,
+                symbol: None,
+                inline: false,
             },
         ]
         .into();

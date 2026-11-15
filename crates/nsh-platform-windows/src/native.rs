@@ -352,7 +352,7 @@ impl NativeState {
         let hosts = std::mem::take(&mut *self.hosts.borrow_mut());
         for host in hosts.values() {
             if let Host::Web(w) = host {
-                w.close();
+                w.shutdown();
             }
         }
         drop(hosts);
@@ -991,16 +991,23 @@ impl Emitter {
         }
     }
 
+    /// Whether the view has a listener for `kind`.
+    fn listens(&self, kind: EventKind) -> bool {
+        let Some(surface) = self.surface.upgrade() else {
+            return false;
+        };
+        surface
+            .view(self.id)
+            .is_some_and(|v| v.try_state().is_none_or(|s| s.events.contains(kind)))
+    }
+
     fn emit(&self, kind: EventKind, payload: impl FnOnce() -> EventPayload) {
         let Some(surface) = self.surface.upgrade() else {
             return;
         };
         // A view whose state is being changed right now cannot be read:
         // send the event, JS ignores events it has no handler for.
-        let listens = surface
-            .view(self.id)
-            .is_some_and(|v| v.try_state().is_none_or(|s| s.events.contains(kind)));
-        if listens {
+        if self.listens(kind) {
             surface.event(self.id, kind, payload());
         }
     }

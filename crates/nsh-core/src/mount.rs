@@ -87,6 +87,11 @@ pub struct WebProps {
     /// ([`crate::web_resource`]). Read when the platform makes the web
     /// view, as `incognito`.
     pub url_schemes: Vec<crate::web_resource::WebUrlScheme>,
+    /// Internal: an `on_download` or `on_download_pending` listener asks
+    /// the platform to hold every download for the core. Read by the
+    /// web view's backend.
+    #[doc(hidden)]
+    pub defer_downloads: bool,
 }
 
 impl Default for WebProps {
@@ -103,6 +108,7 @@ impl Default for WebProps {
             back_forward_gestures: false,
             incognito: false,
             url_schemes: Vec::new(),
+            defer_downloads: false,
         }
     }
 }
@@ -196,6 +202,9 @@ pub struct ScrollBehavior {
     pub enabled: bool,
     /// It overscrolls past its edges.
     pub bounces: bool,
+    /// A tap at the top of the window scrolls it to its top (iOS:
+    /// `UIScrollView.scrollsToTop`).
+    pub scrolls_to_top: bool,
     /// Room around the content.
     pub content_inset: EdgeInsets,
     /// Whether taps dismiss the keyboard.
@@ -236,6 +245,7 @@ impl Default for ScrollBehavior {
             deceleration: 0.0,
             enabled: true,
             bounces: true,
+            scrolls_to_top: true,
             content_inset: EdgeInsets::default(),
             keyboard_taps: KeyboardTaps::Never,
             one_step: false,
@@ -437,6 +447,10 @@ pub struct ScreenConfig {
     pub left_system_item: Option<crate::HeaderSystemItem>,
     /// As `right_symbol`, in the leading slot, pressing `left`.
     pub left_symbol: Option<Arc<str>>,
+    /// Trailing UIKit bar buttons (`ios={{ headerRightItems }}`); a
+    /// non-empty list wins over `right_system_item` / `right_symbol` and
+    /// leaves `right`'s view out of the iOS bar. Empty is unset.
+    pub right_items: Vec<crate::HeaderItem>,
     /// Custom title view.
     pub title_view: Option<NodeId>,
     /// The app's header (`header`): on a platform without a native header
@@ -472,6 +486,7 @@ impl Default for ScreenConfig {
             right_symbol: None,
             left_system_item: None,
             left_symbol: None,
+            right_items: Vec::new(),
             title_view: None,
             header_view: None,
             header_height: Points::ZERO,
@@ -562,7 +577,8 @@ pub struct InputConfig {
     pub return_key: ReturnKeyType,
     /// Automatic capitalization.
     pub auto_capitalize: AutoCapitalize,
-    /// Autocorrection.
+    /// The system's corrections: spelling, smart quotes and dashes, text
+    /// replacement.
     pub auto_correct: bool,
     /// Several lines (return inserts a line break).
     pub multiline: bool,
@@ -616,6 +632,19 @@ impl InputConfig {
             None if self.blur_on_submit => SubmitBehavior::BlurAndSubmit,
             None => SubmitBehavior::Submit,
         }
+    }
+
+    /// A password shown as plain text: the input holds a password
+    /// ([`InputConfig::auto_fill`] `current-password` or `new-password`)
+    /// but is not `secure`, as after a "show password" toggle. Platforms
+    /// type it as it is: Android's visible password keyboard, iOS's ASCII
+    /// keyboard, never capitalized, suggested or corrected.
+    pub fn visible_password(&self) -> bool {
+        !self.secure
+            && matches!(
+                self.auto_fill,
+                crate::ops::AutoFill::Password | crate::ops::AutoFill::NewPassword
+            )
     }
 }
 
@@ -743,11 +772,13 @@ pub enum MountItem {
     },
     /// The area the view's descendants cover outside its bounds, in its
     /// own coordinates (it contains the bounds), while overflow is visible;
-    /// `None` when they stay inside. UIKit and Android only look for the
-    /// target of a touch inside a view's bounds: platforms look in the
-    /// descendants of views with an area too, so children placed outside
-    /// their parent (a dropdown under its field) can be touched. Sent only
-    /// when it changes; from layout frames (transforms are not included).
+    /// `None` when they stay inside. It takes in the descendants' hit
+    /// slop. UIKit and Android only look for the target of a touch inside a
+    /// view's bounds: platforms look in the descendants of views with an
+    /// area too, so children placed outside their parent (a dropdown under
+    /// its field) and the slop reaching out of it can be touched. Sent only
+    /// when it changes; from layout frames and hit slop (transforms are not
+    /// included).
     Overflow {
         /// View.
         id: NodeId,
@@ -852,7 +883,8 @@ pub enum MountItem {
     Keymap(std::sync::Arc<crate::keymap::Keymap>),
     /// The sticky cells of a list (replaces the previous set): each one
     /// is translated along the main axis by `clamp(offset - start, 0,
-    /// end - start)` on every scroll, natively.
+    /// end - start)` on every scroll, natively. The set is in the order
+    /// the cells stack, bottom to top (a built-in scroll bar last).
     StickyCells {
         /// The list.
         id: NodeId,

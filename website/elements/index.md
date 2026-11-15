@@ -134,6 +134,7 @@ and take their look from the app.
 | `<Select>` | `nsh_base::select()` | One value chosen from a list of items, with the keyboard, search and sections | [Select](./select.md) |
 | `<Sheet>` | `nsh_base::sheet()` | A panel at an edge of the screen over a backdrop | [Sheet](./sheet.md) |
 | `<Slider>` | `nsh_base::slider()` | A value, or a range of two, picked along a track | [Slider](./slider.md) |
+| `<SplitView>` | `nsh_base::split_view()` | Columns of navigation stacks side by side that show one at a time where the room is compact: `UISplitViewController` on iOS | [SplitView](./split-view.md) |
 | `<Switch>` | `nsh_base::switch()` | An on / off control with a track and a thumb | [Switch](./switch.md) |
 | `<Table>` and its parts | `nsh_base::table()`, `table_row()`, ... | A table of the app's own rows and cells, with a table's roles | [Table](./table.md) |
 | `<Tab>`, `<Tabs>` | `nsh_base::tab()`, `tabs()` | One tab of a tab list, and the list | [Tabs](./tabs.md) |
@@ -245,6 +246,11 @@ inside it, so the views around the one under the mouse hear `onMouseEnter` too (
 from the inside out). The events come after the fact and never on touches. A view removed from under the mouse hears
 `onMouseLeave`, on Linux and Windows at the next mouse move.
 
+Every component takes these events, those of `nsh/base` and of an app's own crate alike: `<Button onMouseEnter>`,
+`<Switch onMouseMove>`, `<Avatar onMouseUp>`, `button().on_mouse_enter(..)` in Rust. They report the mouse over the
+component's root with the same `MouseEvent`, after the component's own handling, and the component listens only while
+the app does.
+
 `MouseEvent` says where the mouse is, as GPUI's `MouseMoveEvent` does: `position` in the view (a `Point` in points, its
 transforms undone), `pagePosition` in the root view it is in, as touches give it, the `modifiers` held (`control`,
 `alt`, `shift`, `platform`: Command on Apple platforms, the Windows key elsewhere), `pressedButton`, the button held
@@ -291,8 +297,14 @@ const at = signal<number | null>(null);
 `onWheel` hears a mouse wheel or touchpad scroll over a view, on macOS, Windows, Linux, the GPUI backend and the web
 (the DOM's `wheel`, GPUI's `ScrollWheelEvent`). The nearest view around the one under the pointer that listens hears
 it. When that view is nearer than every scroll view under the pointer, it takes the wheel: nothing scrolls, zooms or
-pinches natively, so a canvas inside a page can zoom on Control + wheel and pan otherwise. A scroll view that listens,
-or a view around one, only observes: the scroll view still scrolls. JS never cancels a native scroll after the fact
+pinches natively, so a canvas inside a page can zoom on Control + wheel and pan otherwise. A listener whose
+`panActivation` names one axis (`{ activeOffsetX, failOffsetY }`, Rust `PanActivation::horizontal(..)`) takes only the wheels along that
+axis, and Control + wheel: the others reach the scroll views around it, as a horizontal scroll view lets vertical
+wheels scroll the page. A timeline in a vertical page hears horizontal wheels while vertical ones scroll the page. A scroll view that listens,
+or a view around one, only observes: the scroll view still scrolls. One scroll stays where it went, as a scroll
+view's does: a view that took it keeps the rest of it (a touchpad gesture and its momentum, notches while they keep
+coming) even when the pointer leaves it, and a scroll a scroll view has started is never taken over halfway by a
+listener that comes under the pointer: the listener only observes it. JS never cancels a native scroll after the fact
 (the main thread does not wait for it), so whether a view takes the wheel is decided by what is mounted, as with
 `onContextMenu`.
 
@@ -338,10 +350,34 @@ const offset = signal({ x: 0, y: 0 });
 />
 ```
 
+`onPinch` hears a touchpad pinch over a view, as GPUI's `on_pinch`, on macOS, Linux, the GPUI backend and Safari.
+Windows and the other browsers report a touchpad pinch as Control + wheel, which `onWheel` hears, so a view that zooms
+listens to both. The nearest view around the one under the pointer that listens hears the pinch, from its start to its
+end; when it is nearer than every view that pinches natively (`pinch` values, `onPinchStart`), it takes the pinch and
+nothing zooms natively. A view that starts listening during a pinch hears the rest of it, without its start. Fingers
+pinching a touchscreen are the native gesture's (`onPinchStart`, [Touch and gestures](../docs/touch-and-gestures.md)).
+
+| Prop | Rust | Type | Description |
+|---|---|---|---|
+| `onPinch` | `.on_pinch(..)` | `(e: PinchEvent) => void` | A touchpad pinched over the view or a view inside it. |
+
+`PinchEvent` has `position`, `pagePosition` and `modifiers`, as `MouseEvent`, `delta`, how much the scale changed since
+the last event as a fraction (0.1 is 10 % bigger, negative smaller), and `phase`: `"start"`, `"move"` or `"end"`, as a
+touch's. In Rust `delta` is a `Percentage` and `phase` a `PinchPhase`.
+
+```tsx
+<View
+  style={{ flex: 1 }}
+  onPinch={(e) => zoom.update((z) => z * (1 + e.delta))}
+  onWheel={(e) => e.modifiers.control && zoom.update((z) => z * (1 - (e.delta.y * (e.deltaMode === "lines" ? 16 : 1)) / 200))}
+/>
+```
+
 ### Tooltips
 
 `tooltip` gives any element a hint, shown above it on the desktops (macOS, Windows, Linux, the GPUI backend and
-desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it, and on
+desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it (at
+once when the pointer comes from another element whose hint it showed, within 300 ms of leaving it), and on
 every device once the keyboard moves the focus to it, until the focus leaves or Escape is pressed (a click or a tap
 that focuses it leaves the hint to the pointer). The hint never takes the pointer or presses, so the element works
 exactly as it does without it.
@@ -417,12 +453,19 @@ instead. The platform decides this as the button goes down, from what is mounted
 and nothing has to be cancelled. A `disabled` view leaves the click to the nearest enabled listener around it. On
 touchscreens, a long press opens menus: handle `onLongPress` with the same function.
 
+Every component takes `onContextMenu` too (`<Button onContextMenu>`, `button().on_context_menu(..)`), with the same
+`ContextMenuEvent` for its root. A component that shows a menu of its own there (a `ContextMenu` trigger) keeps the
+event. `DataTable` and `Editor` have an `onContextMenu` of their own, which reports the row and column, or the
+position in the text.
+
 ### Keyboard focus
 
-On macOS and the web, Tab moves the keyboard focus between its stops in tree order: the inputs, the views that take
-presses, and every `focusable` view. Focus styles (`focus:`, `.focus(..)`) style the focused view, and Return or Space
-presses it when it takes presses. A click presses a view without focusing it, so focus styles show for keyboard focus
-only.
+On macOS, the web and Android, Tab moves the keyboard focus between its stops in tree order: the inputs, the views
+that take presses, and every `focusable` view. Focus styles (`focus:`, `.focus(..)`) style the focused view, and
+Return or Space presses it when it takes presses. A click presses a view without focusing it, so focus styles show
+for keyboard focus only. On Android a pressable view is a hardware-keyboard stop, while a touch-mode tap focuses
+only an explicit `focusable` view (or one a ref focused), so tapping a button leaves a field editing; at the first
+and last stop Tab and Shift+Tab go to the embedding Android host instead of wrapping.
 
 The view the focus reaches scrolls into view in the scroll views and lists around it. Tab walks every row of a list,
 the rows not rendered yet included: the list renders the next row as the focus reaches it, and the focus leaves the
@@ -447,6 +490,8 @@ its ref's `on_focus_in(..)` and `on_focus_out(..)`: moving between views inside 
 | `focusable` | `.focusable(..)` | `boolean` | `true` for views that take presses | Whether the view is a stop of Tab. `true` makes any view one, whether it takes presses or leaves them to the views around it; `false` leaves a pressable to the pointer (a backdrop that closes a popover, rows the arrow keys move between). |
 | `onFocus` | `.on_focus(..)` | `() => void` | | Tab (or `focus()`) gave the view the keyboard focus. |
 | `onBlur` | `.on_blur(..)` | `() => void` | | The keyboard focus left the view. |
+| `onKeyDown` / `onKeyUp` | `.on_key_down(..)` / `.on_key_up(..)` | `(e: KeyEvent) => void` | | A hardware key went down on the focused view or inside it / came up on it. `KeyEvent` is `{ key, code, modifiers, repeat, defaultPrevented }`; one event bubbles to the enabled listening ancestors within the native window ([hardware keys](./keyboard.md#hardware-keys-on-custom-views)). |
+| `captureKeys` | `.capture_keys(..)` | `"none" \| "all" \| readonly string[]` | `"none"` | Keys the view, or a focused descendant, consumes before native defaults: canonical keystrokes such as `["mod+k", "escape"]`. `defaultPrevented` reports the decision; app shortcuts take precedence and native inputs keep their editing keys ([hardware keys](./keyboard.md#hardware-keys-on-custom-views)). |
 
 ```rust tabs
 view()
@@ -585,6 +630,9 @@ activates its pan, so drags inside scroll views leave the other axis to them
 | `role` | `.role(AccessibilityRole::Button)` | `AccessibilityRole` | What the element is (`"button"`, `"header"`, `"link"`, `"switch"`, …). |
 | `accessibilityState` | `.accessibility_state(..)` | `{ disabled?, selected?, checked?, busy?, expanded?, pressed?, current? }` | The state assistive technologies report (`checked` and `pressed` may be `"mixed"`; `current` is `true` or `"page"`, `"step"`, `"location"`, `"date"`, `"time"`). |
 | `accessibilityLevel` | `.accessibility_level(..)` | `number` | The level of a heading (1 the top), the depth of a tree item (1 at the top). |
+| `accessibilityActiveDescendant` | `.accessibility_active_descendant(..)` | `ViewRef \| null` | The item that is active inside the focused element: a combo box's highlighted option, a list's cursor row ([Accessibility](../docs/accessibility.md#the-active-item-of-a-focused-element)). |
+| `accessibilityControls` | `.accessibility_controls(..)` | `ViewRef \| null` | The element whose content this one controls: a combo box's list. |
+| `accessibilityDescribedBy` | `.accessibility_described_by(..)` | `ViewRef \| null` | The element whose text describes this one: a field's error line ([Accessibility](../docs/accessibility.md#an-element-that-describes-another)). |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | The value of a range or textual element. |
 | `accessibilityElementsHidden` | | `boolean` | Hides the view and its subtree from assistive technologies. |
 | `importantForAccessibility` | | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | Whether the view is exposed. |

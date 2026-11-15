@@ -46,6 +46,9 @@ An embedded app has these limits:
 (including the rendering it causes), bind one list row, run one timer, run one frame's `requestAnimationFrame`
 callbacks, drain the microtask queue. A long-running app never accumulates time toward a limit; only a single call
 that does not return in time is interrupted. Calls nested inside another share the outer call's budget.
+A call is charged the time it runs: its thread's CPU time on Linux, Android, macOS and iOS, monotonic time on
+Windows and the web. Time the system keeps the app frozen or suspended in the background, or waiting for a CPU, is not
+the call's.
 
 An interrupted call ends with an exception that no `catch` can swallow, and the error is reported with the budget it
 exceeded:
@@ -60,6 +63,17 @@ The VM keeps running: the next event, timer or frame runs normally.
 handler, and in development builds over the app), no JS runs after that, and the views stay as they were. The node
 and operation quotas exist because native views and queued changes live in native memory, which the JS heap limit does
 not cover: without them, an app could exhaust the device's memory through the UI.
+
+**Arrays NSH reads natively hold up to 2^20 (1 048 576) items, in every app.** Children (nested arrays counted
+together), `<Each>`'s items, menus (submenus counted together), a tray's title, `Animated.sequence` / `parallel` /
+`stagger`, `split`'s keys, a navigation stack's routes, a native component's `props` and `events` and the values it
+is given, a pan's `touches`, a canvas call's arguments, a style (its nested styles, shadows and transforms), a
+prop's lists, an animation's ranges and easing and the animations a composite runs (each counted together) are read
+in native code, beyond the call budget's reach, and an array is as long as it says, empty or not
+(`new Array(2 ** 32 - 1)`). A longer one throws an error the app can catch: a `RangeError`, a `TypeError` for a menu
+or the tray; an animation's `start` rejects its promise; a canvas call ignores it with a warning. A navigation stack
+holds up to as many screens: `push` beyond that throws a `RangeError`. Children, submenus and styles nested more than
+64 levels deep throw a `TypeError`. A `<List>`'s `each` takes any number of rows.
 
 > [!TIP]
 > These limits are generous for normal apps. If you hit the 2 s call budget, the work is too long for one event
@@ -120,6 +134,8 @@ An app declares what it may reach outside its VM in `nsh.json`:
     "speech": true,
     "notifications": true,
     "audio": true,
+    "application": true,
+    "homeDir": true,
     "host": ["getUserInfo", "bridge.*"],
     "openUrl": { "schemes": ["https", "mailto"] },
     "windows": { "kinds": ["normal", "dialog", "panel"], "max": 4 }
@@ -204,6 +220,11 @@ The page's own subresources (its scripts, images, XHRs) are the web content's bu
 allows them without allowing any remote page. A `baseUrl` gives inline HTML that URL's origin in the native
 web views, so the base URL needs the grant a page there would: its host in `hosts`.
 
+A page may show and download a `blob:` URL it made (`URL.createObjectURL`, a `<a download>` link): a blob URL
+embeds the origin of the document that made it, so it is allowed when that origin is a host in `hosts`, and a
+blob of a host the page may not show — or an opaque one (`blob:null/…`) — is not. Every platform checks this
+the same way.
+
 `input` is separate from `hosts` because trusted input carries user activation, which `injectJavaScript` never gets:
 the page may then open windows, write the clipboard, open the system's file panel, start WebAuthn or permission prompts
 and press any button that checks `isTrusted`. Without it the core drops `sendInput` and logs which key to add.
@@ -247,6 +268,22 @@ needs a `network` grant for its host.
 
 `"notifications": true` lets the app show system notifications and set its icon's badge
 ([`Notifications`](../modules/nsh.md#notifications)). The system still asks the user once, where it asks.
+
+### `application`
+
+`"application": true` lets the app act on the application as a whole on the desktop
+([`nsh/desktop`](../modules/nsh-desktop.md)): the main window (`currentWindow()` outside any `<Window>`,
+`Window.get("main")`: its title, title bar, mode, frame and level, bringing it to the front, closing it), the
+application menu (`Menu.setApplicationMenu`), the tray, global shortcuts, `Application.quit()`, `Application.restart()`
+and `Application.setLaunchAtLogin()`. Without it they do nothing, `Application.launchAtLogin()` resolves `false` and
+`setLaunchAtLogin` rejects with `ERR_ACCESS_DENIED` (`permission` `"application"`). Context menus (`Menu.popup`) show in the app's own view,
+and windows the app opens are granted by [`windows`](#windows), so neither needs it.
+
+### `homeDir`
+
+`"homeDir": true` lets [`os.homedir()`](../modules/standard-modules.md) tell the user's home directory; without it the
+call throws an error with `code` `ERR_ACCESS_DENIED`. The path is only a name: reading or writing there still needs
+`fs` grants.
 
 ### `openUrl`
 
@@ -354,7 +391,10 @@ The declaration goes with the app wherever it goes:
 - `nsh build` and `nsh package` write it next to the bundle as `capabilities.json`;
 - `nsh publish` puts it in the [signed package](./signed-packages.md) header, covered by the signature;
 - `nsh dev` sends it with every build, so development enforces the same rules. Changing `capabilities` reloads the app
-  instead of hot-patching it.
+  instead of hot-patching it;
+- an app whose root is a Rust component (`"root"` in `nsh.json`) has it compiled in with the root, so every runner, the
+  web and `nsh test` included, checks the app's calls against it, as a TSX app's. Without `"capabilities"` it reaches
+  what any app without a declaration does.
 
 ## Grants: what a host app allows
 

@@ -368,6 +368,31 @@ fn bare_urls_beside_latin_text_are_githubs() {
 }
 
 #[test]
+fn bare_urls_in_link_text_are_text() {
+    // Links do not contain other links (GFM): a URL written as a link's
+    // text is that text, at any depth, from a reference or `<a>` too.
+    assert_eq!(
+        blocks("[https://a.com](https://b.com)"),
+        vec![p(vec![link("https://b.com", vec![t("https://a.com")])])]
+    );
+    assert_eq!(
+        blocks("[see **www.a.com** 中文](https://b.com)"),
+        vec![p(vec![link(
+            "https://b.com",
+            vec![t("see "), strong(vec![t("www.a.com")]), t(" 中文")]
+        )])]
+    );
+    assert_eq!(
+        blocks("[https://a.com][r]\n\n[r]: https://b.com"),
+        vec![p(vec![link("https://b.com", vec![t("https://a.com")])])]
+    );
+    assert_eq!(
+        blocks("<a href=\"https://b.com\">https://a.com</a>"),
+        vec![p(vec![link("https://b.com", vec![t("https://a.com")])])]
+    );
+}
+
+#[test]
 fn emphasis_beside_latin_text_is_commonmarks() {
     // CommonMark's examples, unchanged.
     assert_eq!(blocks("a**\"foo\"**"), vec![p(vec![t("a**\"foo\"**")])]);
@@ -592,6 +617,7 @@ fn code_blocks_and_rules() {
                 language: Some("rust".into()),
                 meta: Some("title=\"main.rs\"".into()),
                 code: "fn main() {}".into(),
+                ..Default::default()
             }),
             Block::CodeBlock(CodeBlock::new(None, "indented")),
             Block::Rule,
@@ -1319,6 +1345,7 @@ fn streamed_fences_never_flash_empty_code_or_their_closer() {
             language: Some("py".into()),
             meta: None,
             code: "x\n``".into(),
+            ..Default::default()
         })]
     );
 }

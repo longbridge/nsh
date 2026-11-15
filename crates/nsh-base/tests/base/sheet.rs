@@ -1,6 +1,10 @@
 //! `Sheet`: it comes in when opened and goes once its slide-out ends, also
 //! on a manual clock that only the test moves (its end is the motion's,
-//! not a timer of the app's clock).
+//! not a timer of the app's clock). A bottom sheet, and a menu a phone
+//! shows as one, stays above the software keyboard. On every platform it
+//! is a modal dialog named by its `accessibilityLabel`: where the keyboard
+//! moves between views, the focus leaves what is under it, Tab goes round
+//! its stops and the focus goes back as it closes.
 
 use nsh_base::sheet;
 use nsh_core::{Size, element::Root, prelude::*};
@@ -155,6 +159,41 @@ fn declining_a_controlled_request_returns_the_sheet() {
     app.press("id:close").unwrap();
     app.wait_for_gone("Sheet body", std::time::Duration::from_secs(2))
         .unwrap();
+}
+
+/// A swipeable sheet holding an input over its handle.
+#[component]
+fn EditingScreen() -> impl IntoElement {
+    let editing = signal(false);
+    sheet().open(Some(true)).close_on_swipe(true).child(
+        view()
+            .h(px(200.0))
+            .child(text(move || format!("editing:{}", editing.get())))
+            .child(
+                nsh_base::input()
+                    .test_id("field")
+                    .h(px(40.0))
+                    .on_focus(move || editing.set(true))
+                    .on_blur(move || editing.set(false)),
+            )
+            .child(
+                view()
+                    .test_id("handle")
+                    .h(px(44.0))
+                    .child(text("Sheet body")),
+            ),
+    )
+}
+
+#[test]
+fn dragging_a_sheet_ends_editing_in_it() {
+    let mut app = start::<EditingScreen>();
+    app.wait(std::time::Duration::from_millis(400)).unwrap();
+    app.type_text("id:field", "hi").unwrap();
+    app.wait_for("text:editing:true").unwrap();
+    app.drag("id:handle", point(px(0.0), px(20.0))).unwrap();
+    app.wait_for("text:editing:false").unwrap();
+    app.wait_for("Sheet body").unwrap();
 }
 
 #[test]
@@ -576,4 +615,283 @@ fn a_web_sheet_uses_the_presented_surface_size_and_keeps_its_close_lifecycle() {
     app.wait_for_gone("Sheet body", Duration::from_secs(2))
         .unwrap();
     app.wait_for("text:requests:1").unwrap();
+}
+
+/// A phone's surface (390 × 844, 47 points of safe area at the top and 34
+/// at the bottom) on a manual clock showing `C`.
+fn start_on_a_phone<C: Component<Props = ()>>() -> Headless {
+    use nsh_core::platform::{Idiom, Os};
+
+    let mut config = EngineConfig {
+        viewport: Size::new(px(390.0), px(844.0)),
+        clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
+        ..EngineConfig::new(Root::of::<C>())
+    };
+    config.environment.os = Os::Ios;
+    config.environment.idiom = Idiom::Phone;
+    config.environment.safe_area.top = px(47.0);
+    config.environment.safe_area.bottom = px(34.0);
+    let mut app = Headless::start(config).unwrap();
+    app.first_render().unwrap();
+    app
+}
+
+/// The bounds of the view with `test_id`, in the surface.
+fn bounds_of(app: &Headless, test_id: &str) -> nsh_core::Bounds<Points> {
+    app.screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|n| n.test_id.as_deref() == Some(test_id))
+        .unwrap_or_else(|| panic!("a view {test_id}"))
+        .bounds
+}
+
+/// The software keyboard comes up `height` points high (the bottom safe
+/// area under it included), moving for 250 ms, and the frames settle.
+fn keyboard(app: &mut Headless, height: f32) {
+    app.set_environment("keyboard", |e| {
+        e.keyboard_height = px(height);
+        e.keyboard_duration = 250.0;
+    })
+    .unwrap();
+    app.run_for(std::time::Duration::from_millis(400)).unwrap();
+}
+
+/// A bottom sheet padded by the safe area, open at first.
+#[component]
+fn KeyboardSheet() -> impl IntoElement {
+    sheet().default_open(true).child(
+        view()
+            .pb_safe_area()
+            .child(view().test_id("first").h(px(44.0)).child(text("First")))
+            .child(view().test_id("last").h(px(44.0)).child(text("Last"))),
+    )
+}
+
+#[test]
+fn a_bottom_sheet_stays_above_the_keyboard() {
+    use std::sync::{Arc, Mutex};
+
+    use nsh_core::{LayoutAnimation, LayoutCurve, MountItem};
+
+    let mut app = start_on_a_phone::<KeyboardSheet>();
+    app.run_for(std::time::Duration::from_millis(400)).unwrap();
+    app.wait_for("Last").unwrap();
+    assert_eq!(
+        bounds_of(&app, "last").bottom(),
+        px(844.0 - 34.0),
+        "above the home indicator"
+    );
+    // Whether the batches that move views lead with the keyboard's motion.
+    let moves = Arc::new(Mutex::new(Vec::new()));
+    let seen = moves.clone();
+    app.observe(move |_, batch| {
+        if batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Frame { .. }))
+        {
+            seen.lock().unwrap().push(matches!(
+                batch.items.first(),
+                Some(MountItem::LayoutAnimation(LayoutAnimation { update: Some(t), .. }))
+                    if t.curve == LayoutCurve::Keyboard
+            ));
+        }
+    });
+    keyboard(&mut app, 336.0);
+    assert_eq!(
+        bounds_of(&app, "last").bottom(),
+        px(844.0 - 336.0),
+        "right above the keyboard, the safe area's padding behind it"
+    );
+    assert_eq!(
+        *moves.lock().unwrap(),
+        [true],
+        "moved once, with the keyboard"
+    );
+    keyboard(&mut app, 0.0);
+    assert_eq!(
+        bounds_of(&app, "last").bottom(),
+        px(844.0 - 34.0),
+        "back down with the keyboard gone"
+    );
+}
+
+/// A sheet taller than the room above the keyboard.
+#[component]
+fn TallKeyboardSheet() -> impl IntoElement {
+    sheet().default_open(true).child(
+        view()
+            .test_id("panel")
+            .h(px(700.0))
+            .pb_safe_area()
+            .child(text("Tall")),
+    )
+}
+
+#[test]
+fn a_bottom_sheet_above_the_keyboard_stays_below_the_status_bar() {
+    let mut app = start_on_a_phone::<TallKeyboardSheet>();
+    app.run_for(std::time::Duration::from_millis(400)).unwrap();
+    app.wait_for("Tall").unwrap();
+    keyboard(&mut app, 336.0);
+    // The sheet's panel: the view around the app's content.
+    let nodes = app.screen().layout_nodes();
+    let content = nodes
+        .iter()
+        .find(|n| n.test_id.as_deref() == Some("panel"))
+        .expect("the content");
+    let panel = nodes
+        .iter()
+        .find(|n| n.id == content.parent)
+        .expect("the panel")
+        .bounds;
+    assert_eq!(
+        panel.bottom(),
+        px(844.0 - (336.0 - 34.0)),
+        "above the keyboard, past the home indicator: {panel:?}"
+    );
+    assert_eq!(
+        panel.origin.y,
+        px(47.0),
+        "held below the status bar: {panel:?}"
+    );
+}
+
+/// A menu, which a phone shows as a sheet at the bottom, padded by the
+/// safe area.
+#[component]
+fn KeyboardMenu() -> impl IntoElement {
+    use nsh_base::{menu, menu_item};
+
+    view().pt(px(100.0)).child(
+        menu()
+            .popup_class("pb-[env(safe-area-inset-bottom)]")
+            .trigger(view().test_id("plus").h(px(44.0)).child(text("Plus")))
+            .child(menu_item().child(view().h(px(44.0)).child(text("Photo"))))
+            .child(menu_item().child(view().test_id("file").h(px(44.0)).child(text("File")))),
+    )
+}
+
+#[test]
+fn a_menu_sheet_opened_with_the_keyboard_up_is_above_it() {
+    let mut app = start_on_a_phone::<KeyboardMenu>();
+    keyboard(&mut app, 336.0);
+    app.press("id:plus").unwrap();
+    app.run_for(std::time::Duration::from_millis(400)).unwrap();
+    app.wait_for("File").unwrap();
+    assert_eq!(
+        bounds_of(&app, "file").bottom(),
+        px(844.0 - 336.0),
+        "the last item right above the keyboard"
+    );
+}
+
+/// A Settings sheet the app opens with a button, two buttons in its panel
+/// and a stop after it all, logging the focus they take.
+#[component]
+fn FocusSheet() -> impl IntoElement {
+    let open = signal(false);
+    let closes = signal(0);
+    let log = signal(String::from("focus"));
+    let note = move |what: &'static str| log.update(|log| *log = format!("{log} {what}"));
+    let stop = move |id: &'static str| {
+        view()
+            .test_id(id)
+            .focusable(true)
+            .h(px(44.0))
+            .on_focus(move |_: &()| note(id))
+            .child(text(id))
+    };
+    view()
+        .child(text(move || log.get()))
+        .child(text(move || format!("closes:{}", closes.get())))
+        .child(stop("open").on_press(move || open.set(true)))
+        .child(
+            sheet()
+                .open(move || Some(open.get()))
+                .accessibility_label("Settings")
+                .on_open_change(move |e: &nsh_base::SheetEvent| {
+                    if let nsh_base::SheetEvent::OpenChange(next, _) = e {
+                        open.set(*next);
+                        closes.update(|n| *n += 1);
+                    }
+                })
+                .child(
+                    view()
+                        .h(px(200.0))
+                        .child(stop("first"))
+                        .child(stop("second")),
+                ),
+        )
+        .child(stop("after"))
+}
+
+fn start_on<C: Component<Props = ()>>(os: nsh_core::platform::Os) -> Headless {
+    use nsh_core::platform::Idiom;
+
+    let mut config = EngineConfig {
+        viewport: Size::new(px(390.0), px(844.0)),
+        ..EngineConfig::new(Root::of::<C>())
+    };
+    config.environment.os = os;
+    config.environment.idiom = if matches!(os, nsh_core::platform::Os::Ios) {
+        Idiom::Phone
+    } else {
+        Idiom::Desktop
+    };
+    let mut app = Headless::start(config).unwrap();
+    app.first_render().unwrap();
+    app
+}
+
+#[test]
+fn a_sheet_is_a_dialog_named_by_its_label_everywhere() {
+    use nsh_core::platform::Os;
+
+    for os in [
+        Os::Ios,
+        Os::Android,
+        Os::MacOs,
+        Os::Windows,
+        Os::Linux,
+        Os::Web,
+    ] {
+        let mut app = start_on::<FocusSheet>(os);
+        app.press("id:open").unwrap();
+        app.wait_for("first").unwrap();
+        let screen = app.screen();
+        assert_eq!(screen.count("role:dialog[Settings]"), Ok(1), "{os:?}");
+        assert_eq!(screen.count("role:dialog >> id:second"), Ok(1), "{os:?}");
+    }
+}
+
+#[test]
+fn a_sheet_keeps_the_keyboard_focus_while_it_shows_and_gives_it_back() {
+    use nsh_core::platform::Os;
+
+    for os in [Os::MacOs, Os::Windows, Os::Linux, Os::Web] {
+        let mut app = start_on::<FocusSheet>(os);
+        app.press_key("tab").unwrap();
+        app.wait_for("text:focus open").unwrap();
+        // Opened from the keyboard: the focus leaves the button under it,
+        // and Tab goes round the panel's stops, never out to the rest.
+        app.press_key("enter").unwrap();
+        app.wait_for("first").unwrap();
+        app.wait(std::time::Duration::from_millis(400)).unwrap();
+        for _ in 0..3 {
+            app.press_key("tab").unwrap();
+        }
+        app.wait_for("text:focus open first second first")
+            .unwrap_or_else(|e| panic!("{os:?}: {e}"));
+        // Escape closes it, and the focus is the button's again.
+        app.press_key("escape").unwrap();
+        app.wait_for_gone("first", std::time::Duration::from_secs(2))
+            .unwrap();
+        app.wait_for("text:focus open first second first open")
+            .unwrap_or_else(|e| panic!("{os:?}: {e}"));
+        // Escape asked to close it once.
+        app.wait_for("text:closes:1")
+            .unwrap_or_else(|e| panic!("{os:?}: {e}"));
+    }
 }

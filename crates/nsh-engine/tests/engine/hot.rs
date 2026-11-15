@@ -185,6 +185,7 @@ fn edits_replace_modules_and_keep_unrelated_state() {
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     };
     let engine = Engine::start(
         config,
@@ -348,6 +349,7 @@ fn entry_edits_keep_navigation_and_state() {
             speech: None,
             audio: None,
             windows: None,
+            login_item: None,
         };
         let engine = Engine::start(
             config,
@@ -495,6 +497,7 @@ fn nested_hot_components_render_the_stacks_screen() {
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     };
     let engine = Engine::start(
         config,

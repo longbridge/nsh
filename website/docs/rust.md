@@ -505,6 +505,20 @@ axis and content size in `scroll`, a text view's text and the box it was laid ou
 that nothing passes its parent, is cut by a view that clips, or is too wide for its text. Both are Rust API of
 `nsh_testing`, for `cargo test`.
 
+A web app's routing is tested on its page: `Headless::start_at_page(config, "https://example.test/app/")` starts the
+app on the web at that address, and `app.browser()` is the browser around it, with the history the web keeps (an
+entry per page a stack pushes and per open dialog, the app's `set_app_url_with(url, HistoryBehavior::Push)` addresses)
+and the user's moves through it: `back()`, `forward()`, `go(delta)` and `type_address("#inbox")`, which the app hears
+as on the web (`next_app_url_change`, `next_url_scheme_open`); `entries()`, `index()` and `url()` read the history.
+
+```rust
+let mut app = Headless::start_at_page(config, "https://example.test/app/").unwrap();
+app.press("Message").unwrap(); // pushes a page and sets `?m=1`
+assert_eq!(app.browser().url(), Some("https://example.test/app/?m=1"));
+app.browser().back().unwrap(); // pops the page
+app.browser().type_address("#inbox").unwrap(); // an `Address` change
+```
+
 A TSX entry is built with `nsh-testing`'s feature `bundle` as `nsh run` builds it, against the UI sets its hosts
 serve: NSH's, and each crate's `registry()`, which `#[native_module]` makes:
 

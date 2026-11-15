@@ -13,7 +13,7 @@ use std::{
 
 use nsh_base::{SelectEntry, SelectEvent, SelectItem, select};
 use nsh_core::{
-    AccessibilityRole, Bounds, Command, MountItem, NodeId, Size, ViewProps,
+    AccessibilityRole, AccessibilityState, Bounds, Command, MountItem, NodeId, Size, ViewProps,
     element::Root,
     platform::{Idiom, Os},
     prelude::*,
@@ -40,6 +40,11 @@ struct HarnessProps {
     /// A clear button `Clear` (labelled `Clear food`) while an item is
     /// chosen.
     cleanable: bool,
+    /// The app's trigger says its content is invalid, and that it is
+    /// busy, at first; F6 toggles `invalid`.
+    invalid: bool,
+    /// The app's `cover`, unless left to the platform.
+    cover: Option<bool>,
 }
 
 fn fruits() -> Vec<SelectItem> {
@@ -72,13 +77,16 @@ fn props(items: Vec<SelectItem>) -> HarnessProps {
         disabled: false,
         default_open: false,
         cleanable: false,
+        invalid: false,
+        cover: None,
     }
 }
 
 /// A select of `props`' items under a 160 × 30 trigger, rows drawn as
 /// their titles (`renderItem`) and at half opacity while highlighted
 /// (`focus:`); what the app heard as `Log: …`, its value as `Value: …`; F5
-/// replaces the items with Celery and Kiwi.
+/// replaces the items with Celery and Kiwi; F6 toggles the `invalid` the
+/// app's trigger says.
 #[component]
 fn Harness(props: HarnessProps) -> impl IntoElement {
     let value = signal(props.value.clone().map(SharedString::from));
@@ -86,6 +94,11 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     let log = signal(Vec::<String>::new());
     let push = move |s: String| log.update(|l| l.push(s));
     let items = signal(props.items.clone());
+    let invalid = signal(props.invalid);
+    // Only the trigger that starts invalid is busy too, so that the other
+    // tests' trigger carries no state of the app's.
+    let busy = props.invalid;
+    on_key("f6", move |_| invalid.update(|i| *i = !*i));
     on_key("f5", move |_| {
         items.set(vec![
             SelectItem::new("kiwi", "Kiwi"),
@@ -105,6 +118,11 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .trigger(
             view()
                 .test_id("trigger")
+                .accessibility_state(move || AccessibilityState {
+                    invalid: invalid.get(),
+                    busy,
+                    ..AccessibilityState::default()
+                })
                 .w(px(160.0))
                 .h(px(30.0))
                 .child(text("Pick")),
@@ -140,6 +158,9 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     }
     if props.controlled_open {
         el = el.open(move || Some(open.get()));
+    }
+    if let Some(cover) = props.cover {
+        el = el.cover(cover);
     }
     view()
         .pt(px(100.0))
@@ -294,13 +315,31 @@ impl App {
 }
 
 fn start_on(props: HarnessProps, os: Os, idiom: Idiom, screen_reader: bool) -> App {
+    start_env(props, |env| {
+        env.os = os;
+        env.idiom = idiom;
+        env.screen_reader = screen_reader;
+    })
+}
+
+/// [`start_on`] a Mac whose screen reader runs and follows active
+/// descendants (`Environment::reads_active_descendants`).
+fn reading_active_descendants(props: HarnessProps) -> App {
+    start_env(props, |env| {
+        env.os = Os::MacOs;
+        env.idiom = Idiom::Desktop;
+        env.screen_reader = true;
+        env.reads_active_descendants = true;
+    })
+}
+
+/// The select in an environment `set` makes.
+fn start_env(props: HarnessProps, set: impl FnOnce(&mut nsh_core::platform::Environment)) -> App {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         ..EngineConfig::new(Root::new::<Harness>(move || props.clone()))
     };
-    config.environment.os = os;
-    config.environment.idiom = idiom;
-    config.environment.screen_reader = screen_reader;
+    set(&mut config.environment);
     let mut app = Headless::start(config).expect("the engine starts");
     let seen = Arc::new(Mutex::new(Seen::default()));
     let into = seen.clone();
@@ -674,6 +713,11 @@ fn tab_closes_it_and_the_focus_moves_on() {
             !app.sent(trigger, &Command::Focus),
             "searchable {searchable}: the focus is not taken back"
         );
+        if searchable {
+            // The search field had the keyboard (`autoFocus`): Tab left
+            // it, not the trigger.
+            continue;
+        }
         // It went on: the trigger's keys open nothing.
         app.key("down");
         app.wait(Duration::from_millis(100)).unwrap();
@@ -992,6 +1036,46 @@ fn on_windows_and_linux_the_list_drops_below_the_trigger() {
     }
 }
 
+#[test]
+fn without_cover_the_list_drops_below_the_trigger_on_macos() {
+    let chosen = HarnessProps {
+        value: Some("carrot".into()),
+        cover: Some(false),
+        ..props(fruits())
+    };
+    let frame = popup_frame_on(Os::MacOs, chosen);
+    // Below the trigger (its 160 × 30 view at 40, 100), at its start, as
+    // wide, although an item is chosen: as on the other desktops.
+    assert_eq!(frame.origin.x, px(40.0), "{frame:?}");
+    assert_eq!(frame.origin.y, px(130.0), "{frame:?}");
+    assert_eq!(frame.size.width, px(160.0), "{frame:?}");
+}
+
+#[test]
+fn with_cover_the_chosen_item_opens_over_the_trigger_on_every_desktop() {
+    for os in [Os::Windows, Os::Linux, Os::Web] {
+        let chosen = HarnessProps {
+            value: Some("carrot".into()),
+            cover: Some(true),
+            ..props(fruits())
+        };
+        let frame = popup_frame_on(os, chosen);
+        // Carrot's row lies over the trigger (at 100), the rows above it
+        // above the trigger, as on macOS.
+        assert!(frame.origin.y < px(100.0), "{os:?}: {frame:?}");
+        assert_eq!(frame.origin.x, px(40.0), "{os:?}");
+    }
+    // With nothing chosen there is no row to lay over it: below.
+    let frame = popup_frame_on(
+        Os::Windows,
+        HarnessProps {
+            cover: Some(true),
+            ..props(fruits())
+        },
+    );
+    assert_eq!(frame.origin.y, px(130.0), "{frame:?}");
+}
+
 // 10. Accessibility.
 
 #[test]
@@ -1025,6 +1109,33 @@ fn screen_readers_hear_a_combobox_a_listbox_and_its_options() {
 }
 
 #[test]
+fn the_trigger_keeps_the_states_the_app_gives_it() {
+    let mut app = desktop(HarnessProps {
+        invalid: true,
+        ..props(fruits())
+    });
+    let state = app.trigger().accessibility.state;
+    assert!(state.invalid, "the app's `invalid` stays");
+    assert!(state.busy, "the app's `busy` stays");
+    assert_eq!(state.expanded, Some(false), "the select's `expanded` wins");
+    assert!(state.has_popup);
+    app.key("f6");
+    assert!(
+        !app.trigger().accessibility.state.invalid,
+        "the app's `invalid` follows its changes"
+    );
+    app.open_list();
+    let state = app.trigger().accessibility.state;
+    assert!(!state.invalid);
+    assert!(state.busy);
+    assert_eq!(state.expanded, Some(true));
+    app.key("f6");
+    let state = app.trigger().accessibility.state;
+    assert!(state.invalid);
+    assert_eq!(state.expanded, Some(true), "the select's `expanded` stays");
+}
+
+#[test]
 fn a_keys_highlight_takes_the_screen_readers_focus() {
     let mut app = start_on(props(fruits()), Os::MacOs, Idiom::Desktop, true);
     app.key("tab");
@@ -1039,6 +1150,85 @@ fn a_keys_highlight_takes_the_screen_readers_focus() {
             .any(|(id, c)| *id == row && *c == Command::AccessibilityFocus)
     })
     .unwrap();
+}
+
+/// Where screen readers follow active descendants, the trigger, which
+/// keeps the keyboard focus, names the highlighted row as its active
+/// descendant and the listbox as what it controls; nothing is announced
+/// and no row takes the screen reader's focus.
+#[test]
+fn the_trigger_names_the_highlighted_row_as_its_active_descendant() {
+    let mut app = reading_active_descendants(props(fruits()));
+    let trigger = app.screen().id("role:combobox").unwrap();
+    assert_eq!(app.screen().active_descendant("role:combobox"), Ok(None));
+    app.key("tab");
+    app.key("down");
+    app.see_row(">Apple");
+    let listbox = app.screen().id("role:listbox").unwrap();
+    let apple = app.screen().id("role:option[Apple]").unwrap();
+    app.wait_until("the trigger naming Apple", Duration::from_secs(5), |s| {
+        s.active_descendant("role:combobox") == Ok(Some(apple))
+    })
+    .unwrap();
+    assert_eq!(
+        app.screen().accessibility_controls("role:combobox"),
+        Ok(Some(listbox))
+    );
+    app.key("down");
+    app.see_row(">Blueberry");
+    let blueberry = app.screen().id("role:option[Blueberry]").unwrap();
+    app.wait_until(
+        "the trigger naming Blueberry",
+        Duration::from_secs(5),
+        |s| s.active_descendant("role:combobox") == Ok(Some(blueberry)),
+    )
+    .unwrap();
+    assert!(
+        !app.screen()
+            .commands()
+            .iter()
+            .any(|(_, c)| *c == Command::AccessibilityFocus || matches!(c, Command::Announce(_))),
+        "the relation alone tells the screen reader"
+    );
+    // Closed: it names nothing.
+    app.key("escape");
+    app.gone("role:listbox");
+    assert_eq!(app.screen().id("role:combobox"), Ok(trigger));
+    assert_eq!(app.screen().active_descendant("role:combobox"), Ok(None));
+    assert_eq!(
+        app.screen().accessibility_controls("role:combobox"),
+        Ok(None)
+    );
+}
+
+/// The search field, which takes the keyboard focus while it shows, names
+/// the highlighted row too.
+#[test]
+fn the_search_field_names_the_highlighted_row() {
+    let mut app = reading_active_descendants(HarnessProps {
+        searchable: true,
+        ..props(fruits())
+    });
+    app.open_list();
+    app.type_text("Search", "cel").unwrap();
+    app.see_row(">Celery");
+    let celery = app.screen().id("role:option[Celery]").unwrap();
+    let listbox = app.screen().id("role:listbox").unwrap();
+    app.wait_until("the field naming Celery", Duration::from_secs(5), |s| {
+        s.active_descendant("id:food-search") == Ok(Some(celery))
+    })
+    .unwrap();
+    assert_eq!(
+        app.screen().accessibility_controls("id:food-search"),
+        Ok(Some(listbox))
+    );
+    assert!(
+        !app.screen()
+            .commands()
+            .iter()
+            .any(|(_, c)| matches!(c, Command::Announce(_))),
+        "the relation alone tells the screen reader"
+    );
 }
 
 #[test]

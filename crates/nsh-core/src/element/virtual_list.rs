@@ -540,24 +540,6 @@ impl Accessible for VirtualList {}
 impl Interactive for VirtualList {}
 impl super::Scrollable for VirtualList {}
 
-/// How the rows changed from `old` to `new` keys: `(at, removed,
-/// inserted)` by the common start and end (as `List` does), `None` when
-/// they are the same.
-pub(crate) fn splice(old: &[u64], new: &[u64]) -> Option<(u32, u32, u32)> {
-    let max = old.len().min(new.len());
-    let start = old.iter().zip(new).take_while(|(a, b)| a == b).count();
-    let end = old[start..]
-        .iter()
-        .rev()
-        .zip(new[start..].iter().rev())
-        .take(max - start)
-        .take_while(|(a, b)| a == b)
-        .count();
-    let removed = old.len() - start - end;
-    let inserted = new.len() - start - end;
-    (removed > 0 || inserted > 0).then_some((start as u32, removed as u32, inserted as u32))
-}
-
 #[cfg(test)]
 mod tests {
     use super::ViewableItems;
@@ -577,15 +559,5 @@ mod tests {
         };
         assert_eq!(none.indices().count(), 0);
         assert_eq!(none.changed().collect::<Vec<_>>(), [(0, false), (1, false)]);
-    }
-
-    #[test]
-    fn splices_keep_the_common_ends() {
-        use super::splice;
-        assert_eq!(splice(&[1, 2, 3], &[1, 2, 3]), None);
-        assert_eq!(splice(&[1, 2, 3], &[0, 1, 2, 3]), Some((0, 0, 1)));
-        assert_eq!(splice(&[1, 2, 3], &[1, 3]), Some((1, 1, 0)));
-        assert_eq!(splice(&[1, 2, 3], &[1, 2, 3, 4]), Some((3, 0, 1)));
-        assert_eq!(splice(&[1, 1], &[1]), Some((1, 1, 0)));
     }
 }

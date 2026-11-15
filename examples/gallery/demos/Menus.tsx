@@ -1,5 +1,6 @@
 import { type JSX, LayoutAnimation, reduceMotion, Scroll, signal, Text, token, View } from "nsh";
-import { ContextMenu, Menu, MenuItem, MenuSeparator, type OpenChangeReason, Submenu, Toolbar } from "nsh/base";
+import { ContextMenu, Menu, MenuButton, MenuItem, MenuSeparator, type OpenChangeReason, Submenu, Toolbar } from "nsh/base";
+import { SegmentedControl } from "nsh/mobile";
 import { platform } from "nsh";
 import { keymap } from "nsh";
 import { Icon, type IconName, LucideIcon, type LucideIconName } from "../icons";
@@ -484,5 +485,47 @@ export function Menus() {
     );
   }
 
-  return <DemoPage cards={[MenuBar, Rows, Placement, LongList, Commands, Events]} />;
+  /**
+   * The system's own controls: `MenuButton` shows UIKit's menu from the
+   * gallery's chip on iOS (the platform's context menu on the desktops),
+   * and `SegmentedControl` is a `UISegmentedControl` on iOS, the gallery's
+   * drawn segments elsewhere.
+   */
+  function SystemMenu() {
+    const sort = signal<"Name" | "Date" | "Size">("Date");
+    const layout = signal(0);
+    const layouts = ["List", "Grid", "Columns"] as const;
+    const ios = platform.os === "ios";
+    const menuOff = !ios && !platform.desktop;
+    return (
+      <Card icon="system" title="The system's menu" subtitle={ios ? "UIKit's menu and segmented control" : platform.desktop ? "The platform's menu at the pointer" : "Phones without a system menu use Menu"}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <MenuButton
+            testID="system-menu"
+            accessibilityLabel="Arrange"
+            title="Arrange"
+            disabled={menuOff}
+            items={[
+              { id: "", label: "Sort by", inline: true, items: (["Name", "Date", "Size"] as const).map((by) => ({ id: `sort:${by}`, label: by, checked: sort() === by })) },
+              { id: "share", label: "Share", icon: "square.and.arrow.up" },
+              { id: "duplicate", label: "Duplicate", icon: "plus.square.on.square" },
+              { id: "", label: "", inline: true, items: [{ id: "delete", label: "Delete", icon: "trash", destructive: true }] },
+            ]}
+            onSelect={({ id }) => {
+              if (id.startsWith("sort:")) sort.set(id.slice(5) as "Name" | "Date" | "Size");
+              log(`system menu · ${id}`);
+            }}
+          >
+            <Chip label={`Sorted by ${sort()}`} lucide="list-filter" />
+          </MenuButton>
+        </View>
+        <If when={ios} else={<Segmented size="small" options={layouts.map((l, i) => ({ value: String(i), label: l }))} value={String(layout())} onChange={(v) => layout.set(Number(v))} />}>
+          <SegmentedControl testID="system-segments" items={layouts.map((title) => ({ title }))} selectedIndex={layout()} onChange={({ index }) => layout.set(index)} />
+        </If>
+        <Caption label={`${layouts[layout()]} · sorted by ${sort()}`} />
+      </Card>
+    );
+  }
+
+  return <DemoPage cards={[MenuBar, Rows, Placement, LongList, Commands, SystemMenu, Events]} />;
 }

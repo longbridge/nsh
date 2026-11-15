@@ -113,6 +113,7 @@ mount(() => <Text>{{shown()}}</Text>);
             refuse_connections: None,
             filesystem: None,
             windows: None,
+            login_item: None,
             assets: None,
             environment: Environment {
                 os: Os::Linux,
@@ -320,7 +321,8 @@ report({
   run: typeof process.run,
 });
 "##,
-        serde_json::json!({}),
+        // `os.homedir()` is told only to apps granted `homeDir` (#1499).
+        serde_json::json!({ "homeDir": true }),
         None,
         |_| {},
     );

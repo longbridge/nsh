@@ -375,7 +375,10 @@ impl<M: TextEngine> Core<M> {
         }
         // And its `position: sticky` views'.
         all.extend_from_slice(&scroll.view_sticky);
-        all.sort_by_key(|r| r.cell);
+        // By cell, its built-in bar last: the platforms raise the cells in
+        // this order, and the bar draws over the viewport, rows included.
+        let bar = scroll.bar.as_ref().map(|b| b.0);
+        all.sort_by_key(|r| (Some(r.cell) == bar, r.cell));
         all
     }
 
@@ -741,7 +744,7 @@ const IGNORED: [(u16, &str, &str); 8] = [
     ),
     (
         ignored::BEHAVIOR,
-        "paging, snapping, `contentInset`, `contentOffset`, `bounces`, `scrollable` and `keyboardDismissMode`",
+        "paging, snapping, `contentInset`, `contentOffset`, `bounces`, `scrollsToTop`, `scrollable` and `keyboardDismissMode`",
         AROUND,
     ),
     (ignored::SCROLLBAR, "`scrollbar`", AROUND),

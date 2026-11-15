@@ -15,6 +15,12 @@
 //! configured line height, its extra space split above and below the text
 //! ([`LineBox`]), as the caret is as tall as a line fragment.
 //!
+//! A scaled or translated ancestor requires hosting the pad above its
+//! layer transform so AppKit's geometry matches the drawn editor. Rounded
+//! clips from intervening ancestors are copied into the pad's coordinates
+//! for drawing and picking. Placement and clips follow scrolling and zoom
+//! without ending the edit ([`sync`]).
+//!
 //! The fields are subclasses ([`define_field!`]) only to hear what AppKit
 //! tells a field's delegate's delegate: AppKit edits a field with the
 //! window's shared field editor, whose delegate is the field, so the
@@ -71,14 +77,17 @@ use objc2_app_kit::{
     NSDraggingInfo, NSEvent, NSEventModifierFlags, NSEventType, NSFocusRingType,
     NSFontAttributeName, NSForegroundColorAttributeName, NSLineBreakMode, NSMutableParagraphStyle,
     NSParagraphStyleAttributeName, NSPasteboard, NSResponder, NSScrollView, NSSecureTextField,
-    NSText, NSTextAlignment, NSTextDelegate, NSTextField, NSTextFieldDelegate, NSTextInputClient,
-    NSTextView, NSTextViewDelegate, NSValidatedUserInterfaceItem, NSView, NSWritingDirection,
+    NSSpellChecker, NSText, NSTextAlignment, NSTextDelegate, NSTextField, NSTextFieldDelegate,
+    NSTextInputClient, NSTextStorage, NSTextView, NSTextViewDelegate, NSValidatedUserInterfaceItem,
+    NSView, NSWritingDirection,
 };
-use objc2_core_foundation::{CGFloat, CGSize};
+use objc2_core_foundation::{CGAffineTransform, CGFloat, CGPoint, CGRect, CGSize};
+use objc2_core_graphics::CGPath;
 use objc2_foundation::{
-    NSAttributedString, NSDictionary, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRange,
-    NSRect, NSString,
+    NSArray, NSAttributedString, NSDictionary, NSNotification, NSObject, NSObjectProtocol, NSPoint,
+    NSRange, NSRect, NSString, NSUndoManager,
 };
+use objc2_quartz_core::{CALayer, CAShapeLayer};
 
 use crate::{
     surface::Surface,
@@ -97,10 +106,26 @@ enum Editor {
     Area {
         scroller: Retained<NSScrollView>,
         view: Retained<NSTextView>,
+        /// Retained because `NSTextView.textStorage` is an assign property.
+        storage: Retained<NSTextStorage>,
     },
 }
 
 impl Editor {
+    /// Clears this editor's undo records without changing another input's history.
+    fn clear_undo(
+        &self,
+        fallback: Option<&Retained<NSUndoManager>>,
+    ) -> Option<Retained<NSUndoManager>> {
+        let Editor::Area { view, storage, .. } = self else {
+            return None;
+        };
+        let manager = view.undoManager().or_else(|| fallback.cloned())?;
+        // SAFETY: AppKit registers text undo operations with the text storage as target.
+        unsafe { manager.removeAllActionsWithTarget(storage) };
+        Some(manager)
+    }
+
     /// The view hosted in the input's view.
     fn host(&self) -> Retained<NSView> {
         match self {
@@ -257,9 +282,22 @@ impl Editor {
     }
 }
 
+/// A pad hosted above the transforms around its input ([`lifted`]): the
+/// view it is hosted on, the frame it takes there and the opacity the
+/// views it left give it.
+struct Lift {
+    host: objc2::rc::Weak<NSView>,
+    /// The child the pad is raised above (its transformed ancestor).
+    anchor: objc2::rc::Weak<NSView>,
+    rect: Bounds<Points>,
+    alpha: f32,
+}
+
 /// The native side of an input view ([`crate::view::ViewState::input`]).
 pub(crate) struct InputState {
     editor: RefCell<Editor>,
+    /// Retains a manager when available for cleanup after editor detachment.
+    undo_manager: RefCell<Option<Retained<NSUndoManager>>>,
     /// Hears the editors (their `delegate` is weak).
     delegate: Retained<InputDelegate>,
     /// Fills the view and holds the editor ([`InputPad`]).
@@ -271,6 +309,12 @@ pub(crate) struct InputState {
     configured: Cell<bool>,
     /// Content box; the whole view until the core sends one.
     content: Cell<Option<Bounds<Points>>>,
+    /// Where the pad is hosted while the transforms above the input cannot
+    /// show an AppKit view where it is ([`lifted`]); `None` while it is
+    /// hosted on the input's own view.
+    lift: RefCell<Option<Lift>>,
+    /// Clips copied from the ancestors the lifted pad left behind.
+    clips: RefCell<Vec<PadClip>>,
     /// User edits reported to the engine.
     count: Cell<u32>,
     /// A change made here, not by the user, is being applied.
@@ -368,6 +412,7 @@ impl Ctx {
         }
         let count = input.count.get() + 1;
         input.count.set(count);
+        input.remember_undo_manager();
         let text = input.editor.borrow().text();
         input.known.borrow_mut().clone_from(&text);
         // A composition that starts or changes is reported before the text
@@ -496,7 +541,9 @@ impl Ctx {
             return;
         }
         let editor = input.editor.borrow().clone();
-        let Some(caret) = editor.caret(view.ns()) else {
+        // The pad's space is the input view's, while the pad may be hosted
+        // above the transforms around it.
+        let Some(caret) = editor.caret(&input.pad) else {
             return;
         };
         if input.caret.replace(caret) != caret {
@@ -553,6 +600,11 @@ impl Ctx {
         }
         set_focused(&surface, &view, focused);
         if focused {
+            // AppKit receives input clicks outside the drawn-text pointer path.
+            // Programmatic focus (Find, dialogs) preserves the selection.
+            if crate::view::pressing(view.ns().mtm()) {
+                crate::text::clear(&surface);
+            }
             // The scroll views around show the field, as on phones.
             crate::scroll::reveal(&surface, &view);
         }
@@ -797,8 +849,11 @@ pub(crate) fn tab(surface: &Surface, from: &NSView, backward: bool) -> bool {
         // A text view's clip view comes right before it in the loop and
         // gives the focus back to it: skip the views around `from`.
         if next.isDescendantOf(&scope)
-            && (!crate::view::is_ours(&next)
-                || NshView::from_ns(&next).is_some_and(|view| crate::input::is_key_stop(&view)))
+            && (if crate::view::is_ours(&next) {
+                NshView::from_ns(&next).is_some_and(|view| crate::input::is_key_stop(&view))
+            } else {
+                held_seen(&next)
+            })
             && !from.isDescendantOf(&next)
         {
             return window.makeFirstResponder(Some(&next));
@@ -806,6 +861,20 @@ pub(crate) fn tab(surface: &Surface, from: &NSView, backward: bool) -> bool {
         at = next;
     }
     false
+}
+
+/// Whether a view of the key view loop that is not ours (an input's field,
+/// a hosted view) shows to the keyboard: the view of ours holding it does
+/// ([`NshView::seen_by_keys`]).
+fn held_seen(view: &NSView) -> bool {
+    let mut at = crate::view::superview(view);
+    while let Some(ns) = at {
+        if let Some(view) = NshView::from_ns(&ns) {
+            return view.seen_by_keys();
+        }
+        at = crate::view::superview(&ns);
+    }
+    true
 }
 
 /// Defines a field class: `NSTextField` or `NSSecureTextField` that tells
@@ -836,6 +905,57 @@ macro_rules! define_field {
 
             impl $name {
                 $($extra)*
+
+                // A combo box's field is the combo box, as WebKit's is: the
+                // element VoiceOver is on while the list is open, named and
+                // expanded as the input, its selected child the input's
+                // active descendant, its linked element the list
+                // ([`crate::access::combobox_field`]).
+                #[unsafe(method_id(accessibilityRole))]
+                fn accessibility_role(&self) -> Option<Retained<NSString>> {
+                    match self.combobox() {
+                        Some(_) => Some(NSString::from_str("AXComboBox")),
+                        // Forwarding this override to AppKit exposes AXUnknown,
+                        // for secure fields too. Both have the text-field role.
+                        None => Some(NSString::from_str("AXTextField")),
+                    }
+                }
+
+                #[unsafe(method_id(accessibilityLabel))]
+                fn accessibility_label(&self) -> Option<Retained<NSString>> {
+                    match self.combobox() {
+                        Some(field) => field.label.map(|l| NSString::from_str(&l)),
+                        // SAFETY: NSTextField's own label.
+                        None => unsafe { msg_send![super(self), accessibilityLabel] },
+                    }
+                }
+
+                #[unsafe(method(isAccessibilityExpanded))]
+                fn is_accessibility_expanded(&self) -> bool {
+                    match self.combobox() {
+                        Some(field) => field.expanded,
+                        // SAFETY: NSTextField's own state.
+                        None => unsafe { msg_send![super(self), isAccessibilityExpanded] },
+                    }
+                }
+
+                #[unsafe(method_id(accessibilitySelectedChildren))]
+                fn accessibility_selected_children(&self) -> Option<Retained<NSArray>> {
+                    match self.combobox().and_then(|f| f.active) {
+                        Some(active) => Some(NSArray::from_retained_slice(&[active])),
+                        // SAFETY: NSTextField's own answer.
+                        None => unsafe { msg_send![super(self), accessibilitySelectedChildren] },
+                    }
+                }
+
+                #[unsafe(method_id(accessibilityLinkedUIElements))]
+                fn accessibility_linked_ui_elements(&self) -> Option<Retained<NSArray>> {
+                    match self.combobox().and_then(|f| f.controls) {
+                        Some(list) => Some(NSArray::from_retained_slice(&[list])),
+                        // SAFETY: NSTextField's own answer.
+                        None => unsafe { msg_send![super(self), accessibilityLinkedUIElements] },
+                    }
+                }
 
                 #[unsafe(method(becomeFirstResponder))]
                 fn become_first_responder(&self) -> bool {
@@ -934,6 +1054,19 @@ macro_rules! define_field {
             }
         }
     };
+}
+
+/// What a field of an input answers for its view.
+trait FieldOf {
+    /// The input view's combo box, when the field is one.
+    fn combobox(&self) -> Option<crate::access::ComboboxField>;
+}
+
+impl<T: objc2::DefinedClass<Ivars = OnceCell<Ctx>>> FieldOf for T {
+    fn combobox(&self) -> Option<crate::access::ComboboxField> {
+        let (_, view, _) = self.ivars().get()?.get()?;
+        crate::access::combobox_field(&view)
+    }
 }
 
 define_field!(
@@ -1094,6 +1227,28 @@ define_text_view!(
             ok
         }
 
+        /// Scrolls the selection into view once AppKit laid the text out
+        /// ([`reveal_caret_later`]).
+        #[unsafe(method(nshRevealSelection))]
+        fn reveal_selection(&self) {
+            let range = self.selectedRange();
+            // SAFETY: NSTextView's TextKit 2 objects and their methods, when
+            // it has them (nil otherwise: TextKit 1 lays out as it scrolls).
+            unsafe {
+                let manager: Option<Retained<AnyObject>> = msg_send![self, textLayoutManager];
+                if let Some(manager) = manager {
+                    let content: Option<Retained<AnyObject>> = msg_send![&manager, textContentManager];
+                    if let Some(content) = content {
+                        let all: Option<Retained<AnyObject>> = msg_send![&content, documentRange];
+                        if let Some(all) = all {
+                            let _: () = msg_send![&manager, ensureLayoutForRange: &*all];
+                        }
+                    }
+                }
+            }
+            self.scrollRangeToVisible(range);
+        }
+
         #[unsafe(method(resignFirstResponder))]
         fn resign_first_responder(&self) -> bool {
             commit_marked(self);
@@ -1208,7 +1363,6 @@ pub(crate) fn test_paste(
 
 /// Runs `f` with the text view that edits the focused input and its
 /// context: an error when no input of the app has the focus.
-#[cfg(feature = "dev")]
 fn with_focused<R>(
     window: &objc2_app_kit::NSWindow,
     f: impl FnOnce(&NSTextView, Ctx) -> R,
@@ -1224,6 +1378,19 @@ fn with_focused<R>(
             return Err("no input of the app has the focus".into());
         };
     Ok(f(text_view, cx.ok_or("the focused input is gone")?))
+}
+
+/// The input focused in `window` leaves the tree
+/// ([`crate::input::removed`]): its focus is reported gone now, so the end
+/// of its editing says nothing to it.
+pub(crate) fn taken_out(window: &objc2_app_kit::NSWindow) {
+    let _ = with_focused(window, |_, cx| {
+        if let Some((surface, view, input)) = cx.get()
+            && input.focused.replace(false)
+        {
+            set_focused(&surface, &view, false);
+        }
+    });
 }
 
 /// The input that has the keyboard focus, if one of the app's has it.
@@ -1637,6 +1804,23 @@ define_class!(
 );
 
 impl InputState {
+    fn clear_undo(&self, editor: &Editor) {
+        let fallback = self.undo_manager.borrow().clone();
+        if let Some(manager) = editor.clear_undo(fallback.as_ref()) {
+            *self.undo_manager.borrow_mut() = Some(manager);
+        }
+    }
+
+    fn remember_undo_manager(&self) {
+        let editor = self.editor.borrow();
+        let Editor::Area { view, .. } = &*editor else {
+            return;
+        };
+        if let Some(manager) = view.undoManager() {
+            *self.undo_manager.borrow_mut() = Some(manager);
+        }
+    }
+
     fn update_placeholder(&self) {
         let editor = self.editor.borrow();
         let shown = matches!(&*editor, Editor::Area { .. })
@@ -1653,6 +1837,7 @@ impl InputState {
         let old_len = editor.ns_text().length() as u32;
         let caret = editor.selection().map(|(_, end)| end);
         self.applying.set(true);
+        self.clear_undo(&editor);
         editor.set_text(text);
         if let Some(caret) = caret {
             let len = utf16_len(text) as u32;
@@ -1739,12 +1924,15 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
         }
         InputState {
             editor: RefCell::new(new_editor(mtm, &cx, &delegate, false, false)),
+            undo_manager: RefCell::new(None),
             delegate,
             pad: InputPad::create(mtm),
             placeholder,
             config: RefCell::new(InputConfig::default()),
             configured: Cell::new(false),
             content: Cell::new(None),
+            lift: RefCell::new(None),
+            clips: RefCell::new(Vec::new()),
             count: Cell::new(0),
             applying: Cell::new(false),
             clipping: Cell::new(false),
@@ -1791,6 +1979,10 @@ fn new_editor(
         };
         // SAFETY: the class is a subclass of NSTextView.
         let view: Retained<NSTextView> = unsafe { Retained::cast_unchecked(area) };
+        // SAFETY: initWithFrame creates a text system; retaining its storage
+        // here keeps the target alive through undo cleanup.
+        let storage = unsafe { view.textStorage() }
+            .expect("NSTextView's frame initializer creates a text storage");
         view.setMinSize(CGSize::new(0.0, size.height));
         view.setMaxSize(CGSize::new(CGFloat::MAX, CGFloat::MAX));
         view.setVerticallyResizable(true);
@@ -1841,7 +2033,11 @@ fn new_editor(
                     );
             }
         }
-        Editor::Area { scroller, view }
+        Editor::Area {
+            scroller,
+            view,
+            storage,
+        }
     } else {
         let field = if secure {
             SecureField::create(mtm, cx.clone())
@@ -1867,6 +2063,33 @@ fn new_editor(
     }
 }
 
+impl Drop for InputState {
+    fn drop(&mut self) {
+        let fallback = self.undo_manager.get_mut().clone();
+        self.editor.get_mut().clear_undo(fallback.as_ref());
+        // A pad hosted above the transforms around its input would outlive
+        // it there.
+        if let Some(lift) = self.lift.get_mut().take()
+            && let Some(host) = lift.host.load()
+            && let Some(host) = NshView::from_ns(&host)
+            && !host.forget_native(&self.pad)
+        {
+            // This drop runs inside a state update; the host's own state is
+            // in use, so its tracked entry is removed at the next sync.
+            FORGOTTEN.with(|q| {
+                q.borrow_mut().push((host, Retained::from(&*self.pad)));
+            });
+        }
+        self.pad.removeFromSuperview();
+    }
+}
+
+thread_local! {
+    /// Pads dropped while their host's state was in use ([`InputState`]'s
+    /// drop): their tracked entries are removed at the next [`sync`].
+    static FORGOTTEN: RefCell<Vec<(NshView, Retained<NSView>)>> = const { RefCell::new(Vec::new()) };
+}
+
 /// `Input`.
 pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig) {
     let Some(input) = view.state().input.clone() else {
@@ -1879,6 +2102,7 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
     if swap {
         let old = input.editor.borrow().clone();
         let text = old.text();
+        input.clear_undo(&old);
         let focused = input.focused.get();
         if focused {
             input.cx.unfocus();
@@ -1929,6 +2153,7 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
         Editor::Area {
             scroller,
             view: text,
+            ..
         } => {
             // A built-in bar of the app's takes the indicator's place; the
             // text still scrolls with the wheel, the keys and the caret.
@@ -1939,8 +2164,22 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
             text.setBaseWritingDirection(direction);
             text.setEditable(config.editable);
             text.setSelectable(true);
-            text.setContinuousSpellCheckingEnabled(config.auto_correct);
-            text.setAutomaticSpellingCorrectionEnabled(config.auto_correct);
+            // Never in a password shown as plain text.
+            let correct = config.auto_correct && !config.visible_password();
+            text.setContinuousSpellCheckingEnabled(correct);
+            text.setAutomaticSpellingCorrectionEnabled(correct);
+            // Smart quotes, dashes and text replacement are the system's
+            // corrections too: off with `autoCorrect`, else the user's
+            // settings (Keyboard › Text Input), so typed code stays as typed.
+            text.setAutomaticQuoteSubstitutionEnabled(
+                correct && NSSpellChecker::isAutomaticQuoteSubstitutionEnabled(),
+            );
+            text.setAutomaticDashSubstitutionEnabled(
+                correct && NSSpellChecker::isAutomaticDashSubstitutionEnabled(),
+            );
+            text.setAutomaticTextReplacementEnabled(
+                correct && NSSpellChecker::isAutomaticTextReplacementEnabled(),
+            );
             let line = LineBox::new(config.style.line_height.0 as CGFloat, natural_height(&font));
             text.setDefaultParagraphStyle(Some(&paragraph(line, align)));
             // The space above the first line and below the last.
@@ -1956,6 +2195,11 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
     *input.config.borrow_mut() = config.clone();
     if editor.focused() {
         input.style_editor();
+        // A new font or paragraph style lays the text out again from
+        // estimates: keep the line being edited in view.
+        if let Editor::Area { view, .. } = &editor {
+            reveal_caret_later(view);
+        }
     }
     input.update_placeholder();
     let first = !input.configured.replace(true);
@@ -1964,6 +2208,15 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
     }
     place(view, &input);
     report_scroll(surface, view, &input);
+}
+
+/// Clears text undo records before a deleted input's editor can be released.
+pub(crate) fn deleted(view: &NshView) {
+    let Some(input) = view.state().input.clone() else {
+        return;
+    };
+    let editor = input.editor.borrow().clone();
+    input.clear_undo(&editor);
 }
 
 /// Reports how far a multiline input's text scrolled while a built-in bar
@@ -1975,6 +2228,7 @@ fn report_scroll(surface: &Surface, view: &NshView, input: &InputState) {
     let Editor::Area {
         scroller,
         view: text,
+        ..
     } = &*input.editor.borrow()
     else {
         return;
@@ -2016,6 +2270,7 @@ pub(crate) fn scroll_to(view: &NshView, y: Points, animated: bool) {
     let Editor::Area {
         scroller,
         view: text,
+        ..
     } = &*input.editor.borrow()
     else {
         return;
@@ -2176,6 +2431,125 @@ pub(crate) fn resized(view: &NshView) {
     place(view, &input);
 }
 
+/// One display frame: the views above an input can move, scale or fade (a
+/// camera, an animation, a layout) without the input's own frame changing,
+/// and the pad is hosted above them ([`lifted`]). Walks only the branches
+/// that hold inputs.
+pub(crate) fn sync(surface: &Rc<Surface>) {
+    let forgotten = FORGOTTEN.with(|q| std::mem::take(&mut *q.borrow_mut()));
+    if !forgotten.is_empty() {
+        let mut again = Vec::new();
+        for (host, view) in forgotten {
+            if !host.forget_native(&view) {
+                again.push((host, view));
+            }
+        }
+        if !again.is_empty() {
+            FORGOTTEN.with(|q| q.borrow_mut().extend(again));
+        }
+    }
+    let roots = std::iter::once(surface.root.clone()).chain(crate::window::roots(surface));
+    for root in roots {
+        sync_view(&root);
+    }
+}
+
+fn sync_view(view: &NshView) {
+    // Clone before placing: hosting the pad reaches AppKit, which may end
+    // an edit (and change this view's state) before it returns.
+    let input = view.state().input.clone();
+    if let Some(input) = input {
+        let bounds = bounds_of(view.state().frame);
+        let content = input.content.get().unwrap_or(bounds);
+        let around = surroundings(view, bounds, content);
+        set_hidden(&input, around.hidden);
+        if !around.hidden {
+            place_pad(view, &input, bounds, around.lifted);
+        }
+    }
+    if view.state().input_count == 0 {
+        return;
+    }
+    for child in view.child_views() {
+        sync_view(&child);
+    }
+}
+
+/// The view's own box (its content space starts at its top left).
+fn bounds_of(frame: Bounds<Points>) -> Bounds<Points> {
+    Bounds {
+        origin: Point::new(Points(0.0), Points(0.0)),
+        size: frame.size,
+    }
+}
+
+/// What the views around an input say about its pad, from one walk of its
+/// ancestors: whether it should not show (no area, its window or `hidden`
+/// anywhere above it, since the pad is hosted above those layers and AppKit
+/// hides nothing for it), and the lift its transforms ask for, if any.
+struct Surroundings {
+    hidden: bool,
+    lifted: Option<Lifted>,
+}
+
+fn surroundings(view: &NshView, bounds: Bounds<Points>, content: Bounds<Points>) -> Surroundings {
+    let empty = |r: Bounds<Points>| r.size.width.0 <= 0.0 || r.size.height.0 <= 0.0;
+    if empty(bounds) || empty(content) {
+        return Surroundings {
+            hidden: true,
+            lifted: None,
+        };
+    }
+    if view.ns().window().is_none() || view.ns().isHiddenOrHasHiddenAncestor() {
+        return Surroundings {
+            hidden: true,
+            lifted: None,
+        };
+    }
+    let mut hidden = false;
+    let mut host = None;
+    let mut anchor = None;
+    let mut at = Some(view.clone());
+    while let Some(v) = at {
+        if v.state().style.hidden {
+            hidden = true;
+        }
+        if v.state().transform().is_some() {
+            host = v.parent_view();
+            anchor = Some(v.clone());
+        }
+        at = v.parent_view();
+    }
+    let lifted = match (host, anchor) {
+        (Some(host), Some(anchor)) => lifted(view, host, anchor),
+        _ => None,
+    };
+    Surroundings { hidden, lifted }
+}
+
+fn set_hidden(input: &InputState, hidden: bool) {
+    if input.pad.isHidden() != hidden {
+        input.pad.setHidden(hidden);
+    }
+}
+
+/// `view` is leaving its parent (`crate::view::NshView::unparent`): a pad
+/// hosted above it is not in its subtree and would stay where it was, so
+/// hide it. A sync places it again once it is attached somewhere.
+pub(crate) fn left(view: &NshView) {
+    // Hiding reaches AppKit, which may end the edit before it returns.
+    let input = view.state().input.clone();
+    if let Some(input) = input {
+        set_hidden(&input, true);
+    }
+    if view.state().input_count == 0 {
+        return;
+    }
+    for child in view.child_views() {
+        left(&child);
+    }
+}
+
 /// Places the pad over the whole view and the editor (and a text view's
 /// placeholder) in it at the content box (`crate::native::resized` keeps
 /// the pad at the view's size). While the view or its content box has no
@@ -2183,27 +2557,18 @@ pub(crate) fn resized(view: &NshView) {
 /// pad is hidden: it does not clip, so the editor would keep drawing at its
 /// last frame.
 fn place(view: &NshView, input: &InputState) {
-    let frame = view.state().frame;
-    let bounds = Bounds {
-        origin: Point {
-            x: Points(0.0),
-            y: Points(0.0),
-        },
-        size: Size {
-            width: frame.size.width,
-            height: frame.size.height,
-        },
-    };
+    let bounds = bounds_of(view.state().frame);
     let content = input.content.get().unwrap_or(bounds);
+    let around = surroundings(view, bounds, content);
+    set_hidden(input, around.hidden);
+    // Only zero area skips hosting (a `display: none` subtree lays its
+    // views out at a zero frame). A view that only hides keeps its editor
+    // hosted, so showing it again needs no new frame or content.
     let empty = |r: Bounds<Points>| r.size.width.0 <= 0.0 || r.size.height.0 <= 0.0;
-    let hidden = empty(bounds) || empty(content);
-    if input.pad.isHidden() != hidden {
-        input.pad.setHidden(hidden);
-    }
-    if hidden {
+    if empty(bounds) || empty(content) {
         return;
     }
-    view.set_native(&input.pad, bounds);
+    place_pad(view, input, bounds, around.lifted);
     let pad = &input.pad;
     let host = |sub: &NSView, r: Bounds<Points>| {
         if crate::view::superview(sub).as_deref() != Some(&**pad) {
@@ -2223,7 +2588,8 @@ fn place(view: &NshView, input: &InputState) {
         // they were added.
         window.setAutorecalculatesKeyViewLoop(true);
     }
-    match &*input.editor.borrow() {
+    let editor = input.editor.borrow();
+    match &*editor {
         Editor::Line { field, .. } => {
             // One line, centered in the box as UIKit centers it; a box
             // shorter than the line grows around its center. The cell
@@ -2244,7 +2610,7 @@ fn place(view: &NshView, input: &InputState) {
             };
             host(field, rect);
         }
-        Editor::Area { scroller, view } => {
+        Editor::Area { scroller, view, .. } => {
             // The placeholder goes first: hosted views stack in order. A
             // label insets its text as a field does; it starts where the
             // editor's first line of text does.
@@ -2257,7 +2623,359 @@ fn place(view: &NshView, input: &InputState) {
                 ),
             };
             host(&input.placeholder, label);
+            let before = scroller.frame().size;
             host(scroller, content);
+            if scroller.frame().size != before && editor.focused() {
+                reveal_caret_later(view);
+            }
+        }
+    }
+}
+
+/// Keeps the caret of a multiline input being edited in view as the input
+/// is resized or its text styled again, as typing keeps it: an input that grows with its text (a
+/// paste past its maximum height) kept its old offset, the line being
+/// edited out of view until the next key. Its text may not be laid out yet
+/// (TextKit 2 lays it out lazily, from estimates: a paste scrolls to an
+/// estimate of the caret), so on the next turn of the run loop the text is
+/// laid out and the selection revealed.
+fn reveal_caret_later(view: &NSTextView) {
+    // SAFETY: the text view answers the selector (`TextArea`'s
+    // `nshRevealSelection`), which takes no argument.
+    unsafe {
+        let _: () = msg_send![
+            view,
+            performSelector: sel!(nshRevealSelection),
+            withObject: std::ptr::null::<AnyObject>(),
+            afterDelay: 0.0f64
+        ];
+    }
+}
+
+/// A pad's place above the transforms around its input ([`lifted`]).
+struct Lifted {
+    host: NshView,
+    /// The transformed ancestor the pad is raised directly above.
+    anchor: NshView,
+    rect: Bounds<Points>,
+    /// The opacity the views it left give it.
+    alpha: f32,
+    clips: Vec<PadClip>,
+}
+
+/// One ancestor's rounded clip, mapped into the pad's natural space.
+#[derive(PartialEq)]
+struct PadClip {
+    size: Size<Points>,
+    radii: nsh_core::CornerRadii,
+    transform: CGAffineTransform,
+}
+
+/// The pad's host and frame while the transforms around the input make
+/// AppKit's own geometry wrong, or `None` while they do not. `host` and
+/// `anchor` are the parent and the highest transformed view around the
+/// input, found by [`surroundings`].
+///
+/// AppKit places a hosted view from its superview's geometry and ignores
+/// the layer transforms above it: under a scaled or translated ancestor
+/// the field editor draws at the untransformed place (the box stays blank
+/// when that is off the window) and a press there misses. Hosting the pad
+/// directly above the highest transformed view, in its parent's container,
+/// at the box those transforms show and with its natural bounds, gives
+/// AppKit geometry that already carries the scale: text rasterizes at the
+/// scale it shows at, the field editor and the caret follow, and presses
+/// land where they show. Siblings stacked over that view stay over the pad.
+fn lifted(view: &NshView, host: NshView, anchor: NshView) -> Option<Lifted> {
+    let mut alpha = 1.0;
+    let mut at = Some(view.clone());
+    loop {
+        let v = at?;
+        if v == host {
+            break;
+        }
+        // Picking a pad above the input would skip what gates it where it
+        // was: `pointerEvents: none`, `visibility: hidden`, an animating-out
+        // view or a screen under the top one.
+        if !v.can_target() {
+            return None;
+        }
+        alpha *= v.state().opacity();
+        at = v.parent_view();
+    }
+    // Where it draws, from the frames, transforms and scroll offsets
+    // between it and the host, animated ones included.
+    let size = view.state().frame.size;
+    let (w, h) = (size.width.0 as f64, size.height.0 as f64);
+    if !(w > 0.0 && h > 0.0) {
+        return None;
+    }
+    let m = map_of(view, &host)?;
+    let w_scale = m[2][2];
+    if !w_scale.is_finite() || w_scale.abs() < 1e-9 {
+        return None;
+    }
+    // Only a scale and a translation: a rotated or skewed box is not what a
+    // bounds/frame pair shows, and a perspective one is not a rectangle at
+    // all.
+    let tolerance = 1e-4 * (m[0][0].abs().max(m[1][1].abs()) * w_scale.abs()).max(1e-4);
+    if m[0][1].abs() > tolerance
+        || m[1][0].abs() > tolerance
+        || m[0][2].abs() > 1e-6
+        || m[1][2].abs() > 1e-6
+    {
+        return None;
+    }
+    let (sx, sy) = (m[0][0] / w_scale, m[1][1] / w_scale);
+    let (x, y) = (m[2][0] / w_scale, m[2][1] / w_scale);
+    if !(sx > 0.0 && sy > 0.0) || !sx.is_finite() || !sy.is_finite() {
+        return None;
+    }
+    // The relocated pad no longer inherits these masks. Carry each rounded
+    // viewport into its natural coordinates; nested masks intersect without
+    // flattening rounded corners to a bounding rectangle. The host's own
+    // clip still applies because the pad lives in its container.
+    let mut clips = Vec::new();
+    let mut at = view.parent_view();
+    while let Some(v) = at {
+        if v == host {
+            break;
+        }
+        let s = v.state();
+        if s.clips() {
+            let c = map_of(&v, &host)?;
+            if c[0][2].abs() > 1e-6 || c[1][2].abs() > 1e-6 || c[2][2].abs() < 1e-9 {
+                return None;
+            }
+            let cw = c[2][2];
+            clips.push(PadClip {
+                size: s.frame.size,
+                radii: s.style.radii().fit(s.frame.size),
+                transform: CGAffineTransform {
+                    a: c[0][0] / cw / sx,
+                    b: c[0][1] / cw / sy,
+                    c: c[1][0] / cw / sx,
+                    d: c[1][1] / cw / sy,
+                    tx: (c[2][0] / cw - x) / sx,
+                    ty: (c[2][1] / cw - y) / sy,
+                },
+            });
+        }
+        drop(s);
+        at = v.parent_view();
+    }
+    Some(Lifted {
+        host,
+        anchor,
+        rect: Bounds {
+            origin: Point::new(px(x as f32), px(y as f32)),
+            size: Size::new(px((sx * w) as f32), px((sy * h) as f32)),
+        },
+        alpha,
+        clips,
+    })
+}
+
+/// Rebuilds masks only when clipping geometry changes, not on idle frames.
+fn clip_pad(input: &InputState, clips: Vec<PadClip>) {
+    if *input.clips.borrow() == clips {
+        return;
+    }
+    input.pad.setWantsLayer(true);
+    let layer = input.pad.layer().expect("a layer-backed input pad");
+    let mut mask: Option<Retained<CALayer>> = None;
+    for clip in &clips {
+        let path = crate::decor::rounded(
+            CGRect::new(
+                CGPoint::ZERO,
+                CGSize::new(clip.size.width.0 as f64, clip.size.height.0 as f64),
+            ),
+            clip.radii,
+        );
+        // SAFETY: the path and affine transform live through the copy.
+        let path = unsafe { CGPath::new_copy_by_transforming_path(Some(&path), &clip.transform) };
+        let shape = CAShapeLayer::new();
+        shape.setPath(path.as_deref());
+        // SAFETY: fresh layers, retained by their mask owner, without a superlayer.
+        unsafe { shape.setMask(mask.as_deref()) };
+        mask = Some(Retained::into_super(shape));
+    }
+    // SAFETY: mask layers belong only to this pad.
+    unsafe { layer.setMask(mask.as_deref()) };
+    *input.clips.borrow_mut() = clips;
+}
+
+/// A lifted pad's copied clips also gate picking; Core Animation masks do
+/// not participate in AppKit hit testing.
+pub(crate) fn pad_contains(view: &NSView, point: NSPoint) -> bool {
+    if view.downcast_ref::<InputPad>().is_none() {
+        return true;
+    }
+    let mut mask = view.layer().and_then(|l| l.mask());
+    while let Some(layer) = mask {
+        if let Some(shape) = layer.downcast_ref::<CAShapeLayer>() {
+            let path = shape.path();
+            // SAFETY: a retained path and no additional transform.
+            if !unsafe { CGPath::contains_point(path.as_deref(), std::ptr::null(), point, false) } {
+                return false;
+            }
+        }
+        mask = layer.mask();
+    }
+    true
+}
+
+/// The 2D transform from `view`'s content space to `host`'s: frames,
+/// transforms and the scroll offsets and zooms of the containers between
+/// them, composed as a row-vector projective matrix (`[x y 1] · m`).
+fn map_of(view: &NshView, host: &NshView) -> Option<[[f64; 3]; 3]> {
+    type Map = [[f64; 3]; 3];
+    fn mul(a: &Map, b: &Map) -> Map {
+        let mut m = [[0.0; 3]; 3];
+        for (i, row) in m.iter_mut().enumerate() {
+            for (j, slot) in row.iter_mut().enumerate() {
+                *slot = (0..3).map(|k| a[i][k] * b[k][j]).sum();
+            }
+        }
+        m
+    }
+    let mut total: Map = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut at = view.clone();
+    while at != *host {
+        if let Some(transform) = at.state().transform() {
+            let m = &transform.0;
+            total = mul(
+                &total,
+                &[
+                    [m[0], m[1], m[3]],
+                    [m[4], m[5], m[7]],
+                    [m[12], m[13], m[15]],
+                ],
+            );
+        }
+        let frame = at.ns().frame();
+        total = mul(
+            &total,
+            &[
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [frame.origin.x, frame.origin.y, 1.0],
+            ],
+        );
+        let parent = at.parent_view()?;
+        // A child's frame is in its parent's container; a scroll view's
+        // offset and zoom put the container in the parent's space.
+        let (offset, zoom) = crate::input::container_offset(&parent);
+        let (z, ox, oy) = (zoom as f64, offset.0 as f64, offset.1 as f64);
+        total = mul(
+            &total,
+            &[[z, 0.0, 0.0], [0.0, z, 0.0], [-ox * z, -oy * z, 1.0]],
+        );
+        at = parent;
+    }
+    Some(total)
+}
+
+/// Places the pad itself: over the input's view, or above the transforms
+/// around it ([`lifted`]). Moving it between superviews keeps the focus
+/// and the selection: a camera that starts or stops transforming must not
+/// end the edit.
+fn place_pad(
+    view: &NshView,
+    input: &InputState,
+    bounds: Bounds<Points>,
+    mut target: Option<Lifted>,
+) {
+    let clips = target
+        .as_mut()
+        .map(|l| std::mem::take(&mut l.clips))
+        .unwrap_or_default();
+    clip_pad(input, clips);
+    // The pad's bounds are the input view's space, so its editor and
+    // placeholder stay at the core's content box whatever the transforms
+    // above show.
+    let size = input.pad.bounds().size;
+    if size.width != bounds.size.width.0 as CGFloat
+        || size.height != bounds.size.height.0 as CGFloat
+    {
+        input
+            .pad
+            .setBounds(ns_rect(0.0, 0.0, bounds.size.width.0, bounds.size.height.0));
+    }
+    let (host, rect, alpha) = match &target {
+        Some(l) => (l.host.clone(), l.rect, l.alpha),
+        None => (view.clone(), bounds, 1.0),
+    };
+    let same = {
+        let current = input.lift.borrow();
+        match (&*current, &target) {
+            (None, None) => true,
+            (Some(l), Some(lifted)) => {
+                l.host
+                    .load()
+                    .is_some_and(|v| std::ptr::eq(&*v, lifted.host.ns()))
+                    && l.anchor
+                        .load()
+                        .is_some_and(|v| std::ptr::eq(&*v, lifted.anchor.ns()))
+            }
+            _ => false,
+        }
+    };
+    if same {
+        if let Some(lifted) = &target {
+            let mut current = input.lift.borrow_mut();
+            if let Some(current) = current.as_mut() {
+                if current.rect != rect {
+                    host.set_raised(&input.pad, rect, lifted.anchor.ns());
+                    current.rect = rect;
+                }
+                if (current.alpha - alpha).abs() > 1e-4 {
+                    input.pad.setAlphaValue(alpha as CGFloat);
+                    current.alpha = alpha;
+                }
+            }
+        } else {
+            let frame = input.pad.frame();
+            let placed = crate::view::superview(&input.pad).as_deref() == Some(view.ns())
+                && frame.origin.x == bounds.origin.x.0 as CGFloat
+                && frame.origin.y == bounds.origin.y.0 as CGFloat
+                && frame.size.width == bounds.size.width.0 as CGFloat
+                && frame.size.height == bounds.size.height.0 as CGFloat;
+            if !placed {
+                view.set_native(&input.pad, bounds);
+            }
+            if input.pad.alphaValue() != 1.0 {
+                input.pad.setAlphaValue(1.0);
+            }
+        }
+        return;
+    }
+    // Another host: move it, and put the field editor back if the move
+    // took the focus off the window.
+    let (focused, selection) = {
+        let editor = input.editor.borrow();
+        (editor.focused(), editor.selection())
+    };
+    if let Some(old) = input.lift.borrow_mut().take()
+        && let Some(old) = old.host.load().and_then(|v| NshView::from_ns(&v))
+    {
+        old.remove_native(&input.pad);
+    }
+    match &target {
+        Some(l) => host.set_raised(&input.pad, rect, l.anchor.ns()),
+        None => host.set_native(&input.pad, rect),
+    }
+    input.pad.setAlphaValue(alpha as CGFloat);
+    *input.lift.borrow_mut() = target.map(|l| Lift {
+        host: objc2::rc::Weak::new(l.host.ns()),
+        anchor: objc2::rc::Weak::new(l.anchor.ns()),
+        rect: l.rect,
+        alpha: l.alpha,
+    });
+    let editor = input.editor.borrow().clone();
+    if focused && !editor.focused() {
+        editor.focus();
+        if let Some((start, end)) = selection {
+            editor.select(start, end);
         }
     }
 }
@@ -2325,6 +3043,21 @@ pub(crate) fn content(view: &NshView, content: Bounds<Points>) {
 /// keyboard to show it over on the desktop, so it stays unmounted.
 pub(crate) fn accessory(_surface: &Rc<Surface>, _parent: &NshView, child: &NshView) {
     log::debug!("input accessory {} is not shown on macOS", child.id());
+}
+
+/// The element VoiceOver is on while `view` has the keyboard focus: an
+/// input's editor (its field, or its text view), else the view.
+pub(crate) fn accessibility_element(view: &NshView) -> Retained<NSView> {
+    let editor = view
+        .state()
+        .input
+        .as_ref()
+        .map(|i| i.editor.borrow().clone());
+    match editor {
+        Some(Editor::Line { field, .. }) => Retained::into_super(Retained::into_super(field)),
+        Some(Editor::Area { view, .. }) => Retained::into_super(Retained::into_super(view)),
+        None => objc2::Message::retain(view.ns()),
+    }
 }
 
 /// `focus()`.

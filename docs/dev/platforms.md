@@ -95,7 +95,8 @@ applied)`, `resize(size)`, `set_environment(environment)` (appearance, safe area
 
 `Environment::platform` names a platform built outside NSH (`Some("miniprogram")`); NSH's own platforms leave it
 `None`. Apps read it as `platform.name` (TSX) and `platform_name()` (Rust, `nsh_core::prelude`), which is the OS's
-name (`ios`, `web`, ...) on NSH's own platforms (`Environment::platform_name`). The name is lower case and none of
+name (`ios`, `web`, ...) on NSH's own platforms (`Environment::platform_name`), and `platform.select(spec)` checks
+`platform.name` before `platform.os`. The name is lower case and none of
 `Os`'s; it is the same name as the command line's `--target`. A Mini Program is a platform that runs on an operating
 system, so the environment holds both: the platform's name and the OS beneath it.
 

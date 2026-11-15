@@ -9,7 +9,7 @@ demo: el-menu
 
 菜单是由触发元素打开的一组操作。同一个结构适用于每种设备，并按各自的习惯呈现：
 
-- 在桌面平台和桌面浏览器中，它是触发元素处的弹出层；指针移到 `Submenu` 的条目上或按下它时，子菜单在条目旁级联展开。
+- 在桌面平台和桌面浏览器中，它是触发元素处的弹出层；指针移到 `Submenu` 的条目上或按下它时，子菜单在条目旁级联展开，它的第一个条目与该条目齐平（在你的 `popupClass` 的内边距和边框之内）。
 - 在手机和平板上，它是屏幕底部、覆盖在背景层之上的 sheet；`Submenu` 在 sheet 中就地显示它的条目，取代菜单的条目，并由你提供的一行返回上一级。
 
 选择一个条目、外部按压、Escape、Android 返回键和 VoiceOver 的退出手势都会关闭它。`ContextMenu` 是同样的菜单，由辅助按键（右键单击）在指针处打开，在触摸屏上由手指按住触发元素打开，或在触发元素下方由浏览器和 Linux 上的键盘、macOS 和 Windows 上的读屏软件打开。
@@ -118,6 +118,8 @@ import { ContextMenu, MenuItem } from "nsh/base";
 
 键盘和读屏用户同样可以打开它。在浏览器和 Linux 上，触发元素获得焦点时按 Shift+F10 或菜单键即可打开。在 macOS 上，VoiceOver 的「显示菜单」操作（VO-Shift-M）可以打开它；在 Windows 上，读屏软件通过 UI Automation 的「显示上下文菜单」操作也可以打开它。这样打开时，菜单出现在触发元素下方、从它的起始边开始，键盘焦点落在第一个可用的条目上，与 WAI-ARIA 对上下文菜单的描述一致。给触发元素设置 `focusable`，键盘才能到达它。视图自己的 `onContextMenu` 可以通过 `pointerType` 区分这类打开方式：此时它为 `null`。
 
+由你控制 `open` 并自己把它设为 `true` 时（比如你自己的快捷键，或者获得焦点的列表要打开其中某一行的菜单），菜单也这样打开：出现在触发元素下方，键盘焦点落在第一个可用的条目上，关闭后焦点回到触发元素。
+
 <a id="checkable-items"></a>
 
 ## 可勾选的条目
@@ -211,7 +213,7 @@ function ViewMenu() {
 
 ## 出现与离开
 
-在桌面平台上，弹出层像 [Popover](./popover.md#entrance-and-exit) 一样随你的过渡出现和离开：`popupStartingClass` 是它第一帧的外观，`popupEndingClass` 是关闭后的外观，在 `popupClass` 的 `transition-*` 类播放期间它会保留，随后触发 `onClose`。离开途中它不接受按压和按键：关闭时键盘焦点就回到触发元素，所以离开途中按 Return 不会选中条目，而是再次打开菜单。子菜单使用同样的外观，并随菜单一起关闭。手机上的 sheet 自带滑入和滑出的动作。
+在桌面平台上，弹出层像 [Popover](./popover.md#entrance-and-exit) 一样随你的过渡出现和离开：`popupStartingClass` 是它第一帧的外观，`popupEndingClass` 是关闭后的外观，在 `popupClass` 的 `transition-*` 类播放期间它会保留，随后触发 `onClose`。离开途中它不接受按压和按键：关闭时键盘焦点就回到触发元素，所以离开途中按 Return 不会选中条目，而是再次打开菜单。条目的 `onSelect` 把焦点移到别处（比如开始编辑的输入框）时，焦点留在那里：菜单只在焦点没被别处拿走时才把它交还触发元素。子菜单使用同样的外观，并随菜单一起关闭。手机上的 sheet 自带滑入和滑出的动作。
 
 ```tsx
 <Menu
@@ -230,7 +232,7 @@ function ViewMenu() {
 
 没有 `open` 时，菜单自己保存状态（`Menu` 的初始值为 `defaultOpen`）。有 `open` 时，状态由应用持有，并在 `onOpenChange({ open, reason })` 中修改它，原因为 `"triggerPress"`、`"select"`、`"pressOutside"`、`"backdropPress"`、`"cancel"`、`"contextMenu"` 或 `"longPress"`。
 
-`Submenu` 自己保存状态，并在 `onOpenChange({ open, reason })` 中报告用户引起的每次打开和关闭：`"hover"`（指针移到它的条目上，或移到所在菜单的另一个条目上）、`"focus"`（键盘焦点移到所在菜单的另一个条目上）、`"triggerPress"`（按下它的条目，或在条目上按右方向键、Return 或空格）、`"cancel"`（左方向键、Escape、返回键或它的 `back` 行），整个菜单关闭时则是菜单的原因（`"select"`、`"pressOutside"` 等）。它的条目在打开时才创建，因此应用可以在第一次打开时才开始加载条目，加载到后再显示。应用自己关闭菜单时不会报告。
+`Submenu` 在应用没有设置它的 `open` 时自己保存状态，并在 `onOpenChange({ open, reason })` 中报告用户引起的每次打开和关闭：`"hover"`（指针移到它的条目上，或移到所在菜单的另一个条目上）、`"focus"`（键盘焦点移到所在菜单的另一个条目上）、`"triggerPress"`（按下它的条目，或在条目上按右方向键、Return 或空格）、`"cancel"`（左方向键、Escape、返回键或它的 `back` 行），整个菜单关闭时则是菜单的原因（`"select"`、`"pressOutside"` 等）。它的条目在打开时才创建，因此应用可以在第一次打开时才开始加载条目，加载到后再显示。应用自己关闭菜单时不会报告。
 
 ```tsx
 const recent = signal<string[] | null>(null);
@@ -244,6 +246,20 @@ const recent = signal<string[] | null>(null);
   <Each of={recent() ?? []}>
     {(name) => <MenuItem onSelect={() => openFile(name())}><Text>{name()}</Text></MenuItem>}
   </Each>
+</Submenu>
+```
+
+设置了 `open` 的 `Submenu` 和 `Menu` 一样是受控的：`onOpenChange` 提出请求，显示的是应用设置的值。应用按数据重新建出的条目（菜单打开时会变化的列表）也会重新建出其中的子菜单；受控的子菜单按应用的值重新打开，键盘焦点回到原来所在的条目，用户停在原处。
+
+```tsx
+const modelsOpen = signal(false);
+
+<Submenu
+  open={modelsOpen()}
+  onOpenChange={({ open }) => modelsOpen.set(open)}
+  trigger={<Text>Model</Text>}
+>
+  <Each of={models()}>{(m) => <MenuItem onSelect={() => pick(m())}><Text>{m().name}</Text></MenuItem>}</Each>
 </Submenu>
 ```
 
@@ -273,6 +289,49 @@ menu()
 ```
 
 <a id="props"></a>
+
+## 系统菜单：MenuButton
+
+`Menu` 在每种设备上以应用自己的外观绘制菜单。应用若需要系统自己的菜单（iOS 的下拉菜单，有系统的位置、动效，在 iOS 26 上是 Liquid Glass），用 `MenuButton` 从应用绘制的触发器上打开它：
+
+```tsx
+import { MenuButton } from "nsh/base";
+
+<MenuButton
+  accessibilityLabel="账户"
+  title={email()}
+  items={[
+    { id: "settings", label: "设置", icon: "gearshape" },
+    { id: "read", label: "全部已读", disabled: !unread() },
+    { id: "", label: "语言", items: languages.map((l) => ({ id: l.id, label: l.label, checked: l.id === lang() })) },
+    { id: "", label: "外观", inline: true, items: [
+      { id: "light", label: "浅色", checked: !dark() },
+      { id: "dark", label: "深色", checked: dark() },
+    ] },
+  ]}
+  onSelect={({ id }) => choose(id)}
+  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+>
+  <Avatar … />
+  <Text>{account()}</Text>
+</MenuButton>;
+```
+
+条目是数据，每个都有应用自己的 `id`，由 `onSelect({ id })` 报告；勾选、`disabled` 和 `destructive`（在 iOS 上为红色）是条目的状态，由应用改变；带 `items` 的条目是子菜单，再加 `inline` 则是以 `label` 为标题、就地显示的分组。子元素、`class` 和 `style` 构成触发器，在所有平台上都由应用绘制。
+
+- **iOS 和 Mac Catalyst**：触发器上覆盖一个透明的 `UIButton`，它的 `UIMenu` 是主操作：点按、VoiceOver 激活或硬件键盘都会立即打开菜单，不等待 JS。`icon` 是 SF Symbol；`title` 显示在菜单顶部。VoiceOver 访问的是这个按钮（名称来自 `accessibilityLabel`），而不是它下面的触发器内容。新的 `items` 在下次打开时生效。
+- **桌面（macOS、Windows、Linux）**：按下时在指针处以平台的上下文菜单显示这些条目（同 `nsh/desktop` 的 `Menu.popup`），分组之间用分隔线；不显示 `icon`、`title` 和 `destructive`。
+- **Android 和 Web**：视图没有系统菜单；触发器照常显示，按下不打开任何内容。在这些平台上按 `platform.os` 改用 `Menu`。
+
+| 属性 | Rust | 类型 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `items` | `.items(..)` | `MenuButtonItem[]` | `[]` | 菜单的条目，按顺序。 |
+| `title` | `.title(..)` | `string` | 无 | iOS：菜单的标题，显示在条目上方。 |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | 不能按下，不打开任何内容。 |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 读屏软件为这个按钮朗读的内容。 |
+| `class`、`style`、`children` | 样式方法、`.child(..)` | | 无 | 应用绘制的触发器。 |
+
+`MenuButtonItem` 为 `{ id, label, icon?, checked?, disabled?, destructive?, items?, inline? }`（Rust：`MenuButtonItem::new(id, label)`、`::submenu(label, items)`、`::section(label, items)`，再加 `.icon(..)`、`.checked(..)`、`.disabled(..)`、`.destructive(..)`）。唯一的事件是 `onSelect({ id })`（Rust：`.on_select(|id: &SharedString| ..)`），在菜单关闭后触发。
 
 ## 属性
 
@@ -315,6 +374,7 @@ menu()
 | `indicator` | `.indicator(..)` | `JSX.Element` | 无 | 指示部件里的标记。 |
 | `closeOnSelect` | `.close_on_select(..)` | `boolean` | `true` | 选择它会关闭菜单。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 内容不足以说明时，屏幕阅读器读出的文字。 |
+| `accessibilityDescription` | `.accessibility_description(..)` | `string` | 无 | 名称之外的说明，屏幕阅读器在名称之后读出：例如这个选项做什么。 |
 | `children`、`class`、`style` | `.child(..)`、样式方法 | | 无 | 它的内容和外观，支持 `hover:`、`active:` 和 `checked:` 状态。 |
 
 ### Submenu
@@ -322,6 +382,7 @@ menu()
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
 | `trigger` | `.trigger(..)` | `JSX.Element` | 无 | 打开它的条目。 |
+| `open` | `.open(..)` | `boolean` | 无 | 是否打开，由应用持有（在 `onOpenChange` 中修改）；不设置时子菜单自己保存状态。 |
 | `back` | `.back(..)` | `JSX.Element` | 无 | 手机：它的条目上方返回上一级条目的那一行。 |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 它不会打开。 |
 | `offset` | `.offset(..)` | `number` | `0` | 桌面端：它的弹出层与外层菜单之间的间距。 |
@@ -355,4 +416,4 @@ menu()
 
 ## 无障碍
 
-对屏幕阅读器而言，弹出层或 sheet 是一个菜单，其中的条目是菜单项；触发元素会告诉屏幕阅读器菜单是否已展开。可勾选的条目是复选或单选菜单项，读作已勾选或未勾选；它的标记是条目的一部分。在 TSX 中，触发元素就是你传入的元素（`Button` 或你自己的视图都可以）：按压和展开状态都在它自己身上，所以它自己的 `active:` 类和 `activeStyle` 会在按下时生效，它自己的 `onPress` 也照常运行。屏幕上只有当前显示层级的条目，所以屏幕阅读器读到的就是显示出来的内容。
+对屏幕阅读器而言，弹出层或 sheet 是一个菜单，其中的条目是菜单项；触发元素会告诉屏幕阅读器菜单是否已展开。可勾选的条目是复选或单选菜单项，读作已勾选或未勾选；它的标记是条目的一部分。条目的 `accessibilityDescription` 在名称之后读出，所以名称可以保持简短；子菜单的触发元素是你自己的元素，直接给它设置即可。在 TSX 中，触发元素就是你传入的元素（`Button` 或你自己的视图都可以）：按压和展开状态都在它自己身上，所以它自己的 `active:` 类和 `activeStyle` 会在按下时生效，它自己的 `onPress` 也照常运行。屏幕上只有当前显示层级的条目，所以屏幕阅读器读到的就是显示出来的内容。

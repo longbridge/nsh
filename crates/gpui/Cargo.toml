@@ -39,6 +39,8 @@ nsh-platform-gpui = { version = "0.5.0", path = "nsh-platform-gpui", default-fea
 
 # The same versions as the main workspace's.
 anyhow = "1"
+# A picture's alpha inlined in the SVG GPUI turns (already in GPUI's tree).
+base64 = "0.22"
 crossbeam-channel = "0.5"
 image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
@@ -50,13 +52,16 @@ futures-channel = "0.3"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # GPUI Fast (Zed's GPUI with retained rendering), the renderer; the published
 # crates under GPUI's library names, as GPUI Kit apps use them.
-gpui = { package = "gpui-fast", version = "0.1.13", default-features = false, features = ["font-kit", "wayland", "x11"] }
-gpui_platform = { package = "gpui-fast-platform", version = "0.1.13", default-features = false, features = ["font-kit", "wayland", "x11"] }
+gpui = { package = "gpui-fast", version = "0.1.14", default-features = false, features = ["font-kit", "wayland", "x11"] }
+gpui_platform = { package = "gpui-fast-platform", version = "0.1.14", default-features = false, features = ["font-kit", "wayland", "x11"] }
+# Tests check the accessibility tree as the platforms' adapters do (the
+# version GPUI's adapters use).
+accesskit_consumer = "0.38"
 # Script shots on Linux: the redirected window pixmap read from the X server.
 raw-window-handle = "0.6"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSView", "NSWindow", "NSResponder", "NSAppearance", "NSApplication", "NSButton", "NSControl", "NSGraphics", "NSScreen"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSGeometry", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSGeometry", "NSString", "NSValue", "objc2-core-foundation"] }
 x11rb = { version = "0.13", default-features = false, features = ["composite", "dri3", "present"] }
 # The canvas rasterizer (already in GPUI's tree through resvg).
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }

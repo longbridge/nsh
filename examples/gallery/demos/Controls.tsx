@@ -3,7 +3,7 @@ import { Button as BaseButton, Checkbox, Collapsible, Combobox, type DateMatcher
 import { reduceMotion } from "nsh";
 import { platform, windowSize } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, backdrop, Badge, Button, CalendarItem, Kbd, calendarLook, Chevron, Caption, Card, chart, checkboxLook, DateTrigger, CheckboxMark, density, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderFill, solidTint, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep, LastEvent } from "../ui";
+import { alpha, backdrop, Badge, Button, CalendarItem, Kbd, calendarLook, Chevron, Caption, Card, chart, checkboxLook, DateTrigger, CheckboxMark, density, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxPopupStarting, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderFill, solidTint, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep, LastEvent } from "../ui";
 import { play as sound } from "../../nsh-gallery-ui/sound";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
@@ -1255,6 +1255,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               align="end"
               // Wider than the trigger with a pointer: the titles whole.
               popupStyle={listboxPopup()}
+              popupStartingStyle={listboxPopupStarting()}
               backdropStyle={backdrop()}
               itemClass={optionClass}
               trigger={<Picker title={titleOf(SORTS, sort())} open={sortOpen()} />}
@@ -1281,6 +1282,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               margin={8}
               align="end"
               popupStyle={listboxPopup({ minWidth: 260 })}
+              popupStartingStyle={listboxPopupStarting()}
               backdropStyle={backdrop()}
               itemClass={optionClass}
               cleanable
@@ -1307,6 +1309,9 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     align: "end" as const,
     get popupStyle() {
       return listboxPopup({ minWidth });
+    },
+    get popupStartingStyle() {
+      return listboxPopupStarting();
     },
     get backdropStyle() {
       return backdrop();
@@ -1583,6 +1588,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               margin={8}
               align="end"
               popupStyle={listboxPopup()}
+              popupStartingStyle={listboxPopupStarting()}
               backdropStyle={backdrop()}
               itemClass={optionClass}
               cleanable
@@ -1609,6 +1615,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               margin={8}
               align="end"
               popupStyle={listboxPopup()}
+              popupStartingStyle={listboxPopupStarting()}
               backdropStyle={backdrop()}
               itemClass={optionClass}
               {...comboboxLook(() => reviewerOpen())}
@@ -1888,6 +1895,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               margin={8}
               align="end"
               popupStyle={listboxPopup()}
+              popupStartingStyle={listboxPopupStarting()}
               backdropStyle={backdrop()}
               calendarStyle={calendar}
               headerStyle={header}
@@ -1917,6 +1925,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               margin={8}
               align="end"
               popupStyle={listboxPopup()}
+              popupStartingStyle={listboxPopupStarting()}
               backdropStyle={backdrop()}
               contentStyle={content}
               presetsStyle={calendarLook.presets}
@@ -1948,6 +1957,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               margin={8}
               align="end"
               popupStyle={listboxPopup()}
+              popupStartingStyle={listboxPopupStarting()}
               backdropStyle={backdrop()}
               calendarStyle={calendar}
               headerStyle={header}
@@ -1975,6 +1985,9 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     align,
     get popupStyle() {
       return listboxPopup();
+    },
+    get popupStartingStyle() {
+      return listboxPopupStarting();
     },
     get backdropStyle() {
       return backdrop();

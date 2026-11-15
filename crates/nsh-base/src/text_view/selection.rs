@@ -285,6 +285,7 @@ impl Cut {
                 self.take(text).map(|part| {
                     let mut code = code.clone();
                     code.code = part;
+                    code.content.clear();
                     Block::CodeBlock(code)
                 })
             }

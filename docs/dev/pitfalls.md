@@ -174,6 +174,12 @@ Things that were found the hard way. Read the section of the area you change bef
   container, so its superview's tag is 0. The control carries its scroll view's id as its own tag (`refresh_control`), and a
   pull only refreshes when that scroll view still holds this very control (`Mounter::refresh_pulled`), so a control of a
   deleted or replaced view reports nothing, even where a new view took its id.
+- **A large title collapses over a scroll view at the top of a lower header** (verified on the iOS 27 simulator):
+  UIKit reads that content as scrolled. It keeps a scroll view at its top only when the scroll view's safe area
+  changes. A stack laid out in the frame its first screen arrives leaves the bar at an inline title's height
+  (`sizeThatFits` gives the large one). `fit_large_title` sizes the bar when a stack shows a screen whose content is
+  at its top. A scroll view on screen that starts to adjust its insets (`contentInsetAdjustmentBehavior` automatic)
+  keeps its offset under the header. The mounter moves it to its top when it switches.
 - **Mac idiom custom pull to refresh**: on release, the system's bounce already targets the old inset (back to 0), so changing only
   `contentInset` hides the spinner; once refreshing starts, the offset is animated to the top inset plus the refresh room on the next main-queue turn. Synthetic
   tests need continuous scroll events with phases (began / changed / ended); plain wheel events never overscroll.
@@ -182,6 +188,10 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Styles arrive before frames** (new views have a zero size): a shared radius goes straight to the layer (Core Animation clamps it itself);
   only paths, shadow paths, the content view and the image layer depend on the size, and they are rebuilt on `Frame` while `Decor::sized()`
   is true. Scaling radii by the CSS rule at a zero size once turned every rounded corner square.
+- **An input's insertion precedes its first frame and content box in a mount batch**: UIKit may draw an inserted
+  `UITextField` before the later `InputContent` sets its text insets, briefly placing text against the leading edge.
+  The iOS mounter pre-reads a newly created input's `Frame` and `InputContent` from that batch and applies both while
+  its container is still detached; do not defer or reorder its `Insert`, which would break `autoFocus`.
 - **A view's first style does not transition**: a mounting tree's views are styled after they are added to the window, so
   `window().is_some()` alone animates the first style from the defaults (a pill's corners growing out of a square). The
   mounter only transitions a view it has styled before (`Slot::styled`), as `nsh_core`'s `transition::restyle` and
@@ -223,6 +233,12 @@ Things that were found the hard way. Read the section of the area you change bef
   presented or dismissed over the stack sets the coordinator too and never reaches `didShow`) and are applied on the next
   main-queue turn (the coordinator outlives those callbacks); only pages the controller actually had count as popped by
   the user.
+- **A navigation bar shown again by a pop rests too high in a stack below the top of the window**: in a stack whose
+  view starts under the status bar (the app pads its root by the safe area), UIKit keeps the bar a few points down
+  (10 pt on an iPad). Popping a screen that hid the header slides the bar back in at the stack's very top, with the
+  screen's safe area to match, and UIKit moves neither until the screen's view is laid out again, which no pass during
+  the transition does (in `willShow`, alongside the transition, or of the navigation view). `didShow` asks for that
+  layout of the shown screen's view; `tests/header` checks it (`nsh test --target ios`).
 - **UIKit installs its own interactive-pop delegate while loading a navigation controller's view**: assigning NSH's
   delegate when the stack is created can be overwritten. Bind the current recognizer in `didShow`, after UIKit has
   configured the screen, so hidden headers use NSH's mounted `popOnSwipe` / `popOnBack` policy too. Verify the gesture
@@ -265,6 +281,12 @@ Things that were found the hard way. Read the section of the area you change bef
   prevented every press there, so a navigation bar's back button did nothing (seen on an iPhone foldable simulator; a
   real tap through XCUITest reproduced it). `PressRecognizer` is not preventable by tap recognizers on a `UIWindow`
   (`press.rs`, `is_window_tap`); edge-gesture gates are not taps and still cancel presses.
+- **iOS, a tap recognizer on a view around pressables**: a `UITapGestureRecognizer` recognizes on release, where a
+  press ends too, and prevents the `PressRecognizer`s of the views inside its view: `cancelsTouchesInView = false`
+  leaves the views their touches, not the other recognizers their turn. The tap that focuses a `focusable` view
+  that takes no presses took every press inside it that way (a row's ⋯ button opened no menu, for a real tap on the
+  simulator as for a test's). `FocusTap` (`native_view.rs`) prevents no recognizer
+  (`canPreventGestureRecognizer:`), and fails on a touch on a stop inside its view, which takes the focus itself.
 - **iOS, a hardware keyboard's keys** reach the first responder as presses (`pressesBegan:withEvent:`) before
   UIKit's text system acts on them: a text input that does not call `super` for a press neither moves its caret,
   inserts a line break nor types it, and must not call `super` for that key's release either. A held key's press
@@ -315,6 +337,11 @@ Things that were found the hard way. Read the section of the area you change bef
   measures again. A layout of precomputed text does not draw `UnderlineSpan` / `StrikethroughSpan` (even ones set after
   `create`): runs carry a `TextLayouts.Decoration` marker and `TextBox` draws the lines. `Layout.Alignment` is relative to each
   paragraph's direction: absolute left / right alignment sets an `AlignmentSpan` per paragraph from its resolved direction.
+  `StaticLayout.Builder.obtain` hands out pooled builders and, on Android 15, does not reset `useBoundsForWidth` or
+  `shiftDrawingOffsetForStartOverhang`; a `TextView` (an `Input`'s `EditText`) of an app targeting 35 or later turns them
+  on, and a layout from such a builder breaks lines by the glyphs' ink, wider than the advances text is measured by
+  ("Wor" / "k"): `TextLayouts` sets both to false on every builder (`examples/gallery/tests/text-bounds.test.tsx`, on a
+  device with `--target android`).
 - **Android, text hit testing**: `Layout.getOffsetForHorizontal` stops before the last cluster of a wrapped (non-last)
   line, so a hit past its end is snapped to the line's end (`TextLayouts.hitTest`, upstream); `getSelectionPath` adds
   margin rectangles when a range ends at a wrapped line's end, so range boxes come from the run's carets
@@ -356,6 +383,10 @@ Things that were found the hard way. Read the section of the area you change bef
   whether a rectangle is visible. `NshView` is a scroll container (`setScrollContainer(true)`) so that windows without a soft
   input mode resize instead of panning: the system picks the mode at the first layout, before the app's content is mounted,
   and a mode set from code afterwards is overridden. Windows that ask for `adjustPan` are left to the system.
+- **Android, the keyboard a gesture drives has no duration**: the back swipe that dismisses the keyboard (predictive back,
+  seen on Android 16) moves it by hand, and its `WindowInsetsAnimation` reports `getDurationMillis()` as -1. `KeyboardAnimation` takes the
+  keyboard's curve and duration from timed moves only: -1 kept as the duration makes `ValueAnimator.setDuration` throw
+  when the next input is focused in a scroll view (`Mounter.revealFocused`).
 - **Android, passive press feedback**: `activeStyle` / `active:` and `android.ripple` observe a touch without
   consuming it. The root's `TouchTracker` feeds style-only views through `Pressable`; `Box` and leaf views take
   clicks for their press handlers or text spans. Feedback is cancelled when scrolling, panning, pinching or rotation
@@ -364,6 +395,12 @@ Things that were found the hard way. Read the section of the area you change bef
   iOS's `handled_deeper` checks the link at the touch), so a card around plain text still shows its pressed style.
   While feedback shows, the root claims the gesture as a clickable view would: Android sends the release only to
   the view that took the down, and the release is what ends the feedback.
+- **Android, a pan view over a scroll view**: a `Box` that handles nothing leaves the down untaken, and Android then
+  offers it to the views under it: a scroll view the box lies over (a chat's composer over its messages) took the
+  drag and scrolled, and the box's pan never activated. A `Box` with a `panActivation` takes the down, as UIKit's hit
+  test gives the touch to the topmost view. Having taken the down from the views around it, the box hands its touch to
+  the nearest pressable `Box` around it (`Box.forwardTap`, in that box's coordinates) until its gate activates or the
+  finger passes the touch slop, so a tap presses that box as UIKit's press recognizers around a view do.
 - **Android, drags that start on a child**: a pannable `Box` intercepts the move that exceeds the slop and starts its pan right
   there; that intercepted move never reaches its `onTouchEvent`, so starting the pan there is what makes a quick flick (few moves)
   pan and end at all.
@@ -372,6 +409,10 @@ Things that were found the hard way. Read the section of the area you change bef
   copies the activity's bar appearance (light / dark icons).
 - **Android, nested scrolling**: scroll views enable nested scrolling, or an outer vertical ScrollView intercepts every vertical
   drag meant for an inner one.
+- **Android, a zoomed scroll view in a pager**: `HorizontalScrollView` intercepts a move past the touch slop before the
+  child sees it, with the same slop as `ZScroll`, so the pager took every horizontal drag of a zoomed image. `ZScroll`
+  asks its parents not to intercept from the down (`requestDisallowInterceptTouchEvent`) while it has content to pan and
+  gives that back when the drag has nothing to move or pushes past an edge a scroll view around can go on from.
 - **Android, safe area**: `NshView` reports only the parts of the system bars / keyboard that overlap it (like UIKit's
   `safeAreaInsets`), so embedded views below a toolbar get no top inset. Overlays use the same overlap (`topInset()`).
 - **Android, dev assets come over plain HTTP**, which apps block by default (API 28+): the dev host APK and `nsh-dev.aar` set
@@ -492,6 +533,11 @@ Things that were found the hard way. Read the section of the area you change bef
   transition guards allow the gesture. `didShowViewController:` restores that editor if its page returns after
   cancellation and no other control took focus. Rejected gestures keep focus. The regression observes `onBlur` while the
   root's system-delivered touch is still down, rather than checking only after the page has detached.
+- **Interactive back and responders**: both pop recognizers sit on the navigation view, around every page, and
+  on iOS 26 the content one begins from a rightward drag anywhere in the page, so a drawing canvas's stroke would pop
+  its page while the responder still got the moves. A responder that blocks native gestures (`SetJsResponder`'s
+  `block`) turns them off until it lets go, as it does the pans of the scroll views around it
+  (`mount.rs` `set_js_responder`); turning a recognizer off also cancels a pop that began before the grant arrived.
 - **A hardware keyboard's keys are IOHID keyboard events** (`IOHIDEventCreateKeyboardEvent`, usage page 7) handed to
   UIKit the way touches are: they become presses, key commands and typing as a real keyboard's do. Modifiers are
   keys of their own (left Control, Shift, Option, Command), down before the key and up after it.
@@ -641,6 +687,11 @@ Things that were found the hard way. Read the section of the area you change bef
   for `accessibilityElementsHidden`. `setAccessibilityChildren:` cannot be undone: `nil` leaves the view without
   children instead of AppKit's again, so a subtree shown again stayed out of reach; `NshView` answers
   `accessibilityChildren` itself (none while hidden or grouped, else `NSView`'s).
+- An `NSTextField` or `NSSecureTextField` subclass that overrides `accessibilityRole` and forwards to `super`
+  exposes `AXUnknown` to an external accessibility client (checked on macOS 27). Return `AXTextField` explicitly
+  for ordinary inputs; editable combo boxes keep `AXComboBox`. The secure field still supplies its
+  `AXSecureTextField` subrole and masked value. A direct getter call is not the same as an external AX query:
+  even a plain `NSTextField` returns `AXUnknown` directly while exposing `AXTextField` externally.
 - In-process screenshots (`cacheDisplayInRect:`, `renderInContext:`) ignore `maskedCorners`, `shadowPath`, Core Image
   filters and cut masks at the mask layer's bounds; they show no backdrop blur, sheets or `AVPlayerLayer` content, and
   `renderInContext:` no `WKWebView` pages either (`cacheDisplayInRect:` shows them: WebKit draws them for it). Pages
@@ -663,6 +714,12 @@ Things that were found the hard way. Read the section of the area you change bef
   AppKit accessory app and in an NSH one (an NSH regular app did the same under synthetic input).
   `activateIgnoringOtherApps:YES` (deprecated in macOS 14) activated it, as Tauri, winit, Qt's `raise()` and GPUI call
   it to focus a window; `focus()` uses it, `show()` and new windows ask (`window::activation`).
+- **A sheet of a window out of sight is never seen**, and its completion handler waits for the window:
+  `beginSheetModalForWindow:` on a hidden window (a tray app's main window, `defaultVisible: false`), a minimized one or
+  one off every screen shows nothing until that window shows. Open and save panels then show in a window of their own
+  (`beginWithCompletionHandler:`); `NSAlert` shows on its own only app-modal (`runModal`), as Electron's message boxes
+  do without a visible parent (electron/electron#22671). How that modal loop is entered and ended, so the app's batches
+  go on while it shows, is in `system::run_alone` and its neighbours' comments (`tests/native/window_alert.rs`).
 - While the screen is locked an app cannot become active (`activateIgnoringOtherApps:` does nothing), its windows are
   occluded and the display link stops; events posted to the app's own queue, `sendEvent:` and in-process drawing
   keep working. `CGSessionCopyCurrentDictionary`'s `CGSSessionScreenIsLocked` (present only while locked) and

@@ -565,6 +565,13 @@ impl EditorSession {
         ))
     }
 
+    /// The box of the block starting at `pos`, in points of the content box
+    /// of the view showing the session (where `contentLayer` places its
+    /// children), or `None` when no view does.
+    pub fn node_rect(&self, pos: usize) -> Option<Bounds<Points>> {
+        self.geometry()?.node_rect(pos)
+    }
+
     /// The box of the block starting at `pos` in the root view (page
     /// coordinates, as ProseMirror's `nodeDOM(pos).getBoundingClientRect()`
     /// gives the window's): where to place what goes around a table or an

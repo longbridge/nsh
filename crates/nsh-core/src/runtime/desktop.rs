@@ -1,6 +1,7 @@
-//! `nsh/desktop`'s app functions (macOS, Windows, Linux; nothing happens
-//! elsewhere). Windows and menus, which call the app's functions and live
-//! in its reactive graph, are `nsh-js`'s.
+//! `nsh/desktop`'s app functions (macOS, Windows, Linux; elsewhere `quit`
+//! and `restart` do nothing and the app does not launch at login). Windows and
+//! menus, which call the app's functions and live in its reactive graph,
+//! are `nsh-js`'s.
 
 use std::{
     cell::{Cell, RefCell},
@@ -9,10 +10,12 @@ use std::{
 
 use crate::{
     Command, ROOT_ID,
-    desktop::DesktopCommand,
+    desktop::{DesktopCommand, LaunchAtLoginError, QuitRequestOptions},
     element::{
-        CallCx, Callback, JsHost, JsIn, JsObject, JsOwned, JsValue, Local, ModuleCx, PropEnum,
-        PropError, Ret, Stop, System, TsTypes, module, task::Action,
+        CallCx, Callback, JsError, JsHost, JsIn, JsObject, JsOwned, JsValue, Local, ModuleCx,
+        PropEnum, PropError, Ret, Stop, System, TsTypes, codes, io_code, module,
+        quit::{QuitRequestListener, Subscription},
+        task::Action,
     },
     single_instance::SecondInstance,
 };
@@ -22,6 +25,21 @@ fn desktop(cx: &mut ModuleCx, command: DesktopCommand) {
         ROOT_ID,
         Command::Desktop(Box::new(command)),
     ));
+}
+
+/// What a `setLaunchAtLogin` call rejects with.
+fn launch_at_login_error(error: LaunchAtLoginError) -> JsError {
+    match error {
+        LaunchAtLoginError::Unavailable => {
+            JsError::Error(error.to_string()).with_code(codes::UNAVAILABLE)
+        }
+        LaunchAtLoginError::Denied => JsError::access_denied(error.to_string(), "application", ""),
+        // Every failure has a code to branch on: the error's own, else EIO.
+        LaunchAtLoginError::System(io) => {
+            let code = io_code(&io).unwrap_or("EIO");
+            JsError::Error(LaunchAtLoginError::System(io).to_string()).with_code(code)
+        }
+    }
 }
 
 /// The application as a whole (desktops; its functions do nothing elsewhere,
@@ -35,10 +53,37 @@ impl Application {
     /// platform's quit key do: its windows close and the app stops as when
     /// its last window closes, then its run ends, also while closing the
     /// window alone would leave it running (a window kept hidden, a tray
-    /// icon). A view embedded in another app leaves the app's lifecycle to
-    /// that app.
+    /// icon). It quits while the app listens to `quitRequest` too: that is
+    /// how an app that asks first quits once it is ready. A view embedded
+    /// in another app leaves the app's lifecycle to that app. On the web,
+    /// called while a `quitRequest` listener runs, it lets the page leave
+    /// without a question.
     pub(crate) fn quit(cx: &mut ModuleCx) {
         desktop(cx, DesktopCommand::Quit);
+    }
+
+    /// Sets the additional sources of `quitRequest` on standalone macOS
+    /// apps. `system` includes logout, restart and shutdown;
+    /// `mainWindowClose` includes a user closing the main window when that
+    /// would end the app. Both default to false, and each call replaces
+    /// them. A window with `closeOnPress: false` keeps its own close
+    /// handler; a window kept alive on close still hides. Requires a
+    /// `quitRequest` listener. Changing the options cancels a pending
+    /// request. Replacing the app cancels its request and restores the
+    /// default options. Other platforms and embedded views ignore it.
+    pub(crate) fn set_quit_request_options(options: QuitRequestOptions, cx: &mut ModuleCx) {
+        desktop(cx, DesktopCommand::SetQuitRequestOptions(options));
+    }
+
+    /// Cancels the pending quit request on standalone macOS apps,
+    /// including an intercepted logout or shutdown. Call `quit()` to
+    /// approve instead. Repeated requests share the pending confirmation
+    /// until answered. An unanswered system request is cancelled after
+    /// 110 seconds, before AppKit's logout timeout. Removing the last
+    /// listener also cancels it. Does nothing without a pending request
+    /// or on other platforms.
+    pub(crate) fn cancel_quit_request(cx: &mut ModuleCx) {
+        desktop(cx, DesktopCommand::CancelQuitRequest);
     }
 
     /// Restarts the app: it quits as `quit` does, and once the app has
@@ -49,6 +94,30 @@ impl Application {
     /// to that app.
     pub(crate) fn restart(cx: &mut ModuleCx) {
         desktop(cx, DesktopCommand::Restart);
+    }
+
+    /// Whether the system opens the app when the user logs in, as the
+    /// system has it now: ask again when the app shows it, as the user may
+    /// change it in the system's settings. `false` wherever the app cannot
+    /// launch at login (a view embedded in another app, `nsh run`, iOS,
+    /// Android, the web) and while macOS waits for the user to approve it
+    /// in Login Items.
+    pub(crate) async fn launch_at_login() -> bool {
+        crate::element::desktop::launch_at_login().await
+    }
+
+    /// Turns launching at login on or off: turning on what is on and off
+    /// what is off succeed. Call it when the user turns the app's own
+    /// setting on or off, never at every start: what the user chose in the
+    /// system's settings stands. Rejects with
+    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the app cannot launch at
+    /// login, with `ERR_ACCESS_DENIED` (`permission` `"application"`) for an
+    /// app that declares capabilities without `application`, and with the
+    /// system's error (Node's code, `EIO` without one).
+    pub(crate) async fn set_launch_at_login(enabled: bool) -> Result<(), JsError> {
+        crate::element::desktop::set_launch_at_login(enabled)
+            .await
+            .map_err(launch_at_login_error)
     }
 
     /// Listens to `event`. `secondInstance`: with nsh.json
@@ -70,14 +139,30 @@ impl Application {
     /// oldest dropped). The app reads them with `fs`, which their opening
     /// does not grant. `quit`: the app is quitting (its Quit
     /// item, `quit()`, its last window closing, the system ending it, a host
-    /// app removing its view), for its cleanup, as GPUI's `on_app_quit`: it
-    /// cannot keep the app running (an app that asks first quits from a Quit
-    /// item of its own). A promise the listener returns is awaited, 200 ms
-    /// at most for all of them, while the platform waits too. Returns a
-    /// function that stops listening.
+    /// app removing its view, on the web the page going, once, however the
+    /// user left it; a page the browser keeps to come back to keeps the app
+    /// running), for its cleanup, as GPUI's `on_app_quit`: it
+    /// cannot keep the app running (an app that asks first listens to
+    /// `quitRequest`). A promise the listener returns is awaited, 200 ms at
+    /// most for all of them, while the platform waits too. `quitRequest`:
+    /// the user asked to quit the app with its Quit item or the platform's
+    /// quit key (Command-Q, Ctrl+Q), as AppKit's
+    /// `applicationShouldTerminate:`. While anything listens, these no
+    /// longer quit: the app decides (it asks the user, saves, waits for work
+    /// to finish), then calls `quit()`. The system ending the app (logging
+    /// out, shutting down) does not ask by default. On macOS,
+    /// `setQuitRequestOptions` includes system requests and main-window
+    /// closes; answer with `quit()` or `cancelQuitRequest()`.
+    /// Standalone apps on macOS, Windows and Linux; on the web, the user
+    /// leaving the page (closing its tab,
+    /// reloading) is the request: a `quit()` the listener calls at once lets
+    /// the page go without a question, otherwise the browser asks the user
+    /// whether to leave; `quit` listeners run once the page is gone.
+    /// Returns a function that stops listening.
     #[overload(fn(event: ApplicationSecondInstanceEvent, #[args(launch)] listener: Callback<ApplicationSecondInstance>) -> Stop)]
     #[overload(fn(event: ApplicationOpenFilesEvent, #[args(files)] listener: Callback<ApplicationOpenFiles>) -> Stop)]
     #[overload(fn(event: ApplicationQuitEvent, listener: Callback<()>) -> Stop)]
+    #[overload(fn(event: ApplicationQuitRequestEvent, listener: Callback<()>) -> Stop)]
     pub(crate) fn on(
         event: ApplicationEvent,
         #[args(payload)] listener: Callback<Payload>,
@@ -88,6 +173,7 @@ impl Application {
             ApplicationEvent::SecondInstance => second_instance(listener, &sys, cx),
             ApplicationEvent::OpenFiles => open_files(listener, &sys, cx),
             ApplicationEvent::Quit => quit(listener, &sys, cx),
+            ApplicationEvent::QuitRequest => quit_request(listener, &sys, cx),
         }
     }
 }
@@ -147,6 +233,76 @@ fn quit(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) -> Stop {
     })
 }
 
+/// Hears the user ask to quit while the listener lasts: as long as one
+/// is there, the platform leaves quitting to the app.
+fn quit_request(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) -> Stop {
+    let requests = sys.locals.get::<QuitRequests>();
+    let id = requests.next.get();
+    requests.next.set(id.wrapping_add(1));
+    requests.listeners.borrow_mut().push((id, listener));
+    // The core's listener is added by a task of the core, where its
+    // registry is; one at a time.
+    if requests.subscription.borrow().is_none() && !requests.adding.replace(true) {
+        cx.start(subscribe(Rc::downgrade(&requests)));
+    }
+    let requests = Rc::downgrade(&requests);
+    Stop::new(move || {
+        let Some(requests) = requests.upgrade() else {
+            return;
+        };
+        let removed = {
+            let mut listeners = requests.listeners.borrow_mut();
+            listeners.retain(|(i, _)| *i != id);
+            // The last one gone: quit requests quit again.
+            listeners
+                .is_empty()
+                .then(|| requests.subscription.borrow_mut().take())
+        };
+        drop(removed);
+    })
+}
+
+/// The VM's `quitRequest` listeners.
+#[derive(Default)]
+struct QuitRequests {
+    listeners: RefCell<Vec<(u32, Callback<Payload>)>>,
+    next: Cell<u32>,
+    /// The core's listener, while the VM's has any: the platform asks the
+    /// app while it is there.
+    subscription: RefCell<Option<Subscription<QuitRequestListener>>>,
+    /// A task adding it is on its way.
+    adding: Cell<bool>,
+}
+
+impl Local for QuitRequests {
+    fn close(&self) {
+        self.listeners.borrow_mut().clear();
+        let subscription = self.subscription.borrow_mut().take();
+        drop(subscription);
+    }
+}
+
+/// Adds the core's listener of quit requests for the VM's, unless they
+/// went meanwhile: it posts each request to all of them.
+async fn subscribe(requests: Weak<QuitRequests>) {
+    let Some(this) = requests.upgrade() else {
+        return;
+    };
+    this.adding.set(false);
+    if this.listeners.borrow().is_empty() || this.subscription.borrow().is_some() {
+        return;
+    }
+    let subscription = crate::element::desktop::add_quit_request_listener(Rc::new(move || {
+        let Some(requests) = requests.upgrade() else {
+            return;
+        };
+        for (_, listener) in &*requests.listeners.borrow() {
+            listener.post(Payload::QuitRequest);
+        }
+    }));
+    *this.subscription.borrow_mut() = Some(subscription);
+}
+
 /// `Application.on`'s events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 pub(crate) enum ApplicationEvent {
@@ -157,6 +313,8 @@ pub(crate) enum ApplicationEvent {
     OpenFiles,
     /// The app is quitting.
     Quit,
+    /// The user asked to quit the app.
+    QuitRequest,
 }
 
 /// The event of a later launch (`on`'s first overload).
@@ -171,6 +329,12 @@ pub(crate) enum ApplicationQuitEvent {
     Quit,
 }
 
+/// The event of the user asking to quit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub(crate) enum ApplicationQuitRequestEvent {
+    QuitRequest,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 pub(crate) enum ApplicationOpenFilesEvent {
     #[default]
@@ -183,6 +347,7 @@ pub(crate) enum Payload {
     SecondInstance(ApplicationSecondInstance),
     OpenFiles(ApplicationOpenFiles),
     Quit,
+    QuitRequest,
 }
 
 impl JsValue for Payload {
@@ -198,7 +363,7 @@ impl JsValue for Payload {
         match self {
             Payload::SecondInstance(launch) => launch.to_js(host),
             Payload::OpenFiles(files) => files.to_js(host),
-            Payload::Quit => Ret::into_js((), host),
+            Payload::Quit | Payload::QuitRequest => Ret::into_js((), host),
         }
     }
 }

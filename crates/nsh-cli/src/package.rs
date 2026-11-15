@@ -7,6 +7,7 @@
 //! embedding in GPUI apps and has no package of its own.
 
 use std::{
+    ffi::OsString,
     fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -53,7 +54,7 @@ pub(crate) enum PackageTarget {
 impl PackageTarget {
     /// This machine's desktop target (`None` off macOS, Windows and
     /// Linux): where `--target gpui` points.
-    fn desktop() -> Option<PackageTarget> {
+    pub(crate) fn desktop() -> Option<PackageTarget> {
         if cfg!(target_os = "macos") {
             Some(PackageTarget::Macos)
         } else if cfg!(windows) {
@@ -213,6 +214,11 @@ pub(crate) struct AppConfig {
     /// release runner reads it; macOS runs one instance of an app already.
     #[serde(default)]
     pub(crate) single_instance: bool,
+    /// Native features a package always includes (`"features": ["plot"]`),
+    /// which nothing in the bundle shows it uses: what its Rust code or a
+    /// computed import needs (`native_features`).
+    #[serde(default)]
+    pub(crate) features: Vec<String>,
     /// The file types the app opens (`"fileTypes"`: `[{ "name": "Video",
     /// "extensions": ["mp4"] }]`), which packages declare to the system;
     /// the app hears the files through `Application.on("openFiles", ...)`
@@ -576,6 +582,9 @@ pub(crate) struct PackageOptions<'a> {
     pub(crate) run: bool,
     /// The web: the URL the site's files are served from (`--asset-url`).
     pub(crate) asset_url: Option<&'a str>,
+    /// A development build for `nsh run`. Android: the APK is debuggable,
+    /// so `AppActivity` takes the environment `nsh run` passes it.
+    pub(crate) development: bool,
 }
 
 /// `nsh.json` `"icon"`: one PNG for every target, or one per platform
@@ -618,6 +627,19 @@ impl AppConfig {
     /// The app's icon for `target` (`nsh.json` `"icon"`, or `--icon`).
     pub(crate) fn icon(&self, target: PackageTarget) -> Option<&Path> {
         self.icon.as_ref()?.of(target)
+    }
+
+    /// The macOS development host's arguments for the app (`nsh run`,
+    /// `nsh test`): its activation policy ([`MacosConfig::host_args`]) and
+    /// its icon. The host is an executable without an app bundle around it,
+    /// so the Dock and the app switcher show the app's icon only when the
+    /// host is given it.
+    pub(crate) fn macos_host_args(&self) -> Vec<OsString> {
+        let mut args: Vec<OsString> = self.macos.host_args().into_iter().map(Into::into).collect();
+        if let Some(icon) = self.icon(PackageTarget::Macos) {
+            args.extend(["--icon".into(), icon.into()]);
+        }
+        args
     }
 }
 
@@ -899,6 +921,53 @@ pub(crate) fn release_name_and_id(
     Ok(name_and_id(entry, config))
 }
 
+/// Whether the TSX app at `entry` builds its own release runner for
+/// `target` (`rust_app::runner_only`): this machine's desktop, with cargo
+/// here and no prebuilt runtime asked for (`NSH_RUNTIME`). It is then the
+/// app of this command ([`crate::rust_app::current`]). Another OS's
+/// package keeps the prebuilt runner, which needs no cross toolchain.
+fn trimmed_runner(entry: &Path, target: PackageTarget) -> bool {
+    let this_machine = match target {
+        PackageTarget::Linux => cfg!(target_os = "linux"),
+        PackageTarget::Macos => cfg!(target_os = "macos"),
+        PackageTarget::Windows => cfg!(windows),
+        // iOS's runner builds with Xcode's SDK, so only on macOS.
+        PackageTarget::Ios | PackageTarget::IosSimulator => cfg!(target_os = "macos"),
+        // Android's library is cross-compiled with the NDK on any OS;
+        // without it (or the Rust target) the build fails and the package
+        // gets the prebuilt library.
+        PackageTarget::Android => true,
+        _ => false,
+    };
+    if !this_machine || std::env::var_os("NSH_RUNTIME").is_some() {
+        return false;
+    }
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let has_cargo = std::process::Command::new(cargo)
+        .arg("--version")
+        .output()
+        .is_ok_and(|out| out.status.success());
+    if !has_cargo {
+        ui::note(
+            "no cargo here: the package has the prebuilt runner, with every native feature; \
+             install Rust (rustup.rs) to build one with only those the app uses",
+        );
+        return false;
+    }
+    match crate::rust_app::runner_only(entry) {
+        Ok(app) => {
+            crate::rust_app::set_current(app);
+            true
+        }
+        Err(e) => {
+            ui::warn(format!(
+                "the prebuilt runner it is, with every native feature: {e:#}"
+            ));
+            false
+        }
+    }
+}
+
 pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     if options.asset_url.is_some() && options.target != PackageTarget::Web {
         bail!("--asset-url is where a web site's files are served from: package with --target web");
@@ -964,11 +1033,57 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     if options.target != PackageTarget::Web {
         crate::updater::add_config(config, &id, options.out, &mut built)?;
     }
+    // An app builds its own release runner: with only the native features
+    // its bundle can reach, and those `nsh.json` keeps. A TSX app does too
+    // where cargo is, else it ships the prebuilt runner, which has all.
+    let has_crates = crate::rust_app::current().is_some();
+    let mut own_runner = false;
+    if options.target != PackageTarget::Web
+        && !crate::rust_app::is_root(&entry)
+        && (has_crates || trimmed_runner(&entry, options.target))
+    {
+        own_runner = !has_crates;
+        let choices = crate::native_features::choose(built.native_use.as_ref(), &config.features);
+        for c in &choices {
+            let mark = if c.keep { "keep" } else { "leave out" };
+            ui::note(format!("{mark} `{}`: {}", c.feature, c.why));
+        }
+        crate::rust_app::set_runner_features(
+            choices
+                .into_iter()
+                .filter(|c| c.keep)
+                .map(|c| c.feature.to_owned())
+                .collect(),
+        );
+        // A TSX app's own runner is a saving, never a requirement: built
+        // now, so a failure (system libraries, a Rust target, crates.io)
+        // leaves it the prebuilt runner as before, not a failed package.
+        // The packaging below finds the runner built.
+        // Android's is built when packaging, for the APK's ABIs
+        // (`package_android`), which falls back the same way.
+        if !has_crates && options.target != PackageTarget::Android {
+            let built = match options.target {
+                PackageTarget::Macos => macos_runners(options.arch).map(drop),
+                PackageTarget::Linux => runtime::file(Platform::Linux, true).map(drop),
+                PackageTarget::Ios => runtime::file(Platform::IphoneOs, true).map(drop),
+                PackageTarget::IosSimulator => {
+                    runtime::file(Platform::IphoneSimulator, true).map(drop)
+                }
+                _ => runtime::file(Platform::Windows, true).map(drop),
+            };
+            if let Err(e) = built {
+                crate::rust_app::clear_current();
+                ui::warn(format!(
+                    "the app's own runner did not build, so it has the prebuilt one, with every native feature: {e:#}"
+                ));
+            }
+        }
+    }
     let platform = match options.target {
         PackageTarget::Ios => Platform::IphoneOs,
         PackageTarget::IosSimulator => Platform::IphoneSimulator,
         PackageTarget::Android => {
-            return package_android(&options, config, &name, &id, &built);
+            return package_android(&options, config, &name, &id, &built, own_runner);
         }
         PackageTarget::Linux => {
             let app = App {
@@ -1068,7 +1183,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
             codesign(&app, "-", path.as_deref())?;
             ui::done(format!("packaged {}", ui::path(&app)));
             if options.run {
-                let udid = crate::run::simulator(None)?;
+                let udid = crate::run::simulator(None, crate::run::SimulatorWindow::Front)?;
                 let step = ui::Step::start(format!("installing {id} in the simulator"));
                 crate::run::simctl(&["install", &udid, &app.to_string_lossy()])?;
                 crate::run::simctl_with_env(
@@ -1164,6 +1279,7 @@ fn package_android(
     name: &str,
     id: &str,
     built: &crate::build::Built,
+    own_runner: bool,
 ) -> anyhow::Result<()> {
     use crate::android::{self, Apk, Signing};
     let sdk = android::Sdk::find()?;
@@ -1177,7 +1293,19 @@ fn package_android(
         None => None,
     };
     let abis = apk_abis(options.abis, device.as_deref())?;
-    let runtime = runtime::android(false, &abis)?;
+    // A TSX app's own library is a saving, never a requirement
+    // (`trimmed_runner`): a failure (no NDK, a Rust target, crates.io)
+    // leaves it the prebuilt library, with every native feature.
+    let runtime = match runtime::android(false, &abis) {
+        Err(e) if own_runner => {
+            crate::rust_app::clear_current();
+            ui::warn(format!(
+                "the app's own library did not build, so it has the prebuilt one, with every native feature: {e:#}"
+            ));
+            runtime::android(false, &abis)?
+        }
+        runtime => runtime?,
+    };
     // A Rust app has no bundle: `AppActivity` runs its root (the
     // manifest's `com.longbridge.nsh.RUST`).
     let mut assets = Vec::new();
@@ -1228,7 +1356,7 @@ fn package_android(
             version_code: config.build.unwrap_or(1),
             target_sdk,
             activity: "com.longbridge.nsh.AppActivity",
-            dev: false,
+            dev: options.development,
             cleartext: config.android.uses_cleartext_traffic,
             notifications: config.notifications(),
             microphone: config.web_media("microphone"),
@@ -1350,7 +1478,13 @@ fn package_linux(
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    crate::updater::copy_archive(config, name, &archive, options.out)?;
+    crate::updater::copy_archive(
+        config,
+        name,
+        &nsh_updater::platform(),
+        &archive,
+        options.out,
+    )?;
     step.done(format!(
         "packaged {} and {}",
         ui::path(&dir),
@@ -2078,6 +2212,7 @@ mod tests {
                 arch: Some(Arch::X86_64),
                 run: false,
                 asset_url: None,
+                development: false,
             })
             .unwrap_err();
             assert_eq!(
@@ -2512,6 +2647,39 @@ mod tests {
                 ]
                 .into()
             ))
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The macOS development host gets the app's macOS icon, after its
+    /// activation policy; an app without one gets none.
+    #[test]
+    fn the_macos_host_gets_the_apps_icon() {
+        let dir = std::env::temp_dir().join(format!("nsh-macos-host-icon-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let entry = dir.join("app.tsx");
+        let args = |json: &str| {
+            fs::write(dir.join("nsh.json"), json).unwrap();
+            read_config(&entry).unwrap().macos_host_args()
+        };
+        let icon = |name: &str| OsString::from(dir.join(name));
+        assert!(args("{}").is_empty());
+        assert!(args(r#"{ "icon": { "windows": "win.png" } }"#).is_empty());
+        assert_eq!(
+            args(r#"{ "icon": "icon.png" }"#),
+            [OsString::from("--icon"), icon("icon.png")]
+        );
+        assert_eq!(
+            args(
+                r#"{ "icon": { "macos": "mac.png", "windows": "win.png" },
+                     "macos": { "activationPolicy": "accessory" } }"#
+            ),
+            [
+                OsString::from("--activation-policy"),
+                "accessory".into(),
+                "--icon".into(),
+                icon("mac.png"),
+            ]
         );
         fs::remove_dir_all(&dir).unwrap();
     }

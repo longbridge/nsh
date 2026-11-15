@@ -15,7 +15,10 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use nsh_core::{
     EventKind, EventPayload, JsonValue, NodeId, Points, Size,
-    platform::{TAB_BAR_COMPONENT, is_reserved_component},
+    platform::{
+        MENU_BUTTON_COMPONENT, SEGMENTED_CONTROL_COMPONENT, TAB_BAR_COMPONENT,
+        is_reserved_component,
+    },
 };
 use nsh_engine::EngineControl;
 use objc2_ui_kit::UIView;
@@ -122,6 +125,11 @@ impl Default for Components {
         };
         // NSH's own: what `nsh/base`'s exports render.
         components.insert(TAB_BAR_COMPONENT, crate::system_tab_bar::factory());
+        components.insert(
+            SEGMENTED_CONTROL_COMPONENT,
+            crate::system_segmented_control::factory(),
+        );
+        components.insert(MENU_BUTTON_COMPONENT, crate::system_menu_button::factory());
         components
     }
 }

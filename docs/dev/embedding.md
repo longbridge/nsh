@@ -163,7 +163,9 @@
   surface, no globals.
   - *Launch parameters*: `set_params(map)` before a load; the engine snapshots them when it starts (`HostChannel::bridge`)
     and `host.params` reads them synchronously (a JSON object, `{}` without any), fixed for the app's life. Later
-    requests ("open conversation X" from a notification) are events.
+    requests ("open conversation X" from a notification) are events. Parameters alone leave the channel unconfigured
+    (`HostBridge::available`): a handler or an event configures it, so the web page's `runModule({ params })` keeps
+    the app's calls on the page's host.
   - *Events* (`send(name, data)`, any thread, never waiting): `Message::HostEvent` on the attached engine
     (`HostChannel::attach`: an engine attaches when it starts and detaches when it goes, by id, so a reload's new engine
     is not detached by the old one). While no engine runs, the channel keeps them for the next (`HostInbox`, 256, the
@@ -256,9 +258,19 @@
   follows too. `None` / `nil` / `null` / 0 follows the system's again (its settings are read again). The text
   size scales what allows font scaling (`Core::set_font_scale`): texts, inputs, the components' labels; lengths, `rem`
   in classes included, stay as they are. The layout direction stays the system's language's.
+- **The host's own floating UI** (the safe area): a host that draws its own UI over the view (a tab bar floating over
+  the content) adds it to the safe area, so the app's content scrolls under that UI and still ends clear of it
+  (`safeAreaInsets()`, `env(safe-area-inset-*)`). On iOS that is UIKit's own: the surface reads the view's
+  `safeAreaInsets` (`surface.rs`), which the host's `additionalSafeAreaInsets` on its view controller adds to. On
+  Android the view publishes the system bars' insets it sits under, so Java `NshView.setAdditionalSafeAreaInsets(left,
+  top, right, bottom)` (px, on the UI thread) adds the host's on top in `publishEnvironment`; the keyboard still
+  measures from the view's edge. All zeros takes them away. When the safe area changes (the host's insets or the
+  system bars), the view reports every mounted screen's insets again (`Mounter.reportAllScreenInsets`), so the pages
+  already shown in a `NavStack` follow. A host's UI floating over the content is a mobile pattern: the desktop hosts
+  lay their own UI out beside the view.
 - **The host's theme overrides**: a host that embeds one app in several branded host apps overrides the app's theme
   tokens (brand colors, `radius`, ...) at run time: Rust `AppView::set_theme_overrides(Option<&str>)` (AppKit, GTK,
-  Win32; the iOS `AppView`'s too), Swift `NshAppView.setThemeOverrides(_:)` (C `nsh_app_set_theme_overrides`), Java
+  Win32; GPUI's takes `cx` as well; the iOS `AppView`'s too), Swift `NshAppView.setThemeOverrides(_:)` (C `nsh_app_set_theme_overrides`), Java
   `NshView.setThemeOverrides`. The value is a theme file in the format of `nsh.json`'s `"theme"` (shadcn's `cssVars`:
   `theme`, `light` and `dark` sections, values as CSS writes them; `components.md` "The theme"); it is parsed on the
   calling thread by `nsh_base::theme_overrides`, which keeps only the tokens the file sets (a `var()` it names and
@@ -271,7 +283,8 @@
   every app loaded later, a development reload included; `None` / `nil` / `null` gives the app its own theme back. A
   token takes both appearances: one the file gives only in `light` (or `theme`) is that color in dark mode too, as
   in a theme file, so an override that differs in dark mode names it in `dark`. GPUI's `AppView::set_theme` /
-  `set_theme_json` (below) give a whole theme instead, the default's where the file is silent.
+  `set_theme_json` (below) give a whole theme instead, the default's where the file is silent; GPUI's surface keeps
+  the two apart and sends the overrides over the theme (`Tokens::over`), so each stays when the other changes.
 - **The iOS SDK** (`crates/xtask/src/ios.rs`): per platform slice (device, simulator, Catalyst) a static
   `NativeShell.framework` whose binary is `nsh-platform-ios` with feature `embed` (built by `cargo rustc --crate-type
   staticlib`, so the hosts never build or export it) merged by `libtool` with the Swift module, compiled with library
@@ -307,7 +320,8 @@ NSH draws (`src/layers.rs`).
 
 - **One GPUI.** NSH draws with GPUI Fast (`gpui-fast` from crates.io); GPUI Kit (`gpui-kit` / `gpui-component`) must
   use it too: its `gpui-fast` feature. `cargo tree -i gpui-fast` must show one version, else the app has two GPUIs
-  and NSH's views are not the app's elements. `nsh_platform_gpui::gpui` re-exports NSH's.
+  and NSH's views are not the app's elements. `nsh_platform_gpui::gpui` re-exports NSH's. NSH builds with GPUI Fast
+  0.1.14 or later, which GPUI Kit is built on from 0.9.1.
 - **A view.** `cx.new(|cx| AppView::new(options, window, cx))`, then `view.read(cx).load(App::Js(bundle))` (or a
   Rust app's root); the app puts the entity wherever it wants as a child element. The surface fills the space its
   parent gives it and follows it when resized (each layout reports the size to the engine). Several views run at once,

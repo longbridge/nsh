@@ -264,7 +264,8 @@ impl<M: TextEngine> Core<M> {
             };
             let renders = &mut self.components.renders;
             let slot = renders.slots.get_mut(&key).expect("a slot");
-            let value = renders.places[&place].value.clone();
+            let placed = &renders.places[&place];
+            let value = placed.value.clone();
             if !slot.sent.as_ref().is_some_and(|v| v.same(&*value)) {
                 slot.sent = Some(value.clone());
                 self.events.push(JsEvent::Render {
@@ -272,6 +273,7 @@ impl<M: TextEngine> Core<M> {
                     prop: slot.prop,
                     key: slot.key.clone(),
                     value,
+                    func: placed.func.clone(),
                 });
             }
             // Its placeholder may be another one now.

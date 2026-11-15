@@ -222,6 +222,155 @@ function CustomHeader() {
   );
 }
 
+/** A custom title longer than the bar: it shrinks and clamps between the
+ * back button and the trailing item, which stay on the bar. */
+function LongTitle() {
+  const title = "A session title long enough to need more than one phone's width";
+  const center = () => (
+    <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <Text style={{ numberOfLines: 1, flex: 1, minWidth: 0, fontSize: 17, fontWeight: "600", color: colors.text }}>
+        {title}
+      </Text>
+      <Icon name="chevron-down" size={18} tint={colors.muted} />
+    </View>
+  );
+  const right = () => (
+    <Text hitSlop={10} style={{ color: colors.accent, fontSize: 17, fontWeight: "500" }}>
+      Edit
+    </Text>
+  );
+  return (
+    <NavPage title="Long title" headerTitle={center()} headerRight={right()} header={<PageHeader title="Long title" center={center()} right={right()} />}>
+      <Page intro="The title view takes the room between the bar's items: a long title clamps to one line, and the chevron and Edit stay visible.">
+        <Section title="Header" note="headerTitle">
+          <Text style={{ color: colors.muted }}>{title}</Text>
+        </Section>
+      </Page>
+    </NavPage>
+  );
+}
+
+/** Trailing iOS bar buttons with a native menu; other platforms keep the
+ * `headerRight` views. */
+function NativeBarButtons() {
+  const filter = signal<"all" | "open" | "done">("all");
+  const log = signal("Tap Edit, Filter or +");
+  const editing = signal(false);
+  const right = () => (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+      <Text
+        onPress={() => {
+          editing.set(!editing());
+          log.set(editing() ? "Editing" : "Edit");
+        }}
+        hitSlop={10}
+        style={{ color: colors.accent, fontSize: 17, fontWeight: "500" }}
+      >
+        {editing() ? "Done" : "Edit"}
+      </Text>
+      <Text
+        onPress={() => log.set(`Filter: ${filter()}`)}
+        hitSlop={10}
+        style={{ color: colors.accent, fontSize: 17, fontWeight: "500" }}
+      >
+        Filter
+      </Text>
+      <Text onPress={() => log.set("Add")} hitSlop={10} style={{ color: colors.accent, fontSize: 22, fontWeight: "400" }}>
+        +
+      </Text>
+    </View>
+  );
+  return (
+    <NavPage
+      title="Bar buttons"
+      {...header}
+      headerRight={right()}
+      header={<PageHeader title="Bar buttons" right={right()} />}
+      ios={{
+        headerRightItems: [
+          {
+            key: "edit",
+            label: editing() ? "Done" : "Edit",
+            onPress: () => {
+              editing.set(!editing());
+              log.set(editing() ? "Editing" : "Edit");
+            },
+          },
+          {
+            key: "filter",
+            label: "Filter",
+            menu: [
+              {
+                label: "All",
+                checked: filter() === "all",
+                onSelect: () => {
+                  filter.set("all");
+                  log.set("Filter: all");
+                },
+              },
+              {
+                label: "Open",
+                checked: filter() === "open",
+                onSelect: () => {
+                  filter.set("open");
+                  log.set("Filter: open");
+                },
+              },
+              {
+                label: "Done",
+                checked: filter() === "done",
+                onSelect: () => {
+                  filter.set("done");
+                  log.set("Filter: done");
+                },
+              },
+              {
+                label: "Danger",
+                inline: true,
+                submenu: [
+                  {
+                    label: "Clear filters",
+                    destructive: true,
+                    symbol: "trash",
+                    onSelect: () => {
+                      filter.set("all");
+                      log.set("Filters cleared");
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            key: "add",
+            systemItem: "add",
+            label: "Add",
+            onPress: () => log.set("Add"),
+          },
+        ],
+      }}
+    >
+      <Page
+        intro={hint(
+          "iOS: Edit, Filter (a native menu with a check mark) and + share one Liquid Glass group on iOS 26. Android and the desktops show the same actions as headerRight views.",
+          "The trailing actions are views here; on iOS they are UIKit bar buttons with a native Filter menu.",
+        )}
+      >
+        <Section title="Last action" note="onPress / onSelect">
+          <Figure value={log()} />
+        </Section>
+        <Section title="Filter" note="checked menu item">
+          <View style={{ flexDirection: "row" }}>
+            <Stat width="33%" label="All" value={filter() === "all" ? "On" : "—"} tone={filter() === "all" ? "up" : "neutral"} />
+            <Stat width="33%" label="Open" value={filter() === "open" ? "On" : "—"} tone={filter() === "open" ? "up" : "neutral"} />
+            <Stat width="34%" label="Done" value={filter() === "done" ? "On" : "—"} tone={filter() === "done" ? "up" : "neutral"} />
+          </View>
+        </Section>
+      </Page>
+    </NavPage>
+  );
+}
+
 function Locked() {
   return (
     <NavPage title="No swipe back" {...header} popOnSwipe={false} header={<PageHeader title="No swipe back" />}>
@@ -530,6 +679,8 @@ export function Navigation() {
               <LinkRow icon="lists" title="Large title list" note="headerLargeTitle, List" onPress={push(LargeTitleList)} />
               <LinkRow icon="styles" title="Transparent header" note="headerTransparent" onPress={push(Transparent)} />
               <LinkRow icon="star" title="Custom header items" note="headerLeft / Title / Right" onPress={push(CustomHeader)} />
+              <LinkRow icon="text" title="Long custom title" note="headerTitle, clamped" onPress={push(LongTitle)} />
+              <LinkRow icon="sliders" title="Native bar buttons" note="ios.headerRightItems" onPress={push(NativeBarButtons)} />
               <LinkRow icon="mobile" title="No header" note="headerVisible={false}" onPress={push(Headerless)} />
               <LinkRow icon="spark" title="Fade in" note='animation="fade"' onPress={push(Faded)} />
               <LinkRow icon="animation" title="No animation" note='animation="none"' onPress={push(Instant)} />

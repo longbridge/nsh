@@ -384,6 +384,14 @@ final class TextLayouts {
                     .setLineSpacing(0f, 1f)
                     .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
                     .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE);
+            if (android.os.Build.VERSION.SDK_INT >= 35) {
+                // `obtain` hands out pooled builders and does not reset these
+                // two: a TextView in an app targeting 35 or later leaves them
+                // on, and lines would then break by the glyphs' ink, wider
+                // than the advances the text was measured by ("Wor" / "k").
+                b.setUseBoundsForWidth(false);
+                b.setShiftDrawingOffsetForStartOverhang(false);
+            }
             if (justify) b.setJustificationMode(Layout.JUSTIFICATION_MODE_INTER_WORD);
             if (maxLines > 0) {
                 b.setMaxLines(maxLines);

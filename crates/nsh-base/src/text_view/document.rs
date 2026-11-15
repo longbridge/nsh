@@ -362,6 +362,10 @@ pub(crate) fn inline_text(inlines: &[Inline], out: &mut String) {
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct CodeBlock {
+    /// The app's id of the block, handed back with its actions
+    /// (`onCodeBlockAction`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     /// Its language (the info string's first word: `rust`), if named.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
@@ -370,6 +374,15 @@ pub struct CodeBlock {
     pub meta: Option<String>,
     /// The code, without a final line break.
     pub code: String,
+    /// The code as inline content (the app's annotations: strong text,
+    /// highlights, custom nodes shown as their content), shown in place of
+    /// the highlighted code when its plain text is `code`; other content is
+    /// ignored with a warning, so what shows is what copying takes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub content: Vec<Inline>,
+    /// Wraps long lines in the available width instead of scrolling them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wrap: bool,
 }
 
 impl CodeBlock {
@@ -377,8 +390,8 @@ impl CodeBlock {
     pub fn new(language: Option<String>, code: impl Into<String>) -> Self {
         Self {
             language,
-            meta: None,
             code: code.into(),
+            ..Self::default()
         }
     }
 }
@@ -766,12 +779,18 @@ export type TextViewInline =
 
 const CODE_BLOCK: &str = "/** A block of code. */
 export interface TextViewCodeBlock {
+  /** The app's id of the block, handed back with its actions (`onCodeBlockAction`). */
+  id?: string;
   /** Its language (the info string's first word: `rust`), if named. */
   language?: string;
   /** The rest of the info string. */
   meta?: string;
   /** The code, without a final line break. */
   code: string;
+  /** The code as inline content (the app's annotations), shown when its plain text is `code`. */
+  content?: TextViewInline[];
+  /** Wrap long lines instead of scrolling horizontally. */
+  wrap?: boolean;
 }";
 
 const TABLE: &str = "/** A table. */

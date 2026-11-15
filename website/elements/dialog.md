@@ -125,7 +125,7 @@ and the explicit import takes its place. For the system's alert or action sheet,
 
 | `ios` key | Rust | Type | Default | Description |
 |---|---|---|---|---|
-| `supportedOrientations` | `.supported_orientations(..)` | `("portrait" \| "portrait-upside-down" \| "landscape" \| "landscape-left" \| "landscape-right")[]` | the presenter's | The orientations the dialog allows. |
+| `supportedOrientations` | `.supported_orientations(..)` | `("portrait" \| "portrait-upside-down" \| "landscape" \| "landscape-left" \| "landscape-right")[]` | the presenter's | The orientations the dialog allows. `landscape-left` is the device turned clockwise, its home side on the left (UIKit's `landscapeLeft`). |
 
 | `android` key | Rust | Type | Default | Description |
 |---|---|---|---|---|

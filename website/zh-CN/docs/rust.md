@@ -454,6 +454,20 @@ test("a tap counts", async () => {
 根视图坐标下未计变换的边界、是否隐藏、是否裁剪，`scroll` 里是滚动视图的方向和内容尺寸，`text` 里是文字视图的文字及其排版所用的框），
 测试据此检查有没有视图超出父视图、被裁剪的视图截掉，或文字放不下。两者都是 `nsh_testing` 给 `cargo test` 用的 Rust API。
 
+Web 应用的路由在它的页面上测：`Headless::start_at_page(config, "https://example.test/app/")` 以这个地址在 Web 上启动应用，
+`app.browser()` 是它所在的浏览器，带着 Web 记下的历史（栈每推一页、每开一个对话框各一条，应用以
+`set_app_url_with(url, HistoryBehavior::Push)` 设的地址各一条）和用户在其中的移动：`back()`、`forward()`、`go(delta)` 与
+`type_address("#inbox")`，应用像在 Web 上一样收到它们（`next_app_url_change`、`next_url_scheme_open`）；`entries()`、`index()`
+和 `url()` 读历史。
+
+```rust
+let mut app = Headless::start_at_page(config, "https://example.test/app/").unwrap();
+app.press("Message").unwrap(); // 推一页并设 `?m=1`
+assert_eq!(app.browser().url(), Some("https://example.test/app/?m=1"));
+app.browser().back().unwrap(); // 弹掉这一页
+app.browser().type_address("#inbox").unwrap(); // 原因为 `Address` 的变化
+```
+
 TSX 入口用 `nsh-testing` 的特性 `bundle` 按 `nsh run` 的方式构建，使用它的宿主提供的 UI 集合：NSH 的，以及每个 crate 由
 `#[native_module]` 生成的 `registry()`：
 

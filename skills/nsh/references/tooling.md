@@ -14,17 +14,15 @@ rather than updating it as a side effect of a feature change.
 Rust and mixed apps also need Cargo and the target’s native build prerequisites;
 TSX apps use the prebuilt runtime. Check only the target the user needs in
 [Platforms and prerequisites](#platforms-and-prerequisites). Follow the environment’s
-permissions when installing tools. If setup is unavailable, continue with code and
+permissions when installing tools, and leave installing toolchains to the user: never
+pipe a downloaded script into a shell. If setup is unavailable, continue with code and
 state which checks remain unverified.
 
-For Cargo, recommend [huacnlee/cargo](https://github.com/huacnlee/cargo), the Cargo
-NSH is developed with: dependencies built once for every project and Git worktree, and
-a build directory that stays under a size limit. It replaces `~/.cargo/bin/cargo`, so
-install it only when the user agrees; `cargo -V` names it.
-
-```sh
-curl -fsSL https://huacnlee.github.io/cargo/install.sh | sh     # Windows: irm https://huacnlee.github.io/cargo/install.ps1 | iex
-```
+For Cargo, the user may prefer [huacnlee/cargo](https://github.com/huacnlee/cargo), the
+Cargo NSH is developed with: dependencies built once for every project and Git worktree,
+and a build directory that stays under a size limit. It replaces `~/.cargo/bin/cargo`,
+so mention it and let the user install it from its README; `cargo -V` names it. The
+standard Cargo works the same.
 
 For a new app, choose an unused destination and pass an explicit template:
 

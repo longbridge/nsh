@@ -14,8 +14,10 @@ use std::{
 
 use nsh_core::{
     AccessibilityRole, AccessibilityState, Bounds, Command, Dialog, EventKind, EventMask,
-    GestureValues, InputConfig, MountBatch, MountItem, NodeId, PanActivation, Point, PointerEvents,
-    Points, Size, ViewKind, element::PropEnum,
+    GestureValues, InputConfig, KeyCapture, MountBatch, MountItem, NodeId, PanActivation, Point,
+    PointerEvents, Points, Size, ViewKind,
+    element::{ClipboardItem, PropEnum},
+    keymap::Keystroke,
 };
 
 use crate::selector::{Matcher, Selector, TextMatch};
@@ -104,6 +106,9 @@ pub struct Screen {
     /// The view that takes presses Tab gave the keyboard focus to (macOS,
     /// the web).
     key_focus: Option<NodeId>,
+    /// Inputs configured to take the focus when they mount (`autoFocus`)
+    /// that are not in a window yet, in the order they were configured.
+    auto_focus: Vec<NodeId>,
     /// Scroll views a command moved, whose offset the engine is told
     /// ([`Screen::take_scrolled`]), as a platform reports it.
     scrolled: Vec<NodeId>,
@@ -116,21 +121,25 @@ pub struct Screen {
     /// The dialogs shown, in order, and how many were answered.
     dialogs: Vec<Dialog>,
     answered: usize,
-    /// The clipboard's text.
-    clipboard: Option<String>,
+    /// The item on the clipboard: its text, and the HTML written with it
+    /// (`Clipboard.write`).
+    clipboard: Option<ClipboardItem>,
     /// Clipboard reads to answer: the request, and whether it asks only if
     /// the clipboard holds text.
     clipboard_reads: Vec<(u32, bool)>,
     /// The `Image.getSize` / `Image.prefetch` requests to answer.
     image_infos: Vec<u32>,
+    /// The source each image view is loading, until a test fails it
+    /// ([`Screen::fail_images`]): headless runs load none.
+    loading_images: HashMap<NodeId, Arc<str>>,
     /// The picks asked (`Picker.pickImages`), in order, and how many were
     /// answered.
     picks: Vec<(u32, nsh_core::picker::Pick)>,
     picks_answered: usize,
     /// The URLs the app had the system open (`openUrl`), in order.
     opened_urls: Vec<String>,
-    /// The `openUrl` requests to answer.
-    url_opens: Vec<u32>,
+    /// The `openUrl` requests to answer, with their URLs.
+    url_opens: Vec<(u32, String)>,
     /// The screen colors asked for (`pick_screen_color`), to answer.
     screen_colors: Vec<u32>,
     /// The requests on local paths that reached the platform
@@ -154,6 +163,9 @@ pub struct Screen {
     /// The views under the mouse that care (`input::hoverable`), innermost
     /// first.
     hovered: Vec<NodeId>,
+    /// Views a removal took out of the hover or the keyboard focus, with
+    /// their states since, for the engine ([`Screen::take_restated`]).
+    restated: Vec<(NodeId, u16)>,
     /// The context menu the app showed (`Menu.popup`), until it is chosen
     /// from or closed.
     menu: Option<Arc<[nsh_core::desktop::MenuItem]>>,
@@ -208,6 +220,14 @@ struct View {
     /// A shown overlay's place in the Tab order
     /// ([`nsh_core::ViewProps::tab_after`]).
     tab_after: Option<NodeId>,
+    /// The keys it captures for itself and what it holds (`capture_keys`):
+    /// a press one of them matches is the platform's, so it types nothing
+    /// and runs no default.
+    key_capture: KeyCapture,
+    /// The logical parent of a portaled view for keyboard ancestry
+    /// (`ViewProps::key_parent`): its `parent` is the native host the core
+    /// inserted it into, which need not be its keyboard ancestor.
+    key_parent: Option<NodeId>,
     /// It is selected (`selected`, its accessibility state; a canvas node's
     /// `selected`).
     selected: bool,
@@ -217,6 +237,12 @@ struct View {
     level: Option<u32>,
     /// Its `accessibilityDescription`.
     description: Option<Arc<str>>,
+    /// The view its `accessibilityActiveDescendant` names.
+    active_descendant: Option<NodeId>,
+    /// The view its `accessibilityControls` names.
+    controls: Option<NodeId>,
+    /// The view its `accessibilityDescribedBy` names.
+    described_by: Option<NodeId>,
     /// How long a press must last to be a long one (`delayLongPress`), in
     /// milliseconds.
     long_press_delay: Option<f32>,
@@ -235,6 +261,10 @@ struct View {
     hidden: bool,
     /// It clips what it holds to its bounds (`overflow: hidden`).
     clips: bool,
+    /// Its own `opacity`, `None` until its style arrives (fully opaque).
+    opacity: Option<f32>,
+    /// Its `backgroundColor`, `0xRRGGBBAA`; transparent is `0`.
+    background: u32,
     /// A span of a text that takes presses (a nested `<Text onPress>`):
     /// not a view of its own, its parent is the text view showing it, or
     /// the span around it.
@@ -254,6 +284,17 @@ struct View {
     screen_order: Option<nsh_core::geometry::Axis>,
     /// A node of a canvas's drawing, not a view of its own.
     canvas_node: bool,
+}
+
+/// A view's style as the app set it ([`Screen::view_style`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ViewStyle {
+    /// Its `backgroundColor`, `0xRRGGBBAA`; `None` when transparent.
+    pub background_color: Option<u32>,
+    /// Its own `opacity`.
+    pub opacity: f32,
+    /// The opacity it shows with: its own times every view's around it.
+    pub effective_opacity: f32,
 }
 
 /// A link of a text view's text ([`nsh_core::TextLink`]): a span that takes
@@ -392,6 +433,9 @@ pub(crate) struct Input {
     /// Where its text goes in the view (inside padding and border); the
     /// whole view until the core says.
     pub(crate) content: Option<Bounds<Points>>,
+    /// Whether it was configured: only its first configuration asks for
+    /// the focus.
+    configured: bool,
 }
 
 /// Where a scroll view is, as its platform view keeps it.
@@ -415,6 +459,45 @@ impl Screen {
     pub fn apply(&mut self, batch: &MountBatch) {
         for item in &batch.items {
             self.apply_item(item);
+        }
+        self.auto_focus();
+    }
+
+    /// Gives the focus to the inputs that asked for it when they mounted
+    /// (`autoFocus`) once they are in a window, as the platforms do after
+    /// the batch that made them: whatever had it before, a `focus()` of
+    /// the same batch included; the last one configured keeps it. One not
+    /// in a window yet waits for it.
+    fn auto_focus(&mut self) {
+        let mut pending = std::mem::take(&mut self.auto_focus);
+        pending.retain(|&id| {
+            if self.input(id).is_none() {
+                return false;
+            }
+            if !self.in_window(id) {
+                return true;
+            }
+            self.focused = Some(id);
+            false
+        });
+        self.auto_focus = pending;
+    }
+
+    /// Whether view `id` is in a window: the main window's root or the
+    /// root of one of the app's own is around it, with nothing on the way
+    /// a back closed natively ([`Screen::in_tree`], windows included).
+    fn in_window(&self, mut id: NodeId) -> bool {
+        loop {
+            if id == ROOT || self.is_window(id) {
+                return true;
+            }
+            if self.closed.contains(&id) {
+                return false;
+            }
+            match self.nodes.get(&id).and_then(|v| v.parent) {
+                Some(parent) => id = parent,
+                None => return false,
+            }
         }
     }
 
@@ -446,12 +529,14 @@ impl Screen {
                 }
             }
             MountItem::Remove { id } => {
+                self.taken_out(*id);
                 self.detach(*id);
                 self.popped.remove(id);
                 self.closed.remove(id);
                 self.forget_window(*id);
             }
             MountItem::Delete { id } => {
+                self.taken_out(*id);
                 self.drop_spans(*id);
                 self.canvas(*id, &[]);
                 self.detach(*id);
@@ -460,10 +545,16 @@ impl Screen {
                 self.popped.remove(id);
                 self.closed.remove(id);
                 self.forget_window(*id);
-                if self.focused == Some(*id) {
-                    self.focused = None;
-                }
+                self.loading_images.remove(id);
             }
+            MountItem::Image { id, source, .. } => match source {
+                Some(source) => {
+                    self.loading_images.insert(*id, source.uri.clone());
+                }
+                None => {
+                    self.loading_images.remove(id);
+                }
+            },
             MountItem::ScreenConfig { id, config } => {
                 self.nodes.entry(*id).or_default().prevent_back = config.prevent_back;
             }
@@ -478,6 +569,8 @@ impl Screen {
                 let view = self.nodes.entry(*id).or_default();
                 view.hidden = style.hidden;
                 view.clips = style.overflow_hidden;
+                view.opacity = Some(style.opacity);
+                view.background = style.background_color.0;
             }
             MountItem::ScrollBehavior { id, behavior } => {
                 if let Some(scroll) = self.scroll_mut(*id) {
@@ -494,10 +587,15 @@ impl Screen {
                 view.disabled = props.accessibility.state.disabled;
                 view.focusable = props.focusable;
                 view.tab_after = props.tab_after;
+                view.key_capture = props.key_capture.clone();
+                view.key_parent = props.key_parent;
                 view.selected = props.accessibility.state.selected;
                 view.accessibility_state = props.accessibility.state;
                 view.level = props.accessibility.level;
                 view.description = props.accessibility.description.clone();
+                view.active_descendant = props.accessibility.active_descendant;
+                view.controls = props.accessibility.controls;
+                view.described_by = props.accessibility.described_by;
                 view.long_press_delay = props.long_press_delay;
                 view.selectable_view = props.selectable_view;
                 view.pan_activation = props.pan_activation;
@@ -530,6 +628,10 @@ impl Screen {
             MountItem::Input { id, config } => {
                 if let Some(input) = self.input_mut(*id) {
                     input.config = config.clone();
+                    let first = !std::mem::replace(&mut input.configured, true);
+                    if first && config.auto_focus {
+                        self.auto_focus.push(*id);
+                    }
                 }
             }
             MountItem::InputContent { id, content } => {
@@ -621,9 +723,12 @@ impl Screen {
     fn command(&mut self, id: NodeId, command: &Command) {
         match command {
             Command::Dialog(dialog) => self.dialogs.push((**dialog).clone()),
-            Command::SetClipboard(text) => self.clipboard = Some(text.clone()),
+            Command::SetClipboard(text) => self.set_clipboard(Some(text.clone())),
+            Command::SetClipboardItem(item) => self.clipboard = Some(item.clone()),
             // An image replaces the text.
-            Command::SetClipboardImage(_) => self.clipboard = None,
+            Command::SetClipboardImage(_) => {
+                self.clipboard = None;
+            }
             Command::ReadClipboard { id, has_only } => self.clipboard_reads.push((*id, *has_only)),
             Command::ReadClipboardImage { .. } => {
                 self.unsupported.push("reading an image from the clipboard");
@@ -643,7 +748,7 @@ impl Screen {
             // Recorded, never opened: a test's machine opens nothing.
             Command::OpenUrl { id, url } => {
                 self.opened_urls.push(url.clone());
-                self.url_opens.push(*id);
+                self.url_opens.push((*id, url.clone()));
             }
             Command::PickScreenColor { id } => self.screen_colors.push(*id),
             // Recorded, never carried out: a test's machine opens, shows
@@ -851,6 +956,72 @@ impl Screen {
             .and_then(|text| text.span_at(start))
             .map(|span| span.style)
             .ok_or_else(|| crate::failure::not_found("span", selector))
+    }
+
+    /// The style of the view `selector` names: its `backgroundColor` (when
+    /// not transparent), its own `opacity`, and the opacity it shows with
+    /// (its own times every view's around it). The values are those the
+    /// app set last, an animation's end value while it runs. `None` when no
+    /// view matches; an error when several do.
+    pub fn view_style(&self, selector: &str) -> Result<Option<ViewStyle>, String> {
+        let parsed = Selector::parse(selector)?;
+        let id = match self.resolve(&parsed)[..] {
+            [id] => id,
+            [] => return Ok(None),
+            ref all => return Err(format!("`{selector}` matches {} views", all.len())),
+        };
+        let view = self.nodes.get(&id);
+        let opacity = view.and_then(|v| v.opacity).unwrap_or(1.0);
+        let mut effective = opacity;
+        let mut parent = view.and_then(|v| v.parent);
+        while let Some(p) = parent {
+            let Some(v) = self.nodes.get(&p) else { break };
+            effective *= v.opacity.unwrap_or(1.0);
+            parent = v.parent;
+        }
+        Ok(Some(ViewStyle {
+            background_color: view.map(|v| v.background).filter(|c| c & 0xff != 0),
+            opacity,
+            effective_opacity: effective,
+        }))
+    }
+
+    /// View `id` leaves the tree with what it holds: none of it is under
+    /// the mouse or has the focus any more, and it hears no leave or blur
+    /// for that, as a removed DOM element does not. A removed view may live
+    /// on (a JS cycle keeps it until a collection) while its component is
+    /// gone, whose handlers must not run.
+    fn taken_out(&mut self, id: NodeId) {
+        let mut hovered = std::mem::take(&mut self.hovered);
+        hovered.retain(|&v| {
+            let inside = self.within(v, id);
+            if inside {
+                self.clear_state(v, nsh_core::tailwind::state::HOVERED);
+            }
+            !inside
+        });
+        self.hovered = hovered;
+        if self.focused.is_some_and(|v| self.within(v, id)) {
+            self.focused = None;
+        }
+        if let Some(key) = self.key_focus.filter(|&v| self.within(v, id)) {
+            self.key_focus = None;
+            self.clear_state(key, nsh_core::tailwind::state::FOCUSED);
+        }
+    }
+
+    fn clear_state(&mut self, id: NodeId, bit: u16) {
+        if let Some(states) = self.set_state(id, bit, false) {
+            self.restated.push((id, states));
+        }
+    }
+
+    /// The views a removal took out of the hover or the keyboard focus
+    /// since the last call, still alive, with their states now.
+    pub(crate) fn take_restated(&mut self) -> Vec<(NodeId, u16)> {
+        let mut restated = std::mem::take(&mut self.restated);
+        restated.retain(|(id, _)| self.nodes.contains_key(id));
+        restated
     }
 
     fn detach(&mut self, id: NodeId) {
@@ -1128,6 +1299,29 @@ impl Screen {
             .unwrap_or_default()
     }
 
+    /// Whether view `id` is on a stack's page that does not show: one a
+    /// newer page covers, or one a back popped.
+    pub(crate) fn on_covered_page(&self, id: NodeId) -> bool {
+        let mut at = id;
+        while let Some(parent) = self.nodes.get(&at).and_then(|v| v.parent) {
+            if self.kind(parent) == Some(ViewKind::Stack)
+                && self.screens(parent).last() != Some(&at)
+            {
+                return true;
+            }
+            at = parent;
+        }
+        false
+    }
+
+    /// Whether view `id` is inside the newest modal over its window, or
+    /// no modal is over it: where the desktops and the web keep the
+    /// keyboard's reach ([`Self::focus_scope`]).
+    pub(crate) fn in_focus_scope(&self, id: NodeId) -> bool {
+        self.focus_scope(self.window_of(id))
+            .is_none_or(|scope| self.within(id, scope))
+    }
+
     /// What going back does now, as a platform's back does it: in the
     /// newest modal (else the whole screen) the innermost stack that can go
     /// back and is laid out with a size (`shown_in_layout`) pops its top
@@ -1183,6 +1377,28 @@ impl Screen {
         }
     }
 
+    /// How many backs the screen holds, as the web counts its history
+    /// entries: a presented modal each, and each shown stack's screens over
+    /// its bottom one.
+    pub(crate) fn back_depth(&self) -> usize {
+        self.attached()
+            .into_iter()
+            .map(|id| match self.kind(id) {
+                Some(ViewKind::Modal) if !self.is_window(id) => 1,
+                Some(ViewKind::Stack)
+                    if nsh_core::navigation::shown_in_layout(
+                        std::iter::successors(Some(id), |id| self.nodes.get(id)?.parent)
+                            .filter(|id| *id != ROOT)
+                            .filter_map(|id| Some(self.nodes.get(&id)?.frame)),
+                    ) =>
+                {
+                    self.screens(id).len().saturating_sub(1)
+                }
+                _ => 0,
+            })
+            .sum()
+    }
+
     /// A back popped `screen` natively: it is gone until the app removes it.
     pub(crate) fn pop(&mut self, screen: NodeId) {
         self.popped.insert(screen);
@@ -1199,6 +1415,31 @@ impl Screen {
         let mut presented = std::mem::take(&mut self.presented);
         presented.retain(|id| !self.is_window(*id));
         presented
+    }
+
+    /// The modals presented since the last [`Screen::take_presented`],
+    /// which it leaves for that call.
+    pub(crate) fn presenting(&self) -> Vec<NodeId> {
+        let mut presented = self.presented.clone();
+        presented.retain(|id| !self.is_window(*id));
+        presented
+    }
+
+    /// Whether view `id` is still in the tree: attached up to the root,
+    /// with nothing on the way a back closed natively.
+    pub(crate) fn in_tree(&self, mut id: NodeId) -> bool {
+        loop {
+            if id == ROOT {
+                return true;
+            }
+            if self.closed.contains(&id) {
+                return false;
+            }
+            match self.nodes.get(&id).and_then(|v| v.parent) {
+                Some(parent) => id = parent,
+                None => return false,
+            }
+        }
     }
 
     /// Whether `id` is the root of a window of the app's own.
@@ -1294,11 +1535,21 @@ impl Screen {
 
     /// The clipboard's text.
     pub fn clipboard(&self) -> Option<&str> {
-        self.clipboard.as_deref()
+        self.clipboard.as_ref().map(|item| item.text.as_str())
+    }
+
+    /// The item on the clipboard, every format the app put there
+    /// (`Clipboard.write`); text alone is an item without HTML.
+    pub fn clipboard_item(&self) -> Option<&ClipboardItem> {
+        self.clipboard.as_ref()
     }
 
     pub(crate) fn set_clipboard(&mut self, text: Option<String>) {
-        self.clipboard = text;
+        self.clipboard = text.map(|text| {
+            let mut item = ClipboardItem::default();
+            item.text = text;
+            item
+        });
     }
 
     /// The clipboard reads asked since the last call.
@@ -1310,6 +1561,21 @@ impl Screen {
     /// last call.
     pub(crate) fn take_image_infos(&mut self) -> Vec<u32> {
         std::mem::take(&mut self.image_infos)
+    }
+
+    /// Ends the loads of the images whose source `fails` picks, as failed:
+    /// the views and their sources, in no particular order. A view's next
+    /// source loads again.
+    pub(crate) fn fail_images(&mut self, fails: impl Fn(&str) -> bool) -> Vec<(NodeId, Arc<str>)> {
+        let mut failed = Vec::new();
+        self.loading_images.retain(|id, uri| {
+            let fail = fails(uri);
+            if fail {
+                failed.push((*id, uri.clone()));
+            }
+            !fail
+        });
+        failed
     }
 
     /// The URLs the app had the system open (`openUrl`, a `TextView`'s
@@ -1338,7 +1604,7 @@ impl Screen {
     }
 
     /// The `openUrl` requests to answer since the last call.
-    pub(crate) fn take_url_opens(&mut self) -> Vec<u32> {
+    pub(crate) fn take_url_opens(&mut self) -> Vec<(u32, String)> {
         std::mem::take(&mut self.url_opens)
     }
 
@@ -1430,14 +1696,25 @@ impl Screen {
         Ok(self.resolve(&Selector::parse(selector)?).len())
     }
 
-    /// The commands sent so far, in order, with the view each went to.
+    /// The commands sent so far, in order, with the view each went to
+    /// (since the last [`Screen::clear_commands`]).
     pub fn commands(&self) -> &[(NodeId, Command)] {
         &self.commands
     }
 
-    /// Whether the command `command` was sent.
+    /// Whether the command `command` was sent (since the last
+    /// [`Screen::clear_commands`]).
     pub fn sent(&self, command: &Command) -> bool {
         self.commands.iter().any(|(_, c)| c == command)
+    }
+
+    /// Forgets the commands sent so far: [`Screen::commands`] and
+    /// [`Screen::sent`] see only those sent afterwards. What the commands
+    /// did stays (the clipboard, the focus, scroll offsets). The record
+    /// otherwise grows with every command, for as long as the test runs.
+    pub fn clear_commands(&mut self) {
+        // A new vector, not `clear`: the old one's capacity goes too.
+        self.commands = Vec::new();
     }
 
     /// The view a press on `selector` goes to ([`Screen::matches`]'s
@@ -1568,6 +1845,45 @@ impl Screen {
             [] => Err(crate::failure::not_found("view", selector)),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }
+    }
+
+    /// The id of the one view `selector` names: what
+    /// [`Screen::active_descendant`] and [`Screen::accessibility_controls`]
+    /// give; an error when none or several match.
+    pub fn id(&self, selector: &str) -> Result<NodeId, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.resolve(&parsed)[..] {
+            [id] => Ok(id),
+            [] => Err(crate::failure::not_found("view", selector)),
+            ref all => Err(format!("`{selector}` matches {} views", all.len())),
+        }
+    }
+
+    /// The view the view `selector` names has as its active descendant
+    /// (its `accessibilityActiveDescendant`: a combo box's highlighted
+    /// option), by its id ([`Screen::id`]); an error when none or several
+    /// match.
+    pub fn active_descendant(&self, selector: &str) -> Result<Option<NodeId>, String> {
+        let id = self.id(selector)?;
+        Ok(self.nodes.get(&id).and_then(|v| v.active_descendant))
+    }
+
+    /// The view whose content the view `selector` names controls (its
+    /// `accessibilityControls`: a combo box's listbox), by its id
+    /// ([`Screen::id`]); an error when none or several match.
+    pub fn accessibility_controls(&self, selector: &str) -> Result<Option<NodeId>, String> {
+        let id = self.id(selector)?;
+        Ok(self.nodes.get(&id).and_then(|v| v.controls))
+    }
+
+    /// The view whose text describes the view `selector` names (its
+    /// `accessibilityDescribedBy`: a field's error line), by its id
+    /// ([`Screen::id`]); its text is the view's
+    /// [`Screen::accessibility_description`]. An error when none or
+    /// several match.
+    pub fn accessibility_described_by(&self, selector: &str) -> Result<Option<NodeId>, String> {
+        let id = self.id(selector)?;
+        Ok(self.nodes.get(&id).and_then(|v| v.described_by))
     }
 
     /// The views on screen `selector` matches, in the order a user's eyes
@@ -1815,7 +2131,13 @@ impl Screen {
                 .filter(|c| placed(c))
                 .chain(children.iter().rev().filter(|c| !placed(c)));
             for &child in order {
-                let node = self.nodes.get(&child).is_some_and(|v| v.canvas_node);
+                // A span has its text's bounds here, not its characters':
+                // the pointer reaches the text, or the last span would
+                // cover its siblings.
+                let node = self
+                    .nodes
+                    .get(&child)
+                    .is_some_and(|v| v.canvas_node || v.span.is_some());
                 // Windows are windows of their own; dialogs were tried
                 // first ([`Screen::hit_pointer`]).
                 if node || !attached.contains(&child) || self.kind(child) == Some(ViewKind::Modal) {
@@ -1857,7 +2179,17 @@ impl Screen {
             return Pick::Disabled;
         }
         self.pick(selector, |id| {
-            let target = self.up_to(id, |v| v.events.contains(EventKind::Press))?;
+            let pressable = |v: &View| v.events.contains(EventKind::Press);
+            // A view in no pressable one that holds a combobox (a
+            // `Select`'s root, which its `testID` names): its trigger, as
+            // a `Button`'s `testID` names what the user presses.
+            let id = match self.up_to(id, pressable) {
+                Some(_) => id,
+                None => self.down_to(id, |v| {
+                    v.role == AccessibilityRole::Combobox && pressable(v)
+                })?,
+            };
+            let target = self.up_to(id, pressable)?;
             (!self.disabled_from(id, Some(target))).then_some(target)
         })
     }
@@ -1946,8 +2278,8 @@ impl Screen {
     }
 
     /// `id`, or its nearest ancestor, that `test` accepts.
-    /// The scroll views around `id` (not it), innermost first, with whether
-    /// each scrolls horizontally.
+    /// The scroll views around `id` (not it) up to the modal it is in,
+    /// innermost first, with whether each scrolls horizontally.
     #[cfg(feature = "agent")]
     pub(crate) fn scroll_ancestors(&self, id: NodeId) -> Vec<(NodeId, bool)> {
         let mut out = Vec::new();
@@ -1958,6 +2290,11 @@ impl Screen {
             };
             if let Some(scroll) = &view.scroll {
                 out.push((id, scroll.horizontal));
+            }
+            // A modal shows over the window wherever it is in the tree:
+            // the scroll views around it there do not move it.
+            if view.kind == Some(ViewKind::Modal) {
+                break;
             }
             at = view.parent;
         }
@@ -2172,7 +2509,6 @@ impl Screen {
 
     /// View `id`'s interaction states with `bit` set (or cleared), when it
     /// tracks it and they change.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn set_state(&mut self, id: NodeId, bit: u16, on: bool) -> Option<u16> {
         let view = self.nodes.get_mut(&id)?;
         let next = nsh_core::input::next_states(view.tracked, view.states, bit, on)?;
@@ -2264,6 +2600,69 @@ impl Screen {
             .is_some_and(|v| v.events.contains(event))
     }
 
+    /// Whether `id` or an enabled view around it captures `stroke`
+    /// (`capture_keys`), as the platform's capture policy reads it off the
+    /// mounted props: the key is the platform's then, so it types nothing
+    /// and runs no default. The walk stops at the root of the window `id`
+    /// is in, as a window of the app's own is a window of its own on a
+    /// platform: the views around that root capture nothing. A view that
+    /// was unmounted, or is disabled, captures nothing.
+    pub(crate) fn captures_key(&self, id: NodeId, stroke: &Keystroke) -> bool {
+        let window = self.window_of(id);
+        let mut current = Some(id);
+        while let Some(id) = current {
+            let Some(view) = self.nodes.get(&id) else {
+                return false;
+            };
+            if !self.disabled_from(id, Some(window)) && view.key_capture.captures_key(Some(stroke))
+            {
+                return true;
+            }
+            if id == window {
+                return false;
+            }
+            let parent = view.key_parent.or(view.parent);
+            // A logical parent outside this window is not its ancestor, as
+            // the platform keeps key routing inside one window.
+            if let Some(parent) = parent
+                && parent != window
+                && self.window_of(parent) != window
+            {
+                return false;
+            }
+            current = parent;
+        }
+        false
+    }
+
+    /// Whether `id` can hold the keyboard focus now: it is a stop of Tab
+    /// ([`Self::is_tab_stop`]) — on screen, a stop of its own, and enabled in
+    /// its own window. A view disabled or hidden after it had the focus
+    /// takes no input, as a platform's focused view that is no longer a
+    /// stop; a disabled view of another window is not over it.
+    pub(crate) fn accepts_key_focus(&self, id: NodeId) -> bool {
+        self.shown().contains(&id) && self.is_tab_stop(id)
+    }
+
+    /// The view a pointer at `at` (in the root) reaches in `id`'s window, as
+    /// [`Self::hit_pointer`] has it: a dialog over the window first, the
+    /// innermost view there after it.
+    pub(crate) fn hit_pointer_at(&self, at: Point<Points>, id: NodeId) -> NodeId {
+        self.hit_pointer(at, self.window_of(id))
+    }
+
+    /// Whether view `id` hosts native content of its own (a web view, a
+    /// native component, a video): it takes its keys itself, so no view's
+    /// capture rule and no text handling applies to it.
+    pub(crate) fn hosts_native(&self, id: NodeId) -> bool {
+        self.nodes.get(&id).is_some_and(|v| {
+            matches!(
+                v.kind,
+                Some(ViewKind::WebView | ViewKind::Native | ViewKind::Video | ViewKind::Input)
+            )
+        })
+    }
+
     pub(crate) fn input(&self, id: NodeId) -> Option<&Input> {
         self.nodes.get(&id)?.input.as_ref()
     }
@@ -2272,7 +2671,9 @@ impl Screen {
     /// [`nsh_core::ApproxTextEngine`] lays the text out: characters `0.55 ×`
     /// the font size wide, lines `1.2 ×` it tall, wrapped at the content
     /// box's width when multiline; a single line is centered in the box and
-    /// keeps the caret inside it.
+    /// keeps the caret inside it. A multiline input taller in text than its
+    /// box scrolls it to keep the caret's line in view, as the platforms'
+    /// do while the user edits: the line at the bottom of the box.
     pub(crate) fn input_caret(&self, id: NodeId) -> Option<Bounds<Points>> {
         let view = self.nodes.get(&id)?;
         let input = view.input.as_ref()?;
@@ -2299,7 +2700,9 @@ impl Screen {
         };
         let mut x = content.origin.x.0 + column as f32 * advance;
         let y = if input.config.multiline {
-            content.origin.y.0 + row as f32 * line
+            let at = row as f32 * line;
+            let scrolled = (at + line - content.size.height.0).max(0.0);
+            content.origin.y.0 + at - scrolled
         } else {
             x = x.min(content.origin.x.0 + (content.size.width.0 - 1.0).max(0.0));
             content.origin.y.0 + (content.size.height.0 - line) / 2.0
@@ -2374,6 +2777,50 @@ impl Screen {
         .collect()
     }
 
+    /// The newest modal shown over `window` (the root of a window of the
+    /// app's own, else the main window's): the desktops and the web keep
+    /// Tab inside it, its views the only stops while it is shown.
+    pub(crate) fn focus_scope(&self, window: NodeId) -> Option<NodeId> {
+        self.shown().into_iter().rev().find(|&id| {
+            self.kind(id) == Some(ViewKind::Modal)
+                && !self.is_window(id)
+                && self.window_of(id) == window
+        })
+    }
+
+    /// Whether view `id` is `scope` or inside it.
+    pub(crate) fn within(&self, id: NodeId, scope: NodeId) -> bool {
+        id == scope || self.is_inside(id, scope)
+    }
+
+    /// Whether `id` is a stop of Tab now (and can hold the keyboard focus):
+    /// shown, a [`nsh_core::ViewProps::focus_stop`] of its own, and enabled —
+    /// in its own window, as a window of the app's own is a window of its
+    /// own on a platform, so a disabled view of the main window is not
+    /// over a view in another one.
+    fn is_tab_stop(&self, id: NodeId) -> bool {
+        let Some(v) = self.nodes.get(&id) else {
+            return false;
+        };
+        let window = self.window_of(id);
+        if self.disabled_from(id, Some(window)) {
+            return false;
+        }
+        if let Some(input) = &v.input {
+            return input.config.editable;
+        }
+        // A link in a text view is a stop after it, in text order
+        // (`TextLink::focus_stop`).
+        if v.span.is_some() {
+            return v.focusable == Some(true);
+        }
+        let props = nsh_core::ViewProps {
+            focusable: v.focusable,
+            ..Default::default()
+        };
+        props.focus_stop(v.events.contains(EventKind::Press))
+    }
+
     /// The stop a press on `id` gives the focus to in a terminal: `id` or
     /// its nearest ancestor that Tab stops at (`tab_stops`), else the
     /// topmost stop over the press's point (a table's hit layer over its
@@ -2396,6 +2843,123 @@ impl Screen {
                     .bounds_in_root(*stop)
                     .is_some_and(|bounds| bounds.contains(&point))
         })
+    }
+
+    /// The views `id` is in, innermost first, up to and including the root
+    /// of its window (a window of the app's own is a window of its own on a
+    /// platform, so nothing above its root takes part).
+    fn window_chain(&self, id: NodeId) -> Vec<NodeId> {
+        let window = self.window_of(id);
+        let mut out = Vec::new();
+        let mut current = Some(id);
+        while let Some(id) = current {
+            let Some(view) = self.nodes.get(&id) else {
+                break;
+            };
+            out.push(id);
+            if id == window {
+                break;
+            }
+            current = view.parent;
+        }
+        out
+    }
+
+    /// The view around the one under the pointer that hears the wheel, and
+    /// whether it takes it: the nearest enabled listener, and whether no
+    /// scroll view is nearer than it nor is itself one
+    /// ([`nsh_core::input::wheel_listener`], as the platforms share it). A
+    /// view that takes it keeps the scroll views around it from scrolling;
+    /// one that only observes (a scroll view, or a view around one) lets
+    /// them scroll. A listener whose `panActivation` names one axis takes
+    /// only wheels by `delta` along it, or with `control` held
+    /// ([`nsh_core::input::wheel_along`]).
+    pub(crate) fn wheel_listener(
+        &self,
+        id: NodeId,
+        delta: Point<Points>,
+        control: bool,
+    ) -> Option<(NodeId, bool)> {
+        let window = self.window_of(id);
+        let (view, takes) = nsh_core::input::wheel_listener(
+            self.window_chain(id),
+            |&id| self.hears(id, EventKind::Wheel) && !self.disabled_from(id, Some(window)),
+            |&id| self.kind(id) == Some(ViewKind::Scroll),
+        )?;
+        let activation = self.nodes.get(&view).and_then(|v| v.pan_activation);
+        let horizontal = delta.x.0.abs() > delta.y.0.abs();
+        let along = nsh_core::input::wheel_along(activation, horizontal, control);
+        Some((view, takes && along))
+    }
+
+    /// The innermost view at `id` or around it that hosts native content of
+    /// its own (a web view, a native component, a video), within its own
+    /// window: input that reaches it is its own, not the views' around it.
+    pub(crate) fn native_host(&self, id: NodeId) -> Option<NodeId> {
+        let window = self.window_of(id);
+        let mut current = Some(id);
+        while let Some(id) = current {
+            let view = self.nodes.get(&id)?;
+            if matches!(
+                view.kind,
+                Some(ViewKind::WebView | ViewKind::Native | ViewKind::Video)
+            ) {
+                return Some(id);
+            }
+            if id == window {
+                return None;
+            }
+            current = view.parent;
+        }
+        None
+    }
+
+    /// The innermost scroll view at `id` or around it that a wheel by
+    /// `delta` moves, within `id`'s window: the core's own choice for a
+    /// wheel ([`nsh_core::input::scroll_target`]) — scroll views along the
+    /// wheel's axis first (a vertical wheel over a horizontal carousel
+    /// scrolls the page around it), an inner one passing the wheel on at
+    /// its edge, and a disabled (`.scrollable(false)`) one taking nothing.
+    pub(crate) fn wheel_scroll(&self, id: NodeId, delta: Point<Points>) -> Option<NodeId> {
+        nsh_core::input::scroll_target(
+            self.window_chain(id),
+            delta.x,
+            delta.y,
+            |&id| self.scroll(id).map(|scroll| scroll.horizontal),
+            |&id| self.scroll_can_move(id, delta),
+        )
+    }
+
+    /// Whether scroll view `id` can move by `delta` (positive moves the
+    /// content up / left), as [`nsh_core::scroll::ScrollState::can_scroll`]
+    /// has it: it is enabled, scrolls along that way and has room left
+    /// there.
+    fn scroll_can_move(&self, id: NodeId, delta: Point<Points>) -> bool {
+        let Some(view) = self.nodes.get(&id) else {
+            return false;
+        };
+        let Some(scroll) = &view.scroll else {
+            return false;
+        };
+        if scroll.locked {
+            return false;
+        }
+        let (dx, dy) = (delta.x.0, delta.y.0);
+        let d = if scroll.horizontal {
+            if dx != 0.0 { dx } else { dy }
+        } else {
+            dy
+        };
+        let end = self.scroll_end(id).0;
+        if d == 0.0 || end <= 0.0 {
+            return false;
+        }
+        let at = if scroll.horizontal {
+            scroll.x.0
+        } else {
+            scroll.y.0
+        };
+        (d > 0.0 && at < end - 0.5) || (d < 0.0 && at > 0.5)
     }
 
     pub(crate) fn scroll(&self, id: NodeId) -> Option<&Scroll> {
@@ -2589,6 +3153,51 @@ mod tests {
         assert_eq!(takers, [4, 6, 16]);
     }
 
+    /// Two portaled views share a native overlay host: one points at a
+    /// logical ancestor that captures, the other at an unrelated one.
+    #[test]
+    fn capture_follows_key_parent_not_the_native_insert_parent() {
+        let mut screen = Screen::default();
+        let props = |id, change: fn(&mut nsh_core::ViewProps)| {
+            let mut props = nsh_core::ViewProps::default();
+            change(&mut props);
+            MountItem::ViewProps {
+                id,
+                props: Box::new(props),
+            }
+        };
+        screen.apply(&batch(vec![
+            create(2, ViewKind::View),
+            create(3, ViewKind::View),
+            create(4, ViewKind::View),
+            create(5, ViewKind::View),
+            create(7, ViewKind::View),
+            insert(ROOT, 2),
+            insert(ROOT, 5),
+            insert(ROOT, 7),
+            insert(5, 3),
+            insert(5, 4),
+            props(2, |props| props.key_capture = KeyCapture::All),
+            props(3, |props| {
+                props.key_parent = Some(2);
+                props.focusable = Some(true);
+            }),
+            props(4, |props| {
+                props.key_parent = Some(7);
+                props.focusable = Some(true);
+            }),
+        ]));
+        let stroke = Keystroke::parse_with("escape", false).expect("a stroke");
+        assert!(
+            screen.captures_key(3, &stroke),
+            "the portal reaches its logical ancestor"
+        );
+        assert!(
+            !screen.captures_key(4, &stroke),
+            "the unrelated portal is not under that ancestor"
+        );
+    }
+
     fn batch(items: Vec<MountItem>) -> MountBatch {
         MountBatch { items }
     }
@@ -2634,6 +3243,40 @@ mod tests {
             layout: nsh_core::TextLayout(Arc::new(())),
             content: Bounds::default(),
         }
+    }
+
+    #[test]
+    fn a_multiline_input_taller_in_text_than_its_box_keeps_its_caret_in_view() {
+        let mut screen = Screen::default();
+        let mut config = nsh_core::InputConfig::default();
+        config.style.font_size = Points(10.0);
+        config.multiline = true;
+        screen.apply(&batch(vec![
+            create(2, ViewKind::Input),
+            frame(2, 0.0, 0.0, 60.0, 40.0),
+            MountItem::Input {
+                id: 2,
+                config: Box::new(config),
+            },
+            MountItem::InputContent {
+                id: 2,
+                content: Bounds::new(
+                    Point::new(Points(4.0), Points(6.0)),
+                    Size::new(Points(55.0), Points(28.0)),
+                ),
+            },
+            insert(1, 2),
+        ]));
+        // Five lines of 12 in a box of 28: the last line at its bottom.
+        screen.input_mut(2).unwrap().text = "a\nb\nc\nd\ne".into();
+        let caret = screen.input_caret(2).unwrap();
+        assert_eq!(
+            (caret.origin.y.0, caret.size.height.0),
+            (6.0 + 28.0 - 12.0, 12.0)
+        );
+        // One line: where it is.
+        screen.input_mut(2).unwrap().text = "a".into();
+        assert_eq!(screen.input_caret(2).unwrap().origin.y.0, 6.0);
     }
 
     #[test]
@@ -2792,6 +3435,103 @@ mod tests {
         // Popped: the screen under it is the one laid out.
         screen.apply(&batch(vec![MountItem::Remove { id: 8 }]));
         assert_eq!(ids(&screen), [2, 4, 6]);
+    }
+
+    fn input_config(id: NodeId, auto_focus: bool) -> MountItem {
+        MountItem::Input {
+            id,
+            config: Box::new(nsh_core::InputConfig {
+                auto_focus,
+                ..Default::default()
+            }),
+        }
+    }
+
+    #[test]
+    fn inputs_that_ask_for_the_focus_take_it_once_in_a_window() {
+        let mut screen = Screen::default();
+        // Several in one batch, around one that does not ask: the last
+        // configured keeps it, over a `focus()` of the same batch.
+        screen.apply(&batch(vec![
+            create(2, ViewKind::Input),
+            create(4, ViewKind::Input),
+            create(6, ViewKind::Input),
+            input_config(2, true),
+            input_config(4, true),
+            input_config(6, false),
+            insert(1, 2),
+            insert(1, 4),
+            insert(1, 6),
+            MountItem::Command {
+                id: 6,
+                command: Command::Focus,
+            },
+        ]));
+        assert_eq!(screen.focused(), Some(4));
+        // Configured again (a prop changed), it does not ask again.
+        screen.apply(&batch(vec![MountItem::Command {
+            id: 6,
+            command: Command::Focus,
+        }]));
+        screen.apply(&batch(vec![input_config(4, true)]));
+        assert_eq!(screen.focused(), Some(6));
+        // One not in a window waits for it, and takes the focus from the
+        // input that has it then.
+        screen.apply(&batch(vec![
+            create(8, ViewKind::View),
+            create(10, ViewKind::Input),
+            input_config(10, true),
+            insert(8, 10),
+        ]));
+        assert_eq!(screen.focused(), Some(6));
+        screen.apply(&batch(vec![insert(1, 8)]));
+        assert_eq!(screen.focused(), Some(10));
+        // Deleted before it was ever shown, it asks for nothing.
+        screen.apply(&batch(vec![
+            create(12, ViewKind::Input),
+            input_config(12, true),
+        ]));
+        screen.apply(&batch(vec![MountItem::Delete { id: 12 }]));
+        screen.apply(&batch(vec![create(12, ViewKind::Input), insert(1, 12)]));
+        assert_eq!(screen.focused(), Some(10));
+    }
+
+    #[test]
+    fn a_removed_subtree_leaves_the_hover_and_the_focus_without_a_word() {
+        use nsh_core::tailwind::state::{FOCUSED, HOVERED};
+        let mut screen = Screen::default();
+        screen.apply(&batch(vec![
+            create(2, ViewKind::View),
+            create(4, ViewKind::View),
+            create(6, ViewKind::Input),
+            create(8, ViewKind::View),
+            MountItem::TrackStates {
+                id: 4,
+                states: HOVERED,
+            },
+            insert(1, 2),
+            insert(2, 4),
+            insert(4, 6),
+            insert(4, 8),
+        ]));
+        screen.set_hovered(vec![4, 2]);
+        screen.set_state(4, HOVERED, true);
+        screen.set_focused(Some(6));
+        screen.set_key_focus(Some(8));
+        screen.set_state(8, FOCUSED, true);
+        // Removed, kept alive (a JS cycle holds it): it and what it holds
+        // leave the hover and the focus, their states cleared.
+        screen.apply(&batch(vec![MountItem::Remove { id: 4 }]));
+        assert_eq!(screen.set_hovered(vec![2]), [2]);
+        assert_eq!(screen.focused(), None);
+        assert_eq!(screen.key_focus(), None);
+        assert_eq!(screen.take_restated(), [(4, 0), (8, 0)]);
+        assert!(!screen.in_tree(6));
+        assert!(screen.in_tree(2));
+        // Deleted: nothing left to report on.
+        screen.apply(&batch(vec![MountItem::Delete { id: 2 }]));
+        assert_eq!(screen.set_hovered(Vec::new()), Vec::<NodeId>::new());
+        assert_eq!(screen.take_restated(), []);
     }
 
     #[test]
@@ -2982,6 +3722,23 @@ mod tests {
         assert_eq!(pick(&screen, "Privacy"), Pick::One(102));
         assert_eq!(pick(&screen, "text:Terms 🙂"), Pick::One(100));
         assert_eq!(screen.span(102), Some((4, 26, 33)));
+        // A span after it that only hears the pointer (its `hover:`
+        // styles) covers no press on it.
+        let mut hovers = EventMask::default();
+        hovers.set(EventKind::MouseEnter, true);
+        hovers.set(EventKind::MouseLeave, true);
+        screen.apply(&batch(vec![linked(vec![
+            link(13, 21, 100),
+            nsh_core::TextLink {
+                events: hovers,
+                focus_stop: false,
+                ..link(26, 33, 102)
+            },
+        ])]));
+        assert_eq!(
+            screen.covering(100, Point::new(Points(150.0), Points(20.0))),
+            None
+        );
         // They are not texts of their own.
         assert_eq!(screen.texts(), ["Agree to the Terms 🙂 and Privacy"]);
         screen.apply(&batch(vec![linked(Vec::new())]));

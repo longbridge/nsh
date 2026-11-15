@@ -51,6 +51,7 @@ fn stop_spinning(code: &str) -> (Duration, Vec<String>) {
         speech: None,
         audio: None,
         windows: None,
+        login_item: None,
     };
     let errors = Arc::new(Mutex::new(Vec::new()));
     let engine = Engine::start(config, || ApproxTextEngine, Sink(errors.clone())).unwrap();

@@ -104,13 +104,32 @@ pub struct Renderer {
 /// no host-visible memory both coherent and cached, so wgpu maps its
 /// read-back buffers write-combined and reading a frame out costs several
 /// milliseconds of the main thread (a 2000×300 frame: 8–17 ms against
-/// 0.2 ms through OpenGL). Elsewhere the platform's own API first.
+/// 0.2 ms through OpenGL). Elsewhere the platform's own API first. Windows
+/// asks for Direct3D 12 alone first: offered Vulkan and Direct3D 12 at
+/// once, wgpu takes the Vulkan adapter where the driver has one, and its
+/// instance alone takes some 200 ms to open (Direct3D 12's: a few). Then
+/// every backend at once, as before, for a machine whose only Direct3D 12
+/// adapter is the software one ([`takes`]).
 fn backend_order() -> Vec<wgpu::Backends> {
     if cfg!(all(target_os = "linux", not(target_os = "android"))) {
         vec![wgpu::Backends::GL, wgpu::Backends::PRIMARY]
+    } else if cfg!(windows) {
+        vec![
+            wgpu::Backends::DX12,
+            wgpu::Backends::PRIMARY | wgpu::Backends::GL,
+        ]
     } else {
         vec![wgpu::Backends::PRIMARY | wgpu::Backends::GL]
     }
+}
+
+/// Whether the renderer tries an adapter of `device_type` found by an entry
+/// of [`backend_order`]. On Windows a software one (WARP, Direct3D 12's only
+/// adapter on Haswell's integrated GPUs and in many virtual machines) only
+/// from the last entry, which offers every backend, so that a hardware
+/// adapter of another one sorts ahead of it.
+fn takes(device_type: wgpu::DeviceType, last_entry: bool) -> bool {
+    last_entry || !cfg!(windows) || device_type != wgpu::DeviceType::Cpu
 }
 
 impl Renderer {
@@ -124,7 +143,8 @@ impl Renderer {
         // needs compute shaders its GL context lacks), and Vulkan opens.
         let mut opened = None;
         let mut last = None;
-        for backends in backend_order() {
+        let order = backend_order();
+        for (i, &backends) in order.iter().enumerate() {
             let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
                 backends,
                 ..wgpu::InstanceDescriptor::new_without_display_handle()
@@ -140,10 +160,25 @@ impl Renderer {
                         continue;
                     }
                 };
+            if !takes(adapter.get_info().device_type, i + 1 == order.len()) {
+                log::debug!(
+                    "shaders: only a software adapter on {backends:?}; trying the next backends"
+                );
+                continue;
+            }
+            // Direct3D 12 allocates a descriptor heap this large when the
+            // device opens (default: a million); other backends ignore it.
+            let required_limits = wgpu::Limits {
+                max_non_sampler_bindings: 65_536,
+                ..wgpu::Limits::downlevel_webgl2_defaults()
+            }
+            .using_resolution(adapter.limits());
             match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("nsh shaders"),
-                required_limits:
-                    wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()),
+                required_limits,
+                // The default (`Performance`) allocates blocks of 128 MB and
+                // more, which a few views' textures and buffers never fill.
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
                 ..Default::default()
             })) {
                 Ok((device, queue)) => {
@@ -1605,15 +1640,38 @@ mod tests {
             "fn shade(uv: vec2f) -> vec4f { return vec4f(fract(nsh.time), 0.0, 0.0, 1.0); }",
             &[],
         )));
-        assert!(!view.render(&renderer, Instant::now()), "on its way");
-        let start = Instant::now();
-        while !view.collect_frame(&renderer) {
-            assert!(start.elapsed() < Duration::from_secs(5), "no frame");
-            let _ = renderer.device.poll(wgpu::PollType::wait_indefinitely());
+        // Direct3D 12 can hand a frame this small back within `render`.
+        if !view.render(&renderer, Instant::now()) {
+            let start = Instant::now();
+            while !view.collect_frame(&renderer) {
+                assert!(start.elapsed() < Duration::from_secs(5), "no frame");
+                let _ = renderer.device.poll(wgpu::PollType::wait_indefinitely());
+            }
         }
         assert_eq!((view.frame().width, view.frame().height), (2, 2));
-        assert!(!view.pending(), "no other frame was rendered");
         assert!(!view.collect_frame(&renderer));
+        assert!(!view.pending(), "no other frame was rendered");
         assert!(view.wants_frame(), "its time still runs");
+    }
+
+    #[test]
+    fn a_software_adapter_is_tried_only_from_the_last_backends() {
+        assert_eq!(takes(wgpu::DeviceType::Cpu, false), !cfg!(windows));
+        assert!(takes(wgpu::DeviceType::Cpu, true));
+        for hardware in [
+            wgpu::DeviceType::DiscreteGpu,
+            wgpu::DeviceType::IntegratedGpu,
+            wgpu::DeviceType::VirtualGpu,
+            wgpu::DeviceType::Other,
+        ] {
+            assert!(takes(hardware, false), "{hardware:?}");
+        }
+        if cfg!(windows) {
+            assert_eq!(
+                backend_order().last(),
+                Some(&(wgpu::Backends::PRIMARY | wgpu::Backends::GL)),
+                "the last entry offers every backend"
+            );
+        }
     }
 }

@@ -203,6 +203,7 @@ pub(crate) type ErrorHandler = Box<dyn Fn(&str)>;
 
 /// Turns the performance monitor on or off.
 type PerfToggle = Box<dyn Fn(bool)>;
+type PerfMode = Box<dyn Fn(nsh_core::FpsMode)>;
 
 /// One engine and its views.
 pub(crate) struct Surface {
@@ -284,6 +285,9 @@ pub(crate) struct Surface {
     /// (`setFpsEnabled`): set by its [`crate::AppView`],
     /// which owns the panel.
     pub(crate) perf_toggle: RefCell<Option<PerfToggle>>,
+    /// How the view's performance monitor shows (`setFpsMode`): set by its
+    /// [`crate::AppView`].
+    pub(crate) perf_mode: RefCell<Option<PerfMode>>,
     /// When the last frame ran (`CACurrentMediaTime`).
     last_tick: Cell<f64>,
     /// The deadline the timer scheduled waits for
@@ -332,6 +336,8 @@ pub(crate) struct Surface {
     pub(crate) native: crate::native::NativeState,
     /// The app's keyboard shortcuts ([`crate::keymap`]).
     pub(crate) keymap: crate::keymap::KeymapState,
+    /// Raw keys of focused custom views ([`crate::keyboard`]).
+    pub(crate) keyboard: crate::keyboard::KeyboardState,
     pub(crate) file_drop: crate::file_drop::State,
     /// The GPU device and the shader views rendering ([`crate::shader`]).
     pub(crate) shaders: crate::shader::Shaders,
@@ -402,6 +408,7 @@ impl Surface {
             perf: RefCell::new(None),
             perf_on: Arc::new(AtomicBool::new(false)),
             perf_toggle: RefCell::new(None),
+            perf_mode: RefCell::new(None),
             last_tick: Cell::new(0.0),
             keeper: Cell::new(None),
             resize_late: Cell::new(false),
@@ -418,6 +425,7 @@ impl Surface {
             media_files: RefCell::default(),
             native: Default::default(),
             keymap: Default::default(),
+            keyboard: Default::default(),
             file_drop: Default::default(),
             chrome: Default::default(),
             main_window: Default::default(),
@@ -433,6 +441,7 @@ impl Surface {
             std::thread::spawn(crate::text::prewarm);
         });
         root.set_surface(Rc::downgrade(&surface));
+        crate::keyboard::install(&surface);
         surface
     }
 
@@ -513,6 +522,10 @@ impl Surface {
 
     /// Stops the app and removes its views.
     pub(crate) fn stop(&self) {
+        // The confirmation and policy belong to the engine being replaced,
+        // not its successor. Approval takes the request before stopping.
+        crate::app::set_quit_request_options(self.key, Default::default());
+        self.chrome.asks_quit.set(false);
         // Dropping the engine joins its thread.
         self.control.borrow_mut().take();
         self.engine.borrow_mut().take();
@@ -525,6 +538,7 @@ impl Surface {
         crate::window::close_all(self);
         crate::input::reset(self);
         crate::keymap::clear(self);
+        crate::keyboard::reset(self);
         crate::tray::release(self.key);
         crate::global_shortcut::release(self.key);
         self.js_frame.set(false);
@@ -541,6 +555,13 @@ impl Surface {
         if let Some(control) = &*self.control.borrow() {
             f(control);
         }
+    }
+
+    /// A handle to the engine's events that stays usable after this surface
+    /// is gone: a download's stop confirmation must reach the core after
+    /// the view is released.
+    pub(crate) fn event_control(&self) -> Option<EngineControl> {
+        self.control.borrow().clone()
     }
 
     /// Sends an event to JS.
@@ -632,6 +653,7 @@ impl Surface {
                 if applied {
                     self.write_animations();
                     self.revisit();
+                    crate::text_input::sync(self);
                 }
             })
         });
@@ -703,6 +725,9 @@ impl Surface {
                 crate::fps::drained(cost);
             }
         }
+        // The frames may carry no animation, but a pad hosted above its
+        // input's transforms follows what the batch moved or scaled.
+        crate::text_input::sync(self);
         self.ensure_ticking();
     }
 
@@ -793,6 +818,7 @@ impl Surface {
             }
         }
         self.mounter.borrow_mut().end_batch(self);
+        crate::access::batch_applied();
         crate::window::batch_applied(self);
         #[cfg(feature = "dev")]
         if let Some(model) = &*self.test_model.borrow() {
@@ -1240,6 +1266,9 @@ impl Surface {
         if applied || crate::sight::moves() != self.revisited.get() {
             self.revisit();
         }
+        // A pad hosted above its input's transforms takes the place those
+        // transforms show, so it follows them this frame.
+        crate::text_input::sync(self);
     }
 
     /// Applies the batches that waited for this frame, in order, until
@@ -1308,6 +1337,11 @@ impl Drop for Surface {
         }
         crate::tray::release(key);
         crate::global_shortcut::release(key);
+        // A surface dropped without stopping takes its alerts with it: a
+        // sheet left on an embedding app's window, or an alert shown on
+        // its own (an app-modal loop), would wait for an answer no one
+        // hears.
+        crate::system::clear(self);
         let _ = SURFACES.try_with(|s| s.borrow_mut().remove(&key));
     }
 }

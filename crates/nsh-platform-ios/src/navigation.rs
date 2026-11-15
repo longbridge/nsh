@@ -20,9 +20,11 @@ use std::{
 
 use block2::RcBlock;
 use nsh_core::{
-    Color, EdgeInsets, EventKind, EventPayload, HeaderSystemItem, ModalAnimation, ModalConfig,
-    ModalPresentation, NavShader, NodeId, PayloadValue, Points, ScreenAnimation, ScreenConfig,
-    Size,
+    Color, EdgeInsets, EventKind, EventPayload, HeaderItem, HeaderItemContent, HeaderSystemItem,
+    ModalAnimation, ModalConfig, ModalPresentation, NavShader, NodeId, PayloadValue, Points,
+    ScreenAnimation, ScreenConfig, Size,
+    desktop::{MenuAction, MenuItem},
+    element::header::{KeptContent, same_right_buttons},
 };
 use nsh_engine::EngineControl;
 use objc2::{
@@ -35,14 +37,15 @@ use objc2_core_foundation::{CGFloat, CGSize};
 use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSString};
 use objc2_quartz_core::{CAMediaTiming, CATransition};
 use objc2_ui_kit::{
-    NSForegroundColorAttributeName, UIAdaptivePresentationControllerDelegate, UIBarButtonItem,
-    UIBarButtonItemStyle, UIBarButtonSystemItem, UIBehavioralStyle, UIColor, UIEdgeInsets,
-    UIGestureRecognizer, UIGestureRecognizerDelegate, UIImage, UIInterfaceOrientationMask,
-    UIModalPresentationStyle, UIModalTransitionStyle, UINavigationBar, UINavigationBarAppearance,
-    UINavigationController, UINavigationControllerDelegate, UINavigationItem,
-    UINavigationItemLargeTitleDisplayMode, UIPresentationController, UIResponder, UIScrollView,
-    UIView, UIViewAutoresizing, UIViewController, UIViewControllerTransitionCoordinator,
-    UIViewControllerTransitionCoordinatorContext,
+    NSForegroundColorAttributeName, UIAction, UIAdaptivePresentationControllerDelegate,
+    UIBarButtonItem, UIBarButtonItemStyle, UIBarButtonSystemItem, UIBehavioralStyle, UIColor,
+    UIEdgeInsets, UIGestureRecognizer, UIGestureRecognizerDelegate, UIImage,
+    UIInterfaceOrientationMask, UIMenu, UIMenuElement, UIMenuElementAttributes, UIMenuElementState,
+    UIMenuOptions, UIModalPresentationStyle, UIModalTransitionStyle, UINavigationBar,
+    UINavigationBarAppearance, UINavigationController, UINavigationControllerDelegate,
+    UINavigationItem, UINavigationItemLargeTitleDisplayMode, UIPresentationController, UIResponder,
+    UIScrollView, UIView, UIViewAutoresizing, UIViewController,
+    UIViewControllerTransitionCoordinator, UIViewControllerTransitionCoordinatorContext,
 };
 
 use crate::{mount::SharedMounter, native_view::NshView};
@@ -283,6 +286,12 @@ define_class!(
             if !own.is_empty() {
                 return own;
             }
+            // The presenter's: the root controller answers with the page's
+            // under it, NSH's own and a host's that forwards it alike, and a
+            // host's that does not keeps its own for its dialogs too.
+            if let Some(presenter) = self.presentingViewController() {
+                return presenter.supportedInterfaceOrientations();
+            }
             // SAFETY: calling the superclass implementation.
             unsafe { msg_send![super(self), supportedInterfaceOrientations] }
         }
@@ -407,6 +416,19 @@ pub(crate) struct NavIvars {
     applying: Cell<bool>,
 }
 
+/// The recognizers of `nav`'s swipe back: the screen edge's and, since
+/// iOS 26, the content's, which can take an edge drag too.
+pub(crate) fn back_swipes(nav: &UINavigationController) -> Vec<Retained<UIGestureRecognizer>> {
+    let content = nav
+        .respondsToSelector(objc2::sel!(interactiveContentPopGestureRecognizer))
+        .then(|| nav.interactiveContentPopGestureRecognizer())
+        .flatten();
+    nav.interactivePopGestureRecognizer()
+        .into_iter()
+        .chain(content)
+        .collect()
+}
+
 /// A drag that starts at the screen's edge belongs to the stack: the top
 /// screen's scroll views wait for the back gesture to fail before they pan,
 /// so a swipe at the edge goes back instead of scrolling the page. The
@@ -514,6 +536,38 @@ fn clip_side_safe_area(nav: &UINavigationController) {
     }
 }
 
+/// Gives the bar of `nav` the height of the large title its top screen asks
+/// for, when UIKit left it lower and the screen's content rests at its top.
+///
+/// A stack laid out in the frame its first screen arrives shows that screen
+/// with the bar at the height of an inline title (`sizeThatFits` already
+/// gives the large title's): the screen's safe area and its scroll view's
+/// offset follow that height, and UIKit then reads the content as scrolled
+/// under a collapsed large title, which stays collapsed. Sized here, the
+/// bar grows the safe area, UIKit keeps the scroll view at its top, and the
+/// title shows large. Content the user scrolled keeps its collapsed title.
+fn fit_large_title(nav: &UINavigationController) {
+    let bar = nav.navigationBar();
+    if nav.isNavigationBarHidden() || !bar.prefersLargeTitles() {
+        return;
+    }
+    let Some(top) = nav.topViewController() else {
+        return;
+    };
+    if top.navigationItem().largeTitleDisplayMode() != UINavigationItemLargeTitleDisplayMode::Always
+    {
+        return;
+    }
+    let scrolled = top
+        .viewIfLoaded()
+        .and_then(|view| crate::mount::first_scroll_view(&view))
+        .is_some_and(|s| s.contentOffset().y > -s.adjustedContentInset().top);
+    let size = bar.frame().size;
+    if !scrolled && bar.sizeThatFits(size).height > size.height {
+        bar.sizeToFit();
+    }
+}
+
 define_class!(
     /// A stack's navigation controller: the back button asks it before
     /// popping (`navigationBar:shouldPopItem:`), answered from `preventBack`.
@@ -566,6 +620,14 @@ define_class!(
             let _: () = unsafe { msg_send![super(self), viewDidLayoutSubviews] };
             size_screens(self);
             clip_side_safe_area(self);
+            // A column of a split (or its compact stack): the core lays the
+            // column's pages out at the size the split gives it.
+            let ivars = self.ivars();
+            if let Ok(mut m) = ivars.mounter.get(self.mtm()).try_borrow_mut()
+                && let Some(m) = m.as_mut()
+            {
+                m.split_column_laid_out(ivars.stack);
+            }
         }
 
         /// A side bar arriving, leaving or changing side moves no view of
@@ -667,6 +729,16 @@ define_class!(
             // it brought in is only reachable here.
             size_screens(nav);
             defer_to_back_swipe(nav);
+            fit_large_title(nav);
+            // A bar that comes back with the transition (the screen that
+            // left hid the header) is put at the top of a stack that starts
+            // below the top of the window, above where UIKit keeps it at
+            // rest, and nothing lays the screen out again once the
+            // transition is over: this pass moves the bar to its place and
+            // reports the header the screen's content starts below.
+            if let Some(view) = controller.viewIfLoaded() {
+                view.setNeedsLayout();
+            }
             // Safety net: whatever the transition did, the bar ends where the
             // stack says it goes.
             slide_bottom_bar(nav, bottom_bar_hidden(nav));
@@ -756,6 +828,53 @@ impl BarItemTarget {
     }
 }
 
+/// The target of a trailing `ios.headerRightItems` button without a menu:
+/// reports the root's `Menu` event with the item's press id. The id is a
+/// [`Cell`] so a kept button can take the current binding's id without
+/// rebuilding the `UIBarButtonItem`.
+struct HeaderItemIvars {
+    mounter: SharedMounter,
+    press_id: Cell<u32>,
+}
+
+define_class!(
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = HeaderItemIvars]
+    struct HeaderItemTarget;
+
+    impl HeaderItemTarget {
+        #[unsafe(method(nshPress:))]
+        fn press(&self, _sender: Option<&NSObject>) {
+            let ivars = self.ivars();
+            let press_id = ivars.press_id.get();
+            if press_id == 0 {
+                return;
+            }
+            if let Ok(mut m) = ivars.mounter.get(self.mtm()).try_borrow_mut()
+                && let Some(m) = m.as_mut()
+            {
+                m.menu_id_event(press_id);
+            }
+        }
+    }
+);
+
+impl HeaderItemTarget {
+    fn new(mtm: MainThreadMarker, press_id: u32, mounter: SharedMounter) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(HeaderItemIvars {
+            mounter,
+            press_id: Cell::new(press_id),
+        });
+        // SAFETY: NSObject's designated initializer.
+        unsafe { msg_send![super(this), init] }
+    }
+
+    fn set_press_id(&self, press_id: u32) {
+        self.ivars().press_id.set(press_id);
+    }
+}
+
 /// What a UIKit bar button shows.
 #[derive(Debug, Clone, PartialEq)]
 enum BarButton {
@@ -770,6 +889,17 @@ type SystemBarItem = (
     BarButton,
     Retained<UIBarButtonItem>,
     Retained<BarItemTarget>,
+);
+
+/// Trailing `ios.headerRightItems`: the description, buttons and press
+/// targets kept while the buttons' identity stays (UIKit holds targets
+/// weakly). Targets are one per button (`None` when it has a menu), so a
+/// re-bind can refresh `press_id` by index. Rebuilding a bar button
+/// flashes it, so menus, labels, `disabled` and press ids update in place.
+type RightItemsBar = (
+    Vec<HeaderItem>,
+    Vec<Retained<UIBarButtonItem>>,
+    Vec<Option<Retained<HeaderItemTarget>>>,
 );
 
 /// UIKit's bar button showing `kind`, pressing `target`; `None` for a
@@ -806,6 +936,315 @@ fn make_bar_button(
             })
         }
     }
+}
+
+/// An SF Symbol image, or `None` when the name is unknown.
+fn system_image(name: &str) -> Option<Retained<UIImage>> {
+    UIImage::systemImageNamed(&NSString::from_str(name))
+}
+
+/// Dispatches a menu / press id as the root's `Menu` event.
+fn menu_select(mounter: &SharedMounter, mtm: MainThreadMarker, id: u32) {
+    if id == 0 {
+        return;
+    }
+    if let Ok(mut m) = mounter.get(mtm).try_borrow_mut()
+        && let Some(m) = m.as_mut()
+    {
+        m.menu_id_event(id);
+    }
+}
+
+/// A `UIAction` for a [`MenuAction`].
+fn make_menu_action(
+    mtm: MainThreadMarker,
+    action: &MenuAction,
+    mounter: SharedMounter,
+) -> Retained<UIAction> {
+    let title = NSString::from_str(&action.label);
+    // Prefer an SF Symbol; `icon` (an image source) is for desktop menus.
+    let image = action.symbol.as_deref().and_then(system_image);
+    let id = action.id;
+    let handler = RcBlock::new(move |_: NonNull<UIAction>| {
+        menu_select(&mounter, mtm, id);
+    });
+    // No UIKit identifier: the API lets an app reuse an action id in two
+    // menus, and UIKit may drop or merge elements that share one. The
+    // handler already carries the id.
+    // SAFETY: UIKit copies the handler; the block stays while the action does.
+    let item = unsafe {
+        UIAction::actionWithTitle_image_identifier_handler(
+            &title,
+            image.as_deref(),
+            None,
+            (&*handler as *const block2::DynBlock<_>).cast_mut(),
+            mtm,
+        )
+    };
+    let mut attrs = UIMenuElementAttributes::empty();
+    if !action.enabled {
+        attrs |= UIMenuElementAttributes::Disabled;
+    }
+    if action.destructive {
+        attrs |= UIMenuElementAttributes::Destructive;
+    }
+    item.setAttributes(attrs);
+    item.setState(if action.checked == Some(true) {
+        UIMenuElementState::On
+    } else {
+        UIMenuElementState::Off
+    });
+    item
+}
+
+/// Builds a `UIMenu` tree from [`MenuItem`]s.
+fn make_menu(
+    mtm: MainThreadMarker,
+    items: &[MenuItem],
+    mounter: &SharedMounter,
+) -> Retained<UIMenu> {
+    let children = menu_children(mtm, items, mounter, true);
+    UIMenu::menuWithTitle_children(&NSString::from_str(""), &children, mtm)
+}
+
+/// One menu element from a non-separator [`MenuItem`].
+fn menu_element(
+    mtm: MainThreadMarker,
+    entry: &MenuItem,
+    mounter: &SharedMounter,
+    enabled: bool,
+) -> Option<Retained<UIMenuElement>> {
+    match entry {
+        MenuItem::Separator => None,
+        MenuItem::Action(action) => {
+            let mut action = action.clone();
+            if !enabled {
+                action.enabled = false;
+            }
+            Some(Retained::into_super(make_menu_action(
+                mtm,
+                &action,
+                mounter.clone(),
+            )))
+        }
+        MenuItem::Submenu {
+            label,
+            enabled: submenu_enabled,
+            items,
+            icon: _,
+            symbol,
+            inline,
+        } => {
+            let child_enabled = enabled && *submenu_enabled;
+            let nested = menu_children(mtm, items, mounter, child_enabled);
+            let image = symbol.as_deref().and_then(system_image);
+            let options = if *inline {
+                UIMenuOptions::DisplayInline
+            } else {
+                UIMenuOptions::empty()
+            };
+            let submenu = UIMenu::menuWithTitle_image_identifier_options_children(
+                &NSString::from_str(label),
+                image.as_deref(),
+                None,
+                options,
+                &nested,
+                mtm,
+            );
+            Some(Retained::into_super(submenu))
+        }
+    }
+}
+
+/// Menu children for a list of [`MenuItem`]s. Separators split the list into
+/// consecutive inline `UIMenu` groups (UIKit draws separators between those);
+/// with no separators the elements stay flat. A disabled submenu has no
+/// enabled state of its own, so its children are disabled instead.
+fn menu_children(
+    mtm: MainThreadMarker,
+    entries: &[MenuItem],
+    mounter: &SharedMounter,
+    enabled: bool,
+) -> Retained<NSArray<UIMenuElement>> {
+    let has_separator = entries.iter().any(|e| matches!(e, MenuItem::Separator));
+    if !has_separator {
+        let children: Vec<_> = entries
+            .iter()
+            .filter_map(|entry| menu_element(mtm, entry, mounter, enabled))
+            .collect();
+        return NSArray::from_retained_slice(&children);
+    }
+    let mut children: Vec<Retained<UIMenuElement>> = Vec::new();
+    let mut group: Vec<Retained<UIMenuElement>> = Vec::new();
+    let flush = |group: &mut Vec<Retained<UIMenuElement>>,
+                 children: &mut Vec<Retained<UIMenuElement>>| {
+        if group.is_empty() {
+            return;
+        }
+        let elems = NSArray::from_retained_slice(group);
+        let section = UIMenu::menuWithTitle_image_identifier_options_children(
+            &NSString::from_str(""),
+            None,
+            None,
+            UIMenuOptions::DisplayInline,
+            &elems,
+            mtm,
+        );
+        children.push(Retained::into_super(section));
+        group.clear();
+    };
+    for entry in entries {
+        match entry {
+            MenuItem::Separator => flush(&mut group, &mut children),
+            other => {
+                if let Some(el) = menu_element(mtm, other, mounter, enabled) {
+                    group.push(el);
+                }
+            }
+        }
+    }
+    flush(&mut group, &mut children);
+    NSArray::from_retained_slice(&children)
+}
+
+/// A bar button from its content only (no menu, target or action yet).
+fn make_right_item_content(
+    mtm: MainThreadMarker,
+    content: &HeaderItemContent,
+    fallback_title: &str,
+) -> Retained<UIBarButtonItem> {
+    match content {
+        // SAFETY: UIKit's designated initializer with no target yet; the
+        // caller sets the menu or the target and action.
+        HeaderItemContent::SystemItem(system) => unsafe {
+            UIBarButtonItem::initWithBarButtonSystemItem_target_action(
+                UIBarButtonItem::alloc(mtm),
+                system_bar_item(*system),
+                None,
+                None,
+            )
+        },
+        HeaderItemContent::Symbol(name) => match system_image(name) {
+            Some(image) => unsafe {
+                UIBarButtonItem::initWithImage_style_target_action(
+                    UIBarButtonItem::alloc(mtm),
+                    Some(&image),
+                    UIBarButtonItemStyle::Plain,
+                    None,
+                    None,
+                )
+            },
+            None => unsafe {
+                UIBarButtonItem::initWithTitle_style_target_action(
+                    UIBarButtonItem::alloc(mtm),
+                    Some(&NSString::from_str(fallback_title)),
+                    UIBarButtonItemStyle::Plain,
+                    None,
+                    None,
+                )
+            },
+        },
+        HeaderItemContent::Label(title) => unsafe {
+            UIBarButtonItem::initWithTitle_style_target_action(
+                UIBarButtonItem::alloc(mtm),
+                Some(&NSString::from_str(title)),
+                UIBarButtonItemStyle::Plain,
+                None,
+                None,
+            )
+        },
+        _ => unsafe {
+            UIBarButtonItem::initWithTitle_style_target_action(
+                UIBarButtonItem::alloc(mtm),
+                Some(&NSString::from_str(fallback_title)),
+                UIBarButtonItemStyle::Plain,
+                None,
+                None,
+            )
+        },
+    }
+}
+
+/// Title / image, menu, label, enabled and press id on an existing trailing
+/// bar button (label and symbol content only: system items are rebuilt).
+fn update_right_item(
+    mtm: MainThreadMarker,
+    item: &HeaderItem,
+    button: &UIBarButtonItem,
+    target: Option<&HeaderItemTarget>,
+    mounter: &SharedMounter,
+) {
+    // What to show is the core's (`kept_button`, tested there); this applies it.
+    let kept = nsh_core::element::header::kept_button(item);
+    match kept.content {
+        KeptContent::Title(title) => {
+            button.setTitle(Some(&NSString::from_str(title)));
+            button.setImage(None);
+        }
+        KeptContent::Symbol { name, fallback } => match system_image(name) {
+            Some(image) => {
+                button.setImage(Some(&image));
+                button.setTitle(None);
+            }
+            None => {
+                button.setTitle(Some(&NSString::from_str(fallback)));
+                button.setImage(None);
+            }
+        },
+        KeptContent::Unchanged => {}
+    }
+    if let Some(menu) = &item.menu {
+        button.setMenu(Some(&make_menu(mtm, menu, mounter)));
+    } else {
+        button.setMenu(None);
+    }
+    if let Some(target) = target {
+        // The previous binding's handlers are gone; take this binding's id
+        // (0 when `onPress` was removed).
+        target.set_press_id(item.press_id);
+    }
+    button.setEnabled(kept.enabled);
+    {
+        use objc2_ui_kit::NSObjectUIAccessibility;
+        // `None` clears a label an earlier binding set.
+        let label = kept.label.map(NSString::from_str);
+        button.setAccessibilityLabel(label.as_deref(), mtm);
+    }
+}
+
+/// One trailing `ios.headerRightItems` button.
+fn make_right_item(
+    mtm: MainThreadMarker,
+    item: &HeaderItem,
+    mounter: SharedMounter,
+    targets: &mut Vec<Option<Retained<HeaderItemTarget>>>,
+) -> Retained<UIBarButtonItem> {
+    let fallback = item.label.as_deref().unwrap_or(match &item.content {
+        HeaderItemContent::Label(t) => t.as_ref(),
+        HeaderItemContent::Symbol(s) => s.as_ref(),
+        _ => "",
+    });
+    let button = make_right_item_content(mtm, &item.content, fallback);
+    if let Some(menu) = &item.menu {
+        // With no primary action, a tap opens the menu (iOS 14+).
+        button.setMenu(Some(&make_menu(mtm, menu, &mounter)));
+        targets.push(None);
+    } else {
+        let target = HeaderItemTarget::new(mtm, item.press_id, mounter);
+        // SAFETY: UIKit holds the target weakly; the caller keeps it as long
+        // as the button, and `nshPress:` is its action.
+        unsafe {
+            button.setTarget(Some(&*target));
+            button.setAction(Some(objc2::sel!(nshPress:)));
+        }
+        targets.push(Some(target));
+    }
+    button.setEnabled(!item.disabled);
+    if let Some(label) = item.label.as_deref() {
+        use objc2_ui_kit::NSObjectUIAccessibility;
+        button.setAccessibilityLabel(Some(&NSString::from_str(label)), mtm);
+    }
+    button
 }
 
 /// The accessibility label of the first labelled view in `view` (itself
@@ -873,6 +1312,10 @@ pub(crate) struct StackHost {
     pub(crate) applied: std::cell::RefCell<Vec<NodeId>>,
     /// The controller is a child of the surface's controller.
     contained: bool,
+    /// The `SplitView` (its native component's node) whose column this
+    /// stack is: the split holds its navigation controller, and while it
+    /// is collapsed its pages are in the split's compact stack.
+    pub(crate) split: Option<NodeId>,
 }
 
 impl StackHost {
@@ -894,12 +1337,7 @@ impl StackHost {
         // Apply our permission delegate afterwards, to both recognizers:
         // on iOS 26 even an edge drag can use the content recognizer, whose
         // default delegate prevents popping with a hidden navigation bar.
-        if let Some(pop) = nav.interactivePopGestureRecognizer() {
-            pop.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-        }
-        if nav.respondsToSelector(objc2::sel!(interactiveContentPopGestureRecognizer))
-            && let Some(pop) = nav.interactiveContentPopGestureRecognizer()
-        {
+        for pop in back_swipes(&nav) {
             pop.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
         }
         Self {
@@ -910,13 +1348,15 @@ impl StackHost {
             popped: Vec::new(),
             applied: Default::default(),
             contained: false,
+            split: None,
         }
     }
 
     /// Makes the navigation controller a child of the controller showing
     /// the stack (appearance callbacks, safe areas, rotation).
     pub(crate) fn contain(&mut self) {
-        if self.contained || self.container.window().is_none() {
+        // A split's column: the split is its parent.
+        if self.contained || self.split.is_some() || self.container.window().is_none() {
             return;
         }
         let Some(parent) = controller_of(&self.container) else {
@@ -925,6 +1365,46 @@ impl StackHost {
         parent.addChildViewController(&self.nav);
         self.nav.didMoveToParentViewController(Some(&parent));
         self.contained = true;
+    }
+
+    /// Gives the navigation controller to `split`, as its column.
+    pub(crate) fn join_split(&mut self, split: NodeId) {
+        self.split = Some(split);
+        // The split adds it as its child (taking it out of any parent).
+        self.contained = false;
+    }
+
+    /// Takes the navigation controller back from the split it was a
+    /// column of, into the stack's own container (its screens are given
+    /// back by the next reconcile, if the split had them).
+    pub(crate) fn leave_split(&mut self) {
+        if self.split.take().is_none() {
+            return;
+        }
+        let nav = &self.nav;
+        nav.willMoveToParentViewController(None);
+        if let Some(view) = nav.view() {
+            view.removeFromSuperview();
+            view.setFrame(self.container.bounds());
+            self.container.addSubview(&view);
+        }
+        nav.removeFromParentViewController();
+        self.contained = false;
+    }
+
+    /// Empties the navigation controller without a transition (a collapsing
+    /// split takes the screens into its compact stack, an expanding one
+    /// gives them back to the columns): what it was given is forgotten, so
+    /// nothing reads as popped.
+    pub(crate) fn detach_screens(&self) {
+        self.applied.borrow_mut().clear();
+        if self.nav.viewControllers().count() == 0 {
+            return;
+        }
+        let none: Retained<NSArray<UIViewController>> = NSArray::new();
+        self.nav.ivars().applying.set(true);
+        self.nav.setViewControllers_animated(&none, false);
+        self.nav.ivars().applying.set(false);
     }
 
     /// Shows the app's screens: pushes, pops or replaces as needed.
@@ -1042,6 +1522,16 @@ fn ancestors_visible(view: &UIView) -> bool {
 /// the stack asks for it, until that screen is popped (Apple: "the bottom bar
 /// remains hidden until the view controller is popped from the stack").
 pub(crate) fn bottom_bar_hidden(nav: &UINavigationController) -> bool {
+    match crate::split::bar_role(nav) {
+        // An expanded split's columns show side by side: a page of any of
+        // them keeps the bar off screen, as a page of one stack does.
+        crate::split::BarRole::Shown { shown, .. } => shown.iter().any(|nav| hides_bar(nav)),
+        _ => hides_bar(nav),
+    }
+}
+
+/// Whether a screen of `nav` asks for the bar off screen.
+fn hides_bar(nav: &UINavigationController) -> bool {
     let controllers = nav.viewControllers();
     controllers.iter().any(|controller| {
         // SAFETY: asking UIKit for the property it defines for every screen.
@@ -1069,8 +1559,16 @@ pub(crate) fn slide_bottom_bar(nav: &UINavigationController, hiding: bool) {
     if view.window().is_none() || !ancestors_visible(&view) {
         return;
     }
-    let Some(parent) = view.superview() else {
-        return;
+    let parent = match crate::split::bar_role(nav) {
+        crate::split::BarRole::Stack => match view.superview() {
+            Some(parent) => parent,
+            None => return,
+        },
+        // A split's navigation controller is in the split's own views: the
+        // bar is looked for from where the split is, as from a stack there.
+        crate::split::BarRole::Shown { place, .. } => place,
+        // Its pages show in another of the split's, which moves the bar.
+        crate::split::BarRole::Idle => return,
     };
     // The bar is a component's view, nested in the container the component
     // system puts it in: look through the siblings' subtrees for it.
@@ -1153,6 +1651,9 @@ pub(crate) struct ScreenHost {
     /// (UIKit keeps a bar button's target weakly).
     left_system: RefCell<Option<SystemBarItem>>,
     right_system: RefCell<Option<SystemBarItem>>,
+    /// Trailing `ios.headerRightItems`: rebuilt when the description
+    /// changes (a menu item's `checked` or `title` included).
+    right_items: RefCell<Option<RightItemsBar>>,
     /// The screen's root view, placed by the core.
     pub(crate) view: Retained<NshView>,
     pub(crate) config: ScreenConfig,
@@ -1172,6 +1673,7 @@ impl ScreenHost {
             config: ScreenConfig::default(),
             left_system: RefCell::new(None),
             right_system: RefCell::new(None),
+            right_items: RefCell::new(None),
         }
     }
 
@@ -1231,14 +1733,60 @@ impl ScreenHost {
         .or_else(|| custom(c.left));
         nav_item.setLeftBarButtonItem(left.as_deref());
         nav_item.setLeftItemsSupplementBackButton(true);
-        let right = system(
-            false,
-            &self.right_system,
-            c.right,
-            look(c.right_system_item, &c.right_symbol),
-        )
-        .or_else(|| custom(c.right));
-        nav_item.setRightBarButtonItem(right.as_deref());
+        // `headerRightItems` (non-empty) wins over the single system /
+        // symbol button and leaves `headerRight`'s view out of the bar.
+        if !c.right_items.is_empty() {
+            self.right_system.borrow_mut().take();
+            let mut kept = self.right_items.borrow_mut();
+            // Rebuild only when the buttons themselves change; a menu's
+            // `checked` state would otherwise flash the bar on every choice.
+            let rebuild = kept
+                .as_ref()
+                .is_none_or(|(items, ..)| !same_right_buttons(items, &c.right_items));
+            if rebuild {
+                if let Some(mounter) = press.clone() {
+                    let mut targets = Vec::new();
+                    let buttons: Vec<_> = c
+                        .right_items
+                        .iter()
+                        .map(|item| make_right_item(mtm, item, mounter.clone(), &mut targets))
+                        .collect();
+                    *kept = Some((c.right_items.clone(), buttons, targets));
+                } else {
+                    *kept = None;
+                }
+            } else if let Some((cached, buttons, targets)) = kept.as_mut()
+                && cached != &c.right_items
+            {
+                if let Some(mounter) = press.clone() {
+                    for (item, (button, target)) in
+                        c.right_items.iter().zip(buttons.iter().zip(targets.iter()))
+                    {
+                        update_right_item(mtm, item, button, target.as_deref(), &mounter);
+                    }
+                }
+                *cached = c.right_items.clone();
+            }
+            let array = kept
+                .as_ref()
+                .map(|(_, buttons, _)| NSArray::from_retained_slice(buttons));
+            nav_item.setRightBarButtonItems(array.as_deref());
+        } else {
+            self.right_items.borrow_mut().take();
+            let right = system(
+                false,
+                &self.right_system,
+                c.right,
+                look(c.right_system_item, &c.right_symbol),
+            )
+            .or_else(|| custom(c.right));
+            // The whole list, not `setRightBarButtonItem:`: given nil, that
+            // clears only the first of the `headerRightItems` a page made
+            // again (a region's page, the same screen) had, and the others
+            // stay with their menus.
+            let right: Vec<Retained<UIBarButtonItem>> = right.into_iter().collect();
+            nav_item.setRightBarButtonItems(Some(&NSArray::from_retained_slice(&right)));
+        }
         nav_item.setHidesBackButton(!c.back_visible);
         nav_item.setBackButtonTitle(c.back_title.as_deref().map(NSString::from_str).as_deref());
         nav_item.setLargeTitleDisplayMode(if c.large_title {
@@ -1401,27 +1949,10 @@ impl ModalHost {
         }
         let c = self.config;
         let controller = &self.controller;
-        let mut mask = UIInterfaceOrientationMask::empty();
-        for (bit, m) in [
-            (ModalConfig::PORTRAIT, UIInterfaceOrientationMask::Portrait),
-            (
-                ModalConfig::PORTRAIT_UPSIDE_DOWN,
-                UIInterfaceOrientationMask::PortraitUpsideDown,
-            ),
-            (
-                ModalConfig::LANDSCAPE_LEFT,
-                UIInterfaceOrientationMask::LandscapeLeft,
-            ),
-            (
-                ModalConfig::LANDSCAPE_RIGHT,
-                UIInterfaceOrientationMask::LandscapeRight,
-            ),
-        ] {
-            if c.orientations & bit != 0 {
-                mask |= m;
-            }
-        }
-        controller.ivars().orientations.set(mask);
+        controller
+            .ivars()
+            .orientations
+            .set(crate::system::orientation_mask(c.orientations));
         controller.set_flags(&c);
         // Full screen, the modal has no look of its own: the app's popup
         // and backdrop show over what is behind. Sheets are the system's.

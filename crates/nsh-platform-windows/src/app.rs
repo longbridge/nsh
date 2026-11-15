@@ -34,7 +34,7 @@ use crate::{
 
 static UI_SETS: RwLock<Option<Vec<nsh_core::element::Registry>>> = RwLock::new(None);
 
-/// Sets the UI sets every engine serves (default: `nsh/base`); an app
+/// Sets the UI sets every engine serves (default: `nsh/base`'s core part, enough for a Rust app; hosts that run JS pass all of `nsh/base`, `nsh_base::registry()`); an app
 /// with Rust components of its own calls this before [`run_app`].
 pub fn set_ui_sets(sets: Vec<nsh_core::element::Registry>) {
     *UI_SETS.write().unwrap_or_else(|e| e.into_inner()) = Some(sets);
@@ -87,13 +87,20 @@ fn register_app_components(components: &crate::native::Components) {
     }
 }
 
-/// The UI sets engines serve.
+/// The UI sets engines serve: [`set_ui_sets`]'s, else `nsh/base`'s core
+/// part only. A Rust app makes `nsh/base`'s components by type, so
+/// registering every part would link every component into its binary;
+/// hosts that run JS register the sets their code imports.
 pub(crate) fn ui_sets() -> Vec<nsh_core::element::Registry> {
     UI_SETS
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
-        .unwrap_or_else(|| vec![nsh_base::registry()])
+        .unwrap_or_else(|| {
+            vec![nsh_base::registry_of([
+                nsh_base::parts::core as nsh_base::parts::Part
+            ])]
+        })
 }
 
 /// What [`run_app`] runs.
@@ -181,6 +188,13 @@ pub struct AppOptions {
     /// their presses (`nsh`'s `Notifications`). Without it the permission is
     /// `unavailable` and nothing shows. [`run_app`] sets it.
     pub notifications: bool,
+    /// The app [`run_app`] runs reads and changes its login item
+    /// (`Application.loginItem()`: a value named [`app_id`](Self::app_id)
+    /// in the current user's `Run` key holding this executable's path,
+    /// which Settings lists under Startup apps). False by default, and read
+    /// by [`run_app`]'s view only: a view embedded in another app has no
+    /// login item. The release runner sets it, except under `nsh run`.
+    pub login_item: bool,
     /// The embedding app's channel with the apps the view runs
     /// (`nsh/host`): their launch parameters, events to them and handlers of
     /// their calls and posts ([`AppView::host`]). One for every app the view
@@ -205,6 +219,13 @@ pub struct AppOptions {
     /// the app (`Application.on("openFiles", ...)`), a later
     /// launch with files handing them to the running instance.
     pub file_types: Vec<nsh_core::file_type::FileType>,
+    /// Runs [`run_app`]'s app in the background: its windows show without
+    /// activating and nothing brings them to the foreground, so the keyboard
+    /// stays with the app the user works in, while the window that would
+    /// have it reads as focused to the app. `nsh test --target windows` sets
+    /// it (the development host's `--background`); the test agent's input
+    /// goes to the window directly. False by default.
+    pub background: bool,
 }
 
 impl Default for AppOptions {
@@ -229,7 +250,9 @@ impl Default for AppOptions {
             single_instance: false,
             file_types: Vec::new(),
             notifications: false,
+            login_item: false,
             host: nsh_engine::HostChannel::default(),
+            background: false,
         }
     }
 }
@@ -265,6 +288,9 @@ pub struct AppView {
     surface: Rc<Surface>,
     hwnd: HWND,
     options: RefCell<AppOptions>,
+    /// The view is [`run_app`]'s: the standalone app's, not one embedded in
+    /// another app.
+    standalone: Cell<bool>,
     #[cfg(feature = "dev")]
     pub(crate) dev: RefCell<Option<crate::dev::DevSession>>,
 }
@@ -300,9 +326,6 @@ impl AppView {
         let transparent = options.transparent && parent.is_none();
         let composed = (composed || transparent) && parent.is_none();
         let hwnd = crate::window::create(&surface, &options.title, options.size, parent, composed)?;
-        if composed {
-            *surface.base.borrow_mut() = Some(crate::compose::Composition::new(hwnd)?);
-        }
         if parent.is_none() {
             crate::window::set_icon(hwnd, options.icon.as_deref());
             // The main window's attributes: a normal window's, with the
@@ -319,6 +342,7 @@ impl AppView {
             surface,
             hwnd,
             options: RefCell::new(options),
+            standalone: Cell::new(false),
             #[cfg(feature = "dev")]
             dev: RefCell::new(None),
         });
@@ -436,7 +460,11 @@ impl AppView {
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),
             trace: options.trace,
             content_culling: true,
+            // Without `net`, `fetch` rejects and remote images fail.
+            #[cfg(feature = "net")]
             network: Some(nsh_engine::net::network()),
+            #[cfg(not(feature = "net"))]
+            network: None,
             websocket: None,
             refuse_connections: None,
             filesystem: None,
@@ -459,12 +487,26 @@ impl AppView {
             speech: None,
             audio: None,
             windows: None,
+            login_item: self.login_item(&options),
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface
             .native
             .set_asset_base(options.asset_base.clone());
         self.surface.start(config);
+    }
+
+    /// The login item of the app this view runs: the standalone app's alone
+    /// ([`run_app`]'s view, not one embedded in another app, also while the
+    /// standalone app runs on this thread), when its runner says.
+    fn login_item(
+        &self,
+        options: &AppOptions,
+    ) -> Option<Arc<dyn nsh_core::desktop::LoginItemBackend>> {
+        (options.login_item && self.standalone.get()).then(|| {
+            Arc::new(crate::login_item::LoginItem::new(&options.app_id))
+                as Arc<dyn nsh_core::desktop::LoginItemBackend>
+        })
     }
 
     /// Where `asset:/` URIs resolve from now on.
@@ -535,24 +577,29 @@ fn initial_environment() -> Environment {
         color_scheme: ColorScheme::Light,
         os: Os::Windows,
         idiom: Idiom::Desktop,
+        canvas_render: true,
         file_requests: true,
         notifications: true,
         audio: true,
+        webview_requests: true,
         // wgpu, in builds with it, until it finds no GPU.
         shaders: nsh_engine::shader::LINKED,
         ..Environment::default()
     }
 }
 
-/// Runs `source` in a window until it is closed.
+/// Runs `source` in a window until it is closed, then ends the process.
 ///
-/// The window and its message loop run on a thread of their own, which this
-/// one joins: when it ends, its thread-locals (the graphics devices, font
-/// faces, bitmaps and the other device resources cached per thread) are
-/// released at a plain thread exit. Released by the main thread's
-/// thread-local destructors instead, they would run inside `ExitProcess`,
-/// after the graphics DLLs and their driver threads are gone, and the
-/// process would end with a stray exit code.
+/// The window and its message loop run on a thread of their own. When its
+/// run ends, this thread ends the process while that thread waits, so its
+/// thread-locals (the graphics devices, font faces, bitmaps and the other
+/// device resources cached per thread) are never destroyed. Destroyed when
+/// that thread exits, they are released under the loader lock, where a
+/// driver that waits for its own threads to release a device (NVIDIA's
+/// does) never returns, and the process stays behind without a window.
+/// Destroyed by the main thread's thread-local destructors instead, they
+/// would run inside `ExitProcess`, after the graphics DLLs and their driver
+/// threads are gone, and the process would end with a stray exit code.
 pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::ExitCode {
     wait_for_replaced_process();
     options.notifications = true;
@@ -560,27 +607,35 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     struct Job(AppSource, AppOptions);
     // SAFETY: the options hold `Rc`s (the native components), so they are
     // not `Send`. They move to the UI thread whole while this thread waits
-    // in `join` and never touches them; clones the caller kept are only
-    // used again after `join` returns, once the UI thread has ended, so
-    // the reference counts are never changed from two threads at once.
+    // for its run to end and never touches them; the process ends then,
+    // so clones the caller kept are never used again and the reference
+    // counts are never changed from two threads at once.
     unsafe impl Send for Job {}
     let job = Job(source, options);
+    let (done, ended) = std::sync::mpsc::channel();
     let ui = std::thread::Builder::new()
         .name("nsh-ui".into())
         // Deep view trees recurse in drawing and hit testing.
         .stack_size(8 << 20)
         .spawn(move || {
             let job = job;
-            run_on_this_thread(job.0, job.1)
+            let code = run_on_this_thread(job.0, job.1);
+            let _ = done.send(code);
+            // The process ends while this thread waits (below).
+            loop {
+                std::thread::park();
+            }
         });
-    match ui.map(std::thread::JoinHandle::join) {
-        Ok(Ok(code)) => code,
-        Ok(Err(_)) => std::process::ExitCode::FAILURE,
-        Err(err) => {
-            fatal_error(&format!("Cannot start the UI thread: {err}"));
-            std::process::ExitCode::FAILURE
-        }
+    if let Err(err) = ui {
+        fatal_error(&format!("Cannot start the UI thread: {err}"));
+        return std::process::ExitCode::FAILURE;
     }
+    // The run has ended (or the UI thread panicked, dropping `done`): the
+    // process ends with the UI thread still waiting, as the doc above says.
+    let succeeded = ended
+        .recv()
+        .is_ok_and(|code| code == std::process::ExitCode::SUCCESS);
+    std::process::exit(if succeeded { 0 } else { 1 })
 }
 
 thread_local! {
@@ -630,6 +685,9 @@ fn wait_for_replaced_process() {
 /// [`run_app`] on the calling thread.
 fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::ExitCode {
     STANDALONE.set(true);
+    if options.background {
+        crate::window::run_in_background();
+    }
     // SAFETY: process setup before any window exists: per-monitor DPI
     // (points stay sharp on every monitor) and an OLE apartment for the
     // clipboard, drag and drop and WIC.
@@ -691,6 +749,7 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
             return std::process::ExitCode::FAILURE;
         }
     };
+    view.standalone.set(true);
     crate::linking::launch(view.surface());
     match source {
         AppSource::Rust(root) => view.load(App::Rust(root)),
@@ -746,6 +805,9 @@ pub(crate) fn show_main(surface: &Rc<Surface>, hwnd: HWND) {
     surface.paint();
     crate::window::show(hwnd);
     crate::window::set_cloaked(hwnd, false);
+    // The show's own messages worked the state out while the window was
+    // still cloaked, and uncloaking sends the window none.
+    crate::system::lifecycle_changed(surface);
     if let Some(mode) = surface.main_opening_mode.take() {
         crate::window_state::set_mode(hwnd, mode);
     }
@@ -857,6 +919,28 @@ mod tests {
         }
         // SAFETY: the test's own window.
         let _ = unsafe { DestroyWindow(view.hwnd()) };
+    }
+
+    #[test]
+    fn only_the_standalone_apps_view_has_a_login_item() {
+        let options = AppOptions {
+            login_item: true,
+            ..Default::default()
+        };
+        // An embedded view, while the standalone app runs on this thread.
+        STANDALONE.set(true);
+        let embedded = AppView::new(None, options.clone()).unwrap();
+        assert!(embedded.login_item(&options).is_none());
+        // `run_app`'s own view, when its runner turns it on.
+        let standalone = AppView::new(None, options.clone()).unwrap();
+        standalone.standalone.set(true);
+        assert!(standalone.login_item(&options).is_some());
+        assert!(standalone.login_item(&AppOptions::default()).is_none());
+        STANDALONE.set(false);
+        for view in [embedded, standalone] {
+            // SAFETY: the test's own windows.
+            let _ = unsafe { DestroyWindow(view.hwnd()) };
+        }
     }
 
     #[test]

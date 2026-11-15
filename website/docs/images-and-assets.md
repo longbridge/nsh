@@ -121,7 +121,17 @@ let page: Arc<[u8]> = render_page(); // 1192 × 1684 pixels
 image(ImageSrc::rgba(1192, 1684, page)).w_full()
 ```
 
-The image lays out at `width` × `height` points, as a `data:` image does; style it to size it. Each buffer is an image of its own: give the view a new source for a new frame, and the caches drop the old one once no view shows it. Windows, macOS, Linux and GPUI draw the pixels as they are; iOS, Android and the browser load images from encoded bytes, so there the buffer becomes an uncompressed PNG the first time it is shown (a copy, no compression). TSX has `Blob` URLs for bytes it holds.
+The image lays out at `width` × `height` points by default, as a `data:` image does. For a buffer drawn at another pixel density, give its source a natural size in points with `ImageSrc::size`:
+
+```rust
+let pixels = vec![7u8; 200 * 100 * 4]; // 200 × 100 pixels drawn at 2×
+let src = ImageSrc::rgba(200, 100, pixels).size(Size::new(px(100.0), px(50.0)));
+view().items_start().child(image(src)) // 100 × 50 points
+```
+
+The natural size sets the intrinsic layout when the element's style leaves a dimension unset. Setting just a width or height keeps its aspect ratio; setting both sizes the box. The buffer keeps its original pixel dimensions and bytes, and `onLoad` reports its pixel dimensions.
+
+Each buffer is an image of its own: give the view a new source for a new frame, and the caches drop the old one once no view shows it. Windows, macOS, Linux and GPUI draw the pixels as they are; iOS, Android and the browser load images from encoded bytes, so there the buffer becomes an uncompressed PNG the first time it is shown (a copy, no compression). TSX has `Blob` URLs for bytes it holds.
 
 ## Remote images
 
@@ -160,6 +170,11 @@ The cache follows the server's HTTP caching headers:
   `Last-Modified`): an unchanged image (`304`) is used again without downloading it, a changed one replaces it.
 - When the request fails (no network) or the server has an error (`5xx`), the kept copy is shown, unless the response
   said `must-revalidate` or `no-cache`.
+- When a request for the image is redirected to an address the app's `network` capability does not allow, the image
+  fails and the kept copy is dropped.
+- A kept copy remembers the addresses its download was redirected to. When the app is opened again and the copy is
+  read from disk, they are checked against the app's current `network` capability; when one is no longer allowed, the
+  copy is dropped and the image is requested again, as an image requested for the first time.
 
 Each app has its own cache of 256 MiB; past that, the images used least recently are dropped first. Several views,
 surfaces and processes of one app share it safely. Embedding apps choose where it is and how large, or turn it off:

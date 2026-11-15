@@ -80,7 +80,25 @@ function Filters() {
 面板按内容高度布局，适合矮菜单；业务通过 `popupStyle` 或子元素高度约束较长内容，并自行绘制拖动条。
 iOS 中，内部竖向 `Scroll` 或 `List` 先消费滚动，到顶部后把同一次手势剩余的下拉位移交给面板。
 Android、桌面和 Web 使用已有的原生 pan 支持拖动条及滚动区域外的内容拖动，内部滚动沿用各平台的手势仲裁。
+面板开始跟手时结束编辑：其中获得焦点的输入框失焦，软键盘收起；只滚动内部列表不会收起键盘。
 将 `closeOnSwipe` 改为 false 后面板保持原位，内容和滚动位置保留。其他 `side` 保持现有行为。
+
+<a id="the-software-keyboard"></a>
+
+## 软键盘
+
+软键盘弹起时，贴着屏幕底边的面板（底部 sheet、左右两侧的抽屉）改为贴在键盘上沿，并随键盘的弹起和收起按键盘自己的曲线移动。
+面板底部照常按安全区留白（`pb-[env(safe-area-inset-bottom)]`，Rust 用 `.pb_safe_area()`），与没有键盘时一样：
+这段留白此时落在键盘后面，面板内容正好停在键盘上方，即安全区与键盘取较大者。被键盘抬起时，底部 sheet 内容再高也不会越过状态栏。
+`popupStyle` 中的 `maxHeight` 会取代这一上限，因此更矮的上限要自行扣除键盘超出安全区的高度（`keyboardFrame().height - safeArea().bottom`），
+例如 `windowSize().height - safeArea().top - Math.max(0, keyboardFrame().height - safeArea().bottom) - 24`。
+手机上以 sheet 呈现的菜单、选择器和日期选择器也是如此，它们的 `popupStyle` 或 `popupClass` 中的 `maxHeight` 同样取代其上限。
+
+<a id="screen-readers-and-keyboard-focus"></a>
+
+## 读屏与键盘焦点
+
+与 [Dialog](./dialog.md) 一样，Sheet 在每个平台上都是模态对话框。读屏软件把它当作对话框，用 `accessibilityLabel`（填 sheet 的标题）为它命名，它显示期间读屏只在它里面移动。在桌面平台和 Web 上，它打开时键盘焦点离开下面的内容，Tab 在面板里的各个焦点停靠点之间循环，关闭时焦点回到原来的位置。要一打开就让面板里的某个控件获得焦点，在 `onOpen` 中聚焦它。
 
 <a id="native-sheets"></a>
 
@@ -102,6 +120,7 @@ Sheet 由 NSH 在应用的窗口中绘制，样式由应用决定。要使用平
 | `closeOnSwipe` | `.close_on_swipe(..)` | `boolean` | `false` | 底部面板跟随下拉，并在松手达到阈值时请求关闭。 |
 | `popupClass`、`popupStyle` | `popup_class`、`popup_style` | `string`、`StyleProp<ViewStyle>` | 无 | 面板的外观。 |
 | `backdropClass`、`backdropStyle` | `backdrop_class`、`backdrop_style` | `string`、`StyleProp<ViewStyle>` | 无 | 背景层的外观，比如半透明的颜色。 |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 读屏软件对这个对话框的称呼：sheet 的标题。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 内容。 |
 
 <a id="events"></a>

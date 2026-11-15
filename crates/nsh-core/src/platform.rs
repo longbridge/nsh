@@ -12,6 +12,20 @@ use crate::geometry::{Edges, Points, Size};
 /// the same name).
 pub const TAB_BAR_COMPONENT: &str = "nsh/tab-bar";
 
+/// The native component of `nsh/mobile`'s `SegmentedControl`, which the iOS
+/// backend registers itself (`UISegmentedControl`).
+pub const SEGMENTED_CONTROL_COMPONENT: &str = "nsh/segmented-control";
+
+/// The native component of `nsh/base`'s `MenuButton`, which the iOS backend
+/// registers itself (a `UIButton` showing its `UIMenu` as its primary
+/// action).
+pub const MENU_BUTTON_COMPONENT: &str = "nsh/menu-button";
+
+/// The native component of `nsh/base`'s `SplitView`, which the iOS backend
+/// makes itself (a `UISplitViewController` whose columns are the
+/// navigation controllers of the stacks the view places before it).
+pub const SPLIT_VIEW_COMPONENT: &str = "nsh/split-view";
+
 /// Whether native component `name` is NSH's own: names under `nsh/` are, and
 /// an embedding app's registration of one is refused, so it can never
 /// replace what NSH's exports render.
@@ -204,11 +218,44 @@ impl Lifecycle {
     }
 }
 
+/// The space available along one axis of a surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SizeClass {
+    /// Less room for content.
+    Compact,
+    /// Room for an expanded layout.
+    Regular,
+}
+
+impl SizeClass {
+    /// Classify a length in points: below 600 is compact, 600 and above regular.
+    /// This is the fallback where the platform supplies no native size class.
+    pub(crate) fn from_length(length: Points) -> Self {
+        if length < Points(600.0) {
+            Self::Compact
+        } else {
+            Self::Regular
+        }
+    }
+
+    /// The TypeScript value of this class.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Compact => "compact",
+            Self::Regular => "regular",
+        }
+    }
+}
+
 /// What the platform knows about the surface.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Environment {
     /// Size of the surface in points.
     pub window: Size<Points>,
+    /// Native horizontal size class (UIKit); `None` derives it from window width.
+    pub horizontal_size_class: Option<SizeClass>,
+    /// Native vertical size class (UIKit); `None` derives it from window height.
+    pub vertical_size_class: Option<SizeClass>,
     /// Insets not covered by system UI (notch, home indicator, title bar).
     pub safe_area: Edges<Points>,
     /// The title bar's area while the app hides it (desktops,
@@ -239,6 +286,13 @@ pub struct Environment {
     pub pixel_ratio: f32,
     /// A screen reader runs (VoiceOver, TalkBack).
     pub screen_reader: bool,
+    /// The platform's screen readers follow the active descendant a
+    /// focused view names (`accessibilityActiveDescendant`): they read the
+    /// element named as it changes while the focus stays. `nsh-base`'s
+    /// lists then name their highlighted row and tell screen readers
+    /// nothing more; without it, they announce the row or move the screen
+    /// reader's focus to it.
+    pub reads_active_descendants: bool,
     /// The operating system.
     pub os: Os,
     /// The platform's name where it is not the OS's: a platform built
@@ -274,10 +328,21 @@ pub struct Environment {
     /// focus, or in the background. For an embedded surface, the embedding
     /// app's.
     pub lifecycle: Lifecycle,
+    /// How many times the system woke from sleep while the surface ran
+    /// (TS: `wakeCount()`): the platform adds one on each wake (macOS,
+    /// Windows, Linux), so what read it runs again then. A sleep may leave
+    /// the app's state as it was (a laptop's lid closed and opened with the
+    /// app in front), while its network connections and timers did not
+    /// live through it.
+    pub wake_count: u32,
     /// The platform picks a color from the screen
     /// ([`crate::Command::PickScreenColor`]); without it, a pick answers
     /// no color at once.
     pub screen_color: bool,
+    /// The platform renders canvas drawings offscreen into images
+    /// ([`crate::Command::RenderCanvas`], `OffscreenCanvas`); without it,
+    /// a render fails at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+    pub canvas_render: bool,
     /// The platform shows the system's open and save dialogs and opens,
     /// reveals and trashes local paths ([`crate::Command::FileRequest`],
     /// the desktops); without it, those requests answer at once with an
@@ -330,6 +395,12 @@ pub struct Environment {
     /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. A web engine that fails only
     /// when a web view starts reports that error itself.
     pub web_views: bool,
+    /// The platform carries out a web view's requests
+    /// ([`crate::Command::WebViewRequest`]: a pending download's
+    /// destination or cancellation; the desktops); without it, they answer
+    /// at once with an error and no web view downloads behind the app's
+    /// back.
+    pub webview_requests: bool,
     /// The platform draws shader views (`Shader`, `ShaderEffect`,
     /// `ShaderTransition`, the screen's; TS: `shadersAvailable()`). `true`
     /// by default. A platform built without a renderer sets `false` from
@@ -341,6 +412,18 @@ pub struct Environment {
 }
 
 impl Environment {
+    /// Native horizontal size class, or the window width at the 600pt breakpoint.
+    pub fn horizontal_size_class(&self) -> SizeClass {
+        self.horizontal_size_class
+            .unwrap_or_else(|| SizeClass::from_length(self.window.width))
+    }
+
+    /// Native vertical size class, or the window height at the 600pt breakpoint.
+    pub fn vertical_size_class(&self) -> SizeClass {
+        self.vertical_size_class
+            .unwrap_or_else(|| SizeClass::from_length(self.window.height))
+    }
+
     /// The platform's name (TS: `platform.name`): [`Environment::platform`]
     /// on a platform built outside NSH (`"miniprogram"`), else the OS's
     /// (`"ios"`, `"web"`, ...).
@@ -366,6 +449,8 @@ impl Default for Environment {
     fn default() -> Self {
         Self {
             window: Size::default(),
+            horizontal_size_class: None,
+            vertical_size_class: None,
             safe_area: Edges::default(),
             title_bar: Edges::default(),
             window_state: None,
@@ -377,6 +462,7 @@ impl Default for Environment {
             reduce_motion: false,
             pixel_ratio: 1.0,
             screen_reader: false,
+            reads_active_descendants: false,
             os: Os::default(),
             platform: None,
             os_version: (0, 0),
@@ -387,7 +473,9 @@ impl Default for Environment {
             locale_settings: LocaleSettings::EN_US,
             host: false,
             lifecycle: Lifecycle::Active,
+            wake_count: 0,
             screen_color: false,
+            canvas_render: false,
             file_requests: false,
             speech: false,
             notifications: false,
@@ -398,6 +486,7 @@ impl Default for Environment {
             web_input: false,
             web_evaluate: false,
             web_views: true,
+            webview_requests: false,
             shaders: true,
         }
     }
@@ -762,6 +851,36 @@ impl std::fmt::Debug for TimeZone {
 impl std::fmt::Display for TimeZone {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+/// What the performance monitor measured over the last second
+/// ([`crate::element::perf_stats`]; TS `perfStats()`), read once a second
+/// while it measures. More of what the monitor measures can join it.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Default, crate::element::JsObject)]
+pub struct PerfStats {
+    /// Frames shown per second: display refreshes in which the app changed
+    /// something. An idle app reads low, which is not slowness.
+    pub fps: f32,
+    /// The rate the display refreshes at (Hz), once the monitor saw it
+    /// refresh.
+    pub refresh_rate: Option<f32>,
+    /// The share of recent frames that took longer than one refresh, from 0
+    /// to 1 (`0.05` is 5%), as TS's `dropped` reads it.
+    pub dropped: crate::geometry::Percentage,
+}
+
+impl PerfStats {
+    /// Stats of `fps` frames a second, the rest unknown: the engine's way
+    /// to make them (the type is non-exhaustive). Apps read them
+    /// ([`crate::element::perf_stats`]) and never make one.
+    #[doc(hidden)]
+    pub fn new(fps: f32) -> PerfStats {
+        PerfStats {
+            fps,
+            ..PerfStats::default()
+        }
     }
 }
 
@@ -1436,6 +1555,33 @@ pub enum FetchOp {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn size_class_fallback_uses_points_and_native_traits_win() {
+        use super::{Environment, SizeClass};
+        use crate::geometry::size_pt;
+        for (dimension, expected) in [
+            (0.0, SizeClass::Compact),
+            (599.5, SizeClass::Compact),
+            (600.0, SizeClass::Regular),
+            (1200.0, SizeClass::Regular),
+        ] {
+            let env = Environment {
+                window: size_pt(dimension, dimension),
+                ..Default::default()
+            };
+            assert_eq!(env.horizontal_size_class(), expected);
+            assert_eq!(env.vertical_size_class(), expected);
+        }
+        let env = Environment {
+            window: size_pt(900.0, 300.0),
+            horizontal_size_class: Some(SizeClass::Compact),
+            vertical_size_class: Some(SizeClass::Regular),
+            ..Default::default()
+        };
+        assert_eq!(env.horizontal_size_class(), SizeClass::Compact);
+        assert_eq!(env.vertical_size_class(), SizeClass::Regular);
+    }
+
     use super::{
         Environment, HostEnvironment, HourCycle, Idiom, Languages, Locale, LocaleSettings,
         MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday, content_type, file_mime_type,

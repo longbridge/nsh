@@ -77,6 +77,18 @@ impl Notifications {
         Ok(())
     }
 
+    /// Removes every notification of the app's, shown or waiting to show,
+    /// those an earlier run of the app left included where the system keeps
+    /// them for the app (macOS, iOS, Windows, Android): call it when the user
+    /// signs out, so what the notifications said goes with them. Rejects
+    /// with `ERR_ACCESS_DENIED` when the `notifications` capability is not
+    /// granted.
+    pub(crate) async fn close_all(sys: System) -> Result<(), JsError> {
+        granted(&sys)?;
+        crate::prelude::close_all_notifications();
+        Ok(())
+    }
+
     /// Shows `count` on the app's icon, and `0` clears it: the Dock on
     /// macOS, an installed web app's icon, the home screen on iOS, which
     /// needs the permission (`requestPermission`). Android has no count to

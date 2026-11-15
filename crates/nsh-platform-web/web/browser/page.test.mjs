@@ -97,3 +97,18 @@ test("the app's own Open Graph title wins over the head's title", async () => {
   assert.equal(document.documentElement.lang, "");
   assert.deepEqual(document.head.children, []);
 });
+
+test("the heads' title goes to the player, which keeps it above the main window's title", async () => {
+  globalThis.document = fakeDocument();
+  const reactive = fakeReactive();
+  const titles = [];
+  const { exports } = createWebPage(reactive, { setHeadTitle: title => titles.push(title) });
+  reactive.own(() => exports.Head({ description: "All notes" }));
+  const page = reactive.own(() => exports.Head({ title: "Q3 earnings" }));
+  await settle();
+  // The player writes the document's title: the heads leave it alone.
+  assert.equal(document.title, "Site");
+  page();
+  await settle();
+  assert.deepEqual(titles, ["Q3 earnings", null]);
+});

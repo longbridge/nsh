@@ -68,6 +68,8 @@ export function createDom(invoke, values, reactive, live, wake) {
       call(305, [node, name, typeof value === "function"]);
       return;
     }
+    // The browser's selection menu cannot take the app's items.
+    if (name === "selectionMenu") return;
     if (PLATFORM_PROPS.has(name)) { platformProps(node, name, value); return; }
     call(303, [node, name, value]);
     hold(node, name, value);

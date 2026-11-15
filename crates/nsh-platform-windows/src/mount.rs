@@ -162,6 +162,7 @@ impl Mounter {
             }
             MountItem::Remove { id } => {
                 if let Some(view) = &self.get(*id) {
+                    crate::input::removed(surface, view);
                     crate::navigation::removing(surface, view);
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, view, self.layout_animation.as_ref()) {
@@ -172,6 +173,7 @@ impl Mounter {
             MountItem::Delete { id } => {
                 crate::file_drop::deleted(surface, *id);
                 if let Some(view) = self.views.remove(*id) {
+                    crate::input::removed(surface, &view);
                     crate::navigation::removing(surface, &view);
                     crate::native::deleted(surface, &view);
                     crate::shader::deleted(surface, &view);
@@ -430,6 +432,9 @@ impl Mounter {
             ViewKind::HeaderItem => return crate::navigation::header_item_removed(surface, view),
             _ => {}
         }
+        // A view that leaves has no keyboard focus to keep (its listeners
+        // hear no more keys).
+        crate::keyboard::forget(surface, view);
         let parent = view.parent_view();
         view.unparent();
         if let Some(parent) = parent
@@ -443,9 +448,18 @@ impl Mounter {
         let view = self.views.get(id);
         let view = view.as_ref();
         match command {
-            Command::Focus => view.map_or((), crate::text_input::focus),
+            // A field edits; a focusable custom view takes the keyboard
+            // focus as Tab gives it.
+            Command::Focus => match view {
+                Some(view) if view.kind() == ViewKind::Input => crate::text_input::focus(view),
+                Some(view) if view.id() != ROOT_ID => {
+                    crate::keyboard::focus_control(surface, view);
+                }
+                _ => {}
+            },
             Command::Blur => match view {
                 Some(view) if view.kind() == ViewKind::Input => crate::text_input::blur(view),
+                Some(view) if view.id() != ROOT_ID && crate::keyboard::blur(surface, view) => {}
                 _ => crate::text_input::blur_all(surface),
             },
             Command::SetSelection { start, end } => {
@@ -487,6 +501,7 @@ impl Mounter {
             | Command::InjectJavaScript(_)
             | Command::PostMessage(_)
             | Command::Load(_)
+            | Command::WebViewRequest(_)
             | Command::Seek(_)
             | Command::Native { .. } => {
                 if let Some(view) = view {

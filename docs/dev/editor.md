@@ -78,7 +78,8 @@ user-facing page is `website/elements/editor.md`; how each module works inside i
 ### The display map
 
 `DisplayMap` (`display_map.rs`) lays the text out in display rows: tabs advance to the next stop, widths come from
-the editor's font measured with the platform's text engine, and large files lay out without measuring every row.
+the editor's font as drawn (the app's `fontSize` and `lineHeight` grown by the user's text size, `fontScale`, as the
+core grows every text's: `controller::drawn_font`) measured with the platform's text engine, and large files lay out without measuring every row.
 With `softWrap`, a line breaks after whitespace where the row would overflow, else between graphemes, and its
 continuation rows start at its indentation unless that is over half the width. A folded line shows as one row and the
 lines it hides as none. An edit lays out only the lines it touched.
@@ -419,7 +420,8 @@ The defaults are the theme's tokens (`crate::theme()`), so a theme and the dark 
 | `definitionLink` | A 1 point line of `primary` under the link's text, on each row it covers |
 
 Syntax colors are `crate::syntax`'s `Token` styles, Allsum's palette in light and dark (the table in `text-view.md`
-"Syntax highlighting"). The font is a prop, not a class: the editor measures its text in it.
+"Syntax highlighting"). The font is a prop, not a class: the editor measures its text in it, grown by the user's text size, and its rows'
+texts keep the app's values, which the core grows. A row's text is one line, clipped where it ends.
 
 ## Accessibility
 

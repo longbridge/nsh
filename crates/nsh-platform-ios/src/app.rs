@@ -8,9 +8,10 @@ use objc2::{
 use objc2_core_foundation::CGSize;
 use objc2_foundation::{NSObject, NSObjectProtocol, NSSet, NSString, NSURL};
 use objc2_ui_kit::{
-    UIApplication, UIApplicationDelegate, UIResponder, UIScene, UISceneConfiguration,
-    UISceneConnectionOptions, UISceneDelegate, UISceneSession, UIViewController, UIWindow,
-    UIWindowScene, UIWindowSceneDelegate, UIWindowSceneSessionRoleApplication,
+    UIApplication, UIApplicationDelegate, UIInterfaceOrientationMask, UIResponder, UIScene,
+    UISceneConfiguration, UISceneConnectionOptions, UISceneDelegate, UISceneSession,
+    UIViewController, UIWindow, UIWindowScene, UIWindowSceneDelegate,
+    UIWindowSceneSessionRoleApplication,
 };
 
 use crate::{image::AssetBase, surface::SurfaceOptions, view::AppView};
@@ -168,10 +169,11 @@ define_class!(
 );
 
 define_class!(
-    /// The window's root controller: shows the status bar the app sets.
+    /// The window's root controller: shows the status bar the app sets,
+    /// and takes the orientations of the page shown.
     #[unsafe(super(UIViewController, UIResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
-    struct RootController;
+    pub(crate) struct RootController;
 
     impl RootController {
         #[unsafe(method(preferredStatusBarStyle))]
@@ -187,6 +189,15 @@ define_class!(
         #[unsafe(method(preferredStatusBarUpdateAnimation))]
         fn preferred_status_bar_update_animation(&self) -> objc2_ui_kit::UIStatusBarAnimation {
             crate::system::status_bar_animation()
+        }
+
+        #[unsafe(method(supportedInterfaceOrientations))]
+        fn supported_interface_orientations(&self) -> UIInterfaceOrientationMask {
+            if let Some(mask) = crate::system::page_orientations() {
+                return mask;
+            }
+            // SAFETY: calling the superclass implementation.
+            unsafe { msg_send![super(self), supportedInterfaceOrientations] }
         }
     }
 );

@@ -23,7 +23,10 @@ use super::{
     AdaptiveColor, Environment, Memo, Owner, Signal, SignalEquals, Tokens, cleanup, computed,
     reactive::with_data,
     signal_with,
-    task::{self, Action, Answer, ClipboardImage, DialogAnswer, Executor, FileAnswer, ImageSize},
+    task::{
+        self, Action, Answer, ClipboardImage, ClipboardItem, DialogAnswer, Executor, FileAnswer,
+        ImageSize,
+    },
 };
 use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size,
@@ -55,6 +58,9 @@ pub(crate) struct Ambient {
     /// Whether the performance monitor measures, as the platform reports
     /// it.
     perf_monitor: Option<Signal<bool>>,
+    /// What the performance monitor measured last, as the engine reports
+    /// it ([`perf_stats`]).
+    perf_stats: Option<Signal<Option<crate::platform::PerfStats>>>,
     /// The main window's close presses: how many, and the last one's
     /// reason ([`crate::element::desktop::WindowRef::on_close_press`]).
     main_close_press: Option<Signal<(u64, crate::desktop::CloseReason)>>,
@@ -74,6 +80,8 @@ impl Ambient {
 struct EnvSignals {
     env: Signal<Environment>,
     window: Memo<Size<Points>>,
+    horizontal_size_class: Memo<crate::platform::SizeClass>,
+    vertical_size_class: Memo<crate::platform::SizeClass>,
     safe_area: Memo<EdgeInsets>,
     title_bar: Memo<crate::geometry::Edges<crate::geometry::Points>>,
     window_state: Memo<Option<crate::desktop::WindowState>>,
@@ -88,6 +96,7 @@ struct EnvSignals {
     locale: Memo<Locale>,
     locale_settings: Memo<LocaleSettings>,
     lifecycle: Memo<Lifecycle>,
+    wake_count: Memo<u32>,
     screen_color: Memo<bool>,
     shaders: Memo<bool>,
 }
@@ -104,6 +113,20 @@ impl EnvSignals {
             Self {
                 env: signal,
                 window: part!(window),
+                horizontal_size_class: computed(move || {
+                    signal.with(|e| {
+                        e.horizontal_size_class.unwrap_or_else(|| {
+                            crate::platform::SizeClass::from_length(e.window.width)
+                        })
+                    })
+                }),
+                vertical_size_class: computed(move || {
+                    signal.with(|e| {
+                        e.vertical_size_class.unwrap_or_else(|| {
+                            crate::platform::SizeClass::from_length(e.window.height)
+                        })
+                    })
+                }),
                 safe_area: part!(safe_area),
                 title_bar: part!(title_bar),
                 window_state: part!(window_state),
@@ -118,6 +141,7 @@ impl EnvSignals {
                 locale: part!(locale),
                 locale_settings: part!(locale_settings),
                 lifecycle: part!(lifecycle),
+                wake_count: part!(wake_count),
                 screen_color: part!(screen_color),
                 shaders: part!(shaders),
             }
@@ -187,6 +211,16 @@ impl super::Runtime {
         let signal = perf_monitor_signal();
         if signal.get_untracked() != enabled {
             signal.set(enabled);
+        }
+    }
+
+    /// What the performance monitor measured last (`None`: it does not
+    /// measure): what read it runs again.
+    pub(crate) fn set_perf_stats(&self, stats: Option<crate::platform::PerfStats>) {
+        let _entered = self.enter();
+        let signal = perf_stats_signal();
+        if signal.get_untracked() != stats {
+            signal.set(stats);
         }
     }
 
@@ -264,6 +298,18 @@ pub fn window() -> Size<Points> {
     env(|e| e.window)
 }
 
+/// The horizontal size class (reactive; TS: `horizontalSizeClass()`).
+/// iOS uses UIKit traits; elsewhere widths below 600pt are compact.
+pub fn horizontal_size_class() -> crate::platform::SizeClass {
+    env(|e| e.horizontal_size_class)
+}
+
+/// The vertical size class (reactive; TS: `verticalSizeClass()`).
+/// iOS uses UIKit traits; elsewhere heights below 600pt are compact.
+pub fn vertical_size_class() -> crate::platform::SizeClass {
+    env(|e| e.vertical_size_class)
+}
+
 /// The edges system UI covers: notch, home indicator (TS: `safeArea()`).
 pub fn safe_area() -> EdgeInsets {
     env(|e| e.safe_area)
@@ -306,6 +352,16 @@ pub fn reduce_motion() -> bool {
 /// A screen reader runs (TS: `screenReaderEnabled()`).
 pub fn screen_reader() -> bool {
     env(|e| e.screen_reader)
+}
+
+/// The platform's screen readers follow the active descendant a focused
+/// element names ([`super::Interactive::accessibility_active_descendant`],
+/// [`crate::platform::Environment::reads_active_descendants`]); it does
+/// not change.
+pub fn reads_active_descendants() -> bool {
+    with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .expect("the core sets the environment")
+        .with_untracked(|e| e.reads_active_descendants)
 }
 
 /// Whether the platform draws shader views ([`super::shader`] and the
@@ -372,6 +428,18 @@ pub fn locale_settings() -> LocaleSettings {
 /// so an effect pauses work in the background and resumes it after.
 pub fn lifecycle() -> Lifecycle {
     env(|e| e.lifecycle)
+}
+
+/// How many times the system woke from sleep while the app ran (TS:
+/// `wakeCount()`), 0 until the first wake. Reading it subscribes, so an
+/// effect that reads it runs again after each wake: a sleep may leave
+/// [`lifecycle`] as it was (a laptop's lid closed and opened with the app
+/// in front), while network connections and timers did not live through
+/// it, so the app checks or opens them again there. macOS, Windows and
+/// Linux count wakes; on iOS and Android a sleeping device takes the app
+/// to the background, which [`lifecycle`] reports.
+pub fn wake_count() -> u32 {
+    env(|e| e.wake_count)
 }
 
 /// The operating system (TS: `platform.os`); it does not change.
@@ -599,6 +667,20 @@ pub fn data_dir() -> Option<std::path::PathBuf> {
     with_data(|d| d.ambient.data_dir.clone())
 }
 
+/// The file the app's log lines are written to (TS: `process.logFile`): a
+/// packaged desktop app's rolling log, `logs/app.log` in the app's data
+/// directory, for a diagnostics report or an "Open logs folder" command
+/// (older files beside it are `app.1.log`, `app.2.log`, ...). `None` where
+/// the lines go to the platform's log only: development hosts, embedding
+/// apps, mobile, the web.
+///
+/// ```ignore
+/// let folder = log_file().and_then(|file| file.parent().map(Path::to_path_buf));
+/// ```
+pub fn log_file() -> Option<std::path::PathBuf> {
+    crate::log_file::path().map(std::path::Path::to_path_buf)
+}
+
 /// Opens `url` outside the app (TS: `openUrl` of `nsh/device`): a web page
 /// in the browser, a `mailto:` or `tel:` link in its app, any scheme
 /// another app registered. The embedding app may take it first (its host
@@ -618,10 +700,27 @@ pub fn set_clipboard(text: impl Into<String>) {
     act(super::services::set_clipboard(text.into()));
 }
 
+/// Puts `item` on the system clipboard (TS: `Clipboard.write`): its
+/// text, and its HTML as the platform's HTML type, which apps that read
+/// formatting paste. Where the platform has no HTML on the clipboard (a
+/// terminal) the text only.
+pub fn set_clipboard_item(item: ClipboardItem) {
+    act(super::services::set_clipboard_item(item));
+}
+
 /// The text on the system clipboard, `""` when it holds none (TS:
 /// `Clipboard.readText`), to await in a task.
 pub fn clipboard_string() -> Answer<String> {
     let (answer, action) = super::services::clipboard_string();
+    act(action);
+    answer
+}
+
+/// The text on the system clipboard for `Clipboard.readText`: `""` when
+/// it holds none, `None` when the person refused the read (iOS's paste
+/// prompt).
+pub(crate) fn clipboard_checked_string() -> Answer<Option<String>> {
+    let (answer, action) = super::services::clipboard_checked_string();
     act(action);
     answer
 }
@@ -663,6 +762,16 @@ pub(crate) fn clipboard_checked_image() -> Answer<Result<Option<ClipboardImage>,
 /// `Clipboard.hasImage`).
 pub fn clipboard_has_image() -> Answer<bool> {
     let (answer, action) = super::services::clipboard_has_image();
+    act(action);
+    answer
+}
+
+/// Renders `request`'s drawing offscreen into an image
+/// ([`super::Painter::render`]).
+pub(crate) fn render_canvas(
+    request: crate::canvas::render::RenderRequest,
+) -> Answer<Result<Vec<u8>, super::JsError>> {
+    let (answer, action) = super::services::render_canvas(request);
     act(action);
     answer
 }
@@ -850,6 +959,13 @@ pub fn close_notification(id: impl Into<String>) {
     act(Action::Notification(super::NotificationAction::Close(
         id.into(),
     )));
+}
+
+/// Removes every notification of the app's, shown or waiting to show, those
+/// an earlier run of the app left included where the platform can reach
+/// them (TS: `Notifications.closeAll`): what signing out clears.
+pub fn close_all_notifications() {
+    act(Action::Notification(super::NotificationAction::CloseAll));
 }
 
 /// Shows `count` on the app's icon, 0 clears it (TS: `Notifications.setBadge`).
@@ -1329,7 +1445,7 @@ pub fn timer(delay: Duration) -> Delay {
 pub fn timer_until(at: Instant) -> Delay {
     Delay {
         at,
-        registered: false,
+        timer: None,
         #[cfg(not(target_arch = "wasm32"))]
         elsewhere: None,
     }
@@ -1342,8 +1458,9 @@ pub fn timer_until(at: Instant) -> Delay {
 #[derive(Debug)]
 pub struct Delay {
     at: Instant,
-    /// The core keeps it.
-    registered: bool,
+    /// Its timer in the core, which dropping the delay takes back (a task
+    /// cancelled before its time).
+    timer: Option<task::TimerKey>,
     #[cfg(not(target_arch = "wasm32"))]
     elsewhere: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
 }
@@ -1360,15 +1477,18 @@ impl Future for Delay {
             return sleep.as_mut().poll(cx);
         }
         if crate::time::now() >= self.at {
+            // Its timer goes too if it has not fired yet (the task was
+            // polled for something else).
+            self.timer = None;
             return std::task::Poll::Ready(());
         }
-        if self.registered {
+        if let Some(timer) = &self.timer {
+            timer.set_waker(cx.waker());
             return std::task::Poll::Pending;
         }
         match super::reactive::try_with_data(|d| d.ambient.executor.clone()).flatten() {
             Some(executor) => {
-                executor.add_timer(self.at, cx.waker().clone());
-                self.registered = true;
+                self.timer = Some(executor.add_timer(self.at, cx.waker().clone()));
                 std::task::Poll::Pending
             }
             #[cfg(not(target_arch = "wasm32"))]
@@ -1631,7 +1751,10 @@ impl super::ElementRef {
 
     /// Listens to the keyboard focus leaving the element: going from it
     /// or an element inside it to one outside, or to none (GPUI's
-    /// `on_focus_out`; the element leaves `focus-within`). As
+    /// `on_focus_out`; the element leaves `focus-within`). An element
+    /// removed with the focus inside it, or one that stops carrying the
+    /// ref, is left too, and the focus coming into the next element that
+    /// carries the ref is heard by [`Self::on_focus_in`]. As
     /// [`Self::on_focus_in`] otherwise.
     pub fn on_focus_out(&self, listener: impl Fn() + 'static) {
         let element = *self;
@@ -1807,6 +1930,33 @@ pub fn set_fps_enabled(enabled: bool) {
     act(super::services::perf_monitor(enabled));
 }
 
+/// What the performance monitor measured over the last second (TS:
+/// `perfStats()`): its frame rate and more, read once a second while it
+/// measures ([`fps_enabled`]), `None` while it does not (and until its first
+/// second). Reading it in a binding subscribes it.
+pub fn perf_stats() -> Option<crate::platform::PerfStats> {
+    perf_stats_signal().get()
+}
+
+/// The performance stats' signal, none until the engine reports some.
+fn perf_stats_signal() -> Signal<Option<crate::platform::PerfStats>> {
+    if let Some(signal) = with_data(|d| d.ambient.perf_stats) {
+        return signal;
+    }
+    let signal = Owner::detached().run(|| super::signal(None));
+    with_data(|d| d.ambient.perf_stats = Some(signal));
+    signal
+}
+
+/// How the performance monitor shows (TS: `setFpsMode`), now and whenever it
+/// shows later: its whole panel ([`crate::FpsMode::Expanded`], the
+/// default), collapsed to its frame rate, or nothing while it still
+/// measures. A click on the panel switches between the first two. macOS's
+/// panel takes it; platforms without a panel ignore it.
+pub fn set_fps_mode(mode: crate::FpsMode) {
+    act(super::services::perf_monitor_mode(mode));
+}
+
 /// The performance monitor's signal, off until the platform reports it.
 fn perf_monitor_signal() -> Signal<bool> {
     if let Some(signal) = with_data(|d| d.ambient.perf_monitor) {
@@ -1838,6 +1988,16 @@ pub(crate) fn desktop_command(command: crate::desktop::DesktopCommand) {
         crate::ROOT_ID,
         Command::Desktop(Box::new(command)),
     ));
+}
+
+/// Asks the core whether the app launches at login (`enabled` `None`) or
+/// to change it ([`Action::LoginItem`]).
+pub(crate) fn login_item_request(
+    enabled: Option<bool>,
+) -> Answer<Result<bool, crate::desktop::LaunchAtLoginError>> {
+    let (answer, slot) = Answer::new();
+    act(Action::LoginItem(enabled, slot));
+    answer
 }
 
 #[cfg(test)]

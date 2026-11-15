@@ -12,10 +12,12 @@
 //! `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` and `hasImage` answers `false`
 //! without asking the platform; an image over
 //! [`crate::platform::clipboard::MAX_IMAGE_BYTES`] rejects `readImage`
-//! with `ERR_NSH_QUOTA_EXCEEDED`.
+//! with `ERR_NSH_QUOTA_EXCEEDED`. A read the person refuses (iOS's paste
+//! prompt) rejects `readText` with `ERR_ACCESS_DENIED`, as a missing
+//! capability does.
 
 use crate::{
-    element::{ClipboardImage, JsError, System, codes, module},
+    element::{ClipboardImage, ClipboardItem, JsError, System, codes, module},
     platform::clipboard::MAX_IMAGE_BYTES,
 };
 
@@ -50,6 +52,17 @@ fn images_available(sys: &System, call: &str) -> Result<(), JsError> {
     .with_code(codes::UNAVAILABLE))
 }
 
+/// The rejection of a text read the person refused (iOS's paste prompt
+/// answered with Don't Allow Paste, or pasting from other apps denied in
+/// Settings).
+fn refused() -> JsError {
+    JsError::access_denied(
+        "Clipboard.readText: the person did not allow the paste",
+        "clipboard",
+        "",
+    )
+}
+
 /// The rejection of an image over [`MAX_IMAGE_BYTES`] (`bytes` encoded).
 fn too_large(bytes: usize) -> JsError {
     JsError::Error(format!(
@@ -74,11 +87,25 @@ impl Clipboard {
         Ok(())
     }
 
+    /// Puts `item` on the clipboard, replacing what it holds: its
+    /// `text` as plain text and its `html`, when given, as the platform's
+    /// HTML type, which apps that read formatting (mail, documents, rich
+    /// text editors) paste. Where the platform has no HTML on the clipboard
+    /// (a terminal) the text only.
+    pub(crate) async fn write(item: ClipboardItem, sys: System) -> Result<(), JsError> {
+        granted(&sys)?;
+        crate::prelude::set_clipboard_item(item);
+        Ok(())
+    }
+
     /// The clipboard's text, `""` when it holds none. On iOS, reading it
-    /// may show the system's paste notice.
+    /// may show the system's paste prompt; when the person refuses, it
+    /// rejects with `ERR_ACCESS_DENIED`.
     pub(crate) async fn read_text(sys: System) -> Result<String, JsError> {
         granted(&sys)?;
-        Ok(crate::prelude::clipboard_string().await)
+        crate::element::clipboard_checked_string()
+            .await
+            .ok_or_else(refused)
     }
 
     /// Whether the clipboard holds text, without reading it (no paste
