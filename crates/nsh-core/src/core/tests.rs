@@ -15355,6 +15355,102 @@ mod components {
         assert!(!bound(&c, 1) && !bound(&c, 2));
     }
 
+    /// A long list of keyed rows, each a stop of Tab; a press moves row 10
+    /// to the third place, another moves row 3 past the rendered rows.
+    #[component]
+    fn MovingRows() -> impl IntoElement {
+        let rows = signal((0..100).map(|i| format!("r{i}")).collect::<Vec<_>>());
+        let move_row = move |from: usize, to: usize| {
+            move |_: &()| {
+                rows.update(|r| {
+                    let row = r.remove(from);
+                    r.insert(to, row);
+                })
+            }
+        };
+        view()
+            .flex_1()
+            .child(view().h(px(20.0)).label("up").on_press(move_row(10, 2)))
+            .child(view().h(px(20.0)).label("down").on_press(move_row(3, 90)))
+            .child(
+                virtual_list(
+                    move || rows.with(Vec::len),
+                    move |at| {
+                        view()
+                            .h(px(40.0))
+                            .focusable(true)
+                            .child(text(move || rows.with(|r| r[at.index()].clone())))
+                    },
+                )
+                .keys(move || rows.get())
+                .estimated_item_size(px(40.0))
+                .flex_1(),
+            )
+    }
+
+    /// A keyed row that moves keeps its cell, and so do the rows it passes:
+    /// nothing is made or drawn again, only placed, and the focus in a row
+    /// that moved stays where it is.
+    #[test]
+    fn virtual_lists_move_keyed_rows_with_their_cells() {
+        use crate::tailwind::state::FOCUSED;
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<MovingRows>(|| ()));
+        let batch = c.commit().unwrap();
+        let text_node = |content: &str| {
+            batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Text { id, text, .. } if text.text == content => Some(*id),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no text {content:?}"))
+        };
+        let row = |c: &Core<FakeEngine>, text: NodeId| {
+            let key = c.key(text).unwrap();
+            c.nodes[c.nodes[key as usize].parent as usize].id
+        };
+        let buttons: Vec<NodeId> = batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        let press = |c: &mut Core<FakeEngine>, label: &str| {
+            let button = buttons[usize::from(label == "down")];
+            assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+            let mut batches = Vec::new();
+            while let Some(batch) = c.commit() {
+                batches.push(batch);
+            }
+            batches
+        };
+        let (moved, passed) = (text_node("r10"), text_node("r5"));
+        let focused = row(&c, passed);
+        c.set_states(focused, FOCUSED);
+        let _ = c.commit();
+        for label in ["up", "down"] {
+            let batches = press(&mut c, label);
+            let items: Vec<&MountItem> = batches.iter().flat_map(|b| &b.items).collect();
+            assert!(
+                !items.iter().any(|i| matches!(i, MountItem::Create { .. })),
+                "{label}: {items:?}"
+            );
+            // Only a row coming into the window is drawn: row 3's cell,
+            // moved past it, shows it.
+            let drawn = items
+                .iter()
+                .filter(|i| matches!(i, MountItem::Text { .. }))
+                .count();
+            assert_eq!(drawn, usize::from(label == "down"), "{label}: {items:?}");
+            assert!(c.key(moved).is_ok() && c.key(passed).is_ok(), "{label}");
+            assert_eq!(c.focus.map(|(_, id)| id), Some(focused), "{label}");
+        }
+    }
+
     /// A long list of its own rows, each a stop of Tab.
     #[component]
     fn FocusableRows() -> impl IntoElement {

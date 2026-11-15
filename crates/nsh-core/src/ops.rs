@@ -2974,6 +2974,10 @@ pub enum Prop {
     /// (precedes the new `Count`).
     #[prop(js = "splice", with = crate::js::host_values::splice, internal)]
     Splice(u32, u32, u32),
+    /// The items of a keyed list changed: rows kept, moved, inserted and
+    /// removed, each row that stays keeping its cell (precedes the new
+    /// `Count`). Set by the runtime's lists.
+    ListDiff(std::rc::Rc<crate::list_diff::ListDiff>),
     /// `inverted`: laid out from the end, item 0 last (chat style); starts scrolled
     /// to the end and keeps its distance from the end as content changes.
     #[prop(js = "inverted", on = LIST)]

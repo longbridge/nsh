@@ -31,6 +31,7 @@ use crate::{
         virtual_list::{self, RowFn, SeparatorFn, VirtualListEl},
     },
     geometry::Points,
+    list_diff::ListDiff,
     tailwind::ClassList,
 };
 
@@ -4660,13 +4661,13 @@ impl<M: TextEngine> Core<M> {
             let made = std::cell::Cell::new(false);
             crate::element::computed(move || {
                 let (count, keys) = rows();
-                let splice = match (&*last.borrow(), &keys) {
-                    (Some(old), Some(new)) => crate::element::virtual_list::splice(old, new),
+                let diff = match (&*last.borrow(), &keys) {
+                    (Some(old), Some(new)) => ListDiff::new(old, new),
                     _ => None,
                 };
                 last.replace(keys.clone());
                 if made.replace(true) {
-                    move_rows(&cells, splice, count);
+                    move_rows(&cells, diff.as_ref(), count);
                     count_signal.set(count as usize);
                     patches.borrow_mut().push(super::views::Patch::Rows {
                         list: id,
@@ -4712,7 +4713,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Sends list `id` its rows' changes from `before` (none: a new list):
-    /// a splice when the keys say rows came or went, then the count.
+    /// how the keys say rows came, went or moved, then the count.
     fn send_list_rows(
         &mut self,
         id: NodeId,
@@ -4721,11 +4722,11 @@ impl<M: TextEngine> Core<M> {
         keys: Option<&Rc<[u64]>>,
     ) {
         if let (Some((_, Some(old))), Some(new)) = (before, keys)
-            && let Some((at, removed, inserted)) = crate::element::virtual_list::splice(old, new)
+            && let Some(diff) = ListDiff::new(old, new)
         {
             let _ = self.apply_op(Op::SetProp {
                 id,
-                prop: Prop::Splice(at, removed, inserted),
+                prop: Prop::ListDiff(Rc::new(diff)),
             });
         }
         if before.map(|(count, _)| *count) != Some(count) {
@@ -7397,12 +7398,12 @@ fn dispose_rows(rows: &std::rc::Weak<RefCell<CellRowMap>>) {
     }
 }
 
-/// Moves the live cells of a view's list as its rows moved (`splice`, now
+/// Moves the live cells of a view's list as its rows moved (`diff`, now
 /// `count` rows): each keeps its row, at the row's new index. A cell whose
 /// row went keeps its index (the list frees it, and binds it to another row
 /// before showing it again) while that is a row; past the rows, its content
 /// is disposed, before its bindings could read there.
-fn move_rows(cells: &CellRows, splice: Option<(u32, u32, u32)>, count: u32) {
+fn move_rows(cells: &CellRows, diff: Option<&ListDiff>, count: u32) {
     let parts: Vec<_> = cells
         .borrow()
         .iter()
@@ -7415,17 +7416,9 @@ fn move_rows(cells: &CellRows, splice: Option<(u32, u32, u32)>, count: u32) {
             continue;
         }
         let i = index.get_untracked();
-        let to = match splice {
-            Some((at, removed, inserted)) => {
-                let (at, removed, inserted) = (at as usize, removed as usize, inserted as usize);
-                if i < at || (at..at + removed).contains(&i) {
-                    i
-                } else {
-                    i - removed + inserted
-                }
-            }
-            None => i,
-        };
+        let to = diff
+            .and_then(|d| d.new_index(i as u32))
+            .map_or(i, |(to, _)| to as usize);
         if to < count as usize {
             index.set(to);
         } else {

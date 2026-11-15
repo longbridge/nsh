@@ -945,14 +945,14 @@ what changed.
   when the list rebinds the cell to another row (`cellIndex`) and whose count when the number of rows changes, so
   only the wrapper's bindings that read them run. The row the app rendered goes into the wrapper. Binding,
   recycling, measuring and positioning stay the list's.
-- The component's own rows (`virtual_list(count, |at| row)`, layout from `ListLayout`, `.keys(ids)` for splices):
+- The component's own rows (`virtual_list(count, |at| row)`, layout from `ListLayout`, `.keys(ids)` to match rows by key):
   the core creates the list and binds its cells itself, within the commit that needs them (`Core::commit` binds and
   lays out again; JS is not involved). Each cell's content (`Inner::VirtualRow`) is made once, under an owner of its
   own made under the owner `virtual_list` was called in (the view's, or a `when` / `dynamic` / `each` run's), so the
   rows see that run's context and are disposed with it (also when the list is passed as another component's `Items`; a list a later run keeps moves to that run, and the earlier run's end leaves it alone); it shows the row its `Position` says: a memo of the list's count and keys moves the cells' index signals
-  (`move_rows`) before the bindings that read them run, so a splice runs only the bindings of the rows that moved
-  and never shows a row with another row's data. With keys, rows removed or inserted before others leave their
-  cells and sizes alone. A cell past the end (the list shrank) disposes its content until the list binds it again.
+  (`move_rows`) before the bindings that read them run, so a change runs only the bindings of the rows that changed
+  and never shows a row with another row's data. With keys, a row that stays keeps its cell and size wherever it
+  moves, and rows removed or inserted before others leave the others alone. A cell past the end (the list shrank) disposes its content until the list binds it again.
   The header, footer and empty view are part of the view (their `CellSlot`s), outside the recycling; a separator
   goes into each row's cell, after the row (before it, inverted), while the row is not the last.
 - Another component's rows (`ComponentElement::items(virtual_list(..))`): the list is content of the nested

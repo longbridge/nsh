@@ -5357,6 +5357,13 @@ impl<M: TextEngine> Core<M> {
                     list.splice(at, removed, inserted);
                 }
             }
+            Prop::ListDiff(diff) => {
+                let loads_at_start = node.events.contains(EventKind::LoadMoreAtStart);
+                if let Some(list) = node.list.as_mut() {
+                    list.loads_at_start = loads_at_start;
+                    list.reorder(&diff);
+                }
+            }
             Prop::Columns(columns) => {
                 if let Some(list) = node.list.as_mut() {
                     list.set_columns(columns);

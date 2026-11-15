@@ -36,6 +36,7 @@ pub mod input;
 pub mod js;
 pub mod keyboard;
 pub mod keymap;
+pub mod list_diff;
 pub mod log_file;
 pub mod main_thread;
 pub mod mobile;
