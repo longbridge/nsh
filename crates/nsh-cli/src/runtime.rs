@@ -656,6 +656,11 @@ fn metal_toolchain_missing() -> bool {
             .is_ok_and(|out| out.status.success())
 }
 
+/// The nsh checkout this CLI was built in, if it was built in one.
+pub(crate) fn cli_checkout() -> Option<PathBuf> {
+    checkout(cli_exe().ok()?.parent()?)
+}
+
 /// The workspace of a cargo checkout of nsh this CLI was built in
 /// (`<root>/target/<profile>/nsh`), if it is one.
 fn checkout(bin: &Path) -> Option<PathBuf> {

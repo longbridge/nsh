@@ -520,15 +520,22 @@ pub(crate) fn set_clipboard_html(text: &str, html: &str) {
 /// `Clipboard.readText` / `hasText`: whether the general pasteboard
 /// holds text and, unless `has_only`, the text. `hasStrings` does not read
 /// it, so it shows no paste notice.
-pub(crate) fn read_clipboard(has_only: bool) -> (bool, Option<String>) {
+///
+/// The third value says the person refused the read: iOS's paste prompt
+/// answered with Don't Allow Paste (or pasting from other apps denied in
+/// Settings) leaves `string` `nil` while `hasStrings` still says the
+/// board holds text.
+pub(crate) fn read_clipboard(has_only: bool) -> (bool, Option<String>, bool) {
     let board = objc2_ui_kit::UIPasteboard::generalPasteboard();
     if has_only {
         // SAFETY: a plain getter.
-        return (unsafe { board.hasStrings() }, None);
+        return (unsafe { board.hasStrings() }, None, false);
     }
     // SAFETY: a plain getter.
     let text = unsafe { board.string() }.map(|s| s.to_string());
-    (text.is_some(), text)
+    // SAFETY: a plain getter, which shows no paste prompt.
+    let denied = text.is_none() && unsafe { board.hasStrings() };
+    (text.is_some(), text, denied)
 }
 
 /// Pasteboard types of images read as they are (others become PNG through

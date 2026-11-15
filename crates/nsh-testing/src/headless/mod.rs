@@ -975,6 +975,7 @@ impl Headless {
         self.focus_calls(batch, focused);
         self.modals_presented(before);
         self.modals_closed();
+        self.leave_covered_pages();
         self.exited |= batch.items.iter().any(|item| {
             matches!(
                 item,
@@ -1548,6 +1549,7 @@ impl Headless {
                     control.dispatch_event(screen, EventKind::BackRequest, EventPayload::None);
                 }
                 self.screen.pop(screen);
+                self.leave_covered_pages();
                 control.dispatch_event(screen, EventKind::Dismiss, EventPayload::None);
             }
             Back::Ask(screen) => {
@@ -2181,6 +2183,7 @@ impl Headless {
                 changed: true,
                 pointer_type: nsh_core::PointerType::Touch,
             }],
+            modifiers: self.held,
             activated: None,
         };
         self.engine.control().dispatch_event(
@@ -2409,7 +2412,7 @@ impl Headless {
         if matches!(
             self.environment.os,
             Os::MacOs | Os::Windows | Os::Linux | Os::Web
-        ) && let Some((listener, takes)) = self.screen.wheel_listener(hit)
+        ) && let Some((listener, takes)) = self.screen.wheel_listener(hit, delta, self.held.ctrl)
         {
             let local = self
                 .screen
@@ -3735,6 +3738,196 @@ mod tests {
         }
     }
 
+    /// A stack whose first page has a button with a tooltip that pushes
+    /// the next page, which has a button of its own; it counts the pages,
+    /// the presses of the first page's button and the buttons' blurs.
+    #[component]
+    fn PushFromButton() -> impl IntoElement {
+        let pages = signal(vec![0_u32]);
+        let nexts = signal(0_u32);
+        let blurs = signal(0_u32);
+        view()
+            .flex_1()
+            .child(text(move || {
+                format!(
+                    "pages {} nexts {} blurs {}",
+                    pages.get().len(),
+                    nexts.get(),
+                    blurs.get()
+                )
+            }))
+            .child(nsh_base::nav_stack().flex_1().child(each(
+                move || pages.get(),
+                |&page: &u32| page,
+                move |page, _| {
+                    let page = page.get_untracked();
+                    let content = if page == 0 {
+                        view().child(
+                            view()
+                                .test_id("next")
+                                .on_press(move || {
+                                    nexts.update(|n| *n += 1);
+                                    pages.update(|p| p.push(1));
+                                })
+                                .on_blur(move || blurs.update(|n| *n += 1))
+                                .tooltip(nsh_base::tooltip().child(text("Opens the next page")))
+                                .child(text("Next")),
+                        )
+                    } else {
+                        view().child(text("Second page")).child(
+                            view()
+                                .test_id("done")
+                                .on_press(|| {})
+                                .on_blur(move || blurs.update(|n| *n += 1))
+                                .child(text("Done")),
+                        )
+                    };
+                    nsh_base::nav_page()
+                        .on_dismiss(move |_: &()| pages.update(|p| p.retain(|p| *p < page)))
+                        .child(content)
+                },
+            )))
+    }
+
+    #[test]
+    fn a_pushed_page_takes_the_keyboard_focus_off_the_page_it_covers() {
+        for os in [Os::MacOs, Os::Linux, Os::Web] {
+            let mut config = EngineConfig::new(Root::of::<PushFromButton>());
+            config.environment.os = os;
+            config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+            let mut app = Headless::start(config).unwrap();
+            app.first_render().unwrap();
+            // Tab to the button: its tooltip shows for the keyboard's focus.
+            app.press_key("tab").unwrap();
+            app.wait_for("Opens the next page")
+                .unwrap_or_else(|e| panic!("{os:?}: {e}"));
+            app.press_key("return").unwrap();
+            app.wait_for("Second page").unwrap();
+            // The covered page's button lost the focus, as the platforms
+            // hand it to the window before they hide the page: it heard
+            // its blur and its tooltip went.
+            assert_eq!(app.screen().key_focus(), None, "{os:?}");
+            app.wait_for("pages 2 nexts 1 blurs 1")
+                .unwrap_or_else(|e| panic!("{os:?}: {e}"));
+            app.wait_for_gone("Opens the next page", Duration::from_secs(2))
+                .unwrap_or_else(|e| panic!("{os:?}: {e}"));
+            // Return presses nothing on the page nobody sees.
+            app.press_key("return").unwrap();
+            app.wait_for("pages 2 nexts 1 blurs 1").unwrap();
+            // The first Escape goes back: no tooltip is left to take it.
+            app.press_key("escape").unwrap();
+            app.wait_for_gone("Second page", Duration::from_secs(2))
+                .unwrap_or_else(|e| panic!("{os:?}: {e}"));
+            app.wait_for("pages 1 nexts 1 blurs 1").unwrap();
+        }
+    }
+
+    #[test]
+    fn a_back_takes_the_keyboard_focus_off_the_page_it_pops() {
+        for os in [Os::MacOs, Os::Linux, Os::Web] {
+            let mut config = EngineConfig::new(Root::of::<PushFromButton>());
+            config.environment.os = os;
+            config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+            let mut app = Headless::start(config).unwrap();
+            app.first_render().unwrap();
+            app.press_key("tab").unwrap();
+            app.press_key("return").unwrap();
+            app.wait_for("Second page").unwrap();
+            app.press_key("tab").unwrap();
+            let crate::screen::Pick::One(done) =
+                app.screen().view(&Selector::parse("id:done").unwrap())
+            else {
+                panic!("one done button");
+            };
+            assert_eq!(app.screen().key_focus(), Some(done), "{os:?}");
+            // Escape pops the page natively: the focus leaves it first,
+            // and its button hears that, as before the platforms take
+            // the page away.
+            app.press_key("escape").unwrap();
+            app.wait_for_gone("Second page", Duration::from_secs(2))
+                .unwrap_or_else(|e| panic!("{os:?}: {e}"));
+            assert_eq!(app.screen().key_focus(), None, "{os:?}");
+            app.wait_for("pages 1 nexts 1 blurs 2")
+                .unwrap_or_else(|e| panic!("{os:?}: {e}"));
+        }
+    }
+
+    /// A page with a button that opens a dialog, which has a button that
+    /// moves the focus back to the page's button (the app's `focus()`)
+    /// while the dialog stays, and a binding of Return that confirms.
+    #[component]
+    fn FocusUnderDialog() -> impl IntoElement {
+        let open = signal(false);
+        let opens = signal(0_u32);
+        let confirms = signal(0_u32);
+        let opener = element_ref();
+        on_key_with(
+            "enter",
+            KeyOptions {
+                when: When::NotEditing,
+                ..Default::default()
+            },
+            move |_| {
+                if open.get_untracked() {
+                    confirms.update(|n| *n += 1);
+                }
+            },
+        );
+        view()
+            .flex_1()
+            .child(text(move || {
+                format!("opens {} confirms {}", opens.get(), confirms.get())
+            }))
+            .child(
+                view()
+                    .test_id("open")
+                    .element_ref(&opener)
+                    .on_press(move || {
+                        opens.update(|n| *n += 1);
+                        open.set(true);
+                    })
+                    .child(text("Open")),
+            )
+            .child(dynamic(move || {
+                open.get().then(|| {
+                    nsh_base::dialog().child(
+                        view()
+                            .test_id("refocus")
+                            .on_press(move || opener.focus())
+                            .child(text("Refocus")),
+                    )
+                })
+            }))
+    }
+
+    #[test]
+    fn return_presses_no_control_outside_the_newest_dialog() {
+        for os in [Os::MacOs, Os::Linux, Os::Web] {
+            let mut config = EngineConfig::new(Root::of::<FocusUnderDialog>());
+            config.environment.os = os;
+            config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+            let mut app = Headless::start(config).unwrap();
+            app.first_render().unwrap();
+            app.press("id:open").unwrap();
+            app.wait_for("id:refocus").unwrap();
+            // The app gives the focus to the button under the dialog.
+            app.press("id:refocus").unwrap();
+            let crate::screen::Pick::One(opener) =
+                app.screen().view(&Selector::parse("id:open").unwrap())
+            else {
+                panic!("one open button");
+            };
+            assert_eq!(app.screen().key_focus(), Some(opener), "{os:?}");
+            // Return leaves that button alone and goes to the bindings, as
+            // the platforms press only a control in the newest dialog.
+            app.press_key("return").unwrap();
+            app.wait_for("opens 1 confirms 1")
+                .unwrap_or_else(|e| panic!("{os:?}: {e}"));
+            app.press_key("space").unwrap();
+            app.wait_for("opens 1 confirms 1").unwrap();
+        }
+    }
+
     #[test]
     fn tab_stops_at_a_focusable_view_that_takes_no_presses() {
         let mut config = EngineConfig::new(Root::of::<FocusStops>());
@@ -3860,6 +4053,40 @@ mod tests {
             app.press_key("mod+enter").unwrap();
             app.wait_for("Allows 1 denies 2 cancels 1 sends 2").unwrap();
         }
+    }
+
+    #[test]
+    fn tab_stops_at_fields_and_controls_on_windows() {
+        let mut config = EngineConfig::new(Root::of::<ReturnAllows>());
+        config.environment.os = Os::Windows;
+        config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+        let mut app = Headless::start(config).unwrap();
+        app.first_render().unwrap();
+        let id = |app: &Headless, s: &str| match app.screen().view(&Selector::parse(s).unwrap()) {
+            crate::screen::Pick::One(id) => id,
+            _ => panic!("{s} is shown"),
+        };
+        let (note, deny, cancel) = (
+            id(&app, "id:note"),
+            id(&app, "id:deny"),
+            id(&app, "id:cancel"),
+        );
+        // The field, then the views that take presses, in tree order, as
+        // the Windows backend's traversal (`keyboard::is_stop`) runs it.
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().focused(), Some(note));
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().focused(), None);
+        assert_eq!(app.screen().key_focus(), Some(deny));
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(cancel));
+        app.press_key("shift+tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(deny));
+        // Around from the last stop to the field.
+        app.press_key("tab").unwrap();
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().focused(), Some(note));
+        assert_eq!(app.screen().key_focus(), None);
     }
 
     /// A list of 200 rows of its own, each a button showing its row.
@@ -4983,6 +5210,57 @@ mod tests {
         // No listener around Row 3: the nearest scroll view scrolls.
         app.wheel("Row 3", point(px(0.0), px(120.0))).unwrap();
         assert_eq!(app.screen().scroll(rows).unwrap().y, px(120.0));
+    }
+
+    /// A horizontal timeline (a wheel listener with a horizontal pan) in a
+    /// scroll view of tall rows.
+    #[component]
+    fn WheeledTimeline() -> impl IntoElement {
+        let wheel = signal(String::from("none"));
+        view()
+            .flex_1()
+            .child(text(move || format!("wheel {}", wheel.get())))
+            .child(
+                scroll()
+                    .test_id("rows")
+                    .flex_1()
+                    .child(
+                        view()
+                            .test_id("timeline")
+                            .h(px(40.0))
+                            .claim_touches(TouchClaim::on_pan(PanActivation::horizontal(
+                                px(10.0),
+                                px(10.0),
+                            )))
+                            .on_wheel(move |e: &WheelEvent| {
+                                let WheelDelta::Points(delta) = &e.delta else {
+                                    return;
+                                };
+                                wheel.set(format!("{:.0} {:.0}", delta.x.0, delta.y.0));
+                            }),
+                    )
+                    .children((0..100).map(|i| view().h(px(50.0)).child(text(format!("Row {i}"))))),
+            )
+    }
+
+    #[test]
+    fn a_listener_with_a_pan_axis_takes_only_wheels_along_it() {
+        let mut app = start_linux(Root::of::<WheeledTimeline>());
+        app.first_render().unwrap();
+        let Pick::One(rows) = app
+            .screen()
+            .scroll_view(&Selector::parse("id:rows").unwrap())
+        else {
+            panic!("one scroll view");
+        };
+        // A horizontal wheel is the timeline's: the page stays.
+        app.wheel("id:timeline", point(px(30.0), px(0.0))).unwrap();
+        app.wait_for("wheel 30 0").unwrap();
+        assert_eq!(app.screen().scroll(rows).unwrap().y, Points::ZERO);
+        // A vertical one scrolls the page; the timeline only hears it.
+        app.wheel("id:timeline", point(px(0.0), px(40.0))).unwrap();
+        app.wait_for("wheel 0 40").unwrap();
+        assert_eq!(app.screen().scroll(rows).unwrap().y, px(40.0));
     }
 
     /// A root that listens to the wheel around a scroll view of tall rows.

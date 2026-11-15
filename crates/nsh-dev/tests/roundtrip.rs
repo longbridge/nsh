@@ -670,3 +670,148 @@ fn a_site_deployed_under_a_path_is_served_there() {
     drop(server);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A TCP relay in front of the server whose connection can be cut, as a
+/// phone's when it goes to the background or changes networks.
+struct Relay {
+    addr: std::net::SocketAddr,
+    up: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    open: std::sync::Arc<std::sync::Mutex<Vec<std::net::TcpStream>>>,
+}
+
+impl Relay {
+    fn start(server: std::net::SocketAddr) -> Relay {
+        use std::sync::{Arc, Mutex, atomic::AtomicBool};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let up = Arc::new(AtomicBool::new(true));
+        let open: Arc<Mutex<Vec<std::net::TcpStream>>> = Arc::default();
+        let (relay_up, relay_open) = (up.clone(), open.clone());
+        std::thread::spawn(move || {
+            for device in listener.incoming().flatten() {
+                if !relay_up.load(std::sync::atomic::Ordering::SeqCst) {
+                    continue;
+                }
+                let Ok(upstream) = std::net::TcpStream::connect(server) else {
+                    continue;
+                };
+                let mut open = relay_open.lock().unwrap();
+                open.push(device.try_clone().unwrap());
+                open.push(upstream.try_clone().unwrap());
+                for (mut from, mut to) in [
+                    (device.try_clone().unwrap(), upstream.try_clone().unwrap()),
+                    (upstream, device),
+                ] {
+                    std::thread::spawn(move || {
+                        let _ = std::io::copy(&mut from, &mut to);
+                        let _ = to.shutdown(std::net::Shutdown::Both);
+                    });
+                }
+            }
+        });
+        Relay { addr, up, open }
+    }
+
+    fn cut(&self) {
+        self.up.store(false, std::sync::atomic::Ordering::SeqCst);
+        for stream in self.open.lock().unwrap().drain(..) {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+    }
+
+    fn restore(&self) {
+        self.up.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+fn publish(server: &DevServer, build: u8, patch: Option<&str>) {
+    server.publish(
+        vec![build],
+        format!("source v{build}"),
+        None,
+        AppInfo::default(),
+        patch.map(|code| (code.to_owned(), None)),
+        Vec::new(),
+    );
+}
+
+/// Waits for the client to lose its connection, then for the server to
+/// count it gone.
+fn wait_disconnected(rx: &mpsc::Receiver<DevEvent>, server: &DevServer) {
+    loop {
+        if let DevEvent::Disconnected = rx.recv_timeout(TIMEOUT).expect("disconnect") {
+            break;
+        }
+    }
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    while server.clients() > 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "server still counts it"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// A host that reconnects after missing builds catches up through their
+/// hot updates, in order, then gets the bundle it already runs: the app
+/// keeps its state. When a missed build had no hot update, it gets only
+/// the bundle and reloads, as before.
+#[test]
+fn a_host_that_reconnects_after_missed_builds_gets_their_hot_updates() {
+    let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, |_| {}).unwrap();
+    publish(&server, 1, None);
+    let relay = Relay::start(server.local_addr());
+    let url = format!("ws://{}{WS_PATH}", relay.addr);
+    let (tx, rx) = mpsc::channel();
+    let _client = DevClient::start(url, host("phone", "bc-1"), move |e| {
+        let _ = tx.send(e);
+    })
+    .unwrap();
+    assert!(matches!(
+        next_non_status(&rx),
+        DevEvent::Bundle { version: 1, .. }
+    ));
+
+    // Away while two builds land.
+    relay.cut();
+    wait_disconnected(&rx, &server);
+    publish(&server, 2, Some("patch v2"));
+    publish(&server, 3, Some("patch v3"));
+    relay.restore();
+    for (version, base, code) in [(2, 1, "patch v2"), (3, 2, "patch v3")] {
+        match next_non_status(&rx) {
+            DevEvent::Patch {
+                version: v,
+                base: b,
+                code: c,
+                ..
+            } => assert_eq!((v, b, c.as_str()), (version, base, code)),
+            other => panic!("{other:?}"),
+        }
+    }
+    assert!(matches!(
+        next_non_status(&rx),
+        DevEvent::Bundle { version: 3, .. }
+    ));
+
+    // A reconnect on the same build: the bundle only, which it runs.
+    relay.cut();
+    wait_disconnected(&rx, &server);
+    relay.restore();
+    assert!(matches!(
+        next_non_status(&rx),
+        DevEvent::Bundle { version: 3, .. }
+    ));
+
+    // A missed build that reloads (no hot update) breaks the chain.
+    relay.cut();
+    wait_disconnected(&rx, &server);
+    publish(&server, 4, None);
+    publish(&server, 5, Some("patch v5"));
+    relay.restore();
+    assert!(matches!(
+        next_non_status(&rx),
+        DevEvent::Bundle { version: 5, .. }
+    ));
+}

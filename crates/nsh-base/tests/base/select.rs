@@ -43,6 +43,8 @@ struct HarnessProps {
     /// The app's trigger says its content is invalid, and that it is
     /// busy, at first; F6 toggles `invalid`.
     invalid: bool,
+    /// The app's `cover`, unless left to the platform.
+    cover: Option<bool>,
 }
 
 fn fruits() -> Vec<SelectItem> {
@@ -76,6 +78,7 @@ fn props(items: Vec<SelectItem>) -> HarnessProps {
         default_open: false,
         cleanable: false,
         invalid: false,
+        cover: None,
     }
 }
 
@@ -155,6 +158,9 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     }
     if props.controlled_open {
         el = el.open(move || Some(open.get()));
+    }
+    if let Some(cover) = props.cover {
+        el = el.cover(cover);
     }
     view()
         .pt(px(100.0))
@@ -1023,6 +1029,46 @@ fn on_windows_and_linux_the_list_drops_below_the_trigger() {
         assert_eq!(frame.origin.y, px(130.0), "{os:?}: {frame:?}");
         assert_eq!(frame.size.width, px(160.0), "{os:?}: {frame:?}");
     }
+}
+
+#[test]
+fn without_cover_the_list_drops_below_the_trigger_on_macos() {
+    let chosen = HarnessProps {
+        value: Some("carrot".into()),
+        cover: Some(false),
+        ..props(fruits())
+    };
+    let frame = popup_frame_on(Os::MacOs, chosen);
+    // Below the trigger (its 160 × 30 view at 40, 100), at its start, as
+    // wide, although an item is chosen: as on the other desktops.
+    assert_eq!(frame.origin.x, px(40.0), "{frame:?}");
+    assert_eq!(frame.origin.y, px(130.0), "{frame:?}");
+    assert_eq!(frame.size.width, px(160.0), "{frame:?}");
+}
+
+#[test]
+fn with_cover_the_chosen_item_opens_over_the_trigger_on_every_desktop() {
+    for os in [Os::Windows, Os::Linux, Os::Web] {
+        let chosen = HarnessProps {
+            value: Some("carrot".into()),
+            cover: Some(true),
+            ..props(fruits())
+        };
+        let frame = popup_frame_on(os, chosen);
+        // Carrot's row lies over the trigger (at 100), the rows above it
+        // above the trigger, as on macOS.
+        assert!(frame.origin.y < px(100.0), "{os:?}: {frame:?}");
+        assert_eq!(frame.origin.x, px(40.0), "{os:?}");
+    }
+    // With nothing chosen there is no row to lay over it: below.
+    let frame = popup_frame_on(
+        Os::Windows,
+        HarnessProps {
+            cover: Some(true),
+            ..props(fruits())
+        },
+    );
+    assert_eq!(frame.origin.y, px(130.0), "{frame:?}");
 }
 
 // 10. Accessibility.

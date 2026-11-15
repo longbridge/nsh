@@ -267,6 +267,14 @@ pub struct SelectProps {
     /// Desktops: the distance it keeps from the edges of the safe area.
     #[prop(default)]
     pub margin: Prop<Points>,
+    /// Desktops: the list opens with the chosen item's row over the
+    /// trigger, the rows before it above (`true`), or on the `placement`
+    /// side of the trigger (`false`). Left out, the platform's way: over
+    /// the trigger on macOS, as its pop-up buttons open; on the side
+    /// elsewhere, as Windows', Linux's and browsers' drop-down lists do.
+    /// With nothing chosen it opens on the side; a terminal's list always
+    /// does.
+    pub cover: Prop<Option<bool>>,
     /// The classes of the popup (desktops: at least as wide as the
     /// trigger, never taller than the room beside it) or of the sheet
     /// (touch screens) the list is in.
@@ -673,12 +681,19 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
         render_group: props.render_group,
         empty: props.empty,
         footer: None,
-        // On macOS the list opens with the chosen item over the trigger,
-        // as the system's pop-up buttons do; elsewhere (Windows, Linux,
-        // browsers, terminals) it drops below the trigger, as their own
-        // drop-down lists do.
-        cover: (os() == nsh_core::platform::Os::MacOs && !is_terminal())
-            .then(crate::popup::Cover::new),
+        // Unless the app says otherwise (`cover`), on macOS the list opens
+        // with the chosen item over the trigger, as the system's pop-up
+        // buttons do; elsewhere (Windows, Linux, browsers) it drops below
+        // the trigger, as their own drop-down lists do. A terminal's list
+        // always drops below; a touch screen's is a sheet.
+        cover: (is_desktop() && !is_terminal()).then(|| {
+            let cover = props.cover;
+            crate::popup::Cover::new(move || {
+                cover
+                    .get()
+                    .unwrap_or_else(|| os() == nsh_core::platform::Os::MacOs)
+            })
+        }),
     };
     // Tab past the trigger, or out of the list's search field, closes the
     // list and moves the focus on.

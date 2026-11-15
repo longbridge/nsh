@@ -85,16 +85,23 @@ pub struct MouseInput {
 pub enum Input {
     /// Mouse input.
     Mouse(MouseInput),
-    /// A key name as in NSH's keymap (`Enter`, `Escape`, or a character).
+    /// A key as the terminal names it: a character, or the key's name
+    /// (`Enter`, `Escape`, `ArrowLeft`, `F5`; the keymap's `Left` and the
+    /// DOM's `ArrowLeft` both name the same key). `release` is true when
+    /// the source reported the key coming up: only the kitty keyboard
+    /// protocol, or crossterm's Windows console input, reports that.
     Key {
         /// Key name.
         key: String,
         /// Held modifiers.
         modifiers: Modifiers,
-        /// True for a release when the terminal reports it.
+        /// True for a release when the source reports it: the kitty keyboard
+        /// protocol, or crossterm's Windows console input.
         release: bool,
     },
-    /// A repeated key press identified by the terminal protocol.
+    /// An auto-repeat the terminal reported (the kitty keyboard protocol):
+    /// a press the key's being held repeated. A terminal without the
+    /// protocol sends its repeats as presses of their own.
     KeyRepeat {
         /// Key name, as for `Key`.
         key: String,
@@ -175,6 +182,8 @@ struct Drag {
     velocity: nsh_core::input::VelocityTracker,
     activated: Option<NodeId>,
     scroll_start: Points,
+    /// The modifier keys held when the button went down.
+    modifiers: Modifiers,
 }
 
 impl Drag {
@@ -188,6 +197,7 @@ impl Drag {
             EventPayload::Touch(Box::new(nsh_core::TouchEvent {
                 phase,
                 timestamp: self.started.elapsed().as_secs_f64() * 1000.0,
+                modifiers: self.modifiers,
                 activated: self.activated,
                 points: vec![nsh_core::TouchPoint {
                     id: 0,
@@ -268,6 +278,7 @@ impl Pointer {
             velocity: Default::default(),
             activated: None,
             scroll_start: Points::ZERO,
+            modifiers: mouse.modifiers,
         };
         touch.report(cx.control, nsh_core::TouchPhase::Start);
         touch.report(cx.control, nsh_core::TouchPhase::Cancel);
@@ -735,6 +746,7 @@ impl Pointer {
                             velocity: Default::default(),
                             activated: None,
                             scroll_start: Points::ZERO,
+                            modifiers: mouse.modifiers,
                         };
                         drag.velocity.add(0.0, page);
                         drag.report(control, nsh_core::TouchPhase::Start);

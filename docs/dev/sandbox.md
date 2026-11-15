@@ -23,14 +23,20 @@ trusted: every limit and check is enforced in Rust, never in JS.
   reads natively, where the time budget cannot interrupt (children, nested arrays counted together; `<Each>`; menus,
   submenus counted together; a tray's title; `Animated.sequence` / `parallel` / `stagger`; `split`'s keys; a navigation
   stack's routes; a native component's `props` and `events`; a pan's `touches`; a canvas call's arguments, counted
-  together), hold at most `dom::MAX_ARRAY_ITEMS` (2^20) items, each loop running over the length it checked: a sparse
-  array is as long as it says, and one nested in itself multiplies its length, so more is refused (a `RangeError`; a
-  menu's or the tray's error; a canvas argument is ignored with a warning) rather than read index by index. A
-  navigation stack does not grow past the bound either (`push` throws), so it can always be navigated. Two arrays read
-  together are looked up, never compared pairwise (`setRoutes`'s old and new routes, `split`'s keys and the props'
-  names). Children and submenus nested more than `dom::MAX_DEPTH` (64) levels deep are refused: they are read by
-  native recursion, which the interpreter's stack limit does not cover. A list's rows (`<List each>`) are not bounded:
-  a long list is what it is for.
+  together; what the decoders of `protocol.rs` read of one value, counted together: a style and its shadows and
+  transforms, a host prop's lists, an animation's ranges and easing, a composite's runs, a native component's JSON),
+  hold at most `dom::MAX_ARRAY_ITEMS` (2^20) items, each loop running over the length it checked: a sparse array is as
+  long as it says, and one nested in itself multiplies its length, so more is refused (a `RangeError`; a menu's or the
+  tray's error; a canvas argument is ignored with a warning; an animation's `start` rejects) rather than read index by
+  index. Lengths are never read with rquickjs's `Array::len` (`protocol::take_len`): it asserts an integer, and the
+  length of an array of 2^31 items or more is a float, so the panic, in a call from QuickJS that cannot unwind, aborts
+  the process. A navigation stack does not grow past the bound either (`push` throws), so it can always be navigated.
+  Two arrays read together are looked up, never compared pairwise (`setRoutes`'s old and new routes, `split`'s keys
+  and the props' names, the keys a style's objects merge). Children, submenus and styles nested more than
+  `dom::MAX_DEPTH` (64) levels deep are refused, and a scrollbar theme's JSON reads `null` past that depth or 2^20
+  entries: they are read by native recursion, which the interpreter's stack limit does not cover. A composite keeps
+  the values it animates once each, however many places of its tree hold them. A list's rows (`<List each>`) are not
+  bounded: a long list is what it is for.
 - An overrun call is cut off by the interrupt handler with an exception no `catch` swallows, reported with the budget it
   exceeded; the VM goes on. Running out of memory or going over a quota **stops the VM** (`Host::fatal`), also when the
   app catches the error: the heap's allocator (`HeapAllocator`) enforces the limit and records reaching it, since QuickJS
@@ -46,7 +52,8 @@ trusted: every limit and check is enforced in Rust, never in JS.
   libraries such as axios. Hot updates are evaluated from Rust and need none of it.
 - **Capabilities** (`nsh_core::access`): an app declares what it may reach in `nsh.json` `"capabilities"` — `network`
   (`hosts`: `*`, `*.example.com` or a host; `http`: a host narrowed by methods, schemes, a port, paths and path prefixes),
-  `webview` (`hosts` a web view may show and navigate to; `input`: its ref's `sendInput`, trusted input that carries
+  `webview` (`hosts` a web view may show and navigate to, a page's own `blob:` URLs following the origin they embed;
+  `input`: its ref's `sendInput`, trusted input that carries
   user activation, so never granted without a declaration, `Capabilities::all` leaves it off), `statusBar`, `process` (`execute`: exact executable names or absolute paths; `exit`: host exit requests; `env`: additional
   visible environment names), `fs` (`read` / `write`: trusted path roots), `clipboard` (`nsh`'s `Clipboard`: reading and
   writing the system clipboard; the copy menu of selectable text is the user's own act and needs none), `picker`

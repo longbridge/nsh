@@ -43,7 +43,6 @@ mod web;
 
 use std::{
     cell::{Cell, RefCell},
-    path::PathBuf,
     rc::{Rc, Weak},
     sync::Arc,
 };
@@ -309,10 +308,6 @@ pub(crate) struct NativeState {
     access: RefCell<Option<Arc<Access>>>,
     /// The application id: web views keep their data under it.
     app_id: RefCell<String>,
-    /// Where web views save downloads (the app's data directory's
-    /// `downloads`); `None` before an app starts or without a data
-    /// directory.
-    downloads: RefCell<Option<PathBuf>>,
     /// The controls, by node.
     hosts: RefCell<FxHashMap<NodeId, Host>>,
 }
@@ -351,24 +346,13 @@ impl NativeState {
         *self.app_id.borrow_mut() = app_id.to_owned();
     }
 
-    /// Where the app that starts saves web downloads (its data directory's
-    /// `downloads`); `None` without one.
-    pub(crate) fn set_downloads(&self, downloads: Option<PathBuf>) {
-        *self.downloads.borrow_mut() = downloads;
-    }
-
-    /// Where web views save downloads.
-    pub(crate) fn downloads(&self) -> Option<PathBuf> {
-        self.downloads.borrow().clone()
-    }
-
     /// Drops every control (the app stopped): media stops playing, pages
     /// close.
     pub(crate) fn clear(&self) {
         let hosts = std::mem::take(&mut *self.hosts.borrow_mut());
         for host in hosts.values() {
             if let Host::Web(w) = host {
-                w.close();
+                w.shutdown();
             }
         }
         drop(hosts);

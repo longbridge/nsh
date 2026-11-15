@@ -35,8 +35,11 @@ There the environment's `ctrl_for_command` is set, and labels show such shortcut
 (`Keystroke::pressed`: `keymap.label`, `Command`'s hints, the menus' right column).
 Every mode is restored on exit, on errors, on a panic and on a stop signal, the kitty flags popped first.
 When the terminal reports focus coming back, the host turns bracketed paste, focus reports and mouse capture on
-again (another program in the same terminal may have turned them off) and the next frame repaints every Cell;
-losing focus cancels a held pointer and a scroll bar drag. The host collects what ratatui writes for a frame
+again (another program in the same terminal may have turned them off), pushes the kitty keyboard flags again
+if losing focus popped them — and only sets them (`CSI = flags u`) if their level is still held, so focus
+moving back and forth never stacks levels — and repaints every Cell in the next frame; losing focus pops the
+kitty flags, so focus moving away gives the terminal back the level the host pushed, and cancels a held pointer
+and a scroll bar drag. The host collects what ratatui writes for a frame
 and writes it between frames as one synchronized update (`?2026h` … `?2026l`), so the terminal never shows half
 a frame; a frame that changes no Cell (only the cursor commands of the frame before) writes nothing at all. Inside
 tmux (`TMUX` set) the markers are written only when tmux reported mode 2026 to DECRQM.
@@ -899,6 +902,55 @@ again. Legacy terminal presses are independent actions: Ctrl+I/Tab, Ctrl+M/Enter
 indistinguishable, and a terminal may consume Ctrl+S/Ctrl+Q for flow control (the host's raw mode turns
 the tty's own flow control off). With the kitty keyboard protocol the standalone host negotiates, those pairs
 arrive apart. Editing uses the keys below while a field is focused.
+
+### Raw key events and capture
+
+A focused custom view can hear the keys themselves, not only the app's shortcuts: `on_key_down` and `on_key_up`
+(a Rust view's `Interactive::on_key_down` / `on_key_up`, a TSX view's `onKeyDown` / `onKeyUp`) report a
+`KeyEvent`. `key_event.rs` names the key as the other platforms do: a character exactly as the terminal
+reports it (its case and the layout's Shift are the source's), a named key by its DOM spelling (`ArrowLeft`
+where the keymap says `Left`; `PageUp`, `F5`), and a key no shortcut names (`Shift`, `CapsLock`, a media
+key) by the terminal's name — `Unidentified` for one it has none for. `code` is always `""`: a terminal
+reports no hardware key identity, and the host never derives one from the character or the key's name.
+`repeat` marks the terminal's auto-repeats. `default_prevented` is the mounted capture policy's decision for
+this one transition.
+
+The app's shortcuts and its menus' are matched first, as on the desktops; the raw transition follows, before the
+terminal's defaults (Tab's traversal, Return and Space pressing, Escape going back, scrolling). A transition is
+reported once, on the focused view (or the text view of a focused link): the engine bubbles it to the enabled
+ancestors that listen, in this surface's window — a dialog (`Modal`, `nsh_base::dialog()`) is the keyboard
+boundary, as a window is on the desktops. A sheet (`nsh_base::sheet()`) is not one: only the web build wraps it
+in a `modal()`, while on the native platforms it is two overlays in the page's own window. A portaled `Overlay`
+is mounted in a root view, but its logical parent is the view that declared it: interest and capture follow
+that logical parent (the core's `ViewProps::key_parent`), as the engine's bubbling does, so a portal's — or a
+sheet's — keys reach its declaring view's listeners and capture rules and not another portal's. A release reaches the view that has the focus when it arrives; a terminal cannot pair it with a
+press that went to another view.
+
+`capture_keys` (`KeyCapture`: none, all, or a list of shortcuts) is read from the mounted props of the focused
+view and its enabled ancestors before the defaults run. A captured key still reaches the listeners, marked
+`default_prevented: true`, and runs no default; a view that only listens takes nothing from what the key does.
+The rule is matched against the canonical shortcut keystroke (`shift+tab`, `a`), with the app's existing
+vocabulary, and `all` captures keys no shortcut can name too. It is re-read on every transition, so mounting or
+unmounting a rule applies at once. A native control keeps its own keys: while a text field or the Minibuffer has
+the keys, views hear no raw transitions, and a capture around the field cannot intercept what is typed into it.
+
+What a `KeyEvent` can say follows the input source. A plain terminal, or a legacy one, sends presses: a press
+is a key down, and the host invents no release, repeat or physical code for it. A release and an auto-repeat
+are sent only by a source that reports event types: the kitty keyboard protocol, which the standalone host
+negotiates, and Windows' console input, which crossterm reads with kinds. The kitty flags add releases and
+auto-repeats for the keys the terminal sends as escape codes — the functional keys and those with modifiers; a
+plain text key stays text, so its release or repeat arrives only where the terminal reports it anyway. That is
+deliberate: kitty's "report all keys as escape codes" flag (8) would give text keys repeats and releases too,
+but it also stops the terminal sending their text at all; the text is only reportable through a CSI-u event's
+associated-text field (flag 16), which crossterm drops, so composed input (dead keys, IME, an AltGr character)
+would be lost or arrive as the base key's character. The same flag is why Enter, Tab and Backspace carry no
+release here: the protocol leaves them in their legacy bytes, which a shell needs, unless every key is
+escape-coded. Full key events for plain text need a parser that reads that field; until there is one, typing
+stays as the terminals send it. With `REPORT_ALTERNATE_KEYS`, crossterm reports a shifted key as the character
+the user's layout types and clears Shift from that event's modifiers: `key` is that character (the DOM's key for
+the press), while the Key scheme's canonical keystroke still matches `shift+…` shortcuts. A modifier key
+arrives only when the terminal reports it (the flags pushed leave out kitty's "all keys as escape codes"), and
+then as `Shift`, `Control`, `Alt` or `Meta`; keypad, CapsLock and NumLock state is not part of a `KeyEvent`.
 
 ## The Minibuffer
 

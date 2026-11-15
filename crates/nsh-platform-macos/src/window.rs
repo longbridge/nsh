@@ -1995,6 +1995,9 @@ fn main_close_press(surface: &Surface, reason: CloseReason) -> bool {
     if held.pending_close.get().is_some() {
         return false;
     }
+    if crate::app::ask_main_window_quit(surface.key(), held.close_on_press.get()) {
+        return false;
+    }
     let serial = held.serial.get() + 1;
     held.serial.set(serial);
     let close = held.close_on_press.get();

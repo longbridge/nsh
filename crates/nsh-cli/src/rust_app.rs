@@ -87,9 +87,114 @@ pub(crate) fn set_release_hosts() {
     RELEASE_HOSTS.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// The platform crate features `nsh package` builds the release runner
+/// with (`crate::native_features`); `None`: all of them.
+static RUNNER_FEATURES: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex::new(None);
+
+/// Builds this command's release runners with only `features` of their
+/// platform crate ([`RUNNER_FEATURES`]).
+pub(crate) fn set_runner_features(features: Vec<String>) {
+    *RUNNER_FEATURES.lock().unwrap_or_else(|e| e.into_inner()) = Some(features);
+}
+
+/// The features a release runner's crate forwards to its runner library
+/// (`nsh-windows-app`, ...) for the platform crate `platform`: the
+/// library's defaults, so a build that names none of them is the whole
+/// runner it always was.
+fn runner_features(platform: &str) -> &'static [&'static str] {
+    const ALL: &[&str] = &[
+        "js",
+        "shader",
+        "editor",
+        "emoji-picker",
+        "highlight",
+        "math",
+        "plot",
+        "rich-editor",
+        "term",
+        "zlib",
+        "crypto",
+        "websocket",
+        "updater",
+        "svg",
+    ];
+    const LINUX: &[&str] = &[
+        "js",
+        "shader",
+        "editor",
+        "emoji-picker",
+        "highlight",
+        "math",
+        "plot",
+        "rich-editor",
+        "term",
+        "zlib",
+        "crypto",
+        "webview",
+        "websocket",
+        "updater",
+        "svg",
+        "net",
+        "sound",
+    ];
+    const WINDOWS: &[&str] = &[
+        "js",
+        "shader",
+        "editor",
+        "emoji-picker",
+        "highlight",
+        "math",
+        "plot",
+        "rich-editor",
+        "term",
+        "zlib",
+        "crypto",
+        "websocket",
+        "updater",
+        "svg",
+        "net",
+    ];
+    match platform {
+        "nsh-platform-linux" => LINUX,
+        "nsh-platform-windows" => WINDOWS,
+        _ => ALL,
+    }
+}
+
+/// The cargo arguments of a release runner of `platform`: its features
+/// when [`set_runner_features`] chose some, each the runner's crate has
+/// (`net` is not macOS's), plus those no import tells about (Linux's
+/// `sound` and `webview`).
+fn runner_feature_args(platform: &str) -> Vec<String> {
+    let Some(chosen) = RUNNER_FEATURES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+    else {
+        return Vec::new();
+    };
+    let has = runner_features(platform);
+    let kept: Vec<&str> = has
+        .iter()
+        .copied()
+        .filter(|f| matches!(*f, "sound" | "webview") || chosen.iter().any(|c| c == f))
+        .collect();
+    vec![
+        "--no-default-features".into(),
+        "--features".into(),
+        kept.join(","),
+    ]
+}
+
 /// Makes `app` the app of this command ([`current`]).
 pub(crate) fn set_current(app: RustApp) {
     *CURRENT.lock().unwrap_or_else(|e| e.into_inner()) = Some(app);
+}
+
+/// Forgets the app of this command: a TSX app whose own runner could not
+/// be built ([`runner_only`]) ships the prebuilt one instead.
+pub(crate) fn clear_current() {
+    *CURRENT.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 /// The app of this command, if it has Rust crates of its own.
@@ -692,6 +797,30 @@ pub(crate) fn is_root(entry: &Path) -> bool {
     entry
         .file_name()
         .is_some_and(|name| name.eq_ignore_ascii_case("nsh.json"))
+}
+
+/// A workspace with no crates of the app's, for `nsh package` of a TSX
+/// app: its release runner built here with only the native features its
+/// bundle reaches, instead of the prebuilt one that has all of them. nsh's
+/// crates come from the checkout this CLI was built in, else from
+/// crates.io at this CLI's version.
+pub(crate) fn runner_only(entry: &Path) -> anyhow::Result<RustApp> {
+    let entry = dunce::canonicalize(entry)
+        .with_context(|| format!("entry not found: {}", entry.display()))?;
+    let dir = entry.parent().context("entry has no directory")?;
+    let nsh = crate::runtime::cli_checkout().map_or(Nsh::Registry, Nsh::Source);
+    let watched = watched(&[], nsh.source());
+    let app = RustApp {
+        workspace: dir.join(".nsh/rust"),
+        nsh,
+        crates: Vec::new(),
+        watched,
+        root: None,
+        retargeted: false,
+        unify: true,
+    };
+    app.write_workspace()?;
+    Ok(app)
 }
 
 /// The `"rust"` crates of the app whose entry is `entry`, if it has any.
@@ -1663,16 +1792,32 @@ panic = \"abort\"
         if let Some(root) = &self.root {
             self.write_rust_runners(ws, root)?;
         }
+        // Its features forward to the platform crate's, with no crate's
+        // defaults, so `nsh package` can build the release library with
+        // only those the app uses ([`runner_feature_args`]); by default,
+        // and for development (`dev`), all of them.
+        let all = runner_features("nsh-platform-android");
+        let forward: String = all
+            .iter()
+            .map(|f| format!("{f} = [\"nsh-platform-android/{f}\"]\n"))
+            .collect();
+        let default = all
+            .iter()
+            .map(|f| format!("{f:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let off = ", default-features = false";
         write(
             &ws.join("android/Cargo.toml"),
             &format!(
-                "{}\n[lib]\nname = {:?}\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n[features]\ndev = [\"nsh-platform-android/dev\"]\n\n\
+                "{}\n[lib]\nname = {:?}\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n\
+                 [features]\ndefault = [{default}]\ndev = [\"nsh-platform-android/dev\"]\n{forward}\n\
                  [dependencies]\nnsh-core = {}\nnsh-platform-android = {}\nnsh-base = {}\n{app}\n",
                 package("android"),
                 self.android_lib(false),
                 src("nsh-core"),
-                src("nsh-platform-android"),
-                self.nsh.dep("nsh-base", HIGHLIGHT),
+                self.nsh.dep("nsh-platform-android", off),
+                self.nsh.dep("nsh-base", off),
             ),
         )?;
         write(&ws.join("android/build.rs"), ANDROID_BUILD_RS)?;
@@ -2489,18 +2634,46 @@ opt-level = \"s\"
         } else {
             (String::new(), "")
         };
+        // A release runner names its features itself, on its runner library
+        // and with no crate's defaults, so `nsh package` can build it with
+        // only those the app uses ([`runner_feature_args`]); by default,
+        // all of them.
+        let release = dir.ends_with("-app");
+        let (lib_dep, base_dep, platform_dep, features) = if release {
+            let all = runner_features(platform);
+            let forward: String = all
+                .iter()
+                .map(|f| format!("{f} = [\"{lib}/{f}\"]\n"))
+                .collect();
+            let default = all
+                .iter()
+                .map(|f| format!("{f:?}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let off = ", default-features = false";
+            (
+                self.nsh.dep(lib, off),
+                self.nsh.dep("nsh-base", off),
+                self.nsh.dep(platform, off),
+                format!("\n[features]\ndefault = [{default}]\n{forward}"),
+            )
+        } else {
+            (
+                src(lib),
+                self.nsh.dep("nsh-base", HIGHLIGHT),
+                src(platform),
+                String::new(),
+            )
+        };
         write(
             &ws.join(dir).join("Cargo.toml"),
             &format!(
                 "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
-                 [[bin]]\nname = {:?}\npath = \"main.rs\"\n\n[dependencies]\n{lib} = {}\nnsh-core = {}\nnsh-base = {}\n{app}\n{hack}\n\
-                 [target.'cfg({os})'.dependencies]\n{platform} = {}\n",
+                 [[bin]]\nname = {:?}\npath = \"main.rs\"\n\n[dependencies]\n{lib} = {lib_dep}\nnsh-core = {}\nnsh-base = {base_dep}\n{app}\n{hack}\n\
+                 [target.'cfg({os})'.dependencies]\n{platform} = {platform_dep}\n{features}",
                 self.bin(dir),
                 self.bin(dir),
-                src(lib),
                 src("nsh-core"),
-                self.nsh.dep("nsh-base", HIGHLIGHT),
-                src(platform),
             ),
         )?;
         let lib = lib.replace('-', "_");
@@ -2695,10 +2868,22 @@ opt-level = \"s\"
             (_, true) => "ios-app",
         };
         let what = platform.host(runner);
+        let platform_crate = match platform {
+            Platform::Linux => "nsh-platform-linux",
+            Platform::Windows => "nsh-platform-windows",
+            Platform::MacOs => "nsh-platform-macos",
+            _ => "nsh-platform-ios",
+        };
+        let trimmed = if runner && !matches!(platform, Platform::Gpui | Platform::Tui) {
+            runner_feature_args(platform_crate)
+        } else {
+            Vec::new()
+        };
+        let trimmed: Vec<&str> = trimmed.iter().map(String::as_str).collect();
         let (workspace, features) = match platform {
             Platform::Gpui => (self.gpui_workspace()?, crate::runtime::gpui_features()),
             Platform::Tui => (self.tui_workspace()?, &[][..]),
-            _ => (self.workspace.clone(), &[][..]),
+            _ => (self.workspace.clone(), &trimmed[..]),
         };
         let package = self.bin(name);
         let release = runner || RELEASE_HOSTS.load(std::sync::atomic::Ordering::Relaxed);
@@ -2829,10 +3014,18 @@ opt-level = \"s\"
             };
             // A Rust app's library has no development support (it has no
             // JS to reload): `nsh run` builds it in debug.
+            // A TSX app's release library has only the features `nsh package`
+            // chose ([`set_runner_features`]).
+            let trimmed = if !dev && !rust {
+                runner_feature_args("nsh-platform-android")
+            } else {
+                Vec::new()
+            };
+            let trimmed: Vec<&str> = trimmed.iter().map(String::as_str).collect();
             let features: &[&str] = if dev && !rust {
                 &["--features", "dev"]
             } else {
-                &[]
+                &trimmed
             };
             let package = self.bin(if rust { "rust-android" } else { "android" });
             let artifact = format!("lib{}.so", self.android_lib(rust));
@@ -2844,7 +3037,11 @@ opt-level = \"s\"
                 profile: None,
                 extra: features,
                 artifact: &artifact,
-                what: &format!("libnsh.so of {} for {abi}", self.packages()),
+                what: &match self.packages() {
+                    // A TSX app's own library (`runner_only`) has no crates.
+                    p if p.is_empty() => format!("libnsh.so for {abi}"),
+                    p => format!("libnsh.so of {p} for {abi}"),
+                },
             };
             let lib = self.build_with(sdk.ndk_cargo(triple)?, &build)?;
             let dir = out.join("lib").join(&abi);
@@ -3312,6 +3509,32 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{AppCrate, Nsh, RootConfig, RustApp};
+
+    #[test]
+    fn a_release_runner_builds_with_the_chosen_features() {
+        assert!(super::runner_feature_args("nsh-platform-windows").is_empty());
+        super::set_runner_features(vec!["js".into(), "net".into(), "svg".into(), "plot".into()]);
+        let args = super::runner_feature_args("nsh-platform-windows");
+        assert_eq!(
+            args,
+            ["--no-default-features", "--features", "js,plot,svg,net"]
+        );
+        // macOS has no `net`; Linux keeps `sound`, which no import tells.
+        assert_eq!(
+            super::runner_feature_args("nsh-platform-macos")[2],
+            "js,plot,svg"
+        );
+        assert_eq!(
+            super::runner_feature_args("nsh-platform-linux")[2],
+            "js,plot,webview,svg,net,sound"
+        );
+        // Android: a TSX app's own library, trimmed the same way.
+        assert_eq!(
+            super::runner_feature_args("nsh-platform-android")[2],
+            "js,plot,svg"
+        );
+        *super::RUNNER_FEATURES.lock().unwrap() = None;
+    }
 
     #[test]
     fn rust_app_platforms_name_only_features_they_have() {
@@ -3905,6 +4128,12 @@ mod tests {
         let android = read("rust-android/lib.rs");
         assert!(android.contains("nsh::main!(app_root());"), "{android}");
         assert!(read("rust-android/Cargo.toml").contains("default-features = false"));
+        // A TSX app's Android library names its features itself: all by
+        // default, so `nsh package` can turn off those it does not use.
+        let lib = read("android/Cargo.toml");
+        assert_eq!(lib.matches("default-features = false").count(), 2, "{lib}");
+        assert!(lib.contains("plot = [\"nsh-platform-android/plot\"]"), "{lib}");
+        assert!(lib.contains("default = [\"js\", \"shader\""), "{lib}");
         let web = read("rust-web/lib.rs");
         // Only `nsh/base`'s core part: the root makes the components it uses
         // by type, so the module links those and no others.

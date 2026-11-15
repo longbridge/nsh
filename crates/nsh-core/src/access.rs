@@ -1061,6 +1061,17 @@ fn read_url(url: &str) -> Result<UrlParts<'_>, Unread> {
     })
 }
 
+/// The origin a `blob:` URL embeds (`blob:<origin>/<id>`, as
+/// `URL.createObjectURL` writes it), when `url` is one. A blob's origin is
+/// its creator's: a browser only makes a blob URL in the origin of the
+/// document that made it, so checking the embedded origin checks the page.
+fn blob_origin(url: &str) -> Option<&str> {
+    url.get(..5)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("blob:"))
+        .then(|| &url[5..])
+        .filter(|origin| !origin.is_empty())
+}
+
 impl Capabilities {
     /// Legacy unrestricted APIs for apps without a declaration. Socket,
     /// process, filesystem and host function grants stay empty and always
@@ -2307,11 +2318,16 @@ impl Access {
     }
 
     /// Whether a web view may show (or navigate to) `url`; `about:blank`
-    /// whenever web views are granted.
+    /// whenever web views are granted. A `blob:` URL is the blob's
+    /// creator's: it is granted when the origin it embeds is, so a page may
+    /// show and download its own blobs, and a blob of a host it may not
+    /// show is not granted. An opaque blob (`blob:null/…`) names no origin
+    /// and is not granted.
     pub fn allows_webview(&self, url: &str) -> bool {
         if url == "about:blank" {
             return self.allows_webviews();
         }
+        let url = blob_origin(url).unwrap_or(url);
         match read_url(url) {
             Ok(parts) => self.each(|c| c.allows_webview(&parts)),
             Err(Unread::Ambiguous(scheme)) => self.each(|c| c.allows_webview_anywhere(&scheme)),
@@ -3155,6 +3171,74 @@ mod tests {
             granted: Some(caps(r#"{ "webview": { "hosts": ["*"] } }"#)),
         };
         assert!(!narrowed.allows_web_media(WebMedia::Microphone));
+    }
+
+    /// A page's `URL.createObjectURL` blob URL embeds its creator's origin:
+    /// a web view may show and download it when that origin is a granted
+    /// host, and never a blob of a host it may not show, an opaque one, or
+    /// any without a `webview` grant.
+    #[test]
+    fn page_owned_blob_urls_follow_the_origin_they_embed() {
+        let a = Access {
+            declared: caps(
+                r#"{ "webview": { "hosts": ["app.example.com", "*.app.example.com"] } }"#,
+            ),
+            granted: None,
+        };
+        for url in [
+            "blob:https://app.example.com/uuid",
+            "blob:http://app.example.com:6711/uuid",
+            "blob:https://docs.app.example.com/uuid",
+            "BLOB:HTTPS://APP.EXAMPLE.COM/uuid",
+        ] {
+            assert!(a.allows_webview(url), "{url}");
+        }
+        for url in [
+            "blob:https://bank.example/uuid",
+            "blob:https://app.example.com.evil.example/uuid",
+            "blob:https://app.example.com@bank.example/uuid",
+            "blob:null/uuid",
+            "blob:data:text/html,hi",
+            "blob:file:///etc/passwd",
+            "blob:",
+            "blob:https://",
+        ] {
+            assert!(!a.allows_webview(url), "{url}");
+        }
+        // Without a `webview` grant, a blob naming a host is still refused.
+        let denied = Access {
+            declared: caps("{}"),
+            granted: None,
+        };
+        assert!(!denied.allows_webview("blob:https://app.example.com/uuid"));
+        // The embedding app may narrow the hosts: both must grant the origin.
+        let narrowed = Access {
+            granted: Some(caps(r#"{ "webview": { "hosts": ["app.example.com"] } }"#)),
+            ..a.clone()
+        };
+        assert!(narrowed.allows_webview("blob:https://app.example.com/uuid"));
+        assert!(!narrowed.allows_webview("blob:https://docs.app.example.com/uuid"));
+        // The shape WebKit reports for a page at a granted loopback host.
+        let local = Access {
+            declared: caps(r#"{ "webview": { "hosts": ["127.0.0.1"] } }"#),
+            granted: None,
+        };
+        assert!(
+            local.allows_webview("blob:http://127.0.0.1:6711/6f3c2f0e-8a1d-4c5e-9b7a-0d2e4f6a8b1c")
+        );
+        // HTTP(S) pages are checked as before: the origin either matches or
+        // it does not.
+        assert!(a.allows_webview("https://app.example.com/page"));
+        assert!(!a.allows_webview("https://bank.example/page"));
+        // A blob whose embedded origin parsers read differently is covered
+        // only by a grant of every host, as any ambiguous URL is.
+        let ambiguous = "blob:https://app.example.com\\@bank.example/uuid";
+        assert!(!a.allows_webview(ambiguous));
+        let any = Access {
+            declared: caps(r#"{ "webview": { "hosts": ["*"] } }"#),
+            granted: None,
+        };
+        assert!(any.allows_webview(ambiguous));
     }
 
     #[test]

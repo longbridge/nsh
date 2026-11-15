@@ -1400,18 +1400,22 @@ fn purpose(config: &InputConfig) -> (gtk::InputPurpose, gtk::InputHints) {
         (false, KeyboardType::Phone) => gtk::InputPurpose::Phone,
         (false, KeyboardType::Url) => gtk::InputPurpose::Url,
     };
+    // A visible password is typed as it is: never capitalized, checked,
+    // completed or learned.
+    let password = config.visible_password();
     let mut hints = match config.auto_capitalize {
+        _ if password => gtk::InputHints::NONE,
         AutoCapitalize::None => gtk::InputHints::NONE,
         AutoCapitalize::Sentences => gtk::InputHints::UPPERCASE_SENTENCES,
         AutoCapitalize::Words => gtk::InputHints::UPPERCASE_WORDS,
         AutoCapitalize::Characters => gtk::InputHints::UPPERCASE_CHARS,
     };
-    hints |= if config.auto_correct {
+    hints |= if config.auto_correct && !password {
         gtk::InputHints::SPELLCHECK | gtk::InputHints::WORD_COMPLETION
     } else {
         gtk::InputHints::NO_SPELLCHECK
     };
-    if config.secure {
+    if config.secure || password {
         hints |= gtk::InputHints::PRIVATE;
     }
     (purpose, hints)

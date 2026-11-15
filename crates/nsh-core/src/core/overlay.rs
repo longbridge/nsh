@@ -8,10 +8,12 @@
 //! (every view around them is, and the overlays around them are) and in
 //! which root view, and moves their native views there: one opened later
 //! goes on top. An overlay is a layout root of its own, laid out in a box
-//! the size of its root view (`position: fixed`), and placed against its
-//! anchor when it has one ([`crate::overlay::place`]); it follows the
-//! anchor as it moves ([`Core::place_overlays`], after the lists and
-//! scroll offsets of the commit). The core also routes what dismissing
+//! the size of its root view (`position: fixed`), or with an anchor in the
+//! room it is placed in (the root view's safe area less its `margin`: its
+//! percentage sizes and insets are against that room), and placed against
+//! its anchor when it has one ([`crate::overlay::place`]); it follows the
+//! anchor as it moves ([`Core::place_overlays`], after the lists and scroll
+//! offsets of the commit). The core also routes what dismissing
 //! takes: presses outside (`onPressOutside`: the overlays watching them,
 //! their anchors and root views listen to touches while they are shown)
 //! and Escape / the back button (`onCancel`, to the top overlay listening:
@@ -1359,8 +1361,28 @@ impl<M: TextEngine> Core<M> {
         Some((size, root.insets))
     }
 
-    /// Lays out shown overlay `key` in a box the size of its root view,
-    /// when that size or its content changed, and places it.
+    /// The room overlay `key` shown in `host` keeps to beside its anchor:
+    /// the root view's safe area less the overlay's `margin`.
+    fn overlay_area(&self, key: Key, host: NodeId) -> Option<Bounds<Points>> {
+        let config = self.overlay(key)?.config;
+        let (size, insets) = self.overlay_host_size(host)?;
+        let m = config.margin.0;
+        Some(inset(
+            rect(0.0, 0.0, size.width.0, size.height.0),
+            [
+                insets.top.0 + m,
+                insets.right.0 + m,
+                insets.bottom.0 + m,
+                insets.left.0 + m,
+            ],
+        ))
+    }
+
+    /// Lays out shown overlay `key` when the box it is laid out in or its
+    /// content changed, and places it. One with an anchor is laid out in
+    /// the room it is placed in ([`Self::overlay_area`]), so content wider
+    /// than that room wraps within it; one without in a box the size of
+    /// its root view, as a `position: fixed` box.
     pub(super) fn layout_overlay(&mut self, key: Key) {
         let Some(state) = self.overlay(key) else {
             return;
@@ -1368,7 +1390,12 @@ impl<M: TextEngine> Core<M> {
         let (Some(host), wrapper) = (state.host, state.wrapper) else {
             return;
         };
-        let Some((size, _)) = self.overlay_host_size(host) else {
+        let anchored = self.resolved_anchor(key) != OverlayAnchor::None;
+        let size = match anchored {
+            false => self.overlay_host_size(host).map(|(size, _)| size),
+            true => self.overlay_area(key, host).map(|area| area.size),
+        };
+        let Some(size) = size else {
             return;
         };
         let root = self.nodes[key as usize].root.as_ref().expect("root state");
@@ -1376,16 +1403,9 @@ impl<M: TextEngine> Core<M> {
         if !changed && !self.layout.dirty(wrapper) {
             return;
         }
-        if changed {
-            let style = taffy::Style {
-                size: taffy::Size {
-                    width: taffy::Dimension::length(size.width.0),
-                    height: taffy::Dimension::length(size.height.0),
-                },
-                ..taffy::Style::default()
-            };
-            self.layout.set_style(wrapper, style);
-        }
+        // Also when only its content changed: the box may still be the
+        // frame's room of the layout before (below).
+        self.layout.set_style(wrapper, sized(size));
         self.nodes[key as usize]
             .root
             .as_mut()
@@ -1396,6 +1416,24 @@ impl<M: TextEngine> Core<M> {
             state.natural = None;
         }
         self.layout_root(wrapper, definite(size));
+        // A terminal frames a popup's box one Cell outside it, which is
+        // placed with the box (`overlay_origin`): a box that fills the
+        // room would put its frame past the margin. Whether there is such
+        // a frame is the layout's (it keeps a card's border inside the box
+        // instead), so it is known only now: such a box is laid out once
+        // more, within the frame.
+        if anchored && self.layout.grid().is_some() {
+            let ring = self.outside_frame(key);
+            let room = framed_room(size, ring);
+            let laid = self.nodes[key as usize]
+                .layout
+                .map(|l| self.rounded_layout(l).size);
+            if laid.is_some_and(|l| l.width > room.width.0 + 0.5 || l.height > room.height.0 + 0.5)
+            {
+                self.layout.set_style(wrapper, sized(room));
+                self.layout_root(wrapper, definite(room));
+            }
+        }
         self.emit_frames(key);
     }
 
@@ -1463,19 +1501,9 @@ impl<M: TextEngine> Core<M> {
             self.set_native_overlay_anchor(key, own);
             return origin;
         };
-        let Some((size, insets)) = self.overlay_host_size(host) else {
+        let Some(area) = self.overlay_area(key, host) else {
             return frame.origin;
         };
-        let m = config.margin.0;
-        let area = inset(
-            rect(0.0, 0.0, size.width.0, size.height.0),
-            [
-                insets.top.0 + m,
-                insets.right.0 + m,
-                insets.bottom.0 + m,
-                insets.left.0 + m,
-            ],
-        );
         // A terminal frames a popup's box one Cell outside it (a rounded
         // line, `nsh-platform-tui`): it is placed with that frame, which
         // then sits beside the trigger, never on its row, and lines up
@@ -1601,10 +1629,7 @@ impl<M: TextEngine> Core<M> {
                 Points(super::round((placed.origin.x + ring.width).0, ratio)),
                 Points(super::round((placed.origin.y + ring.height).0, ratio)),
             ),
-            available: Size {
-                width: (placed.available.width - ring.width * 2.0).max(Points::ZERO),
-                height: (placed.available.height - ring.height * 2.0).max(Points::ZERO),
-            },
+            available: framed_room(placed.available, ring),
             ..placed
         };
         let bounds = Bounds {
@@ -1667,19 +1692,10 @@ impl<M: TextEngine> Core<M> {
         let told = state.told?;
         let layout = self.nodes[key as usize].layout?;
         let max = self.layout.style(layout).max_size;
+        let room = framed_room(area.size, ring);
         let (max, told, extent, room) = match horizontal {
-            true => (
-                max.width,
-                told.width,
-                size.width,
-                area.size.width - ring.width * 2.0,
-            ),
-            false => (
-                max.height,
-                told.height,
-                size.height,
-                area.size.height - ring.height * 2.0,
-            ),
+            true => (max.width, told.width, size.width, room.width),
+            false => (max.height, told.height, size.height, room.height),
         };
         // A max size of the app's own: the overlay's size is its own.
         let taffy::ExpandedLengthPercentageAuto::Length(max) = max.expand() else {
@@ -1702,7 +1718,7 @@ impl<M: TextEngine> Core<M> {
         let measure = super::leaf_measure(&self.text_engine, &mut self.measure_cache);
         let measured = self
             .layout
-            .extent_capped(layout, !horizontal, room.0.max(0.0), measure)?;
+            .extent_capped(layout, !horizontal, room.0, measure)?;
         let natural = Points(measured).max(extent);
         self.overlay_mut(key)?.natural = Some(natural);
         Some(natural)
@@ -2120,6 +2136,28 @@ impl<M: TextEngine> Core<M> {
                 );
             }
         }
+    }
+}
+
+/// The style of an overlay's wrapper: the box `size` it is laid out in.
+fn sized(size: Size<Points>) -> taffy::Style {
+    taffy::Style {
+        size: taffy::Size {
+            width: taffy::Dimension::length(size.width.0),
+            height: taffy::Dimension::length(size.height.0),
+        },
+        ..taffy::Style::default()
+    }
+}
+
+/// The room inside `room` left to a box a terminal frames `ring` outside
+/// it on each side ([`Core::outside_frame`]): what its layout, the size it
+/// is measured at and the `available` it is told all keep to, so its frame
+/// fits where the box is placed.
+fn framed_room(room: Size<Points>, ring: Size<Points>) -> Size<Points> {
+    Size {
+        width: (room.width - ring.width * 2.0).max(Points::ZERO),
+        height: (room.height - ring.height * 2.0).max(Points::ZERO),
     }
 }
 

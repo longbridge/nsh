@@ -13,9 +13,10 @@ use std::sync::Arc;
 use crate::{
     ImageSource,
     color::Hsla,
-    element::{JsHost, JsIn, JsKind, JsOwned, JsValue, PropEnum, PropError, TsTypes},
+    element::{JsHost, JsIn, JsKind, JsObject, JsOwned, JsValue, PropEnum, PropError, TsTypes},
     geometry::{Point, Points},
     keymap::{self, Keystroke, Modifiers, When},
+    platform::Os,
 };
 
 mod login_item;
@@ -32,7 +33,39 @@ pub use window::{
     WindowKind, WindowMode, WindowOptions, WindowPointerEvents, WindowPosition, WindowProgress,
     WindowRequest, Workspaces,
 };
-pub use window_state::{Display, DisplayId, WindowPlacement, WindowState};
+pub use window_state::{Display, DisplayId, WindowPlacement, WindowState, notch};
+
+/// Additional sources of quit requests on standalone macOS apps. Both
+/// options default to false and require a quit request listener. Other
+/// platforms and embedded views keep their existing lifecycle.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, JsObject)]
+#[non_exhaustive]
+pub struct QuitRequestOptions {
+    /// Asks the app before logout, restart or shutdown. Call `quit()` to
+    /// approve, or `cancel_quit_request()` to cancel the system request.
+    #[prop(default)]
+    pub system: bool,
+    /// Asks before a user closes the main window when that would end the
+    /// app. A window with `close_on_press: false` uses its close handler
+    /// instead; a window kept alive on close still hides as before.
+    #[prop(default)]
+    pub main_window_close: bool,
+}
+
+impl QuitRequestOptions {
+    /// Whether logout, restart and shutdown ask the quit listener.
+    pub fn system(mut self, system: bool) -> Self {
+        self.system = system;
+        self
+    }
+
+    /// Whether closing the main window asks the quit listener when that
+    /// close would end the app.
+    pub fn main_window_close(mut self, main_window_close: bool) -> Self {
+        self.main_window_close = main_window_close;
+        self
+    }
+}
 
 /// How a window's title bar looks ([`TitleBarOptions::style`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
@@ -332,9 +365,23 @@ impl Shortcut {
         out
     }
 
+    /// Its label on `os`: on macOS as symbols in the order Apple writes
+    /// them (`⌃⌥⇧⌘C`), else [`Shortcut::label`].
+    pub fn label_for(&self, os: Os) -> String {
+        if os != Os::MacOs {
+            return self.label();
+        }
+        self.keystroke().label(os, true)
+    }
+
     /// Whether a focused text field uses this shortcut itself, as it uses
     /// the same keystroke of `nsh/keymap` ([`Keystroke::edits_text`]).
     pub fn edits_text(&self) -> bool {
+        self.keystroke().edits_text()
+    }
+
+    /// The same keystroke as `nsh/keymap` reads it.
+    fn keystroke(&self) -> Keystroke {
         let key = match self.key {
             Key::Char(c) => keymap::Key::Char(c),
             Key::Space => keymap::Key::Char(' '),
@@ -360,7 +407,7 @@ impl Shortcut {
             shift: self.shift,
             cmd: self.meta,
         };
-        Keystroke { modifiers, key }.edits_text()
+        Keystroke { modifiers, key }
     }
 }
 
@@ -999,9 +1046,17 @@ pub enum DesktopCommand {
     /// listens to them ([`crate::element::desktop::on_quit_request`]): the
     /// platform reports them on the root ([`WindowEvent::QuitRequest`])
     /// instead, and the app sends [`DesktopCommand::Quit`] when it is
-    /// ready. The system ending the app (logging out, shutting down) quits
-    /// either way. Sent when it changes; `true` until the first.
+    /// ready. The system ending the app quits either way by default;
+    /// macOS can include it with [`DesktopCommand::SetQuitRequestOptions`].
+    /// Sent when it changes; `true` until the first. On the
+    /// web, while it is `false`, the user leaving the page is the request.
     SetQuitOnRequest(bool),
+    /// Sets the additional macOS quit request sources. Both default to
+    /// false. Other platforms ignore this command.
+    SetQuitRequestOptions(QuitRequestOptions),
+    /// Cancels a pending macOS quit request, including the system's
+    /// logout or shutdown. Nothing happens without a pending request.
+    CancelQuitRequest,
     /// The application menu (macOS's menu bar, the window's menu bar on
     /// Windows and Linux; not shown there while the title bar is hidden,
     /// its shortcuts still work); `None` restores the platform's default.
@@ -1221,6 +1276,40 @@ mod tests {
         }
         assert_eq!(title_bar_height(Some(px(42.0))), Some(px(42.0)));
         assert_eq!(title_bar_height(Some(px(300.0))), Some(px(200.0)));
+    }
+
+    #[test]
+    fn mac_labels_use_symbols() {
+        let copy = MenuRole::Copy.shortcut(true).unwrap();
+        assert_eq!(copy.label_for(Os::MacOs), "⌘C");
+        assert_eq!(
+            MenuRole::Redo.shortcut(true).unwrap().label_for(Os::MacOs),
+            "⇧⌘Z"
+        );
+        assert_eq!(
+            MenuRole::ToggleFullScreen
+                .shortcut(true)
+                .unwrap()
+                .label_for(Os::MacOs),
+            "⌃⌘F"
+        );
+        assert_eq!(
+            MenuRole::Copy
+                .shortcut(false)
+                .unwrap()
+                .label_for(Os::Windows),
+            "Ctrl+C"
+        );
+        // Off macOS it is `label()` as it was, `Win+` and all.
+        let win = Shortcut {
+            meta: true,
+            ..Shortcut::key(Key::Char('e'))
+        };
+        assert_eq!(win.label_for(Os::Linux), win.label());
+        assert_eq!(win.label_for(Os::Windows), win.label());
+        assert_eq!(win.label_for(Os::Linux), "Win+E");
+        let copy = MenuRole::Copy.shortcut(false).unwrap();
+        assert_eq!(copy.label_for(Os::Linux), copy.label());
     }
 
     #[test]

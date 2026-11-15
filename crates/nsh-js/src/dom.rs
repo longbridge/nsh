@@ -479,6 +479,14 @@ pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
         ),
     ),
     (
+        "animateLayout",
+        1,
+        decl!("(transition?: LayoutAnimationAnimation): void"),
+        decl!(
+            "Animates the frames this view's change moves in this turn, with `transition` (a phase of `LayoutAnimation.configureNext`: `type`, `duration`, `delay`, `springDamping`, `bezier`; easing in and out over 300 ms without one): its own frame and its subtree's, its siblings' and its ancestors' siblings' that it pushes, and the content of those that it resizes. The rest of the turn (a list that updates, live data) changes at once, as it would without it, and a view that gains or loses children does not carry the change into them. Insertions and removals are not animated. A `LayoutAnimation.configureNext` in the same turn animates every frame instead. E.g. a header that collapses over a list that keeps updating."
+        ),
+    ),
+    (
         "reveal",
         1,
         decl!("(options?: RevealOptions): void"),
@@ -637,6 +645,17 @@ unsafe extern "C" fn node_method(
                 qjs::JS_SetPropertyStr(cx, o, c"y".as_ptr(), offset);
                 qjs::JS_SetPropertyStr(cx, o, c"animated".as_ptr(), field(a0, c"animated"));
                 ("scrollTo", o)
+            }
+            // The phase `update` of a layout animation sent to this node.
+            "animateLayout" => {
+                let o = qjs::JS_NewObject(cx);
+                let update = if qjs::JS_IsObject(a0) {
+                    qjs::JS_DupValue(cx, a0)
+                } else {
+                    qjs::JS_NewObject(cx)
+                };
+                qjs::JS_SetPropertyStr(cx, o, c"update".as_ptr(), update);
+                ("layoutAnimation", o)
             }
             "scrollToEnd" if qjs::JS_IsUndefined(a0) => ("scrollToEnd", qjs::JS_NewObject(cx)),
             other => (
@@ -2285,6 +2304,17 @@ unsafe extern "C" fn item_run(
     if unsafe { !qjs::JS_IsException(r) && qjs::JS_IsFunction(cx, r) } && node_ptr(cx, r).is_null()
     {
         return item_memo(cx, r);
+    }
+    // An array holding functions (a component's `children` shown beside a
+    // branch of its own, `{cond ? a : b}{props.children}`): each gets a memo
+    // too, as `insert_run` gives them, or the array's effect would call
+    // them all, and make their nodes again, when any one of them changes.
+    if unsafe { qjs::JS_IsArray(r) }
+        && let Some(memos) = memoize_run(cx, r)
+    {
+        // SAFETY: the copy holds what it needs of `r`.
+        unsafe { qjs::JS_FreeValue(cx, r) };
+        return memos;
     }
     r
 }
@@ -5067,6 +5097,9 @@ mod tests {
             const v = element("view");
             v.focus();
             v.blur();
+            // The frames its change moves, with its own transition.
+            v.animateLayout({ type: "bezier", bezier: [0.3, 0, 0, 1], duration: 200 });
+            v.animateLayout();
             globalThis.keep = [s, i, v];
             "#,
         )
@@ -5085,6 +5118,8 @@ mod tests {
                 "Command { id: 4, command: InsertText(\"pasted\") }",
                 "Command { id: 6, command: Focus }",
                 "Command { id: 6, command: Blur }",
+                "Command { id: 6, command: LayoutAnimation(LayoutAnimation { create: None, update: Some(LayoutTransition { curve: Bezier([0.3, 0.0, 0.0, 1.0]), property: Opacity, duration_ms: 200.0, delay_ms: 0.0 }), delete: None }) }",
+                "Command { id: 6, command: LayoutAnimation(LayoutAnimation { create: None, update: Some(LayoutTransition { curve: EaseInEaseOut, property: Opacity, duration_ms: 300.0, delay_ms: 0.0 }), delete: None }) }",
             ]
         );
     }

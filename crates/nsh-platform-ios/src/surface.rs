@@ -15,21 +15,23 @@ use nsh_engine::{
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
     rc::{Retained, Weak},
-    runtime::{AnyObject, ProtocolObject},
+    runtime::ProtocolObject,
 };
 use objc2_core_foundation::{CGRect, CGSize};
 use objc2_foundation::{
     NSCurrentLocaleDidChangeNotification, NSNotification, NSNotificationCenter, NSNumber, NSObject,
-    NSObjectProtocol, NSOperationQueue, NSSystemTimeZoneDidChangeNotification, NSTimeZone, NSValue,
+    NSObjectProtocol, NSOperationQueue, NSSet, NSSystemTimeZoneDidChangeNotification, NSTimeZone,
+    NSValue,
 };
 use objc2_ui_kit::{
     NSValueUIGeometryExtensions, UIApplication, UIApplicationDidBecomeActiveNotification,
     UIApplicationDidEnterBackgroundNotification, UIApplicationState,
     UIApplicationWillEnterForegroundNotification, UIApplicationWillResignActiveNotification,
-    UIDevice, UIFont, UIFontTextStyleBody, UIKeyboardAnimationCurveUserInfoKey,
-    UIKeyboardAnimationDurationUserInfoKey, UIKeyboardFrameEndUserInfoKey,
-    UIKeyboardWillChangeFrameNotification, UIKeyboardWillHideNotification, UIResponder,
-    UISceneActivationState, UISceneDidActivateNotification, UISceneDidEnterBackgroundNotification,
+    UIDevice, UIFocusAnimationCoordinator, UIFocusUpdateContext, UIFont, UIFontTextStyleBody,
+    UIKeyboardAnimationCurveUserInfoKey, UIKeyboardAnimationDurationUserInfoKey,
+    UIKeyboardFrameEndUserInfoKey, UIKeyboardWillChangeFrameNotification,
+    UIKeyboardWillHideNotification, UIPress, UIPressesEvent, UIResponder, UISceneActivationState,
+    UISceneDidActivateNotification, UISceneDidEnterBackgroundNotification,
     UISceneWillDeactivateNotification, UISceneWillEnterForegroundNotification, UITraitCollection,
     UITraitEnvironment, UIUserInterfaceIdiom, UIUserInterfaceStyle, UIView, UIWindowScene,
 };
@@ -211,6 +213,10 @@ define_class!(
             let _: () = unsafe { msg_send![super(self), didMoveToWindow] };
             // Another window may be another scene, in another state.
             self.ivars().lifecycle.set(self.scene_state());
+            // Keys held through a window move lose their releases.
+            if let Some(target) = self.target() {
+                target.keyboard().clear();
+            }
             self.publish_environment();
             let Some(mounter) = self
                 .ivars()
@@ -260,13 +266,23 @@ define_class!(
             });
         }
 
+        /// The root owns the keyboard until a view or input takes it: a
+        /// hardware key with nothing focused reaches the surface (Tab then
+        /// moves to the first stop) instead of going to no responder.
+        #[unsafe(method(canBecomeFirstResponder))]
+        fn can_become_first_responder(&self) -> bool {
+            true
+        }
+
         /// Hardware keys no responder inside handled: the app's shortcuts
-        /// (`nsh/keymap`) take those they bind.
+        /// (`nsh/keymap`) take those they bind, then Tab with no focused
+        /// view moves to the first stop ([`crate::keyboard::root_tab`]).
         #[unsafe(method(pressesBegan:withEvent:))]
-        fn presses_began(&self, presses: &AnyObject, event: Option<&AnyObject>) {
-            let consumed = self
-                .target()
-                .is_some_and(|target| crate::keymap::root_began(&target, presses));
+        fn presses_began(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
+            let consumed = self.target().is_some_and(|target| {
+                crate::keymap::root_began(&target, presses)
+                    || crate::keyboard::root_tab(self, &target, presses)
+            });
             if !consumed {
                 // SAFETY: calling the superclass implementation.
                 let _: () = unsafe { msg_send![super(self), pressesBegan: presses, withEvent: event] };
@@ -274,7 +290,7 @@ define_class!(
         }
 
         #[unsafe(method(pressesEnded:withEvent:))]
-        fn presses_ended(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+        fn presses_ended(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
             let consumed = self
                 .target()
                 .is_some_and(|target| crate::keymap::ended(&target, presses));
@@ -285,7 +301,7 @@ define_class!(
         }
 
         #[unsafe(method(pressesCancelled:withEvent:))]
-        fn presses_cancelled(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+        fn presses_cancelled(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
             let consumed = self
                 .target()
                 .is_some_and(|target| crate::keymap::ended(&target, presses));
@@ -294,6 +310,29 @@ define_class!(
                 let _: () =
                     unsafe { msg_send![super(self), pressesCancelled: presses, withEvent: event] };
             }
+        }
+
+        /// UIKit's focus engine moved focus (its hardware Tab traversal
+        /// from the window's initial focus, or a request made after a
+        /// responder change): the focused focusable view becomes the first
+        /// responder, so it hears hardware keys. Inputs follow too; an
+        /// embedded native component keeps its own controls' behavior.
+        #[allow(deprecated)]
+        #[unsafe(method(didUpdateFocusInContext:withAnimationCoordinator:))]
+        fn did_update_focus(
+            &self,
+            context: &UIFocusUpdateContext,
+            coordinator: &UIFocusAnimationCoordinator,
+        ) {
+            // SAFETY: calling the superclass implementation.
+            let _: () = unsafe {
+                msg_send![
+                    super(self),
+                    didUpdateFocusInContext: context,
+                    withAnimationCoordinator: coordinator
+                ]
+            };
+            crate::keyboard::adopt_focus(context);
         }
     }
 );
@@ -404,6 +443,9 @@ impl RootView {
             // AVAudioEngine and AVPlayer.
             audio: true,
             web_evaluate: true,
+            // Download decisions and cancellations reach the web view
+            // (`nsh_platform_apple::web_download`).
+            webview_requests: true,
             // wgpu on Metal, in builds with it, until it finds no GPU.
             shaders: nsh_engine::shader::LINKED,
             // No file dialogs, file manager or trash (Catalyst included):
@@ -522,6 +564,13 @@ impl RootView {
             };
             if ours {
                 view.ivars().lifecycle.set(state);
+                // The keys held in a surface that stopped taking input lose
+                // their releases; forget them without inventing one.
+                if state != Lifecycle::Active
+                    && let Some(target) = view.target()
+                {
+                    target.keyboard().clear();
+                }
                 view.publish_environment();
             }
         });
@@ -849,6 +898,9 @@ impl RootView {
         *mounter.get(mtm).borrow_mut() = Some(installed);
         *self.ivars().running.borrow_mut() = Some(Running { engine, mounter });
         self.ivars().environment.set(Some(self.environment()));
+        // The root owns hardware keys until a view or input takes the focus
+        // (an `autoFocus` input still becomes first responder after this).
+        let _ = self.becomeFirstResponder();
     }
 
     /// Stops the engine and removes all native views.

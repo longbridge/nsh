@@ -29,6 +29,10 @@ mod mount;
 #[cfg(target_os = "macos")]
 mod press_momentum;
 #[cfg(target_os = "macos")]
+mod quit_requests;
+#[cfg(target_os = "macos")]
+mod scaled_input;
+#[cfg(target_os = "macos")]
 mod title_bar;
 #[cfg(target_os = "macos")]
 mod window_alert;
@@ -48,7 +52,11 @@ fn main() {
     } else {
         #[cfg(target_os = "macos")]
         {
-            if std::env::var_os("NSH_TITLE_BAR_CHECK_ONLY").is_some() {
+            if std::env::var_os("NSH_QUIT_CHECK_CASE").is_some() {
+                quit_requests::run_case();
+            } else if std::env::var_os("NSH_QUIT_CHECK_ONLY").is_some() {
+                quit_requests::run();
+            } else if std::env::var_os("NSH_TITLE_BAR_CHECK_ONLY").is_some() {
                 title_bar::run();
             } else if mount::bench_only() {
                 mount::bench_alone();
@@ -67,6 +75,8 @@ fn main() {
                 input_hidden::run();
             } else if std::env::var_os("NSH_FPS_COLLAPSE_CHECK_ONLY").is_some() {
                 fps_collapse::run();
+            } else if std::env::var_os("NSH_SCALED_INPUT_CHECK_ONLY").is_some() {
+                scaled_input::run();
             } else if std::env::var_os("NSH_ZOOM_CHECK_ONLY").is_some()
                 || std::env::var_os("NSH_ZOOM_PINCH_CHECK_ONLY").is_some()
             {
@@ -79,6 +89,7 @@ fn main() {
             } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
                 press_momentum::run();
             } else {
+                quit_requests::run();
                 window_press::run();
                 window_hover::run();
                 title_bar::run();
@@ -89,6 +100,7 @@ fn main() {
                 ime::run();
                 input_hidden::run();
                 fps_collapse::run();
+                scaled_input::run();
                 zoom::run();
                 mount::run();
                 // Last: it makes the process an accessory app.

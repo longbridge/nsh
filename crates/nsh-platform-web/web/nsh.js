@@ -1632,6 +1632,8 @@ class Player {
   reset() {
     this.stop();
     this.audioDispose();
+    this.askBeforeLeaving(false);
+    this.watchPageEnd(false);
     this.resetHistory();
     // The next app sets its own (its first commit comes before the write).
     if (this.windowTitle) {
@@ -1667,6 +1669,8 @@ class Player {
     this.hostEvents ??= [];
     // Fonts registered while it starts hold its first frame back (`fontLoading`).
     this.starting = true;
+    // The page's end is the app's (`watchPageEnd`).
+    this.watchPageEnd(true);
     // The app's address starts as its first entry's, which the core has
     // before the app's code runs (`nsh_set_page_url`).
     if (this.history) this.withStrings([this.firstUrl], (p, l) => this.wasm.nsh_set_page_url?.(p, l));
@@ -2045,6 +2049,10 @@ class Player {
     this.trapped = true;
     this.deferred = [];
     clearTimeout(this.timer);
+    // Nothing of the app's can run any more (save, quit): the page leaves
+    // as any other.
+    this.askBeforeLeaving(false);
+    this.watchPageEnd(false);
   }
 
   showError(message, { overlay = !this.trapped } = {}) {
@@ -2286,12 +2294,38 @@ class Player {
     const host = parent._layer ?? parent;
     // Appended children stay under a border drawn over them.
     const last = host._borderOver && host._border?.parentNode === host ? host._border : null;
-    host.insertBefore(child, before && before.parentNode === host ? before : last);
+    this.placeChild(host, child, before && before.parentNode === host ? before : last);
     this.showHosted(child);
     this.readingChanged(host);
     if (parent._kind === "stack") {
       this.changedStacks.add(parent);
       this.stackChanged(parent, child);
+    }
+  }
+
+  /// Puts `child` before `ref` in `host`. A restack (`zIndex` changed)
+  /// re-inserts a view already there; moving the node holding the focus
+  /// would drop it (and fire blur), so its siblings move around it instead.
+  placeChild(host, child, ref) {
+    const active = document.activeElement;
+    if (child.parentNode !== host || !active || active === document.body || !child.contains(active)) {
+      host.insertBefore(child, ref);
+      return;
+    }
+    if (child === ref || child.nextSibling === ref) return;
+    const moved = [];
+    let forward = false;
+    for (let n = child.nextSibling; n; n = n.nextSibling) {
+      if (n === ref) { forward = true; break; }
+    }
+    if (ref === null) forward = true;
+    if (forward) {
+      for (let n = child.nextSibling; n && n !== ref; n = n.nextSibling) moved.push(n);
+      for (const n of moved) host.insertBefore(n, child);
+    } else {
+      for (let n = ref; n && n !== child; n = n.nextSibling) moved.push(n);
+      const anchor = child.nextSibling;
+      for (const n of moved) host.insertBefore(n, anchor);
     }
   }
 
@@ -2524,6 +2558,16 @@ class Player {
   op_a([, id, prop, value]) {
     const el = this.view(id);
     if (!el) return;
+    // A view that left the page keeps its bindings until its node is
+    // collected (`op_d`), which may be long after: a view mounted and
+    // removed again and again (a looping pulse inside a condition) would
+    // have every batch write many views no one sees. One that was on the
+    // page and is off it now is skipped; it is written again with the
+    // batch that inserts it again (every batch writes every bound value,
+    // after its inserts). One never on the page yet is written, so it
+    // shows its values once it is; one animating out is still on it.
+    if (el.isConnected) el._onPage = true;
+    else if (el._onPage) return;
     if (prop.startsWith("canvas:") && el._shader) {
       this.shaderSlot(el, Number(prop.slice(7)), value);
       return;
@@ -2583,10 +2627,12 @@ class Player {
   }
 
   /**
-   * A text whose plain runs are as many as before (a cell's new value, a
-   * counter): its spans take the new texts and places in place, so a text
-   * that changes often makes and removes no nodes. False when the runs
-   * cannot be updated so (backgrounds, links, another count).
+   * A text of plain runs that had plain runs (a cell's new value, a
+   * counter, an answer streamed in): its spans take the new texts and
+   * places in place, and only the runs it gained or lost are made or
+   * removed, so a text that changes often remakes no nodes for the lines
+   * that stayed. False when the runs cannot be updated so (backgrounds,
+   * links, runs of parts).
    */
   updateRuns(el, cx, cy, runs, styles, backgrounds, links) {
     if (backgrounds?.length || links?.length || !runs.length) return false;
@@ -2595,12 +2641,26 @@ class Player {
       if (child.classList.contains("nsh-run-bg")) return false;
       if (child.classList.contains("nsh-run")) spans.push(child);
     }
-    if (spans.length !== runs.length) return false;
+    if (!spans.length) return false;
     for (let i = 0; i < runs.length; i++) {
       const [, , text, , , parts] = runs[i];
+      if (parts || !text) return false;
+      if (i >= spans.length) continue;
       const node = spans[i].firstChild;
       // Only a span holding one text node, as `fillRun` leaves plain text.
-      if (parts || !text || !node || node.nodeType !== 3 || node.nextSibling) return false;
+      if (!node || node.nodeType !== 3 || node.nextSibling) return false;
+    }
+    // The runs it lost go; those it gained follow the last span kept (past
+    // its line's break, which `lineBreaks` keeps).
+    for (const span of spans.splice(runs.length)) span.remove();
+    let before = spans[spans.length - 1]?.nextSibling;
+    if (before?.nodeType === 3) before = before.nextSibling;
+    while (spans.length < runs.length) {
+      const span = document.createElement("span");
+      span.append(document.createTextNode(""));
+      if (el._animation.color) span.style.color = el._animation.color;
+      el.insertBefore(span, before ?? null);
+      spans.push(span);
     }
     runs.forEach(([x, y, text, style, start, , after], i) => {
       const span = spans[i];
@@ -2628,9 +2688,15 @@ class Player {
    * shows of them.
    */
   lineBreaks(el) {
-    for (const node of [...el.childNodes]) if (node.nodeType === 3) node.remove();
+    // A break already in its place stays: a text that changes often (an
+    // answer streamed in) moves no nodes for the lines it did not change.
+    for (const node of [...el.childNodes]) {
+      if (node.nodeType !== 3) continue;
+      const span = node.previousSibling;
+      if (!span?.classList?.contains("nsh-run") || span._after !== node.data) node.remove();
+    }
     for (const span of el.querySelectorAll(":scope > .nsh-run")) {
-      if (span._after) span.after(span._after);
+      if (span._after && span.nextSibling?.nodeType !== 3) span.after(span._after);
     }
   }
 
@@ -5231,11 +5297,16 @@ class Player {
       field.enterKeyHint = { done: "done", go: "go", next: "next", search: "search", send: "send" }[config.returnKey] ?? "enter";
     } else field.removeAttribute("enterkeyhint");
     field.readOnly = !config.editable;
-    field.autocapitalize = config.autoCapitalize === "none" ? "off" : config.autoCapitalize;
-    field.spellcheck = config.autoCorrect;
+    // A password shown as plain text (a password field that is not secure)
+    // is never capitalized or checked (the closest the browser has to
+    // Android's visible password keyboard).
+    const password = !config.secure && (config.autoComplete === "current-password" || config.autoComplete === "new-password");
+    const correct = config.autoCorrect && !password;
+    field.autocapitalize = password || config.autoCapitalize === "none" ? "off" : config.autoCapitalize;
+    field.spellcheck = correct;
     // `spellcheck` alone only stops suggestions: Chrome on Android still asks
     // the keyboard to autocorrect unless this attribute is off.
-    field.setAttribute("autocorrect", config.autoCorrect ? "on" : "off");
+    field.setAttribute("autocorrect", correct ? "on" : "off");
     if (config.autoComplete != null) field.setAttribute("autocomplete", config.autoComplete);
     else field.removeAttribute("autocomplete");
     if (config.maxLength != null) field.maxLength = config.maxLength;
@@ -6649,6 +6720,11 @@ class Player {
       case "back": this.defaultBack(); break;
       case "setAppUrl": this.setPageUrl(args[0]); break;
       case "pushAppUrl": this.setPageUrl(args[0], true); break;
+      case "quitOnRequest": this.askBeforeLeaving(!args[0]); break;
+      // The app's `quit()`: its answer while it is asked about leaving the
+      // page (the page may go); a page cannot close its own tab, so at
+      // other times the page stays as it is.
+      case "quit": if (this.quitAsked) this.quitAsked.granted = true; break;
       case "setTitle": this.setWindowTitle(args[0]); break;
       case "exitApp": {
         const app = this.app;
@@ -6685,6 +6761,78 @@ class Player {
   }
 
 
+
+  /** Whether leaving the page (closing its tab, reloading, going to
+   * another site) asks the app first: on while the app listens to quit
+   * requests (`quitOnRequest` false). A `beforeunload` listener can keep a
+   * page out of the back / forward cache in some browsers, so it is there
+   * only while it is needed. */
+  askBeforeLeaving(ask) {
+    if (typeof window === "undefined" || !ask === !this.leaveGuard) return;
+    if (ask) {
+      this.leaveGuard = (event) => {
+        if (this.deliverQuitRequest()) return;
+        event.preventDefault();
+        // Browsers before `preventDefault` was enough.
+        event.returnValue = "";
+      };
+      window.addEventListener("beforeunload", this.leaveGuard);
+    } else {
+      window.removeEventListener("beforeunload", this.leaveGuard);
+      this.leaveGuard = null;
+    }
+  }
+
+  /** The user is leaving the page: the app hears the quit request as the
+   * desktops' quit key reports it, its listeners running before this
+   * returns. Whether the app quit meanwhile: the page then leaves without
+   * asking. Otherwise the browser asks the user, and what the listeners
+   * started (their own question, a save) is on the page should the user
+   * stay. A request the engine cannot take now (it is running: the page
+   * left from inside an engine call) or that fails leaves the question to
+   * the browser. This only decides: `beforeunload` comes before the
+   * browser commits to leaving, and the page may still stay (the user
+   * cancels another listener's question, the navigation is a download),
+   * so the app's quit listeners start only once the page is really gone
+   * (`watchPageEnd`). */
+  deliverQuitRequest() {
+    if (this.depth > 0 || this.trapped) return false;
+    const asked = { granted: false };
+    this.quitAsked = asked;
+    try {
+      this.call((w) => w.nsh_quit_request());
+    } catch (err) {
+      console.error("[nsh]", err);
+      return false;
+    } finally {
+      this.quitAsked = null;
+    }
+    return asked.granted;
+  }
+
+  /** While an app runs: the page being discarded ends it, as the process
+   * ending ends a desktop app, whichever way the user left (the app let
+   * the page go, the user chose to leave in the browser's question,
+   * nothing listened to quit requests). Its quit listeners start then,
+   * once (`nsh_quit`): what they do synchronously completes, work they
+   * await runs for as long as the page remains. A `pagehide` that keeps
+   * the page in the back / forward cache (`persisted`) ends nothing: the
+   * app runs on when the page comes back. A `pagehide` listener keeps no
+   * page out of that cache. */
+  watchPageEnd(watch) {
+    if (typeof window === "undefined" || !watch === !this.pageEnd) return;
+    if (watch) {
+      this.pageEnd = (event) => {
+        if (event.persisted) return;
+        this.watchPageEnd(false);
+        this.call((w) => w.nsh_quit());
+      };
+      window.addEventListener("pagehide", this.pageEnd);
+    } else {
+      window.removeEventListener("pagehide", this.pageEnd);
+      this.pageEnd = null;
+    }
+  }
 
   /** Has screen readers read `text` (`announce`), through the live region. */
   announce(text) {
@@ -8600,6 +8748,7 @@ class Player {
       takes = true;
     } else {
       [el, takes] = this.wheelListenerOf(e.target) ?? [null, false];
+      if (takes && !e.ctrlKey) takes = this.wheelAlong(el, e);
       const lock = this.wheelLock;
       if (takes && lock && now - lock.t <= 200 && lock.el.isConnected) takes = false;
     }
@@ -8616,6 +8765,22 @@ class Player {
       modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
     });
     return takes;
+  }
+
+  /** Whether listener `el` takes wheel `e` along its axis
+   * (`input::wheel_along`): a `panActivation` naming one axis takes only
+   * wheels along it (Ctrl + wheel is checked by the caller); the others
+   * reach the scroll views around it. */
+  wheelAlong(el, e) {
+    const a = el._props?.panActivation;
+    if (!a) return true;
+    const [ax, ay, fx, fy] = a;
+    const x = ax != null || fy != null;
+    const y = ay != null || fx != null;
+    if (x === y) return true;
+    let [dx, dy] = [e.deltaX, e.deltaY];
+    if (e.shiftKey && !dx) [dx, dy] = [dy, 0];
+    return (Math.abs(dx) > Math.abs(dy)) === x;
   }
 
   /** The nearest view around `target` listening to `onWheel`, and whether
@@ -8857,7 +9022,9 @@ class Player {
       });
     }
     if (!points.length) return;
-    const json = JSON.stringify({ phase, time: performance.now(), points, activated });
+    // The keys held when the changed pointer went down, as its press's.
+    const modifiers = this.pointers.get(changedId)?.modifiers;
+    const json = JSON.stringify({ phase, time: performance.now(), points, activated, modifiers });
     this.call(() => this.withStrings([json], (p, l) => this.wasm.nsh_touch(p, l)));
   }
 

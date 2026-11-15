@@ -116,6 +116,16 @@ text("Run ")
 </Text>
 ```
 
+A span has no box of its own, so padding on it is ignored (a warning says so). The spaces at its ends pad the
+background instead; a narrow no-break space (`"\u202F"`) or a thin space (`"\u2009"`) gives less room than a space. A
+relative `fontSize` keeps the span in proportion to its paragraph wherever it is used:
+
+```tsx
+<Text style={{ fontSize: 16 }}>
+  Run <Text style={{ fontSize: "0.875em", backgroundColor: "#eff1f3", borderRadius: 4 }}>{"\u202Fnpm test\u202F"}</Text> first.
+</Text>
+```
+
 ### Hidden spans
 
 `visibility: "hidden"` on a span hides its characters where they stand: the text lays out as when they show, nothing
@@ -186,7 +196,7 @@ others of the same names.
 | Property | Values | Rust |
 |---|---|---|
 | `color` | A [color](./styling.md#colors). Default black | `.text_color(..)` |
-| `fontSize` | Points. Default 14 | `.text_size(px(..))`, `.text_sm()`, `.text_lg()`, ... |
+| `fontSize` | Points. Default 14. Or relative to the inherited size, as CSS's `em` and percentages: `"0.875em"`, `"87.5%"` | `.text_size(px(..))`, `.text_size(relative(0.875))`, `.text_sm()`, `.text_lg()`, ... |
 | `fontWeight` | `"normal"` (400), `"bold"` (700), or `100`–`900` (number or string) | `.font_weight(FontWeight::BOLD)` |
 | `fontStyle` | `"normal"`, `"italic"`: color emoji stay upright | `.italic()` |
 | `fontFamily` | A system family, a generic family, or an [imported font](./fonts.md) | `.font_family(..)` |

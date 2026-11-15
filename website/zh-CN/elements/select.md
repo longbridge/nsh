@@ -9,7 +9,7 @@ demo: el-select
 
 选择框从一组条目中选出一个值：一项设置、一个筛选条件、一个国家、一个时区。应用提供的触发元素打开列表，并按每种设备的习惯呈现：
 
-- 在桌面平台和桌面浏览器中，它是与触发元素一样宽的弹出层（应用的 `popupStyle` / `popupClass` 设置宽度时用它的，和 `gpui-component` 的 `menu_width` 一样），高度随行数增长，最多占满屏幕上的空间。在 macOS 上它盖在触发元素上打开，已选的行正好叠在触发元素上，所以已选的标题停在原处，和系统的弹出按钮一样（shadcn/ui 的 `item-aligned` 定位）；没有已选条目时它在触发元素下方打开。在 Windows、Linux 和浏览器中它在触发元素下方打开，和这些平台的下拉列表一样。键盘可以在条目间移动并选中一个。
+- 在桌面平台和桌面浏览器中，它是与触发元素一样宽的弹出层（应用的 `popupStyle` / `popupClass` 设置宽度时用它的，和 `gpui-component` 的 `menu_width` 一样），高度随行数增长，最多占满屏幕上的空间。在 macOS 上它盖在触发元素上打开，已选的行正好叠在触发元素上，所以已选的标题停在原处，和系统的弹出按钮一样（shadcn/ui 的 `item-aligned` 定位）；没有已选条目时它在触发元素下方打开。在 Windows、Linux 和浏览器中它在触发元素下方打开，和这些平台的下拉列表一样；`cover` 让它在每个桌面平台上都按同一种方式打开。键盘可以在条目间移动并选中一个。
 - 在手机和平板上，它是屏幕底部、覆盖在背景层之上的 sheet。
 
 选择框负责行为：值（应用持有的，或它自己保存的）、打开状态、键盘、输入跳转、搜索、分组、高亮的行以及屏幕阅读器听到的内容。外观由应用决定：应用为触发元素、弹出层、列表、行、分组标题和搜索框设置样式，或者自己绘制行。
@@ -253,6 +253,7 @@ mount(App);
 | `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"start"` | 桌面：它如何与触发元素对齐。 |
 | `offset` | `.offset(..)` | `number` | `0` | 桌面：触发元素与列表之间的间距。 |
 | `margin` | `.margin(..)` | `number` | `0` | 桌面：它与安全区边缘保持的距离。 |
+| `cover` | `.cover(..)` | `boolean` | macOS 上为 `true`，其它平台为 `false` | 桌面：列表打开时已选的行盖在触发元素上（`true`），或在触发元素的 `placement` 一侧（`false`），让选择框在每个桌面平台上都以同一种方式打开。没有已选条目时它在一侧打开。 |
 | `popupClass`、`popupStyle` | `.popup_class(..)`、`.popup_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 列表所在的弹出层（桌面）或 sheet（触摸屏）。 |
 | `popupStartingClass`、`popupStartingStyle` | `.popup_starting_class(..)`、`.popup_starting_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 桌面：弹出层第一帧的外观，叠加在它自己的外观之上：它的过渡从这里开始。 |
 | `popupEndingClass`、`popupEndingStyle` | `.popup_ending_class(..)`、`.popup_ending_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 桌面：弹出层关闭后的外观，叠加在它自己的外观之上：过渡播放期间它会保留。 |
@@ -339,7 +340,7 @@ mount(App);
 
 | | 桌面平台和桌面浏览器 | 手机和平板 |
 | --- | --- | --- |
-| 列表 | 在 macOS 上是盖在触发元素上的弹出层，已选的行在它上面（没有已选条目时在它下方），在 Windows、Linux 和浏览器中在触发元素下方，与触发元素一样宽，除非 `popupStyle` 设置了宽度，高度随行数增长，最多占满屏幕上的空间 | 屏幕底部、覆盖在背景层之上的 sheet，高度随行数增长，最高到状态栏 |
+| 列表 | 在 macOS 上是盖在触发元素上的弹出层，已选的行在它上面（没有已选条目时在它下方），在 Windows、Linux 和浏览器中在触发元素下方（由 `cover` 选择），与触发元素一样宽，除非 `popupStyle` 设置了宽度，高度随行数增长，最多占满屏幕上的空间 | 屏幕底部、覆盖在背景层之上的 sheet，高度随行数增长，最高到状态栏 |
 | 关闭 | 一次选择、Escape、外部按压（按压继续作用于指针下的元素） | 一次选择、背景层、Android 返回键 |
 | 搜索 | 列表打开时搜索框获得键盘焦点 | 按下搜索框时键盘弹出 |
 | 选择 | 鼠标键按下时就选中，搜索框保持键盘焦点 | 轻点 |

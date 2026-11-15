@@ -127,10 +127,14 @@ impl ScrollState {
 /// A native AppKit view a view hosts at `rect` (view coordinates).
 #[derive(Debug, Clone)]
 pub(crate) struct Native {
-    /// The view (a subview of the node's view).
+    /// The view (a subview of the node's view, or of its container when
+    /// `above` is set).
     pub(crate) view: Retained<NSView>,
     /// Where it goes.
     pub(crate) rect: Bounds<Points>,
+    /// The child it is hosted directly above in the node's container (a
+    /// lifted input's pad), or `None` for a subview of the node's view.
+    pub(crate) above: Option<Retained<NSView>>,
 }
 
 /// Everything the mounter set on one view.
@@ -422,6 +426,9 @@ pub(crate) struct Ivars {
     /// A subview that may not stay ours ([`stays_ours`]) can have come in
     /// since a scan of its subviews last found none ([`first_foreign`]).
     foreign: Cell<bool>,
+    /// `drawLayer:inContext:` returned while `state` was borrowed, leaving
+    /// Core Animation's cleared region unpainted.
+    dropped_draw: Cell<bool>,
     /// Deferred drawing and placement marks in this subtree, including
     /// this view. Only their transforms can reveal deferred work.
     waiting: Cell<usize>,
@@ -451,6 +458,7 @@ define_class!(
                 return;
             };
             let Ok(state) = view.ivars().state.try_borrow() else {
+                view.ivars().dropped_draw.set(true);
                 return;
             };
             let c = Some(cx);
@@ -1535,6 +1543,19 @@ pub(crate) fn is_ours(view: &NSView) -> bool {
         || crate::visual::is_backdrop(view)
 }
 
+/// `rect` (a view's coordinates) in its container's, which the view's scroll
+/// offset and zoom scale.
+fn container_frame(view: &NshView, rect: Bounds<Points>) -> NSRect {
+    let (origin, zoom) = crate::input::container_offset(view);
+    let (ox, oy) = (origin.0, origin.1);
+    ns_rect(
+        rect.origin.x.0 / zoom + ox,
+        rect.origin.y.0 / zoom + oy,
+        rect.size.width.0 / zoom,
+        rect.size.height.0 / zoom,
+    )
+}
+
 /// Only our view and container classes remain ours regardless of changes
 /// to their identifier. Backdrops are identified by a mutable identifier,
 /// so their holders conservatively keep scanning.
@@ -1718,6 +1739,7 @@ impl NshView {
             unplaced: Cell::new(false),
             // Not known until a first scan.
             foreign: Cell::new(true),
+            dropped_draw: Cell::new(false),
             waiting: Cell::new(0),
             sharpened: Cell::new(0.0),
         });
@@ -1981,8 +2003,41 @@ impl NshView {
         }
         if let Some(layer) = self.content_layer() {
             self.update_canvas_overlay();
+            self.clear_canvas_painted();
             layer.setNeedsDisplay();
         }
+    }
+
+    /// Forgets what its canvas's content layer painted when the whole layer
+    /// is invalidated.
+    fn clear_canvas_painted(&self) {
+        if let Ok(state) = self.0.ivars().state.try_borrow()
+            && let Some(canvas) = &state.canvas
+        {
+            canvas.clear_painted();
+        }
+    }
+
+    /// Whether `drawLayer:inContext:` returned while `state` was borrowed,
+    /// clearing the flag.
+    pub(crate) fn take_dropped_draw(&self) -> bool {
+        self.ivars().dropped_draw.replace(false)
+    }
+
+    /// What its content layer must hold for a partial canvas redraw
+    /// (`setNeedsDisplayInRect`) to keep the rest of the picture.
+    pub(crate) fn canvas_painted(&self) -> Option<crate::canvas::Painted> {
+        let content = self.ivars().content.borrow();
+        let (layer, _) = content.as_ref()?;
+        let size = layer.bounds().size;
+        if size.width <= 0.0 || size.height <= 0.0 {
+            return None;
+        }
+        Some(crate::canvas::Painted {
+            size,
+            scale: layer.contentsScale(),
+            prefix_only: self.ivars().overlay.borrow().is_some(),
+        })
     }
 
     /// Updates the small animated surface and reports a partition change.
@@ -2172,10 +2227,16 @@ impl NshView {
     /// scale of the transforms above it, or a zoomable scroll view's zoom.
     /// Never below the backing scale and at most 4096 pixels a side.
     pub(crate) fn draw_zoomed(&self, scale: CGFloat, zoom: CGFloat) {
-        for surface in [&self.ivars().content, &self.ivars().overlay] {
+        for (i, surface) in [&self.ivars().content, &self.ivars().overlay]
+            .into_iter()
+            .enumerate()
+        {
             if let Some((layer, _)) = &*surface.borrow() {
                 let factor = content_density(scale, zoom, layer.bounds().size);
                 if layer.contentsScale() != factor {
+                    if i == 0 {
+                        self.clear_canvas_painted();
+                    }
                     layer.setContentsScale(factor);
                     layer.setNeedsDisplay();
                 }
@@ -2188,14 +2249,16 @@ impl NshView {
     /// text's recolored lines).
     pub(crate) fn redraw_rect(&self, rect: nsh_core::Bounds<nsh_core::Points>) {
         crate::shader::ui_changed(self);
+        let fresh = self.ivars().content.borrow().is_none();
         let Some(layer) = self.content_layer() else {
             return;
         };
         let changed = self.update_canvas_overlay();
-        if changed {
+        if fresh || changed {
+            self.clear_canvas_painted();
             layer.setNeedsDisplay();
         }
-        if self.ivars().overlay.borrow().is_some() || changed {
+        if fresh || self.ivars().overlay.borrow().is_some() || changed {
             return;
         }
         // Layer space is y up unless its contents are flipped
@@ -2347,13 +2410,18 @@ impl NshView {
     fn place_natives(&self) {
         let natives = self.state().natives.clone();
         for n in natives {
-            let r = n.rect;
-            n.view.setFrame(ns_rect(
-                r.origin.x.0,
-                r.origin.y.0,
-                r.size.width.0,
-                r.size.height.0,
-            ));
+            let frame = match n.above {
+                // A pad raised into the container is laid out in its space,
+                // which the node's scroll offset and zoom scale.
+                Some(_) => container_frame(self, n.rect),
+                None => ns_rect(
+                    n.rect.origin.x.0,
+                    n.rect.origin.y.0,
+                    n.rect.size.width.0,
+                    n.rect.size.height.0,
+                ),
+            };
+            n.view.setFrame(frame);
         }
     }
 
@@ -2387,7 +2455,9 @@ impl NshView {
         let container = parent.container();
         let above = match before {
             Some(b) => Some(Retained::from(b.ns())),
-            None => first_foreign(&container),
+            // A lifted input's pad is not what children stack under: it
+            // rides directly above its own anchor, out of their way.
+            None => first_foreign(&container).filter(|v| !parent.is_raised(v)),
         };
         match above {
             Some(above) => container.addSubview_positioned_relativeTo(
@@ -2397,6 +2467,7 @@ impl NshView {
             ),
             None => container.addSubview(self.ns()),
         }
+        parent.raise_natives();
         let inputs = self.state().input_count;
         parent.track_inputs(inputs, true);
         parent.adjust_waiting(self.ivars().waiting.get(), true);
@@ -2411,6 +2482,9 @@ impl NshView {
         if let Some(parent) = self.parent_view() {
             parent.track_inputs(self.state().input_count, false);
             parent.adjust_waiting(self.ivars().waiting.get(), false);
+        }
+        if self.state().input_count != 0 {
+            crate::text_input::left(self);
         }
         self.ns().removeFromSuperview();
     }
@@ -2440,6 +2514,7 @@ impl NshView {
                 None => s.natives.push(Native {
                     view: Retained::from(view),
                     rect,
+                    above: None,
                 }),
             }
         }
@@ -2454,12 +2529,122 @@ impl NshView {
         ));
     }
 
+    /// Hosts `view` in the node's container directly above `anchor`, tracked
+    /// at `rect` (the node's coordinates) for picking. A lifted input's pad
+    /// lives here rather than among the node's subviews, so siblings stacked
+    /// over the transformed subtree that holds the input stay over it.
+    pub(crate) fn set_raised(&self, view: &NSView, rect: Bounds<Points>, anchor: &NSView) {
+        {
+            let mut s = self.state_mut();
+            match s.natives.iter_mut().find(|n| &*n.view == view) {
+                Some(n) => {
+                    n.rect = rect;
+                    n.above = Some(Retained::from(anchor));
+                }
+                None => s.natives.push(Native {
+                    view: Retained::from(view),
+                    rect,
+                    above: Some(Retained::from(anchor)),
+                }),
+            }
+        }
+        let container = self.container();
+        container.addSubview_positioned_relativeTo(view, NSWindowOrderingMode::Above, Some(anchor));
+        view.setFrame(container_frame(self, rect));
+    }
+
+    /// Whether `view` is one of this view's natives raised into its
+    /// container (`set_raised`).
+    pub(crate) fn is_raised(&self, view: &NSView) -> bool {
+        self.state()
+            .natives
+            .iter()
+            .any(|n| n.above.is_some() && std::ptr::eq(&*n.view, view))
+    }
+
+    /// Puts each raised native back directly above its anchor: moving a
+    /// child in the container (a reparent, an insert) can leave a pad below
+    /// it. A pad whose anchor left the container is taken out; placing its
+    /// input again hosts it anew.
+    pub(crate) fn raise_natives(&self) {
+        let raised: Vec<(Retained<NSView>, Retained<NSView>, Bounds<Points>)> = self
+            .state()
+            .natives
+            .iter()
+            .filter_map(|n| {
+                n.above
+                    .as_ref()
+                    .map(|a| (n.view.clone(), a.clone(), n.rect))
+            })
+            .collect();
+        if raised.is_empty() {
+            return;
+        }
+        let container = self.container();
+        for (view, anchor, rect) in raised {
+            if superview(&anchor).as_deref() != Some(&*container) {
+                view.removeFromSuperview();
+                continue;
+            }
+            let subviews = container.subviews();
+            let mut previous: Option<Retained<NSView>> = None;
+            let mut directly = false;
+            for sub in subviews.iter() {
+                if std::ptr::eq(&*sub, &*view) {
+                    directly = previous
+                        .as_deref()
+                        .is_some_and(|p| std::ptr::eq(p, &*anchor));
+                    break;
+                }
+                previous = Some(sub);
+            }
+            if !directly {
+                container.addSubview_positioned_relativeTo(
+                    &view,
+                    NSWindowOrderingMode::Above,
+                    Some(&anchor),
+                );
+                view.setFrame(container_frame(self, rect));
+            }
+        }
+    }
+
     /// Stops hosting `view`.
     pub(crate) fn remove_native(&self, view: &NSView) {
         self.state_mut().natives.retain(|n| &*n.view != view);
-        if superview(view).as_deref() == Some(self.ns()) {
+        if self.hosts(view) {
             view.removeFromSuperview();
         }
+    }
+
+    /// Stops hosting `view`, also while its state is in use: for a hosted
+    /// view outliving what put it here (an input's pad lifted onto a view
+    /// above its input). Returns whether the tracked entry was removed; a
+    /// borrowed (in-use) state leaves it for the caller to retry.
+    pub(crate) fn forget_native(&self, view: &NSView) -> bool {
+        let forgotten = match self.0.ivars().state.try_borrow_mut() {
+            Ok(mut s) => {
+                s.natives.retain(|n| &*n.view != view);
+                true
+            }
+            Err(_) => false,
+        };
+        if self.hosts(view) {
+            view.removeFromSuperview();
+        }
+        forgotten
+    }
+
+    /// Whether `view` is hosted by this view: a subview of it or of its
+    /// container (a raised native).
+    fn hosts(&self, view: &NSView) -> bool {
+        let Some(superview) = superview(view) else {
+            return false;
+        };
+        std::ptr::eq(&*superview, self.ns())
+            || self
+                .container_view()
+                .is_some_and(|c| std::ptr::eq(&*superview, &*c))
     }
 
     /// Whether the pointer may target it (`pointerEvents` and visibility).

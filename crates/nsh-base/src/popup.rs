@@ -410,7 +410,7 @@ impl PopupPresence {
         effect(move || {
             let now = open();
             // Not cleared here: the focus watch says when the focus leaves,
-            // and keeps its own record of where it is across openings.
+            // the popup part's removal on close included.
             if was.replace(now) && !now && inside.get() {
                 untracked(&back);
             }
@@ -720,20 +720,24 @@ impl DropdownFrame {
 }
 
 /// A view inside a dropdown laid over its trigger (`Select`'s selected
-/// item).
+/// item) while `on` says so.
 #[derive(Clone, Copy)]
 pub(crate) struct Cover {
     /// The view.
     pub(crate) view: ElementRef,
     /// It is rendered and laid out (refs are not tracked).
     pub(crate) shown: Signal<bool>,
+    /// The dropdown lays it over the trigger (tracked); else the dropdown
+    /// goes on a side of the trigger.
+    pub(crate) on: Memo<bool>,
 }
 
 impl Cover {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(on: impl Fn() -> bool + 'static) -> Self {
         Self {
             view: element_ref(),
             shown: signal(false),
+            on: computed(on),
         }
     }
 }
@@ -915,7 +919,7 @@ pub(crate) fn dropdown(
             // A view inside over the trigger (a select's selected item);
             // on a side of it while there is none.
             .when_some(cover, |p, cover| {
-                p.cover(&cover.view, move || cover.shown.get())
+                p.cover(&cover.view, move || cover.on.get() && cover.shown.get())
             })
             // Never past the room on its side: its rows scroll. Until
             // the core says where it went, the window bounds it, so the
