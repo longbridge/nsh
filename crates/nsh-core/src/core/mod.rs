@@ -152,6 +152,9 @@ struct RootState {
     nav_shader: Option<crate::NavShader>,
     /// Where a header item goes (header items).
     slot: HeaderSlot,
+    /// A leading or trailing header item laid out with no width: nothing
+    /// of it shows, so the screen's options leave it out of the bar.
+    empty: bool,
     /// `nativeID` (input accessories).
     native_id: Option<Box<str>>,
     /// `statusBar` (screens and modals).
@@ -8492,15 +8495,36 @@ impl<M: TextEngine> Core<M> {
             self.fit_window(key, layout);
         }
         self.emit_frames(key);
-        if kind == Kind::Screen && header_changed {
-            let id = self.nodes[key as usize].id;
-            if let Some(config) = self.screen_config(key) {
+        let screen = match kind {
+            Kind::Screen if header_changed => Some(key),
+            Kind::HeaderItem if self.header_item_emptied(key) => Some(parent),
+            _ => None,
+        };
+        if let Some(screen) = screen {
+            let id = self.nodes[screen as usize].id;
+            if let Some(config) = self.screen_config(screen) {
                 self.mount.push(MountItem::ScreenConfig {
                     id,
                     config: Box::new(config),
                 });
             }
         }
+    }
+
+    /// Header item `key` was laid out: records whether a leading or
+    /// trailing one has no width (its content is gone, or shows nothing)
+    /// and answers whether that changed, so its screen's options go out
+    /// again with the bar's item left out or put back.
+    fn header_item_emptied(&mut self, key: Key) -> bool {
+        let width = self.nodes[key as usize]
+            .layout
+            .map_or(0.0, |l| self.rounded_layout(l).size.width);
+        let root = self.nodes[key as usize].root.as_mut().expect("root state");
+        if !matches!(root.slot, HeaderSlot::Left | HeaderSlot::Right) {
+            return false;
+        }
+        let empty = width <= 0.0;
+        std::mem::replace(&mut root.empty, empty) != empty
     }
 
     /// The width a native header leaves screen `key`'s title view: the
@@ -8564,6 +8588,22 @@ impl<M: TextEngine> Core<M> {
                 continue;
             }
             let slot = child.root.as_ref().map_or(HeaderSlot::Left, |r| r.slot);
+            // A side's item with nothing to show leaves the bar without a
+            // button there, unless the platform's own button stands in for
+            // it (and presses it).
+            let empty = child.root.as_ref().is_some_and(|r| r.empty);
+            let system = match slot {
+                HeaderSlot::Left => {
+                    config.left_system_item.is_some() || config.left_symbol.is_some()
+                }
+                HeaderSlot::Right => {
+                    config.right_system_item.is_some() || config.right_symbol.is_some()
+                }
+                _ => true,
+            };
+            if empty && !system {
+                continue;
+            }
             let target = match slot {
                 HeaderSlot::Left => &mut config.left,
                 HeaderSlot::Right => &mut config.right,

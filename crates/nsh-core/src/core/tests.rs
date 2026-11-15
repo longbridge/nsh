@@ -22551,6 +22551,70 @@ mod views {
         assert!(config.right.is_some(), "the trailing slot is set");
     }
 
+    /// A screen whose trailing header item shows a button only while `SHOWN`
+    /// says so.
+    #[derive(Default)]
+    struct OptionalItemPage;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct OptionalItemPageProps {}
+
+    thread_local! {
+        static SHOWN: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+    }
+
+    impl Component for OptionalItemPage {
+        type Props = OptionalItemPageProps;
+        type Event = NoEvent;
+
+        // The core's own stack and screen: `nsh_base`'s wrap them.
+        #[allow(deprecated)]
+        fn view(_: OptionalItemPageProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let shown = signal(false);
+            SHOWN.with(|s| s.set(Some(shown)));
+            stack().flex_1().child(
+                screen()
+                    .header_right(when(shown, || view().w(px(24.0)).h(px(24.0))))
+                    .child(view().flex_1()),
+            )
+        }
+    }
+
+    /// The last screen options of `batch`, if it has any.
+    fn last_screen_config(batch: &MountBatch) -> Option<ScreenConfig> {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+            _ => None,
+        })
+    }
+
+    /// A header item whose content is gone shows nothing: the screen's
+    /// options leave it out (the iOS bar would wrap it in an empty button),
+    /// and put it back when its content returns.
+    #[test]
+    fn an_empty_header_item_is_left_out_of_the_screens_config() {
+        let mut c = core();
+        c.mount_root(&Root::new::<OptionalItemPage>(|| OptionalItemPageProps {}));
+        let first = last_screen_config(&c.commit().unwrap()).expect("a screen");
+        assert_eq!(first.right, None, "nothing shows in the trailing slot");
+        let shown = SHOWN.with(Cell::get).unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            shown.set(true);
+        }
+        let config = last_screen_config(&c.commit().unwrap()).expect("options again");
+        assert!(config.right.is_some(), "the trailing slot shows its button");
+        {
+            let _entered = c.components.runtime.enter();
+            shown.set(false);
+        }
+        let config = last_screen_config(&c.commit().unwrap()).expect("options again");
+        assert_eq!(config.right, None, "the trailing slot is empty again");
+        // Nothing changed: no options again.
+        let batch = c.commit();
+        assert!(batch.is_none_or(|b| last_screen_config(&b).is_none()));
+    }
+
     /// Without the prop the header is built as before: no system button, so
     /// the platform wraps the app's `headerRight` view instead.
     #[test]
