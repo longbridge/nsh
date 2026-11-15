@@ -1713,6 +1713,16 @@ final class Mounter {
         }
         boolean selectableView = b.getInt() != 0;
         boolean continuesText = b.getInt() != 0;
+        // `selectionMenu` (`encode.rs` `selection_menu`): the count, then per
+        // item its id (-1 a separator), whether it is enabled and its label.
+        int menuCount = b.getInt();
+        SelectableView.MenuEntry[] selectionMenu = new SelectableView.MenuEntry[menuCount];
+        for (int i = 0; i < menuCount; i++) {
+            int itemId = b.getInt();
+            boolean enabled = b.getInt() != 0;
+            String label = string(objects, b.getInt());
+            selectionMenu[i] = new SelectableView.MenuEntry(itemId, enabled, label);
+        }
         // `captureKeys` (`encode.rs` `key_capture`): mode, then for keys
         // the count and each canonical key id and modifiers.
         int captureMode = b.getInt();
@@ -1746,6 +1756,8 @@ final class Mounter {
             area.clear();
             selectableViews.remove(id);
         }
+        area = selectableViews.get(id);
+        if (area != null) area.menu = selectionMenu;
         Feedback f = feedback.get(id);
         if (f == null) feedback.put(id, f = new Feedback());
         f.longPressDelay = longPressDelay >= 0 ? Math.round(longPressDelay) : -1;

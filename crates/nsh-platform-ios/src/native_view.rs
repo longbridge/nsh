@@ -673,6 +673,11 @@ impl NshView {
         self.ivars().props.borrow().selectable_view
     }
 
+    /// The app's items of the view's selection menu (`selectionMenu`).
+    pub(crate) fn selection_menu(&self) -> std::sync::Arc<[nsh_core::desktop::MenuItem]> {
+        self.ivars().props.borrow().selection_menu.clone()
+    }
+
     /// The view is a text that continues the one before it
     /// (`ViewProps::continues_text`: a wrapped line's later part).
     pub(crate) fn continues_text(&self) -> bool {

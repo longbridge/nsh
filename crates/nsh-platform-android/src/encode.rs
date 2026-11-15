@@ -996,6 +996,31 @@ fn audio_command(e: &mut Encoded, command: AudioCommand) {
 
 /// The event kind with index `index` (`EventKind as u8`, the order of the
 /// constants in `Native.java`).
+/// `selectionMenu` (Mounter.java `selectionMenu`): the count, then per
+/// item its id (-1 a separator), whether it is enabled and its label.
+fn selection_menu(e: &mut Encoded, items: &[nsh_core::desktop::MenuItem]) {
+    use nsh_core::desktop::MenuItem;
+    let items: Vec<_> = items
+        .iter()
+        .filter(|item| !matches!(item, MenuItem::Submenu { .. }))
+        .collect();
+    e.int(items.len() as i32);
+    for item in items {
+        match item {
+            MenuItem::Action(action) => {
+                e.int(action.id as i32);
+                e.bool(action.enabled);
+                e.string(action.label.clone());
+            }
+            _ => {
+                e.int(-1);
+                e.bool(false);
+                e.int(-1);
+            }
+        }
+    }
+}
+
 pub(crate) fn kind_from(index: i32) -> Option<nsh_core::EventKind> {
     nsh_core::EventKind::ALL
         .get(usize::try_from(index).ok()?)
@@ -1461,6 +1486,7 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
     }
     e.bool(p.selectable_view);
     e.bool(p.continues_text);
+    selection_menu(e, &p.selection_menu);
     key_capture(e, &p.key_capture);
     // `focusable` (Mounter.java `focusProps`): -1 unset, 0 false, 1 true.
     e.int(match p.focusable {

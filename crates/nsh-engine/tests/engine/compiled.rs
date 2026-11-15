@@ -1557,6 +1557,91 @@ fn pages_report_trailing_header_item_presses_and_menu_selections() {
     );
 }
 
+const SELECTION_MENU: &str = r##"import { mount, signal, Text, View } from "nsh";
+
+const log = signal<string[]>([]);
+const label = signal("Highlight");
+
+mount(() => (
+  <View style={{ flex: 1 }}>
+    <Text>{`log ${log().join(",")}`}</Text>
+    <View
+      selectable
+      selectionMenu={[
+        { label: label(), onSelect: () => { log.update((l) => [...l, label()]); label.set("Unhighlight"); } },
+        { type: "separator" },
+        { label: "Define", disabled: true },
+      ]}
+    >
+      <Text>Some words</Text>
+    </View>
+  </View>
+));
+"##;
+
+/// The items of a selectable view's `selectionMenu` reach its view props;
+/// a chosen item's `onSelect` runs when the platform reports its id as the
+/// root's `Menu` event, and items set again get new ids (stale ones do
+/// nothing).
+#[test]
+fn selection_menu_items_run_when_chosen() {
+    use nsh_core::desktop::MenuItem;
+
+    let (engine, rx) = start_app(SELECTION_MENU);
+    let control = engine.control();
+    let menu_of = |batch: &MountBatch| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ViewProps { props, .. } if props.selectable_view => {
+                Some(props.selection_menu.clone())
+            }
+            _ => None,
+        })
+    };
+    let first = next(&rx, |b| menu_of(b).is_some());
+    let menu = menu_of(&first).unwrap();
+    let [
+        MenuItem::Action(highlight),
+        MenuItem::Separator,
+        MenuItem::Action(define),
+    ] = &menu[..]
+    else {
+        panic!("two items and a separator: {menu:?}");
+    };
+    assert_eq!(highlight.label, "Highlight");
+    assert!(highlight.id != 0);
+    assert_eq!(define.label, "Define");
+    assert!(!define.enabled);
+    let choose = |id: u32| {
+        control.dispatch_event(
+            nsh_core::ROOT_ID,
+            EventKind::Menu,
+            EventPayload::Map(vec![("id", nsh_core::PayloadValue::Number(id as f64))]),
+        );
+    };
+    choose(highlight.id);
+    let batch = next(&rx, |b| menu_of(b).is_some());
+    let updated = menu_of(&batch).unwrap();
+    let MenuItem::Action(unhighlight) = &updated[0] else {
+        panic!("an action: {updated:?}");
+    };
+    assert_eq!(unhighlight.label, "Unhighlight");
+    assert_ne!(unhighlight.id, highlight.id);
+    let mut seen = log_of(&batch);
+    while seen.as_deref() != Some("log Highlight") {
+        seen = log_of(&next(&rx, |b| log_of(b).is_some()));
+    }
+    // The old id does nothing.
+    choose(highlight.id);
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_millis(300))
+            .is_err()
+    );
+    choose(unhighlight.id);
+    next(&rx, |b| {
+        log_of(b).as_deref() == Some("log Highlight,Unhighlight")
+    });
+}
+
 const PAGE_HEADER: &str = r#"import { mount, Text, View } from "nsh";
 import { NavPage, NavStack, createNavStack } from "nsh/base";
 

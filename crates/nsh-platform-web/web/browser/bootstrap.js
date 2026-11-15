@@ -3504,6 +3504,7 @@
 				]);
 				return;
 			}
+			if (name === "selectionMenu") return;
 			if (PLATFORM_PROPS.has(name)) {
 				platformProps(node, name, value);
 				return;

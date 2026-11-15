@@ -22679,6 +22679,84 @@ mod views {
         assert_eq!(SELECTS.with(|c| c.get()), 2);
     }
 
+    /// A selectable view's `selection_menu` reaches its view props as plain
+    /// items and separators (roles, submenus and shortcuts left out), and a
+    /// chosen item's `on_select` runs when the platform reports its id as
+    /// the root's `Menu` event.
+    #[test]
+    fn selection_menu_items_reach_the_view_and_run_when_chosen() {
+        use std::cell::Cell;
+
+        use crate::{
+            EventKind, EventPayload, PayloadValue, ROOT_ID,
+            desktop::{MenuItem as PlatformItem, MenuRole},
+            element::desktop::MenuItem,
+        };
+
+        thread_local! {
+            static CHOSEN: Cell<u32> = const { Cell::new(0) };
+        }
+        CHOSEN.with(|c| c.set(0));
+
+        #[derive(Default)]
+        struct Area;
+        #[derive(Clone, PartialEq, Props)]
+        struct AreaProps {}
+        impl Component for Area {
+            type Props = AreaProps;
+            type Event = NoEvent;
+            fn view(_: AreaProps, _: Scope<NoEvent>) -> impl IntoElement {
+                view()
+                    .selectable(true)
+                    .selection_menu(vec![
+                        MenuItem::separator(),
+                        MenuItem::role(MenuRole::Copy),
+                        MenuItem::new("Highlight")
+                            .shortcut("mod+h")
+                            .on_select(|| CHOSEN.with(|c| c.set(c.get() + 1))),
+                        MenuItem::separator(),
+                        MenuItem::separator(),
+                        MenuItem::submenu("More", [MenuItem::new("Nested")]),
+                        MenuItem::new("Define").disabled(true),
+                        MenuItem::separator(),
+                    ])
+                    .child(text("Some words"))
+            }
+        }
+
+        let mut c = core();
+        c.mount_root(&Root::new::<Area>(|| AreaProps {}));
+        let batch = c.commit().unwrap();
+        let menu = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewProps { props, .. } if props.selectable_view => {
+                    Some(props.selection_menu.clone())
+                }
+                _ => None,
+            })
+            .expect("the selectable view's props");
+        let [
+            PlatformItem::Action(highlight),
+            PlatformItem::Separator,
+            PlatformItem::Action(define),
+        ] = &menu[..]
+        else {
+            panic!("plain items and one separator between them: {menu:?}");
+        };
+        assert_eq!(highlight.label, "Highlight");
+        assert_eq!(highlight.shortcut, None);
+        assert_ne!(highlight.id, 0);
+        assert_eq!(define.label, "Define");
+        assert!(!define.enabled);
+        assert_eq!(define.id, 0, "no handler, no id");
+
+        let chosen = EventPayload::Map(vec![("id", PayloadValue::Number(highlight.id as f64))]);
+        assert!(c.component_event(ROOT_ID, EventKind::Menu, &chosen));
+        assert_eq!(CHOSEN.with(|c| c.get()), 1);
+    }
+
     /// A Rust component that renders a native component.
     #[derive(Default)]
     struct NativeHost;

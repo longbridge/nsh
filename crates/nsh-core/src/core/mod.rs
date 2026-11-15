@@ -5750,6 +5750,15 @@ impl<M: TextEngine> Core<M> {
                     flags |= dirty::VIEW_PROPS;
                 }
             }
+            Prop::SelectionMenu(items) => {
+                let items: std::sync::Arc<[crate::desktop::MenuItem]> =
+                    crate::desktop::MenuItem::selection_menu(&items).into();
+                let props = node.props.get_or_insert_default();
+                if props.selection_menu != items {
+                    props.selection_menu = items;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
             Prop::ContinuesText(value) => {
                 let props = node.props.get_or_insert_default();
                 if props.continues_text != value {

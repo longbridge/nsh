@@ -128,6 +128,8 @@ struct NodeData {
     /// Has a `panActivation`: becomes the responder when the platform
     /// activates its pan, and is not asked before.
     pan_gated: bool,
+    /// It was given a `selectionMenu`, whose functions go with it.
+    selection_menu: bool,
     /// Values of props that may hold native animation nodes (`style`,
     /// `pan`, ...), kept alive with the view (owned).
     retained: Vec<(std::borrow::Cow<'static, str>, JsValue)>,
@@ -700,6 +702,7 @@ fn new_node(cx: *mut JsContext, id: NodeId, text: bool, tag: Option<Tag>) -> JsV
         popped: UNDEFINED,
         touch: Vec::new(),
         pan_gated: false,
+        selection_menu: false,
         retained: Vec::new(),
         parent: DETACHED,
         children: Vec::new(),
@@ -989,8 +992,9 @@ unsafe extern "C" fn node_finalize(rt: *mut qjs::JSRuntime, obj: JsValue) {
             // Not the op queue: a finalizer may run while it is borrowed.
             d.shared.releases.borrow_mut().push(data.id);
         }
-        // Trailing header bar handlers live as long as the page.
-        if data.tag == Some(Tag::Screen) {
+        // Trailing header bar handlers live as long as the page, a
+        // selection menu's as long as its view.
+        if data.tag == Some(Tag::Screen) || data.selection_menu {
             crate::desktop::clear_header_rt(rt, data.id);
         }
         if data.tag == Some(Tag::Modal) {
@@ -1472,6 +1476,11 @@ fn set_prop(
         }
         "tooltip" if followed(cx, name, value) => return bind_prop_with(cx, node, name, value),
         _ => {}
+    }
+    if name == "selectionMenu" {
+        // SAFETY: live node data.
+        unsafe { (*p).selection_menu = true };
+        return crate::desktop::set_selection_menu(cx, id, value);
     }
     if name == "headerRightItems" {
         return crate::desktop::set_header_right_items(cx, id, value);
