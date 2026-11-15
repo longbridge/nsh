@@ -26,6 +26,12 @@ NSH_MOUNT_BENCH_ONLY=1 cargo test --release -p nsh-platform-macos --test native 
 Features: `js` (default; JS apps; without it the crate only runs Rust apps and links no QuickJS) and `dev` (the dev
 server client, log forwarding, the error overlay: `dev.rs`). The runtime needs macOS 14 (`NSView`'s display links).
 
+## Nested shaders
+
+When a nested shader's GPU frame arrives, content readers around it take their pictures again. Screen-effect
+outputs are excluded from those pictures and do not invalidate content readers, avoiding feedback between static
+screen effects. Animated nested shaders still require the existing CPU picture and upload on each changed frame.
+
 ## Table accessibility
 
 `Table` and `Grid` roles expose `AXTable`, as WebKit maps tables for VoiceOver. Declared `Row` views expose
