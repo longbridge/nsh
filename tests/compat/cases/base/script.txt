@@ -937,6 +937,10 @@ tap text:OpenSheet
 expect SheetBody
 expect Life: sheet open
 frame parent:text:SheetBody 0 0 390 50
+# A dialog for screen readers, named by its `accessibilityLabel`.
+prop label:"Top sheet" role dialog
+# It covers the whole screen, under an Android status bar too.
+prop label:"Top sheet" statusBarTranslucent true
 style parent:text:SheetBody backgroundColor #abcdefff
 style below:parent:text:SheetBody backgroundColor #111111ff
 style below:parent:text:SheetBody opacity 0.75
@@ -967,6 +971,7 @@ covers [props] Sheet.popupClass
 covers [props] Sheet.popupStyle
 covers [props] Sheet.backdropClass
 covers [props] Sheet.backdropStyle
+covers [props] accessibilityLabel
 covers [events] Sheet.onOpenChange
 covers [events] Sheet.onCancel
 # base-menu-checked
@@ -1004,6 +1009,9 @@ prop id:sort-name role menuitemradio
 prop id:sort-name accessibilityState checked=true
 prop id:sort-size role menuitemradio
 prop id:sort-size accessibilityState checked=false
+# A description, read after the item's name; an item without one has none.
+prop id:sort-name accessibilityDescription Sorts by file name
+noprop id:plain accessibilityDescription
 # A plain item stays a menuitem with no checked state.
 prop id:plain role menuitem
 prop id:plain accessibilityState {}
@@ -1023,6 +1031,7 @@ covers [props] MenuItem.indicatorClass
 covers [props] MenuItem.indicatorStyle
 covers [props] MenuItem.closeOnSelect
 covers [props] checkedStyle
+covers [props] accessibilityDescription
 covers [props] role
 covers [events] MenuItem.onSelect
 # base-switch

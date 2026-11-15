@@ -196,6 +196,7 @@ fn ViewMenu() -> impl IntoElement {
                 .child(
                     menu_item()
                         .accessibility_label("About")
+                        .accessibility_description("Version and license")
                         .child(view().test_id("about").child(text("About"))),
                 ),
         )
@@ -238,6 +239,23 @@ fn checkable_items_are_heard_checked_or_not() {
             .enabled("role:menuitemcheckbox[Show minimap]")
             .unwrap(),
         "a disabled setting"
+    );
+}
+
+#[test]
+fn an_item_hands_its_description_to_screen_readers() {
+    let mut app = start();
+    app.app.press("id:view").unwrap();
+    app.app.wait_for("Show sidebar").unwrap();
+    let screen = app.app.screen();
+    assert_eq!(
+        screen.accessibility_description("role:menuitem[About]"),
+        Ok(Some("Version and license".to_owned()))
+    );
+    assert_eq!(
+        screen.accessibility_description("role:menuitemradio[Name]"),
+        Ok(None),
+        "an item without one has none"
     );
 }
 

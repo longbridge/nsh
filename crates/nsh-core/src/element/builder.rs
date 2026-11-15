@@ -1322,6 +1322,18 @@ pub trait Accessible: Element {
         self
     }
 
+    /// [`Accessible::accessibility_description`] while it is set (`None`:
+    /// none), for a component that hands the app's optional description
+    /// on to its element.
+    fn optional_accessibility_description(
+        mut self,
+        description: impl IntoReactive<Option<SharedString>>,
+    ) -> Self {
+        self.node()
+            .bind_attr(description, |a, description| a.description = description);
+        self
+    }
+
     /// What it is (a button, a header, ...).
     fn role(mut self, role: impl IntoReactive<AccessibilityRole>) -> Self {
         self.node().bind_attr(role, |a, role| a.role = role);
