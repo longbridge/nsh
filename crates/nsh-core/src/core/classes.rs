@@ -2,8 +2,9 @@
 //! `style` applied on top) and resolving them again when what they depend
 //! on changes: the appearance, the window size, the layout direction, the
 //! node's interaction states, its group's states or its sibling position.
-//! A sibling-position change shares one element count across the immediate
-//! restyling pass (`positions_changed`); ordinary restyling queries its position.
+//! A sibling-position change restyles, in one pass over the parent's
+//! children (`positions_changed`), only those whose position bits moved;
+//! ordinary restyling queries its position.
 
 use super::{Core, Key, Kind, NO_KEY, dirty, disabling_changes};
 use crate::{
@@ -1174,12 +1175,18 @@ impl<M: TextEngine> Core<M> {
                 // Keep position_bits' fallback for a child that does not count.
                 0
             };
-            if self.nodes[c as usize]
+            let node = &self.nodes[c as usize];
+            if node
                 .classes
                 .as_ref()
                 .is_some_and(|c| c.deps() & deps::POSITION != 0)
             {
-                self.restyle_at(c, Some(Self::position_at(index, count)));
+                // Only the children whose bits moved: an append restyles the
+                // old last row and the new one, not every sibling.
+                let bits = Self::position_at(index, count);
+                if node.position_used != bits {
+                    self.restyle_at(c, Some(bits));
+                }
             }
         }
     }
@@ -1326,7 +1333,7 @@ impl<M: TextEngine> Core<M> {
         self.restyle_at(key, None);
     }
 
-    /// Styles siblings with positions computed once for their shared parent.
+    /// [`Self::restyle`] with `position` already known (`None`: query it).
     fn restyle_at(&mut self, key: Key, position: Option<u8>) {
         let mut base = Style::default();
         // Under its own classes and style, as `:where()` is in CSS.
@@ -1534,6 +1541,7 @@ impl<M: TextEngine> Core<M> {
                     }
                 },
             );
+            self.nodes[key as usize].position_used = if positional { pos } else { 0 };
             if positional {
                 let parent = self.nodes[key as usize].parent;
                 self.nodes[parent as usize].positional_children = true;
