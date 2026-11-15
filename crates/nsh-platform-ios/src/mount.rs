@@ -3451,7 +3451,7 @@ impl Mounter {
         }
         if let Some(press) = &g.press {
             press.set_long_press(events.contains(EventKind::LongPress) || links_long_press);
-            press.set_own(own_press, handles_press);
+            press.set_own(own_press, handles_press, nsh_core::input::has_tap(events));
             press.set_long_press_delay(slot.long_press_delay);
         }
         let wants_hover = nsh_core::input::hoverable(slot.tracked, events);

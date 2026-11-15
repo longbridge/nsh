@@ -76,6 +76,7 @@ mount(App);
 How presses behave:
 
 - **Only the innermost pressable view responds.** A pressable row containing a pressable button gets no press when the button is pressed.
+- **A view with only `onLongPress` leaves the taps to the view around it.** Its long press is its own, but a tap goes to the nearest pressable view outwards, as a long press recognizer takes no taps on the Web, iOS and Android: a row's content can hold a long-press menu and the row still selects on a tap.
 - **Inside a scroll view, the press waits about 130 ms** before it starts (and shows feedback), so a drag that begins on a button scrolls instead of pressing it.
 - **Sliding off cancels.** Moving the finger out of the view ends the press with the press-up handler and no press.
 - **Disabling removes the press listeners** from what is mounted, so the view shows no feedback at all, and the disabled style applies (`.disabled_style(..)`, `class="disabled:opacity-40"`).
