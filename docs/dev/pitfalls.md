@@ -526,8 +526,10 @@ Things that were found the hard way. Read the section of the area you change bef
   `maxLength`; `input::paste_text`, the agent's paste too, asks it first):
   typing goes through `UIKeyboardImpl`, which asks it, as the software keyboard does. Keys typed faster than a
   controlled input's value comes back lose characters, so keys come at a typist's pace.
-- **A finger at rest still reports its position**: a drag that stops sending events before it lifts keeps its last
-  velocity and flings. A drag whose path leaves the scroll view moves it much further than the finger.
+- **A finger at rest still moves**: a scroll view measures its speed from the moves that change its offset, so a drag
+  that stops sending events, or keeps reporting the same spot, before it lifts keeps its last velocity and flings. A
+  resting finger trembles a fraction of a point (`agent.rs`). A drag whose path leaves the scroll view moves it much
+  further than the finger.
 - **Interactive back needs system-delivered touches**: the agent's IOHID drags can start UIKit's navigation
   gestures in the simulator. Test with `app.drag` from an element at the leading edge; `app.back()` exercises
   the back button instead. On iOS 26 a leading-edge drag can be recognized by
