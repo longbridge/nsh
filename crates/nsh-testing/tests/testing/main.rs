@@ -553,6 +553,14 @@ fn span_styles_follow_id_updates_and_reject_empty_spans() {
 }
 
 #[test]
+fn view_styles_read_background_and_opacity() {
+    let file = todo().parent().unwrap().join("queries/ViewStyles.test.tsx");
+    let results = run_file(&test_run(None), &file, &mut |_| {}).unwrap();
+    assert_eq!(results.len(), 1);
+    assert!(results[0].failure.is_none(), "{:?}", results[0]);
+}
+
+#[test]
 fn expect_compares_values_as_jest_does() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/expect");
     let results = run_file(&test_run(None), &dir.join("Expect.test.ts"), &mut |_| {}).unwrap();

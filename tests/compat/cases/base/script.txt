@@ -937,6 +937,10 @@ tap text:OpenSheet
 expect SheetBody
 expect Life: sheet open
 frame parent:text:SheetBody 0 0 390 50
+# A dialog for screen readers, named by its `accessibilityLabel`.
+prop label:"Top sheet" role dialog
+# It covers the whole screen, under an Android status bar too.
+prop label:"Top sheet" statusBarTranslucent true
 style parent:text:SheetBody backgroundColor #abcdefff
 style below:parent:text:SheetBody backgroundColor #111111ff
 style below:parent:text:SheetBody opacity 0.75
@@ -967,6 +971,7 @@ covers [props] Sheet.popupClass
 covers [props] Sheet.popupStyle
 covers [props] Sheet.backdropClass
 covers [props] Sheet.backdropStyle
+covers [props] accessibilityLabel
 covers [events] Sheet.onOpenChange
 covers [events] Sheet.onCancel
 # base-menu-checked
@@ -1004,6 +1009,9 @@ prop id:sort-name role menuitemradio
 prop id:sort-name accessibilityState checked=true
 prop id:sort-size role menuitemradio
 prop id:sort-size accessibilityState checked=false
+# A description, read after the item's name; an item without one has none.
+prop id:sort-name accessibilityDescription Sorts by file name
+noprop id:plain accessibilityDescription
 # A plain item stays a menuitem with no checked state.
 prop id:plain role menuitem
 prop id:plain accessibilityState {}
@@ -1023,6 +1031,7 @@ covers [props] MenuItem.indicatorClass
 covers [props] MenuItem.indicatorStyle
 covers [props] MenuItem.closeOnSelect
 covers [props] checkedStyle
+covers [props] accessibilityDescription
 covers [props] role
 covers [events] MenuItem.onSelect
 # base-switch
@@ -4216,6 +4225,12 @@ expect Selected: row 2 column 2
 tap id:read
 expect Read: 2:1 0-5
 tap id:scroll
+# A title press reports its column. The name cell of row 1 carries the
+# class from `cellClasses`. The rendered text sits in the render's holder,
+# in the placeholder, in that cell.
+style parent:parent:parent:text:"Cell 1:name fig" backgroundColor #00ff00ff
+tap text:Name
+expect Column: 0 1
 # A sortable column's sort button reports the next sort, which the app
 # sets (`sort`): from it, the next press goes on to descending, then
 # clears it.
@@ -4226,6 +4241,8 @@ expect Sorted: name descending
 tap id:sort:name
 expect Sorted: cleared
 covers [events] DataTable.onRowPress
+covers [events] DataTable.onColumnPress
+covers [props] DataTable.cellClasses
 covers [nsh/base] DataTable
 covers [props] DataTable.columns
 covers [props] DataTable.data
@@ -4472,6 +4489,30 @@ expect Observed: true 1 日Seed
 # Host event names have one shared coverage key, including a component
 # that emits its own payload under that name.
 covers [events] onCompositionChange
+
+# base-rich-editor-node-view
+tap id:case-base-rich-editor-node-view
+# The app's component renders the atom with its props, once.
+expect Ticker IBM
+expect NodeViewFacts: true true ticker NYSE ticker true
+expect NodeViewMounts: 1 tickers 1 pos none content refused
+# An edit before it moves it: its position follows, its component is not called again.
+tap text:TypeBeforeTicker
+tap text:ReadTickerPos
+expect NodeViewMounts: 1 tickers 1 pos 8 content refused
+# updateAttributes and a node selection change its props in place.
+tap id:ticker
+expect Ticker IBMX
+tap text:SelectTicker
+expect Ticker IBMX selected
+expect NodeViewMounts: 1 tickers 1 pos 8 content refused
+# deleteNode is one undoable change.
+tap text:DeleteTicker
+expect NodeViewMounts: 1 tickers 0 pos 8 content refused
+absent Ticker IBMX selected
+tap text:UndoTicker
+expect Ticker IBMX selected
+covers [nsh/base] RichNodeViewProps
 
 # base-rich-editor-view
 tap id:case-base-rich-editor-view

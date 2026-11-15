@@ -1357,6 +1357,25 @@ fn decode(
         .collect()
 }
 
+/// Decodes the items of a selectable view's selection menu
+/// ([`super::Element::selection_menu`]), keeping their handlers under a
+/// generation that a cleanup drops when the binding is replaced or the
+/// owner goes. Shown on every OS, not the desktops alone.
+pub(crate) fn register_selection_menu(items: Vec<MenuItem>) -> Vec<desktop::MenuItem> {
+    let menus = super::view_menus();
+    let owner = Owner::current();
+    let mut handlers = Vec::new();
+    let items = decode(items, super::os() == Os::MacOs, &owner, &mut handlers);
+    let generation = menus.borrow_mut().push_header(handlers);
+    let weak = Rc::downgrade(&menus);
+    cleanup(move || {
+        if let Some(menus) = weak.upgrade() {
+            menus.borrow_mut().take_header(generation);
+        }
+    });
+    items
+}
+
 /// Whether the app runs on a desktop OS, where menus show (as TS's).
 fn desktop_os() -> bool {
     super::os().is_desktop()

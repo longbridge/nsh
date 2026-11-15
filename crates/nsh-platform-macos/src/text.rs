@@ -2414,12 +2414,13 @@ pub(crate) fn selection_text(surface: &crate::surface::Surface) -> Option<String
 /// (with a selection), Select All and, for selected text, Look Up, titled
 /// in AppKit's own words ([`appkit_title`]). The root view is a Services
 /// requestor for the selection (`validRequestorForSendType:returnType:`),
-/// available to AppKit Services. Context-menu plugins are enabled by
+/// available to AppKit Services. The items of the selectable view `area`'s
+/// `selectionMenu` follow, after a separator. Context-menu plugins are enabled by
 /// default; their presentation depends on AppKit. Translate is not
 /// offered: `NSTextView`'s comes from a private framework, and the public
 /// translation UI is SwiftUI's only (`translationPresentation`). Returns
 /// once the menu closed.
-pub(crate) fn context_menu(surface: &crate::surface::Surface) {
+pub(crate) fn context_menu(surface: &crate::surface::Surface, area: Option<&crate::view::NshView>) {
     use nsh_core::desktop::MenuRole;
     use objc2::{MainThreadMarker, MainThreadOnly, sel};
     use objc2_app_kit::{NSApplication, NSMenu, NSMenuItem, NSPasteboardTypeString};
@@ -2475,7 +2476,21 @@ pub(crate) fn context_menu(surface: &crate::surface::Surface) {
         unsafe { item.setTarget(Some(root.ns())) };
         menu.addItem(&item);
     }
+    // The app's items (`selectionMenu`), built as its menus are: chosen,
+    // each reports its id as the root's `Menu` event.
+    let items = area.map(|a| a.state().props.selection_menu.clone());
+    let mut loads = Vec::new();
+    if let Some(items) = items.filter(|items| !items.is_empty()) {
+        let app = crate::chrome::menu(surface, "", &items, &mut loads);
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
+        for item in app.itemArray().iter() {
+            app.removeItem(&item);
+            menu.addItem(&item);
+        }
+    }
+    // Returns once the menu closed.
     NSMenu::popUpContextMenu_withEvent_forView(&menu, &event, root.ns());
+    drop(loads);
 }
 
 /// The characters of a selection a Look Up title quotes, as many as

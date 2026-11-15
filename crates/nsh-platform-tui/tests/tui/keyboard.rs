@@ -1774,7 +1774,7 @@ fn an_app_shortcut_keeps_its_priority_over_a_capture_of_every_key() {
 }
 
 /// A page that captures `a` and listens, with an opener whose sheet has the
-/// only stop after it. A sheet is a portaled overlay in the page's window.
+/// only stop after it. A sheet is a dialog: a `Modal` of its own.
 #[component]
 fn SheetKeys() -> impl IntoElement {
     let open = signal(false);
@@ -1823,32 +1823,28 @@ fn SheetKeys() -> impl IntoElement {
 }
 
 #[test]
-fn a_sheet_is_a_same_window_overlay_its_declaring_view_still_captures() {
+fn a_sheet_is_the_keyboard_boundary_a_page_capture_does_not_cross() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
     view.load(App::Rust(Root::new::<SheetKeys>(|| ()))).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "focused none");
     view.handle(key("Tab", Default::default()));
     draw_until(&mut view, &mut terminal, &rx, "focused opener");
+    // Enter is the page's to hear; presenting the sheet then moves the
+    // focus to its first tree stop, as a dialog's does.
     view.handle(key("Enter", Default::default()));
-    // The sheet mounts in the engine's next commit: wait for it before the
-    // Tab that enters it, as the other sheet tests do.
-    draw_until(&mut view, &mut terminal, &rx, "inside");
-    view.handle(key("Tab", Default::default()));
     draw_until(&mut view, &mut terminal, &rx, "focused inside");
-    // `nsh_base::sheet()` is two overlays in the page's own window (only
-    // the web build wraps them in a `modal()`): its content follows the
-    // view that declared it, so the page's listener hears the key and its
-    // rule captures `a` — a key the rule does not name runs no default.
+    // `nsh_base::sheet()` is a dialog, a `Modal`: the terminal's keyboard
+    // window. The page outside it neither hears nor captures the keys
+    // typed in it.
     assert_eq!(view.handle(key("q", Default::default())), Handled::Ignored);
+    assert_eq!(view.handle(key("a", Default::default())), Handled::Ignored);
     draw_until(
         &mut view,
         &mut terminal,
         &rx,
-        "focused inside heard q false",
+        "focused inside heard Enter false",
     );
-    assert_eq!(view.handle(key("a", Default::default())), Handled::Yes);
-    draw_until(&mut view, &mut terminal, &rx, "focused inside heard a true");
     // The sheet goes: the opener is the focus again, and the page's rule
     // covers it as before.
     view.handle(key("Escape", Default::default()));

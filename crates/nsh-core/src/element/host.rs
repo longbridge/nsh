@@ -67,6 +67,7 @@ crate::static_reactive!(crate::HeaderItem: crate::HeaderItem);
 crate::static_reactive!(Vec<crate::HeaderItem>: Vec<crate::HeaderItem>);
 crate::static_reactive!(super::header::HeaderItem: super::header::HeaderItem);
 crate::static_reactive!(Vec<super::header::HeaderItem>: Vec<super::header::HeaderItem>);
+crate::static_reactive!(Vec<super::desktop::MenuItem>: Vec<super::desktop::MenuItem>);
 crate::static_reactive!(KeyboardAppearance: KeyboardAppearance);
 crate::static_reactive!(KeyboardType: KeyboardType);
 crate::static_reactive!(ModalAnimation: ModalAnimation);

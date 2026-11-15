@@ -145,7 +145,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   underlay of their own. Background colors that would be hidden by a gradient replace it (`docs/dev/styles.md`,
   Effects). Safe areas and the keyboard are CSS environment variables in padding and margin
   (`env(safe-area-inset-top)`, `env(keyboard-inset-height)`, `docs/dev/styles.md` "Environment variables"); a view
-  with `selectable` makes its texts select together (`text.md` "Selectable views").
+  with `selectable` makes its texts select together (`text.md` "Selectable views"), and `selectionMenu` adds the
+  app's items to their selection menu (`text.md` "Selection menu").
 - **Platform modules**: `platform` (`nsh`'s environment, a constant: `os`: `ios` / `android` / `macos` / `windows` / `linux` / `web`, from the platform's
   `Environment::os` (`nsh_engine::Os`; the default is the build's mobile OS, so `nsh test` is iOS); `version` (a string,
   Android's API level), `idiom` (`phone` / `pad` / `mac` / `tv` / `desktop` / `terminal`: `Environment::reported_idiom()`, `terminal` in the terminal idiom, else `desktop` exactly where `Environment::desktop()` holds, else the platform's idiom, so a test's `Os::Linux` + `Idiom::Phone` reports `desktop`), `desktop` (`Environment::desktop()`), `catalyst` (`Os::is_catalyst()`: an iOS build for `target_abi = "macabi"`, in the iPad and the Mac idiom alike), `select` (the OS, then `desktop` / `mobile` by `Environment::desktop()`, `native` (not on the web), `default`); NSH's one definition of desktop (`api-naming.md`): `Environment::desktop()`, a desktop OS, the web in the desktop idiom, or the terminal idiom, which `platform.desktop`, the `desktop` idiom (outside a terminal), `select`'s `desktop` and `desktop={{…}}` all follow; Mac Catalyst is mobile (the iOS backend, `ios={{…}}`, its idiom `pad` or `mac`); `nsh/desktop`'s `isAvailable` is `Os::is_desktop()`, where its window and menu APIs work), `pixelRatio()` (an accessor: the window moving to another screen writes it), `nsh`'s
@@ -261,8 +262,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   component's keys while its part has the focus or its popup is open, a menu button's Return opening its menu), else they press
   it; an app's other bindings of those keys (a dialog's Return for its main action) give way to the control the user
   moved the focus to, on every platform (`Keymap::find_at`, `input::presses_focused_control`). Return and Space press
-  only a focused stop inside the newest modal. A page a newer one covers, or a back pops, gives the focus back to the
-  window (the view hears `onBlur`); the headless driver does the same.
+  only a focused stop inside the newest modal, and a focus the newest modal covers (one the app left under a dialog) has
+  no keys of its own: its bindings for the focus give way to the others, the dialog's (`KeyFocus::covered`,
+  `Keymap::find_with`; the headless driver, macOS and GPUI, where `focus()` can leave it there). A page a newer one
+  covers, or a back pops, gives the focus back to the window (the view hears `onBlur`); the headless driver does the
+  same.
   A stop the keyboard or `focus()` reaches scrolls into view in the scroll views around it, as a focused field does
   (macOS `scroll::reveal` unless a click focused it, Linux on any focus widget, the browser's own `focus()`, the
   headless driver's Tab at once); a list keeps the rows beside the focused one rendered, so Tab walks all its rows
@@ -764,3 +768,13 @@ next `reload()`, `load()` or new source shows a page again. Android's `WebBox` h
 `onRenderProcessGone` and makes a new WebView for it; the WebKit backends reload the
 same web view.
 
+
+
+### Size classes
+
+`horizontal_size_class()` and `vertical_size_class()` (`horizontalSizeClass()` and
+`verticalSizeClass()` in TS) report `SizeClass::Compact` / `Regular` through the
+existing environment signals. iOS supplies the surface's UIKit traits; unspecified
+traits and other platforms classify the corresponding window dimension at 600pt.
+Each axis notifies readers only when its class changes. The gallery's System demo
+shows both values while resizing or rotating.

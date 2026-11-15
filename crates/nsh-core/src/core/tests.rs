@@ -118,6 +118,7 @@ fn js_events<M: TextEngine>(c: &mut Core<M>) -> Vec<(NodeId, EventKind, EventPay
                     prop,
                     key,
                     value,
+                    ..
                 } => native(
                     host,
                     "$render",
@@ -20841,6 +20842,52 @@ mod views {
     }
 
     thread_local! {
+        static SIZE_CLASS_RUNS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    #[component]
+    fn SizeClasses() -> impl IntoElement {
+        effect(move || {
+            horizontal_size_class();
+            SIZE_CLASS_RUNS.with(|n| n.set(n.get() + 1));
+        });
+        text(move || format!("{:?} {:?}", horizontal_size_class(), vertical_size_class()))
+    }
+
+    #[test]
+    fn size_classes_follow_each_axis_and_native_traits_without_redundant_notifications() {
+        SIZE_CLASS_RUNS.with(|n| n.set(0));
+        let mut c = core();
+        let mut environment = crate::element::Environment {
+            window: crate::geometry::size_pt(390.0, 844.0),
+            ..Default::default()
+        };
+        c.set_environment(environment);
+        c.mount_root(&Root::new::<SizeClasses>(|| ()));
+        assert_eq!(texts(&c.commit().unwrap()), ["Compact Regular"]);
+        environment.window.width = px(599.0);
+        c.set_environment(environment);
+        c.commit();
+        assert_eq!(SIZE_CLASS_RUNS.with(Cell::get), 1);
+        environment.window = crate::geometry::size_pt(600.0, 599.0);
+        c.set_environment(environment);
+        assert_eq!(texts(&c.commit().unwrap()), ["Regular Compact"]);
+        assert_eq!(SIZE_CLASS_RUNS.with(Cell::get), 2);
+        // UIKit's classes win even when the size would classify differently.
+        environment.horizontal_size_class = Some(SizeClass::Compact);
+        environment.vertical_size_class = Some(SizeClass::Regular);
+        c.set_environment(environment);
+        assert_eq!(texts(&c.commit().unwrap()), ["Compact Regular"]);
+        environment.window = crate::geometry::size_pt(900.0, 900.0);
+        c.set_environment(environment);
+        c.commit();
+        assert_eq!(SIZE_CLASS_RUNS.with(Cell::get), 3);
+        environment.horizontal_size_class = None;
+        c.set_environment(environment);
+        assert_eq!(texts(&c.commit().unwrap()), ["Regular Regular"]);
+    }
+
+    thread_local! {
         static WAKE_RUNS: Cell<u32> = const { Cell::new(0) };
     }
 
@@ -22676,6 +22723,84 @@ mod views {
         assert_eq!(PRESSES.with(|c| c.get()), 2);
         assert!(c.component_event(ROOT_ID, EventKind::Menu, &menu(new_select_id)));
         assert_eq!(SELECTS.with(|c| c.get()), 2);
+    }
+
+    /// A selectable view's `selection_menu` reaches its view props as plain
+    /// items and separators (roles, submenus and shortcuts left out), and a
+    /// chosen item's `on_select` runs when the platform reports its id as
+    /// the root's `Menu` event.
+    #[test]
+    fn selection_menu_items_reach_the_view_and_run_when_chosen() {
+        use std::cell::Cell;
+
+        use crate::{
+            EventKind, EventPayload, PayloadValue, ROOT_ID,
+            desktop::{MenuItem as PlatformItem, MenuRole},
+            element::desktop::MenuItem,
+        };
+
+        thread_local! {
+            static CHOSEN: Cell<u32> = const { Cell::new(0) };
+        }
+        CHOSEN.with(|c| c.set(0));
+
+        #[derive(Default)]
+        struct Area;
+        #[derive(Clone, PartialEq, Props)]
+        struct AreaProps {}
+        impl Component for Area {
+            type Props = AreaProps;
+            type Event = NoEvent;
+            fn view(_: AreaProps, _: Scope<NoEvent>) -> impl IntoElement {
+                view()
+                    .selectable(true)
+                    .selection_menu(vec![
+                        MenuItem::separator(),
+                        MenuItem::role(MenuRole::Copy),
+                        MenuItem::new("Highlight")
+                            .shortcut("mod+h")
+                            .on_select(|| CHOSEN.with(|c| c.set(c.get() + 1))),
+                        MenuItem::separator(),
+                        MenuItem::separator(),
+                        MenuItem::submenu("More", [MenuItem::new("Nested")]),
+                        MenuItem::new("Define").disabled(true),
+                        MenuItem::separator(),
+                    ])
+                    .child(text("Some words"))
+            }
+        }
+
+        let mut c = core();
+        c.mount_root(&Root::new::<Area>(|| AreaProps {}));
+        let batch = c.commit().unwrap();
+        let menu = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewProps { props, .. } if props.selectable_view => {
+                    Some(props.selection_menu.clone())
+                }
+                _ => None,
+            })
+            .expect("the selectable view's props");
+        let [
+            PlatformItem::Action(highlight),
+            PlatformItem::Separator,
+            PlatformItem::Action(define),
+        ] = &menu[..]
+        else {
+            panic!("plain items and one separator between them: {menu:?}");
+        };
+        assert_eq!(highlight.label, "Highlight");
+        assert_eq!(highlight.shortcut, None);
+        assert_ne!(highlight.id, 0);
+        assert_eq!(define.label, "Define");
+        assert!(!define.enabled);
+        assert_eq!(define.id, 0, "no handler, no id");
+
+        let chosen = EventPayload::Map(vec![("id", PayloadValue::Number(highlight.id as f64))]);
+        assert!(c.component_event(ROOT_ID, EventKind::Menu, &chosen));
+        assert_eq!(CHOSEN.with(|c| c.get()), 1);
     }
 
     /// A Rust component that renders a native component.
@@ -44344,4 +44469,285 @@ mod download_decisions {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+#[path = "reconciliation_tests.rs"]
+mod reconciliation_cleanup;
+
+// Structural variants share positions without changing immediate restyling.
+mod positional_regressions {
+    use super::*;
+
+    const CLASSES: &str = "w-10 h-4 bg-red-500 first:bg-green-500 last:bg-blue-500 odd:pt-1 even:pb-2 only:px-3 last:text-white first:z-10 odd:pointer-events-none last:max-w-prose";
+
+    fn snapshot(c: &Core<FakeEngine>, children: &[Key]) -> Vec<String> {
+        children
+            .iter()
+            .map(|&key| {
+                let n = &c.nodes[key as usize];
+                format!(
+                    "{:?}",
+                    (
+                        n.id,
+                        &n.view_style,
+                        &n.text_style,
+                        &n.class_props,
+                        &n.base_layout,
+                        n.direction,
+                        n.rtl,
+                        n.z_index,
+                        n.wants_fixed,
+                    )
+                )
+            })
+            .collect()
+    }
+
+    // The ordinary resolver still queries the actual sibling list for each
+    // child. Compare the shared-position pass with that independent path.
+    fn check(c: &mut Core<FakeEngine>, parent: NodeId) {
+        let parent = c.key(parent).unwrap();
+        c.positions_changed(parent);
+        let children = c.nodes[parent as usize].children.clone();
+        let expected = snapshot(c, &children);
+        for &key in &children {
+            if c.nodes[key as usize]
+                .classes
+                .as_ref()
+                .is_some_and(|classes| classes.deps() & crate::tailwind::deps::POSITION != 0)
+            {
+                c.restyle(key);
+            }
+        }
+        assert_eq!(snapshot(c, &children), expected);
+    }
+
+    fn child(c: &mut Core<FakeEngine>, id: NodeId, parent: NodeId) {
+        apply(
+            c,
+            vec![
+                Op::Create { id, tag: Tag::View },
+                class_op(id, CLASSES),
+                Op::Insert {
+                    parent,
+                    child: id,
+                    before: None,
+                },
+            ],
+        );
+        check(c, parent);
+    }
+
+    #[test]
+    fn shared_positions_match_individual_resolution_after_tree_edits() {
+        let mut c = core();
+        view_with_classes(&mut c, 2, "");
+        view_with_classes(&mut c, 100, "");
+        for id in [4, 6, 8, 10] {
+            child(&mut c, id, 2);
+        }
+
+        // Text markers do not consume the first, last or odd/even positions.
+        for (id, before) in [(40, Some(4)), (42, Some(8)), (44, None)] {
+            apply(
+                &mut c,
+                vec![
+                    Op::CreateText {
+                        id,
+                        text: "".into(),
+                    },
+                    Op::Insert {
+                        parent: 2,
+                        child: id,
+                        before,
+                    },
+                ],
+            );
+            check(&mut c, 2);
+        }
+
+        // An ordinary sibling still consumes an element position.
+        c.apply(Op::Create {
+            id: 52,
+            tag: Tag::View,
+        })
+        .unwrap();
+        c.apply(class_op(52, "w-10 h-4")).unwrap();
+        c.apply(Op::Insert {
+            parent: 2,
+            child: 52,
+            before: Some(8),
+        })
+        .unwrap();
+        check(&mut c, 2);
+
+        // The core's own decorations are excluded too. A decoration with
+        // structural classes keeps the resolver's existing index-0 fallback.
+        c.apply(Op::Create {
+            id: 46,
+            tag: Tag::View,
+        })
+        .unwrap();
+        let decoration = c.key(46).unwrap();
+        c.nodes[decoration as usize].decoration = true;
+        c.apply(class_op(46, CLASSES)).unwrap();
+        c.apply(Op::Insert {
+            parent: 2,
+            child: 46,
+            before: Some(6),
+        })
+        .unwrap();
+        check(&mut c, 2);
+
+        // Setting classes after insertion must register the parent's
+        // positional children before the next append.
+        c.apply(Op::Create {
+            id: 48,
+            tag: Tag::View,
+        })
+        .unwrap();
+        c.apply(Op::Insert {
+            parent: 100,
+            child: 48,
+            before: None,
+        })
+        .unwrap();
+        c.apply(class_op(48, CLASSES)).unwrap();
+        assert!(c.nodes[c.key(100).unwrap() as usize].positional_children);
+        child(&mut c, 50, 100);
+
+        for op in [
+            Op::Insert {
+                parent: 2,
+                child: 10,
+                before: Some(4),
+            },
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: 100,
+                child: 6,
+                before: Some(48),
+            },
+            Op::Remove {
+                parent: 2,
+                child: 8,
+            },
+            Op::Remove {
+                parent: 100,
+                child: 50,
+            },
+            Op::Remove {
+                parent: 100,
+                child: 48,
+            },
+        ] {
+            c.apply(op).unwrap();
+            check(&mut c, 2);
+            check(&mut c, 100);
+        }
+
+        // A real tooltip overlay also does not count among the rows.
+        c.apply(Op::Create {
+            id: 60,
+            tag: Tag::View,
+        })
+        .unwrap();
+        c.apply(Op::SetProp {
+            id: 2,
+            prop: Prop::Tooltip(crate::overlay::TooltipContent::Node(60)),
+        })
+        .unwrap();
+        let overlay = c.overlay_state.tooltips[&2].overlay;
+        c.apply(class_op(overlay, CLASSES)).unwrap();
+        check(&mut c, 2);
+        child(&mut c, 62, 2);
+        c.commit();
+        check(&mut c, 2);
+        check(&mut c, 100);
+
+        // The sole element in the second parent is still both first and last.
+        let only = &c.nodes[c.key(6).unwrap() as usize];
+        assert_eq!(only.view_style.background_color, Color(0x2b7f_ffff));
+        assert_eq!(only.text_style.color, Some(Color(0xffff_ffff)));
+    }
+
+    #[test]
+    fn positional_fixed_style_still_settles_after_reordering() {
+        let mut c = core();
+        view_with_classes(&mut c, 2, "");
+        for id in [4, 6, 8] {
+            apply(
+                &mut c,
+                vec![
+                    Op::Create { id, tag: Tag::View },
+                    class_op(id, "w-10 h-4 last:fixed"),
+                    Op::Insert {
+                        parent: 2,
+                        child: id,
+                        before: None,
+                    },
+                ],
+            );
+        }
+        c.commit();
+        for id in [4, 6, 8] {
+            assert_eq!(c.nodes[c.key(id).unwrap() as usize].fixed_view, id == 8);
+        }
+        c.apply(Op::Insert {
+            parent: 2,
+            child: 4,
+            before: None,
+        })
+        .unwrap();
+        c.commit();
+        for id in [4, 6, 8] {
+            assert_eq!(c.nodes[c.key(id).unwrap() as usize].fixed_view, id == 4);
+        }
+        check(&mut c, 2);
+    }
+}
+
+#[test]
+fn padding_on_a_span_is_warned_once() {
+    let mut c = core();
+    let span = |id, padding: f32| {
+        [
+            Op::Create { id, tag: Tag::Text },
+            style_op(id, &[("paddingLeft", StyleValue::Number(padding))]),
+        ]
+    };
+    let mut ops = vec![Op::Create {
+        id: 2,
+        tag: Tag::Text,
+    }];
+    ops.extend(span(3, 0.0));
+    ops.extend([
+        Op::Insert {
+            parent: 2,
+            child: 3,
+            before: None,
+        },
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ]);
+    apply(&mut c, ops);
+    let _ = c.commit();
+    assert!(!c.span_padding_warned);
+    // Styled before it is inserted into its text, then made a span.
+    let mut ops: Vec<Op> = span(4, 4.0).into();
+    ops.push(Op::Insert {
+        parent: 2,
+        child: 4,
+        before: None,
+    });
+    apply(&mut c, ops);
+    let _ = c.commit();
+    assert!(c.span_padding_warned);
 }

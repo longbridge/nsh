@@ -200,7 +200,11 @@ impl ResolvedTextStyle {
     /// Applies the properties set on a node on top of the inherited style.
     #[inline]
     pub(crate) fn inherit(self, style: &TextStyle) -> Self {
-        let font_size = style.font_size.unwrap_or(self.font_size);
+        // Ems / percentages are of the inherited font size, like CSS.
+        let font_size = match style.font_size_em {
+            Some(em) => px(em * self.font_size.0),
+            None => style.font_size.unwrap_or(self.font_size),
+        };
         // A multiple follows each nested font size (unitless CSS
         // line-height); points stay points.
         let (line_height, line_height_multiple) = match (
@@ -2261,5 +2265,22 @@ mod tests {
         forged.extend([0; 6]); // the stream, padded to 4 bytes
         assert_eq!(forged.len(), 60);
         assert!(font_data(&forged).is_err());
+    }
+
+    #[test]
+    fn em_font_size_is_of_the_inherited_size() {
+        let parent = ResolvedTextStyle {
+            font_size: px(16.0),
+            ..ResolvedTextStyle::default()
+        };
+        let span = TextStyle {
+            font_size_em: Some(0.875),
+            letter_spacing_em: Some(0.1),
+            ..TextStyle::default()
+        };
+        let r = parent.inherit(&span);
+        assert_eq!(r.font_size, px(14.0));
+        // Other ems follow the resolved size.
+        assert!((r.letter_spacing.0 - 1.4).abs() < 1e-4);
     }
 }

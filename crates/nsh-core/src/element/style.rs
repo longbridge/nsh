@@ -571,7 +571,7 @@ impl Declaration {
                 if let Some(&(size, line)) = PRESETS.text.get(*name) {
                     out.push(Decl::Set(
                         StyleKey::FontSize,
-                        PropertyValue::OptPoints(Some(px(size))),
+                        PropertyValue::FontSize(Some(px(size)), None),
                     ));
                     // As `text-lg`'s: a line height set anywhere wins.
                     if let Some(m) = line {

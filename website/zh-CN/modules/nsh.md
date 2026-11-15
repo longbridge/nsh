@@ -946,6 +946,24 @@ const wide = () => windowSize().width >= 600;
 <View style={{ flexDirection: wide() ? "row" : "column" }}>{/* ... */}</View>
 ```
 
+### horizontalSizeClass / verticalSizeClass
+
+```ts
+export type SizeClass = "compact" | "regular";
+const horizontalSizeClass: Accessor<SizeClass>;
+const verticalSizeClass: Accessor<SizeClass>;
+```
+
+读取窗口横向和纵向可用空间的响应式分类。iOS 使用当前视图的 UIKit trait collection，随旋转和分屏变化；系统尚未提供分类时按窗口尺寸回退。其他平台（含桌面、Android 和 Web）分别按窗口的宽、高判断：小于 600pt 为 `compact`，600pt 及以上为 `regular`。横向阈值与 DockArea 一致；Android 的点对应 dp，Web 对应 CSS 像素。分类变化时才通知读取者。
+
+Rust：`horizontal_size_class()` / `vertical_size_class()` 返回 `SizeClass::Compact` 或 `SizeClass::Regular`，由 `nsh_core::prelude` 导出。
+
+```tsx
+import { horizontalSizeClass, Text } from "nsh";
+
+<Text>{horizontalSizeClass() === "compact" ? "Compact layout" : "Expanded layout"}</Text>
+```
+
 ### colorScheme
 
 ```ts
@@ -2990,6 +3008,8 @@ on_key_with("space", KeyOptions { for_focus: true, ..KeyOptions::default() }, mo
   onBlur={() => unbind?.()}
 />
 ```
+
+按键归最新的对话框：焦点留在被对话框盖住的视图上时（菜单项打开对话框，菜单关闭时把焦点还给触发器），回车和空格交给对话框的绑定，这个视图的 `forFocus` 绑定和按下都要等对话框关闭后才生效。
 
 菜单快捷键会让位给相同按键组合的绑定：所有桌面平台上的应用菜单（[`nsh/desktop`](./nsh-desktop)），以及 macOS 上的内置菜单（Cmd+W、Cmd+C 等）。使用 `nsh run` 开发时，即使应用绑定了 `mod+r`，Cmd+R / Ctrl+R 也总是重新加载应用；打包后的应用可以绑定它。
 

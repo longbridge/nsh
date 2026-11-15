@@ -857,6 +857,47 @@ pub(crate) fn set_header_right_items(
     )
 }
 
+/// Sets `selectionMenu` on view `id` from JS value `value`: assigns the
+/// items' ids and keeps their `onSelect` functions by the view's id (in
+/// the slot header items use), freed when the prop changes or the view
+/// goes.
+pub(crate) fn set_selection_menu(
+    cx: *mut JsContext,
+    id: u32,
+    value: JsValue,
+) -> Result<(), JsValue> {
+    listen(cx)?;
+    let items = if nullish(value) {
+        clear_header(cx, id);
+        Vec::new()
+    } else {
+        let mut decoder = Decoder {
+            cx,
+            mac: os(cx) == Os::MacOs,
+            functions: Vec::new(),
+            depth: 0,
+            budget: dom::MAX_ARRAY_ITEMS,
+        };
+        match decoder.items(value) {
+            Ok(items) => {
+                keep_header(cx, id, std::mem::take(&mut decoder.functions));
+                items
+            }
+            Err(message) => {
+                decoder.free();
+                return Err(throw(cx, &format!("nsh: selectionMenu: {message}")));
+            }
+        }
+    };
+    dom::push_op(
+        cx,
+        Op::SetProp {
+            id,
+            prop: Prop::SelectionMenu(items),
+        },
+    )
+}
+
 /// `Tray.set(options | null)`.
 unsafe extern "C" fn set_tray(
     cx: *mut JsContext,

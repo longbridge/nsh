@@ -23,11 +23,13 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     rc::Rc,
+    time::Duration,
 };
 
 use nsh_core::{
     element::{Style, measure_text},
     prelude::*,
+    time::{Instant, now},
 };
 
 pub use self::{
@@ -118,8 +120,11 @@ impl TerminalApi {
 #[derive(Clone)]
 struct Term {
     emu: Rc<RefCell<Box<dyn TerminalEmulator>>>,
-    /// The size in cells the last layout gave, `None` before the first.
+    /// The size in cells the emulator has, `None` before the first layout.
     size: Rc<Cell<Option<TerminalSize>>>,
+    /// The size the latest layout gave while it waits to be applied, and
+    /// when: a drag of the box's edge lays it out every frame.
+    pending: Rc<Cell<Option<(TerminalSize, Instant)>>>,
     rev: Signal<u64>,
     cx: Scope<TerminalEvent>,
     sink: ElementRef,
@@ -161,7 +166,45 @@ impl Term {
         }
     }
 
+    /// A layout gave the cells `size`. The first one applies at once;
+    /// later ones wait until the size has held [`RESIZE_SETTLE`], so a drag
+    /// (a split's handle, a window's edge) neither re-wraps the emulator
+    /// and redraws every row nor has the program redraw its screen at each
+    /// column it crosses: the rows are clipped to the box meanwhile, as
+    /// terminals do.
     fn resize(&self, size: TerminalSize) {
+        if self.size.get().is_none() {
+            return self.apply_size(size);
+        }
+        if self.size.get() == Some(size) {
+            self.pending.set(None);
+            return;
+        }
+        let at = now() + RESIZE_SETTLE;
+        if self.pending.replace(Some((size, at))).is_none() {
+            self.resize_after(RESIZE_SETTLE);
+        }
+    }
+
+    /// Applies the pending size once it has held, waiting again while it
+    /// changed.
+    fn resize_after(&self, delay: Duration) {
+        let term = self.clone();
+        set_timeout(delay, move || {
+            let Some((size, at)) = term.pending.get() else {
+                return;
+            };
+            let left = at.saturating_duration_since(now());
+            if left.is_zero() {
+                term.pending.set(None);
+                term.apply_size(size);
+            } else {
+                term.resize_after(left);
+            }
+        });
+    }
+
+    fn apply_size(&self, size: TerminalSize) {
         // The first layout reports its size even when it is the one the
         // emulator starts at.
         if self.size.get() == Some(size) {
@@ -231,6 +274,9 @@ impl Term {
     }
 }
 
+/// How long a new size must hold before the terminal takes it.
+const RESIZE_SETTLE: Duration = Duration::from_millis(80);
+
 /// The CSS `font` shorthand `measure_text` takes.
 fn font_css(family: &str, size: Points) -> String {
     match family {
@@ -268,6 +314,7 @@ pub fn Terminal(props: TerminalProps, cx: Scope<TerminalEvent>) -> impl IntoElem
     let term = Term {
         emu: Rc::new(RefCell::new(emu)),
         size: Rc::new(Cell::new(None)),
+        pending: Rc::new(Cell::new(None)),
         rev: signal(0),
         cx,
         sink: element_ref(),

@@ -1037,7 +1037,8 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
             return;
         }
         if crate::text::selectable(&v.state()) || v.state().props.selectable_view {
-            crate::text::context_menu(surface);
+            let area = crate::selectable_view::area_of(&v);
+            crate::text::context_menu(surface, area.as_ref());
             return;
         }
     }
@@ -1222,6 +1223,22 @@ pub(crate) fn control_activation_target(surface: &Surface, event: &NSEvent) -> O
         return None;
     }
     NshView::from_ns(native).filter(is_key_control)
+}
+
+/// Whether the keyboard focus is on a view of the window the newest modal
+/// over it covers: a focus the app left there (a popup closing gave it
+/// back to its trigger as a dialog opened). That view's own bindings take
+/// no keys ([`nsh_core::keymap::KeyFocus::covered`]).
+pub(crate) fn focus_covered(surface: &Surface) -> bool {
+    let root = event_root(surface);
+    let Some(responder) = root.ns().window().and_then(|w| w.firstResponder()) else {
+        return false;
+    };
+    let Some(native) = responder.downcast_ref::<objc2_app_kit::NSView>() else {
+        return false;
+    };
+    native.isDescendantOf(root.ns())
+        && !native.isDescendantOf(&crate::navigation::focus_scope(surface))
 }
 
 /// Presses `view` with no pointer to report, as Return and Space press a

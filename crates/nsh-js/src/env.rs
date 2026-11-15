@@ -55,9 +55,11 @@ enum Part {
     PerfStats,
     Shaders,
     WakeCount,
+    HorizontalSizeClass,
+    VerticalSizeClass,
 }
 
-const PARTS: usize = 18;
+const PARTS: usize = 20;
 
 /// The environment's part of a context's state.
 pub(crate) struct Env {
@@ -495,6 +497,18 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
         writes.push((
             Part::Window,
             object(cx, &[(c"width", number(w)), (c"height", number(h))]),
+        ));
+    }
+    if changed(&|p| p.horizontal_size_class() == next.horizontal_size_class()) {
+        writes.push((
+            Part::HorizontalSizeClass,
+            string(cx, next.horizontal_size_class().name()),
+        ));
+    }
+    if changed(&|p| p.vertical_size_class() == next.vertical_size_class()) {
+        writes.push((
+            Part::VerticalSizeClass,
+            string(cx, next.vertical_size_class().name()),
         ));
     }
     if changed(&|p| p.safe_area == next.safe_area) {
@@ -937,6 +951,22 @@ unsafe extern "C" fn platform_select(
 /// The exports of `nsh/device`.
 pub(crate) const DEVICE_EXPORTS: &[Item] = &[
     (
+        "horizontalSizeClass",
+        Export::Value(|cx| accessor(cx, Part::HorizontalSizeClass)),
+        Ts::value(
+            "Horizontal space (reactive): UIKit's trait on iOS; elsewhere compact below 600pt of window width, regular at 600pt and above.",
+            "Accessor<SizeClass>",
+        ),
+    ),
+    (
+        "verticalSizeClass",
+        Export::Value(|cx| accessor(cx, Part::VerticalSizeClass)),
+        Ts::value(
+            "Vertical space (reactive): UIKit's trait on iOS; elsewhere compact below 600pt of window height, regular at 600pt and above.",
+            "Accessor<SizeClass>",
+        ),
+    ),
+    (
         "windowSize",
         Export::Value(|cx| accessor(cx, Part::Window)),
         Ts::value(
@@ -1043,7 +1073,10 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
 ];
 
 /// `nsh/device`'s types.
-pub(crate) const DEVICE_TYPES: &str = r#"export interface PlatformSelectSpec<T> {
+pub(crate) const DEVICE_TYPES: &str = r#"/** Space available along one axis of the surface. */
+export type SizeClass = "compact" | "regular";
+
+export interface PlatformSelectSpec<T> {
   ios?: T;
   android?: T;
   macos?: T;

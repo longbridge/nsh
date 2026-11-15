@@ -401,6 +401,28 @@ pub struct SpanStyle {
     pub line_through: bool,
 }
 
+/// A view's style, as [`TestStep::ViewStyle`] answers it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[non_exhaustive]
+pub struct ViewStyle {
+    /// Its `backgroundColor`, `0xRRGGBBAA`; `None` when transparent.
+    pub background_color: Option<u32>,
+    /// Its own `opacity`.
+    pub opacity: f32,
+    /// The opacity it shows with: its own times every view's around it.
+    pub effective_opacity: f32,
+}
+
+impl Default for ViewStyle {
+    fn default() -> Self {
+        ViewStyle {
+            background_color: None,
+            opacity: 1.0,
+            effective_opacity: 1.0,
+        }
+    }
+}
+
 /// A step of a test on a host's app, named as `nsh/test` names them: views
 /// are found by selectors (`id:save`, `text:Add`, `role:button[Save]`), and
 /// actions are native input at the view the selector names.
@@ -619,6 +641,12 @@ pub enum TestStep {
     /// The style of the first character `selector` names
     /// (`app.spanStyle`): a [`SpanStyle`].
     SpanStyle {
+        /// The selector.
+        selector: String,
+    },
+    /// The style of the view `selector` names (`app.viewStyle`): a
+    /// [`ViewStyle`], or null when none matches.
+    ViewStyle {
         /// The selector.
         selector: String,
     },
