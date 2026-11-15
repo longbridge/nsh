@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-use nsh_base::{TerminalEmulator, TerminalEmulatorFactory, TerminalEvent, VtEmulator, terminal};
+use nsh_base::{TerminalEmulator, TerminalEmulatorFactory, VtEmulator, terminal};
 use nsh_core::{
     EventKind, EventPayload, NodeId, PayloadValue, Size, ViewKind,
     element::{Root, measure_text},
@@ -49,10 +49,8 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
                     .font_family("monospace")
                     .accessibility_label("Shell")
                     .flex_1()
-                    .on_data(move |e: &TerminalEvent| {
-                        if let TerminalEvent::Data(data) = e {
-                            sent.update(|s| s.push(data.to_string()));
-                        }
+                    .on_data(move |data: &SharedString| {
+                        sent.update(|s| s.push(data.to_string()));
                     }),
             ),
         )
