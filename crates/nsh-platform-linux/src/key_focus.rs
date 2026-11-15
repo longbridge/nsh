@@ -1016,6 +1016,64 @@ mod tests {
         });
     }
 
+    /// A removed field takes the focus with it, as a removed DOM element
+    /// does: GTK would hand it to another field, where the app's
+    /// `notEditing` shortcuts stop firing.
+    #[test]
+    fn a_removed_field_takes_the_focus_with_it() {
+        run(|| {
+            let surface = surface();
+            let create = |id, kind| MountItem::Create { id, kind };
+            let insert = |parent, child| MountItem::Insert {
+                parent,
+                child,
+                before: None,
+            };
+            let place = |id, y| MountItem::Frame {
+                id,
+                frame: frame(0.0, y, 100.0, 30.0),
+            };
+            let configure = |id| MountItem::Input {
+                id,
+                config: Box::default(),
+            };
+            // A field in a panel (2), and a field after the panel.
+            apply(
+                &surface,
+                &[
+                    create(2, ViewKind::View),
+                    create(4, ViewKind::Input),
+                    create(6, ViewKind::Input),
+                    insert(ROOT_ID, 2),
+                    insert(2, 4),
+                    insert(ROOT_ID, 6),
+                    place(2, 0.0),
+                    place(4, 0.0),
+                    place(6, 40.0),
+                    configure(4),
+                    configure(6),
+                ],
+            );
+            let window = show(&surface);
+            let field = view(&surface, 4);
+            assert!(wait_until(|| field.is_mapped()));
+            crate::text_input::focus(&field);
+            let in_field =
+                |w: &gtk::Window| GtkWindowExt::focus(w).is_some_and(|f| f.is_ancestor(&field));
+            assert!(wait_until(|| in_field(&window)));
+            apply(&surface, &[MountItem::Remove { id: 2 }]);
+            // GTK moves the focus on a later frame.
+            let settled = std::time::Instant::now() + std::time::Duration::from_millis(200);
+            wait_until(|| std::time::Instant::now() >= settled);
+            assert_eq!(
+                GtkWindowExt::focus(&window).map(|w| w.type_().name()),
+                None,
+                "the focus leaves with the field"
+            );
+            window.destroy();
+        });
+    }
+
     #[cfg(feature = "dev")]
     mod menus {
         use nsh_core::{
