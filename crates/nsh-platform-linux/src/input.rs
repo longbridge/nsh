@@ -2477,10 +2477,12 @@ fn set_hovered(surface: &Surface, views: Vec<NshView>, x: f32, y: f32) {
 }
 
 /// `view` is removed or deleted: it and the views inside it leave the hover
-/// without an `onMouseLeave`, as a removed DOM element does. A removed view
-/// can outlive its component (a JS cycle through its ref), whose handlers
-/// must not run.
+/// without an `onMouseLeave`, and the keyboard focus at once (a removal
+/// animation keeps them in the tree), as a removed DOM element does. A
+/// removed view can outlive its component (a JS cycle through its ref),
+/// whose handlers must not run.
 pub(crate) fn removed(surface: &Surface, view: &NshView) {
+    crate::navigation::drop_focus(view);
     let input = &surface.input;
     let inside = |v: &NshView| v == view || v.is_ancestor(view);
     if input
