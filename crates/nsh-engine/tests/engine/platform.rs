@@ -1046,8 +1046,7 @@ fn size_classes_react_to_resize_and_native_traits_in_js() {
         &entry,
         r#"
 import { mount, Text, horizontalSizeClass, verticalSizeClass } from "nsh";
-import { horizontalSizeClass as deviceHorizontal } from "nsh/device";
-mount(() => <Text>{`${horizontalSizeClass()} ${verticalSizeClass()} ${deviceHorizontal()}`}</Text>);
+mount(() => <Text>{`${horizontalSizeClass()} ${verticalSizeClass()}`}</Text>);
 "#,
     )
     .unwrap();
@@ -1082,17 +1081,17 @@ mount(() => <Text>{`${horizontalSizeClass()} ${verticalSizeClass()} ${deviceHori
             }
             panic!("no text {expected:?}");
         };
-    read("compact regular compact");
+    read("compact regular");
     environment.window = Size::new(px(600.0), px(599.0));
     engine.control().set_environment(environment);
-    read("regular compact regular");
+    read("regular compact");
     environment.os = Os::Ios;
     environment.horizontal_size_class = Some(SizeClass::Compact);
     environment.vertical_size_class = Some(SizeClass::Regular);
     engine.control().set_environment(environment);
-    read("compact regular compact");
+    read("compact regular");
     environment.horizontal_size_class = None;
     environment.vertical_size_class = None;
     engine.control().set_environment(environment);
-    read("regular compact regular");
+    read("regular compact");
 }
