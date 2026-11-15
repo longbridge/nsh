@@ -673,6 +673,34 @@ fn return_confirms_a_dialog_a_keyboard_menu_opened() {
 }
 
 #[test]
+fn a_choice_typed_ahead_of_a_key_move_still_gives_the_focus_back_to_the_trigger() {
+    // Down and Return in one batch: Down moves the focus to Copy, Return
+    // chooses it, and the menu closes, all in one commit. The move into
+    // the closing menu is not the app's: the focus goes back to the
+    // trigger, not to an item on its way out.
+    for controlled in [false, true] {
+        let mut app = start_on(
+            Root::new::<RenameMenu>(move || RenameMenuProps {
+                controlled,
+                input: false,
+            }),
+            Os::MacOs,
+        );
+        app.app.press_key("tab").unwrap();
+        app.app.wait_for("text:focus trigger").unwrap();
+        app.app.press_key("enter").unwrap();
+        app.app.wait_for("Rename").unwrap();
+        app.app.press_keys(&["down", "enter"]).unwrap();
+        app.app
+            .wait_for_gone("Copy", std::time::Duration::from_secs(2))
+            .unwrap();
+        app.app
+            .wait_for("text:focus trigger trigger")
+            .unwrap_or_else(|e| panic!("controlled {controlled}: {e}"));
+    }
+}
+
+#[test]
 fn page_down_and_page_up_go_to_the_last_and_first_enabled_items_and_stop() {
     // Every item is in view: a page is all of them. New is disabled, so
     // Page Up stops at Open; neither goes around.

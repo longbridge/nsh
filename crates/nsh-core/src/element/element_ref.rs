@@ -188,14 +188,18 @@ impl ElementRef {
         self.send(Command::Focus);
     }
 
-    /// [`Self::focus`], given way to any other move of the focus in the
-    /// same commit (a `focus()` from Rust or JS): a popup closing gives the
-    /// keyboard focus back to its trigger, but not over the focus the
-    /// choice that closed it moved elsewhere (an item that starts editing
-    /// a field). The last one asked for in a commit is the one that counts.
+    /// [`Self::focus`] as `from` closes, given way to any other move of the
+    /// focus out of `from` in the same commit (a `focus()` from Rust or
+    /// JS): a popup closing gives the keyboard focus back to its trigger,
+    /// but not over the focus the choice that closed it moved elsewhere (an
+    /// item that starts editing a field). A move inside `from` does not
+    /// count: it is going, and keys typed ahead (Down, then Return) move
+    /// the focus to the item they choose in the commit that closes it. The
+    /// last one asked for in a commit is the one that counts.
     #[doc(hidden)]
-    pub fn focus_back(&self) {
-        self.reach(|node, executor| executor.act(Action::FocusBack(node)));
+    pub fn focus_back(&self, from: ElementRef) {
+        let from = from.node();
+        self.reach(|to, executor| executor.act(Action::FocusBack { to, from }));
     }
 
     /// Ends the press going on in the element (or inside it) without its

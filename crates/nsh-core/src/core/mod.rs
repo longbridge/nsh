@@ -1293,9 +1293,10 @@ pub struct Core<M: TextEngine> {
     batches: u64,
     /// Imperative calls, run after everything else in the batch.
     commands: Vec<(NodeId, Command)>,
-    /// Where the keyboard focus goes back to in this commit unless a
-    /// `focus()` moves it ([`crate::element::ElementRef::focus_back`]).
-    focus_back: Option<NodeId>,
+    /// Where the keyboard focus goes back to in this commit, and the popup
+    /// it comes back from, unless a `focus()` moves it out of that popup
+    /// ([`crate::element::ElementRef::focus_back`]).
+    focus_back: Option<(NodeId, Option<NodeId>)>,
     /// Animates the layout changes of the next commit.
     layout_animation: Option<LayoutAnimation>,
     /// Nodes whose change animates the frames it moves in the next commit,
@@ -3248,25 +3249,33 @@ impl<M: TextEngine> Core<M> {
         // a web view left with neither of them cancels what it holds, and
         // the cancel commands go out with this batch.
         self.sync_download_listeners();
-        // A focus given back yields to one moved anywhere in this commit
-        // (in this round, or an earlier one's items), whichever came
-        // first: the app's choice outranks a popup's closing.
-        if let Some(id) = self.focus_back.take()
-            && !self
+        // A focus given back yields to one moved out of the popup anywhere
+        // in this commit (in this round, or an earlier one's items),
+        // whichever came first: the app's choice outranks a popup's
+        // closing. A move inside the popup (its items' keys typed ahead of
+        // the choice) or to a view that is gone does not.
+        if let Some((id, from)) = self.focus_back.take() {
+            let from = from.and_then(|from| self.key(from).ok());
+            let moved_out = |to: NodeId| {
+                self.key(to)
+                    .is_ok_and(|key| from.is_none_or(|from| !self.is_ancestor(from, key)))
+            };
+            let moved = self
                 .commands
                 .iter()
-                .any(|(_, c)| matches!(c, Command::Focus))
-            && !self.mount.iter().any(|m| {
-                matches!(
-                    m,
-                    MountItem::Command {
-                        command: Command::Focus,
-                        ..
-                    }
-                )
-            })
-        {
-            self.commands.push((id, Command::Focus));
+                .any(|(to, c)| matches!(c, Command::Focus) && moved_out(*to))
+                || self.mount.iter().any(|m| {
+                    matches!(
+                        m,
+                        MountItem::Command {
+                            id: to,
+                            command: Command::Focus,
+                        } if moved_out(*to)
+                    )
+                });
+            if !moved {
+                self.commands.push((id, Command::Focus));
+            }
         }
         // On laid out views; dropped for views that were never shown.
         let mut kept = Vec::new();

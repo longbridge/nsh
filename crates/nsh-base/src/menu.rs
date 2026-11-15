@@ -1505,7 +1505,7 @@ fn surface(
             move || open.get(),
             move || {
                 if closed_by.get() != Some(OpenChangeReason::PressOutside) {
-                    anchor.focus_back();
+                    anchor.focus_back(presence.popup());
                 }
             },
         );

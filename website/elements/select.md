@@ -194,11 +194,12 @@ shown and gone (a sheet once it came in and once it went), `onCancel` that the u
 ## Entrance and exit
 
 On the desktops the popup comes and goes with your transitions, as a [Popover](./popover.md#entrance-and-exit)'s:
-`popupStartingClass` is its look in its first frame, and the `transition-*` classes of `popupClass` carry it to its
-own look; `popupEndingClass` is its look once closed, which it keeps, taking no presses, while those transitions run,
-and `onClose` follows. The keyboard focus is back on the trigger as it closes. Opened again on its way out, it returns to
-its look from where it is. `popupStartingStyle` and `popupEndingStyle` do the same with inline styles. When the user
-asks for less motion it appears and goes at once; the sheet of touch screens slides in and out on its own.
+`popupStartingClass` is its look in its first frame, and the `transition-*` classes of `popupClass` carry it to its own
+look; `popupEndingClass` is its look once closed, which it keeps, taking no presses, while those transitions run, and
+`onClose` follows. The keyboard focus is back on the trigger as it closes, unless the choice's `onChange` focused
+another view (the next field of a form), which keeps it. Opened again on its way out, it returns to its look from where
+it is. `popupStartingStyle` and `popupEndingStyle` do the same with inline styles. When the user asks for less motion it
+appears and goes at once; the sheet of touch screens slides in and out on its own.
 
 ```tsx
 <Select
@@ -359,8 +360,8 @@ open:
 | Escape | Closes the list without choosing. |
 | Tab, Shift+Tab | Closes the list (`reason: "focus"`) and moves the focus to the next or previous control. |
 
-Once the list closes, the keyboard focus returns to the trigger, unless a press outside or Tab took it elsewhere. The
-pointer highlights the row it moves over; the highlighted row is revealed as the keys move to it.
+Once the list closes, the keyboard focus returns to the trigger, unless a press outside, Tab or the choice's `onChange`
+took it elsewhere. The pointer highlights the row it moves over; the highlighted row is revealed as the keys move to it.
 
 ## On each device
 

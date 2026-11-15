@@ -637,15 +637,15 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
             }
             cx.emit(SelectEvent::Close);
         }),
-        // The keyboard goes back to the trigger, unless a press outside or
-        // Tab took it somewhere else.
-        back: Rc::new(move || {
+        // The keyboard goes back to the trigger, unless a press outside,
+        // Tab or the app's `onChange` took it somewhere else.
+        back: Rc::new(move |popup| {
             let by = closed_by.replace(None);
             if !matches!(
                 by,
                 Some(OpenChangeReason::PressOutside | OpenChangeReason::Focus)
             ) {
-                anchor.focus();
+                anchor.focus_back(popup);
             }
         }),
     };

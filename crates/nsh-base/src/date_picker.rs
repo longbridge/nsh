@@ -686,9 +686,11 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
             }
             cx.emit(DatePickerEvent::Close);
         }),
-        back: Rc::new(move || {
+        // Back to the trigger, unless a press outside or the app's
+        // `onChange` took the keyboard somewhere else.
+        back: Rc::new(move |popup| {
             if closed_by.replace(None) != Some(OpenChangeReason::PressOutside) {
-                anchor.focus();
+                anchor.focus_back(popup);
             }
         }),
     };
