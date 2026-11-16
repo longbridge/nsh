@@ -26,7 +26,7 @@
 //!   ([`NativeComponent::visual`]: content another device draws, a swap
 //!   chain of its own), which the window's composition stacks in order with
 //!   nsh's drawing as it stacks a web view's page, placed, clipped and faded
-//!   like its view ([`NativeComponent::compose_at`]), or brings a child
+//!   like its view ([`NativeComponent::placed`]), or brings a child
 //!   window of its own ([`NativeComponent::window`]), moved where the view
 //!   was drawn after every frame ([`Hosted::placed`]), clipped to its
 //!   clipping ancestors and its rounded corners with a window region and
@@ -73,7 +73,6 @@ use windows::Win32::{
     },
 };
 
-pub use crate::compose::Placement as ComposedAt;
 use crate::{
     compose::Composition,
     image::AssetBase,
@@ -140,7 +139,11 @@ pub trait NativeComponent {
     }
 
     /// True for a component that brings a composition visual of its own
-    /// ([`Self::visual`]). Asked once, when it is made.
+    /// ([`Self::visual`]). Asked once, when it is made: a frame decides
+    /// whether to draw the view or stack a visual before any visual exists,
+    /// so a component that only draws is never asked for one and its first
+    /// frame is drawn. True with no visual from [`Self::visual`]: its first
+    /// frame shows nothing, and it is drawn from the next frame on.
     fn composed(&self) -> bool {
         false
     }
@@ -151,6 +154,12 @@ pub trait NativeComponent {
     /// stacks a web view's page: what is drawn before the view is below it,
     /// what is drawn after it above. `None`: it is drawn with
     /// [`Self::draw`] instead.
+    ///
+    /// Not asked again when the view moves to another window: the visual
+    /// stays on the first window's device and is not shown in the new one.
+    /// Like a web view's page, it is left out of the window's offscreen
+    /// drawings (the surface drawn to a picture, shader effects and
+    /// transitions).
     fn visual(&mut self, device: &IDCompositionDesktopDevice) -> Option<IDCompositionVisual2> {
         let _ = device;
         None
@@ -160,7 +169,9 @@ pub trait NativeComponent {
     /// (`None`: it was not drawn, and its visual is out of the window's
     /// tree): the component sets its visual to it (its transform, clip,
     /// corners and opacity), and the window commits its composition after.
-    fn compose_at(&mut self, at: Option<ComposedAt>) {
+    /// A window that closes while the component lives does not call it with
+    /// `None`; the component drops with its view.
+    fn placed(&mut self, at: Option<crate::Placement>) {
         let _ = at;
     }
 
@@ -807,7 +818,7 @@ impl Hosted for ComponentItem {
         if let Ok(mut component) = self.component.try_borrow_mut()
             && let Some(component) = component.as_mut()
         {
-            component.compose_at(at.copied());
+            component.placed(at.copied());
         }
     }
 

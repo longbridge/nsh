@@ -75,8 +75,8 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   content another device draws, such as a swap chain of the app's own. The first frame that draws its view in a
   window asks it for the visual on that window's composition device, and the window draws again with the visual in
   its composition; the composition stacks it in paint order like a web view's page and hands the component its
-  `ComposedAt` (transform, size, clip, corner radii, opacity) every frame, which the component applies to its
-  visual before the window commits. Unlike a child window, it is covered by what NSH draws after it.
+  `Placement` (transform, size, clip, corner radii, opacity) with `placed` every frame, which the component applies to
+  its visual before the window commits. Unlike a child window, it is covered by what NSH draws after it.
 - **Drawing a view** (`render::draw_view`): shadows and background (`decor.rs`), the content clipped to the bounds
   (text, image, canvas), the children (clipped to the rounded bounds when the view clips), the items the view hosts
   (`ViewState::natives`: text editors, alerts, overlays, videos — the `Hosted` trait), the scroll

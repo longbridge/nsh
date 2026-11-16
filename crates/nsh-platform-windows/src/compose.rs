@@ -70,8 +70,9 @@ use windows_numerics::Matrix3x2;
 use crate::gfx::{self, Gfx};
 
 /// Where a frame put a composed item (a web view, a component's visual,
-/// [`crate::ComposedAt`]): what its visuals are set to.
+/// [`crate::NativeComponent::placed`]): what its visuals are set to.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct Placement {
     /// The item's pixels (its own coordinates times the window's scale) to
     /// window pixels.
