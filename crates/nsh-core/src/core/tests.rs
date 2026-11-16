@@ -18307,6 +18307,9 @@ mod touch {
                 location: point(px(x - 10.0), px(5.0)),
                 changed: true,
                 pointer_type: crate::PointerType::Touch,
+                pressure: 0.5,
+                tilt_x: 0.0,
+                tilt_y: 0.0,
             }],
         }))
     }
@@ -29884,6 +29887,9 @@ fn touch_down(path: Vec<NodeId>) -> EventPayload {
             location: point(px(5.0), px(6.0)),
             changed: true,
             pointer_type: crate::PointerType::Touch,
+            pressure: 0.5,
+            tilt_x: 0.0,
+            tilt_y: 0.0,
         }],
         modifiers: Default::default(),
         activated: None,

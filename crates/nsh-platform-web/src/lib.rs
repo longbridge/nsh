@@ -1426,7 +1426,7 @@ pub unsafe extern "C" fn nsh_canvas_image(
 }
 
 /// Touches, as JSON `{ phase, time, points: [{ id, target, path, pageX,
-/// pageY, x, y, changed, pointerType }] }` (`phase`: 0 start, 1 move, 2 end, 3
+/// pageY, x, y, changed, pointerType, pressure, tiltX, tiltY }] }` (`phase`: 0 start, 1 move, 2 end, 3
 /// cancel).
 ///
 /// # Safety
@@ -1473,6 +1473,17 @@ pub unsafe extern "C" fn nsh_touch(ptr: *const u8, len: usize) -> f64 {
                         .and_then(|v| v.as_str())
                         .and_then(nsh_core::PointerType::from_name)
                         .unwrap_or(nsh_core::PointerType::Touch),
+                    pressure: p.get("pressure").and_then(|v| v.as_f64()).map_or_else(
+                        || {
+                            nsh_core::TouchPoint::default_pressure(
+                                phase,
+                                p.get("changed").and_then(|v| v.as_bool()).unwrap_or(true),
+                            )
+                        },
+                        |v| v.clamp(0.0, 1.0) as f32,
+                    ),
+                    tilt_x: f(p, "tiltX") as f32,
+                    tilt_y: f(p, "tiltY") as f32,
                 })
                 .collect()
         })

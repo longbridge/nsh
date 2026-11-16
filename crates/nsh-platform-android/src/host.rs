@@ -1519,7 +1519,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
         ints(&paths),
     );
     let n = ids.len();
-    let mut c = vec![0.0; n * 4];
+    let mut c = vec![0.0; n * 8];
     let mut flags = vec![0u8; n];
     if targets.len() != n
         || path_lengths.len() != n
@@ -1543,10 +1543,22 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
                 id: ids[i] as u32,
                 target: targets[i] as NodeId,
                 path,
-                page: point(px(c[i * 4]), px(c[i * 4 + 1])),
-                location: point(px(c[i * 4 + 2]), px(c[i * 4 + 3])),
+                page: point(px(c[i * 8]), px(c[i * 8 + 1])),
+                location: point(px(c[i * 8 + 2]), px(c[i * 8 + 3])),
                 changed: flags[i] != 0,
-                pointer_type: nsh_core::PointerType::Touch,
+                pointer_type: match c[i * 8 + 7] as u8 {
+                    1 => nsh_core::PointerType::Pen,
+                    2 => nsh_core::PointerType::Mouse,
+                    _ => nsh_core::PointerType::Touch,
+                },
+                // The lifted finger reports its last pressure: 0 as the DOM.
+                pressure: if flags[i] != 0 && phase >= 2 {
+                    0.0
+                } else {
+                    c[i * 8 + 4].clamp(0.0, 1.0)
+                },
+                tilt_x: c[i * 8 + 5],
+                tilt_y: c[i * 8 + 6],
             }
         })
         .collect();
