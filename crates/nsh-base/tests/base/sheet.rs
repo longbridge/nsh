@@ -906,6 +906,9 @@ struct Replica {
     translations: std::collections::HashMap<nsh_core::NodeId, nsh_core::NodeId>,
     heights: std::collections::HashMap<nsh_core::NodeId, f32>,
     clock: f64,
+    /// Graph nodes made, and made less those released since.
+    made: usize,
+    live: isize,
 }
 
 impl Replica {
@@ -925,6 +928,19 @@ impl Replica {
 
 type Replicated = std::sync::Arc<std::sync::Mutex<Replica>>;
 
+/// How many graph nodes `op` adds (1), releases (-1) or neither.
+fn live_change(op: &nsh_core::animation::AnimationOp) -> isize {
+    use nsh_core::animation::AnimationOp::*;
+    match op {
+        CreateValue { .. }
+        | CreateInterpolate { .. }
+        | CreateDiffClamp { .. }
+        | CreateMath { .. } => 1,
+        Release { .. } => -1,
+        _ => 0,
+    }
+}
+
 fn replicate(app: &mut Headless) -> Replicated {
     use nsh_core::{MountItem, animation::AnimationProp};
 
@@ -934,7 +950,11 @@ fn replicate(app: &mut Headless) -> Replicated {
         let mut replica = seen.lock().unwrap();
         for item in &batch.items {
             match item {
-                MountItem::Animation(op) => replica.graph.apply(op.clone(), &mut Vec::new()),
+                MountItem::Animation(op) => {
+                    replica.live += live_change(op);
+                    replica.made += usize::from(live_change(op) > 0);
+                    replica.graph.apply(op.clone(), &mut Vec::new());
+                }
                 MountItem::Gestures { id, values } if values.pan_y.is_some() => {
                     replica.panel = Some(*id);
                 }
@@ -1112,4 +1132,150 @@ fn the_grabber_changes_the_detent_for_screen_readers_and_presses() {
     app.wait_for("text:picked:Large").unwrap();
     app.press("label:Resize").unwrap();
     app.wait_for("text:picked:Medium").unwrap();
+}
+
+#[derive(Clone, PartialEq, Props)]
+struct PlainProps {
+    open: bool,
+}
+
+/// A bottom sheet with none of the detents' props, as sheets were before
+/// them.
+#[component]
+fn PlainScreen(props: PlainProps) -> impl IntoElement {
+    view().child(
+        sheet().default_open(props.open).close_on_swipe(true).child(
+            view()
+                .test_id("handle")
+                .h(px(60.0))
+                .child(text("Sheet body")),
+        ),
+    )
+}
+
+/// The graph nodes a sheet without detents makes and the animation
+/// operations of its first render, open or closed: no more than before
+/// detents existed (19 nodes: the motion's and the sheet's own drag and
+/// fade), so the detents' graph costs nothing where it is not used.
+#[test]
+fn a_sheet_without_detents_makes_no_graph_of_theirs() {
+    use nsh_core::MountItem;
+
+    for open in [true, false] {
+        let mut app = Headless::start(EngineConfig {
+            viewport: Size::new(px(390.0), px(844.0)),
+            ..EngineConfig::new(Root::new::<PlainScreen>(move || PlainProps { open }))
+        })
+        .unwrap();
+        let ops = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = ops.clone();
+        app.observe(move |_, batch| {
+            let mut ops = seen.lock().unwrap();
+            for item in &batch.items {
+                if let MountItem::Animation(op) = item {
+                    ops.push(op.clone());
+                }
+            }
+        });
+        app.first_render().unwrap();
+        let first = ops.lock().unwrap().clone();
+        let made = |ops: &[nsh_core::animation::AnimationOp]| {
+            ops.iter().filter(|op| live_change(op) > 0).count()
+        };
+        assert_eq!(made(&first), 19, "open: {open}, {first:#?}");
+        if open {
+            assert_eq!(first.len(), 27, "{first:#?}");
+        }
+        // Coming in and resting, it makes no more.
+        app.wait(std::time::Duration::from_millis(400)).unwrap();
+        let all = ops.lock().unwrap().clone();
+        assert_eq!(made(&all), 19, "open: {open}, {all:#?}");
+    }
+}
+
+/// A sheet open with a button in it that gives it detents (medium and
+/// large) or takes them away.
+#[component]
+fn ToggleDetentsScreen() -> impl IntoElement {
+    use nsh_base::SheetDetent;
+
+    let with = signal(false);
+    view().child(
+        sheet()
+            .default_open(true)
+            .detents(move || {
+                if with.get() {
+                    vec![SheetDetent::Medium, SheetDetent::Large]
+                } else {
+                    Vec::new()
+                }
+            })
+            .child(
+                view()
+                    .child(
+                        view()
+                            .test_id("handle")
+                            .h(px(60.0))
+                            .child(text("Sheet body")),
+                    )
+                    .child(
+                        view()
+                            .test_id("toggle")
+                            .h(px(44.0))
+                            .on_press(move || with.update(|w| *w = !*w)),
+                    ),
+            ),
+    )
+}
+
+/// Detents given to an open sheet take effect (as tall as the largest,
+/// resting at the smallest), and taken away bring it back to its
+/// content's height at the bottom; the nodes made for them go with them.
+#[test]
+fn detents_given_and_taken_away_while_open_take_effect() {
+    let mut app = Headless::start(EngineConfig {
+        viewport: Size::new(px(390.0), px(844.0)),
+        ..EngineConfig::new(Root::of::<ToggleDetentsScreen>())
+    })
+    .unwrap();
+    let replica = replicate(&mut app);
+    app.first_render().unwrap();
+    app.wait(std::time::Duration::from_millis(400)).unwrap();
+    let rest = |replica: &Replicated| {
+        let mut replica = replica.lock().unwrap();
+        let (translation, height) = replica.rest();
+        (translation, height, replica.live)
+    };
+    let (translation, height, plain) = rest(&replica);
+    assert!(
+        translation.abs() < 0.5,
+        "rests at the bottom, not {translation}"
+    );
+    assert_eq!(height, 104.0, "as tall as its content");
+    assert_eq!(replica.lock().unwrap().made, 19);
+
+    app.press("id:toggle").unwrap();
+    app.wait(std::time::Duration::from_millis(400)).unwrap();
+    app.wait_for("Sheet body").unwrap();
+    let (translation, height, live) = rest(&replica);
+    assert_eq!(height, 844.0, "as tall as the largest detent");
+    assert!(
+        (translation - 422.0).abs() < 0.5,
+        "rests at the smallest detent, not {translation}"
+    );
+    assert!(
+        live > plain,
+        "the detents' nodes: {live} live, {plain} without"
+    );
+
+    app.press("id:toggle").unwrap();
+    app.wait(std::time::Duration::from_millis(400)).unwrap();
+    app.wait_for("Sheet body").unwrap();
+    let (translation, height, live) = rest(&replica);
+    assert_eq!(height, 104.0, "as tall as its content again");
+    assert!(
+        translation.abs() < 0.5,
+        "back at the bottom, not {translation}"
+    );
+    assert_eq!(live, plain, "the detents' nodes went with them");
 }

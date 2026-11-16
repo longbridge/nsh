@@ -96,6 +96,7 @@ Android、桌面和 Web 使用已有的原生 pan 支持拖动条及滚动区域
 
 没有 `detent` 时，面板自己记住停靠高度，从 `defaultDetent`（默认是最小的）开始。设置 `detent` 后由应用控制：
 在 `onDetentChange({ detent })` 中更新它，每次用户把面板移到另一个高度都会报告；应用保持原值时面板会回到原来的高度。
+`detents` 可以在面板打开时改变：原来没有停靠高度的面板设置了它，或者全部去掉，都会立即生效，面板会重新创建其中的内容。
 
 `grabber` 在面板顶部、内容之前显示一个拖动条。和 sheet 的其他部分一样，它没有自己的外观：用 `grabberClass` /
 `grabberStyle` 设置样式，用 `grabberAccessibilityLabel` 命名。读屏软件可以调节它来切换停靠高度，按下它会移到下一个更大的高度

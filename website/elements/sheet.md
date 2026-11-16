@@ -102,7 +102,8 @@ and the web.
 
 Without `detent`, the sheet keeps its own detent, starting from `defaultDetent` (the smallest by default). With
 `detent`, the app owns it: change it in `onDetentChange({ detent })`, which reports each detent the user moves it
-to; a detent the app keeps brings the panel back.
+to; a detent the app keeps brings the panel back. `detents` may change while the sheet is open: given to a sheet
+that had none, or all taken away, they take effect at once, and the sheet makes its content again.
 
 `grabber` shows a handle at the top of the panel, before the content. Like the rest of the sheet it looks like
 nothing: style it with `grabberClass` / `grabberStyle` and name it with `grabberAccessibilityLabel`. Screen readers

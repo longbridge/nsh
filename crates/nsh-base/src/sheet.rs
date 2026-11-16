@@ -123,7 +123,9 @@ pub struct SheetProps {
     /// finger, and a release springs it to the nearest, or on in the
     /// direction of a flick; past the smallest it closes when
     /// `closeOnSwipe` allows. On iOS, a scroll inside it hands the
-    /// downward drag over at its top.
+    /// downward drag over at its top. Given to an open sheet that had
+    /// none, or all taken away, they take effect at once and the sheet
+    /// makes its content again.
     #[prop(default)]
     pub detents: Prop<Vec<SheetDetent>>,
     /// The detent it rests at (controlled): the app owns the value and
@@ -264,7 +266,6 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
     let height = animated_value(1.0);
     let panel_height = stored(Points(1.0));
     let swipe_enabled = animated_value(0.0);
-    let detents = Detents::new(&props, cx, motion);
     // The same native value drives the panel and scrim: finger motion
     // never waits for a Rust component turn or a JS callback.
     let progress = motion
@@ -276,35 +277,16 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
         .sub(&motion.drag_y)
         .mul(&swipe_enabled)
         .add(&motion.y);
-    // With detents, `drag_y` is where the panel stands below its top,
-    // kept between the largest detent and the smallest (or the bottom of
-    // the panel, where it may close), and the entrance and exit move the
-    // panel between there and out of sight.
-    let held_y = motion
-        .drag_y
-        .div(&detents.limit)
-        .interpolate(&[0.0, 1.0], &[0.0, 1.0])
-        .mul(&detents.limit);
-    let detent_y = height
-        .mul(&motion.fade.interpolate(&[0.0, 1.0], &[1.0, 0.0]))
-        .add(&held_y.mul(&motion.fade));
-    let translate_y = dragged_y
-        .mul(&detents.mode.interpolate(&[0.0, 1.0], &[1.0, 0.0]))
-        .add(&detent_y.mul(&detents.mode));
     // During exit both fade and drag return to zero. Subtracting keeps
     // the backdrop fading forward from the finger's release position.
-    // With detents it fades below the smallest only.
     let dragged_fade = motion
         .fade
-        .sub(
-            &motion
-                .drag_y
-                .sub(&detents.fade_from)
-                .div(&detents.fade_span)
-                .interpolate(&[0.0, 1.0], &[0.0, 1.0])
-                .mul(&swipe_enabled),
-        )
+        .sub(&progress.mul(&swipe_enabled))
         .interpolate(&[0.0, 1.0], &[0.0, 1.0]);
+    // Detents make their own translation and fade, only while the sheet
+    // shows with some (`Detents::graph`): a sheet without them makes no
+    // more of the graph than the nodes above.
+    let detents = Detents::new(&props, cx, motion);
     let swipe = move || props.close_on_swipe.get() && props.side.get() == Placement::Bottom;
     let draggable = move || swipe() || detents.draggable();
     let was_swipe = stored(false);
@@ -315,7 +297,7 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
             motion.come_in();
         }
     });
-    detents.follow(open, swipe);
+    detents.follow(open);
     lifecycle(
         move || motion.there(),
         move || cx.emit(SheetEvent::Open),
@@ -324,99 +306,112 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
     when(motion.shown, move || {
         // Placed in a toolbar, its content is still no part of it.
         leave_bar();
-        let backdrop = overlay()
-            .inset_0()
-            .bind_opacity(&dragged_fade)
-            .focusable(false)
-            .app_class(props.backdrop_class)
-            .inline_style(props.backdrop_style)
-            .on_press(move || {
-                cx.emit(SheetEvent::Cancel);
-                if props.close_on_backdrop_press.get_untracked() {
-                    change(false, OpenChangeReason::BackdropPress);
-                }
-            });
-        let mut panel = overlay()
-            // What reaches the bottom of the screen ends above the
-            // keyboard. A bottom sheet the keyboard lifts stays below the
-            // status bar; otherwise its height is the app's (a web sheet's
-            // presented surface may be taller than the window), or its
-            // largest detent's.
-            .style_with(move |s| {
-                let lift = keyboard_lift();
-                let above = Length::from(lift);
-                let s = match props.side.get() {
-                    Placement::Bottom if lift > Points::ZERO => s
-                        .left_0()
-                        .right_0()
-                        .bottom(above)
-                        .max_h(bottom_panel_max_height()),
-                    Placement::Bottom => s.left_0().right_0().bottom_0(),
-                    Placement::Top => s.left_0().right_0().top_0(),
-                    Placement::Left => s.top_0().bottom(above).left_0(),
-                    Placement::Right => s.top_0().bottom(above).right_0(),
-                };
-                match detents.largest() {
-                    Some(largest) => s.h(largest),
-                    None => s,
-                }
-            })
-            .app_class(props.popup_class)
-            .inline_style(props.popup_style)
-            .bind_translate_x(&motion.x)
-            .on_layout(move |frame: &Bounds<Points>| {
-                panel_height.replace(frame.size.height.max(Points(1.0)));
-                height.set(frame.size.height.0.max(1.0));
-                detents.laid_out(frame.size.height);
-                motion.laid_out(frame.size);
-            })
-            .child(when(move || props.grabber.get(), move || detents.grabber()))
-            .child(props.children);
-        panel = panel
-            .pan_values(None, Some(&motion.drag_y))
-            .pan_enabled(move || draggable() && open.get() && motion.settled.get())
-            .pan_scroll_handoff(draggable)
-            // At the start, as a stack's back swipe (#430): the keyboard
-            // would cover the panel the finger is moving.
-            .on_pan_start(move |_: &PanEvent| {
-                detents.grab();
-                dismiss_keyboard();
-            })
-            .on_pan_end(move |e: &PanEvent| {
-                if !open.get_untracked() {
+        // The backdrop and the panel, bound to the translation and fade of
+        // a sheet with detents or without: whether it has some changes
+        // which, and makes them again.
+        let layers = move |translate: AnimatedNode, fade: AnimatedNode| {
+            let backdrop = overlay()
+                .inset_0()
+                .bind_opacity(&fade)
+                .focusable(false)
+                .app_class(props.backdrop_class)
+                .inline_style(props.backdrop_style)
+                .on_press(move || {
+                    cx.emit(SheetEvent::Cancel);
+                    if props.close_on_backdrop_press.get_untracked() {
+                        change(false, OpenChangeReason::BackdropPress);
+                    }
+                });
+            let mut panel = overlay()
+                // What reaches the bottom of the screen ends above the
+                // keyboard. A bottom sheet the keyboard lifts stays below the
+                // status bar; otherwise its height is the app's (a web sheet's
+                // presented surface may be taller than the window), or its
+                // largest detent's.
+                .style_with(move |s| {
+                    let lift = keyboard_lift();
+                    let above = Length::from(lift);
+                    let s = match props.side.get() {
+                        Placement::Bottom if lift > Points::ZERO => s
+                            .left_0()
+                            .right_0()
+                            .bottom(above)
+                            .max_h(bottom_panel_max_height()),
+                        Placement::Bottom => s.left_0().right_0().bottom_0(),
+                        Placement::Top => s.left_0().right_0().top_0(),
+                        Placement::Left => s.top_0().bottom(above).left_0(),
+                        Placement::Right => s.top_0().bottom(above).right_0(),
+                    };
+                    match detents.largest() {
+                        Some(largest) => s.h(largest),
+                        None => s,
+                    }
+                })
+                .app_class(props.popup_class)
+                .inline_style(props.popup_style)
+                .bind_translate_x(&motion.x)
+                .on_layout(move |frame: &Bounds<Points>| {
+                    panel_height.replace(frame.size.height.max(Points(1.0)));
+                    height.set(frame.size.height.0.max(1.0));
+                    detents.laid_out(frame.size.height);
+                    motion.laid_out(frame.size);
+                })
+                .child(when(move || props.grabber.get(), move || detents.grabber()))
+                .child(props.children);
+            panel = panel
+                .pan_values(None, Some(&motion.drag_y))
+                .pan_enabled(move || draggable() && open.get() && motion.settled.get())
+                .pan_scroll_handoff(draggable)
+                // At the start, as a stack's back swipe (#430): the keyboard
+                // would cover the panel the finger is moving.
+                .on_pan_start(move |_: &PanEvent| {
+                    detents.grab();
+                    dismiss_keyboard();
+                })
+                .on_pan_end(move |e: &PanEvent| {
+                    if !open.get_untracked() {
+                        detents.let_go();
+                        return;
+                    }
+                    if detents.active_untracked() {
+                        if detents.release(e, props.close_on_swipe.get_untracked()) {
+                            cx.emit(SheetEvent::Cancel);
+                            change(false, OpenChangeReason::Swipe);
+                            detents.back_unless_closed(open);
+                        }
+                        return;
+                    }
                     detents.let_go();
-                    return;
-                }
-                if detents.active_untracked() {
-                    if detents.release(e, props.close_on_swipe.get_untracked()) {
+                    let distance = e.value_y.unwrap_or(0.0).max(0.0);
+                    let dismiss = !e.cancelled
+                        && distance > 0.0
+                        && (distance >= panel_height.get().0 * 0.3 || e.velocity_y >= 800.0);
+                    if props.close_on_swipe.get_untracked()
+                        && props.side.get_untracked() == Placement::Bottom
+                        && dismiss
+                    {
                         cx.emit(SheetEvent::Cancel);
                         change(false, OpenChangeReason::Swipe);
-                        detents.back_unless_closed(open);
                     }
-                    return;
-                }
-                detents.let_go();
-                let distance = e.value_y.unwrap_or(0.0).max(0.0);
-                let dismiss = !e.cancelled
-                    && distance > 0.0
-                    && (distance >= panel_height.get().0 * 0.3 || e.velocity_y >= 800.0);
-                if props.close_on_swipe.get_untracked()
-                    && props.side.get_untracked() == Placement::Bottom
-                    && dismiss
-                {
-                    cx.emit(SheetEvent::Cancel);
-                    change(false, OpenChangeReason::Swipe);
-                }
-                // Controlled open may decline the request. It comes back
-                // until the owner's next value actually starts closing it.
-                if open.get_untracked() {
-                    motion.come_in();
-                }
-            });
-        // These bindings change in place when the permission changes;
-        // children and scroll positions keep their state.
-        panel = panel.bind_translate_y(&translate_y);
-        let layers = vec![backdrop.into_element(), panel.into_element()];
+                    // Controlled open may decline the request. It comes back
+                    // until the owner's next value actually starts closing it.
+                    if open.get_untracked() {
+                        motion.come_in();
+                    }
+                });
+            // These bindings change in place when the permission changes;
+            // children and scroll positions keep their state.
+            panel = panel.bind_translate_y(&translate);
+            vec![backdrop.into_element(), panel.into_element()]
+        };
+        let layers = when(
+            move || detents.active(),
+            move || {
+                let (translate, fade) = detents.graph(height, swipe_enabled, swipe);
+                layers(translate, fade)
+            },
+        )
+        .otherwise(move || layers(dragged_y, dragged_fade));
         // A dialog's modal root around both, with no motion or closing of
         // its own: the sheet's are `SheetMotion`'s and its props'. It keeps
         // screen readers and the keyboard focus to the sheet as a dialog
@@ -439,15 +434,15 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
                         change(false, OpenChangeReason::Cancel);
                     }
                 })
-                .children(layers)
+                .child(layers)
                 .into_element(),
         ]
     })
 }
 
 /// A bottom sheet's detents: their heights and which one it rests at,
-/// the values the panel's translation and the backdrop read, and where a
-/// drag ends.
+/// the translation and fade the panel and the backdrop take with them,
+/// and where a drag ends.
 #[derive(Clone, Copy)]
 struct Detents {
     list: Prop<Vec<SheetDetent>>,
@@ -466,15 +461,6 @@ struct Detents {
     laid: Signal<Points>,
     /// The index of the detent it rests at.
     current: Memo<Option<usize>>,
-    /// 1 with detents, else 0: which translation the panel takes.
-    mode: AnimatedValue,
-    /// The lowest the panel stands below its top: the smallest detent's
-    /// place, or its height where a drag may close it.
-    limit: AnimatedValue,
-    /// Where the backdrop starts to fade (the smallest detent's place, 0
-    /// without detents) and over how far.
-    fade_from: AnimatedValue,
-    fade_span: AnimatedValue,
     /// Where it was sent last (`None` once a finger took it).
     aimed: Stored<Option<f32>>,
     /// A finger moves it.
@@ -523,10 +509,6 @@ impl Detents {
             heights,
             laid: signal(Points::ZERO),
             current,
-            mode: animated_value(0.0),
-            limit: animated_value(1.0),
-            fade_from: animated_value(0.0),
-            fade_span: animated_value(1.0),
             aimed: stored(None),
             dragging: stored(false),
             owner: Owner::current(),
@@ -568,39 +550,84 @@ impl Detents {
         })
     }
 
-    /// Keeps the motion and the values the panel reads to the detents, the
-    /// panel's height and whether a drag may close it; sends the panel to
-    /// a detent the app or a layout changed.
-    fn follow(self, open: OpenState, swipe: impl Fn() -> bool + 'static) {
+    /// Where the panel's translation stops a drag (the smallest detent's
+    /// place, or the bottom of the panel where a drag may close it,
+    /// `can_close`), where the backdrop starts to fade (the smallest
+    /// detent's place) and over how far.
+    fn shape(self, can_close: bool) -> (f32, f32, f32) {
+        let (heights, laid) = (self.heights.get(), self.laid.get());
+        let height = laid.0.max(1.0);
+        let lowest = self.offsets(laid, &heights).into_iter().fold(0.0, f32::max);
+        let limit = if can_close { height } else { lowest.max(0.01) };
+        (limit, lowest, (height - lowest).max(1.0))
+    }
+
+    /// The panel's translation and the backdrop's opacity with detents,
+    /// made with the layers that show them (and gone with them), so a
+    /// sheet without detents makes none of these nodes. `drag_y` is where
+    /// the panel stands below its top, kept between the largest detent and
+    /// the smallest (or the bottom of the panel, where it may close); the
+    /// entrance and exit move the panel between there and out of sight,
+    /// and the backdrop fades below the smallest detent only.
+    fn graph(
+        self,
+        height: AnimatedValue,
+        swipe_enabled: AnimatedValue,
+        swipe: impl Fn() -> bool + 'static,
+    ) -> (AnimatedNode, AnimatedNode) {
+        let close = untracked(&swipe);
+        let shape = untracked(|| self.shape(close));
+        let limit = animated_value(shape.0);
+        let fade_from = animated_value(shape.1);
+        let fade_span = animated_value(shape.2);
+        let set = stored(shape);
         effect(move || {
-            let heights = self.heights.get();
-            let laid = self.laid.get();
-            let close = swipe();
-            let height = laid.0.max(1.0);
-            let offsets = self.offsets(laid, &heights);
-            untracked(|| {
-                self.motion.hold_drag(!heights.is_empty());
-                if heights.is_empty() {
-                    self.mode.set(0.0);
-                    self.fade_from.set(0.0);
-                    // As `height`: the backdrop fades as it did.
-                    self.fade_span.set(height);
-                    return;
-                }
-                let lowest = offsets.iter().copied().fold(0.0, f32::max);
-                self.mode.set(1.0);
-                self.limit
-                    .set(if close { height } else { lowest.max(0.01) });
-                self.fade_from.set(lowest);
-                self.fade_span.set((height - lowest).max(1.0));
-            });
+            if !self.active() {
+                // Going with the layers.
+                return;
+            }
+            let shape = self.shape(swipe());
+            if set.replace(shape) != shape {
+                limit.set(shape.0);
+                fade_from.set(shape.1);
+                fade_span.set(shape.2);
+            }
         });
+        let motion = self.motion;
+        let held_y = motion
+            .drag_y
+            .div(&limit)
+            .interpolate(&[0.0, 1.0], &[0.0, 1.0])
+            .mul(&limit);
+        let translate = height
+            .mul(&motion.fade.interpolate(&[0.0, 1.0], &[1.0, 0.0]))
+            .add(&held_y.mul(&motion.fade));
+        let fade = motion
+            .fade
+            .sub(
+                &motion
+                    .drag_y
+                    .sub(&fade_from)
+                    .div(&fade_span)
+                    .interpolate(&[0.0, 1.0], &[0.0, 1.0])
+                    .mul(&swipe_enabled),
+            )
+            .interpolate(&[0.0, 1.0], &[0.0, 1.0]);
+        (translate, fade)
+    }
+
+    /// Keeps the motion to the detents and the panel's height: where it
+    /// rests and whether it holds that place as it goes; sends the panel
+    /// to a detent the app or a layout changed, and back to where a sheet
+    /// without detents rests once they went.
+    fn follow(self, open: OpenState) {
         effect(move || {
             let _ = self.current.get();
-            let _ = self.heights.get();
+            let active = self.active();
             let _ = self.laid.get();
             let settled = self.motion.settled.get();
             untracked(|| {
+                self.motion.hold_drag(active);
                 let target = self.target_untracked();
                 self.motion.rest_at(target.unwrap_or(0.0));
                 if !settled || !open.get_untracked() {
