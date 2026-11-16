@@ -2149,7 +2149,7 @@ an answer to await in a task (`spawn`, or an `async` module function).
 | Platform | `"shared"` means |
 |---|---|
 | iOS | The target finished sharing (a cancelled mail or message is `"dismissed"`) |
-| macOS | The service finished sharing (a cancelled mail or message is `"dismissed"`); a service that reports nothing (adding to a list, copying) is `"shared"` once the user is back in the app's window |
+| macOS | The service reported that it finished, or it reported nothing and the user came back to the window the menu opened from (after copying or adding to a list, and also with a mail draft still open); a service that reports a cancel is `"dismissed"`, and so is one that reports nothing while the user stays away for ten minutes |
 | Android | The user chose an app; Android tells nothing of what the app does next |
 | Web | `navigator.share` resolved |
 

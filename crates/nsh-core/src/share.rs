@@ -22,10 +22,10 @@
 //! meanwhile).
 //!
 //! What `shared` means is as much as the platform knows: on iOS the target
-//! finished sharing; on macOS the service did, or, for a service that
-//! reports nothing, the user came back to the window from it; Android tells
-//! only which app the user chose; the web, that `navigator.share`
-//! resolved.
+//! finished sharing; on macOS the service reported it finished, or it
+//! reported nothing and the user came back to the window from it (with a
+//! mail draft still open, too); Android tells only which app the user
+//! chose; the web, that `navigator.share` resolved.
 //!
 //! Only platforms whose
 //! [`Environment::share`](crate::platform::Environment::share) is set get
@@ -232,8 +232,9 @@ impl ShareSheet {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum ShareAction {
-    /// The user shared: the target finished where the platform knows it
-    /// (iOS, macOS), the user chose an app on Android.
+    /// The user shared: the target finished (iOS), the service reported
+    /// it finished or the user came back from one that reported nothing
+    /// (macOS), the user chose an app (Android).
     Shared,
     /// The user closed the share sheet without sharing (or another share
     /// replaced it).

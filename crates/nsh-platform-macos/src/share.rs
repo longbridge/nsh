@@ -3,12 +3,17 @@
 //! items; the title becomes the subject of the service the user chooses (a
 //! mail's subject line). The menu shows on a later turn of the run loop,
 //! never from the batch that asked for it, below the anchor's own view, in
-//! whatever window it is, or at the middle of the surface. A new share
-//! replaces the menu of one still open. The share is answered once on the
-//! root's `Share` event: shared with the service's title once the service
-//! finished, or, for a service that reports nothing, once the user is back
-//! from it; dismissed when the menu closed without a choice or the service
-//! was cancelled; else the service's error.
+//! whatever window it is, or at the middle of the surface (a surface in no
+//! window fails the share). A new share replaces the menu of one still
+//! open. The share is answered once on the root's `Share` event: shared
+//! with the service's title once the service reports it finished, or, for
+//! a service that has reported nothing, once the user is back in the
+//! window the menu opened from (a window since closed counts as back);
+//! dismissed when the menu closed without a choice, the service reported a
+//! cancel, or nothing was reported and the user stayed away for ten
+//! minutes; else the service's error. AppKit tells no service that will
+//! never report from one that has not yet, so a service the user came back
+//! from before it reported (a mail draft still open) is shared too.
 
 use std::{
     cell::{Cell, RefCell},
@@ -25,7 +30,7 @@ use objc2::{
     rc::{Allocated, Retained},
     runtime::{AnyClass, AnyObject},
 };
-use objc2_app_kit::{NSApplication, NSModalPanelRunLoopMode, NSView};
+use objc2_app_kit::{NSApplication, NSModalPanelRunLoopMode, NSView, NSWindow};
 use objc2_foundation::{
     NSArray, NSDefaultRunLoopMode, NSError, NSObject, NSObjectProtocol, NSPoint, NSRect, NSRunLoop,
     NSSize, NSString, NSURL,
@@ -51,6 +56,11 @@ const STAYED: u32 = 8;
 /// its window closed.
 const BACK: u32 = 2;
 
+/// Looks after which a service that reported nothing, and that the user
+/// did not come back from, counts as dismissed (ten minutes): the share
+/// is not looked after for ever.
+const GIVE_UP: u32 = (10 * 60 * 1000 / WATCH_MS) as u32;
+
 /// A surface's share: the menu while it shows and its delegate until the
 /// share is answered (the picker and the service hold it weakly). One per
 /// surface, as the core keeps one share per engine.
@@ -65,6 +75,11 @@ pub(crate) struct DelegateIvars {
     control: EngineControl,
     title: Option<Retained<NSString>>,
     surface: Weak<Surface>,
+    /// The window the menu opened from, which the user comes back to, and
+    /// whether it was the key window then (a panel that never becomes key
+    /// is back once it shows again).
+    window: objc2::rc::Weak<NSWindow>,
+    key: bool,
     /// The chosen service's title, the share's target.
     service: RefCell<Option<String>>,
     answered: Cell<bool>,
@@ -171,20 +186,20 @@ impl PickerDelegate {
 
 impl PickerDelegate {
     /// Looks whether the user is back from a chosen service that has not
-    /// answered: the app active, the surface's window key and no sheet on
-    /// it. Some services (adding to a list, copying) never tell their
-    /// delegate; they count as done once the user is back, or at once when
-    /// the user never left. Returns whether to look again.
-    fn look(&self, surface: &Surface) -> bool {
+    /// answered: the app active, the menu's window showing (key again if
+    /// it was key) with no sheet on it, or gone. Some services (adding to
+    /// a list, copying) never tell their delegate; they count as done once
+    /// the user is back, or at once when the user never left, and as
+    /// dismissed after [`GIVE_UP`] looks. Returns whether to look again.
+    fn look(&self) -> bool {
         let ivars = self.ivars();
         if ivars.answered.get() {
             return false;
         }
-        let active = NSApplication::sharedApplication(surface.mtm).isActive();
-        let root: &NSView = &surface.root;
-        let here = root
-            .window()
-            .is_some_and(|w| w.isKeyWindow() && w.attachedSheet().is_none());
+        let active = NSApplication::sharedApplication(self.mtm()).isActive();
+        let here = ivars.window.load().is_none_or(|w| {
+            w.isVisible() && (!ivars.key || w.isKeyWindow()) && w.attachedSheet().is_none()
+        });
         let looks = ivars.looks.get() + 1;
         ivars.looks.set(looks);
         if active && here {
@@ -204,12 +219,16 @@ impl PickerDelegate {
             ivars.left.set(true);
             ivars.back.set(0);
         }
+        if looks >= GIVE_UP {
+            self.finish(ShareOutcome::dismissed().payload(ivars.id));
+            return false;
+        }
         true
     }
 }
 
 /// Looks after share `id`'s chosen service every [`WATCH_MS`] until the
-/// share is answered or replaced ([`PickerDelegate::look`]).
+/// share is answered or replaced, or gives up ([`PickerDelegate::look`]).
 fn watch(key: u64, id: u32) {
     crate::input::later(WATCH_MS, move || {
         let Some(surface) = Surface::with_key(key) else {
@@ -219,7 +238,7 @@ fn watch(key: u64, id: u32) {
         let Some(delegate) = delegate.filter(|d| d.ivars().id == id) else {
             return;
         };
-        if delegate.look(&surface) {
+        if delegate.look() {
             watch(key, id);
         }
     });
@@ -282,6 +301,13 @@ fn show(surface: &Rc<Surface>, id: u32, sheet: &ShareSheet) {
     let fail = |error: ShareError| {
         control.dispatch_event(ROOT_ID, EventKind::Share, error.payload(id));
     };
+    // A share still open is replaced (the core answered it already),
+    // whether this one shows or fails.
+    if let Some(earlier) = surface.share.delegate.borrow_mut().take() {
+        earlier.ivars().answered.set(true);
+        release_later(Some(earlier));
+    }
+    release_later(surface.share.picker.borrow_mut().take());
     let Some(class) = AnyClass::get(c"NSSharingServicePicker") else {
         return fail(ShareError::unavailable("this system has no share menu"));
     };
@@ -314,6 +340,10 @@ fn show(surface: &Rc<Surface>, id: u32, sheet: &ShareSheet) {
         Some(anchor) => (anchor.ns().retain(), anchor.ns().bounds()),
         None => {
             let root: &NSView = &surface.root;
+            if root.window().is_none() {
+                // AppKit shows no menu there, and so never answers.
+                return fail(ShareError::failed("share: the surface is in no window"));
+            }
             let bounds = root.bounds();
             (
                 root.retain(),
@@ -324,17 +354,18 @@ fn show(surface: &Rc<Surface>, id: u32, sheet: &ShareSheet) {
             )
         }
     };
-    // A share still open is replaced (the core answered it already).
-    if let Some(earlier) = surface.share.delegate.borrow_mut().take() {
-        earlier.ivars().answered.set(true);
-        release_later(Some(earlier));
-    }
-    release_later(surface.share.picker.borrow_mut().take());
+    let window = view.window();
+    let key = window.as_ref().is_some_and(|w| w.isKeyWindow());
     let delegate = PickerDelegate::alloc(surface.mtm).set_ivars(DelegateIvars {
         id,
         control: control.clone(),
         title: sheet.title.as_deref().map(NSString::from_str),
         surface: Rc::downgrade(surface),
+        window: window
+            .as_ref()
+            .map(objc2::rc::Weak::from_retained)
+            .unwrap_or_default(),
+        key,
         service: RefCell::new(None),
         answered: Cell::new(false),
         left: Cell::new(false),

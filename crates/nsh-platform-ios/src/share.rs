@@ -114,9 +114,10 @@ enum Phase {
     Shown,
 }
 
-/// A sheet a share closes before it shows.
+/// A sheet a share closes before it shows, while UIKit holds it: one it
+/// let go of (a presentation it dropped) will not show.
 struct Earlier {
-    sheet: Retained<UIActivityViewController>,
+    sheet: objc2::rc::Weak<UIActivityViewController>,
     phase: Rc<Cell<Phase>>,
 }
 
@@ -135,8 +136,9 @@ impl Current {
             waiting.replaced.set(true);
             return waiting.earlier.take();
         }
+        last.sheet.load()?;
         Some(Earlier {
-            sheet: last.sheet.load()?,
+            sheet: last.sheet,
             phase: last.phase,
         })
     }
@@ -226,7 +228,12 @@ pub(crate) fn show(
                 // that finished, or the sheet closed) answers. Should that
                 // call never come, the sheet gone answers.
                 if !completed.as_bool() && activity.is_some() && error.is_none() && up(&shown) {
-                    return watch(mtm, shown.clone(), answer.clone());
+                    let presenter = shown
+                        .load()
+                        .and_then(|sheet| sheet.presentingViewController())
+                        .map(|presenter| objc2::rc::Weak::from_retained(&presenter))
+                        .unwrap_or_default();
+                    return watch(mtm, shown.clone(), presenter, answer.clone());
                 }
                 let payload = match error {
                     Some(error) => {
@@ -270,6 +277,7 @@ pub(crate) fn show(
         root: root.retain(),
         answer,
         waits: Cell::new(0),
+        requested: Cell::new(0),
         replaced: Cell::new(false),
         earlier: RefCell::new(None),
     });
@@ -285,24 +293,41 @@ fn up(sheet: &objc2::rc::Weak<UIActivityViewController>) -> bool {
         .is_some_and(|c| c.presentingViewController().is_some() && !c.isBeingDismissed())
 }
 
+/// Whether the sheet, or what took its place over `presenter` (the next
+/// target's view, presented once a popover closed), is still presented
+/// and not on its way out. A controller presents one controller at a
+/// time, so what `presenter` presents now stands where the sheet was.
+fn held(
+    sheet: &objc2::rc::Weak<UIActivityViewController>,
+    presenter: &objc2::rc::Weak<UIViewController>,
+) -> bool {
+    up(sheet)
+        || presenter
+            .load()
+            .and_then(|presenter| presenter.presentedViewController())
+            .is_some_and(|presented| !presented.isBeingDismissed())
+}
+
 /// How often a sheet that may never call its completion again is looked
 /// at, in milliseconds.
 const WATCH_MS: u64 = 500;
 
-/// Answers dismissed once `sheet` is gone without its completion having
-/// answered: after a share extension was cancelled some systems call the
-/// completion no more, whichever way the sheet then closes.
+/// Answers dismissed once `sheet` is gone, with nothing presented in its
+/// place over `presenter`, without its completion having answered: after
+/// a share extension was cancelled some systems call the completion no
+/// more, whichever way the sheet then closes.
 fn watch(
     mtm: MainThreadMarker,
     sheet: objc2::rc::Weak<UIActivityViewController>,
+    presenter: objc2::rc::Weak<UIViewController>,
     answer: Rc<Answer>,
 ) {
     later(mtm, WATCH_MS, move || {
         if answer.answered.get() {
             return;
         }
-        if up(&sheet) {
-            return watch(mtm, sheet, answer);
+        if held(&sheet, &presenter) {
+            return watch(mtm, sheet, presenter, answer);
         }
         // Gone, or going: a completion still to come answers first.
         next_turn(move || answer.send(ShareOutcome::dismissed().payload(answer.id)));
@@ -348,6 +373,8 @@ struct Presenting {
     answer: Rc<Answer>,
     /// The waits for transitions to end so far.
     waits: Cell<u32>,
+    /// The looks so far for the earlier sheet to begin presenting.
+    requested: Cell<u32>,
     /// A newer share replaced this one before it was presented: it never
     /// is (the core answered it already).
     replaced: Cell<bool>,
@@ -363,6 +390,10 @@ const MAX_WAITS: u32 = 120;
 /// cannot tell when it ends, in milliseconds (a frame).
 const LOOK_MS: u64 = 16;
 
+/// The most looks a share makes for an earlier sheet UIKit holds to begin
+/// presenting (ten seconds: a sheet of many files loads them first).
+const MAX_REQUESTED: u32 = (10_000 / LOOK_MS) as u32;
+
 impl Presenting {
     /// Closes the earlier sheet, once no transition runs in it or what
     /// its target presented over it, then presents this one.
@@ -374,17 +405,22 @@ impl Presenting {
             .earlier
             .borrow()
             .as_ref()
-            .map(|e| (e.sheet.clone(), e.phase.get()));
+            .map(|e| (e.sheet.load(), e.phase.get()));
         let Some((earlier, phase)) = earlier else {
             let Some(top) = crate::system::top_controller(&self.root) else {
                 return self.refuse();
             };
             return self.present_over(top);
         };
-        if phase == Phase::Requested && self.waits.get() < MAX_WAITS {
+        let Some(earlier) = earlier else {
+            // UIKit let go of it: dropped before it showed, or closed.
+            self.earlier.take();
+            return self.go();
+        };
+        if phase == Phase::Requested && self.requested.get() < MAX_REQUESTED {
             // UIKit has not begun presenting it: look again shortly. (Never
             // begun after all these looks, it is not coming.)
-            self.waits.set(self.waits.get() + 1);
+            self.requested.set(self.requested.get() + 1);
             return later(self.mtm, LOOK_MS, move || self.go());
         }
         let Some(presenter) = earlier.presentingViewController() else {

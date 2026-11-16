@@ -2080,7 +2080,7 @@ Rust：`share(request)`，在任务中 await 的回答（`spawn`，或 `async` �
 | 平台 | `"shared"` 表示 |
 |---|---|
 | iOS | 目标已完成分享（取消的邮件或消息为 `"dismissed"`） |
-| macOS | 服务已完成分享（取消的邮件或消息为 `"dismissed"`）；不报告结果的服务（加入列表、拷贝）在用户回到应用窗口后为 `"shared"` |
+| macOS | 服务报告已完成；或服务没有报告结果，而用户回到了弹出菜单的窗口（拷贝、加入列表之后，邮件草稿仍开着时也算）。服务报告取消时为 `"dismissed"`；服务没有报告、用户十分钟内也没有回来，同样为 `"dismissed"` |
 | Android | 用户选了一个应用；Android 不告诉该应用之后做了什么 |
 | Web | `navigator.share` 已 resolve |
 
