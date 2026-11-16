@@ -40,6 +40,10 @@ pub struct TabProps {
     /// What screen readers say: the tab's name, when its children have no
     /// text that says it (an icon).
     pub accessibility_label: Prop<Option<SharedString>>,
+    /// More about the tab than its name, which screen readers read after a
+    /// pause, and a user can skip: what it can do that its name does not
+    /// say (a closable tab that Delete closes).
+    pub accessibility_description: Prop<Option<SharedString>>,
     /// The content: the app's label, icon or badge, which screen readers
     /// say.
     pub children: Prop<Children>,
@@ -78,6 +82,7 @@ pub fn Tab(props: TabProps, cx: Scope<TabEvent>) -> impl IntoElement {
         .disabled(props.disabled)
         .role(AccessibilityRole::Tab)
         .optional_label(props.accessibility_label)
+        .optional_accessibility_description(props.accessibility_description)
         .accessibility_state(move || AccessibilityState {
             selected: props.selected.get(),
             ..AccessibilityState::default()
