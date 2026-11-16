@@ -12,7 +12,7 @@ its own (no `nsh-js`, no QuickJS). The browser loads the app's ES modules; Wasm 
 graph, core, base components, layout and DOM backend. Native targets keep QuickJS.
 
 `Player.runModule(entry, { appId, capabilities, chunks, imports, params })` returns a promise after the entry module
-loads; `Player.runSource(code, { appId, capabilities, sourceMap, name })` does the same for a module given as
+loads; `Player.runSource(code, { appId, capabilities, sourceMap, name, params })` does the same for a module given as
 source text (a blob URL: development bundles, the playground). Either replaces the previous app. Each run has a
 fresh same-origin iframe realm, preserving native module identity, cycles, top-level await and browser globals.
 `params` (a JSON object) is the app's `host.params` (`nsh_set_host_params`, kept for the next start and given to its
@@ -217,7 +217,8 @@ build to the same file) and takes `nsh.js` from the crate.
   runtime exists (`runtime::web(false)`), `nsh run --target web` builds one first and prints the page's address (the user opens it). The page
   speaks the dev protocol over the same port's WebSocket: its hello has platform `web` and an empty
   `bytecode_version` (the server then sends JS source, without the warning a mismatched version gets), it runs
-  each development bundle with `player.runSource` and its message's `app_id` (the app's storage), applies patches with
+  each development bundle with `player.runSource` and its message's `app_id` (the app's storage) and the address's query
+  as `params` (`host.params`; `?idiom=phone|pad|desktop` is also the player's `idiom` option), applies patches with
   `player.hotUpdate` ("Hot module replacement"; when it resolves false, the bundle that follows loads from scratch),
   shows build errors and `CannotRun` over the app, sends the app's log lines back, and
   reads fonts with a synchronous `XMLHttpRequest` from `/assets/`. With `nsh.json` `web.host` it imports the module

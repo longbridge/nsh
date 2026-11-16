@@ -1629,13 +1629,13 @@ class Player {
   /**
    * Runs `code`, an ES module given as source text (a development bundle
    * from the dev server, a compiled playground module), as `runModule`
-   * does; settles once it ran. Options: `appId` and `capabilities` (as in
-   * `runModule`), `sourceMap` (JSON: inlined, so DevTools shows the
+   * does; settles once it ran. Options: `appId`, `capabilities` and `params`
+   * (as in `runModule`), `sourceMap` (JSON: inlined, so DevTools shows the
    * original sources) and `name` (what DevTools calls the module).
    */
-  runSource(code, { appId = "", capabilities = "", sourceMap = "", name = "" } = {}) {
+  runSource(code, { appId = "", capabilities = "", sourceMap = "", name = "", params } = {}) {
     if (!this.browserHost) return Promise.reject(new Error("this runtime has no browser JavaScript host"));
-    return this.browserHost.runSource(code, { appId, capabilities, sourceMap, name });
+    return this.browserHost.runSource(code, { appId, capabilities, sourceMap, name, params });
   }
 
   /**

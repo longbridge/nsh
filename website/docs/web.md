@@ -285,7 +285,7 @@ nsh run App.tsx --target web       # a TSX app
 starts the dev server and prints its page's address, `http://127.0.0.1:8790/`: open it in any browser. The page is a development host
 like the others: it runs each build of the app, shows build errors and runtime errors over the app, and sends the app's
 logs to the terminal. A change to a Rust app's crate builds its runtime again and the open page loads it by itself;
-TSX edits are applied in place (hot updates). Phones on the same network open the
+TSX edits are applied in place (hot updates). The page's address is the app's launch link: `?idiom=phone` (or `pad`, `desktop`) makes the app run as on that device whatever the window and the pointer, and every query parameter is in the app's `host.params`, as a string (`?story=cards` gives `{ story: "cards" }`). Phones on the same network open the
 address `nsh run` prints under it (`on this network: http://192.168.…:8790/`). `nsh dev` serves the same page once the
 web runtime is there (in the distribution, always).
 
@@ -345,7 +345,7 @@ await player.runModule(new URL("./bundle.js", location.href).href);
 
 `runModule(url, { chunks })` also takes where the chunks of a [split bundle](#split-bundles) are, and `runModule(url, { params })` the app's `host.params`: a JSON object the page already has for the app, such as the data of its first screen. The page `nsh package --target web` writes passes the JSON of a `<script type="application/json" id="nsh-params">` element when the page has one, so a server that serves the page can hand the app its data with it and the app shows it without asking for it again. The parameters go together with the page's [host](#the-hosts-functions): the app's `host.call` still reaches `createPlayer`'s `host`.
 
-`player.runSource(code, { name, sourceMap, capabilities, appId })` runs an ES module given as source text, with the same options. With `nsh-playground.wasm`, `player.compileAndRun(tsx, name, options)` compiles TSX first, runs it with `runSource`'s options and resolves to the compile error, or `null`; `player.compile(tsx)` returns `{ code }` or `{ error }`.
+`player.runSource(code, { name, sourceMap, capabilities, appId, params })` runs an ES module given as source text, with the same options. With `nsh-playground.wasm`, `player.compileAndRun(tsx, name, options)` compiles TSX first, runs it with `runSource`'s options and resolves to the compile error, or `null`; `player.compile(tsx)` returns `{ code }` or `{ error }`.
 
 The container's size is the app's window (`windowSize()`); resizing the container resizes the app. `player.setDark(true)` switches the appearance at run time, which apps observe through `colorScheme()` and `dark:` classes.
 

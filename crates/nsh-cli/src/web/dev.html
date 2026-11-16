@@ -51,6 +51,15 @@
   // Whether pages and dialogs are browser history entries (`nsh.json`
   // `web.history`; `null`: the player's default).
   const HISTORY = {{history}};
+  // The page's address is the app's launch link, as the embedding app's
+  // parameters are on the other platforms: `?idiom=phone` (or `pad`,
+  // `desktop`) makes the app believe it runs on that device, whatever the
+  // window and the pointer, as the demos' page does, and every query
+  // parameter is in `host.params`, as a string.
+  const address = new URLSearchParams(location.search);
+  const idiom = address.get("idiom");
+  const launch = Object.fromEntries(address);
+  const params = Object.keys(launch).length ? launch : undefined;
   const status = document.getElementById("status");
   const problem = document.getElementById("problem");
   const decoder = new TextDecoder();
@@ -104,6 +113,7 @@
     host: HOST ? { call: (name, args) => host.call(name, args), post: (name, args) => (host.post ?? host.call).call(host, name, args) } : undefined,
     assetBase: "/assets/",
     history: HISTORY ?? undefined,
+    idiom: idiom === "phone" || idiom === "pad" || idiom === "desktop" ? idiom : undefined,
     readAsset,
     onLog: (level, message) => send({ type: "log", level: levels[level] ?? "info", target: "js", message }),
   });
@@ -167,6 +177,7 @@
             capabilities: message.capabilities ?? "",
             sourceMap: text(frames[1]),
             appId: message.app_id ?? "",
+            params,
             name: `bundle-${message.version}.js`,
           });
         } catch {

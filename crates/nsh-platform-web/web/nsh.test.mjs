@@ -619,7 +619,15 @@ test("compileAndRun hands the compiled module to runSource, or returns the compi
   player.browserHost = { runSource: async (code, options) => { ran.push([code, options]); } };
   assert.equal(await player.compileAndRun("bad"), "1 | bad");
   assert.equal(await player.compileAndRun("good", "Demo.tsx", { appId: "demo" }), null);
-  assert.deepEqual(ran, [["compiled good", { appId: "demo", capabilities: "", sourceMap: "", name: "Demo.tsx" }]]);
+  assert.deepEqual(ran, [["compiled good", { appId: "demo", capabilities: "", sourceMap: "", name: "Demo.tsx", params: undefined }]]);
+});
+
+test("runSource gives the browser host the app's host params as runModule does", async () => {
+  const { player } = fakePlayer();
+  const ran = [];
+  player.browserHost = { runSource: async (code, options) => { ran.push([code, options]); } };
+  await player.runSource("code", { name: "bundle-1.js", params: { story: "bubble", "nsh-idiom": "phone" } });
+  assert.deepEqual(ran, [["code", { appId: "", capabilities: "", sourceMap: "", name: "bundle-1.js", params: { story: "bubble", "nsh-idiom": "phone" } }]]);
 });
 
 test("hotUpdate goes to the browser host, and is not applied without one", async () => {

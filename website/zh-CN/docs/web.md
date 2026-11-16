@@ -254,7 +254,7 @@ nsh run --target web               # Rust 应用，在它的目录里
 nsh run App.tsx --target web       # TSX 应用
 ```
 
-会启动开发服务器，并打印它的页面地址 `http://127.0.0.1:8790/`，在任意浏览器中打开即可。这个页面和其他开发宿主一样：运行应用的每次构建，在应用上方显示构建错误和运行时错误，并把应用的日志发送到终端。修改 Rust 应用的 crate 会重新构建它的运行时，已打开的页面会自动加载；TSX 的修改则就地应用（热更新）。同一网络中的手机打开 `nsh run` 在其下方打印的地址（`on this network: http://192.168.…:8790/`）即可。只要 Web 运行时存在（发行包中总是存在），`nsh dev` 也会提供同一个页面。
+会启动开发服务器，并打印它的页面地址 `http://127.0.0.1:8790/`，在任意浏览器中打开即可。这个页面和其他开发宿主一样：运行应用的每次构建，在应用上方显示构建错误和运行时错误，并把应用的日志发送到终端。修改 Rust 应用的 crate 会重新构建它的运行时，已打开的页面会自动加载；TSX 的修改则就地应用（热更新）。页面地址就是应用的启动链接：`?idiom=phone`（或 `pad`、`desktop`）让应用按该设备运行，不受窗口和指针影响；地址中的每个查询参数都以字符串形式出现在应用的 `host.params` 中（`?story=cards` 得到 `{ story: "cards" }`）。同一网络中的手机打开 `nsh run` 在其下方打印的地址（`on this network: http://192.168.…:8790/`）即可。只要 Web 运行时存在（发行包中总是存在），`nsh dev` 也会提供同一个页面。
 
 ## 构建本站的播放器
 
@@ -308,7 +308,7 @@ await player.runModule(new URL("./bundle.js", location.href).href);
 
 `runModule(url, { chunks })` 还可以指定[拆分 bundle](#拆分-bundle) 的 chunk 所在位置；`runModule(url, { params })` 指定应用的 `host.params`：页面已经为应用准备好的 JSON 对象，比如首屏的数据。`nsh package --target web` 写出的页面里如果有 `<script type="application/json" id="nsh-params">`，就把它的 JSON 传给应用，这样提供页面的服务器可以随页面把数据交给应用，应用直接显示，不必再请求一次。参数和页面的[宿主](#宿主的函数)一起使用：应用的 `host.call` 照样交给 `createPlayer` 的 `host` 回答。
 
-`player.runSource(code, { name, sourceMap, capabilities, appId })` 运行以源码文本给出的 ES 模块，选项相同。使用 `nsh-playground.wasm` 时，`player.compileAndRun(tsx, name, options)` 会先编译 TSX，再用 `runSource` 的选项运行，结果是编译错误或 `null`；`player.compile(tsx)` 返回 `{ code }` 或 `{ error }`。
+`player.runSource(code, { name, sourceMap, capabilities, appId, params })` 运行以源码文本给出的 ES 模块，选项相同。使用 `nsh-playground.wasm` 时，`player.compileAndRun(tsx, name, options)` 会先编译 TSX，再用 `runSource` 的选项运行，结果是编译错误或 `null`；`player.compile(tsx)` 返回 `{ code }` 或 `{ error }`。
 
 容器的尺寸就是应用的窗口（`windowSize()`），调整容器大小会同步调整应用。`player.setDark(true)` 可在运行时切换外观，应用通过 `colorScheme()` 和 `dark:` 类感知到变化。
 
