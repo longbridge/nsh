@@ -382,6 +382,15 @@ impl ShaderState {
         }
     }
 
+    /// Takes `from` as what a transition starts from. The bitmap kept goes:
+    /// it may hold an earlier start picture, which is uploaded under the
+    /// same serial (`u64::MAX`) and, on shared textures, is never replaced
+    /// by a frame read back.
+    fn set_start(&mut self, from: Pixels) {
+        self.start = Some((self.view.frame().serial, from));
+        *self.drawn.get_mut() = None;
+    }
+
     /// Whether a transition shows what it started from: no frame came
     /// since it started.
     fn starting(&self) -> bool {
@@ -650,7 +659,7 @@ pub(crate) fn start_transition(surface: &Rc<Surface>, view: &NshView, duration: 
                 ShaderInput::From,
                 Some((&from.data, from.width, from.height, from.width * 4)),
             );
-            shader.start = Some((shader.view.frame().serial, from));
+            shader.set_start(from);
         }
         let now = Instant::now();
         shader.view.start_transition(duration, now);
@@ -1480,6 +1489,38 @@ mod tests {
         reveal();
         let s = view.state();
         assert!(s.shader.as_ref().is_some_and(ShaderState::starting));
+    }
+
+    /// A transition that starts again shows its new start picture, not the
+    /// one it started from before.
+    #[test]
+    fn a_new_start_picture_replaces_the_last_one() {
+        let Ok(gfx) = crate::gfx::get() else {
+            // No Direct3D device, not even WARP.
+            return;
+        };
+        let mut shader = ShaderState::default();
+        let mut shown = |bgra: [u8; 4]| {
+            shader.set_start(Pixels {
+                width: 1,
+                height: 1,
+                data: bgra.to_vec(),
+            });
+            let bitmap = shader.bitmap(&gfx.dc, 4).expect("the start picture's bitmap");
+            let rect = D2D_RECT_U {
+                left: 0,
+                top: 0,
+                right: 1,
+                bottom: 1,
+            };
+            crate::render::read_back(&gfx.dc, &bitmap, rect)
+                .expect("the bitmap read back")
+                .data
+        };
+        let morning = [0x2b, 0x89, 0xe8, 0xff];
+        let noon = [0xe8, 0x7d, 0x2b, 0xff];
+        assert_eq!(shown(morning), morning);
+        assert_eq!(shown(noon), noon);
     }
 
     /// A partial frame that meets a view reading what is behind it draws
