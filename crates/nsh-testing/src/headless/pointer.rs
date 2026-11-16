@@ -124,10 +124,7 @@ impl Headless {
             gate,
             ..
         } = grab;
-        let press = self
-            .screen
-            .press_in_chain(&chain)
-            .map(|(node, events, delay)| input::Press::new(node, node, events, delay, 0));
+        let press = self.screen.press_in_chain(&chain);
         let mut finger = Finger {
             start,
             at: start,
@@ -281,7 +278,7 @@ impl Headless {
                 if let Some(mut press) = finger.press.take() {
                     // A quick tap inside a scroll view: the press goes in now.
                     if let Some(kind) = press.press_in() {
-                        self.send(press.node, kind, EventPayload::None);
+                        self.send(press.target(kind), kind, EventPayload::None);
                     }
                     let inside = self.screen.bounds_in_root(press.view).is_some_and(|b| {
                         let r = PRESS_RETENTION;
@@ -291,7 +288,7 @@ impl Headless {
                             && finger.at.y <= b.origin.y + b.size.height + r
                     });
                     for kind in press.press_out(inside) {
-                        self.send(press.node, kind, EventPayload::None);
+                        self.send(press.target(kind), kind, EventPayload::None);
                     }
                 }
             }
@@ -321,7 +318,7 @@ impl Headless {
     fn cancel_press(&mut self, finger: &mut Finger) {
         if let Some(mut press) = finger.press.take() {
             for kind in press.press_out(false) {
-                self.send(press.node, kind, EventPayload::None);
+                self.send(press.target(kind), kind, EventPayload::None);
             }
         }
     }

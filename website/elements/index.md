@@ -165,7 +165,8 @@ traits in Rust). Element pages list only their own props. The Rust column names 
 ### Presses and feedback
 
 Press handling runs natively: the platform recognizes the press and applies the app's press styles, and the app's code
-only hears about it afterwards. Only the innermost pressable view responds; inside scroll views a press-in waits about
+only hears about it afterwards. Only the innermost pressable view responds, except that one listening only to `onLongPress` leaves
+the taps to the pressable view around it; inside scroll views a press-in waits about
 130 ms so a scroll can start first.
 
 | Prop | Rust | Type | Default | Description |

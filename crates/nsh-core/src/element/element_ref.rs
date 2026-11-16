@@ -500,6 +500,24 @@ impl ElementRef {
         }
         answer
     }
+
+    /// The text the element shows (the DOM's `textContent`): the texts
+    /// inside it in tree order, joined, with the commit this call goes out
+    /// with, so a text changed before it counts. What `display: none`
+    /// hides is left out; empty when no rendered element carries the ref.
+    /// For a component that matches its content's words (a menu's
+    /// typeahead). Await it in a task.
+    pub fn text_content(&self) -> Answer<String> {
+        let (answer, slot) = Answer::new();
+        let pending = slot.clone();
+        if self
+            .reach(|node, executor| executor.act(Action::TextContent(node, pending)))
+            .is_none()
+        {
+            slot.borrow_mut().deliver(String::new());
+        }
+        answer
+    }
 }
 
 impl PartialEq for ElementRef {

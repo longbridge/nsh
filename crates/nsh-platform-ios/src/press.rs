@@ -7,7 +7,7 @@
 //! release, so scroll views and pans on the same touches win whenever they
 //! start first; it then fails and reports `onPressUp`.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use dispatch2::{DispatchQueue, DispatchTime, MainThreadBound};
 use nsh_core::{EventKind, NodeId, TextLink};
@@ -18,8 +18,8 @@ use objc2::{
 use objc2_core_foundation::CGPoint;
 use objc2_foundation::{NSObject, NSObjectProtocol, NSSet};
 use objc2_ui_kit::{
-    UIControl, UIEvent, UIGestureRecognizer, UIGestureRecognizerState, UIScrollView,
-    UITapGestureRecognizer, UITouch, UIView, UIWindow,
+    UIControl, UIEvent, UIGestureRecognizer, UIGestureRecognizerState, UINavigationBar,
+    UIScrollView, UITapGestureRecognizer, UITouch, UIView, UIWindow,
 };
 
 use crate::{target::EventTarget, text_view::TextView};
@@ -52,6 +52,12 @@ pub(crate) struct PressIvars {
     own: Cell<bool>,
     /// Has press handlers, rather than only tracking the pressed style.
     handles_press: Cell<bool>,
+    /// Has tap handlers (`onPress`, `onPressDown`, `onPressUp`): without
+    /// them, a long press recognizer leaves the taps to the views around.
+    taps: Cell<bool>,
+    /// The long-press-only recognizer inside that takes the current
+    /// touch's long press, while this one takes its taps.
+    deeper_long: RefCell<Option<Retained<PressRecognizer>>>,
     /// The pressable text span the current touch is on: its presses go
     /// there.
     link: Cell<Option<TextLink>>,
@@ -98,10 +104,13 @@ define_class!(
             if link.is_none() && !ivars.own.get() {
                 return self.set_state(UIGestureRecognizerState::Failed);
             }
-            let long_press = match link {
-                Some(l) => l.events.contains(EventKind::LongPress),
-                None => ivars.long_press.get(),
-            };
+            let deeper_long = self.long_deeper(&touch, &view);
+            let long_press = deeper_long.is_none()
+                && match link {
+                    Some(l) => l.events.contains(EventKind::LongPress),
+                    None => ivars.long_press.get(),
+                };
+            ivars.deeper_long.replace(deeper_long);
             ivars.start.set(touch.locationInView(Some(&view)));
             // SAFETY: UIEvent's `modifierFlags` (iOS 13.4), a
             // UIKeyModifierFlags (NSInteger).
@@ -159,7 +168,12 @@ define_class!(
             }
             // A style observer reports the pressed state without competing
             // with an ancestor that handles the click.
-            self.set_state(if self.ivars().handles_press.get() || self.ivars().link.get().is_some() {
+            // A long press recognizer without taps leaves a tap to the
+            // views around it.
+            let ivars = self.ivars();
+            let takes = ivars.link.get().is_some()
+                || (ivars.handles_press.get() && (ivars.taps.get() || ivars.long_pressed.get()));
+            self.set_state(if takes {
                 UIGestureRecognizerState::Ended
             } else {
                 UIGestureRecognizerState::Failed
@@ -185,12 +199,23 @@ define_class!(
 
         #[unsafe(method(canBePreventedByGestureRecognizer:))]
         fn can_be_prevented(&self, other: &UIGestureRecognizer) -> bool {
-            // Taps UIKit attaches to the window skip `UIControl`s, and a
-            // press stands in for one: on iOS 26+ the window's top-edge tap
-            // interaction (`_UIDoubleTapInteraction`, top 64 pt, cancels
+            // Taps UIKit attaches to the window and the navigation bar skip
+            // `UIControl`s, and a press stands in for one: on iOS 26+ their
+            // top-edge tap interaction (`_UIDoubleTapInteraction`, cancels
             // touches, never simultaneous) would otherwise swallow every
-            // press near the top, such as a navigation bar's back button.
-            !is_window_tap(other)
+            // press near the top, such as a navigation bar's back button or
+            // a view the app put in the header.
+            !is_system_tap(other)
+        }
+
+        #[unsafe(method(shouldBeRequiredToFailByGestureRecognizer:))]
+        fn required_to_fail_by(&self, other: &UIGestureRecognizer) -> bool {
+            // That tap interaction also acts on the tap: it is the status
+            // bar's tap, which scrolls the scroll views under it to their
+            // top. It skips `UIControl`s, so it waits for the press: a press
+            // that ends takes the tap, one that fails (nothing to press)
+            // leaves it to the system.
+            is_system_tap(other)
         }
 
         #[unsafe(method(canPreventGestureRecognizer:))]
@@ -221,6 +246,8 @@ impl PressRecognizer {
             long_press_delay: Cell::new(LONG_PRESS),
             own: Cell::new(false),
             handles_press: Cell::new(false),
+            taps: Cell::new(false),
+            deeper_long: RefCell::new(None),
             link: Cell::new(None),
             at: Cell::new(PressAt::default()),
         });
@@ -247,9 +274,10 @@ impl PressRecognizer {
     }
 
     /// Whether the view itself takes presses.
-    pub(crate) fn set_own(&self, on: bool, handles_press: bool) {
+    pub(crate) fn set_own(&self, on: bool, handles_press: bool, taps: bool) {
         self.ivars().own.set(on);
         self.ivars().handles_press.set(handles_press);
+        self.ivars().taps.set(taps);
     }
 
     /// The pressable text span the current press is on.
@@ -277,7 +305,13 @@ impl PressRecognizer {
         if self.ivars().pressed.replace(false) {
             self.report(Report::PressOut);
         }
-        !self.ivars().long_pressed.get() && !self.ivars().tap_only.get()
+        let deeper_long = self
+            .ivars()
+            .deeper_long
+            .borrow()
+            .as_ref()
+            .is_some_and(|r| r.ivars().long_pressed.get());
+        !self.ivars().long_pressed.get() && !deeper_long && !self.ivars().tap_only.get()
     }
 
     fn set_state(&self, state: UIGestureRecognizerState) {
@@ -345,7 +379,7 @@ impl PressRecognizer {
                 && recognizers.iter().any(|r| {
                     r.isEnabled()
                         && r.downcast_ref::<PressRecognizer>().is_some_and(|r| {
-                            r.ivars().handles_press.get()
+                            (r.ivars().handles_press.get() && r.ivars().taps.get())
                                 || v.downcast_ref::<TextView>().is_some_and(|t| {
                                     t.link_at(touch.locationInView(Some(&v))).is_some()
                                 })
@@ -360,14 +394,41 @@ impl PressRecognizer {
     }
 }
 
-/// A tap recognizer UIKit attaches to a window (the top-edge tap
-/// interaction, keyboard dismissal): it ignores controls, so it must not
-/// prevent a press either. Edge-gesture gates are not taps and still do.
-fn is_window_tap(recognizer: &UIGestureRecognizer) -> bool {
+impl PressRecognizer {
+    /// The innermost recognizer between the touched view and `view` that
+    /// takes only long presses, if any: it gets the long press, as a
+    /// `UILongPressGestureRecognizer` would, and the taps stay here.
+    fn long_deeper(&self, touch: &UITouch, view: &UIView) -> Option<Retained<PressRecognizer>> {
+        let mut current = touch.view();
+        while let Some(v) = current {
+            if std::ptr::eq::<UIView>(&*v, view) {
+                return None;
+            }
+            let found = v.gestureRecognizers().and_then(|recognizers| {
+                recognizers.iter().find_map(|r| {
+                    let r = r.downcast::<PressRecognizer>().ok()?;
+                    let ivars = r.ivars();
+                    (r.isEnabled() && ivars.handles_press.get() && !ivars.taps.get()).then_some(r)
+                })
+            });
+            if found.is_some() {
+                return found;
+            }
+            current = v.superview();
+        }
+        None
+    }
+}
+
+/// A tap recognizer UIKit attaches to a window or a navigation bar (the
+/// top-edge tap interaction, keyboard dismissal): it ignores controls, so it
+/// must not prevent a press either. Edge-gesture gates are not taps and
+/// still do.
+fn is_system_tap(recognizer: &UIGestureRecognizer) -> bool {
     recognizer.isKindOfClass(UITapGestureRecognizer::class())
-        && recognizer
-            .view()
-            .is_some_and(|view| view.isKindOfClass(UIWindow::class()))
+        && recognizer.view().is_some_and(|view| {
+            view.isKindOfClass(UIWindow::class()) || view.isKindOfClass(UINavigationBar::class())
+        })
 }
 
 fn inside_scroll_view(view: &UIView) -> bool {

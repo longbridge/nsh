@@ -148,6 +148,7 @@ input::WheelStep::Discrete.time                                  # time (millise
 input::ZOOM_STEP                                                 # a scale factor
 input::latch_holds(last)                                         # time (milliseconds)
 input::latch_holds(time)                                         # time (milliseconds)
+input::pick_press(views)                                         # time (milliseconds): the delayLongPress of each view
 input::touchpad_wait ->                                          # time (milliseconds)
 input::touchpad_wait(last)                                       # time (milliseconds)
 input::touchpad_wait(now)                                        # time (milliseconds)

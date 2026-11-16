@@ -738,6 +738,101 @@ mount(App);
     assert_eq!(paced.errors(), Vec::<String>::new());
 }
 
+/// A keyed row that moves up (an item that sorts first once it changes),
+/// its rows rebuilt as new objects with the same keys: the row and the rows
+/// it passes keep their cells, so no view is made and no text drawn again,
+/// with or without a layout animation; under one, the moved row slides
+/// from where it showed to its new place.
+#[test]
+fn moving_a_keyed_row_keeps_every_cell_on_its_row() {
+    use std::collections::HashMap;
+
+    use nsh_core::NodeId;
+    const APP: &str = r#"
+import { LayoutAnimation, List, mount, signal, Text, View } from "nsh";
+const rows = signal(Array.from({ length: 100 }, (_, i) => ({ label: `row ${i}` })));
+function App() {
+  const up = () => {
+    ANIMATE
+    rows.update((r) => {
+      const next = r.map((row) => ({ ...row }));
+      next.splice(2, 0, ...next.splice(10, 1));
+      return next;
+    });
+  };
+  return (
+    <View style={{ flex: 1 }}>
+      <View onPress={up} style={{ height: 0 }} />
+      <List each={rows()} keyExtractor={(row) => row.label} estimatedItemSize={50} style={{ flex: 1 }}>
+        {(row) => <View style={{ height: 50 }}><Text>{row().label}</Text></View>}
+      </List>
+    </View>
+  );
+}
+mount(App);
+"#;
+    for animated in [false, true] {
+        let animate = "LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);";
+        let app = APP.replace("ANIMATE", if animated { animate } else { "" });
+        let mut paced = Paced::start(&app);
+        paced.settle(|_, _| {});
+        assert!(paced.shows(0, 12), "{:?}", paced.texts);
+        let list = paced.list.expect("the list");
+        let mut parents: HashMap<NodeId, NodeId> = HashMap::new();
+        let mut frames = HashMap::new();
+        for item in std::mem::take(&mut paced.items) {
+            match item {
+                MountItem::Insert { parent, child, .. } => {
+                    parents.insert(child, parent);
+                }
+                MountItem::Frame { id, frame } => {
+                    frames.insert(id, frame);
+                }
+                _ => {}
+            }
+        }
+        let cell_of = |mut id: NodeId| loop {
+            let parent = parents[&id];
+            if parent == list {
+                return id;
+            }
+            id = parent;
+        };
+        let moved = paced
+            .texts
+            .iter()
+            .find_map(|(id, t)| (t == "row 10").then_some(cell_of(*id)))
+            .unwrap();
+        let (before, created) = (paced.texts.clone(), paced.created);
+        paced.engine.control().dispatch_event(
+            paced.pressable.expect("the pressable view"),
+            nsh_core::EventKind::Press,
+            nsh_core::EventPayload::None,
+        );
+        let mut drawn = Vec::new();
+        paced.settle(|_, set| drawn.extend_from_slice(set));
+        assert!(drawn.is_empty(), "animated {animated}: drew {drawn:?}");
+        assert_eq!(paced.created, created, "animated {animated}: views made");
+        assert_eq!(paced.texts, before, "animated {animated}");
+        // The moved row's cell: placed at its new row, sliding there from
+        // its old one under the layout animation.
+        let mut animation = None;
+        let mut placed = None;
+        for item in &paced.items {
+            match item {
+                MountItem::LayoutAnimation(a) => animation = a.update,
+                MountItem::Frame { id, frame } if *id == moved => {
+                    placed = Some((frame.origin.y.0, animation.is_some()));
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(frames[&moved].origin.y.0, 500.0);
+        assert_eq!(placed, Some((100.0, animated)), "animated {animated}");
+        assert_eq!(paced.errors(), Vec::<String>::new());
+    }
+}
+
 /// A row added at the start of an inverted list (a chat's new message)
 /// leaves the other cells on their rows: rows made again by key
 /// (`<Each of={[key]}>`) are not made again, only the new one is made.

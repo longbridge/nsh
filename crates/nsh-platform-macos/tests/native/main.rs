@@ -34,6 +34,8 @@ mod press_momentum;
 mod quit_requests;
 #[cfg(target_os = "macos")]
 mod scaled_input;
+#[cfg(all(target_os = "macos", feature = "shader"))]
+mod shader_content;
 #[cfg(target_os = "macos")]
 mod title_bar;
 #[cfg(target_os = "macos")]
@@ -62,6 +64,9 @@ fn main() {
                 title_bar::run();
             } else if std::env::var_os("NSH_MODAL_FADE_CHECK_ONLY").is_some() {
                 modal_fade::run();
+            } else if std::env::var_os("NSH_SHADER_CONTENT_CHECK_ONLY").is_some() {
+                #[cfg(feature = "shader")]
+                shader_content::run();
             } else if mount::bench_only() {
                 mount::bench_alone();
             } else if std::env::var_os("NSH_MENU_LABELS_CHECK_ONLY").is_some() {
@@ -99,6 +104,8 @@ fn main() {
                 title_bar::run();
                 window_dialog::run();
                 modal_fade::run();
+                #[cfg(feature = "shader")]
+                shader_content::run();
                 menu_labels::run();
                 window_frames::run();
                 keyboard::run();

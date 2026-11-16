@@ -338,7 +338,7 @@ function Editor() {
 }
 ```
 
-它接受[选项](#选项)中的 `defaultSize`、`defaultPosition`、`display` 和 `defaultMode`，以及所有[属性](#属性)。应用运行时，任何 `<Window>` 之外的 `currentWindow()`（或 `Window.get("main")`）就是主窗口，它的 `set()` 修改同样的属性。
+它接受[选项](#选项)中的 `defaultSize`、`defaultPosition`、`display` 和 `defaultMode`，以及所有[属性](#属性)。应用运行时，任何 `<Window>` 之外的 `currentWindow()`（或 `Window.get("main")`）就是主窗口，它的 `set()` 修改同样的属性。同一份 nsh.json 适用于所有构建：桌面应用这些设置，网页以 `title` 作为页面标题，在 iOS 和 Android 上应用填满它在屏幕中的视图。
 
 `"defaultVisible": false` 让应用启动时主窗口处于隐藏状态：窗口照常创建，应用在其中运行，只是看不见，也不占用键盘，直到应用用 `show()` 或 `focus()` 显示它，比如[托盘](#tray)应用在图标被点击时这样做。在此之前 `state()` 报告它是隐藏的；第一次显示时，它按 `defaultMode` 打开。应用运行期间打开它的 [URL scheme](./nsh.md#urlscheme) 链接也会显示它；在 macOS 上，再次打开应用（点 Dock 图标、在访达中打开）也一样。`nsh run` 和 `nsh test --target` 同样以隐藏状态启动它。开发宿主打开窗口的方式和运行其他应用时一样：`--target windows`（`nsh run` 在 Windows 上的默认值）按应用的 `defaultSize` 和 `defaultMode` 打开，`--target macos`、`linux` 或 `gpui` 按宿主的大小、以普通模式打开；GPUI 在 Linux 上一打开窗口就会显示，所以在 Linux 上用 `--target gpui` 时窗口会显示。在 `nsh run` 下出错时会显示它，好让错误被看到。
 
