@@ -53,6 +53,11 @@ function Links() {
         </Text>
         .
       </Text>
+      <Text style={body()}>
+        {"Run "}
+        <Text style={{ fontFamily: "monospace", backgroundColor: colors.raised, borderRadius: 4, paddingHorizontal: 4 }}>nsh test</Text>
+        {" first: a padded span keeps room around its code."}
+      </Text>
       <Caption label="Pressed" note={tapped()} />
     </Card>
   );
