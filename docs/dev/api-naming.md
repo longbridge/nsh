@@ -69,6 +69,9 @@ go elsewhere under these rules rather than into them.
   `on_will_change` may veto (NSH has no veto: the main thread never waits for JS). Lifecycle pairs are `onOpen` /
   `onClose` (`DialogTrigger::on_open`, `Dialog::on_close`). A user's attempt is named after the act (`onCancel`,
   `onBackPress`: `Dialog::on_cancel`, `DialogChangeReason::*Press`), never `on<Noun>Request`.
+  `RichEditor.onCompositionChange({ composing })` uses `Input`'s composition name for the view's boolean state
+  transitions. The editor owns the transient marked text; apps observe the start/end state through the session's
+  existing `composing` value, with the event emitted after the state settles.
 - **Press, not click**: `onPress`, `onPressDown`, `onPressUp`, `onLongPress` (below, Button). `gpui-base` itself says
   *press* for pointer-independent activation (`DialogChangeReason::TriggerPress`, `close_on_backdrop_press`).
 - **States**: `disabled` blocks interaction, `readonly` allows selecting but not editing, `selected` is membership /
