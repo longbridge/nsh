@@ -772,6 +772,7 @@ fn chat() -> impl IntoElement {
 |---|---|---|
 | `selectedText({ format? })` | `selected_text(Option<TextSelectionOptions>)` | 读取 `selectable` 视图的选区：`format` 为 `"plain"`（默认，与复制相同）、`"markdown"` 或 `"html"`，由选中的节点重新生成；选中全部时返回原样的源文（[读取为 Markdown 或 HTML](./text-selection.md#读取为-markdown-或-html)）。没有选中内容时返回 `""`。 |
 | `onImagePress` | `.on_image_press(\|image: &Image\| ..)` | 不在链接中的图片被点击：`{ image }` 是该图片，由应用放大显示（应用自己的可缩放查看器）。 |
+| `onTaskPress` | `.on_task_press(\|event: &TextViewTaskPressEvent\| ..)` | 任务项的方框被点击：`{ index, checked }`，即文档中的第几个任务（从 0 开始，按阅读顺序）以及这次点击要求的状态。文档本身不会改变：由应用把修改后的源文本交给视图。 |
 
 <a id="accessibility"></a>
 
