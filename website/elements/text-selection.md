@@ -181,6 +181,10 @@ An [`Input`](./input.md)'s `onSelectionChange` is its own: the caret and selecti
 | iOS, Android | A long press selects a word; the platform's handles extend it, and its edit menu has Copy and Select All. |
 | Web | The browser's own selection, with its gestures, menu and shortcuts. |
 
+Outside the web, a word is a run of letters, digits and `_`. A hostname, URL, path or id is one word (`demo-app.pages.dev`,
+`https://x.y/a-b?c=1`, `~/a/b-c.md`, `v0.5.1`): the punctuation between its words joins them, while punctuation after it
+(a sentence's `foo.`) stays out.
+
 ## What it selects
 
 - **Texts that stay out**: a text with `userSelect: "none"` (`.select_none()` in Rust, the class `select-none`; a

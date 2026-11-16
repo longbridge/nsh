@@ -28,7 +28,11 @@
 //!
 //! Words are runs of letters, digits, `_` and combining marks, runs of
 //! spaces, or single other characters: punctuation, an emoji, each CJK
-//! ideograph or kana (scripts written without spaces between words).
+//! ideograph or kana (scripts written without spaces between words). The
+//! punctuation of a hostname, URL, path or id between two words joins them
+//! into one, as browsers keep a link whole: `demo-app.pages.dev`,
+//! `https://x.y/a-b?c=1`, `~/a/b-c.md`, `v0.5.1` are each a word, a sentence's
+//! last word (`foo.`) is still the word alone.
 
 use std::ops::Range;
 
@@ -674,43 +678,40 @@ fn unit_at(
     match granularity {
         Granularity::Character => (pos, pos),
         Granularity::Word => {
-            let range = word_range(content, pos.offset);
-            let mut start = TextPosition::new(pos.text, range.start);
-            let mut end = TextPosition::new(pos.text, range.end);
-            // A word a wrap cut runs on into the parts around it: while the
-            // word reaches its text's start and the text continues one
-            // whose last character is of the same kind, it goes on there
-            // (and the same forward).
-            while start.offset == 0
-                && continues(texts, start.text)
-                && joins_word(texts, start.text - 1, start.text)
-            {
-                let before = texts.content(start.text - 1);
-                let range = word_range(before, utf16_len(before));
-                start = TextPosition::new(start.text - 1, range.start);
+            // The word is found in the line the text is part of (it, the
+            // texts it continues and those that continue it, joined as a
+            // copy joins them): a word a wrap cut, or a token whose parts
+            // are texts of their own, runs on into the parts around it.
+            let (first, last) = line_of(texts, pos.text);
+            let mut line = String::new();
+            let mut starts = Vec::with_capacity(last - first + 1);
+            for i in first..=last {
+                starts.push(utf16_len(&line));
+                line.push_str(texts.content(i));
             }
-            while end.offset == utf16_len(texts.content(end.text))
-                && end.text + 1 < texts.len()
-                && continues(texts, end.text + 1)
-                && joins_word(texts, end.text, end.text + 1)
-            {
-                let after = texts.content(end.text + 1);
-                let range = word_range(after, 0);
-                end = TextPosition::new(end.text + 1, range.end);
+            let mut at = starts[pos.text - first] + pos.offset;
+            // At a text's end, the character before it, as in a text alone.
+            if pos.offset > 0 && pos.offset == utf16_len(content) {
+                let before = content.chars().next_back().map_or(0, char::len_utf16);
+                at -= before as u32;
             }
-            (start, end)
+            let range = word_range(&line, at);
+            if range.is_empty() {
+                return (pos, pos);
+            }
+            // The start in the text its first character is in, the end in
+            // the text its last character is in.
+            let start_text = starts.partition_point(|&s| s <= range.start) - 1;
+            let end_text = starts.partition_point(|&s| s < range.end) - 1;
+            (
+                TextPosition::new(first + start_text, range.start - starts[start_text]),
+                TextPosition::new(first + end_text, range.end - starts[end_text]),
+            )
         }
         // The whole line: the text and the texts it continues and that
         // continue it.
         Granularity::Paragraph => {
-            let mut first = pos.text;
-            while continues(texts, first) {
-                first -= 1;
-            }
-            let mut last = pos.text;
-            while last + 1 < texts.len() && continues(texts, last + 1) {
-                last += 1;
-            }
+            let (first, last) = line_of(texts, pos.text);
             (
                 TextPosition::new(first, 0),
                 TextPosition::new(last, utf16_len(texts.content(last))),
@@ -724,19 +725,18 @@ fn continues(texts: &impl SelectionTexts, i: usize) -> bool {
     i > 0 && i < texts.len() && texts.continues(i)
 }
 
-/// Whether the characters on both sides of the join of texts `a` and `b`
-/// (`b` continuing `a`) are of one kind that makes words longer than a
-/// character (letters and digits, or spaces): a word a wrap cut there is
-/// one word.
-fn joins_word(texts: &impl SelectionTexts, a: usize, b: usize) -> bool {
-    let (Some(last), Some(first)) = (
-        texts.content(a).chars().next_back(),
-        texts.content(b).chars().next(),
-    ) else {
-        return false;
-    };
-    let kind = CharKind::of(last);
-    kind != CharKind::Single && kind == CharKind::of(first)
+/// The first and last texts of the line text `i` is part of: it, the
+/// texts it continues and the texts that continue it.
+fn line_of(texts: &impl SelectionTexts, i: usize) -> (usize, usize) {
+    let mut first = i;
+    while continues(texts, first) {
+        first -= 1;
+    }
+    let mut last = i;
+    while last + 1 < texts.len() && continues(texts, last + 1) {
+        last += 1;
+    }
+    (first, last)
 }
 
 /// What kind of character `c` is, for word boundaries.
@@ -822,6 +822,10 @@ fn word_range(text: &str, offset: u32) -> Range<u32> {
     } else {
         after
     };
+    if let Some((first, last)) = token_at(&chars, index) {
+        let end = chars[last].0 + chars[last].1.len_utf16() as u32;
+        return chars[first].0..end;
+    }
     let kind = CharKind::of(chars[index].1);
     let (mut first, mut last) = (index, index);
     if kind != CharKind::Single {
@@ -834,6 +838,93 @@ fn word_range(text: &str, offset: u32) -> Range<u32> {
     }
     let end = chars[last].0 + chars[last].1.len_utf16() as u32;
     chars[first].0..end
+}
+
+/// Punctuation that joins the words on both sides of it into one: a
+/// hostname's dots and hyphens, a path's slashes, a URL's `://`, `?`, `=`,
+/// `&`, `#` and `%`, an address's `@`, a version's dots, `a+b`.
+fn is_joiner(c: char) -> bool {
+    matches!(
+        c,
+        '-' | '.' | '/' | ':' | '@' | '~' | '%' | '?' | '=' | '&' | '#' | '+'
+    )
+}
+
+/// Joiners a token may start with: a path's root or home (`/etc`, `~/a`),
+/// a relative path's or a dotfile's dot (`./x`, `.env`), a flag's dashes
+/// (`--force`), a handle's `@`.
+fn is_leading(c: char) -> bool {
+    matches!(c, '/' | '~' | '.' | '-' | '@')
+}
+
+/// The token around character `index` of `chars`, as indexes of its first
+/// and last characters: words joined by runs of joiners (`is_joiner`) each
+/// between two words, after a run of leading joiners (`is_leading`) and
+/// before a directory's last `/`. `None` when the character is in no token
+/// longer than a word, or is no word's nor a joiner's.
+fn token_at(chars: &[(u32, char)], index: usize) -> Option<(usize, usize)> {
+    let word = |i: usize| CharKind::of(chars[i].1) == CharKind::Word;
+    let joiner = |i: usize| is_joiner(chars[i].1);
+    let n = chars.len();
+    // A word of the token to grow from.
+    let core = if word(index) {
+        index
+    } else if joiner(index) {
+        let (mut a, mut b) = (index, index);
+        while a > 0 && joiner(a - 1) {
+            a -= 1;
+        }
+        while b + 1 < n && joiner(b + 1) {
+            b += 1;
+        }
+        let before = a > 0 && word(a - 1);
+        let after = b + 1 < n && word(b + 1);
+        if before && after {
+            a - 1
+        } else if after && !before && (a..=b).all(|i| is_leading(chars[i].1)) {
+            b + 1
+        } else {
+            return None;
+        }
+    } else {
+        return None;
+    };
+    let (mut first, mut last) = (core, core);
+    loop {
+        while last + 1 < n && word(last + 1) {
+            last += 1;
+        }
+        let mut j = last + 1;
+        while j < n && joiner(j) {
+            j += 1;
+        }
+        if j > last + 1 && j < n && word(j) {
+            last = j;
+        } else {
+            break;
+        }
+    }
+    loop {
+        while first > 0 && word(first - 1) {
+            first -= 1;
+        }
+        let mut j = first;
+        while j > 0 && joiner(j - 1) {
+            j -= 1;
+        }
+        if j < first && j > 0 && word(j - 1) {
+            first = j - 1;
+        } else {
+            break;
+        }
+    }
+    while first > 0 && is_leading(chars[first - 1].1) {
+        first -= 1;
+    }
+    if last + 1 < n && chars[last + 1].1 == '/' {
+        last += 1;
+    }
+    Some((first, last))
 }
 
 /// `text`'s length in UTF-16 code units.
@@ -1269,6 +1360,98 @@ mod tests {
         assert_eq!(word(20), "");
         assert_eq!(word(24), "end");
         assert_eq!(word_range("", 0), 0..0);
+    }
+
+    /// The word `word_range` finds at each `at` of `text` (the first
+    /// occurrence of `at`, then `skip` characters into it).
+    fn word_at(text: &str, at: &str, skip: usize) -> String {
+        let byte = text.find(at).expect("in the text") + at.char_indices().nth(skip).unwrap().0;
+        let offset = utf16_len(&text[..byte]);
+        let range = word_range(text, offset);
+        text[byte_offset(text, range.start)..byte_offset(text, range.end)].to_string()
+    }
+
+    #[test]
+    fn hostnames_urls_paths_and_ids_are_one_word() {
+        let host = "Open demo-app.pages.dev now.";
+        for (at, skip) in [
+            ("demo", 0),
+            ("demo", 3),
+            ("-app", 0),
+            ("app", 1),
+            (".pages", 0),
+            ("dev", 2),
+        ] {
+            assert_eq!(
+                word_at(host, at, skip),
+                "demo-app.pages.dev",
+                "at {at}+{skip}"
+            );
+        }
+        let url = "See https://x.y/a-b?c=1, then";
+        for (at, skip) in [("https", 0), ("://", 1), ("x.y", 2), ("a-b", 2), ("c=1", 2)] {
+            assert_eq!(
+                word_at(url, at, skip),
+                "https://x.y/a-b?c=1",
+                "at {at}+{skip}"
+            );
+        }
+        assert_eq!(word_at("edit ~/a/b-c.md today", "b-c", 0), "~/a/b-c.md");
+        assert_eq!(word_at("edit ~/a/b-c.md today", "~", 0), "~/a/b-c.md");
+        assert_eq!(word_at("(in /etc/hosts)", "hosts", 0), "/etc/hosts");
+        assert_eq!(word_at("cd client/ui/ first", "ui", 0), "client/ui/");
+        assert_eq!(word_at("run with --force-all", "force", 0), "--force-all");
+        assert_eq!(word_at("mail me@x.io.", "me", 0), "me@x.io");
+        assert_eq!(word_at("NSH v0.5.1 is out", "5", 0), "v0.5.1");
+        assert_eq!(word_at("id ab-1234cdef ok", "12", 0), "ab-1234cdef");
+        assert_eq!(word_at("worker `abc_def-1` here", "def", 0), "abc_def-1");
+        // Punctuation after a token, or alone, stays out of it.
+        assert_eq!(word_at("It ends with foo.", "foo", 1), "foo");
+        assert_eq!(word_at("It ends with foo.", ".", 0), ".");
+        assert_eq!(
+            word_at("(see demo-app.pages.dev)", "dev", 0),
+            "demo-app.pages.dev"
+        );
+        assert_eq!(word_at("one, two", "one", 0), "one");
+        assert_eq!(word_at("a - b", "-", 0), "-");
+        assert_eq!(word_at("so -- then", "--", 0), "-");
+        // Prose and CJK as before.
+        assert_eq!(word_at("the quick brown fox", "quick", 2), "quick");
+        assert_eq!(word_at("it's here", "it", 0), "it");
+        assert_eq!(word_at("中文demo-app.pages.dev。", "中", 0), "中");
+        assert_eq!(
+            word_at("中文demo-app.pages.dev。", "app", 0),
+            "demo-app.pages.dev"
+        );
+        assert_eq!(word_at("测试。日本", "。", 0), "。");
+        assert_eq!(word_at("测试-日本", "-", 0), "-");
+    }
+
+    #[test]
+    fn a_long_press_selects_a_hostname_whole() {
+        let texts = Fake::new(&[("Open demo-app.pages.dev now.", (0.0, 0.0, 300.0, 20.0))]);
+        let mut model = SelectionModel::new();
+        // On `demo` (characters 5 to 8, 8pt each).
+        assert!(model.select_word_at(&texts, at(44.0, 10.0)));
+        assert_eq!(model.text(&texts), "demo-app.pages.dev");
+    }
+
+    #[test]
+    fn a_token_a_wrap_cut_after_a_hyphen_is_one_word() {
+        // `demo-` ends the first line, `app.pages.dev` starts the next.
+        let texts = Wrapped(
+            Fake::new(&[
+                ("Open demo-", (0.0, 0.0, 80.0, 20.0)),
+                ("app.pages.dev now.", (0.0, 20.0, 144.0, 20.0)),
+            ]),
+            vec![false, true],
+        );
+        let mut model = SelectionModel::new();
+        model.press(&texts, at(44.0, 5.0), 2, false);
+        assert_eq!(model.text(&texts), "demo-app.pages.dev");
+        assert_eq!(model.bounds(), Some((pos(0, 5), pos(1, 13))));
+        model.press(&texts, at(4.0, 25.0), 2, false);
+        assert_eq!(model.text(&texts), "demo-app.pages.dev");
     }
 
     #[test]
