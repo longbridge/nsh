@@ -1716,6 +1716,25 @@ pub extern "C" fn nsh_scroll(id: u32, x: f32, y: f32, applied: u32) -> f64 {
     })
 }
 
+/// The user moved scroll view `id` with a scroll key, which the page
+/// animates (`EngineControl::key_scrolled`; a list follows its end from
+/// End on). `kind` is the key's move, as `scrollKey` of `web/nsh.js`
+/// numbers it: 0 by `amount` points along the view's axis, 1 by `amount`
+/// viewports, 2 to the start, 3 to the end.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_key_scroll(id: u32, kind: u32, amount: f32) -> f64 {
+    use nsh_core::scroll::KeyMove;
+    let key_move = match kind {
+        0 => KeyMove::Points(px(amount)),
+        1 => KeyMove::Pages(amount),
+        2 => KeyMove::Start,
+        3 => KeyMove::End,
+        // A move this runtime does not know: nothing to tell the core.
+        _ => return pump(),
+    };
+    send(|app| app.control.key_scrolled(id, key_move))
+}
+
 /// The text of multiline input `id` scrolled to `y`, or its height
 /// (`content`) or its viewport's changed, while a built-in bar takes the
 /// place of its indicator.

@@ -3861,6 +3861,214 @@ fn animated_scroll_commands_retarget_while_rows_are_measured() {
     assert_eq!(target, (content.height - Points(400.0)).0);
 }
 
+/// The animated `ScrollTo`s for list 2 in `batch`.
+fn scroll_tos(batch: &MountBatch) -> Vec<f32> {
+    batch
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            MountItem::Command {
+                id: 2,
+                command: Command::ScrollTo { y, animated, .. },
+            } => {
+                assert!(animated);
+                Some(y.0)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_end_key_follows_a_lists_end_as_rows_are_measured() {
+    use crate::scroll::KeyMove;
+    let mut c = core();
+    estimated_list(&mut c);
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    render_binds(&mut c, &mut next_id, &mut cells, 80.0);
+    c.commit();
+    // End: the platform animates to the end it knows, estimated rows
+    // included, and tells the core, which follows the real end.
+    c.key_scrolled(2, KeyMove::End);
+    let first = scroll_tos(&c.commit().unwrap());
+    assert_eq!(first.len(), 1, "one scroll to the end");
+    let mut target = first[0];
+    // The platform's own animation, before it applied the core's scroll.
+    c.set_scroll_offset(2, point(px(0.0), px(1000.0)), 0);
+    c.commit();
+    // Then the core's; the key repeats, which changes nothing.
+    c.set_scroll_offset(2, point(px(0.0), px(target - 10.0)), 1);
+    c.key_scrolled(2, KeyMove::End);
+    assert!(!c.commands.iter().any(|(to, _)| *to == 2), "no new scroll");
+    let mut issued = 1;
+    for _ in 0..4 {
+        render_binds(&mut c, &mut next_id, &mut cells, 80.0);
+        if let Some(batch) = c.commit() {
+            for y in scroll_tos(&batch) {
+                target = y;
+                issued += 1;
+            }
+        }
+    }
+    assert!(issued > 1 && target > first[0], "retargeted");
+    let key = c.key(2).unwrap();
+    let content = c.nodes[key as usize]
+        .scroll
+        .as_ref()
+        .unwrap()
+        .content
+        .unwrap();
+    assert_eq!(target, (content.height - Points(400.0)).0);
+}
+
+#[test]
+fn other_scroll_keys_leave_the_end_the_end_key_followed() {
+    use crate::scroll::KeyMove;
+    let mut c = core();
+    estimated_list(&mut c);
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    render_binds(&mut c, &mut next_id, &mut cells, 80.0);
+    c.commit();
+    c.key_scrolled(2, KeyMove::End);
+    let target = scroll_tos(&c.commit().unwrap())[0];
+    // On its way, Page Up: the platform turns back from where the
+    // animation is.
+    c.set_scroll_offset(2, point(px(0.0), px(target - 200.0)), 1);
+    c.key_scrolled(2, KeyMove::Pages(-1.0));
+    c.set_scroll_offset(2, point(px(0.0), px(target - 550.0)), 1);
+    for _ in 0..4 {
+        render_binds(&mut c, &mut next_id, &mut cells, 80.0);
+        if let Some(batch) = c.commit() {
+            assert_eq!(scroll_tos(&batch), [0.0; 0], "no scroll back to the end");
+        }
+    }
+
+    // End and Home in one turn: Home wins.
+    c.key_scrolled(2, KeyMove::End);
+    c.key_scrolled(2, KeyMove::Start);
+    if let Some(batch) = c.commit() {
+        assert_eq!(scroll_tos(&batch), [0.0; 0]);
+    }
+}
+
+#[test]
+fn a_wheel_during_the_end_keys_scroll_leaves_the_end() {
+    use crate::scroll::KeyMove;
+    let mut c = core();
+    estimated_list(&mut c);
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    render_binds(&mut c, &mut next_id, &mut cells, 80.0);
+    c.commit();
+    c.key_scrolled(2, KeyMove::End);
+    let target = scroll_tos(&c.commit().unwrap())[0];
+    // The animation comes nearer, then the wheel turns it back up.
+    c.set_scroll_offset(2, point(px(0.0), px(target - 900.0)), 1);
+    c.commit();
+    c.set_scroll_offset(2, point(px(0.0), px(target - 600.0)), 1);
+    c.commit();
+    c.set_scroll_offset(2, point(px(0.0), px(target - 700.0)), 1);
+    for _ in 0..4 {
+        render_binds(&mut c, &mut next_id, &mut cells, 80.0);
+        if let Some(batch) = c.commit() {
+            assert_eq!(scroll_tos(&batch), [0.0; 0], "no scroll back to the end");
+        }
+    }
+}
+
+#[test]
+fn an_app_scroll_after_the_end_key_in_one_turn_wins() {
+    use crate::scroll::KeyMove;
+    let mut c = core();
+    estimated_list(&mut c);
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    render_binds(&mut c, &mut next_id, &mut cells, 80.0);
+    c.commit();
+    c.key_scrolled(2, KeyMove::End);
+    c.apply(Op::Command {
+        id: 2,
+        command: Command::ScrollTo {
+            x: px(0.0),
+            y: px(0.0),
+            animated: true,
+        },
+    })
+    .unwrap();
+    let tos = scroll_tos(&c.commit().unwrap());
+    assert_eq!(
+        tos.last(),
+        Some(&0.0),
+        "the app's scroll comes last: {tos:?}"
+    );
+    let key = c.key(2).unwrap();
+    assert!(!c.nodes[key as usize].list.as_ref().unwrap().pinned());
+}
+
+#[test]
+fn the_end_keys_take_their_place_among_the_apps_scroll_commands() {
+    use crate::scroll::KeyMove;
+    let to_top = || Op::Command {
+        id: 2,
+        command: Command::ScrollTo {
+            x: px(0.0),
+            y: px(0.0),
+            animated: true,
+        },
+    };
+    let mut c = core();
+    estimated_list(&mut c);
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    render_binds(&mut c, &mut next_id, &mut cells, 80.0);
+    c.commit();
+    // End, the app's scroll to the top, End again: the end.
+    c.key_scrolled(2, KeyMove::End);
+    c.apply(to_top()).unwrap();
+    c.key_scrolled(2, KeyMove::End);
+    let tos = scroll_tos(&c.commit().unwrap());
+    assert!(tos.len() == 3 && tos[2] > 0.0, "{tos:?}");
+
+    // End, the app's scroll to the top and then to the end, Home: Home
+    // takes back the key's End only (from the top, where Home took the
+    // list).
+    c.key_scrolled(2, KeyMove::Start);
+    c.set_scroll_offset(2, point(px(0.0), px(0.0)), u32::MAX);
+    c.commit();
+    c.key_scrolled(2, KeyMove::End);
+    c.apply(to_top()).unwrap();
+    c.apply(Op::Command {
+        id: 2,
+        command: Command::ScrollToEnd { animated: true },
+    })
+    .unwrap();
+    c.key_scrolled(2, KeyMove::Start);
+    let tos = scroll_tos(&c.commit().unwrap());
+    assert!(tos.len() == 2 && tos[0] == 0.0 && tos[1] > 0.0, "{tos:?}");
+}
+
+#[test]
+fn the_end_key_leaves_inverted_lists_to_the_platform() {
+    use crate::scroll::KeyMove;
+    let mut c = core();
+    estimated_list(&mut c);
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::Inverted(true),
+    })
+    .unwrap();
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    render_binds(&mut c, &mut next_id, &mut cells, 80.0);
+    c.commit();
+    c.key_scrolled(2, KeyMove::End);
+    if let Some(batch) = c.commit() {
+        assert_eq!(scroll_tos(&batch), [0.0; 0]);
+    }
+}
+
 #[test]
 fn animated_background_colors_replace_gradients() {
     let mut c = core();

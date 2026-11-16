@@ -91,7 +91,10 @@ the render layer each line's text and position, so the page draws lines exactly 
 
 `EngineControl` (from `engine.control()`) sends what the user does: `dispatch_event(id, kind, payload)` (a press is
 `EventKind::Press` with `EventPayload::None` where the platform does not know the pointer), `scroll(id, offset,
-applied)`, `resize(size)`, `set_environment(environment)` (appearance, safe areas, locale, ...), `frame()`.
+applied)`, `resize(size)`, `set_environment(environment)` (appearance, safe areas, locale, ...), `frame()`. A platform
+whose scroll views move with the keyboard (arrows, Page Up / Down, Home, End) also calls `key_scrolled(id, key_move)`
+after it starts each key's scroll, with the key's `nsh_core::scroll::KeyMove`: from End a list goes on to its real end
+through rows it has only estimated, and every other key lets go of that end (`docs/dev/scrolling-and-lists.md`).
 
 `Environment::platform` names a platform built outside NSH (`Some("miniprogram")`); NSH's own platforms leave it
 `None`. Apps read it as `platform.name` (TSX) and `platform_name()` (Rust, `nsh_core::prelude`), which is the OS's

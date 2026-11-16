@@ -123,8 +123,17 @@
 - **List scroll commands**: the core resolves a list's `scrollToEnd` / `scrollToIndex` to a `ScrollTo` with the sizes it
   knows, which are estimates for rows never rendered; the target stays pinned (`ListState::follow_pin`), and as the rows
   around it are measured the list follows it (a `ScrollBy`, or a retargeted `ScrollTo` while an animated scroll is in
-  flight) until the rows in the viewport are all measured, the user scrolls away or the items change. Platforms only
-  apply what they get.
+  flight) until the rows in the viewport are all measured, the user scrolls away or the items change; an animated scroll
+  that moves away from its target (farther than anchoring moved the target) once every scroll the core issued is applied
+  was taken over by the user (a wheel, a drag, the scroll bar). Platforms only apply what they get. The End key of the
+  desktops and the web (Command+Down on macOS) takes the same path on a list of its own that is not inverted: the
+  platform starts its key animation to the end it knows and tells the core (`EngineControl::key_scrolled`,
+  `Core::key_scrolled`; the web's `nsh_key_scroll`), which queues an animated `scrollToEnd` in order with the app's
+  commands (a repeat right after one queues nothing), so one press reaches the end through rows never rendered; every
+  other scroll key takes back an End not resolved yet and ends the target followed. A list in its parent's viewport and
+  an inverted one (whose End shows its first items) keep the platform's move alone. The platform reports every scroll
+  key's move, not End alone: Windows, Linux and GPUI from the shared `scroll::key_scroll` (`ScrollHost::key_scrolled`),
+  macOS and the web where they start their own key animation.
 - **Reading position** (`ListRef.measureScrollPosition()`, `ElementRef::measure_scroll_position`): answered by
   the core at the commit, as `measure()` is, from the list's own row positions (`ListState::scroll_position`,
   `Core::list_scroll_position`): the row the viewport starts in and how far into it, so an app keeps a reading

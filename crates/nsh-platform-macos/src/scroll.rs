@@ -2437,6 +2437,16 @@ pub(crate) fn key_scroll(
     );
     interrupt(surface, &view);
     animate_to(surface, &view, to, KEY_ANIMATION, false, true);
+    // A list follows its real end from here on (rows never rendered are
+    // only estimated), and the other keys leave it.
+    let id = view.state().id;
+    let m = match m {
+        KeyMove::Points(d) => nsh_core::scroll::KeyMove::Points(Points(d)),
+        KeyMove::Pages(n) => nsh_core::scroll::KeyMove::Pages(n),
+        KeyMove::Start => nsh_core::scroll::KeyMove::Start,
+        KeyMove::End => nsh_core::scroll::KeyMove::End,
+    };
+    surface.control(|c| c.key_scrolled(id, m));
     true
 }
 

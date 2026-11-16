@@ -81,6 +81,11 @@ impl ScrollHost for Host<'_> {
         self.surface.control(|c| c.scroll(id, offset, applied));
     }
 
+    fn key_scrolled(&self, key_move: KeyMove) {
+        let id = self.view.id();
+        self.surface.control(|c| c.key_scrolled(id, key_move));
+    }
+
     fn report_zoom(&self, scale: f32) {
         let id = self.view.id();
         self.surface.control(|c| c.zoom(id, scale));

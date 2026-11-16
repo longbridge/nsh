@@ -1255,6 +1255,7 @@ const MAX_FLUSH_ROUNDS: usize = 64;
 enum Message {
     Event(NodeId, EventKind, EventPayload),
     Scroll(NodeId, Point<Points>, u32),
+    KeyScrolled(NodeId, nsh_core::scroll::KeyMove),
     Kept(Vec<NodeId>),
     ContentCulling(bool),
     InputScroll(NodeId, Point<Points>, Size<Points>, Size<Points>),
@@ -1380,6 +1381,14 @@ impl EngineControl {
     /// engine frame.
     pub fn scroll(&self, id: NodeId, offset: Point<Points>, applied: u32) {
         let _ = self.tx.send(Message::Scroll(id, offset, applied));
+    }
+
+    /// Reports that a scroll key moved scroll view `id` by `key_move`. Sent
+    /// after the platform started its own key scroll, for every key move
+    /// and not End alone: the core takes a list on to its real end from
+    /// End and lets go of it on the others (`Core::key_scrolled`).
+    pub fn key_scrolled(&self, id: NodeId, key_move: nsh_core::scroll::KeyMove) {
+        let _ = self.tx.send(Message::KeyScrolled(id, key_move));
     }
 
     /// Keeps the virtual list rows holding `nodes` rendered wherever they
@@ -3975,6 +3984,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 event.pending = true;
             }
         }
+        Message::KeyScrolled(id, key_move) => state.core.key_scrolled(id, key_move),
         Message::Kept(nodes) => state.core.set_kept(&nodes),
         Message::ContentCulling(enabled) => {
             state.core.set_content_culling(enabled);
