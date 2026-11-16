@@ -14730,6 +14730,69 @@ mod components {
         assert_eq!(shown.last().unwrap(), "10,0 30x20 at 26,16 true");
     }
 
+    /// Reads its box's text when pressed (and a ref no element carries):
+    /// the texts inside it in order, one hidden left out.
+    #[component]
+    fn Reader() -> impl IntoElement {
+        let target = element_ref();
+        let unused = element_ref();
+        let shown = signal(String::new());
+        view()
+            .child(
+                view()
+                    .element_ref(&target)
+                    .child(text("Open "))
+                    .child(view().child(text("recent")).child(text(" file")))
+                    .child(view().hidden().child(text(" secret"))),
+            )
+            .child(text(move || shown.get()))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                let (target, unused) = (target.text_content(), unused.text_content());
+                spawn(async move {
+                    let (text, none) = (target.await, unused.await);
+                    shown.set(format!("read:{text}|{none}"));
+                });
+            }))
+    }
+
+    #[test]
+    fn element_refs_read_the_text_they_show() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Reader>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Reader>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button listens to presses");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("read:")));
+        assert_eq!(shown.last().unwrap(), "read:Open recent file|");
+    }
+
     #[derive(Clone, PartialEq, Debug)]
     struct Accent(u32);
 
@@ -15331,6 +15394,135 @@ mod components {
             }
         }
         assert!(shown.iter().all(|t| !t.starts_with("failed")), "{shown:?}");
+    }
+
+    // A list of wrapping texts beside a panel shown while `narrow`; a
+    // press toggles the panel inside `animate_layout` when `animated`.
+    thread_local! {
+        static PANEL: Cell<(bool, bool)> = const { Cell::new((false, false)) };
+    }
+
+    #[component]
+    fn ListBesidePanel() -> impl IntoElement {
+        let (animated, narrow) = PANEL.with(Cell::get);
+        let narrow = signal(narrow);
+        view()
+            .flex_1()
+            .child(view().h(px(20.0)).on_press(move |_: &()| {
+                if animated {
+                    animate_layout(crate::LayoutAnimation {
+                        create: Some(crate::LayoutTransition::new(
+                            crate::LayoutCurve::EaseOut,
+                            150.0,
+                        )),
+                        update: Some(crate::LayoutTransition::new(
+                            crate::LayoutCurve::EaseInEaseOut,
+                            220.0,
+                        )),
+                        delete: Some(crate::LayoutTransition::new(
+                            crate::LayoutCurve::EaseOut,
+                            150.0,
+                        )),
+                    });
+                }
+                narrow.update(|n| *n = !*n);
+            }))
+            .child(
+                view()
+                    .flex_row()
+                    .flex_1()
+                    .child(
+                        virtual_list(6, move |at| {
+                            // 160, 320 and 480 points of text at 8 a char.
+                            text("x".repeat(20 * (at.index() % 3 + 1)))
+                        })
+                        .keys(|| 0..6)
+                        .estimated_item_size(px(64.0))
+                        .flex_1(),
+                    )
+                    .child(when(move || narrow.get(), || view().w(px(160.0)))),
+            )
+    }
+
+    /// The frames of the texts shown, by length, once commits settle,
+    /// after a press on the button when `press`.
+    fn text_frames(c: &mut Core<FakeEngine>, press: bool) -> Vec<(usize, Bounds<Points>)> {
+        let mut frames = std::collections::HashMap::new();
+        let mut texts = std::collections::HashMap::new();
+        let mut button_id = None;
+        let mut take = |batch: MountBatch, button_id: &mut Option<NodeId>| {
+            for item in batch.items {
+                match item {
+                    MountItem::Frame { id, frame } => {
+                        frames.insert(id, frame);
+                    }
+                    MountItem::Text { id, text, .. } => {
+                        texts.insert(id, text.text.chars().count());
+                    }
+                    MountItem::Events { id, events } if events.contains(EventKind::Press) => {
+                        *button_id = Some(id);
+                    }
+                    _ => {}
+                }
+            }
+        };
+        for _ in 0..4 {
+            if let Some(batch) = c.commit() {
+                take(batch, &mut button_id);
+            }
+        }
+        if press && let Some(id) = button_id {
+            assert!(c.component_event(id, EventKind::Press, &EventPayload::None));
+            for _ in 0..4 {
+                if let Some(batch) = c.commit() {
+                    take(batch, &mut button_id);
+                }
+            }
+        }
+        let mut out: Vec<_> = texts
+            .into_iter()
+            .filter_map(|(id, chars)| Some((chars, *frames.get(&id)?)))
+            .collect();
+        out.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then(a.1.origin.y.0.total_cmp(&b.1.origin.y.0))
+        });
+        out
+    }
+
+    /// #1830: a list narrowed inside `animate_layout` measures its rows at
+    /// the new width, as it does without the animation.
+    #[test]
+    fn a_list_narrowed_inside_a_layout_animation_measures_its_rows_again() {
+        for animated in [false, true] {
+            let mut c = core();
+            PANEL.with(|p| p.set((animated, false)));
+            c.mount_root(&crate::element::Root::new::<ListBesidePanel>(|| ()));
+            let toggled = text_frames(&mut c, true);
+            let mut fresh = core();
+            PANEL.with(|p| p.set((false, true)));
+            fresh.mount_root(&crate::element::Root::new::<ListBesidePanel>(|| ()));
+            let expected = text_frames(&mut fresh, false);
+            assert!(!expected.is_empty());
+            for (chars, frame) in &expected {
+                // 160 points wide: one line per 20 characters.
+                assert_eq!(
+                    frame.size.height.0,
+                    (*chars / 20) as f32 * 16.0,
+                    "{expected:?}"
+                );
+            }
+            let heights = |f: &[(usize, Bounds<Points>)]| {
+                f.iter()
+                    .map(|(n, b)| (*n, b.size.height.0))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                heights(&toggled),
+                heights(&expected),
+                "animated: {animated}"
+            );
+        }
     }
 
     /// A long list of its own rows: row 1 holds a field, row 2 a menu (an

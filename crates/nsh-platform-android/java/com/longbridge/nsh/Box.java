@@ -730,6 +730,8 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
     /** The pressable box around this pan gate its touch is handed to ({@link #forwardTap}). */
     private Box tapTarget;
     private final Runnable longPress = this::onLongPress;
+    /** Handles the taps of this long-press-only box's touch ({@link LongOnly}). */
+    private final LongOnly longOnly = new LongOnly(this);
     private final Runnable pressIn = this::onPressIn;
     /** Two-finger gesture: start span / angle, last values for velocity. */
     private boolean transforming;
@@ -758,6 +760,7 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         if (tracking && !panning) {
             if (!pressedIn) onPressIn();
             longPressed = true;
+            longOnly.longPressed();
             mounter.press(id, Native.LONG_PRESS, this, at);
         }
     }
@@ -885,6 +888,7 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         }
         float density = mounter.density;
         if (pressable) at.track(e);
+        if (pressable) longOnly.forward(e, mounter.handlesTap(id), mounter);
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 downRawX = e.getRawX();
@@ -1007,6 +1011,68 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         local.transform(m);
         target.onTouchEvent(local);
         local.recycle();
+    }
+
+    /**
+     * The taps of a view that listens only to `onLongPress`: as a long press recognizer on the Web, iOS and Android
+     * takes no taps from the views around it, its touch goes on to the nearest box outwards that listens to taps, which
+     * gets its presses, and the view keeps the long press. The long press cancels that box's press.
+     */
+    static final class LongOnly {
+        private final View view;
+        private Box target;
+
+        LongOnly(View view) {
+            this.view = view;
+        }
+
+        void forward(MotionEvent e, boolean taps, Mounter mounter) {
+            int action = e.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                target = null;
+                if (taps) return;
+                for (ViewParent p = view.getParent(); p instanceof View; p = p.getParent()) {
+                    if (p instanceof Box && mounter.handlesTap(((Box) p).id)) {
+                        target = (Box) p;
+                        break;
+                    }
+                }
+            }
+            Box to = target;
+            if (to == null) return;
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) target = null;
+            // A box that intercepted the drag (this view got the cancel) handles the touch itself now.
+            if (action == MotionEvent.ACTION_CANCEL && to.panning) return;
+            if (action != MotionEvent.ACTION_DOWN && action != MotionEvent.ACTION_MOVE
+                    && action != MotionEvent.ACTION_UP && action != MotionEvent.ACTION_CANCEL) return;
+            send(to, e, action);
+        }
+
+        /** The view's long press fired: the taps' box gets no press. */
+        void longPressed() {
+            Box to = target;
+            target = null;
+            if (to == null) return;
+            long now = android.os.SystemClock.uptimeMillis();
+            MotionEvent cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0, 0, 0);
+            to.onTouchEvent(cancel);
+            cancel.recycle();
+        }
+
+        private void send(Box to, MotionEvent e, int action) {
+            MotionEvent local = MotionEvent.obtain(e);
+            local.setAction(action);
+            android.graphics.Matrix m = new android.graphics.Matrix();
+            for (View v = view; v != to; ) {
+                View p = (View) v.getParent();
+                if (!v.getMatrix().isIdentity()) m.postConcat(v.getMatrix());
+                m.postTranslate(v.getLeft() - p.getScrollX(), v.getTop() - p.getScrollY());
+                v = p;
+            }
+            local.transform(m);
+            to.onTouchEvent(local);
+            local.recycle();
+        }
     }
 
     /** Whether the finger is still over the view (with a margin). */
