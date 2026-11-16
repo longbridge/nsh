@@ -133,7 +133,7 @@ fn glyphs(text: &AttributedText, cells: CellSize, alignments: &AttachmentAlignme
             );
             let attachment = attachment.map(|(index, a)| {
                 let font = FontExtent::new(cells.height(), Points::ZERO, cells.height() / 2.0);
-                let (ascent, descent) = a.extent(font, alignments.get(start));
+                let (ascent, descent) = alignments.extent(a, font);
                 Attachment {
                     index,
                     ascent: (ascent / cells.height()).ceil() as usize,

@@ -177,6 +177,17 @@ text("Made with ")
 </Text>
 ```
 
+在基线上时，内部有文字的视图以其首行文字的基线站在所在行上，与 CSS 摆放 `inline-block` 或 `inline-flex` 盒子的方式一致：句子里的胶囊、标签或 @ 提及，不论内边距和字号多大，其中的文字都与周围文字落在同一条线上，所在行会为视图在这条基线上方和下方的部分留出空间。没有文字的视图（图片、色块）以自己的底边站在基线上，与图片一样。
+
+```tsx
+<Text style={{ fontSize: 15, lineHeight: 24 }}>
+  今天加仓了{" "}
+  <View style={{ flexDirection: "row", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+    <Text style={{ fontSize: 13 }}>NVDA</Text>
+  </View>
+</Text>
+```
+
 ## 文字样式
 
 | 属性 | 取值 | Rust |

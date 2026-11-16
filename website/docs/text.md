@@ -191,6 +191,21 @@ others of the same names.
 </Text>
 ```
 
+On the baseline, a view that holds text stands on the line by the baseline of its first line of text, as CSS
+places an `inline-block` or `inline-flex` box: a chip, a tag or a mention in a sentence has its label on the line of
+the words around it, whatever its padding and font size, and the line reserves what the view has above and below that
+baseline. A view without text (an image, a colored box) stands on its bottom edge, as an image does.
+
+```tsx
+<Text style={{ fontSize: 15, lineHeight: 24 }}>
+  Bought more{" "}
+  <View style={{ flexDirection: "row", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+    <Text style={{ fontSize: 13 }}>NVDA</Text>
+  </View>{" "}
+  today
+</Text>
+```
+
 ## Text styles
 
 | Property | Values | Rust |

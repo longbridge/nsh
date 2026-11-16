@@ -43285,6 +43285,106 @@ impl TextEngine for BaselineEngine {
     }
 }
 
+/// A view inside a text that holds text of its own tells the engine how
+/// far below its top the baseline of that text is (its padding, then the
+/// text's first baseline), so the engine stands it on the line by that, as
+/// CSS stands an `inline-flex` box; for the other alignments, and without
+/// text in it, it stays a box placed by its edges, as an image.
+#[test]
+fn a_view_in_a_text_stands_on_the_line_by_its_own_first_baseline() {
+    let mut c = Core::new(BaselineEngine, size_pt(320.0, 480.0));
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Text,
+        },
+        Op::CreateText {
+            id: 3,
+            text: "ab".into(),
+        },
+        // The chip: a padded row holding its label.
+        Op::Create {
+            id: 4,
+            tag: Tag::View,
+        },
+        style_op(
+            4,
+            &[
+                ("paddingTop", StyleValue::Number(3.0)),
+                ("paddingBottom", StyleValue::Number(5.0)),
+            ],
+        ),
+        Op::Create {
+            id: 6,
+            tag: Tag::Text,
+        },
+        style_op(6, &[("fontSize", StyleValue::Number(16.0))]),
+        Op::CreateText {
+            id: 7,
+            text: "NVDA".into(),
+        },
+        // A box with no text: a swatch.
+        Op::Create {
+            id: 8,
+            tag: Tag::View,
+        },
+        style_op(
+            8,
+            &[
+                ("width", StyleValue::Number(10.0)),
+                ("height", StyleValue::Number(10.0)),
+            ],
+        ),
+        insert(6, 7),
+        insert(4, 6),
+        insert(2, 3),
+        insert(2, 4),
+        insert(2, 8),
+        insert(ROOT_ID, 2),
+    ];
+    for op in ops {
+        c.apply(op).unwrap();
+    }
+    c.commit().unwrap();
+    let baseline = |c: &mut Core<BaselineEngine>, i: usize| {
+        let layout = c.nodes[c.key(2).unwrap() as usize].layout.unwrap();
+        let cx = c.text_cx(layout);
+        let a = cx.text.attachments[i];
+        (cx.alignments.baseline(a.index), a.height)
+    };
+    // The label's baseline is 15.2 below its top (16 x 0.95), under the
+    // chip's padding; the label is 20 tall (16 x 1.25), the chip 28.
+    assert_eq!(
+        baseline(&mut c, 0),
+        (Some(Points(3.0 + 15.2)), Points(28.0))
+    );
+    // The swatch stands on its bottom edge.
+    assert_eq!(baseline(&mut c, 1), (None, Points(10.0)));
+    // A style replaces the one before it: the padding goes with each.
+    let set = |c: &mut Core<BaselineEngine>, align: &'static str| {
+        c.apply(style_op(
+            4,
+            &[
+                ("paddingTop", StyleValue::Number(3.0)),
+                ("paddingBottom", StyleValue::Number(5.0)),
+                ("verticalAlign", StyleValue::Str(align)),
+            ],
+        ))
+        .unwrap();
+        c.commit().unwrap();
+    };
+    // Another alignment places the box by its edges.
+    set(&mut c, "middle");
+    assert_eq!(baseline(&mut c, 0).0, None);
+    set(&mut c, "baseline");
+    assert_eq!(baseline(&mut c, 0).0, Some(Points(3.0 + 15.2)));
+}
+
 #[test]
 fn a_row_aligned_by_baseline_lines_its_texts_up_by_their_first_baselines() {
     let mut c = Core::new(BaselineEngine, size_pt(320.0, 480.0));
