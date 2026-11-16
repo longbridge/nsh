@@ -3857,7 +3857,7 @@ test("share reports shared, dismissed and unavailable, never shared when it coul
       ["onShare", 3, unavailable],
       ["onShare", 4, unavailable],
       ["onShare", 5, unavailable],
-      ["onShare", 6, "error"],
+      ["onShare", 6, unavailable],
     ]);
   } finally {
     if (saved) Object.defineProperty(globalThis, "navigator", saved);

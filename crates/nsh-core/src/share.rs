@@ -6,15 +6,22 @@
 //! The flow: the call checks the content ([`ShareRequest::check`]) and the
 //! app's `share` capability (a JS call also checks each file against
 //! `capabilities.fs.read`); the core sends it to the platform as
-//! [`Command::Share`](crate::Command::Share) on the root, its anchor turned
-//! into a place in the root view ([`ShareSheet::anchor`]), and the
-//! platform shows its share sheet (iOS `UIActivityViewController`,
+//! [`Command::Share`](crate::Command::Share) on the root, naming its
+//! anchor view ([`ShareSheet::anchor`]), and the platform shows its share
+//! sheet (iOS `UIActivityViewController`,
 //! Android's chooser over `Intent.ACTION_SEND`, macOS
 //! `NSSharingServicePicker`, the browser's `navigator.share`). It answers
 //! with the root's [`EventKind::Share`](crate::EventKind::Share), whose
 //! payload [`ShareOutcome::payload`] / [`ShareError::payload`] make and
-//! [`answer_from_payload`] reads: shared (with the target the user chose,
-//! where the platform names it), dismissed, or why it could not share.
+//! the core reads: shared (with the target the user chose, where the
+//! platform names it), dismissed, or why it could not share. A platform
+//! answers every request it gets, once. One sheet shows at a time: a new
+//! share answers the one still showing as dismissed, and the platform
+//! replaces its sheet.
+//!
+//! What `shared` means is as much as the platform knows: on iOS and macOS
+//! the target finished sharing; Android tells only which app the user
+//! chose; the web, that `navigator.share` resolved.
 //!
 //! Only platforms whose
 //! [`Environment::share`](crate::platform::Environment::share) is set get
@@ -24,10 +31,7 @@
 
 use std::path::PathBuf;
 
-use crate::{
-    EventPayload, NodeId, PayloadValue,
-    geometry::{Bounds, Points},
-};
+use crate::{EventPayload, NodeId, PayloadValue};
 
 /// The most bytes of text (and of a title) one share carries.
 pub const MAX_TEXT_BYTES: usize = 1024 * 1024;
@@ -40,7 +44,7 @@ pub const MAX_FILES: usize = 100;
 
 /// What a share rejects with when the app's capabilities do not grant
 /// `share` (`ERR_ACCESS_DENIED`, permission `"share"`).
-pub const NOT_GRANTED: &str =
+pub(crate) const NOT_GRANTED: &str =
     "share: the share sheet is not granted: add `\"share\": true` to capabilities in nsh.json";
 
 /// Schemes a shared URL never has: they run code or name the app's own
@@ -62,9 +66,10 @@ const REFUSED_SCHEMES: &[&str] = &[
 #[non_exhaustive]
 pub struct ShareRequest {
     /// A title for what is shared: the subject of a mail, the heading of
-    /// the share sheet where the platform shows one.
+    /// the share sheet where the platform shows one. An empty one is no
+    /// title.
     pub title: Option<String>,
-    /// Text to share.
+    /// Text to share. An empty one is no text.
     pub text: Option<String>,
     /// A link to share (absolute; not `file:`, `data:`, `javascript:`, ...).
     pub url: Option<String>,
@@ -119,7 +124,8 @@ impl ShareRequest {
     /// [`MAX_FILES`] files, each by an absolute path. The error says what
     /// is wrong.
     pub fn check(&self) -> Result<(), String> {
-        if self.text.is_none() && self.url.is_none() && self.files.is_empty() {
+        let text = self.text.as_deref().filter(|text| !text.is_empty());
+        if text.is_none() && self.url.is_none() && self.files.is_empty() {
             return Err("share: give `text`, `url` or `files`".into());
         }
         for (name, value) in [("title", &self.title), ("text", &self.text)] {
@@ -169,7 +175,7 @@ fn check_url(url: &str) -> Result<(), String> {
 }
 
 /// What the platform shows: the checked content of a [`ShareRequest`],
-/// its files as paths, its anchor as a place in the root view.
+/// its files as paths, empty text and title left out.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[non_exhaustive]
 pub struct ShareSheet {
@@ -181,18 +187,21 @@ pub struct ShareSheet {
     pub url: Option<String>,
     /// The files' absolute paths ([`ShareRequest::files`]).
     pub files: Vec<String>,
-    /// Where the anchor view is in the root view (the coordinates of
-    /// touches' `pagePosition`); `None`: no anchor, or one not laid out,
-    /// and a popover points at the middle of the root view.
-    pub anchor: Option<Bounds<Points>>,
+    /// The view the sheet points at where it is a popover: the platform
+    /// places it at that view's native view, in whatever root view or
+    /// window it is. `None`: no anchor, or one not shown, and a popover
+    /// points at the middle of the surface.
+    pub anchor: Option<NodeId>,
 }
 
 impl ShareSheet {
-    /// What `request` shows, its anchor at `anchor`.
-    pub fn new(request: ShareRequest, anchor: Option<Bounds<Points>>) -> Self {
+    /// What `request` shows, pointing at `anchor` (a view the core
+    /// checked is shown).
+    pub(crate) fn new(request: ShareRequest, anchor: Option<NodeId>) -> Self {
+        let present = |value: Option<String>| value.filter(|value| !value.is_empty());
         Self {
-            title: request.title,
-            text: request.text,
+            title: present(request.title),
+            text: present(request.text),
             url: request.url,
             files: request
                 .files
@@ -219,10 +228,12 @@ impl ShareSheet {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum ShareAction {
-    /// The user chose where to share (a target took it).
-    #[default]
+    /// The user shared: the target finished where the platform knows it
+    /// (iOS, macOS), the user chose an app on Android.
     Shared,
-    /// The user closed the share sheet without sharing.
+    /// The user closed the share sheet without sharing (or another share
+    /// replaced it).
+    #[default]
     Dismissed,
 }
 
@@ -336,7 +347,7 @@ impl std::error::Error for ShareError {}
 /// fails it, else `action` (`"shared"`, with its `target`, or
 /// `"dismissed"`; an unknown one is taken as dismissed) ends it. `None`
 /// when the payload names no request.
-pub fn answer_from_payload(
+pub(crate) fn answer_from_payload(
     payload: &EventPayload,
 ) -> Option<(u32, Result<ShareOutcome, ShareError>)> {
     let EventPayload::Map(fields) = payload else {

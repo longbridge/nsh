@@ -2139,22 +2139,35 @@ interface ShareResult {
 show(content: ShareContent): Promise<ShareResult>;
 ```
 
-Shows the share sheet and resolves once the user has chosen: `"shared"` with the `target` the user shared with (an
+Shows the share sheet and resolves with what the user did: `"shared"` with the `target` the user shared with (an
 activity type on iOS, an app's package on Android, a service's title on macOS, `null` where the platform does not say),
 or `"dismissed"` when the user closed the sheet. A dismissal is the user's answer, not a failure. Rust: `share(request)`,
 an answer to await in a task (`spawn`, or an `async` module function).
 
+`"shared"` says as much as the platform knows:
+
+| Platform | `"shared"` means |
+|---|---|
+| iOS, macOS | The target finished sharing (a cancelled mail or message is `"dismissed"`) |
+| Android | The user chose an app; Android tells nothing of what the app does next |
+| Web | `navigator.share` resolved |
+
 `show` never throws; every failure rejects the promise:
 
-- content with none of `text`, `url` and `files`, or a URL that does not parse or that runs code (`javascript:`) or
-  names a local file (`file:`; share it as `files`): a `TypeError`;
-- more than 100 files or text past its limit: a `RangeError`;
+- content with none of `text`, `url` and `files` (empty text counts as none), or a URL that does not parse or that runs
+  code (`javascript:`) or names a local file (`file:`; share it as `files`): a `TypeError`;
+- more than 100 files, text or a title past 1 MiB, or a URL past 16 KiB: a `RangeError`;
 - a file the app's `capabilities.fs.read` does not grant: `ERR_ACCESS_DENIED`, and a file that does not exist: `ENOENT`;
-- a share where the platform has no share sheet, or of content it does not share (files in a browser): an `Error` whose
-  `code` is `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. `Share.available()` tells beforehand.
+- a share where the platform has no share sheet, or of content it does not share (a file outside an Android app's own
+  storage, files in a browser, a browser that does not allow sharing here): an `Error` whose `code` is
+  `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. `Share.available()` tells beforehand where the platform has no sheet.
 
-One sheet shows at a time: a second `show` while one is open rejects. On an iPad and on macOS the sheet is a popover:
-give `anchor` the view that opened it (the share button), and without one it shows at the middle of the window.
+One sheet shows at a time: a `show` while a sheet is open replaces it, and the earlier promise resolves
+`"dismissed"`. On an iPad and on macOS the sheet is a popover: give `anchor` the view that opened it (the share button,
+in a page, a header, a dialog or another window), and without one it shows at the middle of the window.
+
+On iOS the sheet offers saving an image to Photos when the app says why it adds to the photo library:
+`NSPhotoLibraryAddUsageDescription` in `ios.infoPlist` ([Info.plist keys](../docs/packaging.md#infoplist-keys-and-entitlements)).
 
 A trip planner shares a trip from its share button:
 
@@ -2216,7 +2229,7 @@ function ShareButton(props: { trip: string }) {
 | iOS | `UIActivityViewController`; a popover on an iPad | Any file the app reads |
 | Android | The chooser of `ACTION_SEND` (`ACTION_SEND_MULTIPLE` for several files) | Files in the app's own storage (`process.dataDir`, the cache), as `content:` URIs |
 | macOS | The share menu, `NSSharingServicePicker` | Any file the app reads |
-| Web | `navigator.share`, where the browser has it | Text and links |
+| Web | `navigator.share`, where the browser has it and the page allows `web-share` | Text and links |
 
 On Windows, Linux and in GPUI windows, `Share.available()` resolves `false` and `show` rejects with
 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`, so the app can offer another way (copying the link, say).

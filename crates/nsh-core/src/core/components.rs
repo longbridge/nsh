@@ -6410,7 +6410,7 @@ impl<M: TextEngine> Core<M> {
         request: crate::share::ShareRequest,
         answer: AnswerSlot<Result<crate::share::ShareOutcome, crate::share::ShareError>>,
     ) {
-        use crate::share::ShareError;
+        use crate::share::{ShareError, ShareOutcome};
         static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
         let refused = if !self.components.environment.share {
             Some(ShareError::unavailable("this platform has no share sheet"))
@@ -6419,10 +6419,6 @@ impl<M: TextEngine> Core<M> {
                 code: Some(crate::element::codes::ACCESS_DENIED.into()),
                 message: crate::share::NOT_GRANTED.into(),
             })
-        } else if !self.components.shares.is_empty() {
-            Some(ShareError::failed(
-                "share: a share sheet is already showing",
-            ))
         } else {
             request.check().err().map(ShareError::failed)
         };
@@ -6430,12 +6426,17 @@ impl<M: TextEngine> Core<M> {
             answer.borrow_mut().deliver(Err(error));
             return;
         }
-        // Where the anchor view is in its root view, if it is laid out.
-        let anchor = request.anchor.and_then(|node| {
-            let measured = self.measure(node)?;
-            Some(crate::Bounds {
-                origin: measured.page,
-                size: measured.frame.size,
+        // One sheet at a time: the one still showing ends as dismissed and
+        // the platform replaces it, so a sheet the platform never answered
+        // cannot hold every later share back.
+        for (_, earlier) in self.components.shares.drain() {
+            earlier.borrow_mut().deliver(Ok(ShareOutcome::dismissed()));
+        }
+        // The anchor goes to the platform as a view it shows, which it
+        // places the sheet at wherever that view is (a modal, a window).
+        let anchor = request.anchor.filter(|&node| {
+            self.key(node).is_ok_and(|key| {
+                self.nodes[key as usize].created && (key == self.root || self.in_tree(key))
             })
         });
         let id = loop {

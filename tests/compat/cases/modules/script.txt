@@ -109,6 +109,8 @@ expect Empty: rejected TypeError
 expect Local URL: rejected TypeError
 expect Many: rejected RangeError
 expect File: rejected ERR_ACCESS_DENIED
+expect Blank: rejected TypeError
+expect Long URL: rejected RangeError
 covers [nsh] Share
 # mod-speech
 tap id:case-mod-speech

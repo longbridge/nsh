@@ -1002,10 +1002,10 @@ impl From<&nsh_core::picker::Pick> for PickRequest {
 /// How the user answers the share sheet (`app.onShare`).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PropEnum)]
 pub enum ShareAnswerAction {
-    /// The user chooses where to share.
-    #[default]
+    /// The user shares.
     Shared,
     /// The user closes the sheet without sharing.
+    #[default]
     Dismissed,
 }
 

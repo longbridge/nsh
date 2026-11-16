@@ -2572,7 +2572,11 @@ pub enum Command {
     /// `Share.show`, [`crate::share`]) and report how it ended as
     /// [`EventKind::Share`] `id` ([`crate::share::ShareOutcome::payload`],
     /// [`crate::share::ShareError::payload`]). Sent only on platforms whose
-    /// [`crate::platform::Environment::share`] is set.
+    /// [`crate::platform::Environment::share`] is set. The platform answers
+    /// every request exactly once, failures included (a sheet it could not
+    /// present is an error): one it never answers leaves its promise
+    /// pending. A new request while a sheet shows replaces that sheet (the
+    /// core has already answered the old one as dismissed).
     Share {
         /// The request.
         id: u32,

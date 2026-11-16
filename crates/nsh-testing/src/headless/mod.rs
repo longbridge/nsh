@@ -335,8 +335,10 @@ pub struct Headless {
     picks: Picks,
     /// The color the user picks on the screen ([`Headless::on_screen_color`]).
     screen_color: Option<nsh_core::Hsla>,
-    /// How the user answers the share sheet ([`Headless::on_share`]).
-    share: nsh_core::share::ShareOutcome,
+    /// How the user answers the share sheet ([`Headless::on_share`]);
+    /// `None`: never (a sheet the platform never answers, in this crate's
+    /// tests).
+    share: Option<nsh_core::share::ShareOutcome>,
     /// The paths the user picks in the open dialog
     /// ([`Headless::on_pick_paths`]).
     picked_paths: Vec<std::path::PathBuf>,
@@ -481,7 +483,7 @@ impl Headless {
             dialogs: Dialogs::Default,
             picks: Picks::Default,
             screen_color: None,
-            share: nsh_core::share::ShareOutcome::dismissed(),
+            share: Some(nsh_core::share::ShareOutcome::dismissed()),
             picked_paths: Vec::new(),
             save_path: None,
             failing_images: Vec::new(),
@@ -817,7 +819,7 @@ impl Headless {
     /// until the app is quiet.
     pub fn on_share(&mut self, outcome: nsh_core::share::ShareOutcome) -> Result<(), String> {
         let what = format!("onShare({})", outcome.action.as_str());
-        self.share = outcome;
+        self.share = Some(outcome);
         self.set_environment(&what, |env| env.share = true)
     }
 
@@ -1129,7 +1131,9 @@ impl Headless {
             control.dispatch_event(ROOT_ID, EventKind::ScreenColor, EventPayload::Map(fields));
         }
         for id in self.screen.take_share_answers() {
-            control.dispatch_event(ROOT_ID, EventKind::Share, self.share.payload(id));
+            if let Some(outcome) = &self.share {
+                control.dispatch_event(ROOT_ID, EventKind::Share, outcome.payload(id));
+            }
         }
         for (id, request) in self.screen.take_file_answers() {
             use nsh_core::file_dialog::FileRequest;
@@ -3108,6 +3112,28 @@ mod tests {
         assert_eq!(shares[0].url.as_deref(), Some("https://example.com/docs"));
         assert_eq!(shares[0].title.as_deref(), Some("Docs"));
         assert_eq!(shares[0].anchor, None);
+    }
+
+    #[test]
+    fn a_share_never_answered_does_not_hold_the_next_back() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Sharing>())).unwrap();
+        app.first_render().unwrap();
+        app.on_share(nsh_core::share::ShareOutcome::shared(None))
+            .unwrap();
+        // The platform loses the first sheet's answer.
+        app.share = None;
+        app.press("Share").unwrap();
+        app.wait_for("text:nothing").unwrap();
+        assert_eq!(app.screen().shares().len(), 1);
+        // The next share still reaches the platform, and the first ends as
+        // dismissed.
+        app.press("Share").unwrap();
+        app.wait_for("text:dismissed").unwrap();
+        assert_eq!(app.screen().shares().len(), 2);
+        app.share = Some(nsh_core::share::ShareOutcome::shared(Some("mail".into())));
+        app.press("Share").unwrap();
+        app.wait_for("text:shared mail").unwrap();
+        assert_eq!(app.screen().shares().len(), 3);
     }
 
     #[test]

@@ -485,6 +485,18 @@ function localOffset(ms) {
   return 0 - new Date(ms).getTimezoneOffset() * 60;
 }
 
+/**
+ * Whether the page can show the browser's share sheet: it has
+ * `navigator.share` and the page's permissions policy allows `web-share`
+ * (a frame of another origin needs `allow="web-share"`).
+ */
+function webShareAllowed() {
+  if (typeof navigator === "undefined" || typeof navigator.share !== "function") return false;
+  const doc = typeof document === "undefined" ? undefined : document;
+  const policy = doc?.permissionsPolicy ?? doc?.featurePolicy;
+  return typeof policy?.allowsFeature === "function" ? policy.allowsFeature("web-share") : true;
+}
+
 /** The browser's time zone (`Asia/Shanghai`), Intl's default; "" when unknown. */
 function timeZoneName() {
   return new Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
@@ -2022,7 +2034,7 @@ class Player {
         : document.hasFocus() ? "active" : "inactive",
       timeZone: timeZoneName(),
       screenColor: typeof window.EyeDropper === "function",
-      share: typeof navigator.share === "function",
+      share: webShareAllowed(),
       notifications: typeof window.Notification === "function",
       audio: typeof (window.AudioContext ?? window.webkitAudioContext) === "function",
       // Shader views draw until the first one finds no WebGL 2 (`shaderGl`).
@@ -7001,7 +7013,7 @@ class Player {
     if (text != null) data.text = text;
     if (url != null) data.url = url;
     if (files) return unavailable("share: a page shares no local files");
-    if (typeof navigator.share !== "function") return unavailable("share: this browser has no share sheet");
+    if (!webShareAllowed()) return unavailable("share: this browser has no share sheet for this page");
     if (typeof navigator.canShare === "function" && !navigator.canShare(data)) {
       return unavailable("share: this browser cannot share this content");
     }
@@ -7011,6 +7023,10 @@ class Player {
     } catch (err) {
       if (err?.name === "AbortError") {
         this.event(ROOT_ID, "onShare", { id: request, action: "dismissed" });
+      } else if (err?.name === "NotAllowedError") {
+        // The browser refuses the sheet here: the page's permissions policy
+        // (a frame without `web-share`) or a share without a user gesture.
+        unavailable(`share: the browser does not allow sharing here (${err?.message ?? err})`);
       } else {
         this.event(ROOT_ID, "onShare", { id: request, error: `share: ${err?.message ?? err}` });
       }

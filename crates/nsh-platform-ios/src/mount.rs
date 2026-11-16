@@ -2003,7 +2003,14 @@ impl Mounter {
                 crate::picker::pick_files(request, asked, native.view(), &self.control);
             }
             (Command::Share { id: request, sheet }, native) if id == nsh_core::ROOT_ID => {
-                crate::share::show(request, &sheet, native.view(), &self.control);
+                let anchor = sheet.anchor.and_then(|anchor| self.ui_view(anchor));
+                crate::share::show(
+                    request,
+                    &sheet,
+                    native.view(),
+                    anchor.as_deref(),
+                    &self.control,
+                );
             }
             (
                 Command::RenderCanvas {

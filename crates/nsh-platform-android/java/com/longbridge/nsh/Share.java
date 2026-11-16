@@ -24,12 +24,15 @@ import java.util.ArrayList;
  * EXTRA_SUBJECT} and the chooser's title, the files as {@code content:} URIs
  * the app's {@link FilesProvider} serves (only files of the app's own
  * storage). The chooser tells which app the user chose through an {@code
- * IntentSender} broadcast; its result, once the user is back, answers the
- * root's {@code Share} event: shared to that app's package, else dismissed.
+ * IntentSender} broadcast, which answers the root's {@code Share} event as
+ * shared to that app's package; Android tells nothing of what the app then
+ * does. The chooser's result without that broadcast answers dismissed.
  */
 final class Share {
     private static final String TAG = "nsh";
     private static final String FRAGMENT = "com.longbridge.nsh.Share";
+    /** The code of content this platform does not share. */
+    private static final String UNAVAILABLE = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
 
     /** What one share asks ({@code nsh_core::share::ShareSheet}). */
     static final class Request {
@@ -57,7 +60,7 @@ final class Share {
         try {
             send = intent(activity, request);
         } catch (IllegalArgumentException e) {
-            fail(request, e.getMessage());
+            fail(request, e.getMessage(), UNAVAILABLE);
             return;
         }
         android.app.FragmentManager manager = activity.getFragmentManager();
@@ -117,6 +120,11 @@ final class Share {
         answer(request, new String[] {"id", "error"}, new Object[] {(double) request.id, error});
     }
 
+    private static void fail(Request request, String error, String code) {
+        answer(request, new String[] {"id", "error", "code"},
+                new Object[] {(double) request.id, error, code});
+    }
+
     private static void answer(Request request, String[] keys, Object[] values) {
         if (request.answered) return;
         request.answered = true;
@@ -148,7 +156,11 @@ final class Share {
                 @Override
                 public void onReceive(Context context, Intent intent) {
                     ComponentName chosen = intent.getParcelableExtra(Intent.EXTRA_CHOSEN_COMPONENT);
-                    if (chosen != null) request.chosen = chosen.getPackageName();
+                    if (chosen == null) return;
+                    // The choice is all Android tells: answer it now.
+                    request.chosen = chosen.getPackageName();
+                    answer(request, new String[] {"id", "action", "target"},
+                            new Object[] {(double) request.id, "shared", request.chosen});
                 }
             };
             Context app = activity.getApplicationContext();
@@ -161,8 +173,12 @@ final class Share {
             int flags = PendingIntent.FLAG_UPDATE_CURRENT;
             // The chooser fills in the chosen component.
             if (Build.VERSION.SDK_INT >= 31) flags |= PendingIntent.FLAG_MUTABLE;
-            PendingIntent chosen = PendingIntent.getBroadcast(
-                    app, code, new Intent(action).setPackage(activity.getPackageName()), flags);
+            // On the foreground queue: the choice arrives before the
+            // chooser's result as a rule, not seconds later.
+            Intent broadcast = new Intent(action)
+                    .setPackage(activity.getPackageName())
+                    .addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
+            PendingIntent chosen = PendingIntent.getBroadcast(app, code, broadcast, flags);
             Intent chooser = Intent.createChooser(send, request.title, chosen.getIntentSender());
             pending.put(code, request);
             receivers.put(code, receiver);
@@ -196,17 +212,13 @@ final class Share {
             }
             pending.remove(code);
             Context app = getActivity().getApplicationContext();
-            // The chooser broadcasts the chosen app before it starts it: give
-            // a broadcast still in the queue its turn first.
+            // The result tells only that the chooser closed; a choice
+            // answered the request already. Give a broadcast still in the
+            // queue its turn before taking the close as a dismissal.
             new Handler(Looper.getMainLooper()).postDelayed(() -> {
                 unregister(app, code);
-                if (request.chosen != null) {
-                    answer(request, new String[] {"id", "action", "target"},
-                            new Object[] {(double) request.id, "shared", request.chosen});
-                } else {
-                    answer(request, new String[] {"id", "action"},
-                            new Object[] {(double) request.id, "dismissed"});
-                }
+                answer(request, new String[] {"id", "action"},
+                        new Object[] {(double) request.id, "dismissed"});
             }, 100);
         }
     }

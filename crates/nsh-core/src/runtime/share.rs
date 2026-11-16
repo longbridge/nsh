@@ -28,17 +28,19 @@ impl Share {
     /// title as a mail's subject where the target takes one. On an iPad and
     /// on macOS the sheet points at `anchor` (a `ref`), else at the middle
     /// of the window. Resolves with `{ action: "shared", target }` once the
-    /// user chose where to share (`target` names it where the platform
-    /// tells, else `null`), or `{ action: "dismissed", target: null }`
-    /// when they closed the sheet. Rejects with a `TypeError` for content
-    /// with nothing to share or a URL that is not shared (`file:`,
-    /// `javascript:`, relative), a `RangeError` for content over the
-    /// limits (1 MiB of text, 100 files), `ERR_ACCESS_DENIED` when the
+    /// user shared (the target finished, on iOS and macOS; the user chose
+    /// an app, on Android; `target` names it where the platform tells,
+    /// else `null`), or `{ action: "dismissed", target: null }` when they
+    /// closed the sheet or a later `show` replaced it. Rejects with a
+    /// `TypeError` for content with nothing to share (empty text is none)
+    /// or a URL that is not shared (`file:`, `javascript:`, relative), a
+    /// `RangeError` for content over the limits (1 MiB of text, 16 KiB of
+    /// URL, 100 files), `ERR_ACCESS_DENIED` when the
     /// `share` capability or a file's `fs.read` grant is missing, `ENOENT`
     /// for a file that does not exist, and
     /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the platform has no
-    /// share sheet, or none for this content (a browser that shares no
-    /// files).
+    /// share sheet, or none for this content (a file outside an Android
+    /// app's own storage, a file a browser does not share).
     pub(crate) fn show(content: ShareContent, sys: System) -> Result<Later<ShareResult>, JsError> {
         if !sys.access.allows_share() {
             return Err(JsError::access_denied(
@@ -104,6 +106,16 @@ impl ShareContent {
                 )));
             }
         }
+        if self
+            .url
+            .as_ref()
+            .is_some_and(|url| url.len() > crate::share::MAX_URL_BYTES)
+        {
+            return Err(JsError::Range(format!(
+                "share: `url` has at most {} bytes",
+                crate::share::MAX_URL_BYTES
+            )));
+        }
         let mut request = ShareRequest {
             title: self.title,
             text: self.text,
@@ -124,10 +136,10 @@ impl ShareContent {
 /// What the user did with the share sheet.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PropEnum)]
 pub(crate) enum ShareAction {
-    /// They chose where to share.
-    #[default]
+    /// They shared (see `Share.show`).
     Shared,
     /// They closed the sheet without sharing.
+    #[default]
     Dismissed,
 }
 

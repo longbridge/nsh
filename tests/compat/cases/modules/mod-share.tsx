@@ -2,8 +2,9 @@
 // `Share` on the headless runtime, which has no share sheet: `available()`
 // resolves false and `show` rejects with ERR_FEATURE_UNAVAILABLE_ON_PLATFORM,
 // never resolving as shared. `show` returns a promise that never throws:
-// content with nothing to share rejects with a `TypeError`, a `file:` URL
-// too, more than 100 files with a `RangeError`, and a file no
+// content with nothing to share (empty text is none) rejects with a
+// `TypeError`, a `file:` URL too, more than 100 files and a URL past 16 KiB
+// with a `RangeError`, and a file no
 // `capabilities.fs.read` grant covers with ERR_ACCESS_DENIED. Its script
 // checks each.
 import { Share, Text, View, type ShareResult, type ViewRef, signal } from "nsh";
@@ -15,6 +16,8 @@ function App() {
   const local = signal("none");
   const many = signal("none");
   const file = signal("none");
+  const blank = signal("none");
+  const long = signal("none");
   let button: ViewRef | undefined;
   Share.available().then((yes: boolean) => available.set(`${yes}`));
   const outcome = (promise: Promise<ShareResult>, into: typeof shown) => {
@@ -32,6 +35,8 @@ function App() {
       <Text>{`Local URL: ${local()}`}</Text>
       <Text>{`Many: ${many()}`}</Text>
       <Text>{`File: ${file()}`}</Text>
+      <Text>{`Blank: ${blank()}`}</Text>
+      <Text>{`Long URL: ${long()}`}</Text>
       <View
         testID="share"
         ref={button}
@@ -42,6 +47,8 @@ function App() {
             outcome(Share.show({ url: "file:///etc/hosts" }), local);
             outcome(Share.show({ files: Array.from({ length: 101 }, (_, i) => `/tmp/${i}.txt`) }), many);
             outcome(Share.show({ files: ["/tmp/report.pdf"] }), file);
+            outcome(Share.show({ title: "Notes", text: "" }), blank);
+            outcome(Share.show({ url: `https://example.com/${"a".repeat(17000)}` }), long);
           } catch (e) {
             shown.set(`threw ${(e as Error).name}`);
           }

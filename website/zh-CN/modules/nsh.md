@@ -2071,21 +2071,32 @@ interface ShareResult {
 show(content: ShareContent): Promise<ShareResult>;
 ```
 
-显示分享面板，在用户做出选择后 resolve：`"shared"`，带上用户分享到的 `target`（iOS 上是 activity type，Android 上是应用的
+显示分享面板，并以用户的操作 resolve：`"shared"`，带上用户分享到的 `target`（iOS 上是 activity type，Android 上是应用的
 包名，macOS 上是服务的标题，平台不告诉时为 `null`）；或 `"dismissed"`，表示用户关掉了面板。关掉面板是用户的回答，不是失败。
 Rust：`share(request)`，在任务中 await 的回答（`spawn`，或 `async` 的模块函数）。
 
+`"shared"` 的含义以平台能知道的为准：
+
+| 平台 | `"shared"` 表示 |
+|---|---|
+| iOS、macOS | 目标已完成分享（取消的邮件或消息为 `"dismissed"`） |
+| Android | 用户选了一个应用；Android 不告诉该应用之后做了什么 |
+| Web | `navigator.share` 已 resolve |
+
 `show` 从不抛出，所有失败都 reject promise：
 
-- `text`、`url`、`files` 一个都没有，或 URL 解析不了、会运行代码（`javascript:`）、指向本地文件（`file:`；请用 `files`
-  分享）：`TypeError`；
-- 超过 100 个文件，或文本超过上限：`RangeError`；
+- `text`、`url`、`files` 一个都没有（空文本视同没有），或 URL 解析不了、会运行代码（`javascript:`）、指向本地文件（`file:`；
+  请用 `files` 分享）：`TypeError`；
+- 超过 100 个文件、文本或标题超过 1 MiB、URL 超过 16 KiB：`RangeError`；
 - 应用的 `capabilities.fs.read` 没有授予的文件：`ERR_ACCESS_DENIED`；不存在的文件：`ENOENT`；
-- 平台没有分享面板时的分享，或平台不分享的内容（浏览器里的文件）：一个 `code` 为 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 的
-  `Error`。`Share.available()` 可以事先判断。
+- 平台没有分享面板时的分享，或平台不分享的内容（Android 应用自有存储之外的文件、浏览器里的文件、浏览器在此不允许分享）：
+  一个 `code` 为 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 的 `Error`。平台没有面板时，`Share.available()` 可以事先判断。
 
-同一时间只显示一个面板：面板打开时再调用 `show` 会 reject。iPad 和 macOS 上面板是 popover：把打开它的视图（分享按钮）交给
-`anchor`，没有时显示在窗口中央。
+同一时间只显示一个面板：面板打开时再调用 `show` 会替换它，之前的 promise resolve 为 `"dismissed"`。iPad 和 macOS 上面板是
+popover：把打开它的视图（分享按钮，可以在页面、标题栏、对话框或另一个窗口里）交给 `anchor`，没有时显示在窗口中央。
+
+iOS 上，应用说明了写入相册的理由时，面板才提供把图片存到“照片”：在 `ios.infoPlist` 中写
+`NSPhotoLibraryAddUsageDescription`（[Info.plist 键](../docs/packaging.md#infoplist-keys-and-entitlements)）。
 
 一个旅行计划应用从分享按钮分享行程：
 
@@ -2147,7 +2158,7 @@ function ShareButton(props: { trip: string }) {
 | iOS | `UIActivityViewController`；iPad 上是 popover | 应用能读的任何文件 |
 | Android | `ACTION_SEND` 的选择器（多个文件时 `ACTION_SEND_MULTIPLE`） | 应用自己存储中的文件（`process.dataDir`、缓存），以 `content:` URI 分享 |
 | macOS | 分享菜单 `NSSharingServicePicker` | 应用能读的任何文件 |
-| Web | 浏览器提供的 `navigator.share` | 文本和链接 |
+| Web | 浏览器提供的 `navigator.share`，且页面允许 `web-share` | 文本和链接 |
 
 在 Windows、Linux 和 GPUI 窗口中，`Share.available()` resolve 为 `false`，`show` 以
 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` reject，应用可以提供别的方式（比如复制链接）。

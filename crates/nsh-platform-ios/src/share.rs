@@ -2,11 +2,11 @@
 //! ([`nsh_core::share`]). The text and the link are items of their own, the
 //! files file URLs; the title is the subject the first item gives (a mail's
 //! subject line). On an iPad the sheet is a popover pointing at the anchor
-//! the core placed in the root view, or at the middle of the surface
-//! without an arrow. Its completion answers the root's `Share` event:
-//! shared with the activity type the user chose, or dismissed.
+//! view, or at the middle of the surface without an arrow. Its completion
+//! answers the root's `Share` event: shared with the activity type that
+//! finished, or dismissed.
 
-use std::cell::Cell;
+use std::{cell::Cell, rc::Rc};
 
 use block2::RcBlock;
 use nsh_core::{
@@ -15,14 +15,15 @@ use nsh_core::{
 };
 use nsh_engine::EngineControl;
 use objc2::{
-    AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
+    AnyThread, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
     rc::Retained,
     runtime::{AnyObject, Bool},
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-use objc2_foundation::{NSArray, NSError, NSObject, NSObjectProtocol, NSString, NSURL};
+use objc2_foundation::{NSArray, NSBundle, NSError, NSObject, NSObjectProtocol, NSString, NSURL};
 use objc2_ui_kit::{
-    UIActivityItemSource, UIActivityType, UIActivityViewController, UIPopoverArrowDirection, UIView,
+    UIActivityItemSource, UIActivityType, UIActivityTypeSaveToCameraRoll, UIActivityViewController,
+    UIPopoverArrowDirection, UIView,
 };
 
 /// What one shared item holds: the item and the subject it gives.
@@ -81,16 +82,25 @@ fn object<T: objc2::Message>(value: Retained<T>) -> Retained<AnyObject> {
     unsafe { Retained::cast_unchecked(value) }
 }
 
-/// Shows the share sheet for `sheet` over the controller of `root` (the
-/// surface's root view) and answers request `id` once it closes.
-pub(crate) fn show(id: u32, sheet: &ShareSheet, root: &UIView, control: &EngineControl) {
+/// Shows the share sheet for `sheet` over the top controller of `root`'s
+/// window (the surface's root view), pointing at `anchor` (the anchor
+/// node's own view, in whatever modal it is) where it is a popover, and
+/// answers request `id` once: when it closes, or at once when it cannot
+/// be presented. A share sheet still showing is replaced.
+pub(crate) fn show(
+    id: u32,
+    sheet: &ShareSheet,
+    root: &UIView,
+    anchor: Option<&UIView>,
+    control: &EngineControl,
+) {
     let fail = |error: ShareError| {
         control.dispatch_event(ROOT_ID, EventKind::Share, error.payload(id));
     };
     let Some(mtm) = MainThreadMarker::new() else {
         return fail(ShareError::failed("share: not on the main thread"));
     };
-    let Some(top) = crate::system::top_controller(root) else {
+    let Some(mut top) = crate::system::top_controller(root) else {
         return fail(ShareError::failed("share: the surface is in no window"));
     };
     let mut items: Vec<Retained<AnyObject>> = Vec::new();
@@ -124,46 +134,70 @@ pub(crate) fn show(id: u32, sheet: &ShareSheet, root: &UIView, control: &EngineC
             None,
         )
     };
-    let answered = Cell::new(false);
-    let control = control.clone();
-    let completion = RcBlock::new(
-        move |activity: *mut UIActivityType,
-              completed: Bool,
-              _: *mut NSArray,
-              error: *mut NSError| {
-            // Called once per sheet, but a second call must not answer a
-            // later request of the same number.
-            if answered.replace(true) {
-                return;
-            }
-            // SAFETY: UIKit passes a valid error or null.
-            let payload = match unsafe { error.as_ref() } {
-                Some(error) => {
-                    ShareError::failed(error.localizedDescription().to_string()).payload(id)
+    if !can_save_photos() {
+        // Saving an image to Photos needs the app's reason for adding to
+        // the library; without it the system ends the app, so the sheet
+        // does not offer it.
+        // SAFETY: a constant UIKit defines.
+        let save = unsafe { UIActivityTypeSaveToCameraRoll };
+        controller.setExcludedActivityTypes(Some(&NSArray::from_slice(&[save])));
+    }
+    let answered = Rc::new(Cell::new(false));
+    let shown = objc2::rc::Weak::from_retained(&controller);
+    let completion = {
+        let answered = answered.clone();
+        let control = control.clone();
+        RcBlock::new(
+            move |activity: *mut UIActivityType,
+                  completed: Bool,
+                  _: *mut NSArray,
+                  error: *mut NSError| {
+                // SAFETY: UIKit passes a valid error or null.
+                let error = unsafe { error.as_ref() };
+                // SAFETY: UIKit passes a valid activity type or null.
+                let activity = unsafe { activity.as_ref() };
+                // A share extension the user cancelled leaves the sheet up
+                // to choose another target: only its final call (a target
+                // that finished, or the sheet closed) answers.
+                if !completed.as_bool()
+                    && activity.is_some()
+                    && error.is_none()
+                    && shown.load().is_some_and(|c| {
+                        c.presentingViewController().is_some() && !c.isBeingDismissed()
+                    })
+                {
+                    return;
                 }
-                None if completed.as_bool() => {
-                    // SAFETY: UIKit passes a valid activity type or null.
-                    let target = unsafe { activity.as_ref() }.map(ToString::to_string);
-                    ShareOutcome::shared(target).payload(id)
+                // Once per request, whatever UIKit calls after.
+                if answered.replace(true) {
+                    return;
                 }
-                None => ShareOutcome::dismissed().payload(id),
-            };
-            control.dispatch_event(ROOT_ID, EventKind::Share, payload);
-        },
-    );
+                let payload = match error {
+                    Some(error) => {
+                        ShareError::failed(error.localizedDescription().to_string()).payload(id)
+                    }
+                    None if completed.as_bool() => {
+                        ShareOutcome::shared(activity.map(ToString::to_string)).payload(id)
+                    }
+                    None => ShareOutcome::dismissed().payload(id),
+                };
+                control.dispatch_event(ROOT_ID, EventKind::Share, payload);
+            },
+        )
+    };
     // SAFETY: the block lives as long as UIKit keeps it (it copies it).
     unsafe { controller.setCompletionWithItemsHandler(RcBlock::as_ptr(&completion)) };
     controller.setOverrideUserInterfaceStyle(crate::system::appearance());
     if let Some(popover) = controller.popoverPresentationController() {
-        // iPad and Mac: a popover pointing at the anchor, else at the
-        // middle of the surface without an arrow.
-        popover.setSourceView(Some(root));
-        match sheet.anchor {
-            Some(anchor) => popover.setSourceRect(CGRect::new(
-                CGPoint::new(anchor.origin.x.0.into(), anchor.origin.y.0.into()),
-                CGSize::new(anchor.size.width.0.into(), anchor.size.height.0.into()),
-            )),
+        // iPad and Mac: a popover pointing at the anchor's own view, else
+        // at the middle of the surface without an arrow.
+        match anchor.filter(|view| view.window().is_some()) {
+            Some(view) => {
+                popover.setSourceView(Some(view));
+                popover.setSourceRect(view.bounds());
+            }
             None => {
+                popover.setSourceView(Some(root));
                 let bounds = root.bounds();
                 popover.setSourceRect(CGRect::new(
                     CGPoint::new(bounds.size.width / 2.0, bounds.size.height / 2.0),
@@ -173,5 +207,30 @@ pub(crate) fn show(id: u32, sheet: &ShareSheet, root: &UIView, control: &EngineC
             }
         }
     }
+    // A share sheet still showing gives way to this one (the core answered
+    // it already).
+    if top.isKindOfClass(UIActivityViewController::class())
+        && let Some(presenter) = top.presentingViewController()
+    {
+        top.dismissViewControllerAnimated_completion(false, None);
+        top = presenter;
+    }
     top.presentViewController_animated_completion(&controller, true, None);
+    // UIKit refuses a presentation over a controller that is presenting or
+    // dismissing another one, and then never calls the completion: answer
+    // the request now.
+    if controller.presentingViewController().is_none() && !answered.replace(true) {
+        fail(ShareError::failed(
+            "share: the share sheet could not be presented (another view is being presented)",
+        ));
+    }
+}
+
+/// Whether the app gives a reason for adding to the photo library
+/// (`NSPhotoLibraryAddUsageDescription` in its Info.plist), without which
+/// saving an image to Photos ends the app.
+fn can_save_photos() -> bool {
+    NSBundle::mainBundle()
+        .objectForInfoDictionaryKey(&NSString::from_str("NSPhotoLibraryAddUsageDescription"))
+        .is_some()
 }
