@@ -583,8 +583,25 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
         } else {
             gtk::gio::ApplicationFlags::NON_UNIQUE
         })
+        // Told by the session manager before the session ends (`query-end`).
+        .register_session(true)
         .build();
     STANDALONE.with(|s| *s.borrow_mut() = Some(app.downgrade()));
+    // Signing out or shutting down closes no window: the app leaves when
+    // the session manager asks, and stops when it ends the run; systemd
+    // sends SIGTERM to what remains of the session, which quits the app
+    // (`crate::session`).
+    app.connect_query_end(|_| crate::session::leave());
+    app.connect_startup(|app| {
+        let app = app.downgrade();
+        crate::session::on_terminate(move || {
+            crate::session::leave();
+            if let Some(app) = app.upgrade() {
+                quit_application(&app);
+            }
+        });
+    });
+    app.connect_shutdown(|_| crate::session::end());
     if links {
         let mut mime_types: Vec<String> = Vec::new();
         for mime in options.file_types.iter().flat_map(|t| &t.mime_types) {

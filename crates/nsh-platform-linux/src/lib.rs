@@ -46,6 +46,7 @@ mod navigation;
 mod notifications;
 mod scroll;
 mod selectable_view;
+mod session;
 mod shader;
 // Without GStreamer (the feature `sound`), a stand-in whose loads fail
 // as not supported.
