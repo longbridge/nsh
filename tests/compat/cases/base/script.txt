@@ -1254,6 +1254,9 @@ prop id:activity accessibilityState {}
 nostyle id:activity backgroundColor
 frame text:Activity 28 2 62 17
 listens id:activity onPress
+# A description, read after the tab's name; a tab without one has none.
+prop id:activity accessibilityDescription Updates every minute
+noprop id:overview accessibilityDescription
 # The list is one stop of the keyboard focus: the selected tab.
 prop id:overview focusable true
 prop id:activity focusable false
@@ -1300,6 +1303,7 @@ covers [props] Tabs.indicatorClass
 covers [props] Tabs.indicatorStyle
 covers [props] disabled
 covers [props] accessibilityLabel
+covers [props] accessibilityDescription
 covers [events] onPress
 
 # base-toggle

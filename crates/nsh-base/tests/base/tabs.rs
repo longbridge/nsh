@@ -200,7 +200,11 @@ fn NamedTabs() -> impl IntoElement {
     tabs()
         .accessibility_label("Sections")
         .child(tab().selected(true).child(text("One")))
-        .child(tab().child(text("Two")))
+        .child(
+            tab()
+                .accessibility_description("Delete closes it")
+                .child(text("Two")),
+        )
 }
 
 #[test]
@@ -213,6 +217,23 @@ fn a_list_takes_the_name_the_app_gives_it() {
     let app = start::<TabsScreen>();
     assert_eq!(app.screen().count("role:tablist"), Ok(1));
     assert_eq!(app.screen().count("role:tablist[Sections]"), Ok(0));
+}
+
+#[test]
+fn a_tab_hands_its_description_to_screen_readers() {
+    let app = start::<NamedTabs>();
+    let screen = app.screen();
+    assert_eq!(
+        screen.accessibility_description("role:tab[Two]"),
+        Ok(Some("Delete closes it".to_owned()))
+    );
+    // The description is said after the name, never folded into it.
+    assert_eq!(screen.count("role:tab[Two]"), Ok(1));
+    assert_eq!(
+        screen.accessibility_description("role:tab[One]"),
+        Ok(None),
+        "a tab without one has none"
+    );
 }
 
 /// Tabs without a list are stops of their own, as before.
