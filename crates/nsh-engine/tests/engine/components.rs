@@ -1550,16 +1550,18 @@ mount(() => <Text>{shown()}</Text>);
 /// (`Environment::clipboard_images`), hold text only on the clipboard.
 #[test]
 fn clipboard_images_are_unavailable_where_the_clipboard_holds_text_only() {
-    for (os, platform) in [
-        (nsh_engine::Os::Android, None),
-        (nsh_engine::Os::Ios, Some("miniprogram")),
+    // Android by its OS alone, as an environment that names only the OS
+    // has it; a platform built outside NSH by what it says.
+    for (os, platform, clipboard_images) in [
+        (nsh_engine::Os::Android, None, None),
+        (nsh_engine::Os::Ios, Some("miniprogram"), Some(false)),
     ] {
         let (_engine, rx) = start_in(
             CLIPBOARD_IMAGE_TEXT_ONLY,
             Environment {
                 os,
                 platform,
-                clipboard_images: false,
+                clipboard_images,
                 ..Environment::default()
             },
         );

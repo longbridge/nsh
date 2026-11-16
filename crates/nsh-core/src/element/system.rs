@@ -51,9 +51,10 @@ pub struct System {
     pub filesystem: Option<Arc<dyn crate::filesystem::FileSystem>>,
     /// The operating system the app runs on, as the host says.
     pub os: crate::platform::Os,
-    /// The platform puts images on the clipboard and reads them back
+    /// Whether the platform puts images on the clipboard and reads them
+    /// back; `None`: as NSH's own backend on [`Self::os`]
     /// ([`crate::platform::Environment::clipboard_images`]).
-    pub clipboard_images: bool,
+    pub clipboard_images: Option<bool>,
     /// Refuses the app's connections (`net` sockets and WebSockets, both
     /// APIs) before they reach the network: a test's, which reaches it
     /// only when the test asks (`nsh test`'s `network: "live"`). `None`:
@@ -94,7 +95,7 @@ impl System {
             websocket: None,
             filesystem: None,
             os: crate::platform::Os::default(),
-            clipboard_images: true,
+            clipboard_images: None,
             refuse_connections: None,
             updater: None,
             app_url: Default::default(),
@@ -164,9 +165,10 @@ impl System {
         self
     }
 
-    /// Whether the platform puts images on the clipboard
+    /// Whether the platform puts images on the clipboard; `None`: as NSH's
+    /// own backend on the OS
     /// ([`crate::platform::Environment::clipboard_images`]).
-    pub fn with_clipboard_images(mut self, clipboard_images: bool) -> Self {
+    pub fn with_clipboard_images(mut self, clipboard_images: Option<bool>) -> Self {
         self.clipboard_images = clipboard_images;
         self
     }
