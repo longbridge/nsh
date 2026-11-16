@@ -20,8 +20,41 @@ bin="$HOME/.local/bin"
 version="${NSH_VERSION:-latest}"
 
 fail() {
+  [ -z "${tty:-}" ] || printf '\r\033[K' >&2
   echo "nsh: $*" >&2
   exit 1
+}
+
+# Progress goes to stderr, which stays a terminal under `curl ... | sh`.
+# Without a terminal (CI, logs) every step prints one plain line.
+tty=
+if [ -t 2 ] && [ "${TERM:-dumb}" != dumb ]; then
+  tty=1
+fi
+
+# step LABEL COMMAND...: run COMMAND with a spinner, then mark it done.
+step() {
+  label="$1"
+  shift
+  if [ -z "$tty" ]; then
+    echo "$label"
+    "$@"
+    return
+  fi
+  "$@" &
+  pid=$!
+  frames='|/-\'
+  i=0
+  while kill -0 "$pid" 2> /dev/null; do
+    i=$(((i % 4) + 1))
+    printf '\r\033[K%s %s' "$(echo "$frames" | cut -c "$i")" "$label" >&2
+    sleep 0.1
+  done
+  status=0
+  wait "$pid" || status=$?
+  printf '\r\033[K' >&2
+  [ "$status" -eq 0 ] || return "$status"
+  printf '\033[32m✓\033[0m %s\n' "$label" >&2
 }
 
 source_install() {
@@ -112,29 +145,40 @@ fi
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
 
+echo "Installing NSH $version for $platform"
 echo "Downloading $url"
-curl -fsSL "$url" -o "$work/$asset"
-curl -fsSL "$url.sha256" -o "$work/$asset.sha256"
+if [ -n "$tty" ]; then
+  # curl draws its own bar with size and rate on stderr.
+  curl -fL --progress-bar "$url" -o "$work/$asset" || fail "could not download $url"
+  printf '\033[1A\r\033[K\033[32m✓\033[0m Downloaded %s (%s)\n' "$asset" "$(du -h "$work/$asset" | cut -f1)" >&2
+else
+  curl -fsSL "$url" -o "$work/$asset" || fail "could not download $url"
+fi
+curl -fsSL "$url.sha256" -o "$work/$asset.sha256" || fail "could not download $url.sha256"
 
-(
+verify() {
   cd "$work"
   if command -v shasum > /dev/null 2>&1; then
     shasum -a 256 -c "$asset.sha256" > /dev/null
   else
     sha256sum -c "$asset.sha256" > /dev/null
   fi
-) || fail "the checksum of $asset does not match"
+}
+(step "Verifying checksum" verify) || fail "the checksum of $asset does not match"
 
-tar -xzf "$work/$asset" -C "$work"
+step "Extracting $asset" tar -xzf "$work/$asset" -C "$work" || fail "could not extract $asset"
 [ -x "$work/nsh/bin/nsh" ] || fail "$asset holds no nsh/bin/nsh"
 
 # Replace the whole directory: runtimes of an older release must not stay.
-mkdir -p "$(dirname "$dir")" "$bin"
-rm -rf "$dir.old"
-[ ! -e "$dir" ] || mv "$dir" "$dir.old"
-mv "$work/nsh" "$dir"
-rm -rf "$dir.old"
-ln -sf "$dir/bin/nsh" "$bin/nsh"
+place() {
+  mkdir -p "$(dirname "$dir")" "$bin"
+  rm -rf "$dir.old"
+  [ ! -e "$dir" ] || mv "$dir" "$dir.old"
+  mv "$work/nsh" "$dir"
+  rm -rf "$dir.old"
+  ln -sf "$dir/bin/nsh" "$bin/nsh"
+}
+step "Installing to $dir" place || fail "could not install to $dir"
 
 echo "Installed $("$dir/bin/nsh" --version) to $dir"
 case ":$PATH:" in
