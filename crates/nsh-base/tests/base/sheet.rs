@@ -1194,7 +1194,7 @@ fn a_sheet_without_detents_makes_no_graph_of_theirs() {
 }
 
 /// A sheet open with a button in it that gives it detents (medium and
-/// large) or takes them away.
+/// large) or takes them away, closed by a swipe.
 #[component]
 fn ToggleDetentsScreen() -> impl IntoElement {
     use nsh_base::SheetDetent;
@@ -1203,6 +1203,9 @@ fn ToggleDetentsScreen() -> impl IntoElement {
     view().child(
         sheet()
             .default_open(true)
+            // A drag moves it either way: the replica finds the panel by
+            // its drag.
+            .close_on_swipe(true)
             .detents(move || {
                 if with.get() {
                     vec![SheetDetent::Medium, SheetDetent::Large]
