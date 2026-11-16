@@ -166,6 +166,7 @@ pub(crate) fn hwnd_showing(surface: &Surface, view: &NshView) -> HWND {
 
 /// The composition the web views of the window showing dialog root `id`
 /// are in, and its native window: made with the first of them.
+#[cfg_attr(not(feature = "webview"), allow(dead_code))]
 pub(crate) fn compose(
     surface: &Surface,
     id: NodeId,

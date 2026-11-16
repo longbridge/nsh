@@ -86,6 +86,7 @@ pub(crate) struct Placement {
 impl Placement {
     /// Its window rectangle (pixels) when it is only translated, as
     /// WebView2's bounds (pop-ups and the IME are placed from them).
+    #[cfg_attr(not(feature = "webview"), allow(dead_code))]
     pub(crate) fn bounds(&self) -> windows::Win32::Foundation::RECT {
         let left = self.matrix.M31.round() as i32;
         let top = self.matrix.M32.round() as i32;
@@ -368,6 +369,7 @@ pub(crate) fn composition_swap_chain(
 /// A web view's visuals: an outer one with its ancestors' clip (window
 /// pixels) and its opacity, holding an inner one with its transform and
 /// rounded corners, which WebView2 draws the page into.
+#[cfg_attr(not(feature = "webview"), allow(dead_code))]
 pub(crate) struct Portal {
     /// Kept while the web view lives: the window composes while it has one.
     _composition: Rc<Composition>,
@@ -378,6 +380,7 @@ pub(crate) struct Portal {
     applied: Cell<Option<Placement>>,
 }
 
+#[cfg_attr(not(feature = "webview"), allow(dead_code))]
 impl Portal {
     /// Visuals in `composition` for a web view.
     pub(crate) fn new(composition: Rc<Composition>) -> Result<Portal> {
