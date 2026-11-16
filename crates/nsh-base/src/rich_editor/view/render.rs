@@ -122,7 +122,12 @@ pub(crate) fn render(rv: Rv) -> impl IntoElement {
                         scroll_rv.scrolled.set(e.offset.y);
                         scroll_rv.viewport.set(e.size);
                     })
-                    .on_layout(move |b: &Bounds<Points>| layout_rv.viewport.set(b.size))
+                    .on_layout(move |b: &Bounds<Points>| {
+                        layout_rv.viewport.set(b.size);
+                        // The viewport moving moves the content on the page
+                        // with no layout of the content's own.
+                        layout_rv.place();
+                    })
                     .child(content(rv.clone())),
             )
             .child(sink(rv)),

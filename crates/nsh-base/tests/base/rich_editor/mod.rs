@@ -5,8 +5,8 @@
 //! back, and lists' items show their markers.
 
 mod commands;
+mod content_size;
 mod extensions;
-mod geometry_events;
 mod marks_clipboard_history;
 mod selection;
 mod sizing;

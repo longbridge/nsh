@@ -37,12 +37,12 @@ import BaseTerminal from "./base-terminal";
 import BaseTable from "./base-table";
 import BaseRadio from "./base-radio";
 import BaseResizable from "./base-resizable";
+import BaseRichEditorContentSize from "./base-rich-editor-content-size";
 import BaseRichEditorExtensions from "./base-rich-editor-extensions";
 import BaseRichEditorKit from "./base-rich-editor-kit";
 import BaseRichEditorSession from "./base-rich-editor-session";
 import BaseRichEditorTables from "./base-rich-editor-tables";
 import BaseRichEditorView from "./base-rich-editor-view";
-import BaseRichEditorGeometry from "./base-rich-editor-geometry";
 import BaseSafeAreaKeyboard from "./base-safe-area-keyboard";
 import BaseCombobox from "./base-combobox";
 import BaseCommand from "./base-command";
@@ -95,11 +95,11 @@ const cases: Record<string, () => JSX.Element> = {
   "base-checkbox": BaseCheckbox,
   "base-radio": BaseRadio,
   "base-resizable": BaseResizable,
+  "base-rich-editor-content-size": BaseRichEditorContentSize,
   "base-rich-editor-extensions": BaseRichEditorExtensions,
   "base-rich-editor-kit": BaseRichEditorKit,
   "base-rich-editor-session": BaseRichEditorSession,
   "base-rich-editor-view": BaseRichEditorView,
-  "base-rich-editor-geometry": BaseRichEditorGeometry,
   "base-rich-editor-tables": BaseRichEditorTables,
   "base-tabs": BaseTabs,
   "base-toggle": BaseToggle,

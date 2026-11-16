@@ -87,11 +87,10 @@ document scrolls in. A chat composer is an editor with a `maxHeight` and no heig
 <RichEditor editor={editor} class="max-h-40 px-3 py-2" />
 ```
 
-`onGeometryChange={({ contentSize, scrollOffset }) => …}` reports the laid-out document after layout,
-edits or internal scrolling, coalesced once per engine frame. `contentSize` is its full flow size in points,
-including blocks outside the viewport and excluding the `content` part's padding. It stays independent of a
-fixed viewport height. `scrollOffset` is the editor's vertical scroll offset. Notifications stop once geometry
-settles and when the view is removed.
+`onContentSizeChange={({ contentSize }) => …}` reports the laid-out document's size when it changes, as
+`Input`'s does, at most once per frame. `contentSize` is its full flow size in points, including blocks outside
+the viewport and excluding the `content` part's padding. It stays independent of a fixed viewport height.
+Scrolling does not report a change; use `onScroll` for the offset.
 
 ### Touch selection
 

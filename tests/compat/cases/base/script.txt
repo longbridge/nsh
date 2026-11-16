@@ -4568,12 +4568,12 @@ covers [events] Terminal.onData
 covers [events] Terminal.onResize
 covers [events] Terminal.onTitleChange
 
-# base-rich-editor-geometry
+# base-rich-editor-content-size
 # The extent excludes the viewport's minimum height and follows width.
-tap id:case-base-rich-editor-geometry
-expect Extent: true true true
+tap id:case-base-rich-editor-content-size
+expect Extent: true true
 expect Width: false
-tap id:geometry-narrow
+tap id:content-size-narrow
 expect Width: true
-covers [events] RichEditor.onGeometryChange
+covers [events] RichEditor.onContentSizeChange
 covers [nsh/base] createRichEditor

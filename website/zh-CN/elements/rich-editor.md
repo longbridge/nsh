@@ -64,7 +64,7 @@ mount(App);
 <RichEditor editor={editor} class="max-h-40 px-3 py-2" />
 ```
 
-`onGeometryChange={({ contentSize, scrollOffset }) => …}` 在布局、编辑或内部滚动后报告已排版文档的信息，每个引擎帧合并为一次通知。`contentSize` 是完整内容流的尺寸，单位为点，包含视口外的块，不含 `content` 部件的内边距，且独立于固定的视口高度。`scrollOffset` 是编辑器内部的垂直滚动偏移。几何信息稳定后停止通知，移除视图会取消待发通知。
+`onContentSizeChange={({ contentSize }) => …}` 与 `Input` 的同名事件一样，在已排版文档的尺寸变化时报告，每帧最多一次。`contentSize` 是完整内容流的尺寸，单位为点，包含视口外的块，不含 `content` 部件的内边距，且独立于固定的视口高度。滚动不会触发该事件，滚动偏移请用 `onScroll`。
 
 ### 触摸选区
 

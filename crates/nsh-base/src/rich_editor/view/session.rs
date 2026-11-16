@@ -551,23 +551,21 @@ impl EditorSession {
         self.geometry()?.selection_rect()
     }
 
-    /// Measures the view's placement after an enclosing scroll view or
-    /// layout moved it. A sectioned editor in an outer scroll view calls
-    /// this from its coalesced scroll/layout invalidation: its local block
-    /// frames can stay unchanged while their page coordinates move.
-    /// Local coordinates and editor state stay the same; page queries use
-    /// the new placement after measurement, reported by `GeometryChange`
-    /// if placement changed. Requests end with the mounted view.
-    pub fn refresh_geometry(&self) {
+    /// Measures the view's placement again: an enclosing scroll view or
+    /// layout can move it with no layout of its own. Page queries ask for
+    /// it, so their answers follow such a move once measured (the next
+    /// query, a frame later).
+    pub(crate) fn refresh_geometry(&self) {
         self.request(ViewRequest::Place);
     }
 
     /// The caret's box at `pos` in the root view (page coordinates, as
     /// ProseMirror's `coordsAtPos` gives the window's). The view measures
-    /// where it is as it lays out and on [`Self::refresh_geometry`], so the
-    /// answer follows enclosing scroll/layout changes after measurement.
+    /// where it is as it lays out and after each page query, so the answer
+    /// follows a move of what is around it a frame later.
     pub fn page_coords_at_pos(&self, pos: usize) -> Option<Bounds<Points>> {
         let geometry = self.geometry()?;
+        self.refresh_geometry();
         let shift = geometry.page_shift()?;
         let b = geometry.coords_at_pos(pos)?;
         Some(Bounds::new(
@@ -589,6 +587,7 @@ impl EditorSession {
     /// image.
     pub fn page_node_rect(&self, pos: usize) -> Option<Bounds<Points>> {
         let geometry = self.geometry()?;
+        self.refresh_geometry();
         let shift = geometry.page_shift()?;
         let b = geometry.node_rect(pos)?;
         Some(Bounds::new(
@@ -601,6 +600,7 @@ impl EditorSession {
     /// coordinates, as ProseMirror's `posAtCoords` takes the window's).
     pub fn pos_at_page_coords(&self, page: Point<Points>) -> Option<usize> {
         let geometry = self.geometry()?;
+        self.refresh_geometry();
         let shift = geometry.page_shift()?;
         geometry.pos_at_coords(Point::new(page.x + shift.x, page.y + shift.y))
     }
