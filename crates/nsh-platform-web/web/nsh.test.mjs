@@ -8,8 +8,8 @@ import test from "node:test";
 
 const source = await readFile(new URL("nsh.js", import.meta.url), "utf8");
 // `Player` is not exported; the page only gets it from `createPlayer`.
-const { Player, keyCode, elementTag } = await import(
-  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode };`)}`
+const { Player, keyCode, elementTag, runtimeSheet } = await import(
+  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode, runtimeSheet };`)}`
 );
 
 /** A player on a fake engine; `sent` holds `[name, payload]` of the events it got. */
@@ -3706,4 +3706,123 @@ test("animated values skip a view that left the page until it is back, and reach
   el.isConnected = true;
   player.op_a(["a", 2, "opacity", "0.6"]);
   assert.equal(inline.get("opacity"), "0.6");
+});
+
+test("the runtime's rules are sheets the document adopts, which a strict style-src allows", () => {
+  const savedDocument = globalThis.document, savedSheet = globalThis.CSSStyleSheet;
+  const appended = [];
+  class Sheet { replaceSync(text) { this.text = text; } }
+  globalThis.CSSStyleSheet = Sheet;
+  globalThis.document = { adoptedStyleSheets: [], head: { append: el => appended.push(el) } };
+  try {
+    const own = runtimeSheet("nsh-style", "@keyframes a {}");
+    const classes = runtimeSheet("nsh-classes");
+    assert.deepEqual(document.adoptedStyleSheets, [own, classes]);
+    assert.equal(own.text, "@keyframes a {}");
+    assert.deepEqual(appended, []);
+    // A browser without constructed sheets gets `<style>` elements.
+    globalThis.CSSStyleSheet = undefined;
+    globalThis.document = {
+      createElement: () => ({ sheet: { rules: [] } }),
+      head: { append: el => appended.push(el) },
+    };
+    const style = runtimeSheet("nsh-own", "a {}");
+    assert.equal(appended.length, 1);
+    assert.equal(appended[0].id, "nsh-own");
+    assert.equal(appended[0].textContent, "a {}");
+    assert.equal(style, appended[0].sheet);
+  } finally {
+    globalThis.document = savedDocument;
+    globalThis.CSSStyleSheet = savedSheet;
+  }
+});
+
+test("links and addresses resolve against the site's base where the page names it", () => {
+  const savedDocument = globalThis.document;
+  // A strict `base-uri`: the page's base is the route it was opened at.
+  globalThis.document = { baseURI: "https://a.test/apps/notes/n/42" };
+  try {
+    const { player } = fakePlayer();
+    player.siteBase = null;
+    assert.equal(player.addressBase(), "https://a.test/apps/notes/n/42");
+    player.siteBase = "https://a.test/apps/notes/";
+    assert.equal(player.addressBase(), "https://a.test/apps/notes/");
+    assert.equal(player.linkHref("n/43"), "https://a.test/apps/notes/n/43");
+    assert.equal(player.linkHref("/elsewhere"), "https://a.test/elsewhere");
+    assert.equal(player.linkHref("https://b.test/x"), "https://b.test/x");
+  } finally {
+    globalThis.document = savedDocument;
+  }
+});
+
+/** An element whose DOM state, as a real one's, is not among its own
+ * enumerable keys (`retag` copies those); a `style` attribute set as text
+ * applies nothing, as under a strict `style-src`. */
+function fakeElement(tag, attributes = {}) {
+  const attrs = new Map(Object.entries(attributes));
+  const set = [];
+  const el = {};
+  Object.defineProperties(el, {
+    localName: { value: tag },
+    attributes: { get: () => [...attrs].map(([name, value]) => ({ name, value })) },
+    setAttribute: { value(name, value) { set.push(name); if (name !== "style") attrs.set(name, String(value)); } },
+    getAttribute: { value: (name) => attrs.get(name) ?? null },
+    removeAttribute: { value: (name) => attrs.delete(name) },
+    attributesSet: { value: set },
+    style: { value: { cssText: attributes.style ?? "" } },
+    childNodes: { value: [] },
+    append: { value(...nodes) { this.childNodes.push(...nodes); } },
+    replaceWith: { value() {} },
+  });
+  return el;
+}
+
+test("a view drawn as another element keeps its frame under a strict style-src", () => {
+  const savedDocument = globalThis.document;
+  globalThis.document = { createElement: (tag) => fakeElement(tag) };
+  try {
+    const { player } = fakePlayer();
+    player.views = new Map();
+    const frame = "left: 10px; top: 20px; width: 100px; height: 40px;";
+    const el = fakeElement("div", { class: "nsh-v", style: frame });
+    Object.assign(el, { _id: 6, _kind: "view" });
+    player.views.set(6, el);
+    // A `Link` whose `href` arrives after its frame: drawn as an `a`.
+    const next = player.retag(el, "a");
+    assert.equal(next.localName, "a");
+    assert.equal(next.style.cssText, frame);
+    assert.ok(!next.attributesSet.includes("style"));
+    assert.equal(next.getAttribute("class"), "nsh-v");
+    assert.equal(next._id, 6);
+    assert.equal(player.views.get(6), next);
+  } finally {
+    globalThis.document = savedDocument;
+  }
+});
+
+test("a web view's relative URL is the site's where the page names its base", () => {
+  const savedLocation = globalThis.location;
+  // Opened at one of the app's routes, below the site's base.
+  globalThis.location = { href: "https://a.test/apps/x/a/b", origin: "https://a.test" };
+  try {
+    const { player } = fakePlayer();
+    const frame = fakeElement("iframe");
+    const el = { _id: 8, _frameEl: frame, _events: new Set() };
+    player.view = () => el;
+    const load = (url) => {
+      el._web = null;
+      player.op_web(["web", 8, url, null, null, null, null, true, true]);
+      return frame.src;
+    };
+    player.siteBase = "https://a.test/apps/x/";
+    assert.equal(load("help/index.html"), "https://a.test/apps/x/help/index.html");
+    assert.equal(load("https://b.test/doc"), "https://b.test/doc");
+    // Without a site base the page's own base resolves it, as it does a link's.
+    player.siteBase = null;
+    assert.equal(load("help/index.html"), "help/index.html");
+    assert.equal(el._webUrl, "help/index.html");
+  } finally {
+    if (savedLocation === undefined) delete globalThis.location;
+    else globalThis.location = savedLocation;
+  }
 });

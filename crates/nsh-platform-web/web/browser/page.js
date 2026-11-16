@@ -4,10 +4,11 @@
 /** Elements the heads made, so that what no head sets any more is removed. */
 const MARK = "data-nsh-head";
 
-/** A URL the app gives: a path (`"/notes/q3"`) starts at the site's base, the
- * directory the site was published to, as a linked `NavStack`'s paths do. */
-function siteURL(url) {
-  const base = new URL(".", document.baseURI);
+/** A URL the app gives: a path (`"/notes/q3"`) starts at the site's base
+ * (`addressBase`: `player.addressBase()`), the directory the site was
+ * published to, as a linked `NavStack`'s paths do. */
+function siteURL(url, addressBase) {
+  const base = new URL(".", addressBase);
   return /^\/(?!\/)/.test(url) ? new URL(url.slice(1), base).href : new URL(url, base).href;
 }
 
@@ -51,7 +52,7 @@ export function createWebPage(reactive, player) {
       d.append(el);
     };
     if (head.description != null) add("meta", { name: "description", content: head.description });
-    if (head.canonical != null) add("link", { rel: "canonical", href: siteURL(head.canonical) });
+    if (head.canonical != null) add("link", { rel: "canonical", href: siteURL(head.canonical, player.addressBase?.() ?? document.baseURI) });
     // Link previews read Open Graph: the title and description unless the
     // app's own meta say otherwise.
     if (head.title != null && !meta.has("property:og:title")) add("meta", { property: "og:title", content: head.title });

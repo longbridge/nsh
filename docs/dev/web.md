@@ -187,16 +187,24 @@ build to the same file) and takes `nsh.js` from the crate.
   `host:*`), as the browser follows redirects before NSH could check them. Relative URLs resolve against the page
   (`document.baseURI`, `nsh_set_base_url`) as it starts: the page's script resolves its `app` URLs (and the head's
   requests are keyed the same way), the `Player` its `assets`, `data` and `assetBase` and the app's relative
-  `asset()` URLs against `player.baseURL`, and `browser/runtime.js` the entry, the chunks and the app realm's
-  `<base>`, so nothing loads from the directory a `history.pushState` moved the address to. `nsh.json` `web.base`
+  `asset()` URLs against `player.baseURL` (`createPlayer`'s `baseURL`, the site's base, else `document.baseURI`),
+  links, web views' URLs and addresses against `player.addressBase()`, and `browser/runtime.js` the entry, the chunks and the realm's
+  `import.meta.url`, so nothing
+  loads from the directory a `history.pushState` moved the address to. `nsh.json` `web.base`
   (`web::page_base`: a path from the root
   in the form browsers send it, unreserved characters and percent-escapes without dot or empty segments, a `/`
-  added at its end, which `start_at` matches requests against as it is) puts a `<base href>` first in the head, so the page loads its files at any of the app's paths
-  (`/sports/football`), which `SiteServer::start_at` (`--run`) serves under it; the dev page has `<base href="/">`
+  added at its end, which `start_at` matches requests against as it is) prefixes every file's URL (`Site::url`) and
+  is the app's `base` (the player's `baseURL`); the page has no `<base href>`, which a strict `base-uri` refuses, and
+  loads its files at any of the app's paths (`/sports/football`), which `SiteServer::start_at` (`--run`) serves
+  under it; the dev page has `<base href="/">`
   (the dev server serves its files at the root). `nsh.json` `web.history` reaches `createPlayer`'s `history` on
   both pages (the packaged page's `app.history`, the dev page's `HISTORY`, which `with_page_host` fills in); without
   it the player's default (`window.top === window`) holds. The app ships as minified ES modules
-  (`app.<digest>.js` and `<chunk>.<digest>.js`). An import map resolves original chunk URLs to hashed files;
+  (`app.<digest>.js` and `<chunk>.<digest>.js`), linked to one another and to the native modules' facade files
+  (`web::publish_modules`), so the realm needs no import map (an inline script) unless the app imports a native
+  module whole; the page's styles are a file and the runtime's are constructed sheets, for a strict `style-src`;
+  the runtime's own images (`image_bytes`, `svgInColor`, `Clipboard.readImage`) are `blob:` / `data:` URLs, so the
+  policy `nsh package` prints adds `img-src 'self' blob: data:`;
   transitive entry fonts load before startup and dynamic imports prepare the requested chunk's font dependencies.
   The browser loads static dependencies, module cycles and dynamic chunks itself. No bytecode or hardening
   bytecode ships in a browser package. An app with a Rust crate of
@@ -673,7 +681,9 @@ follows itself to check each one against restricted capabilities (`access.rs`).
 
 Relative request URLs (`fetch("/api")`, `new Request("x")`) resolve against the page's `document.baseURI` as the
 player started (`player.baseURL`), which `nsh.js` hands over once with `nsh_set_base_url`. The app's `fetch`, the
-browser's own run in the app realm, resolves them against that realm's `<base>`, which is `player.baseURL` too; a
+browser's own run in the app realm, resolves them against `player.baseURL` too: the realm's `<base>`, or where the
+page names the site's base (`baseURL`, a published app's page, which has no `<base>` for a strict `base-uri` to
+refuse) the realm's `fetch` itself (`installFetch`'s `base`); a
 `fetch` in the page's own realm (the host module's) resolves against the page's address when it runs.
 Native hosts have no base and keep rejecting relative URLs. `new URL("/x")` without a base throws,
 as in browsers. Relative `<Image>` URLs resolve against `player.baseURL` too (`asset()`), so they load after the

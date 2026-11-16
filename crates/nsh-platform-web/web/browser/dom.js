@@ -4,7 +4,7 @@ const PLATFORM_PROPS = new Set(["ios", "android", "macos", "desktop", "web"]);
 
 export function createDom(invoke, values, reactive, live, wake) {
   const handlers = new WeakMap(), owners = new WeakMap(), heldProps = new WeakMap();
-  let touches, measure, hot, platform;
+  let touches, measure, hot, platform, base;
   const prototype = Object.create(null);
   for (const name of ["focus", "blur", "scrollTo", "zoomTo", "scrollToIndex", "scrollToEnd", "reveal", "reload", "goBack", "goForward", "stopLoading", "injectJavaScript", "postMessage", "insertText", "sendInput", "load", "seek"]) {
     prototype[name] = function (argument) { const id = values.nodeIds.get(this); if (id === undefined) throw new TypeError("nsh: not a node"); return call(314, [id, name, argument]); };
@@ -175,6 +175,9 @@ export function createDom(invoke, values, reactive, live, wake) {
     setTouches(value) { touches = value; },
     setPlatform(value) { platform = value; },
     setHot(value) { hot = value; },
+    // What `import.meta.url` resolves against: the page's base as the
+    // player started (`player.baseURL`), not the realm's document's.
+    setBase(value) { base = value; },
     rootProp: (name, value) => prop(root, name, value),
     listen(node, name, value) {
       let events = handlers.get(node);
@@ -184,7 +187,7 @@ export function createDom(invoke, values, reactive, live, wake) {
     },
     rt: { element: tag => call(300, [tag]), text: value => call(301, [String(value)]),
       prop, bindProp, insert, append, component, cond, each, merge, spread,
-      metaUrl: path => new URL(path, document.baseURI).href,
+      metaUrl: path => new URL(path, base ?? document.baseURI).href,
       ref,
     },
     mount(App, props) {
