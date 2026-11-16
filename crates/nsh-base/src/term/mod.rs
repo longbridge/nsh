@@ -340,10 +340,7 @@ const RESIZE_SETTLE: Duration = Duration::from_millis(80);
 
 /// The CSS `font` shorthand `measure_text` takes.
 fn font_css(family: &str, size: Points) -> String {
-    match family {
-        "monospace" | "ui-monospace" => format!("{}px {family}", size.0),
-        _ => format!("{}px \"{}\"", size.0, family.replace('"', "")),
-    }
+    format!("{}px {}", size.0, nsh_core::css_font_families(family))
 }
 
 fn font_family(family: Option<SharedString>) -> SharedString {

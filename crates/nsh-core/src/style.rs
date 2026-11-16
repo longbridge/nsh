@@ -203,6 +203,39 @@ pub fn font_families(value: &str) -> impl Iterator<Item = FamilyName<'_>> {
     })
 }
 
+/// Formats a `fontFamily` value as a CSS family list: generic keywords stay
+/// bare and named families are quoted (`"SF Mono", "Menlo", monospace`), so a
+/// list embedded in a CSS `font` shorthand preserves every fallback family and
+/// any commas inside quoted names (`'ACME, Inc'`).
+pub fn css_font_families(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    for family in font_families(value) {
+        if !out.is_empty() {
+            out.push_str(", ");
+        }
+        match family {
+            FamilyName::System => out.push_str("system-ui"),
+            FamilyName::Serif => out.push_str("serif"),
+            FamilyName::Monospace => out.push_str("monospace"),
+            FamilyName::Rounded => out.push_str("ui-rounded"),
+            FamilyName::Named(name) => {
+                out.push('"');
+                for c in name.chars().filter(|c| !c.is_control()) {
+                    if c == '"' || c == '\\' {
+                        out.push('\\');
+                    }
+                    out.push(c);
+                }
+                out.push('"');
+            }
+        }
+    }
+    if out.is_empty() {
+        out.push_str("system-ui");
+    }
+    out
+}
+
 /// Lines drawn through or under text (`textDecorationLine`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct TextDecoration {
@@ -4005,6 +4038,14 @@ mod tests {
         assert_eq!(
             font_families("Inter, 'Noto, Sans").collect::<Vec<_>>(),
             [FamilyName::Named("Inter"), FamilyName::Named("Noto, Sans")]
+        );
+        assert_eq!(
+            super::css_font_families("SF Mono, Menlo, PingFang SC, monospace"),
+            "\"SF Mono\", \"Menlo\", \"PingFang SC\", monospace"
+        );
+        assert_eq!(
+            super::css_font_families("'ACME, Inc', serif"),
+            "\"ACME, Inc\", serif"
         );
     }
 

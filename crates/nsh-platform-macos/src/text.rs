@@ -3097,6 +3097,40 @@ mod tests {
                     .is_none()
             );
         }
+
+        // Canvas / measure_text parses CSS font shorthands with missing primary
+        // families ("SF Mono, Menlo, PingFang SC") into the exact same resolved
+        // primary face and cascade list as drawn text rows.
+        let engine = super::CoreTextEngine::default();
+        let stack = "No Such Family, SF Mono, Menlo, PingFang SC";
+        let css = format!("13px {}", nsh_core::css_font_families(stack));
+        let canvas_font = nsh_core::canvas::CanvasFont::parse(&css).expect("valid CSS font");
+        let sample = "Mixed 中英文 test 测试 editor 光标 123456";
+        let mut drawn = AttributedText {
+            no_wrap: true,
+            max_lines: 1,
+            ..Default::default()
+        };
+        drawn.push(
+            sample,
+            ResolvedTextStyle {
+                font_size: Points(13.0),
+                font_family: Some(nsh_core::FontFamily::new(stack)),
+                ..ResolvedTextStyle::default()
+            },
+        );
+        let rendered = engine.measure(&engine.prepare(&drawn), None).width.0;
+        let summed: f32 = sample
+            .chars()
+            .map(|c| {
+                nsh_core::canvas::measure_line(&engine, &canvas_font, &c.to_string().repeat(64)).0
+                    / 64.0
+            })
+            .sum();
+        assert!(
+            (summed - rendered).abs() < 0.5,
+            "summed={summed:.2}, rendered={rendered:.2}"
+        );
     }
 
     /// Showing words of a long paragraph or recoloring them draws again
