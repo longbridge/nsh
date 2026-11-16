@@ -28,11 +28,13 @@
 //!
 //! Words are runs of letters, digits, `_` and combining marks, runs of
 //! spaces, or single other characters: punctuation, an emoji, each CJK
-//! ideograph or kana (scripts written without spaces between words). The
-//! punctuation of a hostname, URL, path or id between two words joins them
-//! into one, as browsers keep a link whole: `demo-app.pages.dev`,
-//! `https://x.y/a-b?c=1`, `~/a/b-c.md`, `v0.5.1` are each a word, a sentence's
-//! last word (`foo.`) is still the word alone.
+//! ideograph or kana (scripts written without spaces between words). A long
+//! press on a touch screen selects a token, as the phones' own text views keep
+//! a link or an address whole: the punctuation of a hostname, URL, path or id
+//! between two words joins them into one (`demo-app.pages.dev`,
+//! `https://x.y/a-b?c=1`, `~/a/b-c.md`, `v0.5.1`), while a sentence's last word
+//! (`foo.`) is still the word alone. A double click selects the word alone, as
+//! desktops and browsers do.
 
 use std::ops::Range;
 
@@ -127,8 +129,11 @@ pub enum Granularity {
     /// Characters (a press and drag).
     #[default]
     Character,
-    /// Words (a double click, a long press, then drags by words).
+    /// Words (a double click, then drags by words).
     Word,
+    /// Tokens: words joined by the punctuation of a hostname, URL, path or
+    /// id between them (a long press on a touch screen).
+    Token,
     /// Paragraphs: a whole text (a triple click).
     Paragraph,
 }
@@ -216,13 +221,14 @@ impl SelectionModel {
         self.bounds() != before
     }
 
-    /// Selects the word at `point` (a long press on a touch screen).
+    /// Selects the token at `point` (a long press on a touch screen): a
+    /// hostname, URL, path or id whole, or else the word.
     pub fn select_word_at(&mut self, texts: &impl SelectionTexts, point: Point<Points>) -> bool {
         let before = self.bounds();
         let Some(pos) = hit(texts, point) else {
             return self.clear();
         };
-        self.select_unit(texts, pos, Granularity::Word);
+        self.select_unit(texts, pos, Granularity::Token);
         self.remember(texts);
         self.bounds() != before
     }
@@ -677,7 +683,7 @@ fn unit_at(
     let content = texts.content(pos.text);
     match granularity {
         Granularity::Character => (pos, pos),
-        Granularity::Word => {
+        Granularity::Word | Granularity::Token => {
             // The word is found in the line the text is part of (it, the
             // texts it continues and those that continue it, joined as a
             // copy joins them): a word a wrap cut, or a token whose parts
@@ -695,7 +701,7 @@ fn unit_at(
                 let before = content.chars().next_back().map_or(0, char::len_utf16);
                 at -= before as u32;
             }
-            let range = word_range(&line, at);
+            let range = word_range(&line, at, granularity == Granularity::Token);
             if range.is_empty() {
                 return (pos, pos);
             }
@@ -797,8 +803,9 @@ fn is_combining_mark(c: char) -> bool {
 
 /// The UTF-16 range of the word at UTF-16 offset `offset` of `text`: the
 /// word of the character after the offset, or of the one before at a line's
-/// or the text's end. Empty on an empty line or text.
-fn word_range(text: &str, offset: u32) -> Range<u32> {
+/// or the text's end; with `tokens`, the token (`token_at`) there, if any.
+/// Empty on an empty line or text.
+fn word_range(text: &str, offset: u32, tokens: bool) -> Range<u32> {
     // UTF-16 starts of each character, with the characters.
     let chars: Vec<(u32, char)> = text
         .chars()
@@ -822,7 +829,7 @@ fn word_range(text: &str, offset: u32) -> Range<u32> {
     } else {
         after
     };
-    if let Some((first, last)) = token_at(&chars, index) {
+    if let Some((first, last)) = tokens.then(|| token_at(&chars, index)).flatten() {
         let end = chars[last].0 + chars[last].1.len_utf16() as u32;
         return chars[first].0..end;
     }
@@ -841,13 +848,16 @@ fn word_range(text: &str, offset: u32) -> Range<u32> {
 }
 
 /// Punctuation that joins the words on both sides of it into one: a
-/// hostname's dots and hyphens, a path's slashes, a URL's `://`, `?`, `=`,
-/// `&`, `#` and `%`, an address's `@`, a version's dots, `a+b`.
-fn is_joiner(c: char) -> bool {
-    matches!(
-        c,
-        '-' | '.' | '/' | ':' | '@' | '~' | '%' | '?' | '=' | '&' | '#' | '+'
-    )
+/// hostname's dots and hyphens, a path's slashes, a URL's `://` and `%`, an
+/// address's `@`, a version's dots, a port's or a time's `:`; with `query`,
+/// also a URL query's `?`, `=`, `&` and fragment's `#`.
+fn is_joiner(c: char, query: bool) -> bool {
+    matches!(c, '-' | '.' | '/' | ':' | '@' | '~' | '%') || (query && is_query(c))
+}
+
+/// A URL query's and fragment's punctuation.
+fn is_query(c: char) -> bool {
+    matches!(c, '?' | '=' | '&' | '#')
 }
 
 /// Joiners a token may start with: a path's root or home (`/etc`, `~/a`),
@@ -860,11 +870,21 @@ fn is_leading(c: char) -> bool {
 /// The token around character `index` of `chars`, as indexes of its first
 /// and last characters: words joined by runs of joiners (`is_joiner`) each
 /// between two words, after a run of leading joiners (`is_leading`) and
-/// before a directory's last `/`. `None` when the character is in no token
-/// longer than a word, or is no word's nor a joiner's.
+/// before a directory's last `/`. A query's punctuation joins only after a
+/// `/` (a URL's path): `a=b` or `really?yes` are words apart. `None` when the
+/// character is a joiner in no token, or is no word's nor a joiner's.
 fn token_at(chars: &[(u32, char)], index: usize) -> Option<(usize, usize)> {
+    let (first, last) = grow_token(chars, index, true)?;
+    match (first..=last).find(|&i| is_query(chars[i].1)) {
+        Some(q) if !(first..q).any(|i| chars[i].1 == '/') => grow_token(chars, index, false),
+        _ => Some((first, last)),
+    }
+}
+
+/// `token_at`'s token, with the query's punctuation joining (`query`) or not.
+fn grow_token(chars: &[(u32, char)], index: usize, query: bool) -> Option<(usize, usize)> {
     let word = |i: usize| CharKind::of(chars[i].1) == CharKind::Word;
-    let joiner = |i: usize| is_joiner(chars[i].1);
+    let joiner = |i: usize| is_joiner(chars[i].1, query);
     let n = chars.len();
     // A word of the token to grow from.
     let core = if word(index) {
@@ -1335,14 +1355,14 @@ mod tests {
         assert_eq!(snap("a😀b", 3), 3);
         assert_eq!(snap("a😀b", 9), 4);
         assert_eq!(byte_offset("a😀b", 3), 5);
-        assert_eq!(word_range("a😀b", 2), 1..3);
+        assert_eq!(word_range("a😀b", 2, false), 1..3);
     }
 
     #[test]
     fn words_in_latin_and_cjk() {
         let text = "中文abc 测试, café_1  x\n\nend";
         let word = |offset| {
-            let range = word_range(text, offset);
+            let range = word_range(text, offset, false);
             let (from, to) = (byte_offset(text, range.start), byte_offset(text, range.end));
             text[from..to].to_string()
         };
@@ -1359,7 +1379,7 @@ mod tests {
         assert_eq!(word(19), "x");
         assert_eq!(word(20), "");
         assert_eq!(word(24), "end");
-        assert_eq!(word_range("", 0), 0..0);
+        assert_eq!(word_range("", 0, false), 0..0);
     }
 
     /// The word `word_range` finds at each `at` of `text` (the first
@@ -1367,7 +1387,7 @@ mod tests {
     fn word_at(text: &str, at: &str, skip: usize) -> String {
         let byte = text.find(at).expect("in the text") + at.char_indices().nth(skip).unwrap().0;
         let offset = utf16_len(&text[..byte]);
-        let range = word_range(text, offset);
+        let range = word_range(text, offset, true);
         text[byte_offset(text, range.start)..byte_offset(text, range.end)].to_string()
     }
 
@@ -1428,12 +1448,40 @@ mod tests {
     }
 
     #[test]
-    fn a_long_press_selects_a_hostname_whole() {
+    fn a_long_press_selects_a_hostname_whole_and_a_double_click_its_word() {
         let texts = Fake::new(&[("Open demo-app.pages.dev now.", (0.0, 0.0, 300.0, 20.0))]);
         let mut model = SelectionModel::new();
         // On `demo` (characters 5 to 8, 8pt each).
         assert!(model.select_word_at(&texts, at(44.0, 10.0)));
         assert_eq!(model.text(&texts), "demo-app.pages.dev");
+        // A double click (desktops), as the platforms' own text views do.
+        model.press(&texts, at(44.0, 10.0), 2, false);
+        assert_eq!(model.text(&texts), "demo");
+        model.drag(&texts, at(124.0, 10.0));
+        assert_eq!(model.text(&texts), "demo-app.pages");
+    }
+
+    #[test]
+    fn a_query_joins_only_in_a_url_and_operators_never() {
+        assert_eq!(
+            word_at("go to https://x.y/a?b=1&c=2#d now", "c=2", 0),
+            "https://x.y/a?b=1&c=2#d"
+        );
+        assert_eq!(word_at("go to x.y/a?b=1 now", "b=1", 2), "x.y/a?b=1");
+        assert_eq!(word_at("set a=b first", "a=b", 0), "a");
+        assert_eq!(word_at("set a=b first", "a=b", 2), "b");
+        assert_eq!(word_at("then x+y is", "x+y", 0), "x");
+        assert_eq!(word_at("really?yes", "yes", 0), "yes");
+        assert_eq!(word_at("issue#12 here", "issue", 0), "issue");
+        // A time, a port, a key and a missing space after a period are
+        // written as tokens are: they stay one.
+        assert_eq!(word_at("at 12:30 today", "30", 0), "12:30");
+        assert_eq!(
+            word_at("on localhost:8080 now", "8080", 0),
+            "localhost:8080"
+        );
+        assert_eq!(word_at("key:value pairs", "key", 0), "key:value");
+        assert_eq!(word_at("the end.Next one", "end", 0), "end.Next");
     }
 
     #[test]
@@ -1447,11 +1495,14 @@ mod tests {
             vec![false, true],
         );
         let mut model = SelectionModel::new();
-        model.press(&texts, at(44.0, 5.0), 2, false);
+        model.select_word_at(&texts, at(44.0, 5.0));
         assert_eq!(model.text(&texts), "demo-app.pages.dev");
         assert_eq!(model.bounds(), Some((pos(0, 5), pos(1, 13))));
-        model.press(&texts, at(4.0, 25.0), 2, false);
+        model.select_word_at(&texts, at(4.0, 25.0));
         assert_eq!(model.text(&texts), "demo-app.pages.dev");
+        // A double click selects the word alone, wrapped or not.
+        model.press(&texts, at(44.0, 5.0), 2, false);
+        assert_eq!(model.text(&texts), "demo");
     }
 
     #[test]
