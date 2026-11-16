@@ -14,6 +14,8 @@ mod compile;
 mod hot;
 mod jsx;
 #[cfg(feature = "bundle")]
+mod link;
+#[cfg(feature = "bundle")]
 mod minify;
 #[cfg(feature = "bundle")]
 mod natives;
@@ -27,6 +29,8 @@ mod types;
 
 #[cfg(feature = "bundle")]
 pub use bundle::*;
+#[cfg(feature = "bundle")]
+pub use link::rewrite_imports;
 #[cfg(feature = "bundle")]
 pub use minify::minify_module;
 #[cfg(feature = "bundle")]

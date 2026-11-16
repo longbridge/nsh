@@ -8,8 +8,8 @@ import test from "node:test";
 
 const source = await readFile(new URL("nsh.js", import.meta.url), "utf8");
 // `Player` is not exported; the page only gets it from `createPlayer`.
-const { Player, keyCode, elementTag } = await import(
-  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode };`)}`
+const { Player, keyCode, elementTag, runtimeSheet } = await import(
+  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode, runtimeSheet };`)}`
 );
 
 /** A player on a fake engine; `sent` holds `[name, payload]` of the events it got. */
@@ -3706,4 +3706,51 @@ test("animated values skip a view that left the page until it is back, and reach
   el.isConnected = true;
   player.op_a(["a", 2, "opacity", "0.6"]);
   assert.equal(inline.get("opacity"), "0.6");
+});
+
+test("the runtime's rules are sheets the document adopts, which a strict style-src allows", () => {
+  const savedDocument = globalThis.document, savedSheet = globalThis.CSSStyleSheet;
+  const appended = [];
+  class Sheet { replaceSync(text) { this.text = text; } }
+  globalThis.CSSStyleSheet = Sheet;
+  globalThis.document = { adoptedStyleSheets: [], head: { append: el => appended.push(el) } };
+  try {
+    const own = runtimeSheet("nsh-style", "@keyframes a {}");
+    const classes = runtimeSheet("nsh-classes");
+    assert.deepEqual(document.adoptedStyleSheets, [own, classes]);
+    assert.equal(own.text, "@keyframes a {}");
+    assert.deepEqual(appended, []);
+    // A browser without constructed sheets gets `<style>` elements.
+    globalThis.CSSStyleSheet = undefined;
+    globalThis.document = {
+      createElement: () => ({ sheet: { rules: [] } }),
+      head: { append: el => appended.push(el) },
+    };
+    const style = runtimeSheet("nsh-own", "a {}");
+    assert.equal(appended.length, 1);
+    assert.equal(appended[0].id, "nsh-own");
+    assert.equal(appended[0].textContent, "a {}");
+    assert.equal(style, appended[0].sheet);
+  } finally {
+    globalThis.document = savedDocument;
+    globalThis.CSSStyleSheet = savedSheet;
+  }
+});
+
+test("links and addresses resolve against the site's base where the page names it", () => {
+  const savedDocument = globalThis.document;
+  // A strict `base-uri`: the page's base is the route it was opened at.
+  globalThis.document = { baseURI: "https://a.test/apps/notes/n/42" };
+  try {
+    const { player } = fakePlayer();
+    player.siteBase = null;
+    assert.equal(player.addressBase(), "https://a.test/apps/notes/n/42");
+    player.siteBase = "https://a.test/apps/notes/";
+    assert.equal(player.addressBase(), "https://a.test/apps/notes/");
+    assert.equal(player.linkHref("n/43"), "https://a.test/apps/notes/n/43");
+    assert.equal(player.linkHref("/elsewhere"), "https://a.test/elsewhere");
+    assert.equal(player.linkHref("https://b.test/x"), "https://b.test/x");
+  } finally {
+    globalThis.document = savedDocument;
+  }
 });

@@ -8,11 +8,14 @@
 // before the app starts, so no call comes earlier. Its pages and dialogs
 // are browser history entries as nsh.json `web.history` says.
 //
-// What it starts is in the page (`#nsh-app`, JSON). Every URL of the app
-// is resolved once against the page's base (its `<base href>`, nsh.json
-// `web.base`, else the page's own URL): the app may move the address to
-// another directory before a chunk's fonts load. The head's script
-// (`prefetch.js`) keyed its requests the same way.
+// What it starts is in the page (`#nsh-app`, JSON). With nsh.json
+// `web.base` its URLs are absolute paths (or the `--asset-url`'s) and the
+// site's base is `app.base`, the player's `baseURL`: the page has no
+// `<base href>`, which a strict `base-uri` refuses, and is served at every
+// route of the app. Without it the URLs are relative to the page. Each is
+// resolved once: the app may move the address to another directory before
+// a chunk's fonts load. The head's script (`prefetch.js`) keyed its
+// requests the same way.
 const app = JSON.parse(document.getElementById("nsh-app").textContent);
 const url = (path) => new URL(path, document.baseURI).href;
 for (const key of ["wasm", "glue", "code", "host"]) if (app[key]) app[key] = url(app[key]);
@@ -69,6 +72,8 @@ try {
       sides: app.sides,
       // nsh.json `web.history`; without it the player's default.
       history: app.history,
+      // nsh.json `web.base`: what the app's relative URLs resolve against.
+      baseURL: app.base,
       readAsset: (uri) => fonts.get(path(uri)) ?? null,
       // The chunk's fonts and the side modules of the runtime it needs.
       prepareChunk: (id) => Promise.all([
@@ -103,7 +108,7 @@ try {
   const served = document.getElementById("nsh-params");
   const params = served ? JSON.parse(served.textContent) : undefined;
   if (app.rust) player.runRust();
-  else await player.runModule(app.code, { capabilities: app.capabilities ?? "", appId: app.id ?? "", chunks: app.chunks, nativeExports: app.nativeExports, importMap: app.importMap, params });
+  else await player.runModule(app.code, { capabilities: app.capabilities ?? "", appId: app.id ?? "", chunks: app.chunks, nativeExports: app.nativeExports, linked: app.linked, params });
   player.preloadSides(app.sides);
 } catch (err) {
   fail("This app could not be loaded.", String(err?.message ?? err));

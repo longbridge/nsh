@@ -3369,7 +3369,7 @@
 	]);
 	function createDom(invoke, values, reactive, live, wake) {
 		const handlers = /* @__PURE__ */ new WeakMap(), owners = /* @__PURE__ */ new WeakMap(), heldProps = /* @__PURE__ */ new WeakMap();
-		let touches, measure, hot, platform;
+		let touches, measure, hot, platform, base;
 		const prototype = Object.create(null);
 		for (const name of [
 			"focus",
@@ -3655,6 +3655,9 @@
 			setHot(value) {
 				hot = value;
 			},
+			setBase(value) {
+				base = value;
+			},
 			rootProp: (name, value) => prop(root, name, value),
 			listen(node, name, value) {
 				let events = handlers.get(node);
@@ -3679,7 +3682,7 @@
 				each,
 				merge,
 				spread,
-				metaUrl: (path) => new URL(path, document.baseURI).href,
+				metaUrl: (path) => new URL(path, base ?? document.baseURI).href,
 				ref
 			},
 			mount(App, props) {
@@ -5806,7 +5809,7 @@
 	* always, HTTP when `network` (a test session). `call` is the host's
 	* operation call; callbacks end with `wake` (a pump).
 	*/
-	function installFetch(target, call, { active = () => true, wake = () => {}, network = false } = {}) {
+	function installFetch(target, call, { active = () => true, wake = () => {}, network = false, base = null } = {}) {
 		const { Request, Response, ReadableStream, TypeError: RealmTypeError } = target;
 		const nativeFetch = target.fetch;
 		const failure = (message) => new RealmTypeError(`Network request failed: ${message}`);
@@ -5911,6 +5914,9 @@
 			}
 		};
 		async function fetch(input, init) {
+			if (base && (typeof input === "string" || input instanceof URL)) try {
+				input = new URL(String(input), base).href;
+			} catch {}
 			const protocol = schemeOf(input);
 			if (protocol !== "asset:" && !(network && (protocol === "http:" || protocol === "https:"))) return nativeFetch.call(target, input, init);
 			const request = new Request(input, init);
@@ -6251,8 +6257,8 @@
 	const NOT_IN_AN_ADDRESS = /[\p{White_Space}\p{Cc}]/u;
 	/**
 	* Makes `urlScheme`'s `setUrl` (`nsh`'s `UrlScheme`) the page's. `page`:
-	* `base()`, what `history.replaceState` resolves against (the page's
-	* `document.baseURI`); `origin`, the page's. `url()` reads the core's
+	* `base()`, what the app's relative addresses resolve against (the site's
+	* base: `player.addressBase`); `origin`, the page's. `url()` reads the core's
 	* address as it is, which has the page's from before the app's code runs.
 	* The options (`{ history }`) go to the core as they are, which checks them.
 	*/
