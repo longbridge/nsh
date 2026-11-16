@@ -45250,42 +45250,99 @@ mod positional_regressions {
 }
 
 #[test]
-fn padding_on_a_span_is_warned_once() {
+fn span_padding_widens_its_box_in_the_line() {
+    // <Text>a <Text bg paddingHorizontal=4>b</Text> c</Text>
     let mut c = core();
-    let span = |id, padding: f32| {
-        [
-            Op::Create { id, tag: Tag::Text },
-            style_op(id, &[("paddingLeft", StyleValue::Number(padding))]),
-        ]
+    let span_style = |padding: f32| {
+        style_op(
+            4,
+            &[
+                ("backgroundColor", StyleValue::Str("#ff0000")),
+                ("paddingHorizontal", StyleValue::Number(padding)),
+            ],
+        )
     };
-    let mut ops = vec![Op::Create {
-        id: 2,
-        tag: Tag::Text,
-    }];
-    ops.extend(span(3, 0.0));
-    ops.extend([
-        Op::Insert {
-            parent: 2,
-            child: 3,
-            before: None,
-        },
-        Op::Insert {
-            parent: ROOT_ID,
-            child: 2,
-            before: None,
-        },
-    ]);
-    apply(&mut c, ops);
-    let _ = c.commit();
-    assert!(!c.span_padding_warned);
-    // Styled before it is inserted into its text, then made a span.
-    let mut ops: Vec<Op> = span(4, 4.0).into();
-    ops.push(Op::Insert {
-        parent: 2,
-        child: 4,
-        before: None,
-    });
-    apply(&mut c, ops);
-    let _ = c.commit();
-    assert!(c.span_padding_warned);
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 3,
+                text: "a ".into(),
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            span_style(4.0),
+            Op::CreateText {
+                id: 5,
+                text: "b".into(),
+            },
+            Op::CreateText {
+                id: 6,
+                text: " c".into(),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 5,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 6,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let text = text_item(&batch).unwrap();
+    // An empty attachment at each end of the span takes its padding in the
+    // line, in the span's background.
+    assert_eq!(text.text, "a \u{FFFC}b\u{FFFC} c");
+    let pads: Vec<_> = text
+        .attachments
+        .iter()
+        .map(|a| (a.index, a.width, a.height))
+        .collect();
+    assert_eq!(
+        pads,
+        [(2, Points(4.0), Points(0.0)), (4, Points(4.0), Points(0.0))]
+    );
+    for i in 2..5 {
+        assert_eq!(text.background_at(i).map(|b| b.node), Some(4));
+    }
+    assert_eq!(text.background_at(5), None);
+    // Copies and reads without them.
+    assert_eq!(text.copied_text(0..text.len_utf16()), "a b c");
+    assert_eq!(text.visible_text(), "a b c");
+
+    // Another padding lays the text out again.
+    apply(&mut c, vec![span_style(6.0)]);
+    let text = text_item(&c.commit().unwrap()).unwrap();
+    assert_eq!(text.attachments[0].width, Points(6.0));
+
+    // No padding, no attachments.
+    apply(&mut c, vec![span_style(0.0)]);
+    let text = text_item(&c.commit().unwrap()).unwrap();
+    assert_eq!(text.text, "a b c");
+    assert!(text.attachments.is_empty());
 }

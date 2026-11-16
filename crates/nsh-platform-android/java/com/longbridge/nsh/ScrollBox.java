@@ -401,6 +401,18 @@ final class ScrollBox extends FrameLayout implements Node {
         }
 
         @Override
+        public boolean dispatchTouchEvent(MotionEvent e) {
+            if (!claim(this, e)) return super.dispatchTouchEvent(e);
+            // Handed over: the platform scroll view would start its own drag on this move and ask the
+            // views around not to intercept again, so it ends its touch here.
+            MotionEvent cancel = MotionEvent.obtain(e);
+            cancel.setAction(MotionEvent.ACTION_CANCEL);
+            super.dispatchTouchEvent(cancel);
+            cancel.recycle();
+            return false;
+        }
+
+        @Override
         public boolean onInterceptTouchEvent(MotionEvent e) {
             return enabled && !jsBlocked && !gateBlocked && super.onInterceptTouchEvent(e);
         }
@@ -439,6 +451,18 @@ final class ScrollBox extends FrameLayout implements Node {
         }
 
         @Override
+        public boolean dispatchTouchEvent(MotionEvent e) {
+            if (!claim(this, e)) return super.dispatchTouchEvent(e);
+            // Handed over: the platform scroll view would start its own drag on this move and ask the
+            // views around not to intercept again, so it ends its touch here.
+            MotionEvent cancel = MotionEvent.obtain(e);
+            cancel.setAction(MotionEvent.ACTION_CANCEL);
+            super.dispatchTouchEvent(cancel);
+            cancel.recycle();
+            return false;
+        }
+
+        @Override
         public boolean onInterceptTouchEvent(MotionEvent e) {
             return enabled && !jsBlocked && !gateBlocked && super.onInterceptTouchEvent(e);
         }
@@ -469,6 +493,83 @@ final class ScrollBox extends FrameLayout implements Node {
             super.draw(canvas);
             frames++;
         }
+    }
+
+    /** Where the touch that {@link #claim} is deciding went down; deciding while true. */
+    private float claimX, claimY;
+    private boolean claiming, yielded, owning;
+    /** Owning the drag: where the last move was, to tell when it reaches an edge. */
+    private float lastX, lastY;
+
+    /**
+     * A scroll view around this one along the same axis (a pager) intercepts the move that passes the
+     * touch slop before this view sees it. From the down, while this view has content to move, it asks
+     * the views around not to intercept; the first move past the slop decides: along the axis towards
+     * content this view keeps the drag, otherwise the views around get the next move (as ZScroll does).
+     * Returns whether this view gave the touch away: it no longer sees the touch.
+     */
+    private boolean claim(View scroller, MotionEvent e) {
+        ViewParent parent = scroller.getParent();
+        if (parent == null) return false;
+        if (yielded) {
+            int a = e.getActionMasked();
+            if (a == MotionEvent.ACTION_DOWN) yielded = false;
+            else {
+                if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) yielded = false;
+                return true;
+            }
+        }
+        switch (e.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                claimX = e.getX();
+                claimY = e.getY();
+                owning = false;
+                claiming = enabled && !jsBlocked && !gateBlocked && (horizontal
+                        ? scroller.canScrollHorizontally(1) || scroller.canScrollHorizontally(-1)
+                        : scroller.canScrollVertically(1) || scroller.canScrollVertically(-1));
+                if (claiming) parent.requestDisallowInterceptTouchEvent(true);
+                break;
+            case MotionEvent.ACTION_MOVE:
+                if (owning) {
+                    // Holding the drag: at the edge it moves towards, the rest of the drag goes to
+                    // the views around (a pager's next page), as ZScroll does.
+                    float mx = e.getX() - lastX, my = e.getY() - lastY;
+                    lastX = e.getX();
+                    lastY = e.getY();
+                    float along = horizontal ? mx : my;
+                    boolean more = horizontal ? scroller.canScrollHorizontally(along < 0 ? 1 : -1)
+                            : scroller.canScrollVertically(along < 0 ? 1 : -1);
+                    if (along != 0 && !more) {
+                        owning = false;
+                        parent.requestDisallowInterceptTouchEvent(false);
+                        yielded = true;
+                        return true;
+                    }
+                    break;
+                }
+                if (!claiming) break;
+                float dx = e.getX() - claimX, dy = e.getY() - claimY;
+                int slop = ViewConfiguration.get(scroller.getContext()).getScaledTouchSlop();
+                if (Math.abs(dx) <= slop && Math.abs(dy) <= slop) break;
+                claiming = false;
+                if (!scrolls(dx, dy)) {
+                    parent.requestDisallowInterceptTouchEvent(false);
+                    yielded = true;
+                    return true;
+                }
+                owning = true;
+                lastX = e.getX();
+                lastY = e.getY();
+                break;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                claiming = false;
+                owning = false;
+                break;
+            default:
+                break;
+        }
+        return false;
     }
 
     /** Before the scroll view sees {@code e}: whether it ends the touch. */
