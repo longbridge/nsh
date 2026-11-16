@@ -935,6 +935,28 @@ impl RichEditorSession {
         )
     }
 
+    /// Pastes `html` at the selection as a paste of it would go in
+    /// (ProseMirror's `pasteHTML`): read by the schema's parse rules for a
+    /// paste and fitted to the selection, then through the editor's own
+    /// paste steps (links, character limits). What a `handlePaste` calls
+    /// with HTML it cleaned up; the plugins' `transformPasted` and
+    /// `handlePaste` are not asked again. Whether it pasted: HTML that
+    /// parses to nothing, or HTML into a code block, pastes nothing.
+    #[allow(non_snake_case)]
+    pub(crate) fn pasteHTML(&self, html: String) -> bool {
+        let _guard = CallGuard::enter();
+        self.session.paste_html(&html)
+    }
+
+    /// Pastes `text` at the selection as a paste of plain text would go in
+    /// (ProseMirror's `pasteText`): a paragraph per line, through the
+    /// editor's own paste steps; the plugins' `transformPasted` and
+    /// `handlePaste` are not asked again. Whether it pasted.
+    pub(crate) fn paste_text(&self, text: String) -> bool {
+        let _guard = CallGuard::enter();
+        self.session.paste_text(&text)
+    }
+
     /// The document as JSON (ProseMirror's shape), named as Tiptap's
     /// `getJSON`: `#[class]` keeps a name's case past its first letter.
     #[allow(non_snake_case)]
@@ -1827,6 +1849,43 @@ mod tests {
     fn run(session: &EditorSession, command: RichCommand) -> bool {
         let schema = session.state().schema().clone();
         session.run(&resolve(&command, &schema).unwrap())
+    }
+
+    fn markdown_of(session: &EditorSession) -> String {
+        serialize(session.state().doc(), RichFormat::Markdown).unwrap()
+    }
+
+    #[test]
+    fn paste_html_fits_html_to_the_selection_as_a_paste() {
+        let session = editor("Hello");
+        let end = session.state().doc().content().size() - 1;
+        let select = RichCommand {
+            command: RichCommandName::SetTextSelection,
+            pos: Some(end),
+            ..RichCommand::default()
+        };
+        assert!(run(&session, select));
+        // One paragraph pasted into one is its text: the paste's rules
+        // close nothing a paste would not.
+        assert!(session.paste_html("<p>, <strong>world</strong></p>"));
+        assert_eq!(markdown_of(&session).trim(), "Hello, **world**");
+        // HTML of nothing pastes nothing.
+        assert!(!session.paste_html("<!-- nothing -->"));
+        assert_eq!(markdown_of(&session).trim(), "Hello, **world**");
+        // One undo step, as a paste is.
+        assert!(run(&session, RichCommand::plain(RichCommandName::Undo)));
+        assert_eq!(markdown_of(&session).trim(), "Hello");
+    }
+
+    #[test]
+    fn paste_text_pastes_plain_text_a_paragraph_per_line() {
+        let session = editor("");
+        assert!(session.paste_text("**one**\ntwo"));
+        // A paste: its rules apply (StarterKit's bold); a line a paragraph.
+        assert_eq!(markdown_of(&session).trim(), "**one**\n\ntwo");
+        let text = serialize(session.state().doc(), RichFormat::Text).unwrap();
+        assert_eq!(text.trim(), "one\ntwo");
+        assert!(!session.paste_text(""));
     }
 
     #[test]

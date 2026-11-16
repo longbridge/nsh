@@ -4540,6 +4540,7 @@ covers [nsh/base] RichNodeViewProps
 # base-rich-editor-paste-hooks
 tap id:case-base-rich-editor-paste-hooks
 expect PasteHooks true paste true
+expect PasteHTML true true false <p>a <em>b c</em></p>
 
 # base-rich-editor-view
 tap id:case-base-rich-editor-view

@@ -239,6 +239,7 @@ const canIndent = editor.can(sinkListItem("listItem"));
 | `isEmpty`, `undoDepth`, `redoDepth`, `composing` | What a UI shows about the editor |
 | `setContent(content, format?)` | Replaces the document, as one undoable change |
 | `insertContent(content, format?)` | Inserts content over the selection |
+| `pasteHTML(html)`, `pasteText(text)` | Pastes HTML or plain text over the selection as a paste of it would go in; whether it pasted |
 | `getJSON()`, `getHTML()`, `getMarkdown()`, `getText()`, `textBetween(from?, to?, separator?)` | The document in a format |
 | `dispatch(tr)` | Applies a transaction given as JSON (its steps against the current document) |
 | `on(event, listener)` | Calls `listener` with the payload of every `event`, in JS's next turn: `revision` (`{ revision }`, after every change, from any source), `update`, `selectionUpdate`, `transaction`, `focus`, `blur`, `delete`. Returns a function that stops it; a listener added while a component renders stops with the component |
@@ -446,6 +447,20 @@ const paste = new RichEditorPlugin("paste")
 - `handlePaste(slice, clipboard)` returning `true` means the app handled the paste and the editor inserts nothing.
   `clipboard` is `{ text, html }`, what the clipboard held: an app that reads Word or Google Docs HTML, Markdown or a
   link in its own way inserts the result itself (`editor.run(insertContent(...))`) and returns `true`.
+
+An app that cleans up the clipboard's HTML itself (Word's lists, Google Docs' wrapper, Markdown turned into HTML)
+hands the result on with `editor.pasteHTML(html)` and returns `true`; plain text goes on with `editor.pasteText(text)`.
+They are ProseMirror's `pasteHTML` and `pasteText`: the content is read as a paste is, by the schema's parse rules and
+fitted to the selection, so a node marked `isolating` (a figure with its caption) stays whole where
+`insertContent(html, "html")` would open it, and the editor's own paste steps (links, character limits, paste rules)
+apply. The plugins' `transformPasted` and `handlePaste` are not asked again. They return whether something was pasted.
+
+```tsx
+const paste = new RichEditorPlugin("paste").handlePaste((_slice, clipboard) => {
+  const docs = /^<b id="docs-internal-guid-[^"]*">([\s\S]*)<\/b>$/.exec(clipboard.html);
+  return docs ? editor.pasteHTML(docs[1]) : false;
+});
+```
 
 Paste is the one input that waits for JS: once a plugin has a paste hook, the paste goes in after the hooks have
 answered, a JS turn later. Pastes go in in the order they were made. A paste whose document or selection changes

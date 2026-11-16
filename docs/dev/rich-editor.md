@@ -196,6 +196,9 @@ to the view) cannot run in the paste event, where JS is not running: when a plug
 (`Callback::call_async`). After each await it checks the state: a document or selection changed meanwhile means the
 content was made for another place, so the paste starts over from the current state (dropped after three tries);
 Rust hooks so always see the current state. Typing never waits; a paste waits a JS turn.
+`EditorSession::paste_html` / `paste_text` (JS `pasteHTML` / `pasteText`, ProseMirror's) take the same steps
+(`parse_paste`, `paste_transaction`, shared with the view) without the JS hooks: they are what a `handlePaste` calls
+to go on with content it cleaned up, and a JS hook could only answer a turn later.
 (images with their bytes, `file:` URLs from a file manager) go to the app as `onPasteFiles` and insert nothing,
 as Tiptap's file handler leaves them to its `onPaste`. Files dropped on the desktops are the host's `onFileDrop`
 (a component's host takes a view's file drop events, `ComponentHostProps`): the root listens only when the app
