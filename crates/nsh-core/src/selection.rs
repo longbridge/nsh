@@ -131,11 +131,30 @@ pub enum Granularity {
     Character,
     /// Words (a double click, then drags by words).
     Word,
-    /// Tokens: words joined by the punctuation of a hostname, URL, path or
-    /// id between them (a long press on a touch screen).
-    Token,
     /// Paragraphs: a whole text (a triple click).
     Paragraph,
+}
+
+/// What the model selects by: a [`Granularity`], or a long press's tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Unit {
+    #[default]
+    Character,
+    Word,
+    /// Words joined by the punctuation of a hostname, URL, path or id
+    /// between them (a long press on a touch screen).
+    Token,
+    Paragraph,
+}
+
+impl From<Granularity> for Unit {
+    fn from(granularity: Granularity) -> Self {
+        match granularity {
+            Granularity::Character => Unit::Character,
+            Granularity::Word => Unit::Word,
+            Granularity::Paragraph => Unit::Paragraph,
+        }
+    }
 }
 
 /// One of the two ends of a selection, for touch handles.
@@ -155,7 +174,7 @@ pub enum Handle {
 pub struct SelectionModel {
     anchor: Option<TextPosition>,
     focus: Option<TextPosition>,
-    granularity: Granularity,
+    granularity: Unit,
     /// The unit (word, paragraph) around the anchor that a drag by words
     /// or paragraphs keeps selected.
     anchor_unit: Option<(TextPosition, TextPosition)>,
@@ -200,7 +219,7 @@ impl SelectionModel {
             2 => Granularity::Word,
             _ => Granularity::Paragraph,
         };
-        self.select_unit(texts, pos, granularity);
+        self.select_unit(texts, pos, granularity.into());
         self.remember(texts);
         self.bounds() != before
     }
@@ -228,7 +247,7 @@ impl SelectionModel {
         let Some(pos) = hit(texts, point) else {
             return self.clear();
         };
-        self.select_unit(texts, pos, Granularity::Token);
+        self.select_unit(texts, pos, Unit::Token);
         self.remember(texts);
         self.bounds() != before
     }
@@ -255,7 +274,7 @@ impl SelectionModel {
         };
         self.anchor = Some(fixed);
         self.focus = Some(pos);
-        self.granularity = Granularity::Character;
+        self.granularity = Unit::Character;
         self.anchor_unit = None;
         self.remember(texts);
         self.bounds() != Some((start, end))
@@ -276,7 +295,7 @@ impl SelectionModel {
         let before = self.bounds();
         self.anchor = Some(clamp_position(texts, start));
         self.focus = Some(clamp_position(texts, end));
-        self.granularity = Granularity::Character;
+        self.granularity = Unit::Character;
         self.anchor_unit = None;
         self.remember(texts);
         self.bounds() != before
@@ -346,7 +365,7 @@ impl SelectionModel {
                 .then(|| (clamp_position(texts, a), clamp_position(texts, b)))
         });
         if self.anchor_unit.is_none() {
-            self.granularity = Granularity::Character;
+            self.granularity = Unit::Character;
         }
         self.remember(texts);
         moved || self.bounds() != before
@@ -473,14 +492,9 @@ impl SelectionModel {
 
     /// Puts the anchor at `pos` and selects the unit of `granularity`
     /// around it (nothing for characters).
-    fn select_unit(
-        &mut self,
-        texts: &impl SelectionTexts,
-        pos: TextPosition,
-        granularity: Granularity,
-    ) {
+    fn select_unit(&mut self, texts: &impl SelectionTexts, pos: TextPosition, granularity: Unit) {
         self.granularity = granularity;
-        if granularity == Granularity::Character {
+        if granularity == Unit::Character {
             self.anchor = Some(pos);
             self.focus = Some(pos);
             self.anchor_unit = None;
@@ -678,12 +692,12 @@ fn hit(texts: &impl SelectionTexts, point: Point<Points>) -> Option<TextPosition
 fn unit_at(
     texts: &impl SelectionTexts,
     pos: TextPosition,
-    granularity: Granularity,
+    granularity: Unit,
 ) -> (TextPosition, TextPosition) {
     let content = texts.content(pos.text);
     match granularity {
-        Granularity::Character => (pos, pos),
-        Granularity::Word | Granularity::Token => {
+        Unit::Character => (pos, pos),
+        Unit::Word | Unit::Token => {
             // The word is found in the line the text is part of (it, the
             // texts it continues and those that continue it, joined as a
             // copy joins them): a word a wrap cut, or a token whose parts
@@ -701,7 +715,7 @@ fn unit_at(
                 let before = content.chars().next_back().map_or(0, char::len_utf16);
                 at -= before as u32;
             }
-            let range = word_range(&line, at, granularity == Granularity::Token);
+            let range = word_range(&line, at, granularity == Unit::Token);
             if range.is_empty() {
                 return (pos, pos);
             }
@@ -716,7 +730,7 @@ fn unit_at(
         }
         // The whole line: the text and the texts it continues and that
         // continue it.
-        Granularity::Paragraph => {
+        Unit::Paragraph => {
             let (first, last) = line_of(texts, pos.text);
             (
                 TextPosition::new(first, 0),
