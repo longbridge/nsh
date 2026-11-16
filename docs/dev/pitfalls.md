@@ -96,7 +96,9 @@ Things that were found the hard way. Read the section of the area you change bef
   (`UIRefreshControl` at the bottom, scroll indicators), which would shift indices.
 - **Platforms clamp scroll offsets to the content**: UIKit clamps `contentOffset` when `contentSize` shrinks, Android's
   ScrollView clamps `scrollBy` to the child's current size. The core grows the content before a `ScrollBy` and scrolls
-  before shrinking it; Android sizes the content view at once in `setContentSize` (not at the next layout pass).
+  before shrinking it; Android sizes the content view at once in `setContentSize` (not at the next layout pass). What
+  a `scrollBy` or `scrollTo` (a command, an initial `contentOffset`) could not reach yet is owed on Android and paid as
+  the content grows (`ScrollBox.payOwed`), until the user scrolls: a pager's pages arriving after its offset.
 - **Scroll reports can predate the core's own scrolls**: each report carries how many `ScrollBy` / list `ScrollTo` the view
   has applied (`EngineControl::scroll(.., applied)`), and the core adds the ones still pending; otherwise a stale offset
   moves the window (and fires `onLoadMore`) backwards.

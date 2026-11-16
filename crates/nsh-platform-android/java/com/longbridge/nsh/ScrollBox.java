@@ -671,9 +671,11 @@ final class ScrollBox extends FrameLayout implements Node {
     private int applied;
 
     /**
-     * The part of the last {@code scrollByPx} that the scroll view clamped
-     * (px): the view or its content is about to change size (e.g. while a
-     * layout animation resizes it) and catches up when it does.
+     * The part of the last {@code scrollByPx} or {@code scrollToPx} that the
+     * scroll view clamped (px): the view or its content is about to change
+     * size (e.g. while a layout animation resizes it, or a pager's pages
+     * arrive after the command) and catches up when it does, until the user
+     * scrolls.
      */
     private int owedX, owedY;
 
@@ -707,13 +709,23 @@ final class ScrollBox extends FrameLayout implements Node {
             return;
         }
         if (scroller instanceof ZScroll) {
+            owedX = owedY = 0;
             ((ZScroll) scroller).scrollToPx(x, y, animated);
-        } else if (scroller instanceof ScrollView) {
-            if (animated) ((ScrollView) scroller).smoothScrollTo(x, y);
-            else scroller.scrollTo(x, y);
+            return;
+        }
+        // Where the scroll view can go now; the rest is owed until the
+        // content (or the view) grows to it (`payOwed`).
+        int maxX = Math.max(0, content.getWidth() - scroller.getWidth());
+        int maxY = Math.max(0, content.getHeight() - scroller.getHeight());
+        int toX = Math.max(0, Math.min(x, maxX)), toY = Math.max(0, Math.min(y, maxY));
+        owedX = x - toX;
+        owedY = y - toY;
+        if (scroller instanceof ScrollView) {
+            if (animated) ((ScrollView) scroller).smoothScrollTo(toX, toY);
+            else scroller.scrollTo(toX, toY);
         } else {
-            if (animated) ((HorizontalScrollView) scroller).smoothScrollTo(x, y);
-            else scroller.scrollTo(x, y);
+            if (animated) ((HorizontalScrollView) scroller).smoothScrollTo(toX, toY);
+            else scroller.scrollTo(toX, toY);
         }
     }
 
