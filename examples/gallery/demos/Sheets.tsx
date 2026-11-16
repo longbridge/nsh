@@ -1,4 +1,4 @@
-import { type JSX, Scroll, signal, Text, token, View, windowSize } from "nsh";
+import { type JSX, safeArea, Scroll, signal, Text, token, View, windowSize } from "nsh";
 import { type OpenChangeReason, Sheet, type SheetDetent } from "nsh/base";
 import { LucideIcon, type LucideIconName } from "../icons";
 import { toast } from "../toast";
@@ -228,7 +228,16 @@ export function Sheets() {
   function CommentsSheet() {
     const open = signal(false);
     const detent = signal<SheetDetent>("medium");
+    const thread = signal<Comment[]>(comments);
+    const draft = signal("");
     const named = (d: SheetDetent) => (typeof d === "string" ? d : "custom");
+    const send = () => {
+      const text = draft().trim();
+      if (!text) return;
+      thread.set([{ name: "You", time: "now", text, likes: 0 }, ...thread()]);
+      draft.set("");
+      log("comment sent");
+    };
     return (
       <Card icon="sheet" title="Resting heights" subtitle="Half the screen or all of it: drag, flick or press the grabber">
         {/* The sheet beside its trigger: one child of the card, so it takes no gap of its own. */}
@@ -243,7 +252,7 @@ export function Sheets() {
                 open.set(true);
               }}
             />
-            <Caption label={`${comments.length} comments`} note={open() ? (named(detent()) === "large" ? "Full height" : "Half height") : undefined} />
+            <Caption label={`${thread().length} comments`} note={open() ? (named(detent()) === "large" ? "Full height" : "Half height") : undefined} />
           </View>
           <Sheet
             open={open()}
@@ -261,13 +270,34 @@ export function Sheets() {
             onOpenChange={changed("comments", (v) => open.set(v))}
             popupStyle={sheetPanel("bottom")}
             backdropStyle={backdrop()}
+            // At the bottom of what shows, half height or full: it covers the panel's bottom padding (the home
+            // indicator's room), so the list never shows under it.
+            footer={
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <Avatar name="You" size={pointer ? 28 : 34} />
+                <View style={{ flex: 1 }}>
+                  <Field value={draft()} onChange={({ value }) => draft.set(value)} placeholder="Add a comment" accessibilityLabel="Comment" returnKeyType="send" onSubmit={send} />
+                </View>
+                <Trigger icon="arrow-up" variant="primary" accessibilityLabel="Send" short="↑" disabled={!draft().trim()} onPress={send} />
+              </View>
+            }
+            footerStyle={{
+              marginHorizontal: -16,
+              marginBottom: -(safeArea().bottom + 16),
+              paddingHorizontal: 16,
+              paddingTop: 10,
+              paddingBottom: safeArea().bottom + 10,
+              borderTopWidth: 1,
+              borderColor: colors.border,
+              backgroundColor: colors.surface,
+            }}
           >
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <Text style={{ flex: 1, fontSize: pointer ? 16 : 18, fontWeight: "600", color: colors.text }}>Comments</Text>
               <Trigger icon="x" variant="ghost" accessibilityLabel="Close" short="×" onPress={() => open.set(false)} />
             </View>
             <Scroll style={{ flex: 1, marginHorizontal: -16 }} contentStyle={{ paddingHorizontal: 16, gap: 16, paddingBottom: 8 }}>
-              <Each of={comments}>
+              <Each of={thread()}>
                 {(c) => (
                   <View style={{ flexDirection: "row", gap: 12 }}>
                     <Avatar name={c().name} size={pointer ? 32 : 38} />

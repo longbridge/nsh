@@ -905,6 +905,11 @@ struct Replica {
     panel: Option<nsh_core::NodeId>,
     translations: std::collections::HashMap<nsh_core::NodeId, nsh_core::NodeId>,
     heights: std::collections::HashMap<nsh_core::NodeId, f32>,
+    /// Each view's laid-out frame, its parent, and the translation of
+    /// those with only a vertical one bound (the footer).
+    frames: std::collections::HashMap<nsh_core::NodeId, nsh_core::Bounds<Points>>,
+    parents: std::collections::HashMap<nsh_core::NodeId, nsh_core::NodeId>,
+    lifts: std::collections::HashMap<nsh_core::NodeId, nsh_core::NodeId>,
     clock: f64,
     /// Graph nodes made, and made less those released since.
     made: usize,
@@ -920,9 +925,33 @@ impl Replica {
             self.clock += 1.0 / 60.0;
             self.graph.tick(self.clock, &mut finished);
         }
+        self.now()
+    }
+
+    /// Where the panel stands below its top now, and its height.
+    fn now(&self) -> (f32, f32) {
         let panel = self.panel.expect("the panel drags");
         let node = self.translations[&panel];
         (self.graph.eval(node).number(), self.heights[&panel])
+    }
+
+    /// Moves the animations on by a frame.
+    fn frame(&mut self) {
+        self.clock += 1.0 / 60.0;
+        self.graph.tick(self.clock, &mut Vec::new());
+    }
+
+    /// Where the bottom of the footer around `content` is on the screen
+    /// now: the panel's place, translation and the footer's own.
+    fn footer_bottom(&self, content: nsh_core::NodeId) -> f32 {
+        let panel = self.panel.expect("the panel drags");
+        let footer = self.parents[&content];
+        assert_eq!(self.parents[&footer], panel, "the footer is the panel's");
+        let lift = self
+            .lifts
+            .get(&footer)
+            .map_or(0.0, |&n| self.graph.eval(n).number());
+        self.frames[&panel].origin.y.0 + self.now().0 + self.frames[&footer].bottom().0 + lift
     }
 }
 
@@ -964,9 +993,16 @@ fn replicate(app: &mut Headless) -> Replicated {
                             replica.translations.insert(*id, *node);
                         }
                     }
+                    if let [(AnimationProp::Transform(0), node)] = bindings[..] {
+                        replica.lifts.insert(*id, node);
+                    }
                 }
                 MountItem::Frame { id, frame } => {
                     replica.heights.insert(*id, frame.size.height.0);
+                    replica.frames.insert(*id, *frame);
+                }
+                MountItem::Insert { parent, child, .. } => {
+                    replica.parents.insert(*child, *parent);
                 }
                 _ => {}
             }
@@ -980,6 +1016,7 @@ struct DetentProps {
     swipe: bool,
     controlled: bool,
     start: Option<nsh_base::SheetDetent>,
+    footer: bool,
 }
 
 /// A bottom sheet resting at half the screen or all of it, open, with a
@@ -991,10 +1028,17 @@ fn DetentScreen(props: DetentProps) -> impl IntoElement {
     let open = signal(true);
     let picked = signal(String::from("none"));
     let controlled = props.controlled;
+    let footer = props.footer;
+    let sheet = sheet();
+    let sheet = if footer {
+        sheet.footer(view().test_id("footer").h(px(50.0)).child(text("Reply")))
+    } else {
+        sheet
+    };
     view()
         .child(text(move || format!("picked:{}", picked.get())))
         .child(
-            sheet()
+            sheet
                 .open(move || Some(open.get()))
                 .on_open_change(move |_: &SheetEvent| open.set(false))
                 .close_on_swipe(props.swipe)
@@ -1031,6 +1075,7 @@ const MEDIUM: DetentProps = DetentProps {
     swipe: false,
     controlled: false,
     start: None,
+    footer: false,
 };
 
 fn assert_rests(replica: &Replicated, at: f32) {
@@ -1137,14 +1182,21 @@ fn the_grabber_changes_the_detent_for_screen_readers_and_presses() {
 #[derive(Clone, PartialEq, Props)]
 struct PlainProps {
     open: bool,
+    footer: bool,
 }
 
 /// A bottom sheet with none of the detents' props, as sheets were before
-/// them.
+/// them (with a footer or not).
 #[component]
 fn PlainScreen(props: PlainProps) -> impl IntoElement {
+    let sheet = sheet();
+    let sheet = if props.footer {
+        sheet.footer(text("Reply"))
+    } else {
+        sheet
+    };
     view().child(
-        sheet().default_open(props.open).close_on_swipe(true).child(
+        sheet.default_open(props.open).close_on_swipe(true).child(
             view()
                 .test_id("handle")
                 .h(px(60.0))
@@ -1161,10 +1213,13 @@ fn PlainScreen(props: PlainProps) -> impl IntoElement {
 fn a_sheet_without_detents_makes_no_graph_of_theirs() {
     use nsh_core::MountItem;
 
-    for open in [true, false] {
+    for (open, footer) in [(true, false), (false, false), (true, true), (false, true)] {
         let mut app = Headless::start(EngineConfig {
             viewport: Size::new(px(390.0), px(844.0)),
-            ..EngineConfig::new(Root::new::<PlainScreen>(move || PlainProps { open }))
+            ..EngineConfig::new(Root::new::<PlainScreen>(move || PlainProps {
+                open,
+                footer,
+            }))
         })
         .unwrap();
         let ops = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1281,4 +1336,63 @@ fn detents_given_and_taken_away_while_open_take_effect() {
         "back at the bottom, not {translation}"
     );
     assert_eq!(live, plain, "the detents' nodes went with them");
+}
+
+/// The bottom of the footer of a [`DetentScreen`] on the screen, now.
+fn footer_bottom(app: &Headless, replica: &Replicated) -> f32 {
+    let content = app.screen().id("id:footer").unwrap();
+    replica.lock().unwrap().footer_bottom(content)
+}
+
+fn assert_footer_at(app: &Headless, replica: &Replicated, at: f32) {
+    let bottom = footer_bottom(app, replica);
+    assert!(
+        (bottom - at).abs() < 0.5,
+        "the footer ends at {at}, not {bottom}"
+    );
+}
+
+#[test]
+fn the_footer_stays_at_the_bottom_of_what_shows() {
+    let (mut app, replica) = detent_app(DetentProps {
+        footer: true,
+        ..MEDIUM
+    });
+    assert_rests(&replica, 422.0);
+    assert_footer_at(&app, &replica, 844.0);
+    app.drag("id:handle", point(px(0.0), px(-300.0))).unwrap();
+    // On its way to the large detent, frame by frame, the footer stays at
+    // the bottom of the screen.
+    for _ in 0..30 {
+        replica.lock().unwrap().frame();
+        assert_footer_at(&app, &replica, 844.0);
+    }
+    app.wait_for("text:picked:Large").unwrap();
+    app.wait(std::time::Duration::from_millis(400)).unwrap();
+    assert_rests(&replica, 0.0);
+    assert_footer_at(&app, &replica, 844.0);
+    app.drag("id:handle", point(px(0.0), px(250.0))).unwrap();
+    app.wait_for("text:picked:Medium").unwrap();
+    app.wait(std::time::Duration::from_millis(400)).unwrap();
+    assert_rests(&replica, 422.0);
+    assert_footer_at(&app, &replica, 844.0);
+}
+
+#[test]
+fn the_keyboard_raises_the_sheet_to_its_largest_detent_and_back() {
+    let (mut app, replica) = detent_app(DetentProps {
+        footer: true,
+        ..MEDIUM
+    });
+    assert_rests(&replica, 422.0);
+    keyboard(&mut app, 300.0);
+    let (translation, height) = replica.lock().unwrap().rest();
+    assert_eq!(height, 544.0, "as tall as the room above the keyboard");
+    assert!(translation.abs() < 0.5, "at the largest, not {translation}");
+    assert_footer_at(&app, &replica, 544.0);
+    // Standing at the largest is no detent the user picked.
+    app.wait_for("text:picked:none").unwrap();
+    keyboard(&mut app, 0.0);
+    assert_rests(&replica, 422.0);
+    assert_footer_at(&app, &replica, 844.0);
 }

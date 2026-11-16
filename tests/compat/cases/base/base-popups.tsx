@@ -6,7 +6,7 @@
 // `MenuSeparator`, a `ContextMenu` a held finger opens, `Tooltip`s given as
 // elements' `tooltip` the app opens (a touch screen shows none of its own, nor an
 // element's `tooltip`), a `Sheet` at an edge over a backdrop, bottom sheets
-// resting at detents with a grabber; every part
+// resting at detents with a grabber and a footer; every part
 // styled by the app, every change reported with its reason, their
 // lifecycles (`onOpen`, `onClose`) and Escape or back heard (`onCancel`). Its script
 // checks each.
@@ -194,6 +194,9 @@ function App() {
         grabberClass="bg-[#123456]"
         grabberStyle={{ width: 40, height: 6, alignSelf: "center" }}
         grabberAccessibilityLabel="Resize"
+        footer={<Text>DetentFooter</Text>}
+        footerClass="bg-[#234567]"
+        footerStyle={{ height: 40 }}
       >
         <Text>DetentBody</Text>
       </Sheet>

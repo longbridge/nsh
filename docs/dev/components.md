@@ -1307,7 +1307,8 @@ With `detents` (bottom side), the panel is as tall as its largest detent and res
 same native pan value moves it between detents, a release settles it at one or, past the smallest with
 `closeOnSwipe`, requests closing; sheets without detents keep the motion above unchanged and build none of the
 detents' animation graph (the detents' layers are a branch of their own, made again when a sheet gains or loses its
-detents). The detent is controlled
+detents). A `footer` stays at the bottom of what shows of the panel, moved by the same native value; while the
+software keyboard is up the sheet stands at its largest detent without changing the detent it reports. The detent is controlled
 or the sheet's own (`detent`, `defaultDetent`, `onDetentChange`), and the optional grabber is an adjustable part for
 screen readers. Code: `sheet.rs` (`Detents`), `popup.rs` (`SheetMotion`).
 

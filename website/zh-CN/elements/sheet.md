@@ -102,6 +102,10 @@ Android、桌面和 Web 使用已有的原生 pan 支持拖动条及滚动区域
 `grabberStyle` 设置样式，用 `grabberAccessibilityLabel` 命名。读屏软件可以调节它来切换停靠高度，按下它会移到下一个更大的高度
 （最大之后回到最小）。减少动态效果开启时，面板在停靠高度之间直接到位。
 
+`footer` 显示在面板底部、内容之后，例如输入条或面板的操作按钮。有停靠高度时，它始终贴在面板可见部分的底部：
+停在任何一个高度、拖动或弹簧动画在高度之间移动面板时都一样，随面板在原生侧移动；拖到最小高度以下时随面板一起移动。
+用 `footerClass` / `footerStyle` 设置样式。
+
 ```tsx
 const detent = signal<SheetDetent>("medium");
 
@@ -117,12 +121,15 @@ const detent = signal<SheetDetent>("medium");
   grabberAccessibilityLabel="调整高度"
   popupClass="rounded-t-2xl bg-white pt-2"
   backdropClass="bg-black/40"
+  footer={<Input placeholder="添加评论" />}
+  footerClass="border-t border-zinc-200 px-4 py-2"
 >
   <Scroll class="flex-1">{/* … */}</Scroll>
 </Sheet>
 ```
 
-软键盘会像抬起其他底部面板一样抬起带停靠高度的面板：此时它不会越过状态栏，各停靠高度在剩下的空间内保持不变。
+软键盘会像抬起其他底部面板一样抬起带停靠高度的面板，最多到状态栏下方。键盘弹出期间，面板停在最大的停靠高度，
+这样底栏或内容里正在输入的文字看得见；键盘收起后回到原来的停靠高度，应用读到的 `detent` 不变。
 
 <a id="the-software-keyboard"></a>
 
@@ -165,6 +172,8 @@ Sheet 由 NSH 在应用的窗口中绘制，样式由应用决定。要使用平
 | `grabber` | `.grabber(..)` | `boolean` | `false` | 在面板顶部显示拖动条。 |
 | `grabberClass`、`grabberStyle` | `grabber_class`、`grabber_style` | `string`、`StyleProp<ViewStyle>` | 无 | 拖动条的外观。 |
 | `grabberAccessibilityLabel` | `.grabber_accessibility_label(..)` | `string` | 无 | 读屏软件对拖动条的称呼。 |
+| `footer` | `.footer(..)` | `JSX.Element` | 无 | 显示在面板底部的内容；有停靠高度时显示在可见部分的底部。 |
+| `footerClass`、`footerStyle` | `footer_class`、`footer_style` | `string`、`StyleProp<ViewStyle>` | 无 | 底栏的外观。 |
 | `popupClass`、`popupStyle` | `popup_class`、`popup_style` | `string`、`StyleProp<ViewStyle>` | 无 | 面板的外观。 |
 | `backdropClass`、`backdropStyle` | `backdrop_class`、`backdrop_style` | `string`、`StyleProp<ViewStyle>` | 无 | 背景层的外观，比如半透明的颜色。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 读屏软件对这个对话框的称呼：sheet 的标题。 |

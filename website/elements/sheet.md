@@ -110,6 +110,11 @@ nothing: style it with `grabberClass` / `grabberStyle` and name it with `grabber
 adjust it to change the detent, and a press moves to the next larger one (after the largest, the smallest). With
 reduced motion the sheet moves between detents at once.
 
+`footer` shows at the bottom of the panel, after the content: an input bar, the sheet's actions. With detents it stays
+at the bottom of the part of the panel that shows, at every detent and while a drag or a spring moves the panel
+between them, moving natively with the panel; below the smallest detent it goes with the panel. Style it with
+`footerClass` / `footerStyle`.
+
 ```tsx
 const detent = signal<SheetDetent>("medium");
 
@@ -125,13 +130,16 @@ const detent = signal<SheetDetent>("medium");
   grabberAccessibilityLabel="Resize"
   popupClass="rounded-t-2xl bg-white pt-2"
   backdropClass="bg-black/40"
+  footer={<Input placeholder="Add a comment" />}
+  footerClass="border-t border-zinc-200 px-4 py-2"
 >
   <Scroll class="flex-1">{/* … */}</Scroll>
 </Sheet>
 ```
 
-The software keyboard lifts a sheet with detents as any bottom sheet: it then stays below the status bar, and its
-detents keep their heights within the room left.
+The software keyboard lifts a sheet with detents as any bottom sheet, below the status bar at most. While it is up the
+sheet rests at its largest detent, so what is typed in the footer or the content shows, and it goes back to its detent
+once the keyboard goes; the detent the app reads stays the same.
 
 ## The software keyboard
 
@@ -174,6 +182,8 @@ on iOS), use a [Dialog](./dialog.md) with `presentation="pageSheet"`.
 | `grabber` | `.grabber(..)` | `boolean` | `false` | Shows a grabber at the top of the panel. |
 | `grabberClass`, `grabberStyle` | `.grabber_class(..)`, `.grabber_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The look of the grabber. |
 | `grabberAccessibilityLabel` | `.grabber_accessibility_label(..)` | `string` | none | What screen readers call the grabber. |
+| `footer` | `.footer(..)` | `JSX.Element` | none | What shows at the bottom of the panel; with detents, at the bottom of what shows. |
+| `footerClass`, `footerStyle` | `.footer_class(..)`, `.footer_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The look of the footer. |
 | `popupClass`, `popupStyle` | `.popup_class(..)`, `.popup_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The look of the panel. |
 | `backdropClass`, `backdropStyle` | `.backdrop_class(..)`, `.backdrop_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The look of the backdrop, such as a translucent color. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers call the dialog: the sheet's title. |

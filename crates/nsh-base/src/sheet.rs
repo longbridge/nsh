@@ -123,7 +123,9 @@ pub struct SheetProps {
     /// finger, and a release springs it to the nearest, or on in the
     /// direction of a flick; past the smallest it closes when
     /// `closeOnSwipe` allows. On iOS, a scroll inside it hands the
-    /// downward drag over at its top. Given to an open sheet that had
+    /// downward drag over at its top. While the software keyboard is up,
+    /// it rests at the largest, and back at its detent once the keyboard
+    /// goes. Given to an open sheet that had
     /// none, or all taken away, they take effect at once and the sheet
     /// makes its content again.
     #[prop(default)]
@@ -150,6 +152,17 @@ pub struct SheetProps {
     pub grabber_style: Prop<Style>,
     /// What screen readers call the grabber.
     pub grabber_accessibility_label: Prop<Option<SharedString>>,
+    /// What shows at the bottom of the panel, after the content (an input
+    /// bar, the sheet's actions). With `detents` it stays at the bottom of
+    /// the part of the panel that shows, at every detent and while a drag
+    /// moves the panel between them; below the smallest it goes with the
+    /// panel.
+    pub footer: Prop<Option<Slot>>,
+    /// The classes of the footer.
+    pub footer_class: Prop<Option<SharedString>>,
+    /// The inline style of the footer, over its classes.
+    #[prop(default)]
+    pub footer_style: Prop<Style>,
     /// The classes of the panel.
     pub popup_class: Prop<Option<SharedString>>,
     /// The inline style of the panel, over its classes.
@@ -309,7 +322,9 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
         // The backdrop and the panel, bound to the translation and fade of
         // a sheet with detents or without: whether it has some changes
         // which, and makes them again.
-        let layers = move |translate: AnimatedNode, fade: AnimatedNode| {
+        let layers = move |translate: AnimatedNode,
+                           fade: AnimatedNode,
+                           footer_stop: Option<AnimatedValue>| {
             let backdrop = overlay()
                 .inset_0()
                 .bind_opacity(&fade)
@@ -357,7 +372,25 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
                     motion.laid_out(frame.size);
                 })
                 .child(when(move || props.grabber.get(), move || detents.grabber()))
-                .child(props.children);
+                .child(props.children)
+                .child(when(
+                    move || props.footer.with(Option::is_some),
+                    move || {
+                        // At the bottom of the panel however tall the
+                        // content is; the app's style may place it
+                        // otherwise.
+                        let footer = view()
+                            .mt(auto())
+                            .flex_shrink_0()
+                            .app_class(props.footer_class)
+                            .inline_style(props.footer_style)
+                            .child(props.footer.place(|c| c));
+                        match footer_stop {
+                            Some(stop) => footer.bind_translate_y(&detents.footer_lift(stop)),
+                            None => footer,
+                        }
+                    },
+                ));
             panel = panel
                 .pan_values(None, Some(&motion.drag_y))
                 .pan_enabled(move || draggable() && open.get() && motion.settled.get())
@@ -407,11 +440,11 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
         let layers = when(
             move || detents.active(),
             move || {
-                let (translate, fade) = detents.graph(height, swipe_enabled, swipe);
-                layers(translate, fade)
+                let (translate, fade, footer_stop) = detents.graph(height, swipe_enabled, swipe);
+                layers(translate, fade, Some(footer_stop))
             },
         )
-        .otherwise(move || layers(dragged_y, dragged_fade));
+        .otherwise(move || layers(dragged_y, dragged_fade, None));
         // A dialog's modal root around both, with no motion or closing of
         // its own: the sheet's are `SheetMotion`'s and its props'. It keeps
         // screen readers and the keyboard focus to the sheet as a dialog
@@ -461,6 +494,10 @@ struct Detents {
     laid: Signal<Points>,
     /// The index of the detent it rests at.
     current: Memo<Option<usize>>,
+    /// The index of the detent it stands at: the largest while the
+    /// software keyboard is up (as UIKit's sheets do, so what is typed in
+    /// shows), else `current`.
+    resting: Memo<Option<usize>>,
     /// Where it was sent last (`None` once a finger took it).
     aimed: Stored<Option<f32>>,
     /// A finger moves it.
@@ -497,6 +534,18 @@ impl Detents {
                         .map(|(i, _)| i)
                 })
         });
+        let resting = computed(move || {
+            if keyboard_lift() > Points::ZERO {
+                heights.with(|h| {
+                    h.iter()
+                        .enumerate()
+                        .max_by(|a, b| a.1.0.total_cmp(&b.1.0))
+                        .map(|(i, _)| i)
+                })
+            } else {
+                current.get()
+            }
+        });
         Self {
             list,
             detent,
@@ -509,6 +558,7 @@ impl Detents {
             heights,
             laid: signal(Points::ZERO),
             current,
+            resting,
             aimed: stored(None),
             dragging: stored(false),
             owner: Owner::current(),
@@ -544,7 +594,7 @@ impl Detents {
     /// Where the panel rests now, below its top.
     fn target_untracked(self) -> Option<f32> {
         untracked(|| {
-            let i = self.current.get()?;
+            let i = self.resting.get()?;
             let heights = self.heights.get();
             Some((self.laid.get().0 - heights.get(i)?.0).max(0.0))
         })
@@ -553,13 +603,22 @@ impl Detents {
     /// Where the panel's translation stops a drag (the smallest detent's
     /// place, or the bottom of the panel where a drag may close it,
     /// `can_close`), where the backdrop starts to fade (the smallest
-    /// detent's place) and over how far.
-    fn shape(self, can_close: bool) -> (f32, f32, f32) {
+    /// detent's place) and over how far, and how far the footer follows
+    /// the panel down: to the smallest detent's place, or all the way
+    /// while the keyboard is up, so the footer stays above it as the
+    /// panel rises (a drag, which may close it, takes the keyboard down
+    /// first).
+    fn shape(self, can_close: bool) -> (f32, f32, f32, f32) {
         let (heights, laid) = (self.heights.get(), self.laid.get());
         let height = laid.0.max(1.0);
         let lowest = self.offsets(laid, &heights).into_iter().fold(0.0, f32::max);
         let limit = if can_close { height } else { lowest.max(0.01) };
-        (limit, lowest, (height - lowest).max(1.0))
+        let footer = if keyboard_lift() > Points::ZERO {
+            height
+        } else {
+            lowest
+        };
+        (limit, lowest, (height - lowest).max(1.0), footer)
     }
 
     /// The panel's translation and the backdrop's opacity with detents,
@@ -568,18 +627,20 @@ impl Detents {
     /// the panel stands below its top, kept between the largest detent and
     /// the smallest (or the bottom of the panel, where it may close); the
     /// entrance and exit move the panel between there and out of sight,
-    /// and the backdrop fades below the smallest detent only.
+    /// and the backdrop fades below the smallest detent only. With them,
+    /// the value the footer stops following the panel at (`footer_lift`).
     fn graph(
         self,
         height: AnimatedValue,
         swipe_enabled: AnimatedValue,
         swipe: impl Fn() -> bool + 'static,
-    ) -> (AnimatedNode, AnimatedNode) {
+    ) -> (AnimatedNode, AnimatedNode, AnimatedValue) {
         let close = untracked(&swipe);
         let shape = untracked(|| self.shape(close));
         let limit = animated_value(shape.0);
         let fade_from = animated_value(shape.1);
         let fade_span = animated_value(shape.2);
+        let footer_stop = animated_value(shape.3);
         let set = stored(shape);
         effect(move || {
             if !self.active() {
@@ -591,6 +652,7 @@ impl Detents {
                 limit.set(shape.0);
                 fade_from.set(shape.1);
                 fade_span.set(shape.2);
+                footer_stop.set(shape.3);
             }
         });
         let motion = self.motion;
@@ -613,7 +675,22 @@ impl Detents {
                     .mul(&swipe_enabled),
             )
             .interpolate(&[0.0, 1.0], &[0.0, 1.0]);
-        (translate, fade)
+        (translate, fade, footer_stop)
+    }
+
+    /// How far the footer moves up from the bottom of the panel to the
+    /// bottom of what shows of it: the panel's distance below its top, up
+    /// to `stop` (the smallest detent's place: below it the footer goes
+    /// with the panel), as far as it came in.
+    fn footer_lift(self, stop: AnimatedValue) -> AnimatedNode {
+        let motion = self.motion;
+        motion
+            .drag_y
+            .div(&stop)
+            .interpolate(&[0.0, 1.0], &[0.0, 1.0])
+            .mul(&stop)
+            .mul(&motion.fade)
+            .mul(-1.0)
     }
 
     /// Keeps the motion to the detents and the panel's height: where it
@@ -622,7 +699,7 @@ impl Detents {
     /// without detents rests once they went.
     fn follow(self, open: OpenState) {
         effect(move || {
-            let _ = self.current.get();
+            let _ = self.resting.get();
             let active = self.active();
             let _ = self.laid.get();
             let settled = self.motion.settled.get();
