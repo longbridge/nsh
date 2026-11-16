@@ -158,6 +158,12 @@ restyles.
 Geometry (`geometry.rs`): maps document positions to the laid-out text's lines and back from the blocks' and texts'
 layouts, so the caret and hit tests follow the app's fonts (classes included). A position at a wrap shows at the
 upper line's end with `Affinity::Upstream`.
+The view reports `contentSizeChange({ contentSize })` (as `Input`'s `onContentSizeChange`) when the laid-out
+document's size changes, at most once per engine frame. `contentSize` is the full flow extent in points, including
+offscreen blocks and independent of the viewport's minimum height; it excludes the `content` part's padding.
+Scrolling does not report (`onScroll` does). The event stops at idle and its pending task is canceled with the view.
+Rust uses `RichEditor::on_content_size_change`, whose listener receives
+`RichEditorEvent::ContentSizeChange { content_size }`.
 
 Input (`controller.rs`): as the code `Editor`, an invisible native input at the caret (the sink) takes typed text
 and input methods. Typed text goes to plugins' `handle_text_input` (input rules), else is inserted with the stored
@@ -335,6 +341,10 @@ JS describes.
   nothing. `pageCoordsAtPos` / `posAtPageCoords` answer the same in page (root) points, for UI an app places
   outside the editor (a block handle): the view keeps the content's page offset, measured after each layout of the
   content and as a handle drag starts, and moved by the scroll since.
+  Scrolling an ancestor or a sibling's layout can move the editor on the page with every editor-local frame
+  unchanged, so the view also measures its placement when its viewport lays out and after each page query
+  (`Rv::place`, one measurement in flight): a query after such a move answers by the new placement a frame
+  later, with no app call. Local coordinates, document and selection remain unchanged.
   A query's position outside `0..=doc.content.size` throws a `RangeError` (ProseMirror's `resolve`;
   `RichEditorSession::check_pos`), never a `null`: `null` is an answer (no node after the position, no view, no
   such parent). `run` / `can` throw a `TypeError` for a command, node or mark type the editor does not know.

@@ -175,6 +175,8 @@ pub(crate) struct Rv {
     /// content, and the scroll offset then: how a drag the app starts
     /// from a page point (a drag handle's) maps into the content.
     pointer: Rc<Cell<Option<PageOffset>>>,
+    /// A [`Rv::place`] measurement is in flight.
+    placing: Rc<Cell<bool>>,
     /// Where a drag that moves the selection would drop it (the drop
     /// cursor).
     pub(crate) drop_at: Signal<Option<usize>>,
@@ -192,6 +194,8 @@ pub(crate) struct Rv {
     pub(crate) viewport: Signal<Size<Points>>,
     /// The content box's height, how far the scroll view scrolls.
     pub(crate) content_height: Signal<Points>,
+    /// Intrinsic flow extent, without the content box's minimum viewport height.
+    pub(crate) document_size: Signal<Size<Points>>,
     /// A drag scrolling on its own past the viewport's edge.
     autoscroll: Rc<RefCell<AutoScroll>>,
     /// The state's scroll request was not carried out yet.
@@ -243,6 +247,7 @@ impl Rv {
             next_composition: Rc::new(Cell::new(1)),
             drag: Rc::default(),
             pointer: Rc::default(),
+            placing: Rc::default(),
             drop_at: signal(None),
             goal_x: Rc::default(),
             selected: Rc::default(),
@@ -253,6 +258,7 @@ impl Rv {
             scrolled: Rc::default(),
             viewport: signal(Size::default()),
             content_height: signal(px(0.0)),
+            document_size: signal(Size::default()),
             autoscroll: Rc::default(),
             scroll_pending: Rc::default(),
             blink_task: Rc::default(),
@@ -367,6 +373,34 @@ impl Rv {
             if rv.scroll_pending.get() {
                 untracked(|| rv.scroll_into_view());
             }
+        });
+        // Native layout reports many block/text frames in one commit. Apps
+        // need a settled size, not an event per paragraph: the change is
+        // reported once a frame, and only when the size differs from the
+        // last one reported. The owner cancels the pending frame on unmount.
+        let rv = self.clone();
+        let pending = Rc::new(Cell::new(false));
+        let reported = Rc::new(Cell::new(Size::<Points>::default()));
+        let owner = Owner::current();
+        effect(move || {
+            rv.document_size.get();
+            if pending.replace(true) {
+                return;
+            }
+            let (rv, pending, reported) = (rv.clone(), pending.clone(), reported.clone());
+            owner.run(|| {
+                spawn(async move {
+                    next_frame().await;
+                    pending.set(false);
+                    let size = rv.document_size.get_untracked();
+                    if size.width.0 <= 0.0 || size.height.0 <= 0.0 || reported.replace(size) == size
+                    {
+                        return;
+                    }
+                    rv.cx
+                        .emit(RichEditorEvent::ContentSizeChange { content_size: size });
+                })
+            });
         });
     }
 
@@ -1682,16 +1716,26 @@ impl Rv {
         ))
     }
 
-    /// Measures where the content is on the page (after a layout, and as a
-    /// handle drag starts): the offset page queries and handle drags map
-    /// by, before any pointer has been over the content.
+    /// Measures where the content is on the page (after a layout of the
+    /// editor or its content, after a page query, and as a handle drag
+    /// starts): the offset page queries and handle drags map by, before
+    /// any pointer has been over the content. What is around the editor
+    /// can move it (an outer scroll view, a sibling's layout) with no
+    /// layout of its own, so each page query measures again; one
+    /// measurement is in flight at a time.
     pub(crate) fn place(&self) {
+        if self.placing.replace(true) {
+            return;
+        }
         let content = self.content;
         let pointer = self.pointer.clone();
         let scroll = self.scroll_y;
         let drag = self.drag.clone();
+        let placing = self.placing.clone();
         spawn(async move {
-            if let Some(m) = content.measure().await {
+            let measured = content.measure().await;
+            placing.set(false);
+            if let Some(m) = measured {
                 let at = scroll.get_untracked();
                 let shift = Point::new(-m.page.x, -m.page.y);
                 pointer.set(Some((shift, at)));
