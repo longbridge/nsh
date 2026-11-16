@@ -1282,9 +1282,7 @@ class Player {
     // browser, as it was when the player started.
     this.withStrings([this.baseURL], (p, l) => this.wasm.nsh_set_base_url(p, l));
     new ResizeObserver(() => this.resized()).observe(this.root);
-    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
-      if (this.options.dark === undefined) this.setDark(e.matches);
-    });
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => this.schemeChanged(e.matches));
     this.installEnvironment();
     this.installInput();
   }
@@ -2039,7 +2037,22 @@ class Player {
     this.call(() => this.withStrings([json], (p, l) => this.wasm.nsh_environment(p, l)));
   }
 
+  /**
+   * Switches the appearance at run time. It stays until the next `setDark`:
+   * the browser's color scheme changing later does not undo it, as it does
+   * not undo the `dark` option.
+   */
   setDark(dark) {
+    this.darkChosen = true;
+    this.applyDark(dark);
+  }
+
+  /** The browser's color scheme changed: the app follows it unless the page chose its appearance. */
+  schemeChanged(dark) {
+    if (this.options.dark === undefined && !this.darkChosen) this.applyDark(dark);
+  }
+
+  applyDark(dark) {
     this.dark = dark;
     this.updateRootClasses();
     this.call((w) => w.nsh_set_dark(dark ? 1 : 0));
