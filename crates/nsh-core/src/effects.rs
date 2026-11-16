@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use crate::{
+    color::Hsla,
     geometry::{DefiniteLength, Percentage, Points, REM_SIZE, Radians, Size, deg},
     style::{BorderStyle, Color},
 };
@@ -140,7 +141,7 @@ pub struct ColorStop {
     pub position: Option<DefiniteLength>,
 }
 
-/// A gradient image (`backgroundImage`).
+/// A gradient image (`backgroundImage`, `maskImage`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Gradient {
     /// Geometry.
@@ -151,7 +152,63 @@ pub struct Gradient {
     pub repeating: bool,
 }
 
+/// A stop at no position of its own: spread evenly between its neighbors.
+impl From<Hsla> for ColorStop {
+    fn from(color: Hsla) -> Self {
+        ColorStop {
+            color: color.into(),
+            position: None,
+        }
+    }
+}
+
+/// A stop at a fraction of the gradient line (`percentage(0.2)`) or a
+/// length from its start (`px(12.0)`).
+impl<P: Into<DefiniteLength>> From<(Hsla, P)> for ColorStop {
+    fn from((color, position): (Hsla, P)) -> Self {
+        ColorStop {
+            color: color.into(),
+            position: Some(position.into()),
+        }
+    }
+}
+
+// A gradient where an optional one goes (`Styled::mask_image`).
+crate::static_reactive!(Option<Gradient>: Gradient);
+
 impl Gradient {
+    /// A linear gradient along `angle` (0 up, `deg(90.0)` right, as CSS's)
+    /// through `stops`: colors, spread evenly, or colors with positions
+    /// (`(black(), percentage(0.2))`).
+    pub fn linear(
+        angle: impl Into<Radians>,
+        stops: impl IntoIterator<Item = impl Into<ColorStop>>,
+    ) -> Self {
+        Gradient {
+            kind: GradientKind::Linear {
+                angle: angle.into(),
+            },
+            stops: stops.into_iter().map(Into::into).collect(),
+            repeating: false,
+        }
+    }
+
+    /// A radial gradient out from the center to the farthest corner,
+    /// CSS's `radial-gradient(...)` without a shape, through `stops` (as
+    /// [`Gradient::linear`]'s).
+    pub fn radial(stops: impl IntoIterator<Item = impl Into<ColorStop>>) -> Self {
+        Gradient {
+            kind: GradientKind::Radial {
+                circle: false,
+                size: GradientSize::FarthestCorner,
+                x: Percentage(0.5),
+                y: Percentage(0.5),
+            },
+            stops: stops.into_iter().map(Into::into).collect(),
+            repeating: false,
+        }
+    }
+
     /// Whether a stop is placed in points, so the stops depend on the
     /// size of the box ([`Gradient::resolved_stops`]).
     pub fn has_lengths(&self) -> bool {

@@ -23,7 +23,7 @@ use super::{IntoReactive, Reactive, SharedString};
 use crate::{
     BlendMode, BoxShadow, Cursor, FontVariant, ObjectPosition, TransformOrigin, TransitionProps,
     color::{Hsla, Rgba, transparent_black},
-    effects::{Filter, GradientKind, GradientSize, KeyframeAnimation, Keyframes},
+    effects::{Filter, Gradient, GradientKind, GradientSize, KeyframeAnimation, Keyframes},
     geometry::{
         AbsoluteLength, DefiniteLength, Length, Percentage, Points, REM_SIZE, Radians, Rems, deg,
         percentage, px, relative,
@@ -2881,6 +2881,25 @@ pub trait Styled: Sized {
         self
     }
 
+    /// Masks it with a gradient whose alpha decides how much of it is
+    /// drawn (`maskImage`): fully where opaque, not at all where
+    /// transparent; the stops' colors are otherwise ignored. Masks
+    /// everything it draws, its backdrop filter included, whose blur then
+    /// draws without the system material's tint. `None` removes the mask.
+    /// Edges that fade out to both sides:
+    /// `.mask_image(Gradient::linear(deg(90.0), [transparent_black(), black(), transparent_black()]))`.
+    /// Not drawn on Windows and GPUI.
+    fn mask_image(mut self, gradient: impl IntoReactive<Option<Gradient>>) -> Self {
+        self.style()
+            .bind_value(gradient, |s, gradient: Option<Gradient>| {
+                s.value(
+                    StyleKey::MaskImage,
+                    PropertyValue::Gradients(gradient.into_iter().collect()),
+                );
+            });
+        self
+    }
+
     /// Blurs it and its content by `radius` (Tailwind's `blur-sm` is 8
     /// points).
     fn blur(self, radius: impl Into<Points>) -> Self {
@@ -4372,7 +4391,7 @@ mod tests {
     use super::*;
     use crate::{
         Style,
-        color::rgba,
+        color::{black, rgba},
         element::palette::{EMERALD, PINK, RED, SKY, VIOLET},
         geometry::point,
         tailwind::{ClassEnvironment, ClassProps, Context},
@@ -4724,6 +4743,62 @@ mod tests {
         ] {
             same(typed, classes);
         }
+    }
+
+    #[test]
+    fn mask_image_is_the_style_keys() {
+        let css = |value: &'static str| {
+            move |style: &mut Style| {
+                style
+                    .set_key(StyleKey::MaskImage, crate::StyleValue::Str(value))
+                    .unwrap();
+            }
+        };
+        same_with(
+            s().mask_image(Gradient::linear(
+                deg(90.0),
+                [transparent_black(), black(), transparent_black()],
+            )),
+            "",
+            &css("linear-gradient(to right, transparent, black, transparent)"),
+        );
+        same_with(
+            s().mask_image(Gradient::linear(
+                deg(180.0),
+                [
+                    (transparent_black(), percentage(0.2)),
+                    (black(), percentage(0.8)),
+                ],
+            )),
+            "",
+            &css("linear-gradient(to bottom, transparent 20%, black 80%)"),
+        );
+        same_with(
+            s().mask_image(Gradient::radial([black(), transparent_black()])),
+            "",
+            &css("radial-gradient(black, transparent)"),
+        );
+        // Any gradient CSS can write, as its struct.
+        same_with(
+            s().mask_image(Gradient {
+                kind: GradientKind::Conic {
+                    from: deg(0.0),
+                    x: percentage(0.5),
+                    y: percentage(0.5),
+                },
+                stops: vec![black().into(), transparent_black().into()],
+                repeating: false,
+            }),
+            "",
+            &css("conic-gradient(black, transparent)"),
+        );
+        // `None` removes it, as `none` does.
+        same_with(
+            s().mask_image(Gradient::radial([black(), transparent_black()]))
+                .mask_image(None),
+            "",
+            &css("none"),
+        );
     }
 
     #[test]

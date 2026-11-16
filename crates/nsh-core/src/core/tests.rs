@@ -24553,6 +24553,56 @@ mod views {
         assert_eq!(view_style_of(&batch, nested).map(|s| s.opacity), Some(1.0));
     }
 
+    /// Fades its edges with a bound mask; a press removes it.
+    #[derive(Default)]
+    struct Faded;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct FadedProps {}
+
+    impl Component for Faded {
+        type Props = FadedProps;
+        type Event = NoEvent;
+
+        fn view(_: FadedProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let masked = signal(true);
+            view()
+                .on_press(move |_: &()| masked.update(|m| *m = !*m))
+                .w(px(10.0))
+                .mask_image(move || {
+                    masked.get().then(|| {
+                        Gradient::linear(
+                            deg(90.0),
+                            [transparent_black(), black(), transparent_black()],
+                        )
+                    })
+                })
+        }
+    }
+
+    #[test]
+    fn a_bound_mask_image_is_mounted_and_removed() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Faded>(|| FadedProps {}));
+        let batch = c.commit().unwrap();
+        let host = root_host(&batch);
+        let masks = |batch: &MountBatch| {
+            view_style_of(batch, host)
+                .and_then(|s| s.effects)
+                .map(|e| e.mask_images.clone())
+        };
+        let mounted = masks(&batch).expect("the mask is mounted");
+        assert_eq!(mounted.len(), 1);
+        assert_eq!(mounted[0].kind, GradientKind::Linear { angle: deg(90.0) });
+        assert_eq!(
+            mounted[0].stops.iter().map(|s| s.color).collect::<Vec<_>>(),
+            [Color::TRANSPARENT, Color::from(black()), Color::TRANSPARENT]
+        );
+        assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert!(masks(&batch).is_none_or(|m| m.is_empty()));
+    }
+
     /// Counts back presses while its view lives.
     #[derive(Default)]
     struct Catcher;
