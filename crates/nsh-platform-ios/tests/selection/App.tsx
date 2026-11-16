@@ -1,5 +1,6 @@
 // Geometry fixture: fixed dimensions make selection and toolbar positions observable.
 import { mount, Overlay, Scroll, signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
 import type { Bounds } from "nsh";
 
 function App() {
@@ -30,6 +31,10 @@ function App() {
       </Scroll>
       <Text>{`Selection: ${selected()}`}</Text>
       <Text>{`Toolbar: ${toolbar()}`}</Text>
+      <View onTouchStart={() => {}} style={{ alignSelf: "flex-start" }}>
+        <Text style={{ userSelect: "text" }}>Copy this sentence</Text>
+      </View>
+      <Input testID="paste" style={{ height: 44, width: 240 }} />
       <If when={anchor()}>
         <Overlay
           anchor={anchor()!}

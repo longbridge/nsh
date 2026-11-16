@@ -42,7 +42,7 @@ Published apps behave as desktop apps in desktop browsers and as phone apps in p
 - **Wheels and touchpads** scroll the innermost scroll view along their axis that can still move (a vertical wheel scrolls a horizontal list when nothing vertical can), and stay on it until the scroll ends; wheel notches glide, paging and snapping views move one page per scroll. Ctrl + wheel and touchpad pinches pinch views with native pinch values instead of zooming the page. Dragging with the mouse does not scroll, as on the desktop platforms: mouse drags go to pans, the responder system and text selection. Scroll views report `onScrollDragStart` / `onScrollDragEnd`, `onMomentumStart` / `End` and `onScrollEnd` as on the desktop platforms.
 - **Keyboard**: Tab and Shift+Tab move between pressables and inputs (the app's `focus-visible:` styles show the keyboard focus); Return presses the focused pressable, Space presses it when released; arrows, Page Up / Page Down, Space, Home and End scroll the scroll view around the focus or under the mouse; Escape leaves a field, closes the dialog, then goes back. `keymap` shortcuts work in the browser, matched on the spot (`mod` is Command in Safari and Chrome on a Mac, Control elsewhere).
 - **Going back**: Escape, Alt+Left (Cmd+[ on a Mac) and the mouse's back button close the newest dialog or pop the innermost shown stack (a stack in a tab that is not selected keeps its pages), as the Android back button does; `popOnBack` and `onBackPress` work as there. When the app is the whole page, every page pushed on a shown stack and every open dialog is a browser history entry, so the browser's back button goes back in the app. `nsh.json` `web.history` decides it for the packaged page and the dev server's: `false` keeps the browser's history to the page's own entries, `true` adds the app's in an iframe too.
-- **Addresses**: when the app is the whole page, [`UrlScheme.setUrl(url)`](../modules/nsh.md#urlscheme) sets the address of the current history entry, resolved against the page's address (and its `<base href>`), and `UrlScheme.url()` reads it. The browser's back button goes back in the app: the stack's pages go back and the address becomes the entry's. An address the user types (a `#fragment`) is an entry of the app's at the pages shown, and a back or forward to an entry of the same pages tells the app the entry's address with [`UrlScheme.on("change")`](../modules/nsh.md#urlschemeonchange). `setUrl(url, { history: "push" })` makes such an entry for an address of the app's own, a tab or a filter.
+- **Addresses**: when the app is the whole page, [`UrlScheme.setUrl(url)`](../modules/nsh.md#urlscheme) sets the address of the current history entry, resolved against the page's address (or the site's `web.base`), and `UrlScheme.url()` reads it. The browser's back button goes back in the app: the stack's pages go back and the address becomes the entry's. An address the user types (a `#fragment`) is an entry of the app's at the pages shown, and a back or forward to an entry of the same pages tells the app the entry's address with [`UrlScheme.on("change")`](../modules/nsh.md#urlschemeonchange). `setUrl(url, { history: "push" })` makes such an entry for an address of the app's own, a tab or a filter.
 - **Touch**: only scroll views pan; the page itself never scrolls, zooms or pulls to refresh under the app, and taps have no delay. In an iframe, swipes the app does not take scroll the embedding page. Drags on views with native pans, pinches and the responder system are the app's.
 - **Accessibility**: `role`, `accessibilityLabel`, `accessibilityHint`, `accessibilityDescription`, `accessibilityState`, `accessibilityValue`, `accessibilityLiveRegion` and `accessibilityElementsHidden` become ARIA; `announce` speaks through a live region and `setAccessibilityFocus` moves the focus there (an input's into its field), or, while the user types in a field, reads the view out and leaves the focus in the field. Views under a dialog or alert are inert.
 - **Selection and menus**: in desktop browsers text is selectable by default, as on a web page, except inside interactive elements (views with press or touch handlers: buttons, pressable rows, tabs) and text with `userSelect: "none"` or `select-none`; dragging the mouse over it selects it, Ctrl/Cmd+C copies it line by line and Ctrl/Cmd+A selects all of the text the selection is in. In phone and tablet browsers only text with `userSelect: "text"` is selectable, as in native apps. The browser's context menu appears only in selectable text and inputs.
@@ -185,8 +185,8 @@ under in `nsh.json`:
 { "web": { "base": "/apps/counter/" } }
 ```
 
-The page then has a `<base href="/apps/counter/">`, and loads at `https://example.com/apps/counter/sports/football` as at
-`https://example.com/apps/counter/`. `"base": "/"` is a site at the host's root. `nsh package --target web --run` serves
+The page then names its files under `/apps/counter/`, the app's relative URLs resolve against it, and the page loads
+at `https://example.com/apps/counter/sports/football` as at `https://example.com/apps/counter/`. `"base": "/"` is a site at the host's root. `nsh package --target web --run` serves
 the site under that path. The path's segments are ASCII letters, digits, `-`, `.`, `_` and `~`, with other characters
 percent-encoded as browsers send them (`/%E5%BA%94%E7%94%A8/` for `/应用/`).
 
@@ -242,21 +242,28 @@ Content-Security-Policy `connect-src` with the declared hosts (and the page's ow
 refuses requests and redirect hops to any other host. An error that keeps it from starting is shown on the page;
 later errors go to the browser's console.
 
-#### Under a strict script policy
+#### Under a strict content policy
 
-The page runs no inline code: its scripts are files of the site, so a server that sends a strict policy such as
-`script-src 'self' 'wasm-unsafe-eval'` serves it as it is. The app itself runs in a frame of the page whose import map
-is the one inline script left; `nsh package` prints its hash, which the policy adds:
+The page has no inline code or styles: its scripts, its styles and the app's modules are files of the site, and the
+runtime adds its own rules as style sheets it builds in place. The images the runtime makes itself (in-memory
+images, an `svg()` in its text color, a clipboard image) are `blob:` and `data:` URLs, which `img-src` allows. A server
+that sends a strict policy such as
+
+```text
+default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob: data:; base-uri 'none'
+```
+
+serves it as it is, and `nsh package` prints what it needs:
 
 ```text
 ✓ packaged .nsh/out/Sports, 5.1 MB
-  under a Content-Security-Policy it needs script-src 'self' 'wasm-unsafe-eval' 'sha256-…'
+  under a Content-Security-Policy it needs script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob: data:
 ```
 
-The map names the app's files by their digests, so the hash changes when the app's code does: take it from each
-package. `base-uri` may be `'none'`. A TSX app that loads a native module whole (`import * as base from "nsh/base"`
-passed on as a value, `import(name)`) has the map made as it starts, which needs `'unsafe-inline' blob:`; `nsh package`
-says so. A web view's bridge (`window.nsh.postMessage`) is a file too; scripts in the web view's own `html` and its
+With `web.base` the page names its files by absolute paths and gives the runtime the site's base itself, with no
+`<base href>`, so under `base-uri 'none'` the app loads at every one of its paths. A TSX app that loads a native module whole (`import * as base from "nsh/base"` passed on as a value,
+`import(name)`) has its modules linked as it starts, which needs `'unsafe-inline' blob:`; `nsh package` says so. A web
+view's bridge (`window.nsh.postMessage`) is a file too; scripts in the web view's own `html` and its
 `injectedJavaScript*` are inline, the app's to allow, and `injectJavaScript` needs `'unsafe-eval'`.
 
 ### Embed it with an iframe
@@ -334,7 +341,7 @@ const player = await createPlayer(document.querySelector("#phone"), {
 await player.runModule(new URL("./bundle.js", location.href).href);
 ```
 
-`assets` (a map from `asset:/` paths to URLs) replaces `assetBase`, `readAsset(uri)` returns the bytes of an asset the engine needs at once (a font) or `null`, `data` maps the files the runtime fetches when it first needs them to their URLs (`syntaxes`: `nsh-syntaxes.<digest>.bin`; by default `nsh-<name>.bin` next to `nsh.js`), and `glue` is the URL of the wasm-bindgen glue of a runtime whose crates call [browser APIs from Rust](#browser-apis-from-rust) (`nsh-bindgen.<digest>.js`), which the player loads with the runtime; `player.runModule(url, { capabilities, appId })` runs the app under the capabilities it declares (its `capabilities.json`) and keeps its storage under its `nsh.json` id (without one, under the page's path). Relative URLs, in these options and the app's images alike, resolve against the page's URL as the player is made (`player.baseURL`), so they still load after the page moves the address to another directory. The page `nsh package --target web` writes uses all of them.
+`assets` (a map from `asset:/` paths to URLs) replaces `assetBase`, `readAsset(uri)` returns the bytes of an asset the engine needs at once (a font) or `null`, `data` maps the files the runtime fetches when it first needs them to their URLs (`syntaxes`: `nsh-syntaxes.<digest>.bin`; by default `nsh-<name>.bin` next to `nsh.js`), and `glue` is the URL of the wasm-bindgen glue of a runtime whose crates call [browser APIs from Rust](#browser-apis-from-rust) (`nsh-bindgen.<digest>.js`), which the player loads with the runtime; `player.runModule(url, { capabilities, appId })` runs the app under the capabilities it declares (its `capabilities.json`) and keeps its storage under its `nsh.json` id (without one, under the page's path). Relative URLs, in these options and the app's images alike, resolve against the page's URL as the player is made, or `baseURL`, the site's base, when given (`player.baseURL`), so they still load after the page moves the address to another directory. The page `nsh package --target web` writes uses all of them.
 
 `runModule(url, { chunks })` also takes where the chunks of a [split bundle](#split-bundles) are, and `runModule(url, { params })` the app's `host.params`: a JSON object the page already has for the app, such as the data of its first screen. The page `nsh package --target web` writes passes the JSON of a `<script type="application/json" id="nsh-params">` element when the page has one, so a server that serves the page can hand the app its data with it and the app shows it without asking for it again. The parameters go together with the page's [host](#the-hosts-functions): the app's `host.call` still reaches `createPlayer`'s `host`.
 
@@ -461,7 +468,7 @@ The page reports the rest of the environment, and keeps it current:
 
 `fetch` (with streams, `AbortController` and `FormData`) and `<Image>` URLs go through the browser's own network stack, after NSH has checked the app's [capabilities](./sandbox-and-capabilities.md). Since the requests are the browser's, the browser's rules apply:
 
-- **Relative URLs** resolve against the page's URL as the app started (its `<base href>` when it has one), as in the browser: a published app reaches its own API with `fetch("/api/items")`, and `<Image src="/photos/a.jpg" />` loads from its own server. (Native platforms have no page, so they need absolute URLs.)
+- **Relative URLs** in `fetch` (a string or a `URL`) and in the app's images, videos and sounds resolve against the page's URL as the app started, or against the site's `web.base` when it has one: a published app reaches its own API with `fetch("/api/items")`, and `<Image src="/photos/a.jpg" />` loads from its own server. A link's `href` and a web view's `url` resolve against the site's `web.base` too when it has one, and against the page's address otherwise. (Native platforms have no page, so they need absolute URLs.)
 - **CORS.** A request to another origin than the page's only succeeds if that server allows the page's origin (`Access-Control-Allow-Origin`); otherwise `fetch` rejects with a network error. Only the response headers the server exposes are visible.
 - **Cookies** (and HTTP authentication) are sent to the page's own origin only (`credentials: "same-origin"`), and headers browsers forbid (`Cookie`, `User-Agent`, `Host`, ...) are dropped.
 - **Redirects** are followed by the browser. A redirected request that must not follow it fails: `redirect: "manual"` and `"error"`, and requests of an app whose capabilities restrict `network` (NSH checks every hop, and browsers do not reveal a redirect before following it).

@@ -402,7 +402,7 @@ Standalone apps and views embedded in AppKit, Win32 and GTK apps count wakes on 
 
 ## Safe areas
 
-Notches, the home indicator, the status bar, Android's navigation bar and the Mac Catalyst title bar cover parts of the surface. NSH apps draw edge to edge on every platform, and get the covered parts as insets.
+Notches, the home indicator, the status bar, Android's navigation bar, the Mac Catalyst title bar and the window controls of an iPad app in a window cover parts of the surface. NSH apps draw edge to edge on every platform, and get the covered parts as insets. On iPadOS 26 and later, a windowed app's leading inset is as wide as the window controls in its top-leading corner, over the whole leading edge; in full screen and on iPhone it is the plain safe area.
 
 - `safe_area()` (TSX: `safeArea()`) gives the surface's insets.
 - A component's `cx.insets()` (TSX: `safeAreaInsets()`) gives the insets **where the component renders**: inside a navigation [page](./navigation.md#safe-areas-under-the-header) they are measured below its header, inside a [dialog](../elements/dialog.md) they are the dialog's. Prefer it in components that may be shown in several places.

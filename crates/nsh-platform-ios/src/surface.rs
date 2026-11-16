@@ -33,7 +33,8 @@ use objc2_ui_kit::{
     UIKeyboardWillHideNotification, UIPress, UIPressesEvent, UIResponder, UISceneActivationState,
     UISceneDidActivateNotification, UISceneDidEnterBackgroundNotification,
     UISceneWillDeactivateNotification, UISceneWillEnterForegroundNotification, UITraitCollection,
-    UITraitEnvironment, UIUserInterfaceIdiom, UIUserInterfaceStyle, UIView, UIWindowScene,
+    UITraitEnvironment, UIUserInterfaceIdiom, UIUserInterfaceStyle, UIView, UIViewLayoutRegion,
+    UIViewLayoutRegionAdaptivityAxis, UIWindowScene,
 };
 
 use crate::{
@@ -168,7 +169,17 @@ define_class!(
             // SAFETY: calling the superclass implementation.
             let _: () = unsafe { msg_send![super(self), layoutSubviews] };
             let size = self.bounds().size;
-            if size.width <= 0.0 || size.height <= 0.0 || size == self.ivars().size.get() {
+            if size.width <= 0.0 || size.height <= 0.0 {
+                return;
+            }
+            if size == self.ivars().size.get() {
+                // UIKit updates the layout regions as it lays the view
+                // out: publish when they moved the safe area without a
+                // resize.
+                let published = self.ivars().environment.get().map(|env| env.safe_area);
+                if published.is_some_and(|safe| safe != self.safe_area()) {
+                    self.publish_environment();
+                }
                 return;
             }
             self.ivars().size.set(size);
@@ -378,10 +389,38 @@ impl RootView {
         mounter.as_ref().map(|m| m.target().clone())
     }
 
+    /// The surface's safe area (`safe_area()`): UIKit's, and from iOS 26
+    /// on the corner a windowed iPad app's window controls cover, as an
+    /// inset of the whole leading edge. That inset comes from the safe-area
+    /// layout region adapted horizontally to the corners, which also pads
+    /// both sides alike for the display's rounded corners (9pt on an iPad
+    /// Pro 11-inch in full screen): only a side the region insets further
+    /// than the other, where the window controls are, takes it, so full
+    /// screen and iPhone keep the plain safe area.
+    fn safe_area(&self) -> Edges<Points> {
+        let mut insets = self.safeAreaInsets();
+        if os_version(self.mtm()).0 >= 26 {
+            let region = UIViewLayoutRegion::safeAreaLayoutRegionWithCornerAdaptation(
+                UIViewLayoutRegionAdaptivityAxis::Horizontal,
+            );
+            let corner = self.edgeInsetsForLayoutRegion(&region);
+            if corner.left > corner.right {
+                insets.left = insets.left.max(corner.left);
+            } else if corner.right > corner.left {
+                insets.right = insets.right.max(corner.right);
+            }
+        }
+        Edges {
+            top: Points(insets.top as f32),
+            right: Points(insets.right as f32),
+            bottom: Points(insets.bottom as f32),
+            left: Points(insets.left as f32),
+        }
+    }
+
     /// What JS sees through `windowSize()`, `safeArea()`, `keyboard()`...
     fn environment(&self) -> Environment {
         let size = self.bounds().size;
-        let insets = self.safeAreaInsets();
         let (keyboard_height, keyboard_duration) = self.ivars().keyboard.get();
         // SAFETY: plain getters.
         let (style, body, scale, horizontal, vertical) = unsafe {
@@ -407,12 +446,7 @@ impl RootView {
             horizontal_size_class: size_class(horizontal),
             vertical_size_class: size_class(vertical),
             window: Size::new(Points(size.width as f32), Points(size.height as f32)),
-            safe_area: Edges {
-                top: Points(insets.top as f32),
-                right: Points(insets.right as f32),
-                bottom: Points(insets.bottom as f32),
-                left: Points(insets.left as f32),
-            },
+            safe_area: self.safe_area(),
             // UIKit draws no title bar an app could hide.
             title_bar: Edges::default(),
             keyboard_height: Points(keyboard_height),

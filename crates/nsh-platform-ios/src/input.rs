@@ -125,7 +125,7 @@ define_class!(
         }
 
         #[unsafe(method(caretRectForPosition:))]
-        fn caret_rect(&self, position: &objc2::runtime::AnyObject) -> CGRect {
+        fn caret_rect(&self, position: Option<&objc2::runtime::AnyObject>) -> CGRect {
             if self.ivars().caret_hidden.get() {
                 return CGRect::ZERO;
             }
@@ -135,7 +135,7 @@ define_class!(
 
         /// Where the caret is, drawn or not (`caret()`).
         #[unsafe(method(nshCaretRectForPosition:))]
-        fn shown_caret_rect(&self, position: &objc2::runtime::AnyObject) -> CGRect {
+        fn shown_caret_rect(&self, position: Option<&objc2::runtime::AnyObject>) -> CGRect {
             // SAFETY: calling the superclass implementation.
             unsafe { msg_send![super(self), caretRectForPosition: position] }
         }
@@ -314,7 +314,7 @@ define_class!(
 
     impl Area {
         #[unsafe(method(caretRectForPosition:))]
-        fn caret_rect(&self, position: &objc2::runtime::AnyObject) -> CGRect {
+        fn caret_rect(&self, position: Option<&objc2::runtime::AnyObject>) -> CGRect {
             if self.ivars().caret_hidden.get() {
                 return CGRect::ZERO;
             }
@@ -324,7 +324,7 @@ define_class!(
 
         /// Where the caret is, drawn or not (`caret()`).
         #[unsafe(method(nshCaretRectForPosition:))]
-        fn shown_caret_rect(&self, position: &objc2::runtime::AnyObject) -> CGRect {
+        fn shown_caret_rect(&self, position: Option<&objc2::runtime::AnyObject>) -> CGRect {
             // SAFETY: calling the superclass implementation.
             unsafe { msg_send![super(self), caretRectForPosition: position] }
         }

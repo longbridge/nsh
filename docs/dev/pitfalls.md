@@ -222,6 +222,9 @@ Things that were found the hard way. Read the section of the area you change bef
   range the text never had (`NSMutableRLEArray` out of bounds). Inserting other text from the delegate during that
   paste crashes the same way. An input with `maxLength` therefore pastes by itself (`input::paste_text`): it clips the
   text, asks the delegate and calls `insertText:`, whose undo is right.
+- **UIKit passes nil where `UITextInput` declares a position or range nonnull** (a secondary click on selectable text
+  with nothing selected moves a nil position): a method a class defines with `define_class!` takes these as `Option`,
+  since a `&T` is a null reference then and objc2's debug-build nil check on messaging it aborts the app.
 - **UIKit implements the `UITextInputTraits` setters of `UITextField` by message forwarding**: objc2's debug-build signature
   check cannot find them on the class and panics, so `input.rs` sends them with a raw `objc_msgSend`.
 - **objc2 crates are used with `default-features = false`** and an explicit feature list in the root `Cargo.toml` (one feature per
@@ -271,6 +274,12 @@ Things that were found the hard way. Read the section of the area you change bef
   negative `additionalSafeAreaInsets` worked out from the window and the stack's frame alone. Deriving what UIKit
   granted by subtracting the compensation already applied looks equivalent and cannot heal: UIKit floors a safe area at
   zero, so after an overshoot that subtraction returns the value already applied, for good.
+- **iPadOS 26, the window controls' corner**: `safeAreaInsets` leaves out the controls a windowed app has at its
+  top-leading corner; the safe-area layout region with horizontal corner adaptation
+  (`edgeInsetsForLayoutRegion:`) covers them, and also pads both sides alike for the display's rounded corners
+  (left and right 9pt on an iPad Pro 11-inch in full screen, where `safeAreaInsets` has 0; in a window, left 66pt
+  for the controls and right 9.5pt for the window's corner). `RootView::safe_area` takes the region's inset only on
+  a side it insets further than the other, so full screen and iPhone keep `safeAreaInsets`.
 
 - **iOS, dismissing a modal that presents another**: `dismissViewControllerAnimated` called on a controller that is
   itself presenting one (a `Sheet` is a transparent modal over the modal it is in) dismisses only that one, and the outer

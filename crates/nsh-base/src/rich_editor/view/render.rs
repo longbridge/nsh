@@ -1246,7 +1246,7 @@ fn link_destination(marks: &[Mark]) -> Option<(SharedString, Option<SharedString
 /// point.
 fn inline_box(rv: &Rv, el: View, (id, offset): (u64, usize)) -> View {
     let width_rv = rv.clone();
-    el.on_layout(move |b: &Bounds<Points>| width_rv.set_inline_width(id, offset, b.size.width))
+    el.on_layout(move |b: &Bounds<Points>| width_rv.set_inline_width(id, offset, *b))
 }
 
 /// An inline leaf: its one-character text (a line break), its node view,
@@ -1702,15 +1702,15 @@ impl Rv {
 
     /// The width of the inline view or image at `offset` in textblock
     /// `id`'s content (see `TextGeo::widths`).
-    fn set_inline_width(&self, id: u64, offset: usize, width: Points) {
+    fn set_inline_width(&self, id: u64, offset: usize, frame: Bounds<Points>) {
         let mut geo = self.geo.borrow_mut();
         let Some(text) = geo.texts.get_mut(&id) else {
             return;
         };
-        if text.widths.get(&offset) == Some(&width) {
+        if text.widths.get(&offset) == Some(&frame) {
             return;
         }
-        text.widths.insert(offset, width);
+        text.widths.insert(offset, frame);
         drop(geo);
         // Every inline view of a block reports its width as an edit before
         // them moves them (their offsets are new): the geometry follows once
