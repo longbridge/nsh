@@ -88,6 +88,10 @@ fn show(container: &UIView) -> AppView {
 `NshAppView` 的成员对应；`AppView::set_locale`、`set_font_scale` 和 `set_error_handler` 对应 `locale`、`fontScale` 和 `onError`。
 `nsh package --target ios` 会为你构建这种应用，并挂载好根组件。
 
+不调用 `set_ui_sets` 时，`AppView` 提供 `nsh/base` 的核心部分（`Button`、`Checkbox`、`Switch`、`Tabs`、`Slider`、`AlertDialog`、
+导航、`Input` 等），这已足够 Rust 根组件使用，因为 Rust 按类型创建 `nsh/base` 的组件。视图加载的 TSX 若导入 `nsh/base`
+的更多组件（`Select`、`TextView`、`EmojiPicker` 等），就像上例那样传入完整的 `nsh_base::registry()`。
+
 ## 获取 framework
 
 发行包中包含两个版本：
@@ -113,6 +117,10 @@ cargo xtask ios-embed --dynamic
 
 默认情况下，每个 XCFramework 包含三个 arm64 切片：iOS 真机、iOS 模拟器（Apple 芯片）和 Mac Catalyst。最低部署目标为 iOS 15.0。Swift
 模块启用了 library evolution 编译，因此用其他版本 Swift 编译器构建的应用也能导入它；framework 已链接了它需要的一切，你无需再添加其他东西。
+
+`NshAppView` 为它运行的应用提供完整的 `nsh/base`（包括 `nsh/base/plot`），与 Android 的 `NshView` 一样：应用可以导入其中任何组件。
+宿主应用若用自己的 Rust 代码构建运行时，可以在创建第一个视图之前用 `nsh_platform_ios::set_ui_sets` 选择 UI 集合
+（[嵌入 Rust 应用](#嵌入-rust-应用)）。
 
 ## 加入 Xcode 项目
 

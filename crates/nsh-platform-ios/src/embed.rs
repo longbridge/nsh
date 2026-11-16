@@ -1742,4 +1742,28 @@ mod tests {
         // SAFETY: never released by the handler (no `release`).
         drop(unsafe { Box::from_raw(context) });
     }
+
+    /// A Swift host cannot call `set_ui_sets`: a part missing from the
+    /// default fails every app that imports it.
+    #[test]
+    fn the_sdk_serves_every_part_of_nsh_base() {
+        let exports = |sets: &[nsh_core::element::Registry]| {
+            sets.iter()
+                .flat_map(nsh_core::element::Registry::sets)
+                .flat_map(nsh_core::element::Registry::specs)
+                .map(|spec| spec.export.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        let served = exports(&crate::ui_sets());
+        assert_eq!(served, exports(&[nsh_base::registry()]));
+        for name in [
+            "TextView",
+            #[cfg(feature = "emoji-picker")]
+            "EmojiPicker",
+            #[cfg(feature = "rich-editor")]
+            "RichEditor",
+        ] {
+            assert!(served.contains(name), "{name} is not served");
+        }
+    }
 }
