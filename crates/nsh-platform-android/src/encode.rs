@@ -867,6 +867,13 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                                 e.string(notification.title);
                                 e.string(notification.body);
                                 e.bool(notification.silent);
+                                // The app's sound as a raw resource name, "" for none.
+                                e.string(
+                                    notification
+                                        .sound_path()
+                                        .map(nsh_core::notifications::Notification::sound_resource_name)
+                                        .unwrap_or_default(),
+                                );
                             }
                             N::Close(id) => {
                                 e.int(2);

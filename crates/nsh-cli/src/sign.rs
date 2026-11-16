@@ -428,6 +428,7 @@ mod tests {
             bytecode: None,
             source_map: None,
             assets: Vec::new(),
+            sounds: Vec::new(),
             min_runtime: None,
         };
         let input = dir.join("in.nshpkg");

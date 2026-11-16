@@ -253,7 +253,14 @@ fn show(center: &AnyObject, control: EngineControl, id: u32, notification: &Noti
         let () = msg_send![&*content, setUserInfo: &*info];
         // A content without a sound plays none (nor vibrates an iPhone),
         // though `PRESENTATION` lets sounds play.
-        if !notification.silent {
+        // The app's sound by its file name, which the system finds in the
+        // bundle's `Library/Sounds` (`nsh package` copies it there) or plays
+        // the default for when it finds none.
+        if let Some(path) = notification.sound_path() {
+            let name = NSString::from_str(Notification::sound_file_name(path));
+            let sound: Retained<AnyObject> = msg_send![sound, soundNamed: &*name];
+            let () = msg_send![&*content, setSound: &*sound];
+        } else if !notification.silent {
             let sound: Retained<AnyObject> = msg_send![sound, defaultSound];
             let () = msg_send![&*content, setSound: &*sound];
         }

@@ -2058,6 +2058,14 @@ Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`s
 await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
 ```
 
+`sound` 播放应用自带的声音来代替系统默认提示音，让用户分辨出这个应用的通知（例如新的客户消息）；`silent: true` 优先于它。传入打包的资源路径或导入的声音。`nsh package` 会把应用的声音复制到系统读取的位置：Apple 平台从 `Library/Sounds` 按文件名播放不超过 30 秒的 `.caf`、`.aiff`、`.wav`，所以每个声音的文件名要不同；Android 播放 `.ogg`、`.mp3`、`.wav` 原始资源，每个声音一个通知渠道，用户可在系统设置里修改；Linux 把文件交给通知服务（`sound-file`）。Windows（未打包的应用）、Web，以及找不到声音的平台播放默认提示音。
+
+```tsx
+import ding from "./sounds/message.caf";
+
+await Notifications.show({ id: "chat:42", title: "Ada", body: "Are you there?", sound: ding });
+```
+
 ### Notifications.closeAll
 
 `closeAll()` 移除应用显示的全部通知，包括已显示的和等待显示的。在用户退出登录时调用，让通知里的内容随账号一起清掉。Apple 平台、Windows 和 Android 的系统通知中心会跨运行保留通知，`closeAll()` 在这些平台上移除 NSH 显示的通知，包括应用上一次运行留下的，嵌入方自己的通知保留。Linux 和 Web 上它移除当前运行的应用显示的通知。
