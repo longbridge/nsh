@@ -45,7 +45,11 @@
 //! and the whole text is parsed as before:
 //!
 //! - a link or footnote definition anywhere: references before it resolve,
-//!   footnotes are numbered by their first reference;
+//!   footnotes are numbered by their first reference. The text is still
+//!   parsed once: a tree read from the text's start is the whole text's and
+//!   is converted as it is; a definition first seen in a tail drops what
+//!   was kept, so the reads after it start there. The tree alone says
+//!   whether there is one: `]:` is all over code (`if seen[key]:`);
 //! - plugins (they read the whole source and its positions), declared
 //!   `:::` containers (cut out of the whole source before parsing) and MDX;
 //! - front matter still open (`---` first, its closing line not arrived);
@@ -245,7 +249,21 @@ impl Prefix {
             // need to read the whole text.
             self.whole = before.iter().any(defines);
             if self.whole || defines(last) {
-                return None;
+                // A definition changes the blocks before the boundary too
+                // (references to it resolve, footnotes are numbered): the
+                // whole text is read, now and, from its start, next time.
+                if !first {
+                    *self = Self::default();
+                    return None;
+                }
+                // The tree is the whole text's, definitions included: it
+                // is the document, with no second parse.
+                let mut converter = Converter::new(parser, std::slice::from_ref(&tree));
+                converter.source = tree.source;
+                let mut blocks = Vec::new();
+                converter.blocks_into(nodes, &mut blocks);
+                let footnotes = converter.footnotes();
+                return Some(Document { blocks, footnotes }.into());
             }
         }
         // Front matter is the first lines up to its closing line: until
@@ -580,6 +598,105 @@ mod tests {
     }
 
     #[test]
+    fn definitions_set_and_replaced() {
+        let nested = "# Part\n\nSee [docs] and ![logo] and note[^b].\n\n## Part\n\nAgain[^a].\n\n> [docs]: /docs \"Docs\"\n>\n> - [logo]: /logo.png\n\n[^a]: # Part\n\n    Links [docs] and [^b].\n\n[^b]: Second note [^a].";
+        let plain = "# Part\n\nText.\n\n## Part\n\nMore.\n\nEnd.\n";
+        for streaming in [false, true] {
+            let parser = parser(streaming);
+            for source in [DEFINITIONS, FOOTNOTES, nested] {
+                let read = Prefix::default()
+                    .read(&parser, source)
+                    .expect("the tree read from the start can be converted");
+                assert_eq!(read.document(), parser.markdown(source));
+                let mut incremental = Incremental::default();
+                for text in [source, plain, source] {
+                    assert_eq!(
+                        incremental.parse(&parser, &shared(text)).document(),
+                        parser.markdown(text),
+                        "streaming {streaming}: {text:?}"
+                    );
+                }
+                let edited = source.replace("Part", "Changed");
+                assert_eq!(
+                    incremental.parse(&parser, &shared(&edited)).document(),
+                    parser.markdown(&edited)
+                );
+                assert_eq!(
+                    incremental.parse(&parser, &shared(plain)).document(),
+                    parser.markdown(plain)
+                );
+                assert!(incremental.boundary() > 0);
+            }
+        }
+        grows(nested);
+    }
+
+    #[test]
+    fn definitions_in_the_open_tail() {
+        for tail in [
+            "[docs]: https://example.com/guide \"Docs\"",
+            "[^a]: First [^b].\n\n[^b]: Second [^a].\n\n    More [docs].",
+            // The streaming repair can turn this into a definition even
+            // though the source has no adjacent closing bracket and colon.
+            "[docs][: /guide",
+        ] {
+            grows(&format!(
+                "See [docs] and [^a].\n\n## Part\n\nA paragraph.\n\n{tail}"
+            ));
+        }
+    }
+
+    /// `]:` in code or in a code span is no definition: what was kept of
+    /// the text stays kept while it arrives.
+    #[test]
+    fn literal_markers_keep_the_boundary() {
+        let source = "Intro.\n\nFirst.\n\n```python\nif seen[key]:\n    total += counts[key]\n```\n\nText `[docs]: /guide`.\n\nEnd.\n";
+        for streaming in [false, true] {
+            let parser = parser(streaming);
+            let mut incremental = Incremental::default();
+            let mut boundary = 0;
+            for end in 1..=source.len() {
+                let text = &source[..end];
+                assert_eq!(
+                    incremental.parse(&parser, &shared(text)).document(),
+                    parser.markdown(text)
+                );
+                assert!(incremental.boundary() >= boundary, "{text:?}");
+                boundary = incremental.boundary();
+            }
+            assert_eq!(boundary, source.find("End.").unwrap());
+        }
+    }
+
+    #[test]
+    fn temporary_definitions_and_literal_markers() {
+        for source in [
+            // The destination is valid until the unquoted text arrives.
+            "See [docs].\n\nParagraph.\n\n[docs]: /guide invalid\n\nAfter.\n\nEnd.\n",
+            "Before.\n\n```md\n[docs]: /guide\n```\n\nLiteral `]:` in a paragraph.\n\nAfter.\n\nEnd.\n",
+        ] {
+            grows(source);
+            for streaming in [false, true] {
+                let parser = parser(streaming);
+                let mut incremental = Incremental::default();
+                let initial = source.find(" invalid").map_or(source, |at| &source[..at]);
+                for text in [
+                    initial.to_owned(),
+                    source.to_owned(),
+                    format!("{source}\nMore.\n\nLast.\n"),
+                ] {
+                    assert_eq!(
+                        incremental.parse(&parser, &shared(&text)).document(),
+                        parser.markdown(&text)
+                    );
+                }
+                assert!(!incremental.prefix.whole);
+                assert!(incremental.boundary() > 0);
+            }
+        }
+    }
+
+    #[test]
     fn frontmatter() {
         let source = "---\ntitle: A\n\nauthor: B\n---\n\n# Title\n\nText.\n\nMore.\n";
         let with = |p: Parser| {
@@ -906,6 +1023,7 @@ mod tests {
                 .collect();
             let longest = 1 + rng.below(16);
             let mut incremental = Incremental::default();
+            let mut advanced = false;
             let mut end = 0;
             while end < source.len() {
                 end = (end + 1 + rng.below(longest)).min(source.len());
@@ -931,8 +1049,10 @@ mod tests {
                     parser.options
                 );
                 reads += 1;
+                // A later definition may discard a boundary reached earlier.
+                advanced |= incremental.boundary() > 0;
             }
-            moved += usize::from(incremental.boundary() > 0);
+            moved += usize::from(advanced);
         }
         (reads, moved, panicked)
     }
@@ -979,6 +1099,12 @@ mod tests {
 
     fn reply(bytes: usize) -> String {
         let section = "## Section\n\nSome **bold** text with `code`, a [link](https://example.com) and $x^2$.\n\n- item one\n- item two with *emphasis*\n\n```rust\nfn main() { println!(\"hi\"); }\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n> [!NOTE]\n> A note.\n\n";
+        section.repeat(bytes / section.len() + 1)[..bytes].to_owned()
+    }
+
+    /// A reply whose code has `]:`, which is no definition.
+    fn python(bytes: usize) -> String {
+        let section = "## Section\n\nSome **bold** text with `code`, a [link](https://example.com) and $x^2$.\n\n- item one\n- item two with *emphasis*\n\n```python\nfor key in keys:\n    if seen[key]:\n        total += counts[key]\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n> [!NOTE]\n> A note.\n\n";
         section.repeat(bytes / section.len() + 1)[..bytes].to_owned()
     }
 
@@ -1033,6 +1159,103 @@ mod tests {
         }
     }
 
+    /// A fresh set or one update after an untimed set. Alternate the two
+    /// readers, and keep document comparison and destruction out of timing.
+    fn bench_set(parser: &Parser, before: Option<&str>, source: &str) -> [f64; 2] {
+        use std::{hint::black_box, time::Instant};
+        let source = shared(source);
+        let before = before.map(shared);
+        let prepare = || {
+            let mut incremental = Incremental::default();
+            if let Some(before) = &before {
+                black_box(incremental.parse(parser, before));
+            }
+            incremental
+        };
+        assert_eq!(
+            prepare().parse(parser, &source).document(),
+            parser.markdown(&source)
+        );
+        let mut ms = [0.0; 2];
+        for run in 0..30 {
+            let mut incremental = prepare();
+            for reader in [run % 2, 1 - run % 2] {
+                let start = Instant::now();
+                if reader == 0 {
+                    let read = black_box(parser.markdown(black_box(&source)));
+                    ms[reader] += start.elapsed().as_secs_f64() * 1000.0;
+                    drop(read);
+                } else {
+                    let read = black_box(incremental.parse(parser, black_box(&source)));
+                    ms[reader] += start.elapsed().as_secs_f64() * 1000.0;
+                    drop(read);
+                }
+            }
+        }
+        ms.map(|ms| ms / 30.0)
+    }
+
+    /// `cargo test --release -p nsh-base --lib bench_streaming_set -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_streaming_set() {
+        let mut body = reply(40_000);
+        // End at a complete section: a truncated fence would hide the
+        // definitions from both readers and measure the wrong case.
+        body.truncate(body.rfind("\n\n## Section\n").unwrap());
+        body.push_str("\n\nSee [docs] and note[^a].\n\nBefore definitions.\n\n");
+        println!("mean ms of 30 runs; setup, comparison and drop excluded");
+        println!(
+            "{:<15} {:<16} {:>9} {:>7} | {:>11} | {:>11}",
+            "definitions", "update", "streaming", "bytes", "whole", "kept"
+        );
+        for streaming in [false, true] {
+            let parser = parser(streaming);
+            for (name, definitions) in [
+                ("none", ""),
+                ("literal markers", "`[docs]: /guide` and `[^a]: note`"),
+                ("link", "[docs]: https://example.com/guide"),
+                ("footnote", "[^a]: A note"),
+                (
+                    "link + footnote",
+                    "[docs]: https://example.com/guide\n\n[^a]: A note",
+                ),
+            ] {
+                let source = format!("{body}{definitions}");
+                let replaced = format!("# Previous\n\n{source}");
+                let continued = format!("{source}/more");
+                for (update, before, text) in [
+                    ("first set", None, source.as_str()),
+                    ("replace", Some(replaced.as_str()), source.as_str()),
+                    ("late definition", Some(body.as_str()), source.as_str()),
+                    ("tail grows", Some(source.as_str()), continued.as_str()),
+                ] {
+                    if definitions.is_empty() && matches!(update, "late definition" | "tail grows")
+                    {
+                        continue;
+                    }
+                    let [whole, kept] = bench_set(&parser, before, text);
+                    println!(
+                        "{name:<15} {update:<16} {streaming:>9} {:>7} | {whole:>11.3} | {kept:>11.3}",
+                        text.len()
+                    );
+                }
+            }
+            // The first late definition can follow a large tail that
+            // cannot be split: that one update reads the tail, then the
+            // whole text.
+            let before = format!("{body}{}", "> A quoted paragraph.\n>\n".repeat(1600));
+            let source = format!("{before}> [docs]: /guide");
+            let [whole, kept] = bench_set(&parser, Some(&before), &source);
+            println!(
+                "{:<15} {:<16} {streaming:>9} {:>7} | {whole:>11.3} | {kept:>11.3}",
+                "link in quote",
+                "late definition",
+                source.len()
+            );
+        }
+    }
+
     /// What a `TextView` does with its Markdown on each update of a reply
     /// arriving 24 bytes at a time, up to the rows: reading the text, then
     /// the document's and the blocks' memos (their value made and compared
@@ -1054,6 +1277,8 @@ mod tests {
         for (name, source) in [
             ("typical, 20 KB", reply(20_000)),
             ("typical, 40 KB", reply(40_000)),
+            ("`]:` in its code, 20 KB", python(20_000)),
+            ("`]:` in its code, 40 KB", python(40_000)),
             ("ends in a 400-row table", table(400)),
             ("ends in a 400-item list", list(400)),
             ("ends in 400 lines of code", program(400)),
