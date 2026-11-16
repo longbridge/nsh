@@ -770,7 +770,9 @@ impl Cx {
                     )
                     .into_element(),
                 // Typeset, centered, scrolling sideways when wider than
-                // the view.
+                // the view. In a text, as the one thing in its line, so a
+                // selection takes it in as it does an inline formula
+                // (#2121).
                 None if let Some(formula) = self.formula(tex, true, BODY_SIZE * 1.1) => self
                     .part(
                         scroll().horizontal().scrollbar(false).child(
@@ -779,8 +781,15 @@ impl Cx {
                                 .justify_center()
                                 .min_w(relative(1.0))
                                 .py(px(BODY_SIZE * 0.25))
-                                .label(tex.clone())
-                                .child(formula),
+                                .child(
+                                    text("").when(self.selectable, |t| t.select_text()).child(
+                                        view()
+                                            .flex_row()
+                                            .align_middle()
+                                            .label(tex.clone())
+                                            .child(formula),
+                                    ),
+                                ),
                         ),
                         Part::MathBlock,
                     )
