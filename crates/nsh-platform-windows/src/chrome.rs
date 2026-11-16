@@ -1237,8 +1237,7 @@ pub(crate) fn draw(surface: &Surface, hwnd: HWND, dc: &ID2D1DeviceContext, scale
         // SAFETY: drawing on the context between its BeginDraw / EndDraw.
         unsafe {
             use windows::Win32::Graphics::{
-                Direct2D::D2D1_DRAW_TEXT_OPTIONS_NONE,
-                DirectWrite::DWRITE_MEASURING_MODE_NATURAL,
+                Direct2D::D2D1_DRAW_TEXT_OPTIONS_NONE, DirectWrite::DWRITE_MEASURING_MODE_NATURAL,
             };
             if let Some(bg) = background
                 && let Ok(brush) = dc.CreateSolidColorBrush(&color_f(bg), None)
@@ -1349,7 +1348,9 @@ fn icon_font() -> Option<&'static str> {
     let mut collection = None;
     // SAFETY: COM calls with local out values.
     unsafe {
-        factory.GetSystemFontCollection(&mut collection, false).ok()?;
+        factory
+            .GetSystemFontCollection(&mut collection, false)
+            .ok()?;
         let collection = collection?;
         ["Segoe Fluent Icons", "Segoe MDL2 Assets"]
             .into_iter()
