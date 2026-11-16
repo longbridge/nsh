@@ -17,18 +17,46 @@ use super::{
 
 /// `source` with the syntax its last block leaves open closed.
 pub(crate) fn repair_streaming(source: &str) -> Cow<'_, str> {
-    let tail_start = match last_block(source) {
+    repair(source, false, &mut |_| {}).unwrap_or(Cow::Borrowed(source))
+}
+
+/// [`repair_streaming`] of `tail`, the end of a source from the start of a
+/// line after a blank line outside its fenced blocks (an offset a scan of
+/// the source gave `blank`): the scan of the whole source is in the same
+/// state there as at the start of a text, so the repair of the whole is
+/// the text before `tail` as written, then this. `None` when it is not: a
+/// line held back at the start of `tail` leaves the repair to the block
+/// before it. `blank` gets where each line after a blank line of `tail`
+/// outside its fenced blocks starts.
+pub(super) fn repair_tail<'s>(tail: &'s str, blank: &mut dyn FnMut(usize)) -> Option<Cow<'s, str>> {
+    repair(tail, true, blank)
+}
+
+/// The blank lines of `source` outside its fenced blocks, as the repair's
+/// scan reads them: where the line after each starts goes to `blank`.
+pub(super) fn blank_lines(source: &str, blank: &mut dyn FnMut(usize)) {
+    last_block(source, blank);
+}
+
+/// `source` repaired; with `tail`, `None` when the repair would reach the
+/// text before `source` ([`repair_tail`]).
+fn repair<'s>(source: &'s str, tail: bool, blank: &mut dyn FnMut(usize)) -> Option<Cow<'s, str>> {
+    let tail_start = match last_block(source, blank) {
         Last::Block(start) => start,
-        Last::Fenced => return Cow::Borrowed(source),
+        Last::Fenced => return Some(Cow::Borrowed(source)),
         Last::Hold(at) => {
             // The rest is repaired as if the held line had not arrived.
             let kept = source[..at].trim_end();
-            return Cow::Owned(repair_streaming(kept).into_owned());
+            if tail && kept.is_empty() {
+                return None;
+            }
+            let repaired = repair(kept, tail, &mut |_| {})?;
+            return Some(Cow::Owned(repaired.into_owned()));
         }
     };
     let tail = &source[tail_start..];
     if tail.trim().is_empty() {
-        return Cow::Borrowed(source);
+        return Some(Cow::Borrowed(source));
     }
     let repaired = match table(tail) {
         Some(table) => table,
@@ -45,11 +73,11 @@ pub(crate) fn repair_streaming(source: &str) -> Cow<'_, str> {
             text
         }
     };
-    if repaired == tail {
+    Some(if repaired == tail {
         Cow::Borrowed(source)
     } else {
         Cow::Owned(format!("{}{repaired}", &source[..tail_start]))
-    }
+    })
 }
 
 /// Where the last block of a streamed source starts.
@@ -65,8 +93,9 @@ enum Last {
 }
 
 /// Where the last block of `source` starts (after its last blank line or
-/// fenced block).
-fn last_block(source: &str) -> Last {
+/// fenced block). `blank` gets where the line after each blank line outside
+/// fenced blocks starts.
+fn last_block(source: &str, blank: &mut dyn FnMut(usize)) -> Last {
     let mut code: Option<(u8, usize)> = None;
     let mut math = false;
     let mut start = 0;
@@ -108,6 +137,7 @@ fn last_block(source: &str) -> Last {
         } else if line.trim().is_empty() && !open_end {
             // Markers alone on the last line (`- `) are no blank line yet.
             tail = next;
+            blank(next);
         }
         start = next;
     }
