@@ -25,6 +25,8 @@ mod keyboard;
 #[cfg(target_os = "macos")]
 mod menu_labels;
 #[cfg(target_os = "macos")]
+mod modal_fade;
+#[cfg(target_os = "macos")]
 mod mount;
 #[cfg(target_os = "macos")]
 mod press_momentum;
@@ -60,6 +62,8 @@ fn main() {
                 quit_requests::run();
             } else if std::env::var_os("NSH_TITLE_BAR_CHECK_ONLY").is_some() {
                 title_bar::run();
+            } else if std::env::var_os("NSH_MODAL_FADE_CHECK_ONLY").is_some() {
+                modal_fade::run();
             } else if std::env::var_os("NSH_SHADER_CONTENT_CHECK_ONLY").is_some() {
                 #[cfg(feature = "shader")]
                 shader_content::run();
@@ -99,6 +103,7 @@ fn main() {
                 window_hover::run();
                 title_bar::run();
                 window_dialog::run();
+                modal_fade::run();
                 #[cfg(feature = "shader")]
                 shader_content::run();
                 menu_labels::run();
