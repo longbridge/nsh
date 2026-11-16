@@ -277,7 +277,7 @@ import type {
 | [`Input`](../elements/input.md) | `nsh_base::input()` | 平台原生的文本输入框，单行或多行。 |
 | [`Popover`](../elements/popover.md) | `popover()` | 锚定在触发元素上、显示在一切之上的内容。 |
 | [`HoverCard`](../elements/hover-card.md) | `hover_card()` | 预览触发元素所指向的内容，在指针停留在它上面时显示（触摸屏上为按压）。 |
-| [`Menu`、`ContextMenu`、`MenuItem`、`MenuSeparator`、`Submenu`](../elements/menu.md) | `menu()`、... | 菜单：桌面上是带级联子菜单的弹出层，手机上是 sheet；支持可勾选的条目和单选的一组选项。 |
+| [`Menu`、`ContextMenu`、`MenuItem`、`MenuSeparator`、`Submenu`](../elements/menu.md) | `menu()`、... | 菜单：桌面和常规宽度的 iPad 上是带级联子菜单的弹出层，手机上是 sheet；支持可勾选的条目和单选的一组选项。 |
 | [`Tooltip`](../elements/tooltip.md) | `tooltip()` | 显示在触发元素旁的提示。 |
 | [`Sheet`](../elements/sheet.md) | `sheet()` | 位于屏幕一侧边缘、覆盖在背景层之上的面板。 |
 | [`Toast`、`ToastStack`、`ToastManager`](../elements/toast.md) | `toast()`、`toast_stack()`、`ToastManager` | 无样式的 toast：语义根、层叠的栈、它们的生命周期。 |

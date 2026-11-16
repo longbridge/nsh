@@ -291,7 +291,7 @@ walkthroughs, see the [Navigation guide](../docs/navigation.md) and [Forms and k
 | [`Input`](../elements/input.md) | `nsh_base::input()` | The platform's native text input, one line or several. |
 | [`Popover`](../elements/popover.md) | `popover()` | Content anchored to a trigger, on top of everything. |
 | [`HoverCard`](../elements/hover-card.md) | `hover_card()` | A preview of what its trigger points at, while the pointer rests on it (a press on touch screens). |
-| [`Menu`, `ContextMenu`, `MenuItem`, `MenuSeparator`, `Submenu`](../elements/menu.md) | `menu()`, ... | Menus: popups with cascading submenus on desktops, sheets on phones; checkable items and choices of one. |
+| [`Menu`, `ContextMenu`, `MenuItem`, `MenuSeparator`, `Submenu`](../elements/menu.md) | `menu()`, ... | Menus: popups with cascading submenus on desktops and iPads in a regular width, sheets on phones; checkable items and choices of one. |
 | [`Tooltip`](../elements/tooltip.md) | `tooltip()` | A hint next to its trigger. |
 | [`Sheet`](../elements/sheet.md) | `sheet()` | A panel at an edge of the screen over a backdrop. |
 | [`Toast`, `ToastStack`, `ToastManager`](../elements/toast.md) | `toast()`, `toast_stack()`, `ToastManager` | Unstyled toasts: a semantic root, a stack of layers, their lifecycle. |

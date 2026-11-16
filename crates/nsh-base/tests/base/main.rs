@@ -29,6 +29,7 @@ mod hover_card;
 mod link;
 mod menu;
 mod menu_list;
+mod menu_presentation;
 mod menu_room;
 mod menu_typeahead;
 mod number_input;

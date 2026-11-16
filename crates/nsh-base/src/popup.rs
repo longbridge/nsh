@@ -13,8 +13,9 @@
 //! a popup at its trigger or the pointer, with cascading submenus, and a
 //! press outside closes a popup and goes on to what is under it; on phones
 //! and tablets a menu is a sheet at the bottom of the screen whose
-//! submenus replace its items, and a press outside a popup only closes it
-//! (a transparent backdrop takes it). A popover stays anchored to its
+//! submenus replace its items (an iPad in a regular width shows the
+//! desktops' popup: `menu.rs`'s `as_sheet`), and a press outside a popup
+//! only closes it (a transparent backdrop takes it). A popover stays anchored to its
 //! trigger everywhere: what it shows belongs next to it.
 
 use std::{rc::Rc, time::Duration};
