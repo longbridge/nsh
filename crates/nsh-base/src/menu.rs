@@ -1927,10 +1927,49 @@ pub enum MenuEvent {
     /// root view and the room on that side.
     #[args(placement, bounds, available)]
     Position(Placement, Bounds<Points>, Size<Points>),
-    /// A `ContextMenu` shown as the system's menu (its `items`): the user
-    /// chose the item of this `id`. The menu has closed.
+}
+
+/// The events of a [`ContextMenu`]: a menu's ([`MenuEvent`]'s), and the
+/// choice in the system's menu its `items` make. (`ContextMenuEvent` is
+/// the core's `onContextMenu` payload.)
+#[derive(Debug, Clone, PartialEq, Event)]
+pub enum ContextMenuEvents {
+    /// It opened or closed (a secondary click or a held finger, a press
+    /// outside or on the backdrop, Escape or back, an item chosen), with
+    /// why: set `open` to follow it.
+    #[args(open, reason)]
+    OpenChange(bool, OpenChangeReason),
+    /// It is shown (a sheet once it came in).
+    Open,
+    /// It is gone (a sheet once it went, a popup after its exit; also when
+    /// the app closed it).
+    Close,
+    /// The user tried to close it without choosing (Escape or back, a press
+    /// outside or on the backdrop).
+    Cancel,
+    /// As a popup: the popup was placed: the side it went on (the other
+    /// side of `placement` when only that one had room), its frame in the
+    /// root view and the room on that side.
+    #[args(placement, bounds, available)]
+    Position(Placement, Bounds<Points>, Size<Points>),
+    /// The system's menu (`items`, on iOS): the user chose the item of
+    /// this `id`. The menu has closed.
     #[args(id)]
     Select(SharedString),
+}
+
+impl From<MenuEvent> for ContextMenuEvents {
+    fn from(event: MenuEvent) -> Self {
+        match event {
+            MenuEvent::OpenChange(open, reason) => Self::OpenChange(open, reason),
+            MenuEvent::Open => Self::Open,
+            MenuEvent::Close => Self::Close,
+            MenuEvent::Cancel => Self::Cancel,
+            MenuEvent::Position(placement, bounds, available) => {
+                Self::Position(placement, bounds, available)
+            }
+        }
+    }
 }
 
 /// A menu its trigger opens: a popup at the trigger on the desktops and on
@@ -2177,12 +2216,14 @@ pub struct ContextMenuProps {
 /// the app cannot open it (`open` set true shows nothing), and `open` set
 /// false closes it.
 #[component]
-pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
+pub fn ContextMenu(props: ContextMenuProps, cx: Scope<ContextMenuEvents>) -> impl IntoElement {
     let open = OpenState::new(props.open, Prop::from(false));
     let items = props.items;
     // The system's menu: iOS with items. The drawn menu's openers stand
-    // aside while it is, so a held finger opens one menu.
-    let system = computed(move || os() == Os::Ios && items.with(|items| !items.is_empty()));
+    // aside while it is, so a held finger opens one menu. Elsewhere there
+    // is nothing to follow: the menu is made as without `items`.
+    let system = (os() == Os::Ios).then(|| computed(move || items.with(|i| !i.is_empty())));
+    let is_system = move || system.is_some_and(|s| s.get_untracked());
     // An opening from the keyboard or an assistive technology focuses the
     // first enabled item once they are there.
     let keyed = stored(None::<Keyed>);
@@ -2195,7 +2236,9 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
             return;
         }
         why.stamp(reason);
-        open.request(next, || cx.emit(MenuEvent::OpenChange(next, reason)));
+        open.request(next, || {
+            cx.emit(ContextMenuEvents::OpenChange(next, reason))
+        });
     });
     // Where the pointer asked for it; none when the app opened it.
     let point = signal(None::<Point<Points>>);
@@ -2235,7 +2278,7 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
             trigger
                 .element_ref(&anchor)
                 .on_context_menu(move |e: &ContextMenuEvent| {
-                    if system.get_untracked() {
+                    if is_system() {
                         return;
                     }
                     point.set(Some(e.page_position));
@@ -2260,7 +2303,7 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
                         TouchPhase::Start
                             if e.points.len() == 1
                                 && e.points[0].pointer_type != PointerType::Mouse
-                                && !system.get_untracked() =>
+                                && !is_system() =>
                         {
                             let on_hold = on_hold.clone();
                             let page = at.unwrap_or_default();
@@ -2298,39 +2341,46 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
                     }
                 })
         }))
-        .child(
-            when(system, {
+        .child({
+            let drawn = {
                 let change = change.clone();
-                let (title, disabled) = (props.title, props.disabled);
-                move || system_menu(items, title, disabled, open, change.clone(), cx)
-            })
-            .otherwise(move || {
-                presented(
-                    open,
-                    change.clone(),
-                    Rc::new(move |e| cx.emit(e)),
-                    At::Pointer(point, anchor),
-                    parts,
-                    // The secondary button and a held finger open it with no
-                    // item focused, the keyboard with the first.
-                    Asked { keyed, why },
-                    props.children,
-                )
-            }),
-        )
+                move || {
+                    presented(
+                        open,
+                        change.clone(),
+                        Rc::new(move |e: MenuEvent| cx.emit(e.into())),
+                        At::Pointer(point, anchor),
+                        parts,
+                        // The secondary button and a held finger open it with
+                        // no item focused, the keyboard with the first.
+                        Asked { keyed, why },
+                        props.children,
+                    )
+                }
+            };
+            match system {
+                None => drawn(),
+                Some(system) => {
+                    let (title, disabled) = (props.title, props.disabled);
+                    when(system, move || {
+                        system_menu(items, title, disabled, open, change.clone(), cx)
+                    })
+                    .otherwise(drawn)
+                    .into_element()
+                }
+            }
+        })
 }
 
 /// A `ContextMenu`'s system menu (iOS, given `items`): the native
-/// component that puts `UIContextMenuInteraction` on the view around the
-/// trigger. It takes no room and no touches; the interaction is on its
-/// parent, and the trigger beside it is what lifts.
+/// component beside the trigger, taking no room and no touches.
 fn system_menu(
     items: Prop<Vec<MenuButtonItem>>,
     title: Prop<Option<SharedString>>,
     disabled: Prop<bool>,
     open: OpenState,
     change: Rc<dyn Fn(bool, OpenChangeReason)>,
-    cx: Scope<MenuEvent>,
+    cx: Scope<ContextMenuEvents>,
 ) -> impl IntoElement {
     // Shown, as the platform last told: it reports the closing once,
     // whether a choice or a dismissal tells first.
@@ -2359,7 +2409,7 @@ fn system_menu(
                             _ => OpenChangeReason::LongPress,
                         };
                         change(true, reason);
-                        cx.emit(MenuEvent::Open);
+                        cx.emit(ContextMenuEvents::Open);
                     }
                 }
                 "select" => {
@@ -2370,9 +2420,9 @@ fn system_menu(
                         if was {
                             change(false, OpenChangeReason::Select);
                         }
-                        cx.emit(MenuEvent::Select(SharedString::from(id.to_owned())));
+                        cx.emit(ContextMenuEvents::Select(SharedString::from(id.to_owned())));
                         if was {
-                            cx.emit(MenuEvent::Close);
+                            cx.emit(ContextMenuEvents::Close);
                         }
                     }
                 }
@@ -2381,8 +2431,8 @@ fn system_menu(
                     // preview's drag away.
                     if shown.replace(false) {
                         change(false, OpenChangeReason::PressOutside);
-                        cx.emit(MenuEvent::Cancel);
-                        cx.emit(MenuEvent::Close);
+                        cx.emit(ContextMenuEvents::Cancel);
+                        cx.emit(ContextMenuEvents::Close);
                     }
                 }
                 _ => {}

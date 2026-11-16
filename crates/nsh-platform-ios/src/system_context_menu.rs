@@ -1,13 +1,7 @@
 //! `nsh/base`'s `ContextMenu` given `items`, on iOS: the system's context
-//! menu (`UIContextMenuInteraction`, iOS 13). The component's own view
-//! takes no room and no touches; it puts the interaction on the view
-//! around the trigger (its container's superview), so the system's
-//! gestures (a held finger, a secondary click) see the trigger's touches
-//! beside the app's presses, and answers its delegate natively: the menu
-//! is made from the mounted `items`, and the trigger is the preview the
-//! system lifts, clipped to its own corners. JS hears about it afterwards:
-//! `open` when the menu shows, `select` with the app's id, `close` once it
-//! went without a choice.
+//! menu (`UIContextMenuInteraction`), made from the mounted items and
+//! answered natively; the trigger is what the system lifts. JS hears about
+//! it afterwards: `open`, `select` with the app's id, and `close`.
 
 use std::{
     cell::{Cell, RefCell},

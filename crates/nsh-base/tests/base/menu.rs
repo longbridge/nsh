@@ -18,7 +18,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use nsh_base::{MenuButtonItem, MenuEvent, context_menu, dialog, input, menu, menu_item};
+use nsh_base::{
+    ContextMenuEvents, MenuButtonItem, MenuEvent, context_menu, dialog, input, menu, menu_item,
+};
 use nsh_core::{
     Checked, MountItem, NodeId, Size,
     element::Root,
@@ -44,6 +46,8 @@ struct Seen {
     /// last sent.
     components: HashMap<String, NodeId>,
     component_props: HashMap<(NodeId, String), Option<serde_json::Value>>,
+    /// Every item sent, written out, in order.
+    items: Vec<String>,
 }
 
 struct App {
@@ -104,6 +108,7 @@ fn start_on(root: Root, os: Os) -> App {
         let mut seen = into.lock().unwrap();
         let mut touched = Vec::new();
         for item in &batch.items {
+            seen.items.push(format!("{item:?}"));
             match item {
                 MountItem::ViewProps { id, props } => {
                     if let Some(test_id) = &props.test_id {
@@ -1084,14 +1089,14 @@ fn RowMenu(props: RowMenuProps) -> impl IntoElement {
         .pt(px(100.0))
         .pl(px(40.0))
         .child(
-            menu.on_open_change(move |e: &MenuEvent| {
-                if let MenuEvent::OpenChange(next, _) = e {
+            menu.on_open_change(move |e: &ContextMenuEvents| {
+                if let ContextMenuEvents::OpenChange(next, _) = e {
                     open.set(*next);
                     changes.update(|c| c.push(if *next { 'o' } else { 'c' }));
                 }
             })
-            .on_position(move |e: &MenuEvent| {
-                if let MenuEvent::Position(_, bounds, _) = e {
+            .on_position(move |e: &ContextMenuEvents| {
+                if let ContextMenuEvents::Position(_, bounds, _) = e {
                     at.set(format!("{} {}", bounds.origin.x.0, bounds.origin.y.0));
                 }
             })
@@ -1227,13 +1232,13 @@ fn ShownMenu() -> impl IntoElement {
         .child(
             context_menu()
                 .open(move || Some(open.get()))
-                .on_open_change(move |e: &MenuEvent| {
-                    if let MenuEvent::OpenChange(next, _) = e {
+                .on_open_change(move |e: &ContextMenuEvents| {
+                    if let ContextMenuEvents::OpenChange(next, _) = e {
                         open.set(*next);
                     }
                 })
-                .on_position(move |e: &MenuEvent| {
-                    if let MenuEvent::Position(_, bounds, _) = e {
+                .on_position(move |e: &ContextMenuEvents| {
+                    if let ContextMenuEvents::Position(_, bounds, _) = e {
                         at.set(format!("{} {}", bounds.origin.x.0, bounds.origin.y.0));
                     }
                 })
@@ -1359,8 +1364,8 @@ fn SystemMenuRow() -> impl IntoElement {
                     ),
                 ])
                 .title("Notes.txt")
-                .on_open_change(move |e: &MenuEvent| {
-                    if let MenuEvent::OpenChange(open, reason) = e {
+                .on_open_change(move |e: &ContextMenuEvents| {
+                    if let ContextMenuEvents::OpenChange(open, reason) = e {
                         hear(format!("{open}:{reason:?}"));
                     }
                 })
@@ -1454,4 +1459,39 @@ fn off_ios_a_context_menus_items_are_not_used() {
             .wait_for("Drawn rename")
             .unwrap_or_else(|e| panic!("{os:?}: {e}"));
     }
+}
+
+/// A row with a context menu and no `items`, as before they existed.
+#[component]
+fn DrawnOnlyRow() -> impl IntoElement {
+    view().pt(px(100.0)).child(
+        context_menu()
+            .trigger(
+                view()
+                    .test_id("row")
+                    .w(px(200.0))
+                    .h(px(40.0))
+                    .child(text("Row")),
+            )
+            .child(menu_item().child(text("Drawn rename"))),
+    )
+}
+
+#[test]
+fn without_items_ios_mounts_what_the_other_platforms_do() {
+    // Off iOS a context menu without `items` is made as it was before they
+    // existed; on iOS it must send the platform the same items too (views,
+    // listeners, the drawn menu), with no system menu, as it renders and
+    // as a held finger opens it.
+    let mounted = |os| {
+        let mut app = start_on(Root::of::<DrawnOnlyRow>(), os);
+        hold_row(&mut app, PointerType::Touch);
+        app.app.wait_for("Drawn rename").unwrap();
+        let seen = app.seen.lock().unwrap();
+        assert!(seen.components.is_empty(), "{os:?}: no native component");
+        seen.items.clone()
+    };
+    let ios = mounted(Os::Ios);
+    assert!(!ios.is_empty());
+    assert_eq!(ios, mounted(Os::Android));
 }

@@ -1202,10 +1202,8 @@ draws the menu. On iOS the app's content is covered by the native component `nsh
 is its primary action, so the tap is answered natively; the button sets itself as the element's only accessibility
 element, and an action emits `select` with the app's id. On a desktop OS a press shows the same items with
 `popup_menu`; elsewhere the content opens nothing. A `ContextMenu` given `items` is the same kind of menu on iOS: the native component
-`nsh/context-menu` (`system_context_menu.rs`) puts a `UIContextMenuInteraction` on the view around the trigger and
-answers it from the mounted items (`MenuButton`'s, read by the same code), the trigger itself the preview the system
-lifts; it emits `open`, `select` and `close`, which `menu.rs` turns into the drawn menu's events. While it is used the
-drawn menu's openers (the secondary button, the held finger) stand aside; elsewhere the items are not used. `nsh/mobile`'s `SegmentedControl` is the same kind of native
+`nsh/context-menu` (`system_context_menu.rs`) shows the system's context menu from `MenuButton`'s item data, and
+`menu.rs` reports it with the drawn menu's events; elsewhere, and without items, the menu is the drawn one. `nsh/mobile`'s `SegmentedControl` is the same kind of native
 component, `nsh/segmented-control` (`system_segmented_control.rs`), built as `TabBar` is.
 
 `HoverCard` (`hover_card.rs`) is `gpui-base`'s `HoverCard` on `Popover`'s overlay and presence. On the desktops the
