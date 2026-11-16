@@ -904,6 +904,12 @@ impl gpui::EntityInputHandler for AppView {
 
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The frame this render draws is presented by the next frame's
+        // callback: the process's first is logged there.
+        static FIRST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+        if FIRST.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            window.on_next_frame(|_, _| nsh_engine::perf::first_frame());
+        }
         let surface = SurfaceElement {
             surface: self.surface.clone(),
             focus: self.focus.clone(),
