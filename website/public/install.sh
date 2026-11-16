@@ -43,11 +43,18 @@ step() {
   fi
   "$@" &
   pid=$!
-  frames='|/-\'
   i=0
   while kill -0 "$pid" 2> /dev/null; do
-    i=$(((i % 4) + 1))
-    printf '\r\033[K%s %s' "$(echo "$frames" | cut -c "$i")" "$label" >&2
+    i=$(((i % 10) + 1))
+    case "$i" in
+      1) frame=⠋ ;; 2) frame=⠙ ;; 3) frame=⠹ ;; 4) frame=⠸ ;; 5) frame=⠼ ;;
+      6) frame=⠴ ;; 7) frame=⠦ ;; 8) frame=⠧ ;; 9) frame=⠇ ;; 10) frame=⠏ ;;
+    esac
+    printf '\r\033[K\033[36m%s\033[0m %s' "$frame" "$label" >&2
+    if [ -n "${download_file:-}" ] && [ -f "$download_file" ]; then
+      size=$(wc -c < "$download_file" | awk '{printf "%.1f", $1 / 1048576}')
+      printf '  \033[2m%s MB\033[0m' "$size" >&2
+    fi
     sleep 0.1
   done
   status=0
@@ -146,12 +153,12 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
 
 echo "Installing NSH $version for $platform"
-echo "Downloading $url"
 if [ -n "$tty" ]; then
-  # curl draws its own bar with size and rate on stderr.
-  curl -fL --progress-bar "$url" -o "$work/$asset" || fail "could not download $url"
-  printf '\033[1A\r\033[K\033[32m✓\033[0m Downloaded %s (%s)\n' "$asset" "$(du -h "$work/$asset" | cut -f1)" >&2
+  download_file="$work/$asset"
+  step "Downloading $asset" curl -fsSL "$url" -o "$download_file" || fail "could not download $url"
+  download_file=
 else
+  echo "Downloading $url"
   curl -fsSL "$url" -o "$work/$asset" || fail "could not download $url"
 fi
 curl -fsSL "$url.sha256" -o "$work/$asset.sha256" || fail "could not download $url.sha256"
