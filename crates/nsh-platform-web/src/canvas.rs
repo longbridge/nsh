@@ -179,7 +179,7 @@ pub(crate) fn font(f: &CanvasFont) -> String {
     let family = f
         .family
         .as_deref()
-        .map(crate::text::css::family_list)
+        .map(crate::text::family_list)
         .filter(|list| !list.is_empty())
         .unwrap_or_else(|| "system-ui, sans-serif".to_owned());
     format!(
