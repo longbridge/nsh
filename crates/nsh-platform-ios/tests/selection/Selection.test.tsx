@@ -49,3 +49,17 @@ for (const scroll of ["inner", "outer"]) {
     await toolbarFollows(app);
   });
 }
+
+test("a long press on selectable text opens the edit menu, and the selection copies", async () => {
+  const app = await open("./App.tsx");
+  // The press selects a word and UIKit builds its edit menu, asking the
+  // text for positions and ranges around the selection.
+  await app.longPress("text:Copy this sentence");
+  await app.wait(1000);
+  await app.keyboard.press("mod+a");
+  await app.keyboard.press("mod+c");
+  // Read back through the system pasteboard: a paste into an input.
+  await app.clear("id:paste");
+  await app.keyboard.press("mod+v");
+  await app.waitUntil(() => app.value("id:paste") === "Copy this sentence");
+});
