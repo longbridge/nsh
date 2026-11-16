@@ -970,15 +970,16 @@ covers [props] closeOnSwipe
 # A bottom sheet with detents: as tall as the largest (the screen), resting
 # at the smallest (half of it, 422 points below its top), with a grabber
 # the app styles that screen readers adjust and a footer at the bottom of
-# what shows (as far up from the panel's bottom).
+# what shows (as far up from the panel's bottom; its content is in the
+# slot's own view).
 tap text:OpenDetentSheet
 expect DetentBody
 wait 400
 frame parent:text:DetentBody 0 0 390 844
 animated parent:text:DetentBody transform.1 422
-animated parent:text:DetentFooter transform.0 -422
-frame parent:text:DetentFooter 0 804 390 40
-style parent:text:DetentFooter backgroundColor #234567ff
+animated parent:parent:text:DetentFooter transform.0 -422
+frame parent:parent:text:DetentFooter 0 804 390 40
+style parent:parent:text:DetentFooter backgroundColor #234567ff
 listens parent:text:DetentBody onPanEnd
 prop label:Resize role adjustable
 frame label:Resize 175 0 40 6

@@ -1060,8 +1060,14 @@ fn DetentScreen(props: DetentProps) -> impl IntoElement {
 
 /// A 390 × 844 surface (no safe area) showing a [`DetentScreen`].
 fn detent_app(props: DetentProps) -> (Headless, Replicated) {
+    detent_app_on(props, nsh_engine::Clock::system())
+}
+
+/// [`detent_app`] on `clock`.
+fn detent_app_on(props: DetentProps, clock: nsh_engine::Clock) -> (Headless, Replicated) {
     let mut app = Headless::start(EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
+        clock,
         ..EngineConfig::new(Root::new::<DetentScreen>(move || props.clone()))
     })
     .unwrap();
@@ -1380,10 +1386,15 @@ fn the_footer_stays_at_the_bottom_of_what_shows() {
 
 #[test]
 fn the_keyboard_raises_the_sheet_to_its_largest_detent_and_back() {
-    let (mut app, replica) = detent_app(DetentProps {
-        footer: true,
-        ..MEDIUM
-    });
+    // The keyboard's motion runs on a clock the test moves.
+    let (mut app, replica) = detent_app_on(
+        DetentProps {
+            footer: true,
+            ..MEDIUM
+        },
+        nsh_engine::Clock::manual(std::time::SystemTime::now()),
+    );
+    app.run_for(std::time::Duration::from_millis(400)).unwrap();
     assert_rests(&replica, 422.0);
     keyboard(&mut app, 300.0);
     let (translation, height) = replica.lock().unwrap().rest();
