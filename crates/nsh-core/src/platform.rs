@@ -21,6 +21,11 @@ pub const SEGMENTED_CONTROL_COMPONENT: &str = "nsh/segmented-control";
 /// action).
 pub const MENU_BUTTON_COMPONENT: &str = "nsh/menu-button";
 
+/// The native component of `nsh/base`'s `SplitView`, which the iOS backend
+/// makes itself (a `UISplitViewController` whose columns are the
+/// navigation controllers of the stacks the view places before it).
+pub const SPLIT_VIEW_COMPONENT: &str = "nsh/split-view";
+
 /// Whether native component `name` is NSH's own: names under `nsh/` are, and
 /// an embedding app's registration of one is refused, so it can never
 /// replace what NSH's exports render.
@@ -213,11 +218,44 @@ impl Lifecycle {
     }
 }
 
+/// The space available along one axis of a surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SizeClass {
+    /// Less room for content.
+    Compact,
+    /// Room for an expanded layout.
+    Regular,
+}
+
+impl SizeClass {
+    /// Classify a length in points: below 600 is compact, 600 and above regular.
+    /// This is the fallback where the platform supplies no native size class.
+    pub(crate) fn from_length(length: Points) -> Self {
+        if length < Points(600.0) {
+            Self::Compact
+        } else {
+            Self::Regular
+        }
+    }
+
+    /// The TypeScript value of this class.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Compact => "compact",
+            Self::Regular => "regular",
+        }
+    }
+}
+
 /// What the platform knows about the surface.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Environment {
     /// Size of the surface in points.
     pub window: Size<Points>,
+    /// Native horizontal size class (UIKit); `None` derives it from window width.
+    pub horizontal_size_class: Option<SizeClass>,
+    /// Native vertical size class (UIKit); `None` derives it from window height.
+    pub vertical_size_class: Option<SizeClass>,
     /// Insets not covered by system UI (notch, home indicator, title bar).
     pub safe_area: Edges<Points>,
     /// The title bar's area while the app hides it (desktops,
@@ -360,6 +398,18 @@ pub struct Environment {
 }
 
 impl Environment {
+    /// Native horizontal size class, or the window width at the 600pt breakpoint.
+    pub fn horizontal_size_class(&self) -> SizeClass {
+        self.horizontal_size_class
+            .unwrap_or_else(|| SizeClass::from_length(self.window.width))
+    }
+
+    /// Native vertical size class, or the window height at the 600pt breakpoint.
+    pub fn vertical_size_class(&self) -> SizeClass {
+        self.vertical_size_class
+            .unwrap_or_else(|| SizeClass::from_length(self.window.height))
+    }
+
     /// The platform's name (TS: `platform.name`): [`Environment::platform`]
     /// on a platform built outside NSH (`"miniprogram"`), else the OS's
     /// (`"ios"`, `"web"`, ...).
@@ -385,6 +435,8 @@ impl Default for Environment {
     fn default() -> Self {
         Self {
             window: Size::default(),
+            horizontal_size_class: None,
+            vertical_size_class: None,
             safe_area: Edges::default(),
             title_bar: Edges::default(),
             window_state: None,
@@ -1487,6 +1539,33 @@ pub enum FetchOp {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn size_class_fallback_uses_points_and_native_traits_win() {
+        use super::{Environment, SizeClass};
+        use crate::geometry::size_pt;
+        for (dimension, expected) in [
+            (0.0, SizeClass::Compact),
+            (599.5, SizeClass::Compact),
+            (600.0, SizeClass::Regular),
+            (1200.0, SizeClass::Regular),
+        ] {
+            let env = Environment {
+                window: size_pt(dimension, dimension),
+                ..Default::default()
+            };
+            assert_eq!(env.horizontal_size_class(), expected);
+            assert_eq!(env.vertical_size_class(), expected);
+        }
+        let env = Environment {
+            window: size_pt(900.0, 300.0),
+            horizontal_size_class: Some(SizeClass::Compact),
+            vertical_size_class: Some(SizeClass::Regular),
+            ..Default::default()
+        };
+        assert_eq!(env.horizontal_size_class(), SizeClass::Compact);
+        assert_eq!(env.vertical_size_class(), SizeClass::Regular);
+    }
+
     use super::{
         Environment, HostEnvironment, HourCycle, Idiom, Languages, Locale, LocaleSettings,
         MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday, content_type, file_mime_type,

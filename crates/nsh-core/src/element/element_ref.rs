@@ -188,6 +188,20 @@ impl ElementRef {
         self.send(Command::Focus);
     }
 
+    /// [`Self::focus`] as `from` closes, given way to any other move of the
+    /// focus out of `from` in the same commit (a `focus()` from Rust or
+    /// JS): a popup closing gives the keyboard focus back to its trigger,
+    /// but not over the focus the choice that closed it moved elsewhere (an
+    /// item that starts editing a field). A move inside `from` does not
+    /// count: it is going, and keys typed ahead (Down, then Return) move
+    /// the focus to the item they choose in the commit that closes it. The
+    /// last one asked for in a commit is the one that counts.
+    #[doc(hidden)]
+    pub fn focus_back(&self, from: ElementRef) {
+        let from = from.node();
+        self.reach(|to, executor| executor.act(Action::FocusBack { to, from }));
+    }
+
     /// Ends the press going on in the element (or inside it) without its
     /// release: no `on_press_up` or `on_press` follow, and its `active:`
     /// styles reset (`nsh-base`'s context menu opened by a held finger).
@@ -483,6 +497,24 @@ impl ElementRef {
             .is_none()
         {
             slot.borrow_mut().deliver(std::time::Duration::ZERO);
+        }
+        answer
+    }
+
+    /// The text the element shows (the DOM's `textContent`): the texts
+    /// inside it in tree order, joined, with the commit this call goes out
+    /// with, so a text changed before it counts. What `display: none`
+    /// hides is left out; empty when no rendered element carries the ref.
+    /// For a component that matches its content's words (a menu's
+    /// typeahead). Await it in a task.
+    pub fn text_content(&self) -> Answer<String> {
+        let (answer, slot) = Answer::new();
+        let pending = slot.clone();
+        if self
+            .reach(|node, executor| executor.act(Action::TextContent(node, pending)))
+            .is_none()
+        {
+            slot.borrow_mut().deliver(String::new());
         }
         answer
     }

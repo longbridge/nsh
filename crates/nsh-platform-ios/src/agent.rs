@@ -44,6 +44,9 @@ const MOVE_STEP: f64 = 40.0;
 /// How long a finger rests before it lifts at the end of a scroll, so the
 /// scroll view keeps no velocity (no fling after it).
 const REST: Duration = Duration::from_millis(120);
+/// How far a resting finger trembles along its way, in points: the
+/// scroll view moves with it, and so measures it at rest.
+const TREMBLE: f64 = 0.25;
 
 thread_local! {
     /// The views agents act on, by key (main thread).
@@ -100,12 +103,23 @@ impl IosNative {
             let t = 1.0 - (1.0 - f64::from(i) / f64::from(n)).powi(3);
             self.finger(from.0 + dx * t, from.1 + dy * t, Phase::Move);
         }
-        // A resting finger still reports where it is, every frame: the
-        // scroll view sees it stop, so it lifts without a fling.
+        // A resting finger reports where it is every frame, trembling a
+        // fraction of a point back and forth along its way, as a real one
+        // does. A scroll view takes its speed from the moves that change
+        // its offset, and reports at the same spot change nothing: it
+        // would keep the swipe's speed and fling past the end of the
+        // scroll on lifting. Each tremble moves it, at almost no speed, so
+        // it lifts at rest.
+        let length = dx.hypot(dy).max(1.0);
+        let (tx, ty) = (dx / length * TREMBLE, dy / length * TREMBLE);
+        // It rests at `to` last.
         let resting = std::time::Instant::now();
-        while resting.elapsed() < rest {
+        let mut back = true;
+        while resting.elapsed() < rest || !back {
             std::thread::sleep(FRAME);
-            self.finger(to.0, to.1, Phase::Move);
+            let (x, y) = if back { (to.0 - tx, to.1 - ty) } else { to };
+            self.finger(x, y, Phase::Move);
+            back = !back;
         }
         self.finger(to.0, to.1, Phase::Up);
     }

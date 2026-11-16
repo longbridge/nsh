@@ -482,6 +482,12 @@ pub struct ViewProps {
     /// selection, from text to text ([`crate::selection`]); an area inside
     /// another is part of the outer one. Texts outside areas select alone.
     pub selectable_view: bool,
+    /// The app's items of a selectable view's selection menu, after the
+    /// system's (`selectionMenu`): plain items and separators, each
+    /// action's `id` reported as the root's `Menu` event when chosen. The
+    /// selection's menu takes the items of the outermost selectable view
+    /// around it ([`crate::desktop::MenuItem::selection_menu`]).
+    pub selection_menu: Arc<[crate::desktop::MenuItem]>,
     /// The text continues the text before it in document order, as a long
     /// line's next wrapped part (`Element::continues_text`): in a
     /// selectable view a copy joins the two with nothing between them,

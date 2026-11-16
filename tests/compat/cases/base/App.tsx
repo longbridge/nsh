@@ -18,6 +18,7 @@ import BaseDialogBackdrop from "./base-dialog-backdrop";
 import BaseDataTable from "./base-data-table";
 import BaseDiff from "./base-diff";
 import BaseDock from "./base-dock";
+import BaseSplitView from "./base-split-view";
 import BaseEditor from "./base-editor";
 import BaseHoverCard from "./base-hover-card";
 import BaseLink from "./base-link";
@@ -39,7 +40,9 @@ import BaseRadio from "./base-radio";
 import BaseResizable from "./base-resizable";
 import BaseRichEditorContentSize from "./base-rich-editor-content-size";
 import BaseRichEditorExtensions from "./base-rich-editor-extensions";
+import BaseRichEditorComposition from "./base-rich-editor-composition";
 import BaseRichEditorKit from "./base-rich-editor-kit";
+import BaseRichEditorNodeView from "./base-rich-editor-node-view";
 import BaseRichEditorSession from "./base-rich-editor-session";
 import BaseRichEditorTables from "./base-rich-editor-tables";
 import BaseRichEditorView from "./base-rich-editor-view";
@@ -75,6 +78,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-data-table": BaseDataTable,
   "base-diff": BaseDiff,
   "base-dock": BaseDock,
+  "base-split-view": BaseSplitView,
   "base-editor": BaseEditor,
   "base-hover-card": BaseHoverCard,
   "base-link": BaseLink,
@@ -97,7 +101,9 @@ const cases: Record<string, () => JSX.Element> = {
   "base-resizable": BaseResizable,
   "base-rich-editor-content-size": BaseRichEditorContentSize,
   "base-rich-editor-extensions": BaseRichEditorExtensions,
+  "base-rich-editor-composition": BaseRichEditorComposition,
   "base-rich-editor-kit": BaseRichEditorKit,
+  "base-rich-editor-node-view": BaseRichEditorNodeView,
   "base-rich-editor-session": BaseRichEditorSession,
   "base-rich-editor-view": BaseRichEditorView,
   "base-rich-editor-tables": BaseRichEditorTables,

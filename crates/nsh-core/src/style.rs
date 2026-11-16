@@ -838,38 +838,43 @@ impl ViewStyle {
 
 impl Default for ViewStyle {
     fn default() -> Self {
-        Self {
-            background_color: Color::TRANSPARENT,
-            border_radius: Points::ZERO,
-            corner_radius: Corners {
-                top_left: None,
-                top_right: None,
-                bottom_right: None,
-                bottom_left: None,
-            },
-            continuous_corners: false,
-            borders: Borders::NONE,
-            opacity: 1.0,
-            overflow_hidden: false,
-            transform: Transform::IDENTITY,
-            tint_color: None,
-            elevation: Points::ZERO,
-            transform_origin: TransformOrigin::CENTER,
-            object_position: ObjectPosition::CENTER,
-            backface_hidden: false,
-            effects: None,
-            blend_mode: BlendMode::Normal,
-            backdrop_material: BackdropMaterial::UltraThin,
-            glass_effect: GlassEffect::None,
-            glass_tint_color: None,
-            macos_backdrop: None,
-            outline: Outline::NONE,
-            hidden: false,
-            cursor: Cursor::Auto,
-            transition: None,
-            animation: None,
-        }
+        Self::DEFAULT
     }
+}
+
+impl ViewStyle {
+    /// [`Default::default`], as a constant.
+    pub(crate) const DEFAULT: Self = Self {
+        background_color: Color::TRANSPARENT,
+        border_radius: Points::ZERO,
+        corner_radius: Corners {
+            top_left: None,
+            top_right: None,
+            bottom_right: None,
+            bottom_left: None,
+        },
+        continuous_corners: false,
+        borders: Borders::NONE,
+        opacity: 1.0,
+        overflow_hidden: false,
+        transform: Transform::IDENTITY,
+        tint_color: None,
+        elevation: Points::ZERO,
+        transform_origin: TransformOrigin::CENTER,
+        object_position: ObjectPosition::CENTER,
+        backface_hidden: false,
+        effects: None,
+        blend_mode: BlendMode::Normal,
+        backdrop_material: BackdropMaterial::UltraThin,
+        glass_effect: GlassEffect::None,
+        glass_tint_color: None,
+        macos_backdrop: None,
+        outline: Outline::NONE,
+        hidden: false,
+        cursor: Cursor::Auto,
+        transition: None,
+        animation: None,
+    };
 }
 
 /// A shadow behind text (`textShadow`, `text-shadow-*`).
@@ -915,6 +920,9 @@ pub struct TextStyle {
     /// A line-height length relative to this node's font size (`em` or
     /// a percentage), resolved before inheritance.
     pub line_height_em: Option<f32>,
+    /// The font size relative to the inherited font size (`"0.875em"`,
+    /// `"87.5%"`), resolved before inheritance; overrides `font_size`.
+    pub font_size_em: Option<f32>,
     /// Line height as a multiple of the font size (`"1.5"`),
     /// inherited as a multiple.
     pub line_height_multiple: Option<f32>,
@@ -952,6 +960,40 @@ pub struct TextStyle {
     pub selection_color: Option<Color>,
     /// `caretColor`: an input's caret (not inherited).
     pub caret_color: Option<Color>,
+}
+
+impl TextStyle {
+    /// [`Default::default`], as a constant.
+    pub(crate) const DEFAULT: Self = Self {
+        color: None,
+        font_size: None,
+        font_weight: None,
+        line_height: None,
+        text_align: None,
+        text_align_physical: false,
+        font_family: None,
+        italic: None,
+        letter_spacing: None,
+        letter_spacing_em: None,
+        line_height_em: None,
+        font_size_em: None,
+        line_height_multiple: None,
+        decoration: None,
+        decoration_style: None,
+        decoration_thickness: None,
+        underline_offset: None,
+        decoration_color: None,
+        transform: None,
+        shadow_color: None,
+        shadow_offset: None,
+        shadow_radius: None,
+        font_variant: None,
+        writing_direction: None,
+        align_vertical: None,
+        placeholder_color: None,
+        selection_color: None,
+        caret_color: None,
+    };
 }
 
 impl TextStyle {
@@ -1668,7 +1710,7 @@ style_keys! {
     Opacity = "opacity": View "number | AnimatedNode",
     Overflow = "overflow": View "\"visible\" | \"hidden\"",
     Color = "color": Text "ColorValue | AnimatedNode",
-    FontSize = "fontSize": Text "number",
+    FontSize = "fontSize": Text "number | `${number}em` | `${number}%`" "Points, or relative to the inherited font size as CSS's `em` and percentages (`\"0.875em\"`, `\"87.5%\"`), so a span scales with its paragraph.",
     FontWeight = "fontWeight": Text "\"normal\" | \"bold\" | number | `${number}`" "`\"normal\"` (400), `\"bold\"` (700) or 100–900.",
     LineHeight = "lineHeight": Text "number",
     FontFamily = "fontFamily": Text "string" "A system family or the name an imported font (`import Inter from \"./Inter.ttf\"`) evaluates to, or a list of them as CSS writes it, most preferred first (`\"Brand, 'Noto Sans SC', sans-serif\"`): characters the first lacks come from the next that has them.",
@@ -1820,6 +1862,8 @@ pub enum PropertyValue {
     FontFamily(Option<FontFamily>),
     /// `letterSpacing`: points, or ems of the font size.
     LetterSpacing(Option<Points>, Option<OrderedFloat<f32>>),
+    /// `fontSize`: points, or a multiple of the inherited font size.
+    FontSize(Option<Points>, Option<OrderedFloat<f32>>),
     /// `textDecorationLine`.
     TextDecoration(Option<TextDecoration>),
     /// `fontVariant`.
@@ -2743,6 +2787,10 @@ impl StyleKey {
             (K::PaddingStart | K::PaddingEnd, len) => PropertyValue::OptLp(Some(len.lp()?)),
             (K::LineHeight, Len::Px(n)) => PropertyValue::LineHeight(LineHeight::Points(px(n))),
             (K::LineHeight, Len::Pct(f)) => PropertyValue::LineHeight(LineHeight::Em(f)),
+            (K::FontSize, Len::Px(n)) => PropertyValue::FontSize(Some(px(n)), None),
+            (K::FontSize, Len::Pct(f)) if f >= 0.0 => {
+                PropertyValue::FontSize(None, Some(OrderedFloat(f)))
+            }
             (key, Len::Px(n)) => key.number_value(n)?,
             _ => return Err(StyleError::InvalidValue),
         })
@@ -2907,8 +2955,11 @@ impl StyleKey {
             | K::BorderTopLeftRadius
             | K::BorderTopRightRadius
             | K::BorderBottomRightRadius
-            | K::BorderBottomLeftRadius
-            | K::FontSize => PropertyValue::OptPoints(opt_points(value)?),
+            | K::BorderBottomLeftRadius => PropertyValue::OptPoints(opt_points(value)?),
+            K::FontSize => {
+                let (points, em) = font_size(value)?;
+                PropertyValue::FontSize(points, em.map(of))
+            }
             K::BorderRadius => PropertyValue::Points(px(number(value, 0.0)?)),
             K::BorderStyle | K::OutlineStyle => {
                 // `none` (and `hidden`) draws and lays out no line whatever
@@ -3236,6 +3287,28 @@ fn transform_value(
 /// classes write, are a multiple of the font size (`"1.5"`), a multiple
 /// of the element's own font size (`"1.5em"`, `"150%"`), points
 /// (`"20px"`) or the font's own (`"normal"`).
+/// `fontSize`: points (a number or a length), or ems / a percentage of
+/// the inherited font size.
+fn font_size(value: StyleValue<'_>) -> Result<(Option<Points>, Option<f32>), StyleError> {
+    Ok(match value {
+        StyleValue::Str(s) if s.ends_with('%') || (s.ends_with("em") && !s.ends_with("rem")) => {
+            let n = if let Some(n) = s.strip_suffix('%') {
+                css::number(n).map(|n| n / 100.0)
+            } else {
+                css::number(&s[..s.len() - 2])
+            }
+            .filter(|n| *n >= 0.0)
+            .ok_or(StyleError::InvalidValue)?;
+            (None, Some(n))
+        }
+        StyleValue::Str(s) => (
+            Some(px(css::length(s).ok_or(StyleError::InvalidValue)?)),
+            None,
+        ),
+        v => (opt_points(v)?, None),
+    })
+}
+
 fn line_height(value: StyleValue<'_>) -> Result<LineHeight, StyleError> {
     Ok(match value {
         StyleValue::Null | StyleValue::Str("normal") => LineHeight::Normal,
@@ -3699,7 +3772,10 @@ impl Style {
             (K::Stroke, V::Paint(v)) => self.paint.stroke = *v,
             (K::StrokeWidth, V::OptPoints(v)) => self.paint.stroke_width = *v,
             (K::StrokeDasharray, V::Dashes(v)) => self.paint.stroke_dasharray = v.clone(),
-            (K::FontSize, V::OptPoints(v)) => self.text.font_size = *v,
+            (K::FontSize, V::FontSize(points, em)) => {
+                self.text.font_size = *points;
+                self.text.font_size_em = em.map(|n| n.0);
+            }
             (K::FontWeight, V::FontWeight(v)) => self.text.font_weight = *v,
             (K::LineHeight, V::LineHeight(v)) => {
                 let t = &mut self.text;
@@ -4062,6 +4138,33 @@ mod tests {
             ),
             (None, None, None)
         );
+    }
+
+    #[test]
+    fn font_size_takes_ems_and_percentages() {
+        let mut s = Style::default();
+        s.set("fontSize", StyleValue::Number(16.0)).unwrap();
+        assert_eq!(
+            (s.text.font_size, s.text.font_size_em),
+            (Some(px(16.0)), None)
+        );
+        s.set("fontSize", StyleValue::Str("0.875em")).unwrap();
+        assert_eq!((s.text.font_size, s.text.font_size_em), (None, Some(0.875)));
+        s.set("fontSize", StyleValue::Str("150%")).unwrap();
+        assert_eq!(s.text.font_size_em, Some(1.5));
+        s.set("fontSize", StyleValue::Str("20px")).unwrap();
+        assert_eq!(
+            (s.text.font_size, s.text.font_size_em),
+            (Some(px(20.0)), None)
+        );
+        assert!(s.set("fontSize", StyleValue::Str("-1em")).is_err());
+        // Rust's `text_size(relative(..))` writes the same value.
+        let rel = StyleKey::FontSize
+            .length_value(crate::geometry::relative(0.5).into())
+            .unwrap();
+        assert_eq!(rel, PropertyValue::FontSize(None, Some(OrderedFloat(0.5))));
+        s.set("fontSize", StyleValue::Null).unwrap();
+        assert_eq!((s.text.font_size, s.text.font_size_em), (None, None));
     }
 
     #[test]

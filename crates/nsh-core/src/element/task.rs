@@ -63,6 +63,13 @@ impl Wake for TaskWaker {
 /// What a component or a task asks of the platform, applied by the core.
 pub(crate) enum Action {
     Command(NodeId, Command),
+    /// The keyboard focus back to node `to` as `from` closes, unless the
+    /// commit it goes out with moves it anywhere out of `from`
+    /// ([`super::ElementRef::focus_back`]).
+    FocusBack {
+        to: NodeId,
+        from: Option<NodeId>,
+    },
     /// A dialog; its answer resolves the slot.
     Dialog(Dialog, Rc<RefCell<Output<i32>>>),
     /// The result of a module function JS waits for.
@@ -237,6 +244,9 @@ pub(crate) enum Action {
     /// How long the node's transitions run with the styles of the commit
     /// the action goes out with; the time resolves the slot.
     TransitionTime(NodeId, AnswerSlot<std::time::Duration>),
+    /// The text the node shows with the commit the action goes out with;
+    /// the text resolves the slot.
+    TextContent(NodeId, AnswerSlot<String>),
     /// Presses what a pointer at the press's page position would inside
     /// the node, with the layout of the commit the action goes out with;
     /// whether a view took it resolves the slot.

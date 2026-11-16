@@ -5,7 +5,7 @@
 //! window itself. AppKit views live on the main thread, so this test runs
 //! without libtest's harness, on the process's own. Its arguments pick the
 //! cases to run (`window`, `unhide`, `scaled`, `animated`, `sharp`,
-//! `nested`); none runs all.
+//! `nested`, `canvas`); none runs all.
 
 #[cfg(target_os = "macos")]
 fn main() {
@@ -534,5 +534,112 @@ mod macos {
         if runs("nested") {
             nested_scaled_window(mtm);
         }
+        if runs("canvas") {
+            canvas_window(mtm);
+        }
+    }
+
+    /// An animated canvas mounted out of any window waits to draw until it
+    /// enters one, and heals its static bands on the next animation frame if
+    /// its content layer loses its whole-layer paint.
+    fn canvas_window(mtm: MainThreadMarker) {
+        let code = r##"
+            import { element, append, prop } from "nsh:rt";
+            import { mount, Canvas, createAnimatedValue, Animated } from "nsh";
+            mount(() => {
+                const x = createAnimatedValue(20);
+                Animated.loop(Animated.sequence([
+                    Animated.timing(x, { toValue: 60, duration: 160 }),
+                    Animated.timing(x, { toValue: 20, duration: 160 }),
+                ])).start();
+                const root = element("view");
+                prop(root, "style", { flex: 1, alignItems: "center", justifyContent: "center" });
+                const c = Canvas({
+                    testID: "mascot",
+                    style: { width: 100, height: 100 },
+                    draw: (cx) => {
+                        cx.fillStyle = "#ff0000";
+                        cx.fillRect(10, 4, 80, 16);
+                        cx.fillStyle = "#0000ff";
+                        cx.fillRect(10, 80, 80, 16);
+                        cx.fillStyle = "#00aa00";
+                        cx.fillRect(x, 44, 20, 12);
+                    },
+                });
+                append(root, c);
+                return root;
+            });
+        "##;
+
+        let app = app_view(mtm);
+        app.load(nsh_platform_macos::Bundle::source(code.to_owned()).into());
+        let root = app.view();
+        until("the canvas's mount", || find(&root, "mascot").is_some());
+        let mascot = find(&root, "mascot").expect("the canvas");
+        spin(0.2);
+        assert!(
+            content_scale(&mascot).is_none(),
+            "the canvas made a content layer out of any window"
+        );
+        assert!(!drawn(&mascot), "the canvas was drawn out of any window");
+
+        let window = window(mtm);
+        window.setContentView(Some(&root));
+        window.orderFrontRegardless();
+
+        let bands_drawn = |view: &NSView| {
+            let rep = view
+                .bitmapImageRepForCachingDisplayInRect(view.bounds())
+                .expect("a bitmap");
+            let cx = NSGraphicsContext::graphicsContextWithBitmapImageRep(&rep).expect("a context");
+            let layer = view.layer().expect("a layer-backed view");
+            layer.renderInContext(&cx.CGContext());
+            cx.flushGraphics();
+            let (w, h, stride) = (
+                rep.pixelsWide() as usize,
+                rep.pixelsHigh() as usize,
+                rep.bytesPerRow() as usize,
+            );
+            if w == 0 || h == 0 {
+                return false;
+            }
+            let data = unsafe { std::slice::from_raw_parts(rep.bitmapData(), stride * h) };
+            let opaque = |fx: f64, fy: f64| {
+                let px = ((fx * w as f64) as usize).min(w - 1);
+                let py = ((fy * h as f64) as usize).min(h - 1);
+                let i = py * stride + px * 4;
+                data[i..i + 4].iter().any(|&b| b != 0)
+            };
+            opaque(0.5, 0.12) && opaque(0.5, 0.88)
+        };
+
+        until("the canvas's initial whole paint", || bands_drawn(&mascot));
+
+        // Drop the content layer's backing store at an unpainted scale so any
+        // partial `setNeedsDisplayInRect` tick alone would leave only the
+        // animated middle band (`y = 44..56`).
+        let content = {
+            let host = mascot.layer().expect("host layer");
+            let sublayers = unsafe { host.sublayers() }.expect("sublayers");
+            sublayers
+                .iter()
+                .find(|l| l.delegate().is_some())
+                .expect("content layer")
+                .retain()
+        };
+        unsafe { content.setContents(None) };
+        content.setContentsScale(1.0);
+        // Let several animation frames commit first so `content` holds what
+        // the frame ticks asked Core Animation to draw (`Damage::Rect` alone
+        // would populate the backing store with only the middle band).
+        spin(0.1);
+        until(
+            "the canvas's whole repaint after a lost backing store",
+            || bands_drawn(&mascot),
+        );
+
+        app.stop();
+        window.close();
+        println!("draw_on_show: canvas: ok");
     }
 }

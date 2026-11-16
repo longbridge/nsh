@@ -24,7 +24,10 @@ with it on its last; the arrow keys then move between the items. A press opens i
 focuses the first enabled item and Up or End the last. Page Down moves to the last enabled item in view and Page Up to
 the first, a view at a time, stopping at the ends (a `MenuList` the same, see [Long lists](#long-lists)). On the desktops the pointer moving over an item gives
 it the keyboard focus, so the keys go on from the item under the pointer; style an item's `focus:` state as its
-`hover:` one.
+`hover:` one. On the desktops a letter or digit moves the focus to the next enabled item whose text (or
+`accessibilityLabel`) starts with it, as `Select`'s list does: the same letter again moves on among those items, and
+letters typed in quick succession match a prefix. They act on the menu or submenu the focus is in, a text field in the
+menu keeps them, and an item out of view scrolls into it.
 On the desktops and in a terminal, Right, Return or Space on a `Submenu`'s item opens it with the keyboard focus on
 its first enabled item; Left on one of its items, or Escape, closes it and puts the focus back on its item. A submenu
 the pointer opened closes when the arrow keys move the focus to another item of its menu.
@@ -245,7 +248,9 @@ On the desktops the popup comes and goes with your transitions, as a [Popover](.
 `popupStartingClass` is its look in its first frame, `popupEndingClass` its look once closed, which it keeps while the
 `transition-*` classes of `popupClass` run, and `onClose` follows. On its way out it takes no presses or keys: the
 keyboard focus is back on the trigger as it closes, so Return during the exit chooses no item and opens the menu
-again. Submenus take the same looks and close with their menu. The sheet of phones slides in and out on its own.
+again. An item whose `onSelect` moves the focus elsewhere (to a field it starts editing) keeps it there: the menu
+gives the focus back only when nothing else took it. Submenus take the same looks and close with their menu. The
+sheet of phones slides in and out on its own.
 
 ```tsx
 <Menu
@@ -308,7 +313,7 @@ A menu of many items, or of as many as the data has (models, accounts, recent fi
 (Rust): a virtualized list whose rows are made only near its viewport. Its rows are items of the menu among the ones
 around it: Up, Down, Home and End walk every row of the list, scrolling to a row before focusing it and passing over
 disabled ones, then go on to the items before and after the list, a `Submenu`'s item among them. Page Down and Page Up
-scroll the list a view at a time. `render_item` draws
+scroll the list a view at a time. Letters reach the rows the list has made, the ones near its viewport. `render_item` draws
 each row from its index, one `MenuItem` or `Submenu` per row; give the list a height.
 
 ```rust
@@ -428,6 +433,7 @@ shown in place under its `label`. The children, `class` and `style` are the trig
 | `indicator` | `.indicator(..)` | `JSX.Element` | none | The mark inside the indicator. |
 | `closeOnSelect` | `.close_on_select(..)` | `boolean` | `true` | Choosing it closes the menu. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say, when the content is not enough. |
+| `accessibilityDescription` | `.accessibility_description(..)` | `string` | none | More about it than its name, which screen readers read after it: what a choice does. |
 | `children`, `class`, `style` | `.child(..)`, style methods | | none | Its content and look, with `hover:`, `active:` and `checked:` states. |
 
 ### Submenu
@@ -467,5 +473,6 @@ shown in place under its `label`. The children, `class` and `style` are the trig
 
 The popup or sheet is a menu and its items menu items for screen readers; the trigger tells whether the menu is
 expanded. A checkable item is a checkbox or radio menu item, read as checked or not checked; its indicator is part of
-the item. In TSX the trigger is the element you pass, a `Button` or a view of your own: it takes the presses and the
-expanded state itself, so its own `active:` classes and `activeStyle` show while it is pressed, and its own `onPress` runs too. Only the items of the level shown are on screen, so screen readers read what is there.
+the item. An item's `accessibilityDescription` is read after its name, so a short label can stay short; a
+submenu's trigger is your element and takes its own. In TSX the trigger is the element you pass, a `Button` or a view
+of your own: it takes the presses and the expanded state itself, so its own `active:` classes and `activeStyle` show while it is pressed, and its own `onPress` runs too. Only the items of the level shown are on screen, so screen readers read what is there.

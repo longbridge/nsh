@@ -83,7 +83,7 @@ jobs:
       GDK_BACKEND: x11
       WEBKIT_DISABLE_DMABUF_RENDERER: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up temporary directories outside the checkout
         run: |
@@ -142,7 +142,7 @@ jobs:
     # 24.04 has GTK 4.14 and Pango 1.52+, what `nsh-platform-linux` needs.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # QuickJS is C (bindgen needs libclang); the backend links GTK 4 and
       # Pango, and WebKitGTK 6.0 for web views (the hosts' default); Xvfb
@@ -222,7 +222,7 @@ jobs:
           # accessibility lookups wait for D-Bus autolaunch on each display.
           run() { dbus-run-session -- xvfb-run -a ./target/debug/nsh test "$@" --target linux; }
           run examples/counter
-          for file in context-menu device dock form gestures hover links navigation network photos resizable shortcuts storage timers; do
+          for file in combobox-click context-menu device dock form gestures hover links navigation network photos resizable shortcuts storage timers; do
             run "examples/gallery/tests/$file.test.tsx"
           done
           run examples/gallery/tests/environment.test.tsx --filter appearance

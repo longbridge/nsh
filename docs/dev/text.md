@@ -112,6 +112,19 @@
   responder clears, so a surface shows one selection. Android (`selectable_view.rs`, `SelectableView.java`): the
   shared Rust model runs on the UI thread over JNI, hit-testing through a Java callback; a long press selects a word,
   then handles and a floating `ActionMode` (Copy, Select all, Share).
+- **Selection menu**: `selectionMenu` on a selectable view (Rust `Element::selection_menu`, the host prop
+  `Prop::SelectionMenu`, `ViewProps::selection_menu`) takes `nsh/desktop`'s `MenuItem`s, each running its `onSelect`;
+  they go after the system's items, which always stay. The core keeps plain items and separators
+  (`desktop::MenuItem::selection_menu`: inline sections expanded; submenus, roles, shortcuts and check marks left
+  out; no leading, trailing or repeated separators); a chosen item is reported as the root's `Menu` event with its id,
+  as a menu's (nsh-js keeps the functions by the view's id and frees them with it; Rust's live with the binding). The
+  outermost area's items are the selection's. macOS appends them to the secondary-click menu (`text::context_menu`,
+  built by `chrome::menu`), Windows and GPUI to their popup (`selectable_view::context_menu`), GTK as a section of
+  the edit popover (`selection-menu.item-N` actions), iOS 16 and later to the edit menu
+  (`editMenuInteraction:menuForConfiguration:suggestedActions:`; groups between separators are inline sections; iOS
+  15's `UIMenuController` shows the system's items alone), Android to the floating `ActionMode` after the
+  `PROCESS_TEXT` actions (`encode.rs` `selection_menu`, `SelectableView.addAppItems`). The web shows the browser's
+  menu alone: the browser's renderer drops the prop.
 - **Color changes**: a text whose spans change only their colors (text, decoration and background) or which of them
   are hidden keeps its typesetting, measurements and layout where the platform draws colors from the text it mounts
   (`TextEngine::draws_colors_from_text`: macOS, Windows, Linux and GPUI, which also read `hidden` there): only the new

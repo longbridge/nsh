@@ -46,6 +46,9 @@ An embedded app has these limits:
 (including the rendering it causes), bind one list row, run one timer, run one frame's `requestAnimationFrame`
 callbacks, drain the microtask queue. A long-running app never accumulates time toward a limit; only a single call
 that does not return in time is interrupted. Calls nested inside another share the outer call's budget.
+A call is charged the time it runs: its thread's CPU time on Linux, Android, macOS and iOS, monotonic time on
+Windows and the web. Time the system keeps the app frozen or suspended in the background, or waiting for a CPU, is not
+the call's.
 
 An interrupted call ends with an exception that no `catch` can swallow, and the error is reported with the budget it
 exceeded:

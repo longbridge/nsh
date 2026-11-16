@@ -360,6 +360,49 @@ pub fn has_press(events: EventMask) -> bool {
     .any(|k| events.contains(k))
 }
 
+/// Whether `events` hold a tap listener: a press listener other than
+/// `onLongPress`.
+pub fn has_tap(events: EventMask) -> bool {
+    [EventKind::Press, EventKind::PressDown, EventKind::PressUp]
+        .into_iter()
+        .any(|k| events.contains(k))
+}
+
+/// The press of the views under the pointer, innermost first, each with
+/// its node, events, `delayLongPress` and whether it is disabled.
+///
+/// The innermost enabled view with a press listener gets the press. When
+/// it listens only to `onLongPress`, as on the Web, iOS and Android a long
+/// press recognizer does not take the taps of the views around it: the
+/// taps go to the nearest enabled view outside it with a tap listener,
+/// and the long press stays with it.
+pub fn pick_press<V>(
+    views: impl IntoIterator<Item = (V, NodeId, EventMask, Option<f32>, bool)>,
+    generation: u64,
+) -> Option<Press<V>> {
+    let mut long: Option<Press<V>> = None;
+    for (view, node, events, delay, disabled) in views {
+        if disabled || !has_press(events) {
+            continue;
+        }
+        match &long {
+            None if has_tap(events) => {
+                return Some(Press::new(view, node, events, delay, generation));
+            }
+            None => long = Some(Press::new(view, node, events, delay, generation)),
+            Some(inner) if has_tap(events) => {
+                let mut events = events;
+                events.set(EventKind::LongPress, true);
+                let mut press = Press::new(view, node, events, Some(inner.long_delay), generation);
+                press.long_node = Some(inner.node);
+                return Some(press);
+            }
+            Some(_) => {}
+        }
+    }
+    long
+}
+
 /// A press in progress on a view `V`.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -383,6 +426,9 @@ pub struct Press<V> {
     pub modifiers: crate::keymap::Modifiers,
     /// Consecutive clicks it is (1 for a click, 2 for a double click).
     pub clicks: u32,
+    /// The view inside `node` that listens only to `onLongPress` and gets
+    /// it, while the taps go to `node` ([`pick_press`]).
+    pub long_node: Option<NodeId>,
 }
 
 impl<V> Press<V> {
@@ -405,6 +451,16 @@ impl<V> Press<V> {
             generation,
             modifiers: crate::keymap::Modifiers::default(),
             clicks: 1,
+            long_node: None,
+        }
+    }
+
+    /// The node that gets an event of `kind`: the long-press-only view
+    /// inside for `onLongPress`, else [`Press::node`].
+    pub fn target(&self, kind: EventKind) -> NodeId {
+        match (kind, self.long_node) {
+            (EventKind::LongPress, Some(node)) => node,
+            _ => self.node,
         }
     }
 
@@ -1113,6 +1169,37 @@ mod tests {
         assert_eq!(Gate::step(&mut gate, &mut candidates, dx, dy), Some(1));
         assert!(gate.is_none());
         assert_eq!(candidates, vec![(1, pan)]);
+    }
+
+    #[test]
+    fn a_long_press_only_view_leaves_taps_to_the_view_around_it() {
+        let mask = |kinds: &[EventKind]| {
+            let mut m = EventMask::default();
+            for k in kinds {
+                m.set(*k, true);
+            }
+            m
+        };
+        let long = mask(&[EventKind::LongPress]);
+        let tap = mask(&[EventKind::Press]);
+        let press = pick_press(
+            [(1, 1, long, Some(300.0), false), (2, 2, tap, None, false)],
+            0,
+        )
+        .unwrap();
+        assert_eq!((press.view, press.node, press.long_delay), (2, 2, 300.0));
+        assert_eq!(press.target(EventKind::LongPress), 1);
+        assert_eq!(press.target(EventKind::Press), 2);
+        assert!(press.events.contains(EventKind::LongPress));
+        // Alone, it keeps the press.
+        let press = pick_press([(1, 1, long, None, false)], 0).unwrap();
+        assert_eq!((press.node, press.long_node), (1, None));
+        // A tap listener inside wins.
+        let press = pick_press([(1, 1, tap, None, false), (2, 2, long, None, false)], 0).unwrap();
+        assert_eq!((press.node, press.long_node), (1, None));
+        // Disabled views are skipped.
+        let press = pick_press([(1, 1, tap, None, true), (2, 2, tap, None, false)], 0).unwrap();
+        assert_eq!(press.node, 2);
     }
 
     #[test]

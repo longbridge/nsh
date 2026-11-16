@@ -81,10 +81,11 @@ const components: DemoEntry[] = [
   { name: "Progress", detail: "A transfer the app drives, and one of unknown size", icon: "progress", screen: lazy(() => import("./demos/Controls").then((m) => m.ProgressDemo)) },
   { name: "Radio", detail: "Plans, delivery options as cards, a reading preference", icon: "radio", screen: lazy(() => import("./demos/Controls").then((m) => m.RadioDemo)) },
   { name: "Resizable", detail: "Panels resized by dragging the lines between them, within their ranges", icon: "sidebar", screen: lazy(() => import("./demos/Resizable").then((m) => m.Resizable)) },
-  { name: "RichEditor", detail: "A document editor on Tiptap's extensions: lists, links, tables, Markdown shortcuts, undo and redo", icon: "richtext", screen: lazy(() => import("./demos/RichEditorDemo").then((m) => m.RichEditorDemo)) },
+  { name: "RichEditor", detail: "A document editor on Tiptap's extensions: lists, links, tables, Markdown shortcuts, undo and redo, stock tags and cards as node views", icon: "richtext", screen: lazy(() => import("./demos/RichEditorDemo").then((m) => m.RichEditorDemo)) },
   { name: "Select", detail: "A sort order, fonts in sections with search, a disabled language", icon: "select", screen: lazy(() => import("./demos/Controls").then((m) => m.SelectDemo)) },
   { name: "Sheet", detail: "A panel at an edge, over a backdrop; a swipe, the backdrop, Escape or back closes it", icon: "sheet", screen: lazy(() => import("./demos/Overlays").then((m) => m.SheetDemo)) },
   { name: "Slider", detail: "A level and a price range the app owns", icon: "sliders", screen: lazy(() => import("./demos/Controls").then((m) => m.SliderDemo)) },
+  { name: "SplitView", detail: "Mailboxes, messages and a message in columns: a sidebar that hides, one column at a time on a phone, each column's pages kept", icon: "sidebar", fill: true, screen: lazy(() => import("./demos/SplitViewDemo").then((m) => m.SplitViewDemo)) },
   { name: "Switch", detail: "Settings that take effect at once, one that needs another on", icon: "switch", screen: lazy(() => import("./demos/Controls").then((m) => m.SwitchDemo)) },
   { name: "Tabs", detail: "A section switcher, a disabled tab", icon: "tabs", screen: lazy(() => import("./demos/Controls").then((m) => m.TabsDemo)) },
   { name: "Terminal", detail: "A shell's colors, a progress bar redrawn in place, the keys typed sent back", icon: "terminal", screen: lazy(() => import("./demos/TerminalDemo").then((m) => m.TerminalDemo)) },
@@ -100,7 +101,7 @@ const components: DemoEntry[] = [
 const purposes: [string, string[]][] = [
   ["Actions", ["Button", "Link", "Toggle", "Toolbar", "Command"]],
   ["Inputs", ["Input", "NumberInput", "OtpInput", "Checkbox", "Radio", "Switch", "Slider", "Select", "Combobox", "DatePicker", "ColorPicker", "EmojiPicker"]],
-  ["Navigation", ["NavStack", "Tabs", "Pagination", "Accordion", "Collapsible", "Carousel", "Tree"]],
+  ["Navigation", ["NavStack", "SplitView", "Tabs", "Pagination", "Accordion", "Collapsible", "Carousel", "Tree"]],
   ["Overlays", ["Popover", "HoverCard", "Menu", "Tooltip", "Sheet", "Toast"]],
   ["Data", ["Avatar", "Progress", "DataTable", "Plot", "DiffView"]],
   ["Documents and workspaces", ["TextView", "Editor", "RichEditor", "Terminal", "Dock", "Resizable"]],
@@ -267,6 +268,17 @@ function Phone() {
             return <Home />;
           case "demo": {
             const Demo = route.demo.screen;
+            // A demo of its own pages (`fill`) takes the whole page: they show
+            // their headers and the way back.
+            if (route.demo.fill) {
+              return (
+                <NavPage title={route.demo.name} headerVisible={false}>
+                  <View style={{ flex: 1, backgroundColor: colors.background }}>
+                    <Demo />
+                  </View>
+                </NavPage>
+              );
+            }
             return (
               <NavPage title={route.demo.name} {...header} header={<PageHeader title={route.demo.name} />}>
                 <View style={{ flex: 1, backgroundColor: colors.background }}>

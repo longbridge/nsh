@@ -2215,22 +2215,43 @@ impl LinuxLayout {
             let Some(baseline) = runs.first().map(|r| r.baseline) else {
                 continue;
             };
-            let pieces = runs.iter().flat_map(|run| {
-                let mut gx = run.x;
-                let (ascent, descent) = run.font.extents;
-                run.glyphs.iter().map(move |g| {
-                    let x = gx;
-                    let width = from_pango(g.width);
-                    gx += width;
-                    nsh_core::LinePiece {
-                        x: Points(x),
-                        width: Points(width),
-                        background: text.background_at(g.index),
-                        ascent: Points(ascent),
-                        descent: Points(descent),
-                    }
+            let mut pieces: Vec<_> = runs
+                .iter()
+                .flat_map(|run| {
+                    let mut gx = run.x;
+                    let (ascent, descent) = run.font.extents;
+                    run.glyphs.iter().map(move |g| {
+                        let x = gx;
+                        let width = from_pango(g.width);
+                        gx += width;
+                        nsh_core::LinePiece {
+                            x: Points(x),
+                            width: Points(width),
+                            background: text.background_at(g.index),
+                            ascent: Points(ascent),
+                            descent: Points(descent),
+                        }
+                    })
                 })
-            });
+                .collect();
+            // Attachments hold no glyphs: their room (a span's padding
+            // too) is in the background of their span.
+            let range = line.info.start..line.info.end;
+            let before = pieces.len();
+            for (&(index, width), at) in self.attachment_extents.iter().zip(&self.attachments) {
+                if let (true, Some((x, _))) = (range.contains(&index), at) {
+                    pieces.push(nsh_core::LinePiece {
+                        x: Points(*x),
+                        width: Points(width),
+                        background: text.background_at(index),
+                        ascent: Points(0.0),
+                        descent: Points(0.0),
+                    });
+                }
+            }
+            if pieces.len() > before {
+                pieces.sort_by(|a, b| a.x.0.total_cmp(&b.x.0));
+            }
             let clip = (line.info.x, line.info.x + line.info.width);
             nsh_core::BackgroundBox::join(pieces, clip, |b| {
                 f(

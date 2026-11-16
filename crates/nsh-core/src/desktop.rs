@@ -853,6 +853,38 @@ pub enum MenuItem {
 }
 
 impl MenuItem {
+    /// The items of a selection menu (`selectionMenu`), as the platforms
+    /// show them after the system's own: plain items and separators.
+    /// Inline sections are expanded ([`Self::with_inline_expanded`]);
+    /// submenus, roles (the system's items are there already), shortcuts
+    /// and check marks are left out, as are items with no label and
+    /// separators that separate nothing.
+    pub fn selection_menu(items: &[MenuItem]) -> Vec<MenuItem> {
+        let mut out: Vec<MenuItem> = Vec::new();
+        for item in Self::with_inline_expanded(items) {
+            match item {
+                MenuItem::Separator => {
+                    if matches!(out.last(), Some(MenuItem::Action(_))) {
+                        out.push(MenuItem::Separator);
+                    }
+                }
+                MenuItem::Action(action) if action.role.is_none() && !action.label.is_empty() => {
+                    out.push(MenuItem::Action(MenuAction {
+                        shortcut: None,
+                        checked: None,
+                        when: When::Always,
+                        ..action
+                    }));
+                }
+                MenuItem::Action(_) | MenuItem::Submenu { .. } => {}
+            }
+        }
+        if matches!(out.last(), Some(MenuItem::Separator)) {
+            out.pop();
+        }
+        out
+    }
+
     /// Expands [`inline`](Self::Submenu::inline) submenus into their items
     /// between separators (no leading or trailing separator, label not
     /// shown), for the desktops. Nested non-inline submenus are kept;

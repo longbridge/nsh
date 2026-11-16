@@ -31,6 +31,7 @@ use crate::{
         virtual_list::{self, RowFn, SeparatorFn, VirtualListEl},
     },
     geometry::Points,
+    list_diff::ListDiff,
     tailwind::ClassList,
 };
 
@@ -590,6 +591,15 @@ pub(super) struct Components {
     pub(super) instances: FxHashMap<NodeId, Box<Instance>>,
     /// Expanded node -> the host of the component whose view made it.
     pub(super) owners: FxHashMap<NodeId, NodeId>,
+    /// Changes when reconciliation releases an expanded element or raw
+    /// node. A region that only populates or retains nodes needs no sweep
+    /// of its host's listeners and bindings.
+    pub(super) release_generation: u64,
+    /// Region hosts to clean before the next binding/event round. Several
+    /// regions of one view can release nodes in the same patch batch.
+    pub(super) released_hosts: FxHashSet<NodeId>,
+    #[cfg(test)]
+    pub(super) cleanup_work: super::views::CleanupWork,
     /// Slot nodes (`componentSlot`) -> their slot's name.
     slot_names: FxHashMap<NodeId, Arc<str>>,
     /// Slot nodes in a host -> the host.
@@ -698,6 +708,9 @@ pub(super) struct Components {
     /// Elements whose transitions' time to tell once this commit is
     /// styled ([`crate::element::ElementRef::transition_time`]).
     pub(super) transition_times: Vec<(NodeId, AnswerSlot<std::time::Duration>)>,
+    /// Elements whose text to tell once this commit is applied
+    /// ([`crate::element::ElementRef::text_content`]).
+    pub(super) text_contents: Vec<(NodeId, AnswerSlot<String>)>,
     /// Presses to pass on inside elements once this commit is laid out
     /// ([`crate::element::ElementRef::press_at`]).
     pub(super) presses: Vec<(NodeId, crate::PressEvent, AnswerSlot<bool>)>,
@@ -767,6 +780,10 @@ impl Default for Components {
             host_tokens: None,
             instances: FxHashMap::default(),
             owners: FxHashMap::default(),
+            release_generation: 0,
+            released_hosts: FxHashSet::default(),
+            #[cfg(test)]
+            cleanup_work: Default::default(),
             slot_names: FxHashMap::default(),
             slot_hosts: FxHashMap::default(),
             slot_targets: FxHashMap::default(),
@@ -815,6 +832,7 @@ impl Default for Components {
             measures: Vec::new(),
             scroll_positions: Vec::new(),
             transition_times: Vec::new(),
+            text_contents: Vec::new(),
             presses: Vec::new(),
             downloads: crate::webview::downloads::Downloads::default(),
             next_webview_request: 1,
@@ -4660,13 +4678,13 @@ impl<M: TextEngine> Core<M> {
             let made = std::cell::Cell::new(false);
             crate::element::computed(move || {
                 let (count, keys) = rows();
-                let splice = match (&*last.borrow(), &keys) {
-                    (Some(old), Some(new)) => crate::element::virtual_list::splice(old, new),
+                let diff = match (&*last.borrow(), &keys) {
+                    (Some(old), Some(new)) => ListDiff::new(old, new),
                     _ => None,
                 };
                 last.replace(keys.clone());
                 if made.replace(true) {
-                    move_rows(&cells, splice, count);
+                    move_rows(&cells, diff.as_ref(), count);
                     count_signal.set(count as usize);
                     patches.borrow_mut().push(super::views::Patch::Rows {
                         list: id,
@@ -4712,7 +4730,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Sends list `id` its rows' changes from `before` (none: a new list):
-    /// a splice when the keys say rows came or went, then the count.
+    /// how the keys say rows came, went or moved, then the count.
     fn send_list_rows(
         &mut self,
         id: NodeId,
@@ -4721,11 +4739,11 @@ impl<M: TextEngine> Core<M> {
         keys: Option<&Rc<[u64]>>,
     ) {
         if let (Some((_, Some(old))), Some(new)) = (before, keys)
-            && let Some((at, removed, inserted)) = crate::element::virtual_list::splice(old, new)
+            && let Some(diff) = ListDiff::new(old, new)
         {
             let _ = self.apply_op(Op::SetProp {
                 id,
-                prop: Prop::Splice(at, removed, inserted),
+                prop: Prop::ListDiff(Rc::new(diff)),
             });
         }
         if before.map(|(count, _)| *count) != Some(count) {
@@ -4950,7 +4968,13 @@ impl<M: TextEngine> Core<M> {
     }
 
     fn release_id(&mut self, id: NodeId) {
-        self.components.owners.remove(&id);
+        self.components.release_generation = self.components.release_generation.wrapping_add(1);
+        if let Some(host) = self.components.owners.remove(&id) {
+            // Cells can replace/empty their static root outside a region's
+            // matching pass. Their released bindings need the same sweep
+            // even if the next region only populates new nodes.
+            self.components.released_hosts.insert(host);
+        }
         self.forget_node_extras(id);
         // A root component's host is its view's: only the name goes.
         if self.is_alias(id) {
@@ -4977,6 +5001,9 @@ impl<M: TextEngine> Core<M> {
     /// Frees an expanded element and what it rendered (a slot's node is
     /// JS's: it only leaves the tree).
     pub(super) fn release_expanded(&mut self, e: Expanded) {
+        // Slot/JS nodes can lose this view's part without being deleted or
+        // leaving `owners`, so count expanded releases as well as raw IDs.
+        self.components.release_generation = self.components.release_generation.wrapping_add(1);
         match e.part {
             Part::Slot => {
                 self.drop_slot_target(e.id);
@@ -5983,6 +6010,7 @@ impl<M: TextEngine> Core<M> {
             Action::Command(id, command) => {
                 let _ = self.apply_op(Op::Command { id, command });
             }
+            Action::FocusBack { to, from } => self.focus_back = Some((to, from)),
             Action::Dialog(mut dialog, answer) => {
                 dialog.id = self.components.next_dialog;
                 self.components.next_dialog += 1;
@@ -6035,6 +6063,7 @@ impl<M: TextEngine> Core<M> {
             Action::TransitionTime(id, answer) => {
                 self.components.transition_times.push((id, answer))
             }
+            Action::TextContent(id, answer) => self.components.text_contents.push((id, answer)),
             Action::PressAt(id, press, answer) => self.components.presses.push((id, press, answer)),
             // A terminal decodes no images: the answer is at once, and no
             // request goes to the platform.
@@ -7396,12 +7425,12 @@ fn dispose_rows(rows: &std::rc::Weak<RefCell<CellRowMap>>) {
     }
 }
 
-/// Moves the live cells of a view's list as its rows moved (`splice`, now
+/// Moves the live cells of a view's list as its rows moved (`diff`, now
 /// `count` rows): each keeps its row, at the row's new index. A cell whose
 /// row went keeps its index (the list frees it, and binds it to another row
 /// before showing it again) while that is a row; past the rows, its content
 /// is disposed, before its bindings could read there.
-fn move_rows(cells: &CellRows, splice: Option<(u32, u32, u32)>, count: u32) {
+fn move_rows(cells: &CellRows, diff: Option<&ListDiff>, count: u32) {
     let parts: Vec<_> = cells
         .borrow()
         .iter()
@@ -7414,17 +7443,9 @@ fn move_rows(cells: &CellRows, splice: Option<(u32, u32, u32)>, count: u32) {
             continue;
         }
         let i = index.get_untracked();
-        let to = match splice {
-            Some((at, removed, inserted)) => {
-                let (at, removed, inserted) = (at as usize, removed as usize, inserted as usize);
-                if i < at || (at..at + removed).contains(&i) {
-                    i
-                } else {
-                    i - removed + inserted
-                }
-            }
-            None => i,
-        };
+        let to = diff
+            .and_then(|d| d.new_index(i as u32))
+            .map_or(i, |(to, _)| to as usize);
         if to < count as usize {
             index.set(to);
         } else {

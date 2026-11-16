@@ -919,11 +919,10 @@ The app's shortcuts and its menus' are matched first, as on the desktops; the ra
 terminal's defaults (Tab's traversal, Return and Space pressing, Escape going back, scrolling). A transition is
 reported once, on the focused view (or the text view of a focused link): the engine bubbles it to the enabled
 ancestors that listen, in this surface's window — a dialog (`Modal`, `nsh_base::dialog()`) is the keyboard
-boundary, as a window is on the desktops. A sheet (`nsh_base::sheet()`) is not one: only the web build wraps it
-in a `modal()`, while on the native platforms it is two overlays in the page's own window. A portaled `Overlay`
-is mounted in a root view, but its logical parent is the view that declared it: interest and capture follow
-that logical parent (the core's `ViewProps::key_parent`), as the engine's bubbling does, so a portal's — or a
-sheet's — keys reach its declaring view's listeners and capture rules and not another portal's. A release reaches the view that has the focus when it arrives; a terminal cannot pair it with a
+boundary, as a window is on the desktops, and so is a sheet (`nsh_base::sheet()`), a dialog on every platform. A
+portaled `Overlay` is mounted in a root view, but its logical parent is the view that declared it: interest and
+capture follow that logical parent (the core's `ViewProps::key_parent`), as the engine's bubbling does, so a
+portal's keys reach its declaring view's listeners and capture rules and not another portal's. A release reaches the view that has the focus when it arrives; a terminal cannot pair it with a
 press that went to another view.
 
 `capture_keys` (`KeyCapture`: none, all, or a list of shortcuts) is read from the mounted props of the focused

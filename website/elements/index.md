@@ -134,6 +134,7 @@ and take their look from the app.
 | `<Select>` | `nsh_base::select()` | One value chosen from a list of items, with the keyboard, search and sections | [Select](./select.md) |
 | `<Sheet>` | `nsh_base::sheet()` | A panel at an edge of the screen over a backdrop | [Sheet](./sheet.md) |
 | `<Slider>` | `nsh_base::slider()` | A value, or a range of two, picked along a track | [Slider](./slider.md) |
+| `<SplitView>` | `nsh_base::split_view()` | Columns of navigation stacks side by side that show one at a time where the room is compact: `UISplitViewController` on iOS | [SplitView](./split-view.md) |
 | `<Switch>` | `nsh_base::switch()` | An on / off control with a track and a thumb | [Switch](./switch.md) |
 | `<Table>` and its parts | `nsh_base::table()`, `table_row()`, ... | A table of the app's own rows and cells, with a table's roles | [Table](./table.md) |
 | `<Tab>`, `<Tabs>` | `nsh_base::tab()`, `tabs()` | One tab of a tab list, and the list | [Tabs](./tabs.md) |
@@ -164,7 +165,8 @@ traits in Rust). Element pages list only their own props. The Rust column names 
 ### Presses and feedback
 
 Press handling runs natively: the platform recognizes the press and applies the app's press styles, and the app's code
-only hears about it afterwards. Only the innermost pressable view responds; inside scroll views a press-in waits about
+only hears about it afterwards. Only the innermost pressable view responds, except that one listening only to `onLongPress` leaves
+the taps to the pressable view around it; inside scroll views a press-in waits about
 130 ms so a scroll can start first.
 
 | Prop | Rust | Type | Default | Description |
@@ -459,7 +461,7 @@ position in the text.
 
 ### Keyboard focus
 
-On macOS, the web and Android, Tab moves the keyboard focus between its stops in tree order: the inputs, the views
+On macOS, Windows, the web and Android, Tab moves the keyboard focus between its stops in tree order: the inputs, the views
 that take presses, and every `focusable` view. Focus styles (`focus:`, `.focus(..)`) style the focused view, and
 Return or Space presses it when it takes presses. A click presses a view without focusing it, so focus styles show
 for keyboard focus only. On Android a pressable view is a hardware-keyboard stop, while a touch-mode tap focuses

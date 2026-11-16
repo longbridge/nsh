@@ -235,10 +235,54 @@ fn inline(tail: &str) -> String {
 /// A range of bytes, `(start, end)` or `(start, len)`.
 pub(super) type Span = (usize, usize);
 
-/// The spans of inline code and TeX formulas (`\\(…\\)`, `\\[…\\]`) of
-/// `text`, whose content is left alone.
-fn code_spans(text: &str) -> (Vec<Span>, Option<Span>) {
-    spans(text, true)
+/// The code of a text, whose content is left alone: its spans and the
+/// opening backtick run nothing closes (`spans`), read by a scan from the
+/// text's start to its end. Each question moves a cursor past the spans
+/// that end before the byte asked about, so a scan visits every span once
+/// rather than searching all of them at each byte: a block of thousands of
+/// spans (a long table still arriving) is repaired in time linear in its
+/// length.
+struct Code {
+    spans: Vec<Span>,
+    open: Option<Span>,
+    /// The first span that may hold a byte not asked about yet.
+    next: usize,
+}
+
+impl Code {
+    /// The code of `text`: its inline code, with `tex` its TeX formulas
+    /// (`\\(…\\)`, `\\[…\\]`) too.
+    fn of(text: &str, tex: bool) -> Self {
+        let (spans, open) = spans(text, tex);
+        Self {
+            spans,
+            open,
+            next: 0,
+        }
+    }
+
+    /// The span holding byte `i`, which is no less than at the call before.
+    fn span_at(&mut self, i: usize) -> Option<Span> {
+        debug_assert!(
+            self.next == 0 || self.spans[self.next - 1].1 <= i,
+            "code is read from start to end"
+        );
+        // The spans are in order and apart: the first that ends after `i` is
+        // the only one that may hold it.
+        while self.spans.get(self.next).is_some_and(|&(_, end)| end <= i) {
+            self.next += 1;
+        }
+        self.spans
+            .get(self.next)
+            .copied()
+            .filter(|&(start, _)| start <= i)
+    }
+
+    /// Whether byte `i`, which is no less than at the call before, is
+    /// outside code.
+    fn outside(&mut self, i: usize) -> bool {
+        self.span_at(i).is_none() && self.open.is_none_or(|(start, _)| i < start)
+    }
 }
 
 /// The spans of inline code of `text` (from their first backtick to after
@@ -303,19 +347,14 @@ fn run(bytes: &[u8], at: usize, b: u8) -> usize {
     bytes[at..].iter().take_while(|&&c| c == b).count()
 }
 
-/// Whether byte `i` is outside code.
-fn outside(spans: &[Span], open: Option<Span>, i: usize) -> bool {
-    !spans.iter().any(|&(s, e)| (s..e).contains(&i)) && open.is_none_or(|(s, _)| i < s)
-}
-
 /// A TeX formula left open (`\\(x`, `\\[` and lines of it) closed, or
 /// removed while nothing follows its opener.
 fn tex(text: &str) -> String {
-    let (code, open_code) = spans(text, false);
+    let mut code = Code::of(text, false);
     let bytes = text.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if !outside(&code, open_code, i) {
+        if !code.outside(i) {
             i += 1;
             continue;
         }
@@ -362,7 +401,7 @@ fn tex(text: &str) -> String {
 /// Links and images not finished: `[text` and `[text](partial` as their
 /// text, `![alt` and `![alt](partial` removed.
 fn links(text: &str) -> String {
-    let (spans, open) = code_spans(text);
+    let mut code = Code::of(text, true);
     let bytes = text.as_bytes();
     // Ranges removed, and for a link whose destination is unfinished the
     // ranges of its syntax.
@@ -370,7 +409,7 @@ fn links(text: &str) -> String {
     let mut brackets: Vec<usize> = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
-        if !outside(&spans, open, i) {
+        if !code.outside(i) {
             i += 1;
             continue;
         }
@@ -449,13 +488,11 @@ fn destination_end(bytes: &[u8], from: usize) -> Option<usize> {
 /// An HTML tag (or autolink) being typed at the end, removed: `<`, `<di`,
 /// `<a href="x`, `</`.
 fn tag(text: &str) -> String {
-    let (spans, open) = code_spans(text);
+    let mut code = Code::of(text, true);
     let Some(lt) = text.rfind('<') else {
         return text.to_owned();
     };
-    if !outside(&spans, open, lt)
-        || text[lt..].contains('>')
-        || (lt > 0 && text.as_bytes()[lt - 1] == b'\\')
+    if !code.outside(lt) || text[lt..].contains('>') || (lt > 0 && text.as_bytes()[lt - 1] == b'\\')
     {
         return text.to_owned();
     }
@@ -475,7 +512,8 @@ fn tag(text: &str) -> String {
 /// (`$$`, `$`) left open, closed in the reverse order they opened; a marker
 /// with nothing after it yet is removed instead.
 fn close(text: &str) -> String {
-    let (spans, open_code) = code_spans(text);
+    let mut code = Code::of(text, true);
+    let open_code = code.open;
     // A run of markers at the end after a space opens nothing yet (`a **`):
     // removed.
     let trimmed = text.trim_end();
@@ -494,8 +532,10 @@ fn close(text: &str) -> String {
     let mut stack: Vec<(&'static str, usize)> = Vec::new();
     let mut i = 0;
     while i < scan_end {
-        if let Some(&(_, e)) = spans.iter().find(|&&(s, _)| s == i) {
-            i = e;
+        if let Some((start, end)) = code.span_at(i)
+            && start == i
+        {
+            i = end;
             continue;
         }
         let b = bytes[i];
@@ -746,6 +786,110 @@ mod tests {
         check("*a*b", "*a*b");
         check("foo**bar", "foo**bar**");
         check("中*粗", "中*粗*");
+    }
+
+    #[test]
+    fn escaped_and_open_code() {
+        // Escaped backticks open no code: the markers after them count.
+        check("Use \\`not code\\` and **b", "Use \\`not code\\` and **b**");
+        check("\\``a` and **b", "\\``a` and **b**");
+        // A backslash inside code escapes nothing.
+        check("`a\\` **b", "`a\\` **b**");
+        // An escaped backtick before an open span: the span opens after it.
+        check("\\`a` and **b", "\\`a` and **b`");
+        // An open span after closed ones: what follows it is code.
+        check("Use `x` and `open **b", "Use `x` and `open **b`");
+        check("Use `x` and `[open", "Use `x` and `[open`");
+        check("`a` `b` ``c ` d", "`a` `b` ``c ` d``");
+        check("`a` and `", "`a` and");
+        check("`a` *b* `", "`a` *b*");
+    }
+
+    #[test]
+    fn tex_holding_backticks() {
+        // A formula's backtick opens no code, whether it is closed or not.
+        check("\\(a`b\\) and **c", "\\(a`b\\) and **c**");
+        check("Euler \\(a`b", "Euler \\(a`b\\)");
+        check("\\(`x` *y", "\\(`x` *y\\)");
+        check("\\[\n`a`\n**b", "\\[\n`a`\n**b\n\\]");
+        check("\\(x*`y`*z\\) [link](htt", "\\(x*`y`*z\\) link");
+        // Code holding a formula's opener: no formula.
+        check("`\\(` and \\(x", "`\\(` and \\(x\\)");
+        check("`\\[a` **b", "`\\[a` **b**");
+    }
+
+    #[test]
+    fn links_beside_code() {
+        check("`a` [b](htt", "`a` b");
+        check("[`a`](htt", "`a`");
+        check("`[` [b](c) and [d](e", "`[` [b](c) and d");
+        check("[a `]` b](htt", "a `]` b");
+        check("`x`![alt](htt", "`x`");
+        check("`x`[", "`x`");
+        check("[`a` and `b", "`a` and `b`");
+        // Multi-byte characters around spans.
+        check("中`代码`文 **粗", "中`代码`文 **粗**");
+        check("é`a`[链接](htt", "é`a`链接");
+        check("`中`\\(公式", "`中`\\(公式\\)");
+        check("中文 `代码", "中文 `代码`");
+        check("`é`[ü](http", "`é`ü");
+        check("`日本` <di", "`日本`");
+    }
+
+    #[test]
+    fn many_code_spans() {
+        let spans = "`a` x ".repeat(2_000);
+        // Nothing to repair: the source itself.
+        assert!(matches!(repair(&spans), std::borrow::Cow::Borrowed(_)));
+        check(&format!("{spans}**b"), &format!("{spans}**b**"));
+        check(&format!("{spans}[c](htt"), &format!("{spans}c"));
+        check(&format!("{spans}\\(x"), &format!("{spans}\\(x\\)"));
+        check(&format!("{spans}`open"), &format!("{spans}`open`"));
+        let starred = "`a*b` _ `[` ".repeat(500);
+        check(&format!("{starred}*it"), &format!("{starred}*it*"));
+        let mut table = String::from("| Name | Type |\n|---|---|\n");
+        for n in 0..600 {
+            table.push_str(&format!("| `field_{n}` | `Option<u32>` |\n"));
+        }
+        assert!(matches!(repair(&table), std::borrow::Cow::Borrowed(_)));
+        check(
+            &format!("{table}| `last` | **b"),
+            &format!("{table}| `last` | **b**"),
+        );
+    }
+
+    /// The cursor answers as a search of all the spans would, whichever
+    /// bytes a scan skips.
+    #[test]
+    fn code_cursor_matches_search() {
+        let pieces = [
+            "`", "``", "\\", "\\(", "\\)", "\\[", "\\]", "a", " ", "中", "é", "*", "[", "\n",
+        ];
+        // xorshift from a fixed seed: the same texts on every run.
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut random = move |below: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % below as u64) as usize
+        };
+        for _ in 0..2_000 {
+            let text: String = (0..random(30))
+                .map(|_| pieces[random(pieces.len())])
+                .collect();
+            for tex in [false, true] {
+                let (spans, open) = super::spans(&text, tex);
+                for stride in 1..=3 {
+                    let mut code = super::Code::of(&text, tex);
+                    for i in (0..text.len()).step_by(stride) {
+                        let holding = spans.iter().copied().find(|&(s, e)| (s..e).contains(&i));
+                        let outside = holding.is_none() && open.is_none_or(|(s, _)| i < s);
+                        assert_eq!(code.span_at(i), holding, "{text:?} at {i}");
+                        assert_eq!(code.outside(i), outside, "{text:?} at {i}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]

@@ -50,6 +50,12 @@ Without `schema` an editor uses the starter schema (`starterSchema()`); without 
 (`starterKit()`: the starter's input rules and key bindings, the base key bindings and the history). An empty
 `plugins` array makes an editor with no plugins at all.
 
+`onCompositionChange({ composing })` reports `true` when this view starts input-method composition and `false`
+when it ends, including cancellation. Updates to the text being composed keep the current state. The callback
+observes the session's updated `composing` value and any committed text, so an app can retain the editor view
+while composition is active and release it when it ends. Starting or canceling composition can keep the document
+and its revision unchanged; `onChange` reports document edits.
+
 ## Styling
 
 The editor draws the document with the app's look: `classes` and `styles` style its parts (`root`, `content`, `caret`,
@@ -320,6 +326,38 @@ const editor = createRichEditor({ extensions: [StarterKit, Signature.configure({
 to other types; `addProseMirrorPlugins` returns plugins, `RichEditorPlugin`s included; `addPasteRules` returns
 `textRule` and `markRule` rules for pasted text. A built-in class's `extend({...})` replaces the parts it gives:
 `Underline.extend({ addKeyboardShortcuts: () => ({ "Mod-Alt-u": toggleMark("underline") }) })`.
+
+### Node views
+
+`addNodeView` returns the component that renders every node of the extension's node type: a stock tag in the text, a
+card between paragraphs, a mention, an embed. The node type must be an atom (`atom: true`, or a leaf): the caret steps
+over it as one character or one block and Backspace deletes it. A node with content is refused.
+
+```tsx
+import { RichEditor, StarterKit, createRichEditor, defineExtension, type RichNodeViewProps } from "nsh/base";
+
+function StockTag(props: RichNodeViewProps) {
+  return (
+    <View class={props.selected ? "rounded border border-primary px-1" : "rounded border border-transparent px-1"}>
+      <Text>{`$${props.node.attrs.symbol}`}</Text>
+    </View>
+  );
+}
+
+const Stock = defineExtension({
+  name: "stock",
+  node: { group: "inline", inline: true, atom: true, attrs: { symbol: { default: "AAPL" } } },
+  addNodeView: () => StockTag,
+});
+
+const editor = createRichEditor({ extensions: [StarterKit, Stock] });
+```
+
+The component runs once per node. Its props follow the node: read in JSX or an effect, `node` (`{ type, attrs,
+textContent }`) and `selected` change in place when the node's attributes or its selection change, and typing around
+the node never calls it. `editor` is the editor the node is in, `extension` is `{ name, options }`. `getPos()` is
+where the node starts now (`null` once it is gone); `updateAttributes(attrs)` sets some of its attributes and
+`deleteNode()` deletes it, each one undoable change through the editor (and its `dispatchTransaction`).
 
 An app's crate registers extensions written in Rust through its UI set, and JS takes them by name:
 

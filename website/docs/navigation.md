@@ -241,8 +241,8 @@ In Rust, each prop below is a method of `nav_page()` in snake case: `.title(..)`
 | `headerStyle` | `{ backgroundColor?, color?, tintColor? }` | | iOS and Android: the header's background, the title's color (`color`) and the buttons' (`tintColor`). |
 | `headerClass` | `string` | | The same as classes: `bg-*`, `text-*` for the title, `tint-*` for the buttons; `headerStyle` wins over them. |
 | `headerBackVisible` | `boolean` | `true` | iOS and Android: the back button shows. |
-| `headerLeft` | `JSX.Element` | | iOS and Android: views at the start of the header (they replace the back button). |
-| `headerRight` | `JSX.Element` | | iOS and Android: views at the end of the header. |
+| `headerLeft` | `JSX.Element` | | iOS and Android: views at the start of the header (they replace the back button). While they show nothing (no width), the header has no button there. |
+| `headerRight` | `JSX.Element` | | iOS and Android: views at the end of the header. While they show nothing (no width), the header has no button there, and it comes back with the content. |
 | `ios={{ headerRightSystemItem }}` | `"add" \| "done" \| "close" \| "edit" \| "compose" \| "search" \| "share" \| "trash" \| "save" \| "cancel"` | | iOS: UIKit's own bar button at the end of the header, with the system's look, symbol or label, in place of `headerRight`'s views; a press on it is a press on the first pressable view of `headerRight`, so keep one there. Android shows `headerRight` as it is. |
 | `ios={{ headerLeftSystemItem }}` | same as `headerRightSystemItem` | | iOS: the same, at the start of the header, pressing `headerLeft`. |
 | `ios={{ headerRightSymbol }}` | `string` | | iOS: UIKit's own bar button showing the SF Symbol of that name (`"slider.horizontal.3"`) in place of `headerRight`'s views; a press on it is a press on the first pressable view of `headerRight`, and VoiceOver reads that view's label. `headerRightSystemItem` wins over it; a name SF Symbols does not have shows `headerRight` as it is. Android shows `headerRight` as it is. |
@@ -643,6 +643,10 @@ A listener made in an effect lasts until the effect runs again or its component 
 ## Tabs and other layouts
 
 A tab bar is your own UI, drawn from primitives: a row of pressable views and a signal holding the selected tab; render the selected tab's content with [`when` / `<If>`](../elements/control-flow.md) (or a function child in TSX). To keep each tab's state while switching, give each tab its own stack and routes and keep all of them mounted, hiding the inactive ones with `display: none`.
+
+Columns of stacks, a sidebar beside a list and its detail as in Mail or Settings on iPad, are a
+[`SplitView`](../elements/split-view.md): each column is a `NavStack` of its own, a `UISplitViewController` on iOS
+and iPadOS, and where the window is compact one column shows at a time.
 
 ## Related
 

@@ -1,6 +1,6 @@
 import { cleanup, resource, signal, Text, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh";
-import { colorScheme, fontScale, windowSize } from "nsh";
+import { colorScheme, fontScale, horizontalSizeClass, verticalSizeClass, windowSize } from "nsh";
 import { AlertDialog, type AlertDialogAction, Dialog, type StatusBarForeground } from "nsh/base";
 import { keyboardFrame, safeArea } from "nsh";
 import { Menu } from "nsh/desktop";
@@ -67,6 +67,11 @@ function Environment() {
       <View style={{ height: 1, backgroundColor: colors.line }} />
       <View style={{ gap: 4 }}>
         {/* The terminal's figures carry their unit, as the keyboard's does. */}
+        <Caption label="Size classes" note="Resize or rotate the window" />
+        <View class="flex-row">
+          <Stat label="Horizontal" value={horizontalSizeClass() === "compact" ? "Compact" : "Regular"} width="50%" />
+          <Stat label="Vertical" value={verticalSizeClass() === "compact" ? "Compact" : "Regular"} width="50%" />
+        </View>
         <Caption label="Safe area insets" note={terminal ? undefined : "pt"} />
         <View style={{ flexDirection: "row" }}>
           <Each of={insets()}>

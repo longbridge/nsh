@@ -80,7 +80,7 @@ pub use self::{
     driver::Host,
     module::{
         App, ClockOptions, ColorScheme, Entries, Expectation, NetworkOption, OpenOptions, Platform,
-        RouteOption, SPECIFIER, SafeArea, SpanStyle, StubRequest, Testing, registry,
+        RouteOption, SPECIFIER, SafeArea, SpanStyle, StubRequest, Testing, ViewStyle, registry,
     },
     run::{
         Built, Compile, Entry, Failure, HostOptions, HostTarget, Output, StartHost, TestResult,
