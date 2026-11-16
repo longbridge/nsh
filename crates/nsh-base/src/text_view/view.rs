@@ -70,11 +70,6 @@ pub struct TextViewProps {
     /// view (default true).
     #[prop(default = true)]
     pub table_scrollbar: Prop<bool>,
-    /// Whether a press on a task item's box reports it (`onTaskPress`), for
-    /// an app that edits the document's source (default false: the boxes
-    /// only show their state).
-    #[prop(default)]
-    pub pressable_tasks: Prop<bool>,
     /// Shown inline at the end of the last block (a streaming reply's
     /// caret).
     pub streaming_caret: Prop<Option<Slot>>,
@@ -147,7 +142,7 @@ pub enum TextViewEvent {
     /// viewer of its own).
     #[args(image)]
     ImagePress(Image),
-    /// The box of a task item was pressed (`pressableTasks`): which task of
+    /// The box of a task item was pressed: which task of
     /// the document, and the state the press asks for. The document does
     /// not change: the app gives the view its edited source.
     #[args(event)]
@@ -493,7 +488,6 @@ struct Cx {
     selectable: bool,
     code_scroll_indicator: bool,
     table_scrollbar: bool,
-    pressable_tasks: bool,
     caret: Option<Slot>,
     render_custom: Option<Renderer<CustomNode>>,
     render_code_block: Option<Renderer<CodeBlock>>,
@@ -538,7 +532,6 @@ impl Cx {
             selectable: props.selectable.get(),
             code_scroll_indicator: props.code_block_scrollbar.get(),
             table_scrollbar: props.table_scrollbar.get(),
-            pressable_tasks: props.pressable_tasks.get(),
             caret: props.streaming_caret.get(),
             render_custom: props.render_custom.get(),
             render_code_block: props.render_code_block.get(),
@@ -914,7 +907,6 @@ impl Cx {
             // names the box to an assistive technology.
             let press = item
                 .checked
-                .filter(|_| self.pressable_tasks)
                 .map(|checked| {
                     let index = self.task.get();
                     let scope = self.scope;

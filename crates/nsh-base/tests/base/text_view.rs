@@ -486,13 +486,13 @@ const TASKS: &str = "- [ ] first\n- [x] second\n  - [ ] nested\n\n<details>\n<su
 
 /// Task items at the top, nested, in a closed disclosure and in a quote
 /// after it; what their boxes' presses reported.
-fn tasks(pressable: bool) -> impl IntoElement {
+#[component]
+fn PressableTasks() -> impl IntoElement {
     let pressed = signal(Vec::<String>::new());
     view()
         .child(
             text_view()
                 .markdown(TASKS)
-                .pressable_tasks(pressable)
                 .on_task_press(move |e: &TextViewTaskPressEvent| {
                     let report = format!("{}:{}", e.index, e.checked);
                     pressed.update(|p| p.push(report));
@@ -501,16 +501,6 @@ fn tasks(pressable: bool) -> impl IntoElement {
         .child(text(move || {
             format!("Pressed: {}", pressed.get().join(" "))
         }))
-}
-
-#[component]
-fn PressableTasks() -> impl IntoElement {
-    tasks(true)
-}
-
-#[component]
-fn ShownTasks() -> impl IntoElement {
-    tasks(false)
 }
 
 #[test]
@@ -531,12 +521,4 @@ fn a_pressed_task_box_reports_its_place_in_the_document_and_the_state_asked_for(
     app.press("label:first").unwrap();
     app.wait_for("Pressed: 1:false 2:true 4:true 3:false 3:false 0:true")
         .unwrap();
-}
-
-#[test]
-fn task_boxes_only_show_their_state_unless_made_pressable() {
-    let mut app = Headless::start(EngineConfig::new(Root::of::<ShownTasks>())).unwrap();
-    app.wait_for("first").unwrap();
-    assert!(app.press("label:first").is_err());
-    assert!(!app.shows("0:true"));
 }

@@ -11,7 +11,7 @@
 // code blocks' actions (`codeBlockActions`, the built-in copy and one of
 // the app's: `onCodeBlockAction`), `selectable`, link presses
 // (`onLinkPress`, with the modifier keys held), images' presses
-// (`onImagePress`), task boxes' presses (`pressableTasks`, `onTaskPress`),
+// (`onImagePress`), task boxes' presses (`onTaskPress`),
 // and the static functions
 // (`TextView.parse`, `TextView.parseHtml`, `TextView.plainText`; emphasis
 // beside CJK text read by the CJK-friendly rule, a tag that names no
@@ -92,7 +92,6 @@ function App() {
       <Text>{`Image pressed: ${image()}`}</Text>
       <TextView
         markdown={"- [x] Draft it\n- [ ] Ship it"}
-        pressableTasks
         onTaskPress={({ index, checked }) => task.set(`${index} ${checked}`)}
       />
       <Text>{`Task: ${task()}`}</Text>
