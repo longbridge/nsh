@@ -17,20 +17,22 @@ function App() {
       <View role="button" onPress={add} style={{ height: 32, justifyContent: "center" }}>
         <Text style={{ color: "#111" }}>Add 30 rows</Text>
       </View>
-      <List
-        testID="list"
-        each={rows()}
-        estimatedItemSize={20}
-        maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}
-        onScroll={(e) => y.set(e.offset.y)}
-        style={{ height: 300, backgroundColor: "#f4f4f5" }}
-      >
-        {(row) => (
-          <View style={{ height: 100, justifyContent: "center", paddingHorizontal: 12 }}>
-            <Text style={{ color: "#111" }}>{`Row ${row()}`}</Text>
-          </View>
-        )}
-      </List>
+      {/* A plain view, which every host makes natively: the pointer the keys follow rests on it. */}
+      <View testID="list">
+        <List
+          each={rows()}
+          estimatedItemSize={20}
+          maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}
+          onScroll={(e) => y.set(e.offset.y)}
+          style={{ height: 300, backgroundColor: "#f4f4f5" }}
+        >
+          {(row) => (
+            <View style={{ height: 100, justifyContent: "center", paddingHorizontal: 12 }}>
+              <Text style={{ color: "#111" }}>{`Row ${row()}`}</Text>
+            </View>
+          )}
+        </List>
+      </View>
     </View>
   );
 }
