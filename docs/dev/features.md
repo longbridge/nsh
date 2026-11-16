@@ -19,6 +19,8 @@ The large optional parts of a native runtime are Cargo features of the platform 
 | `svg` | resvg, usvg, tiny-skia (SVG images) | An SVG `<Image>` shows nothing; its load fails naming the feature |
 | `net` | ureq and rustls: `fetch` and remote images (Linux, Windows, TUI, GPUI; macOS, iOS and Android use the system's HTTP) | `fetch` rejects; `<Image>` shows files, assets and inline data only |
 | `sound` | GStreamer (Linux only: `nsh-platform-linux`, `nsh-linux-app`; the other platforms play sounds with the system's audio) | `Sound.load` rejects with `not-supported`, naming the feature; `AudioPlayer` and `Video` play as before, through GTK |
+| `webview` | WebKitGTK (Linux), WebView2 (Windows) | A web view fails at once, as on a platform that shows none |
+| `media` | Media Foundation and XAudio2 (Windows only: `nsh-platform-windows`, `nsh-windows-app`) | A `Video` shows nothing; `Sound.load` and `AudioPlayer` fail with `not-supported`, naming the feature |
 
 An app turns them off with `default-features = false` on the platform crate and names what it keeps. A direct dependency
 on `nsh-base` must also say `default-features = false`, or Cargo turns its defaults back on.
@@ -38,7 +40,7 @@ What is kept:
 - `shader`, `editor`, `rich-editor`, `plot`, `term`, `emoji-picker`: kept when a reachable import links their part;
   `highlight` and `math` also by `TextView` (Markdown shows code and formulas);
 - `zlib`, `crypto`, `websocket`, `updater`: kept when the bundle imports their module;
-- `js`, `net`, `svg` (and Linux's `sound`): always kept, since a URL or an image's format comes from data;
+- `js`, `net`, `svg` (and Linux's `sound` and `webview`, Windows' `webview` and `media`): always kept, since a URL or an image's format comes from data;
 - everything is kept when the bundle computes an import (`import(name)`), or when it could not be analyzed.
 
 What only the app's Rust code or a dynamic access needs, it keeps in `nsh.json`: `"features": ["plot"]`. Rust code that
