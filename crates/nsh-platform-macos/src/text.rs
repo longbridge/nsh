@@ -147,7 +147,7 @@ fn listed_fonts(
     weight: u16,
 ) -> Option<(CFRetained<CTFont>, Vec<CFRetained<CTFont>>)> {
     let mut fonts = nsh_core::font_families(list).filter_map(|family| match family {
-        FamilyName::Named(name) => family_font(name, size, weight),
+        FamilyName::Named(name) => family_font(&name, size, weight),
         generic => Some(generic_font(generic, size, weight)),
     });
     let Some(first) = fonts.next() else {

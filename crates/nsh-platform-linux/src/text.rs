@@ -155,13 +155,13 @@ fn resolve_family(name: &str, ui: &str) -> String {
     let mut out = String::with_capacity(name.len());
     use nsh_core::FamilyName;
     for family in nsh_core::font_families(name) {
-        let family = match family {
+        let family = match &family {
             FamilyName::Monospace => "monospace",
             FamilyName::Serif => "serif",
             // Pango's list is comma-separated: a quoted name with a comma
             // in it can't be one of its families.
             FamilyName::Named(f) if f.contains(',') => continue,
-            FamilyName::Named(f) => f,
+            FamilyName::Named(f) => f.as_ref(),
             _ => ui,
         };
         if !out.is_empty() {

@@ -477,22 +477,10 @@ impl CanvasFont {
         font.family = match (first, families.next()) {
             (crate::style::FamilyName::System, None) => None,
             (crate::style::FamilyName::Named(name), None)
-                if !name.contains(',')
-                    && !matches!(
-                        name,
-                        "system-ui"
-                            | "sans-serif"
-                            | "ui-sans-serif"
-                            | "-apple-system"
-                            | "BlinkMacSystemFont"
-                            | "serif"
-                            | "ui-serif"
-                            | "monospace"
-                            | "ui-monospace"
-                            | "ui-rounded"
-                    ) =>
+                if !name.contains([',', '"', '\'', '\\'])
+                    && !crate::style::is_css_generic_keyword(&name) =>
             {
-                Some(name.into())
+                Some((&*name).into())
             }
             _ => Some(rest.into()),
         };
@@ -1817,7 +1805,7 @@ mod tests {
         assert_eq!(
             crate::style::font_families(f.family.as_deref().unwrap()).collect::<Vec<_>>(),
             vec![
-                crate::style::FamilyName::Named("Inter"),
+                crate::style::FamilyName::Named("Inter".into()),
                 crate::style::FamilyName::System,
             ]
         );
@@ -1827,7 +1815,7 @@ mod tests {
         assert_eq!(
             crate::style::font_families(quoted_generic.family.as_deref().unwrap())
                 .collect::<Vec<_>>(),
-            vec![crate::style::FamilyName::Named("serif")]
+            vec![crate::style::FamilyName::Named("serif".into())]
         );
         let f = CanvasFont::parse("600 12px/1.5 system-ui").unwrap();
         assert_eq!((f.size, f.weight, f.family), (px(12.0), 600, None));

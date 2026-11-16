@@ -200,32 +200,39 @@ const FANTASY: &[&str] = &["Impact", "Papyrus"];
 /// The families a `fontFamily` value names, in order of preference: a
 /// comma-separated stack, CSS generic names and Apple's font names as fonts
 /// this platform has; `""` is the UI font.
-fn family_candidates(name: &str) -> Vec<&str> {
+fn family_candidates(name: &str) -> Vec<std::borrow::Cow<'_, str>> {
+    use std::borrow::Cow;
+
     use nsh_core::FamilyName;
     let mut out = Vec::new();
     for family in nsh_core::font_families(name) {
         match family {
-            FamilyName::Monospace => out.extend_from_slice(MONOSPACE),
-            FamilyName::Serif => out.extend_from_slice(SERIF),
-            FamilyName::Named("cursive") => out.extend_from_slice(CURSIVE),
-            FamilyName::Named("fantasy") => out.extend_from_slice(FANTASY),
+            FamilyName::Monospace => out.extend(MONOSPACE.iter().copied().map(Cow::Borrowed)),
+            FamilyName::Serif => out.extend(SERIF.iter().copied().map(Cow::Borrowed)),
+            FamilyName::Named(f) if f == "cursive" => {
+                out.extend(CURSIVE.iter().copied().map(Cow::Borrowed));
+            }
+            FamilyName::Named(f) if f == "fantasy" => {
+                out.extend(FANTASY.iter().copied().map(Cow::Borrowed));
+            }
             FamilyName::Named(f) => {
-                out.push(f);
                 // What apps written for Apple platforms name, as what
                 // this platform has (when it lacks the font itself).
-                out.extend_from_slice(match f {
+                let aliases = match &*f {
                     "Menlo" | "Monaco" | "SF Mono" | "Courier" | "Courier New" => MONOSPACE,
                     "Times" | "New York" | "Georgia" => SERIF,
                     "Helvetica" | "Helvetica Neue" | "Arial" => SANS,
                     _ => &[],
-                });
+                };
+                out.push(f);
+                out.extend(aliases.iter().copied().map(Cow::Borrowed));
             }
             // The system font, and its rounded design (which GPUI lacks).
-            _ => out.push(""),
+            _ => out.push(Cow::Borrowed("")),
         }
     }
     if out.is_empty() {
-        out.push("");
+        out.push(Cow::Borrowed(""));
     }
     out
 }

@@ -39,10 +39,15 @@ pub(crate) struct Font {
 impl Font {
     /// The CSS `font` shorthand `measure_text` takes.
     pub(crate) fn css(&self) -> String {
+        let families = nsh_core::css_font_families(self.family.as_str());
         format!(
             "{}px {}",
             self.size.0,
-            nsh_core::css_font_families(self.family.as_str())
+            if families.is_empty() {
+                "system-ui"
+            } else {
+                &families
+            }
         )
     }
 }
@@ -2029,9 +2034,9 @@ mod tests {
         assert_eq!(
             nsh_core::font_families(parsed.family.as_deref().unwrap()).collect::<Vec<_>>(),
             vec![
-                nsh_core::FamilyName::Named("SF Mono"),
-                nsh_core::FamilyName::Named("Menlo"),
-                nsh_core::FamilyName::Named("PingFang SC"),
+                nsh_core::FamilyName::Named("SF Mono".into()),
+                nsh_core::FamilyName::Named("Menlo".into()),
+                nsh_core::FamilyName::Named("PingFang SC".into()),
             ]
         );
     }

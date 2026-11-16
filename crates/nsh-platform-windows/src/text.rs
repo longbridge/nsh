@@ -254,12 +254,12 @@ fn family_names(name: &str, ui: &str) -> Vec<String> {
     let mut out = Vec::new();
     use nsh_core::FamilyName;
     for family in nsh_core::font_families(name) {
-        let family = match family {
+        let family = match &family {
             FamilyName::Monospace => "Consolas",
             FamilyName::Serif => "Times New Roman",
-            FamilyName::Named("cursive") => "Comic Sans MS",
-            FamilyName::Named("fantasy") => "Impact",
-            FamilyName::Named(f) => f,
+            FamilyName::Named(f) if f == "cursive" => "Comic Sans MS",
+            FamilyName::Named(f) if f == "fantasy" => "Impact",
+            FamilyName::Named(f) => f.as_ref(),
             _ => ui,
         };
         out.push(family.to_owned());
