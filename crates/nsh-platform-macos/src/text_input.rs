@@ -163,7 +163,8 @@ impl Editor {
     }
 
     fn text(&self) -> String {
-        self.ns_text().to_string()
+        let string = self.ns_text();
+        input_text(&string, NSRange::new(0, string.length()))
     }
 
     /// The text an input method is composing in the editor (its marked
@@ -186,7 +187,7 @@ impl Editor {
         {
             return None;
         }
-        Some(string.substringWithRange(range).to_string())
+        Some(input_text(&string, range))
     }
 
     fn is_empty(&self) -> bool {
@@ -707,7 +708,7 @@ impl Ctx {
         // Until `changed` reports the edit, the composition it changes is
         // not looked at (the editor may unmark before it replaces).
         input.editing.set(true);
-        let mut text = replacement.to_string();
+        let mut text = input_text(replacement, NSRange::new(0, replacement.length()));
         if text.is_empty() {
             if range.length > 0 {
                 self.key_press("Backspace");
@@ -3196,9 +3197,53 @@ fn clip_utf16(s: &str, max: usize) -> &str {
     s
 }
 
+/// The editor's UTF-16 range as the text an app receives.
+fn input_text(string: &NSString, range: NSRange) -> String {
+    // Input methods can leave an unpaired surrogate in their text or marked
+    // range. NSString's UTF8String is null then, so its Display conversion
+    // cannot be used. Read UTF-16 without changing the native composition.
+    let mut units = vec![0; range.length];
+    // SAFETY: The caller supplies a range within the string. The buffer has
+    // room for every UTF-16 unit, and its pointer is non-null when empty too.
+    unsafe {
+        string.getCharacters_range(std::ptr::NonNull::new(units.as_mut_ptr()).unwrap(), range);
+    }
+    String::from_utf16_lossy(&units)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn input_text_preserves_unicode_and_replaces_incomplete_surrogates() {
+        let string = NSString::from_str("a😀かな");
+        for (range, expected) in [
+            (NSRange::new(0, 5), "a😀かな"),
+            (NSRange::new(1, 2), "😀"),
+            (NSRange::new(1, 1), "�"),
+            (NSRange::new(2, 1), "�"),
+            (NSRange::new(3, 2), "かな"),
+            (NSRange::new(5, 0), ""),
+        ] {
+            assert_eq!(input_text(&string, range), expected);
+        }
+    }
+
+    #[test]
+    fn input_text_accepts_an_edit_with_unpaired_surrogates() {
+        let mut units = [0x306b, 0xd800, 0x307b, 0xdc00];
+        // SAFETY: The initialized buffer contains units.len() UTF-16 units.
+        // NSString accepts unpaired surrogates, as AppKit's editor does.
+        let string = unsafe {
+            NSString::initWithCharacters_length(
+                NSString::alloc(),
+                std::ptr::NonNull::new(units.as_mut_ptr()).unwrap(),
+                units.len(),
+            )
+        };
+        assert_eq!(input_text(&string, NSRange::new(0, 4)), "に�ほ�");
+    }
 
     #[test]
     fn single_line_placeholder_matches_native_editor_metrics() {
