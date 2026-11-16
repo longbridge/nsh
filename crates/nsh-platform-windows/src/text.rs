@@ -70,7 +70,7 @@ use windows::{
                 DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE,
                 DWRITE_TRIMMING, DWRITE_TRIMMING_GRANULARITY_CHARACTER,
                 DWRITE_TRIMMING_GRANULARITY_NONE, DWRITE_UNDERLINE, DWRITE_UNICODE_RANGE,
-                DWRITE_WORD_WRAPPING_NO_WRAP, DWRITE_WORD_WRAPPING_WRAP, IDWriteFactory2,
+                DWRITE_WORD_WRAPPING_EMERGENCY_BREAK, DWRITE_WORD_WRAPPING_NO_WRAP, IDWriteFactory2,
                 IDWriteFactory5, IDWriteFontCollection, IDWriteFontCollection1, IDWriteFontFace,
                 IDWriteFontFace2, IDWriteFontFallback, IDWriteFontFile,
                 IDWriteInMemoryFontFileLoader, IDWriteInlineObject, IDWriteInlineObject_Impl,
@@ -1148,7 +1148,7 @@ impl DWriteTextEngine {
             let _ = format.SetWordWrapping(if t.no_wrap {
                 DWRITE_WORD_WRAPPING_NO_WRAP
             } else {
-                DWRITE_WORD_WRAPPING_WRAP
+                DWRITE_WORD_WRAPPING_EMERGENCY_BREAK
             });
             let _ =
                 format.SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, PITCH, PITCH_BASELINE);

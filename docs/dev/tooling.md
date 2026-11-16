@@ -769,7 +769,7 @@ simulator's values. Touches are IOHID digitizer events handed to UIKit
 (`-[UIApplication _enqueueHIDEvent:]`, with IOKit's and BackBoardServices' functions looked up at run time,
 `synth.rs`), so UIKit makes the `UITouch`es and runs hit
 testing, gesture recognizers and scroll views as for a finger: a press is a finger down and up, a scroll a drag kept
-inside the scroll view that rests (still reporting where it is) before it lifts, so it ends without a fling; a tap
+inside the scroll view that rests (trembling a fraction of a point) before it lifts, so it ends without a fling; a tap
 that lands in a text input also gives it the focus (made touches leave the first responder where it was, as UI test
 tools know). Typing goes through the software keyboard's input manager (`UIKeyboardImpl.addInputString:`, a key at
 a quick typist's pace), which asks the input's delegate first (`maxLength`, a controlled value), as the keyboard does.
@@ -1059,6 +1059,12 @@ is built with `cargo build -p nsh-tui-host` into the CLI's native target/profile
 are. App-specific development hosts are generated in `.nsh/rust/tui/tui-host`.
 
 ## Releases
+
+The Apple-silicon release job uses `macos-26` and checks that the selected Xcode's device, simulator and
+macOS SDKs are 26 or newer. Building against the newer SDK enables iOS 26's system appearance, including
+Liquid Glass; the deployment target stays iOS 15.0. After building, `.github/ci/ios-build-versions.py` checks
+the four device, simulator and Catalyst runtimes' actual `LC_BUILD_VERSION` before packaging: the SDK must
+be 26 or newer and the minimum OS must remain 15.0. It reads the binaries without modifying them.
 
 `.github/workflows/release.yml` runs `cargo xtask dist` on macOS (Apple silicon, with the iOS and Mac Catalyst
 runtimes and the iOS SDK, and Intel), Linux and Windows (x86_64 and arm64), each with the desktop runtime and the GPUI

@@ -279,8 +279,14 @@ Things that were found the hard way. Read the section of the area you change bef
   press is a gesture recognizer, not a control. On iOS 26+ the window's `_UIDoubleTapInteraction` (a single-tap
   recognizer over the top 64 pt, `cancelsTouchesInView`, never simultaneous, action disabled) recognized first and
   prevented every press there, so a navigation bar's back button did nothing (seen on an iPhone foldable simulator; a
-  real tap through XCUITest reproduced it). `PressRecognizer` is not preventable by tap recognizers on a `UIWindow`
-  (`press.rs`, `is_window_tap`); edge-gesture gates are not taps and still cancel presses.
+  real tap through XCUITest reproduced it). The navigation bar has one of its own (iOS 27 simulator): it prevented
+  every press of the views an app puts in the header's slots, which the bar wraps in custom bar button items.
+  `PressRecognizer` is not preventable by tap recognizers on a `UIWindow` or a `UINavigationBar` (`press.rs`,
+  `is_system_tap`); edge-gesture gates are not taps and still cancel presses. That interaction is also the status bar's
+  tap, which scrolls the scroll views under it to their top: a press it did not prevent still scrolled the page back
+  to its top (opening a menu from the header did). Those taps wait for the press to fail
+  (`shouldBeRequiredToFailByGestureRecognizer:`), so a press takes its tap and a tap where nothing is pressed still
+  scrolls to the top.
 - **iOS, a tap recognizer on a view around pressables**: a `UITapGestureRecognizer` recognizes on release, where a
   press ends too, and prevents the `PressRecognizer`s of the views inside its view: `cancelsTouchesInView = false`
   leaves the views their touches, not the other recognizers their turn. The tap that focuses a `focusable` view
@@ -520,8 +526,10 @@ Things that were found the hard way. Read the section of the area you change bef
   `maxLength`; `input::paste_text`, the agent's paste too, asks it first):
   typing goes through `UIKeyboardImpl`, which asks it, as the software keyboard does. Keys typed faster than a
   controlled input's value comes back lose characters, so keys come at a typist's pace.
-- **A finger at rest still reports its position**: a drag that stops sending events before it lifts keeps its last
-  velocity and flings. A drag whose path leaves the scroll view moves it much further than the finger.
+- **A finger at rest still moves**: a scroll view measures its speed from the moves that change its offset, so a drag
+  that stops sending events, or keeps reporting the same spot, before it lifts keeps its last velocity and flings. A
+  resting finger trembles a fraction of a point (`agent.rs`). A drag whose path leaves the scroll view moves it much
+  further than the finger.
 - **Interactive back needs system-delivered touches**: the agent's IOHID drags can start UIKit's navigation
   gestures in the simulator. Test with `app.drag` from an element at the leading edge; `app.back()` exercises
   the back button instead. On iOS 26 a leading-edge drag can be recognized by

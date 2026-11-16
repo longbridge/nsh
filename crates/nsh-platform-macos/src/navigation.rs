@@ -35,8 +35,9 @@
 //! at the size of the surface: transparent layers with no look of their own
 //! (the runtime renders the app's popup and backdrop in them; the
 //! presentation is ignored). They slide up or fade in, then get `onShow`;
-//! when the app removes one it leaves as an image of its last frame, then
-//! gets `onDismiss`.
+//! a fade out keeps its live views (including glass and backdrop materials)
+//! until it ends; other exits use an image of the last frame. Then it gets
+//! `onDismiss`.
 //!
 //! Transitions run on the display link ([`Surface::add_frame_callback`])
 //! and only move views (`shift`, `fade`): nothing is laid out again while
@@ -250,6 +251,13 @@ enum Motion {
         frame: Bounds<Points>,
         fade: bool,
     },
+    /// A fading modal keeps its native materials until the fade ends.
+    ModalFadeOut {
+        view: NshView,
+        host: NshView,
+        dismiss: Option<NodeId>,
+        pointer_events: nsh_core::PointerEvents,
+    },
     /// A motion drawn through the page's or dialog's `transitionShader`:
     /// its views at rest under the overlay until it ends.
     Shader {
@@ -339,7 +347,7 @@ impl Motion {
                     true,
                 )
             }
-            Motion::Shader { .. } => return self,
+            Motion::Shader { .. } | Motion::ModalFadeOut { .. } => return self,
         };
         let overlay =
             crate::shader::NavOverlay::new(surface, host, &upper, image, shader, backwards);
@@ -723,8 +731,12 @@ impl Nav {
         // the app's views away).
         let mut hosted: Vec<Retained<NSView>> = Vec::new();
         for motion in self.transitions.iter() {
-            if let Motion::ModalOut { image, .. } = motion.inner() {
-                hosted.push(Retained::into_super(image.fill.clone()));
+            match motion.inner() {
+                Motion::ModalOut { image, .. } => {
+                    hosted.push(Retained::into_super(image.fill.clone()))
+                }
+                Motion::ModalFadeOut { view, .. } => view.unparent(),
+                _ => {}
             }
         }
         for view in hosted {
@@ -809,6 +821,7 @@ impl Nav {
                     set_shift(view, (0.0, modal_in_offset(Points(h - y), e).0));
                 }
             }
+            Motion::ModalFadeOut { view, .. } => set_fade(view, 1.0 - e),
             Motion::ModalOut {
                 image,
                 host,
@@ -865,6 +878,20 @@ impl Nav {
                 set_shift(&view, (0.0, 0.0));
                 set_fade(&view, 1.0);
                 surface.event(view.id(), EventKind::Show, EventPayload::None);
+            }
+            Motion::ModalFadeOut {
+                view,
+                dismiss,
+                pointer_events,
+                ..
+            } => {
+                view.unparent();
+                view.state_mut().props.pointer_events = pointer_events;
+                view.state_mut().modal_exiting = false;
+                set_fade(&view, 1.0);
+                if let Some(id) = dismiss {
+                    surface.event(id, EventKind::Dismiss, EventPayload::None);
+                }
             }
             Motion::ModalOut {
                 dismiss,
@@ -1171,8 +1198,8 @@ impl Nav {
         })
     }
 
-    /// Takes modal `id` away natively (it leaves as an image of its last
-    /// frame), then reports `onDismiss` unless `reported` already.
+    /// Takes modal `id` away natively after its exit animation, then
+    /// reports `onDismiss` unless `reported` already.
     fn close_modal(&mut self, surface: &Rc<Surface>, id: NodeId, reported: bool) {
         // Its own coming, and any dialog's change through a shader, end
         // first.
@@ -1200,10 +1227,15 @@ impl Nav {
         let own = modal_motion(surface, animation);
         let animates = own.is_some() || shader.is_some();
         let shown = view.ns().window().is_some();
-        let image = (animates && shown).then(|| shot(surface, &view)).flatten();
+        let live_fade = shown && shader.is_none() && own.is_some_and(|(_, fade)| fade);
+        let image = (animates && shown && !live_fade)
+            .then(|| shot(surface, &view))
+            .flatten();
         if view.has_parent() {
             drop_focus(surface, view.ns());
-            view.unparent();
+            if !live_fade {
+                view.unparent();
+            }
         }
         // A newer modal still covers what had the focus: one that remembers
         // a view of this modal (gone now) gives this one's back instead.
@@ -1220,6 +1252,27 @@ impl Nav {
         restore_focus(surface, &self.scope(&host), focus_before);
         set_shift(&view, (0.0, 0.0));
         set_fade(&view, 1.0);
+        if live_fade {
+            view.state_mut().modal_exiting = true;
+            // It has left the input scope, even while AppKit composites
+            // its glass and backdrop. Restore this prop if it is reused.
+            let pointer_events = std::mem::replace(
+                &mut view.state_mut().props.pointer_events,
+                nsh_core::PointerEvents::None,
+            );
+            self.start(
+                surface,
+                own.map(|(d, _)| d),
+                Motion::ModalFadeOut {
+                    view,
+                    host,
+                    dismiss: (!reported).then_some(id),
+                    pointer_events,
+                },
+                None,
+            );
+            return;
+        }
         match (own, image) {
             (own, Some(image)) => {
                 host.set_native(
@@ -1340,8 +1393,12 @@ impl Nav {
             }
         }
         for motion in self.transitions.iter() {
-            if let Motion::ModalOut { image, host, .. } = motion.inner() {
-                push(host, Retained::into_super(image.fill.clone()));
+            match motion.inner() {
+                Motion::ModalOut { image, host, .. } => {
+                    push(host, Retained::into_super(image.fill.clone()))
+                }
+                Motion::ModalFadeOut { view, host, .. } => push(host, Retained::from(view.ns())),
+                _ => {}
             }
         }
         for (host, tail) in tails {
@@ -1563,6 +1620,11 @@ pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
     }
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
+    // Reopening a retained modal ends its previous fade before reusing it.
+    nav.finish(
+        surface,
+        |m| matches!(m.inner(), Motion::ModalFadeOut { view, .. } if view.id() == id),
+    );
     let m = nav.modals.entry(id).or_default();
     if m.view.is_some() {
         return;

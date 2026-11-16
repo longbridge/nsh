@@ -69,6 +69,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     fenwick::Fenwick,
+    list_diff::ListDiff,
     ops::{CellSlot, ListAlignment, ListContentStyle, Viewability},
 };
 
@@ -582,7 +583,10 @@ impl ListState {
         self.items_changed = true;
         // The visible content keeps its place instead.
         self.pin = None;
-        let anchor = self.visible_anchor();
+        let anchor = self
+            .visible_anchor()
+            .filter(|&(index, _)| index >= at + removed)
+            .map(|(index, from_top)| (index - removed + inserted, from_top));
         let natural_before = self.natural_offset();
         let end = (at + removed) as usize;
         self.sizes.splice(
@@ -590,7 +594,7 @@ impl ListState {
             std::iter::repeat_n(f32::NAN, inserted as usize),
         );
         self.count = self.count - removed + inserted;
-        let shift = |i: u32| -> Option<u32> {
+        self.follow_items(|i: u32| -> Option<u32> {
             if i < at {
                 Some(i)
             } else if i >= at + removed {
@@ -598,16 +602,78 @@ impl ListState {
             } else {
                 None
             }
-        };
+        });
+        if removed == 0 && at + inserted == self.count {
+            // Appended: the rows before stay as they are.
+            self.resize_rows(at);
+        } else {
+            self.rebuild_offsets();
+        }
+        self.after_items_changed(anchor, natural_before);
+    }
+
+    /// The items changed by key ([`ListDiff`]): each item that stays keeps
+    /// its measurement and its cell (the content, the state in it, the
+    /// focus) wherever it goes, the items it passes too; only new items
+    /// need a cell, and only gone ones free theirs. The first visible item
+    /// that kept its order keeps its place, as for a splice: one that moved
+    /// away leaves the rows around it where they were.
+    pub(super) fn reorder(&mut self, diff: &ListDiff) {
+        if diff.old_len != self.count {
+            // Not a change of these items: all of them are new.
+            self.splice(0, self.count, diff.new_len);
+            return;
+        }
+        if let Some((at, removed, inserted)) = diff.as_splice() {
+            self.splice(at, removed, inserted);
+            return;
+        }
+        self.items_changed = true;
+        self.pin = None;
+        let anchor = self.visible_anchor().and_then(|(first, _)| {
+            let top = self.natural_offset();
+            let bottom = top + self.viewport;
+            (first..self.count)
+                .take_while(|&i| self.item_at(i) < bottom)
+                .find_map(|i| match diff.new_index(i) {
+                    Some((to, false)) => Some((to, self.item_at(i) - top)),
+                    _ => None,
+                })
+        });
+        let natural_before = self.natural_offset();
+        let mut sizes = Vec::with_capacity(diff.new_len as usize);
+        for run in &diff.runs {
+            let len = run.len() as usize;
+            match run.from().and_then(|from| {
+                let from = from as usize;
+                self.sizes.get(from..from + len)
+            }) {
+                Some(measured) => sizes.extend_from_slice(measured),
+                None => sizes.resize(sizes.len() + len, f32::NAN),
+            }
+        }
+        self.sizes = sizes;
+        self.count = diff.new_len;
+        let indices = diff.new_indices();
+        self.follow_items(|i| indices.get(i as usize).copied().flatten());
+        self.kept.sort_unstable();
+        self.rebuild_offsets();
+        self.after_items_changed(anchor, natural_before);
+    }
+
+    /// The items moved as `shift` says (an item's new index, `None` when it
+    /// is gone): the cells, the items kept rendered and the rows the
+    /// runtime is told follow them.
+    fn follow_items(&mut self, shift: impl Fn(u32) -> Option<u32>) {
         self.kept = self.kept.iter().filter_map(|&i| shift(i)).collect();
         self.by_index.clear();
         for (slot, s) in self.slots.iter_mut().enumerate() {
-            s.placed = s.placed.and_then(shift);
-            let index = s.index.and_then(shift);
+            s.placed = s.placed.and_then(&shift);
+            let index = s.index.and_then(&shift);
             let Some(new) = index else {
                 if s.index.take().is_some() {
                     self.free.push(slot as u32);
-                } else if let (Some(r), Some(n)) = (s.requested, s.requested.and_then(shift))
+                } else if let (Some(r), Some(n)) = (s.requested, s.requested.and_then(&shift))
                     && s.rendered == Some(r)
                 {
                     // A free cell still showing an item that stays follows
@@ -626,7 +692,7 @@ impl ListState {
                 continue;
             };
             s.index = Some(new);
-            s.rendered = s.rendered.and_then(shift);
+            s.rendered = s.rendered.and_then(&shift);
             // The runtime's index for the cell follows its item at once, or
             // its content shows the item now at the old index.
             match s.requested.map(|r| (r, shift(r))) {
@@ -646,19 +712,16 @@ impl ListState {
         }
         self.free.sort_unstable();
         self.free.dedup();
-        if removed == 0 && at + inserted == self.count {
-            // Appended: the rows before stay as they are.
-            self.resize_rows(at);
-        } else {
-            self.rebuild_offsets();
-        }
+    }
+
+    /// After the items changed: the first visible item (`anchor`: its new
+    /// index and where it showed) keeps its place, from a natural offset of
+    /// `natural_before`.
+    fn after_items_changed(&mut self, anchor: Option<(u32, f32)>, natural_before: f32) {
         if self.load_more_at.is_some() {
             self.load_more_at = None;
         }
-        if let Some((index, from_top)) = anchor
-            && index >= at + removed
-        {
-            let moved_to = index - removed + inserted;
+        if let Some((moved_to, from_top)) = anchor {
             if self.inverted {
                 // `anchor_end` restores the natural offset the list had;
                 // the visible rows need it moved by as much as they did.
@@ -2592,6 +2655,177 @@ mod tests {
         l.splice(90, 2, 0);
         assert_eq!(l.offset, offset);
         assert_eq!(l.count, 101);
+    }
+
+    /// A list of `count` rows at `offset` with every cell of its window
+    /// made (cell `100 + slot`) and showing its row.
+    fn with_cells(count: u32, offset: f32) -> ListState {
+        let mut l = list(count, 50.0, 400.0);
+        l.offset = offset;
+        let mut binds = Vec::new();
+        l.update_window(&mut binds);
+        for (slot, index) in binds {
+            l.add_slot_cell(CellSlot::Item(slot), 100 + slot);
+            l.rendered(100 + slot, index);
+        }
+        l
+    }
+
+    /// Each cell and the row it shows.
+    fn shown(l: &ListState) -> Vec<(u32, u32)> {
+        let mut shown: Vec<_> = l
+            .slots
+            .iter()
+            .filter_map(|s| Some((s.cell, s.ready()?)))
+            .collect();
+        shown.sort_unstable();
+        shown
+    }
+
+    /// Rows `0..count` with row `from` moved to `to`.
+    fn moved_row(count: u32, from: usize, to: usize) -> (Vec<u32>, Vec<u32>) {
+        let old: Vec<u32> = (0..count).collect();
+        let mut new = old.clone();
+        let row = new.remove(from);
+        new.insert(to, row);
+        (old, new)
+    }
+
+    #[test]
+    fn a_moved_row_and_the_rows_it_passed_keep_their_cells() {
+        let mut l = with_cells(100, 0.0);
+        l.measured(3, 80.0);
+        let before = shown(&l);
+        let slots = l.slots.len();
+        let (old, new) = moved_row(100, 10, 2);
+        let diff = ListDiff::new(&old, &new).unwrap();
+        l.reorder(&diff);
+        // Every cell shows the row it showed, at the row's new index.
+        let follow = |(cell, i): (u32, u32)| (cell, diff.new_index(i).unwrap().0);
+        assert_eq!(
+            shown(&l),
+            before.into_iter().map(follow).collect::<Vec<_>>()
+        );
+        // Measurements went with their rows.
+        assert_eq!(l.row_extent(4), 80.0);
+        assert_eq!(l.row_extent(3), 50.0);
+        // The runtime only learns the new indices: no cell is made or bound
+        // to another row.
+        let mut binds = Vec::new();
+        l.update_window(&mut binds);
+        assert_eq!(l.slots.len(), slots);
+        for &(slot, index) in &binds {
+            assert_eq!(l.slots[slot as usize].rendered, Some(index), "{binds:?}");
+        }
+        let mut moved: Vec<u32> = binds.iter().map(|b| b.1).collect();
+        moved.sort_unstable();
+        assert_eq!(moved, (2..=10).collect::<Vec<_>>());
+        // At its start the list stays there: the row shows at the top.
+        assert_eq!((l.offset, l.take_splice_anchor()), (0.0, 0.0));
+    }
+
+    #[test]
+    fn moves_inserts_and_removes_keep_the_rows_that_stay() {
+        let mut l = with_cells(100, 0.0);
+        let before = shown(&l);
+        // Row 5 goes, row 1000 arrives at the top, row 12 moves to 3.
+        let old: Vec<u32> = (0..100).collect();
+        let mut new: Vec<u32> = old.iter().copied().filter(|&k| k != 5 && k != 12).collect();
+        new.insert(0, 1000);
+        new.insert(3, 12);
+        let diff = ListDiff::new(&old, &new).unwrap();
+        l.reorder(&diff);
+        assert_eq!(l.count, 100);
+        let kept: Vec<_> = before
+            .iter()
+            .filter_map(|&(cell, i)| Some((cell, diff.new_index(i)?.0)))
+            .collect();
+        assert_eq!(shown(&l), kept);
+        // The gone row's cell is free; the new row takes a cell.
+        let mut binds = Vec::new();
+        l.update_window(&mut binds);
+        let new_row = binds.iter().find(|b| b.1 == 0).expect("the new row binds");
+        assert_eq!(l.slots[new_row.0 as usize].rendered, None);
+        assert_eq!(
+            binds
+                .iter()
+                .filter(|b| l.slots[b.0 as usize].rendered != Some(b.1))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn rows_out_of_the_window_move_their_measurements_and_cells() {
+        let moves = || {
+            // Row 2 moves past the window, row 60 (never shown) to the end.
+            let old: Vec<u32> = (0..100).collect();
+            let mut new: Vec<u32> = old.iter().copied().filter(|&k| k != 2 && k != 60).collect();
+            new.insert(80, 2);
+            new.push(60);
+            ListDiff::new(&old, &new).unwrap()
+        };
+        let mut l = with_cells(100, 0.0);
+        l.measured(60, 90.0);
+        let slots = l.slots.len();
+        l.reorder(&moves());
+        assert_eq!(l.row_extent(99), 90.0);
+        assert_eq!(l.row_extent(59), 50.0);
+        // Row 2's cell, out of the window, shows the row that came in.
+        let mut binds = Vec::new();
+        l.update_window(&mut binds);
+        assert_eq!(l.slots.len(), slots);
+        // A row that holds the focus keeps its cell wherever it goes.
+        let mut l = with_cells(100, 0.0);
+        let slot = l.by_index[&2];
+        l.set_kept(vec![2]);
+        l.reorder(&moves());
+        binds.clear();
+        l.update_window(&mut binds);
+        assert_eq!(l.slots[slot as usize].ready(), Some(80));
+        assert_eq!(l.slots.len(), slots + 1, "the row that came in");
+        assert!(binds.iter().all(|b| b.0 != slot || b.1 == 80), "{binds:?}");
+    }
+
+    #[test]
+    fn repeated_keys_pair_up_and_keep_their_cells() {
+        let mut l = with_cells(12, 0.0);
+        let before = shown(&l);
+        let old = [7, 7, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11];
+        let new = [1, 7, 2, 7, 3, 4, 5, 6, 8, 9, 10, 11];
+        let diff = ListDiff::new(&old, &new).unwrap();
+        l.reorder(&diff);
+        let follow = |(cell, i): (u32, u32)| (cell, diff.new_index(i).unwrap().0);
+        let mut expected: Vec<_> = before.into_iter().map(follow).collect();
+        expected.sort_unstable();
+        assert_eq!(shown(&l), expected);
+        // A diff of other rows than the list's: all of them are new.
+        l.reorder(&ListDiff::new(&[1, 2], &[2, 1]).unwrap());
+        assert_eq!(l.count, 2);
+        assert!(shown(&l).is_empty());
+    }
+
+    #[test]
+    fn moves_keep_the_first_visible_row_in_place() {
+        // Row 20 at the top, 10 points scrolled into it.
+        let mut l = with_cells(100, 1010.0);
+        let first = l.item_at(20) - l.offset;
+        // A row below moves to the top: row 20 (now 21) stays on screen.
+        let (old, new) = moved_row(100, 50, 0);
+        l.reorder(&ListDiff::new(&old, &new).unwrap());
+        assert_eq!(l.item_at(21) - l.offset, first);
+        assert_eq!(l.take_splice_anchor(), 50.0);
+        // The first visible row itself moves to the top: the rows after it
+        // stay where they were, rather than following it.
+        let next = l.item_at(22) - l.offset;
+        let (old, new) = moved_row(100, 21, 0);
+        l.reorder(&ListDiff::new(&old, &new).unwrap());
+        assert_eq!(l.item_at(22) - l.offset, next);
+        // A row above moves below the viewport: the visible rows stay.
+        let (old, new) = moved_row(100, 3, 90);
+        l.reorder(&ListDiff::new(&old, &new).unwrap());
+        assert_eq!(l.item_at(21) - l.offset, next);
+        assert_eq!(l.take_splice_anchor(), -50.0);
     }
 
     #[test]
