@@ -1992,8 +1992,10 @@ impl Headless {
         self.done()
     }
 
-    /// The step `type(<selector>, <text>)`: types `text` at the end of the
-    /// input `selector` names (the matching view, or the first input in
+    /// The step `type(<selector>, <text>)`: types `text` at the caret of
+    /// the input `selector` names (here always the end of its text; a view
+    /// that keeps its own selection, such as `Editor`, types over it, as
+    /// the native drivers do) (the matching view, or the first input in
     /// it; `text:` also matches what an input holds or its placeholder),
     /// as a keyboard does: the input takes the focus, then each character
     /// is a key (`onKeyPress`) and an edit (`onChange`); a line break

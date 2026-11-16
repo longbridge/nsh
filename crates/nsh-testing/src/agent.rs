@@ -1144,7 +1144,7 @@ pub trait Native: Send + Sync {
         Err("this platform has no mouse".into())
     }
     /// The input that has the keyboard focus, where the platform can tell:
-    /// a paste into it needs no press (one would move its caret).
+    /// typing or a paste into it needs no press (one would move its caret).
     fn focused(&self) -> Option<NodeId> {
         None
     }
@@ -2068,7 +2068,12 @@ impl Agent {
     }
 
     fn type_text(&self, selector: &str, text: &str) -> Result<(), String> {
-        self.focus(selector)?;
+        // As the user types in the field they are in: a press first would
+        // move its caret, collapsing a selection the typing replaces.
+        let (id, _) = self.find(selector, "input", PickTarget::Input)?;
+        if self.native.focused() != Some(id) {
+            self.focus(selector)?;
+        }
         // A line break is the return key, as the headless driver types it.
         for (i, line) in text.split('\n').enumerate() {
             if i > 0 {
@@ -2791,5 +2796,110 @@ mod tests {
         ));
         assert!(typed.lock().unwrap().is_empty());
         drop(engine);
+    }
+
+    /// A field (view 2): what the agent does to it, and whether it has the
+    /// keyboard focus.
+    struct Field {
+        did: Arc<Mutex<Vec<String>>>,
+        focused: Mutex<bool>,
+    }
+
+    impl Native for Field {
+        fn bounds(&self, id: NodeId) -> Option<Bounds<Points>> {
+            (id == 2).then(|| {
+                Bounds::new(
+                    point(Points(0.0), Points(0.0)),
+                    Size::new(Points(200.0), Points(40.0)),
+                )
+            })
+        }
+        fn viewport(&self) -> Size<Points> {
+            Size::new(Points(400.0), Points(400.0))
+        }
+        fn press(&self, _: Point<Points>) {
+            *self.focused.lock().unwrap() = true;
+            self.did.lock().unwrap().push("press".into());
+        }
+        fn long_press(&self, _: Point<Points>, _: Duration) {}
+        fn scroll(&self, _: Point<Points>, _: Point<Points>) {}
+        fn drag(&self, _: Point<Points>, _: Point<Points>) {}
+        fn type_text(&self, text: &str) {
+            self.did.lock().unwrap().push(format!("type {text}"));
+        }
+        fn key(&self, key: Key) {
+            self.did.lock().unwrap().push(format!("{key:?}"));
+        }
+        fn focused(&self) -> Option<NodeId> {
+            self.focused.lock().unwrap().then_some(2)
+        }
+        fn input_text(&self, _: NodeId) -> Option<String> {
+            None
+        }
+        fn back(&self) -> Result<(), String> {
+            Err("no back here".into())
+        }
+        fn answer_dialog(&self, _: Option<&str>) -> Result<(), String> {
+            Ok(())
+        }
+        fn animating(&self) -> bool {
+            false
+        }
+        fn screenshot(&self) -> Result<Vec<u8>, String> {
+            Ok(Vec::new())
+        }
+        fn resize(&self, _: Points, _: Points) -> Result<(), String> {
+            Ok(())
+        }
+        fn set_dark(&self, _: bool) -> Result<(), String> {
+            Ok(())
+        }
+        fn quit(&self) {}
+    }
+
+    #[test]
+    fn typing_into_the_focused_field_keeps_its_caret_and_selection() {
+        use nsh_core::{MountItem, ViewKind};
+        // #2180: a press before typing would collapse a selection (Cmd+A)
+        // the typing replaces, as it does when the user types.
+        let model = Arc::new(Model::default());
+        model.apply(&MountBatch {
+            items: vec![
+                MountItem::Create {
+                    id: 2,
+                    kind: ViewKind::Input,
+                },
+                MountItem::Frame {
+                    id: 2,
+                    frame: Bounds::new(
+                        point(Points(0.0), Points(0.0)),
+                        Size::new(Points(200.0), Points(40.0)),
+                    ),
+                },
+                MountItem::Insert {
+                    parent: 1,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        });
+        let did = Arc::new(Mutex::new(Vec::new()));
+        let field = Field {
+            did: did.clone(),
+            focused: Mutex::new(false),
+        };
+        let agent = Agent::new(model, Box::new(field));
+        let ok = StepOutcome::Done {
+            value: serde_json::Value::Null,
+        };
+        let step = |text: &str| TestStep::Type {
+            selector: "view:2".into(),
+            text: text.into(),
+        };
+        // Not focused: pressed to take the focus.
+        assert_eq!(agent.take(step("A")), ok);
+        // Focused: typed where its caret is.
+        assert_eq!(agent.take(step("Y")), ok);
+        assert_eq!(*did.lock().unwrap(), ["press", "type A", "type Y"]);
     }
 }
