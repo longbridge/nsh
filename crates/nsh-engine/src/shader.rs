@@ -51,6 +51,8 @@ use nsh_core::{
 };
 use rustc_hash::FxHashMap;
 
+#[cfg(windows)]
+pub use crate::shader_frame::SharedTexture;
 pub use crate::shader_frame::{Frame, MAX_SIDE, PixelFormat};
 
 /// This build links the renderer: a platform reports
@@ -281,6 +283,12 @@ impl Renderer {
         self.format
     }
 
+    /// Windows: the adapter of its device when that is Direct3D 12's.
+    #[cfg(all(windows, test))]
+    fn adapter_luid(&self) -> Option<windows_sys::Win32::Foundation::LUID> {
+        crate::shader_surfaces::adapter_luid(&self.device)
+    }
+
     /// Calls `f`, on a thread of the GPU driver's, once the GPU finished
     /// the frames rendered so far ([`ShaderView::render`]): a backend
     /// collects them then instead of polling on every display frame while
@@ -497,11 +505,16 @@ pub struct ShaderView {
     /// It runs backwards: `nsh.progress` goes from 1 to 0.
     backwards: bool,
     /// Its frames go to IOSurfaces ([`Self::show_on_surfaces`]).
-    #[cfg(target_vendor = "apple")]
+    #[cfg(any(target_vendor = "apple", windows))]
     on_surfaces: bool,
     /// The surfaces, once a frame was rendered into one.
-    #[cfg(target_vendor = "apple")]
+    #[cfg(any(target_vendor = "apple", windows))]
     surfaces: Option<crate::shader_surfaces::Surfaces>,
+    /// Windows: the textures of the size before the last resize, while the
+    /// new size has no frame to show: their frame shows until one does, as
+    /// a read-back frame stays shown until the next comes back.
+    #[cfg(windows)]
+    previous: Option<crate::shader_surfaces::Surfaces>,
 }
 
 impl ShaderView {
@@ -625,8 +638,12 @@ impl ShaderView {
     /// that starts over a running one starts from where it is); `false`
     /// when it shows none. On the GPU when the frame is on a surface.
     pub fn set_input_from_frame(&mut self, renderer: &Renderer, input: ShaderInput) -> bool {
-        #[cfg(target_vendor = "apple")]
-        if let Some(texture) = self.surfaces.as_ref().and_then(|s| s.shown_texture()) {
+        #[cfg(any(target_vendor = "apple", windows))]
+        let shown = self.surfaces.as_ref().and_then(|s| s.shown_texture());
+        #[cfg(windows)]
+        let shown = shown.or_else(|| self.previous.as_ref().and_then(|s| s.shown_texture()));
+        #[cfg(any(target_vendor = "apple", windows))]
+        if let Some(texture) = shown {
             let (width, height) = (texture.width(), texture.height());
             let slot = &mut self.pictures[input.index()];
             if picture_slot(renderer, slot, width, height, texture.format()) {
@@ -782,7 +799,7 @@ impl ShaderView {
 
     /// Whether a frame is on its way back from the GPU.
     pub fn pending(&self) -> bool {
-        #[cfg(target_vendor = "apple")]
+        #[cfg(any(target_vendor = "apple", windows))]
         if self.surfaces.as_ref().is_some_and(|s| s.pending()) {
             return true;
         }
@@ -794,19 +811,48 @@ impl ShaderView {
     }
 
     /// The last frame collected (empty until one is, and while its frames
-    /// go to surfaces).
+    /// go to surfaces; on Windows its serial still counts the frames shown
+    /// on shared textures).
     pub fn frame(&self) -> &Frame {
         &self.frame
     }
 
     /// Renders its frames into IOSurfaces the backend shows as they are
-    /// ([`Self::surface`]) rather than reading them back into
-    /// [`Self::frame`]: the window server matches their colours on the
-    /// GPU, and no pixels come back to the CPU. Where the device is not
-    /// Metal's, frames are read back as before.
-    #[cfg(target_vendor = "apple")]
-    pub fn show_on_surfaces(&mut self) {
-        self.on_surfaces = true;
+    /// (`surface`) rather than reading them back into [`Self::frame`]: the
+    /// window server matches their colours on the GPU, and no pixels come
+    /// back to the CPU. Where the device is not Metal's, frames are read
+    /// back as before. `false` reads them back again; the next
+    /// [`Self::render`] renders a frame.
+    ///
+    /// Windows: into textures shared with the backend's Direct3D 11 device
+    /// (`surface`). Where the device is not Direct3D 12's, frames are read
+    /// back as before; a backend that cannot open a shared texture (another
+    /// adapter, no shared fences) passes `false`.
+    #[cfg(any(target_vendor = "apple", windows))]
+    pub fn show_on_surfaces(&mut self, on: bool) {
+        if self.on_surfaces == on {
+            return;
+        }
+        self.on_surfaces = on;
+        if !on {
+            self.surfaces = None;
+            #[cfg(windows)]
+            {
+                self.previous = None;
+            }
+            self.dirty = true;
+        }
+    }
+
+    /// Windows: the texture of the last frame collected, while its frames go
+    /// to textures ([`Self::show_on_surfaces`]): premultiplied BGRA pixels,
+    /// the size of the box and its overflow. A new one each time
+    /// [`Self::render`] says the frame is new. Each call is a draw: the
+    /// backend signals the value returned once its frame is submitted.
+    #[cfg(windows)]
+    pub fn surface(&self) -> Option<SharedTexture> {
+        (self.surfaces.as_ref().and_then(|s| s.shown()))
+            .or_else(|| self.previous.as_ref().and_then(|s| s.shown()))
     }
 
     /// The surface of the last frame collected, while its frames go to
@@ -850,15 +896,20 @@ impl ShaderView {
         }
         // On surfaces where asked and possible (else read back): a free one,
         // or none (all busy: the frame is skipped).
-        #[cfg(target_vendor = "apple")]
+        #[cfg(any(target_vendor = "apple", windows))]
         let mut surface = None;
-        #[cfg(target_vendor = "apple")]
+        #[cfg(any(target_vendor = "apple", windows))]
         if self.on_surfaces {
             if self
                 .surfaces
                 .as_ref()
                 .is_none_or(|s| (s.width, s.height) != (width, height))
             {
+                // The old size's frame shows until the new size has one.
+                #[cfg(windows)]
+                if let Some(old) = (self.surfaces.take()).filter(|s| s.shown_texture().is_some()) {
+                    self.previous = Some(old);
+                }
                 self.surfaces = Some(crate::shader_surfaces::Surfaces::new(width, height));
             }
             match self
@@ -870,22 +921,26 @@ impl ShaderView {
                 Ok(Some(i)) => surface = Some(i),
                 Ok(None) => return collected,
                 Err(_) => {
-                    log::debug!("shaders: no IOSurface frames on this device; reading frames back");
+                    log::debug!("shaders: no shared frames on this device; reading frames back");
                     self.on_surfaces = false;
                     self.surfaces = None;
+                    #[cfg(windows)]
+                    {
+                        self.previous = None;
+                    }
                 }
             }
         }
-        #[cfg(target_vendor = "apple")]
+        #[cfg(any(target_vendor = "apple", windows))]
         let on_surfaces = self.on_surfaces;
-        #[cfg(not(target_vendor = "apple"))]
+        #[cfg(not(any(target_vendor = "apple", windows)))]
         let on_surfaces = false;
         let format = if on_surfaces {
-            #[cfg(target_vendor = "apple")]
+            #[cfg(any(target_vendor = "apple", windows))]
             {
                 crate::shader_surfaces::FORMAT
             }
-            #[cfg(not(target_vendor = "apple"))]
+            #[cfg(not(any(target_vendor = "apple", windows)))]
             unreachable!()
         } else {
             texture_format(renderer.format)
@@ -897,11 +952,11 @@ impl ShaderView {
         // Where the frame goes: a free surface, or the texture and a free
         // read-back buffer. None free: the GPU is behind, skip this frame.
         let destination = if on_surfaces {
-            #[cfg(target_vendor = "apple")]
+            #[cfg(any(target_vendor = "apple", windows))]
             {
                 Destination::Surface(surface.expect("a free surface"))
             }
-            #[cfg(not(target_vendor = "apple"))]
+            #[cfg(not(any(target_vendor = "apple", windows)))]
             unreachable!()
         } else {
             if self
@@ -953,7 +1008,7 @@ impl ShaderView {
         }
         let view = match destination {
             Destination::Readback(_) => &self.target.as_ref().expect("target").view,
-            #[cfg(target_vendor = "apple")]
+            #[cfg(any(target_vendor = "apple", windows))]
             Destination::Surface(i) => self.surfaces.as_ref().expect("surfaces").view(i),
         };
         let mut encoder = renderer
@@ -982,7 +1037,7 @@ impl ShaderView {
         }
         self.serial += 1;
         match destination {
-            #[cfg(target_vendor = "apple")]
+            #[cfg(any(target_vendor = "apple", windows))]
             Destination::Surface(i) => {
                 renderer.queue.submit([encoder.finish()]);
                 self.surfaces.as_mut().expect("surfaces").submitted(
@@ -1055,10 +1110,15 @@ impl ShaderView {
     /// Shows the newest frame done: on its surface, or copied into
     /// [`Self::frame`] from the newest mapped buffer.
     fn collect(&mut self) -> bool {
-        #[cfg(target_vendor = "apple")]
+        #[cfg(any(target_vendor = "apple", windows))]
         if let Some(surfaces) = &mut self.surfaces
             && surfaces.collect()
         {
+            #[cfg(windows)]
+            {
+                self.frame.serial = surfaces.shown_serial();
+                self.previous = None;
+            }
             return true;
         }
         let Some(target) = &mut self.target else {
@@ -1106,7 +1166,7 @@ enum Destination {
     /// The target's texture, then read-back buffer `.0`.
     Readback(usize),
     /// Surface `.0`.
-    #[cfg(target_vendor = "apple")]
+    #[cfg(any(target_vendor = "apple", windows))]
     Surface(usize),
 }
 
@@ -1386,7 +1446,7 @@ mod tests {
             return;
         };
         let mut view = ShaderView::default();
-        view.show_on_surfaces();
+        view.show_on_surfaces(true);
         view.set_size(size(px(4.0), px(2.0)), 2.0);
         let split = |color: u32| {
             layer(
@@ -1424,7 +1484,7 @@ mod tests {
             return;
         };
         let mut view = ShaderView::default();
-        view.show_on_surfaces();
+        view.show_on_surfaces(true);
         view.set_size(size(px(2.0), px(1.0)), 1.0);
         assert!(
             !view.set_input_from_frame(&renderer, ShaderInput::Content),
@@ -1673,5 +1733,203 @@ mod tests {
                 "the last entry offers every backend"
             );
         }
+    }
+
+    /// Windows: renders until a frame shows on a shared texture; its pixels
+    /// as RGBA rows, copied out of the texture.
+    #[cfg(windows)]
+    fn texture_frame(view: &mut ShaderView, renderer: &Renderer) -> Vec<Vec<[u8; 4]>> {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(5) {
+            if view.render(renderer, Instant::now()) {
+                assert_eq!(view.frame().width, 0, "nothing is read back");
+                let texture = view
+                    .surfaces
+                    .as_ref()
+                    .and_then(|s| s.shown_texture())
+                    .expect("a texture");
+                let (width, height) = (texture.width(), texture.height());
+                let stride = (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+                let buffer = renderer.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: None,
+                    size: u64::from(stride * height),
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                });
+                let mut encoder = renderer
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                encoder.copy_texture_to_buffer(
+                    texture.as_image_copy(),
+                    wgpu::TexelCopyBufferInfo {
+                        buffer: &buffer,
+                        layout: wgpu::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(stride),
+                            rows_per_image: Some(height),
+                        },
+                    },
+                    texture.size(),
+                );
+                renderer.queue.submit([encoder.finish()]);
+                buffer.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+                let _ = renderer.device.poll(wgpu::PollType::wait_indefinitely());
+                let data = buffer.slice(..).get_mapped_range();
+                return (0..height as usize)
+                    .map(|y| {
+                        (0..width as usize)
+                            .map(|x| {
+                                let p = y * stride as usize + x * 4;
+                                // BGRA in memory.
+                                [data[p + 2], data[p + 1], data[p], data[p + 3]]
+                            })
+                            .collect()
+                    })
+                    .collect();
+            }
+            let _ = renderer.device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        panic!("no frame");
+    }
+
+    /// Windows: a renderer on Direct3D 12, whose views can share textures.
+    #[cfg(windows)]
+    fn d3d12_renderer() -> Option<Renderer> {
+        let renderer = Renderer::new(PixelFormat::Bgra)?;
+        if renderer.adapter_luid().is_none() {
+            eprintln!("not on Direct3D 12: skipped");
+            return None;
+        }
+        Some(renderer)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn frames_on_shared_textures_have_the_pixels_read_back_ones_have() {
+        let Some(renderer) = d3d12_renderer() else {
+            return;
+        };
+        let mut view = ShaderView::default();
+        view.show_on_surfaces(true);
+        view.set_size(size(px(4.0), px(2.0)), 2.0);
+        let split = |color: u32| {
+            layer(
+                "struct Uniforms { color: vec4f }\n\
+                 fn shade(uv: vec2f) -> vec4f {\n\
+                   if (uv.x < 0.5) { return uniforms.color; }\n\
+                   return vec4f(0.0, 0.0, 1.0, 0.5);\n\
+                 }",
+                &[("color", UniformValue::Color(Color(color)))],
+            )
+        };
+        view.set_layer(Some(split(0xff0000ff)));
+        let rows = texture_frame(&mut view, &renderer);
+        assert_eq!((rows[0].len(), rows.len()), (8, 4));
+        assert_eq!(rows[0][0], [255, 0, 0, 255]);
+        // Straight blue at half alpha, premultiplied.
+        let right = rows[3][7];
+        assert_eq!([right[0], right[1]], [0, 0], "{right:?}");
+        assert!((127..=128).contains(&right[2]) && (127..=128).contains(&right[3]));
+        assert!(!view.wants_frame(), "a still shader renders once");
+        let first = view.surface().expect("a shared texture");
+        assert_eq!((first.width, first.height), (8, 4));
+        // The next frame is on another texture: the one shown stays as it is
+        // while the backend's device may read it.
+        view.set_layer(Some(split(0x00ff00ff)));
+        let rows = texture_frame(&mut view, &renderer);
+        assert_eq!(rows[1][0], [0, 255, 0, 255]);
+        assert_ne!(view.surface().map(|t| t.texture), Some(first.texture));
+    }
+
+    /// Windows: a frame shown on a shared texture moves the frame's serial,
+    /// as a read-back one does: the backend shows a transition's start
+    /// picture until it moves.
+    #[cfg(windows)]
+    #[test]
+    fn frames_on_shared_textures_count_in_the_frame_serial() {
+        let Some(renderer) = d3d12_renderer() else {
+            return;
+        };
+        let mut view = ShaderView::default();
+        view.show_on_surfaces(true);
+        view.set_size(size(px(2.0), px(2.0)), 1.0);
+        let red = |r: f32| {
+            layer(
+                "struct Uniforms { r: f32 }\n\
+                 fn shade(uv: vec2f) -> vec4f { return vec4f(uniforms.r, 0.0, 0.0, 1.0); }",
+                &[("r", UniformValue::Number(r))],
+            )
+        };
+        assert_eq!(view.frame().serial, 0);
+        view.set_layer(Some(red(0.5)));
+        texture_frame(&mut view, &renderer);
+        assert_eq!(view.frame().serial, 1);
+        view.set_layer(Some(red(1.0)));
+        texture_frame(&mut view, &renderer);
+        assert_eq!(view.frame().serial, 2);
+        assert_eq!(view.frame().width, 0, "nothing is read back");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_shared_texture_is_rendered_into_again_only_once_the_backend_signals() {
+        let Some(renderer) = d3d12_renderer() else {
+            return;
+        };
+        let mut view = ShaderView::default();
+        view.show_on_surfaces(true);
+        view.set_size(size(px(2.0), px(2.0)), 1.0);
+        let red = |r: f32| {
+            layer(
+                "struct Uniforms { r: f32 }\n\
+                 fn shade(uv: vec2f) -> vec4f { return vec4f(uniforms.r, 0.0, 0.0, 1.0); }",
+                &[("r", UniformValue::Number(r))],
+            )
+        };
+        // Three frames, each drawn by the backend, which never signals: the
+        // texture shown and the two it drew before are all busy.
+        let mut drawn = Vec::new();
+        for r in [0.25, 0.5, 0.75] {
+            view.set_layer(Some(red(r)));
+            texture_frame(&mut view, &renderer);
+            drawn.push(view.surface().expect("a shared texture"));
+        }
+        view.set_layer(Some(red(1.0)));
+        assert!(!view.render(&renderer, Instant::now()), "skipped");
+        assert!(!view.pending(), "no texture was free");
+        let last = drawn.last().expect("drawn").value;
+        view.surfaces.as_ref().expect("textures").signal(last);
+        assert_eq!(texture_frame(&mut view, &renderer)[0][0], [255, 0, 0, 255]);
+    }
+
+    /// Windows: a view whose size changed shows its last frame until a
+    /// frame of the new size is done, as a read-back view does; drawing
+    /// nothing in between makes a growing view blink.
+    #[cfg(windows)]
+    #[test]
+    fn a_resized_view_shows_its_last_frame_until_the_new_size_has_one() {
+        let Some(renderer) = d3d12_renderer() else {
+            return;
+        };
+        let mut view = ShaderView::default();
+        view.show_on_surfaces(true);
+        view.set_size(size(px(4.0), px(2.0)), 1.0);
+        view.set_layer(Some(layer(
+            "fn shade(uv: vec2f) -> vec4f { return vec4f(1.0, 0.0, 0.0, 1.0); }",
+            &[],
+        )));
+        texture_frame(&mut view, &renderer);
+        // The GPU holds the new size's frame until the stall ends.
+        let stall =
+            crate::shader_surfaces::Stall::new(&renderer.device, &renderer.queue).expect("a stall");
+        view.set_size(size(px(8.0), px(4.0)), 1.0);
+        assert!(!view.render(&renderer, Instant::now()), "on its way");
+        assert!(view.pending());
+        let shown = view.surface().expect("the last frame still shows");
+        assert_eq!((shown.width, shown.height), (4, 2));
+        drop(stall);
+        texture_frame(&mut view, &renderer);
+        let shown = view.surface().expect("the new frame shows");
+        assert_eq!((shown.width, shown.height), (8, 4));
     }
 }

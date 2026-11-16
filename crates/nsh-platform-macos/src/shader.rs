@@ -1680,7 +1680,7 @@ fn show_frame(
 /// A shader view whose frames go to IOSurfaces ([`display_frame`]).
 fn surface_view() -> ShaderView {
     let mut view = ShaderView::default();
-    view.show_on_surfaces();
+    view.show_on_surfaces(true);
     view
 }
 
