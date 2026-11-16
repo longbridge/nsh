@@ -2,8 +2,7 @@
 //! node, as one on a block's does; Shift and Mod keep their meaning there.
 //!
 //! The press points come from the editor's own geometry (where it draws
-//! the view's one position, `coords_at_pos`), which its hit testing reads:
-//! the headless screen does not place a text's inline views on its lines.
+//! the view's one position, `coords_at_pos`), which its hit testing reads.
 
 use std::sync::Arc;
 

@@ -171,7 +171,9 @@ in a terminal, it blurs the editor, so the focus can leave it (Escape stays boun
 suggestion's).
 Presses: a node view's `handle_event`, the plugins' click hooks (`handle_click_on` per ancestor, then
 `handle_click`, double and triple likewise), then a caret (Shift extends), a word, the textblock or a node selection (a press inside an inline node view's box
-selects its node without Shift or Mod: `inline_view_at`, after prosemirror-view's `selectClickedLeaf`);
+selects its node without Shift or Mod: `inline_view_at`, after prosemirror-view's `selectClickedLeaf`; an inline
+view's box is the frame the text engine placed it at, `TextGeo::widths`, which fixes the positions around it, the
+text between two fixed points scaled to the room it has);
 a drag extends through `create_selection_between`, and past the viewport's top or bottom it scrolls the view on a timer (the code `Editor`'s `AutoScroll` and `edge_speed`) and extends again at each step. Paste: HTML through `transform_pasted_html` and the
 `clipboard_parser` (else the schema's), read by `DomParser::parse_from_clipboard`: HTML an editor copied carries
 `data-pm-slice` and comes back as the copied slice (its open depths, its whitespace, wrapped in its context again),

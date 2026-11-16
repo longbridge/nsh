@@ -1,8 +1,7 @@
 // Presses on node views (`addNodeView`): one on a view's own area selects
-// its node; a button inside a view keeps its press, and the selection
-// stays where it was. (A press on an inline view's own area is checked in
-// `nsh-base`'s Rust tests and on the platforms, `--target macos`: the
-// headless screen does not place a text's inline views on its lines.)
+// its node, inline views (on their text, where the text engine placed
+// them) as block ones; a button inside a view keeps its press, and the
+// selection stays where it was.
 import { expect, open, test } from "nsh/test";
 
 const openEditor = async () => {
@@ -14,6 +13,16 @@ const openEditor = async () => {
   await app.waitFor("text:selection: text 16");
   return app;
 };
+
+test("a press on an inline view's text selects its node", async () => {
+  const app = await openEditor();
+  await app.press("text:Tag AAPL");
+  await app.waitFor("text:selection: node 5");
+  await app.waitFor("text:Tag AAPL selected");
+  // The editor has the keyboard: the arrow leaves the node.
+  await app.keyboard.press("right");
+  await app.waitFor("text:selection: text 6");
+});
 
 test("a press on a block view's own area selects its node", async () => {
   const app = await openEditor();
