@@ -2837,7 +2837,10 @@ impl ViewGeometry for GeometryHandle {
         }
         let tree = self.tree.borrow();
         let geo = self.geo.borrow();
-        let b = tree.children.values().flatten().find(|b| b.pos == pos)?;
+        let Some(b) = tree.children.values().flatten().find(|b| b.pos == pos) else {
+            // Not a block: an inline view or image, on its line.
+            return geo.inline_rect(pos);
+        };
         let origin = geo.origin(b.id)?;
         let (_, frame) = geo.frames.get(&b.id)?;
         Some(Bounds::new(origin, frame.size))
