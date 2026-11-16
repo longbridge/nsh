@@ -1524,6 +1524,7 @@ fn sink(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoElement {
         ed.clone(),
     );
     let value = ed.sink_value;
+    let content = ed.clone();
     input()
         .element_ref(&ed.input)
         .absolute()
@@ -1554,6 +1555,15 @@ fn sink(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoElement {
         .auto_capitalize(AutoCapitalize::None)
         .paste_behavior(PasteBehavior::Report)
         .value(move || value.get())
+        // The native field is only a keyboard sink; its semantic value is
+        // the document, including off-screen rows and external updates.
+        .accessibility_value(move || {
+            content.text_rev.get();
+            Some(nsh_core::AccessibilityValue {
+                text: Some(content.text().into()),
+                ..Default::default()
+            })
+        })
         .label(move || props.accessibility_label.get().unwrap_or_default())
         .on_change(move |text: &str| change.sink_changed(text))
         .on_composition_change(move |c: &Composition| composition.composition(c.composing, &c.text))

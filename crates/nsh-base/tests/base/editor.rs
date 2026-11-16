@@ -305,6 +305,27 @@ fn a_default_value_shows_its_rows_and_line_numbers() {
 }
 
 #[test]
+fn testing_value_reads_the_document_instead_of_the_keyboard_sink() {
+    let mut p = props("Hallo\nworld");
+    p.controlled = true;
+    let mut app = start(p);
+    assert_eq!(
+        app.screen().input_text("id:editor"),
+        Ok(Some("Hallo\nworld"))
+    );
+    app.type_text("id:editor", "A").unwrap();
+    assert_eq!(
+        app.screen().input_text("id:editor"),
+        Ok(Some("AHallo\nworld"))
+    );
+    app.press("id:set-parent").unwrap();
+    assert_eq!(
+        app.screen().input_text("id:editor"),
+        Ok(Some("from parent\nsecond"))
+    );
+}
+
+#[test]
 fn typing_inserts_at_the_caret_and_reports_the_text() {
     let mut app = start(props("hello"));
     app.type_text("id:editor", "Hi ").unwrap();

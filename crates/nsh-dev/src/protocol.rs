@@ -716,6 +716,11 @@ pub enum TestStep {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "query", rename_all = "snake_case")]
 pub enum SceneQuery {
+    /// The textual accessibility value of a composite input, if supplied.
+    InputValueText {
+        /// The input selector.
+        selector: String,
+    },
     /// How many batches the app applied and how long ago the last was.
     Activity,
     /// The app's errors since the last time, taken.
