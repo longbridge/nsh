@@ -368,12 +368,14 @@ pub struct Environment {
     /// so the app shows its tabs with `nsh/base`'s `Tabs`. Read only on iOS
     /// and Android.
     pub tab_bar: bool,
-    /// The platform puts images on the system clipboard and reads them back
-    /// (`Clipboard.readImage`, `writeImage`, `hasImage`). On by default;
-    /// off on Android, whose backend holds text only, and on a platform
-    /// built outside NSH without images (its image calls then reject with
-    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`, `hasImage` is false).
-    pub clipboard_images: bool,
+    /// Whether the platform puts images on the system clipboard and reads
+    /// them back (`Clipboard.readImage`, `writeImage`, `hasImage`). `None`
+    /// (the default): as NSH's own backends on [`Self::os`], every OS but
+    /// Android, whose backend holds text only. A platform built outside
+    /// NSH says what it does with `Some`: without images its image calls
+    /// reject with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` and `hasImage` is
+    /// false.
+    pub clipboard_images: Option<bool>,
     /// The size of one Cell of a grid surface (a terminal, whose content is
     /// whole character Cells), in points; `None` on every other surface.
     /// With it the core lays out with its terminal algorithm, ratatui's
@@ -481,7 +483,7 @@ impl Default for Environment {
             notifications: false,
             audio: false,
             tab_bar: true,
-            clipboard_images: true,
+            clipboard_images: None,
             cell: None,
             web_input: false,
             web_evaluate: false,

@@ -57,7 +57,7 @@ let config = EngineConfig {
         os: Os::Ios,                    // 设备的操作系统：应用中的 platform.os
         platform: Some("miniprogram"),  // 应用中的 platform.name
         tab_bar: false,                 // 宿主提供的能力
-        clipboard_images: false,
+        clipboard_images: Some(false),
         idiom: Idiom::Phone,
         ..Environment::default()
     },
@@ -68,7 +68,7 @@ let config = EngineConfig {
 let mut engine = LocalEngine::start(config, text_engine, sink).expect("the app starts");
 ```
 
-环境还说明平台提供哪些能力。`tab_bar`（默认开启）是 iOS 和 Android 上 `nsh/mobile` 的 `TabBar` 所用的系统标签栏；没有它的平台将其关闭，应用改用 `nsh/base` 的 `Tabs` 显示标签。`clipboard_images`（默认开启）是剪贴板上的图片；关闭时 `Clipboard.readImage` 和 `writeImage` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝，`hasImage` 为 false。小程序两者都没有。
+环境还说明平台提供哪些能力。`tab_bar`（默认开启）是 iOS 和 Android 上 `nsh/mobile` 的 `TabBar` 所用的系统标签栏；没有它的平台将其关闭，应用改用 `nsh/base` 的 `Tabs` 显示标签。`clipboard_images` 是剪贴板上的图片：默认与 NSH 自己的后端在 `os` 上一致（Android 上没有），平台用 `Some` 说明自己的情况；没有图片时 `Clipboard.readImage` 和 `writeImage` 以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝，`hasImage` 为 false。小程序两者都没有。
 
 `LocalEngine::pump()` 运行到期的工作，并返回下次到期的时间：平台在那个时间以及每次输入之后调用它。对用 Rust 编写的应用，以 `default-features = false` 依赖 `nsh-engine`，引擎就能构建到 `wasm32-unknown-unknown`。
 

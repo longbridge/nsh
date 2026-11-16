@@ -34,10 +34,12 @@ fn granted(sys: &System) -> Result<(), JsError> {
 }
 
 /// Whether the platform puts images on the clipboard and reads them back:
-/// every backend but Android's, and a platform built outside NSH that says
-/// it does ([`crate::platform::Environment::clipboard_images`]).
+/// what a platform built outside NSH says, otherwise every OS but Android,
+/// whose backend holds text only
+/// ([`crate::platform::Environment::clipboard_images`]).
 fn has_images(sys: &System) -> bool {
     sys.clipboard_images
+        .unwrap_or(sys.os != crate::platform::Os::Android)
 }
 
 /// Why `call` cannot run where the platform has no clipboard images.
