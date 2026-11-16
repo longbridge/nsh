@@ -1732,12 +1732,12 @@ impl TextEngine for DWriteTextEngine {
                             Points(m.x * size),
                         )
                     };
-                    let (up, down) = a.extent(font, alignments.get(a.index));
+                    let (up, down) = alignments.extent(a, font);
                     AttachmentBox {
                         index: a.index,
                         width: a.width.0,
                         height: a.height.0,
-                        top: a.ascent(font, alignments.get(a.index)).0,
+                        top: alignments.ascent(a, font).0,
                         up: up.0,
                         down: down.0,
                     }
