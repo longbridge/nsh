@@ -1180,6 +1180,9 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         PackageTarget::Gpui => unreachable!("refused above"),
     };
     let runner = runtime::file(platform, true)?;
+    if options.target == PackageTarget::Ios && !lipo_archs(&runner)?.iter().any(|a| a == "arm64") {
+        bail!("iOS device runner must contain arm64: {}", runner.display());
+    }
 
     fs::create_dir_all(options.out)?;
     let app = options.out.join(format!("{name}.app"));
@@ -1231,6 +1234,9 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         | PackageTarget::Gpui => "iphonesimulator",
     };
     let mut info = info_plist(&name, &id, &executable, config, sdk)?;
+    if sdk == "iphoneos" {
+        info.extend(ios_toolchain_info()?);
+    }
     url_types(&mut info, &id, &schemes);
     activity_types(&mut info, &id, config.handoff);
     document_types(&mut info, &config.file_types());
@@ -2015,6 +2021,77 @@ pub(crate) fn desktop_entry(
     )
 }
 
+/// Build metadata for device packages, from the active Xcode installation.
+/// Keep tool discovery outside `info_plist` so its defaults stay testable on every OS.
+fn ios_toolchain_info() -> anyhow::Result<plist::Dictionary> {
+    fn read(program: &str, args: &[&str]) -> anyhow::Result<String> {
+        let output = Command::new(program)
+            .args(args)
+            .output()
+            .with_context(|| format!("run {program} {}", args.join(" ")))?;
+        if !output.status.success() {
+            bail!(
+                "{program} {}: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        let value = String::from_utf8(output.stdout)?.trim().to_owned();
+        if value.is_empty() {
+            bail!("{program} {} returned no build metadata", args.join(" "));
+        }
+        Ok(value)
+    }
+    let version = read("xcrun", &["--sdk", "iphoneos", "--show-sdk-version"])?;
+    let sdk_build = read("xcrun", &["--sdk", "iphoneos", "--show-sdk-build-version"])?;
+    let xcode = read("xcodebuild", &["-version"])?;
+    let (xcode_version, xcode_build) = xcode_info(&xcode)?;
+    let os_build = read("sw_vers", &["-buildVersion"])?;
+    Ok([
+        ("DTPlatformName", "iphoneos".to_owned()),
+        ("DTPlatformVersion", version.clone()),
+        ("DTPlatformBuild", sdk_build.clone()),
+        ("DTSDKName", format!("iphoneos{version}")),
+        ("DTSDKBuild", sdk_build),
+        ("DTXcode", xcode_version),
+        ("DTXcodeBuild", xcode_build),
+        (
+            "DTCompiler",
+            "com.apple.compilers.llvm.clang.1_0".to_owned(),
+        ),
+        ("BuildMachineOSBuild", os_build),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), plist::Value::String(v)))
+    .collect())
+}
+
+fn xcode_info(output: &str) -> anyhow::Result<(String, String)> {
+    let version = output
+        .lines()
+        .find_map(|l| l.strip_prefix("Xcode "))
+        .context("xcodebuild -version did not report an Xcode version")?;
+    let parts = version
+        .split('.')
+        .map(str::parse::<u32>)
+        .collect::<Result<Vec<_>, _>>()?;
+    if parts.is_empty() || parts.len() > 3 || parts.iter().skip(1).any(|v| *v > 9) {
+        bail!("unsupported Xcode version: {version}");
+    }
+    let encoded = format!(
+        "{:02}{}{}",
+        parts[0],
+        parts.get(1).unwrap_or(&0),
+        parts.get(2).unwrap_or(&0)
+    );
+    let build = output
+        .lines()
+        .find_map(|l| l.strip_prefix("Build version "))
+        .filter(|v| !v.trim().is_empty())
+        .context("xcodebuild -version did not report a build version")?;
+    Ok((encoded, build.trim().to_owned()))
+}
+
 fn info_plist(
     name: &str,
     id: &str,
@@ -2047,6 +2124,12 @@ fn info_plist(
             "iPhoneSimulator"
         })]),
     );
+    if sdk == "iphoneos" {
+        d.insert(
+            "UIRequiredDeviceCapabilities".into(),
+            Value::Array(vec![s("arm64")]),
+        );
+    }
     // The runtime's, unless the app raises it (`ios.infoPlist`).
     d.insert("MinimumOSVersion".into(), s(IOS_MINIMUM));
     d.insert(
@@ -2297,6 +2380,53 @@ fn make_ipa(app: &Path, ipa: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ios_device_capabilities_and_overrides() {
+        let config = AppConfig::default();
+        let device = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+        assert_eq!(
+            device["UIRequiredDeviceCapabilities"].as_array().unwrap(),
+            &[plist::Value::String("arm64".into())]
+        );
+        let simulator = info_plist("A", "com.a", "a", &config, "iphonesimulator").unwrap();
+        assert!(!simulator.contains_key("UIRequiredDeviceCapabilities"));
+        let config: AppConfig = serde_json::from_value(serde_json::json!({
+            "ios": {"infoPlist": {"UIRequiredDeviceCapabilities": ["arm64", "gps"]}}
+        }))
+        .unwrap();
+        let device = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+        assert_eq!(
+            device["UIRequiredDeviceCapabilities"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn xcode_build_metadata() {
+        for (version, encoded) in [
+            ("27.2", "2720"),
+            ("16.4.1", "1641"),
+            ("9.3", "0930"),
+            ("27", "2700"),
+        ] {
+            assert_eq!(
+                xcode_info(&format!("Xcode {version}\nBuild version 27B52\n")).unwrap(),
+                (encoded.into(), "27B52".into())
+            );
+        }
+        for output in [
+            "",
+            "Xcode 27.2",
+            "Xcode nope\nBuild version A",
+            "Xcode 27.10\nBuild version A",
+        ] {
+            assert!(xcode_info(output).is_err());
+        }
+    }
 
     #[test]
     fn nsh_json_names_the_nsh_versions_it_needs() {

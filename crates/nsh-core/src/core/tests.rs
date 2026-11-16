@@ -36947,7 +36947,8 @@ fn a_follower_made_after_layout_is_placed_on_its_target() {
     for i in 0..80 {
         ops.extend(child_view(100 + 2 * i, 2, 1.0, &[]));
     }
-    let views: [(crate::NodeId, crate::NodeId, Vec<(&str, StyleValue<'_>)>); 5] = [
+    type ViewSpec<'a> = (crate::NodeId, crate::NodeId, Vec<(&'a str, StyleValue<'a>)>);
+    let views: [ViewSpec<'_>; 5] = [
         (20, 2, vec![]),
         (
             22,
