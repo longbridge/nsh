@@ -48,12 +48,6 @@ impl Renderer {
         drop(f);
         false
     }
-
-    /// `None`: this build has no device.
-    #[cfg(windows)]
-    pub fn adapter_luid(&self) -> Option<windows_sys::Win32::Foundation::LUID> {
-        None
-    }
 }
 
 /// One view's state, which never renders.
@@ -147,15 +141,11 @@ impl ShaderView {
 
     /// Does nothing: there are no frames.
     #[cfg(any(target_vendor = "apple", windows))]
-    pub fn show_on_surfaces(&mut self) {}
-
-    /// Does nothing: there are no frames.
-    #[cfg(windows)]
-    pub fn read_back(&mut self) {}
+    pub fn show_on_surfaces(&mut self, _on: bool) {}
 
     /// `None`: there are no frames.
     #[cfg(windows)]
-    pub fn shared_texture(&self) -> Option<SharedTexture> {
+    pub fn surface(&self) -> Option<SharedTexture> {
         None
     }
 

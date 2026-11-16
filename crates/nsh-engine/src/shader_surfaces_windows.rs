@@ -103,6 +103,7 @@ impl Drop for Fence {
 }
 
 /// The adapter of `device`'s Direct3D 12 device; `None` on another API.
+#[cfg(test)]
 pub(crate) fn adapter_luid(device: &wgpu::Device) -> Option<windows_sys::Win32::Foundation::LUID> {
     let raw = raw_device(device)?;
     // SAFETY: a plain query on the live device.

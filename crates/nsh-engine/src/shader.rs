@@ -283,11 +283,9 @@ impl Renderer {
         self.format
     }
 
-    /// Windows: the adapter of its device when that is Direct3D 12's, which
-    /// a backend's device must share for frames on shared textures
-    /// ([`ShaderView::show_on_surfaces`]).
-    #[cfg(windows)]
-    pub fn adapter_luid(&self) -> Option<windows_sys::Win32::Foundation::LUID> {
+    /// Windows: the adapter of its device when that is Direct3D 12's.
+    #[cfg(all(windows, test))]
+    fn adapter_luid(&self) -> Option<windows_sys::Win32::Foundation::LUID> {
         crate::shader_surfaces::adapter_luid(&self.device)
     }
 
@@ -823,26 +821,27 @@ impl ShaderView {
     /// (`surface`) rather than reading them back into [`Self::frame`]: the
     /// window server matches their colours on the GPU, and no pixels come
     /// back to the CPU. Where the device is not Metal's, frames are read
-    /// back as before.
+    /// back as before. `false` reads them back again; the next
+    /// [`Self::render`] renders a frame.
     ///
     /// Windows: into textures shared with the backend's Direct3D 11 device
-    /// (`shared_texture`), which must be on the renderer's adapter
-    /// (`Renderer::adapter_luid`). Where the device is not Direct3D 12's,
-    /// frames are read back as before.
+    /// (`surface`). Where the device is not Direct3D 12's, frames are read
+    /// back as before; a backend that cannot open a shared texture (another
+    /// adapter, no shared fences) passes `false`.
     #[cfg(any(target_vendor = "apple", windows))]
-    pub fn show_on_surfaces(&mut self) {
-        self.on_surfaces = true;
-    }
-
-    /// Windows: reads its frames back again ([`Self::frame`]), as before
-    /// [`Self::show_on_surfaces`]: the backend could not open a texture it
-    /// shared. The next [`Self::render`] renders a frame.
-    #[cfg(windows)]
-    pub fn read_back(&mut self) {
-        self.on_surfaces = false;
-        self.surfaces = None;
-        self.previous = None;
-        self.dirty = true;
+    pub fn show_on_surfaces(&mut self, on: bool) {
+        if self.on_surfaces == on {
+            return;
+        }
+        self.on_surfaces = on;
+        if !on {
+            self.surfaces = None;
+            #[cfg(windows)]
+            {
+                self.previous = None;
+            }
+            self.dirty = true;
+        }
     }
 
     /// Windows: the texture of the last frame collected, while its frames go
@@ -851,7 +850,7 @@ impl ShaderView {
     /// [`Self::render`] says the frame is new. Each call is a draw: the
     /// backend signals the value returned once its frame is submitted.
     #[cfg(windows)]
-    pub fn shared_texture(&self) -> Option<SharedTexture> {
+    pub fn surface(&self) -> Option<SharedTexture> {
         (self.surfaces.as_ref().and_then(|s| s.shown()))
             .or_else(|| self.previous.as_ref().and_then(|s| s.shown()))
     }
@@ -1447,7 +1446,7 @@ mod tests {
             return;
         };
         let mut view = ShaderView::default();
-        view.show_on_surfaces();
+        view.show_on_surfaces(true);
         view.set_size(size(px(4.0), px(2.0)), 2.0);
         let split = |color: u32| {
             layer(
@@ -1485,7 +1484,7 @@ mod tests {
             return;
         };
         let mut view = ShaderView::default();
-        view.show_on_surfaces();
+        view.show_on_surfaces(true);
         view.set_size(size(px(2.0), px(1.0)), 1.0);
         assert!(
             !view.set_input_from_frame(&renderer, ShaderInput::Content),
@@ -1811,7 +1810,7 @@ mod tests {
             return;
         };
         let mut view = ShaderView::default();
-        view.show_on_surfaces();
+        view.show_on_surfaces(true);
         view.set_size(size(px(4.0), px(2.0)), 2.0);
         let split = |color: u32| {
             layer(
@@ -1832,7 +1831,7 @@ mod tests {
         assert_eq!([right[0], right[1]], [0, 0], "{right:?}");
         assert!((127..=128).contains(&right[2]) && (127..=128).contains(&right[3]));
         assert!(!view.wants_frame(), "a still shader renders once");
-        let first = view.shared_texture().expect("a shared texture");
+        let first = view.surface().expect("a shared texture");
         assert_eq!((first.width, first.height), (8, 4));
         // The next frame is on another texture: the one shown stays as it is
         // while the backend's device may read it.
@@ -1840,7 +1839,7 @@ mod tests {
         let rows = texture_frame(&mut view, &renderer);
         assert_eq!(rows[1][0], [0, 255, 0, 255]);
         assert_ne!(
-            view.shared_texture().map(|t| t.texture),
+            view.surface().map(|t| t.texture),
             Some(first.texture)
         );
     }
@@ -1855,7 +1854,7 @@ mod tests {
             return;
         };
         let mut view = ShaderView::default();
-        view.show_on_surfaces();
+        view.show_on_surfaces(true);
         view.set_size(size(px(2.0), px(2.0)), 1.0);
         let red = |r: f32| {
             layer(
@@ -1881,7 +1880,7 @@ mod tests {
             return;
         };
         let mut view = ShaderView::default();
-        view.show_on_surfaces();
+        view.show_on_surfaces(true);
         view.set_size(size(px(2.0), px(2.0)), 1.0);
         let red = |r: f32| {
             layer(
@@ -1896,7 +1895,7 @@ mod tests {
         for r in [0.25, 0.5, 0.75] {
             view.set_layer(Some(red(r)));
             texture_frame(&mut view, &renderer);
-            drawn.push(view.shared_texture().expect("a shared texture"));
+            drawn.push(view.surface().expect("a shared texture"));
         }
         view.set_layer(Some(red(1.0)));
         assert!(!view.render(&renderer, Instant::now()), "skipped");
@@ -1916,7 +1915,7 @@ mod tests {
             return;
         };
         let mut view = ShaderView::default();
-        view.show_on_surfaces();
+        view.show_on_surfaces(true);
         view.set_size(size(px(4.0), px(2.0)), 1.0);
         view.set_layer(Some(layer(
             "fn shade(uv: vec2f) -> vec4f { return vec4f(1.0, 0.0, 0.0, 1.0); }",
@@ -1929,11 +1928,11 @@ mod tests {
         view.set_size(size(px(8.0), px(4.0)), 1.0);
         assert!(!view.render(&renderer, Instant::now()), "on its way");
         assert!(view.pending());
-        let shown = view.shared_texture().expect("the last frame still shows");
+        let shown = view.surface().expect("the last frame still shows");
         assert_eq!((shown.width, shown.height), (4, 2));
         drop(stall);
         texture_frame(&mut view, &renderer);
-        let shown = view.shared_texture().expect("the new frame shows");
+        let shown = view.surface().expect("the new frame shows");
         assert_eq!((shown.width, shown.height), (8, 4));
     }
 }

@@ -152,7 +152,7 @@ struct Drawn {
 }
 
 /// A view's textures shared with the shader's device
-/// ([`ShaderView::shared_texture`]), opened on the window's Direct3D 11
+/// ([`ShaderView::surface`]), opened on the window's Direct3D 11
 /// device as Direct2D bitmaps, and the fence that tells the shader's device
 /// when a frame that drew them was submitted.
 struct Opened {
@@ -337,7 +337,7 @@ impl ShaderState {
         if !starting {
             // Each call is a draw: the fence value it takes is signalled
             // once this frame is submitted.
-            if let Some(shared) = self.view.shared_texture() {
+            if let Some(shared) = self.view.surface() {
                 return match open(dc, &mut self.opened.borrow_mut(), &shared) {
                     Ok(bitmap) => Some(bitmap),
                     Err(e) => {
@@ -501,13 +501,9 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
         shader.surface = Rc::downgrade(surface);
         if layer.is_some() && shader.renderer.is_none() {
             shader.renderer = surface.shader_renderer();
-            let luid = shader.renderer.as_ref().and_then(|r| r.adapter_luid());
-            let ours = crate::gfx::get().ok().and_then(|g| g.adapter_luid());
-            if let (Some(luid), Some(ours)) = (luid, ours)
-                && (luid.LowPart, luid.HighPart) == (ours.LowPart, ours.HighPart)
-            {
-                shader.view.show_on_surfaces();
-            }
+            // A texture on another adapter fails to open and sends the view
+            // back to reading its frames back (`reveal`).
+            shader.view.show_on_surfaces(true);
         }
         if layer.is_none() {
             *shader.drawn.get_mut() = None;
@@ -803,7 +799,7 @@ pub(crate) fn reveal() {
             continue;
         };
         if let Some(shader) = view.state_mut().shader.as_mut() {
-            shader.view.read_back();
+            shader.view.show_on_surfaces(false);
             *shader.opened.get_mut() = None;
         }
         tick(&view);

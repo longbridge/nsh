@@ -138,17 +138,16 @@ clock of `nsh.time` (kept while paused), and its frames.
   surface the window server still uses is not rendered into again (`IOSurfaceIsInUse`); with none free the frame is
   skipped. `frame()` stays empty; `set_input_from_frame` copies the frame shown on the GPU (a transition that starts
   over a running one). Where the device is not Metal's, frames are read back.
-- **Frames on shared textures (Windows).** Where the renderer is on Direct3D 12 and on the adapter of the window's
-  Direct3D 11 device (`Renderer::adapter_luid`), the backend calls `show_on_surfaces`: a view renders into one of
+- **Frames on shared textures (Windows).** Where the renderer is on Direct3D 12, the backend calls `show_on_surfaces(true)`: a view renders into one of
   three Direct3D 12 textures of its frame's size (`shader_surfaces_windows.rs`, in a shared heap, simultaneous access,
-  wrapped for wgpu with `wgpu-hal`'s `texture_from_raw`) instead of reading pixels back. `shared_texture()` gives the
+  wrapped for wgpu with `wgpu-hal`'s `texture_from_raw`) instead of reading pixels back. `surface()` gives the
   texture of the frame to show by NT handle, with the view's shared fence and a value: the backend opens the texture on
   its device (`OpenSharedResource1`), draws it as a Direct2D bitmap (`CreateBitmapFromDxgiSurface`, kept per texture
   and device generation) and signals the value on the fence once `EndDraw` submitted the frame. A texture is rendered
   into again only once the fence passed the value of the last frame that drew it; with none free the frame is skipped.
   `frame()` stays empty, and `set_input_from_frame` copies on the GPU as on Apple. A texture the backend cannot open
   (another adapter after a device loss, a device without shared fences) sends the view back to reading frames back
-  (`read_back`).
+  (`show_on_surfaces(false)`).
 - **Frame pacing.** `wants_frame` is true while something it reads changed, while it is animated and not paused, or
   while a frame is on its way back. Backends call `render` on their frame clock only while it is true, at most once
   per display frame.

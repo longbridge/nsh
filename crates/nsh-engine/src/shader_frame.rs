@@ -34,9 +34,10 @@ pub struct Frame {
 }
 
 /// Windows: the texture of a view's frame, shared with the backend's
-/// Direct3D 11 device (`ShaderView::shared_texture`).
+/// Direct3D 11 device (`ShaderView::surface`).
 #[cfg(windows)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SharedTexture {
     /// The view's textures and fence for one frame size, unique in the
     /// process: handles of another set are other objects, even when equal.

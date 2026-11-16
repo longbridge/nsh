@@ -27,7 +27,7 @@ use std::{
 
 use windows::{
     Win32::{
-        Foundation::{CloseHandle, HANDLE, HWND, LPARAM, LUID, RECT, WAIT_OBJECT_0, WPARAM},
+        Foundation::{CloseHandle, HANDLE, HWND, LPARAM, RECT, WAIT_OBJECT_0, WPARAM},
         Graphics::{
             Direct2D::{
                 Common::{
@@ -109,15 +109,6 @@ pub(crate) fn generation() -> u64 {
 }
 
 impl Gfx {
-    /// The adapter of the Direct3D device (shader frames are shared with
-    /// it only from a device on the same one).
-    pub(crate) fn adapter_luid(&self) -> Option<LUID> {
-        let dxgi: IDXGIDevice = self.d3d.cast().ok()?;
-        // SAFETY: COM calls on live objects.
-        let desc = unsafe { dxgi.GetAdapter().and_then(|a| a.GetDesc()) }.ok()?;
-        Some(desc.AdapterLuid)
-    }
-
     fn new() -> Result<Gfx> {
         let d3d = create_d3d(D3D_DRIVER_TYPE_HARDWARE).or_else(|err| {
             log::warn!("no hardware Direct3D device ({err}); drawing with WARP");
