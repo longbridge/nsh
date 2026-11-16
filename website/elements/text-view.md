@@ -846,6 +846,7 @@ parts with [`TextViewParts`](#typed-part-styles).
 |---|---|---|
 | `selectedText({ format? })` | `selected_text(Option<TextSelectionOptions>)` | The selection of a `selectable` view: `format` `"plain"` (default, as Copy takes it), `"markdown"` or `"html"`, the selected nodes rebuilt; the source as written when all of it is selected ([As Markdown or HTML](./text-selection.md#as-markdown-or-html)). `""` when nothing is selected. |
 | `onImagePress` | `.on_image_press(\|image: &Image\| ..)` | An image not in a link was pressed: `{ image }`, for the app to show it larger (a zoomable viewer of its own). |
+| `onTaskPress` | `.on_task_press(\|event: &TextViewTaskPressEvent\| ..)` | The box of a task item was pressed: `{ index, checked }`, which task of the document (from 0, in reading order) and the state the press asks for. The document does not change: the app gives the view its edited source. |
 
 ## Accessibility
 

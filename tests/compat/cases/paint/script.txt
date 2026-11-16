@@ -708,6 +708,12 @@ frame id:icon-bottom 7.7 4.8 4 12
 frame id:icon-middle 7.7 7.3 4 12
 frame id:icon-class 7.7 0 4 12
 covers [styles] verticalAlign
+# A box 20 pt tall with no text stands on its bottom edge: it fills the
+# line from its top. A chip as tall whose label's baseline is 14 pt below
+# its top (2 of padding, a 12 pt line) stands on the line by that
+# baseline, 2.8 pt down.
+frame id:chip-edge 7.7 0 6 20
+frame id:chip-first 15.4 2.8 6 20
 
 # paint-tailwind
 tap id:case-paint-tailwind

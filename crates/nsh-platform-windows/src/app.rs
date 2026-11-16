@@ -580,8 +580,10 @@ fn initial_environment() -> Environment {
         canvas_render: true,
         file_requests: true,
         notifications: true,
-        audio: true,
-        webview_requests: true,
+        audio: cfg!(feature = "media"),
+        // WebView2, in builds with it.
+        web_views: cfg!(feature = "webview"),
+        webview_requests: cfg!(feature = "webview"),
         // wgpu, in builds with it, until it finds no GPU.
         shaders: nsh_engine::shader::LINKED,
         ..Environment::default()

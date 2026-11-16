@@ -1942,6 +1942,7 @@ fn draw_into(
     // SAFETY: closes the last `BeginDraw` (above, or a layer's); the target
     // is unset so that the swap chains can be resized later.
     let result = unsafe { dc.EndDraw(None, None) };
+    crate::shader::signal_drawn(gfx);
     // SAFETY: as above.
     unsafe { dc.SetTarget(None) };
     if let Some(err) = error {

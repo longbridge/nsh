@@ -138,6 +138,16 @@ clock of `nsh.time` (kept while paused), and its frames.
   surface the window server still uses is not rendered into again (`IOSurfaceIsInUse`); with none free the frame is
   skipped. `frame()` stays empty; `set_input_from_frame` copies the frame shown on the GPU (a transition that starts
   over a running one). Where the device is not Metal's, frames are read back.
+- **Frames on shared textures (Windows).** Where the renderer is on Direct3D 12, the backend calls `show_on_surfaces(true)`: a view renders into one of
+  three Direct3D 12 textures of its frame's size (`shader_surfaces_windows.rs`, in a shared heap, simultaneous access,
+  wrapped for wgpu with `wgpu-hal`'s `texture_from_raw`) instead of reading pixels back. `surface()` gives the
+  texture of the frame to show by NT handle, with the view's shared fence and a value: the backend opens the texture on
+  its device (`OpenSharedResource1`), draws it as a Direct2D bitmap (`CreateBitmapFromDxgiSurface`, kept per texture
+  and device generation) and signals the value on the fence once `EndDraw` submitted the frame. A texture is rendered
+  into again only once the fence passed the value of the last frame that drew it; with none free the frame is skipped.
+  `frame()` stays empty, and `set_input_from_frame` copies on the GPU as on Apple. A texture the backend cannot open
+  (another adapter after a device loss, a device without shared fences) sends the view back to reading frames back
+  (`show_on_surfaces(false)`).
 - **Frame pacing.** `wants_frame` is true while something it reads changed, while it is animated and not paused, or
   while a frame is on its way back. Backends call `render` on their frame clock only while it is true, at most once
   per display frame.
@@ -156,7 +166,7 @@ is. Views out of sight stop rendering until they show again.
 | macOS (AppKit) | one frame callback of the surface's display link while frames change with time, pictures are due or anything else wants frames; a view that only changed renders after the batch and shows its frame when the GPU says it is done (`Renderer::when_done`), without the display link; at the window's backing scale | an IOSurface (`show_on_surfaces`), the contents of a sublayer under the children (`decor.rs` shapes it); a `CGImage` without Metal | `shown`, from `Mounter::revisit` (rows scrolled away, screens under another) |
 | iOS | a `CADisplayLink` of its own, at the screen's scale | an IOSurface (`show_on_surfaces`), the contents of a sublayer under the children; a `CGImage` without Metal | views outside any window render once back in one |
 | Android | the UI-thread animator's `Choreographer`, kept ticking by `UiAnimation::outputs` while a view wants a frame | a bitmap of `Box.java`, filled by `NshView.shaderFrame` | — |
-| Windows | the surface's frame ticker (`Surface::on_frame`), at the window's scale | a Direct2D bitmap drawn under the children (made again after a device loss) | `reveal`: hidden, concealed or detached views |
+| Windows | the surface's frame ticker (`Surface::on_frame`), at the window's scale | a Direct2D bitmap drawn under the children: a texture shared with the renderer's device (`show_on_surfaces`), else the pixels read back (made again after a device loss) | `reveal`: hidden, concealed or detached views |
 | GPUI | a frame client of its surface | a GPUI image (BGRA, straight, the view's opacity multiplied in, as canvases' pixmaps), whose replaced image leaves GPUI's atlases | views not drawn in the last frame |
 | Web | `requestAnimationFrame` | a `<canvas>` under the children (an effect's and a running transition's over them) | `IntersectionObserver` |
 

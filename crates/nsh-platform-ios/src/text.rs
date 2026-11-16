@@ -707,8 +707,9 @@ impl CoreTextEngine {
                 Points(x as f32),
             )
         };
-        let top = a.ascent(font, align).0 as CGFloat;
-        let (up, down) = a.extent(font, align);
+        // By its own baseline where it has one (the first baseline of the text in it).
+        let top = alignments.ascent(a, font).0 as CGFloat;
+        let (up, down) = alignments.extent(a, font);
         let (up, down) = (up.0 as CGFloat, down.0 as CGFloat);
         // A fixed `lineHeight`: CoreText centers a line's own extent in
         // it, so a placeholder reaching past the font on one side only

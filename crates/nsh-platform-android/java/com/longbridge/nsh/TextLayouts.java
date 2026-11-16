@@ -466,13 +466,16 @@ final class TextLayouts {
             }
         }
         if (background != null) s.setSpan(background, backgroundStart, backgroundEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        // Attachments (offset, width, height in dp, vertical alignment):
+        // Attachments (offset, width, height in dp, vertical alignment, how
+        // far below its top its own baseline is in dp or a negative number):
         // placeholders of their size, placed in their line.
-        for (int i = 0; i + 3 < attachments.length; i += 4) {
+        for (int i = 0; i + 4 < attachments.length; i += 5) {
             int at = (int) attachments[i];
             if (at < 0 || at >= text.length()) continue;
+            float baseline = attachments[i + 4];
             s.setSpan(new Attachment(Math.round(attachments[i + 1] * density), Math.round(attachments[i + 2] * density),
-                    (int) attachments[i + 3]), at, at + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    (int) attachments[i + 3], baseline < 0 ? -1 : Math.round(baseline * density)), at, at + 1,
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         // `encode` packs the writing direction and the layout direction in.
         int writing = (align >> 4) & 3;
@@ -943,7 +946,7 @@ final class TextLayouts {
 
     /**
      * An attachment's placeholder: its size, placed in its line by its
-     * `verticalAlign` (as `TextAttachment::ascent` in nsh-core places it, with
+     * `verticalAlign` (as `AttachmentAlignments::ascent` in nsh-core places it, with
      * the run's font metrics); the line grows to hold it. Draws nothing.
      */
     static final class Attachment extends android.text.style.ReplacementSpan {
@@ -955,11 +958,16 @@ final class TextLayouts {
         /** The ascent and descent of the font around it (px, as {@link Paint.FontMetricsInt}), set by {@link #getSize}. */
         int fontAscent, fontDescent;
 
-        Attachment(int width, int height, int align) {
+        /**
+         * `baseline`: how far below its top its own baseline is (px), which
+         * stands on the line's (the first baseline of the text in it); negative: it has none, and
+         * stands on its bottom edge.
+         */
+        Attachment(int width, int height, int align, int baseline) {
             this.width = width;
             this.height = height;
             this.align = align;
-            this.ascent = height;
+            this.ascent = baseline < 0 ? height : Math.min(baseline, height);
         }
 
         @Override

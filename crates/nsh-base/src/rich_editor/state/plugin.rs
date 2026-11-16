@@ -345,6 +345,14 @@ pub trait PluginSpec: Send + Sync {
         false
     }
 
+    /// The app's JS functions a plugin made in TS carries, for the view
+    /// to call where it may wait for JS (a paste). Not for plugins written
+    /// in Rust.
+    #[doc(hidden)]
+    fn __js_hooks(&self) -> Option<Arc<dyn Any + Send + Sync>> {
+        None
+    }
+
     /// Changes pasted or dropped content before it is inserted (each
     /// plugin's in turn).
     fn transform_pasted(&self, state: &EditorState, slice: Slice) -> Slice {

@@ -166,7 +166,12 @@
   box, `align-*` classes; a node field like `zIndex`, a change rebuilds the block) places it in its line:
   `AttachmentAlignments` keeps alignment separately from the legacy `TextAttachment` and
   `AttributedText` structs; `TextEngine::prepare_aligned` accepts it, with a default that calls `prepare` for existing
-  engines.
+  engines. On the baseline, a view that holds text stands on the line by the baseline of the first line of
+  text in it, as CSS stands an `inline-block` / `inline-flex` box; one without text (an image, a box) stands on its
+  bottom edge, as a replaced box. The core finds that text in the attachment's layout
+  (`attachment_baselines`, `TextEngine::first_baseline`, which every engine answers) and
+  `AttachmentAlignments::baseline` carries how far below the attachment's top it is; every engine places an
+  attachment by `AttachmentAlignments::ascent` and `extent`, so the line reserves what is above and below it.
   `TextAttachment::ascent(font, align)` is how far its top is above the baseline (`baseline` the height, the default and the only
   value before; `text-top` the font's ascent, `text-bottom` the height minus the descent, `middle` half the height
   plus the x height), `extent` what the line reserves above and below (each at least 0), both from the

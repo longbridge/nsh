@@ -171,8 +171,12 @@
   natural layout size of `image()` independently: a 200×100 buffer drawn at 2× can lay out at 100×50 points.
   Without it, `rgba` lays out at its pixel width and height in points. The builder sets the source's existing
   size metadata, as `ImageAsset::size` does; the key, pixel data and reported pixel dimensions stay the same.
-  Windows, macOS, Linux and GPUI take the pixels in their decoder closures (`from_rgba`: a copy into their own
-  format, no decode, no downsampling); every other path
+  Windows, macOS, Linux and GPUI take the pixels in their decoder closures (`from_rgba`: no decode or
+  downsampling). macOS scans the alpha bytes: fully opaque buffers become sRGB `NoneSkipLast` CGImages over a
+  data provider holding the original `ImageData`, with no pixel copy or premultiplication; the provider releases
+  its source when its last image reference goes away. Buffers with transparency still copy and premultiply into
+  bitmap storage. The existing budget reservation remains conservative (backing storage plus a display copy).
+  The other backends copy into their own format; every other path
   reading `ImageData::bytes()` (iOS's `NSData`, Android's `Native.imageBytes`, the web's `image_bytes`, `getSize`)
   gets an uncompressed PNG (stored deflate blocks) built once on first use. Old frames leave the caches as any
   unshown source does (L3 never keeps in-memory bytes; L4 entries without a lease are evicted).

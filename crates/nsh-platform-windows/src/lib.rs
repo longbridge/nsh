@@ -28,6 +28,7 @@ mod agent;
 mod animation;
 mod app;
 mod app_window;
+#[cfg_attr(not(feature = "media"), path = "audio_off.rs")]
 mod audio;
 mod canvas;
 mod chrome;
