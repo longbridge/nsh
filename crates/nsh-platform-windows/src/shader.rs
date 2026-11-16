@@ -491,7 +491,11 @@ pub(crate) fn deleted(surface: &Rc<Surface>, view: &NshView) {
     }
 }
 
-/// Mounts `layer` on `view` (`None`: it shows nothing of its own).
+/// Mounts `layer` on `view` (`None`: it shows nothing of its own). A
+/// fill that pictures nothing keeps showing its last frame until the next
+/// comes back, which draws it ([`frame`]): a layer that keeps it such a
+/// fill with the same overflow (new uniforms) asks the window for nothing
+/// before then, so the change presents once.
 pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<ShaderLayer>>) {
     if is_screen(layer.as_ref().map(|l| l.role)) {
         view.state_mut()
@@ -511,7 +515,7 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
     } else {
         view.clone()
     };
-    let backdrop = {
+    let (backdrop, unseen) = {
         let mut state = target.state_mut();
         if layer.is_none() && state.shader.is_none() {
             return;
@@ -533,9 +537,13 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
         shader.owner = (screen && layer.is_some()).then(|| view.id());
         shader.given = [None; 4];
         shader.pictured = None;
+        let plain = |l: &ShaderLayer| l.role == ShaderRole::Fill && l.shader.inputs().is_empty();
+        let unseen = (layer.as_deref())
+            .zip(shader.view.layer().map(Arc::as_ref))
+            .is_some_and(|(new, old)| plain(new) && plain(old) && new.overflow == old.overflow);
         shader.view.set_layer(layer);
         let reads = shader.reads(ShaderInput::Backdrop);
-        reads.then_some(state.id)
+        (reads.then_some(state.id), unseen)
     };
     if let Some(id) = backdrop {
         let mut readers = surface.backdrop_readers.borrow_mut();
@@ -543,7 +551,9 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
             readers.push(id);
         }
     }
-    target.changed();
+    if !unseen {
+        target.changed();
+    }
     tick(&target);
 }
 
@@ -1353,7 +1363,10 @@ impl crate::view::Hosted for NavItem {
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::{MountItem, ROOT_ID, ViewKind, shader::Shader};
+    use nsh_core::{
+        MountItem, ROOT_ID, ViewKind,
+        shader::{Shader, UniformValue},
+    };
 
     use super::*;
 
@@ -1545,6 +1558,57 @@ mod tests {
         // Without a GPU device nothing is read: it leaves the list.
         assert!(backdrop_areas(&surface).is_empty());
         assert!(surface.backdrop_readers.borrow().is_empty());
+    }
+
+    /// A fill whose uniform `a` is `value`, beyond its box by `overflow`.
+    fn fill(value: f32, overflow: f32) -> Option<Arc<ShaderLayer>> {
+        let shader = Shader::compile(
+            "struct Uniforms { a: f32 }\nfn shade(uv: vec2f) -> vec4f {\n    return vec4f(uv, uniforms.a, 1.0);\n}\n",
+        )
+        .expect("a valid shader");
+        let values = [(Arc::from("a"), UniformValue::Number(value))];
+        let layer = ShaderLayer::new(shader, &values, &mut Vec::new());
+        Some(Arc::new(layer.with_overflow(Points(overflow))))
+    }
+
+    /// New uniforms or a new source change nothing on screen until the
+    /// shader's frame of them comes back, which draws the view: they ask for
+    /// no paint, so a change presents once, not twice. A layer that changes
+    /// what is drawn before then, or reads pictures, is drawn at once.
+    #[test]
+    fn new_uniforms_draw_only_with_their_frame() {
+        let surface = surface();
+        let view = mount(&surface, 2, ShaderRole::Fill);
+        apply(
+            &surface,
+            &[MountItem::Shader {
+                id: 2,
+                layer: fill(0.0, 0.0),
+            }],
+        );
+        let paints = |layer: Option<Arc<ShaderLayer>>| {
+            let _ = surface.take_damage();
+            apply(&surface, &[MountItem::Shader { id: 2, layer }]);
+            view.is_queued()
+        };
+        assert!(!paints(fill(0.5, 0.0)), "new uniforms");
+        let other = Shader::compile(
+            "fn shade(uv: vec2f) -> vec4f {\n    return vec4f(uv.y, uv.x, 0.0, 1.0);\n}\n",
+        )
+        .expect("a valid shader");
+        let other = ShaderLayer::new(other, &[], &mut Vec::new());
+        assert!(!paints(Some(Arc::new(other))), "a new source");
+        assert!(paints(fill(0.5, 4.0)), "a new overflow");
+        let reader =
+            Shader::compile("fn shade(uv: vec2f) -> vec4f {\n    return sample_backdrop(uv);\n}\n")
+                .expect("a valid shader");
+        let reader = ShaderLayer::new(reader, &[], &mut Vec::new()).with_overflow(Points(4.0));
+        assert!(
+            paints(Some(Arc::new(reader))),
+            "a fill that samples the backdrop"
+        );
+        assert!(paints(Some(layer(ShaderRole::Effect))), "an effect");
+        assert!(paints(None), "no layer");
     }
 
     /// What [`draw_effect`] does with an effect's children each time the
