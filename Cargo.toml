@@ -402,6 +402,7 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
   "UITraitCollection",
   "UIView",
   "UIViewController",
+  "UIViewLayoutRegion",
   "UIWindow",
   "UIWindowScene",
   "UIWindowSceneGeometry",

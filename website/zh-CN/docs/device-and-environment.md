@@ -390,7 +390,7 @@ effect(() => {
 
 ## 安全区域
 
-刘海、Home 指示条、状态栏、Android 导航栏以及 Mac Catalyst 的标题栏会遮挡 surface 的一部分。NSH 应用在所有平台上都是全屏绘制，被遮挡的部分以 inset 的形式提供。
+刘海、Home 指示条、状态栏、Android 导航栏、Mac Catalyst 的标题栏以及窗口化 iPad 应用的窗口控件会遮挡 surface 的一部分。NSH 应用在所有平台上都是全屏绘制，被遮挡的部分以 inset 的形式提供。在 iPadOS 26 及更高版本上，窗口化应用的前缘 inset 与其顶部前缘角落的窗口控件一样宽，覆盖整条前缘；全屏和 iPhone 上就是普通的安全区。
 
 - `safe_area()`（TSX：`safeArea()`）给出整个 surface 的 inset。
 - 组件的 `cx.insets()`（TSX：`safeAreaInsets()`）给出**组件渲染位置**的 inset：在导航[页面](./navigation.md#标题栏下的安全区域)中从标题栏下方算起，在[对话框](../elements/dialog.md)中是对话框自己的。可能出现在多个地方的组件应该优先用它。
