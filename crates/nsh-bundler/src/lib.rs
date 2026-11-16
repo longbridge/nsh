@@ -78,6 +78,21 @@ mod tests {
     }
 
     #[test]
+    fn compile_module_compiles_enums() {
+        let code = super::compile_module(
+            "App.ts",
+            "enum Side { Buy, Sell = 4 }\n\
+             const enum Trend { Up = 1, Down }\n\
+             export const values = [Side.Sell, Side[0], Trend.Down];\n",
+            &[],
+        )
+        .unwrap();
+        assert!(!code.contains("enum "), "enums are compiled: {code}");
+        assert!(code.contains("Side[\"Sell\"] = 4"), "{code}");
+        assert!(code.contains("Trend.Down") || code.contains("2"), "{code}");
+    }
+
+    #[test]
     fn compile_module_errors_have_a_code_frame_without_colors() {
         let err = super::compile_module("App.tsx", "const = ;", &[]).unwrap_err();
         assert!(err.contains("const = ;"), "{err}");
