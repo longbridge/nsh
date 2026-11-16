@@ -24,7 +24,10 @@ with it on its last; the arrow keys then move between the items. A press opens i
 focuses the first enabled item and Up or End the last. Page Down moves to the last enabled item in view and Page Up to
 the first, a view at a time, stopping at the ends (a `MenuList` the same, see [Long lists](#long-lists)). On the desktops the pointer moving over an item gives
 it the keyboard focus, so the keys go on from the item under the pointer; style an item's `focus:` state as its
-`hover:` one.
+`hover:` one. On the desktops a letter or digit moves the focus to the next enabled item whose text (or
+`accessibilityLabel`) starts with it, as `Select`'s list does: the same letter again moves on among those items, and
+letters typed in quick succession match a prefix. They act on the menu or submenu the focus is in, a text field in the
+menu keeps them, and an item out of view scrolls into it.
 On the desktops and in a terminal, Right, Return or Space on a `Submenu`'s item opens it with the keyboard focus on
 its first enabled item; Left on one of its items, or Escape, closes it and puts the focus back on its item. A submenu
 the pointer opened closes when the arrow keys move the focus to another item of its menu.
@@ -310,7 +313,7 @@ A menu of many items, or of as many as the data has (models, accounts, recent fi
 (Rust): a virtualized list whose rows are made only near its viewport. Its rows are items of the menu among the ones
 around it: Up, Down, Home and End walk every row of the list, scrolling to a row before focusing it and passing over
 disabled ones, then go on to the items before and after the list, a `Submenu`'s item among them. Page Down and Page Up
-scroll the list a view at a time. `render_item` draws
+scroll the list a view at a time. Letters reach the rows the list has made, the ones near its viewport. `render_item` draws
 each row from its index, one `MenuItem` or `Submenu` per row; give the list a height.
 
 ```rust

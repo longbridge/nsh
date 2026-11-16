@@ -14730,6 +14730,69 @@ mod components {
         assert_eq!(shown.last().unwrap(), "10,0 30x20 at 26,16 true");
     }
 
+    /// Reads its box's text when pressed (and a ref no element carries):
+    /// the texts inside it in order, one hidden left out.
+    #[component]
+    fn Reader() -> impl IntoElement {
+        let target = element_ref();
+        let unused = element_ref();
+        let shown = signal(String::new());
+        view()
+            .child(
+                view()
+                    .element_ref(&target)
+                    .child(text("Open "))
+                    .child(view().child(text("recent")).child(text(" file")))
+                    .child(view().hidden().child(text(" secret"))),
+            )
+            .child(text(move || shown.get()))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                let (target, unused) = (target.text_content(), unused.text_content());
+                spawn(async move {
+                    let (text, none) = (target.await, unused.await);
+                    shown.set(format!("read:{text}|{none}"));
+                });
+            }))
+    }
+
+    #[test]
+    fn element_refs_read_the_text_they_show() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Reader>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Reader>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button listens to presses");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("read:")));
+        assert_eq!(shown.last().unwrap(), "read:Open recent file|");
+    }
+
     #[derive(Clone, PartialEq, Debug)]
     struct Accent(u32);
 

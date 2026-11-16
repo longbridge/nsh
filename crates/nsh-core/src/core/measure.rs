@@ -174,6 +174,28 @@ impl<M: TextEngine> Core<M> {
         .then_some((node.id, p))
     }
 
+    /// The text of node `id` and the nodes inside it, in tree order
+    /// ([`crate::element::ElementRef::text_content`]): what `display:
+    /// none` hides is left out; empty when it is not in the tree.
+    pub(super) fn text_content(&self, id: NodeId) -> String {
+        let mut text = String::new();
+        let Ok(key) = self.key(id) else {
+            return text;
+        };
+        let mut stack = vec![key];
+        while let Some(k) = stack.pop() {
+            let node = &self.nodes[k as usize];
+            if node.layout.is_some_and(|l| self.layout.displays_none(l)) {
+                continue;
+            }
+            if node.kind == Kind::RawText {
+                text.push_str(&node.text);
+            }
+            stack.extend(node.children.iter().rev().copied());
+        }
+        text
+    }
+
     /// Where view `id` is, from the last layout; `None` when it is not in
     /// the tree or was never laid out.
     pub fn measure(&self, id: NodeId) -> Option<Measurement> {

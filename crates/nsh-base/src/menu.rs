@@ -22,7 +22,8 @@
 //! `available`), so the core chooses the side at the popup's natural size
 //! and the items scroll past the room rather than run out of the window.
 //! The keys measure where the items are to bring the one they move to into
-//! view and to page by the viewport.
+//! view and to page by the viewport. Typeahead matches `Select`'s
+//! (`listbox.rs`) on each item's label or the text the core has for it.
 
 use std::{
     cell::{Cell, RefCell},
@@ -38,9 +39,11 @@ use nsh_core::{
     keymap::When,
     overlay::OverlayAnchor,
     prelude::*,
+    time::now,
 };
 
 use crate::{
+    listbox::{self, Typeahead},
     popup::{
         OpenChangeReason, OpenState, PopupPresence, SheetMotion, StateLooks,
         bottom_panel_max_height, keyboard_lift, lifecycle,
@@ -338,6 +341,9 @@ struct Entry {
     /// The submenu it is in (0: the menu).
     level: u32,
     disabled: Prop<bool>,
+    /// What screen readers say for it when its content is not enough,
+    /// which typeahead matches in place of its text.
+    label: Prop<Option<SharedString>>,
     /// A list's rows: the entry stands for all of them, made or not.
     rows: Option<Rc<Rows>>,
 }
@@ -366,6 +372,7 @@ struct RowItem {
     index: usize,
     node: ElementRef,
     disabled: Prop<bool>,
+    label: Prop<Option<SharedString>>,
 }
 
 impl Rows {
@@ -598,6 +605,38 @@ impl Walk {
         Some((start, start + rows.len() - 1, page))
     }
 
+    /// The enabled items made, by place: what typeahead matches, the
+    /// label an item has or else its text. A list's rows not made yet are
+    /// not among them.
+    fn enabled(&self) -> Vec<(usize, Prop<Option<SharedString>>, ElementRef)> {
+        let mut found = Vec::new();
+        let mut start = 0;
+        for e in &self.parts {
+            match &e.rows {
+                None => {
+                    if !e.disabled.get_untracked() {
+                        found.push((start, e.label, e.node));
+                    }
+                    start += 1;
+                }
+                Some(rows) => {
+                    let len = rows.len();
+                    let mut made: Vec<RowItem> = rows
+                        .items
+                        .borrow()
+                        .iter()
+                        .filter(|i| i.index < len && !i.disabled.get_untracked())
+                        .copied()
+                        .collect();
+                    made.sort_by_key(|i| i.index);
+                    found.extend(made.iter().map(|i| (start + i.index, i.label, i.node)));
+                    start += len;
+                }
+            }
+        }
+        found
+    }
+
     fn spot(&self, at: usize) -> Spot {
         let Some((entry, row)) = self.part_at(at) else {
             return Spot::Skip;
@@ -647,6 +686,9 @@ struct Items {
     /// Each item's select, by key, for a Return or Space typed ahead of
     /// the focus.
     selects: Rc<RefCell<Vec<(u64, Select)>>>,
+    /// What was typed for typeahead, as `Select`'s list keeps it, and the
+    /// level it was typed in.
+    typeahead: Rc<RefCell<(Option<u32>, Typeahead)>>,
 }
 
 /// A key's move waiting for the ones under way.
@@ -735,6 +777,7 @@ impl Items {
             busy: Rc::new(Cell::new(0)),
             queued: Rc::new(RefCell::new(VecDeque::new())),
             selects: Rc::new(RefCell::new(Vec::new())),
+            typeahead: Rc::new(RefCell::new((None, Typeahead::default()))),
         };
         *made.borrow_mut() = Some(items.clone());
         items
@@ -1013,7 +1056,13 @@ impl Items {
     /// Adds an item of submenu `level` (the item of a [`MenuList`]'s
     /// `row` when it is in one at that level), which the menu forgets
     /// when the current owner (the item's component) ends.
-    fn add(&self, node: ElementRef, level: u32, disabled: Prop<bool>) -> u64 {
+    fn add(
+        &self,
+        node: ElementRef,
+        level: u32,
+        disabled: Prop<bool>,
+        label: Prop<Option<SharedString>>,
+    ) -> u64 {
         let key = self.next.get() + 1;
         self.next.set(key);
         let row = use_context::<MenuRow>().filter(|r| r.rows.level == level);
@@ -1023,6 +1072,7 @@ impl Items {
                 index,
                 node,
                 disabled,
+                label,
             });
             cleanup(move || rows.items.borrow_mut().retain(|i| i.key != key));
             return key;
@@ -1032,6 +1082,7 @@ impl Items {
             node,
             level,
             disabled,
+            label,
             rows: None,
         });
         key
@@ -1055,6 +1106,7 @@ impl Items {
             node: rows.list,
             level: rows.level,
             disabled: Prop::from(false),
+            label: Prop::new(None),
             rows: Some(rows),
         });
     }
@@ -1252,6 +1304,76 @@ impl Items {
         self.walk_from(level, Start::On(target), back, target.abs_diff(first) + 1);
     }
 
+    /// A letter or digit `c` typed: the focus goes to the next enabled
+    /// item of the level the keys are in whose label or text starts with
+    /// what was typed in that level since the last pause, as `Select`'s
+    /// typeahead finds it ([`listbox::find_typed_among`]): the same
+    /// character again moves on among the items it starts, several make a
+    /// prefix. Read where the
+    /// core has the items' texts: the keys pressed meanwhile wait for it
+    /// ([`Busy`]). An item out of view is scrolled into it.
+    fn type_ahead(&self, c: char) {
+        // When it was typed, though it may wait for a move under way.
+        let pressed = now();
+        self.in_turn(move |items| {
+            let from = items.moved_to().or(items.focused.get_untracked());
+            let level = from.and_then(|key| items.level_of(key)).unwrap_or(0);
+            // Each level starts again: letters typed just before Right
+            // opened a submenu are no prefix of its items.
+            let typed = {
+                let mut typeahead = items.typeahead.borrow_mut();
+                let (last, typeahead) = &mut *typeahead;
+                if last.replace(level) != Some(level) {
+                    typeahead.clear();
+                }
+                typeahead.push(c, pressed).to_owned()
+            };
+            let walk = items.walk(level);
+            // A row the keys are still waiting for counts as reached.
+            let waiting = items.pending.take().filter(|p| p.level == level);
+            let at = waiting
+                .and_then(|p| {
+                    walk.place_of_row(&p.rows, p.index)
+                        .filter(|_| p.index < p.rows.len())
+                })
+                .or_else(|| from.and_then(|key| walk.place_of(key)));
+            // Asked all at once, answered in one commit.
+            let texts: Vec<_> = walk
+                .enabled()
+                .into_iter()
+                .map(|(place, label, node)| {
+                    let text = match label.get_untracked() {
+                        Some(label) => Ok(label),
+                        None => Err(node.text_content()),
+                    };
+                    (place, text)
+                })
+                .collect();
+            if texts.is_empty() {
+                return;
+            }
+            let (busy, items) = (Busy::new(items), items.clone());
+            spawn(async move {
+                let _busy = busy;
+                let mut order = Vec::with_capacity(texts.len());
+                let mut folded = Vec::with_capacity(texts.len());
+                for (i, (place, text)) in texts.into_iter().enumerate() {
+                    let text = match text {
+                        Ok(label) => label.to_string(),
+                        Err(answer) => answer.await,
+                    };
+                    order.push((place as u32, i as u32));
+                    folded.push(text.trim_start().to_lowercase().into_boxed_str());
+                }
+                let at = at.map(|at| at as u32);
+                if let Some(i) = listbox::find_typed_among(&order, at, &folded, &typed) {
+                    let place = order[i].0 as usize;
+                    items.walk_from(level, Start::On(place), Dir::Forward, 1);
+                }
+            });
+        });
+    }
+
     /// Binds the keys that move the focus into the menu's items while
     /// `active` and none of them has it (a menu the pointer opened), as
     /// the desktops' menus take them: Down and Home focus the first
@@ -1433,6 +1555,20 @@ fn surface(
     // arrows, Home and End as well.
     if !sheet {
         items.bind_entry_keys(move || presence.mounted() && open.get());
+        // Letters and digits move the focus by typeahead in the level the
+        // keys are in, as the desktops' menus do; a text field in the menu
+        // keeps them. Each opening starts again.
+        let typeahead = items.typeahead.clone();
+        effect(move || {
+            if open.get() {
+                typeahead.borrow_mut().1.clear();
+            }
+        });
+        let typing = items.clone();
+        listbox::bind_typeahead(
+            move || presence.mounted() && open.get(),
+            Rc::new(move |c| typing.type_ahead(c)),
+        );
     }
     let (asks, regain) = (Asks::new(), signal(None::<(u32, usize)>));
     // A place to regain is only for the submenu made in place of the one it
@@ -1720,7 +1856,10 @@ pub enum MenuEvent {
 /// enabled items in view, a view at a time, stopping at the ends. On the
 /// desktops the pointer moving over an item gives it the keyboard focus,
 /// so the keys go on from it (its `focus:` styles apply, as `hover:`
-/// ones). The popup (each submenu's too) is never taller than the room on
+/// ones). On the desktops a letter or digit moves the focus by `Select`'s
+/// typeahead to the next enabled item of the level the focus is in whose
+/// `accessibilityLabel`, else its text, starts with what was typed (a text
+/// field in the menu keeps its letters). The popup (each submenu's too) is never taller than the room on
 /// the side it goes on, nor the sheet than the window below the status
 /// bar: the items scroll inside it, the keys bring the item they move to
 /// into view, and a submenu closes once its trigger scrolls out of view.
@@ -2122,7 +2261,9 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
     let node = element_ref();
     let focused = signal(false);
     let key = hover.as_ref().map(|m| {
-        let key = m.items.add(node, m.level, disabled);
+        let key = m
+            .items
+            .add(node, m.level, disabled, props.accessibility_label);
         m.items.bind_keys(key, focused, m.open);
         key
     });
@@ -2328,8 +2469,9 @@ pub struct MenuListProps {
 /// of the list, made or not, scrolling to a row before focusing it and
 /// passing over disabled ones, and go on to the items before and after the
 /// list (a submenu's trigger too); Page Down and Page Up scroll it a view
-/// at a time. Bound its height with a style (`h`,
-/// `max_h`); `render_item` draws each row from its index. A row's
+/// at a time; typeahead reaches the rows it made, near its viewport. Bound
+/// its height with a style (`h`, `max_h`); `render_item` draws each row
+/// from its index. A row's
 /// `Submenu` closes with its row when the list scrolls the row away and
 /// reuses its cell.
 #[component]
@@ -2666,7 +2808,9 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<SubmenuEvent>) -> impl IntoElement
         }
     });
     let this_level = menu.this_level();
-    let item_key = menu.items.add(anchor, menu.level, props.disabled);
+    let item_key = menu
+        .items
+        .add(anchor, menu.level, props.disabled, Prop::new(None));
     let edges = menu.popup;
     let open_by: Rc<dyn Fn(OpenChangeReason)> = {
         let request = request.clone();
