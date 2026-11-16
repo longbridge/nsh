@@ -217,18 +217,32 @@ parse measured beside the reader after the change.
 
 Without `streaming` the rows read the same way. The second parse is gone; a first set
 costs about 1.5% more than `Parser::markdown` (the boundary's bookkeeping and the shared
-blocks), with and without definitions. The quote's row is the one case that still reads more
-than the whole text: the update in which a definition first shows in a tail reads the tail,
-then the whole text (the tail is the quote here, half of the text); the updates after it read
-once. Scanning the tail for `]:` first would save that tail, and was measured and dropped: the
-sequence is common in code, and a reply whose Python has `if seen[key]:` then parses the whole
-text on most updates. `bench_streaming` has such a reply (24-byte updates, total over the
-stream / average of the last 10, ms):
+blocks), with and without definitions. The quote's row still read more than the whole text
+there: the update in which a definition first shows in a tail read the tail, then the whole
+text (the tail is the quote, half of the text). A tail with a line that looks like a
+definition is now not read first (`may_define`, `text-view.md`); the same benchmark, against
+`bde1a6af`, `Parser::markdown` beside the reader after the change:
 
-| Reply | Updates | `Parser::markdown` | `Incremental`, with the scan | `Incremental`, without it |
+| A definition arrives in a 38 KB quote (the tail) | `Parser::markdown` | `Incremental`, before → after |
+|---|---|---|
+| `streaming: true` | 25.314 | 33.223 → 25.860 |
+| `streaming: false` | 26.456 | 33.413 → 26.951 |
+
+About 2% over `Parser::markdown` is left, the first set's bookkeeping. What looks like a
+definition is a guess, kept narrow: taking every `]:` in the tail for one was measured and
+dropped, because the sequence is common in code and a reply whose Python has `if seen[key]:`
+then parses the whole text on most updates. `bench_streaming` has such a reply (24-byte
+updates, total over the stream / average of the last 10, ms):
+
+| Reply | Updates | `Parser::markdown` | `Incremental`, any `]:` taken | `Incremental`, the guess |
 |---|---|---|---|---|
-| `]:` in its code, 20 KB | 834 | 1913.2 / 4.844 | 1686.5 / 4.425 | 27.7 / 0.033 |
-| `]:` in its code, 40 KB | 1,667 | 8581.6 / 11.322 | 7640.7 / 10.765 | 57.5 / 0.034 |
+| `]:` in its code, 20 KB | 834 | 1913.2 / 4.844 | 1686.5 / 4.425 | 28.5 / 0.034 |
+| `]:` in its code, 40 KB | 1,667 | 8581.6 / 11.322 | 7640.7 / 10.765 | 58.5 / 0.035 |
+
+The guess misses definitions it has no rule for (after indented code that looks like a fence,
+after a table's last row): such a tail is read, then the whole text, as before. On 40,000
+documents of random Markdown fragments it saw 3,577 of the 3,775 that define and took 1,039
+of the 36,193 that do not; replies are far tamer than those.
 
 The other replies of `bench_streaming` are as above (typical 20 / 40 KB: 28.5 / 0.036 and
 58.4 / 0.037).

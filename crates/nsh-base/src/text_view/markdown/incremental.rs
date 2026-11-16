@@ -48,8 +48,11 @@
 //!   footnotes are numbered by their first reference. The text is still
 //!   parsed once: a tree read from the text's start is the whole text's and
 //!   is converted as it is; a definition first seen in a tail drops what
-//!   was kept, so the reads after it start there. The tree alone says
-//!   whether there is one: `]:` is all over code (`if seen[key]:`);
+//!   was kept, so the reads after it start there. A tail with a line that
+//!   looks like a definition (`may_define`) is not read at all: the text
+//!   is read from its start at once. That is a guess to save the tail's
+//!   tree, narrow because `]:` is all over code (`if seen[key]:`); the
+//!   tree alone says whether there is a definition;
 //! - plugins (they read the whole source and its positions), declared
 //!   `:::` containers (cut out of the whole source before parsing) and MDX;
 //! - front matter still open (`---` first, its closing line not arrived);
@@ -215,6 +218,14 @@ impl Prefix {
     /// allows. `None` when the whole text is to be parsed.
     fn read(&mut self, parser: &Parser, text: &str) -> Option<Parsed> {
         let tail = &text[self.end..];
+        let first = self.end == 0;
+        // A definition in the tail has the whole text read: when a line of
+        // the tail looks like one, the tail's tree would be made only to be
+        // dropped, so the text is read from its start at once.
+        if !first && may_define(tail) {
+            *self = Self::default();
+            return self.read(parser, text);
+        }
         // Where the lines after a blank line start, for the repair's scan.
         let mut blanks = Vec::new();
         let repaired = if parser.options.streaming {
@@ -241,7 +252,11 @@ impl Prefix {
             repaired
         };
 
-        let first = self.end == 0;
+        // The repair can make one (`[docs][: /guide`, its open `[` removed).
+        if !first && matches!(source, Cow::Owned(_)) && may_define(&source) {
+            *self = Self::default();
+            return self.read(parser, text);
+        }
         let tree = tree(parser, &source, first);
         let nodes = tree.root.children().map_or(&[][..], Vec::as_slice);
         if let Some((last, before)) = nodes.split_last() {
@@ -348,6 +363,154 @@ fn boundary(
         let on_line = !tree.source.get(to..start)?.contains('\n');
         (ended && on_line && splits[count]).then_some((at, count))
     })
+}
+
+/// Whether a line of `source` (a tail: it starts outside code) looks like
+/// a definition of a link or a footnote: outside fenced code, at the start
+/// of a block, a label and a colon (`[docs]:`, `[^a]:`), and after a
+/// link's a destination with nothing but a title behind it.
+///
+/// A guess, to save reading a tail whose tree would be dropped. The tree
+/// alone says whether there is a definition ([`defines`]): a wrong guess
+/// costs time, never a block. It is narrow on purpose: `]:` is all over
+/// code and prose (`if seen[key]:`, `[12:00]: build started`), and a guess
+/// that took those would read every such reply whole.
+fn may_define(source: &str) -> bool {
+    if !source.contains("]:") {
+        return false;
+    }
+    // The fence of the code a line is in: its character and length.
+    let mut fence: Option<(u8, usize)> = None;
+    // Whether a block can start on the line: the first line, one after a
+    // blank line, after code, a heading or a rule (a definition does not
+    // interrupt a paragraph).
+    let mut starts = true;
+    // How many quotes the line before is in: a quote interrupts.
+    let mut quotes = 0;
+    let mut at = 0;
+    while at < source.len() {
+        let end = source[at..].find('\n').map_or(source.len(), |i| at + i);
+        let line = &source[at..end];
+        let next = end + 1;
+        // The markers of the quotes and items the line is in.
+        let mut rest = line;
+        let mut item = false;
+        let mut depth = 0;
+        loop {
+            rest = rest.trim_start_matches([' ', '\t']);
+            if let Some(quoted) = rest.strip_prefix('>') {
+                rest = quoted;
+                depth += 1;
+            } else if fence.is_none()
+                && let Some(marked) = list_marker(rest)
+            {
+                rest = marked;
+                item = true;
+            } else {
+                break;
+            }
+        }
+        let bytes = rest.as_bytes();
+        let run = match bytes.first() {
+            Some(&c @ (b'`' | b'~')) => {
+                let n = bytes.iter().take_while(|&&b| b == c).count();
+                // A backtick in what follows makes it a code span.
+                (n >= 3 && (c == b'~' || fence.is_some() || !rest[n..].contains('`')))
+                    .then_some((c, n))
+            }
+            _ => None,
+        };
+        match (fence, run) {
+            (Some((c, n)), Some((d, m))) if c == d && m >= n && rest[m..].trim().is_empty() => {
+                fence = None;
+                starts = true;
+            }
+            (Some(_), _) => {}
+            (None, Some(open)) => fence = Some(open),
+            (None, None) => {
+                if rest.trim().is_empty() {
+                    starts = true;
+                } else {
+                    // A footnote's definition holds blocks, as an item
+                    // does: it interrupts a paragraph, a link's does not.
+                    let defined = (starts || item || depth > quotes || rest.starts_with("[^"))
+                        && rest.starts_with('[')
+                        && labelled(&source[end - rest.len()..]);
+                    if defined {
+                        return true;
+                    }
+                    // A heading, or a rule or a heading's underline.
+                    let text = rest.trim();
+                    starts = text.starts_with('#')
+                        || ['-', '=', '*', '_']
+                            .iter()
+                            .any(|&c| text.chars().all(|d| d == c || d == ' '));
+                }
+            }
+        }
+        quotes = depth;
+        at = next;
+    }
+    false
+}
+
+/// `line` after the marker of a list item it starts with, if any.
+fn list_marker(line: &str) -> Option<&str> {
+    let bytes = line.as_bytes();
+    let digits = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
+    let marker = match bytes.get(digits)? {
+        b'-' | b'*' | b'+' if digits == 0 => 1,
+        b'.' | b')' if (1..=9).contains(&digits) => digits + 1,
+        _ => return None,
+    };
+    matches!(bytes.get(marker), Some(b' ' | b'\t')).then(|| &line[marker + 1..])
+}
+
+/// Whether `text`, which starts with `[`, starts with a label and a colon
+/// that may be a definition's: a footnote's, or a link's with a
+/// destination and at most a title after it on the line.
+fn labelled(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    // A label is 999 characters at most and holds no blank line.
+    let mut i = 1;
+    let close = loop {
+        match bytes.get(i) {
+            Some(b'\\') => i += 1,
+            Some(b']') => break i,
+            Some(b'[') | None => return false,
+            Some(b'\n') if bytes.get(i + 1) == Some(&b'\n') => return false,
+            _ => {}
+        }
+        i += 1;
+        if i > 1000 {
+            return false;
+        }
+    };
+    if bytes.get(close + 1) != Some(&b':') || text[1..close].trim().is_empty() {
+        return false;
+    }
+    if bytes[1] == b'^' {
+        return true;
+    }
+    // The destination, which may be on the next line (after its markers).
+    let after = text[close + 2..].trim_start_matches([' ', '\t']);
+    let after = match after.strip_prefix('\n') {
+        Some(line) => line.trim_start_matches([' ', '\t', '>']),
+        None => after,
+    };
+    if after.starts_with('<') {
+        return true;
+    }
+    let destination = after.find([' ', '\t', '\n']).unwrap_or(after.len());
+    if destination == 0 {
+        return false;
+    }
+    // After it the line ends, or a title starts.
+    let behind = after[destination..].trim_start_matches([' ', '\t']);
+    matches!(
+        behind.as_bytes().first(),
+        None | Some(b'\n' | b'"' | b'\'' | b'(')
+    )
 }
 
 /// Whether a definition of a link or a footnote is in `node`.
@@ -642,6 +805,78 @@ mod tests {
         ] {
             grows(&format!(
                 "See [docs] and [^a].\n\n## Part\n\nA paragraph.\n\n{tail}"
+            ));
+        }
+    }
+
+    /// The guess that saves a tail's tree takes what starts a block as a
+    /// definition does, and leaves the `]:` of code and prose.
+    #[test]
+    fn lines_that_may_define() {
+        for source in [
+            "[docs]: /guide",
+            "[docs]: /guide \"Docs\"\n",
+            "[docs]: </a guide>",
+            "[^a]: A note",
+            "Text.\n\n   [docs]: /guide\n",
+            "Text.\n\n[docs]:\n/guide\n",
+            "Text.\n\n[do\ncs]: /guide\n",
+            "> Quoted.\n>\n> [docs]: /guide",
+            "> [docs]:\n> /guide",
+            "- item\n- [logo]: /logo.png\n",
+            "1. [^a]: note",
+            "Text\n[^n]: note\n",
+            "```\ncode\n```\n[docs]: /guide\n",
+            "```a``` text\n\n[docs]: /guide\n",
+            "# Heading\n[docs]: /guide\n",
+            "Title\n===\n[docs]: /guide\n",
+            "Text.\n\n---\n[^a]: note\n",
+            "Paragraph.\n> [docs]: /guide\n",
+            "[a]: /a\n[b]: /b invalid\n",
+            DEFINITIONS,
+            FOOTNOTES,
+        ] {
+            assert!(may_define(source), "{source:?}");
+        }
+        for source in [
+            "No marker at all.",
+            "```python\nif seen[key]:\n    total += counts[key]\n```\n",
+            "```md\n[docs]: /guide\n```\n",
+            "~~~\n[docs]: /guide\n",
+            "Sources:\n[1]: https://example.com\n",
+            "Text\n[n]: /url\n",
+            "[12:00]: build started\n",
+            "[docs]: /guide invalid\n",
+            "[docs]:",
+            "[docs]: ",
+            "[]: /guide",
+            "- [ ] task: later\n",
+            "Text `[docs]: /guide`.\n",
+            "items[0]: first\n",
+            "[link](/url): text\n",
+            "[a [b]: /c\n",
+        ] {
+            assert!(!may_define(source), "{source:?}");
+        }
+    }
+
+    /// A definition arriving in a tail that the guess misses (indented
+    /// code that looks like a fence's start, a table's last row before it)
+    /// or takes for one that is none: the document is the whole text's
+    /// either way.
+    #[test]
+    fn definitions_the_guess_misses() {
+        let fence = "Text.\n\n    ```\n\n[docs]: /guide";
+        assert!(!may_define(fence));
+        for tail in [
+            fence,
+            "| a |\n|---|\n| 1 |\n[docs]: /guide",
+            "- item\n\n  text\n  > [docs]: /guide \"Docs\"",
+            "<div>\n\n[docs]: /guide\n\n</div>",
+            "[12:00]: 'build started'",
+        ] {
+            grows(&format!(
+                "See [docs] and [^a].\n\n## Part\n\nA paragraph.\n\nMore.\n\n{tail}\n\nEnd [docs].\n"
             ));
         }
     }
@@ -1242,8 +1477,7 @@ mod tests {
                 }
             }
             // The first late definition can follow a large tail that
-            // cannot be split: that one update reads the tail, then the
-            // whole text.
+            // cannot be split: the tail is not read before the whole text.
             let before = format!("{body}{}", "> A quoted paragraph.\n>\n".repeat(1600));
             let source = format!("{before}> [docs]: /guide");
             let [whole, kept] = bench_set(&parser, Some(&before), &source);

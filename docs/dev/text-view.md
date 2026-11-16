@@ -281,10 +281,17 @@ The whole text is parsed, as before, when a later line can change any block or t
 
 A text with definitions is still parsed once per update, never twice. A tree read from the text's start (the
 first set, a replaced text, and every update while nothing is kept) is the whole text's, definitions included: it
-is converted as it is, footnotes too. When a definition first shows in the tree of a tail, what was kept is
-dropped and that one update parses the whole text; the updates after it read from the start again. Whether a text
-has a definition is the tree's answer alone, never a scan for `]:`: code is full of that sequence
-(`if seen[key]:`), and a reply with such code keeps its boundary.
+is converted as it is, footnotes too. A definition that arrives in a tail drops what was kept and has the whole
+text read from its start, in that update and the ones after it.
+
+So that the tail is not read first, only for its tree to be dropped, a tail with a line that looks like a
+definition is not read at all (`may_define`): outside fenced code, where a block can start (after a blank line,
+code, a heading or a rule, at an item's or an interrupting quote's start; a footnote's anywhere), a label and a
+colon, and after a link's a destination with at most a title behind it. This is a guess that only saves time: the
+tree alone says whether there is a definition, and a tail whose definition the guess missed is read, then the whole
+text, with the same document. It is narrow on purpose. `]:` is all over code and prose (`if seen[key]:`,
+`[12:00]: build started`, a list of sources under a paragraph's first line), and taking any `]:` for a definition
+reads every such reply whole on each update.
 
 A reply that ends in one large block (a long table, list or code block) has that block after the boundary, so it
 is the part parsed again on each update: the blocks before it are still kept. So is a reply with no paragraph for a
