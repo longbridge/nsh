@@ -2450,6 +2450,17 @@ impl<M: TextEngine> Core<M> {
         None
     }
 
+    /// The window the component that runs once under `owner` shows in (its
+    /// root node), the main window's when there is none.
+    fn window_of_owner(&self, owner: crate::element::Owner) -> NodeId {
+        if self.window_ids.is_empty() {
+            return crate::ROOT_ID;
+        }
+        self.host_of_owner(owner)
+            .and_then(|host| self.key(host).ok())
+            .map_or(crate::ROOT_ID, |key| self.key_window(key))
+    }
+
     /// Makes `inst`'s view on `host` (once: a view made already takes its
     /// slots, children and styles), or builds a list cell's row again; what
     /// its code panicked with, if it did.
@@ -7212,7 +7223,17 @@ impl<M: TextEngine> Core<M> {
         }
         let views = {
             let _entered = self.components.runtime.enter();
-            keys.bindings()
+            // Bindings share a few owners (a component's effect binds many):
+            // each is looked up once.
+            let mut known: Vec<(crate::element::Owner, NodeId)> = Vec::new();
+            keys.bindings(|owner| {
+                if let Some(&(_, window)) = known.iter().find(|(o, _)| *o == owner) {
+                    return window;
+                }
+                let window = self.window_of_owner(owner);
+                known.push((owner, window));
+                window
+            })
         };
         drop(keys);
         let bindings = self
