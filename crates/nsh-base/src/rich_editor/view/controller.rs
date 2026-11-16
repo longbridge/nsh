@@ -1386,13 +1386,22 @@ impl Rv {
             return;
         }
         let Some(hit) = self.hit(at) else { return };
-        let state = self.session.state();
-        let doc = state.doc().clone();
         let mod_key = if apple_keys() {
             modifiers.cmd
         } else {
             modifiers.ctrl
         };
+        // A press on an inline node view's own area selects its node, as one
+        // on a block's does (prosemirror-view's `selectClickedLeaf`); Shift
+        // and Mod keep their meaning (extend the selection, drag blocks).
+        let hit = match hit {
+            Hit::Text(..) if !modifiers.shift && !mod_key => {
+                self.inline_view_at(at).map_or(hit, Hit::Node)
+            }
+            hit => hit,
+        };
+        let state = self.session.state();
+        let doc = state.doc().clone();
         let click = ClickEvent {
             button: 0,
             mod_key,
@@ -2089,8 +2098,39 @@ impl Rv {
             .flatten()
             .find(|b| b.pos == pos)
             .map(|b| b.id);
-        id.and_then(|id| self.geo.borrow().origin(id))
+        let geo = self.geo.borrow();
+        // An inline node's box is where its one position is drawn.
+        id.and_then(|id| geo.origin(id))
+            .or_else(|| geo.range_rects(pos, pos + 1).first().map(|b| b.origin))
             .unwrap_or_default()
+    }
+
+    /// The inline node view whose box holds the content point `at`: its
+    /// node's position.
+    pub(crate) fn inline_view_at(&self, at: Point<Points>) -> Option<usize> {
+        let Some(Hit::Text(p, _)) = self.hit(at) else {
+            return None;
+        };
+        let state = self.session.state();
+        let doc = state.doc();
+        [p.checked_sub(1), Some(p)]
+            .into_iter()
+            .flatten()
+            .find(|&q| {
+                let viewed = doc.node_at(q).is_some_and(|n| {
+                    n.is_inline()
+                        && !n.is_text()
+                        && NodeSelection::is_selectable(&n)
+                        && self.node_view(n.ty().name()).is_some()
+                });
+                viewed
+                    && self.geo.borrow().range_rects(q, q + 1).iter().any(|b| {
+                        at.x >= b.origin.x
+                            && at.x < b.origin.x + b.size.width
+                            && at.y >= b.origin.y
+                            && at.y < b.origin.y + b.size.height
+                    })
+            })
     }
 
     // Focus and the caret.

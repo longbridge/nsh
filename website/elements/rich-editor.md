@@ -348,6 +348,10 @@ the node never calls it. `editor` is the editor the node is in, `extension` is `
 where the node starts now (`null` once it is gone); `updateAttributes(attrs)` sets some of its attributes and
 `deleteNode()` deletes it, each one undoable change through the editor (and its `dispatchTransaction`).
 
+A press on a view's own area selects its node and gives the editor the focus, inline views as block ones (ProseMirror
+selects a clicked atom too); with Shift held it extends the selection instead, and with Mod held it does what it does
+on text. A control inside the view (a `Button`, a `Link`) keeps its press, and the selection stays where it was.
+
 An app's crate registers extensions written in Rust through its UI set, and JS takes them by name:
 
 ```rust

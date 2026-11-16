@@ -255,6 +255,8 @@ const editor = createRichEditor({ extensions: [StarterKit, Stock] });
 
 组件对每个节点只运行一次。它的 props 跟随节点：在 JSX 或 effect 中读取时，节点的属性或选中状态变化，`node`（`{ type, attrs, textContent }`）与 `selected` 就地更新；在节点前后输入不会调用组件。`editor` 是节点所在的编辑器，`extension` 是 `{ name, options }`。`getPos()` 返回节点当前的起始位置（节点删除后为 `null`）；`updateAttributes(attrs)` 设置部分属性，`deleteNode()` 删除节点，两者都是经由编辑器（及其 `dispatchTransaction`）的一次可撤销修改。
 
+按在视图自身的区域上会选中它的节点，并让编辑器获得焦点，行内视图和块级视图都是如此（ProseMirror 点击原子节点也会选中它）；按住 Shift 时改为扩展选区，按住 Mod 时与在文字上按下的效果相同。视图里的控件（`Button`、`Link`）照常处理自己的按下，选区保持不变。
+
 应用的 crate 通过其 UI 集注册用 Rust 编写的扩展，JS 按名称取用：
 
 ```rust
