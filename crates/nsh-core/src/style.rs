@@ -838,38 +838,43 @@ impl ViewStyle {
 
 impl Default for ViewStyle {
     fn default() -> Self {
-        Self {
-            background_color: Color::TRANSPARENT,
-            border_radius: Points::ZERO,
-            corner_radius: Corners {
-                top_left: None,
-                top_right: None,
-                bottom_right: None,
-                bottom_left: None,
-            },
-            continuous_corners: false,
-            borders: Borders::NONE,
-            opacity: 1.0,
-            overflow_hidden: false,
-            transform: Transform::IDENTITY,
-            tint_color: None,
-            elevation: Points::ZERO,
-            transform_origin: TransformOrigin::CENTER,
-            object_position: ObjectPosition::CENTER,
-            backface_hidden: false,
-            effects: None,
-            blend_mode: BlendMode::Normal,
-            backdrop_material: BackdropMaterial::UltraThin,
-            glass_effect: GlassEffect::None,
-            glass_tint_color: None,
-            macos_backdrop: None,
-            outline: Outline::NONE,
-            hidden: false,
-            cursor: Cursor::Auto,
-            transition: None,
-            animation: None,
-        }
+        Self::DEFAULT
     }
+}
+
+impl ViewStyle {
+    /// [`Default::default`], as a constant.
+    pub(crate) const DEFAULT: Self = Self {
+        background_color: Color::TRANSPARENT,
+        border_radius: Points::ZERO,
+        corner_radius: Corners {
+            top_left: None,
+            top_right: None,
+            bottom_right: None,
+            bottom_left: None,
+        },
+        continuous_corners: false,
+        borders: Borders::NONE,
+        opacity: 1.0,
+        overflow_hidden: false,
+        transform: Transform::IDENTITY,
+        tint_color: None,
+        elevation: Points::ZERO,
+        transform_origin: TransformOrigin::CENTER,
+        object_position: ObjectPosition::CENTER,
+        backface_hidden: false,
+        effects: None,
+        blend_mode: BlendMode::Normal,
+        backdrop_material: BackdropMaterial::UltraThin,
+        glass_effect: GlassEffect::None,
+        glass_tint_color: None,
+        macos_backdrop: None,
+        outline: Outline::NONE,
+        hidden: false,
+        cursor: Cursor::Auto,
+        transition: None,
+        animation: None,
+    };
 }
 
 /// A shadow behind text (`textShadow`, `text-shadow-*`).
@@ -955,6 +960,40 @@ pub struct TextStyle {
     pub selection_color: Option<Color>,
     /// `caretColor`: an input's caret (not inherited).
     pub caret_color: Option<Color>,
+}
+
+impl TextStyle {
+    /// [`Default::default`], as a constant.
+    pub(crate) const DEFAULT: Self = Self {
+        color: None,
+        font_size: None,
+        font_weight: None,
+        line_height: None,
+        text_align: None,
+        text_align_physical: false,
+        font_family: None,
+        italic: None,
+        letter_spacing: None,
+        letter_spacing_em: None,
+        line_height_em: None,
+        font_size_em: None,
+        line_height_multiple: None,
+        decoration: None,
+        decoration_style: None,
+        decoration_thickness: None,
+        underline_offset: None,
+        decoration_color: None,
+        transform: None,
+        shadow_color: None,
+        shadow_offset: None,
+        shadow_radius: None,
+        font_variant: None,
+        writing_direction: None,
+        align_vertical: None,
+        placeholder_color: None,
+        selection_color: None,
+        caret_color: None,
+    };
 }
 
 impl TextStyle {

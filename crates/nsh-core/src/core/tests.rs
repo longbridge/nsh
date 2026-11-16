@@ -45346,3 +45346,23 @@ fn span_padding_widens_its_box_in_the_line() {
     assert_eq!(text.text, "a b c");
     assert!(text.attachments.is_empty());
 }
+
+#[test]
+fn node_record_sizes() {
+    // #1345: the per-node records the core keeps for every node.
+    let node = std::mem::size_of::<super::Node>();
+    eprintln!("Node {node} B");
+    assert!(node <= 600, "Node grew to {node} bytes");
+}
+
+#[test]
+fn style_constants_match_default() {
+    assert_eq!(
+        crate::style::ViewStyle::DEFAULT,
+        crate::style::ViewStyle::default()
+    );
+    assert_eq!(
+        crate::style::TextStyle::DEFAULT,
+        crate::style::TextStyle::default()
+    );
+}
