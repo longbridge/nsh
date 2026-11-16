@@ -389,7 +389,6 @@ mod tests {
             bytecode: None,
             source_map: None,
             assets: Vec::new(),
-            sounds: Vec::new(),
             min_runtime: Some("0.1.0".into()),
         };
         let bytes = nsh_package::build(&contents, &release, &cert).unwrap();
