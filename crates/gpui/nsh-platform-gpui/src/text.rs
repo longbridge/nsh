@@ -203,38 +203,59 @@ const FANTASY: &[&str] = &["Impact", "Papyrus"];
 fn family_candidates(name: &str) -> Vec<std::borrow::Cow<'_, str>> {
     use std::borrow::Cow;
 
-    use nsh_core::FamilyName;
+    if name.contains('\\') {
+        let mut out = Vec::new();
+        nsh_core::for_each_font_family(name, |family| {
+            let mut candidates = Vec::new();
+            family_candidate(family, &mut candidates);
+            out.extend(candidates.into_iter().map(|f| Cow::Owned(f.into_owned())));
+        });
+        if out.is_empty() {
+            out.push(Cow::Borrowed(""));
+        }
+        return out;
+    }
     let mut out = Vec::new();
     for family in nsh_core::font_families(name) {
-        match family {
-            FamilyName::Monospace => out.extend(MONOSPACE.iter().copied().map(Cow::Borrowed)),
-            FamilyName::Serif => out.extend(SERIF.iter().copied().map(Cow::Borrowed)),
-            FamilyName::Named(f) if f == "cursive" => {
-                out.extend(CURSIVE.iter().copied().map(Cow::Borrowed));
-            }
-            FamilyName::Named(f) if f == "fantasy" => {
-                out.extend(FANTASY.iter().copied().map(Cow::Borrowed));
-            }
-            FamilyName::Named(f) => {
-                // What apps written for Apple platforms name, as what
-                // this platform has (when it lacks the font itself).
-                let aliases = match &*f {
-                    "Menlo" | "Monaco" | "SF Mono" | "Courier" | "Courier New" => MONOSPACE,
-                    "Times" | "New York" | "Georgia" => SERIF,
-                    "Helvetica" | "Helvetica Neue" | "Arial" => SANS,
-                    _ => &[],
-                };
-                out.push(f);
-                out.extend(aliases.iter().copied().map(Cow::Borrowed));
-            }
-            // The system font, and its rounded design (which GPUI lacks).
-            _ => out.push(Cow::Borrowed("")),
-        }
+        family_candidate(family, &mut out);
     }
     if out.is_empty() {
         out.push(Cow::Borrowed(""));
     }
     out
+}
+
+fn family_candidate<'a>(
+    family: nsh_core::FamilyName<'a>,
+    out: &mut Vec<std::borrow::Cow<'a, str>>,
+) {
+    use std::borrow::Cow;
+
+    use nsh_core::FamilyName;
+    match family {
+        FamilyName::Monospace => out.extend(MONOSPACE.iter().copied().map(Cow::Borrowed)),
+        FamilyName::Serif => out.extend(SERIF.iter().copied().map(Cow::Borrowed)),
+        FamilyName::Named("cursive") => {
+            out.extend(CURSIVE.iter().copied().map(Cow::Borrowed));
+        }
+        FamilyName::Named("fantasy") => {
+            out.extend(FANTASY.iter().copied().map(Cow::Borrowed));
+        }
+        FamilyName::Named(f) => {
+            // What apps written for Apple platforms name, as what
+            // this platform has (when it lacks the font itself).
+            let aliases = match f {
+                "Menlo" | "Monaco" | "SF Mono" | "Courier" | "Courier New" => MONOSPACE,
+                "Times" | "New York" | "Georgia" => SERIF,
+                "Helvetica" | "Helvetica Neue" | "Arial" => SANS,
+                _ => &[],
+            };
+            out.push(Cow::Borrowed(f));
+            out.extend(aliases.iter().copied().map(Cow::Borrowed));
+        }
+        // The system font, and its rounded design (which GPUI lacks).
+        _ => out.push(Cow::Borrowed("")),
+    }
 }
 
 /// The family of the UI font among the `installed` ones (by lowercase
@@ -3229,6 +3250,10 @@ mod tests {
 
     #[test]
     fn families() {
+        let plain = family_candidates("Inter");
+        assert!(matches!(plain[0], std::borrow::Cow::Borrowed("Inter")));
+        assert_eq!(family_candidates(r#"'A\\B', 'A\"B'"#), [r"A\B", "A\"B"]);
+
         assert_eq!(family_candidates("Inter"), ["Inter"]);
         assert_eq!(family_candidates("system-ui"), [""]);
         assert_eq!(family_candidates(" , "), [""]);

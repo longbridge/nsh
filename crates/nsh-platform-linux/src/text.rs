@@ -154,21 +154,21 @@ pub(crate) fn main_font_description(style: &ResolvedTextStyle) -> pango::FontDes
 fn resolve_family(name: &str, ui: &str) -> String {
     let mut out = String::with_capacity(name.len());
     use nsh_core::FamilyName;
-    for family in nsh_core::font_families(name) {
-        let family = match &family {
+    nsh_core::for_each_font_family(name, |family| {
+        let family = match family {
             FamilyName::Monospace => "monospace",
             FamilyName::Serif => "serif",
             // Pango's list is comma-separated: a quoted name with a comma
             // in it can't be one of its families.
-            FamilyName::Named(f) if f.contains(',') => continue,
-            FamilyName::Named(f) => f.as_ref(),
+            FamilyName::Named(f) if f.contains(',') => return,
+            FamilyName::Named(f) => f,
             _ => ui,
         };
         if !out.is_empty() {
             out.push(',');
         }
         out.push_str(family);
-    }
+    });
     if out.is_empty() {
         out.push_str(ui);
     }
@@ -2405,6 +2405,7 @@ mod tests {
 
     #[test]
     fn families() {
+        assert_eq!(resolve_family(r#"'A\\B', 'A\"B'"#, "X"), "A\\B,A\"B");
         assert_eq!(resolve_family("Inter", "Adwaita Sans"), "Inter");
         assert_eq!(resolve_family("system-ui", "Adwaita Sans"), "Adwaita Sans");
         assert_eq!(resolve_family("ui-monospace", "X"), "monospace");

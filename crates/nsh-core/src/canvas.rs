@@ -478,9 +478,9 @@ impl CanvasFont {
             (crate::style::FamilyName::System, None) => None,
             (crate::style::FamilyName::Named(name), None)
                 if !name.contains([',', '"', '\'', '\\'])
-                    && !crate::style::is_css_generic_keyword(&name) =>
+                    && !crate::style::is_css_generic_keyword(name) =>
             {
-                Some((&*name).into())
+                Some(name.into())
             }
             _ => Some(rest.into()),
         };
@@ -1805,7 +1805,7 @@ mod tests {
         assert_eq!(
             crate::style::font_families(f.family.as_deref().unwrap()).collect::<Vec<_>>(),
             vec![
-                crate::style::FamilyName::Named("Inter".into()),
+                crate::style::FamilyName::Named("Inter"),
                 crate::style::FamilyName::System,
             ]
         );
@@ -1815,7 +1815,7 @@ mod tests {
         assert_eq!(
             crate::style::font_families(quoted_generic.family.as_deref().unwrap())
                 .collect::<Vec<_>>(),
-            vec![crate::style::FamilyName::Named("serif".into())]
+            vec![crate::style::FamilyName::Named("serif")]
         );
         let f = CanvasFont::parse("600 12px/1.5 system-ui").unwrap();
         assert_eq!((f.size, f.weight, f.family), (px(12.0), 600, None));

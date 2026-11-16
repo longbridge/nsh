@@ -142,7 +142,7 @@ impl std::fmt::Debug for FontFamily {
 
 /// A family of a `fontFamily` list ([`font_families`]). More generic
 /// families (`cursive`, `fantasy`) may be added: match with a `_` arm.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum FamilyName<'a> {
     /// The system font: `system-ui`, `sans-serif`, `ui-sans-serif`,
@@ -155,7 +155,7 @@ pub enum FamilyName<'a> {
     /// The system's rounded font (`ui-rounded`), where it has one.
     Rounded,
     /// A family installed on the device or registered by the app.
-    Named(std::borrow::Cow<'a, str>),
+    Named(&'a str),
 }
 
 /// Scans a quoted `fontFamily` item after its opening `quote`: returns the
@@ -207,59 +207,138 @@ fn unquote_family(body: &str, quote: char) -> (std::borrow::Cow<'_, str>, &str) 
 /// The families of a `fontFamily` value, most preferred first, as CSS lists
 /// them: names separated by commas, each trimmed and unquoted
 /// (`"Inter, \"Noto Sans SC\", sans-serif"`), the generic families as
-/// [`FamilyName`]'s. A quoted name runs to its closing quote, commas and `\`
-/// escapes included (`'ACME, Inc'`, `"A\"B"`), and is always a family's name:
-/// a quoted `"serif"` names a family called serif, as in CSS. Text is set in
-/// the first family a platform has, and a character that family lacks in the
-/// next that has it.
+/// [`FamilyName`]'s. A quoted name runs to its closing quote, commas and all
+/// (`'ACME, Inc'`), and is always a family's name: a quoted `"serif"` names a
+/// family called serif, as in CSS. Text is set in the first family a
+/// platform has, and a character that family lacks in the next that has it.
+/// This borrowed iterator preserves the input slices; platform lookup uses
+/// [`for_each_font_family`] to decode escapes into temporary storage.
+#[inline]
 pub fn font_families(value: &str) -> impl Iterator<Item = FamilyName<'_>> {
     let mut rest = value;
-    std::iter::from_fn(move || {
-        loop {
-            rest = rest.trim_start();
-            if rest.is_empty() {
-                return None;
+    std::iter::from_fn(
+        #[inline(always)]
+        move || {
+            loop {
+                rest = rest.trim_start();
+                if rest.is_empty() {
+                    return None;
+                }
+                let (family, quoted) = if let Some(q @ ('"' | '\'')) = rest.chars().next() {
+                    // To the closing quote (or the end, unclosed); what follows it
+                    // up to the next comma is not part of the name.
+                    let body = &rest[1..];
+                    let end = body.find(q).unwrap_or(body.len());
+                    let after = body.get(end + 1..).unwrap_or("");
+                    rest = after.find(',').map_or("", |i| &after[i + 1..]);
+                    (body[..end].trim(), true)
+                } else {
+                    let end = rest.find(',').unwrap_or(rest.len());
+                    let name = rest[..end].trim_end();
+                    rest = rest.get(end + 1..).unwrap_or("");
+                    (name, false)
+                };
+                if family.is_empty() {
+                    continue;
+                }
+                return Some(match family {
+                    name if quoted => FamilyName::Named(name),
+                    "system-ui" | "sans-serif" | "ui-sans-serif" | "-apple-system"
+                    | "BlinkMacSystemFont" => FamilyName::System,
+                    "serif" | "ui-serif" => FamilyName::Serif,
+                    "monospace" | "ui-monospace" => FamilyName::Monospace,
+                    "ui-rounded" => FamilyName::Rounded,
+                    name => FamilyName::Named(name),
+                });
             }
-            let (family, quoted) = if let Some(q @ ('"' | '\'')) = rest.chars().next() {
-                // To the unescaped closing quote (or the end, unclosed); what
-                // follows it up to the next comma is not part of the name.
-                let (name, after) = unquote_family(&rest[q.len_utf8()..], q);
-                rest = after.find(',').map_or("", |i| &after[i + 1..]);
-                (name, true)
-            } else {
-                let end = rest.find(',').unwrap_or(rest.len());
-                let name = rest[..end].trim_end();
-                rest = rest.get(end + 1..).unwrap_or("");
-                (std::borrow::Cow::Borrowed(name), false)
-            };
-            if family.is_empty() {
+        },
+    )
+}
+
+/// Resolves font names while temporary decoded storage is alive. Intended
+/// for platform font lookup; only quoted backslash escapes allocate.
+#[doc(hidden)]
+#[inline]
+pub fn for_each_font_family(value: &str, mut resolve: impl FnMut(FamilyName<'_>)) {
+    if value.is_empty() {
+        return;
+    }
+    let mut rest = value;
+    loop {
+        rest = trim_family_start(rest);
+        if rest.is_empty() {
+            return;
+        }
+        let (family, quoted) = if let Some(q @ ('"' | '\'')) = rest.chars().next() {
+            let body = &rest[1..];
+            let end = body.find(q).unwrap_or(body.len());
+            if body.as_bytes()[..end].contains(&b'\\') {
+                rest = resolve_escaped_family(body, q, &mut resolve);
                 continue;
             }
-            if quoted {
-                return Some(FamilyName::Named(family));
-            }
-            return Some(match &*family {
-                f if f.eq_ignore_ascii_case("system-ui")
-                    || f.eq_ignore_ascii_case("sans-serif")
-                    || f.eq_ignore_ascii_case("ui-sans-serif")
-                    || f.eq_ignore_ascii_case("-apple-system")
-                    || f.eq_ignore_ascii_case("BlinkMacSystemFont") =>
-                {
-                    FamilyName::System
-                }
-                f if f.eq_ignore_ascii_case("serif") || f.eq_ignore_ascii_case("ui-serif") => {
-                    FamilyName::Serif
-                }
-                f if f.eq_ignore_ascii_case("monospace")
-                    || f.eq_ignore_ascii_case("ui-monospace") =>
-                {
-                    FamilyName::Monospace
-                }
-                f if f.eq_ignore_ascii_case("ui-rounded") => FamilyName::Rounded,
-                _ => FamilyName::Named(family),
+            let after = body.get(end + 1..).unwrap_or("");
+            rest = after.find(',').map_or("", |i| &after[i + 1..]);
+            (trim_family_start(trim_family_end(&body[..end])), true)
+        } else {
+            let end = rest.find(',').unwrap_or(rest.len());
+            let name = trim_family_end(&rest[..end]);
+            rest = rest.get(end + 1..).unwrap_or("");
+            (name, false)
+        };
+        if !family.is_empty() {
+            resolve(match family {
+                name if quoted => FamilyName::Named(name),
+                "system-ui" | "sans-serif" | "ui-sans-serif" | "-apple-system"
+                | "BlinkMacSystemFont" => FamilyName::System,
+                "serif" | "ui-serif" => FamilyName::Serif,
+                "monospace" | "ui-monospace" => FamilyName::Monospace,
+                "ui-rounded" => FamilyName::Rounded,
+                name => FamilyName::Named(name),
             });
         }
-    })
+    }
+}
+
+// Font names are normally ASCII; preserve Unicode whitespace at either edge.
+#[inline]
+fn trim_family_start(value: &str) -> &str {
+    let value = value.trim_ascii_start();
+    if value
+        .as_bytes()
+        .first()
+        .is_some_and(|b| !b.is_ascii() || *b == 0x0b)
+    {
+        value.trim_start()
+    } else {
+        value
+    }
+}
+
+#[inline]
+fn trim_family_end(value: &str) -> &str {
+    let value = value.trim_ascii_end();
+    if value
+        .as_bytes()
+        .last()
+        .is_some_and(|b| !b.is_ascii() || *b == 0x0b)
+    {
+        value.trim_end()
+    } else {
+        value
+    }
+}
+
+#[cold]
+fn resolve_escaped_family<'a>(
+    body: &'a str,
+    quote: char,
+    resolve: &mut impl FnMut(FamilyName<'_>),
+) -> &'a str {
+    let (name, after) = unquote_family(body, quote);
+    if !name.is_empty() {
+        resolve(FamilyName::Named(&name));
+    }
+    after.find(',').map_or("", |i| &after[i + 1..])
 }
 
 /// Whether `name` is a CSS generic family (CSS Fonts 4) or system font keyword
@@ -288,7 +367,7 @@ pub(crate) fn is_css_generic_keyword(name: &str) -> bool {
 /// Formats a `fontFamily` value as a CSS family list: generic keywords stay
 /// bare and named families are quoted and CSS-escaped (`"SF Mono", "Menlo",
 /// monospace`, or `""` when `value` names no family), so a list embedded in a
-/// CSS `font` shorthand round-trips through [`font_families`] and
+/// CSS `font` shorthand round-trips through [`for_each_font_family`] and
 /// [`crate::canvas::CanvasFont::parse`] with commas, quotes and backslashes
 /// intact (`'ACME, Inc'`, `'A"B'`).
 pub fn css_font_families(value: &str) -> String {
@@ -4094,9 +4173,9 @@ mod tests {
         assert_eq!(
             list,
             [
-                FamilyName::Named("Inter".into()),
-                FamilyName::Named("Noto Sans SC".into()),
-                FamilyName::Named("Brand Mono".into()),
+                FamilyName::Named("Inter"),
+                FamilyName::Named("Noto Sans SC"),
+                FamilyName::Named("Brand Mono"),
                 FamilyName::Monospace,
                 FamilyName::System,
             ]
@@ -4112,30 +4191,53 @@ mod tests {
         assert_eq!(font_families(" , ").count(), 0);
     }
 
-    /// A quoted name keeps its commas, quotes and backslashes, and is a
-    /// family's name even when it spells a generic family, as in CSS.
+    #[test]
+    fn family_names_remain_copy_and_borrowed() {
+        fn is_copy<T: Copy>() {}
+        is_copy::<FamilyName<'_>>();
+        let name = String::from("Inter");
+        let FamilyName::Named(borrowed) = font_families(&name).next().unwrap() else {
+            panic!("expected named family");
+        };
+        assert_eq!(borrowed.as_ptr(), name.as_ptr());
+    }
+
+    #[test]
+    fn decoded_families_keep_whitespace_semantics() {
+        for input in [
+            "\u{2003}Inter\u{2003}, serif",
+            "\u{000b}Inter\u{000b}, serif",
+            "'\u{2003}Inter\u{000b}', serif",
+        ] {
+            assert_eq!(decoded_families(input), decoded_families("Inter, serif"));
+        }
+    }
+
+    fn decoded_families(value: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for_each_font_family(value, |family| out.push(format!("{family:?}")));
+        out
+    }
+
     #[test]
     fn quoted_family_names_keep_their_commas() {
         use super::{FamilyName, css_font_families, font_families};
         assert_eq!(
             font_families("'ACME, Inc', serif").collect::<Vec<_>>(),
-            [FamilyName::Named("ACME, Inc".into()), FamilyName::Serif]
+            [FamilyName::Named("ACME, Inc"), FamilyName::Serif]
         );
         assert_eq!(
             font_families("\"Brand, Display\" , 'monospace', ui-monospace").collect::<Vec<_>>(),
             [
-                FamilyName::Named("Brand, Display".into()),
-                FamilyName::Named("monospace".into()),
+                FamilyName::Named("Brand, Display"),
+                FamilyName::Named("monospace"),
                 FamilyName::Monospace,
             ]
         );
         // An unclosed quote runs to the end.
         assert_eq!(
             font_families("Inter, 'Noto, Sans").collect::<Vec<_>>(),
-            [
-                FamilyName::Named("Inter".into()),
-                FamilyName::Named("Noto, Sans".into()),
-            ]
+            [FamilyName::Named("Inter"), FamilyName::Named("Noto, Sans"),]
         );
         assert_eq!(
             css_font_families("SF Mono, Menlo, PingFang SC, monospace"),
@@ -4147,8 +4249,17 @@ mod tests {
         );
         assert_eq!(css_font_families(" , "), "");
 
+        assert_eq!(
+            decoded_families(r#"'A\\B', monospace"#),
+            [r#"Named("A\\B")"#, "Monospace"]
+        );
+        assert_eq!(
+            decoded_families(r#""A\"B", serif"#),
+            [r#"Named("A\"B")"#, "Serif"]
+        );
+
         // Quotes and backslashes inside family names round-trip identically
-        // through css_font_families -> CanvasFont::parse -> text_style -> font_families.
+        // through css_font_families -> CanvasFont::parse -> text_style -> for_each_font_family.
         for raw in [
             "'A\"B', serif",
             "\"A\\\"B\", serif",
@@ -4156,29 +4267,21 @@ mod tests {
             "a\\b, sans-serif",
             "'Quote\\'s, Back\\\\slash', ui-rounded",
         ] {
-            let expected: Vec<_> = font_families(raw).collect();
+            let expected = decoded_families(raw);
             let css_list = css_font_families(raw);
-            assert_eq!(
-                font_families(&css_list).collect::<Vec<_>>(),
-                expected,
-                "{raw}"
-            );
+            assert_eq!(decoded_families(&css_list), expected, "{raw}");
             let shorthand = format!("13px {css_list}");
             let parsed = crate::canvas::CanvasFont::parse(&shorthand).expect("valid CSS font");
             let text_family = parsed.text_style().font_family.expect("has font_family");
-            assert_eq!(
-                font_families(&text_family.name()).collect::<Vec<_>>(),
-                expected,
-                "{raw}"
-            );
+            assert_eq!(decoded_families(&text_family.name()), expected, "{raw}");
         }
         assert_eq!(
             font_families("'A\"B', serif").collect::<Vec<_>>(),
-            [FamilyName::Named("A\"B".into()), FamilyName::Serif]
+            [FamilyName::Named("A\"B"), FamilyName::Serif]
         );
         assert_eq!(
             font_families("'A\\\\B', monospace").collect::<Vec<_>>(),
-            [FamilyName::Named("A\\B".into()), FamilyName::Monospace]
+            [FamilyName::Named("A\\\\B"), FamilyName::Monospace]
         );
     }
 

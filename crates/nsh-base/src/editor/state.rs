@@ -2034,9 +2034,9 @@ mod tests {
         assert_eq!(
             nsh_core::font_families(parsed.family.as_deref().unwrap()).collect::<Vec<_>>(),
             vec![
-                nsh_core::FamilyName::Named("SF Mono".into()),
-                nsh_core::FamilyName::Named("Menlo".into()),
-                nsh_core::FamilyName::Named("PingFang SC".into()),
+                nsh_core::FamilyName::Named("SF Mono"),
+                nsh_core::FamilyName::Named("Menlo"),
+                nsh_core::FamilyName::Named("PingFang SC"),
             ]
         );
     }

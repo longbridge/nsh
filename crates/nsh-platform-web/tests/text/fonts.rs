@@ -61,8 +61,8 @@ fn stacks_keep_each_family_as_written() {
         let style_family = parsed.text_style().font_family.expect("has font_family");
         assert_eq!(family_list(&style_family.name()), css);
         assert_eq!(
-            nsh_core::font_families(&style_family.name()).collect::<Vec<_>>(),
-            nsh_core::font_families(raw).collect::<Vec<_>>()
+            decoded_families(&style_family.name()),
+            decoded_families(raw)
         );
     }
     assert_eq!(family_list(" , "), "");
@@ -242,4 +242,10 @@ fn emoji_excess_adds_each_emoji_cluster_once() {
     );
     // Text without emoji is not split at all.
     assert!(clusters("Hello 世界 ไทย 123 #*").is_empty());
+}
+
+fn decoded_families(value: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    nsh_core::for_each_font_family(value, |f| out.push(format!("{f:?}")));
+    out
 }
