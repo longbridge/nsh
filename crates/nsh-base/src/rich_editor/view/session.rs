@@ -431,10 +431,13 @@ impl EditorSession {
     /// Pastes `html` at the selection as a paste of it would go in
     /// (ProseMirror's `pasteHTML`): through the plugins'
     /// `transform_pasted_html` and the clipboard parser (the schema's parse
-    /// rules, so `<figure><img><figcaption>` keeps its image), then
-    /// `transform_pasted` and `handle_paste`, else a replace of the
-    /// selection (origin `Paste`). Whether it pasted: HTML that parses to
-    /// nothing, or HTML into code, pastes nothing.
+    /// rules, fitted to the selection: an `isolating` node, such as a
+    /// figure holding its caption, stays whole), then `transform_pasted`
+    /// and `handle_paste`, else a replace of the selection (origin
+    /// `Paste`). Whether it pasted: HTML that parses to nothing, or HTML
+    /// into code, pastes nothing. A plugin's `handle_paste` taking it
+    /// counts as pasted; a transaction the state refuses is logged, and
+    /// does not change the answer.
     ///
     /// The app's JS paste hooks are not asked: they answer a JS turn later,
     /// and this is what one calls to go on with a paste it handled
