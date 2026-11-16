@@ -14,6 +14,7 @@ use nsh_core::{
 use super::{
     Alert, Block, CodeBlock, ColumnAlign, CustomNode, Document, Image, ImageLength, Inline,
     ListItem, MarkdownExtension, MarkdownOptions, MarkdownPlugins, Parser, Table,
+    markdown::{Incremental, Parsed, SharedBlock},
     parts::{TextViewClasses, TextViewPart as Part, TextViewParts, TextViewStyles},
     selection::{Reported, Source, TextSelectionOptions, selected},
 };
@@ -156,7 +157,7 @@ pub enum TextViewEvent {
 
 /// The methods of a [`TextView`]'s ref.
 pub struct TextViewApi {
-    document: Memo<Document>,
+    document: Memo<Parsed>,
     props: TextViewProps,
     reported: Rc<std::cell::RefCell<Reported>>,
 }
@@ -183,7 +184,7 @@ impl TextViewApi {
             Source::None
         };
         self.document
-            .with_untracked(|doc| selected(doc, &source, &reported, format))
+            .with_untracked(|doc| selected(&doc.document(), &source, &reported, format))
     }
 }
 
@@ -274,6 +275,11 @@ pub struct TextViewCodeActionEvent {
 pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElement {
     let plugins = use_context::<MarkdownPlugins>().unwrap_or_default();
     let parser_plugins = plugins.clone();
+    // What was read of the Markdown last: a text that grew at its end (a
+    // reply still arriving) is read from where it can still change, and
+    // the blocks before are the ones made earlier, shared, so comparing
+    // the documents and the rows compares pointers there.
+    let read = std::cell::RefCell::new(Incremental::default());
     let document = computed(move || {
         let parser = || {
             Parser::new()
@@ -282,17 +288,42 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
                 .plugins(&parser_plugins)
         };
         if let Some(markdown) = props.markdown.get() {
-            parser().markdown(&markdown)
-        } else if let Some(html) = props.html.get() {
-            parser().html(&html)
+            return read.borrow_mut().parse(&parser(), &markdown);
+        }
+        read.borrow_mut().clear();
+        if let Some(html) = props.html.get() {
+            parser().html(&html).into()
         } else {
-            props.document.get().unwrap_or_default()
+            props.document.get().unwrap_or_default().into()
         }
     });
-    let blocks = computed(move || {
-        document.with(|d| d.blocks.iter().cloned().enumerate().collect::<Vec<_>>())
+    // The rows' items carry what a row needs of the blocks around it, so a
+    // row hears of a change by its own item alone: an update of a long
+    // document runs nothing per row but that item's comparison.
+    let rows = computed(move || {
+        document.with(|d| {
+            let terminal = is_terminal();
+            let count = d.blocks.len();
+            // The last block before this one that shows (`shown_before`).
+            let mut shown = None;
+            d.blocks
+                .iter()
+                .enumerate()
+                .map(|(index, block)| {
+                    let before = Before::of(shown);
+                    if !terminal || !blank_in_terminal(block) {
+                        shown = Some(&**block);
+                    }
+                    Row {
+                        index,
+                        block: block.clone(),
+                        before,
+                        last: index + 1 == count,
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
     });
-    let count = computed(move || blocks.with(Vec::len));
     let footnotes = computed(move || document.with(|d| d.footnotes.clone()));
     let plugins = Rc::new(plugins);
     let row_plugins = plugins.clone();
@@ -338,29 +369,18 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
                 .with(|s| s.root.as_ref().map(|s| s.0.clone()).unwrap_or_default())
         })
         .child(each(
-            blocks,
+            rows,
             // By position and kind: the block a stream is writing keeps its
             // row, and its row alone is made again.
-            |(index, block): &(usize, Block)| (*index, block.kind().to_owned()),
-            move |item, index| {
+            |row: &Row| (row.index, row.block.kind().to_owned()),
+            move |row, _| {
                 let plugins = row_plugins.clone();
-                // A memo: a block added after this one runs it again only
-                // when this one stops being the last.
-                let last = computed(move || index.get() + 1 == count.get());
-                // A memo as well: what comes before decides a heading's
-                // room above it.
-                let before = computed(move || {
-                    let i = index.get();
-                    blocks.with(|b| {
-                        Before::of(shown_before(b[..i.min(b.len())].iter().map(|(_, b)| b)))
-                    })
-                });
                 // A node as the row's root: an `Each` keeps rows by their
                 // root's key, which a region has none of.
                 view().child(dynamic(move || {
                     let cx = Cx::read(&props, cx, plugins.clone(), math_loaded);
-                    let (i, block) = item.get();
-                    cx.block(&block, &i.to_string(), last.get(), before.get())
+                    let row = row.get();
+                    cx.block(&row.block, &row.index.to_string(), row.last, row.before)
                 }))
             },
         ))
@@ -2258,6 +2278,18 @@ const MARKER_BOX: f32 = BODY_SIZE * 3.0;
 const TASK_BOX: f32 = 15.0;
 /// The size of an alert's icon.
 const ALERT_ICON: f32 = 16.0;
+
+/// A block of the top level, as its row gets it.
+#[derive(Clone, PartialEq)]
+struct Row {
+    /// Where it is among the blocks.
+    index: usize,
+    block: SharedBlock,
+    /// What comes before it: a heading's room above it.
+    before: Before,
+    /// Whether it is the last block, which the caret follows.
+    last: bool,
+}
 
 /// What comes before a block in its column, for the room above it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

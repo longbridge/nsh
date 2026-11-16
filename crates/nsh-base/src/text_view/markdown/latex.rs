@@ -21,6 +21,19 @@ pub(super) fn rewrite(source: &str) -> Cow<'_, str> {
     if !source.contains("\\(") && !source.contains("\\[") {
         return Cow::Borrowed(source);
     }
+    Cow::Owned(rewrite_lines(source, &mut |_, _| {}))
+}
+
+/// [`rewrite`] of `source`, which also tells where its lines after a blank
+/// line outside fenced code start: `blank(at, written)`, `at` the offset in
+/// `source` and `written` the one in what is returned. The scan is there in
+/// the state it starts in, so what follows such a line is rewritten the
+/// same with or without the text before it.
+pub(super) fn rewrite_blanks(source: &str, blank: &mut dyn FnMut(usize, usize)) -> String {
+    rewrite_lines(source, blank)
+}
+
+fn rewrite_lines(source: &str, blank: &mut dyn FnMut(usize, usize)) -> String {
     let lines = lines(source);
     let mut out = String::with_capacity(source.len() + 16);
     // The lines of text (not code, not blank) not written out yet: a
@@ -58,12 +71,17 @@ pub(super) fn rewrite(source: &str) -> Cow<'_, str> {
             continue;
         }
         out.push_str(&source[start..next]);
+        // A blank line that ended: no fence is open (a fence's opening line
+        // is no blank line) and no text waits to be written.
+        if fence.is_none() && end < source.len() {
+            blank(next, out.len());
+        }
         i += 1;
     }
     if let Some(from) = text {
         inline(&source[from..], &mut out);
     }
-    Cow::Owned(out)
+    out
 }
 
 /// The lines of `source`: start, end without the line ending, start of the

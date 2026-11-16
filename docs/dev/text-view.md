@@ -13,7 +13,7 @@ colored with the theme's tokens; the app restyles each part over it.
 | `document.rs` | The document model (`Document`, `Block`, `Inline`, `CodeBlock`, `Table`, `Image`, `CustomNode`, ...): serde data, JSON in JS, its TypeScript declarations (`TextViewDocument`, `TextViewBlock`, ...) |
 | `parts.rs` | The parts the app styles: one `parts!` list makes `TextViewClasses`, `TextViewStyles` (each a `PartStyle`, a `Style` declared `StyleProp<TextStyle>`, since most parts are texts) and `TextViewPart`; `TextViewParts` (context): typed `StyleRefinement` functions by part for Rust views |
 | `extension.rs` | `MarkdownOptions`, `MarkdownExtension` (declared syntax), `MarkdownPlugin` / `MarkdownPlugins` (Rust), `Parser` |
-| `markdown/` | Markdown into the model (markdown-rs's mdast); `container.rs`: `:::` containers, split out before parsing (markdown-rs has no such syntax); `streaming.rs`: streaming repair; `cjk.rs`: emphasis beside CJK text read as the CJK-friendly amendment to CommonMark reads it (`**涨幅：**5%` is bold), which markdown-rs does not; `autolink.rs`: bare URLs end where CJK text or a curly quote starts (`https://example.com。下一句` links only the URL); `offsets.rs`: what is inserted before parsing taken out of the tree again, so positions (and a plugin's `ParseContext::source`) are the text given; `latex.rs`: TeX's `\(…\)` and `\[…\]` read as formulas, escaped brackets that hold a reference number or CJK words (`\[1\]\[3\]`) kept as text |
+| `markdown/` | Markdown into the model (markdown-rs's mdast); `incremental.rs`: a text that grew at its end read from where it can still change ("Streaming"); `container.rs`: `:::` containers, split out before parsing (markdown-rs has no such syntax); `streaming.rs`: streaming repair; `cjk.rs`: emphasis beside CJK text read as the CJK-friendly amendment to CommonMark reads it (`**涨幅：**5%` is bold), which markdown-rs does not; `autolink.rs`: bare URLs end where CJK text or a curly quote starts (`https://example.com。下一句` links only the URL); `offsets.rs`: what is inserted before parsing taken out of the tree again, so positions (and a plugin's `ParseContext::source`) are the text given; `latex.rs`: TeX's `\(…\)` and `\[…\]` read as formulas, escaped brackets that hold a reference number or CJK words (`\[1\]\[3\]`) kept as text |
 | `html/` | HTML into the model (html5ever, as a reader mode reads a page); `ELEMENTS`: HTML's element names, outside which a tag in Markdown is text (`<US tech>`) |
 | `tex_text.rs` | A formula's TeX as plain text, which a terminal shows when the app has no `renderMath` |
 | `common.rs` | What both parsers share: `pattern` extensions on inline content, headings' anchors |
@@ -23,12 +23,18 @@ colored with the theme's tokens; the app restyles each part over it.
 ## How it works
 
 - **Parsed in Rust, once per change.** One `computed` reads `markdown`, else `html`, else `document`, with `options`,
-  `extensions` and the `MarkdownPlugins` of the context, into a `Document`. JS only passes strings (or the `document`
-  JSON); parsing never runs in QuickJS. The `Parser` is public, so Rust code reads documents without a view.
+  `extensions` and the `MarkdownPlugins` of the context, into a document. JS only passes strings (or the `document`
+  JSON); parsing never runs in QuickJS. The `Parser` is public, so Rust code reads documents without a view. Markdown
+  that grew at its end is read from where it can still change ("Reading only what can change", below); the view
+  holds its blocks shared (`Parsed`, `SharedBlock`: an `Rc` each), so the document's and the rows' comparisons are
+  of pointers for the blocks kept.
 - **Blocks are rows of an `Each`, keyed by position and kind** (`(index, block.kind())`). A streamed reply grows at its
   end: the blocks before it parse to equal values and keep their nodes, the block being written keeps its row (same
   position, same kind) and only that row is made again. A block that changes kind mid-stream (a paragraph becoming a
-  table once its delimiter row arrives) gets a new row. Footnotes follow the blocks in one region of their own.
+  table once its delimiter row arrives) gets a new row. A row's item (`Row`) is its block (shared), its position,
+  what comes before it (a heading's room above it) and whether it is the last (the caret's), so a row hears of a
+  change through its own item alone and an update runs no memo per row. Footnotes follow the blocks in one region of
+  their own.
 - **Built on `Text`** (`text.md`): every paragraph, heading, table cell and code block is one native text
   block, so wrapping, font scale, selection, span backgrounds (inline code), pressable
   spans (links) and inline attachments (images, inline custom nodes, the caret) are the text element's, with nothing of
@@ -229,6 +235,50 @@ now, a rule, an item or text later), a fence's opening line and the start of its
 (`a*b`) is never closed. So a reply never flashes literal `**`
 or `[` while the next chunk is on its way. The repair is a `Cow`: text with nothing open is parsed as it is.
 
+### Reading only what can change
+
+A reply streamed in N updates would be parsed N times at a growing length. Each `TextView` keeps what it read of
+its `markdown` instead (`markdown/incremental.rs`, `Incremental`: the text, a boundary in it, the blocks before the
+boundary and the anchors of their headings): when the next text starts with the last one and `options`, `extensions`
+and the plugins are the same, only the text from the boundary on is repaired, rewritten (TeX), parsed and converted,
+and the blocks before it are the ones made earlier. With or without `options.streaming`; the document is the one
+`Parser::markdown` makes of the whole text, which stays the reference (the module's tests read every prefix of their
+documents both ways, in steps of several sizes, and random documents).
+
+The boundary moves to the start of a line when all of these hold:
+
+- the line before it is blank, and the scans that read lines with a state of their own are there in the state they
+  start a text in: the streaming repair's (outside fenced code and `$$`) and the TeX rewrite's (outside fenced
+  code). Both report those lines (`repair_tail`, `rewrite_blanks`), so the tail is repaired and rewritten as the end
+  of the whole text is;
+- the line has ended, shows text and is as written (the repair changed nothing up to its end): what a line means is
+  settled when it ends, not while its characters arrive (`#` is a heading, `#a` goes on with the paragraph above);
+- in the tail's syntax tree a block of the top level starts on that line and every block before it ends before it,
+  so a blank line inside a list, a quote, fenced code, a formula, an HTML block or indented code is no boundary;
+- the block before it is a paragraph. markdown-rs carries state from line to line that a blank line does not always
+  clear, and a block read after it is then not read as the first block of a text is: a list item, and a quote whose
+  paragraph went on without its `>`, are closed only by the first line that does not go on with them, which is then
+  read as a line that might have (it starts no table and underlines no heading, an HTML block ends at another line,
+  what may interrupt its paragraph differs); a row of cells cut short by a quote (`| a |` then `>`) leaves the quote
+  open across the code, headings and rules after it. A paragraph of the top level is where this ends, so the
+  boundary waits for the block after the next paragraph: the tail is a few blocks, not one;
+- no HTML element is open across it: `<details>` on lines of its own takes the blocks up to its closing tag as its
+  content when that arrives, so nothing after a tag still waiting for one is final.
+
+The whole text is parsed, as before, when a later line can change any block or the parser reads the whole source:
+
+| When | Until |
+|---|---|
+| A link or footnote definition is in the text (references before it resolve, footnotes are numbered by first reference) | The text is replaced |
+| Plugins (`ParseContext::source`, positions in the whole text), a declared `:::` container, `options.mdx` | They are gone |
+| Front matter is open (`---` first with `options.frontmatter`, its closing line not arrived) | It closes: nothing is kept before |
+| The repair holds back a line at the start of the tail (it then repairs the block before the boundary) | That update only |
+| The text does not start with the last one (replaced, edited, shorter), or `options` / `extensions` changed | That update: reading starts over from it |
+
+A reply that ends in one large block (a long table, list or code block) has that block after the boundary, so it
+is the part parsed again on each update: the blocks before it are still kept. So is a reply with no paragraph for a
+long stretch (lists, quotes or code one after another): the boundary stays after its last paragraph.
+
 ## HTML
 
 `html/` reads fragments and whole pages (their body) through html5ever, so unclosed and misplaced tags build the tree a
@@ -271,11 +321,16 @@ module, which has everything.
 
 ## Performance
 
-- The whole text is parsed again on each change (one `computed`); parsing is Rust and linear, and the rows that did
-  not change make no mount items. A streamed reply of N chunks costs N parses of a growing text (no incremental
-  parse); a baseline belongs in `performance.md` once measured.
-- Rows are made again only when their value changes (`Each` with the position and kind as the key, the block as the
-  value), and render functions only when their value changes.
+- Markdown that grows at its end is read from the last boundary on ("Reading only what can change"): an update
+  parses the blocks since the last paragraph, not the text before them (about 0.04 ms for a typical reply, at 20 KB
+  as at 40 KB), and compares the kept blocks by pointer. What still grows with the document is the pass over its
+  blocks: a pointer copied and compared per block in the document's and the rows' memos, then `Each`'s own pass over
+  its rows and the commit (`nsh-core`), about 1.2 µs a block in all (0.8 ms an update at 640 blocks). And the last
+  block itself: a reply ending in a 400-row table parses and shows that table again on each update. Replaced text,
+  definitions, plugins, containers and MDX are parsed whole on each change. Baselines: `performance.md` "`TextView`
+  streaming".
+- Rows are made again only when their value changes (`Each` with the position and kind as the key, the row's item as
+  the value), and render functions only when their value changes.
 - A disclosure makes its content only while open.
 - Images default to their natural size (one `image_size` read each), at most the width of the text. An app's
   `renderImage` element on its own (a paragraph or a cell of images) sits in a view as wide as the text, so its own

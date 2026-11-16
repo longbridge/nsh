@@ -11,10 +11,16 @@
 //! its tree converted. Definitions and footnotes are
 //! collected from the trees first, so references resolve wherever they
 //! stand and footnotes are numbered by their first reference.
+//!
+//! A view whose text grows at its end (a reply still arriving) reads it
+//! from where it can still change and keeps the blocks before
+//! (`incremental.rs`); [`parse`] reads a whole text and is what that is
+//! held to.
 
 mod autolink;
 mod cjk;
 mod container;
+mod incremental;
 mod latex;
 mod offsets;
 mod streaming;
@@ -28,8 +34,11 @@ use markdown::{
     mdast::{self, AlignKind, AttributeContent, AttributeValue, Node},
 };
 
-pub(crate) use self::streaming::repair_streaming;
 use self::{container::Segment, offsets::Inserted};
+pub(crate) use self::{
+    incremental::{Incremental, Parsed, SharedBlock},
+    streaming::repair_streaming,
+};
 use super::{
     Parser,
     common::{self, Slugger},
