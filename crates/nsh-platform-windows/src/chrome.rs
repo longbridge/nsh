@@ -1236,6 +1236,9 @@ pub(crate) fn draw(surface: &Surface, hwnd: HWND, dc: &ID2D1DeviceContext, scale
         };
         // SAFETY: drawing on the context between its BeginDraw / EndDraw.
         unsafe {
+            use windows::Win32::Graphics::{
+                Direct2D::D2D1_DRAW_TEXT_OPTIONS_NONE, DirectWrite::DWRITE_MEASURING_MODE_NATURAL,
+            };
             if let Some(bg) = background
                 && let Ok(brush) = dc.CreateSolidColorBrush(&color_f(bg), None)
             {
@@ -1244,6 +1247,28 @@ pub(crate) fn draw(surface: &Surface, hwnd: HWND, dc: &ID2D1DeviceContext, scale
             let Ok(brush) = dc.CreateSolidColorBrush(&color_f(foreground), None) else {
                 continue;
             };
+            // The system's own caption glyphs (Windows 11's Segoe Fluent
+            // Icons, Windows 10's Segoe MDL2 Assets), as native title bars
+            // draw them; lines where neither font is installed.
+            if let Some(format) = icon_format() {
+                let ch = match code {
+                    HTMINBUTTON => '\u{E921}',
+                    HTMAXBUTTON if zoomed(hwnd) => '\u{E923}',
+                    HTMAXBUTTON => '\u{E922}',
+                    _ => '\u{E8BB}',
+                };
+                let mut buf = [0u16; 2];
+                let units = ch.encode_utf16(&mut buf);
+                dc.DrawText(
+                    units,
+                    &format,
+                    &rect_f(x, 0.0, BUTTON_WIDTH, caption),
+                    &brush,
+                    D2D1_DRAW_TEXT_OPTIONS_NONE,
+                    DWRITE_MEASURING_MODE_NATURAL,
+                );
+                continue;
+            }
             let left = snap(x + (BUTTON_WIDTH - glyph) / 2.0);
             let top = snap((caption - glyph) / 2.0);
             let (right, bottom) = (left + glyph - px, top + glyph - px);
@@ -1286,6 +1311,67 @@ pub(crate) fn draw(surface: &Surface, hwnd: HWND, dc: &ID2D1DeviceContext, scale
         }
     }
 }
+
+/// The caption glyphs' font, the one the system's title bars use, centered
+/// in a button; `None` when no such font is installed.
+fn icon_format() -> Option<IDWriteTextFormat> {
+    thread_local! {
+        static FORMAT: Option<IDWriteTextFormat> = icon_font().and_then(|family| {
+            let factory = crate::gfx::dwrite();
+            // SAFETY: COM calls with valid strings.
+            unsafe {
+                let format = factory
+                    .CreateTextFormat(
+                        &HSTRING::from(family),
+                        None,
+                        DWRITE_FONT_WEIGHT_NORMAL,
+                        DWRITE_FONT_STYLE_NORMAL,
+                        DWRITE_FONT_STRETCH_NORMAL,
+                        // The size Windows' caption buttons use.
+                        10.0,
+                        &HSTRING::new(),
+                    )
+                    .ok()?;
+                let _ = format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                let _ = format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                let _ = format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+                Some(format)
+            }
+        });
+    }
+    FORMAT.with(Clone::clone)
+}
+
+/// The installed icon font with the caption glyphs, newest first.
+fn icon_font() -> Option<&'static str> {
+    let factory = crate::gfx::dwrite();
+    let mut collection = None;
+    // SAFETY: COM calls with local out values.
+    unsafe {
+        factory
+            .GetSystemFontCollection(&mut collection, false)
+            .ok()?;
+        let collection = collection?;
+        ["Segoe Fluent Icons", "Segoe MDL2 Assets"]
+            .into_iter()
+            .find(|name| {
+                let (mut index, mut exists) = (0u32, windows::core::BOOL(0));
+                collection
+                    .FindFamilyName(&HSTRING::from(*name), &mut index, &mut exists)
+                    .is_ok()
+                    && exists.as_bool()
+            })
+    }
+}
+
+use windows::{
+    Win32::Graphics::DirectWrite::{
+        DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER,
+        DWRITE_WORD_WRAPPING_NO_WRAP, IDWriteTextFormat,
+    },
+    core::HSTRING,
+};
 
 // --- Menus ------------------------------------------------------------------------------
 
