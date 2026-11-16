@@ -158,7 +158,12 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
   `target`, also after following links (`asset_in_root`); sources, `nsh.json`, `.env`, JSON and other files return
   404. `/ws` takes native hosts (no `Origin`) and the dev server's own web page: a browser's `Origin` must be
   `http(s)://` plus the request's `Host`, an IP address or `localhost` (`allowed_origin`), so another page open in a
-  browser, even on loopback or under a name rebound to this machine, gets 403.
+  browser, even on loopback or under a name rebound to this machine, gets 403. Every other path (`/bundle.js`,
+  `/assets/…`, the web host's page and files) takes only a `Host` that is an IP address or `localhost`
+  (`address_host`, the rule `/ws` holds a browser's page to), else 403: a page whose own name is rebound to this
+  machine (DNS rebinding) reads them same-origin, with no `Origin`, under that name, and any name can be rebound, by
+  its site's DNS or on the network (`.local`, a name of one label). Hosts reach the server by the address the CLI
+  prints.
 - Asset names: `asset:/<path>` is a file's path in the app's directory, the bundle's asset root
   (`nsh_bundler::Bundle::asset_root`, `HotBundle::asset_root`; `bundle.rs` `app_dir`: the entry's directory when it
   holds an `nsh.json` or an `App.tsx`, else the nearest one up with an `nsh.json`, else the nearest one up with an

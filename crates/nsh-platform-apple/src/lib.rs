@@ -6,6 +6,7 @@
 
 pub mod audio;
 pub mod canvas_image;
+pub mod handoff;
 pub mod image_source;
 pub mod notifications;
 pub mod speech;

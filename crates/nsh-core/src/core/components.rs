@@ -6283,7 +6283,6 @@ impl<M: TextEngine> Core<M> {
                 // Checked where the app called (`set_app_url`, `setUrl`);
                 // where the app is the page, the address stays of its
                 // origin (both refuse others first).
-                let web = self.components.environment.os == crate::platform::Os::Web;
                 let address = self.components.url_schemes.address.clone();
                 if let Some(base) = address.page_base()
                     && !crate::url_scheme::same_origin(Some(base.as_str()), &url)
@@ -6294,17 +6293,17 @@ impl<M: TextEngine> Core<M> {
                 // Again for `setUrl`, which wrote it as it was called: in
                 // order with the page's address the core took since.
                 address.set(url.clone());
-                // Only the web shows an address (its history entries).
-                if web {
-                    let command = match history {
-                        crate::url_scheme::HistoryBehavior::Push => Command::PushAppUrl(url),
-                        _ => Command::SetAppUrl(url),
-                    };
-                    let _ = self.apply_op(Op::Command {
-                        id: crate::ROOT_ID,
-                        command,
-                    });
-                }
+                // The platform shows it: the web in its history entries,
+                // iOS and macOS to the system when the app opts in
+                // (Handoff).
+                let command = match history {
+                    crate::url_scheme::HistoryBehavior::Push => Command::PushAppUrl(url),
+                    _ => Command::SetAppUrl(url),
+                };
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command,
+                });
             }
             Action::WebInputAvailable(answer) => {
                 let available =

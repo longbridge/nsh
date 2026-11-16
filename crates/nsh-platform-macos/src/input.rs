@@ -830,6 +830,7 @@ pub(crate) fn event_root(surface: &Surface) -> NshView {
 /// A mouse, wheel or trackpad event over the root view.
 pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
     let ty = event.r#type();
+    pen_sample(event, ty);
     let p = event_root(surface)
         .ns()
         .convertPoint_fromView(event.locationInWindow(), None);
@@ -2298,10 +2299,68 @@ fn selection_up(surface: &Surface, view: &NshView) -> bool {
     }
 }
 
+/// A pen's state at the latest mouse event: pressure (0 to 1) and tilt
+/// in degrees, `None` for a mouse.
+#[derive(Clone, Copy)]
+struct Pen {
+    pressure: f32,
+    tilt: (f32, f32),
+}
+
+thread_local! {
+    static PEN: std::cell::Cell<Option<Pen>> = const { std::cell::Cell::new(None) };
+}
+
+/// Keeps the pen state of mouse `event` of type `ty`: a tablet sends mouse
+/// events with the tablet-point subtype, carrying pressure and tilt.
+fn pen_sample(event: &NSEvent, ty: NSEventType) {
+    let mouse = matches!(
+        ty,
+        NSEventType::LeftMouseDown
+            | NSEventType::LeftMouseUp
+            | NSEventType::LeftMouseDragged
+            | NSEventType::RightMouseDown
+            | NSEventType::RightMouseUp
+            | NSEventType::RightMouseDragged
+            | NSEventType::OtherMouseDown
+            | NSEventType::OtherMouseUp
+            | NSEventType::OtherMouseDragged
+            | NSEventType::MouseMoved
+    );
+    if !mouse && ty != NSEventType::TabletPoint {
+        return;
+    }
+    let pen = (ty == NSEventType::TabletPoint
+        || event.subtype() == objc2_app_kit::NSEventSubtype::TabletPoint)
+        .then(|| {
+            let tilt = event.tilt();
+            Pen {
+                pressure: event.pressure().clamp(0.0, 1.0),
+                // AppKit's tilt runs -1 to 1, positive y toward the bottom.
+                tilt: (tilt.x as f32 * 90.0, tilt.y as f32 * 90.0),
+            }
+        });
+    PEN.set(pen);
+}
+
+/// `event` with the pen's state, when a pen sent the latest mouse event.
+fn with_pen(event: MouseEvent) -> MouseEvent {
+    match PEN.get() {
+        Some(pen) => event.with_pointer(
+            nsh_core::PointerType::Pen,
+            pen.pressure,
+            pen.tilt.0,
+            pen.tilt.1,
+        ),
+        None => event,
+    }
+}
+
 /// Sends the pointer's touch, which `phase` is about, and the view whose
 /// pan activation fired with it.
 fn report(surface: &Surface, phase: TouchPhase, p: &Pointer, activated: Option<NodeId>) {
     let (lx, ly) = local(surface, &p.target, p.x, p.y);
+    let pen = PEN.get();
     let point = TouchPoint {
         id: p.id,
         target: p.target.id(),
@@ -2314,7 +2373,23 @@ fn report(surface: &Surface, phase: TouchPhase, p: &Pointer, activated: Option<N
         page: point(Points(p.x), Points(p.y)),
         location: point(Points(lx), Points(ly)),
         changed: true,
-        pointer_type: nsh_core::PointerType::Mouse,
+        pointer_type: if pen.is_some() {
+            nsh_core::PointerType::Pen
+        } else {
+            nsh_core::PointerType::Mouse
+        },
+        pressure: pen.map_or_else(
+            || TouchPoint::default_pressure(phase, true),
+            |pen| {
+                if matches!(phase, TouchPhase::End | TouchPhase::Cancel) {
+                    0.0
+                } else {
+                    pen.pressure
+                }
+            },
+        ),
+        tilt_x: pen.map_or(0.0, |pen| pen.tilt.0),
+        tilt_y: pen.map_or(0.0, |pen| pen.tilt.1),
     };
     let event = TouchEvent {
         phase,
@@ -2919,7 +2994,7 @@ fn mouse_up(surface: &Surface, x: f32, y: f32, mouse: Mouse, button: MouseButton
             mouse.modifiers,
             button,
         );
-        surface.event(id, EventKind::MouseUp, EventPayload::Mouse(event));
+        surface.event(id, EventKind::MouseUp, EventPayload::Mouse(with_pen(event)));
     }
 }
 
@@ -2990,7 +3065,7 @@ fn mouse_event(surface: &Surface, view: &NshView, kind: EventKind, x: f32, y: f3
         mouse.modifiers,
         mouse.pressed,
     );
-    surface.event(id, kind, EventPayload::Mouse(event));
+    surface.event(id, kind, EventPayload::Mouse(with_pen(event)));
 }
 
 // --- Wheel and trackpad scrolling ---------------------------------------------------

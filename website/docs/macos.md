@@ -255,6 +255,11 @@ An embedded `AppView` does not change the window it is put in: make your own `NS
 `backgroundColor` for the same look.
 
 
+`AppOptions::handoff` gives the address the app sets with [`UrlScheme.setUrl`](../modules/nsh.md#handoff) to the system,
+so Handoff continues it on the user's other devices. An address of the app's own scheme needs `<bundle id>.url` in the
+Info.plist's `NSUserActivityTypes`. `run_app` turns it on when the bundle declares that type (`nsh.json`
+`"handoff": true`).
+
 `AppOptions::notifications` hands the process's [notifications](../modules/nsh.md#notifications) to the app the view runs:
 its banners, presses and badge. It is off by default, so an embedded app's notifications are `unavailable` and your
 app's stay yours; `run_app` sets it.

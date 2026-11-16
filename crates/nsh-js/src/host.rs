@@ -1305,6 +1305,10 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 Some(button) => obj.set("button", button.name())?,
                 None => obj.set("button", Value::new_null(cx.clone()))?,
             }
+            obj.set("pointerType", e.pointer_type.name())?;
+            obj.set("pressure", e.pressure)?;
+            obj.set("tiltX", e.tilt_x)?;
+            obj.set("tiltY", e.tilt_y)?;
         }
         EventPayload::Key(event) => {
             obj.set("key", event.key.as_str())?;
@@ -1486,6 +1490,10 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 o.set("locationX", p.location.x.0)?;
                 o.set("locationY", p.location.y.0)?;
                 o.set("changed", p.changed)?;
+                o.set("pointerType", p.pointer_type.name())?;
+                o.set("pressure", p.pressure)?;
+                o.set("tiltX", p.tilt_x)?;
+                o.set("tiltY", p.tilt_y)?;
                 o.set("timestamp", touch.timestamp)?;
                 points.set(i, o)?;
             }
@@ -2293,6 +2301,32 @@ const report = (v) => text(String(v));
             assert_eq!(page.get::<_, f64>("y").unwrap(), 22.0);
             let modifiers: rquickjs::Object = obj.get("modifiers").unwrap();
             assert!(!modifiers.get::<_, bool>("shift").unwrap());
+        });
+    }
+
+    #[test]
+    fn mouse_payload_has_pen_fields() {
+        let host = Host::new().unwrap();
+        let mouse = nsh_core::MouseEvent::new(
+            point(px(1.0), px(2.0)),
+            point(px(1.0), px(2.0)),
+            Default::default(),
+            Some(nsh_core::MouseButton::Left),
+        );
+        let pen = mouse.with_pointer(nsh_core::PointerType::Pen, 0.75, 30.0, -15.0);
+        host.cx.with(|cx| {
+            let value = payload_object(&cx, &EventPayload::Mouse(mouse)).unwrap();
+            let obj = value.as_object().unwrap();
+            assert_eq!(obj.get::<_, String>("pointerType").unwrap(), "mouse");
+            // A device without pressure: the DOM's 0.5 with a button down.
+            assert_eq!(obj.get::<_, f64>("pressure").unwrap(), 0.5);
+            assert_eq!(obj.get::<_, f64>("tiltX").unwrap(), 0.0);
+            let value = payload_object(&cx, &EventPayload::Mouse(pen)).unwrap();
+            let obj = value.as_object().unwrap();
+            assert_eq!(obj.get::<_, String>("pointerType").unwrap(), "pen");
+            assert_eq!(obj.get::<_, f64>("pressure").unwrap(), 0.75);
+            assert_eq!(obj.get::<_, f64>("tiltX").unwrap(), 30.0);
+            assert_eq!(obj.get::<_, f64>("tiltY").unwrap(), -15.0);
         });
     }
 

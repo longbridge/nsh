@@ -160,7 +160,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   without a button down. All three pass a `MouseEvent` (`EventPayload::Mouse`, JS `{ position, pagePosition, modifiers,
   pressedButton }`: the `Point` in the view, its transforms undone, the `Point` in the root view as touches have it, the
   modifier keys as GPUI's `Modifiers`, and the button held down as GPUI's `MouseButton`, `"left"` / `"right"` /
-  `"middle"` / `"back"` / `"forward"`, or `null`); `onMouseLeave`'s is where the mouse was last. Rust's
+  `"middle"` / `"back"` / `"forward"`, or `null`); `onMouseLeave`'s is where the mouse was last. It also carries the
+  DOM `PointerEvent`'s `pointerType` (`"mouse"`, or `"pen"` for a tablet's pen), `pressure` (0 to 1; 0.5 with a button
+  down and 0 without on a device that senses none) and `tiltX` / `tiltY` (a pen's tilt in degrees, -90 to 90, else 0). Rust's
   `.on_mouse_enter` / `.on_mouse_leave` / `.on_mouse_move` receive `&MouseEvent`. On the desktops they follow the same
   hover tracking as `hover:` classes: the views along the chain under the mouse (innermost first) whose classes read
   `HOVERED` or that listen to any of the three are the hovered ones, so ancestors hear `onMouseEnter` too, as with CSS
@@ -350,7 +352,11 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `onMoveShouldSetResponder` (+ `Capture`), `onResponderGrant/Reject/Start/Move/End/Release/Terminate/TerminationRequest`, and
   `PanResponder.create` on top. A node with any of them listens to `onTouch` natively; one tracker per root view (surface,
   modals: `touch.rs`, `TouchTracker.java`) observes without recognizing and reports touches whose target or an ancestor
-  listens, with the path of listening nodes (`EventPayload::Touch`, sent to the root; moves are merged per engine turn). The
+  listens, with the path of listening nodes (`EventPayload::Touch`, sent to the root; moves are merged per engine turn).
+  Each touch carries `pointerType`, `pressure` and `tiltX` / `tiltY` as the DOM's `PointerEvent` (`TouchPoint`): iOS
+  reads `UITouch` force and the Pencil's angles, Android `MotionEvent` pressure, tool type and tilt, Windows
+  `GetPointerPenInfo` / `GetPointerTouchInfo`, macOS and GTK a tablet's pen events, the web `PointerEvent`; a device
+  without pressure reports 0.5 while down and 0 once lifted. The
   negotiation runs as in React Native, natively (`nsh-js` `touch.rs`), asking the app's handlers. A grant returning true
   (PanResponder's default) sends `SetJsResponder`: scroll
   views around stop taking the touches (UIKit: their pan recognizer is disabled; Android: `ScrollBox.jsBlocked`), and the

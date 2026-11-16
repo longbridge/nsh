@@ -219,6 +219,22 @@ pub unsafe extern "C" fn nsh_app_set_limits(
     app.view.set_limits(limits.limits());
 }
 
+/// Gives the address of the apps `app` loads (`UrlScheme.setUrl`) to the
+/// system as the current `NSUserActivity`, for Handoff. An address
+/// that is no web page needs `<bundle id>.url` in the embedding app's
+/// Info.plist `NSUserActivityTypes`. Off by default; applies from the next
+/// load.
+///
+/// # Safety
+///
+/// `app` must come from [`nsh_app_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_app_set_handoff(app: *mut NshApp, handoff: bool) {
+    // SAFETY: guaranteed by the caller.
+    let app = unsafe { &*app };
+    app.view.set_handoff(handoff);
+}
+
 /// The directory the storage (`nsh/storage`) of the apps `app` loads is
 /// kept in (`storage.json` in it); `NULL`: each app's own,
 /// `nsh/<app id>` in the embedding app's Application Support (the id of
