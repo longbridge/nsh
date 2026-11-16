@@ -2417,15 +2417,14 @@ impl Screen {
     pub(crate) fn press_in_chain(
         &self,
         chain: &[NodeId],
-    ) -> Option<(NodeId, EventMask, Option<f32>)> {
-        chain.iter().find_map(|&id| {
-            let view = self.nodes.get(&id)?;
-            (nsh_core::input::has_press(view.events) && !view.disabled).then_some((
-                id,
-                view.events,
-                view.long_press_delay,
-            ))
-        })
+    ) -> Option<nsh_core::input::Press<NodeId>> {
+        nsh_core::input::pick_press(
+            chain.iter().filter_map(|&id| {
+                let view = self.nodes.get(&id)?;
+                Some((id, id, view.events, view.long_press_delay, view.disabled))
+            }),
+            0,
+        )
     }
 
     /// View `id`'s bounds in the root's points: its frame moved by those
