@@ -903,6 +903,9 @@ impl RootView {
             self.ivars().options.components.clone(),
         );
         installed.watch_scrolls(self.ivars().options.scroll_watchers.clone());
+        if self.ivars().options.handoff {
+            installed.hand_off();
+        }
         // The app's downloaded images go through its disk cache.
         installed.set_image_cache(engine.image_cache());
         if self.ivars().options.fps || nsh_engine::perf::enabled_by_env() {
@@ -983,6 +986,13 @@ pub struct SurfaceOptions {
     /// Logs the performance monitor's readings once a second (target
     /// `nsh::fps`): frame rate, frame and commit costs, CPU, memory.
     pub fps: bool,
+    /// Gives the app's address (`UrlScheme.setUrl`) to the system as the
+    /// current `NSUserActivity`, so Handoff continues it on the user's other
+    /// devices (`nsh_platform_apple::handoff`). An address that is no web page needs
+    /// `<bundle id>.url` in the app's Info.plist `NSUserActivityTypes`.
+    /// False by default; the release runner sets it when the bundle declares
+    /// that type (`nsh.json` `"handoff": true`).
+    pub handoff: bool,
 }
 
 impl Default for SurfaceOptions {
@@ -1000,6 +1010,7 @@ impl Default for SurfaceOptions {
             scroll_watchers: crate::ScrollWatchers::default(),
             host: nsh_engine::HostChannel::default(),
             fps: false,
+            handoff: false,
         }
     }
 }

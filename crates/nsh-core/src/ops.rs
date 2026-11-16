@@ -2266,13 +2266,15 @@ pub enum Command {
     /// Leave the app (Android back handling; on the root).
     ExitApp,
     /// The app's address (`UrlScheme.setUrl`, `set_app_url`; on the root):
-    /// the web replaces the current history entry's, the native platforms
-    /// keep none ([`crate::url_scheme`]).
+    /// the web replaces the current history entry's; iOS and macOS give it
+    /// to the system when the app opts in (Handoff); the other
+    /// platforms keep none ([`crate::url_scheme`]).
     SetAppUrl(String),
     /// The app's address as an entry of its own after the current one
     /// (`UrlScheme.setUrl(url, { history: "push" })`, `set_app_url_with`; on
     /// the root): the web pushes one unless the same turn pushed a page's
-    /// or it is the address shown; the native platforms keep none.
+    /// or it is the address shown; iOS and macOS take it as
+    /// [`Command::SetAppUrl`]; the other platforms keep none.
     PushAppUrl(String),
     /// What the back button does when none of the app's listeners took
     /// it: the innermost stack pops (or asks, with `popOnBack` false); with

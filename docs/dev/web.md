@@ -838,7 +838,7 @@ browsers' touches into what phones report:
   address; where the app is the page `set_app_url` resolves a URL against the page's base (the root `onUrlScheme`
   event's `base`, kept in the cell) and refuses another origin (`resolve_on_page`, and the core again), as `browser/address.js` does for TS (which checks
   the raw string as `check_address` does before resolving, in the app's realm). `setUrl` / `set_app_url` reach the
-  root as `Command::SetAppUrl` on the web, and `setPageUrl` keeps the URL in `pageUrl` when the app is the page.
+  root as `Command::SetAppUrl` (the core sends it to every platform: iOS and macOS hand it off, `embedding.md`), and `setPageUrl` keeps the URL in `pageUrl` when the app is the page.
   `syncHistory` applies it last, with `history.replaceState(history.state, "", url)`, after pushing the entries of
   the turn's pages, so the address lands on the new top entry; while a `history.go` of its own is in flight
   (`ignoredPops`) it waits, and when the last ignored `popstate` lands the waiting address goes to the entry, or the
@@ -880,7 +880,7 @@ browsers' touches into what phones report:
   drops its own) when the turn pushed no page's entry (else the address goes on the new top entry, as a replace) and
   it is not the landed entry's address; a turn that popped pages pushes it once its `history.go` lands. A new run
   drops a push waiting (`resetHistory`). `browser/address.js` hands the options to the core as they are; the core
-  reads them (`SetUrlOptions`), and a `history` of another value is a `TypeError`. The other platforms keep the URL.
+  reads them (`SetUrlOptions`), and a `history` of another value is a `TypeError`. The other platforms keep the URL; iOS and macOS also hand it off when the app opts in.
 - **Text selection**: text is selectable when `selectable` is true (`userSelect: "text"`; `nsh-selectable`), and with the desktop idiom also
   when it is unset (`null` in the `t` item: `nsh-autoselect`, selectable under `.nsh-desktop`) unless a view around it,
   or the text itself, takes presses, touches, pans or pinches (`nsh-press`, set in `updateTouchAction`), as on a web

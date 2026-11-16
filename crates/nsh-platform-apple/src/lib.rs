@@ -6,6 +6,7 @@
 
 pub mod audio;
 pub mod canvas_image;
+pub mod handoff;
 pub mod notifications;
 pub mod speech;
 // The logger NSH's release runners and its iOS SDK install, no API of apps':
