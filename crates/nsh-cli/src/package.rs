@@ -218,6 +218,13 @@ pub(crate) struct AppConfig {
     /// release runner reads it; macOS runs one instance of an app already.
     #[serde(default)]
     pub(crate) single_instance: bool,
+    /// Gives the app's address (`UrlScheme.setUrl`) to the system on iOS
+    /// and macOS (`"handoff": true`), so Handoff continues it on the user's
+    /// other devices. iOS and macOS
+    /// packages declare `<id>.url` in `NSUserActivityTypes`
+    /// ([`activity_types`]), which the release runners read.
+    #[serde(default)]
+    pub(crate) handoff: bool,
     /// Native features a package always includes (`"features": ["plot"]`),
     /// which nothing in the bundle shows it uses: what its Rust code or a
     /// computed import needs (`native_features`).
@@ -531,6 +538,25 @@ fn url_types(info: &mut plist::Dictionary, id: &str, schemes: &[String]) {
         "CFBundleURLTypes".into(),
         Value::Array(vec![Value::Dictionary(url_type)]),
     );
+}
+
+/// Declares the activity type of the app's addresses that are no web pages
+/// (`<id>.url`, `nsh_platform_apple::handoff`) in an Apple `Info.plist`
+/// (`NSUserActivityTypes`, after those `infoPlist` gives) for `nsh.json`
+/// `"handoff": true`.
+fn activity_types(info: &mut plist::Dictionary, id: &str, handoff: bool) {
+    use plist::Value;
+    if !handoff {
+        return;
+    }
+    let kind = Value::String(format!("{id}.url"));
+    match info.get_mut("NSUserActivityTypes") {
+        Some(Value::Array(types)) if types.contains(&kind) => {}
+        Some(Value::Array(types)) => types.push(kind),
+        _ => {
+            info.insert("NSUserActivityTypes".into(), Value::Array(vec![kind]));
+        }
+    }
 }
 
 /// `nsh.json` `"web"`.
@@ -1205,6 +1231,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     };
     let mut info = info_plist(&name, &id, &executable, config, sdk)?;
     url_types(&mut info, &id, &schemes);
+    activity_types(&mut info, &id, config.handoff);
     document_types(&mut info, &config.file_types());
     if let Some(icon) = config.icon(PackageTarget::Ios) {
         let partial = compile_icon(icon, &app, sdk, minimum_os(&info))?;
@@ -1612,6 +1639,7 @@ fn package_macos(
     };
     let mut plist = macos_info_plist(name, id, executable, config, icon)?;
     url_types(&mut plist, id, &schemes);
+    activity_types(&mut plist, id, config.handoff);
     document_types(&mut plist, &config.file_types());
     plist::Value::Dictionary(plist)
         .to_file_xml(contents.join("Info.plist"))
@@ -2533,6 +2561,30 @@ mod tests {
         let config: AppConfig =
             serde_json::from_str(r#"{ "schemes": ["https", "myapp"] }"#).unwrap();
         assert_eq!(config.url_schemes(), ["myapp"]);
+    }
+
+    #[test]
+    fn handoff_declares_the_apps_activity_type() {
+        let types = |json: &str| {
+            let config: AppConfig = serde_json::from_str(json).unwrap();
+            let mut info = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+            activity_types(&mut info, "com.a", config.handoff);
+            info.get("NSUserActivityTypes").map(|types| {
+                types
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(plist::Value::as_string)
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+        };
+        // Off by default: nothing declared, so the runner gives nothing.
+        assert_eq!(types("{}"), None);
+        assert_eq!(types(r#"{ "handoff": true }"#).unwrap(), ["com.a.url"]);
+        // After the app's own types, once.
+        let own = r#"{ "handoff": true, "ios": { "infoPlist": { "NSUserActivityTypes": ["com.a.edit", "com.a.url"] } } }"#;
+        assert_eq!(types(own).unwrap(), ["com.a.edit", "com.a.url"]);
     }
 
     #[test]
