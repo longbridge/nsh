@@ -497,7 +497,9 @@ final class ScrollBox extends FrameLayout implements Node {
 
     /** Where the touch that {@link #claim} is deciding went down; deciding while true. */
     private float claimX, claimY;
-    private boolean claiming, yielded;
+    private boolean claiming, yielded, owning;
+    /** Owning the drag: where the last move was, to tell when it reaches an edge. */
+    private float lastX, lastY;
 
     /**
      * A scroll view around this one along the same axis (a pager) intercepts the move that passes the
@@ -521,12 +523,30 @@ final class ScrollBox extends FrameLayout implements Node {
             case MotionEvent.ACTION_DOWN:
                 claimX = e.getX();
                 claimY = e.getY();
+                owning = false;
                 claiming = enabled && !jsBlocked && !gateBlocked && (horizontal
                         ? scroller.canScrollHorizontally(1) || scroller.canScrollHorizontally(-1)
                         : scroller.canScrollVertically(1) || scroller.canScrollVertically(-1));
                 if (claiming) parent.requestDisallowInterceptTouchEvent(true);
                 break;
             case MotionEvent.ACTION_MOVE:
+                if (owning) {
+                    // Holding the drag: at the edge it moves towards, the rest of the drag goes to
+                    // the views around (a pager's next page), as ZScroll does.
+                    float mx = e.getX() - lastX, my = e.getY() - lastY;
+                    lastX = e.getX();
+                    lastY = e.getY();
+                    float along = horizontal ? mx : my;
+                    boolean more = horizontal ? scroller.canScrollHorizontally(along < 0 ? 1 : -1)
+                            : scroller.canScrollVertically(along < 0 ? 1 : -1);
+                    if (along != 0 && !more) {
+                        owning = false;
+                        parent.requestDisallowInterceptTouchEvent(false);
+                        yielded = true;
+                        return true;
+                    }
+                    break;
+                }
                 if (!claiming) break;
                 float dx = e.getX() - claimX, dy = e.getY() - claimY;
                 int slop = ViewConfiguration.get(scroller.getContext()).getScaledTouchSlop();
@@ -537,10 +557,14 @@ final class ScrollBox extends FrameLayout implements Node {
                     yielded = true;
                     return true;
                 }
+                owning = true;
+                lastX = e.getX();
+                lastY = e.getY();
                 break;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 claiming = false;
+                owning = false;
                 break;
             default:
                 break;
