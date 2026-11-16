@@ -45289,3 +45289,23 @@ fn padding_on_a_span_is_warned_once() {
     let _ = c.commit();
     assert!(c.span_padding_warned);
 }
+
+#[test]
+fn node_record_sizes() {
+    // #1345: the per-node records the core keeps for every node.
+    let node = std::mem::size_of::<super::Node>();
+    eprintln!("Node {node} B");
+    assert!(node <= 600, "Node grew to {node} bytes");
+}
+
+#[test]
+fn style_constants_match_default() {
+    assert_eq!(
+        crate::style::ViewStyle::DEFAULT,
+        crate::style::ViewStyle::default()
+    );
+    assert_eq!(
+        crate::style::TextStyle::DEFAULT,
+        crate::style::TextStyle::default()
+    );
+}

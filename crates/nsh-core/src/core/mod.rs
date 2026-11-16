@@ -526,6 +526,61 @@ struct ImageState {
     svg_current_color: bool,
 }
 
+/// A style most nodes leave at its default: stored only once set to
+/// something else, read through the shared default otherwise.
+#[derive(Default)]
+struct Sparse<T: 'static>(Option<Box<T>>);
+
+trait SharedDefault: Sized + PartialEq + 'static {
+    fn shared_default() -> &'static Self;
+}
+
+impl SharedDefault for ViewStyle {
+    fn shared_default() -> &'static Self {
+        &ViewStyle::DEFAULT
+    }
+}
+
+impl SharedDefault for TextStyle {
+    fn shared_default() -> &'static Self {
+        &TextStyle::DEFAULT
+    }
+}
+
+impl<T: SharedDefault> Sparse<T> {
+    fn set(&mut self, value: T) {
+        // A node restyled once keeps its box: only a node without one pays
+        // for the comparison with the default.
+        if let Some(b) = &mut self.0 {
+            **b = value;
+        } else if value != *T::shared_default() {
+            self.0 = Some(Box::new(value));
+        }
+    }
+}
+
+impl<T: SharedDefault> std::ops::Deref for Sparse<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        match &self.0 {
+            Some(b) => b,
+            None => T::shared_default(),
+        }
+    }
+}
+
+impl<T: SharedDefault + std::fmt::Debug> std::fmt::Debug for Sparse<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (**self).fmt(f)
+    }
+}
+
+impl<T: SharedDefault> PartialEq<T> for Sparse<T> {
+    fn eq(&self, other: &T) -> bool {
+        **self == *other
+    }
+}
+
 struct Node {
     id: NodeId,
     kind: Kind,
@@ -540,8 +595,8 @@ struct Node {
     /// and views made overlays by `position: fixed`; for a span, which has
     /// no layout node, what a layout node takes when it is a block again.
     base_layout: Option<Box<taffy::Style>>,
-    view_style: ViewStyle,
-    text_style: TextStyle,
+    view_style: Sparse<ViewStyle>,
+    text_style: Sparse<TextStyle>,
     /// SVG's paint properties as written on the node (inherited by the
     /// canvases inside it); `None` while it sets none.
     paint: Option<Box<PaintStyle>>,
@@ -889,8 +944,8 @@ impl Node {
             children: Vec::new(),
             layout: None,
             base_layout: None,
-            view_style: ViewStyle::default(),
-            text_style: TextStyle::default(),
+            view_style: Sparse::default(),
+            text_style: Sparse::default(),
             paint: None,
             animated: Vec::new(),
             drawing: None,
@@ -4275,8 +4330,8 @@ impl<M: TextEngine> Core<M> {
             node.vertical_align != vertical_align && node.inline && node.kind != Kind::Text;
         // ... and so is the content's of a render placed there.
         let content_align_changed = node.vertical_align != vertical_align && !node.inline;
-        node.view_style = view;
-        node.text_style = text;
+        node.view_style.set(view);
+        node.text_style.set(text);
         node.paint = paint;
         node.animated = animated;
         node.z_index = z_index;
