@@ -9,6 +9,7 @@ mod content_size;
 mod composition;
 mod extensions;
 mod marks_clipboard_history;
+mod node_view_presses;
 mod selection;
 mod sizing;
 mod structure;
