@@ -209,6 +209,18 @@ fn free(cx: *mut JsContext, v: JsValue) {
     unsafe { qjs::JS_FreeValue(cx, v) };
 }
 
+/// The pointer fields of `p` on `o` (`pointerType`, `pressure`, `tiltX`,
+/// `tiltY`).
+fn set_pointer(cx: *mut JsContext, o: JsValue, p: &TouchPoint) {
+    let name = p.pointer_type.name();
+    // SAFETY: a new string the object takes.
+    let kind = unsafe { qjs::JS_NewStringLen(cx, name.as_ptr().cast(), name.len() as _) };
+    set(cx, o, c"pointerType", kind);
+    set(cx, o, c"pressure", number(p.pressure as f64));
+    set(cx, o, c"tiltX", number(p.tilt_x as f64));
+    set(cx, o, c"tiltY", number(p.tilt_y as f64));
+}
+
 /// A touch point as JS sees it.
 fn point(cx: *mut JsContext, p: &TouchPoint, timestamp: f64) -> JsValue {
     // SAFETY: a new object.
@@ -220,6 +232,7 @@ fn point(cx: *mut JsContext, p: &TouchPoint, timestamp: f64) -> JsValue {
     set(cx, o, c"locationX", number(p.location.x.0 as f64));
     set(cx, o, c"locationY", number(p.location.y.0 as f64));
     set(cx, o, c"timestamp", number(timestamp));
+    set_pointer(cx, o, p);
     o
 }
 
@@ -270,6 +283,7 @@ fn event(
     set(cx, e, c"pageY", number(about.page.y.0 as f64));
     set(cx, e, c"target", number(about.target as f64));
     set(cx, e, c"timestamp", number(timestamp));
+    set_pointer(cx, e, about);
     set(cx, e, c"modifiers", modifiers_object(cx, modifiers));
     let list = |ps: &[&TouchPoint]| array(cx, ps.iter().map(|p| point(cx, p, timestamp)).collect());
     set(cx, e, c"touches", list(touches));
@@ -934,6 +948,15 @@ export interface TouchPoint {
   target: number;
   /** Milliseconds. */
   timestamp: number;
+  /** What touches: `"touch"` (a finger), `"pen"` or `"mouse"`. */
+  pointerType: PointerType;
+  /** How hard it presses, 0 to 1 (`PointerEvent.pressure`): 0.5 while down
+   * and 0 once lifted on a device without pressure. */
+  pressure: number;
+  /** A pen's tilt in degrees, -90 to 90 (`PointerEvent.tiltX` / `tiltY`);
+   * 0 when the device does not report it. */
+  tiltX: number;
+  tiltY: number;
 }
 
 /** A touch or responder event: the finger it is about, the fingers down
@@ -1042,6 +1065,9 @@ mod tests {
                 location: point(px(x), px(y)),
                 changed: true,
                 pointer_type: nsh_core::PointerType::Touch,
+                pressure: 0.5,
+                tilt_x: 0.0,
+                tilt_y: 0.0,
             }],
         }))
     }

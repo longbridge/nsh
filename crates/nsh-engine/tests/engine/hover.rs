@@ -244,6 +244,9 @@ fn a_move_with_a_button_down_reaches_on_mouse_move_with_the_button() {
                     location: nsh_core::geometry::point(px(x as f32), px(2.0)),
                     changed: true,
                     pointer_type: nsh_core::PointerType::Mouse,
+                    pressure: 0.5,
+                    tilt_x: 0.0,
+                    tilt_y: 0.0,
                 }],
             })),
         );

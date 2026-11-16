@@ -2450,6 +2450,17 @@ impl<M: TextEngine> Core<M> {
         None
     }
 
+    /// The window the component that runs once under `owner` shows in (its
+    /// root node), the main window's when there is none.
+    fn window_of_owner(&self, owner: crate::element::Owner) -> NodeId {
+        if self.window_ids.is_empty() {
+            return crate::ROOT_ID;
+        }
+        self.host_of_owner(owner)
+            .and_then(|host| self.key(host).ok())
+            .map_or(crate::ROOT_ID, |key| self.key_window(key))
+    }
+
     /// Makes `inst`'s view on `host` (once: a view made already takes its
     /// slots, children and styles), or builds a list cell's row again; what
     /// its code panicked with, if it did.
@@ -6283,7 +6294,6 @@ impl<M: TextEngine> Core<M> {
                 // Checked where the app called (`set_app_url`, `setUrl`);
                 // where the app is the page, the address stays of its
                 // origin (both refuse others first).
-                let web = self.components.environment.os == crate::platform::Os::Web;
                 let address = self.components.url_schemes.address.clone();
                 if let Some(base) = address.page_base()
                     && !crate::url_scheme::same_origin(Some(base.as_str()), &url)
@@ -6294,17 +6304,17 @@ impl<M: TextEngine> Core<M> {
                 // Again for `setUrl`, which wrote it as it was called: in
                 // order with the page's address the core took since.
                 address.set(url.clone());
-                // Only the web shows an address (its history entries).
-                if web {
-                    let command = match history {
-                        crate::url_scheme::HistoryBehavior::Push => Command::PushAppUrl(url),
-                        _ => Command::SetAppUrl(url),
-                    };
-                    let _ = self.apply_op(Op::Command {
-                        id: crate::ROOT_ID,
-                        command,
-                    });
-                }
+                // The platform shows it: the web in its history entries,
+                // iOS and macOS to the system when the app opts in
+                // (Handoff).
+                let command = match history {
+                    crate::url_scheme::HistoryBehavior::Push => Command::PushAppUrl(url),
+                    _ => Command::SetAppUrl(url),
+                };
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command,
+                });
             }
             Action::WebInputAvailable(answer) => {
                 let available =
@@ -7213,7 +7223,17 @@ impl<M: TextEngine> Core<M> {
         }
         let views = {
             let _entered = self.components.runtime.enter();
-            keys.bindings()
+            // Bindings share a few owners (a component's effect binds many):
+            // each is looked up once.
+            let mut known: Vec<(crate::element::Owner, NodeId)> = Vec::new();
+            keys.bindings(|owner| {
+                if let Some(&(_, window)) = known.iter().find(|(o, _)| *o == owner) {
+                    return window;
+                }
+                let window = self.window_of_owner(owner);
+                known.push((owner, window));
+                window
+            })
         };
         drop(keys);
         let bindings = self

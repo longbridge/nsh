@@ -6,7 +6,7 @@ use objc2::{
     runtime::AnyObject,
 };
 use objc2_core_foundation::CGSize;
-use objc2_foundation::{NSObject, NSObjectProtocol, NSSet, NSString, NSURL};
+use objc2_foundation::{NSObject, NSObjectProtocol, NSSet, NSString, NSURL, NSUserActivity};
 use objc2_ui_kit::{
     UIApplication, UIApplicationDelegate, UIInterfaceOrientationMask, UIResponder, UIScene,
     UISceneConfiguration, UISceneConnectionOptions, UISceneDelegate, UISceneSession,
@@ -155,6 +155,15 @@ define_class!(
             if let Some(contexts) = contexts {
                 url_schemes(&contexts);
             }
+            // An address continued from another device (Handoff) that
+            // launched the app.
+            // SAFETY: a documented property, a set of `NSUserActivity`; read
+            // as nullable, as `URLContexts` above.
+            let activities: Option<Retained<NSSet<NSUserActivity>>> =
+                unsafe { msg_send![options, userActivities] };
+            for activity in activities.iter().flat_map(|set| set.iter()) {
+                continue_activity(&activity);
+            }
         }
 
         // Links of the schemes the app claims (`CFBundleURLTypes`) while it
@@ -162,6 +171,12 @@ define_class!(
         #[unsafe(method(scene:openURLContexts:))]
         fn open_url_contexts(&self, _scene: &UIScene, contexts: &NSSet<AnyObject>) {
             url_schemes(contexts);
+        }
+
+        // An address continued while the app runs (`SurfaceOptions::handoff`).
+        #[unsafe(method(scene:continueUserActivity:))]
+        fn continue_user_activity(&self, _scene: &UIScene, activity: &NSUserActivity) {
+            continue_activity(activity);
         }
     }
 
@@ -207,6 +222,18 @@ impl RootController {
         // SAFETY: UIViewController's designated initializer.
         unsafe { msg_send![Self::alloc(mtm), init] }
     }
+}
+
+/// Hands the address `activity` carries ([`nsh_platform_apple::handoff`])
+/// to the app as a link.
+fn continue_activity(activity: &NSUserActivity) {
+    let Some(url) = nsh_platform_apple::handoff::continued_url(activity) else {
+        return;
+    };
+    APP.with(|app| match &*app.borrow() {
+        Some(app) => app.view.url_scheme(url),
+        None => log::warn!("link dropped: no app runs"),
+    });
 }
 
 /// Hands the URLs of `contexts` (`UIOpenURLContext`s) to the app.
@@ -256,6 +283,7 @@ fn connect(mtm: MainThreadMarker, scene: &UIWindowScene) {
             // An app on its own (the development host, the release runner),
             // not a module embedded in another app.
             limits: nsh_engine::Limits::standalone(),
+            handoff: nsh_platform_apple::handoff::declared(),
             ..SurfaceOptions::default()
         },
     );

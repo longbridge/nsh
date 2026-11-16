@@ -213,6 +213,7 @@ The complete sample, a UIKit app that shows an NSH app below its own native head
 | `init(frame: CGRect = .zero, trace: Bool = false)` | Creates the view. `trace` logs the time of every commit. `init?(coder:)` supports storyboards and nibs. |
 | `onError: ((String) -> Void)?` | Receives fatal app errors (a bundle that fails to load, uncaught JS exceptions, a VM stopped by a limit) on the main thread. Errors are always logged; development builds also show them over the app. |
 | `limits: NshLimits` | The VM limits of the apps loaded from now on. |
+| `handoff: Bool` | Gives the address the apps loaded from now on set with [`UrlScheme.setUrl`](../modules/nsh.md#handoff) to the system, so Handoff continues it on the user's other devices. An address of the app's own scheme needs `<bundle id>.url` in your Info.plist's `NSUserActivityTypes`, and comes back to the other device's `scene(_:continue:)` with the URL in `userInfo["url"]`: pass it to `openURL(_:)`. Off by default. |
 | `grantCapabilities(_ json: String?) throws` | The most the apps loaded from now on may do, as JSON in the form of `nsh.json`'s `capabilities`; `nil` grants what each app declares. Throws `NshError` for invalid JSON. |
 | `locale: Locale?` | The app's language and region in place of the user's: `Intl`, `locale()` and the components follow it at once, and the apps loaded later start in it. `nil` follows the system's. |
 | `fontScale: CGFloat?` | The text size in place of Dynamic Type's (1 is the default): texts and inputs are laid out again at it and `fontScale()` reads it, at once and for the apps loaded later; lengths keep their size. `nil` follows the system's. |
@@ -238,7 +239,7 @@ The complete sample, a UIKit app that shows an NSH app below its own native head
 > anywhere else could corrupt memory: for a file outside the app bundle, load `bundle.js` (JS source), or better, a
 > [signed package](./signed-packages.md).
 
-`limits`, `grantCapabilities`, `storageDirectory` and `cacheOptions` apply from the next load: set them before `loadBundle` / `run`.
+`limits`, `handoff`, `grantCapabilities`, `storageDirectory` and `cacheOptions` apply from the next load: set them before `loadBundle` / `run`.
 
 Each app keeps its storage under its own id with no setting: a signed package under the id its release key's certificate vouches for, a bundle under the `id` of its `nsh.json` (`app.json` next to it, written by `nsh build`). Set `storageDirectory` to keep an app's data somewhere of the host's choosing:
 

@@ -122,7 +122,12 @@ pub(crate) fn render(rv: Rv) -> impl IntoElement {
                         scroll_rv.scrolled.set(e.offset.y);
                         scroll_rv.viewport.set(e.size);
                     })
-                    .on_layout(move |b: &Bounds<Points>| layout_rv.viewport.set(b.size))
+                    .on_layout(move |b: &Bounds<Points>| {
+                        layout_rv.viewport.set(b.size);
+                        // The viewport moving moves the content on the page
+                        // with no layout of the content's own.
+                        layout_rv.place();
+                    })
                     .child(content(rv.clone())),
             )
             .child(sink(rv)),
@@ -222,7 +227,26 @@ fn content(rv: Rv) -> impl IntoElement {
         true => end.release(),
         false => end.end_sweep(),
     })
-    .child(blocks(rv.clone(), DOC))
+    // Keep the intrinsic extent separate from the content box, whose
+    // min-height fills the viewport. In particular, a parent must be able
+    // to shrink an overestimated height and discover offscreen blocks
+    // without progressively enlarging the editor.
+    .child(
+        view()
+            .flex_shrink_0()
+            .on_layout({
+                let extent = rv.clone();
+                move |bounds: &Bounds<Points>| {
+                    // Root blocks are now relative to this wrapper, including
+                    // padding on Part::Content, rather than directly to content.
+                    extent.set_inset(DOC, bounds.origin);
+                    if extent.document_size.get_untracked() != bounds.size {
+                        extent.document_size.set(bounds.size);
+                    }
+                }
+            })
+            .child(blocks(rv.clone(), DOC)),
+    )
     .child(table::controls(rv.clone()))
     .child(gap_cursor(rv.clone()))
     .child(drop_cursor(rv.clone()))

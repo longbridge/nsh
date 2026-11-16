@@ -58,6 +58,8 @@ use nsh_core::{
         loader::{Context, Get, Priority, Ticket, Transport, loader},
     },
 };
+use nsh_platform_apple::image_source;
+pub(crate) use nsh_platform_apple::image_source::source_size;
 use objc2::{
     AnyThread, DefinedClass, define_class, msg_send,
     rc::{Retained, Weak},
@@ -689,7 +691,8 @@ fn fetch(
 
 /// Decodes `bytes` at `target` with ImageIO (a thumbnail when it shrinks:
 /// `CGImageSourceCreateThumbnailAtIndex`), every frame of an animation
-/// when it asks; any thread.
+/// when it asks, the one image of a still file of several (an icon's that
+/// fits, any other's primary image); any thread.
 fn decode(bytes: &[u8], target: &Target) -> Result<Picture, String> {
     if nsh_core::svg::sniff(bytes) {
         return decode_svg(bytes, target.longest);
@@ -701,8 +704,16 @@ fn decode(bytes: &[u8], target: &Target) -> Result<Picture, String> {
             CGImageSource::with_data(&data, None).ok_or("not an image ImageIO can read")?;
         let yes: &CFType = kCFBooleanTrue.ok_or("no kCFBooleanTrue")?;
         let (width, height) = source_size(&source);
+        // An animation's frames, or the one image of a still file (an
+        // icon's that fits the size shown, any other's primary image).
+        let max_frames = match target.frames {
+            Frames::First => 1,
+            Frames::All => MAX_FRAMES,
+        };
+        let shown = image_source::shown(&source, target.longest, max_frames);
+        let (w, h) = image_source::image_size(&source, shown.start);
         // Never above its own size (a thumbnail can grow it).
-        let shrinks = target.longest > 0 && target.longest < width.max(height);
+        let shrinks = target.longest > 0 && target.longest < w.max(h);
         let max = CFNumber::new_cgfloat(target.longest as CGFloat);
         let mut keys: Vec<&CFString> = vec![
             kCGImageSourceCreateThumbnailFromImageAlways,
@@ -716,19 +727,16 @@ fn decode(bytes: &[u8], target: &Target) -> Result<Picture, String> {
         }
         let options = CFDictionary::from_slices(&keys, &values);
         let options: &CFDictionary = options.as_opaque();
-        let count = match target.frames {
-            Frames::First => 1,
-            Frames::All => source.count().clamp(1, MAX_FRAMES),
-        };
+        let count = shown.len();
         let mut frames = Vec::with_capacity(count);
         let mut delays = Vec::with_capacity(count);
-        for i in 0..count {
+        for i in shown {
             let Some(image) = source.thumbnail_at_index(i, Some(options)) else {
                 break;
             };
             frames.push(image);
             delays.push(if count > 1 {
-                frame_delay(&source, i)
+                image_source::frame_delay(&source, i)
             } else {
                 1
             });
@@ -852,90 +860,6 @@ fn rgba_image(raster: &nsh_core::svg::Raster) -> Option<CFRetained<CGImage>> {
             pixels[row * stride..row * stride + width * 4].copy_from_slice(src);
         }
         CGBitmapContextCreateImage(Some(&context))
-    }
-}
-
-/// The pixel size of the first image, as displayed (EXIF orientations 5–8
-/// turn it a quarter).
-pub(crate) fn source_size(source: &CGImageSource) -> (u32, u32) {
-    use objc2_image_io::{
-        kCGImagePropertyOrientation, kCGImagePropertyPixelHeight, kCGImagePropertyPixelWidth,
-    };
-    // SAFETY: a CoreFoundation dictionary of CFString keys, read with the
-    // documented ImageIO keys and value types.
-    unsafe {
-        let Some(props) = source.properties_at_index(0, None) else {
-            return (0, 0);
-        };
-        let props: &CFDictionary<CFString, CFType> = props.cast_unchecked();
-        let number = |key: &CFString| {
-            props
-                .get(key)
-                .and_then(|v| v.downcast_ref::<CFNumber>().and_then(|n| n.as_i64()))
-                .unwrap_or(0)
-                .max(0) as u32
-        };
-        let (w, h) = (
-            number(kCGImagePropertyPixelWidth),
-            number(kCGImagePropertyPixelHeight),
-        );
-        match number(kCGImagePropertyOrientation) {
-            5..=8 => (h, w),
-            _ => (w, h),
-        }
-    }
-}
-
-/// The delay of frame `i` in centiseconds (GIF's unit), at least 2 (as
-/// browsers: shorter ones show for 10).
-fn frame_delay(source: &CGImageSource, i: usize) -> u32 {
-    use objc2_image_io::{
-        kCGImagePropertyAPNGDelayTime, kCGImagePropertyAPNGUnclampedDelayTime,
-        kCGImagePropertyGIFDelayTime, kCGImagePropertyGIFDictionary,
-        kCGImagePropertyGIFUnclampedDelayTime, kCGImagePropertyPNGDictionary,
-        kCGImagePropertyWebPDelayTime, kCGImagePropertyWebPDictionary,
-        kCGImagePropertyWebPUnclampedDelayTime,
-    };
-    // SAFETY: CoreFoundation dictionaries of CFString keys, read with the
-    // documented ImageIO keys and value types.
-    let seconds = unsafe {
-        source.properties_at_index(i, None).and_then(|props| {
-            let props: &CFDictionary<CFString, CFType> = props.cast_unchecked();
-            [
-                (
-                    kCGImagePropertyGIFDictionary,
-                    kCGImagePropertyGIFUnclampedDelayTime,
-                    kCGImagePropertyGIFDelayTime,
-                ),
-                (
-                    kCGImagePropertyPNGDictionary,
-                    kCGImagePropertyAPNGUnclampedDelayTime,
-                    kCGImagePropertyAPNGDelayTime,
-                ),
-                (
-                    kCGImagePropertyWebPDictionary,
-                    kCGImagePropertyWebPUnclampedDelayTime,
-                    kCGImagePropertyWebPDelayTime,
-                ),
-            ]
-            .into_iter()
-            .find_map(|(dict, unclamped, clamped)| {
-                let format = props.get(dict)?;
-                let format: &CFDictionary<CFString, CFType> =
-                    format.downcast_ref::<CFDictionary>()?.cast_unchecked();
-                let number = |key| {
-                    format
-                        .get(key)
-                        .and_then(|v| v.downcast_ref::<CFNumber>().and_then(|n| n.as_cgfloat()))
-                        .filter(|s| *s > 0.0)
-                };
-                number(unclamped).or_else(|| number(clamped))
-            })
-        })
-    };
-    match seconds {
-        Some(s) if s >= 0.02 => (s * 100.0).round() as u32,
-        _ => 10,
     }
 }
 
@@ -1651,6 +1575,53 @@ mod tests {
     /// A 1 × 1 PNG.
     fn png_pixel() -> Vec<u8> {
         nsh_core::image::decode_data_uri("data:;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==").unwrap().1
+    }
+
+    /// An ICO of PNGs `sides` pixels square, in that order, as favicons
+    /// are.
+    fn ico(sides: &[usize]) -> Vec<u8> {
+        use nsh_core::canvas::render::ImageFormat;
+        use nsh_platform_apple::canvas_image::{bitmap_context, encode};
+        use objc2_core_graphics::CGBitmapContextCreateImage;
+        let pngs: Vec<Vec<u8>> = sides
+            .iter()
+            .map(|side| {
+                let context = bitmap_context(*side, *side).unwrap();
+                let image = CGBitmapContextCreateImage(Some(&context)).unwrap();
+                encode(&image, ImageFormat::Png).unwrap()
+            })
+            .collect();
+        let mut out = vec![0, 0, 1, 0, sides.len() as u8, 0];
+        let mut offset = 6 + 16 * sides.len();
+        for (side, png) in sides.iter().zip(&pngs) {
+            let side = (*side % 256) as u8;
+            out.extend([side, side, 0, 0, 1, 0, 32, 0]);
+            out.extend((png.len() as u32).to_le_bytes());
+            out.extend((offset as u32).to_le_bytes());
+            offset += png.len();
+        }
+        for png in &pngs {
+            out.extend(png);
+        }
+        out
+    }
+
+    #[test]
+    fn a_multi_size_icon_is_one_still_image() {
+        let icon = ico(&[16, 32, 48]);
+        let picture = decoded(&icon, 24).unwrap();
+        assert_eq!(picture.frames.len(), 1, "no animation of its sizes");
+        assert_eq!(picture.pixel_longest(), 24, "from the 32-pixel image");
+        assert_eq!(picture.natural, Natural::Pixels(48, 48), "its largest");
+        let picture = decoded(&icon, 32).unwrap();
+        assert_eq!((picture.frames.len(), picture.pixel_longest()), (1, 32));
+        let picture = decoded(&icon, 64).unwrap();
+        assert_eq!(
+            (picture.frames.len(), picture.pixel_longest()),
+            (1, 48),
+            "the largest, never grown"
+        );
+        assert_eq!(info_size(&icon), Some(Natural::Pixels(48, 48)));
     }
 
     #[test]

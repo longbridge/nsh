@@ -525,10 +525,16 @@ fn InlineImage(props: InlineImageProps) -> impl IntoElement {
                     let back = asked.coords_at_pos(image + 1).and_then(|b| {
                         asked.pos_at_coords(b.origin + nsh_core::geometry::point(px(1.0), px(1.0)))
                     });
+                    // The image's own box: where the caret before it is,
+                    // as wide as the image.
+                    let rect = asked
+                        .node_rect(image)
+                        .map(|b| ((b.origin.x.0 - x(image)).round(), b.size.width.0.round()));
                     shown.set(format!(
-                        "Image {image} gap {} {:?}",
+                        "Image {image} gap {} {:?} rect {:?}",
                         (x(image + 1) - x(image)).round(),
-                        back.map(|p| p - image)
+                        back.map(|p| p - image),
+                        rect
                     ));
                 })
                 .child(text("Measure")),
@@ -577,11 +583,11 @@ fn the_caret_steps_over_an_inline_images_width() {
     );
     app.press("text:Measure").unwrap();
     // 80 apart, and a point just after the image is after it.
-    see(&mut app, "Image 3 gap 80 Some(1)");
+    see(&mut app, "Image 3 gap 80 Some(1) rect Some((0.0, 80.0))");
     // Typing before it in its block moves it within the block.
     app.press("text:Type").unwrap();
     app.press("text:Measure").unwrap();
-    see(&mut app, "Image 4 gap 80 Some(1)");
+    see(&mut app, "Image 4 gap 80 Some(1) rect Some((0.0, 80.0))");
 }
 
 /// An edit in an earlier block moves an inline image's position; the
@@ -597,8 +603,8 @@ fn the_caret_steps_over_an_inline_image_moved_by_an_edit_above() {
         ]},
     ]}));
     app.press("text:Measure").unwrap();
-    see(&mut app, "Image 7 gap 80 Some(1)");
+    see(&mut app, "Image 7 gap 80 Some(1) rect Some((0.0, 80.0))");
     app.press("text:Type").unwrap();
     app.press("text:Measure").unwrap();
-    see(&mut app, "Image 8 gap 80 Some(1)");
+    see(&mut app, "Image 8 gap 80 Some(1) rect Some((0.0, 80.0))");
 }

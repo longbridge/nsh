@@ -176,6 +176,16 @@ impl AppView {
         self.inner.set_limits(limits);
     }
 
+    /// Gives the address of the apps this view loads (`UrlScheme.setUrl`)
+    /// to the system as the current `NSUserActivity` (Handoff;
+    /// [`SurfaceOptions::handoff`]). Applies from the next [`AppView::load`]:
+    /// a change removes the running app, as [`AppView::set_limits`] does.
+    pub fn set_handoff(&self, handoff: bool) {
+        if self.inner.state.borrow().options.handoff != handoff {
+            self.reconfigure(|options| options.handoff = handoff);
+        }
+    }
+
     /// Where the apps this view loads keep their caches (the images they
     /// downloaded) and how much each keeps ([`SurfaceOptions::cache`]). A
     /// change applies from the next [`AppView::load`].

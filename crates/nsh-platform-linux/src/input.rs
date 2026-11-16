@@ -569,6 +569,7 @@ pub(crate) fn event_root(surface: &Surface) -> NshView {
 // --- GDK events ---------------------------------------------------------------------
 
 fn handle(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
+    pen_sample(event);
     // Decided before nsh's own handling moves anything.
     let shielded = shields_page(surface, event);
     let propagation = dispatch(surface, event);
@@ -1523,7 +1524,7 @@ fn hover_link(surface: &Surface, link: Option<(NshView, nsh_core::TextLink)>, x:
                 modifiers(state),
                 pressed_button(surface, state),
             );
-            surface.event(l.node, kind, EventPayload::Mouse(event));
+            surface.event(l.node, kind, EventPayload::Mouse(with_pen(event)));
         }
     }
 }
@@ -1886,10 +1887,73 @@ fn cancel_all(surface: &Rc<Surface>) {
     }
 }
 
+/// A pen's state at the latest pointer event: pressure (0 to 1) and tilt
+/// in degrees, `None` for a mouse.
+#[derive(Clone, Copy)]
+struct Pen {
+    pressure: f32,
+    tilt: (f32, f32),
+}
+
+thread_local! {
+    static PEN: std::cell::Cell<Option<Pen>> = const { std::cell::Cell::new(None) };
+}
+
+/// Keeps the pen state of `event`, when it is a mouse event: a tablet's
+/// pen drives the pointer, and its events carry the tool and its axes.
+fn pen_sample(event: &gdk::Event) {
+    use gdk::EventType as T;
+    if !matches!(
+        event.event_type(),
+        T::ButtonPress | T::ButtonRelease | T::MotionNotify
+    ) {
+        return;
+    }
+    let pen = event
+        .device_tool()
+        .filter(|tool| {
+            matches!(
+                tool.tool_type(),
+                gdk::DeviceToolType::Pen
+                    | gdk::DeviceToolType::Eraser
+                    | gdk::DeviceToolType::Pencil
+                    | gdk::DeviceToolType::Brush
+            )
+        })
+        .map(|_| {
+            let axis = |a| event.axis(a).unwrap_or(0.0) as f32;
+            Pen {
+                pressure: event
+                    .axis(gdk::AxisUse::Pressure)
+                    .map_or(0.5, |v| v.clamp(0.0, 1.0) as f32),
+                // GDK's tilt runs -1 to 1.
+                tilt: (
+                    axis(gdk::AxisUse::Xtilt) * 90.0,
+                    axis(gdk::AxisUse::Ytilt) * 90.0,
+                ),
+            }
+        });
+    PEN.set(pen);
+}
+
+/// `event` with the pen's state, when a pen sent the latest mouse event.
+fn with_pen(event: nsh_core::MouseEvent) -> nsh_core::MouseEvent {
+    match PEN.get() {
+        Some(pen) => event.with_pointer(
+            nsh_core::PointerType::Pen,
+            pen.pressure,
+            pen.tilt.0,
+            pen.tilt.1,
+        ),
+        None => event,
+    }
+}
+
 /// Sends the touches of the reporting pointers, `changed` being the one
 /// that `phase` is about (it is not in the list while it is handled), and
 /// the view whose pan activation fired with it.
 fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Option<NodeId>) {
+    let pen = PEN.get();
     let points = {
         let pointers = surface.input.pointers.borrow();
         pointers
@@ -1911,11 +1975,26 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     page: point(Points(p.x), Points(p.y)),
                     location: point(Points(lx), Points(ly)),
                     changed: is_changed,
-                    pointer_type: if p.key == Key::Mouse {
-                        nsh_core::PointerType::Mouse
-                    } else {
-                        nsh_core::PointerType::Touch
+                    pointer_type: match (p.key == Key::Mouse, pen) {
+                        (true, Some(_)) => nsh_core::PointerType::Pen,
+                        (true, None) => nsh_core::PointerType::Mouse,
+                        (false, _) => nsh_core::PointerType::Touch,
                     },
+                    pressure: match pen.filter(|_| p.key == Key::Mouse) {
+                        Some(pen)
+                            if !(is_changed
+                                && matches!(phase, TouchPhase::End | TouchPhase::Cancel)) =>
+                        {
+                            pen.pressure
+                        }
+                        _ => TouchPoint::default_pressure(phase, is_changed),
+                    },
+                    tilt_x: pen
+                        .filter(|_| p.key == Key::Mouse)
+                        .map_or(0.0, |pen| pen.tilt.0),
+                    tilt_y: pen
+                        .filter(|_| p.key == Key::Mouse)
+                        .map_or(0.0, |pen| pen.tilt.1),
                 }
             })
             .collect()
@@ -2562,7 +2641,7 @@ fn mouse_up(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType, button:
             modifiers(state),
             button,
         );
-        surface.event(id, EventKind::MouseUp, EventPayload::Mouse(event));
+        surface.event(id, EventKind::MouseUp, EventPayload::Mouse(with_pen(event)));
     }
 }
 
@@ -2620,7 +2699,7 @@ fn mouse_event(
         modifiers(state),
         pressed_button(surface, state),
     );
-    surface.event(id, kind, EventPayload::Mouse(event));
+    surface.event(id, kind, EventPayload::Mouse(with_pen(event)));
 }
 
 /// The mouse button held down: the one `state` holds (GDK's button masks),

@@ -117,6 +117,9 @@ nsh package --target ios \
 Writes `.nsh/out/<Name>.ipa`, ready for TestFlight, App Store upload tools or direct installation (depending on the
 profile). What happens:
 
+- The executable is checked for an `arm64` slice. `UIRequiredDeviceCapabilities` defaults to `["arm64"]`;
+  `ios.infoPlist` can replace this list. Xcode and SDK build metadata is read from the active Xcode toolchain
+  and written into `Info.plist` before signing.
 - The provisioning profile is copied into the app as `embedded.mobileprovision`.
 - The entitlements come from the profile, with the app's own from `nsh.json` `ios.entitlements` checked against it
   ([below](#infoplist-keys-and-entitlements)). NSH checks that the profile's application identifier covers the app's `id`

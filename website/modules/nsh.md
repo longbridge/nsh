@@ -2133,6 +2133,20 @@ to the browser.
 await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
 ```
 
+`sound` plays a sound the app ships instead of the system's default, so the user tells the app's notifications apart
+(a new customer message, say); `silent: true` wins over it. Name a bundled asset, by its path or an imported sound.
+`nsh package` copies the app's sounds where the system plays them from: Apple platforms play `.caf`, `.aiff` and `.wav`
+files of at most 30 s from `Library/Sounds`, found by file name, so give each sound its own file name; Android plays
+`.ogg`, `.mp3` and `.wav` raw resources, one notification channel per sound, whose sound the user can change in the
+system's settings; Linux passes the file to the daemon (`sound-file`). Windows (an unpackaged app), the web, and a
+platform that cannot find the sound play the default.
+
+```tsx
+import ding from "./sounds/message.caf";
+
+await Notifications.show({ id: "chat:42", title: "Ada", body: "Are you there?", sound: ding });
+```
+
 ### Notifications.closeAll
 
 `closeAll()` removes every notification the app showed, shown or waiting to show. Call it when the user signs out, so
@@ -2227,7 +2241,7 @@ const UrlScheme: {
 | Platform | `url()` | `setUrl(url)` |
 | --- | --- | --- |
 | The web, the app the whole page | The page's address: the one it loaded, what `setUrl` set, or the entry's the browser's back went back to | Replaces the current history entry's address, resolved as `history.replaceState` resolves it (against the page's `<base href>`), after the entries of the pages pushed or popped in the same turn; with `history: "push"`, an entry of its own after it, as `history.pushState` makes one (below) |
-| The native platforms, and the web in an iframe | The last link that opened the app (the link that launched it also comes as the first `open`), or what `setUrl` set after it; `null` before either | Keeps the URL for `url()`, with `history: "push"` too (there is no history to push to); giving it to the system (Handoff, App Links) is the embedding app's |
+| The native platforms, and the web in an iframe | The last link that opened the app (the link that launched it also comes as the first `open`), or what `setUrl` set after it; `null` before either | Keeps the URL for `url()`, with `history: "push"` too (there is no history to push to); on iOS and macOS, an app that opts in also gives it to the system ([below](#handoff)) |
 
 A URL that is not a string, longer than 16 KiB or with whitespace is a `TypeError`, and so on the web, when the app is
 the whole page, is one that is not a URL of the page's origin. The app keeps one address, which Rust reads too, and `url()` reads it as it is: a link,
@@ -2298,6 +2312,10 @@ A push is an entry at the pages shown, after the current one, and drops the brow
 own (as `onChange` sets it); in the turn that pops one, it is an entry after the one the back lands on. Pushing the
 address shown makes no entry, and in one turn the last address wins and a push wins over a replace. `history` of
 another value is a `TypeError`. Rust calls `set_app_url_with(url, HistoryBehavior::Push)` (`nsh_core::url_scheme`).
+
+#### Handoff
+
+On iOS and macOS an app gives its address to the system with `nsh.json` `"handoff": true` (an embedding app sets `NshAppView.handoff`, or `handoff` in the Rust options): the address `setUrl` sets becomes the current `NSUserActivity`, which Handoff continues on the user's other devices. An `http(s)` address is a web page, which the other device opens in its browser. Any other absolute address is continued by the app itself on the other device (Handoff pairs apps signed by the same team), as a link to `open` (a scheme of `schemes`); `nsh package` declares its activity type, `<id>.url`, in `NSUserActivityTypes`. A relative address stays the app's. Android has no outgoing counterpart of App Links, and keeps the address for `url()` only.
 
 ### UrlScheme.on("change")
 

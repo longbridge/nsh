@@ -187,6 +187,12 @@ ops::IMAGE_SCALES                                                # pixel densiti
 ops::ImageProp::FadeDuration.0                                   # time
 ops::ImageScales::iter ->                                        # pixel densities (device pixels per point)
 ops::ImageSource::at_pixel_ratio(pixel_ratio)                    # device pixels per point, a ratio
+ops::MouseEvent.pressure                                         # a pressure, 0..1 as the DOM PointerEvent's
+ops::MouseEvent.tilt_x                                           # a pen tilt in degrees, as the DOM PointerEvent's tiltX / tiltY
+ops::MouseEvent.tilt_y                                           # a pen tilt in degrees, as the DOM PointerEvent's tiltX / tiltY
+ops::MouseEvent::with_pointer(pressure)                          # a pressure, 0..1 as the DOM PointerEvent's
+ops::MouseEvent::with_pointer(tilt_x)                            # a pen tilt in degrees, as the DOM PointerEvent's tiltX / tiltY
+ops::MouseEvent::with_pointer(tilt_y)                            # a pen tilt in degrees, as the DOM PointerEvent's tiltX / tiltY
 ops::NativeProp::ProgressInterval.0                              # time
 ops::NativeProp::Rate.0                                          # a playback rate multiplier
 ops::NativeProp::Volume.0                                        # audio volume, 0..1
@@ -202,6 +208,10 @@ ops::ScrollProp::MaxZoom.0                                       # a zoom scale 
 ops::ScrollProp::MinZoom.0                                       # a zoom scale factor
 ops::ScrollProp::Zoom.0                                          # a zoom scale factor
 ops::TouchEvent.timestamp                                        # time
+ops::TouchPoint.pressure                                         # a pressure, 0..1 as the DOM PointerEvent's
+ops::TouchPoint.tilt_x                                           # a pen tilt in degrees, as the DOM PointerEvent's tiltX / tiltY
+ops::TouchPoint.tilt_y                                           # a pen tilt in degrees, as the DOM PointerEvent's tiltX / tiltY
+ops::TouchPoint::default_pressure ->                             # a pressure, 0..1 as the DOM PointerEvent's
 platform::Environment.font_scale                                 # a font scale factor
 platform::Environment.keyboard_duration                          # time
 platform::Environment.pixel_ratio                                # device pixels per point

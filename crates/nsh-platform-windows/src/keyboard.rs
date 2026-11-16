@@ -840,6 +840,45 @@ pub(crate) fn press(surface: &std::rc::Rc<Surface>, event: &KeyEvent) -> bool {
     captured
 }
 
+/// The focused custom view of the input window when it takes presses: a
+/// control Return and Space press ([`activate`]).
+pub(crate) fn focused_control(surface: &Surface) -> Option<NshView> {
+    let view = focused_in(surface, surface.input_root().id())?;
+    let takes_presses = {
+        let state = view.state();
+        state.events.contains(EventKind::Press) && !state.props.accessibility.state.disabled
+    };
+    takes_presses.then_some(view)
+}
+
+/// Return or Space press the focused control
+/// ([`nsh_core::input::presses_focused_control`]), as on the other
+/// platforms, once the app's bindings and the view's own key listeners
+/// passed on them. True when handled.
+pub(crate) fn activate(surface: &std::rc::Rc<Surface>, event: &KeyEvent) -> bool {
+    use nsh_core::keymap::{Key, Modifiers};
+    let key = match event.vk {
+        0x0D => Key::Enter,
+        0x20 => Key::Char(' '),
+        _ => return false,
+    };
+    let m = event.modifiers;
+    let held = Modifiers {
+        ctrl: m.ctrl,
+        alt: m.alt,
+        shift: m.shift,
+        cmd: m.meta,
+    };
+    if !event.down || !nsh_core::input::presses_focused_control(key, held) {
+        return false;
+    }
+    let Some(view) = focused_control(surface) else {
+        return false;
+    };
+    surface.event(view.id(), EventKind::Press, EventPayload::None);
+    true
+}
+
 /// A key up: the focused custom view hears it (whichever view has the
 /// focus now), with the capture rule that matches the release.
 pub(crate) fn release(surface: &std::rc::Rc<Surface>, event: &KeyEvent) {
@@ -1159,6 +1198,38 @@ mod tests {
         );
         assert!(listens(&surface, &view));
         assert!(!press(&surface, &key(0x41)));
+    }
+
+    #[test]
+    fn return_and_space_press_the_focused_control() {
+        let surface = surface();
+        let view = focusable(&surface, 2);
+        assert!(focus_control(&surface, &view));
+        // A focusable view that takes no presses is not pressed.
+        assert!(!activate(&surface, &key(0x0D)));
+        let mut mask = EventMask::default();
+        mask.set(EventKind::Press, true);
+        apply(
+            &surface,
+            &[MountItem::Events {
+                id: 2,
+                events: mask,
+            }],
+        );
+        assert!(focused_control(&surface).is_some());
+        assert!(activate(&surface, &key(0x0D)), "Return");
+        assert!(activate(&surface, &key(0x20)), "Space");
+        assert!(!activate(&surface, &key(0x41)), "another key");
+        let mut ctrl = key(0x0D);
+        ctrl.modifiers.ctrl = true;
+        assert!(!activate(&surface, &ctrl), "a shortcut, not a press");
+        let mut up = key(0x0D);
+        up.down = false;
+        assert!(!activate(&surface, &up), "the release presses nothing");
+        let mut props = view.state().props.clone();
+        props.accessibility.state.disabled = true;
+        apply(&surface, &[MountItem::ViewProps { id: 2, props }]);
+        assert!(!activate(&surface, &key(0x0D)), "a disabled control");
     }
 
     #[test]

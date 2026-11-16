@@ -158,6 +158,10 @@ pub(crate) struct AppConfig {
     pub(crate) icon: Option<AppIcon>,
     /// The lowest runtime that runs a signed package (`nsh publish`).
     pub(crate) min_runtime: Option<String>,
+    /// The NSH versions the app is written for (`">=0.5"`), which every
+    /// command checks this CLI against first ([`check_nsh_version`]).
+    #[serde(default, rename = "nsh")]
+    _nsh: Option<serde_json::Value>,
     /// Read and checked by the bundler.
     #[serde(default, rename = "tailwind")]
     _tailwind: Option<serde_json::Value>,
@@ -214,6 +218,13 @@ pub(crate) struct AppConfig {
     /// release runner reads it; macOS runs one instance of an app already.
     #[serde(default)]
     pub(crate) single_instance: bool,
+    /// Gives the app's address (`UrlScheme.setUrl`) to the system on iOS
+    /// and macOS (`"handoff": true`), so Handoff continues it on the user's
+    /// other devices. iOS and macOS
+    /// packages declare `<id>.url` in `NSUserActivityTypes`
+    /// ([`activity_types`]), which the release runners read.
+    #[serde(default)]
+    pub(crate) handoff: bool,
     /// Native features a package always includes (`"features": ["plot"]`),
     /// which nothing in the bundle shows it uses: what its Rust code or a
     /// computed import needs (`native_features`).
@@ -529,6 +540,25 @@ fn url_types(info: &mut plist::Dictionary, id: &str, schemes: &[String]) {
     );
 }
 
+/// Declares the activity type of the app's addresses that are no web pages
+/// (`<id>.url`, `nsh_platform_apple::handoff`) in an Apple `Info.plist`
+/// (`NSUserActivityTypes`, after those `infoPlist` gives) for `nsh.json`
+/// `"handoff": true`.
+fn activity_types(info: &mut plist::Dictionary, id: &str, handoff: bool) {
+    use plist::Value;
+    if !handoff {
+        return;
+    }
+    let kind = Value::String(format!("{id}.url"));
+    match info.get_mut("NSUserActivityTypes") {
+        Some(Value::Array(types)) if types.contains(&kind) => {}
+        Some(Value::Array(types)) => types.push(kind),
+        _ => {
+            info.insert("NSUserActivityTypes".into(), Value::Array(vec![kind]));
+        }
+    }
+}
+
 /// `nsh.json` `"web"`.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -641,6 +671,46 @@ impl AppConfig {
         }
         args
     }
+}
+
+/// Fails when the `nsh.json` next to `entry` asks for NSH versions
+/// (`"nsh": ">=0.5"`) this CLI is not one of, with one message that names
+/// both, before a build fails on what the other version lacks.
+pub(crate) fn check_nsh_version(entry: &Path) -> anyhow::Result<()> {
+    let dir = entry.parent().unwrap_or(Path::new("."));
+    let path = dir.join("nsh.json");
+    let Ok(text) = fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    // A file that does not read is reported by the command itself.
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Ok(());
+    };
+    nsh_version_error(&value["nsh"], env!("CARGO_PKG_VERSION"))
+        .map_or(Ok(()), |e| Err(anyhow::anyhow!("{}: {e}", path.display())))
+}
+
+/// Why `required` (`nsh.json` `"nsh"`) does not take NSH `version`, if it
+/// does not.
+fn nsh_version_error(required: &serde_json::Value, version: &str) -> Option<String> {
+    if required.is_null() {
+        return None;
+    }
+    let Some(text) = required.as_str() else {
+        return Some("\"nsh\" must be a version requirement string, e.g. \">=0.5\"".into());
+    };
+    let req = match semver::VersionReq::parse(text) {
+        Ok(req) => req,
+        Err(e) => {
+            return Some(format!(
+                "\"nsh\": invalid version requirement {text:?}: {e}"
+            ));
+        }
+    };
+    // A nightly or other prerelease counts as its release.
+    let mut this = semver::Version::parse(version).ok()?;
+    this.pre = semver::Prerelease::EMPTY;
+    (!req.matches(&this)).then(|| format!("this app requires nsh {text}; this is nsh {version}"))
 }
 
 /// Reads `nsh.json` next to `entry`, if any; relative paths become absolute.
@@ -1110,6 +1180,9 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         PackageTarget::Gpui => unreachable!("refused above"),
     };
     let runner = runtime::file(platform, true)?;
+    if options.target == PackageTarget::Ios && !lipo_archs(&runner)?.iter().any(|a| a == "arm64") {
+        bail!("iOS device runner must contain arm64: {}", runner.display());
+    }
 
     fs::create_dir_all(options.out)?;
     let app = options.out.join(format!("{name}.app"));
@@ -1148,6 +1221,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         }
         fs::copy(&asset.source, &dest).with_context(|| format!("copy {}", asset.path))?;
     }
+    copy_apple_sounds(config, &built, &app)?;
 
     let sdk = match options.target {
         PackageTarget::Ios => "iphoneos",
@@ -1160,7 +1234,11 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         | PackageTarget::Gpui => "iphonesimulator",
     };
     let mut info = info_plist(&name, &id, &executable, config, sdk)?;
+    if sdk == "iphoneos" {
+        info.extend(ios_toolchain_info()?);
+    }
     url_types(&mut info, &id, &schemes);
+    activity_types(&mut info, &id, config.handoff);
     document_types(&mut info, &config.file_types());
     if let Some(icon) = config.icon(PackageTarget::Ios) {
         let partial = compile_icon(icon, &app, sdk, minimum_os(&info))?;
@@ -1368,6 +1446,7 @@ fn package_android(
             abis: &abis,
             icon: config.icon(PackageTarget::Android),
             assets,
+            sounds: android_sounds(config, built),
             signing,
         },
         options.format,
@@ -1503,6 +1582,67 @@ fn package_linux(
     Ok(())
 }
 
+/// The file types Apple platforms play as a notification's sound.
+const APPLE_SOUNDS: &[&str] = &["caf", "aiff", "aif", "wav"];
+/// The file types Android plays as a notification channel's sound.
+const ANDROID_SOUNDS: &[&str] = &["ogg", "mp3", "wav"];
+
+/// The app's sounds a notification can play (`Notifications.show`'s
+/// `sound`), of the file types in `extensions`: none without the
+/// `notifications` capability.
+fn notification_sounds<'a>(
+    config: &AppConfig,
+    built: &'a crate::build::Built,
+    extensions: &'static [&'static str],
+) -> impl Iterator<Item = &'a crate::build::Asset> {
+    let on = config.notifications();
+    built.assets.iter().filter(move |asset| {
+        on && Path::new(&asset.path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| extensions.contains(&e.to_ascii_lowercase().as_str()))
+    })
+}
+
+/// Copies the app's notification sounds into `dir`, the app's main bundle
+/// on Apple platforms, where the system finds them by file name.
+fn copy_apple_sounds(
+    config: &AppConfig,
+    built: &crate::build::Built,
+    dir: &Path,
+) -> anyhow::Result<()> {
+    let mut names = std::collections::HashMap::new();
+    for asset in notification_sounds(config, built, APPLE_SOUNDS) {
+        let name = nsh_core::notifications::Notification::sound_file_name(&asset.path);
+        if let Some(other) = names.insert(name.to_owned(), asset.path.clone()) {
+            ui::warn(format!(
+                "notification sounds {other} and {} share the file name {name}: only the last plays",
+                asset.path
+            ));
+        }
+        fs::copy(&asset.source, dir.join(name)).with_context(|| format!("copy {}", asset.path))?;
+    }
+    Ok(())
+}
+
+/// The app's notification sounds as Android raw resources: (resource
+/// name, file).
+fn android_sounds(config: &AppConfig, built: &crate::build::Built) -> Vec<(String, PathBuf)> {
+    let mut sounds: Vec<(String, PathBuf)> = Vec::new();
+    for asset in notification_sounds(config, built, ANDROID_SOUNDS) {
+        let name = nsh_core::notifications::Notification::sound_resource_name(&asset.path);
+        if sounds.iter().any(|(n, _)| *n == name) {
+            ui::warn(format!(
+                "notification sound {} has the resource name {name} of another: only the first plays",
+                asset.path
+            ));
+            continue;
+        }
+        sounds.push((name, asset.source.clone()));
+    }
+    sounds
+}
+
 /// `<out>/<name>.app`, a macOS app bundle: the release runner as
 /// `Contents/MacOS/<executable>`, the bundle and assets in
 /// `Contents/Resources/nsh/` (where the runner looks), `nsh/app.json` (the
@@ -1547,6 +1687,7 @@ fn package_macos(
         }
         fs::copy(&asset.source, &dest).with_context(|| format!("copy {}", asset.path))?;
     }
+    copy_apple_sounds(config, built, &resources)?;
     let version = config.version.as_deref().unwrap_or("1.0.0");
     let mut info = serde_json::json!({ "name": name, "id": id, "version": version });
     if let Some(appearance) = &config.appearance {
@@ -1568,6 +1709,7 @@ fn package_macos(
     };
     let mut plist = macos_info_plist(name, id, executable, config, icon)?;
     url_types(&mut plist, id, &schemes);
+    activity_types(&mut plist, id, config.handoff);
     document_types(&mut plist, &config.file_types());
     plist::Value::Dictionary(plist)
         .to_file_xml(contents.join("Info.plist"))
@@ -1879,6 +2021,77 @@ pub(crate) fn desktop_entry(
     )
 }
 
+/// Build metadata for device packages, from the active Xcode installation.
+/// Keep tool discovery outside `info_plist` so its defaults stay testable on every OS.
+fn ios_toolchain_info() -> anyhow::Result<plist::Dictionary> {
+    fn read(program: &str, args: &[&str]) -> anyhow::Result<String> {
+        let output = Command::new(program)
+            .args(args)
+            .output()
+            .with_context(|| format!("run {program} {}", args.join(" ")))?;
+        if !output.status.success() {
+            bail!(
+                "{program} {}: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        let value = String::from_utf8(output.stdout)?.trim().to_owned();
+        if value.is_empty() {
+            bail!("{program} {} returned no build metadata", args.join(" "));
+        }
+        Ok(value)
+    }
+    let version = read("xcrun", &["--sdk", "iphoneos", "--show-sdk-version"])?;
+    let sdk_build = read("xcrun", &["--sdk", "iphoneos", "--show-sdk-build-version"])?;
+    let xcode = read("xcodebuild", &["-version"])?;
+    let (xcode_version, xcode_build) = xcode_info(&xcode)?;
+    let os_build = read("sw_vers", &["-buildVersion"])?;
+    Ok([
+        ("DTPlatformName", "iphoneos".to_owned()),
+        ("DTPlatformVersion", version.clone()),
+        ("DTPlatformBuild", sdk_build.clone()),
+        ("DTSDKName", format!("iphoneos{version}")),
+        ("DTSDKBuild", sdk_build),
+        ("DTXcode", xcode_version),
+        ("DTXcodeBuild", xcode_build),
+        (
+            "DTCompiler",
+            "com.apple.compilers.llvm.clang.1_0".to_owned(),
+        ),
+        ("BuildMachineOSBuild", os_build),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), plist::Value::String(v)))
+    .collect())
+}
+
+fn xcode_info(output: &str) -> anyhow::Result<(String, String)> {
+    let version = output
+        .lines()
+        .find_map(|l| l.strip_prefix("Xcode "))
+        .context("xcodebuild -version did not report an Xcode version")?;
+    let parts = version
+        .split('.')
+        .map(str::parse::<u32>)
+        .collect::<Result<Vec<_>, _>>()?;
+    if parts.is_empty() || parts.len() > 3 || parts.iter().skip(1).any(|v| *v > 9) {
+        bail!("unsupported Xcode version: {version}");
+    }
+    let encoded = format!(
+        "{:02}{}{}",
+        parts[0],
+        parts.get(1).unwrap_or(&0),
+        parts.get(2).unwrap_or(&0)
+    );
+    let build = output
+        .lines()
+        .find_map(|l| l.strip_prefix("Build version "))
+        .filter(|v| !v.trim().is_empty())
+        .context("xcodebuild -version did not report a build version")?;
+    Ok((encoded, build.trim().to_owned()))
+}
+
 fn info_plist(
     name: &str,
     id: &str,
@@ -1911,6 +2124,12 @@ fn info_plist(
             "iPhoneSimulator"
         })]),
     );
+    if sdk == "iphoneos" {
+        d.insert(
+            "UIRequiredDeviceCapabilities".into(),
+            Value::Array(vec![s("arm64")]),
+        );
+    }
     // The runtime's, unless the app raises it (`ios.infoPlist`).
     d.insert("MinimumOSVersion".into(), s(IOS_MINIMUM));
     d.insert(
@@ -2161,6 +2380,81 @@ fn make_ipa(app: &Path, ipa: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ios_device_capabilities_and_overrides() {
+        let config = AppConfig::default();
+        let device = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+        assert_eq!(
+            device["UIRequiredDeviceCapabilities"].as_array().unwrap(),
+            &[plist::Value::String("arm64".into())]
+        );
+        let simulator = info_plist("A", "com.a", "a", &config, "iphonesimulator").unwrap();
+        assert!(!simulator.contains_key("UIRequiredDeviceCapabilities"));
+        let config: AppConfig = serde_json::from_value(serde_json::json!({
+            "ios": {"infoPlist": {"UIRequiredDeviceCapabilities": ["arm64", "gps"]}}
+        }))
+        .unwrap();
+        let device = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+        assert_eq!(
+            device["UIRequiredDeviceCapabilities"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn xcode_build_metadata() {
+        for (version, encoded) in [
+            ("27.2", "2720"),
+            ("16.4.1", "1641"),
+            ("9.3", "0930"),
+            ("27", "2700"),
+        ] {
+            assert_eq!(
+                xcode_info(&format!("Xcode {version}\nBuild version 27B52\n")).unwrap(),
+                (encoded.into(), "27B52".into())
+            );
+        }
+        for output in [
+            "",
+            "Xcode 27.2",
+            "Xcode nope\nBuild version A",
+            "Xcode 27.10\nBuild version A",
+        ] {
+            assert!(xcode_info(output).is_err());
+        }
+    }
+
+    #[test]
+    fn nsh_json_names_the_nsh_versions_it_needs() {
+        let ok = |r: serde_json::Value, v| nsh_version_error(&r, v);
+        assert_eq!(ok(serde_json::Value::Null, "0.4.0"), None);
+        assert_eq!(ok(serde_json::json!(">=0.5"), "0.5.0"), None);
+        assert_eq!(ok(serde_json::json!(">=0.5, <0.7"), "0.6.3"), None);
+        assert_eq!(ok(serde_json::json!("0.5"), "0.5.2"), None);
+        // A prerelease counts as its release.
+        assert_eq!(ok(serde_json::json!(">=0.5"), "0.5.0-nightly.1"), None);
+        assert_eq!(
+            ok(serde_json::json!(">=0.5"), "0.4.0").as_deref(),
+            Some("this app requires nsh >=0.5; this is nsh 0.4.0")
+        );
+        assert!(
+            ok(serde_json::json!("latest"), "0.5.0")
+                .unwrap()
+                .contains("invalid")
+        );
+        assert!(
+            ok(serde_json::json!(5), "0.5.0")
+                .unwrap()
+                .contains("must be")
+        );
+        // The key is known: no "unknown key" warning.
+        let (_, ignored) = parse_config(r#"{ "nsh": ">=0.5" }"#).unwrap();
+        assert!(ignored.is_empty(), "{ignored:?}");
+    }
 
     /// Each processor is a build for its Rust target, this Mac's own
     /// without `--target` (the build `nsh run` shares), named as `lipo`
@@ -2461,6 +2755,30 @@ mod tests {
         let config: AppConfig =
             serde_json::from_str(r#"{ "schemes": ["https", "myapp"] }"#).unwrap();
         assert_eq!(config.url_schemes(), ["myapp"]);
+    }
+
+    #[test]
+    fn handoff_declares_the_apps_activity_type() {
+        let types = |json: &str| {
+            let config: AppConfig = serde_json::from_str(json).unwrap();
+            let mut info = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+            activity_types(&mut info, "com.a", config.handoff);
+            info.get("NSUserActivityTypes").map(|types| {
+                types
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(plist::Value::as_string)
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+        };
+        // Off by default: nothing declared, so the runner gives nothing.
+        assert_eq!(types("{}"), None);
+        assert_eq!(types(r#"{ "handoff": true }"#).unwrap(), ["com.a.url"]);
+        // After the app's own types, once.
+        let own = r#"{ "handoff": true, "ios": { "infoPlist": { "NSUserActivityTypes": ["com.a.edit", "com.a.url"] } } }"#;
+        assert_eq!(types(own).unwrap(), ["com.a.edit", "com.a.url"]);
     }
 
     #[test]

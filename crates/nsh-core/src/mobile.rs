@@ -2,11 +2,12 @@
 //! `nsh/mobile`): the system's tab bar ([`TabBar`]), a native component the
 //! two backends register themselves ([`TAB_BAR_COMPONENT`]), and the
 //! system's segmented control ([`SegmentedControl`],
-//! [`SEGMENTED_CONTROL_COMPONENT`], iOS's). Elsewhere a component takes no
-//! room and shows nothing. Common controls belong to `nsh/base`; this
-//! module exposes the system's own controls where an app needs the
-//! platform's exact look and behavior, rather than a parallel set of
-//! styled controls.
+//! [`SEGMENTED_CONTROL_COMPONENT`], iOS's). Elsewhere, and on a platform
+//! built outside NSH without a tab bar
+//! ([`crate::platform::Environment::tab_bar`]), a component takes no room
+//! and shows nothing. Common controls belong to `nsh/base`; this module
+//! exposes the system's own controls where an app needs the platform's
+//! exact look and behavior, rather than a parallel set of styled controls.
 
 use crate::{
     JsonValue,
@@ -97,7 +98,7 @@ pub enum TabBarEvent {
 /// nothing, and the app shows its tabs with `nsh/base`'s `Tabs`.
 #[component]
 pub fn TabBar(props: TabBarProps, cx: Scope<TabBarEvent>) -> impl IntoElement {
-    if !matches!(os(), Os::Ios | Os::Android) {
+    if !crate::element::has_tab_bar() {
         return view().hidden().into_element();
     }
     let items = props.items;

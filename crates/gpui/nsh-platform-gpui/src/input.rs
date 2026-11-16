@@ -2306,6 +2306,9 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     } else {
                         nsh_core::PointerType::Touch
                     },
+                    pressure: TouchPoint::default_pressure(phase, is_changed),
+                    tilt_x: 0.0,
+                    tilt_y: 0.0,
                 }
             })
             .collect()
