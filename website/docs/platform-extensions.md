@@ -115,6 +115,10 @@ The Mini Program platform measures with the logic layer's canvas, breaks lines a
 
 `EngineControl` sends what the user does: `dispatch_event(id, EventKind::Press, EventPayload::None)` for a tap on a view that reports presses, `scroll(id, offset, 0)` as a scroll view moves, `resize(size)` and `set_environment(environment)` when the window or the appearance changes, `frame()` at the display frame the engine asked for (`MountSink::request_frame`).
 
+A platform whose scroll views move with the keyboard (arrows, Page Up / Down, Home, End) calls
+`key_scrolled(id, key_move)` after it starts each key's scroll, with the key's move (`nsh_core::scroll::KeyMove`): one
+press of End then takes a list all the way to its end.
+
 ## 5. Add the command line's target
 
 `nsh dev`, `nsh run`, `nsh test` and `nsh package` with a `--target` none of NSH's own run `nsh-platform-<name>` from your `PATH`. It gets the command and every other argument, and the environment variables `NSH` (the `nsh` executable, to call back), `NSH_VERSION` and `NSH_TARGET`; its exit code is the command's:

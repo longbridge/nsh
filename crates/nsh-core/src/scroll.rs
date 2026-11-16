@@ -272,6 +272,12 @@ pub trait ScrollHost {
     fn report_zoom(&self, scale: f32) {
         let _ = scale;
     }
+    /// Tells the engine that a scroll key moved the view by `key_move`
+    /// (`EngineControl::key_scrolled`), once [`key_scroll`] started its
+    /// animation: a list follows its real end from End on.
+    fn key_scrolled(&self, key_move: KeyMove) {
+        let _ = key_move;
+    }
     /// The offset or the zoom changed (`offset` is the one reported): the
     /// children move, the sticky cells pin to it, native scroll values
     /// follow.
@@ -2007,7 +2013,8 @@ fn key_target(m: KeyMove, base: f32, viewport: f32, min: f32, max: f32) -> f32 {
 /// Scrolls the view by the key move `m`, animated; a repeat continues
 /// from where the running scroll goes. With `flip`, a move by points goes
 /// the other way in a mirrored view (Left and Right follow what they show
-/// in a right-to-left list).
+/// in a right-to-left list). Tells the host the key's move once the
+/// scroll started ([`ScrollHost::key_scrolled`]).
 pub fn key_scroll(host: &impl ScrollHost, m: KeyMove, flip: bool) {
     let Some((base, viewport, min, max, flip)) = host.scroll(|s, size| {
         let (min, max) = s.limits(size);
@@ -2015,13 +2022,17 @@ pub fn key_scroll(host: &impl ScrollHost, m: KeyMove, flip: bool) {
     }) else {
         return;
     };
-    let m = match m {
+    let moved = match m {
         KeyMove::Points(d) if flip => KeyMove::Points(-d),
         m => m,
     };
-    let to = key_target(m, base, viewport, min, max);
+    let to = key_target(moved, base, viewport, min, max);
     interrupt(host);
     animate_along(host, to, KEY_ANIMATION, false, true);
+    // A list follows its real end from here on (rows never rendered are
+    // only estimated), and the other keys leave it. The key's own move,
+    // as the backends with a key scroll of their own report it.
+    host.key_scrolled(m);
 }
 
 /// Room kept around a view scrolled into view.
@@ -2528,6 +2539,8 @@ mod tests {
         redraws: std::cell::Cell<u32>,
         /// What it reported, in order: `zoom <scale>` and `scroll <x> <y>`.
         reports: std::cell::RefCell<Vec<String>>,
+        /// The key moves it was told of, in order.
+        key_moves: std::cell::RefCell<Vec<KeyMove>>,
     }
 
     impl TestHost {
@@ -2536,6 +2549,7 @@ mod tests {
                 state: std::cell::RefCell::new(state),
                 redraws: std::cell::Cell::new(0),
                 reports: Default::default(),
+                key_moves: Default::default(),
             }
         }
     }
@@ -2561,6 +2575,9 @@ mod tests {
         fn report_zoom(&self, scale: f32) {
             self.reports.borrow_mut().push(format!("zoom {scale}"));
         }
+        fn key_scrolled(&self, key_move: KeyMove) {
+            self.key_moves.borrow_mut().push(key_move);
+        }
         fn moved(&self, _: Point<Points>) {}
         fn pulled(&self, _: Points) {}
         fn relayout(&self) {}
@@ -2571,6 +2588,31 @@ mod tests {
             true
         }
         fn start_ticking(&self) {}
+    }
+
+    #[test]
+    fn a_key_scroll_tells_the_host_every_key_move() {
+        let host = TestHost::new(scroll_state((300.0, 100_000.0), false));
+        key_scroll(&host, KeyMove::End, false);
+        key_scroll(&host, KeyMove::Pages(-1.0), false);
+        assert_eq!(
+            *host.key_moves.borrow(),
+            [KeyMove::End, KeyMove::Pages(-1.0)]
+        );
+        assert!(matches!(
+            host.state.borrow().live.phase,
+            Phase::Animate { .. }
+        ));
+
+        // A right-to-left row scrolls the other way, and the host still
+        // hears the key's own move.
+        let mut row = scroll_state((100_000.0, 500.0), true);
+        row.mirrored = true;
+        row.x = Points(1000.0);
+        let host = TestHost::new(row);
+        key_scroll(&host, KeyMove::Points(KEY_LINE), true);
+        assert_eq!(host.state.borrow().goal(), 1000.0 - KEY_LINE.0);
+        assert_eq!(*host.key_moves.borrow(), [KeyMove::Points(KEY_LINE)]);
     }
 
     #[test]

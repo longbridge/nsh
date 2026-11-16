@@ -8694,10 +8694,16 @@ class Player {
     const pos = h ? el.scrollLeft : el.scrollTop;
     const max = h ? el.scrollWidth - el.clientWidth : el.scrollHeight - el.clientHeight;
     const page = (h ? el.clientWidth : el.clientHeight) * 0.875;
-    const d = { ArrowUp: -40, ArrowLeft: -40, ArrowDown: 40, ArrowRight: 40, PageUp: -page, PageDown: page,
-      " ": e.shiftKey ? -page : page, Home: -pos, End: max - pos }[k];
+    // The key's move, as `nsh_key_scroll` takes it: by points (0), by
+    // pages (1), to the start (2), to the end (3).
+    const [kind, amount] = { ArrowUp: [0, -40], ArrowLeft: [0, -40], ArrowDown: [0, 40], ArrowRight: [0, 40],
+      PageUp: [1, -1], PageDown: [1, 1], " ": [1, e.shiftKey ? -1 : 1], Home: [2, 0], End: [3, 0] }[k];
+    const d = [amount, amount * page, -pos, max - pos][kind];
     if (el._snapPoints) this.snapStep(el, Math.sign(d));
     else this.scrollSmoothly(el, h ? d : 0, h ? 0 : d, true);
+    // A list follows its real end from here on (rows never rendered are
+    // only estimated), and the other keys leave it.
+    this.call((w) => w.nsh_key_scroll(el._id, kind, amount));
     return true;
   }
 

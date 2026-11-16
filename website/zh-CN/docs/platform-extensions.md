@@ -115,6 +115,9 @@ impl TextEngine for MiniProgramTextEngine {
 
 `EngineControl` 发送用户的操作：视图上报按下事件时，点击用 `dispatch_event(id, EventKind::Press, EventPayload::None)`；滚动视图移动时用 `scroll(id, offset, 0)`；窗口或外观变化时用 `resize(size)` 和 `set_environment(environment)`；引擎请求的显示帧（`MountSink::request_frame`）到来时用 `frame()`。
 
+滚动视图可以用键盘移动（方向键、Page Up / Down、Home、End）的平台，在开始每次按键滚动之后调用
+`key_scrolled(id, key_move)`，传入这次按键的移动（`nsh_core::scroll::KeyMove`）：这样按一次 End，列表就会一直滚到末尾。
+
 ## 5. 加入命令行 target
 
 `nsh dev`、`nsh run`、`nsh test` 和 `nsh package` 的 `--target` 不是 NSH 自带的 target 时，会运行 `PATH` 上的 `nsh-platform-<name>`。它收到命令和其余所有参数，以及环境变量 `NSH`（`nsh` 可执行文件，用于回调）、`NSH_VERSION` 和 `NSH_TARGET`；它的退出码就是命令的退出码：

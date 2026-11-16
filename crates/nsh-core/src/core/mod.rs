@@ -2081,6 +2081,54 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// The user moved scroll view `id` with scroll key move `key_move`, which
+    /// the platform animates to what it knows of the content. On a list of its
+    /// own End queues an animated `scrollToEnd`, in order with the app's
+    /// scroll commands, so the list follows its end and rows below that
+    /// were never rendered, sized by their estimate, do not stop it short;
+    /// a repeat while the list follows its end changes nothing. Any other
+    /// key takes back an End not resolved yet and ends the target the list
+    /// followed, as the user scrolling away does. Lists in their parent's
+    /// viewport and inverted lists are left to the platform.
+    pub fn key_scrolled(&mut self, id: NodeId, key_move: crate::scroll::KeyMove) {
+        let Ok(key) = self.key(id) else { return };
+        let queued = self.commands.iter().filter(|(to, _)| *to == id).count() as u32;
+        let Some(list) = self.nodes[key as usize].list.as_mut() else {
+            return;
+        };
+        if !list.follows_end_key() {
+            return;
+        }
+        if key_move == crate::scroll::KeyMove::End {
+            // A repeat: the last scroll queued or followed is the end.
+            let repeat = match list.key_ends.last() {
+                Some(&n) => n + 1 == queued,
+                None => queued == 0 && list.follows_end(),
+            };
+            if !repeat {
+                list.key_ends.push(queued);
+                self.commands
+                    .push((id, Command::ScrollToEnd { animated: true }));
+            }
+            return;
+        }
+        list.unpin();
+        let ends = std::mem::take(&mut list.key_ends);
+        // The latest first, so the places of the earlier ones hold.
+        for &n in ends.iter().rev() {
+            let at = self
+                .commands
+                .iter()
+                .enumerate()
+                .filter(|(_, (to, _))| *to == id)
+                .nth(n as usize)
+                .map(|(at, _)| at);
+            if let Some(at) = at {
+                self.commands.remove(at);
+            }
+        }
+    }
+
     /// Keeps the rows of virtual lists that hold `nodes` rendered, out of
     /// the render window too, until the next call: the ends of a text
     /// selection across a list's rows, whose texts must outlive scrolling
@@ -9755,6 +9803,9 @@ impl<M: TextEngine> Core<M> {
             Follow::To(offset) => retarget = Some(offset),
         }
 
+        // The End key's commands, if any, are resolved below with the
+        // rest (`Core::key_scrolled`).
+        list.key_ends.clear();
         // Scroll commands for the list, now that sizes are known: the
         // window follows a jump in this same commit. In its parent's
         // viewport, the view around it scrolls instead.
