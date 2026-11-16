@@ -40,6 +40,7 @@ use super::{
     extension::{ParseContext, ReadChildren},
     html,
 };
+use crate::mdast_tree::{Mdast, plain_text};
 
 /// How deep blocks and inline content are read: deeper content is text.
 const MAX_DEPTH: usize = 32;
@@ -112,7 +113,7 @@ pub(crate) fn parse(parser: &Parser, source: &str) -> Document {
 /// offsets in it.
 struct Tree<'s> {
     source: &'s str,
-    root: Node,
+    root: Mdast,
 }
 
 fn parse_trees<'s>(
@@ -154,7 +155,7 @@ fn tree<'s>(parser: &Parser, text: &'s str, first: bool) -> Tree<'s> {
     let mut source = marked.map_or(ended, Cow::Owned);
     inserted.insert(&marks, cjk::MARK.len_utf8());
     let strip = !ends.is_empty() || !marks.is_empty();
-    let mut root = parse_tree(parser, &source, first);
+    let mut root = Mdast(parse_tree(parser, &source, first));
     if parser.options.math {
         // Pairs of `$` that are prose: their opening `$` escaped, the text
         // is read again, as a whole (emphasis may span the pair); a
@@ -176,7 +177,7 @@ fn tree<'s>(parser: &Parser, text: &'s str, first: bool) -> Tree<'s> {
             }
             escaped.push_str(&source[at..]);
             inserted.insert(&opens, 1);
-            root = parse_tree(parser, &escaped, first);
+            root = Mdast(parse_tree(parser, &escaped, first));
             source = Cow::Owned(escaped);
         }
     }
@@ -468,7 +469,7 @@ impl<'a> Converter<'a> {
         // The tree is read recursively, as it is shown: deeper content is
         // its text, so no input runs the stack out.
         if self.depth >= MAX_DEPTH {
-            let text: String = nodes.iter().map(Node::to_string).collect();
+            let text = plain_text(nodes);
             if !text.trim().is_empty() {
                 out.push(Block::Paragraph {
                     content: vec![Inline::Text { text }],
@@ -748,7 +749,7 @@ impl<'a> Converter<'a> {
 
     fn inlines(&mut self, nodes: &[Node]) -> Vec<Inline> {
         if self.depth >= MAX_DEPTH {
-            let text: String = nodes.iter().map(Node::to_string).collect();
+            let text = plain_text(nodes);
             return vec![Inline::Text { text }];
         }
         self.depth += 1;
@@ -974,7 +975,7 @@ impl<'a> Converter<'a> {
             .position()
             .and_then(|p| self.source.get(p.start.offset..p.end.offset))
             .map(|s| s.replace('\n', " "))
-            .unwrap_or_else(|| node.to_string());
+            .unwrap_or_else(|| plain_text(std::slice::from_ref(node)));
         push_text(out, &text);
     }
 
