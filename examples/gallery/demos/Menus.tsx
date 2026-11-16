@@ -488,11 +488,20 @@ export function Menus() {
   /**
    * The system's own controls: `MenuButton` shows UIKit's menu from the
    * gallery's chip on iOS (the platform's context menu on the desktops),
-   * and `SegmentedControl` is a `UISegmentedControl` on iOS, the gallery's
-   * drawn segments elsewhere.
+   * a `ContextMenu` given `items` lifts its note into UIKit's context menu
+   * on iOS (the gallery's drawn menu elsewhere), and `SegmentedControl` is
+   * a `UISegmentedControl` on iOS, the gallery's drawn segments elsewhere.
    */
   function SystemMenu() {
     const sort = signal<"Name" | "Date" | "Size">("Date");
+    const starred = signal(false);
+    const folder = signal<"Documents" | "Archive">("Documents");
+    const note = "Design review";
+    const choose = (id: string) => {
+      if (id === "star") starred.set(!starred());
+      if (id.startsWith("move:")) folder.set(id.slice(5) as "Documents" | "Archive");
+      log(`context menu · ${id}`);
+    };
     const layout = signal(0);
     const layouts = ["List", "Grid", "Columns"] as const;
     const ios = platform.os === "ios";
@@ -519,6 +528,58 @@ export function Menus() {
             <Chip label={`Sorted by ${sort()}`} lucide="list-filter" />
           </MenuButton>
         </View>
+        <ContextMenu
+          margin={8}
+          {...menuPopup()}
+          title={`${note}.key`}
+          items={[
+            { id: "star", label: starred() ? "Unstar" : "Star", icon: starred() ? "star.slash" : "star" },
+            { id: "share", label: "Share", icon: "square.and.arrow.up" },
+            { id: "", label: "Move to", icon: "folder", items: (["Documents", "Archive"] as const).map((to) => ({ id: `move:${to}`, label: to, checked: folder() === to })) },
+            { id: "", label: "", inline: true, items: [{ id: "delete", label: "Delete", icon: "trash", destructive: true }] },
+          ]}
+          onSelect={({ id }) => choose(id)}
+          onOpenChange={changed(note)}
+          trigger={
+            <View
+              focusable
+              accessibilityLabel={`${note}, in ${folder()}`}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 12,
+                padding: 12,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: colors.border,
+                backgroundColor: isOpen(note) ? token("accent") : colors.raised,
+              }}
+            >
+              <View style={{ width: 36, height: 36, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: colors.inset }}>
+                <Icon name="layers" size={18} tint={colors.muted} />
+              </View>
+              <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Text style={{ numberOfLines: 1, flexShrink: 1, fontSize: 14, fontWeight: "600", color: colors.text }}>{note}</Text>
+                  <If when={starred()}>
+                    <Icon name="star" size={12} tint={colors.accent} />
+                  </If>
+                </View>
+                <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.muted }}>{`Keynote · ${folder()}`}</Text>
+              </View>
+            </View>
+          }
+        >
+          <Item label="Starred" checked={starred()} onSelect={() => choose("star")} />
+          <Item label="Share" icon="share-2" onSelect={() => choose("share")} />
+          <SubmenuOf label="Move to" icon="folder-input">
+            <Item label="Documents" radio checked={folder() === "Documents"} onSelect={() => choose("move:Documents")} />
+            <Item label="Archive" radio checked={folder() === "Archive"} onSelect={() => choose("move:Archive")} />
+          </SubmenuOf>
+          <Separator />
+          <Item label="Delete" icon="trash" danger onSelect={() => choose("delete")} />
+        </ContextMenu>
+        <Caption label={ios ? "Hold the note: UIKit lifts it into its context menu" : platform.desktop ? "Right click the note" : "Hold the note"} />
         <If when={ios} else={<Segmented size="small" options={layouts.map((l, i) => ({ value: String(i), label: l }))} value={String(layout())} onChange={(v) => layout.set(Number(v))} />}>
           <SegmentedControl testID="system-segments" items={layouts.map((title) => ({ title }))} selectedIndex={layout()} onChange={({ index }) => layout.set(index)} />
         </If>

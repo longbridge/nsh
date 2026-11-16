@@ -22,9 +22,10 @@ use objc2_ui_kit::{
 
 use crate::component::{ComponentContext, ComponentFactory, NativeComponent};
 
-/// One entry of the menu as the props give it.
+/// One entry of the menu as the props give it (`ContextMenu`'s system menu
+/// reads the same items: `system_context_menu.rs`).
 #[derive(Debug, Clone, Default, PartialEq)]
-struct Entry {
+pub(crate) struct Entry {
     id: String,
     label: String,
     icon: String,
@@ -41,7 +42,7 @@ struct Entry {
 const MAX_DEPTH: usize = 8;
 
 /// The entries of an `items` prop; anything but objects is skipped.
-fn parse_items(items: &[JsonValue]) -> Vec<Entry> {
+pub(crate) fn parse_items(items: &[JsonValue]) -> Vec<Entry> {
     parse_level(items, 0)
 }
 
@@ -98,14 +99,14 @@ fn symbol(name: &str) -> Option<Retained<UIImage>> {
     }
     let image = UIImage::systemImageNamed(&NSString::from_str(name));
     if image.is_none() {
-        log::warn!(target: "js", "MenuButton: no SF Symbol is named `{name}`");
+        log::warn!(target: "js", "menu: no SF Symbol is named `{name}`");
     }
     image
 }
 
 /// The menu's elements for `entries`; each action emits `select` with its
 /// id through `context`.
-fn elements(
+pub(crate) fn elements(
     entries: &[Entry],
     disabled: bool,
     context: &ComponentContext,
