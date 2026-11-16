@@ -3826,3 +3826,41 @@ test("a web view's relative URL is the site's where the page names its base", ()
     else globalThis.location = savedLocation;
   }
 });
+
+test("share reports shared, dismissed and unavailable, never shared when it could not", async () => {
+  const { player } = fakePlayer();
+  const got = [];
+  player.event = (_, name, value) => got.push([name, value]);
+  const saved = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const browser = (share, canShare) =>
+    Object.defineProperty(globalThis, "navigator", { value: { share, canShare }, configurable: true });
+  try {
+    const shared = [];
+    browser(async (data) => { shared.push(data); });
+    await player.share(1, "Docs", null, "https://example.com/docs", false);
+    assert.deepEqual(shared, [{ title: "Docs", url: "https://example.com/docs" }]);
+    browser(async () => { throw Object.assign(new Error("closed"), { name: "AbortError" }); });
+    await player.share(2, null, "Hello", null, false);
+    // Files never reach the browser.
+    browser(async () => assert.fail("shared files"));
+    await player.share(3, null, "Hello", null, true);
+    browser(async () => assert.fail("shared what it cannot"), () => false);
+    await player.share(4, null, "Hello", null, false);
+    browser(undefined);
+    await player.share(5, null, "Hello", null, false);
+    browser(async () => { throw Object.assign(new Error("no activation"), { name: "NotAllowedError" }); });
+    await player.share(6, null, "Hello", null, false);
+    const unavailable = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
+    assert.deepEqual(got.map(([name, v]) => [name, v.id, v.action ?? v.code ?? "error"]), [
+      ["onShare", 1, "shared"],
+      ["onShare", 2, "dismissed"],
+      ["onShare", 3, unavailable],
+      ["onShare", 4, unavailable],
+      ["onShare", 5, unavailable],
+      ["onShare", 6, "error"],
+    ]);
+  } finally {
+    if (saved) Object.defineProperty(globalThis, "navigator", saved);
+    else delete globalThis.navigator;
+  }
+});

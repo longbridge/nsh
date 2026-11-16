@@ -343,6 +343,10 @@ pub struct Environment {
     /// ([`crate::Command::RenderCanvas`], `OffscreenCanvas`); without it,
     /// a render fails at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
     pub canvas_render: bool,
+    /// The platform shows the system's share sheet
+    /// ([`crate::Command::Share`], `Share.show`); without it, a share fails
+    /// at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+    pub share: bool,
     /// The platform handles file requests ([`crate::Command::FileRequest`]).
     /// Desktops implement the full set; mobile platforms answer the open
     /// dialog and reject operations they do not support. Without it, all
@@ -478,6 +482,7 @@ impl Default for Environment {
             wake_count: 0,
             screen_color: false,
             canvas_render: false,
+            share: false,
             file_requests: false,
             speech: false,
             notifications: false,

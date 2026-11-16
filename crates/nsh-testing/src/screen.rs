@@ -142,6 +142,10 @@ pub struct Screen {
     url_opens: Vec<(u32, String)>,
     /// The screen colors asked for (`pick_screen_color`), to answer.
     screen_colors: Vec<u32>,
+    /// What the app shared (`Share.show`), in order.
+    shares: Vec<nsh_core::share::ShareSheet>,
+    /// The shares to answer.
+    share_answers: Vec<u32>,
     /// The requests on local paths that reached the platform
     /// (`pick_paths`, `open_path`, ...), in order.
     file_requests: Vec<nsh_core::file_dialog::FileRequest>,
@@ -751,6 +755,11 @@ impl Screen {
                 self.url_opens.push((*id, url.clone()));
             }
             Command::PickScreenColor { id } => self.screen_colors.push(*id),
+            // Recorded, never shared: a test's machine has no share sheet.
+            Command::Share { id, sheet } => {
+                self.shares.push((**sheet).clone());
+                self.share_answers.push(*id);
+            }
             // Recorded, never carried out: a test's machine opens, shows
             // and trashes nothing.
             Command::FileRequest { id, request } => {
@@ -1596,6 +1605,19 @@ impl Screen {
     /// The requests on local paths to answer since the last call.
     pub(crate) fn take_file_answers(&mut self) -> Vec<(u32, nsh_core::file_dialog::FileRequest)> {
         std::mem::take(&mut self.file_answers)
+    }
+
+    /// What the app shared (`Share.show`, [`nsh_core::element::share`]),
+    /// in order: what reached the platform, past the content's checks and
+    /// the `share` capability (only once the environment has
+    /// [`nsh_core::platform::Environment::share`]).
+    pub fn shares(&self) -> &[nsh_core::share::ShareSheet] {
+        &self.shares
+    }
+
+    /// The share requests to answer since the last call.
+    pub(crate) fn take_share_answers(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.share_answers)
     }
 
     /// The screen color requests to answer since the last call.

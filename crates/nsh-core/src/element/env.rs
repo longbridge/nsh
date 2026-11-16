@@ -76,6 +76,9 @@ pub struct Environment {
     /// The platform renders canvas drawings offscreen into images
     /// ([`crate::platform::Environment::canvas_render`]).
     pub canvas_render: bool,
+    /// The platform shows the system's share sheet
+    /// ([`crate::platform::Environment::share`]).
+    pub share: bool,
     /// The platform shows file dialogs and opens, reveals and trashes local
     /// paths ([`crate::platform::Environment::file_requests`]).
     pub file_requests: bool,
@@ -150,6 +153,7 @@ impl Default for Environment {
             wake_count: 0,
             screen_color: false,
             canvas_render: false,
+            share: false,
             file_requests: false,
             speech: false,
             notifications: false,

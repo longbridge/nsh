@@ -131,6 +131,7 @@ An app declares what it may reach outside its VM in `nsh.json`:
     "statusBar": true,
     "clipboard": true,
     "picker": true,
+    "share": true,
     "speech": true,
     "notifications": true,
     "audio": true,
@@ -254,6 +255,11 @@ for when a page first needs them. Pages need a secure context (`https:` or `loca
 `"picker": true` lets the app show the system's picker for photos ([`Picker`](../modules/nsh.md#picker)): the user
 picks what reaches the app.
 
+### `share`
+
+`"share": true` lets the app show the system's share sheet ([`Share`](../modules/nsh.md#share)): the user chooses
+where the content goes. A shared file must also be readable under `fs.read`.
+
 ### `speech`
 
 `"speech": true` lets the app recognize what the user says ([`Speech`](../modules/nsh.md#speech)): the microphone and
@@ -345,6 +351,7 @@ if (host.available()) {
 | Status bar change, canvas image | Nothing changes or is drawn; the refusal is logged. |
 | Clipboard | Every function of `Clipboard` rejects with `ERR_ACCESS_DENIED`, `permission` `"clipboard"` and `resource` `""`; the system clipboard is never touched. |
 | Picker | `pickImages` and `pickFiles` show nothing and reject with `ERR_ACCESS_DENIED`, `permission` `"picker"` and `resource` `""`. |
+| Share | `Share.available()` resolves `false` and `Share.show` shows nothing and rejects with `ERR_ACCESS_DENIED`, `permission` `"share"` and `resource` `""`. |
 | Speech | `Speech.start` throws `ERR_ACCESS_DENIED`, `permission` `"speech"` and `resource` `""`; the microphone stays off. |
 | Sound | `Sound.load` rejects and `new AudioPlayer` throws `ERR_ACCESS_DENIED`, `permission` `"audio"` and `resource` the source; nothing is read or played. |
 | Notifications | Each function of `Notifications` rejects or throws `ERR_ACCESS_DENIED`, `permission` `"notifications"` and `resource` `""`; nothing shows. |

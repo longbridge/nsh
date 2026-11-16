@@ -335,6 +335,8 @@ pub struct Headless {
     picks: Picks,
     /// The color the user picks on the screen ([`Headless::on_screen_color`]).
     screen_color: Option<nsh_core::Hsla>,
+    /// How the user answers the share sheet ([`Headless::on_share`]).
+    share: nsh_core::share::ShareOutcome,
     /// The paths the user picks in the open dialog
     /// ([`Headless::on_pick_paths`]).
     picked_paths: Vec<std::path::PathBuf>,
@@ -479,6 +481,7 @@ impl Headless {
             dialogs: Dialogs::Default,
             picks: Picks::Default,
             screen_color: None,
+            share: nsh_core::share::ShareOutcome::dismissed(),
             picked_paths: Vec::new(),
             save_path: None,
             failing_images: Vec::new(),
@@ -806,6 +809,18 @@ impl Headless {
         self.set_environment("onScreenColor", |env| env.screen_color = true)
     }
 
+    /// The platform shows a share sheet
+    /// ([`nsh_core::platform::Environment::share`]), and the user answers
+    /// every share the app shows (`Share.show`, [`nsh_core::element::share`])
+    /// with `outcome`: shared (to a target, if it names one) or dismissed.
+    /// What the app shares is recorded ([`Screen::shares`]). Then waits
+    /// until the app is quiet.
+    pub fn on_share(&mut self, outcome: nsh_core::share::ShareOutcome) -> Result<(), String> {
+        let what = format!("onShare({})", outcome.action.as_str());
+        self.share = outcome;
+        self.set_environment(&what, |env| env.share = true)
+    }
+
     /// The platform has file dialogs, a file manager and a trash
     /// ([`nsh_core::platform::Environment::file_requests`]), and the user
     /// picks `paths` whenever the app shows the open dialog (`pick_paths`;
@@ -1112,6 +1127,9 @@ impl Headless {
                 fields.push(("color", PayloadValue::Number(f64::from(packed))));
             }
             control.dispatch_event(ROOT_ID, EventKind::ScreenColor, EventPayload::Map(fields));
+        }
+        for id in self.screen.take_share_answers() {
+            control.dispatch_event(ROOT_ID, EventKind::Share, self.share.payload(id));
         }
         for (id, request) in self.screen.take_file_answers() {
             use nsh_core::file_dialog::FileRequest;
@@ -3040,6 +3058,56 @@ mod tests {
                 "mailto:help@example.com"
             ]
         );
+    }
+
+    /// Shares a link and shows how the share ended.
+    #[component]
+    fn Sharing() -> impl IntoElement {
+        let result = signal(String::from("nothing"));
+        let share_link = move |_: &()| {
+            let shared = share(
+                nsh_core::share::ShareRequest::new()
+                    .title("Docs")
+                    .url("https://example.com/docs"),
+            );
+            spawn(async move {
+                result.set(match shared.await {
+                    Ok(outcome) => match outcome.target {
+                        Some(target) => format!("{} {target}", outcome.action.as_str()),
+                        None => outcome.action.as_str().to_owned(),
+                    },
+                    Err(error) => error.code.unwrap_or_default(),
+                })
+            });
+        };
+        view()
+            .child(text(move || result.get()))
+            .child(text("Share").on_press(share_link))
+    }
+
+    #[test]
+    fn a_test_answers_the_share_sheet() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Sharing>())).unwrap();
+        app.first_render().unwrap();
+        // No share sheet until the test gives the platform one.
+        app.press("Share").unwrap();
+        app.wait_for("text:ERR_FEATURE_UNAVAILABLE_ON_PLATFORM")
+            .unwrap();
+        assert!(app.screen().shares().is_empty());
+
+        app.on_share(nsh_core::share::ShareOutcome::shared(Some("mail".into())))
+            .unwrap();
+        app.press("Share").unwrap();
+        app.wait_for("text:shared mail").unwrap();
+        app.on_share(nsh_core::share::ShareOutcome::dismissed())
+            .unwrap();
+        app.press("Share").unwrap();
+        app.wait_for("text:dismissed").unwrap();
+        let shares = app.screen().shares();
+        assert_eq!(shares.len(), 2);
+        assert_eq!(shares[0].url.as_deref(), Some("https://example.com/docs"));
+        assert_eq!(shares[0].title.as_deref(), Some("Docs"));
+        assert_eq!(shares[0].anchor, None);
     }
 
     #[test]
