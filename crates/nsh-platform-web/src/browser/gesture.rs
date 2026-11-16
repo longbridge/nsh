@@ -56,6 +56,9 @@ impl Gestures {
                 ),
                 changed: false,
                 pointer_type: nsh_core::PointerType::Touch,
+                pressure: 0.5,
+                tilt_x: 0.0,
+                tilt_y: 0.0,
             });
         }
         let touch = TouchEvent {

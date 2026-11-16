@@ -1457,6 +1457,8 @@ fn handle(
                 WM_POINTERCAPTURECHANGED => PointerKind::Cancel,
                 _ => PointerKind::Move,
             };
+            let sample = pen_sample(id, info.pointerType.0 == 3);
+            crate::input::set_pen_sample(id + 2, Some(sample));
             crate::input::pointer(
                 surface,
                 PointerEvent {
@@ -1473,6 +1475,9 @@ fn handle(
                     clicks: 1,
                 },
             );
+            if matches!(kind, PointerKind::Up | PointerKind::Cancel) {
+                crate::input::set_pen_sample(id + 2, None);
+            }
             return Some(LRESULT(0));
         }
         WM_SETCURSOR if lo(lparam.0) == HTCLIENT as i32 => {
@@ -1733,6 +1738,49 @@ fn sys_close(hwnd: HWND, lparam: LPARAM) -> crate::shell::SysClose {
             SysClose::Menu
         }
     }
+}
+
+/// The pressure and tilt contact `id` reports (`pen`: a pen, else a
+/// finger), from `GetPointerPenInfo` / `GetPointerTouchInfo`.
+fn pen_sample(id: u32, pen: bool) -> crate::input::PenSample {
+    use windows::Win32::UI::Input::Pointer::{
+        GetPointerPenInfo, GetPointerTouchInfo, POINTER_PEN_INFO, POINTER_TOUCH_INFO,
+    };
+    // PEN_MASK_PRESSURE, PEN_MASK_TILT_X, PEN_MASK_TILT_Y; TOUCH_MASK_PRESSURE.
+    const PRESSURE: u32 = 0x1;
+    const TILT_X: u32 = 0x4;
+    const TILT_Y: u32 = 0x8;
+    const TOUCH_PRESSURE: u32 = 0x4;
+    let mut sample = crate::input::PenSample {
+        pen,
+        pressure: None,
+        tilt: (0.0, 0.0),
+    };
+    if pen {
+        let mut info = POINTER_PEN_INFO::default();
+        // SAFETY: a local out value.
+        if unsafe { GetPointerPenInfo(id, &mut info) }.is_ok() {
+            let mask = info.penMask;
+            if mask & PRESSURE != 0 {
+                sample.pressure = Some((info.pressure as f32 / 1024.0).clamp(0.0, 1.0));
+            }
+            if mask & TILT_X != 0 {
+                sample.tilt.0 = info.tiltX as f32;
+            }
+            if mask & TILT_Y != 0 {
+                sample.tilt.1 = info.tiltY as f32;
+            }
+        }
+    } else {
+        let mut info = POINTER_TOUCH_INFO::default();
+        // SAFETY: a local out value.
+        if unsafe { GetPointerTouchInfo(id, &mut info) }.is_ok()
+            && info.touchMask & TOUCH_PRESSURE != 0
+        {
+            sample.pressure = Some((info.pressure as f32 / 1024.0).clamp(0.0, 1.0));
+        }
+    }
+    sample
 }
 
 /// True when a mouse message was synthesized from touch or pen input,

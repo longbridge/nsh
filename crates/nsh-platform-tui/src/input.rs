@@ -211,6 +211,9 @@ impl Drag {
                     location: self.page - self.origin,
                     changed: true,
                     pointer_type: nsh_core::PointerType::Mouse,
+                    pressure: nsh_core::TouchPoint::default_pressure(phase, true),
+                    tilt_x: 0.0,
+                    tilt_y: 0.0,
                 }],
             })),
         );
