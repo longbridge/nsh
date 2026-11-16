@@ -27,6 +27,10 @@
   options); plus the same as `<name>.zip`. No tools are needed; `--run` launches the executable.
   GPUI is the backend for embedding in GPUI and GPUI Kit apps (below), which ship it in their own executable: `nsh
   package` refuses `--target gpui` and names this OS's target, the one backend each desktop packages apps with.
+- iOS device packages check that the runner contains an `arm64` slice and default
+  `UIRequiredDeviceCapabilities` to `["arm64"]` (overridable with `ios.infoPlist`). Before signing,
+  the CLI writes Xcode's `DT*` metadata and `BuildMachineOSBuild` from the active toolchain
+  (`xcrun`, `xcodebuild -version`, `sw_vers`); tool discovery failures stop packaging.
 - Links: `nsh.json` `"schemes": [...]` names the URL schemes a packaged app claims (checked by
   `nsh_core::url_scheme::schemes_from_json` in the bundler, the CLI and a Rust app's generated root). `nsh package`
   declares them to the system (`CFBundleURLTypes` on macOS and iOS) and writes them to `app.json`, which the runner
