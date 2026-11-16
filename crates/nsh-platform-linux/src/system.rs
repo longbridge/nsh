@@ -826,7 +826,8 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         }),
         Command::Notification(command) => surface.control(|c| {
             let root = surface.root.upcast_ref::<gtk::Widget>();
-            crate::notifications::command(c, root, command);
+            let base = surface.asset_base.borrow().clone();
+            crate::notifications::command(c, root, command, base.as_ref());
         }),
         Command::Back => crate::navigation::default_back(surface),
         Command::Tokens(tokens) => set_menu_tokens(tokens),

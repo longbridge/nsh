@@ -155,6 +155,12 @@ pub(crate) struct ShowNotificationOptions {
     body: Option<String>,
     /// Shows it without a sound or vibration (false: with the system's).
     silent: Option<bool>,
+    /// A sound the app ships (an asset's path or `asset:/` URI, an imported
+    /// sound), played instead of the system's default; `silent` wins. Apple
+    /// platforms play `.caf`, `.aiff` and `.wav` of at most 30 s, Android
+    /// `.ogg`, `.mp3` and `.wav`; Windows (unpackaged), the web and a
+    /// platform that cannot read it play the default.
+    sound: Option<String>,
 }
 
 impl ShowNotificationOptions {
@@ -164,10 +170,19 @@ impl ShowNotificationOptions {
                 "Notifications.show: `id` and `title` must not be empty".into(),
             ));
         }
-        Ok(
+        let mut notification =
             Notification::new(self.id, self.title, self.body.unwrap_or_default())
-                .silent(self.silent.unwrap_or_default()),
-        )
+                .silent(self.silent.unwrap_or_default());
+        if let Some(sound) = self.sound {
+            if (sound.contains("://") && !sound.starts_with("asset:")) || sound.starts_with("data:")
+            {
+                return Err(JsError::Range(format!(
+                    "Notifications.show: `sound` must be a sound the app ships (an asset), not {sound}"
+                )));
+            }
+            notification = notification.sound(sound);
+        }
+        Ok(notification)
     }
 }
 

@@ -2133,6 +2133,20 @@ to the browser.
 await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
 ```
 
+`sound` plays a sound the app ships instead of the system's default, so the user tells the app's notifications apart
+(a new customer message, say); `silent: true` wins over it. Name a bundled asset, by its path or an imported sound.
+`nsh package` copies the app's sounds where the system plays them from: Apple platforms play `.caf`, `.aiff` and `.wav`
+files of at most 30 s from `Library/Sounds`, found by file name, so give each sound its own file name; Android plays
+`.ogg`, `.mp3` and `.wav` raw resources, one notification channel per sound, whose sound the user can change in the
+system's settings; Linux passes the file to the daemon (`sound-file`). Windows (an unpackaged app), the web, and a
+platform that cannot find the sound play the default.
+
+```tsx
+import ding from "./sounds/message.caf";
+
+await Notifications.show({ id: "chat:42", title: "Ada", body: "Are you there?", sound: ding });
+```
+
 ### Notifications.closeAll
 
 `closeAll()` removes every notification the app showed, shown or waiting to show. Call it when the user signs out, so
