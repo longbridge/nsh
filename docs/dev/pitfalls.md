@@ -271,6 +271,12 @@ Things that were found the hard way. Read the section of the area you change bef
   negative `additionalSafeAreaInsets` worked out from the window and the stack's frame alone. Deriving what UIKit
   granted by subtracting the compensation already applied looks equivalent and cannot heal: UIKit floors a safe area at
   zero, so after an overshoot that subtraction returns the value already applied, for good.
+- **iPadOS 26, the window controls' corner**: `safeAreaInsets` leaves out the controls a windowed app has at its
+  top-leading corner; the safe-area layout region with horizontal corner adaptation
+  (`edgeInsetsForLayoutRegion:`) covers them, and also pads both sides alike for the display's rounded corners
+  (left and right 9pt on an iPad Pro 11-inch in full screen, where `safeAreaInsets` has 0; in a window, left 66pt
+  for the controls and right 9.5pt for the window's corner). `RootView::safe_area` takes the region's inset only on
+  a side it insets further than the other, so full screen and iPhone keep `safeAreaInsets`.
 
 - **iOS, dismissing a modal that presents another**: `dismissViewControllerAnimated` called on a controller that is
   itself presenting one (a `Sheet` is a transparent modal over the modal it is in) dismisses only that one, and the outer
