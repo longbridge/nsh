@@ -510,7 +510,11 @@ impl MediaFiles {
         };
         Some((|| {
             let dir = crate::runtime::fs::confined::open_root(canonical)?;
-            let file = crate::runtime::fs::confined::open_file(&dir, &relative, false)?;
+            let file = crate::runtime::fs::confined::open_file(
+                &dir,
+                &relative,
+                crate::runtime::fs::confined::Open::Read,
+            )?;
             Ok(file.into_std())
         })())
     }

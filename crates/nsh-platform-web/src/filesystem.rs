@@ -44,6 +44,10 @@ impl FileSystem for BrowserFileSystem {
                 bytes = data;
                 "write"
             }
+            FileOperation::Append(data) => {
+                bytes = data;
+                "append"
+            }
             FileOperation::Entries {
                 max_entries,
                 max_name_bytes,

@@ -6,7 +6,7 @@
 // use rejects with a `TypeError`. (WebSocket denials need a domain that
 // declares its capabilities: macos's mod-access-denied.)
 import { Text, View, signal } from "nsh";
-import fs, { readFile, writeFile, readdir, exists, unlink, rmdir, mkdir, stat, lstat, rename, readlink } from "fs/promises";
+import fs, { readFile, writeFile, appendFile, readdir, exists, unlink, rmdir, mkdir, stat, lstat, rename, readlink } from "fs/promises";
 import net, { connect, Socket } from "net";
 import websocketModule, { connect as connectWebSocket, WebSocketConnection } from "websocket";
 
@@ -31,6 +31,7 @@ function misused(call: () => unknown) {
 const paths: [string, () => Promise<unknown>][] = [
   ["/compat-denied/file", () => readFile("/compat-denied/file")],
   ["/compat-denied/file", () => writeFile("/compat-denied/file", "data")],
+  ["/compat-denied/file", () => appendFile("/compat-denied/file", "data")],
   ["/compat-denied", () => readdir("/compat-denied")],
   ["/compat-denied/file", () => exists("/compat-denied/file")],
   ["/compat-denied/file", () => unlink("/compat-denied/file")],

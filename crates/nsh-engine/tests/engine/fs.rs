@@ -273,6 +273,59 @@ fn reference_io_script_matches_gpui_shell_contract() {
 }
 
 #[test]
+fn append_file_adds_to_the_end_and_creates_the_file() {
+    let (root, app) = data_dir("append");
+    std::fs::write(app.join("log.txt"), "one\n").unwrap();
+    let (_engine, rx) = start(
+        r#"
+import fs, { appendFile, readFile } from "fs/promises";
+(async () => {
+  await appendFile("log.txt", "two\n");
+  await fs.appendFile("log.txt", new Uint8Array([0x74, 0x68, 0x72, 0x65, 0x65, 0x0a]));
+  // Missing, it is created; a write after an append replaces what it holds.
+  await appendFile("made.txt", "a");
+  await appendFile("made.txt", "b");
+  await fs.writeFile("replaced.txt", "old");
+  await appendFile("replaced.txt", "+new");
+  const refused = (p) => p.then(() => "written", (e) => `${e.constructor.name}:${e.code}`);
+  const over = await refused(appendFile("not-created", "x".repeat(8 * 1024 * 1024 + 1)));
+  const dir = await refused(appendFile(".", "x"));
+  report([await readFile("log.txt", "utf8"), await readFile("made.txt", "utf8"), await readFile("replaced.txt", "utf8"), over, dir].join("|"));
+})().catch((e) => report(String(e)));
+"#,
+        DATA_GRANT,
+        Some(root.clone()),
+        Default::default(),
+    );
+    assert_eq!(
+        shown(&rx, "done"),
+        "done one\ntwo\nthree\n|ab|old+new|RangeError:ERR_OUT_OF_RANGE|Error:EISDIR"
+    );
+    assert!(!app.join("not-created").exists());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn append_file_needs_a_write_grant() {
+    let (root, app) = data_dir("append-denied");
+    std::fs::write(app.join("log.txt"), "one").unwrap();
+    let (_engine, rx) = start(
+        r#"
+import { appendFile, readFile } from "fs/promises";
+(async () => {
+  const code = await appendFile("log.txt", "two").then(() => "written", (e) => e.code);
+  report(`${code} ${await readFile("log.txt", "utf8")}`);
+})().catch((e) => report(String(e)));
+"#,
+        r#"{"fs":{"read":["${dataDir}"]}}"#,
+        Some(root.clone()),
+        Default::default(),
+    );
+    assert_eq!(shown(&rx, "done"), "done ERR_ACCESS_DENIED one");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn options_errors_and_link_operations_match_the_reference() {
     let (root, app) = data_dir("options");
     let outside = root.join("outside");
@@ -288,7 +341,7 @@ import fs from "fs/promises";
 import * as namespace from "fs/promises";
 const absoluteLink = ABSOLUTE;
 (async () => {
-  const expected = ["default", "exists", "lstat", "mkdir", "readFile", "readdir", "readlink", "rename", "rmdir", "stat", "unlink", "writeFile"];
+  const expected = ["appendFile", "default", "exists", "lstat", "mkdir", "readFile", "readdir", "readlink", "rename", "rmdir", "stat", "unlink", "writeFile"];
   if (JSON.stringify(Object.keys(namespace).sort()) !== JSON.stringify(expected.sort())) throw Error("exports differ: " + Object.keys(namespace));
   if (fs.readFile !== namespace.readFile) throw Error("default and named exports differ");
   // A function returning a promise never throws: wrong arguments reject

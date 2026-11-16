@@ -7685,15 +7685,18 @@ class Player {
         try {await locate(request.path); throw error("EEXIST");} catch(e) {if(e.name !== "NotFoundError") throw e;}
         await parent.getDirectoryHandle(name,{create:true}); return {};
       }
-      if (request.op === "write") {
+      if (request.op === "write" || request.op === "append") {
         if (!name) throw error("EISDIR");
         const parent = await directory(names.slice(0,-1));
         let handle;
         try {handle=await parent.getFileHandle(name,{create:true});} catch(e) {if(e.name === "TypeMismatchError") throw error("EISDIR");throw e;}
         if (!active()) return {};
-        const writer = await handle.createWritable();
+        // An append keeps the file and writes at its end.
+        const append = request.op === "append";
+        const writer = await handle.createWritable({keepExistingData: append});
         try {
           if (!active()) {await writer.abort(); return {};}
+          if (append) await writer.seek((await handle.getFile()).size);
           await writer.write(bytes);
           if (!active()) {await writer.abort(); return {};}
           await writer.close();

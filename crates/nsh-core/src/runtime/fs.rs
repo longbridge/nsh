@@ -84,36 +84,17 @@ impl Fs {
         data: FileData,
         sys: System,
     ) -> Result<Later<()>, JsError> {
-        let grant = grant(&sys, &path, true)?;
-        let too_long = |len: usize| {
-            JsError::Range(format!(
-                "`{}` write is {len} bytes, over the {MAX_WRITE}-byte fs.writeFile limit",
-                grant.name()
-            ))
-            .with_code("ERR_OUT_OF_RANGE")
-        };
-        let bytes = match data {
-            FileData::Text(text) => text.into_bytes(),
-            FileData::Bytes(bytes) => bytes,
-            FileData::TooLong(len) => return Err(too_long(len)),
-        };
-        if bytes.len() > MAX_WRITE {
-            return Err(too_long(bytes.len()));
-        }
-        let pending = pending(&sys)?;
-        let held = sys
-            .quotas
-            .reserve(IN_FLIGHT, bytes.len(), MAX_IN_FLIGHT)
-            .ok_or_else(|| {
-                JsError::Error(format!(
-                    "fs exceeded the per-runtime limit of {MAX_IN_FLIGHT} bytes of file data in flight"
-                ))
-                .with_code(codes::QUOTA_EXCEEDED)
-            })?;
-        Ok(Later::new(async move {
-            let _held = (pending, held);
-            grant.write(bytes).await
-        }))
+        write(path, data, sys, false)
+    }
+
+    /// Adds UTF-8 or Uint8Array bytes to the end of a regular file, which
+    /// it creates when missing; at most 8 MiB a call.
+    pub(crate) fn append_file(
+        path: String,
+        data: FileData,
+        sys: System,
+    ) -> Result<Later<()>, JsError> {
+        write(path, data, sys, true)
     }
 
     /// Lists a directory's names, sorted, or its entries with
@@ -244,6 +225,46 @@ impl JsValue for Encoding {
     fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
         Ok(JsOwned::new(host, host.new_string("utf8")?))
     }
+}
+
+/// `writeFile` (`append` false) and `appendFile`: the call's checks and
+/// limits, then the disk work as a core task.
+fn write(path: String, data: FileData, sys: System, append: bool) -> Result<Later<()>, JsError> {
+    let limit = if append {
+        "fs.appendFile"
+    } else {
+        "fs.writeFile"
+    };
+    let grant = grant(&sys, &path, true)?;
+    let too_long = |len: usize| {
+        JsError::Range(format!(
+            "`{}` write is {len} bytes, over the {MAX_WRITE}-byte {limit} limit",
+            grant.name()
+        ))
+        .with_code("ERR_OUT_OF_RANGE")
+    };
+    let bytes = match data {
+        FileData::Text(text) => text.into_bytes(),
+        FileData::Bytes(bytes) => bytes,
+        FileData::TooLong(len) => return Err(too_long(len)),
+    };
+    if bytes.len() > MAX_WRITE {
+        return Err(too_long(bytes.len()));
+    }
+    let pending = pending(&sys)?;
+    let held = sys
+        .quotas
+        .reserve(IN_FLIGHT, bytes.len(), MAX_IN_FLIGHT)
+        .ok_or_else(|| {
+            JsError::Error(format!(
+                "fs exceeded the per-runtime limit of {MAX_IN_FLIGHT} bytes of file data in flight"
+            ))
+            .with_code(codes::QUOTA_EXCEEDED)
+        })?;
+    Ok(Later::new(async move {
+        let _held = (pending, held);
+        grant.write(bytes, append).await
+    }))
 }
 
 /// A file's contents: UTF-8 text or bytes.
@@ -831,7 +852,9 @@ impl Grant {
         let (grant, file, size) = blocking(move || {
             let file = self
                 .open(true)
-                .and_then(|(dir, relative)| confined::open_file(&dir, &relative, false))
+                .and_then(|(dir, relative)| {
+                    confined::open_file(&dir, &relative, confined::Open::Read)
+                })
                 .map_err(|e| self.error("read", "open", e))?;
             let size = file
                 .metadata()
@@ -918,15 +941,24 @@ impl Grant {
         Ok(Holding { value, _held: held })
     }
 
-    async fn write(self, bytes: Vec<u8>) -> Result<(), JsError> {
+    /// Replaces the file's contents with `bytes`, or with `append` adds them
+    /// to its end.
+    async fn write(self, bytes: Vec<u8>, append: bool) -> Result<(), JsError> {
         blocking(move || {
             use std::io::Write;
+            let mode = if append {
+                confined::Open::Append
+            } else {
+                confined::Open::Write
+            };
             let mut file = self
                 .open(true)
-                .and_then(|(dir, relative)| confined::open_file(&dir, &relative, true))
+                .and_then(|(dir, relative)| confined::open_file(&dir, &relative, mode))
                 .map_err(|e| self.error("write", "open", e))?;
-            file.set_len(0)
-                .map_err(|e| self.error("write", "ftruncate", e))?;
+            if !append {
+                file.set_len(0)
+                    .map_err(|e| self.error("write", "ftruncate", e))?;
+            }
             file.write_all(&bytes)
                 .map_err(|e| self.error("write", "write", e))
         })
@@ -1167,9 +1199,13 @@ impl VirtualGrant {
             _ => Err(self.invalid()),
         }
     }
-    async fn write(self, bytes: Vec<u8>) -> Result<(), JsError> {
-        self.unit(crate::filesystem::FileOperation::Write(bytes), "write")
-            .await
+    async fn write(self, bytes: Vec<u8>, append: bool) -> Result<(), JsError> {
+        let operation = if append {
+            crate::filesystem::FileOperation::Append(bytes)
+        } else {
+            crate::filesystem::FileOperation::Write(bytes)
+        };
+        self.unit(operation, "write").await
     }
     async fn mkdir(self, recursive: bool) -> Result<(), JsError> {
         self.unit(
@@ -1371,16 +1407,28 @@ pub(crate) mod confined {
         Dir::open_ambient_dir(path, cap_std::ambient_authority())
     }
 
-    /// Opens a regular file to read or to write (created when missing). On
-    /// Unix it is opened non-blocking, so a FIFO or device cannot stall the
-    /// worker; anything but a regular file is refused before a byte moves.
-    pub(crate) fn open_file(dir: &Dir, path: &Path, write: bool) -> io::Result<File> {
+    /// How [`open_file`] opens a file.
+    #[derive(Clone, Copy)]
+    pub(crate) enum Open {
+        /// For reading.
+        Read,
+        /// For writing, created when missing: the caller replaces what it holds.
+        Write,
+        /// For adding to its end, created when missing.
+        Append,
+    }
+
+    /// Opens a regular file to read, to write or to append to (created when
+    /// missing). On Unix it is opened non-blocking, so a FIFO or device cannot
+    /// stall the worker; anything but a regular file is refused before a byte
+    /// moves.
+    pub(crate) fn open_file(dir: &Dir, path: &Path, mode: Open) -> io::Result<File> {
         let mut options = OpenOptions::new();
-        if write {
-            options.write(true).create(true);
-        } else {
-            options.read(true);
-        }
+        match mode {
+            Open::Read => options.read(true),
+            Open::Write => options.write(true).create(true),
+            Open::Append => options.append(true).create(true),
+        };
         #[cfg(unix)]
         {
             use cap_std::fs::OpenOptionsExt;
@@ -1484,11 +1532,15 @@ mod tests {
         let read = |path: &str, follow: bool| {
             let relative = super::through_links(&root, Path::new(path), follow);
             let mut text = String::new();
-            super::confined::open_file(&dir, &relative, false)?.read_to_string(&mut text)?;
+            super::confined::open_file(&dir, &relative, super::confined::Open::Read)?
+                .read_to_string(&mut text)?;
             std::io::Result::Ok(text)
         };
         // cap-std alone refuses both.
-        assert!(super::confined::open_file(&dir, Path::new("dir/a.txt"), false).is_err());
+        assert!(
+            super::confined::open_file(&dir, Path::new("dir/a.txt"), super::confined::Open::Read)
+                .is_err()
+        );
         assert_eq!(read("dir/a.txt", true).unwrap(), "in");
         assert_eq!(read("file", true).unwrap(), "in");
         assert!(read("away/a.txt", true).is_err());
@@ -1651,6 +1703,7 @@ mod tests {
             "export declare function readFile(path: string): Promise<Uint8Array>;",
             r#"export declare function readFile(path: string, encoding: "utf8" | { encoding: "utf8" }): Promise<string>;"#,
             "export declare function writeFile(path: string, data: string | Uint8Array): Promise<void>;",
+            "export declare function appendFile(path: string, data: string | Uint8Array): Promise<void>;",
             "export declare function readdir(path: string, options: { withFileTypes: true }): Promise<Dirent[]>;",
             "export declare function readdir(path: string, options?: ReaddirOptions | null): Promise<(string)[]>;",
             "export declare function mkdir(path: string, options?: MakeDirectoryOptions | null): Promise<void>;",

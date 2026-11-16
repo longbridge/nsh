@@ -29,6 +29,8 @@ pub enum FileOperation {
     },
     /// Replace a regular file's contents.
     Write(Vec<u8>),
+    /// Add to the end of a regular file, creating it when missing.
+    Append(Vec<u8>),
     /// List entries, stopping before either bound is exceeded.
     Entries {
         /// Maximum number of entries.
