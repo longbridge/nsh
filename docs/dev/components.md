@@ -1303,13 +1303,11 @@ distance moves the panel while the scroll stays at its adjusted top. Other backe
 arbitration. `SheetMotion` tags completion callbacks and fallback timers with a generation, so a prior exit cannot
 unmount a reopened sheet or its backdrop.
 
-With `detents` (bottom side), the panel is as tall as its largest detent and `drag_y` holds where it rests below
-its top: the pan moves it from there, and a release springs it to a detent (nearest, or the next one a flick points
-to) or, past the smallest with `closeOnSwipe`, requests closing. The detent is controlled or the sheet's own
-(`detent`, `defaultDetent`, `onDetentChange`), and the optional grabber is an adjustable part for screen readers. The
-panel binds a translation of its own for this mode and leaves the one above unchanged for sheets without detents;
-`SheetMotion` keeps `drag_y` at the detent's place as the sheet comes in and goes. Code: `sheet.rs` (`Detents`,
-`settle`).
+With `detents` (bottom side), the panel is as tall as its largest detent and rests lower for a smaller one. The
+same native pan value moves it between detents, a release settles it at one or, past the smallest with
+`closeOnSwipe`, requests closing; sheets without detents keep the motion above unchanged. The detent is controlled
+or the sheet's own (`detent`, `defaultDetent`, `onDetentChange`), and the optional grabber is an adjustable part for
+screen readers. Code: `sheet.rs` (`Detents`), `popup.rs` (`SheetMotion`).
 
 `SheetMotion` derives the programmatic translation from the remaining fade fraction times the current measured
 distance from the edge. Lazy JS children can fill in over several layout rounds in one native batch; later content
