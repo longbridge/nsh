@@ -149,10 +149,12 @@ fn runner_features(platform: &str) -> &'static [&'static str] {
         "term",
         "zlib",
         "crypto",
+        "webview",
         "websocket",
         "updater",
         "svg",
         "net",
+        "media",
     ];
     match platform {
         "nsh-platform-linux" => LINUX,
@@ -164,7 +166,7 @@ fn runner_features(platform: &str) -> &'static [&'static str] {
 /// The cargo arguments of a release runner of `platform`: its features
 /// when [`set_runner_features`] chose some, each the runner's crate has
 /// (`net` is not macOS's), plus those no import tells about (Linux's
-/// `sound` and `webview`).
+/// `sound` and `webview`, Windows' `webview` and `media`).
 fn runner_feature_args(platform: &str) -> Vec<String> {
     let Some(chosen) = RUNNER_FEATURES
         .lock()
@@ -177,7 +179,7 @@ fn runner_feature_args(platform: &str) -> Vec<String> {
     let kept: Vec<&str> = has
         .iter()
         .copied()
-        .filter(|f| matches!(*f, "sound" | "webview") || chosen.iter().any(|c| c == f))
+        .filter(|f| matches!(*f, "sound" | "webview" | "media") || chosen.iter().any(|c| c == f))
         .collect();
     vec![
         "--no-default-features".into(),
@@ -3517,9 +3519,14 @@ mod tests {
         let args = super::runner_feature_args("nsh-platform-windows");
         assert_eq!(
             args,
-            ["--no-default-features", "--features", "js,plot,svg,net"]
+            [
+                "--no-default-features",
+                "--features",
+                "js,plot,webview,svg,net,media"
+            ]
         );
-        // macOS has no `net`; Linux keeps `sound`, which no import tells.
+        // macOS has no `net`; Linux keeps `sound` and Windows `media`, which no
+        // import tells.
         assert_eq!(
             super::runner_feature_args("nsh-platform-macos")[2],
             "js,plot,svg"
@@ -4132,7 +4139,10 @@ mod tests {
         // default, so `nsh package` can turn off those it does not use.
         let lib = read("android/Cargo.toml");
         assert_eq!(lib.matches("default-features = false").count(), 2, "{lib}");
-        assert!(lib.contains("plot = [\"nsh-platform-android/plot\"]"), "{lib}");
+        assert!(
+            lib.contains("plot = [\"nsh-platform-android/plot\"]"),
+            "{lib}"
+        );
         assert!(lib.contains("default = [\"js\", \"shader\""), "{lib}");
         let web = read("rust-web/lib.rs");
         // Only `nsh/base`'s core part: the root makes the components it uses

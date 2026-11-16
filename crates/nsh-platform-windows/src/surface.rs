@@ -850,6 +850,7 @@ impl Surface {
     }
 
     /// The window's composition, made for a web view if there is none.
+    #[cfg_attr(not(feature = "webview"), allow(dead_code))]
     pub(crate) fn compose(&self) -> windows::core::Result<Rc<crate::compose::Composition>> {
         if let Some(c) = self.composition() {
             return Ok(c);

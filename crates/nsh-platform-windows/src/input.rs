@@ -262,6 +262,7 @@ pub(crate) enum Cursor {
     /// No cursor (`cursor: none`).
     Hidden,
     /// A cursor of the system's or a page's (an `HCURSOR`): a web view's.
+    #[cfg_attr(not(feature = "webview"), allow(dead_code))]
     Native(isize),
 }
 
