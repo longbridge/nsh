@@ -777,6 +777,9 @@ pub(crate) struct Mounter {
     /// `SplitView`s' splits, by their native component's node
     /// ([`crate::split`]).
     splits: rustc_hash::FxHashMap<NodeId, crate::split::SplitHost>,
+    /// The app's address given to the system ([`crate::SurfaceOptions::handoff`]):
+    /// `None` while the app has not opted in.
+    handoff: Option<nsh_platform_apple::handoff::Activity>,
     mtm: MainThreadMarker,
 }
 
@@ -865,8 +868,15 @@ impl Mounter {
             areas: Vec::new(),
             fps: None,
             splits: Default::default(),
+            handoff: None,
             mtm,
         }
+    }
+
+    /// Gives the app's addresses to the system from now on
+    /// ([`crate::SurfaceOptions::handoff`]).
+    pub(crate) fn hand_off(&mut self) {
+        self.handoff.get_or_insert_default();
     }
 
     /// Measures the surface's frames and commits with a performance
@@ -2042,6 +2052,11 @@ impl Mounter {
             (Command::Haptic(haptic), _) => crate::system::haptic(haptic),
             (Command::Orientations(bits), _) if id == nsh_core::ROOT_ID => {
                 self.orientations = Some(bits);
+            }
+            (Command::SetAppUrl(url) | Command::PushAppUrl(url), _) if id == nsh_core::ROOT_ID => {
+                if let Some(activity) = &mut self.handoff {
+                    activity.publish(&url);
+                }
             }
             (Command::PerfMonitor(true), _) => self.measure(),
             (Command::PerfMonitor(false), _) => self.stop_measuring(),

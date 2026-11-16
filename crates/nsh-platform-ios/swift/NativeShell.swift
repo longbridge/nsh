@@ -178,6 +178,20 @@ public final class NshAppView: UIView {
         }
     }
 
+    /// Gives the address of the apps loaded from now on (`UrlScheme.setUrl`)
+    /// to the system as the current `NSUserActivity`, so Handoff continues it
+    /// on the user's other devices. An `http(s)` address is a web page, which
+    /// the other device opens in its browser; any other needs `<bundle id>.url`
+    /// in the app's Info.plist `NSUserActivityTypes`, and comes back to the
+    /// other device's app (`scene(_:continue:)`, or
+    /// `application(_:continue:restorationHandler:)` without scenes) with the
+    /// URL in its `userInfo["url"]`: pass it to ``openURL(_:)``. Applies from
+    /// the next load: a change removes the running app, as ``limits`` does.
+    /// Off by default.
+    public var handoff = false {
+        didSet { nsh_app_set_handoff(app, handoff) }
+    }
+
     /// The directory the storage (`nsh/storage`) of the apps loaded from now
     /// on is kept in. `nil`: each app's own, `nsh/<app id>` in the app's
     /// Application Support (the id of `nsh.json`, `nsh/default` without

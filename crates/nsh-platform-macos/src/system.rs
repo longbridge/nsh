@@ -631,7 +631,7 @@ fn os_version() -> (u16, u16) {
 }
 
 /// A command not addressed to a kind of view.
-pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
+pub(crate) fn command(surface: &Rc<Surface>, id: NodeId, command: &Command) {
     match command {
         Command::Dialog(dialog) => show_dialog(surface, dialog),
         Command::Desktop(command) => crate::chrome::command(surface, command),
@@ -643,6 +643,11 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::PerfMonitorMode(mode) => {
             if let Some(set) = &*surface.perf_mode.borrow() {
                 set(*mode);
+            }
+        }
+        Command::SetAppUrl(url) | Command::PushAppUrl(url) if id == nsh_core::ROOT_ID => {
+            if let Some(activity) = surface.handoff.borrow_mut().as_mut() {
+                activity.publish(url);
             }
         }
         Command::Announce(text) => crate::access::announce(

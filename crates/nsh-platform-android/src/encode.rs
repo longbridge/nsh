@@ -775,7 +775,8 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     | Command::ScrollToEnd { .. }
                     // Desktops only.
                     | Command::Desktop(_)
-                    // The web's history entries; the core sends it there only.
+                    // The app's address: Android keeps none (App Links only
+                    // come in).
                     | Command::SetAppUrl(_)
                     | Command::PushAppUrl(_)
                     // No host answers `nsh/host` here (`Environment::host`):

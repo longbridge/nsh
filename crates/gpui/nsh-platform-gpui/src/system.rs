@@ -1527,7 +1527,10 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::StatusBar(_)
         | Command::SetStatusBar(_)
         | Command::LayoutAnimation(_)
-        | Command::CancelPress => {}
+        | Command::CancelPress
+        // The app's address: this platform keeps none.
+        | Command::SetAppUrl(_)
+        | Command::PushAppUrl(_) => {}
         other => log::debug!("gpui: command {other:?} is not supported"),
     }
 }

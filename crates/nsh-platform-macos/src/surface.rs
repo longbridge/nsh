@@ -246,6 +246,9 @@ pub(crate) struct Surface {
     /// the app): sent before the app's code runs, so its first
     /// `UrlScheme.url()` reads them.
     pub(crate) launch_links: RefCell<Vec<String>>,
+    /// The app's address given to the system ([`crate::AppOptions::handoff`]):
+    /// `None` while the app has not opted in.
+    pub(crate) handoff: RefCell<Option<nsh_platform_apple::handoff::Activity>>,
     /// JS asked for a display frame.
     js_frame: Cell<bool>,
     /// Batches that arrived while animations run, and what came after
@@ -394,6 +397,7 @@ impl Surface {
             host_environment: Cell::default(),
             host_tokens: RefCell::new(None),
             launch_links: RefCell::new(Vec::new()),
+            handoff: RefCell::new(None),
             js_frame: Cell::new(false),
             queued: RefCell::default(),
             frame_callbacks: RefCell::default(),
