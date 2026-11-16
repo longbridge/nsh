@@ -498,7 +498,7 @@ fn images() -> &'static Images<Picture> {
             nsh_core::image::budget(),
             |bytes: &ImageData, target: &Target| {
                 let picture = match bytes.rgba() {
-                    Some(rgba) => from_rgba(rgba)?,
+                    Some(_) => from_rgba(bytes)?,
                     None => decode(bytes, target)?,
                 };
                 let cost = picture.cost();
@@ -762,7 +762,76 @@ fn decode(bytes: &[u8], target: &Target) -> Result<Picture, String> {
 
 /// A pixel buffer ([`ImageSrc::rgba`](nsh_core::element::ImageSrc::rgba)),
 /// taken as it is: no decode, at its own size; any thread.
-fn from_rgba((width, height, rgba): (u32, u32, &[u8])) -> Result<Picture, String> {
+fn from_rgba(data: &ImageData) -> Result<Picture, String> {
+    let (width, height, rgba) = data.rgba().ok_or("not an RGBA image")?;
+    let image = if rgba.as_chunks::<4>().0.iter().all(|px| px[3] == 255) {
+        opaque_image(data)
+    } else {
+        premultiplied_image(width, height, rgba)
+    }
+    .ok_or("cannot make a CGImage")?;
+    Ok(Picture {
+        frames: Arc::new([image]),
+        key_times: Arc::new([0.0, 1.0]),
+        duration: 0.0,
+        natural: Natural::Pixels(width, height),
+    })
+}
+
+/// Keep the source alive until CoreGraphics releases its last reference.
+fn opaque_image(source: &ImageData) -> Option<CFRetained<CGImage>> {
+    let (width, height, rgba) = source.rgba()?;
+    use std::{ffi::c_void, ptr::NonNull};
+
+    use objc2_core_graphics::{
+        CGBitmapInfo, CGColorRenderingIntent, CGColorSpace, CGDataProvider, CGImageAlphaInfo,
+        CGImageByteOrderInfo, kCGColorSpaceSRGB,
+    };
+
+    unsafe extern "C-unwind" fn release(info: *mut c_void, _: NonNull<c_void>, _: usize) {
+        // SAFETY: `info` is the Box transferred to this provider below,
+        // and CoreGraphics calls this exactly once when it releases it.
+        drop(unsafe { Box::from_raw(info.cast::<ImageData>()) });
+    }
+
+    // SAFETY: a constant of CoreGraphics.
+    let space = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceSRGB }))?;
+    let owner = Box::into_raw(Box::new(source.clone()));
+    // SAFETY: ImageData shares the immutable pixels with `source`. The
+    // provider owns that clone, so the bytes outlive all its readers.
+    let provider = unsafe {
+        CGDataProvider::with_data(
+            owner.cast(),
+            rgba.as_ptr().cast(),
+            rgba.len(),
+            Some(release),
+        )
+    };
+    let Some(provider) = provider else {
+        // SAFETY: no provider was created to take ownership of the Box.
+        drop(unsafe { Box::from_raw(owner) });
+        return None;
+    };
+    // SAFETY: ImageData validates the dimensions and buffer length. The
+    // image retains the provider; null decode uses the default mapping.
+    unsafe {
+        CGImage::new(
+            width as usize,
+            height as usize,
+            8,
+            32,
+            width as usize * 4,
+            Some(&space),
+            CGBitmapInfo(CGImageAlphaInfo::NoneSkipLast.0 | CGImageByteOrderInfo::Order32Big.0),
+            Some(&provider),
+            std::ptr::null(),
+            true,
+            CGColorRenderingIntent::RenderingIntentDefault,
+        )
+    }
+}
+
+fn premultiplied_image(width: u32, height: u32, rgba: &[u8]) -> Option<CFRetained<CGImage>> {
     let mut pixels = rgba.to_vec();
     for px in pixels.as_chunks_mut::<4>().0 {
         let a = u16::from(px[3]);
@@ -774,13 +843,7 @@ fn from_rgba((width, height, rgba): (u32, u32, &[u8])) -> Result<Picture, String
     raster.width = width;
     raster.height = height;
     raster.pixels = pixels;
-    let image = rgba_image(&raster).ok_or("cannot make a CGImage")?;
-    Ok(Picture {
-        frames: Arc::new([image]),
-        key_times: Arc::new([0.0, 1.0]),
-        duration: 0.0,
-        natural: Natural::Pixels(width, height),
-    })
+    rgba_image(&raster)
 }
 
 /// Draws an SVG, its longest side `longest` pixels; any thread.
@@ -1568,6 +1631,137 @@ mod tests {
     fn at((w, _, pixels): &(usize, usize, Vec<u8>), x: usize, y: usize) -> [u8; 4] {
         let i = (y * w + x) * 4;
         pixels[i..i + 4].try_into().unwrap()
+    }
+
+    // Obtain ImageData through the same Rust component/mount path as apps.
+    fn pixel_source(width: u32, height: u32, pixels: Arc<[u8]>) -> ImageData {
+        use nsh_core::{
+            Core, MountItem,
+            element::{ImageSrc, Root},
+            geometry::size_pt,
+            prelude::*,
+        };
+
+        thread_local! {
+            static SOURCE: RefCell<Option<ImageSrc>> = const { RefCell::new(None) };
+        }
+        #[component]
+        fn TestImage() -> impl IntoElement {
+            image(SOURCE.with_borrow_mut(|source| source.take().unwrap()))
+        }
+        SOURCE.with_borrow_mut(|source| *source = Some(ImageSrc::rgba(width, height, pixels)));
+        let mut core = Core::new(
+            crate::text::CoreTextEngine::default(),
+            size_pt(100.0, 100.0),
+        );
+        core.mount_root(&Root::of::<TestImage>());
+        core.commit()
+            .unwrap()
+            .items
+            .into_iter()
+            .find_map(|item| match item {
+                MountItem::Image {
+                    source: Some(source),
+                    ..
+                } => source.data,
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn opaque_rgba_keeps_source_alive_and_renders_without_premultiplication() {
+        use objc2_core_graphics::CGImageAlphaInfo;
+
+        let pixels: Arc<[u8]> = Arc::from([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255]);
+        let weak = Arc::downgrade(&pixels);
+        let data = pixel_source(3, 1, pixels);
+        let picture = from_rgba(&data).unwrap();
+        drop(data);
+        assert!(weak.upgrade().is_some());
+        assert_eq!(
+            CGImage::alpha_info(Some(&picture.frames[0])),
+            CGImageAlphaInfo::NoneSkipLast
+        );
+        assert_eq!(
+            rgba(&picture.frames[0]).2,
+            [255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255]
+        );
+        let image = picture.frames[0].clone();
+        drop(picture);
+        assert!(weak.upgrade().is_some());
+        drop(image);
+        assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn rgba_with_transparency_still_premultiplies_every_channel() {
+        use objc2_core_graphics::CGImageAlphaInfo;
+
+        // The last pixel alone rules out the opaque path.
+        let data = pixel_source(2, 1, Arc::from([255, 0, 0, 255, 200, 100, 50, 128]));
+        let picture = from_rgba(&data).unwrap();
+        assert_eq!(
+            CGImage::alpha_info(Some(&picture.frames[0])),
+            CGImageAlphaInfo::PremultipliedLast
+        );
+        assert_eq!(
+            rgba(&picture.frames[0]).2,
+            [255, 0, 0, 255, 100, 50, 25, 128]
+        );
+        assert_eq!(data.rgba().unwrap().2, [255, 0, 0, 255, 200, 100, 50, 128]);
+        let data = pixel_source(1, 1, Arc::from([255, 128, 64, 0]));
+        let picture = from_rgba(&data).unwrap();
+        assert_eq!(rgba(&picture.frames[0]).2, [0, 0, 0, 0]);
+    }
+
+    /// Run in separate processes for independent peak RSS measurements:
+    /// NSH_RGBA_BASELINE=1 cargo test --release -p nsh-platform-macos bench_rgba_page -- --ignored --nocapture
+    /// cargo test --release -p nsh-platform-macos bench_rgba_page -- --ignored --nocapture
+    #[test]
+    #[ignore = "2560x3313 pixel-buffer timing and memory benchmark"]
+    fn bench_rgba_page() {
+        let (width, height) = (2560, 3313);
+        let data = pixel_source(
+            width,
+            height,
+            vec![255u8; width as usize * height as usize * 4].into(),
+        );
+        let baseline = std::env::var_os("NSH_RGBA_BASELINE").is_some();
+        let usage = || {
+            // SAFETY: getrusage initializes the writable structure.
+            let mut value: libc::rusage = unsafe { std::mem::zeroed() };
+            // SAFETY: value is valid writable storage for this process's usage.
+            assert_eq!(unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut value) }, 0);
+            value
+        };
+        let cpu = |value: &libc::rusage| {
+            value.ru_utime.tv_sec as f64
+                + value.ru_utime.tv_usec as f64 / 1e6
+                + value.ru_stime.tv_sec as f64
+                + value.ru_stime.tv_usec as f64 / 1e6
+        };
+        let before = usage();
+        let mut times = Vec::new();
+        for _ in 0..30 {
+            let start = Instant::now();
+            let image = if baseline {
+                premultiplied_image(width, height, std::hint::black_box(data.rgba().unwrap().2))
+                    .unwrap()
+            } else {
+                from_rgba(std::hint::black_box(&data)).unwrap().frames[0].clone()
+            };
+            times.push(start.elapsed().as_secs_f64() * 1000.0);
+            std::hint::black_box(&image);
+        }
+        times.sort_by(f64::total_cmp);
+        let after = usage();
+        println!(
+            "baseline={baseline} median_ms={:.3} peak_rss_mib={:.2} cpu_ms_per_page={:.3}",
+            times[15],
+            after.ru_maxrss as f64 / 1048576.0,
+            (cpu(&after) - cpu(&before)) * 1000.0 / 30.0
+        );
     }
 
     #[test]
