@@ -235,6 +235,16 @@ impl Geometry {
         ))
     }
 
+    /// The box of the inline view or image at `pos` (content box): from
+    /// the caret before it, as wide as its view and as high as its line.
+    pub(crate) fn inline_rect(&self, pos: usize) -> Option<Bounds<Points>> {
+        let id = self.text_at(pos)?;
+        let geo = self.texts.get(&id)?;
+        let width = *geo.widths.get(&pos.checked_sub(geo.start)?)?;
+        let b = self.caret_rect(pos, Affinity::Downstream)?;
+        Some(Bounds::new(b.origin, Size::new(width, b.size.height)))
+    }
+
     /// The drawn caret at `pos`: about the font's em tall (the ascender
     /// and descender less their own gap, as gpui-kit's input draws 0.85 of
     /// a normal line), centred in the line, rather than the whole line box

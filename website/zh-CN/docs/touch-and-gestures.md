@@ -76,6 +76,7 @@ mount(App);
 按压的行为：
 
 - **只有最内层的可按压视图响应。** 可按压的行里包含一个可按压的按钮时，按下按钮不会触发行的按压。
+- **只监听 `onLongPress` 的视图把点击留给外层。** 长按仍归它自己，点击交给外层最近的可按压视图，和 Web、iOS、Android 上长按识别不吞点击一致：行内容可以挂长按菜单，点一下照样选中这一行。
 - **在滚动视图内，按压会等待约 130 ms** 才开始（并显示反馈），这样从按钮上开始的拖动会滚动页面，而不是按下按钮。
 - **滑出即取消。** 手指移出视图时，按压以 press-up 处理函数结束，不触发按压。
 - **禁用会把按压监听从挂载的视图上移除**，因此完全没有反馈，同时应用禁用样式（`.disabled_style(..)`、`class="disabled:opacity-40"`）。
@@ -360,6 +361,7 @@ view()
 | `timestamp` | 毫秒。 |
 | `touches` | 所有按下的手指。 |
 | `changedTouches` | 本次事件涉及的手指。 |
+| `modifiers` | 手指或鼠标按键按下时按住的修饰键（`{ control, alt, shift, platform }`，与按压事件相同）：Alt 拖动或 Shift 点击可以在 grant 里读取。在所有平台上，触摸事件和 grant 都先于同一次按压的 `onPressDown`。 |
 | `nativeEvent` | 事件本身，因此 `e.nativeEvent.locationX` 也可用。 |
 | `stopPropagation()` | 外层视图不再收到这次触摸事件。 |
 
@@ -452,7 +454,7 @@ let origin = 0;
 
 Rust 组件的响应者从成为响应者起一直保持按下状态，直到它的触摸结束，无论手指或指针移到哪里，就像 CSS 的 `:active` 会保持到按钮松开：它的 `.active(..)` 样式和其中的 `group-active:` 类在整个拖动过程中保持不变（例如拖出条带的调整大小手柄）。
 
-Rust 处理函数收到一个 `ResponderEvent`：手指在它按下的视图中的位置 `location`、page 坐标 `page`、`timestamp`，以及自成为响应者以来的手势 `gesture`。
+Rust 处理函数收到一个 `ResponderEvent`：手指在它按下的视图中的位置 `location`、page 坐标 `page`、`timestamp`、按下时按住的修饰键 `modifiers`，以及自成为响应者以来的手势 `gesture`。
 
 ```rust tabs
 use nsh_core::prelude::*;

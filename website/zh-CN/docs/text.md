@@ -104,13 +104,21 @@ Span 的背景色和圆角会在它所在的每一行、字符后面画一个与
 
 ```rust tabs
 text("先运行 ")
-    .child(text(" npm test ").font_family("ui-monospace").bg(rgb(0xeff1f3)).rounded(px(4.0)))
+    .child(text("npm test").font_family("ui-monospace").bg(rgb(0xeff1f3)).rounded(px(4.0)).px(px(4.0)))
     .child("。")
 ```
 
 ```tsx tabs
 <Text>
-  先运行 <Text style={{ fontFamily: "ui-monospace", backgroundColor: "#eff1f3", borderRadius: 4 }}> npm test </Text>。
+  先运行 <Text style={{ fontFamily: "ui-monospace", backgroundColor: "#eff1f3", borderRadius: 4, paddingHorizontal: 4 }}>npm test</Text>。
+</Text>
+```
+
+span 上的水平 padding 会在它两端的行内占位，背景也覆盖这段空间，与 CSS 行内盒一致；垂直 padding 和边框对 span 不起作用。`fontSize` 用相对值时，span 无论放在哪里都和所在段落保持比例：
+
+```tsx
+<Text style={{ fontSize: 16 }}>
+  运行 <Text style={{ fontSize: "0.875em", backgroundColor: "#eff1f3", borderRadius: 4, paddingHorizontal: 3 }}>npm test</Text>。
 </Text>
 ```
 
@@ -174,7 +182,7 @@ text("Made with ")
 | 属性 | 取值 | Rust |
 |---|---|---|
 | `color` | 一个[颜色](./styling.md#颜色)。默认黑色 | `.text_color(..)` |
-| `fontSize` | 点。默认 14 | `.text_size(px(..))`、`.text_sm()`、`.text_lg()` 等 |
+| `fontSize` | 点。默认 14。也可以相对继承的字号，同 CSS 的 `em` 和百分比：`"0.875em"`、`"87.5%"` | `.text_size(px(..))`、`.text_size(relative(0.875))`、`.text_sm()`、`.text_lg()` 等 |
 | `fontWeight` | `"normal"`（400）、`"bold"`（700），或 `100`–`900`（数字或字符串） | `.font_weight(FontWeight::BOLD)` |
 | `fontStyle` | `"normal"`、`"italic"`：彩色表情保持正体 | `.italic()` |
 | `fontFamily` | 系统字体族、通用字体族或[导入的字体](./fonts.md) | `.font_family(..)` |

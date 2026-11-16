@@ -95,7 +95,7 @@ use windows::{
                 DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_JUSTIFIED,
                 DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TEXT_METRICS,
                 DWRITE_TRIMMING, DWRITE_TRIMMING_GRANULARITY_CHARACTER,
-                DWRITE_WORD_WRAPPING_NO_WRAP, DWRITE_WORD_WRAPPING_WRAP, IDWriteTextFormat,
+                DWRITE_WORD_WRAPPING_EMERGENCY_BREAK, DWRITE_WORD_WRAPPING_NO_WRAP, IDWriteTextFormat,
                 IDWriteTextLayout,
             },
         },
@@ -422,7 +422,7 @@ impl InputState {
                 .CreateTextLayout(text, &format, if multiline { width } else { 1.0e6 }, 1.0e6)
                 .ok()?;
             let _ = layout.SetWordWrapping(if multiline {
-                DWRITE_WORD_WRAPPING_WRAP
+                DWRITE_WORD_WRAPPING_EMERGENCY_BREAK
             } else {
                 DWRITE_WORD_WRAPPING_NO_WRAP
             });
@@ -481,6 +481,19 @@ impl InputState {
         ((self.size.get().1 - self.line_height()) / 2.0).max(0.0)
     }
 
+    /// A multiline field's vertical scroll in pixels: where it is and the
+    /// farthest it goes (the last line at the content box's bottom).
+    /// RichEdit keeps no scroll range without a scroll bar and scrolls on
+    /// past its text, so the end comes from the text's height.
+    fn text_scroll(&self) -> Option<(i32, i32)> {
+        let e = self.editor.as_ref()?;
+        let mut at = windows::Win32::Foundation::POINT::default();
+        e.send(EM_GETSCROLLPOS, 0, &mut at as *mut _ as isize);
+        let client = self.client();
+        let height = e.text_height(client.right - client.left)?;
+        Some((at.y, (height - (client.bottom - client.top)).max(0)))
+    }
+
     /// RichEdit's client rectangle: the content box in the window's client
     /// pixels (one line centered).
     fn client(&self) -> RECT {
@@ -513,6 +526,9 @@ impl InputState {
         self.set_size((content.size.width.0, content.size.height.0));
         let scale_changed = self.scale.replace(s) != s;
         self.origin.set(origin);
+        if let Some(e) = &self.editor {
+            e.show_in(crate::app_window::hwnd_showing(&surface, view));
+        }
         if scale_changed {
             self.apply_formats();
         }
@@ -608,8 +624,9 @@ impl InputState {
                 | TXTBIT_SCROLLBARCHANGE,
         );
         // Spelling (and the touch keyboard's suggestions) where the app
-        // wants corrections: never in a password.
-        let spell = config.auto_correct && !config.secure && config.editable;
+        // wants corrections: never in a password, shown or not.
+        let spell =
+            config.auto_correct && !config.secure && !config.visible_password() && config.editable;
         drop(config);
         let (options, _) = self.send(EM_GETLANGOPTIONS, 0, 0);
         let flags = IMF_SPELLCHECKING | IMF_TKBPREDICTION;
@@ -1662,7 +1679,6 @@ pub(crate) fn pointer(surface: &Rc<Surface>, view: &NshView, event: &ItemPointer
 
 /// A wheel over input `view`: scrolls the lines of a multiline field that
 /// do not fit. True when it scrolled (an outer scroll view does not).
-#[allow(dead_code)] // For `crate::input`'s wheel routing.
 pub(crate) fn wheel(view: &NshView, dy: f32) -> bool {
     let Some(input) = input_of(view) else {
         return false;
@@ -1670,25 +1686,51 @@ pub(crate) fn wheel(view: &NshView, dy: f32) -> bool {
     if !input.multiline() {
         return false;
     }
+    let Some((before, max)) = input.text_scroll() else {
+        return false;
+    };
     let s = input.scale.get().max(0.01);
-    let mut at = windows::Win32::Foundation::POINT::default();
-    input.send(EM_GETSCROLLPOS, 0, &mut at as *mut _ as isize);
-    let before = at.y;
-    at.y = (at.y as f32 + dy * s).round().max(0.0) as i32;
-    input.send(EM_SETSCROLLPOS, 0, &mut at as *mut _ as isize);
-    let mut now = windows::Win32::Foundation::POINT::default();
-    input.send(EM_GETSCROLLPOS, 0, &mut now as *mut _ as isize);
-    let moved = now.y != before;
-    if moved {
-        view.changed();
-        input.report_scroll();
-        if input.focused.get()
-            && let Some(surface) = surface_of(view)
-        {
-            report_caret(&surface, view, &input);
-        }
+    let to = (before as f32 + dy * s).round() as i32;
+    // Up to the top; down to the last line, never further than it is.
+    let y = if dy > 0.0 {
+        to.min(max).max(before)
+    } else {
+        to.max(0)
+    };
+    if y == before {
+        return false;
     }
-    moved
+    let mut at = windows::Win32::Foundation::POINT { x: 0, y };
+    input.send(EM_SETSCROLLPOS, 0, &mut at as *mut _ as isize);
+    view.changed();
+    input.report_scroll();
+    if input.focused.get()
+        && let Some(surface) = surface_of(view)
+    {
+        report_caret(&surface, view, &input);
+    }
+    true
+}
+
+/// Whether `view` is a multiline input, which scrolls its own text under
+/// a vertical wheel ([`can_wheel`]).
+pub(crate) fn scrolls_text(view: &NshView) -> bool {
+    input_of(view).is_some_and(|i| i.multiline())
+}
+
+/// Whether multiline input `view` has lines left to scroll towards `dy`
+/// (down when positive): a wheel over it scrolls its text before the
+/// scroll views around it, as a textarea does in browsers and on macOS.
+pub(crate) fn can_wheel(view: &NshView, dy: f32) -> bool {
+    let Some(input) = input_of(view) else {
+        return false;
+    };
+    if dy == 0.0 || !input.multiline() {
+        return false;
+    }
+    input
+        .text_scroll()
+        .is_some_and(|(at, max)| if dy > 0.0 { at < max } else { at > 0 })
 }
 
 /// `Command::ScrollTo` for a multiline input: scrolls its text to `y`,
@@ -1861,6 +1903,15 @@ fn send_key(input: &InputState, vk: u16, modifiers: Modifiers) {
     });
 }
 
+/// True when a Copy key (Ctrl+C, Ctrl+Insert) is for a selection outside the
+/// field: it selects nothing itself, and a text or a selectable view of the
+/// surface selects something.
+fn copy_is_elsewhere(surface: &Surface, input: &InputState) -> bool {
+    let (start, end) = input.selection();
+    start == end
+        && (crate::text::has_selection(surface) || crate::selectable_view::has_selection(surface))
+}
+
 /// A key for the focused field; true when handled.
 pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     if !event.down {
@@ -1945,6 +1996,13 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
             false
         }
         _ if m.ctrl && !m.alt => match vk {
+            // A copy with nothing selected in the field is for the selection
+            // of the text around it, which goes on to `text::key` and
+            // `selectable_view::key`: a chat's composer keeps the focus
+            // while the messages above it are selected. What the field
+            // selects itself still copies first.
+            0x43 if copy_is_elsewhere(surface, &input) => false,
+            _ if vk == VK_INSERT.0 && !m.shift && copy_is_elsewhere(surface, &input) => false,
             // Select all, copy, cut, undo: RichEdit's (a password copies
             // and cuts nothing).
             0x41 | 0x43 | 0x58 => forward(&input),

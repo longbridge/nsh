@@ -70,9 +70,9 @@ use windows::{
                 DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE,
                 DWRITE_TRIMMING, DWRITE_TRIMMING_GRANULARITY_CHARACTER,
                 DWRITE_TRIMMING_GRANULARITY_NONE, DWRITE_UNDERLINE, DWRITE_UNICODE_RANGE,
-                DWRITE_WORD_WRAPPING_NO_WRAP, DWRITE_WORD_WRAPPING_WRAP, IDWriteFactory2,
-                IDWriteFactory5, IDWriteFontCollection, IDWriteFontCollection1, IDWriteFontFace,
-                IDWriteFontFace2, IDWriteFontFallback, IDWriteFontFile,
+                DWRITE_WORD_WRAPPING_EMERGENCY_BREAK, DWRITE_WORD_WRAPPING_NO_WRAP,
+                IDWriteFactory2, IDWriteFactory5, IDWriteFontCollection, IDWriteFontCollection1,
+                IDWriteFontFace, IDWriteFontFace2, IDWriteFontFallback, IDWriteFontFile,
                 IDWriteInMemoryFontFileLoader, IDWriteInlineObject, IDWriteInlineObject_Impl,
                 IDWritePixelSnapping_Impl, IDWriteTextFormat, IDWriteTextFormat1,
                 IDWriteTextLayout, IDWriteTextLayout1, IDWriteTextRenderer,
@@ -1148,7 +1148,7 @@ impl DWriteTextEngine {
             let _ = format.SetWordWrapping(if t.no_wrap {
                 DWRITE_WORD_WRAPPING_NO_WRAP
             } else {
-                DWRITE_WORD_WRAPPING_WRAP
+                DWRITE_WORD_WRAPPING_EMERGENCY_BREAK
             });
             let _ =
                 format.SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, PITCH, PITCH_BASELINE);
@@ -2983,6 +2983,14 @@ fn selected_text(view: &NshView) -> Option<String> {
     Some(state.text.as_ref()?.text.copied_text(a..b)).filter(|t| !t.is_empty())
 }
 
+/// True when a text of `surface` has a selection, which [`key`] copies.
+pub(crate) fn has_selection(surface: &crate::surface::Surface) -> bool {
+    SELECTED.with_borrow(|s| {
+        s.as_ref()
+            .is_some_and(|(key, v)| *key == surface.key() && v.attached())
+    })
+}
+
 /// Keys for the text selection (Ctrl+C, Ctrl+A, Escape); true when
 /// handled.
 pub(crate) fn key(
@@ -3278,6 +3286,21 @@ impl WinLayout {
                     descent: Points(descent),
                 }));
             }
+            // Attachments hold no glyphs: their room (a span's padding
+            // too) is in the background of their span.
+            let range = line.info.start..line.info.end;
+            pieces.extend(
+                self.inline
+                    .iter()
+                    .filter(|a| range.contains(&a.index))
+                    .map(|a| nsh_core::LinePiece {
+                        x: Points(a.x),
+                        width: Points(a.width),
+                        background: text.background_at(a.index),
+                        ascent: Points(0.0),
+                        descent: Points(0.0),
+                    }),
+            );
             pieces.sort_by(|a, b| a.x.0.total_cmp(&b.x.0));
             let clip = (line.info.x, line.info.x + line.info.width);
             nsh_core::BackgroundBox::join(pieces.iter().copied(), clip, |b| {

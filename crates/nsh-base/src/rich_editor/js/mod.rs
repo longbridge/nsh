@@ -16,6 +16,7 @@ mod commands;
 mod extension_api;
 mod extensions;
 mod json;
+mod node_views;
 mod plugins;
 mod tables;
 
@@ -126,6 +127,7 @@ pub(crate) fn register(registry: &mut Registry) {
         .class::<RichSchema>()
         .class::<RichEditorSession>()
         .class::<RichEditorPlugin>()
+        .class::<node_views::RichNodeViewProps>()
         .module::<RichEditorApi>()
         .module::<tables::RichTableApi>();
     extension_api::register(registry);
@@ -407,7 +409,43 @@ const MAX_PENDING: usize = 32;
 
 static NEXT_TR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
+/// What the `RichEditorSession`s of one editor share besides the
+/// session: the schema, named commands, `dispatchTransaction` and the
+/// transactions handed to it.
+pub(crate) struct SessionParts {
+    schema: Schema,
+    commands: Arc<CommandRegistry>,
+    hooks: Arc<HookRef>,
+    pending: Arc<std::sync::Mutex<Vec<(u64, Transaction)>>>,
+}
+
 impl RichEditorSession {
+    /// The parts another handle of this editor shares.
+    fn parts(&self) -> SessionParts {
+        SessionParts {
+            schema: self.schema.clone(),
+            commands: self.commands.clone(),
+            hooks: self.hooks.clone(),
+            pending: self.pending.clone(),
+        }
+    }
+
+    /// Another handle of the editor of `parts` over `session` (with its
+    /// own listeners).
+    fn of_parts(parts: &SessionParts, session: EditorSession) -> Self {
+        Self {
+            session: session.clone(),
+            schema: parts.schema.clone(),
+            commands: parts.commands.clone(),
+            hooks: parts.hooks.clone(),
+            pending: parts.pending.clone(),
+            subscriptions: std::rc::Rc::new(Subscriptions {
+                session,
+                ids: std::cell::RefCell::default(),
+            }),
+        }
+    }
+
     fn over(session: EditorSession, schema: Schema) -> Self {
         Self {
             session: session.clone(),
@@ -672,7 +710,7 @@ impl RichEditorSession {
     /// The caret's box `{ x, y, width, height }` at `pos` in page
     /// coordinates (the root view's, as `onHoverMove`'s `pagePosition` and
     /// a responder's `pageX` / `pageY`; ProseMirror's `coordsAtPos` in the
-    /// window's), or `null` before the pointer has been over the editor.
+    /// window's), or `null` before the mounted view measures its placement.
     /// Throws a `RangeError` for a position outside the document.
     pub(crate) fn page_coords_at_pos(&self, pos: usize) -> Result<Option<JsonValue>, JsError> {
         self.check_pos("pageCoordsAtPos", pos)?;
@@ -691,7 +729,7 @@ impl RichEditorSession {
 
     /// The box `{ x, y, width, height }` of the block starting at `pos` in
     /// page coordinates (ProseMirror's `nodeDOM(pos)` measured in the
-    /// window's), or `null` before the pointer has been over the editor.
+    /// window's), or `null` before the mounted view measures its placement.
     /// Throws a `RangeError` for a position outside the document.
     pub(crate) fn page_node_rect(&self, pos: usize) -> Result<Option<JsonValue>, JsError> {
         self.check_pos("pageNodeRect", pos)?;
@@ -1103,6 +1141,19 @@ impl RichEditorApi {
             RichEditorSession::over(EditorSession::new(state, NodeViews::new()), schema);
         if let Some(manager) = &manager {
             editor.commands = manager.commands().clone();
+        }
+        if let Some(entries) = &options.extensions {
+            let views = extension_api::node_views_of(entries, &editor.schema)?;
+            if !views.is_empty() {
+                let mut node_views = NodeViews::new();
+                for (name, func, extension) in views {
+                    node_views.insert(
+                        name,
+                        Arc::new(node_views::JsNodeView::new(func, extension, editor.parts())),
+                    );
+                }
+                editor.session.set_node_views(node_views);
+            }
         }
         if options.editable == Some(false) {
             editor.session.set_editable(false);

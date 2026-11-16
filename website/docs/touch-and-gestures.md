@@ -76,6 +76,7 @@ mount(App);
 How presses behave:
 
 - **Only the innermost pressable view responds.** A pressable row containing a pressable button gets no press when the button is pressed.
+- **A view with only `onLongPress` leaves the taps to the view around it.** Its long press is its own, but a tap goes to the nearest pressable view outwards, as a long press recognizer takes no taps on the Web, iOS and Android: a row's content can hold a long-press menu and the row still selects on a tap.
 - **Inside a scroll view, the press waits about 130 ms** before it starts (and shows feedback), so a drag that begins on a button scrolls instead of pressing it.
 - **Sliding off cancels.** Moving the finger out of the view ends the press with the press-up handler and no press.
 - **Disabling removes the press listeners** from what is mounted, so the view shows no feedback at all, and the disabled style applies (`.disabled_style(..)`, `class="disabled:opacity-40"`).
@@ -360,6 +361,7 @@ Each TSX handler gets a `GestureResponderEvent`:
 | `timestamp` | Milliseconds. |
 | `touches` | Every finger that is down. |
 | `changedTouches` | The fingers this event is about. |
+| `modifiers` | The modifier keys held when the finger or mouse button went down (`{ control, alt, shift, platform }`, as a press event's): an Alt-drag or a Shift-click reads them in the grant. The touch events and the grant come before the same press's `onPressDown` on every target. |
 | `nativeEvent` | The event itself, so `e.nativeEvent.locationX` works too. |
 | `stopPropagation()` | Views further out do not see this touch event. |
 
@@ -452,7 +454,7 @@ While responding:
 
 A Rust component's responder stays pressed from its grant until its touches end, wherever the finger or pointer goes, as CSS's `:active` holds until the button is released: its `.active(..)` styles and the `group-active:` classes inside it keep their look for the whole drag (a resize handle dragged off its band).
 
-The Rust handlers get a `ResponderEvent`: the finger's `location` in the view it went down on, its `page` position, the `timestamp` and the `gesture` since the grant.
+The Rust handlers get a `ResponderEvent`: the finger's `location` in the view it went down on, its `page` position, the `timestamp`, the `modifiers` held when it went down and the `gesture` since the grant.
 
 ```rust tabs
 use nsh_core::prelude::*;

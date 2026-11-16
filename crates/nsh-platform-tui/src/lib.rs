@@ -11,6 +11,7 @@ mod dialog;
 mod geometry;
 mod gradient;
 mod input;
+mod key_event;
 mod key_scheme;
 mod keyboard;
 mod link;

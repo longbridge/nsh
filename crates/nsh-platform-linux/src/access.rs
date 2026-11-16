@@ -2274,11 +2274,21 @@ mod tests {
                         .is_some()
                 );
                 click(editor.compute_point(&surface.root, &center).unwrap());
-                assert!(
-                    events.lock().unwrap().is_empty(),
-                    "the hosted editor does not dispatch Press: {:?}",
-                    *events.lock().unwrap()
+                // The input hears its own press, and GTK still edits.
+                let editor_press = events.lock().unwrap().clone();
+                assert_eq!(
+                    editor_press
+                        .iter()
+                        .map(|(kind, _)| *kind)
+                        .collect::<Vec<_>>(),
+                    [EventKind::PressDown, EventKind::PressUp, EventKind::Press],
+                    "the input hears its press"
                 );
+                assert!(matches!(
+                    editor_press.last(),
+                    Some((_, EventPayload::Press(press))) if press.clicks == 1
+                ));
+                events.lock().unwrap().clear();
                 assert!(crate::synth::focused_text(&window).is_some());
                 crate::synth::type_text(&window, "native");
                 let editable = editor.downcast::<gtk::Editable>().unwrap();

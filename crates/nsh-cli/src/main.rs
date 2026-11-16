@@ -15,6 +15,7 @@ mod dev_port;
 mod entry;
 mod init;
 mod logger;
+mod native_features;
 mod package;
 mod platforms;
 mod play;
@@ -776,6 +777,11 @@ fn run(mut command: Command) -> anyhow::Result<()> {
                 ..
             }
     );
+    // An app written for other NSH versions says so before anything else
+    // fails on what this one lacks.
+    if let Some(entry) = command.entry_mut() {
+        package::check_nsh_version(entry)?;
+    }
     if let Some(entry) = command.entry_mut()
         && rust_app::is_root(entry)
         && !rust_command

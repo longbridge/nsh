@@ -100,7 +100,7 @@ import -window root -display :170 whole.png        # the display, if the window'
   backing pixmap and reads that with `GetImage`. A covering window cannot replace the captured pixels. The screenshot
   connection releases the pixmap and its redirection on drop, including on errors. Resizing is safe because each shot
   names the pixmap after drawing.
-- Linux's GPUI Fast 0.1.13 window does not implement `render_to_image`; its renderer and scene are private, so NSH
+- Linux's GPUI Fast 0.1.14 window does not implement `render_to_image`; its renderer and scene are private, so NSH
   cannot use the macOS / Windows offscreen path. Pure Wayland screenshots remain unsupported; use an isolated Xvfb
   or Xwayland `-shm` display. The X server must support Composite; capture reports an error otherwise. This captures
   X11 child windows (including embedded web views), rather than only GPUI's scene.
@@ -116,6 +116,30 @@ import -window root -display :170 whole.png        # the display, if the window'
 
 A fully covering window does not change the gallery capture: `app.screenshot` while covered is byte-identical to its unobscured capture.
 
+### Checking the accessibility tree on Linux
+
+AccessKit's AT-SPI adapter attaches when the session's AT-SPI bus is enabled, and from then on checks every tree GPUI
+hands it: one it refuses (a node no node has as a child, a node two have) panics, and the host exits with status
+101, whether or not a client asks for the tree. Run the host with the bus enabled on a display and a session bus of
+their own, so the desktop's stay as they are:
+
+```sh
+xvfb-run -a dbus-run-session -- sh -c '
+  unset WAYLAND_DISPLAY
+  gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus \
+    --method org.freedesktop.DBus.Properties.Set org.a11y.Status IsEnabled "<true>"
+  /usr/lib/at-spi2-registryd &
+  cd examples/embed-gpui && RUST_LOG=warn,gpui::window=info cargo run'
+```
+
+- `gpui::window` logs "Accessibility activated" once the adapter is attached.
+- The registry is started by hand (`/usr/libexec/at-spi2-registryd` on some distributions): this session bus has no
+  systemd to activate it, and without it the adapter does not attach.
+- The first frame is built whole. The frames after it are the ones GPUI Fast draws again from the last one, and they
+  need something in the window to change: press its controls from an AT-SPI client, which also reads the tree as a
+  screen reader does (Python's `gi.repository.Atspi`: the application under `Atspi.get_desktop(0)`, then an
+  element's `get_action_iface().do_action(0)`).
+
 ## Architecture
 
 - **One element per surface.** A surface (`surface.rs`) is drawn by one GPUI element, `render::SurfaceElement`, which
@@ -124,6 +148,13 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
   the content clipped to the bounds (text, image, canvas), the children (clipped when the view clips), the hosted
   items (`view::Hosted`: text editors, alerts) and the scroll indicator, then the border. Each node is an
   `NshView` (`view.rs`), a retained view the core placed at its frame, as on Windows.
+- **Accessibility and native components.** While an assistive technology is attached, the surface element's node
+  gets the views' nodes as synthetic children (`access::synthetic`), and a native component's elements push their
+  own nodes under it as the surface element prepaints them. The surface's node keeps both (`access::Built::adopt`):
+  the views' nodes, the focus proxy in the place of the element it stands for, then the native components' roots.
+  Every node of a frame needs exactly one parent: AccessKit's adapter panics on a tree with a node no node has as a
+  child, or one two nodes have, and the host exits with it. A frame GPUI Fast draws again from the last one keeps
+  that hierarchy from 0.1.14 on, the lowest version the backend builds with.
 - **`DrawCx`** (`render.rs`) is the drawing state GPUI does not keep: GPUI paints primitives (quads, paths, glyphs,
   images) in window coordinates (logical pixels, which are NSH's points) with no world transform and no group
   opacity, so `DrawCx` keeps the current transform (`geom::Mat4`) and applies opacity and color filters
@@ -236,7 +267,7 @@ A fully covering window does not change the gallery capture: `app.screenshot` wh
 | Video | `native/video.rs` | Feature `video` (Linux): GStreamer `playbin` with an `appsink` of BGRA frames, each frame a `RenderImage` painted as view content (clipped, transformed at its bounds, covered like any view); `controls` draws NSH's own bar |
 | Web views | `native/web.rs` | Feature `webview`: wry. Linux: WebKitGTK 4.1 on GTK 3 (X11 only: GPUI must run on X11 or Xwayland) in a GPUI Fast native composition surface (an X11 child window) sized to the visible part of its view, GTK's loop pumped from GPUI's; macOS / Windows: wry's `WKWebView` / WebView2 child at the view's box |
 | Native components | `native.rs` | `AppView::register_component`; a component renders any GPUI or GPUI Kit element, laid out and prepainted at its box every frame, clipped to its clipping ancestors, painted where the tree draws its box; its hitboxes take the pointer there (`embedding.md`) |
-| Accessibility | `access.rs` | AccessKit nodes in GPUI's accessibility tree (NSAccessibility, UI Automation, AT-SPI through AccessKit's adapters), rebuilt while an assistive technology is attached: the views as synthetic children of the surface element, folded as on Windows and Linux (`accessibilityElementsHidden`, `visibility: hidden` and screens below the top hide a subtree, its texts naming nothing), with roles, names, states, values and actions, a scroll view's content and a list's cells in its parent's viewport (`ViewProps::screen_order`) in the order they are on screen (as Tab: a list's recycled cells are not in their rows' order); the accessibility focus is a real element tracking the view's focus handle; announcements are live nodes |
+| Accessibility | `access.rs` | AccessKit nodes in GPUI's accessibility tree (NSAccessibility, UI Automation, AT-SPI through AccessKit's adapters), rebuilt while an assistive technology is attached: the views as synthetic children of the surface element, folded as on Windows and Linux (`accessibilityElementsHidden`, `visibility: hidden` and screens below the top hide a subtree, its texts naming nothing), with roles, names, states, values and actions, a scroll view's content and a list's cells in its parent's viewport (`ViewProps::screen_order`) in the order they are on screen (as Tab: a list's recycled cells are not in their rows' order); the accessibility focus is a real element tracking the view's focus handle; native components' own nodes stay under the surface's node, after the views'; announcements are live nodes |
 | Environment | `system.rs` | Color scheme from the app or the window's appearance (`observe_window_appearance`); locale, font scale, reduce motion, right to left, screen reader and OS version read as each native backend reads them (the settings portal and AT-SPI over D-Bus on Linux, `zbus`); pixel ratio the window's scale factor; safe area and keyboard height 0. The app's state (`lifecycle()`) from the window's activation and visibility (`observe_window_activation`, `observe_window_visibility`): `background` while the surface's window is not presented (`WindowVisibility::Hidden`), `active` while one of the windows showing a surface is the active one, `inactive` otherwise. The preferred languages (`localeSettings()`'s `languages`): `GetUserPreferredUILanguages` on Windows, `CFLocaleCopyPreferredLanguages` on macOS, gettext's `LANGUAGE` / `LC_ALL` / `LC_MESSAGES` / `LANG` with their fallbacks on Linux. The regional preferences (`localeSettings()`'s `hourCycle` and the like), over the region's (`LocaleSettings::parse`): on macOS the hours of `CFDateFormatterCreateDateFormatFromTemplate`'s `j` format, `CFCalendar`'s first weekday, `kCFLocaleMeasurementSystem` and the `AppleTemperatureUnit` preference; on Windows the regional format's `LOCALE_STIMEFORMAT`, `LOCALE_IFIRSTDAYOFWEEK` and `LOCALE_IMEASURE`; on Linux the regions of `LC_TIME` (times, weeks) and `LC_MEASUREMENT` (units), with the settings portal's `clock-format` (`org.gnome.desktop.interface`, live) over the hour cycle. The time zone (`localeSettings()`'s `timeZone`) as the native backends name it: on Windows the setting's zone (`GetDynamicTimeZoneInformation`) by its IANA name from the ICU Windows ships (loaded at run time), elsewhere the zone `TZ` names when it names one (`GMT`, `Europe/Berlin`; a POSIX rule such as `JST-9` names none: `TimeZone::posix`), else the zone `/etc/localtime` links to (else `/etc/timezone`); read again whenever a window becomes the active one (GPUI reports no change of it). |
 | Window chrome (`nsh/desktop`) | `chrome.rs` | Windows open with a transparent title bar (macOS, Windows) so both styles can be drawn later: a title row drawn above the app, or the hidden style with the traffic lights / caption buttons over the app (`WindowControlArea` on Windows); Linux uses the window manager's decorations, or client-side ones when asked and granted. The application menu is GPUI's native menu bar on macOS, a menu bar drawn above the app elsewhere (always, or with `Menu.setMenuBar("autoHide")` only after Alt alone, and while one of its menus is open); its shortcuts are matched on key downs after `nsh`'s bindings and before the focused field (`chrome::shortcut`), except an item whose `when` leaves the field the key (`MenuAction::fires_while_editing`); context menus are popups drawn over the window with keyboard access. A menu item's `icon` (`menus.rs`: not the bar's titles) draws in those rows, in a column of its own that moves a level's labels; it loads when its level first shows and comes in with a redraw, an SVG painted in the row's text color and a bitmap as it is. GPUI's native menu bar on macOS shows none, as `gpui::MenuItem` has no image |
 | Clipboard | `system.rs` | GPUI's (`write_to_clipboard` / `read_from_clipboard`): text, `ClipboardEntry::Image` (a format other than PNG, JPEG, GIF, BMP or WebP, such as TIFF, is made PNG on a worker thread) and `ExternalPaths` (files). GPUI reads one kind per item, preferring files, then text, then images, so an item with text and an image (a browser's copied image with its address) gives the text |
@@ -338,7 +369,7 @@ and Windows.
   logged once) and may need `WEBKIT_DISABLE_DMABUF_RENDERER=1`; on macOS and Windows clipping ancestors do not cut
   them. `baseUrl` for HTML, `scrollable` and `allowsBackForwardNavigationGestures` are not supported; failed
   loads report no `onError` on macOS and Windows.
-- **Accessibility** (AccessKit 0.24, as GPUI Fast 0.1.13 uses it): the adapters pass on only `Click`, `Focus`,
+- **Accessibility** (AccessKit 0.24, as GPUI Fast 0.1.14 uses it): the adapters pass on only `Click`, `Focus`,
   `SetValue` and `ScrollIntoView` everywhere, `Increment` / `Decrement` on macOS and `Expand` / `Collapse` on
   Windows; custom actions, `ShowContextMenu` and scroll actions are in the nodes but not called yet.
 - **Text inputs**: input accessory views are never shown (no software keyboard).
@@ -415,7 +446,9 @@ buttons and the frame's edges.
 Window and display rectangles mean what they do on the other desktop backends: points from the primary display's
 top left corner. GPUI measures them from each display's own corner on macOS, so `window/screen.rs` converts what is
 reported and opens a window at a point on the display holding it; native moves wait until the GPUI update that asks
-for them ends, as the system reports a move to GPUI while it makes it.
+for them ends, as the system reports a move to GPUI while it makes it. On macOS a display also carries its notch as
+a cutout, read from the display's `NSScreen` (`window/native.rs`) and computed by `nsh_core::desktop::notch`, as the
+AppKit backend computes it.
 
 What GPUI and the window managers leave out: Linux windows are placed by the window manager (no positions, levels,
 workspaces, taskbar, shadow, color scheme, content protection, maximum size or aspect ratio; a window shows as it

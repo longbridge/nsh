@@ -102,6 +102,13 @@ in `windowSize().height - safeArea().top - Math.max(0, keyboardFrame().height - 
 selects and date pickers that a phone shows as sheets do the same, and a `maxHeight` in their `popupStyle` or
 `popupClass` takes the place of their limit the same way.
 
+## Screen readers and keyboard focus
+
+A sheet is a modal dialog on every platform, as a [Dialog](./dialog.md) is. Screen readers hear it as a dialog named
+by `accessibilityLabel` (give it the sheet's title) and keep to it while it shows. On the desktops and the web, the
+keyboard focus leaves what is under it as it opens, Tab goes round the stops in its panel, and the focus goes back
+where it was as it closes. To start with the focus on a control in the panel, focus it in `onOpen`.
+
 ## Native sheets
 
 A sheet is drawn by NSH in the app's window, styled by the app. For the platform's own presented sheet (a page sheet
@@ -119,6 +126,7 @@ on iOS), use a [Dialog](./dialog.md) with `presentation="pageSheet"`.
 | `closeOnSwipe` | `.close_on_swipe(..)` | `boolean` | `false` | A bottom panel follows downward dragging and closes on a sufficient release. |
 | `popupClass`, `popupStyle` | `.popup_class(..)`, `.popup_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The look of the panel. |
 | `backdropClass`, `backdropStyle` | `.backdrop_class(..)`, `.backdrop_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The look of the backdrop, such as a translucent color. |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers call the dialog: the sheet's title. |
 | `children` | `.child(..)` | `JSX.Element` | none | The content. |
 
 ## Events

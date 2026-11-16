@@ -39,6 +39,8 @@ mount(App);
 
 省略 `schema` 时编辑器使用起步 schema（`starterSchema()`）；省略 `plugins` 时它得到起步套件（`starterKit()`：起步的输入规则和键位绑定、基础键位绑定和历史）。空的 `plugins` 数组创建一个完全没有插件的编辑器。
 
+`onCompositionChange({ composing })` 在此视图开始输入法组合输入时报告 `true`，结束时报告 `false`，取消也会报告结束。组合中的文本更新保持当前状态。回调执行时，会话的 `composing` 值和已提交文本已经更新，应用可以在组合输入期间保留编辑器视图，在结束时释放它。开始或取消组合输入可以保持文档及其修订号不变；`onChange` 报告文档修改。
+
 ## 样式
 
 编辑器以应用的外观绘制文档：`classes` 和 `styles` 设置它的各个部件（`root`、`content`、`caret`、`selection`、`placeholder`、`composition`、`selectedNode`、`listMarker`、触摸选区的手柄 `selectionHandle`、`selectionHandleStart`、`selectionHandleEnd`，以及表格的 `selectedCell`、`tableGrip`、`tableResizeHandle`、`tableDropIndicator`），按类型设置节点（`nodes: { heading: "text-2xl font-bold", "heading[level=2]": "text-xl" }`），以及设置标记（`marks: { bold: "font-bold" }`）。节点规格把 `extra.listMarker` 设为 `"bullet"` 或 `"ordered"` 的列表（starter schema 的列表）中，每一项都在 `listMarker` 部件中显示标记：按层级显示 `•`、`◦`、`▪`，或从列表的 `start` 开始编号，放在列表项之前、列表的缩进中（如浏览器缩进 `ul`，在列表上设置 `pl-6`）。
@@ -63,6 +65,8 @@ mount(App);
 ```tsx
 <RichEditor editor={editor} class="max-h-40 px-3 py-2" />
 ```
+
+`onContentSizeChange={({ contentSize }) => …}` 与 `Input` 的同名事件一样，在已排版文档的尺寸变化时报告，每帧最多一次。`contentSize` 是完整内容流的尺寸，单位为点，包含视口外的块，不含 `content` 部件的内边距，且独立于固定的视口高度。滚动不会触发该事件，滚动偏移请用 `onScroll`。
 
 ### 触摸选区
 
@@ -228,6 +232,32 @@ const editor = createRichEditor({ extensions: [StarterKit, Signature.configure({
 ```
 
 `node` 或 `mark`（`defineSchema` 的写法）使它成为节点或标记扩展；`addGlobalAttributes` 为其他类型添加属性；`addProseMirrorPlugins` 返回插件，包括 `RichEditorPlugin`；`addPasteRules` 返回作用于粘贴文本的 `textRule` 与 `markRule` 规则。内置类的 `extend({...})` 替换所给的部分：`Underline.extend({ addKeyboardShortcuts: () => ({ "Mod-Alt-u": toggleMark("underline") }) })`。
+
+### 节点视图
+
+`addNodeView` 返回一个组件，由它渲染该扩展节点类型的每个节点：正文里的股票标签、段落之间的卡片、@ 提及、嵌入内容。节点类型必须是原子节点（`atom: true` 或叶子节点）：光标把它当作一个字符或一个块跳过，Backspace 删除它。有内容的节点会被拒绝。
+
+```tsx
+import { RichEditor, StarterKit, createRichEditor, defineExtension, type RichNodeViewProps } from "nsh/base";
+
+function StockTag(props: RichNodeViewProps) {
+  return (
+    <View class={props.selected ? "rounded border border-primary px-1" : "rounded border border-transparent px-1"}>
+      <Text>{`$${props.node.attrs.symbol}`}</Text>
+    </View>
+  );
+}
+
+const Stock = defineExtension({
+  name: "stock",
+  node: { group: "inline", inline: true, atom: true, attrs: { symbol: { default: "AAPL" } } },
+  addNodeView: () => StockTag,
+});
+
+const editor = createRichEditor({ extensions: [StarterKit, Stock] });
+```
+
+组件对每个节点只运行一次。它的 props 跟随节点：在 JSX 或 effect 中读取时，节点的属性或选中状态变化，`node`（`{ type, attrs, textContent }`）与 `selected` 就地更新；在节点前后输入不会调用组件。`editor` 是节点所在的编辑器，`extension` 是 `{ name, options }`。`getPos()` 返回节点当前的起始位置（节点删除后为 `null`）；`updateAttributes(attrs)` 设置部分属性，`deleteNode()` 删除节点，两者都是经由编辑器（及其 `dispatchTransaction`）的一次可撤销修改。
 
 应用的 crate 通过其 UI 集注册用 Rust 编写的扩展，JS 按名称取用：
 

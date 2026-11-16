@@ -620,6 +620,14 @@ define_class!(
             let _: () = unsafe { msg_send![super(self), viewDidLayoutSubviews] };
             size_screens(self);
             clip_side_safe_area(self);
+            // A column of a split (or its compact stack): the core lays the
+            // column's pages out at the size the split gives it.
+            let ivars = self.ivars();
+            if let Ok(mut m) = ivars.mounter.get(self.mtm()).try_borrow_mut()
+                && let Some(m) = m.as_mut()
+            {
+                m.split_column_laid_out(ivars.stack);
+            }
         }
 
         /// A side bar arriving, leaving or changing side moves no view of
@@ -1304,6 +1312,10 @@ pub(crate) struct StackHost {
     pub(crate) applied: std::cell::RefCell<Vec<NodeId>>,
     /// The controller is a child of the surface's controller.
     contained: bool,
+    /// The `SplitView` (its native component's node) whose column this
+    /// stack is: the split holds its navigation controller, and while it
+    /// is collapsed its pages are in the split's compact stack.
+    pub(crate) split: Option<NodeId>,
 }
 
 impl StackHost {
@@ -1336,13 +1348,15 @@ impl StackHost {
             popped: Vec::new(),
             applied: Default::default(),
             contained: false,
+            split: None,
         }
     }
 
     /// Makes the navigation controller a child of the controller showing
     /// the stack (appearance callbacks, safe areas, rotation).
     pub(crate) fn contain(&mut self) {
-        if self.contained || self.container.window().is_none() {
+        // A split's column: the split is its parent.
+        if self.contained || self.split.is_some() || self.container.window().is_none() {
             return;
         }
         let Some(parent) = controller_of(&self.container) else {
@@ -1351,6 +1365,46 @@ impl StackHost {
         parent.addChildViewController(&self.nav);
         self.nav.didMoveToParentViewController(Some(&parent));
         self.contained = true;
+    }
+
+    /// Gives the navigation controller to `split`, as its column.
+    pub(crate) fn join_split(&mut self, split: NodeId) {
+        self.split = Some(split);
+        // The split adds it as its child (taking it out of any parent).
+        self.contained = false;
+    }
+
+    /// Takes the navigation controller back from the split it was a
+    /// column of, into the stack's own container (its screens are given
+    /// back by the next reconcile, if the split had them).
+    pub(crate) fn leave_split(&mut self) {
+        if self.split.take().is_none() {
+            return;
+        }
+        let nav = &self.nav;
+        nav.willMoveToParentViewController(None);
+        if let Some(view) = nav.view() {
+            view.removeFromSuperview();
+            view.setFrame(self.container.bounds());
+            self.container.addSubview(&view);
+        }
+        nav.removeFromParentViewController();
+        self.contained = false;
+    }
+
+    /// Empties the navigation controller without a transition (a collapsing
+    /// split takes the screens into its compact stack, an expanding one
+    /// gives them back to the columns): what it was given is forgotten, so
+    /// nothing reads as popped.
+    pub(crate) fn detach_screens(&self) {
+        self.applied.borrow_mut().clear();
+        if self.nav.viewControllers().count() == 0 {
+            return;
+        }
+        let none: Retained<NSArray<UIViewController>> = NSArray::new();
+        self.nav.ivars().applying.set(true);
+        self.nav.setViewControllers_animated(&none, false);
+        self.nav.ivars().applying.set(false);
     }
 
     /// Shows the app's screens: pushes, pops or replaces as needed.
@@ -1468,6 +1522,16 @@ fn ancestors_visible(view: &UIView) -> bool {
 /// the stack asks for it, until that screen is popped (Apple: "the bottom bar
 /// remains hidden until the view controller is popped from the stack").
 pub(crate) fn bottom_bar_hidden(nav: &UINavigationController) -> bool {
+    match crate::split::bar_role(nav) {
+        // An expanded split's columns show side by side: a page of any of
+        // them keeps the bar off screen, as a page of one stack does.
+        crate::split::BarRole::Shown { shown, .. } => shown.iter().any(|nav| hides_bar(nav)),
+        _ => hides_bar(nav),
+    }
+}
+
+/// Whether a screen of `nav` asks for the bar off screen.
+fn hides_bar(nav: &UINavigationController) -> bool {
     let controllers = nav.viewControllers();
     controllers.iter().any(|controller| {
         // SAFETY: asking UIKit for the property it defines for every screen.
@@ -1495,8 +1559,16 @@ pub(crate) fn slide_bottom_bar(nav: &UINavigationController, hiding: bool) {
     if view.window().is_none() || !ancestors_visible(&view) {
         return;
     }
-    let Some(parent) = view.superview() else {
-        return;
+    let parent = match crate::split::bar_role(nav) {
+        crate::split::BarRole::Stack => match view.superview() {
+            Some(parent) => parent,
+            None => return,
+        },
+        // A split's navigation controller is in the split's own views: the
+        // bar is looked for from where the split is, as from a stack there.
+        crate::split::BarRole::Shown { place, .. } => place,
+        // Its pages show in another of the split's, which moves the bar.
+        crate::split::BarRole::Idle => return,
     };
     // The bar is a component's view, nested in the container the component
     // system puts it in: look through the siblings' subtrees for it.

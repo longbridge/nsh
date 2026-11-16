@@ -427,6 +427,19 @@ fn a_view_removed_under_the_pointer_or_with_the_focus_hears_no_more() {
 }
 
 #[test]
+fn an_input_that_asks_for_the_focus_has_it_once_it_mounts() {
+    let run = TestRun {
+        compile: compiler(vec![nsh_base::registry()]),
+        ..test_run(None)
+    };
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/auto-focus");
+    let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 3);
+}
+
+#[test]
 fn animations_that_loop_forever_hold_no_step() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/loops");
     let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
@@ -547,6 +560,14 @@ fn a_test_plays_the_embedding_app() {
 #[test]
 fn span_styles_follow_id_updates_and_reject_empty_spans() {
     let file = todo().parent().unwrap().join("queries/Spans.test.tsx");
+    let results = run_file(&test_run(None), &file, &mut |_| {}).unwrap();
+    assert_eq!(results.len(), 1);
+    assert!(results[0].failure.is_none(), "{:?}", results[0]);
+}
+
+#[test]
+fn view_styles_read_background_and_opacity() {
+    let file = todo().parent().unwrap().join("queries/ViewStyles.test.tsx");
     let results = run_file(&test_run(None), &file, &mut |_| {}).unwrap();
     assert_eq!(results.len(), 1);
     assert!(results[0].failure.is_none(), "{:?}", results[0]);

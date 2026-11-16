@@ -96,7 +96,8 @@
   view taking it (AppKit's first responder when no view has it) is no focus. A view whose classes read only
   `focus-within:` tracks nothing natively. Rust components hear the focus come into an element and leave it with
   `ElementRef::on_focus_in` / `on_focus_out` (GPUI's names, a focus handle's), watches the core runs at the end of
-  the commit round the focus moved in (`core/watch.rs`). `dark:` follows the appearance
+  the commit round the focus moved in (`core/watch.rs`); an element removed with the focus inside it, or that stops
+  carrying the ref, is left, and the ref's next element hears the focus come in. `dark:` follows the appearance
   shown: the app's own when it set one (`nsh.json` `"appearance"`, `setColorScheme`; `Core::set_appearance`), else the
   system's. The theme is Tailwind 4's
   extended by `nsh.json` `"tailwind"` (`colors`, `spacing`, `breakpoints`, `fontSize`, `radius`, `shadow`, ...; unknown

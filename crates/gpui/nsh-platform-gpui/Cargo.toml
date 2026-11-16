@@ -133,3 +133,4 @@ windows-sys.workspace = true
 [target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dev-dependencies]
 nsh-bundler.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
+accesskit_consumer.workspace = true

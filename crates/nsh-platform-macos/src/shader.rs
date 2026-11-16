@@ -40,8 +40,9 @@
 //! ([`behind`]), and one with the pixels of the last is not uploaded
 //! again ([`picture_hash`]). A transition pictures
 //! the children as they were when it starts ([`start_transition`]).
-//! `renderInContext:` draws no video or web page, nor other shaders'
-//! frames under an effect taken before they arrive.
+//! A shader frame that arrives invalidates the effects around it too,
+//! so their first picture is replaced once the nested shader is ready.
+//! `renderInContext:` draws no video or web page.
 //!
 //! A page's or a dialog's `transitionShader` runs over the stack or the
 //! surface as a [`NavOverlay`]: pictures of the lower and the upper side,
@@ -1604,12 +1605,19 @@ fn frame(surface: &Rc<Surface>) {
 
 /// Renders and collects `view`'s frame, showing one that came back;
 /// whether it has more to render. A frame that showed (or a transition's
-/// that went) changes what the backdrop readers over it read where it
-/// draws ([`behind`]): they picture it again.
+/// that went) changes the content and backdrop pictures that contain it.
 fn render_view(surface: &Rc<Surface>, view: &NshView, renderer: &Renderer, now: Instant) -> bool {
     let (more, showed) = show_frame(surface, view, renderer, now);
     if showed {
-        ui_changed_in(surface, view, true);
+        // Screen outputs live above the root's children, and are excluded
+        // from children_picture. Feeding them back into content readers
+        // would make otherwise static screen effects invalidate each other.
+        let screen = view
+            .state()
+            .shader
+            .as_ref()
+            .is_some_and(|s| is_screen(s.role));
+        ui_changed_in(surface, view, screen);
     }
     more
 }

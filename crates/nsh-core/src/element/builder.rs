@@ -931,6 +931,33 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
+    /// The app's items of the selection menu of this selectable view
+    /// ([`Self::selectable`]; TSX `selectionMenu`): shown after the
+    /// system's own (Copy, Select All, Look Up, Share…), which stay, in
+    /// iOS's edit menu (iOS 16 and later), Android's floating text actions
+    /// and the desktops' secondary-click menu; the web shows the browser's
+    /// menu alone. Each item's
+    /// [`MenuItem::on_select`](super::desktop::MenuItem::on_select) runs
+    /// when it is chosen; the selected text is the one
+    /// [`Interactive::on_text_selection_change`] last reported. Plain items
+    /// and separators only: submenus, roles, shortcuts and check marks are
+    /// left out. The outermost selectable view's items are the selection's.
+    ///
+    /// ```ignore
+    /// view()
+    ///     .selectable(true)
+    ///     .selection_menu(vec![
+    ///         MenuItem::new("Highlight").on_select(highlight),
+    ///         MenuItem::new("Define").on_select(define),
+    ///     ])
+    /// ```
+    fn selection_menu(mut self, items: impl IntoReactive<Vec<super::desktop::MenuItem>>) -> Self {
+        super::host::bind_prop(self.node(), items, |items| {
+            Prop::SelectionMenu(super::desktop::register_selection_menu(items))
+        });
+        self
+    }
+
     /// Marks a text as the continuation of the text before it in document
     /// order: a long line a component draws as several texts, one per
     /// wrapped part (`DiffView`'s soft wrap). In a selectable view
@@ -1319,6 +1346,18 @@ pub trait Accessible: Element {
         self.node().bind_attr(description, |a, description| {
             a.description = Some(description)
         });
+        self
+    }
+
+    /// [`Accessible::accessibility_description`] while it is set (`None`:
+    /// none), for a component that hands the app's optional description
+    /// on to its element.
+    fn optional_accessibility_description(
+        mut self,
+        description: impl IntoReactive<Option<SharedString>>,
+    ) -> Self {
+        self.node()
+            .bind_attr(description, |a, description| a.description = description);
         self
     }
 

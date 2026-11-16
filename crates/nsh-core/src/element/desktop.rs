@@ -942,10 +942,33 @@ impl super::Component for OpenedWindowsHost {
 /// that owns the window is asked first and quits when it is ready. For a
 /// menu item or a button of
 /// the app's own that quits, and for restarting after an update. A view
-/// embedded in another app leaves the app's lifecycle to that app. On
-/// platforms without desktop windows this has no effect.
+/// embedded in another app leaves the app's lifecycle to that app. On the
+/// web, called while a quit request listener runs, it lets the page leave
+/// without a question ([`on_quit_request`]); the app ends as the page goes.
+/// On platforms without desktop windows this has no effect.
 pub fn quit() {
     super::desktop_command(DesktopCommand::Quit);
+}
+
+/// Sets which additional requests go to [`on_quit_request`] on standalone
+/// macOS apps (TS: `Application.setQuitRequestOptions`). Both options
+/// default to false; each call replaces them. Without a listener the app
+/// still quits as before. Changing the options cancels a pending request.
+/// Replacing the app cancels its request and restores the default options.
+/// Other platforms and embedded views ignore it.
+pub fn set_quit_request_options(options: desktop::QuitRequestOptions) {
+    super::desktop_command(DesktopCommand::SetQuitRequestOptions(options));
+}
+
+/// Cancels the pending quit request on standalone macOS apps (TS:
+/// `Application.cancelQuitRequest`). For an intercepted system request,
+/// this cancels logout or shutdown too. Call [`quit`] to approve instead.
+/// Repeated requests share the pending confirmation until answered.
+/// System requests left unanswered are cancelled after 110 seconds, before
+/// AppKit's logout timeout. Removing the last listener also cancels them.
+/// Nothing happens without a pending request or on other platforms.
+pub fn cancel_quit_request() {
+    super::desktop_command(DesktopCommand::CancelQuitRequest);
 }
 
 pub use super::quit::QUIT_TIMEOUT;
@@ -956,7 +979,10 @@ pub use super::quit::QUIT_TIMEOUT;
 /// listens to quit requests ([`on_quit_request`]). It runs when the app
 /// stops: its Quit
 /// item and [`quit`], its last window closing, the system ending it
-/// (logging out), a host app removing its view. The engine waits for the
+/// (logging out), a host app removing its view, on the web the page going
+/// (its tab closed, a reload, another site), once, however the user left
+/// it; a page the browser keeps to come back to keeps the app running.
+/// The engine waits for the
 /// futures it returns [`QUIT_TIMEOUT`] at most, together, and while it
 /// waits the platform does: keep it short. Removed with the current owner.
 ///
@@ -986,9 +1012,15 @@ where
 /// item and the platform's quit key (Command-Q, Ctrl+Q) no longer quit, and
 /// the app decides: it asks the user, saves, or waits for work to finish,
 /// then calls [`quit`]. Without one they quit as before. The system ending
-/// the app (logging out, shutting down) never asks: [`on_app_quit`] runs
-/// then. Standalone apps on macOS, Windows and Linux; a view embedded in
-/// another app leaves the app's lifecycle to that app. Removed with the
+/// the app (logging out, shutting down) runs [`on_app_quit`] without asking
+/// by default. On macOS, [`set_quit_request_options`] can include system
+/// requests and main-window closes; answer with [`quit`] or
+/// [`cancel_quit_request`]. Standalone apps on macOS, Windows and Linux;
+/// a view embedded in another app leaves the app's lifecycle to that app. On the web, the
+/// user leaving the page (closing its tab, reloading) is the request: `f`
+/// runs then, and a [`quit`] it calls at once lets the page go without a
+/// question; otherwise the browser asks the user whether to leave. The
+/// [`on_app_quit`] listeners run once the page is gone. Removed with the
 /// current owner.
 ///
 /// ```ignore
@@ -1323,6 +1355,25 @@ fn decode(
             }
         })
         .collect()
+}
+
+/// Decodes the items of a selectable view's selection menu
+/// ([`super::Element::selection_menu`]), keeping their handlers under a
+/// generation that a cleanup drops when the binding is replaced or the
+/// owner goes. Shown on every OS, not the desktops alone.
+pub(crate) fn register_selection_menu(items: Vec<MenuItem>) -> Vec<desktop::MenuItem> {
+    let menus = super::view_menus();
+    let owner = Owner::current();
+    let mut handlers = Vec::new();
+    let items = decode(items, super::os() == Os::MacOs, &owner, &mut handlers);
+    let generation = menus.borrow_mut().push_header(handlers);
+    let weak = Rc::downgrade(&menus);
+    cleanup(move || {
+        if let Some(menus) = weak.upgrade() {
+            menus.borrow_mut().take_header(generation);
+        }
+    });
+    items
 }
 
 /// Whether the app runs on a desktop OS, where menus show (as TS's).

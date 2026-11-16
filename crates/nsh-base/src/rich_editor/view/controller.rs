@@ -159,6 +159,9 @@ pub(crate) struct Rv {
     pub(crate) deco_rev: Signal<u64>,
     /// A block's frame or a text's lines changed.
     pub(crate) layout_rev: Signal<u64>,
+    /// Inline views' widths changed and `layout_rev` goes up once for all
+    /// of them, in a task (`Rv::set_inline_width`).
+    pub(crate) widths_pending: Rc<Cell<bool>>,
     /// The session has a state the view has not taken yet.
     notified: Signal<u64>,
     pub(crate) focused: Signal<bool>,
@@ -172,6 +175,8 @@ pub(crate) struct Rv {
     /// content, and the scroll offset then: how a drag the app starts
     /// from a page point (a drag handle's) maps into the content.
     pointer: Rc<Cell<Option<PageOffset>>>,
+    /// A [`Rv::place`] measurement is in flight.
+    placing: Rc<Cell<bool>>,
     /// Where a drag that moves the selection would drop it (the drop
     /// cursor).
     pub(crate) drop_at: Signal<Option<usize>>,
@@ -189,6 +194,8 @@ pub(crate) struct Rv {
     pub(crate) viewport: Signal<Size<Points>>,
     /// The content box's height, how far the scroll view scrolls.
     pub(crate) content_height: Signal<Points>,
+    /// Intrinsic flow extent, without the content box's minimum viewport height.
+    pub(crate) document_size: Signal<Size<Points>>,
     /// A drag scrolling on its own past the viewport's edge.
     autoscroll: Rc<RefCell<AutoScroll>>,
     /// The state's scroll request was not carried out yet.
@@ -230,6 +237,7 @@ impl Rv {
             sel_rev: signal(0),
             deco_rev: signal(0),
             layout_rev: signal(0),
+            widths_pending: Rc::default(),
             notified: signal(0),
             focused: signal(false),
             blink: signal(true),
@@ -239,6 +247,7 @@ impl Rv {
             next_composition: Rc::new(Cell::new(1)),
             drag: Rc::default(),
             pointer: Rc::default(),
+            placing: Rc::default(),
             drop_at: signal(None),
             goal_x: Rc::default(),
             selected: Rc::default(),
@@ -249,6 +258,7 @@ impl Rv {
             scrolled: Rc::default(),
             viewport: signal(Size::default()),
             content_height: signal(px(0.0)),
+            document_size: signal(Size::default()),
             autoscroll: Rc::default(),
             scroll_pending: Rc::default(),
             blink_task: Rc::default(),
@@ -363,6 +373,34 @@ impl Rv {
             if rv.scroll_pending.get() {
                 untracked(|| rv.scroll_into_view());
             }
+        });
+        // Native layout reports many block/text frames in one commit. Apps
+        // need a settled size, not an event per paragraph: the change is
+        // reported once a frame, and only when the size differs from the
+        // last one reported. The owner cancels the pending frame on unmount.
+        let rv = self.clone();
+        let pending = Rc::new(Cell::new(false));
+        let reported = Rc::new(Cell::new(Size::<Points>::default()));
+        let owner = Owner::current();
+        effect(move || {
+            rv.document_size.get();
+            if pending.replace(true) {
+                return;
+            }
+            let (rv, pending, reported) = (rv.clone(), pending.clone(), reported.clone());
+            owner.run(|| {
+                spawn(async move {
+                    next_frame().await;
+                    pending.set(false);
+                    let size = rv.document_size.get_untracked();
+                    if size.width.0 <= 0.0 || size.height.0 <= 0.0 || reported.replace(size) == size
+                    {
+                        return;
+                    }
+                    rv.cx
+                        .emit(RichEditorEvent::ContentSizeChange { content_size: size });
+                })
+            });
         });
     }
 
@@ -661,15 +699,16 @@ impl Rv {
     /// shows at the caret, the document waits for the commit (one
     /// transaction, grouped in the history with the composition's).
     pub(crate) fn composition_changed(&self, composing: bool, text: &str) {
-        let held = {
+        let (held, changed) = {
             let mut sink = self.sink.borrow_mut();
+            let changed = sink.composing != composing;
             if composing && sink.composition.is_none() {
                 let id = self.next_composition.get();
                 self.next_composition.set(id + 1);
                 sink.composition = Some(id);
             }
             sink.composing = composing;
-            if composing { None } else { sink.held.take() }
+            (if composing { None } else { sink.held.take() }, changed)
         };
         self.session.set_composing(composing);
         if let Some(held) = held {
@@ -677,6 +716,11 @@ impl Rv {
         }
         self.composition
             .set((composing && !text.is_empty()).then(|| text.to_owned()));
+        // Observers can unmount the editor, so publish the transition only
+        // after its sink and composition state have reached their final values.
+        if changed {
+            self.cx.emit(RichEditorEvent::CompositionChange(composing));
+        }
     }
 
     /// A key the sink reports itself (soft keyboards: Backspace in an
@@ -1672,16 +1716,26 @@ impl Rv {
         ))
     }
 
-    /// Measures where the content is on the page (after a layout, and as a
-    /// handle drag starts): the offset page queries and handle drags map
-    /// by, before any pointer has been over the content.
+    /// Measures where the content is on the page (after a layout of the
+    /// editor or its content, after a page query, and as a handle drag
+    /// starts): the offset page queries and handle drags map by, before
+    /// any pointer has been over the content. What is around the editor
+    /// can move it (an outer scroll view, a sibling's layout) with no
+    /// layout of its own, so each page query measures again; one
+    /// measurement is in flight at a time.
     pub(crate) fn place(&self) {
+        if self.placing.replace(true) {
+            return;
+        }
         let content = self.content;
         let pointer = self.pointer.clone();
         let scroll = self.scroll_y;
         let drag = self.drag.clone();
+        let placing = self.placing.clone();
         spawn(async move {
-            if let Some(m) = content.measure().await {
+            let measured = content.measure().await;
+            placing.set(false);
+            if let Some(m) = measured {
                 let at = scroll.get_untracked();
                 let shift = Point::new(-m.page.x, -m.page.y);
                 pointer.set(Some((shift, at)));
@@ -2833,7 +2887,10 @@ impl ViewGeometry for GeometryHandle {
         }
         let tree = self.tree.borrow();
         let geo = self.geo.borrow();
-        let b = tree.children.values().flatten().find(|b| b.pos == pos)?;
+        let Some(b) = tree.children.values().flatten().find(|b| b.pos == pos) else {
+            // Not a block: an inline view or image, on its line.
+            return geo.inline_rect(pos);
+        };
         let origin = geo.origin(b.id)?;
         let (_, frame) = geo.frames.get(&b.id)?;
         Some(Bounds::new(origin, frame.size))

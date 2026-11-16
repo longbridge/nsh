@@ -594,6 +594,13 @@ export interface MouseEvent {
   pressedButton: MouseButton | null;
   /** The button that changed at this event: the released one on `onMouseUp`, `null` on a move. */
   button: MouseButton | null;
+  /** `"mouse"`, or `"pen"` for a pen over a tablet. */
+  pointerType: PointerType;
+  /** How hard it presses, 0 to 1 (`PointerEvent.pressure`): 0.5 with a button down and 0 without on a device without pressure. */
+  pressure: number;
+  /** A pen's tilt in degrees, -90 to 90 (`PointerEvent.tiltX` / `tiltY`); 0 when not reported. */
+  tiltX: number;
+  tiltY: number;
 }
 
 /** A wheel over a view: the payload of `onWheel` (GPUI's `ScrollWheelEvent`, the DOM's `WheelEvent`). */
@@ -692,15 +699,21 @@ export interface WebViewNavigation {
 
 /** A web view's download (`onDownload`): where it is saved, in the app's data directory's `downloads`. */
 export interface WebViewDownload {
-  state: "started" | "finished" | "failed";
+  state: "started" | "finished" | "failed" | "cancelled";
   id: string;
   url: string;
   filename: string;
   path: string;
+  /** Who owns the bytes: the engine's transfer, a request NSH made, a page, or none (the response is gone). */
+  source: "transfer" | "request" | "page" | "none";
   /** Once finished: the file's size in bytes. */
   bytes?: number;
   /** When it failed: why. */
   message?: string;
+  /** A stable code on failure or cancellation. */
+  code?: string;
+  /** Why it was cancelled. */
+  reason?: "app" | "timeout" | "teardown" | "noListener";
 }
 "#;
 
@@ -1077,6 +1090,9 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::WebEvaluation,
     EventKind::WebViewReply,
     EventKind::DownloadPending,
+    EventKind::DownloadOffer,
+    EventKind::DownloadProgress,
+    EventKind::DownloadEnd,
     EventKind::Clipboard,
     EventKind::Host,
     EventKind::Pick,

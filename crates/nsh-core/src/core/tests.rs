@@ -108,7 +108,7 @@ fn js_events<M: TextEngine>(c: &mut Core<M>) -> Vec<(NodeId, EventKind, EventPay
                 JsEvent::Component { host, event } => native(
                     host,
                     event.name(),
-                    json_host::event_data(&*event).unwrap_or(crate::JsonValue::Null),
+                    json_host::event_data(&*event).unwrap_or(serde_json::Value::Null),
                 ),
                 JsEvent::Children { host, wanted } => {
                     native(host, "$children", crate::JsonValue::Bool(wanted))
@@ -118,6 +118,7 @@ fn js_events<M: TextEngine>(c: &mut Core<M>) -> Vec<(NodeId, EventKind, EventPay
                     prop,
                     key,
                     value,
+                    ..
                 } => native(
                     host,
                     "$render",
@@ -522,6 +523,81 @@ fn frame_of(batch: &MountBatch, id: NodeId) -> Option<Bounds<Points>> {
         MountItem::Frame { id: i, frame } if *i == id => Some(*frame),
         _ => None,
     })
+}
+
+/// A text stretched across a column wraps at its content box: its padding
+/// and border are not room for its lines. Measured at the width of its
+/// border box, it got the height of fewer lines than its content box
+/// holds, and the platforms cut the lines left over with an ellipsis.
+#[test]
+fn a_stretched_text_wraps_at_its_content_box() {
+    for (padding, border) in [(10.0, 0.0), (0.0, 10.0), (6.0, 4.0)] {
+        let mut c = core();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::Create {
+                    id: 3,
+                    tag: Tag::Text,
+                },
+                // 11 characters, 88pt: one line in the column's 100pt, two
+                // in the text's 80pt content box.
+                Op::CreateText {
+                    id: 4,
+                    text: "hello world".into(),
+                },
+                Op::Insert {
+                    parent: 3,
+                    child: 4,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 3,
+                    before: None,
+                },
+                style_op(2, &[("width", StyleValue::Number(100.0))]),
+                style_op(
+                    3,
+                    &[
+                        ("paddingHorizontal", StyleValue::Number(padding)),
+                        ("borderWidth", StyleValue::Number(border)),
+                    ],
+                ),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        let content = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Text { id: 3, content, .. } => Some(*content),
+                _ => None,
+            })
+            .expect("the text mounted");
+        let inset = padding + border;
+        assert_eq!(
+            content,
+            Bounds::new(
+                Point::new(Points(inset), Points(border)),
+                size_pt(100.0 - 2.0 * inset, 32.0)
+            ),
+            "padding {padding}, border {border}"
+        );
+        assert_eq!(
+            frame_of(&batch, 3).map(|f| f.size),
+            Some(size_pt(100.0, 32.0 + 2.0 * border))
+        );
+    }
 }
 
 #[test]
@@ -2244,6 +2320,104 @@ fn image_uses_natural_size_and_aspect_ratio() {
     );
 }
 
+mod rgba_image_sizes {
+    use super::*;
+    use crate::{
+        element::{ImageSrc, Root},
+        prelude::*,
+    };
+
+    #[component]
+    fn Images() -> impl IntoElement {
+        let src = ImageSrc::rgba(200, 100, vec![7u8; 200 * 100 * 4]);
+        let sized = src.clone().size(size_pt(100.0, 50.0));
+        view()
+            .items_start()
+            .child(image(src))
+            .child(image(sized.clone()))
+            .child(image(sized.clone()).w(px(60.0)))
+            .child(image(sized.clone()).h(px(20.0)))
+            .child(image(sized).w(px(60.0)).h(px(20.0)))
+    }
+
+    #[test]
+    fn declared_size_lays_out_in_points_at_each_pixel_ratio() {
+        for ratio in [1.0, 2.0] {
+            let mut c = core();
+            at_ratio(&mut c, ratio);
+            c.mount_root(&Root::new::<Images>(|| ()));
+            let batch = c.commit().unwrap();
+            let sizes: Vec<_> = batch
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    MountItem::Image {
+                        id,
+                        source: Some(source),
+                        ..
+                    } => Some((source.size.unwrap(), frame_of(&batch, *id).unwrap().size)),
+                    _ => None,
+                })
+                .collect();
+            let natural = size_pt(100.0, 50.0);
+            assert_eq!(
+                sizes,
+                [
+                    (size_pt(200.0, 100.0), size_pt(200.0, 100.0)),
+                    (natural, natural),
+                    (natural, size_pt(60.0, 30.0)),
+                    (natural, size_pt(40.0, 20.0)),
+                    (natural, size_pt(60.0, 20.0)),
+                ],
+                "at pixel ratio {ratio}"
+            );
+        }
+    }
+
+    #[component]
+    fn ResizableImage() -> impl IntoElement {
+        let natural = signal(size_pt(100.0, 50.0));
+        let src = ImageSrc::rgba(200, 100, vec![7u8; 200 * 100 * 4]);
+        view().items_start().child(
+            image(move || src.clone().size(natural.get()))
+                .on_press(move || natural.set(size_pt(80.0, 20.0))),
+        )
+    }
+
+    #[test]
+    fn changing_only_the_size_relayouts_the_same_source() {
+        let shown = |batch: &MountBatch| {
+            batch
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    MountItem::Image {
+                        id,
+                        source: Some(source),
+                        ..
+                    } => Some((*id, source.clone())),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let mut c = core();
+        at_ratio(&mut c, 2.0);
+        c.mount_root(&Root::new::<ResizableImage>(|| ()));
+        let first = c.commit().unwrap();
+        let (id, before) = shown(&first);
+        assert_eq!(frame_of(&first, id).unwrap().size, size_pt(100.0, 50.0));
+
+        assert!(c.component_event(id, EventKind::Press, &EventPayload::None));
+        let next = c.commit().unwrap();
+        let (next_id, after) = shown(&next);
+        assert_eq!(next_id, id);
+        assert_eq!(after.uri, before.uri);
+        assert_eq!(after.data, before.data);
+        assert_eq!(after.size, Some(size_pt(80.0, 20.0)));
+        assert_eq!(frame_of(&next, id).unwrap().size, size_pt(80.0, 20.0));
+    }
+}
+
 #[test]
 fn object_position_reaches_the_image_item_only() {
     let mut c = core();
@@ -2530,6 +2704,50 @@ fn scroll_reports_content_size() {
             ..
         }
     )));
+}
+
+/// `scrollsToTop` reaches the scroll view's mounted behavior (iOS sets
+/// `UIScrollView.scrollsToTop` from it): on by default, off when the app
+/// says so, and on again.
+#[test]
+fn scrolls_to_top_reaches_the_scroll_behavior() {
+    fn behavior(batch: &MountBatch) -> Option<ScrollBehavior> {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ScrollBehavior { id: 2, behavior } => Some((**behavior).clone()),
+            _ => None,
+        })
+    }
+    assert!(ScrollBehavior::default().scrolls_to_top);
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Scroll(ScrollProp::ScrollsToTop(false)),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(behavior(&batch).map(|b| b.scrolls_to_top), Some(false));
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Scroll(ScrollProp::ScrollsToTop(true)),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(behavior(&batch).map(|b| b.scrolls_to_top), Some(true));
 }
 
 /// `overflow: "hidden"` clips in layout as well as in paint: what a box
@@ -3047,7 +3265,7 @@ fn a_list_measures_where_its_viewport_starts_among_its_rows() {
         scroll_position(&mut c, 2),
         serde_json::json!({ "index": 0, "offset": 0.0 })
     );
-    assert_eq!(scroll_position(&mut c, ROOT_ID), crate::JsonValue::Null);
+    assert_eq!(scroll_position(&mut c, ROOT_ID), serde_json::Value::Null);
 
     c.apply(Op::Command {
         id: 2,
@@ -4992,6 +5210,83 @@ fn a_layout_animation_on_a_node_animates_the_frames_it_moves() {
     );
 }
 
+/// A header (2) that collapses with a scoped layout animation over a
+/// `flex-1` list (4) that gains a row (12) at its top in the same commit:
+/// the list grows along with the header, but its rows move because of the
+/// new row, so they change at once (#1952).
+#[test]
+fn a_layout_animation_does_not_carry_into_a_list_that_updates() {
+    let mut c = core();
+    let mut ops = Vec::new();
+    for (id, parent, style) in [
+        (2, 1, ("height", StyleValue::Number(100.0))),
+        (4, 1, ("flexGrow", StyleValue::Number(1.0))),
+        (8, 4, ("height", StyleValue::Number(20.0))),
+        (10, 4, ("height", StyleValue::Number(20.0))),
+    ] {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(style_op(id, &[style]));
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    apply(&mut c, ops);
+    c.commit().unwrap();
+    let spring = crate::LayoutTransition::new(
+        crate::LayoutCurve::FittedSpring { damping_ratio: 1.0 },
+        265.0,
+    );
+    apply(
+        &mut c,
+        vec![
+            style_op(2, &[("height", StyleValue::Number(56.0))]),
+            Op::Command {
+                id: 2,
+                command: Command::LayoutAnimation(crate::LayoutAnimation {
+                    update: Some(spring),
+                    ..Default::default()
+                }),
+            },
+            Op::Create {
+                id: 12,
+                tag: Tag::View,
+            },
+            style_op(12, &[("height", StyleValue::Number(20.0))]),
+            Op::Insert {
+                parent: 4,
+                child: 12,
+                before: Some(8),
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let mut current = None;
+    let mut frames = Vec::new();
+    for item in &batch.items {
+        match item {
+            MountItem::LayoutAnimation(a) => current = a.update,
+            MountItem::Frame { id, .. } => frames.push((*id, current)),
+            _ => {}
+        }
+    }
+    let animated = |id| frames.iter().find(|f| f.0 == id).map(|f| f.1.is_some());
+    assert_eq!(animated(2), Some(true), "the header collapses: {frames:?}");
+    assert_eq!(
+        animated(4),
+        Some(true),
+        "the list grows with it: {frames:?}"
+    );
+    for row in [8, 10, 12] {
+        assert_ne!(
+            animated(row),
+            Some(true),
+            "row {row} changes at once: {frames:?}"
+        );
+    }
+}
+
 #[test]
 fn a_layout_animation_on_the_root_still_animates_every_frame() {
     let frames = scoped_layout_commit(true);
@@ -5627,6 +5922,134 @@ fn a_drawn_header_is_as_wide_as_the_screen() {
         );
         assert_eq!(frames[&10].size.width, px(width - 88.0));
     }
+}
+
+/// With a native header, a title view is as wide as its content, at most
+/// the room the bar leaves between its items: a long one-line title shrinks
+/// instead of running under the trailing item (#1895), a short one keeps
+/// its width.
+#[test]
+fn a_native_title_view_fits_between_the_header_items() {
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let build = |title: &str| {
+        let mut c = core();
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Stack,
+            },
+            style_op(2, &[("flex", StyleValue::Number(1.0))]),
+            Op::Create {
+                id: 3,
+                tag: Tag::Screen,
+            },
+            // The title view: a clamped text, then a button.
+            Op::Create {
+                id: 4,
+                tag: Tag::HeaderItem,
+            },
+            Op::SetProp {
+                id: 4,
+                prop: Prop::HeaderSlot(crate::HeaderSlot::Title),
+            },
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            style_op(6, &[("flexDirection", StyleValue::Str("row"))]),
+            Op::Create {
+                id: 10,
+                tag: Tag::View,
+            },
+            style_op(
+                10,
+                &[
+                    ("flex", StyleValue::Number(1.0)),
+                    ("minWidth", StyleValue::Number(0.0)),
+                ],
+            ),
+            Op::Create {
+                id: 12,
+                tag: Tag::Text,
+            },
+            style_op(12, &[("numberOfLines", StyleValue::Number(1.0))]),
+            Op::CreateText {
+                id: 13,
+                text: title.to_string(),
+            },
+            Op::Create {
+                id: 14,
+                tag: Tag::View,
+            },
+            style_op(
+                14,
+                &[
+                    ("width", StyleValue::Number(40.0)),
+                    ("height", StyleValue::Number(40.0)),
+                    ("flexShrink", StyleValue::Number(0.0)),
+                ],
+            ),
+            // The trailing item, 60 wide.
+            Op::Create {
+                id: 20,
+                tag: Tag::HeaderItem,
+            },
+            Op::SetProp {
+                id: 20,
+                prop: Prop::HeaderSlot(crate::HeaderSlot::Right),
+            },
+            Op::Create {
+                id: 22,
+                tag: Tag::View,
+            },
+            style_op(
+                22,
+                &[
+                    ("width", StyleValue::Number(60.0)),
+                    ("height", StyleValue::Number(40.0)),
+                ],
+            ),
+        ];
+        ops.extend([
+            insert(12, 13),
+            insert(10, 12),
+            insert(6, 10),
+            insert(6, 14),
+            insert(4, 6),
+            insert(20, 22),
+            insert(3, 4),
+            insert(3, 20),
+            insert(2, 3),
+            insert(ROOT_ID, 2),
+        ]);
+        apply(&mut c, ops);
+        let mut frames = std::collections::HashMap::new();
+        let batch = c.commit().unwrap();
+        for item in &batch.items {
+            if let MountItem::Frame { id, frame } = item {
+                frames.insert(*id, *frame);
+            }
+        }
+        frames
+    };
+    // 320 wide: the room is 320 - 2 * 16 (insets) - (60 + 16) (the item).
+    let frames = build(&"a title far too long to fit on one line of the header".repeat(2));
+    assert_eq!(frames[&4].size.width, px(212.0));
+    let button = frames[&14];
+    assert_eq!(
+        button.origin.x + button.size.width,
+        px(212.0),
+        "the button in the title"
+    );
+    let frames = build("Hi");
+    assert!(
+        frames[&4].size.width < px(100.0),
+        "a short title keeps its width"
+    );
 }
 
 #[test]
@@ -14307,6 +14730,69 @@ mod components {
         assert_eq!(shown.last().unwrap(), "10,0 30x20 at 26,16 true");
     }
 
+    /// Reads its box's text when pressed (and a ref no element carries):
+    /// the texts inside it in order, one hidden left out.
+    #[component]
+    fn Reader() -> impl IntoElement {
+        let target = element_ref();
+        let unused = element_ref();
+        let shown = signal(String::new());
+        view()
+            .child(
+                view()
+                    .element_ref(&target)
+                    .child(text("Open "))
+                    .child(view().child(text("recent")).child(text(" file")))
+                    .child(view().hidden().child(text(" secret"))),
+            )
+            .child(text(move || shown.get()))
+            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
+                let (target, unused) = (target.text_content(), unused.text_content());
+                spawn(async move {
+                    let (text, none) = (target.await, unused.await);
+                    shown.set(format!("read:{text}|{none}"));
+                });
+            }))
+    }
+
+    #[test]
+    fn element_refs_read_the_text_they_show() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Reader>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Reader>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button listens to presses");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("read:")));
+        assert_eq!(shown.last().unwrap(), "read:Open recent file|");
+    }
+
     #[derive(Clone, PartialEq, Debug)]
     struct Accent(u32);
 
@@ -14910,6 +15396,135 @@ mod components {
         assert!(shown.iter().all(|t| !t.starts_with("failed")), "{shown:?}");
     }
 
+    // A list of wrapping texts beside a panel shown while `narrow`; a
+    // press toggles the panel inside `animate_layout` when `animated`.
+    thread_local! {
+        static PANEL: Cell<(bool, bool)> = const { Cell::new((false, false)) };
+    }
+
+    #[component]
+    fn ListBesidePanel() -> impl IntoElement {
+        let (animated, narrow) = PANEL.with(Cell::get);
+        let narrow = signal(narrow);
+        view()
+            .flex_1()
+            .child(view().h(px(20.0)).on_press(move |_: &()| {
+                if animated {
+                    animate_layout(crate::LayoutAnimation {
+                        create: Some(crate::LayoutTransition::new(
+                            crate::LayoutCurve::EaseOut,
+                            150.0,
+                        )),
+                        update: Some(crate::LayoutTransition::new(
+                            crate::LayoutCurve::EaseInEaseOut,
+                            220.0,
+                        )),
+                        delete: Some(crate::LayoutTransition::new(
+                            crate::LayoutCurve::EaseOut,
+                            150.0,
+                        )),
+                    });
+                }
+                narrow.update(|n| *n = !*n);
+            }))
+            .child(
+                view()
+                    .flex_row()
+                    .flex_1()
+                    .child(
+                        virtual_list(6, move |at| {
+                            // 160, 320 and 480 points of text at 8 a char.
+                            text("x".repeat(20 * (at.index() % 3 + 1)))
+                        })
+                        .keys(|| 0..6)
+                        .estimated_item_size(px(64.0))
+                        .flex_1(),
+                    )
+                    .child(when(move || narrow.get(), || view().w(px(160.0)))),
+            )
+    }
+
+    /// The frames of the texts shown, by length, once commits settle,
+    /// after a press on the button when `press`.
+    fn text_frames(c: &mut Core<FakeEngine>, press: bool) -> Vec<(usize, Bounds<Points>)> {
+        let mut frames = std::collections::HashMap::new();
+        let mut texts = std::collections::HashMap::new();
+        let mut button_id = None;
+        let mut take = |batch: MountBatch, button_id: &mut Option<NodeId>| {
+            for item in batch.items {
+                match item {
+                    MountItem::Frame { id, frame } => {
+                        frames.insert(id, frame);
+                    }
+                    MountItem::Text { id, text, .. } => {
+                        texts.insert(id, text.text.chars().count());
+                    }
+                    MountItem::Events { id, events } if events.contains(EventKind::Press) => {
+                        *button_id = Some(id);
+                    }
+                    _ => {}
+                }
+            }
+        };
+        for _ in 0..4 {
+            if let Some(batch) = c.commit() {
+                take(batch, &mut button_id);
+            }
+        }
+        if press && let Some(id) = button_id {
+            assert!(c.component_event(id, EventKind::Press, &EventPayload::None));
+            for _ in 0..4 {
+                if let Some(batch) = c.commit() {
+                    take(batch, &mut button_id);
+                }
+            }
+        }
+        let mut out: Vec<_> = texts
+            .into_iter()
+            .filter_map(|(id, chars)| Some((chars, *frames.get(&id)?)))
+            .collect();
+        out.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then(a.1.origin.y.0.total_cmp(&b.1.origin.y.0))
+        });
+        out
+    }
+
+    /// #1830: a list narrowed inside `animate_layout` measures its rows at
+    /// the new width, as it does without the animation.
+    #[test]
+    fn a_list_narrowed_inside_a_layout_animation_measures_its_rows_again() {
+        for animated in [false, true] {
+            let mut c = core();
+            PANEL.with(|p| p.set((animated, false)));
+            c.mount_root(&crate::element::Root::new::<ListBesidePanel>(|| ()));
+            let toggled = text_frames(&mut c, true);
+            let mut fresh = core();
+            PANEL.with(|p| p.set((false, true)));
+            fresh.mount_root(&crate::element::Root::new::<ListBesidePanel>(|| ()));
+            let expected = text_frames(&mut fresh, false);
+            assert!(!expected.is_empty());
+            for (chars, frame) in &expected {
+                // 160 points wide: one line per 20 characters.
+                assert_eq!(
+                    frame.size.height.0,
+                    (*chars / 20) as f32 * 16.0,
+                    "{expected:?}"
+                );
+            }
+            let heights = |f: &[(usize, Bounds<Points>)]| {
+                f.iter()
+                    .map(|(n, b)| (*n, b.size.height.0))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                heights(&toggled),
+                heights(&expected),
+                "animated: {animated}"
+            );
+        }
+    }
+
     /// A long list of its own rows: row 1 holds a field, row 2 a menu (an
     /// overlay) while it is open; a press closes the menu.
     #[component]
@@ -15006,6 +15621,102 @@ mod components {
         let _ = c.commit();
         scroll(&mut c, 16000.0, 3);
         assert!(!bound(&c, 1) && !bound(&c, 2));
+    }
+
+    /// A long list of keyed rows, each a stop of Tab; a press moves row 10
+    /// to the third place, another moves row 3 past the rendered rows.
+    #[component]
+    fn MovingRows() -> impl IntoElement {
+        let rows = signal((0..100).map(|i| format!("r{i}")).collect::<Vec<_>>());
+        let move_row = move |from: usize, to: usize| {
+            move |_: &()| {
+                rows.update(|r| {
+                    let row = r.remove(from);
+                    r.insert(to, row);
+                })
+            }
+        };
+        view()
+            .flex_1()
+            .child(view().h(px(20.0)).label("up").on_press(move_row(10, 2)))
+            .child(view().h(px(20.0)).label("down").on_press(move_row(3, 90)))
+            .child(
+                virtual_list(
+                    move || rows.with(Vec::len),
+                    move |at| {
+                        view()
+                            .h(px(40.0))
+                            .focusable(true)
+                            .child(text(move || rows.with(|r| r[at.index()].clone())))
+                    },
+                )
+                .keys(move || rows.get())
+                .estimated_item_size(px(40.0))
+                .flex_1(),
+            )
+    }
+
+    /// A keyed row that moves keeps its cell, and so do the rows it passes:
+    /// nothing is made or drawn again, only placed, and the focus in a row
+    /// that moved stays where it is.
+    #[test]
+    fn virtual_lists_move_keyed_rows_with_their_cells() {
+        use crate::tailwind::state::FOCUSED;
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<MovingRows>(|| ()));
+        let batch = c.commit().unwrap();
+        let text_node = |content: &str| {
+            batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Text { id, text, .. } if text.text == content => Some(*id),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no text {content:?}"))
+        };
+        let row = |c: &Core<FakeEngine>, text: NodeId| {
+            let key = c.key(text).unwrap();
+            c.nodes[c.nodes[key as usize].parent as usize].id
+        };
+        let buttons: Vec<NodeId> = batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        let press = |c: &mut Core<FakeEngine>, label: &str| {
+            let button = buttons[usize::from(label == "down")];
+            assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+            let mut batches = Vec::new();
+            while let Some(batch) = c.commit() {
+                batches.push(batch);
+            }
+            batches
+        };
+        let (moved, passed) = (text_node("r10"), text_node("r5"));
+        let focused = row(&c, passed);
+        c.set_states(focused, FOCUSED);
+        let _ = c.commit();
+        for label in ["up", "down"] {
+            let batches = press(&mut c, label);
+            let items: Vec<&MountItem> = batches.iter().flat_map(|b| &b.items).collect();
+            assert!(
+                !items.iter().any(|i| matches!(i, MountItem::Create { .. })),
+                "{label}: {items:?}"
+            );
+            // Only a row coming into the window is drawn: row 3's cell,
+            // moved past it, shows it.
+            let drawn = items
+                .iter()
+                .filter(|i| matches!(i, MountItem::Text { .. }))
+                .count();
+            assert_eq!(drawn, usize::from(label == "down"), "{label}: {items:?}");
+            assert!(c.key(moved).is_ok() && c.key(passed).is_ok(), "{label}");
+            assert_eq!(c.focus.map(|(_, id)| id), Some(focused), "{label}");
+        }
     }
 
     /// A long list of its own rows, each a stop of Tab.
@@ -17582,6 +18293,7 @@ mod touch {
         EventPayload::Touch(Box::new(TouchEvent {
             phase,
             timestamp: t,
+            modifiers: Default::default(),
             activated: None,
             points: vec![TouchPoint {
                 id: 7,
@@ -17595,6 +18307,9 @@ mod touch {
                 location: point(px(x - 10.0), px(5.0)),
                 changed: true,
                 pointer_type: crate::PointerType::Touch,
+                pressure: 0.5,
+                tilt_x: 0.0,
+                tilt_y: 0.0,
             }],
         }))
     }
@@ -20493,6 +21208,52 @@ mod views {
     }
 
     thread_local! {
+        static SIZE_CLASS_RUNS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    #[component]
+    fn SizeClasses() -> impl IntoElement {
+        effect(move || {
+            horizontal_size_class();
+            SIZE_CLASS_RUNS.with(|n| n.set(n.get() + 1));
+        });
+        text(move || format!("{:?} {:?}", horizontal_size_class(), vertical_size_class()))
+    }
+
+    #[test]
+    fn size_classes_follow_each_axis_and_native_traits_without_redundant_notifications() {
+        SIZE_CLASS_RUNS.with(|n| n.set(0));
+        let mut c = core();
+        let mut environment = crate::element::Environment {
+            window: crate::geometry::size_pt(390.0, 844.0),
+            ..Default::default()
+        };
+        c.set_environment(environment);
+        c.mount_root(&Root::new::<SizeClasses>(|| ()));
+        assert_eq!(texts(&c.commit().unwrap()), ["Compact Regular"]);
+        environment.window.width = px(599.0);
+        c.set_environment(environment);
+        c.commit();
+        assert_eq!(SIZE_CLASS_RUNS.with(Cell::get), 1);
+        environment.window = crate::geometry::size_pt(600.0, 599.0);
+        c.set_environment(environment);
+        assert_eq!(texts(&c.commit().unwrap()), ["Regular Compact"]);
+        assert_eq!(SIZE_CLASS_RUNS.with(Cell::get), 2);
+        // UIKit's classes win even when the size would classify differently.
+        environment.horizontal_size_class = Some(SizeClass::Compact);
+        environment.vertical_size_class = Some(SizeClass::Regular);
+        c.set_environment(environment);
+        assert_eq!(texts(&c.commit().unwrap()), ["Compact Regular"]);
+        environment.window = crate::geometry::size_pt(900.0, 900.0);
+        c.set_environment(environment);
+        c.commit();
+        assert_eq!(SIZE_CLASS_RUNS.with(Cell::get), 3);
+        environment.horizontal_size_class = None;
+        c.set_environment(environment);
+        assert_eq!(texts(&c.commit().unwrap()), ["Regular Regular"]);
+    }
+
+    thread_local! {
         static WAKE_RUNS: Cell<u32> = const { Cell::new(0) };
     }
 
@@ -22060,6 +22821,70 @@ mod views {
         assert!(config.right.is_some(), "the trailing slot is set");
     }
 
+    /// A screen whose trailing header item shows a button only while `SHOWN`
+    /// says so.
+    #[derive(Default)]
+    struct OptionalItemPage;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct OptionalItemPageProps {}
+
+    thread_local! {
+        static SHOWN: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+    }
+
+    impl Component for OptionalItemPage {
+        type Props = OptionalItemPageProps;
+        type Event = NoEvent;
+
+        // The core's own stack and screen: `nsh_base`'s wrap them.
+        #[allow(deprecated)]
+        fn view(_: OptionalItemPageProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let shown = signal(false);
+            SHOWN.with(|s| s.set(Some(shown)));
+            stack().flex_1().child(
+                screen()
+                    .header_right(when(shown, || view().w(px(24.0)).h(px(24.0))))
+                    .child(view().flex_1()),
+            )
+        }
+    }
+
+    /// The last screen options of `batch`, if it has any.
+    fn last_screen_config(batch: &MountBatch) -> Option<ScreenConfig> {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+            _ => None,
+        })
+    }
+
+    /// A header item whose content is gone shows nothing: the screen's
+    /// options leave it out (the iOS bar would wrap it in an empty button),
+    /// and put it back when its content returns.
+    #[test]
+    fn an_empty_header_item_is_left_out_of_the_screens_config() {
+        let mut c = core();
+        c.mount_root(&Root::new::<OptionalItemPage>(|| OptionalItemPageProps {}));
+        let first = last_screen_config(&c.commit().unwrap()).expect("a screen");
+        assert_eq!(first.right, None, "nothing shows in the trailing slot");
+        let shown = SHOWN.with(Cell::get).unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            shown.set(true);
+        }
+        let config = last_screen_config(&c.commit().unwrap()).expect("options again");
+        assert!(config.right.is_some(), "the trailing slot shows its button");
+        {
+            let _entered = c.components.runtime.enter();
+            shown.set(false);
+        }
+        let config = last_screen_config(&c.commit().unwrap()).expect("options again");
+        assert_eq!(config.right, None, "the trailing slot is empty again");
+        // Nothing changed: no options again.
+        let batch = c.commit();
+        assert!(batch.is_none_or(|b| last_screen_config(&b).is_none()));
+    }
+
     /// Without the prop the header is built as before: no system button, so
     /// the platform wraps the app's `headerRight` view instead.
     #[test]
@@ -22328,6 +23153,84 @@ mod views {
         assert_eq!(PRESSES.with(|c| c.get()), 2);
         assert!(c.component_event(ROOT_ID, EventKind::Menu, &menu(new_select_id)));
         assert_eq!(SELECTS.with(|c| c.get()), 2);
+    }
+
+    /// A selectable view's `selection_menu` reaches its view props as plain
+    /// items and separators (roles, submenus and shortcuts left out), and a
+    /// chosen item's `on_select` runs when the platform reports its id as
+    /// the root's `Menu` event.
+    #[test]
+    fn selection_menu_items_reach_the_view_and_run_when_chosen() {
+        use std::cell::Cell;
+
+        use crate::{
+            EventKind, EventPayload, PayloadValue, ROOT_ID,
+            desktop::{MenuItem as PlatformItem, MenuRole},
+            element::desktop::MenuItem,
+        };
+
+        thread_local! {
+            static CHOSEN: Cell<u32> = const { Cell::new(0) };
+        }
+        CHOSEN.with(|c| c.set(0));
+
+        #[derive(Default)]
+        struct Area;
+        #[derive(Clone, PartialEq, Props)]
+        struct AreaProps {}
+        impl Component for Area {
+            type Props = AreaProps;
+            type Event = NoEvent;
+            fn view(_: AreaProps, _: Scope<NoEvent>) -> impl IntoElement {
+                view()
+                    .selectable(true)
+                    .selection_menu(vec![
+                        MenuItem::separator(),
+                        MenuItem::role(MenuRole::Copy),
+                        MenuItem::new("Highlight")
+                            .shortcut("mod+h")
+                            .on_select(|| CHOSEN.with(|c| c.set(c.get() + 1))),
+                        MenuItem::separator(),
+                        MenuItem::separator(),
+                        MenuItem::submenu("More", [MenuItem::new("Nested")]),
+                        MenuItem::new("Define").disabled(true),
+                        MenuItem::separator(),
+                    ])
+                    .child(text("Some words"))
+            }
+        }
+
+        let mut c = core();
+        c.mount_root(&Root::new::<Area>(|| AreaProps {}));
+        let batch = c.commit().unwrap();
+        let menu = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewProps { props, .. } if props.selectable_view => {
+                    Some(props.selection_menu.clone())
+                }
+                _ => None,
+            })
+            .expect("the selectable view's props");
+        let [
+            PlatformItem::Action(highlight),
+            PlatformItem::Separator,
+            PlatformItem::Action(define),
+        ] = &menu[..]
+        else {
+            panic!("plain items and one separator between them: {menu:?}");
+        };
+        assert_eq!(highlight.label, "Highlight");
+        assert_eq!(highlight.shortcut, None);
+        assert_ne!(highlight.id, 0);
+        assert_eq!(define.label, "Define");
+        assert!(!define.enabled);
+        assert_eq!(define.id, 0, "no handler, no id");
+
+        let chosen = EventPayload::Map(vec![("id", PayloadValue::Number(highlight.id as f64))]);
+        assert!(c.component_event(ROOT_ID, EventKind::Menu, &chosen));
+        assert_eq!(CHOSEN.with(|c| c.get()), 1);
     }
 
     /// A Rust component that renders a native component.
@@ -22995,6 +23898,63 @@ mod views {
             "{:?}",
             texts(&batch)
         );
+    }
+
+    /// Logs the focus coming into and leaving one ref's element, which
+    /// shows (with a focusable view inside) while `shown`: a press on
+    /// "toggle" removes it, and the next brings a new one with the ref.
+    #[component]
+    fn FocusRemount() -> impl IntoElement {
+        let log = signal(Vec::<&'static str>::new());
+        let shown = signal(true);
+        let area = element_ref();
+        area.on_focus_in(move || log.update(|l| l.push("in")));
+        area.on_focus_out(move || log.update(|l| l.push("out")));
+        view()
+            .child(text(move || format!("log {}", log.get().join(" "))))
+            .child(when(shown, move || {
+                view()
+                    .element_ref(&area)
+                    .child(view().focusable(true).child(text("field")))
+            }))
+            .child(
+                view()
+                    .on_press(move || shown.update(|s| *s = !*s))
+                    .child(text("toggle")),
+            )
+    }
+
+    /// An element removed with the focus inside it is left (the focus goes
+    /// to none), and the ref's next element hears the focus come in again.
+    #[test]
+    fn an_element_removed_with_the_focus_in_it_is_left() {
+        use crate::tailwind::state::FOCUSED;
+        let mut c = core();
+        c.mount_root(&Root::new::<FocusRemount>(|| ()));
+        let batch = c.commit().unwrap();
+        let field = native_parent(&c, text_node(&batch, "field")).unwrap();
+        let toggle = native_parent(&c, text_node(&batch, "toggle")).unwrap();
+        c.set_states(field, FOCUSED);
+        let shown = texts(&c.commit().unwrap());
+        assert!(shown.contains(&"log in".into()), "{shown:?}");
+        // Removed while the focus is in it.
+        assert!(c.component_event(toggle, EventKind::Press, &EventPayload::None));
+        let shown = texts(&c.commit().unwrap());
+        assert!(c.key(field).is_err(), "released");
+        assert!(shown.contains(&"log in out".into()), "{shown:?}");
+        // A new element with the same ref; the focus comes into it.
+        assert!(c.component_event(toggle, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let field = native_parent(&c, text_node(&batch, "field")).unwrap();
+        c.set_states(field, FOCUSED);
+        let shown = texts(&c.commit().unwrap());
+        assert!(shown.contains(&"log in out in".into()), "{shown:?}");
+        // And out to none (a blur lets go at the frame).
+        c.set_states(field, 0);
+        assert!(c.commit().is_none());
+        c.run_frame(crate::time::now());
+        let shown = texts(&c.commit().unwrap());
+        assert!(shown.contains(&"log in out in out".into()), "{shown:?}");
     }
 
     #[derive(Clone, PartialEq, Props)]
@@ -24332,6 +25292,7 @@ mod rust_desktop {
         let mut c = core();
         READS.set(0);
         c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
             title_bar: Edges {
                 top: Points(42.0),
                 left: Points(78.0),
@@ -24504,6 +25465,40 @@ mod rust_windows {
                     text("Inspector")
                 }),
         )
+    }
+
+    #[test]
+    fn a_window_shown_in_a_commit_gets_its_attributes_first() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        let desktop = |command| Op::Command {
+            id: crate::ROOT_ID,
+            command: Command::Desktop(Box::new(command)),
+        };
+        c.apply(desktop(DesktopCommand::Request(WindowRequest::Show)))
+            .unwrap();
+        c.apply(desktop(DesktopCommand::SetAttributes(Box::new(
+            WindowAttributes {
+                activate: Some(false),
+                ..Default::default()
+            },
+        ))))
+        .unwrap();
+        let batch = c.commit().unwrap();
+        let commands = window_commands(&batch);
+        assert!(
+            matches!(
+                &commands[..],
+                [
+                    (_, DesktopCommand::SetAttributes(a)),
+                    (_, DesktopCommand::Request(WindowRequest::Show)),
+                ] if a.activate == Some(false)
+            ),
+            "{commands:?}"
+        );
     }
 
     fn window_commands(batch: &MountBatch) -> Vec<(NodeId, DesktopCommand)> {
@@ -24970,6 +25965,49 @@ mod rust_windows {
         );
     }
 
+    /// A listener that quits at once answers within the request's delivery:
+    /// the quit is in the commit that follows it, so a platform that must
+    /// decide on the spot (a web page leaving) knows the answer before it
+    /// returns.
+    #[test]
+    fn a_quit_request_answered_at_once_quits_in_the_same_commit() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::Linux,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Empty>());
+        c.commit();
+        let dirty = Rc::new(std::cell::Cell::new(true));
+        let _root = {
+            let _entered = c.components.runtime.enter();
+            let dirty = dirty.clone();
+            crate::element::create_root(move || {
+                crate::element::desktop::on_quit_request(move || {
+                    if !dirty.get() {
+                        crate::element::desktop::quit();
+                    }
+                });
+            })
+        };
+        c.commit();
+        let request = |c: &mut Core<FakeEngine>| {
+            c.component_event(
+                crate::ROOT_ID,
+                EventKind::Window,
+                &EventPayload::Window(Box::new(WindowEvent::QuitRequest)),
+            );
+            c.commit().map(|b| app_commands(&b)).unwrap_or_default()
+        };
+        assert_eq!(
+            request(&mut c),
+            [],
+            "something to lose: the app keeps running"
+        );
+        dirty.set(false);
+        assert_eq!(request(&mut c), [DesktopCommand::Quit]);
+    }
+
     thread_local! {
         static FITTED: RefCell<Option<crate::element::desktop::WindowRef>> =
             const { RefCell::new(None) };
@@ -25184,6 +26222,109 @@ mod rust_windows {
         assert_eq!(table.bindings().len(), 3);
     }
 
+    /// Counts the Escapes it is bound to.
+    #[component]
+    fn EscapeCount() -> impl IntoElement {
+        let count = signal(0);
+        on_key("escape", move |_| count.update(|n| *n += 1));
+        text(move || format!("escape {}", count.get()))
+    }
+
+    /// A component JS places in a window of the app's own (TS `<Window>`)
+    /// has no `WindowRef` around it in Rust, yet its shortcuts are that
+    /// window's, as an `Editor`'s arrows in a `Window` are; the same
+    /// component in the main window keeps the main window's.
+    #[test]
+    fn a_component_js_places_in_a_window_binds_its_keys_there() {
+        use super::views::texts;
+        use crate::{
+            element::Registry,
+            keymap::{KeyMatch, Keystroke},
+        };
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.set_viewport(size(px(800.0), px(600.0)));
+        let mut registry = Registry::new();
+        registry.register::<EscapeCount>();
+        c.set_components(registry);
+        let mut open = OpenWindow::default();
+        open.options.id = "panel".into();
+        open.options.default_size = Some(size(px(300.0), px(100.0)));
+        let component = || crate::Prop::Component(std::any::type_name::<EscapeCount>().into());
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::Modal,
+                },
+                Op::Command {
+                    id: 2,
+                    command: Command::Desktop(Box::new(DesktopCommand::OpenWindow(Box::new(open)))),
+                },
+                Op::Create {
+                    id: 4,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 4,
+                    prop: component(),
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 4,
+                    before: None,
+                },
+                Op::Create {
+                    id: 6,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 6,
+                    prop: component(),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 6,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let mut table = None;
+        for _ in 0..3 {
+            if let Some(b) = c.commit() {
+                table = b
+                    .items
+                    .iter()
+                    .rev()
+                    .find_map(|i| match i {
+                        MountItem::Keymap(k) => Some(k.clone()),
+                        _ => None,
+                    })
+                    .or(table);
+            }
+        }
+        let table = table.expect("a table");
+        let escape = Keystroke::parse_with("escape", true).unwrap();
+        let fired = |window: NodeId| match table.find_in(window, escape, false, false) {
+            KeyMatch::Fire(id) => id,
+            other => panic!("Escape in window {window}: {other:?}"),
+        };
+        let (in_panel, in_main) = (fired(2), fired(ROOT_ID));
+        assert_ne!(in_panel, in_main, "each window has its own");
+        let key = |id: u32| EventPayload::Value(crate::PayloadValue::Number(id as f64));
+        assert!(c.component_event(ROOT_ID, EventKind::KeyCommand, &key(in_panel)));
+        assert_eq!(texts(&c.commit().unwrap()), ["escape 1"]);
+    }
+
     /// A popover anchored to a button and a dialog, both in a window's
     /// content, below a tall view of the main window.
     #[component]
@@ -25350,6 +26491,82 @@ mod rust_windows {
         let hidden = state(80.0, WindowMode::Normal, false);
         report(&mut c, hidden);
         assert_eq!(kept(&c), Some(hidden.placement));
+    }
+
+    /// `nsh.json`'s `"window"` and the app's own `set` reach the main
+    /// window where the surface has one: the desktops', and a browser's
+    /// page (its title). A phone's surface is a view in its app's screen:
+    /// nothing is sent there for its platform to refuse.
+    #[test]
+    fn main_window_attributes_go_where_the_surface_has_a_window() {
+        use crate::{
+            desktop::{MainWindowOptions, TitleBarStyle},
+            platform::Os,
+        };
+        let options = MainWindowOptions::from_json(
+            &serde_json::from_str::<crate::JsonValue>(
+                r#"{"title":"Notes","titleBar":{"style":"hidden","height":40},"minSize":{"width":360,"height":480},"restoreBounds":true}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let sent = |c: &mut Core<FakeEngine>| -> Vec<WindowAttributes> {
+            c.commit()
+                .map(|batch| batch.items)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|item| match item {
+                    MountItem::Command {
+                        id: ROOT_ID,
+                        command: Command::Desktop(command),
+                    } => match *command {
+                        DesktopCommand::SetAttributes(attributes) => Some(*attributes),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .collect()
+        };
+        for os in [
+            Os::MacOs,
+            Os::Windows,
+            Os::Linux,
+            Os::Web,
+            Os::Ios,
+            Os::Android,
+        ] {
+            let mut c = core();
+            c.set_environment(crate::element::Environment {
+                os,
+                ..Default::default()
+            });
+            c.set_main_window(&options);
+            let launch = sent(&mut c);
+            let title = WindowAttributes {
+                title: Some("Inbox".to_owned()),
+                ..Default::default()
+            };
+            let _ = c.apply_op(Op::Command {
+                id: ROOT_ID,
+                command: Command::Desktop(Box::new(DesktopCommand::SetAttributes(Box::new(title)))),
+            });
+            let set = sent(&mut c);
+            if os.is_desktop() || os == Os::Web {
+                assert_eq!(launch.len(), 1, "{os:?}");
+                assert_eq!(launch[0].title.as_deref(), Some("Notes"), "{os:?}");
+                assert!(
+                    launch[0]
+                        .title_bar
+                        .is_some_and(|t| t.style == TitleBarStyle::Hidden),
+                    "{os:?}"
+                );
+                assert_eq!(set.len(), 1, "{os:?}");
+                assert_eq!(set[0].title.as_deref(), Some("Inbox"), "{os:?}");
+            } else {
+                assert!(launch.is_empty(), "{os:?}: {launch:?}");
+                assert!(set.is_empty(), "{os:?}: {set:?}");
+            }
+        }
     }
 
     /// A window with no size of the app's, and one with a `defaultSize`,
@@ -28544,6 +29761,160 @@ fn anchored_overlays_go_beside_their_anchor_and_follow_it() {
 }
 
 #[test]
+fn an_anchored_overlay_wider_than_its_room_wraps_within_the_margin() {
+    use StyleValue::Number;
+    let mut c = core();
+    add(
+        &mut c,
+        2,
+        Tag::View,
+        ROOT_ID,
+        &[
+            ("width", Number(80.0)),
+            ("height", Number(40.0)),
+            ("marginLeft", Number(120.0)),
+        ],
+    );
+    // A popup of a long paragraph: as wide as its root view (320) would
+    // let it be, and wider than the room it keeps from the edges.
+    add(&mut c, 10, Tag::Overlay, 2, &[]);
+    add(&mut c, 12, Tag::Text, 10, &[]);
+    apply(
+        &mut c,
+        vec![
+            Op::CreateText {
+                id: 13,
+                text: "x".repeat(80),
+            },
+            Op::Insert {
+                parent: 12,
+                child: 13,
+                before: None,
+            },
+            overlay_prop(
+                10,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+            ),
+            overlay_prop(10, crate::OverlayProp::Margin(px(8.0))),
+            Op::Listen {
+                id: 10,
+                event: EventKind::Position,
+                enabled: true,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    // Laid out in the room it is placed in: 8 from either edge, its text
+    // wrapped to that width (640 wide: three lines of 304).
+    assert_eq!(frame_of(&batch, 10), Some(rect(8.0, 40.0, 304.0, 48.0)));
+
+    // The safe area narrows that room: laid out again in it.
+    c.set_safe_area(EdgeInsets {
+        left: px(30.0),
+        right: px(10.0),
+        ..EdgeInsets::default()
+    });
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(38.0, 40.0, 264.0, 48.0)));
+
+    // So does a larger margin.
+    c.set_safe_area(EdgeInsets::default());
+    apply(
+        &mut c,
+        vec![overlay_prop(10, crate::OverlayProp::Margin(px(20.0)))],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(20.0, 40.0, 280.0, 48.0)));
+
+    // Without an anchor it is a `position: fixed` box of the whole root
+    // view, margin or not.
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                10,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::None),
+            ),
+            style_op(
+                10,
+                &[
+                    ("left", Number(0.0)),
+                    ("right", Number(0.0)),
+                    ("bottom", Number(0.0)),
+                ],
+            ),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(0.0, 448.0, 320.0, 32.0)));
+}
+
+#[test]
+fn a_framed_terminal_popup_keeps_its_frame_within_the_margin() {
+    use StyleValue::{Number, Str};
+    let mut c = core();
+    c.set_environment(crate::element::Environment {
+        cell: Some(crate::geometry::size_pt(8.0, 16.0)),
+        dark: true,
+        ..Default::default()
+    });
+    add(
+        &mut c,
+        2,
+        Tag::View,
+        ROOT_ID,
+        &[
+            ("width", Number(80.0)),
+            ("height", Number(32.0)),
+            ("marginLeft", Number(120.0)),
+        ],
+    );
+    // A popup with a fill and no border, which a terminal frames one Cell
+    // outside its box, holding a paragraph wider than the room it keeps
+    // from the edges (8…312).
+    add(
+        &mut c,
+        10,
+        Tag::Overlay,
+        2,
+        &[("backgroundColor", Str("#25262a"))],
+    );
+    add(&mut c, 12, Tag::Text, 10, &[]);
+    apply(
+        &mut c,
+        vec![
+            Op::CreateText {
+                id: 13,
+                text: "x".repeat(80),
+            },
+            Op::Insert {
+                parent: 12,
+                child: 13,
+                before: None,
+            },
+            overlay_prop(
+                10,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+            ),
+            overlay_prop(10, crate::OverlayProp::Margin(px(8.0))),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let f = frame_of(&batch, 10).expect("the popup's frame");
+    // Its text wraps within the frame's room (36 of the area's 38 Cells),
+    // and the frame, a Cell each side of the box, stays within the area.
+    assert!(f.size.width.0 <= 288.0, "wrapped within its frame: {f:?}");
+    assert!(
+        f.origin.x.0 - 8.0 >= 8.0,
+        "the frame starts at the margin: {f:?}"
+    );
+    assert!(
+        f.origin.x.0 + f.size.width.0 + 8.0 <= 312.0,
+        "the frame ends at the margin: {f:?}"
+    );
+}
+
+#[test]
 fn a_caret_is_located_in_the_root_view() {
     use StyleValue::Number;
     let mut c = core();
@@ -28619,7 +29990,11 @@ fn touch_down(path: Vec<NodeId>) -> EventPayload {
             location: point(px(5.0), px(6.0)),
             changed: true,
             pointer_type: crate::PointerType::Touch,
+            pressure: 0.5,
+            tilt_x: 0.0,
+            tilt_y: 0.0,
         }],
+        modifiers: Default::default(),
         activated: None,
     }))
 }
@@ -42650,82 +44025,154 @@ mod layout_kept_by_restyle {
         );
     }
 }
-/// Pending download decisions through the event's real handle.
+
+/// Web view downloads: the core's state machine, the files it stages and
+/// publishes (the file work is a real thread here, never an inline stub),
+/// and the platform transport.
 mod download_decisions {
-    use std::path::PathBuf;
+    use std::{
+        cell::RefCell,
+        future::Future,
+        path::{Path, PathBuf},
+        task::{Context, Poll, Waker},
+        time::{Duration, Instant},
+    };
 
-    use super::{views::texts, *};
-    use crate::prelude::*;
+    use super::*;
+    use crate::{
+        prelude::*,
+        webview::{
+            CancelReason, DownloadDestination, DownloadEnd, DownloadOffer, DownloadOutcome,
+            DownloadProgress, WebDownload, WebDownloadPending, WebDownloadSource, WebDownloadState,
+            download_end, download_offer, download_progress, reply,
+        },
+    };
 
-    /// A web view whose pending downloads are decided by buttons, with the
-    /// answer each decision produced shown as text.
+    thread_local! {
+        static PENDING: RefCell<Option<WebDownloadPending>> = const { RefCell::new(None) };
+        static DOWNLOADS: RefCell<Vec<WebDownload>> = const { RefCell::new(Vec::new()) };
+    }
+
+    fn reset() {
+        PENDING.with(|slot| *slot.borrow_mut() = None);
+        DOWNLOADS.with(|list| list.borrow_mut().clear());
+    }
+
+    fn pending() -> Option<WebDownloadPending> {
+        PENDING.with(|slot| slot.borrow().clone())
+    }
+
+    fn downloads() -> Vec<WebDownload> {
+        DOWNLOADS.with(|list| list.borrow().clone())
+    }
+
+    /// The download events the core queued for JS: `(node, state, reason)`.
+    fn queued_downloads(c: &mut Core<FakeEngine>) -> Vec<(NodeId, String, Option<String>)> {
+        let mut events = Vec::new();
+        c.take_events(&mut events);
+        events
+            .into_iter()
+            .filter_map(|event| match event {
+                crate::element::JsEvent::Event(
+                    node,
+                    EventKind::Download,
+                    EventPayload::Map(entries),
+                ) => {
+                    let field = |name: &str| {
+                        entries.iter().find_map(|(k, v)| match v {
+                            crate::PayloadValue::Str(value) if *k == name => Some(value.clone()),
+                            _ => None,
+                        })
+                    };
+                    Some((node, field("state").unwrap_or_default(), field("reason")))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A web view JS made (no component expands it), listening to both
+    /// download events.
+    fn js_web_view(c: &mut Core<FakeEngine>) -> NodeId {
+        apply(
+            c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::WebView,
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+                Op::Listen {
+                    id: 2,
+                    event: EventKind::DownloadPending,
+                    enabled: true,
+                },
+                Op::Listen {
+                    id: 2,
+                    event: EventKind::Download,
+                    enabled: true,
+                },
+            ],
+        );
+        c.commit().expect("the web view");
+        2
+    }
+
+    /// Node `id` listens (`enabled`) or stops listening to a download event.
+    fn listen(c: &mut Core<FakeEngine>, id: NodeId, event: EventKind, enabled: bool) {
+        apply(c, vec![Op::Listen { id, event, enabled }]);
+    }
+
     #[component]
-    fn DownloadDecisions() -> impl IntoElement {
-        let held = signal(None::<crate::webview::WebDownloadPending>);
-        let line = signal(String::from("none"));
-        let hidden = signal(false);
-        let target = || {
-            let path =
-                std::env::temp_dir().join(format!("nsh-core-download-{}", std::process::id()));
-            let _ = std::fs::remove_file(&path);
-            path
-        };
+    fn ManualDownloads() -> impl IntoElement {
+        web_view("https://example.com/")
+            .on_download_pending(|pending: &WebDownloadPending| {
+                PENDING.with(|slot| *slot.borrow_mut() = Some(pending.clone()));
+            })
+            .on_download(|download: &WebDownload| {
+                DOWNLOADS.with(|list| list.borrow_mut().push(download.clone()));
+            })
+            .into_element()
+    }
+
+    #[component]
+    fn AutomaticDownloads() -> impl IntoElement {
+        web_view("https://example.com/")
+            .on_download(|download: &WebDownload| {
+                DOWNLOADS.with(|list| list.borrow_mut().push(download.clone()));
+            })
+            .into_element()
+    }
+
+    #[component]
+    fn ToggleDownloads() -> impl IntoElement {
+        let shown = signal(true);
         view()
             .child(dynamic(move || {
-                if hidden.get() {
-                    return view().into_element();
+                if shown.get() {
+                    web_view("https://example.com/")
+                        .on_download_pending(|pending: &WebDownloadPending| {
+                            PENDING.with(|slot| *slot.borrow_mut() = Some(pending.clone()));
+                        })
+                        .on_download(|download: &WebDownload| {
+                            DOWNLOADS.with(|list| list.borrow_mut().push(download.clone()));
+                        })
+                        .into_element()
+                } else {
+                    view().into_element()
                 }
-                web_view("https://example.com/")
-                    .on_download_pending(move |pending: &crate::webview::WebDownloadPending| {
-                        held.set(Some(pending.clone()));
-                        line.set(format!("pending {}", pending.id));
-                    })
-                    .into_element()
             }))
-            .child(text(move || line.get()))
-            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
-                let Some(mut pending) = held.get() else {
-                    return;
-                };
-                // The public id is only for matching: a change must not
-                // retarget the private decision.
-                pending.id = "forged".into();
-                let line = line;
-                let path = target();
-                spawn(async move {
-                    line.set(format!("accept {:?}", pending.accept(path).await));
-                });
-            }))
-            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
-                let Some(pending) = held.get() else { return };
-                let line = line;
-                spawn(async move {
-                    let result = pending.accept(PathBuf::from("relative/out")).await;
-                    line.set(format!("invalid {result:?}"));
-                });
-            }))
-            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
-                let Some(mut pending) = held.get() else {
-                    return;
-                };
-                pending.id = "forged".into();
-                let line = line;
-                spawn(async move {
-                    line.set(format!("cancel {:?}", pending.cancel().await));
-                });
-            }))
-            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
-                let line = line;
-                spawn(async move {
-                    let result = crate::webview::WebDownloadPending::default()
-                        .accept(target())
-                        .await;
-                    line.set(format!("unbound {result:?}"));
-                });
-            }))
-            .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
-                hidden.set(true);
-            }))
+            .child(
+                view()
+                    .w(px(5.0))
+                    .h(px(5.0))
+                    .on_press(move |_: &()| shown.set(false)),
+            )
+            .into_element()
     }
 
     fn web_node(batch: &MountBatch) -> NodeId {
@@ -42763,370 +44210,1268 @@ mod download_decisions {
             .collect()
     }
 
-    fn pending(id: &str) -> EventPayload {
-        EventPayload::Json(serde_json::json!({
-            "id": id,
-            "url": "https://example.com/a.zip",
-            "filename": "a.zip",
-        }))
-    }
-
-    fn reply(c: &mut Core<FakeEngine>, web: NodeId, request: u64, result: Result<(), &str>) {
-        let value = match result {
-            Ok(()) => serde_json::json!({ "id": request, "ok": true, "value": null }),
-            Err(error) => serde_json::json!({ "id": request, "ok": false, "error": error }),
-        };
-        assert!(c.component_event(web, EventKind::WebViewReply, &EventPayload::Json(value)));
-    }
-
-    #[test]
-    fn pending_events_decide_through_their_private_handles() {
-        let mut c = core();
-        c.set_environment(crate::element::Environment {
-            webview_requests: true,
-            ..Default::default()
-        });
-        c.mount_root(&crate::element::Root::new::<DownloadDecisions>(|| ()));
-        let batch = c.commit().unwrap();
-        let web = web_node(&batch);
-        let buttons = press_nodes(&batch);
-        assert_eq!(buttons.len(), 5);
-        let mask = batch
-            .items
-            .iter()
-            .find_map(|i| match i {
-                MountItem::Events { id, events } if *id == web => Some(*events),
-                _ => None,
-            })
-            .expect("the web view listens");
-        assert!(mask.contains(EventKind::DownloadPending));
-
-        // The listener receives the event's fields.
-        assert!(c.component_event(web, EventKind::DownloadPending, &pending("d1")));
-        c.run_component_tasks();
-        let batch = c.commit().unwrap();
-        assert_eq!(texts(&batch), ["pending d1"]);
-
-        // Accepting goes through the handle's own id and node, even when
-        // the public id was changed.
-        assert!(c.component_event(buttons[0], EventKind::Press, &EventPayload::None));
-        c.run_component_tasks();
-        let batch = c.commit().unwrap();
-        let made = requests(&batch.items);
-        let [(node, request, crate::webview::WebViewOperation::AcceptDownload { id, destination })] =
-            &made[..]
-        else {
-            panic!("one accept request: {made:?}");
-        };
-        assert_eq!(*node, web);
-        assert_eq!(id, "d1", "the private id, not the edited public one");
-        assert!(destination.path.is_absolute());
-        assert!(!destination.overwrite);
-        let request = *request;
-
-        // The platform's answer reaches the app.
-        reply(&mut c, web, request, Ok(()));
-        c.run_component_tasks();
-        let batch = c.commit().unwrap();
-        assert_eq!(texts(&batch), ["accept Ok(())"]);
-
-        // A duplicate decision is settled by the platform's error and does
-        // not move to another download.
-        assert!(c.component_event(buttons[0], EventKind::Press, &EventPayload::None));
-        c.run_component_tasks();
-        let batch = c.commit().unwrap();
-        let made = requests(&batch.items);
-        let [(_, duplicate, crate::webview::WebViewOperation::AcceptDownload { id, .. })] =
-            &made[..]
-        else {
-            panic!("the repeat accept: {made:?}");
-        };
-        assert_eq!(id, "d1");
-        let duplicate = *duplicate;
-        reply(
-            &mut c,
-            web,
-            duplicate,
-            Err("no pending download with id d1"),
-        );
-        c.run_component_tasks();
-        let batch = c.commit().unwrap();
-        let line = &texts(&batch)[0];
-        assert!(line.starts_with("accept Err("), "{line}");
-
-        // An invalid destination fails in the core, with no request.
-        assert!(c.component_event(buttons[1], EventKind::Press, &EventPayload::None));
-        c.run_component_tasks();
-        let batch = c.commit().unwrap();
-        assert!(requests(&batch.items).is_empty());
-        let line = &texts(&batch)[0];
-        assert!(line.starts_with("invalid Err("), "{line}");
-
-        // Cancelling uses the same private identity, after the public id
-        // was changed.
-        assert!(c.component_event(web, EventKind::DownloadPending, &pending("d2")));
-        c.run_component_tasks();
-        let _ = c.commit();
-        assert!(c.component_event(buttons[2], EventKind::Press, &EventPayload::None));
-        c.run_component_tasks();
-        let batch = c.commit().unwrap();
-        let made = requests(&batch.items);
-        let [(node, request, crate::webview::WebViewOperation::CancelDownload { id })] = &made[..]
-        else {
-            panic!("one cancel request: {made:?}");
-        };
-        assert_eq!(*node, web);
-        assert_eq!(id, "d2");
-        let request = *request;
-        reply(&mut c, web, request, Ok(()));
-        c.run_component_tasks();
-        let batch = c.commit().unwrap();
-        assert_eq!(texts(&batch), ["cancel Ok(())"]);
-
-        // A retained decision cannot reach an unmounted view.
-        assert!(c.component_event(web, EventKind::DownloadPending, &pending("d3")));
-        c.run_component_tasks();
-        let _ = c.commit();
-        assert!(c.component_event(buttons[4], EventKind::Press, &EventPayload::None));
-        let _ = c.commit();
-        assert!(c.component_event(buttons[0], EventKind::Press, &EventPayload::None));
-        c.run_component_tasks();
-        let batch = c.commit().unwrap();
-        assert!(requests(&batch.items).is_empty());
-        let line = &texts(&batch)[0];
-        assert!(line.starts_with("accept Err("), "{line}");
-
-        // A value the app made itself names no download: it fails clearly
-        // and sends nothing.
-        assert!(c.component_event(buttons[3], EventKind::Press, &EventPayload::None));
-        c.run_component_tasks();
-        let batch = c.commit().unwrap();
-        assert!(requests(&batch.items).is_empty());
-        let line = &texts(&batch)[0];
-        assert!(line.starts_with("unbound Err("), "{line}");
-    }
-
-    /// `1` once a rooted web view's pending decision was accepted, `2`
-    /// when it failed.
-    static ROOTED_ACCEPT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
-
-    /// A component whose root is the web view itself: its pending
-    /// decision must still name the native web view node.
-    #[component]
-    fn RootedWeb() -> impl IntoElement {
-        web_view("https://example.com/").on_download_pending(
-            |pending: &crate::webview::WebDownloadPending| {
-                let pending = pending.clone();
-                spawn(async move {
-                    let path = std::env::temp_dir()
-                        .join(format!("nsh-core-rooted-download-{}", std::process::id()));
-                    let _ = std::fs::remove_file(&path);
-                    let state = match pending.accept(path).await {
-                        Ok(()) => 1,
-                        Err(_) => 2,
-                    };
-                    ROOTED_ACCEPT.store(state, std::sync::atomic::Ordering::SeqCst);
-                });
-            },
-        )
-    }
-
-    #[test]
-    fn a_rooted_web_view_decides_through_the_native_node() {
-        use std::sync::atomic::Ordering;
-        ROOTED_ACCEPT.store(0, Ordering::SeqCst);
-        let mut c = core();
-        c.set_environment(crate::element::Environment {
-            webview_requests: true,
-            ..Default::default()
-        });
-        c.mount_root(&crate::element::Root::new::<RootedWeb>(|| ()));
-        let batch = c.commit().unwrap();
-        let web = web_node(&batch);
-        assert!(c.component_event(web, EventKind::DownloadPending, &pending("rooted")));
-        c.run_component_tasks();
-        let batch = c.commit().unwrap();
-        let made = requests(&batch.items);
-        let [(node, request, crate::webview::WebViewOperation::AcceptDownload { id, .. })] =
-            &made[..]
-        else {
-            panic!("one rooted accept request: {made:?}");
-        };
-        assert_eq!(*node, web, "the native web view node, not its host");
-        assert_eq!(id, "rooted");
-        reply(&mut c, web, *request, Ok(()));
-        c.run_component_tasks();
-        assert_eq!(ROOTED_ACCEPT.load(Ordering::SeqCst), 1);
-    }
-    /// A web view whose pending-download handler can be removed again.
-    #[component]
-    fn DeferredWeb() -> impl IntoElement {
-        let manual = signal(true);
-        view()
-            .child(dynamic(move || {
-                let web = web_view("https://example.com/page");
-                if manual.get() {
-                    web.on_download_pending(|_: &crate::webview::WebDownloadPending| {})
-                        .into_element()
-                } else {
-                    web.into_element()
-                }
-            }))
-            .child(
-                view()
-                    .w(px(5.0))
-                    .h(px(5.0))
-                    .on_press(move |_: &()| manual.set(false)),
-            )
-    }
-
-    fn web_props(batch: &MountBatch, web: NodeId) -> Option<crate::WebProps> {
-        batch.items.iter().rev().find_map(|item| match item {
-            MountItem::NativeProps {
-                id,
-                props: crate::NativeProps::WebView(props),
-            } if *id == web => Some((**props).clone()),
-            _ => None,
+    fn offer(id: &str, filename: &str, bytes: Option<u64>) -> EventPayload {
+        download_offer(&DownloadOffer {
+            id: id.into(),
+            url: format!("https://example.com/{filename}"),
+            filename: filename.into(),
+            mime_type: Some("application/octet-stream".into()),
+            bytes,
+            method: Some("GET".into()),
+            source: WebDownloadSource::Transfer,
         })
     }
 
-    fn commands_to(c: &mut Core<FakeEngine>, web: NodeId, command: Command) -> Vec<Command> {
-        c.apply(Op::Command { id: web, command }).unwrap();
-        let Some(batch) = c.commit() else {
-            return Vec::new();
-        };
+    fn end(id: &str, outcome: DownloadOutcome) -> EventPayload {
+        download_end(&DownloadEnd {
+            id: id.into(),
+            outcome,
+        })
+    }
+
+    fn reply_ok(c: &mut Core<FakeEngine>, web: NodeId, request: u64) {
+        assert!(c.component_event(
+            web,
+            EventKind::WebViewReply,
+            &reply(request, Ok(serde_json::Value::Null))
+        ));
+    }
+
+    /// The engine's loop: commit (and poll the downloads' file work), then
+    /// hand the core's events to the listeners.
+    fn pump(c: &mut Core<FakeEngine>) -> Option<MountBatch> {
+        let batch = c.commit();
+        let mut events = Vec::new();
+        c.take_events(&mut events);
+        for event in events {
+            if let crate::element::JsEvent::Event(id, kind, payload) = event {
+                c.component_event(id, kind, &payload);
+            }
+        }
         batch
-            .items
+    }
+
+    fn until<T>(what: &str, mut step: impl FnMut() -> Option<T>) -> T {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(value) = step() {
+                return value;
+            }
+            assert!(Instant::now() < deadline, "timed out waiting for {what}");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    /// Pumps until the core sent a platform request; returns it.
+    fn wait_request(c: &mut Core<FakeEngine>) -> (NodeId, u64, crate::webview::WebViewOperation) {
+        until("a platform request", || {
+            pump(c).and_then(|batch| requests(&batch.items).into_iter().next())
+        })
+    }
+
+    /// Pumps until `count` lifecycle events were reported.
+    fn wait_downloads(c: &mut Core<FakeEngine>, count: usize) -> Vec<WebDownload> {
+        until("the download's events", || {
+            pump(c);
+            let events = downloads();
+            (events.len() >= count).then_some(events)
+        })
+    }
+
+    fn settled<T>(answer: impl Future<Output = T>) -> Option<T> {
+        let mut answer = std::pin::pin!(answer);
+        let waker = Waker::noop();
+        let mut cx = Context::from_waker(waker);
+        match answer.as_mut().poll(&mut cx) {
+            Poll::Ready(value) => Some(value),
+            Poll::Pending => None,
+        }
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("nsh-core-download-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn staging_in(parent: &Path) -> Option<PathBuf> {
+        std::fs::read_dir(parent)
+            .ok()?
+            .filter_map(Result::ok)
+            .find(|entry| {
+                entry.file_type().is_ok_and(|t| t.is_dir())
+                    && entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".nsh-download-")
+            })
+            .map(|entry| entry.path())
+    }
+
+    #[test]
+    fn a_manual_download_is_staged_on_accept_and_published_on_finish() {
+        reset();
+        let dir = scratch("manual");
+        let destination = dir.join("out.bin");
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ManualDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadOffer,
+            &offer("d1", "out.bin", Some(3))
+        ));
+        pump(&mut c);
+        let held = pending().expect("the pending download");
+        assert_eq!(held.source, WebDownloadSource::Transfer);
+        assert_eq!(held.bytes, Some(3));
+        assert_eq!(held.method.as_deref(), Some("GET"));
+        assert!(!destination.exists());
+        assert!(staging_in(&dir).is_none());
+
+        // Accepting stages a private directory whose leaf does not exist.
+        // The destination is not accepted until the platform took it.
+        let answer = held.accept(destination.clone());
+        c.apply_actions();
+        let (_, request, operation) = wait_request(&mut c);
+        let crate::webview::WebViewOperation::StartDownload { id, staging } = operation else {
+            panic!("StartDownload: {operation:?}");
+        };
+        assert_eq!(id, "d1");
+        assert!(!staging.exists(), "the staging leaf must not exist");
+        assert!(staging.parent().is_some_and(Path::exists));
+        assert!(!destination.exists());
+        assert_eq!(settled(answer), None, "accept waits for the platform");
+
+        // Start accepted: the destination is accepted and the platform is
+        // writing.
+        reply_ok(&mut c, web, request);
+        let events = wait_downloads(&mut c, 1);
+        assert_eq!(events[0].state, WebDownloadState::Started);
+        assert_eq!(events[0].source, WebDownloadSource::Transfer);
+
+        // The transfer finishes: the file is published atomically.
+        std::fs::write(&staging, b"abc").unwrap();
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadEnd,
+            &end("d1", DownloadOutcome::Finished { bytes: 3 })
+        ));
+        let events = wait_downloads(&mut c, 2);
+        assert_eq!(events[1].state, WebDownloadState::Finished);
+        assert_eq!(std::fs::read(&destination).unwrap(), b"abc");
+        assert!(staging_in(&dir).is_none(), "the staging directory stays");
+
+        // A late end or cancel never touches the published file.
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadEnd,
+            &end(
+                "d1",
+                DownloadOutcome::Failed {
+                    code: None,
+                    message: "late".into()
+                }
+            )
+        ));
+        let late = held.cancel();
+        c.apply_actions();
+        pump(&mut c);
+        assert_eq!(
+            settled(late),
+            Some(Err(crate::element::codes::DOWNLOAD_STATE.into()))
+        );
+        assert_eq!(std::fs::read(&destination).unwrap(), b"abc");
+        assert_eq!(downloads().len(), 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cancel_waits_for_the_stop_and_the_cleanup() {
+        reset();
+        let dir = scratch("cancel-pending");
+        let destination = dir.join("out.bin");
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ManualDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+
+        assert!(c.component_event(web, EventKind::DownloadOffer, &offer("d2", "out.bin", None)));
+        pump(&mut c);
+        let held = pending().expect("the pending download");
+        let mut cancel = held.cancel();
+        c.apply_actions();
+        let (_, request, operation) = wait_request(&mut c);
+        assert!(matches!(
+            operation,
+            crate::webview::WebViewOperation::CancelDownload { ref id } if id == "d2"
+        ));
+        // Not answered, and not reported, until the platform stopped.
+        assert_eq!(settled(&mut cancel), None);
+        assert!(downloads().is_empty());
+
+        reply_ok(&mut c, web, request);
+        let events = wait_downloads(&mut c, 1);
+        assert_eq!(events[0].state, WebDownloadState::Cancelled);
+        assert_eq!(events[0].reason, Some(CancelReason::App));
+        assert_eq!(settled(cancel), Some(Ok(())));
+        assert!(!destination.exists());
+        assert!(staging_in(&dir).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unanswered_offer_times_out_after_the_stop() {
+        use std::time::SystemTime;
+
+        reset();
+        let dir = scratch("timeout");
+        let destination = dir.join("out.bin");
+        let clock = crate::time::Clock::manual(SystemTime::UNIX_EPOCH);
+        let _clock = clock.enter();
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ManualDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+
+        assert!(c.component_event(web, EventKind::DownloadOffer, &offer("d3", "out.bin", None)));
+        pump(&mut c);
+        clock.advance_to(
+            crate::time::now() + crate::webview::downloads::OFFER_TIMEOUT + Duration::from_secs(1),
+        );
+        let (_, request, operation) = wait_request(&mut c);
+        assert!(matches!(
+            operation,
+            crate::webview::WebViewOperation::CancelDownload { ref id } if id == "d3"
+        ));
+        assert!(downloads().is_empty());
+        reply_ok(&mut c, web, request);
+        let events = wait_downloads(&mut c, 1);
+        assert_eq!(events[0].state, WebDownloadState::Cancelled);
+        assert_eq!(events[0].reason, Some(CancelReason::Timeout));
+        assert!(!destination.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn publish_refuses_a_destination_that_appeared_and_keeps_it() {
+        reset();
+        let dir = scratch("appeared");
+        let destination = dir.join("out.bin");
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ManualDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadOffer,
+            &offer("d4", "out.bin", Some(3))
+        ));
+        pump(&mut c);
+        let held = pending().expect("the pending download");
+        let answer = held.accept(destination.clone());
+        c.apply_actions();
+        let (_, request, operation) = wait_request(&mut c);
+        assert!(matches!(
+            operation,
+            crate::webview::WebViewOperation::StartDownload { .. }
+        ));
+        reply_ok(&mut c, web, request);
+        let _ = wait_downloads(&mut c, 1);
+        assert_eq!(settled(answer), Some(Ok(())));
+
+        let staging = staging_in(&dir).expect("the staging directory");
+        let staging = staging.join("out.bin");
+        std::fs::write(&destination, b"the app's").unwrap();
+        std::fs::write(&staging, b"abc").unwrap();
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadEnd,
+            &end("d4", DownloadOutcome::Finished { bytes: 3 })
+        ));
+        let events = wait_downloads(&mut c, 2);
+        assert_eq!(std::fs::read(&destination).unwrap(), b"the app's");
+        assert!(matches!(events[1].state, WebDownloadState::Failed));
+        assert_eq!(
+            events[1].code.as_deref(),
+            Some(crate::element::codes::DOWNLOAD_DESTINATION)
+        );
+        assert!(staging_in(&dir).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn overwrite_replaces_the_destination_and_a_size_mismatch_fails() {
+        reset();
+        let dir = scratch("overwrite");
+        let destination = dir.join("out.bin");
+        std::fs::write(&destination, b"old").unwrap();
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ManualDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadOffer,
+            &offer("d5", "out.bin", Some(3))
+        ));
+        pump(&mut c);
+        let held = pending().expect("the pending download");
+        let answer = held.accept(DownloadDestination::new(destination.clone()).overwrite(true));
+        c.apply_actions();
+        let (_, request, _) = wait_request(&mut c);
+        reply_ok(&mut c, web, request);
+        let _ = wait_downloads(&mut c, 1);
+        assert_eq!(settled(answer), Some(Ok(())));
+        let staging = staging_in(&dir).expect("staging").join("out.bin");
+        std::fs::write(&staging, b"new").unwrap();
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadEnd,
+            &end("d5", DownloadOutcome::Finished { bytes: 3 })
+        ));
+        let events = wait_downloads(&mut c, 2);
+        assert_eq!(events[1].state, WebDownloadState::Finished);
+        assert_eq!(std::fs::read(&destination).unwrap(), b"new");
+
+        // Declared size not met: failed, destination untouched, staging
+        // cleaned.
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadOffer,
+            &offer("d6", "out.bin", Some(9))
+        ));
+        pump(&mut c);
+        let held = pending().expect("the second pending download");
+        drop(held.accept(DownloadDestination::new(destination.clone()).overwrite(true)));
+        c.apply_actions();
+        let (_, request, _) = wait_request(&mut c);
+        reply_ok(&mut c, web, request);
+        let _ = wait_downloads(&mut c, 3);
+        let staging = staging_in(&dir).expect("staging").join("out.bin");
+        std::fs::write(&staging, b"new").unwrap();
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadEnd,
+            &end("d6", DownloadOutcome::Finished { bytes: 3 })
+        ));
+        let events = wait_downloads(&mut c, 4);
+        assert_eq!(events[3].state, WebDownloadState::Failed);
+        assert_eq!(
+            events[3].code.as_deref(),
+            Some(crate::element::codes::DOWNLOAD_SIZE)
+        );
+        assert_eq!(std::fs::read(&destination).unwrap(), b"new");
+        assert!(staging_in(&dir).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn automatic_downloads_land_in_the_apps_data_directory() {
+        reset();
+        let dir = scratch("automatic");
+        let mut c = core();
+        c.set_data_dir(Some(dir.clone()));
+        c.mount_root(&crate::element::Root::new::<AutomaticDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadOffer,
+            &offer("d7", "a.bin", Some(2))
+        ));
+        let (_, request, operation) = wait_request(&mut c);
+        let crate::webview::WebViewOperation::StartDownload { staging, .. } = operation else {
+            panic!("StartDownload: {operation:?}");
+        };
+        reply_ok(&mut c, web, request);
+        let events = wait_downloads(&mut c, 1);
+        assert_eq!(events[0].state, WebDownloadState::Started);
+        std::fs::write(&staging, b"hi").unwrap();
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadEnd,
+            &end("d7", DownloadOutcome::Finished { bytes: 2 })
+        ));
+        let events = wait_downloads(&mut c, 2);
+        assert_eq!(events[1].state, WebDownloadState::Finished);
+        let expected = dir.join("downloads").join("d7").join("a.bin");
+        assert_eq!(std::fs::read(&expected).unwrap(), b"hi");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn teardown_cancels_and_cleans_only_after_the_stop_is_acknowledged() {
+        reset();
+        let dir = scratch("teardown");
+        let destination = dir.join("out.bin");
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ToggleDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+        let press = press_nodes(&batch)[0];
+
+        assert!(c.component_event(web, EventKind::DownloadOffer, &offer("d8", "out.bin", None)));
+        pump(&mut c);
+        let held = pending().expect("the pending download");
+        drop(held.accept(destination.clone()));
+        c.apply_actions();
+        let (_, request, _) = wait_request(&mut c);
+        reply_ok(&mut c, web, request);
+        let _ = wait_downloads(&mut c, 1);
+        let staging = staging_in(&dir).expect("staging").join("out.bin");
+        std::fs::write(&staging, b"abc").unwrap();
+
+        // The view goes: cancelled with teardown, and the platform is told
+        // to stop; the staging file stays until it says its writer
+        // stopped.
+        assert!(c.component_event(press, EventKind::Press, &EventPayload::None));
+        let (_, request, operation) = wait_request(&mut c);
+        assert!(matches!(
+            operation,
+            crate::webview::WebViewOperation::CancelDownload { ref id } if id == "d8"
+        ));
+        // The unified contract: no terminal event before the stop ack and
+        // the cleanup. The listener went with the node, so the files and
+        // the command are what can be observed.
+        assert_eq!(downloads().len(), 1);
+        assert!(staging.exists(), "the writer may still hold it");
+
+        reply_ok(&mut c, web, request);
+        until("the staging cleanup", || {
+            pump(&mut c);
+            (!staging.exists()).then_some(())
+        });
+        assert!(!destination.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn duplicates_foreign_replies_and_unbound_decisions_change_nothing() {
+        reset();
+        let dir = scratch("duplicates");
+        let destination = dir.join("out.bin");
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ManualDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+
+        assert!(c.component_event(web, EventKind::DownloadOffer, &offer("d9", "out.bin", None)));
+        pump(&mut c);
+        let held = pending().expect("the pending download");
+        assert_eq!(
+            settled(WebDownloadPending::default().cancel()),
+            Some(Err(crate::webview::downloads::UNBOUND.into()))
+        );
+
+        let mut first = held.accept(destination.clone());
+        let second = held.accept(destination.clone());
+        c.apply_actions();
+        let (_, request, _) = wait_request(&mut c);
+        assert_eq!(
+            settled(second),
+            Some(Err(crate::element::codes::DOWNLOAD_STATE.into()))
+        );
+        assert_eq!(settled(&mut first), None);
+
+        // A reply from another node must not consume the request.
+        assert!(c.component_event(
+            web.wrapping_add(2),
+            EventKind::WebViewReply,
+            &reply(request, Ok(serde_json::Value::Null))
+        ));
+        assert_eq!(settled(&mut first), None);
+        reply_ok(&mut c, web, request);
+        let _ = wait_downloads(&mut c, 1);
+        assert_eq!(settled(first), Some(Ok(())));
+
+        // Progress is accepted and surfaces nothing.
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadProgress,
+            &download_progress(&DownloadProgress {
+                id: "d9".into(),
+                received: 10
+            })
+        ));
+        assert_eq!(downloads().len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_queued_end_then_core_drop_cleans_the_staging_only() {
+        reset();
+        let dir = scratch("shutdown");
+        let destination = dir.join("out.bin");
+        std::fs::write(&destination, b"keep").unwrap();
+        let sink = crate::webview::downloads::DownloadCleanup::new();
+        let mut c = core();
+        c.set_download_cleanup(sink.clone());
+        c.mount_root(&crate::element::Root::new::<ManualDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadOffer,
+            &offer("d10", "out.bin", None)
+        ));
+        pump(&mut c);
+        let held = pending().expect("the pending download");
+        drop(held.accept(DownloadDestination::new(destination.clone()).overwrite(true)));
+        c.apply_actions();
+        let (_, request, _) = wait_request(&mut c);
+        reply_ok(&mut c, web, request);
+        let _ = wait_downloads(&mut c, 1);
+        let staging = staging_in(&dir).expect("the staging directory");
+        std::fs::write(staging.join("out.bin"), b"partial").unwrap();
+
+        // The platform's End is queued (and recorded by the sink at send
+        // time) but the engine stops before consuming it: dropping the
+        // whole core must clean the stopped staging, not just a failed
+        // send.
+        sink.dispatch(
+            web,
+            EventKind::DownloadEnd,
+            &end("d10", DownloadOutcome::Finished { bytes: 3 }),
+        );
+        assert!(staging.exists(), "a live core may still publish");
+        drop(c);
+        until("the sink's cleanup", || (!staging.exists()).then_some(()));
+        assert_eq!(std::fs::read(&destination).unwrap(), b"keep");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_late_stop_after_failed_cancel_and_core_drop_cleans_staging() {
+        reset();
+        let dir = scratch("failed-cancel-shutdown");
+        let destination = dir.join("out.bin");
+        std::fs::write(&destination, b"keep").unwrap();
+        let sink = crate::webview::downloads::DownloadCleanup::new();
+        let mut c = core();
+        c.set_download_cleanup(sink.clone());
+        c.mount_root(&crate::element::Root::new::<ManualDownloads>(|| ()));
+        let web = web_node(&c.commit().unwrap());
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadOffer,
+            &offer("late-stop", "out.bin", None)
+        ));
+        pump(&mut c);
+        let held = pending().expect("the pending download");
+        drop(held.accept(DownloadDestination::new(destination.clone()).overwrite(true)));
+        c.apply_actions();
+        let (_, start, _) = wait_request(&mut c);
+        reply_ok(&mut c, web, start);
+        let _ = wait_downloads(&mut c, 1);
+        let staging = staging_in(&dir).expect("the staging directory");
+        std::fs::write(staging.join("out.bin"), b"partial").unwrap();
+
+        let answer = held.cancel();
+        c.apply_actions();
+        let (_, cancel, _) = wait_request(&mut c);
+        assert!(c.component_event(
+            web,
+            EventKind::WebViewReply,
+            &reply(cancel, Err("stop not confirmed".into()))
+        ));
+        pump(&mut c);
+        assert!(matches!(settled(answer), Some(Err(_))));
+        drop(c);
+        assert!(staging.exists(), "a failed cancel cannot authorize cleanup");
+
+        sink.dispatch(
+            web + 2,
+            EventKind::WebViewReply,
+            &reply(cancel, Ok(crate::JsonValue::Null)),
+        );
+        assert!(staging.exists(), "a foreign reply cannot authorize cleanup");
+        sink.dispatch(
+            web,
+            EventKind::WebViewReply,
+            &reply(cancel, Ok(crate::JsonValue::Null)),
+        );
+        until("the late stop's cleanup", || {
+            (!staging.exists()).then_some(())
+        });
+        assert_eq!(std::fs::read(&destination).unwrap(), b"keep");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_finish_before_the_start_reply_starts_once_then_finishes() {
+        reset();
+        let dir = scratch("end-before-start");
+        let destination = dir.join("out.bin");
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ManualDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadOffer,
+            &offer("d11", "out.bin", Some(3))
+        ));
+        pump(&mut c);
+        let held = pending().expect("the pending download");
+        let answer = held.accept(destination.clone());
+        c.apply_actions();
+        let (_, request, _) = wait_request(&mut c);
+        let staging = staging_in(&dir).expect("staging").join("out.bin");
+        std::fs::write(&staging, b"abc").unwrap();
+
+        // The native setter re-entered: the writer finished before its
+        // Start reply. The app hears started, then finished.
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadEnd,
+            &end("d11", DownloadOutcome::Finished { bytes: 3 })
+        ));
+        let events = wait_downloads(&mut c, 2);
+        assert_eq!(events[0].state, WebDownloadState::Started);
+        assert_eq!(events[1].state, WebDownloadState::Finished);
+        assert_eq!(events[0].bytes, None);
+        assert_eq!(events[1].bytes, Some(3), "the real file length");
+        assert_eq!(settled(answer), Some(Ok(())));
+        assert_eq!(std::fs::read(&destination).unwrap(), b"abc");
+
+        // The late Start reply is not a second start.
+        reply_ok(&mut c, web, request);
+        pump(&mut c);
+        assert_eq!(downloads().len(), 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_rejected_destination_keeps_the_offer_available() {
+        reset();
+        let dir = scratch("destination-retry");
+        let occupied = dir.join("keep.bin");
+        std::fs::write(&occupied, b"keep").unwrap();
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ManualDownloads>(|| ()));
+        let web = web_node(&c.commit().unwrap());
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadOffer,
+            &offer("retry", "out.bin", Some(3))
+        ));
+        pump(&mut c);
+        let held = pending().unwrap();
+        let mut refused = held.accept(occupied.clone());
+        c.apply_actions();
+        let refusal = until("destination refusal", || {
+            pump(&mut c);
+            settled(&mut refused)
+        });
+        assert!(refusal.is_err());
+        assert_eq!(std::fs::read(&occupied).unwrap(), b"keep");
+        assert!(downloads().is_empty());
+        let destination = dir.join("out.bin");
+        let accepted = held.accept(destination.clone());
+        c.apply_actions();
+        let (_, request, operation) = wait_request(&mut c);
+        let crate::webview::WebViewOperation::StartDownload { staging, .. } = operation else {
+            panic!("retry must start the same held download");
+        };
+        reply_ok(&mut c, web, request);
+        assert_eq!(settled(accepted), Some(Ok(())));
+        std::fs::write(staging, b"abc").unwrap();
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadEnd,
+            &end("retry", DownloadOutcome::Finished { bytes: 3 })
+        ));
+        let events = wait_downloads(&mut c, 2);
+        assert_eq!(events[1].state, WebDownloadState::Finished);
+        assert_eq!(std::fs::read(destination).unwrap(), b"abc");
+        assert_eq!(std::fs::read(occupied).unwrap(), b"keep");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A cancel whose stop the platform confirms with an end instead of a
+    /// reply to the stop command: the end is the acknowledgement, so the
+    /// cancel completes (its terminal event is the cancellation, its
+    /// staging is cleaned) and the late reply changes nothing.
+    fn cancel_ended_by(name: &str, outcome: DownloadOutcome) {
+        reset();
+        let dir = scratch(name);
+        let destination = dir.join("out.bin");
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ManualDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadOffer,
+            &offer("ended", "out.bin", Some(3))
+        ));
+        pump(&mut c);
+        let held = pending().expect("the pending download");
+        drop(held.accept(destination.clone()));
+        c.apply_actions();
+        let (_, start, _) = wait_request(&mut c);
+        reply_ok(&mut c, web, start);
+        let events = wait_downloads(&mut c, 1);
+        assert_eq!(events[0].state, WebDownloadState::Started);
+        let staging = staging_in(&dir).expect("staging").join("out.bin");
+        std::fs::write(&staging, b"abc").unwrap();
+
+        let mut cancel = downloads()[0].cancel();
+        c.apply_actions();
+        let (_, cancel_request, operation) = wait_request(&mut c);
+        assert!(matches!(
+            operation,
+            crate::webview::WebViewOperation::CancelDownload { ref id } if id == "ended"
+        ));
+        assert_eq!(settled(&mut cancel), None, "the cancel waits for the stop");
+
+        // The writer ended before the platform answered the stop: the
+        // cancel was asked for first, so it stands, and its cleanup runs.
+        assert!(c.component_event(web, EventKind::DownloadEnd, &end("ended", outcome)));
+        let events = wait_downloads(&mut c, 2);
+        assert_eq!(events[1].state, WebDownloadState::Cancelled);
+        assert_eq!(events[1].reason, Some(CancelReason::App));
+        assert_eq!(settled(cancel), Some(Ok(())));
+        assert!(staging_in(&dir).is_none(), "the staging directory goes");
+        assert!(!destination.exists(), "a cancel publishes nothing");
+
+        // The late reply answers a command the end already settled.
+        reply_ok(&mut c, web, cancel_request);
+        pump(&mut c);
+        assert_eq!(downloads().len(), 2, "no second terminal event");
+        assert!(!destination.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_finish_before_the_cancel_reply_still_finishes_the_cancel() {
+        cancel_ended_by(
+            "cancel-ended-finish",
+            DownloadOutcome::Finished { bytes: 3 },
+        );
+    }
+
+    #[test]
+    fn a_failure_before_the_cancel_reply_still_finishes_the_cancel() {
+        cancel_ended_by(
+            "cancel-ended-failure",
+            DownloadOutcome::Failed {
+                code: None,
+                message: "the network went".into(),
+            },
+        );
+    }
+
+    #[test]
+    fn a_completed_stage_no_poll_took_is_cleaned_when_the_core_drops() {
+        reset();
+        let dir = scratch("unpolled-stage");
+        let destination = dir.join("out.bin");
+        let mut c = core();
+        // The core's notify is the only sign the file thread finished the
+        // stage: it queues the signal first, then notifies.
+        let notified = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = notified.clone();
+        c.set_task_notify(std::sync::Arc::new(move || {
+            count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }));
+        c.mount_root(&crate::element::Root::new::<ManualDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadOffer,
+            &offer("d14", "out.bin", None)
+        ));
+        pump(&mut c);
+        let held = pending().expect("the pending download");
+        drop(held.accept(destination.clone()));
+        // One notification is the executor's for the action; the second is
+        // the file thread's, after the staged signal was queued.
+        c.apply_actions();
+        let staging = until("the queued stage", || {
+            (notified.load(std::sync::atomic::Ordering::SeqCst) >= 2)
+                .then(|| staging_in(&dir))
+                .flatten()
+        });
+        assert!(staging.exists());
+
+        // No commit takes the signal: the staging directory no session
+        // ever learned must still go when the core does.
+        drop(c);
+        until("the staged directory's cleanup", || {
+            (!staging.exists()).then_some(())
+        });
+        assert!(!destination.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_last_download_listener_removed_cancels_with_no_listener() {
+        reset();
+        let dir = scratch("no-listener");
+        let mut c = core();
+        let web = js_web_view(&mut c);
+        assert!(c.component_event(web, EventKind::DownloadOffer, &offer("nl", "out.bin", None)));
+        pump(&mut c);
+
+        // Both listeners removed and given back before the turn ends: the
+        // mask it ended with still has them, so nothing is cancelled.
+        apply(
+            &mut c,
+            vec![
+                Op::Listen {
+                    id: web,
+                    event: EventKind::DownloadPending,
+                    enabled: false,
+                },
+                Op::Listen {
+                    id: web,
+                    event: EventKind::Download,
+                    enabled: false,
+                },
+                Op::Listen {
+                    id: web,
+                    event: EventKind::DownloadPending,
+                    enabled: true,
+                },
+                Op::Listen {
+                    id: web,
+                    event: EventKind::Download,
+                    enabled: true,
+                },
+            ],
+        );
+        if let Some(batch) = c.commit() {
+            assert!(requests(&batch.items).is_empty(), "both are back");
+        }
+
+        // One listener still hears the download and decides its offer.
+        listen(&mut c, web, EventKind::Download, false);
+        if let Some(batch) = c.commit() {
+            assert!(
+                requests(&batch.items).is_empty(),
+                "a remaining listener keeps the download"
+            );
+        }
+
+        // The last one goes: the view stays, and its download is stopped.
+        listen(&mut c, web, EventKind::DownloadPending, false);
+        let batch = c.commit().expect("the cancel command");
+        let (node, request, operation) = requests(&batch.items)
             .into_iter()
-            .filter_map(|item| match item {
-                MountItem::Command { id, command } if id == web => Some(command),
-                _ => None,
+            .next()
+            .expect("a cancel command");
+        assert_eq!(node, web);
+        assert!(matches!(
+            operation,
+            crate::webview::WebViewOperation::CancelDownload { ref id } if id == "nl"
+        ));
+        assert!(c.key(web).is_ok(), "the view itself stays mounted");
+        assert!(
+            !batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Remove { id } if *id == web)),
+            "the view is not released"
+        );
+        // Nothing is reported until the platform confirms its writer
+        // stopped.
+        let mut events = Vec::new();
+        c.take_events(&mut events);
+        assert!(events.is_empty(), "the cancel waits for the stop");
+
+        reply_ok(&mut c, web, request);
+        let queued = queued_downloads(&mut c);
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].0, web);
+        assert_eq!(queued[0].1, WebDownloadState::Cancelled.to_string());
+        assert_eq!(
+            queued[0].2.as_deref(),
+            Some(CancelReason::NoListener.as_str())
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[path = "reconciliation_tests.rs"]
+mod reconciliation_cleanup;
+
+// Structural variants share positions without changing immediate restyling.
+mod positional_regressions {
+    use super::*;
+
+    const CLASSES: &str = "w-10 h-4 bg-red-500 first:bg-green-500 last:bg-blue-500 odd:pt-1 even:pb-2 only:px-3 last:text-white first:z-10 odd:pointer-events-none last:max-w-prose";
+
+    fn snapshot(c: &Core<FakeEngine>, children: &[Key]) -> Vec<String> {
+        children
+            .iter()
+            .map(|&key| {
+                let n = &c.nodes[key as usize];
+                format!(
+                    "{:?}",
+                    (
+                        n.id,
+                        &n.view_style,
+                        &n.text_style,
+                        &n.class_props,
+                        &n.base_layout,
+                        n.direction,
+                        n.rtl,
+                        n.z_index,
+                        n.wants_fixed,
+                    )
+                )
             })
             .collect()
     }
 
-    #[test]
-    fn unsupported_manual_downloads_make_the_page_inert_until_the_handler_goes() {
-        use crate::element::Answer;
-        let mut c = core();
-        c.set_environment(crate::element::Environment {
-            web_evaluate: true,
-            webview_requests: false,
-            ..Default::default()
-        });
-        c.mount_root(&crate::element::Root::new::<DeferredWeb>(|| ()));
-        let batch = c.commit().unwrap();
-        let web = web_node(&batch);
-        let toggle = press_nodes(&batch);
-        assert_eq!(toggle.len(), 1);
-        let toggle = toggle[0];
-        let props = web_props(&batch, web).expect("the web view's props");
-        assert!(props.defer_downloads);
-        assert!(!props.javascript_enabled, "the inert page runs no scripts");
-        assert!(
-            matches!(&props.source, crate::WebSource::Html { .. }),
-            "the app's page was not replaced: {:?}",
-            props.source
+    // The ordinary resolver still queries the actual sibling list for each
+    // child. Compare the shared-position pass with that independent path.
+    fn check(c: &mut Core<FakeEngine>, parent: NodeId) {
+        let parent = c.key(parent).unwrap();
+        c.positions_changed(parent);
+        let children = c.nodes[parent as usize].children.clone();
+        let expected = snapshot(c, &children);
+        for &key in &children {
+            if c.nodes[key as usize]
+                .classes
+                .as_ref()
+                .is_some_and(|classes| classes.deps() & crate::tailwind::deps::POSITION != 0)
+            {
+                c.restyle(key);
+            }
+        }
+        assert_eq!(snapshot(c, &children), expected);
+    }
+
+    fn child(c: &mut Core<FakeEngine>, id: NodeId, parent: NodeId) {
+        apply(
+            c,
+            vec![
+                Op::Create { id, tag: Tag::View },
+                class_op(id, CLASSES),
+                Op::Insert {
+                    parent,
+                    child: id,
+                    before: None,
+                },
+            ],
         );
-        assert!(props.injected_js.is_none() && props.injected_js_before.is_none());
+        check(c, parent);
+    }
 
-        // The app hears that this platform cannot honor the handler.
-        let mut events = Vec::new();
-        c.take_events(&mut events);
-        assert!(events.iter().any(|event| matches!(
-            event,
-            crate::element::JsEvent::Event(id, EventKind::Error, _) if *id == web
-        )));
-
-        // No app-driven navigation or injected script can bypass the inert
-        // page.
-        let load =
-            Command::Load(nsh_core::WebLoad::new("https://example.com/page", Vec::new()).unwrap());
-        for command in [
-            load.clone(),
-            Command::Reload,
-            Command::GoBack,
-            Command::GoForward,
-            Command::InjectJavaScript("location.href='/download'".into()),
-        ] {
-            let kind = std::mem::discriminant(&command);
-            let sent = commands_to(&mut c, web, command);
-            assert!(
-                !sent.iter().any(|sent| std::mem::discriminant(sent) == kind),
-                "a blocked web view received {sent:?}"
-            );
+    #[test]
+    fn shared_positions_match_individual_resolution_after_tree_edits() {
+        let mut c = core();
+        view_with_classes(&mut c, 2, "");
+        view_with_classes(&mut c, 100, "");
+        for id in [4, 6, 8, 10] {
+            child(&mut c, id, 2);
         }
 
-        // Evaluation is settled with an error rather than reaching the
-        // platform, which could navigate or fetch past the policy.
-        let (future, slot) = Answer::new();
-        c.start_web_evaluation(web, "1".into(), T, slot.clone());
-        assert!(slot.borrow_mut().value.take().unwrap().is_err());
-        let sent = c.commit().is_some_and(|batch| {
-            batch.items.iter().any(|item| {
-                matches!(
-                    item,
-                    MountItem::Command {
-                        command: Command::Evaluate { .. },
-                        ..
-                    }
-                )
-            })
-        });
-        assert!(!sent, "a blocked web view evaluated a script");
-        drop(future);
+        // Text markers do not consume the first, last or odd/even positions.
+        for (id, before) in [(40, Some(4)), (42, Some(8)), (44, None)] {
+            apply(
+                &mut c,
+                vec![
+                    Op::CreateText {
+                        id,
+                        text: "".into(),
+                    },
+                    Op::Insert {
+                        parent: 2,
+                        child: id,
+                        before,
+                    },
+                ],
+            );
+            check(&mut c, 2);
+        }
 
-        // Removing the handler restores the app's page and commands.
-        assert!(c.component_event(toggle, EventKind::Press, &EventPayload::None));
-        let batch = c.commit().unwrap();
-        // The same web node may be reconciled without a new `Create` item;
-        // its restored `NativeProps` names it either way.
-        let web = batch
-            .items
-            .iter()
-            .rev()
-            .find_map(|item| match item {
-                MountItem::NativeProps {
-                    id,
-                    props: crate::NativeProps::WebView(_),
-                } => Some(*id),
-                _ => None,
-            })
-            .unwrap_or(web);
-        let props = web_props(&batch, web).expect("the restored props");
-        assert!(!props.defer_downloads);
-        assert!(props.javascript_enabled);
-        assert!(
-            matches!(props.source, crate::WebSource::Uri(ref url) if url.as_ref() == "https://example.com/page"),
-            "the app's page did not return: {:?}",
-            props.source
-        );
+        // An ordinary sibling still consumes an element position.
+        c.apply(Op::Create {
+            id: 52,
+            tag: Tag::View,
+        })
+        .unwrap();
+        c.apply(class_op(52, "w-10 h-4")).unwrap();
+        c.apply(Op::Insert {
+            parent: 2,
+            child: 52,
+            before: Some(8),
+        })
+        .unwrap();
+        check(&mut c, 2);
 
-        let load =
-            Command::Load(nsh_core::WebLoad::new("https://example.com/page", Vec::new()).unwrap());
-        assert!(matches!(
-            commands_to(&mut c, web, load).as_slice(),
-            [Command::Load(_)]
-        ));
-        assert!(matches!(
-            commands_to(&mut c, web, Command::InjectJavaScript("1".into())).as_slice(),
-            [Command::InjectJavaScript(script)] if script == "1"
-        ));
+        // The core's own decorations are excluded too. A decoration with
+        // structural classes keeps the resolver's existing index-0 fallback.
+        c.apply(Op::Create {
+            id: 46,
+            tag: Tag::View,
+        })
+        .unwrap();
+        let decoration = c.key(46).unwrap();
+        c.nodes[decoration as usize].decoration = true;
+        c.apply(class_op(46, CLASSES)).unwrap();
+        c.apply(Op::Insert {
+            parent: 2,
+            child: 46,
+            before: Some(6),
+        })
+        .unwrap();
+        check(&mut c, 2);
 
-        let (future, slot) = Answer::new();
-        c.start_web_evaluation(web, "1".into(), T, slot.clone());
-        let sent = c.commit().is_some_and(|batch| {
-            batch.items.iter().any(|item| {
-                matches!(
-                    item,
-                    MountItem::Command {
-                        command: Command::Evaluate { .. },
-                        ..
-                    }
-                )
-            })
-        });
-        assert!(sent, "the restored web view evaluates scripts again");
-        drop(future);
+        // Setting classes after insertion must register the parent's
+        // positional children before the next append.
+        c.apply(Op::Create {
+            id: 48,
+            tag: Tag::View,
+        })
+        .unwrap();
+        c.apply(Op::Insert {
+            parent: 100,
+            child: 48,
+            before: None,
+        })
+        .unwrap();
+        c.apply(class_op(48, CLASSES)).unwrap();
+        assert!(c.nodes[c.key(100).unwrap() as usize].positional_children);
+        child(&mut c, 50, 100);
+
+        for op in [
+            Op::Insert {
+                parent: 2,
+                child: 10,
+                before: Some(4),
+            },
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: 100,
+                child: 6,
+                before: Some(48),
+            },
+            Op::Remove {
+                parent: 2,
+                child: 8,
+            },
+            Op::Remove {
+                parent: 100,
+                child: 50,
+            },
+            Op::Remove {
+                parent: 100,
+                child: 48,
+            },
+        ] {
+            c.apply(op).unwrap();
+            check(&mut c, 2);
+            check(&mut c, 100);
+        }
+
+        // A real tooltip overlay also does not count among the rows.
+        c.apply(Op::Create {
+            id: 60,
+            tag: Tag::View,
+        })
+        .unwrap();
+        c.apply(Op::SetProp {
+            id: 2,
+            prop: Prop::Tooltip(crate::overlay::TooltipContent::Node(60)),
+        })
+        .unwrap();
+        let overlay = c.overlay_state.tooltips[&2].overlay;
+        c.apply(class_op(overlay, CLASSES)).unwrap();
+        check(&mut c, 2);
+        child(&mut c, 62, 2);
+        c.commit();
+        check(&mut c, 2);
+        check(&mut c, 100);
+
+        // The sole element in the second parent is still both first and last.
+        let only = &c.nodes[c.key(6).unwrap() as usize];
+        assert_eq!(only.view_style.background_color, Color(0x2b7f_ffff));
+        assert_eq!(only.text_style.color, Some(Color(0xffff_ffff)));
     }
+
+    #[test]
+    fn positional_fixed_style_still_settles_after_reordering() {
+        let mut c = core();
+        view_with_classes(&mut c, 2, "");
+        for id in [4, 6, 8] {
+            apply(
+                &mut c,
+                vec![
+                    Op::Create { id, tag: Tag::View },
+                    class_op(id, "w-10 h-4 last:fixed"),
+                    Op::Insert {
+                        parent: 2,
+                        child: id,
+                        before: None,
+                    },
+                ],
+            );
+        }
+        c.commit();
+        for id in [4, 6, 8] {
+            assert_eq!(c.nodes[c.key(id).unwrap() as usize].fixed_view, id == 8);
+        }
+        c.apply(Op::Insert {
+            parent: 2,
+            child: 4,
+            before: None,
+        })
+        .unwrap();
+        c.commit();
+        for id in [4, 6, 8] {
+            assert_eq!(c.nodes[c.key(id).unwrap() as usize].fixed_view, id == 4);
+        }
+        check(&mut c, 2);
+    }
+}
+
+#[test]
+fn span_padding_widens_its_box_in_the_line() {
+    // <Text>a <Text bg paddingHorizontal=4>b</Text> c</Text>
+    let mut c = core();
+    let span_style = |padding: f32| {
+        style_op(
+            4,
+            &[
+                ("backgroundColor", StyleValue::Str("#ff0000")),
+                ("paddingHorizontal", StyleValue::Number(padding)),
+            ],
+        )
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 3,
+                text: "a ".into(),
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            span_style(4.0),
+            Op::CreateText {
+                id: 5,
+                text: "b".into(),
+            },
+            Op::CreateText {
+                id: 6,
+                text: " c".into(),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 5,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 6,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let text = text_item(&batch).unwrap();
+    // An empty attachment at each end of the span takes its padding in the
+    // line, in the span's background.
+    assert_eq!(text.text, "a \u{FFFC}b\u{FFFC} c");
+    let pads: Vec<_> = text
+        .attachments
+        .iter()
+        .map(|a| (a.index, a.width, a.height))
+        .collect();
+    assert_eq!(
+        pads,
+        [(2, Points(4.0), Points(0.0)), (4, Points(4.0), Points(0.0))]
+    );
+    for i in 2..5 {
+        assert_eq!(text.background_at(i).map(|b| b.node), Some(4));
+    }
+    assert_eq!(text.background_at(5), None);
+    // Copies and reads without them.
+    assert_eq!(text.copied_text(0..text.len_utf16()), "a b c");
+    assert_eq!(text.visible_text(), "a b c");
+
+    // Another padding lays the text out again.
+    apply(&mut c, vec![span_style(6.0)]);
+    let text = text_item(&c.commit().unwrap()).unwrap();
+    assert_eq!(text.attachments[0].width, Points(6.0));
+
+    // No padding, no attachments.
+    apply(&mut c, vec![span_style(0.0)]);
+    let text = text_item(&c.commit().unwrap()).unwrap();
+    assert_eq!(text.text, "a b c");
+    assert!(text.attachments.is_empty());
+}
+
+#[test]
+fn node_record_sizes() {
+    // #1345: the per-node records the core keeps for every node.
+    let node = std::mem::size_of::<super::Node>();
+    eprintln!("Node {node} B");
+    assert!(node <= 600, "Node grew to {node} bytes");
+}
+
+#[test]
+fn style_constants_match_default() {
+    assert_eq!(
+        crate::style::ViewStyle::DEFAULT,
+        crate::style::ViewStyle::default()
+    );
+    assert_eq!(
+        crate::style::TextStyle::DEFAULT,
+        crate::style::TextStyle::default()
+    );
 }

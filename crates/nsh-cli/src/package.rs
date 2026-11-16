@@ -7,6 +7,7 @@
 //! embedding in GPUI apps and has no package of its own.
 
 use std::{
+    ffi::OsString,
     fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -157,6 +158,10 @@ pub(crate) struct AppConfig {
     pub(crate) icon: Option<AppIcon>,
     /// The lowest runtime that runs a signed package (`nsh publish`).
     pub(crate) min_runtime: Option<String>,
+    /// The NSH versions the app is written for (`">=0.5"`), which every
+    /// command checks this CLI against first ([`check_nsh_version`]).
+    #[serde(default, rename = "nsh")]
+    _nsh: Option<serde_json::Value>,
     /// Read and checked by the bundler.
     #[serde(default, rename = "tailwind")]
     _tailwind: Option<serde_json::Value>,
@@ -213,6 +218,18 @@ pub(crate) struct AppConfig {
     /// release runner reads it; macOS runs one instance of an app already.
     #[serde(default)]
     pub(crate) single_instance: bool,
+    /// Gives the app's address (`UrlScheme.setUrl`) to the system on iOS
+    /// and macOS (`"handoff": true`), so Handoff continues it on the user's
+    /// other devices. iOS and macOS
+    /// packages declare `<id>.url` in `NSUserActivityTypes`
+    /// ([`activity_types`]), which the release runners read.
+    #[serde(default)]
+    pub(crate) handoff: bool,
+    /// Native features a package always includes (`"features": ["plot"]`),
+    /// which nothing in the bundle shows it uses: what its Rust code or a
+    /// computed import needs (`native_features`).
+    #[serde(default)]
+    pub(crate) features: Vec<String>,
     /// The file types the app opens (`"fileTypes"`: `[{ "name": "Video",
     /// "extensions": ["mp4"] }]`), which packages declare to the system;
     /// the app hears the files through `Application.on("openFiles", ...)`
@@ -523,6 +540,25 @@ fn url_types(info: &mut plist::Dictionary, id: &str, schemes: &[String]) {
     );
 }
 
+/// Declares the activity type of the app's addresses that are no web pages
+/// (`<id>.url`, `nsh_platform_apple::handoff`) in an Apple `Info.plist`
+/// (`NSUserActivityTypes`, after those `infoPlist` gives) for `nsh.json`
+/// `"handoff": true`.
+fn activity_types(info: &mut plist::Dictionary, id: &str, handoff: bool) {
+    use plist::Value;
+    if !handoff {
+        return;
+    }
+    let kind = Value::String(format!("{id}.url"));
+    match info.get_mut("NSUserActivityTypes") {
+        Some(Value::Array(types)) if types.contains(&kind) => {}
+        Some(Value::Array(types)) => types.push(kind),
+        _ => {
+            info.insert("NSUserActivityTypes".into(), Value::Array(vec![kind]));
+        }
+    }
+}
+
 /// `nsh.json` `"web"`.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -622,6 +658,59 @@ impl AppConfig {
     pub(crate) fn icon(&self, target: PackageTarget) -> Option<&Path> {
         self.icon.as_ref()?.of(target)
     }
+
+    /// The macOS development host's arguments for the app (`nsh run`,
+    /// `nsh test`): its activation policy ([`MacosConfig::host_args`]) and
+    /// its icon. The host is an executable without an app bundle around it,
+    /// so the Dock and the app switcher show the app's icon only when the
+    /// host is given it.
+    pub(crate) fn macos_host_args(&self) -> Vec<OsString> {
+        let mut args: Vec<OsString> = self.macos.host_args().into_iter().map(Into::into).collect();
+        if let Some(icon) = self.icon(PackageTarget::Macos) {
+            args.extend(["--icon".into(), icon.into()]);
+        }
+        args
+    }
+}
+
+/// Fails when the `nsh.json` next to `entry` asks for NSH versions
+/// (`"nsh": ">=0.5"`) this CLI is not one of, with one message that names
+/// both, before a build fails on what the other version lacks.
+pub(crate) fn check_nsh_version(entry: &Path) -> anyhow::Result<()> {
+    let dir = entry.parent().unwrap_or(Path::new("."));
+    let path = dir.join("nsh.json");
+    let Ok(text) = fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    // A file that does not read is reported by the command itself.
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Ok(());
+    };
+    nsh_version_error(&value["nsh"], env!("CARGO_PKG_VERSION"))
+        .map_or(Ok(()), |e| Err(anyhow::anyhow!("{}: {e}", path.display())))
+}
+
+/// Why `required` (`nsh.json` `"nsh"`) does not take NSH `version`, if it
+/// does not.
+fn nsh_version_error(required: &serde_json::Value, version: &str) -> Option<String> {
+    if required.is_null() {
+        return None;
+    }
+    let Some(text) = required.as_str() else {
+        return Some("\"nsh\" must be a version requirement string, e.g. \">=0.5\"".into());
+    };
+    let req = match semver::VersionReq::parse(text) {
+        Ok(req) => req,
+        Err(e) => {
+            return Some(format!(
+                "\"nsh\": invalid version requirement {text:?}: {e}"
+            ));
+        }
+    };
+    // A nightly or other prerelease counts as its release.
+    let mut this = semver::Version::parse(version).ok()?;
+    this.pre = semver::Prerelease::EMPTY;
+    (!req.matches(&this)).then(|| format!("this app requires nsh {text}; this is nsh {version}"))
 }
 
 /// Reads `nsh.json` next to `entry`, if any; relative paths become absolute.
@@ -902,6 +991,53 @@ pub(crate) fn release_name_and_id(
     Ok(name_and_id(entry, config))
 }
 
+/// Whether the TSX app at `entry` builds its own release runner for
+/// `target` (`rust_app::runner_only`): this machine's desktop, with cargo
+/// here and no prebuilt runtime asked for (`NSH_RUNTIME`). It is then the
+/// app of this command ([`crate::rust_app::current`]). Another OS's
+/// package keeps the prebuilt runner, which needs no cross toolchain.
+fn trimmed_runner(entry: &Path, target: PackageTarget) -> bool {
+    let this_machine = match target {
+        PackageTarget::Linux => cfg!(target_os = "linux"),
+        PackageTarget::Macos => cfg!(target_os = "macos"),
+        PackageTarget::Windows => cfg!(windows),
+        // iOS's runner builds with Xcode's SDK, so only on macOS.
+        PackageTarget::Ios | PackageTarget::IosSimulator => cfg!(target_os = "macos"),
+        // Android's library is cross-compiled with the NDK on any OS;
+        // without it (or the Rust target) the build fails and the package
+        // gets the prebuilt library.
+        PackageTarget::Android => true,
+        _ => false,
+    };
+    if !this_machine || std::env::var_os("NSH_RUNTIME").is_some() {
+        return false;
+    }
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let has_cargo = std::process::Command::new(cargo)
+        .arg("--version")
+        .output()
+        .is_ok_and(|out| out.status.success());
+    if !has_cargo {
+        ui::note(
+            "no cargo here: the package has the prebuilt runner, with every native feature; \
+             install Rust (rustup.rs) to build one with only those the app uses",
+        );
+        return false;
+    }
+    match crate::rust_app::runner_only(entry) {
+        Ok(app) => {
+            crate::rust_app::set_current(app);
+            true
+        }
+        Err(e) => {
+            ui::warn(format!(
+                "the prebuilt runner it is, with every native feature: {e:#}"
+            ));
+            false
+        }
+    }
+}
+
 pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     if options.asset_url.is_some() && options.target != PackageTarget::Web {
         bail!("--asset-url is where a web site's files are served from: package with --target web");
@@ -967,11 +1103,57 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     if options.target != PackageTarget::Web {
         crate::updater::add_config(config, &id, options.out, &mut built)?;
     }
+    // An app builds its own release runner: with only the native features
+    // its bundle can reach, and those `nsh.json` keeps. A TSX app does too
+    // where cargo is, else it ships the prebuilt runner, which has all.
+    let has_crates = crate::rust_app::current().is_some();
+    let mut own_runner = false;
+    if options.target != PackageTarget::Web
+        && !crate::rust_app::is_root(&entry)
+        && (has_crates || trimmed_runner(&entry, options.target))
+    {
+        own_runner = !has_crates;
+        let choices = crate::native_features::choose(built.native_use.as_ref(), &config.features);
+        for c in &choices {
+            let mark = if c.keep { "keep" } else { "leave out" };
+            ui::note(format!("{mark} `{}`: {}", c.feature, c.why));
+        }
+        crate::rust_app::set_runner_features(
+            choices
+                .into_iter()
+                .filter(|c| c.keep)
+                .map(|c| c.feature.to_owned())
+                .collect(),
+        );
+        // A TSX app's own runner is a saving, never a requirement: built
+        // now, so a failure (system libraries, a Rust target, crates.io)
+        // leaves it the prebuilt runner as before, not a failed package.
+        // The packaging below finds the runner built.
+        // Android's is built when packaging, for the APK's ABIs
+        // (`package_android`), which falls back the same way.
+        if !has_crates && options.target != PackageTarget::Android {
+            let built = match options.target {
+                PackageTarget::Macos => macos_runners(options.arch).map(drop),
+                PackageTarget::Linux => runtime::file(Platform::Linux, true).map(drop),
+                PackageTarget::Ios => runtime::file(Platform::IphoneOs, true).map(drop),
+                PackageTarget::IosSimulator => {
+                    runtime::file(Platform::IphoneSimulator, true).map(drop)
+                }
+                _ => runtime::file(Platform::Windows, true).map(drop),
+            };
+            if let Err(e) = built {
+                crate::rust_app::clear_current();
+                ui::warn(format!(
+                    "the app's own runner did not build, so it has the prebuilt one, with every native feature: {e:#}"
+                ));
+            }
+        }
+    }
     let platform = match options.target {
         PackageTarget::Ios => Platform::IphoneOs,
         PackageTarget::IosSimulator => Platform::IphoneSimulator,
         PackageTarget::Android => {
-            return package_android(&options, config, &name, &id, &built);
+            return package_android(&options, config, &name, &id, &built, own_runner);
         }
         PackageTarget::Linux => {
             let app = App {
@@ -1036,6 +1218,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         }
         fs::copy(&asset.source, &dest).with_context(|| format!("copy {}", asset.path))?;
     }
+    copy_apple_sounds(config, &built, &app)?;
 
     let sdk = match options.target {
         PackageTarget::Ios => "iphoneos",
@@ -1049,6 +1232,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     };
     let mut info = info_plist(&name, &id, &executable, config, sdk)?;
     url_types(&mut info, &id, &schemes);
+    activity_types(&mut info, &id, config.handoff);
     document_types(&mut info, &config.file_types());
     if let Some(icon) = config.icon(PackageTarget::Ios) {
         let partial = compile_icon(icon, &app, sdk, minimum_os(&info))?;
@@ -1167,6 +1351,7 @@ fn package_android(
     name: &str,
     id: &str,
     built: &crate::build::Built,
+    own_runner: bool,
 ) -> anyhow::Result<()> {
     use crate::android::{self, Apk, Signing};
     let sdk = android::Sdk::find()?;
@@ -1180,7 +1365,19 @@ fn package_android(
         None => None,
     };
     let abis = apk_abis(options.abis, device.as_deref())?;
-    let runtime = runtime::android(false, &abis)?;
+    // A TSX app's own library is a saving, never a requirement
+    // (`trimmed_runner`): a failure (no NDK, a Rust target, crates.io)
+    // leaves it the prebuilt library, with every native feature.
+    let runtime = match runtime::android(false, &abis) {
+        Err(e) if own_runner => {
+            crate::rust_app::clear_current();
+            ui::warn(format!(
+                "the app's own library did not build, so it has the prebuilt one, with every native feature: {e:#}"
+            ));
+            runtime::android(false, &abis)?
+        }
+        runtime => runtime?,
+    };
     // A Rust app has no bundle: `AppActivity` runs its root (the
     // manifest's `com.longbridge.nsh.RUST`).
     let mut assets = Vec::new();
@@ -1243,6 +1440,7 @@ fn package_android(
             abis: &abis,
             icon: config.icon(PackageTarget::Android),
             assets,
+            sounds: android_sounds(config, built),
             signing,
         },
         options.format,
@@ -1353,7 +1551,13 @@ fn package_linux(
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    crate::updater::copy_archive(config, name, &archive, options.out)?;
+    crate::updater::copy_archive(
+        config,
+        name,
+        &nsh_updater::platform(),
+        &archive,
+        options.out,
+    )?;
     step.done(format!(
         "packaged {} and {}",
         ui::path(&dir),
@@ -1370,6 +1574,67 @@ fn package_linux(
         ui::done(format!("launched {name}"));
     }
     Ok(())
+}
+
+/// The file types Apple platforms play as a notification's sound.
+const APPLE_SOUNDS: &[&str] = &["caf", "aiff", "aif", "wav"];
+/// The file types Android plays as a notification channel's sound.
+const ANDROID_SOUNDS: &[&str] = &["ogg", "mp3", "wav"];
+
+/// The app's sounds a notification can play (`Notifications.show`'s
+/// `sound`), of the file types in `extensions`: none without the
+/// `notifications` capability.
+fn notification_sounds<'a>(
+    config: &AppConfig,
+    built: &'a crate::build::Built,
+    extensions: &'static [&'static str],
+) -> impl Iterator<Item = &'a crate::build::Asset> {
+    let on = config.notifications();
+    built.assets.iter().filter(move |asset| {
+        on && Path::new(&asset.path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| extensions.contains(&e.to_ascii_lowercase().as_str()))
+    })
+}
+
+/// Copies the app's notification sounds into `dir`, the app's main bundle
+/// on Apple platforms, where the system finds them by file name.
+fn copy_apple_sounds(
+    config: &AppConfig,
+    built: &crate::build::Built,
+    dir: &Path,
+) -> anyhow::Result<()> {
+    let mut names = std::collections::HashMap::new();
+    for asset in notification_sounds(config, built, APPLE_SOUNDS) {
+        let name = nsh_core::notifications::Notification::sound_file_name(&asset.path);
+        if let Some(other) = names.insert(name.to_owned(), asset.path.clone()) {
+            ui::warn(format!(
+                "notification sounds {other} and {} share the file name {name}: only the last plays",
+                asset.path
+            ));
+        }
+        fs::copy(&asset.source, dir.join(name)).with_context(|| format!("copy {}", asset.path))?;
+    }
+    Ok(())
+}
+
+/// The app's notification sounds as Android raw resources: (resource
+/// name, file).
+fn android_sounds(config: &AppConfig, built: &crate::build::Built) -> Vec<(String, PathBuf)> {
+    let mut sounds: Vec<(String, PathBuf)> = Vec::new();
+    for asset in notification_sounds(config, built, ANDROID_SOUNDS) {
+        let name = nsh_core::notifications::Notification::sound_resource_name(&asset.path);
+        if sounds.iter().any(|(n, _)| *n == name) {
+            ui::warn(format!(
+                "notification sound {} has the resource name {name} of another: only the first plays",
+                asset.path
+            ));
+            continue;
+        }
+        sounds.push((name, asset.source.clone()));
+    }
+    sounds
 }
 
 /// `<out>/<name>.app`, a macOS app bundle: the release runner as
@@ -1416,6 +1681,7 @@ fn package_macos(
         }
         fs::copy(&asset.source, &dest).with_context(|| format!("copy {}", asset.path))?;
     }
+    copy_apple_sounds(config, built, &resources)?;
     let version = config.version.as_deref().unwrap_or("1.0.0");
     let mut info = serde_json::json!({ "name": name, "id": id, "version": version });
     if let Some(appearance) = &config.appearance {
@@ -1437,6 +1703,7 @@ fn package_macos(
     };
     let mut plist = macos_info_plist(name, id, executable, config, icon)?;
     url_types(&mut plist, id, &schemes);
+    activity_types(&mut plist, id, config.handoff);
     document_types(&mut plist, &config.file_types());
     plist::Value::Dictionary(plist)
         .to_file_xml(contents.join("Info.plist"))
@@ -2031,6 +2298,34 @@ fn make_ipa(app: &Path, ipa: &Path) -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn nsh_json_names_the_nsh_versions_it_needs() {
+        let ok = |r: serde_json::Value, v| nsh_version_error(&r, v);
+        assert_eq!(ok(serde_json::Value::Null, "0.4.0"), None);
+        assert_eq!(ok(serde_json::json!(">=0.5"), "0.5.0"), None);
+        assert_eq!(ok(serde_json::json!(">=0.5, <0.7"), "0.6.3"), None);
+        assert_eq!(ok(serde_json::json!("0.5"), "0.5.2"), None);
+        // A prerelease counts as its release.
+        assert_eq!(ok(serde_json::json!(">=0.5"), "0.5.0-nightly.1"), None);
+        assert_eq!(
+            ok(serde_json::json!(">=0.5"), "0.4.0").as_deref(),
+            Some("this app requires nsh >=0.5; this is nsh 0.4.0")
+        );
+        assert!(
+            ok(serde_json::json!("latest"), "0.5.0")
+                .unwrap()
+                .contains("invalid")
+        );
+        assert!(
+            ok(serde_json::json!(5), "0.5.0")
+                .unwrap()
+                .contains("must be")
+        );
+        // The key is known: no "unknown key" warning.
+        let (_, ignored) = parse_config(r#"{ "nsh": ">=0.5" }"#).unwrap();
+        assert!(ignored.is_empty(), "{ignored:?}");
+    }
+
     /// Each processor is a build for its Rust target, this Mac's own
     /// without `--target` (the build `nsh run` shares), named as `lipo`
     /// and the updater name it.
@@ -2333,6 +2628,30 @@ mod tests {
     }
 
     #[test]
+    fn handoff_declares_the_apps_activity_type() {
+        let types = |json: &str| {
+            let config: AppConfig = serde_json::from_str(json).unwrap();
+            let mut info = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+            activity_types(&mut info, "com.a", config.handoff);
+            info.get("NSUserActivityTypes").map(|types| {
+                types
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(plist::Value::as_string)
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+        };
+        // Off by default: nothing declared, so the runner gives nothing.
+        assert_eq!(types("{}"), None);
+        assert_eq!(types(r#"{ "handoff": true }"#).unwrap(), ["com.a.url"]);
+        // After the app's own types, once.
+        let own = r#"{ "handoff": true, "ios": { "infoPlist": { "NSUserActivityTypes": ["com.a.edit", "com.a.url"] } } }"#;
+        assert_eq!(types(own).unwrap(), ["com.a.edit", "com.a.url"]);
+    }
+
+    #[test]
     fn desktop_packages_carry_the_main_windows_options() {
         let config: AppConfig = serde_json::from_str(
             r#"{ "appearance": "dark", "window": { "title": "Focus", "closeOnPress": false } }"#,
@@ -2516,6 +2835,39 @@ mod tests {
                 ]
                 .into()
             ))
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The macOS development host gets the app's macOS icon, after its
+    /// activation policy; an app without one gets none.
+    #[test]
+    fn the_macos_host_gets_the_apps_icon() {
+        let dir = std::env::temp_dir().join(format!("nsh-macos-host-icon-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let entry = dir.join("app.tsx");
+        let args = |json: &str| {
+            fs::write(dir.join("nsh.json"), json).unwrap();
+            read_config(&entry).unwrap().macos_host_args()
+        };
+        let icon = |name: &str| OsString::from(dir.join(name));
+        assert!(args("{}").is_empty());
+        assert!(args(r#"{ "icon": { "windows": "win.png" } }"#).is_empty());
+        assert_eq!(
+            args(r#"{ "icon": "icon.png" }"#),
+            [OsString::from("--icon"), icon("icon.png")]
+        );
+        assert_eq!(
+            args(
+                r#"{ "icon": { "macos": "mac.png", "windows": "win.png" },
+                     "macos": { "activationPolicy": "accessory" } }"#
+            ),
+            [
+                OsString::from("--activation-policy"),
+                "accessory".into(),
+                "--icon".into(),
+                icon("mac.png"),
+            ]
         );
         fs::remove_dir_all(&dir).unwrap();
     }

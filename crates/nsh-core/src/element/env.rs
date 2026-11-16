@@ -11,6 +11,10 @@ use crate::{
 pub struct Environment {
     /// The surface's size in points.
     pub window: Size<Points>,
+    /// Native horizontal size class, or `None` to use the window width at 600pt.
+    pub horizontal_size_class: Option<crate::platform::SizeClass>,
+    /// Native vertical size class, or `None` to use the window height at 600pt.
+    pub vertical_size_class: Option<crate::platform::SizeClass>,
     /// The edges system UI covers.
     pub safe_area: EdgeInsets,
     /// Space reserved for system controls in a custom desktop title bar.
@@ -84,6 +88,9 @@ pub struct Environment {
     /// The platform plays sound
     /// ([`crate::platform::Environment::audio`]).
     pub audio: bool,
+    /// The platform shows the system's tab bar on iOS and Android
+    /// ([`crate::platform::Environment::tab_bar`]).
+    pub tab_bar: bool,
     /// The Cell size of a grid surface (a terminal): the core lays out in
     /// its Cells ([`crate::platform::Environment::cell`]); `None` elsewhere.
     pub cell: Option<Size<Points>>,
@@ -116,6 +123,8 @@ impl Default for Environment {
     fn default() -> Self {
         Self {
             window: crate::geometry::size_pt(0.0, 0.0),
+            horizontal_size_class: None,
+            vertical_size_class: None,
             safe_area: EdgeInsets::default(),
             title_bar: crate::geometry::Edges::default(),
             window_state: None,
@@ -145,6 +154,7 @@ impl Default for Environment {
             speech: false,
             notifications: false,
             audio: false,
+            tab_bar: true,
             cell: None,
             web_input: false,
             web_evaluate: false,

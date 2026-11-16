@@ -201,8 +201,8 @@ pub struct ImageProgress {
     pub total: f64,
 }
 
-/// An accepted web view download started, finished or failed
-/// (`WebView::on_download`, the platform's `onDownload` payload).
+/// A web view download started, finished, failed or was cancelled
+/// (`WebView::on_download`, the core's `onDownload` payload).
 pub(crate) fn web_download(p: &EventPayload) -> Option<Cow<'_, crate::webview::WebDownload>> {
     let EventPayload::Map(entries) = p else {
         return None;
@@ -215,27 +215,51 @@ pub(crate) fn web_download(p: &EventPayload) -> Option<Cow<'_, crate::webview::W
         Some((_, PayloadValue::Number(n))) => Some(*n),
         _ => None,
     };
+    let state = crate::webview::WebDownloadState::parse(text("state")?.as_str())?;
+    let id = text("id")?;
+    // Only a running download can be cancelled by its event.
+    let handle = (state == crate::webview::WebDownloadState::Started)
+        .then(|| download_handle(id.clone()))
+        .flatten();
     Some(Cow::Owned(crate::webview::WebDownload {
-        state: crate::webview::WebDownloadState::parse(text("state")?.as_str())?,
-        id: text("id")?,
+        state,
+        id,
         url: text("url")?,
         filename: text("filename")?,
         path: std::path::PathBuf::from(text("path")?),
         bytes: number("bytes").map(|n| n.max(0.0) as u64),
         message: text("message"),
+        source: text("source")
+            .as_deref()
+            .and_then(crate::webview::WebDownloadSource::parse)
+            .unwrap_or_default(),
+        code: text("code"),
+        reason: text("reason").as_deref().and_then(cancel_reason),
+        handle,
     }))
 }
 
+fn cancel_reason(name: &str) -> Option<crate::webview::CancelReason> {
+    use crate::webview::CancelReason;
+    match name {
+        "app" => Some(CancelReason::App),
+        "timeout" => Some(CancelReason::Timeout),
+        "teardown" => Some(CancelReason::Teardown),
+        "noListener" => Some(CancelReason::NoListener),
+        _ => None,
+    }
+}
+
 thread_local! {
-    /// The web view a `DownloadPending` event is being dispatched to: its
-    /// node and the executor that reaches it. Set only while its listener
-    /// runs, so the event's handle cannot be made anywhere else.
+    /// The web view a download event is being dispatched to: its node and
+    /// the executor that reaches it. Set only while its listener runs, so
+    /// the event's handle cannot be made anywhere else.
     static DOWNLOAD_TARGET: RefCell<Option<(crate::NodeId, Weak<Executor>)>> =
         const { RefCell::new(None) };
 }
 
-/// Makes `node` the target of the `DownloadPending` events dispatched
-/// while it lives (the previous target is restored when it drops).
+/// Makes `node` the target of the download events dispatched while it
+/// lives (the previous target is restored when it drops).
 pub(crate) struct DownloadTarget {
     previous: Option<(crate::NodeId, Weak<Executor>)>,
 }
@@ -248,14 +272,14 @@ impl Drop for DownloadTarget {
     }
 }
 
-/// Sets the web view a `DownloadPending` event dispatched now belongs to.
+/// Sets the web view a download event dispatched now belongs to.
 pub(crate) fn download_target(node: crate::NodeId, executor: Weak<Executor>) -> DownloadTarget {
     let previous = DOWNLOAD_TARGET.with(|target| target.borrow_mut().replace((node, executor)));
     DownloadTarget { previous }
 }
 
 /// The handle of download `id` of the web view being dispatched to, or
-/// `None` outside a pending event's dispatch.
+/// `None` outside a download event's dispatch.
 fn download_handle(id: String) -> Option<crate::webview::DownloadHandle> {
     DOWNLOAD_TARGET.with(|target| {
         target
@@ -279,6 +303,26 @@ pub(crate) fn web_download_pending(
         id,
         url: value.get("url")?.as_str()?.to_owned(),
         filename: value.get("filename")?.as_str()?.to_owned(),
+        source: value
+            .get("source")
+            .and_then(|v| v.as_str())
+            .and_then(crate::webview::WebDownloadSource::parse)
+            .unwrap_or_default(),
+        mime_type: value
+            .get("mime_type")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
+        bytes: value.get("bytes").and_then(|v| {
+            v.as_u64().or_else(|| {
+                v.as_f64()
+                    .filter(|n| n.is_finite() && *n >= 0.0 && n.fract() == 0.0)
+                    .map(|n| n as u64)
+            })
+        }),
+        method: value
+            .get("method")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
         handle: Some(handle),
     }))
 }

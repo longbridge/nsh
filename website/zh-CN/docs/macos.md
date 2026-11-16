@@ -201,6 +201,8 @@ view.load(Bundle::source(code).into());
 （关于、隐藏、退出、编辑、最小化、缩放、进入全屏、关闭），应用可以用 `Menu.setApplicationMenu`
 （[`nsh/desktop`](../modules/nsh-desktop.md)）替换它，并运行到窗口关闭为止。
 
+`AppOptions::handoff` 把应用用 [`UrlScheme.setUrl`](../modules/nsh.md#handoff) 设置的地址交给系统，Handoff 可以在用户的其他设备上接着打开它。应用自己 scheme 的地址需要在 Info.plist 的 `NSUserActivityTypes` 中声明 `<bundle id>.url`。应用包声明了这个类型时（`nsh.json` 的 `"handoff": true`），`run_app` 会打开它。
+
 `AppOptions::notifications` 把进程的[通知](../modules/nsh.md#notifications)交给视图运行的应用：横幅、点击和角标都归它。默认关闭，这时嵌入应用的通知是 `unavailable`，你的应用的通知仍归你；`run_app` 会打开它。
 
 `AppOptions::login_item` 让 `run_app` 运行的应用拥有[登录项](../modules/nsh-desktop.md#登录时打开)：应用包的登录项

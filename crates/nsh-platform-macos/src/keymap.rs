@@ -101,7 +101,13 @@ pub(crate) fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
         return false;
     }
     // Only the bindings of the window the key is in (and JS's) take it.
-    let found = table.find_at(window_root, keystroke, editing, control, event.isARepeat());
+    // A focus a dialog covers has no keys of its own: the dialog's take
+    // them.
+    let mut focus = nsh_core::keymap::KeyFocus::default();
+    focus.editing = editing;
+    focus.control = control;
+    focus.covered = crate::input::focus_covered(surface);
+    let found = table.find_with(window_root, keystroke, focus, event.isARepeat());
     if let Some(id) = found.fired() {
         surface.event(
             ROOT_ID,

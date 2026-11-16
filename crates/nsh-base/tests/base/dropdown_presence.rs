@@ -5,8 +5,9 @@
 //! then run, taking no presses, and `onClose` comes after; the keyboard
 //! focus is the trigger's again as it starts to go; a press outside it on
 //! its way out is no attempt to close it; opened again on its way out, it
-//! is taken back; a searchable list keeps its rows and query until it is
-//! gone. Without looks, or with reduced motion, it goes at once and nothing
+//! is taken back, unless the choice that closed it moved the focus out of
+//! it (an `onChange` that focuses the next field); a searchable list keeps
+//! its rows and query until it is gone. Without looks, or with reduced motion, it goes at once and nothing
 //! more is sent. On a manual clock: time moves only as the test says.
 
 use std::{
@@ -16,8 +17,8 @@ use std::{
 };
 
 use nsh_base::{
-    CalendarEntry, CalendarItemKind, ComboboxEvent, DatePickerEvent, SelectEntry, SelectEvent,
-    SelectItem, combobox, date_picker, select,
+    CalendarEntry, CalendarItemKind, ComboboxEvent, DatePickerEvent, PickedDate, SelectEntry,
+    SelectEvent, SelectItem, combobox, date_picker, select,
 };
 use nsh_core::{
     Color, Command, MountItem, NodeId, Size,
@@ -82,6 +83,12 @@ impl App {
 
     /// Whether the view `selector` names was told to take the focus.
     fn focus_sent(&self, selector: &str) -> bool {
+        self.focus_count(selector) > 0
+    }
+
+    /// How many times the view `selector` names was told to take the
+    /// focus.
+    fn focus_count(&self, selector: &str) -> usize {
         let screen = self.app.screen();
         let to = screen
             .press_target(selector)
@@ -90,7 +97,8 @@ impl App {
         screen
             .commands()
             .iter()
-            .any(|(id, c)| *id == to && *c == Command::Focus)
+            .filter(|(id, c)| *id == to && *c == Command::Focus)
+            .count()
     }
 }
 
@@ -533,4 +541,237 @@ fn a_date_picker_calendar_comes_in_and_goes_with_its_looks() {
     app.app
         .wait_for("Log: openChange:true open openChange:false close")
         .unwrap();
+}
+
+/// A dropdown chosen in, and the next field of the form beside it.
+#[derive(Clone, PartialEq, Props)]
+struct ChoiceProps {
+    /// The app owns `open`, following `onOpenChange`: the choice's focus
+    /// and the closing come in one turn.
+    controlled: bool,
+    /// The app's `onChange` focuses the next field.
+    moves: bool,
+}
+
+/// The view outside the dropdown an app's `onChange` focuses (the next
+/// field of a form).
+fn next_field(field: ElementRef) -> impl IntoElement {
+    view()
+        .element_ref(&field)
+        .test_id("field")
+        .focusable(true)
+        .w(px(120.0))
+        .h(px(30.0))
+        .on_press(|| {})
+}
+
+/// For a dropdown left to itself and one whose `open` the app owns, with
+/// and without an `onChange` that focuses the next field: `open` opens
+/// it, `choose` chooses in it. The focus goes back to `back` (the trigger,
+/// a combobox's input) only when the choice moved it nowhere.
+fn a_choice_gives_the_focus_back_unless_it_moved_it(
+    root: fn(ChoiceProps) -> Root,
+    back: &str,
+    open: fn(&mut Headless),
+    choose: fn(&mut Headless),
+) {
+    for controlled in [false, true] {
+        for moves in [false, true] {
+            let case = format!("controlled {controlled}, moves {moves}");
+            let mut app = start(root(ChoiceProps { controlled, moves }), false);
+            open(&mut app.app);
+            app.app.run_for(Duration::from_millis(50)).unwrap();
+            let (given_back, field) = (app.focus_count(back), app.focus_count("id:field"));
+            choose(&mut app.app);
+            app.app.run_for(Duration::from_millis(50)).unwrap();
+            if moves {
+                assert!(
+                    app.focus_count("id:field") > field,
+                    "{case}: the field took the focus"
+                );
+                assert_eq!(
+                    app.focus_count(back),
+                    given_back,
+                    "{case}: the focus stays on the field"
+                );
+            } else {
+                assert!(
+                    app.focus_count(back) > given_back,
+                    "{case}: the focus goes back to `{back}`"
+                );
+            }
+        }
+    }
+}
+
+/// A select whose `onChange` focuses the next field when `moves`.
+#[component]
+fn SelectChoice(props: ChoiceProps) -> impl IntoElement {
+    let field = element_ref();
+    let open = signal(false);
+    let moves = props.moves;
+    let mut el = select()
+        .items(vec![
+            SelectItem::new("apple", "Apple"),
+            SelectItem::new("pear", "Pear"),
+        ])
+        .accessibility_label("Fruit")
+        .render_item(|e: &SelectEntry| text(e.title.clone()))
+        .trigger(
+            view()
+                .test_id("trigger")
+                .w(px(160.0))
+                .h(px(30.0))
+                .child(text("Pick")),
+        )
+        .on_change(move |_: &Option<SharedString>| {
+            if moves {
+                field.focus();
+            }
+        })
+        .w(px(200.0));
+    if props.controlled {
+        el = el
+            .open(move || Some(open.get()))
+            .on_open_change(move |e: &SelectEvent| {
+                if let SelectEvent::OpenChange(next, _) = e {
+                    open.set(*next);
+                }
+            });
+    }
+    view()
+        .pt(px(40.0))
+        .pl(px(20.0))
+        .child(el)
+        .child(next_field(field))
+}
+
+#[test]
+fn a_select_choice_that_focuses_another_field_keeps_the_focus_there() {
+    a_choice_gives_the_focus_back_unless_it_moved_it(
+        |p| Root::new::<SelectChoice>(move || p.clone()),
+        "role:combobox",
+        |app| {
+            app.press("role:combobox").unwrap();
+            app.wait_for("role:listbox").unwrap();
+        },
+        |app| {
+            app.press("role:option[Pear]").unwrap();
+            assert!(!app.screen().matches("role:listbox").unwrap(), "closed");
+        },
+    );
+}
+
+/// A combobox whose `onChange` focuses the next field when `moves`.
+#[component]
+fn ComboboxChoice(props: ChoiceProps) -> impl IntoElement {
+    let field = element_ref();
+    let open = signal(false);
+    let moves = props.moves;
+    let mut el = combobox()
+        .items(vec![
+            SelectItem::new("rust", "Rust"),
+            SelectItem::new("swift", "Swift"),
+        ])
+        .accessibility_label("Language")
+        .trigger_button(text("Pick"))
+        .render_item(|e: &SelectEntry| text(e.title.clone()))
+        .on_change(move |_: &Vec<SharedString>| {
+            if moves {
+                field.focus();
+            }
+        })
+        .w(px(200.0));
+    if props.controlled {
+        el = el
+            .open(move || Some(open.get()))
+            .on_open_change(move |e: &ComboboxEvent| {
+                if let ComboboxEvent::OpenChange(next, _) = e {
+                    open.set(*next);
+                }
+            });
+    }
+    view()
+        .pt(px(40.0))
+        .pl(px(20.0))
+        .child(el)
+        .child(next_field(field))
+}
+
+#[test]
+fn a_combobox_choice_that_focuses_another_field_keeps_the_focus_there() {
+    // The focus goes back to the combobox's input.
+    a_choice_gives_the_focus_back_unless_it_moved_it(
+        |p| Root::new::<ComboboxChoice>(move || p.clone()),
+        "role:combobox",
+        |app| {
+            app.press("text:Pick").unwrap();
+            app.wait_for("role:listbox").unwrap();
+        },
+        |app| {
+            app.press("role:option[Swift]").unwrap();
+            assert!(!app.screen().matches("role:listbox").unwrap(), "closed");
+        },
+    );
+}
+
+/// A date picker whose `onChange` focuses the next field when `moves`.
+#[component]
+fn DatePickerChoice(props: ChoiceProps) -> impl IntoElement {
+    let field = element_ref();
+    let open = signal(false);
+    let moves = props.moves;
+    let mut el = date_picker()
+        .accessibility_label("Due")
+        .render_item(|e: &CalendarEntry| {
+            text(match e.kind {
+                CalendarItemKind::Previous => "prev".into(),
+                _ => format!("{}-{}", e.month, e.value),
+            })
+        })
+        .trigger(
+            view()
+                .test_id("trigger")
+                .w(px(160.0))
+                .h(px(30.0))
+                .child(text("Pick")),
+        )
+        .on_change(move |_: &PickedDate| {
+            if moves {
+                field.focus();
+            }
+        });
+    if props.controlled {
+        el = el
+            .open(move || Some(open.get()))
+            .on_open_change(move |e: &DatePickerEvent| {
+                if let DatePickerEvent::OpenChange(next, _) = e {
+                    open.set(*next);
+                }
+            });
+    }
+    view()
+        .pt(px(40.0))
+        .pl(px(20.0))
+        .child(el)
+        .child(next_field(field))
+}
+
+#[test]
+fn a_date_picker_choice_that_focuses_another_field_keeps_the_focus_there() {
+    // From the keyboard: Return opens the calendar with the keyboard on
+    // today's day, and Return again chooses it.
+    a_choice_gives_the_focus_back_unless_it_moved_it(
+        |p| Root::new::<DatePickerChoice>(move || p.clone()),
+        "id:trigger",
+        |app| {
+            app.press_key("tab").unwrap();
+            app.press_key("enter").unwrap();
+            app.wait_for("text:prev").unwrap();
+        },
+        |app| {
+            app.press_key("enter").unwrap();
+            assert!(!app.shows("prev"), "closed");
+        },
+    );
 }

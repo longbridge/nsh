@@ -24,6 +24,7 @@ export function createEnvironment(reactive, invoke, dom) {
     titleBar: { height: 0, left: 0, right: 0 }, keyboard: { height: 0, duration: 0.25 },
     colorScheme: "light", fontScale: 1, pixelRatio: 1, locale: "en-US", reduceMotion: false, screenReader: false, host: false,
     lifecycle: "active", shaders: true, wakeCount: 0,
+    horizontalSizeClass: "compact", verticalSizeClass: "compact",
     localeSettings: { languages: ["en-US"], timeZone: "UTC", hourCycle: "h12", firstDayOfWeek: 7,
       measurementSystem: "us", temperatureUnit: "fahrenheit" } };
   const fields = Object.fromEntries(Object.entries(initial).map(([name, value]) => [name, reactive.signal(value)]));
@@ -55,6 +56,8 @@ export function createEnvironment(reactive, invoke, dom) {
   // serves under those names (`modules`) are the same values as `nsh`'s.
   // `environment.test.mjs` holds both to `env.rs`.
   const device = {
+    horizontalSizeClass: () => fields.horizontalSizeClass(),
+    verticalSizeClass: () => fields.verticalSizeClass(),
     windowSize: () => fields.window(), colorScheme: () => fields.colorScheme(), setColorScheme,
     fontScale: () => fields.fontScale(), pixelRatio: () => fields.pixelRatio(), locale: () => fields.locale(),
     localeSettings: () => fields.localeSettings(), lifecycle: () => fields.lifecycle(), platform,

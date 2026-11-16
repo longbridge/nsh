@@ -80,6 +80,8 @@ impl Ambient {
 struct EnvSignals {
     env: Signal<Environment>,
     window: Memo<Size<Points>>,
+    horizontal_size_class: Memo<crate::platform::SizeClass>,
+    vertical_size_class: Memo<crate::platform::SizeClass>,
     safe_area: Memo<EdgeInsets>,
     title_bar: Memo<crate::geometry::Edges<crate::geometry::Points>>,
     window_state: Memo<Option<crate::desktop::WindowState>>,
@@ -111,6 +113,20 @@ impl EnvSignals {
             Self {
                 env: signal,
                 window: part!(window),
+                horizontal_size_class: computed(move || {
+                    signal.with(|e| {
+                        e.horizontal_size_class.unwrap_or_else(|| {
+                            crate::platform::SizeClass::from_length(e.window.width)
+                        })
+                    })
+                }),
+                vertical_size_class: computed(move || {
+                    signal.with(|e| {
+                        e.vertical_size_class.unwrap_or_else(|| {
+                            crate::platform::SizeClass::from_length(e.window.height)
+                        })
+                    })
+                }),
                 safe_area: part!(safe_area),
                 title_bar: part!(title_bar),
                 window_state: part!(window_state),
@@ -282,6 +298,18 @@ pub fn window() -> Size<Points> {
     env(|e| e.window)
 }
 
+/// The horizontal size class (reactive; TS: `horizontalSizeClass()`).
+/// iOS uses UIKit traits; elsewhere widths below 600pt are compact.
+pub fn horizontal_size_class() -> crate::platform::SizeClass {
+    env(|e| e.horizontal_size_class)
+}
+
+/// The vertical size class (reactive; TS: `verticalSizeClass()`).
+/// iOS uses UIKit traits; elsewhere heights below 600pt are compact.
+pub fn vertical_size_class() -> crate::platform::SizeClass {
+    env(|e| e.vertical_size_class)
+}
+
 /// The edges system UI covers: notch, home indicator (TS: `safeArea()`).
 pub fn safe_area() -> EdgeInsets {
     env(|e| e.safe_area)
@@ -428,6 +456,15 @@ pub fn platform_name() -> &'static str {
     with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
         .expect("the core sets the environment")
         .with_untracked(|e| e.platform_name())
+}
+
+/// The platform shows the system's tab bar: iOS and Android, unless a
+/// platform built outside NSH has none
+/// ([`crate::platform::Environment::tab_bar`]); it does not change.
+pub(crate) fn has_tab_bar() -> bool {
+    with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .expect("the core sets the environment")
+        .with_untracked(|e| matches!(e.os, Os::Ios | Os::Android) && e.tab_bar)
 }
 
 /// [`os`] where an engine runs (its thread, while it runs Rust code),
@@ -675,6 +712,15 @@ pub fn set_clipboard_item(item: ClipboardItem) {
 /// `Clipboard.readText`), to await in a task.
 pub fn clipboard_string() -> Answer<String> {
     let (answer, action) = super::services::clipboard_string();
+    act(action);
+    answer
+}
+
+/// The text on the system clipboard for `Clipboard.readText`: `""` when
+/// it holds none, `None` when the person refused the read (iOS's paste
+/// prompt).
+pub(crate) fn clipboard_checked_string() -> Answer<Option<String>> {
+    let (answer, action) = super::services::clipboard_checked_string();
     act(action);
     answer
 }
@@ -1605,10 +1651,10 @@ pub fn try_apple_keys() -> Option<bool> {
 /// lives (TS: `keymap.bind`): `"mod+k"` (`mod` is Command on Apple
 /// platforms, Control elsewhere), `"shift+mod+l"`, `"escape"`, ... (the
 /// keystrokes of `nsh/keymap`). The handler gets the keystroke as written.
-/// It belongs to the window bound in ([`super::desktop::current_window`])
-/// and fires only for keys pressed there; a key it does not take goes on
-/// as usual. Desktop platforms fire them; elsewhere they are kept but no
-/// key does.
+/// It belongs to the window bound in ([`super::desktop::current_window`];
+/// in a component JS places in a window, that window) and fires only for
+/// keys pressed there; a key it does not take goes on as usual. Desktop
+/// platforms fire them; elsewhere they are kept but no key does.
 ///
 /// # Panics
 ///
@@ -1634,7 +1680,9 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
     }
     let owner = Owner::current();
     let handler: super::keys::KeyHandler = Rc::new(move |k: &str| owner.run(|| handler(k)));
-    // It belongs to the window whose tree binds it (`current_window`).
+    // It belongs to the window whose tree binds it (`current_window`); with
+    // no window around it in Rust (a component JS placed in a `Window`),
+    // the core finds the window its owner's component shows in.
     let window = super::use_context::<super::desktop::WindowRef>().and_then(|w| w.dialog_root());
     let keys = executor().keys.clone();
     let id = keys.borrow_mut().add(
@@ -1646,6 +1694,7 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
         keystroke.into(),
         handler,
         window,
+        owner,
     );
     let weak = Rc::downgrade(&keys);
     cleanup(move || {
@@ -1705,7 +1754,10 @@ impl super::ElementRef {
 
     /// Listens to the keyboard focus leaving the element: going from it
     /// or an element inside it to one outside, or to none (GPUI's
-    /// `on_focus_out`; the element leaves `focus-within`). As
+    /// `on_focus_out`; the element leaves `focus-within`). An element
+    /// removed with the focus inside it, or one that stops carrying the
+    /// ref, is left too, and the focus coming into the next element that
+    /// carries the ref is heard by [`Self::on_focus_in`]. As
     /// [`Self::on_focus_in`] otherwise.
     pub fn on_focus_out(&self, listener: impl Fn() + 'static) {
         let element = *self;

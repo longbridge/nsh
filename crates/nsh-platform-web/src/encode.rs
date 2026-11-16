@@ -961,6 +961,9 @@ fn transition_json(t: &Option<LayoutTransition>) -> String {
                 LayoutCurve::EaseOut => "ease-out".to_owned(),
                 LayoutCurve::EaseInEaseOut | LayoutCurve::Keyboard => "ease-in-out".to_owned(),
                 LayoutCurve::FittedSpring { damping_ratio } => spring_easing(damping_ratio),
+                LayoutCurve::Bezier([x1, y1, x2, y2]) => {
+                    format!("cubic-bezier({x1}, {y1}, {x2}, {y2})")
+                }
                 // It times itself: its progress over the time it settles in,
                 // ending on its place.
                 LayoutCurve::Spring(spring) => sampled_easing(|x| {
@@ -1721,6 +1724,20 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                     out.item("cmd").num(id).str("setTitle").str(title).end();
                 }
             }
+            // While the app listens to quit requests, leaving the page asks
+            // the app first (`nsh.js` `deliverQuitRequest`).
+            (_, nsh_core::desktop::DesktopCommand::SetQuitOnRequest(quit)) => {
+                out.item("cmd")
+                    .num(id)
+                    .str("quitOnRequest")
+                    .bool(*quit)
+                    .end();
+            }
+            // The app's answer to the user leaving the page, while the page
+            // asks it.
+            (true, nsh_core::desktop::DesktopCommand::Quit) => {
+                out.item("cmd").num(id).str("quit").end();
+            }
             _ => log::debug!("web: command {desktop:?} is not supported"),
         },
         other => log::debug!("web: command {other:?} is not supported"),
@@ -1893,5 +1910,27 @@ mod tests {
             ),
             "[]"
         );
+    }
+
+    #[test]
+    fn listening_to_quit_requests_reaches_the_player() {
+        assert_eq!(
+            commands(nsh_core::ROOT_ID, DesktopCommand::SetQuitOnRequest(false)),
+            r#"[["cmd",1,"quitOnRequest",false]]"#
+        );
+        assert_eq!(
+            commands(nsh_core::ROOT_ID, DesktopCommand::SetQuitOnRequest(true)),
+            r#"[["cmd",1,"quitOnRequest",true]]"#
+        );
+    }
+
+    #[test]
+    fn the_apps_quit_reaches_the_player() {
+        assert_eq!(
+            commands(nsh_core::ROOT_ID, DesktopCommand::Quit),
+            r#"[["cmd",1,"quit"]]"#
+        );
+        // Restarting is the browser's (the user reloads).
+        assert_eq!(commands(nsh_core::ROOT_ID, DesktopCommand::Restart), "[]");
     }
 }

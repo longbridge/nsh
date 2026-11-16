@@ -452,6 +452,21 @@ cryptographic entropy comes from the browser's `crypto.getRandomValues`. The `pa
 
 A granted `process.exit(code?)` follows the engine's `ExitApp` command to the player. The player queues `Player.reset()` in a microtask after the current mount batch returns, stopping the app and clearing its surface while retaining the host page. Deferring disposal avoids reentering and freeing the VM during its batch callback; the queued action checks the app identity so it cannot reset a replacement app.
 
+While the app listens to quit requests (`on_quit_request`, `Application.on("quitRequest")`), the core's
+`SetQuitOnRequest(false)` reaches the player as `quitOnRequest`, and the player holds a `beforeunload` listener
+(`Player.askBeforeLeaving`). As the page leaves, it delivers the quit request to the app within the event
+(`deliverQuitRequest` → `nsh_quit_request`, the desktops' `WindowEvent::QuitRequest` on the root): the app's listeners,
+Rust's and TS's, run in that engine call, and a `quit()` among what they do reaches the player as `quit` before the call
+returns. That only decides whether the browser asks (the player prevents the default when the app did not quit):
+`beforeunload` comes before the browser commits to leaving, and the page may still stay. Outside a delivery `quit`
+leaves the page as it is. A `beforeunload` listener can keep a page out of the back / forward cache in some browsers, so
+the player holds it only while the app listens, and drops it on `reset()` and when the engine traps.
+
+The app ends with the page. While an app runs, the player holds a `pagehide` listener (`Player.watchPageEnd`, which does
+not affect the back / forward cache): a `pagehide` that discards the page (not `persisted`) starts the app's quit
+listeners (`nsh_quit` → `LocalEngine::start_quit`, once per app), however the user left; a page kept in the cache keeps
+its app running. `nsh test --target web` closes its pages with `Target.closeTarget`, which runs no `beforeunload`.
+
 ## The playground's compiler
 
 Feature `compiler` adds `nsh_compile` (and `nsh_compiled_ptr` / `_len`): `nsh_bundler::compile_module`, the one-module
@@ -823,7 +838,7 @@ browsers' touches into what phones report:
   address; where the app is the page `set_app_url` resolves a URL against the page's base (the root `onUrlScheme`
   event's `base`, kept in the cell) and refuses another origin (`resolve_on_page`, and the core again), as `browser/address.js` does for TS (which checks
   the raw string as `check_address` does before resolving, in the app's realm). `setUrl` / `set_app_url` reach the
-  root as `Command::SetAppUrl` on the web, and `setPageUrl` keeps the URL in `pageUrl` when the app is the page.
+  root as `Command::SetAppUrl` (the core sends it to every platform: iOS and macOS hand it off, `embedding.md`), and `setPageUrl` keeps the URL in `pageUrl` when the app is the page.
   `syncHistory` applies it last, with `history.replaceState(history.state, "", url)`, after pushing the entries of
   the turn's pages, so the address lands on the new top entry; while a `history.go` of its own is in flight
   (`ignoredPops`) it waits, and when the last ignored `popstate` lands the waiting address goes to the entry, or the
@@ -865,7 +880,7 @@ browsers' touches into what phones report:
   drops its own) when the turn pushed no page's entry (else the address goes on the new top entry, as a replace) and
   it is not the landed entry's address; a turn that popped pages pushes it once its `history.go` lands. A new run
   drops a push waiting (`resetHistory`). `browser/address.js` hands the options to the core as they are; the core
-  reads them (`SetUrlOptions`), and a `history` of another value is a `TypeError`. The other platforms keep the URL.
+  reads them (`SetUrlOptions`), and a `history` of another value is a `TypeError`. The other platforms keep the URL; iOS and macOS also hand it off when the app opts in.
 - **Text selection**: text is selectable when `selectable` is true (`userSelect: "text"`; `nsh-selectable`), and with the desktop idiom also
   when it is unset (`null` in the `t` item: `nsh-autoselect`, selectable under `.nsh-desktop`) unless a view around it,
   or the text itself, takes presses, touches, pans or pinches (`nsh-press`, set in `updateTouchAction`), as on a web

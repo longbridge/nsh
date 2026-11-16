@@ -106,13 +106,23 @@ its font; the text lays out the same and copies whole, so inline code is a span
 
 ```rust tabs
 text("Run ")
-    .child(text(" npm test ").font_family("ui-monospace").bg(rgb(0xeff1f3)).rounded(px(4.0)))
+    .child(text("npm test").font_family("ui-monospace").bg(rgb(0xeff1f3)).rounded(px(4.0)).px(px(4.0)))
     .child(" first.")
 ```
 
 ```tsx tabs
 <Text>
-  Run <Text style={{ fontFamily: "ui-monospace", backgroundColor: "#eff1f3", borderRadius: 4 }}> npm test </Text> first.
+  Run <Text style={{ fontFamily: "ui-monospace", backgroundColor: "#eff1f3", borderRadius: 4, paddingHorizontal: 4 }}>npm test</Text> first.
+</Text>
+```
+
+Horizontal padding on a span takes room in its line at the span's two ends, and its background covers it, as a CSS
+inline box's does; vertical padding and borders leave a span as it is. A relative `fontSize` keeps the span in
+proportion to its paragraph wherever it is used:
+
+```tsx
+<Text style={{ fontSize: 16 }}>
+  Run <Text style={{ fontSize: "0.875em", backgroundColor: "#eff1f3", borderRadius: 4, paddingHorizontal: 3 }}>npm test</Text> first.
 </Text>
 ```
 
@@ -186,7 +196,7 @@ others of the same names.
 | Property | Values | Rust |
 |---|---|---|
 | `color` | A [color](./styling.md#colors). Default black | `.text_color(..)` |
-| `fontSize` | Points. Default 14 | `.text_size(px(..))`, `.text_sm()`, `.text_lg()`, ... |
+| `fontSize` | Points. Default 14. Or relative to the inherited size, as CSS's `em` and percentages: `"0.875em"`, `"87.5%"` | `.text_size(px(..))`, `.text_size(relative(0.875))`, `.text_sm()`, `.text_lg()`, ... |
 | `fontWeight` | `"normal"` (400), `"bold"` (700), or `100`–`900` (number or string) | `.font_weight(FontWeight::BOLD)` |
 | `fontStyle` | `"normal"`, `"italic"`: color emoji stay upright | `.italic()` |
 | `fontFamily` | A system family, a generic family, or an [imported font](./fonts.md) | `.font_family(..)` |

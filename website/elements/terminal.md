@@ -13,6 +13,8 @@ scroll regions, the alternate screen of full-screen programs, titles, the bell) 
 platform's own text engine, so it runs everywhere NSH does: macOS, Windows, Linux, iOS, Android, the web and the
 terminal backend. It keeps a scrollback that scrolls like a list and follows the end while the user is there. An
 input method composes at the cursor: what it composes shows there, underlined, and its candidates open under it.
+The terminal cursor stays hidden during composition and returns when it ends. `onData` receives the committed
+text once composition ends, including any parts confirmed during that composition; cancelling sends no composed text.
 
 The program is the app's. A `Terminal` starts nothing: the app connects it to a source of bytes (a pseudo-terminal
 on the desktop, a WebSocket, an SSH channel) with the ref's `write` and the `onData` event, and tells the program the

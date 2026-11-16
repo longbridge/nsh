@@ -51,6 +51,12 @@ char *_Nullable nsh_app_set_granted_capabilities(NshApp *app, const char *_Nulla
 void nsh_app_set_limits(NshApp *app, uint32_t memory_mb, uint32_t stack_kb, uint32_t load_ms,
                         uint32_t call_ms, uint32_t max_nodes);
 
+/// Gives the address of the apps `app` loads (`UrlScheme.setUrl`) to the
+/// system as the current `NSUserActivity`, for Handoff. An address that
+/// is no web page needs `<bundle id>.url` in the app's Info.plist
+/// `NSUserActivityTypes`. Off by default; applies from the next load.
+void nsh_app_set_handoff(NshApp *app, bool handoff);
+
 /// The directory the storage (`nsh/storage`) of the apps `app` loads is kept
 /// in (`storage.json` in it); NULL: each app's own, `nsh/<app id>` in the
 /// embedding app's Application Support (the id of `nsh.json`, `nsh/default`

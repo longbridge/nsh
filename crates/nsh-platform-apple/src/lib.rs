@@ -6,11 +6,16 @@
 
 pub mod audio;
 pub mod canvas_image;
+pub mod handoff;
 pub mod notifications;
 pub mod speech;
 // The logger NSH's release runners and its iOS SDK install, no API of apps':
 // hidden from the docs, so it stays out of what NSH keeps compatible.
 #[doc(hidden)]
 pub mod unified_log;
+// The `WKDownload` transport iOS and macOS share, no API of apps': hidden
+// from the docs, so it stays out of what NSH keeps compatible.
+#[doc(hidden)]
+pub mod web_download;
 pub mod web_evaluation;
 pub mod web_scheme;

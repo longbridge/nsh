@@ -698,6 +698,8 @@ impl Session {
                     _ => Idiom::Desktop,
                 },
                 host: page_host.is_some(),
+                // As Android's backend: text only on the clipboard.
+                clipboard_images: platform != Platform::Android,
                 ..Default::default()
             },
             ui_sets: self.run.ui_sets.clone(),

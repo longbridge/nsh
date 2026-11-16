@@ -245,8 +245,8 @@ export const nav = createNavStack<Route>([{ name: "home" }]);
 | `headerStyle` | `{ backgroundColor?, color?, tintColor? }` | | iOS 和 Android：标题栏背景色、标题颜色（`color`）和按钮颜色（`tintColor`）。 |
 | `headerClass` | `string` | | 用类名设置同样的颜色：`bg-*`、标题用 `text-*`、按钮用 `tint-*`；`headerStyle` 优先。 |
 | `headerBackVisible` | `boolean` | `true` | iOS 和 Android：显示返回按钮。 |
-| `headerLeft` | `JSX.Element` | | iOS 和 Android：标题栏开头的视图（替换返回按钮）。 |
-| `headerRight` | `JSX.Element` | | iOS 和 Android：标题栏末尾的视图。 |
+| `headerLeft` | `JSX.Element` | | iOS 和 Android：标题栏开头的视图（替换返回按钮）。它们什么都不显示（宽度为 0）时，标题栏那里没有按钮。 |
+| `headerRight` | `JSX.Element` | | iOS 和 Android：标题栏末尾的视图。它们什么都不显示（宽度为 0）时，标题栏那里没有按钮，内容回来时按钮也回来。 |
 | `ios={{ headerRightSystemItem }}` | `"add" \| "done" \| "close" \| "edit" \| "compose" \| "search" \| "share" \| "trash" \| "save" \| "cancel"` | | iOS：在标题栏末尾显示 UIKit 自带的按钮（系统的外观、图标或文字），代替 `headerRight` 的视图；按下它就是按下 `headerRight` 里第一个可按的视图，所以那里要放一个。Android 照常显示 `headerRight`。 |
 | `ios={{ headerLeftSystemItem }}` | 同 `headerRightSystemItem` | | iOS：同上，放在标题栏开头，按下即按下 `headerLeft`。 |
 | `ios={{ headerRightSymbol }}` | `string` | | iOS：在标题栏末尾显示 UIKit 自带的按钮，图标是该名称的 SF Symbol（如 `"slider.horizontal.3"`），代替 `headerRight` 的视图；按下它就是按下 `headerRight` 里第一个可按的视图，VoiceOver 读的也是那个视图的标签。`headerRightSystemItem` 优先；SF Symbols 里没有的名称照常显示 `headerRight`。Android 照常显示 `headerRight`。 |
@@ -648,6 +648,8 @@ function Editor() {
 ## 标签页与其他布局
 
 标签栏是应用自己的界面，用基础元素绘制：一排可按压的视图加一个保存当前标签的 signal；用 [`when` / `<If>`](../elements/control-flow.md)（或 TSX 中的函数子元素）渲染选中标签的内容。要在切换时保留每个标签的状态，给每个标签一个独立的栈和路由，并让它们都保持挂载，用 `display: none` 隐藏未选中的标签。
+
+由多个栈组成的分栏，比如 iPad 上的“邮件”或“设置”那样把侧边栏、列表和详情并排显示，使用 [`SplitView`](../elements/split-view.md)：每一栏都是一个独立的 `NavStack`，在 iOS 和 iPadOS 上是 `UISplitViewController`，窗口紧凑时一次只显示一栏。
 
 ## 相关内容
 

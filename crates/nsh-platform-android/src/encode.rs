@@ -19,11 +19,11 @@
 use jni::objects::GlobalRef;
 use nsh_core::{
     AccessibilityCurrent, AccessibilityRole, AudioSession, AutoCapitalize, AutoFill, BorderStyle,
-    Checked, Color, Command, DialogButtonStyle, EditAction, InputConfig, KeyboardDismissMode,
-    KeyboardTaps, KeyboardType, LayoutCurve, LayoutProperty, LayoutTransition, LiveRegion,
-    ModalAnimation, ModalPresentation, MountBatch, MountItem, NativeProps, PointerEvents,
-    ResizeMode, ReturnKeyType, ScreenAnimation, ScreenConfig, SnapAlignment, StatusBarStyle,
-    SubmitBehavior, TextAlign, ViewKind, ViewProps, ViewStyle, WebSource,
+    Checked, Color, Command, DialogButtonStyle, EditAction, InputConfig, KeyCapture,
+    KeyboardDismissMode, KeyboardTaps, KeyboardType, LayoutCurve, LayoutProperty, LayoutTransition,
+    LiveRegion, ModalAnimation, ModalPresentation, MountBatch, MountItem, NativeProps,
+    PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenConfig, SnapAlignment,
+    StatusBarStyle, SubmitBehavior, TextAlign, ViewKind, ViewProps, ViewStyle, WebSource,
     audio::AudioCommand,
     geometry::{DefiniteLength, REM_SIZE},
 };
@@ -775,7 +775,8 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     | Command::ScrollToEnd { .. }
                     // Desktops only.
                     | Command::Desktop(_)
-                    // The web's history entries; the core sends it there only.
+                    // The app's address: Android keeps none (App Links only
+                    // come in).
                     | Command::SetAppUrl(_)
                     | Command::PushAppUrl(_)
                     // No host answers `nsh/host` here (`Environment::host`):
@@ -861,12 +862,18 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                                 e.bool(ask);
                             }
                             N::Show { id, notification } => {
+                                let sound = notification
+                                    .sound_path()
+                                    .map(nsh_core::notifications::Notification::sound_resource_name)
+                                    .unwrap_or_default();
                                 e.int(1);
                                 e.int(id as i32);
                                 e.string(notification.id);
                                 e.string(notification.title);
                                 e.string(notification.body);
                                 e.bool(notification.silent);
+                                // The app's sound as a raw resource name, "" for none.
+                                e.string(sound);
                             }
                             N::Close(id) => {
                                 e.int(2);
@@ -996,6 +1003,31 @@ fn audio_command(e: &mut Encoded, command: AudioCommand) {
 
 /// The event kind with index `index` (`EventKind as u8`, the order of the
 /// constants in `Native.java`).
+/// `selectionMenu` (Mounter.java `selectionMenu`): the count, then per
+/// item its id (-1 a separator), whether it is enabled and its label.
+fn selection_menu(e: &mut Encoded, items: &[nsh_core::desktop::MenuItem]) {
+    use nsh_core::desktop::MenuItem;
+    let items: Vec<_> = items
+        .iter()
+        .filter(|item| !matches!(item, MenuItem::Submenu { .. }))
+        .collect();
+    e.int(items.len() as i32);
+    for item in items {
+        match item {
+            MenuItem::Action(action) => {
+                e.int(action.id as i32);
+                e.bool(action.enabled);
+                e.string(action.label.clone());
+            }
+            _ => {
+                e.int(-1);
+                e.bool(false);
+                e.int(-1);
+            }
+        }
+    }
+}
+
 pub(crate) fn kind_from(index: i32) -> Option<nsh_core::EventKind> {
     nsh_core::EventKind::ALL
         .get(usize::try_from(index).ok()?)
@@ -1461,6 +1493,38 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
     }
     e.bool(p.selectable_view);
     e.bool(p.continues_text);
+    selection_menu(e, &p.selection_menu);
+    key_capture(e, &p.key_capture);
+    // `focusable` (Mounter.java `focusProps`): -1 unset, 0 false, 1 true.
+    e.int(match p.focusable {
+        None => -1,
+        Some(false) => 0,
+        Some(true) => 1,
+    });
+    // `key_parent` (Mounter.java `keyParents`): a portaled view's logical
+    // keyboard ancestor; -1 leaves the native/mounted parent.
+    e.int(p.key_parent.map_or(-1, |parent| parent as i32));
+}
+
+/// `Mounter.java` `viewProps`: the focused view's `captureKeys` policy, as
+/// `KeyCaptures.java` matches it (mode, and for `keys` the count and each
+/// canonical key id and its modifiers). A view's policy changes with its
+/// other props; the UI thread keeps the latest.
+fn key_capture(e: &mut Encoded, capture: &KeyCapture) {
+    match capture {
+        KeyCapture::None => e.int(0),
+        KeyCapture::All => e.int(1),
+        KeyCapture::Keys(keys) => {
+            e.int(2);
+            e.int(keys.len() as i32);
+            for key in keys.iter() {
+                e.int(crate::keymap::capture_key(key.key));
+                e.int(crate::keymap::capture_modifiers(key.modifiers));
+            }
+        }
+        // A future rule this Android runtime does not know captures none.
+        _ => e.int(0),
+    }
 }
 
 /// Index of `role` in `A11y.java`'s class name table.
@@ -1531,6 +1595,7 @@ fn layout_transition(e: &mut Encoded, t: Option<LayoutTransition>) {
         LayoutCurve::FittedSpring { damping_ratio } => (4, damping_ratio),
         LayoutCurve::Keyboard => (5, 0.0),
         LayoutCurve::Spring(_) => (6, 0.0),
+        LayoutCurve::Bezier(_) => (7, 0.0),
     };
     e.int(curve);
     e.float(damping);
@@ -1544,6 +1609,12 @@ fn layout_transition(e: &mut Encoded, t: Option<LayoutTransition>) {
             } else {
                 spring.progress(spring.settle_ms() * i as f32 / SPRING_SAMPLES as f32)
             });
+        }
+    }
+    if let LayoutCurve::Bezier(points) = t.curve {
+        // Java's `PathInterpolator` of the same control points.
+        for p in points {
+            e.float(p);
         }
     }
     e.int(match t.property {
@@ -1575,6 +1646,8 @@ fn input(e: &mut Encoded, c: &InputConfig) {
     e.int(c.placeholder_color.map_or(0, argb));
     e.bool(c.secure);
     e.int(match c.keyboard {
+        // A password shown as plain text gets the visible password keyboard.
+        KeyboardType::Default if c.visible_password() => 8,
         KeyboardType::Default => 0,
         KeyboardType::Number => 1,
         KeyboardType::Decimal => 2,
@@ -2136,5 +2209,83 @@ mod tests {
             .collect();
         assert_eq!(ints, vec![COMMAND, 3, 51, -1, 0, 1, 2, 3]);
         assert!(matches!(&encoded.objects[0], Obj::Str(generation) if generation == "19"));
+    }
+    #[test]
+    fn view_props_carry_the_key_capture_policy() {
+        use nsh_core::keymap::{Key, Keystroke, Modifiers};
+
+        let mut props = ViewProps::default();
+        props.key_capture = KeyCapture::keys([
+            Keystroke {
+                key: Key::Char('a'),
+                modifiers: Modifiers::default(),
+            },
+            Keystroke {
+                key: Key::Left,
+                modifiers: Modifiers {
+                    shift: true,
+                    ..Modifiers::default()
+                },
+            },
+        ]);
+        let encoded = encode(
+            MountBatch {
+                items: vec![MountItem::ViewProps { id: 2, props }],
+            },
+            0,
+        );
+        let ints: Vec<_> = encoded
+            .bytes
+            .chunks_exact(4)
+            .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+            .collect();
+        // The tail `Mounter.java` reads: mode, count, (key, modifiers)*,
+        // `focusable` (-1 unset), then `key_parent` (-1 none).
+        assert_eq!(
+            &ints[ints.len() - 8..],
+            &[
+                2,
+                2,
+                'a' as i32,
+                0,
+                crate::keymap::capture_key(Key::Left),
+                4,
+                -1,
+                -1
+            ]
+        );
+
+        for (focusable, expected) in [(None, -1), (Some(false), 0), (Some(true), 1)] {
+            let mut props = ViewProps::default();
+            props.focusable = focusable;
+            let encoded = encode(
+                MountBatch {
+                    items: vec![MountItem::ViewProps { id: 2, props }],
+                },
+                0,
+            );
+            let ints: Vec<_> = encoded
+                .bytes
+                .chunks_exact(4)
+                .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+                .collect();
+            assert_eq!(ints[ints.len() - 2], expected);
+            assert_eq!(ints[ints.len() - 1], -1);
+        }
+
+        let mut props = ViewProps::default();
+        props.key_parent = Some(7);
+        let encoded = encode(
+            MountBatch {
+                items: vec![MountItem::ViewProps { id: 2, props }],
+            },
+            0,
+        );
+        let ints: Vec<_> = encoded
+            .bytes
+            .chunks_exact(4)
+            .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+            .collect();
+        assert_eq!(ints[ints.len() - 1], 7);
     }
 }

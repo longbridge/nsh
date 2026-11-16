@@ -48,6 +48,14 @@ fn gesture_phase(phase: TouchPhase) -> GesturePhase {
     }
 }
 
+/// Whether a press moves the window's focus to the surface. A press on
+/// content that cannot take the focus leaves it where the host put it (an
+/// editor next to an embedded surface keeps its caret, #1926); with nothing
+/// focused, or on a focusable view, the surface takes it.
+fn takes_focus(focused: bool, other: bool, focusable: impl FnOnce() -> bool) -> bool {
+    !focused && (!other || focusable())
+}
+
 /// Points the surface's hitbox: the cursor over `(x, y)` (root
 /// coordinates) for the next frame, which is drawn when it changed.
 fn update_cursor(surface: &Rc<Surface>, x: f32, y: f32) {
@@ -169,10 +177,12 @@ pub(crate) fn install<V: gpui::EntityInputHandler>(
             cx.stop_propagation();
             return;
         }
-        if !f.is_focused(window) {
+        let (x, y) = root_point(&s, e.position);
+        if takes_focus(f.is_focused(window), window.focused(cx).is_some(), || {
+            crate::input::focusable_at(&s, x, y)
+        }) {
             window.focus(&f, cx);
         }
-        let (x, y) = root_point(&s, e.position);
         if button == 0 && s.input_pressed.get() & 1 != 0 {
             cancel_press(&s, &e.modifiers);
         }
@@ -372,7 +382,7 @@ pub(crate) fn install<V: gpui::EntityInputHandler>(
                 nsh_core::WheelDelta::Lines(nsh_core::geometry::point(-l.x, -l.y))
             }
         };
-        if crate::input::wheel_event(&s, &event, delta, precise.then_some(phase)) {
+        let handled = if crate::input::wheel_event(&s, &event, delta, precise.then_some(phase)) {
             // The view took it; a gesture going on elsewhere still ends.
             if precise && matches!(phase, GesturePhase::Ended | GesturePhase::Cancelled) {
                 let end = WheelEvent {
@@ -382,12 +392,17 @@ pub(crate) fn install<V: gpui::EntityInputHandler>(
                 };
                 crate::input::touchpad(&s, end, phase);
             }
+            true
         } else if precise {
-            crate::input::touchpad(&s, event, phase);
+            crate::input::touchpad(&s, event, phase)
         } else {
-            crate::input::wheel(&s, event);
+            crate::input::wheel(&s, event)
+        };
+        // Unhandled, it goes on to what is under the surface: the host
+        // view embedding it scrolls (#1927).
+        if handled {
+            cx.stop_propagation();
         }
-        cx.stop_propagation();
         crate::rt::flush(cx);
     });
 
@@ -492,4 +507,20 @@ pub(crate) fn install<V: gpui::EntityInputHandler>(
         crate::input::modifiers_changed(&s, modifiers);
         crate::rt::flush(cx);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::takes_focus;
+
+    #[test]
+    fn press_keeps_the_hosts_focus_on_unfocusable_content() {
+        // #1926: the host's editor keeps its focus.
+        assert!(!takes_focus(false, true, || false));
+        // A field, or nothing focused yet: the surface takes it.
+        assert!(takes_focus(false, true, || true));
+        assert!(takes_focus(false, false, || false));
+        // Already focused: nothing to do.
+        assert!(!takes_focus(true, false, || true));
+    }
 }

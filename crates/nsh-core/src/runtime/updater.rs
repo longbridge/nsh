@@ -337,7 +337,11 @@ mod native {
         available: Available,
         dir: PathBuf,
         archive: RefCell<Option<PathBuf>>,
-        #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+        #[cfg(any(
+            all(target_os = "linux", not(target_env = "ohos")),
+            target_os = "macos",
+            windows
+        ))]
         installation: nsh_updater::install::Installation,
     }
 
@@ -363,7 +367,11 @@ mod native {
                 return Ok(None);
             };
             let config = Config::parse(&bytes).map_err(|e| e.to_string())?;
-            #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+            #[cfg(any(
+                all(target_os = "linux", not(target_env = "ohos")),
+                target_os = "macos",
+                windows
+            ))]
             if let Some(installation) =
                 nsh_updater::install::Installation::current(&config.id, &bytes)
             {
@@ -390,7 +398,11 @@ mod native {
         };
         // Only the desktops install an update (`can_install` below).
         #[cfg_attr(
-            not(any(target_os = "linux", target_os = "macos", windows)),
+            not(any(
+                all(target_os = "linux", not(target_env = "ohos")),
+                target_os = "macos",
+                windows
+            )),
             allow(unused_mut)
         )]
         let mut update = AppUpdate {
@@ -399,7 +411,11 @@ mod native {
             url: available.url.clone(),
             can_install: false,
         };
-        #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+        #[cfg(any(
+            all(target_os = "linux", not(target_env = "ohos")),
+            target_os = "macos",
+            windows
+        ))]
         {
             let id = config.id.clone();
             let installation = blocking(move || {
@@ -433,7 +449,11 @@ mod native {
                 *found = None;
             }
         }
-        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+        #[cfg(not(any(
+            all(target_os = "linux", not(target_env = "ohos")),
+            target_os = "macos",
+            windows
+        )))]
         let _ = (bytes, config, host, &found);
         Ok(Some(update))
     }
@@ -670,13 +690,21 @@ mod native {
 
     /// As `Application.restart()`: the app's launcher runs the package
     /// when it starts again.
-    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    #[cfg(any(
+        all(target_os = "linux", not(target_env = "ohos")),
+        target_os = "macos",
+        windows
+    ))]
     async fn restart_into_package() -> Result<(), JsError> {
         crate::element::desktop::restart();
         std::future::pending().await
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    #[cfg(not(any(
+        all(target_os = "linux", not(target_env = "ohos")),
+        target_os = "macos",
+        windows
+    )))]
     async fn restart_into_package() -> Result<(), JsError> {
         Err(JsError::Error(
             "an app cannot restart itself here: the package runs from the app's next start".into(),
@@ -684,7 +712,11 @@ mod native {
         .with_code(codes::UNAVAILABLE))
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    #[cfg(any(
+        all(target_os = "linux", not(target_env = "ohos")),
+        target_os = "macos",
+        windows
+    ))]
     pub(super) async fn install(sys: System) -> Result<(), JsError> {
         let found = sys.locals.get::<Found>();
         let _operation = begin(&found)?;
@@ -710,7 +742,11 @@ mod native {
         std::future::pending().await
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    #[cfg(not(any(
+        all(target_os = "linux", not(target_env = "ohos")),
+        target_os = "macos",
+        windows
+    )))]
     pub(super) async fn install(_: System) -> Result<(), JsError> {
         Err(unavailable())
     }

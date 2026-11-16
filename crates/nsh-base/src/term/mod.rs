@@ -23,11 +23,13 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     rc::Rc,
+    time::Duration,
 };
 
 use nsh_core::{
     element::{Style, measure_text},
     prelude::*,
+    time::{Instant, now},
 };
 
 pub use self::{
@@ -118,22 +120,93 @@ impl TerminalApi {
 #[derive(Clone)]
 struct Term {
     emu: Rc<RefCell<Box<dyn TerminalEmulator>>>,
-    /// The size in cells the last layout gave, `None` before the first.
+    /// The size in cells the emulator has, `None` before the first layout.
     size: Rc<Cell<Option<TerminalSize>>>,
+    /// The size the latest layout gave while it waits to be applied, and
+    /// when: a drag of the box's edge lays it out every frame.
+    pending: Rc<Cell<Option<(TerminalSize, Instant)>>>,
     rev: Signal<u64>,
     cx: Scope<TerminalEvent>,
     sink: ElementRef,
     focused: Signal<bool>,
-    /// What an input method is composing in the hidden input, empty when
-    /// nothing is: drawn at the cursor.
-    composition: Signal<String>,
+    /// What an input method is composing in the hidden input (empty
+    /// before it shows any text), `None` when nothing is: drawn at the
+    /// cursor, which is hidden while it lasts.
+    composition: Signal<Option<String>>,
     /// Where the rows are in the terminal and how big, as last laid out:
     /// the hidden input goes on the cursor's cell.
     rows_frame: Signal<Bounds<Points>>,
-    /// What the hidden input holds: its value, and the text it held when
-    /// it was emptied, until the platform reports the empty value.
-    sink_value: Signal<String>,
-    held: Rc<RefCell<(String, Option<String>)>>,
+    /// What of the hidden input's text was sent.
+    sink_text: Rc<RefCell<SinkText>>,
+}
+
+/// What the hidden input's text held and what of it the program has, so
+/// each change sends only what is new, and an input method's composition
+/// only what it commits, once.
+///
+/// The platforms agree on the order of a composition's events, not on its
+/// text: a composition that starts or changes is reported before the
+/// change of the text holding it, and one that ends after the change of
+/// the text it committed. iOS, Android, the web and, for some edits,
+/// AppKit keep the composed text in the field's text; Windows, GPUI and
+/// GTK report only committed text, sometimes a part while the rest goes on
+/// composing. A composition carries no range of the field's text, so what
+/// of a change is composed cannot be told apart from what is committed:
+/// while a composition lasts nothing is sent, only the latest text is
+/// kept, and its end sends what that text has that the program does not
+/// (the commit, parts committed during it included; nothing when it was
+/// cancelled).
+#[derive(Debug, Default)]
+struct SinkText {
+    /// The input's text up to what the program has.
+    sent: String,
+    /// An input method composes.
+    composing: bool,
+    /// The input's text last reported while it composes, until its end.
+    pending: Option<String>,
+}
+
+impl SinkText {
+    /// The input reported its text `text`: what to send of it.
+    fn changed(&mut self, text: &str) -> String {
+        if self.composing {
+            self.pending = Some(text.to_owned());
+            return String::new();
+        }
+        self.commit(text)
+    }
+
+    /// An input method's composition started or changed (`composing`), or
+    /// ended: what to send, what the end committed.
+    fn composed(&mut self, composing: bool) -> String {
+        self.composing = composing;
+        if composing {
+            return String::new();
+        }
+        match self.pending.take() {
+            Some(text) => self.commit(&text),
+            None => String::new(),
+        }
+    }
+
+    /// The input's committed text is `text`: what the program does not
+    /// have yet. The input is never emptied (setting its text would end a
+    /// composition), so its text grows as the user types (the keys that
+    /// delete are bound and send their bytes); a text that does not start
+    /// with what was sent (a character deleted natively, the platform's
+    /// own reset) sends what follows the part they share.
+    fn commit(&mut self, text: &str) -> String {
+        let shared: usize = self
+            .sent
+            .chars()
+            .zip(text.chars())
+            .take_while(|(a, b)| a == b)
+            .map(|(a, _)| a.len_utf8())
+            .sum();
+        let typed = text[shared..].to_owned();
+        text.clone_into(&mut self.sent);
+        typed
+    }
 }
 
 impl Term {
@@ -161,7 +234,45 @@ impl Term {
         }
     }
 
+    /// A layout gave the cells `size`. The first one applies at once;
+    /// later ones wait until the size has held [`RESIZE_SETTLE`], so a drag
+    /// (a split's handle, a window's edge) neither re-wraps the emulator
+    /// and redraws every row nor has the program redraw its screen at each
+    /// column it crosses: the rows are clipped to the box meanwhile, as
+    /// terminals do.
     fn resize(&self, size: TerminalSize) {
+        if self.size.get().is_none() {
+            return self.apply_size(size);
+        }
+        if self.size.get() == Some(size) {
+            self.pending.set(None);
+            return;
+        }
+        let at = now() + RESIZE_SETTLE;
+        if self.pending.replace(Some((size, at))).is_none() {
+            self.resize_after(RESIZE_SETTLE);
+        }
+    }
+
+    /// Applies the pending size once it has held, waiting again while it
+    /// changed.
+    fn resize_after(&self, delay: Duration) {
+        let term = self.clone();
+        set_timeout(delay, move || {
+            let Some((size, at)) = term.pending.get() else {
+                return;
+            };
+            let left = at.saturating_duration_since(now());
+            if left.is_zero() {
+                term.pending.set(None);
+                term.apply_size(size);
+            } else {
+                term.resize_after(left);
+            }
+        });
+    }
+
+    fn apply_size(&self, size: TerminalSize) {
         // The first layout reports its size even when it is the one the
         // emulator starts at.
         if self.size.get() == Some(size) {
@@ -174,27 +285,20 @@ impl Term {
             .emit(TerminalEvent::Resize(size.cols as u32, size.rows as u32));
     }
 
-    /// The hidden input's text changed: sends what was typed.
+    /// The hidden input's text changed: sends what was typed, nothing while
+    /// an input method composes ([`SinkText`]).
     fn sink_changed(&self, text: &str) {
-        let typed = {
-            let mut held = self.held.borrow_mut();
-            let base = match held.1.take() {
-                // The platform reports the text it held with what was typed
-                // before the empty value reached it.
-                Some(old) if text != old && text.starts_with(old.as_str()) => old,
-                Some(_) => String::new(),
-                None => std::mem::take(&mut held.0),
-            };
-            let typed = text.strip_prefix(base.as_str()).unwrap_or(text).to_owned();
-            if !text.is_empty() {
-                held.1 = Some(text.to_owned());
-            }
-            typed
-        };
+        let typed = self.sink_text.borrow_mut().changed(text);
         self.send(&typed);
-        if !text.is_empty() {
-            self.sink_value.set(String::new());
-        }
+    }
+
+    /// An input method's composition in the hidden input started, changed
+    /// or ended: drawn at the cursor, hidden while it lasts; its end sends
+    /// what it committed.
+    fn sink_composed(&self, c: &Composition) {
+        self.composition.set(c.composing.then(|| c.text.clone()));
+        let typed = self.sink_text.borrow_mut().composed(c.composing);
+        self.send(&typed);
     }
 
     fn paste(&self, text: &str) {
@@ -230,6 +334,9 @@ impl Term {
         });
     }
 }
+
+/// How long a new size must hold before the terminal takes it.
+const RESIZE_SETTLE: Duration = Duration::from_millis(80);
 
 /// The CSS `font` shorthand `measure_text` takes.
 fn font_css(family: &str, size: Points) -> String {
@@ -268,14 +375,14 @@ pub fn Terminal(props: TerminalProps, cx: Scope<TerminalEvent>) -> impl IntoElem
     let term = Term {
         emu: Rc::new(RefCell::new(emu)),
         size: Rc::new(Cell::new(None)),
+        pending: Rc::new(Cell::new(None)),
         rev: signal(0),
         cx,
         sink: element_ref(),
         focused: signal(false),
-        composition: signal(String::new()),
+        composition: signal(None),
         rows_frame: signal(Bounds::default()),
-        sink_value: signal(String::new()),
-        held: Rc::default(),
+        sink_text: Rc::default(),
     };
     cx.methods(TerminalApi { term: term.clone() });
     term.bind_keys();
@@ -350,36 +457,38 @@ fn row(
         })
     };
     // The column of the cursor, shown or hidden, when it is on this line:
-    // where an input method's composition is drawn.
+    // where an input method's composition is drawn (nowhere, so not drawn,
+    // while the emulator has fewer lines than the screen's rows).
     let caret = {
         let term = term.clone();
         computed(move || {
             term.rev.get();
             let emu = term.emu.borrow();
-            let first_screen = emu.line_count() - term.size.get().unwrap_or_default().rows as usize;
+            let first_screen = emu
+                .line_count()
+                .checked_sub(term.size.get().unwrap_or_default().rows as usize)?;
             let at_cursor = emu.cursor_position();
             (at.index() == first_screen + at_cursor.row as usize).then_some(at_cursor.col)
         })
     };
     let composition = term.composition;
-    // The composition on this line, and how many cells it takes.
+    // The composition on this line.
     let composing = computed(move || {
         caret.get()?;
-        let text = composition.get();
-        (!text.is_empty()).then(|| {
-            let cells = text_width(&text);
-            (text, cells)
-        })
+        composition.get().filter(|text| !text.is_empty())
     });
     let cursor = computed(move || {
+        // Hidden while an input method composes: a composition carries no
+        // caret of its own, so no column would be where its caret is.
+        if composition.with(Option::is_some) {
+            return None;
+        }
         term.rev.get();
         let emu = term.emu.borrow();
         let rows = term.size.get().unwrap_or_default().rows;
-        let first_screen = emu.line_count() - rows as usize;
+        let first_screen = emu.line_count().checked_sub(rows as usize)?;
         let cursor = emu.cursor()?;
-        let col = (at.index() == first_screen + cursor.row as usize).then_some(cursor.col)?;
-        // After what is being composed, as a text field's caret is.
-        Some(col + composing.with(|c| c.as_ref().map_or(0, |c| c.1)) as u16)
+        (at.index() == first_screen + cursor.row as usize).then_some(cursor.col)
     });
     let backgrounds = line;
     view()
@@ -470,13 +579,8 @@ fn row(
                     .bg(move || theme().background)
                     .pointer_events(PointerEvents::None)
                     .child(
-                        text(move || {
-                            SharedString::from(
-                                composing
-                                    .with(|c| c.as_ref().map(|c| c.0.clone()).unwrap_or_default()),
-                            )
-                        })
-                        .underline(),
+                        text(move || SharedString::from(composing.get().unwrap_or_default()))
+                            .underline(),
                     )
             },
         ))
@@ -678,18 +782,23 @@ fn indexed(n: u8) -> u32 {
 /// text are bound while it has the focus, [`Term::bind_keys`]). It sits on
 /// the cursor's cell, so an input method opens its candidates at the
 /// cursor; the composition is drawn by the cursor's row. It stays a point
-/// wide: what was typed stays in it until it fills (the value it is given
-/// stays empty), and a narrow input scrolls its end, where the composition
-/// is, to its one point.
+/// wide: what was typed stays in it (it is never emptied, which would end
+/// an input method's composition; [`SinkText`] sends what is new), and a
+/// narrow input scrolls its end, where the composition is, to its one
+/// point.
 fn sink(
     term: Term,
     props: TerminalProps,
     cell_width: Memo<Points>,
     lh: impl Fn() -> Points + 'static,
 ) -> impl IntoElement {
-    let (change, paste, focus, blur) = (term.clone(), term.clone(), term.clone(), term.clone());
-    let compose = term.composition;
-    let value = term.sink_value;
+    let (change, compose, paste, focus, blur) = (
+        term.clone(),
+        term.clone(),
+        term.clone(),
+        term.clone(),
+        term.clone(),
+    );
     // The cursor's cell in the terminal's points: the rows end at the
     // bottom of their frame (the list follows the end), what is left of a
     // row's height above them.
@@ -725,16 +834,10 @@ fn sink(
         .auto_correct(false)
         .auto_capitalize(AutoCapitalize::None)
         .paste_behavior(PasteBehavior::Report)
-        .value(move || value.get())
+        .value(String::new())
         .label(move || props.accessibility_label.get().unwrap_or_default())
         .on_change(move |text: &str| change.sink_changed(text))
-        .on_composition_change(move |c: &Composition| {
-            compose.set(if c.composing {
-                c.text.clone()
-            } else {
-                String::new()
-            })
-        })
+        .on_composition_change(move |c: &Composition| compose.sink_composed(c))
         .on_paste(move |p: &PasteEvent| paste.paste(&p.text))
         .on_focus(move || focus.focused.set(true))
         .on_blur(move || blur.focused.set(false))
@@ -803,6 +906,165 @@ mod tests {
     #[test]
     fn an_empty_line_has_no_segments() {
         assert!(segments(&TerminalLine::default(), 8.0, |_| 13.0).is_empty());
+    }
+
+    /// An event of the hidden input.
+    #[derive(Clone, Copy)]
+    enum Ev<'a> {
+        /// `onChange` with the input's whole text.
+        Change(&'a str),
+        /// `onCompositionChange`: whether a composition is active.
+        Compose(bool),
+    }
+    use Ev::{Change, Compose};
+
+    /// What the terminal sends for `events`, in order.
+    fn sent(events: &[Ev]) -> Vec<String> {
+        let mut sink = SinkText::default();
+        events
+            .iter()
+            .map(|e| match e {
+                Change(text) => sink.changed(text),
+                Compose(composing) => sink.composed(*composing),
+            })
+            .filter(|s| !s.is_empty())
+            .collect()
+    }
+
+    #[test]
+    fn typing_sends_each_new_character() {
+        assert_eq!(
+            sent(&[Change("l"), Change("ls"), Change("ls ")]),
+            ["l", "s", " "]
+        );
+        // The input emptied, then typed into again.
+        assert_eq!(sent(&[Change("ab"), Change("c")]), ["ab", "c"]);
+        // A change that only deletes sends nothing (the key sent its bytes).
+        assert_eq!(
+            sent(&[Change("ab"), Change("a"), Change("ac")]),
+            ["ab", "c"]
+        );
+    }
+
+    #[test]
+    fn a_composition_in_the_inputs_text_sends_only_its_commit() {
+        // iOS, Android and the web: the composed text is in the input's
+        // text, reported after the composition's start or change; the
+        // commit's change before its end.
+        let commit = [
+            Change("$"),
+            Compose(true),
+            Change("$n"),
+            Compose(true),
+            Change("$ni"),
+            Change("$你"),
+            Compose(false),
+        ];
+        assert_eq!(sent(&commit), ["$", "你"]);
+        // Typing goes on after it.
+        let mut more = commit.to_vec();
+        more.push(Change("$你a"));
+        assert_eq!(sent(&more), ["$", "你", "a"]);
+    }
+
+    #[test]
+    fn a_commit_of_the_composed_text_unchanged_is_sent_at_the_end() {
+        // The text holds what was composed already: the end commits it,
+        // whether the platform reports the text again or not.
+        let again = [Compose(true), Change("ni"), Change("ni"), Compose(false)];
+        assert_eq!(sent(&again), ["ni"]);
+        let silent = [Compose(true), Change("ni"), Compose(false)];
+        assert_eq!(sent(&silent), ["ni"]);
+    }
+
+    #[test]
+    fn a_cancelled_composition_sends_nothing() {
+        // In the input's text: the change drops it before the end.
+        let removed = [
+            Change("a"),
+            Compose(true),
+            Change("ani"),
+            Change("a"),
+            Compose(false),
+        ];
+        assert_eq!(sent(&removed), ["a"]);
+        // Outside it (Windows, GPUI, GTK): no change at all.
+        assert_eq!(sent(&[Change("a"), Compose(true), Compose(false)]), ["a"]);
+    }
+
+    #[test]
+    fn a_composition_outside_the_inputs_text_sends_its_commit_once() {
+        // Windows, GPUI, AppKit's marking and GTK: no change while it
+        // composes, the committed text's change before the end.
+        let events = [
+            Change("a"),
+            Compose(true),
+            Compose(true),
+            Change("a你"),
+            Compose(false),
+        ];
+        assert_eq!(sent(&events), ["a", "你"]);
+        // GTK commits a part while it composes the rest (outside the
+        // text): sent with the rest, at the end.
+        let partial = [Compose(true), Change("你"), Compose(true), Change("你好")];
+        assert!(sent(&partial).is_empty());
+        let mut ended = partial.to_vec();
+        ended.push(Compose(false));
+        assert_eq!(sent(&ended), ["你好"]);
+    }
+
+    #[test]
+    fn a_part_committed_while_the_rest_composes_in_the_text_is_sent_at_the_end() {
+        // Android or iOS: 日本 committed, ご composed after it. Nothing
+        // tells the committed part from the composed one, so all of it
+        // waits for the end.
+        let events = [
+            Compose(true),
+            Change("にほんご"),
+            Compose(true),
+            Change("日本ご"),
+            Change("日本語"),
+        ];
+        assert!(sent(&events).is_empty());
+        let mut ended = events.to_vec();
+        ended.push(Compose(false));
+        assert_eq!(sent(&ended), ["日本語"]);
+    }
+
+    #[test]
+    fn a_cancel_that_removes_text_matching_what_was_sent_sends_nothing() {
+        // The composed `c` repeats the end of what was sent; the cancel
+        // removes it from the text again.
+        let events = [
+            Change("abc"),
+            Compose(true),
+            Change("abcc"),
+            Change("abc"),
+            Compose(false),
+        ];
+        assert_eq!(sent(&events), ["abc"]);
+    }
+
+    #[test]
+    fn nothing_is_sent_while_an_empty_composition_lasts() {
+        // A composition that shows no text yet still holds back the
+        // changes reported during it.
+        let events = [Change("a"), Compose(true), Change("ax")];
+        assert_eq!(sent(&events), ["a"]);
+        let mut cancelled = events.to_vec();
+        cancelled.extend([Change("a"), Compose(false)]);
+        assert_eq!(sent(&cancelled), ["a"]);
+        let mut committed = events.to_vec();
+        committed.push(Compose(false));
+        assert_eq!(sent(&committed), ["a", "x"]);
+    }
+
+    #[test]
+    fn a_composition_ended_before_its_commit_is_reported_sends_the_commit_once() {
+        // The headless driver's typing after a composition: its end with
+        // nothing committed, then the typed text.
+        let events = [Change("a"), Compose(true), Compose(false), Change("a你")];
+        assert_eq!(sent(&events), ["a", "你"]);
     }
 
     #[test]

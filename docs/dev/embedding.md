@@ -35,6 +35,13 @@
   core drops the links of other schemes and keeps the rest until the app listens (`UrlScheme.on("open")`,
   `next_url_scheme_open()`). Links are untrusted input: the app checks what they ask for, and nothing navigates on its own.
   A signed package embedded in another app claims no schemes: the embedding app owns them.
+- Handoff: `nsh.json` `"handoff": true` makes `nsh package` declare `<id>.url` in `NSUserActivityTypes` on macOS and
+  iOS; the release runners turn it on when their bundle declares it (`nsh_platform_apple::handoff::declared`), and an
+  embedding app with `NshAppView.handoff` / `SurfaceOptions::handoff` / `AppOptions::handoff`. The core sends the
+  address the app sets (`Command::SetAppUrl` / `PushAppUrl`) to every platform; iOS and macOS make it the current
+  `NSUserActivity` (`nsh_platform_apple::handoff::Activity`) and hand an activity the system continues to the app as a
+  link (`continued_url`, the root's `UrlScheme` event); web pages go to the other device's browser, since the core
+  takes no web links. The other native platforms ignore the command.
 - Android's `libnsh.so` uses 16 KB ELF LOAD alignment and a 16 KB-aligned RELRO end, set by `nsh-platform-android/build.rs` and
   the generated Android runtimes' build scripts. `cargo xtask android` checks every linked library's LOAD alignment
   with the NDK's `llvm-objdump` before copying it into the runtime; `cargo xtask dist` uses the same checked libraries
@@ -163,7 +170,9 @@
   surface, no globals.
   - *Launch parameters*: `set_params(map)` before a load; the engine snapshots them when it starts (`HostChannel::bridge`)
     and `host.params` reads them synchronously (a JSON object, `{}` without any), fixed for the app's life. Later
-    requests ("open conversation X" from a notification) are events.
+    requests ("open conversation X" from a notification) are events. Parameters alone leave the channel unconfigured
+    (`HostBridge::available`): a handler or an event configures it, so the web page's `runModule({ params })` keeps
+    the app's calls on the page's host.
   - *Events* (`send(name, data)`, any thread, never waiting): `Message::HostEvent` on the attached engine
     (`HostChannel::attach`: an engine attaches when it starts and detaches when it goes, by id, so a reload's new engine
     is not detached by the old one). While no engine runs, the channel keeps them for the next (`HostInbox`, 256, the
@@ -318,7 +327,8 @@ NSH draws (`src/layers.rs`).
 
 - **One GPUI.** NSH draws with GPUI Fast (`gpui-fast` from crates.io); GPUI Kit (`gpui-kit` / `gpui-component`) must
   use it too: its `gpui-fast` feature. `cargo tree -i gpui-fast` must show one version, else the app has two GPUIs
-  and NSH's views are not the app's elements. `nsh_platform_gpui::gpui` re-exports NSH's.
+  and NSH's views are not the app's elements. `nsh_platform_gpui::gpui` re-exports NSH's. NSH builds with GPUI Fast
+  0.1.14 or later, which GPUI Kit is built on from 0.9.1.
 - **A view.** `cx.new(|cx| AppView::new(options, window, cx))`, then `view.read(cx).load(App::Js(bundle))` (or a
   Rust app's root); the app puts the entity wherever it wants as a child element. The surface fills the space its
   parent gives it and follows it when resized (each layout reports the size to the engine). Several views run at once,

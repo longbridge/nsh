@@ -613,6 +613,23 @@ fn menu_role(name: &str) -> Option<crate::desktop::MenuRole> {
 
 // --- Whole variants ---------------------------------------------------------
 
+/// `selectionMenu`: `nsh/desktop`'s `MenuItem` items. Handlers (`onSelect`)
+/// are taken by the JS runtime when it sets the prop; this decode leaves
+/// their ids at 0.
+pub(crate) fn selection_menu<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Prop> {
+    if input.is_nullish() {
+        return Some(Prop::SelectionMenu(Vec::new()));
+    }
+    input.as_list()?;
+    Some(Prop::SelectionMenu(
+        input
+            .items()
+            .iter()
+            .filter_map(|item| decode_menu_item(item, cx))
+            .collect(),
+    ))
+}
+
 /// `slot`: a recycling slot (a number) or a role.
 pub(crate) fn slot<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
     Some(Prop::Slot(match input.as_string() {
@@ -865,15 +882,26 @@ pub(crate) fn scrollbar<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop>
     Some(Prop::Scrollbar(match input.as_bool() {
         Some(shows) => shows.into(),
         None if input.is_object() => {
-            crate::ScrollbarSetting::Themed(std::sync::Arc::new(json_of(input)))
+            crate::ScrollbarSetting::Themed(std::sync::Arc::new(json_of(input, 0, &mut {
+                JSON_ENTRIES
+            })))
         }
         None => crate::ScrollbarSetting::Shown,
     }))
 }
 
+/// Deepest nesting [`json_of`] reads.
+const JSON_DEPTH: u32 = 64;
+/// Most array items and object fields [`json_of`] reads in all.
+const JSON_ENTRIES: usize = 1 << 20;
+
 /// `input` as JSON: what is neither a boolean, number, string, array nor
-/// object (a function) is `null`.
-fn json_of<I: HostInput>(input: &I) -> crate::JsonValue {
+/// object (a function) is `null`, and so is what is nested more than
+/// [`JSON_DEPTH`] deep or past `left` entries (of [`JSON_ENTRIES`]): the
+/// app's value is read natively, where neither the time budget nor the
+/// interpreter's stack limit applies, and one that holds itself would
+/// recurse until the engine thread's stack overflows.
+fn json_of<I: HostInput>(input: &I, depth: u32, left: &mut usize) -> crate::JsonValue {
     use crate::JsonValue;
     if let Some(b) = input.as_bool() {
         return JsonValue::Bool(b);
@@ -884,17 +912,32 @@ fn json_of<I: HostInput>(input: &I) -> crate::JsonValue {
     if let Some(s) = input.as_string() {
         return JsonValue::String(s);
     }
-    if input.as_list().is_some() {
-        return JsonValue::Array(input.items().iter().map(json_of).collect());
+    if depth >= JSON_DEPTH {
+        return JsonValue::Null;
+    }
+    if let Some(list) = input.as_list() {
+        let mut items = Vec::new();
+        for i in 0..list.len() {
+            if *left == 0 {
+                break;
+            }
+            *left -= 1;
+            if let Some(item) = list.item(i) {
+                items.push(json_of(&item, depth + 1, left));
+            }
+        }
+        return JsonValue::Array(items);
     }
     if input.is_object() {
-        return JsonValue::Object(
-            input
-                .entries()
-                .into_iter()
-                .map(|(k, v)| (k, json_of(&v)))
-                .collect(),
-        );
+        let mut fields = serde_json::Map::new();
+        for (key, value) in input.entries() {
+            if *left == 0 {
+                break;
+            }
+            *left -= 1;
+            fields.insert(key, json_of(&value, depth + 1, left));
+        }
+        return JsonValue::Object(fields);
     }
     JsonValue::Null
 }

@@ -300,11 +300,16 @@ await player.runModule(new URL("./bundle.js", location.href).href);
 
 `assets`（从 `asset:/` 路径到 URL 的映射）可代替 `assetBase`，`readAsset(uri)` 返回引擎需要立即读取的资源（字体）的字节，或 `null`，`data` 把运行时第一次需要时才下载的文件映射到 URL（`syntaxes`：`nsh-syntaxes.<digest>.bin`；默认是 `nsh.js` 旁边的 `nsh-<name>.bin`），`glue` 是 crate [在 Rust 中调用浏览器 API](#在-rust-中使用浏览器-api) 的运行时的 wasm-bindgen 胶水代码的 URL（`nsh-bindgen.<digest>.js`），播放器会随运行时一起加载它；`player.runModule(url, { capabilities, appId })` 在应用声明的能力（它的 `capabilities.json`）下运行应用，并把它的存储保存在 `nsh.json` 的 id 之下（没有 id 时保存在页面路径之下）。这些选项和应用图片里的相对 URL 都相对于创建播放器时页面的 URL（`player.baseURL`）解析，所以页面把地址改到其他目录后，它们仍能加载。`nsh package --target web` 写出的页面都用到了。
 
-`runModule(url, { chunks })` 还可以指定[拆分 bundle](#拆分-bundle) 的 chunk 所在位置；`runModule(url, { params })` 指定应用的 `host.params`：页面已经为应用准备好的 JSON 对象，比如首屏的数据。`nsh package --target web` 写出的页面里如果有 `<script type="application/json" id="nsh-params">`，就把它的 JSON 传给应用，这样提供页面的服务器可以随页面把数据交给应用，应用直接显示，不必再请求一次。
+`runModule(url, { chunks })` 还可以指定[拆分 bundle](#拆分-bundle) 的 chunk 所在位置；`runModule(url, { params })` 指定应用的 `host.params`：页面已经为应用准备好的 JSON 对象，比如首屏的数据。`nsh package --target web` 写出的页面里如果有 `<script type="application/json" id="nsh-params">`，就把它的 JSON 传给应用，这样提供页面的服务器可以随页面把数据交给应用，应用直接显示，不必再请求一次。参数和页面的[宿主](#宿主的函数)一起使用：应用的 `host.call` 照样交给 `createPlayer` 的 `host` 回答。
 
 `player.runSource(code, { name, sourceMap, capabilities, appId })` 运行以源码文本给出的 ES 模块，选项相同。使用 `nsh-playground.wasm` 时，`player.compileAndRun(tsx, name, options)` 会先编译 TSX，再用 `runSource` 的选项运行，结果是编译错误或 `null`；`player.compile(tsx)` 返回 `{ code }` 或 `{ error }`。
 
 容器的尺寸就是应用的窗口（`windowSize()`），调整容器大小会同步调整应用。`player.setDark(true)` 可在运行时切换外观，应用通过 `colorScheme()` 和 `dark:` 类感知到变化。
+
+应用的生命周期就是页面的生命周期。监听退出请求的应用（`Application.on("quitRequest")`，见
+[退出](../modules/nsh-desktop.md#退出)）在用户离开嵌入它的页面时会被询问，浏览器可能询问用户是否离开；页面离开时它的
+`quit` listener 会运行。想自己掌管离开的页面在不含 `"application": true` 的能力下运行应用
+（`runModule(url, { capabilities })`）：用户离开时不会询问应用，页面离开时它的 `quit` listener 仍会运行。
 
 Dialog、Sheet 和 AlertDialog 默认覆盖容器。设置 `dialogs: "viewport"` 后，它们像页面自己的模态对话框一样覆盖整个浏览器窗口，应用的窗口仍是容器：`Dialog` 按窗口的尺寸和安全区域布局，从窗口底边滑入，背景覆盖整个页面，在它上面滚动鼠标滚轮时页面保持不动。对话框显示在浏览器的顶层（Chrome 114、Safari 17、Firefox 125 及更新版本），所以无论容器在页面的什么位置，它都在页面其他内容之上；更早的浏览器里它覆盖容器。
 

@@ -196,7 +196,15 @@ impl RichEditorSelection {
 
 /// The events of a [`RichEditor`].
 #[derive(Debug, Clone, PartialEq, Event)]
+#[non_exhaustive]
 pub enum RichEditorEvent {
+    /// The laid-out document's size changed (as `Input`'s
+    /// `onContentSizeChange`): its full flow extent in points, offscreen
+    /// blocks included, the `content` part's padding excluded.
+    ContentSizeChange {
+        /// The full flow extent in points.
+        content_size: Size<Points>,
+    },
     /// The document changed.
     #[args(change)]
     Change(RichEditorChange),
@@ -211,6 +219,11 @@ pub enum RichEditorEvent {
     Focus,
     /// The editor lost the focus.
     Blur,
+    /// An input method started or ended composition in this view. Reports
+    /// only state transitions, after the session and composition are
+    /// updated; a cancel can end composition without a document change.
+    #[args(composing)]
+    CompositionChange(bool),
 }
 
 /// The methods of a [`RichEditor`]'s ref.

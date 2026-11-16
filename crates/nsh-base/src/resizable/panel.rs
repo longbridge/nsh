@@ -102,6 +102,11 @@ pub fn ResizablePanelGroup(
 ) -> impl IntoElement {
     let group = GroupContext::new(props.axis.get_untracked());
     provide_context(group.clone());
+    let shows_handles = use_context::<ShowHandles>().is_none_or(|show| show.0);
+    if !shows_handles {
+        // What its panels hold is the app's: a group in there has handles.
+        provide_context(ShowHandles(true));
+    }
     {
         let group = group.clone();
         effect(move || {
@@ -114,15 +119,23 @@ pub fn ResizablePanelGroup(
     }
     let handles = {
         let group = group.clone();
-        computed(move || {
-            group.tick.get();
-            group.model.borrow().handles()
+        computed(move || match shows_handles {
+            true => {
+                group.tick.get();
+                group.model.borrow().handles()
+            }
+            false => Vec::new(),
         })
     };
     // In a terminal the panes are a Cell apart, the handle's line between
     // them: a column (8 points) beside each other, a row (24 points, the
-    // least a terminal gives a row of) one above the other.
+    // least a terminal gives a row of) one above the other. Without handles
+    // they touch.
     let terminal = terminal_cell().is_some();
+    let (column, row) = match shows_handles {
+        true => (px(8.0), px(24.0)),
+        false => (px(0.0), px(0.0)),
+    };
     view()
         .size_full()
         .style_with(move |s| match (props.axis.get(), terminal) {
@@ -130,8 +143,8 @@ pub fn ResizablePanelGroup(
             (Axis::Vertical, false) => s.flex_col(),
             // A terminal keeps no percentage height for a box of content:
             // the group grows to fill its parent instead.
-            (Axis::Horizontal, true) => s.flex_row().flex_grow(1.0).gap(px(8.0)),
-            (Axis::Vertical, true) => s.flex_col().flex_grow(1.0).gap(px(24.0)),
+            (Axis::Horizontal, true) => s.flex_row().flex_grow(1.0).gap(column),
+            (Axis::Vertical, true) => s.flex_col().flex_grow(1.0).gap(row),
         })
         .on_layout({
             let group = group.clone();
@@ -326,6 +339,16 @@ pub fn ResizablePanel(
         .child(props.children)
         .into_element()
 }
+
+/// Whether a group places handles between its panels, read as it is made
+/// (none provided: it does). A dock area whose sizes its owner keeps
+/// (`SplitView`'s columns) provides `ShowHandles(false)` where it makes a
+/// split: that group has no handles at all, nothing a pointer drags, a
+/// screen reader adjusts or Tab stops on, rather than handles that do
+/// nothing (`disabled`). The group provides `ShowHandles(true)` to what
+/// it holds, so a group in its panels' content has its handles.
+#[derive(Clone, Copy)]
+pub(crate) struct ShowHandles(pub(crate) bool);
 
 /// What a group's panels and handles share: its model and the signal
 /// that tells them it changed.

@@ -1273,12 +1273,18 @@ pub(crate) fn wheel_event(
         |v| shown(v) && v.state().events.contains(EventKind::Wheel),
         || {
             let hit = pick(&surface.input_root(), x, y, true)?;
-            input::wheel_listener(
+            let (view, takes) = input::wheel_listener(
                 chain(&hit.view),
                 |v| v.state().events.contains(EventKind::Wheel),
                 // A multiline field scrolls its own lines.
                 |v| matches!(v.kind(), ViewKind::Scroll | ViewKind::Input),
-            )
+            )?;
+            let along = input::wheel_along(
+                view.state().props.pan_activation,
+                horizontal,
+                event.modifiers.ctrl,
+            );
+            Some((view, takes && along))
         },
     );
     let Some((view, takes)) = routed else {
@@ -1313,7 +1319,7 @@ pub(crate) fn wheel_event(
 }
 
 /// A wheel event from the window.
-pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
+pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) -> bool {
     let (x, y) = (event.x, event.y);
     surface.input.last.set(Some((x, y)));
     surface
@@ -1325,28 +1331,17 @@ pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
     // Mice have no pinch: Ctrl + wheel pinches, as it zooms on desktops
     // (precision touchpads pinch this way too).
     if event.modifiers.ctrl && dy != 0.0 && wheel_zoom(surface, x, y, dy) {
-        return;
+        return true;
     }
     if !event.precise && dx == 0.0 && event.modifiers.shift {
         (dx, dy) = (dy, dx);
-    }
-    // A multiline field under the pointer scrolls its own lines first, as
-    // GTK's and AppKit's text views do.
-    if dy.abs() > dx.abs()
-        && let Some(hit) = pick(&surface.input_root(), x, y, true)
-        && let Some(field) = chain(&hit.view)
-            .into_iter()
-            .find(|v| v.kind() == ViewKind::Input)
-        && crate::text_input::wheel(&field, dy)
-    {
-        return;
     }
     let kind = if event.precise {
         WheelInput::Touchpad { phased: false }
     } else {
         WheelInput::Step
     };
-    wheel_input(surface, x, y, dx, dy, event.time * 1000.0, kind);
+    wheel_input(surface, x, y, dx, dy, event.time * 1000.0, kind)
 }
 
 /// A key the surface synthesized (a menu role's edit key, the window's own
@@ -1691,6 +1686,23 @@ fn collect_stops(surface: &Surface, view: &NshView, out: &mut Vec<NshView>) {
             _ => s.props.focus_stop(s.events.contains(EventKind::Press)),
         }
     }));
+}
+
+/// Whether a press at `(x, y)` (root coordinates) lands on a view that
+/// takes the keyboard: an enabled field, a native component that does, or
+/// a view marked focusable.
+pub(crate) fn focusable_at(surface: &Surface, x: f32, y: f32) -> bool {
+    let Some(hit) = pick(&surface.input_root(), x, y, true) else {
+        return false;
+    };
+    chain(&hit.view).iter().any(|view| {
+        let s = view.state();
+        match s.kind {
+            ViewKind::Input => !s.props.accessibility.state.disabled,
+            ViewKind::Native => crate::native::focusable(surface, s.id),
+            _ => s.props.focusable == Some(true),
+        }
+    })
 }
 
 // --- Hit testing --------------------------------------------------------------------
@@ -2294,6 +2306,9 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     } else {
                         nsh_core::PointerType::Touch
                     },
+                    pressure: TouchPoint::default_pressure(phase, is_changed),
+                    tilt_x: 0.0,
+                    tilt_y: 0.0,
                 }
             })
             .collect()
@@ -2302,6 +2317,7 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
         phase,
         timestamp: changed.time,
         points,
+        modifiers: changed.modifiers.core(),
         activated,
     };
     surface.event(
@@ -2385,19 +2401,20 @@ fn find_press(
             }
         }
     }
-    views.iter().find_map(|v| {
-        let s = v.state();
-        (has_press(s.events) && !s.props.accessibility.state.disabled).then(|| {
-            Press::new(
+    nsh_core::input::pick_press(
+        views.iter().map(|v| {
+            let s = v.state();
+            (
                 v.clone(),
                 s.id,
                 s.events,
                 s.props.long_press_delay,
-                generation,
+                s.props.accessibility.state.disabled,
             )
-            .clicked(modifiers.core(), clicks)
-        })
-    })
+        }),
+        generation,
+    )
+    .map(|p| p.clicked(modifiers.core(), clicks))
 }
 
 fn press_in(surface: &Rc<Surface>, press: &mut Press, at: (f32, f32)) {
@@ -2424,7 +2441,7 @@ fn press_event(surface: &Surface, press: &Press, kind: EventKind, (x, y): (f32, 
         modifiers: press.modifiers,
         clicks: press.clicks,
     };
-    surface.event(press.node, kind, EventPayload::Press(event));
+    surface.event(press.target(kind), kind, EventPayload::Press(event));
 }
 
 fn cancel_press(surface: &Rc<Surface>, p: &mut Pointer) {
@@ -3024,8 +3041,8 @@ enum WheelInput {
     Stop { fling: bool },
 }
 
-/// The innermost scroll view at `(x, y)` that can move by `(dx, dy)`
-/// (nested views fall through to outer ones at their edges). Scroll views
+/// The innermost scroll view or multiline field at `(x, y)` that can move
+/// by `(dx, dy)` (a new gesture falls through at an edge). Scroll views
 /// along the wheel's axis take it: a vertical wheel over a carousel
 /// scrolls the page around it, as in browsers; horizontal views take
 /// vertical wheels only where nothing around scrolls vertically.
@@ -3035,9 +3052,29 @@ fn scroll_target(surface: &Surface, x: f32, y: f32, dx: f32, dy: f32) -> Option<
         chain(&hit.view),
         Points(dx),
         Points(dy),
-        |v| v.state().scroll.as_ref().map(|s| s.horizontal),
-        |v| v.kind() == ViewKind::Scroll && crate::scroll::can_scroll(v, dx, dy),
+        |v| {
+            if v.kind() == ViewKind::Input {
+                (crate::text_input::can_scroll(v, -1.0) || crate::text_input::can_scroll(v, 1.0))
+                    .then_some(false)
+            } else {
+                v.state().scroll.as_ref().map(|s| s.horizontal)
+            }
+        },
+        |v| match v.kind() {
+            ViewKind::Input => dy.abs() > dx.abs() && crate::text_input::can_scroll(v, dy),
+            ViewKind::Scroll => crate::scroll::can_scroll(v, dx, dy),
+            _ => false,
+        },
     )
+}
+
+/// Apply a delta to the latched target, even when it has reached its edge.
+fn scroll_wheel(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32) {
+    if view.kind() == ViewKind::Input {
+        crate::text_input::wheel(view, dy);
+    } else {
+        crate::scroll::wheel(surface, view, dx, dy);
+    }
 }
 
 /// Whether `view` is still shown in its surface.
@@ -3094,10 +3131,28 @@ fn wheel_input(
             *input.latch.borrow_mut() = Some((view.clone(), horizontal, time));
             // Without a begin, the scroll module takes it as a mouse wheel:
             // it settles (and snaps) by itself once the notches stop.
-            crate::scroll::wheel(surface, &view, dx, dy);
+            scroll_wheel(surface, &view, dx, dy);
             true
         }
         WheelInput::Touchpad { phased } => {
+            // Phaseless devices and a field's native momentum expire by idle
+            // time, including when the timer has not run before this event.
+            let expired = input
+                .wheel
+                .borrow()
+                .as_ref()
+                .is_some_and(|w| !w.phased && time - w.last >= TOUCHPAD_IDLE);
+            if expired {
+                wheel_input(
+                    surface,
+                    x,
+                    y,
+                    0.0,
+                    0.0,
+                    time,
+                    WheelInput::Stop { fling: false },
+                );
+            }
             if dx == 0.0 && dy == 0.0 {
                 return input.wheel.borrow().is_some();
             }
@@ -3123,7 +3178,9 @@ fn wheel_input(
                     return false;
                 };
                 *input.wheel.borrow_mut() = Some(Wheel::new(view.clone(), time, phased));
-                crate::scroll::wheel_begin(surface, &view);
+                if view.kind() == ViewKind::Scroll {
+                    crate::scroll::wheel_begin(surface, &view);
+                }
             }
             let view = {
                 let mut wheel = input.wheel.borrow_mut();
@@ -3142,13 +3199,24 @@ fn wheel_input(
             if !phased {
                 watch_touchpad(surface);
             }
-            crate::scroll::wheel(surface, &view, dx, dy);
+            scroll_wheel(surface, &view, dx, dy);
             true
         }
         WheelInput::Stop { fling } => {
             let Some(mut w) = input.wheel.borrow_mut().take() else {
                 return false;
             };
+            // Fields have no scroll-view physics. Keep their target for the
+            // system's momentum, then release it on idle or a new begin.
+            if w.view.kind() == ViewKind::Input {
+                if fling && !w.held {
+                    w.phased = false;
+                    w.last = time;
+                    *input.wheel.borrow_mut() = Some(w);
+                    watch_touchpad(surface);
+                }
+                return true;
+            }
             // A gesture that ended by its phase (fingers lifted) glides on
             // with its velocity, and the system's momentum that follows is
             // swallowed; one that ended by a pause glides no more (Windows'
@@ -3202,7 +3270,7 @@ pub(crate) enum GesturePhase {
 /// and end. Fingers resting on the touchpad stop a glide; lifting them
 /// glides on with the gesture's velocity. Touchpads whose events have no
 /// phases (every event [`GesturePhase::Moved`]) end once they pause.
-pub(crate) fn touchpad(surface: &Rc<Surface>, event: WheelEvent, phase: GesturePhase) {
+pub(crate) fn touchpad(surface: &Rc<Surface>, event: WheelEvent, phase: GesturePhase) -> bool {
     let input = &surface.input;
     let time = event.time * 1000.0;
     let (x, y) = (event.x, event.y);
@@ -3220,7 +3288,7 @@ pub(crate) fn touchpad(surface: &Rc<Surface>, event: WheelEvent, phase: GestureP
             );
             if event.dx == 0.0 && event.dy == 0.0 {
                 touchpad_hold(surface, x, y, time);
-                return;
+                return input.wheel.borrow().is_some();
             }
         }
         GesturePhase::Moved => {
@@ -3237,7 +3305,7 @@ pub(crate) fn touchpad(surface: &Rc<Surface>, event: WheelEvent, phase: GestureP
                     time,
                     WheelInput::Stop { fling: false },
                 );
-                return;
+                return true;
             }
         }
         GesturePhase::Ended | GesturePhase::Cancelled => {}
@@ -3245,9 +3313,10 @@ pub(crate) fn touchpad(surface: &Rc<Surface>, event: WheelEvent, phase: GestureP
     let phased =
         phase != GesturePhase::Moved || input.wheel.borrow().as_ref().is_some_and(|w| w.phased);
     if event.modifiers.ctrl && event.dy != 0.0 && wheel_zoom(surface, x, y, event.dy) {
-        return;
+        return true;
     }
-    wheel_input(
+    let ongoing = input.wheel.borrow().is_some();
+    let handled = wheel_input(
         surface,
         x,
         y,
@@ -3260,6 +3329,7 @@ pub(crate) fn touchpad(surface: &Rc<Surface>, event: WheelEvent, phase: GestureP
         let fling = phase == GesturePhase::Ended;
         wheel_input(surface, x, y, 0.0, 0.0, time, WheelInput::Stop { fling });
     }
+    handled || ongoing
 }
 
 /// A touchpad pinch event in `phase` at `(x, y)`: `delta` is GPUI's (the
@@ -3379,22 +3449,26 @@ fn pinch_scale(scale: f32, absolute: f32, delta: f32) -> f32 {
     next.max(0.01)
 }
 
-/// Fingers rest on the touchpad at `(x, y)`: the scroll view under them
-/// stops gliding, until they scroll or lift.
+/// Fingers rest on the touchpad at `(x, y)`: hold the field or scroll view
+/// under them, stopping a scroll view's glide until they scroll or lift.
 fn touchpad_hold(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {
     let Some(hit) = pick(&surface.input_root(), x, y, true) else {
         return;
     };
-    let Some(view) = chain(&hit.view)
-        .into_iter()
-        .find(|v| v.kind() == ViewKind::Scroll)
-    else {
+    let Some(view) = chain(&hit.view).into_iter().find(|v| {
+        v.kind() == ViewKind::Scroll
+            || (v.kind() == ViewKind::Input
+                && (crate::text_input::can_scroll(v, -1.0)
+                    || crate::text_input::can_scroll(v, 1.0)))
+    }) else {
         return;
     };
     let mut wheel = Wheel::new(view.clone(), time, true);
     wheel.held = true;
     *surface.input.wheel.borrow_mut() = Some(wheel);
-    crate::scroll::wheel_begin(surface, &view);
+    if view.kind() == ViewKind::Scroll {
+        crate::scroll::wheel_begin(surface, &view);
+    }
 }
 
 /// Watches the precise scroll for the pause that ends it.

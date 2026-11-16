@@ -6,7 +6,7 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` holds what only desktops have: the app's windows and their title bars, the displays, the application menu and context menus, the tray and global shortcuts. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: windows of the app's own (`window()`), the window a component renders in (`current_window()`, a `WindowRef`), the displays (`displays`), `quit`, `restart`, opening at login (`launch_at_login`, `set_launch_at_login`), the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), the tray (`set_tray`) and global shortcuts (`register_global_shortcut`), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its windows and menus are there. An app that declares capabilities needs `"application": true` for the main window, the application menu, the tray, global shortcuts, `quit`, `restart` and launching at login ([capabilities](../docs/sandbox-and-capabilities.md#application)); without it they do nothing. Context menus and the windows the app opens (granted by `windows`) need no `application`.
+`nsh/desktop` holds what only desktops have: the app's windows and their title bars, the displays, the application menu and context menus, the tray and global shortcuts. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: windows of the app's own (`window()`), the window a component renders in (`current_window()`, a `WindowRef`), the displays (`displays`), `quit`, `restart`, opening at login (`launch_at_login`, `set_launch_at_login`), the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), the tray (`set_tray`) and global shortcuts (`register_global_shortcut`), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its windows and menus are there. An app that declares capabilities needs `"application": true` for the main window, the application menu, the tray, global shortcuts, `quit` and quit requests, `restart` and launching at login ([capabilities](../docs/sandbox-and-capabilities.md#application)); without it they do nothing. Context menus and the windows the app opens (granted by `windows`) need no `application`.
 
 ```rust tabs
 use nsh_core::{
@@ -338,7 +338,7 @@ The main window is there when the app starts. nsh.json's `window` holds its laun
 }
 ```
 
-It takes the [options](#options) `defaultSize`, `defaultPosition`, `display` and `defaultMode`, and every [attribute](#attributes). While the app runs, `currentWindow()` outside any `<Window>` (or `Window.get("main")`) is the main window, and its `set()` changes the same attributes.
+It takes the [options](#options) `defaultSize`, `defaultPosition`, `display` and `defaultMode`, and every [attribute](#attributes). While the app runs, `currentWindow()` outside any `<Window>` (or `Window.get("main")`) is the main window, and its `set()` changes the same attributes. One nsh.json serves every build: the desktops apply these settings, a web page takes `title` as its title, and on iOS and Android the app fills its view in the screen.
 
 `"defaultVisible": false` starts the app with its main window hidden: the window is made and the app runs in it, unseen and without taking the keyboard, until the app shows it with `show()` or `focus()`, as a [tray](#tray) app does when its icon is clicked. Until then `state()` reports it hidden; the first time it shows, it opens in its `defaultMode`. A link of one of the app's [URL schemes](./nsh.md#urlscheme) opened while the app runs shows it too, and so does opening the app again on macOS (its Dock icon, the Finder). `nsh run` and `nsh test --target` start it hidden as well. Their development host opens the window as it does for every app: with `--target windows` (`nsh run`'s default on Windows) at the app's `defaultSize` and in its `defaultMode`, with `--target macos`, `linux` or `gpui` at the host's size in the normal mode; GPUI shows a window as it opens on Linux, so with `--target gpui` there it shows. Under `nsh run` an error shows it, so the error is seen.
 
@@ -429,9 +429,48 @@ platform's quit key (Cmd+Q, Ctrl+Q) quit at once while nothing listens to `quitR
 (unsaved changes, a running upload) listens to it with `Application.on("quitRequest", listener)` (Rust:
 `on_quit_request`), as AppKit's `applicationShouldTerminate:`: the Quit item, the quit key and the Dock's Quit then
 reach the listener and nothing quits; the app asks, then calls `quit()`, which always quits. Once the last listener
-stops, the Quit item and the key quit at once again. The system ending the app (the user logging out, the machine
-shutting down) never asks. It applies to standalone apps on macOS, Windows and Linux; a GPUI app that owns the window
+stops, the Quit item and the key quit at once again. By default, the system ending the app (the user logging out, the machine
+shutting down) runs the app's cleanup and quits. It applies to standalone apps on macOS, Windows and Linux; a GPUI app that owns the window
 gets the request as `CloseRequest::Quit`.
+
+Standalone macOS apps can include system requests and main-window closes in the same confirmation:
+
+```tsx
+Application.setQuitRequestOptions({ system: true, mainWindowClose: true });
+Application.on("quitRequest", async () => {
+  if (await confirmSaveAndQuit()) Application.quit();
+  else Application.cancelQuitRequest();
+});
+```
+
+Both options default to `false`, and each `setQuitRequestOptions` call replaces them. Rust uses
+`set_quit_request_options(QuitRequestOptions)` and `cancel_quit_request()` from `nsh_core::element::desktop`;
+`QuitRequestOptions` is in `nsh_core::desktop`. The options apply while a quit request listener is registered.
+Rust callers can build the options with `QuitRequestOptions::default().system(true).main_window_close(true)`.
+Replacing the app cancels its pending confirmation and restores the default options.
+
+With `system: true`, logout, restart and shutdown wait for the app's answer. `quit()` approves the request after the
+app's cleanup runs, then AppKit terminates the process. Rust hosts put that cleanup in `on_app_quit`, rather than
+after `run_app`. `cancelQuitRequest()` cancels the system request and keeps the app running. An unanswered system
+request is cancelled after 110 seconds, before AppKit's logout timeout. Removing the last listener or changing the
+options also cancels a pending request.
+
+With `mainWindowClose: true`, a user closing the main window asks the quit listener when that close would end the
+app. A window configured to stay running on close still hides. A window with `closeOnPress: false` keeps using
+`closePress` instead, so one close uses one confirmation handler. Closing the main window, rather than counting
+every window, follows the standalone runner's existing exit rule. An explicit `WindowRef.close()` keeps its existing
+behavior. While a confirmation is pending, repeated Quit or eligible main-window close requests share it. If a system request arrives
+during that confirmation, the same answer also approves or cancels the system request.
+
+On the web, the user leaving the page (closing its tab, reloading, going to another site) is the quit request: it
+reaches the listener as the user leaves, so the example below works there as it is. A listener that calls `quit()` right
+away lets the page go without a question. A listener that asks first (here `askToSave()`) has the browser ask the user
+whether to leave; when the user stays, the app's own question is on the page, and once the work is saved the next leave
+goes at once. Desktop browsers show their question after the user has interacted with the page. However the user leaves,
+the app's `quit` listeners start once as the page goes: what they do synchronously completes, and work they await runs
+for as long as the page remains. A page the browser keeps in its back / forward cache keeps its app running, and the app
+goes on when the user comes back. This works whatever `isAvailable` says; an app that declares capabilities lists
+`"application": true` for it.
 
 ```rust tabs
 use nsh_core::{
@@ -470,7 +509,7 @@ function Editor() {
 
 `Application.on("quit", listener)` (Rust: `on_app_quit`) is the app's cleanup, as GPUI's `on_app_quit`: it runs
 however the app stops (its Quit item, `quit()`, its last window closing, the Dock's Quit, the system ending it when the
-user logs out, a host app removing its view), and cannot keep it running. A promise the listener returns is awaited,
+user logs out, a host app removing its view, the web page going), and cannot keep it running. A promise the listener returns is awaited,
 200 ms at most for all of them, while the platform waits for the app; past that the app stops. A listener added while a
 component renders goes with the component; the function `on` returns stops it.
 
@@ -747,10 +786,17 @@ interface Display {
   primary: boolean;
   scaleFactor: number;
   refreshRate: number | null;  // in hertz
+  cutouts: Bounds[];           // what a camera housing hides: a MacBook's notch
 }
 ```
 
 `win.state()` is a window as the platform reports it, `windowState()` the current window's, and `displays()` the displays, the primary one first; all are reactive. Every rectangle is in points, in screen coordinates: from the primary display's top left corner, with `y` growing down, as `setBounds` takes them. A change of mode, of display, of focus, or of being minimized or visible is reported at once; a move or a resize once the window stops for a moment, so what reads them runs once per move rather than at every step. Rust: `WindowRef::state() -> Option<WindowState>` and `displays() -> Vec<Display>` (`nsh_core::desktop`'s types); reading them subscribes to changes.
+
+A display's `cutouts` are the parts of it a camera housing covers, in the same screen coordinates: on a MacBook with a notch, one rectangle at the top's middle, as tall as the menu bar. A window can sit beside the notch, or show content that grows out of it; on every other display the list is empty.
+
+```tsx
+const notch = () => displays().flatMap((d) => d.cutouts)[0] ?? null;
+```
 
 While the window is on the screen, [`lifecycle()`](./nsh.md#device) reporting `"background"` means other windows cover it.
 

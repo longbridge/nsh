@@ -522,7 +522,7 @@ class AnimatedNode {
     extrapolateRight?: Extrapolation;
     easing?: Easing;
   }): AnimatedNode;
-  diffClamp(min: number, max: number, options?: { snap?: boolean }): AnimatedNode;
+  diffClamp(min: number | AnimatedNode, max: number | AnimatedNode, options?: { snap?: boolean }): AnimatedNode;
   add(b: AnimatedNode | number): AnimatedNode;
   sub(b: AnimatedNode | number): AnimatedNode;
   mul(b: AnimatedNode | number): AnimatedNode;
@@ -538,7 +538,7 @@ type Extrapolation = "extend" | "clamp" | "identity";
 | 方法 | Rust | 说明 |
 |---|---|---|
 | `interpolate(config)` | `interpolate(&input, &output)`、`interpolate_colors(&input, &colors)`、`interpolate_with(&input, output, Interpolation { … })` | 按分段区间映射输入。`outputRange` 可以是数字、颜色（`"#ff0000"`、`"rgba(…)"`）或角度（`"45deg"`、`"1rad"`）。超出 `inputRange` 时默认钳制（clamp）；`extrapolate`（或 `extrapolateLeft` / `extrapolateRight`）可以是 `"extend"`（沿直线延伸）、`"clamp"` 或 `"identity"`（直接输出输入值）。`easing` 决定每一段的曲线。Rust 接受数字、主题颜色（跟随外观）以及供 `bind_rotate` 使用的角度（度）。 |
-| `diffClamp(min, max, options?)` | `diff_clamp(min, max)`、`diff_clamp_with(min, max, DiffClamp::snapping())` | 跟随输入的变化量，但把结果限制在 `min..max` 内：内容向上滚动时隐藏、一旦向下滚动就重新出现的标题栏。`snap: true` 让它在滚动视图停下时用 200 ms 停到较近的一端；只有输入达到 `max` 后才会停在 `max`。 |
+| `diffClamp(min, max, options?)` | `diff_clamp(min, max)`、`diff_clamp_with(min, max, DiffClamp::snapping())` | 跟随输入的变化量，但把结果限制在 `min..max` 内：内容向上滚动时隐藏、一旦向下滚动就重新出现的标题栏。`snap: true` 让它在滚动视图停下时用 200 ms 停到较近的一端；只有输入达到 `max` 后才会停在 `max`。上下限可以是数字或动画值。 |
 | `add`、`sub`、`mul`、`div` | `add`、`sub`、`mul`、`div` | 与另一个节点或常量做算术运算。 |
 | `mod(b)` | `modulo(b)` | 取模，`b` 为正时结果不会为负（比如把角度保持在 0..360）。 |
 
@@ -944,6 +944,24 @@ view().style_when(wide, |s| s.flex_row())
 const wide = () => windowSize().width >= 600;
 
 <View style={{ flexDirection: wide() ? "row" : "column" }}>{/* ... */}</View>
+```
+
+### horizontalSizeClass / verticalSizeClass
+
+```ts
+export type SizeClass = "compact" | "regular";
+const horizontalSizeClass: Accessor<SizeClass>;
+const verticalSizeClass: Accessor<SizeClass>;
+```
+
+读取窗口横向和纵向可用空间的响应式分类。iOS 使用当前视图的 UIKit trait collection，随旋转和分屏变化；系统尚未提供分类时按窗口尺寸回退。其他平台（含桌面、Android 和 Web）分别按窗口的宽、高判断：小于 600pt 为 `compact`，600pt 及以上为 `regular`。横向阈值与 DockArea 一致；Android 的点对应 dp，Web 对应 CSS 像素。分类变化时才通知读取者。
+
+Rust：`horizontal_size_class()` / `vertical_size_class()` 返回 `SizeClass::Compact` 或 `SizeClass::Regular`，由 `nsh_core::prelude` 导出。
+
+```tsx
+import { horizontalSizeClass, Text } from "nsh";
+
+<Text>{horizontalSizeClass() === "compact" ? "Compact layout" : "Expanded layout"}</Text>
 ```
 
 ### colorScheme
@@ -2040,6 +2058,14 @@ Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`s
 await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
 ```
 
+`sound` 播放应用自带的声音来代替系统默认提示音，让用户分辨出这个应用的通知（例如新的客户消息）；`silent: true` 优先于它。传入打包的资源路径或导入的声音。`nsh package` 会把应用的声音复制到系统读取的位置：Apple 平台从 `Library/Sounds` 按文件名播放不超过 30 秒的 `.caf`、`.aiff`、`.wav`，所以每个声音的文件名要不同；Android 播放 `.ogg`、`.mp3`、`.wav` 原始资源，每个声音一个通知渠道，用户可在系统设置里修改；Linux 把文件交给通知服务（`sound-file`）。Windows（未打包的应用）、Web，以及找不到声音的平台播放默认提示音。
+
+```tsx
+import ding from "./sounds/message.caf";
+
+await Notifications.show({ id: "chat:42", title: "Ada", body: "Are you there?", sound: ding });
+```
+
 ### Notifications.closeAll
 
 `closeAll()` 移除应用显示的全部通知，包括已显示的和等待显示的。在用户退出登录时调用，让通知里的内容随账号一起清掉。Apple 平台、Windows 和 Android 的系统通知中心会跨运行保留通知，`closeAll()` 在这些平台上移除 NSH 显示的通知，包括应用上一次运行留下的，嵌入方自己的通知保留。Linux 和 Web 上它移除当前运行的应用显示的通知。
@@ -2120,7 +2146,7 @@ const UrlScheme: {
 | 平台 | `url()` | `setUrl(url)` |
 | --- | --- | --- |
 | Web，应用占据整个页面 | 页面的地址：加载时的地址、`setUrl` 设置的地址，或浏览器后退回到的那条记录的地址 | 替换当前历史记录的地址，与 `history.replaceState` 一样解析（相对于页面的 `<base href>`），在同一轮压入或弹出的页面的历史记录之后生效；带 `history: "push"` 时，像 `history.pushState` 一样在它之后新建一条自己的记录（见下文） |
-| 原生平台，以及 iframe 中的 Web | 最后一个打开应用的链接（启动应用的链接同时作为第一个 `open` 到达），或之后 `setUrl` 设置的地址；两者都没有时为 `null` | 为 `url()` 保存这个 URL，带 `history: "push"` 时也一样（没有可以压入的历史记录）；把它交给系统（Handoff、App Links）由嵌入应用负责 |
+| 原生平台，以及 iframe 中的 Web | 最后一个打开应用的链接（启动应用的链接同时作为第一个 `open` 到达），或之后 `setUrl` 设置的地址；两者都没有时为 `null` | 为 `url()` 保存这个 URL，带 `history: "push"` 时也一样（没有可以压入的历史记录）；在 iOS 和 macOS 上，开启了的应用还会把它交给系统（[见下文](#handoff)） |
 
 URL 不是字符串、超过 16 KiB 或含有空白字符时抛出 `TypeError`；在 Web 上应用占据整个页面时，不是页面同源 URL 的地址同样抛出 `TypeError`。
 应用只有一个地址，Rust 读的也是它，`url()` 直接读取它：链接、Rust 的 `set_app_url` 和 `setUrl` 的改动都立即可见。在上表的平台上，启动应用的链接在应用的代码运行之前就已到达，所以第一次调用 `url()` 就能读到它，它同时也作为第一个 `open` 到达（在 Web 上，页面的地址从一开始就在）。
@@ -2179,6 +2205,10 @@ UrlScheme.on("change", ({ url }) => current.set(tabOf(url)));
 地址归页面的记录，不另建记录（就像 `onChange` 设置的那样）；在弹出页面的那一轮，它是后退落到的那条记录之后的一条记录。压入当前显示的
 地址不会新建记录；同一轮里最后的地址生效，压入优先于替换。`history` 为其他值时抛出 `TypeError`。Rust 调用
 `set_app_url_with(url, HistoryBehavior::Push)`（`nsh_core::url_scheme`）。
+
+#### Handoff
+
+在 iOS 和 macOS 上，应用用 `nsh.json` 的 `"handoff": true` 把地址交给系统（嵌入应用设置 `NshAppView.handoff`，或 Rust 选项中的 `handoff`）：`setUrl` 设置的地址成为当前的 `NSUserActivity`，Handoff 可以在用户的其他设备上接着打开它。`http(s)` 地址是网页，另一台设备在浏览器中打开它。其他绝对地址由另一台设备上的应用自己接着打开（Handoff 只在同一开发团队签名的应用之间进行），作为 `open` 到达的链接（属于 `schemes` 中的 scheme）；`nsh package` 会在 `NSUserActivityTypes` 中声明它的活动类型 `<id>.url`。相对地址只属于应用自己。Android 没有 App Links 的对外对应物，只为 `url()` 保存地址。
 
 ### UrlScheme.on("change")
 
@@ -2990,6 +3020,8 @@ on_key_with("space", KeyOptions { for_focus: true, ..KeyOptions::default() }, mo
   onBlur={() => unbind?.()}
 />
 ```
+
+按键归最新的对话框：焦点留在被对话框盖住的视图上时（菜单项打开对话框，菜单关闭时把焦点还给触发器），回车和空格交给对话框的绑定，这个视图的 `forFocus` 绑定和按下都要等对话框关闭后才生效。
 
 菜单快捷键会让位给相同按键组合的绑定：所有桌面平台上的应用菜单（[`nsh/desktop`](./nsh-desktop)），以及 macOS 上的内置菜单（Cmd+W、Cmd+C 等）。使用 `nsh run` 开发时，即使应用绑定了 `mod+r`，Cmd+R / Ctrl+R 也总是重新加载应用；打包后的应用可以绑定它。
 
