@@ -339,7 +339,7 @@ const player = await createPlayer(container, {
 player.hostEvent("theme", { dark: true });
 ```
 
-发布的应用从 `nsh.json` 得到宿主：`web.host` 指向应用目录内的一个 JS 模块（路径相对于 `nsh.json`），它导出 `createHost(player)`。`nsh package --target web` 把它以 `host.<digest>.js` 复制进站点，页面在应用启动前用播放器调用 `createHost`；它返回（或 resolve）的对象就是播放器的 `host`，必须带 `call` 函数，否则页面显示应用无法加载。`createHost` 拿到的播放器从此可以发送事件：
+发布的应用从 `nsh.json` 得到宿主：`web.host` 指向应用目录内的一个 JS 模块（路径相对于 `nsh.json`），它导出 `createHost(player)`。`nsh package --target web` 把它以 `host.<digest>.js` 复制进站点，页面在应用启动前用播放器调用 `createHost`；它返回（或 resolve）的对象就是播放器的 `host`，必须带 `call` 函数，否则页面显示应用无法加载。`nsh run --target web` 期间，开发服务器会随保存提供新的模块：重新加载页面即可运行修改。`createHost` 拿到的播放器从此可以发送事件：
 
 ```json
 {

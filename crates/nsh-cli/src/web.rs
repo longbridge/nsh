@@ -1255,8 +1255,8 @@ pub(crate) fn dev_host(runtime: &WebRuntime, rust: bool) -> anyhow::Result<(Stri
 
 /// The dev host's page and files ([`dev_host`]) for the app at `entry`:
 /// with its page's host module (`nsh.json` `web.host`) as `nsh-host.js`,
-/// read now (a change takes another session), or none, and its
-/// `web.history`.
+/// read now (a change to the module is read again by [`page_host_file`]),
+/// or none, and its `web.history`.
 pub(crate) fn with_page_host(
     (page, mut files): (String, Files),
     entry: &Path,
@@ -1266,16 +1266,14 @@ pub(crate) fn with_page_host(
         Some(history) => history.to_string(),
         None => "null".to_owned(),
     };
-    let module = web
+    let host = match web
         .host
-        .map(|host| crate::package::web_host_module(entry, &host))
-        .transpose()?;
-    let host = match module {
-        Some(path) => {
-            let bytes = fs::read(&path)
-                .with_context(|| format!("read nsh.json web.host {}", path.display()))?;
+        .map(|host| host_module_file(entry, &host))
+        .transpose()?
+    {
+        Some(file) => {
             files.retain(|(name, _)| name != PAGE_HOST);
-            files.push((PAGE_HOST.to_owned(), bytes));
+            files.push(file);
             format!("\"./{PAGE_HOST}\"")
         }
         None => "null".to_owned(),
@@ -1289,6 +1287,27 @@ pub(crate) fn with_page_host(
 
 /// Where the dev host serves the page's host module ([`with_page_host`]).
 const PAGE_HOST: &str = "nsh-host.js";
+
+/// The module `host` names (`nsh.json` `web.host`) as the file the dev host
+/// serves, with its bytes read now.
+fn host_module_file(entry: &Path, host: &Path) -> anyhow::Result<(String, Vec<u8>)> {
+    let path = crate::package::web_host_module(entry, host)?;
+    let bytes =
+        fs::read(&path).with_context(|| format!("read nsh.json web.host {}", path.display()))?;
+    Ok((PAGE_HOST.to_owned(), bytes))
+}
+
+/// The page's host module as it is now, as the file the dev host serves
+/// ([`with_page_host`] made the page's first one), for the app at `entry`:
+/// none when `nsh.json` has no `web.host`. The dev session serves it again
+/// when the app's sources change, so that the next page loaded runs the
+/// change.
+pub(crate) fn page_host_file(entry: &Path) -> anyhow::Result<Option<(String, Vec<u8>)>> {
+    let web = crate::package::read_config(entry)?.web;
+    web.host
+        .map(|host| host_module_file(entry, &host))
+        .transpose()
+}
 
 /// The app's appearance (`nsh.json` `appearance`): the page's background
 /// and theme color before the app draws.
@@ -3237,6 +3256,49 @@ mod tests {
                 );
             }
         }
+        drop(server);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_page_host_is_read_again_for_the_next_page() {
+        let dir =
+            std::env::temp_dir().join(format!("nsh-web-dev-host-again-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let entry = dir.join("App.tsx");
+        // No `web.host`: nothing to serve again.
+        assert!(page_host_file(&entry).unwrap().is_none());
+        fs::write(dir.join("host.js"), "export const version = 1;").unwrap();
+        fs::write(dir.join("nsh.json"), r#"{ "web": { "host": "host.js" } }"#).unwrap();
+        let runtime = WebRuntime {
+            wasm: dir.join("nsh-dev.wasm"),
+            js: dir.join("nsh.js"),
+            glue: None,
+            syntaxes: None,
+        };
+        fs::write(&runtime.js, "js").unwrap();
+        fs::write(&runtime.wasm, "wasm").unwrap();
+        let (page, files) = with_page_host(dev_host(&runtime, false).unwrap(), &entry).unwrap();
+        let server =
+            nsh_dev::DevServer::start("127.0.0.1:0".parse().unwrap(), "", None, |_| {}).unwrap();
+        server.serve_web(page.clone(), files);
+        let get = |path: &str| {
+            ureq::get(format!("http://{}{path}", server.local_addr()))
+                .call()
+                .unwrap()
+                .body_mut()
+                .read_to_string()
+                .unwrap()
+        };
+        assert_eq!(get("/nsh-host.js"), "export const version = 1;");
+        // An edit is served as it is saved, and the page and the runtime
+        // stay.
+        fs::write(dir.join("host.js"), "export const version = 2;").unwrap();
+        server.serve_web_files(page_host_file(&entry).unwrap());
+        assert_eq!(get("/nsh-host.js"), "export const version = 2;");
+        assert_eq!(get("/nsh.js"), "js");
+        assert_eq!(get("/"), page);
         drop(server);
         let _ = fs::remove_dir_all(&dir);
     }

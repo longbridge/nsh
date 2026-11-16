@@ -221,7 +221,7 @@ build to the same file) and takes `nsh.js` from the crate.
   `player.hotUpdate` ("Hot module replacement"; when it resolves false, the bundle that follows loads from scratch),
   shows build errors and `CannotRun` over the app, sends the app's log lines back, and
   reads fonts with a synchronous `XMLHttpRequest` from `/assets/`. With `nsh.json` `web.host` it imports the module
-  (`web::with_page_host` serves it as `nsh-host.js`, read when the session starts, checked as `nsh package` checks it)
+  (`web::with_page_host` serves it as `nsh-host.js`, checked as `nsh package` checks it; the session reads it again whenever the app's sources change, `web::page_host_file`, so the next page loaded runs the edit: an open page keeps the module it loaded)
   and runs its `createHost(player)` before the first bundle, as a published page does; `nsh test --target web` serves
   each app's the same way (headless `nsh test` runs the module itself: `docs/dev/tooling.md` "Headless runs").
 - **Tests** (`nsh test --target web`, `docs/dev/tooling.md` "On a real platform"): the CLI opens the development host

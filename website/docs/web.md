@@ -397,7 +397,7 @@ const player = await createPlayer(container, {
 player.hostEvent("theme", { dark: true });
 ```
 
-A published app gets its host from `nsh.json`: `web.host` names a JS module in the app's directory, relative to `nsh.json`, that exports `createHost(player)`. `nsh package --target web` copies it into the site as `host.<digest>.js`, and the page runs `createHost` with the player before the app starts; what it returns (or resolves with) must have a `call` function, or the page shows that the app could not be loaded. The player `createHost` receives sends events from then on:
+A published app gets its host from `nsh.json`: `web.host` names a JS module in the app's directory, relative to `nsh.json`, that exports `createHost(player)`. `nsh package --target web` copies it into the site as `host.<digest>.js`, and the page runs `createHost` with the player before the app starts; what it returns (or resolves with) must have a `call` function, or the page shows that the app could not be loaded. During `nsh run --target web` the dev server serves the module as you save it: load the page again to run the change. The player `createHost` receives sends events from then on:
 
 ```json
 {

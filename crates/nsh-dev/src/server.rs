@@ -291,6 +291,14 @@ impl DevServer {
         web.extend(files.into_iter().map(|(path, bytes)| (path, bytes.into())));
     }
 
+    /// Serves `files` (each `(path, bytes)`) in place of the web host's
+    /// files of the same paths ([`DevServer::serve_web`]); the page and the
+    /// others stay. A page loaded from now on gets the new bytes.
+    pub fn serve_web_files(&self, files: impl IntoIterator<Item = (String, Vec<u8>)>) {
+        let mut web = self.shared.web.lock().expect("web lock");
+        web.extend(files.into_iter().map(|(path, bytes)| (path, bytes.into())));
+    }
+
     /// Whether [`DevServer::serve_web`] was called: browsers can open the
     /// app at `http://<address>/`.
     pub fn serves_web(&self) -> bool {

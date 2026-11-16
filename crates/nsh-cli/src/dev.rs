@@ -254,11 +254,26 @@ impl DevSession {
         );
     }
 
+    /// Serves the page's host module (`nsh.json` `web.host`) as it is now,
+    /// so that a page loaded from here on runs the app's edit of it (the
+    /// module runs once, when its page loads: an open page keeps the one it
+    /// has until it is loaded again).
+    fn refresh_page_host(&self) {
+        if !self.server.serves_web() {
+            return;
+        }
+        match crate::web::page_host_file(&self.entry) {
+            Ok(file) => self.server.serve_web_files(file),
+            Err(err) => ui::warn(format!("{err:#}")),
+        }
+    }
+
     fn rebuild(&self) {
         // A Rust app has no JS: its Rust code's changes restart the session.
         if self.rust_root {
             return;
         }
+        self.refresh_page_host();
         self.server.building();
         if self.release {
             match build::compile(&self.entry, true) {
