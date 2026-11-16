@@ -3941,6 +3941,9 @@ covers [events] ToastStack.onExpandedChange
 
 # base-editor
 tap id:case-base-editor
+# The editor keeps its native multiline input with its own drawn caret.
+prop label:Code multiline true
+prop label:Code caret false
 # The text is the editor's own, drawn a row per line; nothing is
 # reported before an edit.
 expect let x = 1;
