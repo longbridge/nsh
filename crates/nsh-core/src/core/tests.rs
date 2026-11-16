@@ -43467,6 +43467,102 @@ fn a_view_in_a_text_stands_on_the_line_by_its_own_first_baseline() {
     assert_eq!(baseline(&mut c, 0).0, Some(Points(3.0 + 15.2)));
 }
 
+/// Only text that takes part in a view's flow gives it its baseline: a
+/// `display: none` text before the label has no box, so the label's
+/// baseline stays the view's, and it is the shown text's once shown; an
+/// absolutely positioned text, out of the flow, never gives it.
+#[test]
+fn a_hidden_or_positioned_text_gives_a_view_in_a_text_no_baseline() {
+    let mut c = Core::new(BaselineEngine, size_pt(320.0, 480.0));
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let text = |id: NodeId, size: f32, extra: &[(&'static str, StyleValue)]| {
+        let mut style = vec![("fontSize", StyleValue::Number(size))];
+        style.extend_from_slice(extra);
+        [Op::Create { id, tag: Tag::Text }, style_op(id, &style)]
+    };
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Text,
+        },
+        Op::CreateText {
+            id: 3,
+            text: "ab".into(),
+        },
+        Op::Create {
+            id: 4,
+            tag: Tag::View,
+        },
+        style_op(
+            4,
+            &[
+                ("paddingTop", StyleValue::Number(3.0)),
+                ("paddingBottom", StyleValue::Number(5.0)),
+            ],
+        ),
+    ];
+    // A text out of the flow first, then a hidden one, then the label.
+    ops.extend(text(10, 40.0, &[("position", StyleValue::Str("absolute"))]));
+    ops.extend(text(8, 80.0, &[("display", StyleValue::Str("none"))]));
+    ops.extend(text(6, 16.0, &[]));
+    ops.extend([
+        Op::CreateText {
+            id: 11,
+            text: "Away".into(),
+        },
+        Op::CreateText {
+            id: 9,
+            text: "Big".into(),
+        },
+        Op::CreateText {
+            id: 7,
+            text: "NVDA".into(),
+        },
+        insert(10, 11),
+        insert(8, 9),
+        insert(6, 7),
+        insert(4, 10),
+        insert(4, 8),
+        insert(4, 6),
+        insert(2, 3),
+        insert(2, 4),
+        insert(ROOT_ID, 2),
+    ]);
+    for op in ops {
+        c.apply(op).unwrap();
+    }
+    c.commit().unwrap();
+    let baseline = |c: &mut Core<BaselineEngine>| {
+        let layout = c.nodes[c.key(2).unwrap() as usize].layout.unwrap();
+        let cx = c.text_cx(layout);
+        let a = cx.text.attachments[0];
+        cx.alignments.baseline(a.index)
+    };
+    let display = |c: &mut Core<BaselineEngine>, value: &'static str| {
+        c.apply(style_op(
+            8,
+            &[
+                ("fontSize", StyleValue::Number(80.0)),
+                ("display", StyleValue::Str(value)),
+            ],
+        ))
+        .unwrap();
+        c.commit().unwrap();
+    };
+    // The label's: 15.2 below its top (16 x 0.95), under the padding.
+    assert_eq!(baseline(&mut c), Some(Points(3.0 + 15.2)));
+    // Shown, the big text comes first: its baseline is 76 down.
+    display(&mut c, "flex");
+    assert_eq!(baseline(&mut c), Some(Points(3.0 + 76.0)));
+    // Hidden again, the label's is back.
+    display(&mut c, "none");
+    assert_eq!(baseline(&mut c), Some(Points(3.0 + 15.2)));
+}
+
 #[test]
 fn a_row_aligned_by_baseline_lines_its_texts_up_by_their_first_baselines() {
     let mut c = Core::new(BaselineEngine, size_pt(320.0, 480.0));

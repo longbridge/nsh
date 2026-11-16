@@ -7760,6 +7760,7 @@ impl<M: TextEngine> Core<M> {
             alignments: crate::AttachmentAlignments::default(),
             spacers: Vec::new(),
             baselines: &baselines,
+            next_baseline: 0,
         };
         self.collect_text(key, base, &mut text, &mut parts, false);
         let TextAttachments {
@@ -7943,7 +7944,14 @@ impl<M: TextEngine> Core<M> {
                 _ => {
                     if let Some(l) = child.layout {
                         let size = self.rounded_layout(l).size;
-                        if let Some(&(_, baseline)) = parts.baselines.iter().find(|b| b.0 == c) {
+                        // The baselines are in the attachments' order: the
+                        // next one is this attachment's, or a later one's.
+                        if let Some(&(_, baseline)) = parts
+                            .baselines
+                            .get(parts.next_baseline)
+                            .filter(|b| b.0 == c)
+                        {
+                            parts.next_baseline += 1;
                             parts
                                 .alignments
                                 .set_baseline(out.len_utf16(), Some(baseline));
@@ -8021,6 +8029,15 @@ impl<M: TextEngine> Core<M> {
             return None;
         }
         let layout = node.layout?;
+        // Only what takes part in the box's flow has its baseline: not a
+        // `display: none` subtree, which has no box (CSS Display), nor an
+        // absolutely positioned one, out of the flow.
+        if !root
+            && (self.layout.displays_none(layout)
+                || self.layout.style(layout).position == Position::Absolute)
+        {
+            return None;
+        }
         let text = node.kind == Kind::Text;
         let l = *self.layout.unrounded_layout(layout);
         let top = if root { 0.0 } else { l.location.y };
@@ -11158,4 +11175,7 @@ struct TextAttachments<'a> {
     /// The baselines of their own the views holding text stand by
     /// ([`Core::attachment_baselines`]).
     baselines: &'a [(Key, Points)],
+    /// The first of `baselines` not met yet: they are in the attachments'
+    /// order ([`Core::attachments_of`]).
+    next_baseline: usize,
 }
