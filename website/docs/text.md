@@ -117,7 +117,8 @@ text("Run ")
 ```
 
 Horizontal padding on a span takes room in its line at the span's two ends, and its background covers it, as a CSS
-inline box's does; vertical padding and borders leave a span as it is. A relative `fontSize` keeps the span in
+inline box's does; vertical padding grows its background above and below the text, leaving the line's height as it
+is, and borders leave a span as it is. A relative `fontSize` keeps the span in
 proportion to its paragraph wherever it is used:
 
 ```tsx

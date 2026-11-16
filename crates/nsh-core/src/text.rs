@@ -75,6 +75,11 @@ pub struct TextBackground {
     /// The span that set it, so neighboring spans that look the same still
     /// get a box each.
     pub node: NodeId,
+    /// Room above the font's ascent (the span's top padding): drawing only,
+    /// as a CSS inline box's vertical padding, the line keeps its height.
+    pub top: Points,
+    /// Room below the font's descent (the span's bottom padding).
+    pub bottom: Points,
 }
 
 /// A piece of a laid out line, in visual order, for
@@ -123,6 +128,8 @@ impl BackgroundBox {
         let mut current: Option<BackgroundBox> = None;
         let mut emit = |b: Option<BackgroundBox>| {
             if let Some(mut b) = b {
+                b.ascent += b.background.top;
+                b.descent += b.background.bottom;
                 let x1 = (b.x + b.width).min(right);
                 b.x = b.x.max(left);
                 b.width = x1 - b.x;

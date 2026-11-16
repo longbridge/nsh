@@ -3971,6 +3971,8 @@ mod tests {
                 color: Color(0xeeee_eeff),
                 radius: Points(4.0),
                 node: 4,
+                top: Default::default(),
+                bottom: Default::default(),
             }),
             ..style
         };
