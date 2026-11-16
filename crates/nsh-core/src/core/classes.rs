@@ -300,7 +300,7 @@ impl<M: TextEngine> Core<M> {
         if focused {
             self.focus = (key != self.root).then_some((key, id));
             self.focus_visible = self.focus_shows(key);
-            self.focus_by_keyboard = self.keyboard_moves_focus();
+            self.focus_by_keyboard = self.keyboard_moves_focus() && !self.restoring_modal_focus;
             self.blur_held = false;
         } else if self.focus == Some((key, id)) {
             self.focus = None;
@@ -320,6 +320,7 @@ impl<M: TextEngine> Core<M> {
     /// ([`Self::keyboard_moves_focus`]): a key typed after a press shows
     /// the focus, never the hint of the view it is on.
     pub fn set_input_modality(&mut self, modality: InputModality) {
+        self.restoring_modal_focus = false;
         self.modality = Some(modality);
         if modality == InputModality::Keyboard && self.focus.is_some() && !self.focus_visible {
             self.focus_visible = true;

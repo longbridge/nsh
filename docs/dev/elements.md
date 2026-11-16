@@ -696,7 +696,9 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   a press, a tap or a click that focuses the anchor (a click on a stop where the platform focuses it, a tap into a
   field, a component's or the app's `focus()` after a press) leaves the hint to the pointer, as Radix's tooltips do:
   the press hid it, and it stays hidden after the pointer left. A key typed later, the focus staying, shows
-  `focus-visible:` and no hint; the hint shows once the keyboard moves the focus to the anchor (a move inside the
+  `focus-visible:` and no hint. Closing a modal also restores focus without opening a hint,
+  including after Escape; the restored focus keeps its ring. The next user action resumes normal
+  hint handling, so fresh hover or keyboard navigation can show one again. The hint shows once the keyboard moves the focus to the anchor (a move inside the
   anchor decides nothing again). Before any input the focus counts as the keyboard's (an `autoFocus`), as it
   does for `focus-visible:`. While a hint is shown the core binds Escape (`Overlays::hint_escape`, the same
   `ESCAPE_BINDING`): Escape hides the top shown hint, or goes to `onCancel` when the top overlay is no hint
