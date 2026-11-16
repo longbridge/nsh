@@ -1,5 +1,5 @@
-import { type JSX, signal, Text, token, View, windowSize } from "nsh";
-import { type OpenChangeReason, Sheet } from "nsh/base";
+import { type JSX, Scroll, signal, Text, token, View, windowSize } from "nsh";
+import { type OpenChangeReason, Sheet, type SheetDetent } from "nsh/base";
 import { LucideIcon, type LucideIconName } from "../icons";
 import { toast } from "../toast";
 import { alpha, Appear, backdrop, Badge, Button, Caption, Card, colors, DemoPage, desktop, hovered, Segmented, sheetGrabber, sheetPanel, Toggle } from "../ui";
@@ -57,6 +57,19 @@ const active = (f: Filters) =>
 
 type Mailbox = { id: string; icon: LucideIconName; label: string; count?: number };
 
+type Comment = { name: string; time: string; text: string; likes: number };
+
+const comments: Comment[] = [
+  { name: "Mira Chen", time: "2m", text: "The new onboarding flow feels so much calmer. Love the spacing.", likes: 24 },
+  { name: "Theo Park", time: "8m", text: "Could the summary card show last week's total too?", likes: 9 },
+  { name: "Ana Souza", time: "15m", text: "Tried it on a small phone: everything fits without the header scrolling away.", likes: 17 },
+  { name: "Jonas Weber", time: "32m", text: "The contrast of the chart labels in dark mode is just right now.", likes: 12 },
+  { name: "Priya Nair", time: "1h", text: "Switching tabs stays smooth even with the long list open.", likes: 31 },
+  { name: "Leo Martin", time: "2h", text: "Small thing: the empty state could use a shorter sentence.", likes: 5 },
+  { name: "Hana Sato", time: "3h", text: "Shipped it to the beta group, and the first answers are great.", likes: 42 },
+  { name: "Omar Haddad", time: "5h", text: "The grabber makes it obvious the panel can grow. Nice touch.", likes: 18 },
+];
+
 const mailboxes: Mailbox[] = [
   { id: "inbox", icon: "inbox", label: "Inbox", count: 12 },
   { id: "starred", icon: "star", label: "Starred" },
@@ -68,7 +81,8 @@ const mailboxes: Mailbox[] = [
 /**
  * Sheets of `nsh/base` as an app has them: filters edited as a draft and
  * applied by the footer's button; a form that saves; a navigation drawer
- * from the leading edge. On a wide window they are edge panels, on a narrow
+ * from the leading edge; comments in a bottom sheet resting at half the
+ * screen or all of it. On a wide window they are edge panels, on a narrow
  * one panels at the bottom that a swipe down closes; each slides in over a
  * fading backdrop, and the backdrop, Escape and back close it.
  */
@@ -211,6 +225,70 @@ export function Sheets() {
     );
   }
 
+  function CommentsSheet() {
+    const open = signal(false);
+    const detent = signal<SheetDetent>("medium");
+    const named = (d: SheetDetent) => (typeof d === "string" ? d : "custom");
+    return (
+      <Card icon="sheet" title="Resting heights" subtitle="Half the screen or all of it: drag, flick or press the grabber">
+        {/* The sheet beside its trigger: one child of the card, so it takes no gap of its own. */}
+        <View>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <Trigger
+              label="Comments"
+              icon="message-circle"
+              open={open()}
+              onPress={() => {
+                detent.set("medium");
+                open.set(true);
+              }}
+            />
+            <Caption label={`${comments.length} comments`} note={open() ? (named(detent()) === "large" ? "Full height" : "Half height") : undefined} />
+          </View>
+          <Sheet
+            open={open()}
+            accessibilityLabel="Comments"
+            closeOnSwipe
+            detents={["medium", "large"]}
+            detent={detent()}
+            onDetentChange={({ detent: next }) => {
+              detent.set(next);
+              log(`comments at ${named(next)}`);
+            }}
+            grabber
+            grabberStyle={sheetGrabber()}
+            grabberAccessibilityLabel="Resize comments"
+            onOpenChange={changed("comments", (v) => open.set(v))}
+            popupStyle={sheetPanel("bottom")}
+            backdropStyle={backdrop()}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={{ flex: 1, fontSize: pointer ? 16 : 18, fontWeight: "600", color: colors.text }}>Comments</Text>
+              <Trigger icon="x" variant="ghost" accessibilityLabel="Close" short="×" onPress={() => open.set(false)} />
+            </View>
+            <Scroll style={{ flex: 1, marginHorizontal: -16 }} contentStyle={{ paddingHorizontal: 16, gap: 16, paddingBottom: 8 }}>
+              <Each of={comments}>
+                {(c) => (
+                  <View style={{ flexDirection: "row", gap: 12 }}>
+                    <Avatar name={c().name} size={pointer ? 32 : 38} />
+                    <View style={{ flex: 1, gap: 3 }}>
+                      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6 }}>
+                        <Text style={{ fontSize: pointer ? 13 : 15, fontWeight: "600", color: colors.text }}>{c().name}</Text>
+                        <Text style={{ fontSize: pointer ? 12 : 13, color: colors.faint }}>{c().time}</Text>
+                      </View>
+                      <Text style={{ fontSize: pointer ? 13 : 15, lineHeight: pointer ? 19 : 21, color: colors.muted }}>{c().text}</Text>
+                      <Text style={{ fontSize: pointer ? 12 : 13, color: colors.faint, fontVariant: ["tabular-nums"] }}>{c().likes} likes</Text>
+                    </View>
+                  </View>
+                )}
+              </Each>
+            </Scroll>
+          </Sheet>
+        </View>
+      </Card>
+    );
+  }
+
   function Drawer() {
     const open = signal(false);
     const box = signal("inbox");
@@ -266,5 +344,5 @@ export function Sheets() {
     );
   }
 
-  return <DemoPage cards={[FilterSheet, ProfileSheet, Drawer, Events]} />;
+  return <DemoPage cards={[FilterSheet, ProfileSheet, CommentsSheet, Drawer, Events]} />;
 }

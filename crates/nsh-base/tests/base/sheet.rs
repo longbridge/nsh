@@ -895,3 +895,221 @@ fn a_sheet_keeps_the_keyboard_focus_while_it_shows_and_gives_it_back() {
             .unwrap_or_else(|e| panic!("{os:?}: {e}"));
     }
 }
+
+/// What a platform shows of a sheet with detents, replayed from its
+/// native batches: the panel's laid-out height and translation.
+#[derive(Default)]
+struct Replica {
+    graph: nsh_core::animation::Graph,
+    /// The panel: the view that drags.
+    panel: Option<nsh_core::NodeId>,
+    translations: std::collections::HashMap<nsh_core::NodeId, nsh_core::NodeId>,
+    heights: std::collections::HashMap<nsh_core::NodeId, f32>,
+    clock: f64,
+}
+
+impl Replica {
+    /// Runs the animations to their end: where the panel stands below its
+    /// top at rest, and its height.
+    fn rest(&mut self) -> (f32, f32) {
+        let mut finished = Vec::new();
+        for _ in 0..240 {
+            self.clock += 1.0 / 60.0;
+            self.graph.tick(self.clock, &mut finished);
+        }
+        let panel = self.panel.expect("the panel drags");
+        let node = self.translations[&panel];
+        (self.graph.eval(node).number(), self.heights[&panel])
+    }
+}
+
+type Replicated = std::sync::Arc<std::sync::Mutex<Replica>>;
+
+fn replicate(app: &mut Headless) -> Replicated {
+    use nsh_core::{MountItem, animation::AnimationProp};
+
+    let replica = Replicated::default();
+    let seen = replica.clone();
+    app.observe(move |_, batch| {
+        let mut replica = seen.lock().unwrap();
+        for item in &batch.items {
+            match item {
+                MountItem::Animation(op) => replica.graph.apply(op.clone(), &mut Vec::new()),
+                MountItem::Gestures { id, values } if values.pan_y.is_some() => {
+                    replica.panel = Some(*id);
+                }
+                MountItem::AnimationBindings { id, bindings } => {
+                    for (prop, node) in bindings {
+                        if *prop == AnimationProp::Transform(1) {
+                            replica.translations.insert(*id, *node);
+                        }
+                    }
+                }
+                MountItem::Frame { id, frame } => {
+                    replica.heights.insert(*id, frame.size.height.0);
+                }
+                _ => {}
+            }
+        }
+    });
+    replica
+}
+
+#[derive(Clone, PartialEq, Props)]
+struct DetentProps {
+    swipe: bool,
+    controlled: bool,
+    start: Option<nsh_base::SheetDetent>,
+}
+
+/// A bottom sheet resting at half the screen or all of it, open, with a
+/// grabber, reporting the detents the user picks.
+#[component]
+fn DetentScreen(props: DetentProps) -> impl IntoElement {
+    use nsh_base::{SheetDetent, SheetEvent};
+
+    let open = signal(true);
+    let picked = signal(String::from("none"));
+    let controlled = props.controlled;
+    view()
+        .child(text(move || format!("picked:{}", picked.get())))
+        .child(
+            sheet()
+                .open(move || Some(open.get()))
+                .on_open_change(move |_: &SheetEvent| open.set(false))
+                .close_on_swipe(props.swipe)
+                .detents(vec![SheetDetent::Medium, SheetDetent::Large])
+                .detent(controlled.then_some(SheetDetent::Medium))
+                .default_detent(props.start)
+                .on_detent_change(move |detent: &SheetDetent| picked.set(format!("{detent:?}")))
+                .grabber(true)
+                .grabber_style(|s| s.h(px(20.0)))
+                .grabber_accessibility_label("Resize")
+                .child(
+                    view()
+                        .test_id("handle")
+                        .h(px(60.0))
+                        .child(text("Sheet body")),
+                ),
+        )
+}
+
+/// A 390 × 844 surface (no safe area) showing a [`DetentScreen`].
+fn detent_app(props: DetentProps) -> (Headless, Replicated) {
+    let mut app = Headless::start(EngineConfig {
+        viewport: Size::new(px(390.0), px(844.0)),
+        ..EngineConfig::new(Root::new::<DetentScreen>(move || props.clone()))
+    })
+    .unwrap();
+    let replica = replicate(&mut app);
+    app.first_render().unwrap();
+    app.wait(std::time::Duration::from_millis(400)).unwrap();
+    (app, replica)
+}
+
+const MEDIUM: DetentProps = DetentProps {
+    swipe: false,
+    controlled: false,
+    start: None,
+};
+
+fn assert_rests(replica: &Replicated, at: f32) {
+    let (translation, height) = replica.lock().unwrap().rest();
+    assert_eq!(height, 844.0, "as tall as the largest detent");
+    assert!(
+        (translation - at).abs() < 0.5,
+        "rests {at} below its top, not {translation}"
+    );
+}
+
+#[test]
+fn a_sheet_with_detents_rests_at_the_smallest_as_tall_as_the_largest() {
+    let (_app, replica) = detent_app(MEDIUM);
+    assert_rests(&replica, 422.0);
+}
+
+#[test]
+fn a_drag_up_moves_the_sheet_to_the_larger_detent() {
+    let (mut app, replica) = detent_app(MEDIUM);
+    app.drag("id:handle", point(px(0.0), px(-300.0))).unwrap();
+    app.wait_for("text:picked:Large").unwrap();
+    app.wait(std::time::Duration::from_millis(400)).unwrap();
+    assert_rests(&replica, 0.0);
+}
+
+#[test]
+fn a_drag_down_moves_the_sheet_to_the_smaller_detent() {
+    let (mut app, replica) = detent_app(DetentProps {
+        start: Some(nsh_base::SheetDetent::Large),
+        ..MEDIUM
+    });
+    assert_rests(&replica, 0.0);
+    app.drag("id:handle", point(px(0.0), px(250.0))).unwrap();
+    app.wait_for("text:picked:Medium").unwrap();
+    app.wait(std::time::Duration::from_millis(400)).unwrap();
+    assert_rests(&replica, 422.0);
+}
+
+#[test]
+fn a_drag_below_the_smallest_detent_closes_only_when_allowed() {
+    let (mut app, replica) = detent_app(MEDIUM);
+    app.drag("id:handle", point(px(0.0), px(300.0))).unwrap();
+    app.wait(std::time::Duration::from_millis(400)).unwrap();
+    app.wait_for("Sheet body").unwrap();
+    app.wait_for("text:picked:none").unwrap();
+    assert_rests(&replica, 422.0);
+
+    let (mut app, _) = detent_app(DetentProps {
+        swipe: true,
+        ..MEDIUM
+    });
+    app.drag("id:handle", point(px(0.0), px(300.0))).unwrap();
+    app.wait_for_gone("Sheet body", std::time::Duration::from_secs(2))
+        .unwrap();
+    app.wait_for("text:picked:none").unwrap();
+}
+
+#[test]
+fn a_controlled_detent_the_app_keeps_brings_the_sheet_back() {
+    let (mut app, replica) = detent_app(DetentProps {
+        controlled: true,
+        ..MEDIUM
+    });
+    app.drag("id:handle", point(px(0.0), px(-300.0))).unwrap();
+    app.wait_for("text:picked:Large").unwrap();
+    app.wait(std::time::Duration::from_millis(400)).unwrap();
+    assert_rests(&replica, 422.0);
+}
+
+#[test]
+fn the_grabber_changes_the_detent_for_screen_readers_and_presses() {
+    use nsh_core::{EventKind, EventPayload, PayloadValue};
+
+    let (mut app, replica) = detent_app(MEDIUM);
+    assert_eq!(app.screen().count("role:adjustable").unwrap(), 1);
+    let act = |app: &mut Headless, action: &str| {
+        let grabber = app
+            .screen()
+            .press_target("label:Resize")
+            .unwrap()
+            .expect("the grabber");
+        app.engine().control().dispatch_event(
+            grabber,
+            EventKind::AccessibilityAction,
+            EventPayload::Map(vec![("actionName", PayloadValue::Str(action.into()))]),
+        );
+    };
+    act(&mut app, "increment");
+    app.wait_for("text:picked:Large").unwrap();
+    app.wait(std::time::Duration::from_millis(400)).unwrap();
+    assert_rests(&replica, 0.0);
+    act(&mut app, "decrement");
+    app.wait_for("text:picked:Medium").unwrap();
+    app.wait(std::time::Duration::from_millis(400)).unwrap();
+    assert_rests(&replica, 422.0);
+    // A press goes to the next larger detent, round to the smallest.
+    app.press("label:Resize").unwrap();
+    app.wait_for("text:picked:Large").unwrap();
+    app.press("label:Resize").unwrap();
+    app.wait_for("text:picked:Medium").unwrap();
+}

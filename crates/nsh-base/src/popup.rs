@@ -491,6 +491,12 @@ pub(crate) struct SheetMotion {
     /// Downward dragging is in points, independently of the entrance's
     /// fraction of the current panel size.
     pub(crate) drag_y: AnimatedValue,
+    /// Where `drag_y` rests while it is there: 0, or how far below its
+    /// top a sheet at a smaller detent stands.
+    rest_y: Stored<f32>,
+    /// `drag_y` stays where it is as it goes (a sheet with detents, whose
+    /// translation reads it scaled by the backdrop's fade).
+    hold_drag: Stored<bool>,
     away_x: AnimatedValue,
     away_y: AnimatedValue,
     away: Stored<(f32, f32)>,
@@ -525,6 +531,8 @@ impl SheetMotion {
             x: away_x.mul(&remaining),
             y: away_y.mul(&remaining).add(&drag_y),
             drag_y,
+            rest_y: stored(0.0),
+            hold_drag: stored(false),
             away_x,
             away_y,
             away: stored((0.0, 0.0)),
@@ -552,6 +560,16 @@ impl SheetMotion {
         self
     }
 
+    /// Where `drag_y` rests once it came in ([`Self::come_in`]).
+    pub(crate) fn rest_at(self, y: f32) {
+        self.rest_y.replace(y);
+    }
+
+    /// Whether `drag_y` stays where it is as the sheet goes.
+    pub(crate) fn hold_drag(self, hold: bool) {
+        self.hold_drag.replace(hold);
+    }
+
     fn follow(self, open: bool, side: Placement) {
         self.side.replace(side);
         if open {
@@ -564,7 +582,7 @@ impl SheetMotion {
                 return;
             }
             self.fade.set(0.0);
-            self.drag_y.set(0.0);
+            self.drag_y.set(self.rest_y.get());
             self.shown.set(true);
             // A kept panel laid out before says its size no more.
             let known = self.kept.get().then(|| self.panel.with(|p| *p)).flatten();
@@ -587,7 +605,9 @@ impl SheetMotion {
             // Going before it stops being settled: it is there until gone.
             self.closing.replace(true);
             self.settled.set(false);
-            self.drag_y.timing(0.0, SHEET_OUT_MS, Easing::EaseIn);
+            if !self.hold_drag.get() {
+                self.drag_y.timing(0.0, SHEET_OUT_MS, Easing::EaseIn);
+            }
             let end = self.fade.timing(0.0, SHEET_OUT_MS, Easing::EaseIn);
             let (shown, closing) = (self.shown, self.closing);
             // Gone when the motion ends: the platform runs it and reports
@@ -645,13 +665,14 @@ impl SheetMotion {
     /// it is there.
     pub(crate) fn come_in(self) {
         let generation = self.next_motion();
+        let rest = self.rest_y.get();
         if reduce_motion() {
-            self.drag_y.set(0.0);
+            self.drag_y.set(rest);
             self.fade.set(1.0);
             self.settled.set(true);
             return;
         }
-        self.drag_y.timing(0.0, SHEET_IN_MS, Easing::EaseOut);
+        self.drag_y.timing(rest, SHEET_IN_MS, Easing::EaseOut);
         let end = self.fade.timing(1.0, SHEET_IN_MS, Easing::EaseOut);
         let (settled, closing) = (self.settled, self.closing);
         // There when the motion ends, or after its time (as it goes).

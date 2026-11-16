@@ -226,7 +226,7 @@ pub use crate::{
         Select, SelectElement, SelectEntry, SelectEvent, SelectGroup, SelectItem, SelectProps,
         SelectValue, select,
     },
-    sheet::{Sheet, SheetElement, SheetEvent, SheetProps, sheet},
+    sheet::{Sheet, SheetDetent, SheetElement, SheetEvent, SheetProps, sheet},
     slider::{Slider, SliderElement, SliderEvent, SliderProps, SliderScale, SliderValue, slider},
     split_view::{
         ColumnVisibility, SplitView, SplitViewElement, SplitViewEvent, SplitViewProps, split_view,
