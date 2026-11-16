@@ -4575,5 +4575,5 @@ expect Extent: true true
 expect Width: false
 tap id:content-size-narrow
 expect Width: true
-covers [events] RichEditor.onContentSizeChange
+covers [events] onContentSizeChange
 covers [nsh/base] createRichEditor
