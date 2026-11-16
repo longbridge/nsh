@@ -146,8 +146,8 @@ clock of `nsh.time` (kept while paused), and its frames.
   and device generation) and signals the value on the fence once `EndDraw` submitted the frame. A texture is rendered
   into again only once the fence passed the value of the last frame that drew it; with none free the frame is skipped.
   `frame()` stays empty, and `set_input_from_frame` copies on the GPU as on Apple. A texture the backend cannot open
-  (another adapter after a device loss, a device without shared fences) sends the view back to reading frames back
-  (`show_on_surfaces(false)`).
+  (another adapter, a device without shared fences) sends the view back to reading frames back
+  (`show_on_surfaces(false)`), and a running transition shows what it started from until its first frame read back.
 - **Frame pacing.** `wants_frame` is true while something it reads changed, while it is animated and not paused, or
   while a frame is on its way back. Backends call `render` on their frame clock only while it is true, at most once
   per display frame.

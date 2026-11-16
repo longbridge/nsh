@@ -333,13 +333,13 @@ impl ShaderState {
     /// be opened sends view `id` back to reading its frames back.
     fn bitmap(&self, dc: &ID2D1DeviceContext, id: NodeId) -> Option<ID2D1Bitmap1> {
         let frame = self.view.frame();
-        let starting = (self.start.as_ref()).is_some_and(|(serial, _)| *serial == frame.serial);
+        let mut starting = self.starting();
         if !starting {
             // Each call is a draw: the fence value it takes is signalled
             // once this frame is submitted.
             if let Some(shared) = self.view.surface() {
-                return match open(dc, &mut self.opened.borrow_mut(), &shared) {
-                    Ok(bitmap) => Some(bitmap),
+                match open(dc, &mut self.opened.borrow_mut(), &shared) {
+                    Ok(bitmap) => return Some(bitmap),
                     Err(e) => {
                         log::debug!(
                             "shader: cannot open a shared frame ({e}); reading frames back"
@@ -349,13 +349,17 @@ impl ShaderState {
                         if let Some(surface) = self.surface.upgrade() {
                             surface.invalidate();
                         }
-                        None
+                        // A transition keeps showing what it started from
+                        // until its first frame read back (`reveal`).
+                        self.start.as_ref()?;
+                        starting = true;
                     }
-                };
+                }
+            } else {
+                // Read back (the engine may have gone back on its own): the
+                // textures opened go.
+                *self.opened.borrow_mut() = None;
             }
-            // Read back (the engine may have gone back on its own): the
-            // textures opened go.
-            *self.opened.borrow_mut() = None;
         }
         let mut drawn = self.drawn.borrow_mut();
         match &self.start {
@@ -376,6 +380,21 @@ impl ShaderState {
                 frame.serial,
             ),
         }
+    }
+
+    /// Takes `from` as what a transition starts from. The bitmap kept goes:
+    /// it may hold an earlier start picture, which is uploaded under the
+    /// same serial (`u64::MAX`) and, on shared textures, is never replaced
+    /// by a frame read back.
+    fn set_start(&mut self, from: Pixels) {
+        self.start = Some((self.view.frame().serial, from));
+        *self.drawn.get_mut() = None;
+    }
+
+    /// Whether a transition shows what it started from: no frame came
+    /// since it started.
+    fn starting(&self) -> bool {
+        (self.start.as_ref()).is_some_and(|(serial, _)| *serial == self.view.frame().serial)
     }
 
     fn role(&self) -> Option<ShaderRole> {
@@ -640,7 +659,7 @@ pub(crate) fn start_transition(surface: &Rc<Surface>, view: &NshView, duration: 
                 ShaderInput::From,
                 Some((&from.data, from.width, from.height, from.width * 4)),
             );
-            shader.start = Some((shader.view.frame().serial, from));
+            shader.set_start(from);
         }
         let now = Instant::now();
         shader.view.start_transition(duration, now);
@@ -801,6 +820,12 @@ pub(crate) fn reveal() {
         if let Some(shader) = view.state_mut().shader.as_mut() {
             shader.view.show_on_surfaces(false);
             *shader.opened.get_mut() = None;
+            // The frame on the texture never showed: what a transition
+            // started from stays until the first frame read back.
+            let shown = shader.view.frame().serial;
+            if let Some((serial, _)) = shader.start.as_mut() {
+                *serial = shown;
+            }
         }
         tick(&view);
     }
@@ -1444,6 +1469,60 @@ mod tests {
         drop(s);
         mount(&surface, 6, ShaderRole::Screen);
         assert!(!effect(&surface.root.state()));
+    }
+
+    /// A transition whose shared texture could not be opened shows what it
+    /// started from, not its children, until its first frame read back.
+    #[test]
+    fn a_transition_sent_back_to_reading_back_shows_its_start_until_its_next_frame() {
+        let surface = surface();
+        let view = mount(&surface, 4, ShaderRole::Transition);
+        {
+            let mut s = view.state_mut();
+            let shader = s.shader.as_mut().expect("the view's shader state");
+            // A frame on a shared texture came since it started: serials differ.
+            let shown = shader.view.frame().serial;
+            shader.start = Some((shown + 1, Pixels::default()));
+            assert!(!shader.starting());
+        }
+        UNSHARED.with(|u| u.borrow_mut().push((Rc::downgrade(&surface), 4)));
+        reveal();
+        let s = view.state();
+        assert!(s.shader.as_ref().is_some_and(ShaderState::starting));
+    }
+
+    /// A transition that starts again shows its new start picture, not the
+    /// one it started from before.
+    #[test]
+    fn a_new_start_picture_replaces_the_last_one() {
+        let Ok(gfx) = crate::gfx::get() else {
+            // No Direct3D device, not even WARP.
+            return;
+        };
+        let mut shader = ShaderState::default();
+        let mut shown = |bgra: [u8; 4]| {
+            shader.set_start(Pixels {
+                width: 1,
+                height: 1,
+                data: bgra.to_vec(),
+            });
+            let bitmap = shader
+                .bitmap(&gfx.dc, 4)
+                .expect("the start picture's bitmap");
+            let rect = D2D_RECT_U {
+                left: 0,
+                top: 0,
+                right: 1,
+                bottom: 1,
+            };
+            crate::render::read_back(&gfx.dc, &bitmap, rect)
+                .expect("the bitmap read back")
+                .data
+        };
+        let morning = [0x2b, 0x89, 0xe8, 0xff];
+        let noon = [0xe8, 0x7d, 0x2b, 0xff];
+        assert_eq!(shown(morning), morning);
+        assert_eq!(shown(noon), noon);
     }
 
     /// A partial frame that meets a view reading what is behind it draws
