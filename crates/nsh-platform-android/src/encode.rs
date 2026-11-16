@@ -796,9 +796,16 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     }
                     // `SystemUi.openPath`: the file at the path, a `content:`
                     // URI the app's FilesProvider serves, to the system's
-                    // viewer (`ACTION_VIEW`). `OpenPath` alone; the dialogs
-                    // have no answer on Android.
+                    // viewer (`ACTION_VIEW`); open dialogs use `Picker.java`
+                    // to copy provider streams into app-owned paths.
                     Command::FileRequest { id, request } => match *request {
+                        nsh_core::file_dialog::FileRequest::OpenDialog(dialog) => {
+                            e.int(57);
+                            e.int(id as i32);
+                            e.bool(dialog.multiple);
+                            e.bool(dialog.kind == nsh_core::file_dialog::OpenDialogKind::Folders);
+                            e.string(nsh_core::file_dialog::extensions(&dialog.filters).join(","));
+                        }
                         nsh_core::file_dialog::FileRequest::OpenPath(path) => {
                             e.int(28);
                             e.int(id as i32);
@@ -2104,7 +2111,7 @@ mod tests {
     }
 
     #[test]
-    fn open_path_is_sent_and_the_other_file_requests_fail() {
+    fn open_requests_are_sent_and_the_other_file_requests_fail() {
         // `COMMAND`, the view id, op 28, the request id, the path's
         // object index: `Mounter.java` opens the file and answers.
         assert_eq!(
@@ -2112,12 +2119,21 @@ mod tests {
             vec![COMMAND, 3, 28, 7, 0]
         );
 
+        assert_eq!(
+            ints(FileRequest::OpenDialog(file_dialog::OpenDialog::files())),
+            vec![COMMAND, 3, 57, 7, 0, 0, 0]
+        );
+        assert_eq!(
+            ints(FileRequest::OpenDialog(
+                file_dialog::OpenDialog::folders().multiple(true)
+            )),
+            vec![COMMAND, 3, 57, 7, 1, 1, 0]
+        );
         // `Environment::file_requests` is set, so the core waits for an
         // answer to every request: op 30 fails the rest instead of leaving
-        // `pick_paths`, `pick_save_path`, `reveal_path` and `move_to_trash`
+        // `pick_save_path`, `reveal_path` and `move_to_trash`
         // pending forever.
         for request in [
-            FileRequest::OpenDialog(file_dialog::OpenDialog::default()),
             FileRequest::SaveDialog(file_dialog::SaveDialog::default()),
             FileRequest::RevealPath("a".into()),
             FileRequest::MoveToTrash("a".into()),
