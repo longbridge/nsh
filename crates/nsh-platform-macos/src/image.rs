@@ -1638,7 +1638,6 @@ mod tests {
         use nsh_core::{
             Core, MountItem,
             element::{ImageSrc, Root},
-            geometry::size_pt,
             prelude::*,
         };
 
@@ -1652,7 +1651,7 @@ mod tests {
         SOURCE.with_borrow_mut(|source| *source = Some(ImageSrc::rgba(width, height, pixels)));
         let mut core = Core::new(
             crate::text::CoreTextEngine::default(),
-            size_pt(100.0, 100.0),
+            Size::new(Points(100.0), Points(100.0)),
         );
         core.mount_root(&Root::of::<TestImage>());
         core.commit()
