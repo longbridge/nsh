@@ -625,6 +625,11 @@ pub(crate) fn sync(surface: &Surface, hwnd: HWND, before: Option<Attrs>, after: 
     }) && (before.is_some() || after.backdrop != Backdrop::None || after.frameless())
     {
         set_material(hwnd, &after);
+        // The background a composed window clears to follows its backdrop
+        // ([`crate::surface::Surface::transparent`]).
+        if before.is_some_and(|b| b.backdrop != after.backdrop) {
+            surface.invalidate();
+        }
     }
     if before.is_none() {
         set_color_scheme(surface, hwnd, Appearance::System);

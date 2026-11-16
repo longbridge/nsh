@@ -727,8 +727,13 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     if launch.attributes.transparent == Some(true) {
         options.transparent = true;
     }
-    // A backdrop shows through a window without a redirection bitmap.
+    // A backdrop shows through a window without a redirection bitmap,
+    // which only a window being made can drop. A development host's
+    // options come with its app, after the window is made: it is composed
+    // in case they bring a backdrop, and draws its opaque background until
+    // they do ([`crate::surface::Surface::transparent`]).
     let composed = options.transparent
+        || held
         || launch
             .attributes
             .backdrop
@@ -943,6 +948,48 @@ mod tests {
             // SAFETY: the test's own windows.
             let _ = unsafe { DestroyWindow(view.hwnd()) };
         }
+    }
+
+    /// A development host's window is made before its app's options come
+    /// (#2177): composed, with its frame, opaque until a backdrop comes,
+    /// see-through while it has one.
+    #[test]
+    fn a_composed_window_takes_a_backdrop_that_comes_later() {
+        let view = AppView::make(
+            None,
+            AppOptions {
+                size: (200, 120),
+                skip_taskbar: true,
+                ..Default::default()
+            },
+            true,
+        )
+        .unwrap();
+        let hwnd = view.hwnd();
+        let (style, ex) = styles(hwnd);
+        assert_ne!(style & WS_CAPTION.0, 0, "keeps its frame");
+        assert_ne!(ex & WS_EX_NOREDIRECTIONBITMAP.0, 0, "no redirection bitmap");
+        let surface = view.surface();
+        assert!(!surface.transparent());
+        assert_ne!(
+            crate::system::window_background(surface),
+            nsh_core::Color::TRANSPARENT
+        );
+        let backdrop = |b| {
+            let mut attrs = nsh_core::desktop::WindowAttributes::default();
+            attrs.backdrop = Some(b);
+            attrs
+        };
+        crate::shell::apply(surface, hwnd, &backdrop(Backdrop::Popover));
+        assert!(surface.transparent());
+        assert_eq!(
+            crate::system::window_background(surface),
+            nsh_core::Color::TRANSPARENT
+        );
+        crate::shell::apply(surface, hwnd, &backdrop(Backdrop::None));
+        assert!(!surface.transparent());
+        // SAFETY: the test's own window.
+        let _ = unsafe { DestroyWindow(hwnd) };
     }
 
     #[test]
