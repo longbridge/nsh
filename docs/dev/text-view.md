@@ -273,11 +273,18 @@ The whole text is parsed, as before, when a later line can change any block or t
 
 | When | Until |
 |---|---|
-| A link or footnote definition is in the text (references before it resolve, footnotes are numbered by first reference) | The text is replaced |
+| A link or footnote definition is in the text (references before it resolve, footnotes are numbered by first reference) | The text is replaced (a definition in the block still being written may yet stop being one: then the boundary moves again) |
 | Plugins (`ParseContext::source`, positions in the whole text), a declared `:::` container, `options.mdx` | They are gone |
 | Front matter is open (`---` first with `options.frontmatter`, its closing line not arrived) | It closes: nothing is kept before |
 | The repair holds back a line at the start of the tail (it then repairs the block before the boundary) | That update only |
 | The text does not start with the last one (replaced, edited, shorter), or `options` / `extensions` changed | That update: reading starts over from it |
+
+A text with definitions is still parsed once per update, never twice. A tree read from the text's start (the
+first set, a replaced text, and every update while nothing is kept) is the whole text's, definitions included: it
+is converted as it is, footnotes too. When a definition first shows in the tree of a tail, what was kept is
+dropped and that one update parses the whole text; the updates after it read from the start again. Whether a text
+has a definition is the tree's answer alone, never a scan for `]:`: code is full of that sequence
+(`if seen[key]:`), and a reply with such code keeps its boundary.
 
 A reply that ends in one large block (a long table, list or code block) has that block after the boundary, so it
 is the part parsed again on each update: the blocks before it are still kept. So is a reply with no paragraph for a

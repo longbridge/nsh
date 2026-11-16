@@ -190,6 +190,57 @@ commits with the same ops, mount items and nodes in each (56 down to 1 items, 37
 most), and every mount item of every step is the same; the presses' commits average
 1796 → 1101 µs.
 
+`TextView` definitions (2026-11-16, Linux x86_64, release, against `717b961b`): a text with a
+link or footnote definition read from its start (the first set, a replaced text, a definition
+in the block being written) built its tree, found the definition and parsed the whole text
+again. That tree is now converted as it is; a definition first seen in the tree of a tail drops
+what was kept and parses the whole text once (`text-view.md` "Reading only what can change").
+
+`cargo test --release -p nsh-base --lib bench_streaming_set -- --ignored --nocapture`: about
+40 KB of Markdown (78 KB in the quote's row), `streaming: true`, mean ms of 30 runs, the two
+readers in alternating order, a new `Incremental` for each run; making the state before the
+update, comparing and dropping the document are not timed. `Parser::markdown` is the full
+parse measured beside the reader after the change.
+
+| Update | `Parser::markdown` | `Incremental`, before → after |
+|---|---|---|
+| First set, no definition | 12.921 | 13.199 → 13.141 |
+| First set, a link definition | 12.978 | 26.211 → 13.169 |
+| First set, a footnote definition | 12.950 | 26.010 → 13.136 |
+| First set, both | 12.970 | 26.097 → 13.152 |
+| Replaced text, both | 12.941 | 26.052 → 13.129 |
+| A final link definition grows | 12.961 | 25.935 → 13.115 |
+| A final footnote definition grows | 12.917 | 25.916 → 13.110 |
+| A link definition arrives after a kept text | 13.016 | 13.234 → 13.191 |
+| A definition arrives in a 38 KB quote (the tail) | 25.174 | 33.728 → 33.223 |
+| `` `[docs]: /guide` `` in a code span arrives, then grows | 12.985 | 0.021 → 0.021 |
+
+Without `streaming` the rows read the same way. The second parse is gone; a first set
+costs about 1.5% more than `Parser::markdown` (the boundary's bookkeeping and the shared
+blocks), with and without definitions. The quote's row is the one case that still reads more
+than the whole text: the update in which a definition first shows in a tail reads the tail,
+then the whole text (the tail is the quote here, half of the text); the updates after it read
+once. Scanning the tail for `]:` first would save that tail, and was measured and dropped: the
+sequence is common in code, and a reply whose Python has `if seen[key]:` then parses the whole
+text on most updates. `bench_streaming` has such a reply (24-byte updates, total over the
+stream / average of the last 10, ms):
+
+| Reply | Updates | `Parser::markdown` | `Incremental`, with the scan | `Incremental`, without it |
+|---|---|---|---|---|
+| `]:` in its code, 20 KB | 834 | 1913.2 / 4.844 | 1686.5 / 4.425 | 27.7 / 0.033 |
+| `]:` in its code, 40 KB | 1,667 | 8581.6 / 11.322 | 7640.7 / 10.765 | 57.5 / 0.034 |
+
+The other replies of `bench_streaming` are as above (typical 20 / 40 KB: 28.5 / 0.036 and
+58.4 / 0.037).
+
+Headless `nsh test examples/bench/MarkdownDefinitions.tsx --trace` (debug, two runs per
+version, the steps in `examples/bench/README.md`): 40 KB of Markdown with a link and a footnote
+definition, set, then replaced six times by a text that differs near its start. Both versions
+make the same commits (19 ops, 9,277 mount items, 16,657 nodes, then 1 op and 1 item for each
+replacement) and every mount item of every step is the same. The first commit takes
+522 → 427 ms, a replacement's 204.5 → 106.9 ms (parsing, expansion and layout; no native
+mounting or drawing).
+
 Terminal `TextView` tables (2026-11-08, Linux x86_64, debug hosts,
 `nsh test <entry> --target tui --trace`, against `71aeb06a`, seven alternating runs per version, medians):
 100 body rows × 10 columns, each cell 100 `x` characters, in a 200 × 60 Cell terminal. Narrowing the table's
