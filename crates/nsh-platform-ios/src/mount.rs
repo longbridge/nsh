@@ -1928,6 +1928,7 @@ impl Mounter {
                         modal.view.endEditing(true);
                     }
                 }
+                self.restore_root_focus();
             }
             (Command::ScrollTo { x, y, animated }, Native::Scroll(scroll)) => {
                 let inset = scroll.adjustedContentInset();
@@ -2690,10 +2691,32 @@ impl Mounter {
         }
     }
 
+    /// Restore hardware-key delivery after a window or root-wide blur,
+    /// including when the root itself was the only first responder.
+    fn restore_root_focus(&self) {
+        // A presented modal owns its responder scope, even with no input
+        // focused. Do not route its keys to the background surface.
+        if self
+            .views
+            .iter()
+            .flatten()
+            .any(|slot| matches!(&slot.native, Native::Modal(modal) if modal.presented))
+        {
+            return;
+        }
+        if let Some(root) = self.slot(nsh_core::ROOT_ID)
+            && let Some(window) = root.native.view().window()
+        {
+            self.target
+                .restore_root_focus(root.native.view().retain(), window);
+        }
+    }
+
     pub(crate) fn dismiss_keyboard(&self) {
         if let Some(root) = self.slot(nsh_core::ROOT_ID) {
             root.native.view().window().map(|w| w.endEditing(true));
         }
+        self.restore_root_focus();
     }
 
     /// Where a fling of scroll view `id` ends when it snaps: `target` is
@@ -3094,6 +3117,7 @@ impl Mounter {
     /// take the pictures they missed.
     pub(crate) fn window_changed(&mut self) {
         self.shaders.revisit();
+        self.restore_root_focus();
     }
 
     /// The surface's traits changed: on a screen of another scale (an
