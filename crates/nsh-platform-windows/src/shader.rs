@@ -1506,7 +1506,9 @@ mod tests {
                 height: 1,
                 data: bgra.to_vec(),
             });
-            let bitmap = shader.bitmap(&gfx.dc, 4).expect("the start picture's bitmap");
+            let bitmap = shader
+                .bitmap(&gfx.dc, 4)
+                .expect("the start picture's bitmap");
             let rect = D2D_RECT_U {
                 left: 0,
                 top: 0,
