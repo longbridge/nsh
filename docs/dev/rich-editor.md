@@ -23,7 +23,7 @@ what is ported. A module ported from one names its source in its module doc; kee
 | `commands/` | prosemirror-commands and prosemirror-schema-list: `Command`s over a state and an optional dispatch, `chain_commands`, `base_keymap` |
 | `extensions/` | optional behavior as plugins: `history`, `keymap`, `input_rules`, `markdown` (Markdown shortcuts as you type, Markdown paste and copy, mapped by `MarkdownNames`); `starter`, the optional starter schema (paragraphs, headings, quotes, code, lists, images, the common marks) with its keymap and input rules |
 | `tables/` | prosemirror-tables: `TableMap`, `CellSelection`, `fix_tables`, the `table_editing` plugin, the table commands and Tiptap's table node specs (see "Tables") |
-| `formats/` | `DocFormat`: `JsonFormat`, `PlainTextFormat`, `MarkdownFormat` (names mapped by `MarkdownNames`; GFM task items read as `taskList` / `taskItem`, a run of them splitting a bullet list, and write as `- [x]` / `- [ ]`), the clipboard's `slice_to_text` / `slice_from_text` |
+| `formats/` | `DocFormat`: `JsonFormat`, `PlainTextFormat`, `MarkdownFormat` (names mapped by `MarkdownNames`; GFM task items read as `taskList` / `taskItem`, a run of them splitting a bullet list, and write as `- [x]` / `- [ ]`; Markdown read to 64 levels of blocks and inline content, deeper content as its text, so a paste of thousands of nested quotes cannot run the stack out), the clipboard's `slice_to_text` / `slice_from_text` |
 
 ## Documents defined by the schema
 

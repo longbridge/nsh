@@ -515,17 +515,25 @@ fn close(text: &str) -> String {
     let mut code = Code::of(text, true);
     let open_code = code.open;
     // A run of markers at the end after a space opens nothing yet (`a **`):
-    // removed.
-    let trimmed = text.trim_end();
-    let run_start = trimmed.trim_end_matches(['*', '_', '~']).len();
-    if run_start < trimmed.len()
-        && trimmed[..run_start]
-            .chars()
-            .next_back()
-            .is_none_or(char::is_whitespace)
-        && open_code.is_none_or(|(s, _)| s > run_start)
-    {
-        return close(trimmed[..run_start].trim_end());
+    // removed, and so is each run then at the end. A loop, not a call per
+    // run: a reply of thousands of runs (`a * * * …`) ran the stack out.
+    // The runs hold no backtick, backslash or `)`, so the code of what is
+    // left is the code of `text` before it.
+    let mut text = text;
+    loop {
+        let trimmed = text.trim_end();
+        let run_start = trimmed.trim_end_matches(['*', '_', '~']).len();
+        if run_start < trimmed.len()
+            && trimmed[..run_start]
+                .chars()
+                .next_back()
+                .is_none_or(char::is_whitespace)
+            && open_code.is_none_or(|(s, _)| s > run_start)
+        {
+            text = trimmed[..run_start].trim_end();
+        } else {
+            break;
+        }
     }
     let bytes = text.as_bytes();
     let scan_end = open_code.map_or(bytes.len(), |(s, _)| s);
@@ -641,6 +649,23 @@ mod tests {
     #[track_caller]
     fn check(input: &str, expected: &str) {
         assert_eq!(repair(input), expected, "input: {input:?}");
+    }
+
+    /// Runs of markers at the end are removed one after another without
+    /// recursion: a degenerate reply (`a * * * …`) ran the stack out.
+    #[test]
+    fn many_trailing_marker_runs() {
+        let source = format!("a{}", " *".repeat(30_000));
+        let repaired = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || repair(&source).into_owned())
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(repaired, "a");
+        check("a ** __ ~~ *", "a");
+        check("a **b ** *", "a **b**");
+        check("`a ** *", "`a ** *`");
     }
 
     #[test]

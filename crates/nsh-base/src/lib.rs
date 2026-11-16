@@ -43,6 +43,7 @@ mod keys;
 mod link;
 mod link_hint;
 mod listbox;
+mod mdast_tree;
 mod menu;
 mod menu_button;
 mod navigation;
