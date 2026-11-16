@@ -451,20 +451,25 @@ define_class!(
         }
 
         #[unsafe(method(insertText:))]
-        fn insert_text(&self, _text: &NSString) {}
+        fn insert_text(&self, _text: Option<&NSString>) {}
 
         #[unsafe(method(deleteBackward))]
         fn delete_backward(&self) {}
     }
 
+    // UIKit declares every position and range these methods take nonnull,
+    // yet passes nil at times (the edit menu of a secondary click on text
+    // with nothing selected moves a nil position): each takes an `Option`
+    // and answers nil with "nothing", as a message to nil would, rather
+    // than messaging it.
     unsafe impl UITextInput for TextView {
         #[unsafe(method_id(textInRange:))]
-        fn text_in_range(&self, range: &UITextRange) -> Option<Retained<NSString>> {
-            self.sel_text_in(range)
+        fn text_in_range(&self, range: Option<&UITextRange>) -> Option<Retained<NSString>> {
+            range.and_then(|range| self.sel_text_in(range))
         }
 
         #[unsafe(method(replaceRange:withText:))]
-        fn replace_range(&self, _range: &UITextRange, _text: &NSString) {}
+        fn replace_range(&self, _range: Option<&UITextRange>, _text: Option<&NSString>) {}
 
         #[unsafe(method_id(selectedTextRange))]
         fn selected_text_range(&self) -> Option<Retained<UITextRange>> {
@@ -506,27 +511,42 @@ define_class!(
         }
 
         #[unsafe(method_id(textRangeFromPosition:toPosition:))]
-        fn text_range(&self, from: &UITextPosition, to: &UITextPosition) -> Option<Retained<UITextRange>> {
-            Some(self.sel_range(from, to))
+        fn text_range(
+            &self,
+            from: Option<&UITextPosition>,
+            to: Option<&UITextPosition>,
+        ) -> Option<Retained<UITextRange>> {
+            from.zip(to).map(|(from, to)| self.sel_range(from, to))
         }
 
         #[unsafe(method_id(positionFromPosition:offset:))]
-        fn position_offset(&self, position: &UITextPosition, offset: NSInteger) -> Option<Retained<UITextPosition>> {
-            self.sel_moved(position, offset)
+        fn position_offset(
+            &self,
+            position: Option<&UITextPosition>,
+            offset: NSInteger,
+        ) -> Option<Retained<UITextPosition>> {
+            position.and_then(|position| self.sel_moved(position, offset))
         }
 
         #[unsafe(method_id(positionFromPosition:inDirection:offset:))]
         fn position_direction(
             &self,
-            position: &UITextPosition,
+            position: Option<&UITextPosition>,
             direction: UITextLayoutDirection,
             offset: NSInteger,
         ) -> Option<Retained<UITextPosition>> {
-            self.sel_moved_in(position, direction, offset)
+            position.and_then(|position| self.sel_moved_in(position, direction, offset))
         }
 
         #[unsafe(method(comparePosition:toPosition:))]
-        fn compare_position(&self, position: &UITextPosition, other: &UITextPosition) -> NSComparisonResult {
+        fn compare_position(
+            &self,
+            position: Option<&UITextPosition>,
+            other: Option<&UITextPosition>,
+        ) -> NSComparisonResult {
+            let (Some(position), Some(other)) = (position, other) else {
+                return NSComparisonResult::Same;
+            };
             match text_selection::offset(position).cmp(&text_selection::offset(other)) {
                 std::cmp::Ordering::Less => NSComparisonResult::Ascending,
                 std::cmp::Ordering::Equal => NSComparisonResult::Same,
@@ -535,7 +555,10 @@ define_class!(
         }
 
         #[unsafe(method(offsetFromPosition:toPosition:))]
-        fn offset_from(&self, from: &UITextPosition, to: &UITextPosition) -> NSInteger {
+        fn offset_from(&self, from: Option<&UITextPosition>, to: Option<&UITextPosition>) -> NSInteger {
+            let (Some(from), Some(to)) = (from, to) else {
+                return 0;
+            };
             text_selection::offset(to) as NSInteger - text_selection::offset(from) as NSInteger
         }
 
@@ -555,36 +578,48 @@ define_class!(
         }
 
         #[unsafe(method_id(positionWithinRange:farthestInDirection:))]
-        fn farthest(&self, range: &UITextRange, direction: UITextLayoutDirection) -> Option<Retained<UITextPosition>> {
-            Some(self.sel_farthest(range, direction))
+        fn farthest(
+            &self,
+            range: Option<&UITextRange>,
+            direction: UITextLayoutDirection,
+        ) -> Option<Retained<UITextPosition>> {
+            range.map(|range| self.sel_farthest(range, direction))
         }
 
         #[unsafe(method_id(characterRangeByExtendingPosition:inDirection:))]
-        fn extending(&self, position: &UITextPosition, direction: UITextLayoutDirection) -> Option<Retained<UITextRange>> {
-            Some(self.sel_extend(position, direction))
+        fn extending(
+            &self,
+            position: Option<&UITextPosition>,
+            direction: UITextLayoutDirection,
+        ) -> Option<Retained<UITextRange>> {
+            position.map(|position| self.sel_extend(position, direction))
         }
 
         #[unsafe(method(baseWritingDirectionForPosition:inDirection:))]
-        fn writing_direction(&self, _position: &UITextPosition, _direction: UITextStorageDirection) -> NSWritingDirection {
+        fn writing_direction(
+            &self,
+            _position: Option<&UITextPosition>,
+            _direction: UITextStorageDirection,
+        ) -> NSWritingDirection {
             self.sel_direction()
         }
 
         #[unsafe(method(setBaseWritingDirection:forRange:))]
-        fn set_writing_direction(&self, _direction: NSWritingDirection, _range: &UITextRange) {}
+        fn set_writing_direction(&self, _direction: NSWritingDirection, _range: Option<&UITextRange>) {}
 
         #[unsafe(method(firstRectForRange:))]
-        fn first_rect(&self, range: &UITextRange) -> CGRect {
-            self.sel_first_rect(range)
+        fn first_rect(&self, range: Option<&UITextRange>) -> CGRect {
+            range.map_or(CGRect::ZERO, |range| self.sel_first_rect(range))
         }
 
         #[unsafe(method(caretRectForPosition:))]
-        fn caret_rect(&self, position: &UITextPosition) -> CGRect {
-            self.sel_caret(position)
+        fn caret_rect(&self, position: Option<&UITextPosition>) -> CGRect {
+            position.map_or(CGRect::ZERO, |position| self.sel_caret(position))
         }
 
         #[unsafe(method_id(selectionRectsForRange:))]
-        fn selection_rects(&self, range: &UITextRange) -> Retained<NSArray<UITextSelectionRect>> {
-            self.sel_rects(range)
+        fn selection_rects(&self, range: Option<&UITextRange>) -> Retained<NSArray<UITextSelectionRect>> {
+            range.map_or_else(NSArray::new, |range| self.sel_rects(range))
         }
 
         #[unsafe(method_id(closestPositionToPoint:))]
@@ -593,8 +628,8 @@ define_class!(
         }
 
         #[unsafe(method_id(closestPositionToPoint:withinRange:))]
-        fn closest_within(&self, point: CGPoint, range: &UITextRange) -> Option<Retained<UITextPosition>> {
-            self.sel_closest(point, Some(range))
+        fn closest_within(&self, point: CGPoint, range: Option<&UITextRange>) -> Option<Retained<UITextPosition>> {
+            self.sel_closest(point, range)
         }
 
         #[unsafe(method_id(characterRangeAtPoint:))]
