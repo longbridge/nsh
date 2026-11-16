@@ -3,11 +3,14 @@
 //! `IFileSaveDialog`) owned by the surface's window, opening a file in its
 //! app (`ShellExecuteW`), showing it selected in File Explorer
 //! (`SHOpenFolderAndSelectItems`) and the Recycle Bin (`IFileOperation`
-//! with `FOFX_RECYCLEONDELETE`). Each request runs on a thread of its own
+//! with `FOFX_RECYCLEONDELETE`). A folder picker stays on the file system:
+//! a folder with no path, such as Home, opens the user's profile instead.
+//! Each request runs on a thread of its own
 //! (a single-threaded COM apartment), so the surface's message loop never
 //! waits in it, and answers as a root `FileRequest` event.
 
 use std::{
+    cell::Cell,
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -26,17 +29,19 @@ use windows::{
         },
         UI::{
             Shell::{
-                Common::COMDLG_FILTERSPEC, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI,
-                FOF_SILENT, FOFX_RECYCLEONDELETE, FOS_ALLOWMULTISELECT, FOS_FILEMUSTEXIST,
-                FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, FileOpenDialog, FileOperation,
-                FileSaveDialog, IFileDialog, IFileOpenDialog, IFileOperation, IFileSaveDialog,
-                ILCreateFromPathW, ILFree, IShellItem, SHCreateItemFromParsingName,
-                SHOpenFolderAndSelectItems, SIGDN_FILESYSPATH, ShellExecuteW,
+                Common::COMDLG_FILTERSPEC, FDE_OVERWRITE_RESPONSE, FDE_SHAREVIOLATION_RESPONSE,
+                FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FOFX_RECYCLEONDELETE,
+                FOLDERID_Profile, FOS_ALLOWMULTISELECT, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM,
+                FOS_PICKFOLDERS, FileOpenDialog, FileOperation, FileSaveDialog, IFileDialog,
+                IFileDialogEvents, IFileDialogEvents_Impl, IFileOpenDialog, IFileOperation,
+                IFileSaveDialog, ILCreateFromPathW, ILFree, IShellItem, KF_FLAG_DEFAULT,
+                SHCreateItemFromParsingName, SHGetKnownFolderPath, SHOpenFolderAndSelectItems,
+                SIGDN_FILESYSPATH, ShellExecuteW,
             },
             WindowsAndMessaging::SW_SHOWNORMAL,
         },
     },
-    core::{HRESULT, HSTRING, PCWSTR, w},
+    core::{HRESULT, HSTRING, PCWSTR, Ref, implement, w},
 };
 
 use crate::surface::Surface;
@@ -114,6 +119,113 @@ fn item_path(item: &IShellItem) -> windows::core::Result<Option<PathBuf>> {
         let path = name.to_string().ok().map(PathBuf::from);
         CoTaskMemFree(Some(name.0 as *const _));
         Ok(path)
+    }
+}
+
+/// Whether `item` has a file system path: Home and This PC do not.
+fn on_file_system(item: &IShellItem) -> bool {
+    matches!(item_path(item), Ok(Some(_)))
+}
+
+/// The user's profile folder.
+fn profile_folder() -> Option<PathBuf> {
+    // SAFETY: the shell allocates the path, which is freed once copied.
+    unsafe {
+        let path = SHGetKnownFolderPath(&FOLDERID_Profile, KF_FLAG_DEFAULT, None).ok()?;
+        let text = path.to_string().ok();
+        CoTaskMemFree(Some(path.0 as *const _));
+        text.map(PathBuf::from)
+    }
+}
+
+/// Keeps a folder picker on the file system: the shell reports a folder
+/// with no path (Home, This PC), and this sink opens the user's profile
+/// with the name field empty, so the dialog answers the folder it shows.
+#[derive(Default)]
+#[implement(IFileDialogEvents)]
+struct FileSystemOnly {
+    /// Set while the redirect runs: `SetFolder` reports the change it
+    /// makes, and a folder that stays off the file system would report it
+    /// again.
+    redirecting: Cell<bool>,
+}
+
+impl FileSystemOnly {
+    /// Moves `dialog` from `folder`, which has no path, to the profile
+    /// folder, with the name field empty.
+    fn keep(&self, dialog: &IFileDialog, folder: &IShellItem) -> windows::core::Result<()> {
+        if on_file_system(folder) {
+            return Ok(());
+        }
+        if self.redirecting.replace(true) {
+            return Ok(());
+        }
+        let moved = match profile_folder() {
+            // SAFETY: COM calls on the dialog of this thread.
+            Some(profile) => unsafe {
+                item(&profile)
+                    .and_then(|profile| dialog.SetFolder(&profile))
+                    .and_then(|()| dialog.SetFileName(&HSTRING::new()))
+            },
+            None => {
+                log::warn!(
+                    "the profile folder is not known: the folder picker stays off the file system"
+                );
+                Ok(())
+            }
+        };
+        self.redirecting.set(false);
+        moved
+    }
+}
+
+impl IFileDialogEvents_Impl for FileSystemOnly_Impl {
+    fn OnFileOk(&self, _dialog: Ref<IFileDialog>) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn OnFolderChanging(
+        &self,
+        _dialog: Ref<IFileDialog>,
+        _folder: Ref<IShellItem>,
+    ) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn OnFolderChange(&self, dialog: Ref<IFileDialog>) -> windows::core::Result<()> {
+        // The notification names no dialog when it is null, and then there
+        // is nothing to keep on the file system.
+        let Some(dialog) = dialog.as_ref() else {
+            return Ok(());
+        };
+        // SAFETY: COM calls on the dialog of this thread, in its own
+        // notification.
+        let folder = unsafe { dialog.GetFolder() }?;
+        self.keep(dialog, &folder)
+    }
+
+    fn OnSelectionChange(&self, _dialog: Ref<IFileDialog>) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn OnShareViolation(
+        &self,
+        _dialog: Ref<IFileDialog>,
+        _item: Ref<IShellItem>,
+    ) -> windows::core::Result<FDE_SHAREVIOLATION_RESPONSE> {
+        Ok(FDE_SHAREVIOLATION_RESPONSE::default())
+    }
+
+    fn OnTypeChange(&self, _dialog: Ref<IFileDialog>) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn OnOverwrite(
+        &self,
+        _dialog: Ref<IFileDialog>,
+        _item: Ref<IShellItem>,
+    ) -> windows::core::Result<FDE_OVERWRITE_RESPONSE> {
+        Ok(FDE_OVERWRITE_RESPONSE::default())
     }
 }
 
@@ -239,7 +351,18 @@ fn pick_paths(owner: HWND, request: &OpenDialog) -> windows::core::Result<Vec<Pa
             request.directory.as_ref(),
             filters,
         )?;
-        if !show(&dialog, owner)? {
+        // A picker that answers folders keeps the dialog on the file
+        // system ([`FileSystemOnly`]); it holds the sink until unadvised.
+        let events: Option<IFileDialogEvents> = folders.then(|| FileSystemOnly::default().into());
+        let cookie = events
+            .as_ref()
+            .map(|events| dialog.Advise(events))
+            .transpose()?;
+        let shown = show(&dialog, owner);
+        if let Some(cookie) = cookie {
+            dialog.Unadvise(cookie)?;
+        }
+        if !shown? {
             return Ok(Vec::new());
         }
         let items = dialog.GetResults()?;
@@ -332,4 +455,87 @@ fn trash(path: &Path) -> windows::core::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use windows::core::PWSTR;
+
+    use super::*;
+
+    /// The string the shell allocated, copied and freed.
+    fn taken(pointer: PWSTR) -> String {
+        // SAFETY: the name the shell allocated is freed once copied.
+        unsafe {
+            let text = pointer.to_string().unwrap_or_default();
+            CoTaskMemFree(Some(pointer.0 as *const _));
+            text
+        }
+    }
+
+    /// A folder of the shell that has no file system path.
+    fn this_pc() -> IShellItem {
+        // SAFETY: a NUL-terminated shell namespace name that outlives the
+        // call.
+        unsafe {
+            SHCreateItemFromParsingName(
+                &HSTRING::from("shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}"),
+                None,
+            )
+            .expect("the shell has This PC")
+        }
+    }
+
+    /// A folder picker of this thread's COM apartment. It never shows, so
+    /// the test opens no window.
+    fn folder_picker() -> windows::core::Result<IFileOpenDialog> {
+        // SAFETY: COM calls on a dialog this thread owns until it is
+        // dropped.
+        unsafe {
+            let dialog: IFileOpenDialog =
+                CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
+            dialog.SetOptions(dialog.GetOptions()? | FOS_FORCEFILESYSTEM | FOS_PICKFOLDERS)?;
+            Ok(dialog)
+        }
+    }
+
+    #[test]
+    fn a_folder_with_no_path_opens_the_profile() {
+        let (folder, name) = with_com(|| {
+            let dialog = folder_picker()?;
+            // SAFETY: COM calls on the dialog of this test's apartment.
+            unsafe {
+                dialog.SetFileName(&HSTRING::from("typed"))?;
+                FileSystemOnly::default().keep(&dialog, &this_pc())?;
+                let folder = item_path(&dialog.GetFolder()?)?;
+                Ok::<_, windows::core::Error>((folder, taken(dialog.GetFileName()?)))
+            }
+        })
+        .and_then(|answer| answer)
+        .expect("the folder picker moves to the profile");
+
+        assert_eq!(folder, profile_folder());
+        assert!(name.is_empty());
+    }
+
+    #[test]
+    fn a_folder_with_a_path_keeps_the_name_typed() {
+        let (before, after, name) = with_com(|| {
+            let dialog = folder_picker()?;
+            // SAFETY: COM calls on the dialog of this test's apartment.
+            unsafe {
+                dialog.SetFileName(&HSTRING::from("typed"))?;
+                let before = item_path(&dialog.GetFolder()?)?;
+                let profile = profile_folder().expect("the profile folder is known");
+                FileSystemOnly::default().keep(&dialog, &item(&profile)?)?;
+                let after = item_path(&dialog.GetFolder()?)?;
+                Ok::<_, windows::core::Error>((before, after, taken(dialog.GetFileName()?)))
+            }
+        })
+        .and_then(|answer| answer)
+        .expect("a folder with a path is left alone");
+
+        assert_eq!(before, after);
+        assert_eq!(name, "typed");
+    }
 }
