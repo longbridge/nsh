@@ -188,7 +188,7 @@ build to the same file) and takes `nsh.js` from the crate.
   (`document.baseURI`, `nsh_set_base_url`) as it starts: the page's script resolves its `app` URLs (and the head's
   requests are keyed the same way), the `Player` its `assets`, `data` and `assetBase` and the app's relative
   `asset()` URLs against `player.baseURL` (`createPlayer`'s `baseURL`, the site's base, else `document.baseURI`),
-  links and addresses against `player.addressBase()`, and `browser/runtime.js` the entry, the chunks and the realm's
+  links, web views' URLs and addresses against `player.addressBase()`, and `browser/runtime.js` the entry, the chunks and the realm's
   `import.meta.url`, so nothing
   loads from the directory a `history.pushState` moved the address to. `nsh.json` `web.base`
   (`web::page_base`: a path from the root
@@ -203,6 +203,8 @@ build to the same file) and takes `nsh.js` from the crate.
   (`app.<digest>.js` and `<chunk>.<digest>.js`), linked to one another and to the native modules' facade files
   (`web::publish_modules`), so the realm needs no import map (an inline script) unless the app imports a native
   module whole; the page's styles are a file and the runtime's are constructed sheets, for a strict `style-src`;
+  the runtime's own images (`image_bytes`, `svgInColor`, `Clipboard.readImage`) are `blob:` / `data:` URLs, so the
+  policy `nsh package` prints adds `img-src 'self' blob: data:`;
   transitive entry fonts load before startup and dynamic imports prepare the requested chunk's font dependencies.
   The browser loads static dependencies, module cycles and dynamic chunks itself. No bytecode or hardening
   bytecode ships in a browser package. An app with a Rust crate of

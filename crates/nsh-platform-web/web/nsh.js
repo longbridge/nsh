@@ -2909,7 +2909,10 @@ class Player {
   retag(el, tag) {
     if (el.localName === tag || (el._kind !== "view" && el._kind !== "text")) return el;
     const next = document.createElement(tag);
-    for (const { name, value } of el.attributes) next.setAttribute(name, value);
+    // Inline styles (a frame's) through the CSSOM: a strict `style-src`
+    // refuses a `style` attribute set as text.
+    for (const { name, value } of el.attributes) if (name !== "style") next.setAttribute(name, value);
+    if (el.style.cssText) next.style.cssText = el.style.cssText;
     for (const key of Object.keys(el)) next[key] = el[key];
     next.append(...el.childNodes);
     el.replaceWith(next);
@@ -6547,7 +6550,9 @@ class Player {
       frame.removeAttribute("srcdoc");
       if (scroll) frame.removeAttribute("scrolling");
       else frame.setAttribute("scrolling", "no");
-      if (url) frame.src = url;
+      // A relative URL is the site's (`linkHref`), which no `<base href>`
+      // names when the page gives it to the player.
+      if (url) frame.src = this.siteBase ? this.linkHref(url) : url;
       else frame.removeAttribute("src");
     }
     // After the batch: its events may come after its props.

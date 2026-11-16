@@ -328,13 +328,17 @@ pub(crate) fn package(
         ui::dim(format!(", {}", ui::bytes(dir_size(&dir))))
     ));
     // What a server with a strict policy allows: the page's scripts and
-    // styles are files ('self'), and so are a linked app's modules.
+    // styles are files ('self'), and so are a linked app's modules; the
+    // runtime shows in-memory images and `svg()`s in their color as `blob:`
+    // URLs and reads clipboard images as `data:` URIs.
+    let whole = !(linked || built.rust_root);
     ui::detail(format!(
-        "under a Content-Security-Policy it needs script-src 'self' 'wasm-unsafe-eval'{}",
-        if linked || built.rust_root {
-            ""
+        "under a Content-Security-Policy it needs script-src 'self' 'wasm-unsafe-eval'{}; img-src 'self' blob: data:{}",
+        if whole { " blob: 'unsafe-inline'" } else { "" },
+        if whole {
+            " (script-src: it loads a native module whole)"
         } else {
-            " blob: 'unsafe-inline' (it loads a native module whole)"
+            ""
         }
     ));
     if options.run {

@@ -223,17 +223,17 @@ nsh package --target web --asset-url https://cdn.example.com/debugger/
 
 #### 在严格的内容安全策略下运行
 
-页面没有内联代码，也没有内联样式：它的脚本、样式和应用的模块都是站点里的文件，运行时自己的样式规则用就地构建的样式表加入。服务器发送下面这样的严格策略时，页面无需改动即可运行：
+页面没有内联代码，也没有内联样式：它的脚本、样式和应用的模块都是站点里的文件，运行时自己的样式规则用就地构建的样式表加入。运行时自己生成的图片（内存中的图片、按文字颜色绘制的 `svg()`、剪贴板里的图片）是 `blob:` 和 `data:` URL，由 `img-src` 放行。服务器发送下面这样的严格策略时，页面无需改动即可运行：
 
 ```text
-default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; base-uri 'none'
+default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob: data:; base-uri 'none'
 ```
 
 `nsh package` 会打印它需要的策略：
 
 ```text
 ✓ packaged .nsh/out/Sports, 5.1 MB
-  under a Content-Security-Policy it needs script-src 'self' 'wasm-unsafe-eval'
+  under a Content-Security-Policy it needs script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob: data:
 ```
 
 设置了 `web.base` 时，页面用绝对路径引用自己的文件，并直接把站点的基址交给运行时，不用 `<base href>`，所以在 `base-uri 'none'` 下应用在它的每个路径上都能加载。整体加载原生模块的 TSX 应用（把 `import * as base from "nsh/base"` 当作值传递、`import(name)`）在启动时才链接它的模块，需要 `'unsafe-inline' blob:`，`nsh package` 会提示。Web 视图的桥（`window.nsh.postMessage`）也是文件；Web 视图自己的 `html` 里的脚本和 `injectedJavaScript*` 是内联的，由应用自己放行，`injectJavaScript` 需要 `'unsafe-eval'`。
@@ -410,7 +410,7 @@ export async function createHost(player) {
 
 `fetch`（包括流、`AbortController` 和 `FormData`）以及 `<Image>` 的 URL 都走浏览器自己的网络栈，在此之前 NSH 已按应用的[能力声明](./sandbox-and-capabilities.md)做过检查。请求是浏览器发出的，所以遵循浏览器的规则：
 
-- **相对 URL** 与浏览器里一样，相对于应用启动时页面的 URL（站点有 `web.base` 时为它）解析：发布出去的应用用 `fetch("/api/items")` 就能访问自己的接口，`<Image src="/photos/a.jpg" />` 从自己的服务器加载。（原生平台没有页面，仍需使用绝对 URL。）
+- **相对 URL**：`fetch`（参数为字符串或 `URL` 时）和应用的图片、视频、声音里的相对 URL 相对于应用启动时页面的 URL 解析，站点有 `web.base` 时相对于它：发布出去的应用用 `fetch("/api/items")` 就能访问自己的接口，`<Image src="/photos/a.jpg" />` 从自己的服务器加载。链接的 `href` 和 Web 视图的 `url` 在站点有 `web.base` 时也相对于它解析，否则相对于页面当前的地址。（原生平台没有页面，仍需使用绝对 URL。）
 - **CORS。** 发往页面所在源以外的请求，只有对方服务器允许页面的源（`Access-Control-Allow-Origin`）才会成功，否则 `fetch` 以网络错误拒绝。只能读到服务器公开的响应头。
 - **Cookie**（以及 HTTP 认证信息）只发送给页面自己的源（`credentials: "same-origin"`），浏览器禁止的请求头（`Cookie`、`User-Agent`、`Host` 等）会被丢弃。
 - **重定向**由浏览器跟随。不应跟随重定向的请求遇到重定向时会失败：`redirect: "manual"` 和 `"error"`，以及能力声明限制了 `network` 的应用发出的请求（NSH 要逐跳检查，而浏览器在跟随之前不会透露重定向的目标）。

@@ -3754,3 +3754,75 @@ test("links and addresses resolve against the site's base where the page names i
     globalThis.document = savedDocument;
   }
 });
+
+/** An element whose DOM state, as a real one's, is not among its own
+ * enumerable keys (`retag` copies those); a `style` attribute set as text
+ * applies nothing, as under a strict `style-src`. */
+function fakeElement(tag, attributes = {}) {
+  const attrs = new Map(Object.entries(attributes));
+  const set = [];
+  const el = {};
+  Object.defineProperties(el, {
+    localName: { value: tag },
+    attributes: { get: () => [...attrs].map(([name, value]) => ({ name, value })) },
+    setAttribute: { value(name, value) { set.push(name); if (name !== "style") attrs.set(name, String(value)); } },
+    getAttribute: { value: (name) => attrs.get(name) ?? null },
+    removeAttribute: { value: (name) => attrs.delete(name) },
+    attributesSet: { value: set },
+    style: { value: { cssText: attributes.style ?? "" } },
+    childNodes: { value: [] },
+    append: { value(...nodes) { this.childNodes.push(...nodes); } },
+    replaceWith: { value() {} },
+  });
+  return el;
+}
+
+test("a view drawn as another element keeps its frame under a strict style-src", () => {
+  const savedDocument = globalThis.document;
+  globalThis.document = { createElement: (tag) => fakeElement(tag) };
+  try {
+    const { player } = fakePlayer();
+    player.views = new Map();
+    const frame = "left: 10px; top: 20px; width: 100px; height: 40px;";
+    const el = fakeElement("div", { class: "nsh-v", style: frame });
+    Object.assign(el, { _id: 6, _kind: "view" });
+    player.views.set(6, el);
+    // A `Link` whose `href` arrives after its frame: drawn as an `a`.
+    const next = player.retag(el, "a");
+    assert.equal(next.localName, "a");
+    assert.equal(next.style.cssText, frame);
+    assert.ok(!next.attributesSet.includes("style"));
+    assert.equal(next.getAttribute("class"), "nsh-v");
+    assert.equal(next._id, 6);
+    assert.equal(player.views.get(6), next);
+  } finally {
+    globalThis.document = savedDocument;
+  }
+});
+
+test("a web view's relative URL is the site's where the page names its base", () => {
+  const savedLocation = globalThis.location;
+  // Opened at one of the app's routes, below the site's base.
+  globalThis.location = { href: "https://a.test/apps/x/a/b", origin: "https://a.test" };
+  try {
+    const { player } = fakePlayer();
+    const frame = fakeElement("iframe");
+    const el = { _id: 8, _frameEl: frame, _events: new Set() };
+    player.view = () => el;
+    const load = (url) => {
+      el._web = null;
+      player.op_web(["web", 8, url, null, null, null, null, true, true]);
+      return frame.src;
+    };
+    player.siteBase = "https://a.test/apps/x/";
+    assert.equal(load("help/index.html"), "https://a.test/apps/x/help/index.html");
+    assert.equal(load("https://b.test/doc"), "https://b.test/doc");
+    // Without a site base the page's own base resolves it, as it does a link's.
+    player.siteBase = null;
+    assert.equal(load("help/index.html"), "help/index.html");
+    assert.equal(el._webUrl, "help/index.html");
+  } finally {
+    if (savedLocation === undefined) delete globalThis.location;
+    else globalThis.location = savedLocation;
+  }
+});
