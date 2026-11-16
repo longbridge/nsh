@@ -3,9 +3,10 @@
 //! below them and the content it draws above them. A component's visual
 //! takes a web view's place below: it is stacked and placed the same way.
 //!
-//! A window without web views draws its whole tree into its flip-model
-//! swap chain ([`crate::render::frame`]) and has no composition at all.
-//! The first web view of a surface makes its [`Composition`]: a
+//! A window without web views or composed components draws its whole tree
+//! into its flip-model swap chain ([`crate::render::frame`]) and has no
+//! composition at all. The first of them in a surface makes its
+//! [`Composition`]: a
 //! DirectComposition target on the window, above the window's own swap
 //! chain, whose root holds, bottom to top, each web view's visual
 //! ([`Portal`], the WebView2 controller's root visual target) and after
@@ -103,7 +104,8 @@ impl Placement {
 }
 
 /// The DirectComposition tree of one surface's window. Made with its first
-/// web view, gone with its last (each [`Portal`] holds it).
+/// web view or composed component, gone with the last (each [`Portal`],
+/// and each composed component's item, holds it).
 pub(crate) struct Composition {
     device: IDCompositionDesktopDevice,
     _target: IDCompositionTarget,

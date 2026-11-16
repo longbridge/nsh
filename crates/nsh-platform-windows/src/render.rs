@@ -1438,11 +1438,12 @@ pub(crate) fn frame(surface: &Rc<Surface>) -> bool {
             return false;
         }
     };
-    // Only a window with web views has a composition: without one the
-    // frame is the one swap chain, drawn and presented as always.
+    // Only a window with web views or composed components has a composition:
+    // without one the frame is the one swap chain, drawn and presented as
+    // always.
     let composition = surface.composition();
-    // What changed, in pixels (`None`: everything). A window with web views
-    // draws its layers whole.
+    // What changed, in pixels (`None`: everything). A window with a
+    // composition draws its layers whole.
     let damage = surface.take_damage();
     let changed = damage
         .filter(|_| composition.is_none())

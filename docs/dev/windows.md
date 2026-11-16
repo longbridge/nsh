@@ -66,14 +66,15 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   no child windows. Changing a view (`changed` / `moved`) queues it on its surface and invalidates the window;
   `WM_PAINT` draws once, however many views changed, only where they changed ("Partial frames", below). Only native components that bring a window of their own are child `HWND`s, and they
   sit above everything NSH draws (the "airspace" limit, below).
-- **Window composition for web views** (`compose.rs`). A window without web views has one swap chain. The first web
-  view makes a DirectComposition target on the window that layers each web view's visual between swap-chain layers
-  of what NSH paints before and after it, so later siblings, dialogs and the dev overlay draw above web views, for
-  any number of them. Windows without web views pay nothing for it; the composition lives as long as a web view
-  holds it (`Surface::compose`). A registered native component may bring a visual of its own the same way
-  (`NativeComponent::composed` / `visual`, `native.rs`): content another device draws, such as a swap chain of
-  the app's own. The first frame that draws its view in a window asks it for the visual on that window's
-  composition device; the composition stacks it in paint order like a web view's page and hands the component its
+- **Window composition for web views** (`compose.rs`). A window without web views or composed components has one
+  swap chain. The first web view makes a DirectComposition target on the window that layers each web view's visual
+  between swap-chain layers of what NSH paints before and after it, so later siblings, dialogs and the dev overlay
+  draw above web views, for any number of them. Windows without web views or composed components pay nothing for it;
+  the composition lives as long as a web view or a composed component holds it (`Surface::compose`). A registered
+  native component may bring a visual of its own the same way (`NativeComponent::composed` / `visual`, `native.rs`):
+  content another device draws, such as a swap chain of the app's own. The first frame that draws its view in a
+  window asks it for the visual on that window's composition device, and the window draws again with the visual in
+  its composition; the composition stacks it in paint order like a web view's page and hands the component its
   `ComposedAt` (transform, size, clip, corner radii, opacity) every frame, which the component applies to its
   visual before the window commits. Unlike a child window, it is covered by what NSH draws after it.
 - **Drawing a view** (`render::draw_view`): shadows and background (`decor.rs`), the content clipped to the bounds

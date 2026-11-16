@@ -733,20 +733,26 @@ impl ComponentItem {
             Err(err) => {
                 log::warn!("native: a component cannot compose: {err}");
                 self.composes.set(false);
+                // The next frame draws it instead.
+                view.changed();
                 return false;
             }
         };
         let Ok(mut component) = self.component.try_borrow_mut() else {
             return false;
         };
-        let Some(visual) = component
-            .as_mut()
-            .and_then(|c| c.visual(composition.device()))
-        else {
+        // Taken out while its own code runs: a later frame asks again.
+        let Some(component) = component.as_mut() else {
+            return false;
+        };
+        let Some(visual) = component.visual(composition.device()) else {
             self.composes.set(false);
+            view.changed();
             return false;
         };
         *self.composed.borrow_mut() = Some((composition, visual));
+        // The window draws again with it in its composition.
+        view.changed();
         true
     }
 

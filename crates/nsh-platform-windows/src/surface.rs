@@ -844,12 +844,13 @@ impl Surface {
         self.base.borrow().is_some()
     }
 
-    /// The window's composition, if it has web views.
+    /// The window's composition, if it has web views or composed components.
     pub(crate) fn composition(&self) -> Option<Rc<crate::compose::Composition>> {
         self.composition.borrow().upgrade()
     }
 
-    /// The window's composition, made for a web view if there is none.
+    /// The window's composition, made for a web view or a composed component
+    /// if there is none.
     #[cfg_attr(not(feature = "webview"), allow(dead_code))]
     pub(crate) fn compose(&self) -> windows::core::Result<Rc<crate::compose::Composition>> {
         if let Some(c) = self.composition() {
