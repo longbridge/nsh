@@ -469,17 +469,10 @@ impl Dt {
             .props
             .font_family
             .get()
-            .unwrap_or_else(|| "system-ui".into());
+            .map(|f| nsh_core::css_font_families(&f))
+            .filter(|f| !f.is_empty());
         let size = self.props.font_size.get().0;
-        let generic = matches!(
-            family.as_str(),
-            "monospace" | "sans-serif" | "serif" | "system-ui" | "ui-monospace"
-        );
-        if generic {
-            format!("{size}px {family}")
-        } else {
-            format!("{size}px \"{}\"", family.replace('"', ""))
-        }
+        format!("{size}px {}", family.as_deref().unwrap_or("system-ui"))
     }
 
     /// The width of the row header column (tracked): wide enough for the

@@ -752,10 +752,10 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         serde_json::json!({ "url": url, "page": true, "quiet": true, "base": base })
     });
     let Some(mut engine) = LocalEngine::start_with(config, text.clone(), Sink, |control| {
-        if let Some(payload) = page {
-            if let Some(payload) = event::payload(EventKind::UrlScheme, payload) {
-                control.dispatch_event(ROOT_ID, EventKind::UrlScheme, payload);
-            }
+        if let Some(payload) = page
+            && let Some(payload) = event::payload(EventKind::UrlScheme, payload)
+        {
+            control.dispatch_event(ROOT_ID, EventKind::UrlScheme, payload);
         }
     }) else {
         return -1.0;

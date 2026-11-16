@@ -130,7 +130,8 @@ pub use crate::{
         FamilyName, FontFamily, FontVariant, GridTemplateValue, LineHeight, ObjectPosition,
         PaintStyle, PositionAxis, PropertyValue, Style, StyleDecl, StyleError, StyleKey,
         StylePatch, StyleValue, SvgPaint, TextAlign, TextDecoration, TextShadow, TextStyle,
-        TextTransform, TransformOrigin, TransformProperty, VerticalAlign, ViewStyle, font_families,
+        TextTransform, TransformOrigin, TransformProperty, VerticalAlign, ViewStyle,
+        css_font_families, font_families, for_each_font_family,
     },
     text::{
         ATTACHMENT_CHAR, Affinity, ApproxTextEngine, AttachmentAlignments, AttributedText,
