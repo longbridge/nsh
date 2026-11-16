@@ -3,11 +3,15 @@
 //! `Submenu`s.
 //!
 //! One structure for every device, presented as it suits (`popup.rs`): on
-//! the desktops a popup at the trigger (or the pointer) whose submenus
-//! cascade beside the item that opens them, on hover or press; on phones
-//! and tablets a sheet at the bottom of the screen, over a backdrop, whose
-//! submenus replace its items (a submenu's `back` row, and Escape or the
-//! back button, return to the items above). The items reach their menu
+//! the desktops, and on an iPad whose window is regular in width, a popup
+//! at the trigger (or the pointer) whose submenus cascade beside the item
+//! that opens them, on hover or press; on phones and the other tablets,
+//! and on an iPad in a compact width, a sheet at the bottom of the screen,
+//! over a backdrop, whose submenus replace its items (a submenu's `back`
+//! row, and Escape or the back button, return to the items above). The
+//! iPad follows UIKit's horizontal size class, as UIKit's own menus and
+//! popovers adapt to it: a window resized across it presents the menu the
+//! other way ([`as_sheet`]). The items reach their menu
 //! through context, so the app arranges them freely (groups, labels,
 //! conditions). An item with `checked` is checkable (a setting, or one
 //! choice of a group by its `role`): the value is the app's, its indicator
@@ -38,6 +42,7 @@ use nsh_core::{
     geometry::Axis,
     keymap::When,
     overlay::OverlayAnchor,
+    platform::{Idiom, Os},
     prelude::*,
     time::now,
 };
@@ -63,7 +68,7 @@ const SLOP: f32 = 10.0;
 struct MenuContext {
     /// Closes the whole menu.
     close: Rc<dyn Fn(OpenChangeReason)>,
-    /// Presented as a sheet (touch screens).
+    /// Presented as a sheet ([`as_sheet`]).
     sheet: bool,
     /// Sheet: the submenus shown, innermost last.
     path: Signal<Vec<u32>>,
@@ -1505,7 +1510,7 @@ impl Surface {
     }
 }
 
-/// Where a menu's popup goes on the desktops.
+/// Where a menu's popup goes.
 #[derive(Clone)]
 enum At {
     Trigger(ElementRef),
@@ -1522,9 +1527,25 @@ struct Asked {
     why: Why,
 }
 
-/// The menu while it is open: its popup or sheet, with the context its
-/// items read. `change` asks to open or close it.
-fn surface(
+/// Whether a menu is a sheet at the bottom of the screen rather than a
+/// popup at its trigger or the pointer: on phones and tablets, an iPad
+/// only while its window is compact in width by UIKit's horizontal size
+/// class (Slide Over, a narrow Split View or Stage Manager window),
+/// as UIKit's own menus and popovers are anchored in a regular width and
+/// adapt to a sheet in a compact one. Mac Catalyst keeps the sheet. Read
+/// in a binding, it follows the size class as the window is resized.
+fn as_sheet() -> bool {
+    if is_desktop() {
+        return false;
+    }
+    let ipad = os() == Os::Ios && idiom() == Idiom::Pad && !is_catalyst();
+    !(ipad && horizontal_size_class() == SizeClass::Regular)
+}
+
+/// The menu's popup or sheet, as [`as_sheet`] has it: made again the other
+/// way when that changes (an iPad's window resized across its size class),
+/// an open menu staying open in its new presentation.
+fn presented(
     open: OpenState,
     change: Rc<dyn Fn(bool, OpenChangeReason)>,
     emit: Rc<dyn Fn(MenuEvent)>,
@@ -1533,8 +1554,38 @@ fn surface(
     asked: Asked,
     children: Prop<Children>,
 ) -> AnyElement {
+    let make = move |at: Option<At>| {
+        let (change, emit) = (change.clone(), emit.clone());
+        move || {
+            surface(
+                open,
+                change.clone(),
+                emit.clone(),
+                at.clone(),
+                parts,
+                asked,
+                children,
+            )
+        }
+    };
+    when(as_sheet, make(None))
+        .otherwise(make(Some(at)))
+        .into_element()
+}
+
+/// The menu while it is open: its popup at `at`, or its sheet without one,
+/// with the context its items read. `change` asks to open or close it.
+fn surface(
+    open: OpenState,
+    change: Rc<dyn Fn(bool, OpenChangeReason)>,
+    emit: Rc<dyn Fn(MenuEvent)>,
+    at: Option<At>,
+    parts: Surface,
+    asked: Asked,
+    children: Prop<Children>,
+) -> AnyElement {
     let Asked { keyed, why } = asked;
-    let sheet = !is_desktop();
+    let sheet = at.is_none();
     // Why it last closed: a press outside put the focus where it pressed.
     let closed_by = stored(None::<OpenChangeReason>);
     let change: Rc<dyn Fn(bool, OpenChangeReason)> = Rc::new(move |next, reason| {
@@ -1637,8 +1688,8 @@ fn surface(
     // where it pressed, nor over a focus the choice moved elsewhere in the
     // same turn (an item that starts editing a field).
     let trigger = match &at {
-        At::Trigger(anchor) | At::Pointer(_, anchor) if !sheet => Some(*anchor),
-        _ => None,
+        Some(At::Trigger(anchor) | At::Pointer(_, anchor)) => Some(*anchor),
+        None => None,
     };
     if let Some(anchor) = trigger {
         presence.focus_back_on_close(
@@ -1681,6 +1732,9 @@ fn surface(
         );
     }
     let placed = emit.clone();
+    // A popup on a touch screen (an iPad's): a press outside only closes
+    // it, as a popover's there.
+    let touch = !is_desktop();
     when(
         move || {
             if sheet {
@@ -1695,7 +1749,7 @@ fn surface(
             // Each opening starts at the top.
             path.set(Vec::new());
             open_sub.set(None);
-            if sheet {
+            let Some(at) = &at else {
                 let dismiss = dismiss.clone();
                 let backdrop = overlay()
                     .inset_0()
@@ -1719,8 +1773,27 @@ fn surface(
                     .on_cancel(cancel.clone())
                     .child(items_scroll(&items, 0, children));
                 return vec![backdrop.into_element(), panel.into_element()];
-            }
-            let popup = match &at {
+            };
+            // The press outside a popup on a touch screen is the menu's
+            // (not while it goes): a transparent overlay takes it. Made
+            // before the popup, as overlays shown together stack in the
+            // order they were made, and its submenus' popups come later.
+            let backdrop = touch.then(|| {
+                let dismiss = dismiss.clone();
+                overlay()
+                    .inset_0()
+                    .focusable(false)
+                    .pointer_events(move || {
+                        if open.get() {
+                            PointerEvents::Auto
+                        } else {
+                            PointerEvents::None
+                        }
+                    })
+                    .on_press(move || dismiss(OpenChangeReason::PressOutside))
+                    .into_element()
+            });
+            let popup = match at {
                 At::Trigger(anchor) => overlay().anchor_content(anchor),
                 At::Pointer(point, anchor) => {
                     let (point, anchor) = (*point, *anchor);
@@ -1751,10 +1824,18 @@ fn surface(
                     room.set(Some(p.available.height));
                     placed(MenuEvent::Position(p.placement, p.bounds, p.available))
                 })
-                .on_press_outside(move |_: &Point<Points>| dismiss(OpenChangeReason::PressOutside))
+                .on_press_outside(move |_: &Point<Points>| {
+                    // A touch screen's went to the overlay under it.
+                    if !touch {
+                        dismiss(OpenChangeReason::PressOutside)
+                    }
+                })
                 .on_cancel(cancel.clone())
                 .child(items_scroll(&items, 0, children));
-            vec![popup.into_element()]
+            backdrop
+                .into_iter()
+                .chain([popup.into_element()])
+                .collect::<Vec<_>>()
         },
     )
     .into_element()
@@ -1769,45 +1850,45 @@ pub struct MenuProps {
     /// Open at first, while `open` is not set.
     #[prop(default)]
     pub default_open: Prop<bool>,
-    /// Desktops: the side of the trigger it goes on (default `"bottom"`);
-    /// the other side when only that one has room.
+    /// As a popup: the side of the trigger it goes on (default
+    /// `"bottom"`); the other side when only that one has room.
     #[prop(default)]
     pub placement: Prop<Placement>,
-    /// Desktops: how it lines up with the trigger (default `"start"`).
+    /// As a popup: how it lines up with the trigger (default `"start"`).
     #[prop(default = Align::Start)]
     pub align: Prop<Align>,
-    /// Desktops: the gap between the trigger and the popup.
+    /// As a popup: the gap between the trigger and the popup.
     #[prop(default)]
     pub offset: Prop<Points>,
-    /// Desktops: the distance it keeps from the edges of the safe area.
+    /// As a popup: the distance it keeps from the edges of the safe area.
     #[prop(default)]
     pub margin: Prop<Points>,
-    /// The classes of the popup the items are in (desktops), or of the
-    /// sheet (touch screens); its submenus' popups take them too.
+    /// The classes of the popup the items are in, or of the sheet; its
+    /// submenus' popups take them too.
     pub popup_class: Prop<Option<SharedString>>,
     /// The inline style of the popup or sheet, over its classes.
     #[prop(default)]
     pub popup_style: Prop<Style>,
-    /// Desktops: classes the popup (and its submenus' popups) has in its
-    /// first frame, which its `transition` classes animate from
+    /// As a popup: classes the popup (and its submenus' popups) has in
+    /// its first frame, which its `transition` classes animate from
     /// (Tailwind's `starting:`, CSS's `@starting-style`): its entrance. A
     /// state's classes apply over `popupClass` and `popupStyle`, as a
-    /// state's styles do. The sheet of touch screens has its own motion.
+    /// state's styles do. A sheet has its own motion.
     pub popup_starting_class: Prop<Option<SharedString>>,
-    /// Desktops: the inline style of the popup in its first frame, over
+    /// As a popup: the inline style of the popup in its first frame, over
     /// `popupStyle`.
     #[prop(default)]
     pub popup_starting_style: Prop<Style>,
-    /// Desktops: classes the popup has while it goes: it stays, taking no
-    /// presses, until the transitions it has then ran (`onClose` after),
+    /// As a popup: classes the popup has while it goes: it stays, taking
+    /// no presses, until the transitions it has then ran (`onClose` after),
     /// so they run its exit.
     pub popup_ending_class: Prop<Option<SharedString>>,
-    /// Desktops: the inline style of the popup while it goes, over
+    /// As a popup: the inline style of the popup while it goes, over
     /// `popupStyle`.
     #[prop(default)]
     pub popup_ending_style: Prop<Style>,
-    /// Touch screens: the classes of the backdrop behind the sheet
-    /// (pressing it closes the menu).
+    /// As a sheet: the classes of the backdrop behind it (pressing it
+    /// closes the menu).
     pub backdrop_class: Prop<Option<SharedString>>,
     /// The inline style of the backdrop, over its classes.
     #[prop(default)]
@@ -1836,27 +1917,29 @@ pub enum MenuEvent {
     /// The user tried to close it without choosing (Escape or back, a press
     /// outside or on the backdrop).
     Cancel,
-    /// Desktops: the popup was placed: the side it went on (the other side
-    /// of `placement` when only that one had room), its frame in the root
-    /// view and the room on that side.
+    /// As a popup: the popup was placed: the side it went on (the other
+    /// side of `placement` when only that one had room), its frame in the
+    /// root view and the room on that side.
     #[args(placement, bounds, available)]
     Position(Placement, Bounds<Points>, Size<Points>),
 }
 
-/// A menu its trigger opens: a popup at the trigger on the desktops, a
-/// sheet at the bottom of the screen on phones and tablets (over a
-/// backdrop), whose items are `MenuItem`s, `MenuSeparator`s and `Submenu`s
-/// (cascading popups on the desktops, the sheet's next items on touch
-/// screens). Choosing an item, a press outside, Escape and the Android back
-/// button close it. Return, Space or Down on the focused trigger opens it
-/// with the keyboard focus on its first enabled item, Up on its last
-/// (WAI-ARIA's menu button); a press opens it with none, and on the
-/// desktops Down or Home then focuses the first, Up or End the last, as
-/// the desktops' menus do. Page Down and Page Up go to the last and first
-/// enabled items in view, a view at a time, stopping at the ends. On the
-/// desktops the pointer moving over an item gives it the keyboard focus,
-/// so the keys go on from it (its `focus:` styles apply, as `hover:`
-/// ones). On the desktops a letter or digit moves the focus by `Select`'s
+/// A menu its trigger opens: a popup at the trigger on the desktops and on
+/// an iPad whose window is regular in width (UIKit's horizontal size
+/// class), a sheet at the bottom of the screen (over a backdrop) on phones
+/// and the other tablets and on an iPad in a compact width, whose items
+/// are `MenuItem`s, `MenuSeparator`s and `Submenu`s (cascading popups
+/// beside a popup's items, the sheet's next items in a sheet). Choosing an
+/// item, a press outside, Escape and the Android back button close it.
+/// Return, Space or Down on the focused trigger opens it with the keyboard
+/// focus on its first enabled item, Up on its last (WAI-ARIA's menu
+/// button); a press opens it with none, and in a popup Down or Home then
+/// focuses the first, Up or End the last, as the desktops' menus do. Page
+/// Down and Page Up go to the last and first enabled items in view, a view
+/// at a time, stopping at the ends. In a popup the pointer moving over an
+/// item gives it the keyboard focus, so the keys go on from it (its
+/// `focus:` styles apply, as `hover:` ones). In a popup a letter or digit
+/// moves the focus by `Select`'s
 /// typeahead to the next enabled item of the level the focus is in whose
 /// `accessibilityLabel`, else its text, starts with what was typed (a text
 /// field in the menu keeps its letters). The popup (each submenu's too) is never taller than the room on
@@ -1981,7 +2064,7 @@ pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
                 });
             bar_trigger(around.clone(), trigger, anchor)
         }))
-        .child(surface(
+        .child(presented(
             open,
             change,
             Rc::new(move |e| cx.emit(e)),
@@ -2004,31 +2087,30 @@ pub struct ContextMenuProps {
     /// No menu: the secondary button and held fingers do nothing.
     #[prop(default)]
     pub disabled: Prop<bool>,
-    /// Desktops: the gap between the pointer and the popup.
+    /// As a popup: the gap between the pointer and the popup.
     #[prop(default)]
     pub offset: Prop<Points>,
-    /// Desktops: the distance it keeps from the edges of the safe area.
+    /// As a popup: the distance it keeps from the edges of the safe area.
     #[prop(default)]
     pub margin: Prop<Points>,
-    /// The classes of the popup (desktops) or of the sheet (touch
-    /// screens).
+    /// The classes of the popup or of the sheet.
     pub popup_class: Prop<Option<SharedString>>,
     /// The inline style of the popup or sheet, over its classes.
     #[prop(default)]
     pub popup_style: Prop<Style>,
-    /// Desktops: classes the popup has in its first frame, which its
+    /// As a popup: classes the popup has in its first frame, which its
     /// `transition` classes animate from: its entrance (as `Menu`'s).
     pub popup_starting_class: Prop<Option<SharedString>>,
-    /// Desktops: the inline style of the popup in its first frame.
+    /// As a popup: the inline style of the popup in its first frame.
     #[prop(default)]
     pub popup_starting_style: Prop<Style>,
-    /// Desktops: classes the popup has while it goes, until the
+    /// As a popup: classes the popup has while it goes, until the
     /// transitions it has then ran: its exit (as `Menu`'s).
     pub popup_ending_class: Prop<Option<SharedString>>,
-    /// Desktops: the inline style of the popup while it goes.
+    /// As a popup: the inline style of the popup while it goes.
     #[prop(default)]
     pub popup_ending_style: Prop<Style>,
-    /// Touch screens: the classes of the backdrop behind the sheet.
+    /// As a sheet: the classes of the backdrop behind it.
     pub backdrop_class: Prop<Option<SharedString>>,
     /// The inline style of the backdrop, over its classes.
     #[prop(default)]
@@ -2045,8 +2127,10 @@ pub struct ContextMenuProps {
 
 /// A menu about its trigger: the secondary button (a right click, a
 /// two-finger click) opens it where the pointer is on the desktops; a
-/// finger held on the trigger opens it as a sheet at the bottom of the
-/// screen on phones and tablets. While it is open, a secondary click on
+/// finger held on the trigger opens it on touch screens, as a popup where
+/// the finger is on an iPad in a regular width, as a sheet at the bottom
+/// of the screen on phones, the other tablets and an iPad in a compact
+/// width (`Menu`'s presentations). While it is open, a secondary click on
 /// the trigger opens it again where the pointer is (it reports closing,
 /// then opening); one elsewhere closes it. Shift+F10 or the Menu key on the focused
 /// trigger (the web, Linux) and a screen reader's "show menu" action (VoiceOver's
@@ -2173,7 +2257,7 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
                     }
                 })
         }))
-        .child(surface(
+        .child(presented(
             open,
             change,
             Rc::new(move |e| cx.emit(e)),
@@ -2552,13 +2636,13 @@ pub struct SubmenuProps {
     /// It does not open.
     #[prop(default)]
     pub disabled: Prop<bool>,
-    /// Desktops: the gap between the menu around it and its popup.
+    /// As a popup: the gap between the menu around it and its popup.
     #[prop(default)]
     pub offset: Prop<Points>,
     /// The item that opens it, among its menu's items.
     pub trigger: Prop<Option<Slot>>,
-    /// Touch screens: the row above its items that returns to the items
-    /// it is among (Escape and back do too).
+    /// As a sheet: the row above its items that returns to the items it
+    /// is among (Escape and back do too).
     pub back: Prop<Option<Slot>>,
     /// Its items.
     #[prop(lazy)]
@@ -2581,15 +2665,15 @@ pub enum SubmenuEvent {
     OpenChange(bool, OpenChangeReason),
 }
 
-/// A menu inside a menu: on the desktops its items are a popup beside its
-/// trigger, its first item level with the trigger (inside the popup's
+/// A menu inside a menu: in a menu's popup its items are a popup beside
+/// its trigger, its first item level with the trigger (inside the popup's
 /// padding and border), opened as the pointer comes over the trigger or
-/// presses it; on touch screens pressing the trigger shows its items in
+/// presses it; in a menu's sheet pressing the trigger shows its items in
 /// the sheet instead of the ones around it, with its `back` row first. Its
 /// popups take the menu's `popupClass` / `popupStyle` and its states' looks
 /// (`popupStartingClass`, `popupEndingClass`, ...). In a terminal its
 /// trigger is a row that ends with ` ›` ([`crate::terminal`]).
-/// On the desktops and in a terminal, Right, Return or Space on its
+/// In a popup and in a terminal, Right, Return or Space on its
 /// focused trigger open it with the keyboard focus on its first enabled
 /// item; Left on one of its items, or Escape, closes it with the focus
 /// back on its trigger, as WAI-ARIA's menus do. `onOpenChange` reports its

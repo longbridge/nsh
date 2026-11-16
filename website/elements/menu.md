@@ -1,6 +1,6 @@
 ---
 title: Menu
-description: "Menu and ContextMenu with MenuItem, MenuSeparator and Submenu: a popup with cascading submenus on desktops, a sheet with submenus in place on phones, styled by the app; MenuButton for the system's own menu."
+description: "Menu and ContextMenu with MenuItem, MenuSeparator and Submenu: a popup with cascading submenus on desktops and iPads in a regular width, a sheet with submenus in place on phones, styled by the app; MenuButton for the system's own menu."
 group: base
 demo: el-menu
 ---
@@ -9,26 +9,30 @@ demo: el-menu
 
 A menu is a list of actions its trigger opens. One structure serves every device, presented as each expects:
 
-- On the desktops and in desktop browsers, a popup at the trigger; a `Submenu` cascades beside its item as the
-  pointer comes over it or presses it, its first item level with that item (inside the padding and border of your
-  `popupClass`).
-- On phones and tablets, a sheet at the bottom of the screen over a backdrop; a `Submenu` shows its items in the
-  sheet in place of the menu's, with a row of yours leading back.
+- On the desktops, in desktop browsers and on an iPad whose window is regular in width, a popup at the trigger; a
+  `Submenu` cascades beside its item as the pointer comes over it or presses it, its first item level with that item
+  (inside the padding and border of your `popupClass`).
+- On phones and the other tablets, and on an iPad in a compact width (Slide Over, a narrow Split View or Stage
+  Manager window), a sheet at the bottom of the screen over a backdrop; a `Submenu` shows its items in the sheet in
+  place of the menu's, with a row of yours leading back.
+
+An iPad follows UIKit's horizontal size class, as the system's own menus do: resizing its window across it presents
+the menu the other way.
 
 Choosing an item, a press outside, Escape, the Android back button and VoiceOver's escape gesture close it. `ContextMenu` is the same menu opened
 by the secondary button (a right click) at the pointer, by a finger held on its trigger on touch screens, or below its
 trigger by the keyboard in the browser and on Linux, and by screen readers on macOS and Windows.
 
 Return, Space or Down on the focused trigger opens the menu with the keyboard focus on its first enabled item, and Up
-with it on its last; the arrow keys then move between the items. A press opens it with no item focused; on the desktops Down or Home then
+with it on its last; the arrow keys then move between the items. A press opens it with no item focused; in a popup Down or Home then
 focuses the first enabled item and Up or End the last. Page Down moves to the last enabled item in view and Page Up to
-the first, a view at a time, stopping at the ends (a `MenuList` the same, see [Long lists](#long-lists)). On the desktops the pointer moving over an item gives
+the first, a view at a time, stopping at the ends (a `MenuList` the same, see [Long lists](#long-lists)). In a popup the pointer moving over an item gives
 it the keyboard focus, so the keys go on from the item under the pointer; style an item's `focus:` state as its
-`hover:` one. On the desktops a letter or digit moves the focus to the next enabled item whose text (or
+`hover:` one. In a popup a letter or digit moves the focus to the next enabled item whose text (or
 `accessibilityLabel`) starts with it, as `Select`'s list does: the same letter again moves on among those items, and
 letters typed in quick succession match a prefix. They act on the menu or submenu the focus is in, a text field in the
 menu keeps them, and an item out of view scrolls into it.
-On the desktops and in a terminal, Right, Return or Space on a `Submenu`'s item opens it with the keyboard focus on
+In a popup and in a terminal, Right, Return or Space on a `Submenu`'s item opens it with the keyboard focus on
 its first enabled item; Left on one of its items, or Escape, closes it and puts the focus back on its item. A submenu
 the pointer opened closes when the arrow keys move the focus to another item of its menu.
 
@@ -98,13 +102,23 @@ function FileMenu() {
 ```
 
 All five come from [`nsh/base`](../modules/nsh-base.md). The items reach their menu on their own, so you arrange them
-freely: groups in views, labels, items that come and go with `If`. `popupClass` styles the popup on desktops and the
-sheet on phones; a style that differs between them can compare `platform.idiom` (`nsh`) with `"desktop"`.
+freely: groups in views, labels, items that come and go with `If`. `popupClass` styles the popup or the sheet,
+whichever the menu is. A style that differs between them follows the same rule, read in a style getter or a binding
+so that it changes as an iPad's window is resized:
+
+```tsx
+import { horizontalSizeClass, platform } from "nsh";
+
+// The menu is a popup here, a sheet elsewhere.
+const popup = () =>
+  platform.desktop ||
+  (platform.os === "ios" && platform.idiom === "pad" && !platform.catalyst && horizontalSizeClass() === "regular");
+```
 
 The popup is never taller than the room on the side it opens on, and a submenu's popup never taller than its own: a
 long menu in a short window opens on the side where it fits whole, or where there is more room, and its items scroll
 inside it. The keys bring the item they move to into view, and a submenu closes once its item scrolls out of view.
-The sheet on phones stays below the status bar the same way. Draw the surface (background, border, shadow) with
+The sheet stays below the status bar the same way. Draw the surface (background, border, shadow) with
 `popupClass`, around the items, so it stays in place while they scroll.
 
 ## Menu bars
@@ -135,7 +149,7 @@ import { ContextMenu, MenuItem } from "nsh/base";
 ```
 
 On the desktops the secondary button opens it where the pointer is. On touch screens a finger held on the trigger
-opens it as a sheet; the trigger's own presses and the scroll views around it keep working, and moving the finger
+opens it: as a popup where the finger is on an iPad in a regular width, as a sheet elsewhere; the trigger's own presses and the scroll views around it keep working, and moving the finger
 cancels the hold.
 
 Keyboard and screen reader users open it too. In the browser and on Linux, Shift+F10 and the Menu key on the focused trigger open
@@ -244,13 +258,13 @@ item.
 
 ## Entrance and exit
 
-On the desktops the popup comes and goes with your transitions, as a [Popover](./popover.md#entrance-and-exit)'s:
+The popup comes and goes with your transitions, as a [Popover](./popover.md#entrance-and-exit)'s:
 `popupStartingClass` is its look in its first frame, `popupEndingClass` its look once closed, which it keeps while the
 `transition-*` classes of `popupClass` run, and `onClose` follows. On its way out it takes no presses or keys: the
 keyboard focus is back on the trigger as it closes, so Return during the exit chooses no item and opens the menu
 again. An item whose `onSelect` moves the focus elsewhere (to a field it starts editing) keeps it there: the menu
 gives the focus back only when nothing else took it. Submenus take the same looks and close with their menu. The
-sheet of phones slides in and out on its own.
+sheet slides in and out on its own.
 
 ```tsx
 <Menu
@@ -399,14 +413,14 @@ shown in place under its `label`. The children, `class` and `style` are the trig
 |---|---|---|---|---|
 | `open` | `.open(..)` | `boolean` | none | Open, controlled by the app. |
 | `defaultOpen` | `.default_open(..)` | `boolean` | `false` | Open at first, without `open`. |
-| `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | Desktops: the side of the trigger it goes on. |
-| `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"start"` | Desktops: how it lines up with the trigger. |
-| `offset` | `.offset(..)` | `number` | `0` | Desktops: the gap between the trigger and the popup. |
-| `margin` | `.margin(..)` | `number` | `0` | Desktops: the distance it keeps from the edges of the safe area. |
-| `popupClass`, `popupStyle` | `.popup_class(..)`, `.popup_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The popup (desktops) or the sheet (phones), and the submenus' popups. |
-| `popupStartingClass`, `popupStartingStyle` | `.popup_starting_class(..)`, `.popup_starting_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Desktops: the popups' look in their first frame, over their own. |
-| `popupEndingClass`, `popupEndingStyle` | `.popup_ending_class(..)`, `.popup_ending_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Desktops: the popups' look once closed, kept while their transitions run. |
-| `backdropClass`, `backdropStyle` | `.backdrop_class(..)`, `.backdrop_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Phones: the backdrop behind the sheet. |
+| `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | As a popup: the side of the trigger it goes on. |
+| `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"start"` | As a popup: how it lines up with the trigger. |
+| `offset` | `.offset(..)` | `number` | `0` | As a popup: the gap between the trigger and the popup. |
+| `margin` | `.margin(..)` | `number` | `0` | As a popup: the distance it keeps from the edges of the safe area. |
+| `popupClass`, `popupStyle` | `.popup_class(..)`, `.popup_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The popup or the sheet, and the submenus' popups. |
+| `popupStartingClass`, `popupStartingStyle` | `.popup_starting_class(..)`, `.popup_starting_style(..)` | `string`, `StyleProp<ViewStyle>` | none | As a popup: the popups' look in their first frame, over their own. |
+| `popupEndingClass`, `popupEndingStyle` | `.popup_ending_class(..)`, `.popup_ending_style(..)` | `string`, `StyleProp<ViewStyle>` | none | As a popup: the popups' look once closed, kept while their transitions run. |
+| `backdropClass`, `backdropStyle` | `.backdrop_class(..)`, `.backdrop_style(..)` | `string`, `StyleProp<ViewStyle>` | none | As a sheet: the backdrop behind it. |
 | `trigger` | `.trigger(..)` | `JSX.Element` | none | What opens it when pressed. While the menu is open its `aria-expanded:` classes and `expandedStyle` apply. |
 | `children` | `.child(..)` | `JSX.Element` | none | The items, made each time it opens. |
 
@@ -418,8 +432,8 @@ shown in place under its `label`. The children, `class` and `style` are the trig
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
 | `disabled` | `.disabled(..)` | `boolean` | `false` | Nothing opens it: not the secondary button, held fingers, the keyboard or a screen reader. |
-| `offset` | `.offset(..)` | `number` | `0` | Desktops: the gap between the pointer and the popup. |
-| `margin` | `.margin(..)` | `number` | `0` | Desktops: the distance it keeps from the edges of the safe area. |
+| `offset` | `.offset(..)` | `number` | `0` | As a popup: the gap between the pointer and the popup. |
+| `margin` | `.margin(..)` | `number` | `0` | As a popup: the distance it keeps from the edges of the safe area. |
 
 ### MenuItem
 
@@ -442,9 +456,9 @@ shown in place under its `label`. The children, `class` and `style` are the trig
 |---|---|---|---|---|
 | `trigger` | `.trigger(..)` | `JSX.Element` | none | The item that opens it. |
 | `open` | `.open(..)` | `boolean` | none | Open, owned by the app (changed in `onOpenChange`); without it the submenu keeps its own state. |
-| `back` | `.back(..)` | `JSX.Element` | none | Phones: the row above its items that returns to the items around it. |
+| `back` | `.back(..)` | `JSX.Element` | none | As a sheet: the row above its items that returns to the items around it. |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | It does not open. |
-| `offset` | `.offset(..)` | `number` | `0` | Desktops: the gap between the menu around it and its popup. |
+| `offset` | `.offset(..)` | `number` | `0` | As a popup: the gap between the menu around it and its popup. |
 | `children` | `.child(..)` | `JSX.Element` | none | Its items. |
 
 ### MenuList (Rust)
@@ -464,7 +478,7 @@ shown in place under its `label`. The children, `class` and `style` are the trig
 | `onOpenChange` (`Menu`, `ContextMenu`) | `.on_open_change(\|e\| ..)` | It opened or closed, with why. |
 | `onOpen` (`Menu`, `ContextMenu`) | `.on_open(\|\| ..)` | It is shown; as a sheet, once it came in. |
 | `onClose` (`Menu`, `ContextMenu`) | `.on_close(\|\| ..)` | It is gone: as a sheet once it went, as a popup after its exit. Also when the app closed it. |
-| `onPosition` (`Menu`, `ContextMenu`) | `.on_position(\|e\| ..)` | Desktops: the popup was placed: `placement` (the side it went on), `bounds`, `available`. |
+| `onPosition` (`Menu`, `ContextMenu`) | `.on_position(\|e\| ..)` | As a popup: the popup was placed: `placement` (the side it went on), `bounds`, `available`. |
 | `onCancel` (`Menu`, `ContextMenu`) | `.on_cancel(\|\| ..)` | The user tried to close it without choosing (Escape or back, a press outside or on the backdrop). |
 | `onSelect` (`MenuItem`) | `.on_select(\|\| ..)` | The item was chosen; a checkable item asks for its other value. |
 | `onOpenChange` (`Submenu`) | `.on_open_change(\|e\| ..)` | It opened or closed as the user asked, with why. |

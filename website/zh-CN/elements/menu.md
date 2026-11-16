@@ -1,6 +1,6 @@
 ---
 title: Menu
-description: Menu 和 ContextMenu，配合 MenuItem、MenuSeparator 和 Submenu：桌面上是带级联子菜单的弹出层，手机上是就地展开子菜单的 sheet，样式由应用决定。
+description: Menu 和 ContextMenu，配合 MenuItem、MenuSeparator 和 Submenu：桌面和常规宽度的 iPad 上是带级联子菜单的弹出层，手机上是就地展开子菜单的 sheet，样式由应用决定。
 group: base
 demo: el-menu
 ---
@@ -9,13 +9,15 @@ demo: el-menu
 
 菜单是由触发元素打开的一组操作。同一个结构适用于每种设备，并按各自的习惯呈现：
 
-- 在桌面平台和桌面浏览器中，它是触发元素处的弹出层；指针移到 `Submenu` 的条目上或按下它时，子菜单在条目旁级联展开，它的第一个条目与该条目齐平（在你的 `popupClass` 的内边距和边框之内）。
-- 在手机和平板上，它是屏幕底部、覆盖在背景层之上的 sheet；`Submenu` 在 sheet 中就地显示它的条目，取代菜单的条目，并由你提供的一行返回上一级。
+- 在桌面平台、桌面浏览器和窗口宽度为常规（regular）的 iPad 上，它是触发元素处的弹出层；指针移到 `Submenu` 的条目上或按下它时，子菜单在条目旁级联展开，它的第一个条目与该条目齐平（在你的 `popupClass` 的内边距和边框之内）。
+- 在手机、其他平板和窗口宽度紧凑（compact）的 iPad 上（侧拉、较窄的分屏或台前调度窗口），它是屏幕底部、覆盖在背景层之上的 sheet；`Submenu` 在 sheet 中就地显示它的条目，取代菜单的条目，并由你提供的一行返回上一级。
+
+iPad 跟随 UIKit 的水平尺寸类别，与系统自己的菜单一致：窗口大小跨过它时，菜单换成另一种呈现方式。
 
 选择一个条目、外部按压、Escape、Android 返回键和 VoiceOver 的退出手势都会关闭它。`ContextMenu` 是同样的菜单，由辅助按键（右键单击）在指针处打开，在触摸屏上由手指按住触发元素打开，或在触发元素下方由浏览器和 Linux 上的键盘、macOS 和 Windows 上的读屏软件打开。
 
-在获得焦点的触发元素上按 Return、Space 或 Down 键打开菜单时，键盘焦点落在第一个可用的条目上；按 Up 键打开时落在最后一个上，之后用方向键在条目间移动。按压打开时不聚焦任何条目；在桌面上，之后按 Down 或 Home 键聚焦第一个可用的条目，按 Up 或 End 键聚焦最后一个。Page Down 移到视图里最后一个可用的条目，Page Up 移到第一个，每次翻一屏，到头停住（`MenuList` 也一样，见[长列表](#长列表)）。在桌面上，指针移到某个条目上时它获得键盘焦点，按键从指针下的条目接着走；给条目的 `focus:` 状态设和 `hover:` 一样的样式。在桌面上按一个字母或数字，焦点跳到下一个文字（或 `accessibilityLabel`）以它开头的可用条目，与 `Select` 的列表一样：连按同一个字母在这些条目之间轮转，短时间内连续打几个字母按前缀匹配。它们只作用于焦点所在的那一级菜单或子菜单；菜单里的输入框照常接收字母；跳到视图外的条目会把它滚进来。
-在桌面和终端中，在 `Submenu` 的条目上按 Right、Return 或 Space 键打开它，键盘焦点落在它第一个可用的条目上；在它的条目上按 Left 键或按 Escape 键关闭它，焦点回到它的条目上。指针打开的子菜单，在方向键把焦点移到所在菜单的另一个条目时关闭。
+在获得焦点的触发元素上按 Return、Space 或 Down 键打开菜单时，键盘焦点落在第一个可用的条目上；按 Up 键打开时落在最后一个上，之后用方向键在条目间移动。按压打开时不聚焦任何条目；在弹出层中，之后按 Down 或 Home 键聚焦第一个可用的条目，按 Up 或 End 键聚焦最后一个。Page Down 移到视图里最后一个可用的条目，Page Up 移到第一个，每次翻一屏，到头停住（`MenuList` 也一样，见[长列表](#长列表)）。在弹出层中，指针移到某个条目上时它获得键盘焦点，按键从指针下的条目接着走；给条目的 `focus:` 状态设和 `hover:` 一样的样式。在弹出层中按一个字母或数字，焦点跳到下一个文字（或 `accessibilityLabel`）以它开头的可用条目，与 `Select` 的列表一样：连按同一个字母在这些条目之间轮转，短时间内连续打几个字母按前缀匹配。它们只作用于焦点所在的那一级菜单或子菜单；菜单里的输入框照常接收字母；跳到视图外的条目会把它滚进来。
+在弹出层和终端中，在 `Submenu` 的条目上按 Right、Return 或 Space 键打开它，键盘焦点落在它第一个可用的条目上；在它的条目上按 Left 键或按 Escape 键关闭它，焦点回到它的条目上。指针打开的子菜单，在方向键把焦点移到所在菜单的另一个条目时关闭。
 
 ```rust tabs
 use nsh_base::{menu, menu_item, menu_separator, submenu};
@@ -82,9 +84,18 @@ function FileMenu() {
 }
 ```
 
-这五个组件都来自 [`nsh/base`](../modules/nsh-base.md)。条目会自己找到所属的菜单，所以你可以自由地编排它们：放在视图里分组、加标签、用 `If` 让条目出现和消失。`popupClass` 在桌面上设置弹出层的样式，在手机上设置 sheet 的样式；两者需要不同样式时，可以把 `platform.idiom`（`nsh`）与 `"desktop"` 比较。
+这五个组件都来自 [`nsh/base`](../modules/nsh-base.md)。条目会自己找到所属的菜单，所以你可以自由地编排它们：放在视图里分组、加标签、用 `If` 让条目出现和消失。`popupClass` 设置菜单所呈现的弹出层或 sheet 的样式。两者需要不同样式时，沿用同一条规则，并在样式 getter 或绑定中读取，这样 iPad 的窗口大小变化时它也随之改变：
 
-弹出层不会高过它打开那一侧的可用空间，子菜单的弹出层也不会高过它自己的可用空间：短窗口里的长菜单会在能完整放下的一侧打开（都放不下时在空间更大的一侧），条目在弹出层里滚动。按键会把移到的条目滚进视野；子菜单的条目被滚出视野后，子菜单随之关闭。手机上的 sheet 同样停在状态栏下方。用 `popupClass` 在条目外面画出面板（背景、边框、阴影），这样条目滚动时面板保持不动。
+```tsx
+import { horizontalSizeClass, platform } from "nsh";
+
+// 菜单在这里是弹出层，其他情况下是 sheet。
+const popup = () =>
+  platform.desktop ||
+  (platform.os === "ios" && platform.idiom === "pad" && !platform.catalyst && horizontalSizeClass() === "regular");
+```
+
+弹出层不会高过它打开那一侧的可用空间，子菜单的弹出层也不会高过它自己的可用空间：短窗口里的长菜单会在能完整放下的一侧打开（都放不下时在空间更大的一侧），条目在弹出层里滚动。按键会把移到的条目滚进视野；子菜单的条目被滚出视野后，子菜单随之关闭。sheet 同样停在状态栏下方。用 `popupClass` 在条目外面画出面板（背景、边框、阴影），这样条目滚动时面板保持不动。
 
 <a id="context-menus"></a>
 
@@ -114,7 +125,7 @@ import { ContextMenu, MenuItem } from "nsh/base";
 </ContextMenu>
 ```
 
-在桌面平台上，辅助按键在指针所在处打开它。在触摸屏上，手指按住触发元素会以 sheet 的形式打开它；触发元素自己的按压和周围的滚动视图照常工作，移动手指会取消这次按住。
+在桌面平台上，辅助按键在指针所在处打开它。在触摸屏上，手指按住触发元素会打开它：在窗口宽度为常规的 iPad 上是手指处的弹出层，其他情况下是 sheet；触发元素自己的按压和周围的滚动视图照常工作，移动手指会取消这次按住。
 
 键盘和读屏用户同样可以打开它。在浏览器和 Linux 上，触发元素获得焦点时按 Shift+F10 或菜单键即可打开。在 macOS 上，VoiceOver 的「显示菜单」操作（VO-Shift-M）可以打开它；在 Windows 上，读屏软件通过 UI Automation 的「显示上下文菜单」操作也可以打开它。这样打开时，菜单出现在触发元素下方、从它的起始边开始，键盘焦点落在第一个可用的条目上，与 WAI-ARIA 对上下文菜单的描述一致。给触发元素设置 `focusable`，键盘才能到达它。视图自己的 `onContextMenu` 可以通过 `pointerType` 区分这类打开方式：此时它为 `null`。
 
@@ -213,7 +224,7 @@ function ViewMenu() {
 
 ## 出现与离开
 
-在桌面平台上，弹出层像 [Popover](./popover.md#entrance-and-exit) 一样随你的过渡出现和离开：`popupStartingClass` 是它第一帧的外观，`popupEndingClass` 是关闭后的外观，在 `popupClass` 的 `transition-*` 类播放期间它会保留，随后触发 `onClose`。离开途中它不接受按压和按键：关闭时键盘焦点就回到触发元素，所以离开途中按 Return 不会选中条目，而是再次打开菜单。条目的 `onSelect` 把焦点移到别处（比如开始编辑的输入框）时，焦点留在那里：菜单只在焦点没被别处拿走时才把它交还触发元素。子菜单使用同样的外观，并随菜单一起关闭。手机上的 sheet 自带滑入和滑出的动作。
+弹出层像 [Popover](./popover.md#entrance-and-exit) 一样随你的过渡出现和离开：`popupStartingClass` 是它第一帧的外观，`popupEndingClass` 是关闭后的外观，在 `popupClass` 的 `transition-*` 类播放期间它会保留，随后触发 `onClose`。离开途中它不接受按压和按键：关闭时键盘焦点就回到触发元素，所以离开途中按 Return 不会选中条目，而是再次打开菜单。条目的 `onSelect` 把焦点移到别处（比如开始编辑的输入框）时，焦点留在那里：菜单只在焦点没被别处拿走时才把它交还触发元素。子菜单使用同样的外观，并随菜单一起关闭。sheet 自带滑入和滑出的动作。
 
 ```tsx
 <Menu
@@ -341,14 +352,14 @@ import { MenuButton } from "nsh/base";
 |---|---|---|---|---|
 | `open` | `.open(..)` | `boolean` | 无 | 是否打开，由应用控制。 |
 | `defaultOpen` | `.default_open(..)` | `boolean` | `false` | 没有 `open` 时，初始是否打开。 |
-| `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | 桌面：它位于触发元素的哪一侧。 |
-| `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"start"` | 桌面：它如何与触发元素对齐。 |
-| `offset` | `.offset(..)` | `number` | `0` | 桌面：触发元素与弹出层之间的间距。 |
-| `margin` | `.margin(..)` | `number` | `0` | 桌面：它与安全区边缘保持的距离。 |
-| `popupClass`、`popupStyle` | `popup_class`、`popup_style` | `string`、`StyleProp<ViewStyle>` | 无 | 弹出层（桌面）或 sheet（手机），以及子菜单的弹出层。 |
-| `popupStartingClass`、`popupStartingStyle` | `popup_starting_class`、`popup_starting_style` | `string`、`StyleProp<ViewStyle>` | 无 | 桌面：弹出层第一帧的外观，叠加在它们自己的外观之上。 |
-| `popupEndingClass`、`popupEndingStyle` | `popup_ending_class`、`popup_ending_style` | `string`、`StyleProp<ViewStyle>` | 无 | 桌面：弹出层关闭后的外观，过渡播放期间保留。 |
-| `backdropClass`、`backdropStyle` | `backdrop_class`、`backdrop_style` | `string`、`StyleProp<ViewStyle>` | 无 | 手机：sheet 后面的背景层。 |
+| `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | 以弹出层呈现时：它位于触发元素的哪一侧。 |
+| `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"start"` | 以弹出层呈现时：它如何与触发元素对齐。 |
+| `offset` | `.offset(..)` | `number` | `0` | 以弹出层呈现时：触发元素与弹出层之间的间距。 |
+| `margin` | `.margin(..)` | `number` | `0` | 以弹出层呈现时：它与安全区边缘保持的距离。 |
+| `popupClass`、`popupStyle` | `popup_class`、`popup_style` | `string`、`StyleProp<ViewStyle>` | 无 | 弹出层或 sheet，以及子菜单的弹出层。 |
+| `popupStartingClass`、`popupStartingStyle` | `popup_starting_class`、`popup_starting_style` | `string`、`StyleProp<ViewStyle>` | 无 | 以弹出层呈现时：弹出层第一帧的外观，叠加在它们自己的外观之上。 |
+| `popupEndingClass`、`popupEndingStyle` | `popup_ending_class`、`popup_ending_style` | `string`、`StyleProp<ViewStyle>` | 无 | 以弹出层呈现时：弹出层关闭后的外观，过渡播放期间保留。 |
+| `backdropClass`、`backdropStyle` | `backdrop_class`、`backdrop_style` | `string`、`StyleProp<ViewStyle>` | 无 | 以 sheet 呈现时：它后面的背景层。 |
 | `trigger` | `.trigger(..)` | `JSX.Element` | 无 | 按下时打开它的元素。菜单打开时，它的 `aria-expanded:` 类和 `expandedStyle` 生效。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 条目，每次打开时创建。 |
 
@@ -359,8 +370,8 @@ import { MenuButton } from "nsh/base";
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 什么都打不开它：辅助按键、按住的手指、键盘和读屏软件都不起作用。 |
-| `offset` | `.offset(..)` | `number` | `0` | 桌面：指针与弹出层之间的间距。 |
-| `margin` | `.margin(..)` | `number` | `0` | 桌面：它与安全区边缘保持的距离。 |
+| `offset` | `.offset(..)` | `number` | `0` | 以弹出层呈现时：指针与弹出层之间的间距。 |
+| `margin` | `.margin(..)` | `number` | `0` | 以弹出层呈现时：它与安全区边缘保持的距离。 |
 
 ### MenuItem
 
@@ -383,9 +394,9 @@ import { MenuButton } from "nsh/base";
 |---|---|---|---|---|
 | `trigger` | `.trigger(..)` | `JSX.Element` | 无 | 打开它的条目。 |
 | `open` | `.open(..)` | `boolean` | 无 | 是否打开，由应用持有（在 `onOpenChange` 中修改）；不设置时子菜单自己保存状态。 |
-| `back` | `.back(..)` | `JSX.Element` | 无 | 手机：它的条目上方返回上一级条目的那一行。 |
+| `back` | `.back(..)` | `JSX.Element` | 无 | 以 sheet 呈现时：它的条目上方返回上一级条目的那一行。 |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 它不会打开。 |
-| `offset` | `.offset(..)` | `number` | `0` | 桌面端：它的弹出层与外层菜单之间的间距。 |
+| `offset` | `.offset(..)` | `number` | `0` | 以弹出层呈现时：它的弹出层与外层菜单之间的间距。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 它的条目。 |
 
 ### MenuList（Rust）
@@ -407,7 +418,7 @@ import { MenuButton } from "nsh/base";
 | `onOpenChange`（`Menu`、`ContextMenu`） | `.on_open_change(\|e\| ..)` | 它打开或关闭了，附带原因。 |
 | `onOpen`（`Menu`、`ContextMenu`） | `.on_open(\|\| ..)` | 它已显示；以 sheet 呈现时，在它进入之后。 |
 | `onClose`（`Menu`、`ContextMenu`） | `.on_close(\|\| ..)` | 它已消失：以 sheet 呈现时在它离开之后，以弹出层呈现时在离开过渡之后。应用关闭它时也会触发。 |
-| `onPosition`（`Menu`、`ContextMenu`） | `.on_position(\|e\| ..)` | 桌面：弹出层已放置：`placement`（它所在的一侧）、`bounds`、`available`。 |
+| `onPosition`（`Menu`、`ContextMenu`） | `.on_position(\|e\| ..)` | 以弹出层呈现时：弹出层已放置：`placement`（它所在的一侧）、`bounds`、`available`。 |
 | `onCancel`（`Menu`、`ContextMenu`） | `.on_cancel(\|\| ..)` | 用户没有选择条目就尝试关闭它（Escape 或返回键、外部按压或按下背景层）。 |
 | `onSelect`（`MenuItem`） | `.on_select(\|\| ..)` | 条目被选择；可勾选的条目请求它的另一个值。 |
 | `onOpenChange`（`Submenu`） | `.on_open_change(\|e\| ..)` | 它按用户的操作打开或关闭了，附带原因。 |

@@ -5,7 +5,7 @@ import { platform } from "nsh";
 import { keymap } from "nsh";
 import { Icon, type IconName, LucideIcon, type LucideIconName } from "../icons";
 import { toast, updateToast } from "../toast";
-import { alpha, Button, Caption, Card, colors, DemoPage, finish, isDark, menuHighlight, setAppearance, menuIndicator, menuItemGlyph, menuItemLabel, menuItemLook, menuItemNote, menuItemSize, MenuLabel, MenuMark, menuPressed, menuSeparator, mono, Row, Segmented, SubmenuBack, SubmenuRow, terminal, Tip, menuPopup, Kbd, placementWords } from "../ui";
+import { alpha, Button, Caption, Card, colors, DemoPage, finish, isDark, menuHighlight, setAppearance, menuIndicator, menuItemGlyph, menuItemLabel, menuItemLook, menuItemNote, menuItemSize, menuIsPopup, MenuLabel, MenuMark, menuPressed, menuSeparator, mono, Row, Segmented, SubmenuBack, SubmenuRow, terminal, Tip, menuPopup, Kbd, placementWords } from "../ui";
 
 // The look of every menu here is the gallery's (`look/menu.tsx`):
 // `nsh/base` draws none.
@@ -189,10 +189,10 @@ function Preview(props: { sidebar: boolean; minimap: boolean; sort: SortBy; zoom
  * shortcuts, submenus three levels deep, checkable settings and choices of
  * one that arrange a preview, group titles, disabled and destructive items; menus on the rows of a list
  * (the secondary button or a held finger, and a ⋯ button); where a popup
- * goes; a long menu that scrolls; a menu a shortcut opens. On desktops they
- * are popups with cascading submenus that grow out of their trigger, on
- * touch screens sheets that slide up, whose submenus take the place of
- * their items.
+ * goes; a long menu that scrolls; a menu a shortcut opens. On desktops and
+ * on an iPad in a regular width they are popups with cascading submenus that
+ * grow out of their trigger, on phones sheets that slide up, whose submenus
+ * take the place of their items.
  */
 export function Menus() {
   const events = signal<string[]>([]);
@@ -248,7 +248,7 @@ export function Menus() {
     });
     const key = (k: string) => (platform.desktop ? keymap.label(k) : undefined);
     return (
-      <Card icon="lists" title="Menu bar" subtitle={platform.desktop ? "Hover across submenus; the shortcuts work too" : "Each menu a sheet; submenus take its place"}>
+      <Card icon="lists" title="Menu bar" subtitle={platform.desktop ? "Hover across submenus; the shortcuts work too" : menuIsPopup() ? "Submenus open beside their items" : "Each menu a sheet; submenus take its place"}>
         {/* A toolbar: with one menu open, the pointer over another title opens it. */}
         <Toolbar accessibilityLabel="Menu bar" style={{ flexDirection: "row", gap: 2, marginLeft: pointer ? -10 : 0 }}>
           <Menu offset={4} margin={8} {...menuPopup()} onOpenChange={changed("File")} trigger={<Chip bar label="File" open={isOpen("File")} />}>
@@ -396,7 +396,7 @@ export function Menus() {
     const placement = signal<"top" | "bottom" | "left" | "right">("bottom");
     const align = signal<"start" | "center" | "end">("start");
     return (
-      <Card icon="components" title="Where it goes" subtitle={platform.desktop ? "The side and alignment; it flips where there is no room" : "Phones show menus as sheets: try a desktop"}>
+      <Card icon="components" title="Where it goes" subtitle={menuIsPopup() ? "The side and alignment; it flips where there is no room" : "Menus are sheets here: try a desktop"}>
         <Segmented
           size="small"
           options={[{ value: "top", label: "Top" }, { value: "bottom", label: "Bottom" }, { value: "left", label: "Left" }, { value: "right", label: "Right" }]}
