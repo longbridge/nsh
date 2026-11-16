@@ -171,8 +171,10 @@ Before opening a pull request, please make sure that:
 - The code has been reviewed by you and properly tested: tests at the layer that owns the behavior, `nsh test --trace` for
   the JS runtime, engine and core, and a run on a simulator, emulator or device for platform code (screenshots or
   recordings are encouraged for UI changes).
-- A pull request focuses on one thing and keeps the diff as small as practical. When using AI, ask it to avoid
-  unrelated refactors, cleanup, or formatting. **Less is better.**
+- A pull request focuses on one thing and keeps the diff as small as practical. A refactor needed to correct the root cause is part of that scope: reproduce the
+  defect, trace the faulty state to its origin, migrate callers and remove obsolete internal paths while preserving
+  released public compatibility. Avoid unrelated refactors, cleanup or formatting. Do not substitute retries,
+  swallowed errors or guards for understanding the fault; keep defensive checks when their constraints are valid.
 
 ### Describe public API changes
 
@@ -262,7 +264,7 @@ entries, then squash merges it. A failing check removes the entry; fix the failu
 
 ### Checks
 
-Run these before opening a pull request (the full list is in [AGENTS.md](AGENTS.md)):
+Run these before opening a pull request (the full list is in [Development commands](docs/dev/commands.md)):
 
 ```sh
 cargo test --workspace
