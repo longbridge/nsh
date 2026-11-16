@@ -343,10 +343,10 @@ pub struct Environment {
     /// ([`crate::Command::RenderCanvas`], `OffscreenCanvas`); without it,
     /// a render fails at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
     pub canvas_render: bool,
-    /// The platform shows the system's open and save dialogs and opens,
-    /// reveals and trashes local paths ([`crate::Command::FileRequest`],
-    /// the desktops); without it, those requests answer at once with an
-    /// error.
+    /// The platform handles file requests ([`crate::Command::FileRequest`]).
+    /// Desktops implement the full set; mobile platforms answer the open
+    /// dialog and reject operations they do not support. Without it, all
+    /// file requests answer at once with an error.
     pub file_requests: bool,
     /// The platform recognizes speech ([`crate::Command::Speech`],
     /// [`crate::speech`]); without it, a session ends at once

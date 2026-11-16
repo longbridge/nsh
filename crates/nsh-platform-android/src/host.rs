@@ -1861,8 +1861,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
         Some(PayloadValue::Number(n))
     };
     let payload = if kind == EventKind::FileRequest {
-        // "id", "error": the answer to an `OpenPath` (`SystemUi.openPath`;
-        // the paths of the request say nothing new, an open answers none).
+        // "id", "error", and repeated "path" keys: no path separator can
+        // be mistaken for a filename character, including newlines.
         let len = if keys.is_null() {
             0
         } else {
@@ -1870,6 +1870,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
         };
         let mut id = None;
         let mut error = None;
+        let mut paths = Vec::new();
         for i in 0..len {
             let Ok(key) = env.get_object_array_element(&keys, i) else {
                 continue;
@@ -1883,6 +1884,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
             match (key.as_str(), v) {
                 ("id", PayloadValue::Number(n)) => id = Some(n as u32),
                 ("error", PayloadValue::Str(message)) => error = Some(message),
+                ("path", PayloadValue::Str(path)) => paths.push(path.into()),
                 ("error", PayloadValue::Null) => {}
                 _ => {}
             }
@@ -1892,11 +1894,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
         let Some(id) = id else {
             return;
         };
-        EventPayload::FileRequest {
-            id,
-            paths: Vec::new(),
-            error,
-        }
+        EventPayload::FileRequest { id, paths, error }
     } else if keys.is_null() {
         match read(&mut env, 0) {
             Some(v) => EventPayload::Value(v),

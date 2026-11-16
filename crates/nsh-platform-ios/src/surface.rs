@@ -441,6 +441,7 @@ impl RootView {
             lifecycle: self.ivars().lifecycle.get(),
             // Only read for the web: iOS keys are always Apple's.
             apple_keyboard: true,
+            file_requests: true,
             // No host answers `nsh/host` here: an embedding app talks to its
             // apps through its own UI sets (`nsh/native`).
             host: false,

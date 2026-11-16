@@ -1974,6 +1974,22 @@ impl Mounter {
             ) if id == nsh_core::ROOT_ID => {
                 crate::picker::pick_images(request, asked, native.view(), &self.control);
             }
+            (
+                Command::FileRequest {
+                    id: request_id,
+                    request,
+                },
+                native,
+            ) if id == nsh_core::ROOT_ID => match *request {
+                nsh_core::file_dialog::FileRequest::OpenDialog(dialog) => {
+                    crate::picker::pick_paths(request_id, dialog, native.view(), &self.control);
+                }
+                _ => self.control.dispatch_event(
+                    nsh_core::ROOT_ID,
+                    nsh_core::EventKind::FileRequest,
+                    nsh_core::EventPayload::file_failed(request_id, "not supported on iOS"),
+                ),
+            },
             (Command::Notification(command), _) if id == nsh_core::ROOT_ID => {
                 crate::notifications::command(&self.control, &command);
             }

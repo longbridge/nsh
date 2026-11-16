@@ -815,9 +815,13 @@ pub fn register_font(data: impl Into<Vec<u8>>) -> Answer<Result<String, String>>
 /// [`OpenDialog::folders`](crate::file_dialog::OpenDialog::folders)) the
 /// user picked, to await in a task: `None` when cancelled, the error when
 /// the dialog could not show (on Linux without a file chooser portal, or
-/// on a platform without file dialogs: iOS, Android, the web;
+/// on a platform without file dialogs, such as the web;
 /// [`crate::platform::Environment::file_requests`]). GPUI's
-/// `prompt_for_paths`.
+/// `prompt_for_paths`. On iOS and Android, returns app-owned copies without
+/// loading the files into memory or imposing a size limit. Android copies
+/// into the app cache; move files you need to keep to persistent storage.
+/// Android's folder picker selects one folder at a time. Mobile pickers use
+/// the system's title, button label and initial location.
 pub fn pick_paths(
     dialog: crate::file_dialog::OpenDialog,
 ) -> Answer<Result<Option<Vec<PathBuf>>, String>> {
