@@ -1838,10 +1838,7 @@ mod tests {
         view.set_layer(Some(split(0x00ff00ff)));
         let rows = texture_frame(&mut view, &renderer);
         assert_eq!(rows[1][0], [0, 255, 0, 255]);
-        assert_ne!(
-            view.surface().map(|t| t.texture),
-            Some(first.texture)
-        );
+        assert_ne!(view.surface().map(|t| t.texture), Some(first.texture));
     }
 
     /// Windows: a frame shown on a shared texture moves the frame's serial,
