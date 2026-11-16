@@ -1415,7 +1415,8 @@ pointer's offset; a press on the track puts the thumb's middle there and a drag 
 reports the scroll a frame or two later, and while it goes on the reports of earlier commands do not move it back.
 `mode` decides when it shows, as `gpui-base`'s: `scrolling` (a move of the target, until `motion.idle` after; the
 pointer on the bar while it shows keeps it), `hover` (also while the pointer is over the bar, which a hidden bar
-follows with a mouse) or `always`; a drag keeps it, and it never shows while the content fits. Its fades are
+follows with a mouse) or `always`; a drag keeps it. While the content fits, the bar stays hidden and passes pointer
+events through to the content in every mode. Its fades are
 `gpui-base`'s `VisibilityAnimation`: two animated values bound natively, the track's opacity and the rail's slide
 (across the axis by the track's thickness, which the track clips), started with `motion.enter` / `exit` scaled by
 the distance still to cover (the bar samples its fade to know where the native one is), linear / cubic out in and
