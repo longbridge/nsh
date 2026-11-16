@@ -176,6 +176,7 @@ const canIndent = editor.can(sinkListItem("listItem"));
 | `isEmpty`、`undoDepth`、`redoDepth`、`composing` | 界面显示的编辑器信息 |
 | `setContent(content, format?)` | 替换文档，作为一次可撤销的修改 |
 | `insertContent(content, format?)` | 在选区处插入内容 |
+| `pasteHTML(html)`、`pasteText(text)` | 像粘贴一样把 HTML 或纯文本放到选区处；返回是否粘贴了内容 |
 | `getJSON()`、`getHTML()`、`getMarkdown()`、`getText()`、`textBetween(from?, to?, separator?)` | 某种格式的文档 |
 | `dispatch(tr)` | 应用以 JSON 给出的事务（其步骤基于当前文档） |
 | `on(event, listener)` | 每次发生 `event` 后，在 JS 的下一轮以它的数据调用 `listener`：`revision`（`{ revision }`，每次修改之后，无论来自何处）、`update`、`selectionUpdate`、`transaction`、`focus`、`blur`、`delete`。返回一个停止监听的函数；在组件渲染期间添加的监听器随组件一起停止 |
@@ -332,6 +333,19 @@ const paste = new RichEditorPlugin("paste")
 
 - `transformPasted(slice)` 在内容插入前修改它，各插件依次运行。内容是 `RichSliceJSON`（`{ content, openStart, openEnd }`），优先按 schema 的规则从剪贴板的 HTML 解析，没有 HTML 时从纯文本解析。
 - `handlePaste(slice, clipboard)` 返回 `true` 表示应用已经处理了这次粘贴，编辑器不再插入内容。`clipboard` 是 `{ text, html }`，即剪贴板里的内容。应用如果要按自己的方式读取 Word 或 Google Docs 的 HTML、Markdown 或链接，就自己插入结果（`editor.run(insertContent(...))`）并返回 `true`。
+
+应用自己清洗剪贴板里的 HTML（Word 的列表、Google Docs 的外壳、转成 HTML 的 Markdown）时，用 `editor.pasteHTML(html)`
+把结果接着粘贴进去并返回 `true`；纯文本用 `editor.pasteText(text)`。它们就是 ProseMirror 的 `pasteHTML` 和 `pasteText`：
+内容按粘贴的方式读取，即按 schema 的规则解析并适配选区，所以标了 `isolating` 的节点（带图注的图片）会完整保留，而
+`insertContent(html, "html")` 会把它打开；编辑器自己的粘贴步骤（链接、字数限制、粘贴规则）照常生效。插件的 `transformPasted`
+和 `handlePaste` 不会再被调用。返回值表示是否粘贴了内容。
+
+```tsx
+const paste = new RichEditorPlugin("paste").handlePaste((_slice, clipboard) => {
+  const docs = /^<b id="docs-internal-guid-[^"]*">([\s\S]*)<\/b>$/.exec(clipboard.html);
+  return docs ? editor.pasteHTML(docs[1]) : false;
+});
+```
 
 粘贴是唯一会等待 JS 的输入：插件一旦有粘贴钩子，粘贴就会在钩子都给出结果之后（晚一个 JS 轮次）才插入。多次粘贴按发生的顺序插入。钩子运行期间文档或选区发生变化的粘贴，会按编辑器当时的状态重新执行。打字和按键从不等待。要插入需要更长时间的内容（例如上传），就让 `handlePaste` 返回 `true`，由应用在内容准备好时再插入。
 

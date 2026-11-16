@@ -25,7 +25,9 @@ use super::{
     geometry::{DOC, Geometry, Hit},
     keys::{self, Move, Unit},
     node_view::{NodeView, NodeViewEvent},
-    session::{EditorSession, NodeViews, ViewGeometry, ViewRequest},
+    session::{
+        EditorSession, NodeViews, ViewGeometry, ViewRequest, parse_paste, paste_transaction,
+    },
     table::{TableGesture, TablePreview},
 };
 use crate::{
@@ -33,7 +35,7 @@ use crate::{
     rich_editor::{
         commands::base_keymap,
         extensions::{HistoryOptions, Keymap, KeymapOptions, history, starter},
-        formats::{DomParser, DomSerializer, slice_from_text, slice_to_text},
+        formats::{DomSerializer, slice_to_text},
         js::{RichClipboardContent, SliceJson, paste_hooks},
         model::{Fragment, Mark, Node, SchemaSpec, Slice},
         state::{
@@ -1379,7 +1381,7 @@ impl Rv {
             }
             return;
         }
-        let Some(mut slice) = self.parsed_paste(&state, text, html) else {
+        let Some(mut slice) = parse_paste(&state, text, html, false) else {
             return;
         };
         for plugin in state.plugins() {
@@ -1391,49 +1393,9 @@ impl Rv {
         self.insert_paste(&state, slice);
     }
 
-    /// What a paste of `text` and `html` is in `state`: HTML through the
-    /// plugins' `transform_pasted_html` and the clipboard parser (the
-    /// schema's parse rules), else plain text through
-    /// `transform_pasted_text` and `clipboard_text_parser`. Into code, HTML
-    /// is skipped; HTML that parses to nothing falls back to the text.
-    fn parsed_paste(&self, state: &EditorState, text: &str, html: &str) -> Option<Slice> {
-        let from = state.selection().resolved_from().clone();
-        let in_code = from.parent().ty().spec().code;
-        if !html.is_empty() && !in_code {
-            let mut html = html.to_owned();
-            for plugin in state.plugins() {
-                html = plugin.transform_pasted_html(state, html);
-            }
-            let parser = state
-                .some_prop(|p| p.clipboard_parser(state))
-                .unwrap_or_else(|| DomParser::from_schema(state.schema()));
-            let slice = parser.parse_from_clipboard(&html, &from);
-            if slice.content.size() > 0 {
-                return Some(slice);
-            }
-        }
-        if text.is_empty() {
-            return None;
-        }
-        let mut text = text.to_owned();
-        for plugin in state.plugins() {
-            text = plugin.transform_pasted_text(state, text, false);
-        }
-        Some(
-            state
-                .some_prop(|p| p.clipboard_text_parser(state, &text, &from, false))
-                .unwrap_or_else(|| slice_from_text(state.schema(), &text, &from)),
-        )
-    }
-
     /// Replaces the selection of `state` (the current one) with `slice`.
     fn insert_paste(&self, state: &EditorState, slice: Slice) {
-        let mut tr = state.tr();
-        tr.replace_selection(slice);
-        tr.set_origin(TransactionOrigin::Paste);
-        tr.set_meta("paste", Value::Bool(true));
-        tr.scroll_into_view();
-        self.dispatch(tr);
+        self.dispatch(paste_transaction(state, slice));
         self.empty_sink();
     }
 
@@ -1477,7 +1439,7 @@ impl Rv {
                     None
                 }
             };
-            let Some(mut slice) = self.parsed_paste(&state, text, html) else {
+            let Some(mut slice) = parse_paste(&state, text, html, false) else {
                 return;
             };
             let plugins: Vec<Plugin> = state.plugins().to_vec();
