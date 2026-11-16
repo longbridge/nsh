@@ -1049,8 +1049,8 @@ fn decode(data: &CFData, d: Decoding) -> Option<DecodedImage> {
             width,
             height,
         };
-        // An animation's frames, or the one image of a multi-size icon or
-        // a multi-page file that fits the size shown.
+        // An animation's frames, or the one image of a still file (an
+        // icon's that fits the size shown, any other's primary image).
         let shown = image_source::shown(&source, max_pixels, MAX_FRAMES);
         if shown.len() <= 1 {
             return frame(shown.start).map(decoded);

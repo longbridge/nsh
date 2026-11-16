@@ -691,8 +691,8 @@ fn fetch(
 
 /// Decodes `bytes` at `target` with ImageIO (a thumbnail when it shrinks:
 /// `CGImageSourceCreateThumbnailAtIndex`), every frame of an animation
-/// when it asks, the one image that fits of a multi-size icon or a
-/// multi-page file; any thread.
+/// when it asks, the one image of a still file of several (an icon's that
+/// fits, any other's primary image); any thread.
 fn decode(bytes: &[u8], target: &Target) -> Result<Picture, String> {
     if nsh_core::svg::sniff(bytes) {
         return decode_svg(bytes, target.longest);
@@ -704,8 +704,8 @@ fn decode(bytes: &[u8], target: &Target) -> Result<Picture, String> {
             CGImageSource::with_data(&data, None).ok_or("not an image ImageIO can read")?;
         let yes: &CFType = kCFBooleanTrue.ok_or("no kCFBooleanTrue")?;
         let (width, height) = source_size(&source);
-        // An animation's frames, or the one image of a multi-size icon or
-        // a multi-page file that fits the size shown.
+        // An animation's frames, or the one image of a still file (an
+        // icon's that fits the size shown, any other's primary image).
         let max_frames = match target.frames {
             Frames::First => 1,
             Frames::All => MAX_FRAMES,

@@ -7,6 +7,9 @@
 pub mod audio;
 pub mod canvas_image;
 pub mod handoff;
+// Which images of a decoded file the macOS and iOS backends show, no API of
+// apps': hidden from the docs, so it stays out of what NSH keeps compatible.
+#[doc(hidden)]
 pub mod image_source;
 pub mod notifications;
 pub mod speech;
