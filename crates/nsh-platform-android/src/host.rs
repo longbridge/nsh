@@ -606,6 +606,57 @@ pub(crate) unsafe fn host<'a>(handle: jlong) -> &'a Arc<Host> {
     unsafe { &*(handle as *const Arc<Host>) }
 }
 
+/// Gives the WebSocket client's TLS verifier (rustls-platform-verifier,
+/// `CertificateVerifier.java`) the app's Context, once per process, so
+/// `wss://` trusts the system's roots (and those a user or administrator
+/// installed) rather than a compiled-in set (#914).
+#[cfg(feature = "websocket")]
+fn init_tls_verifier(env: &mut JNIEnv<'_>, view: &JObject<'_>) {
+    static DONE: std::sync::Once = std::sync::Once::new();
+    DONE.call_once(|| {
+        let context = env
+            .call_method(view, "getContext", "()Landroid/content/Context;", &[])
+            .and_then(|context| context.l())
+            .and_then(|context| {
+                env.call_method(
+                    &context,
+                    "getApplicationContext",
+                    "()Landroid/content/Context;",
+                    &[],
+                )
+            })
+            .and_then(|context| context.l());
+        let context = match context {
+            Ok(context) => context,
+            Err(err) => {
+                let _ = env.exception_clear();
+                log::error!("nsh: no Context for the TLS verifier: {err}");
+                return;
+            }
+        };
+        // SAFETY: the verifier's jni 0.22 wraps this thread's attached
+        // JNIEnv and a live local reference of this native call's frame.
+        let mut unowned = unsafe { jni_verifier::EnvUnowned::from_raw(env.get_raw().cast()) };
+        let outcome = unowned
+            .with_env(|env| {
+                // SAFETY: as above; the 0.21 wrapper keeps the reference.
+                let context = unsafe {
+                    jni_verifier::objects::JObject::from_raw(env, context.as_raw().cast())
+                };
+                rustls_platform_verifier::android::init_with_env(env, context)
+            })
+            .into_outcome();
+        match outcome {
+            jni_verifier::Outcome::Ok(()) => {}
+            jni_verifier::Outcome::Err(err) => {
+                let _ = env.exception_clear();
+                log::error!("nsh: TLS verifier setup failed: {err}");
+            }
+            jni_verifier::Outcome::Panic(_) => log::error!("nsh: TLS verifier setup panicked"),
+        }
+    });
+}
+
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_create(
     mut env: JNIEnv<'_>,
@@ -616,6 +667,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
     data_dir: JString<'_>,
     cache_dir: JString<'_>,
 ) -> jlong {
+    #[cfg(feature = "websocket")]
+    init_tls_verifier(&mut env, &view);
     let Ok(view) = env.new_global_ref(view) else {
         return 0;
     };
