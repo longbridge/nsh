@@ -1571,10 +1571,10 @@ mod tests {
         Some(Arc::new(layer.with_overflow(Points(overflow))))
     }
 
-    /// New uniforms change nothing on screen until the shader's frame of
-    /// them comes back, which draws the view: they ask for no paint, so a
-    /// change presents once, not twice. A layer that changes what is drawn
-    /// before then is drawn at once.
+    /// New uniforms or a new source change nothing on screen until the
+    /// shader's frame of them comes back, which draws the view: they ask for
+    /// no paint, so a change presents once, not twice. A layer that changes
+    /// what is drawn before then, or reads pictures, is drawn at once.
     #[test]
     fn new_uniforms_draw_only_with_their_frame() {
         let surface = surface();
@@ -1592,7 +1592,21 @@ mod tests {
             view.is_queued()
         };
         assert!(!paints(fill(0.5, 0.0)), "new uniforms");
+        let other = Shader::compile(
+            "fn shade(uv: vec2f) -> vec4f {\n    return vec4f(uv.y, uv.x, 0.0, 1.0);\n}\n",
+        )
+        .expect("a valid shader");
+        let other = ShaderLayer::new(other, &[], &mut Vec::new());
+        assert!(!paints(Some(Arc::new(other))), "a new source");
         assert!(paints(fill(0.5, 4.0)), "a new overflow");
+        let reader =
+            Shader::compile("fn shade(uv: vec2f) -> vec4f {\n    return sample_backdrop(uv);\n}\n")
+                .expect("a valid shader");
+        let reader = ShaderLayer::new(reader, &[], &mut Vec::new()).with_overflow(Points(4.0));
+        assert!(
+            paints(Some(Arc::new(reader))),
+            "a fill that samples the backdrop"
+        );
         assert!(paints(Some(layer(ShaderRole::Effect))), "an effect");
         assert!(paints(None), "no layer");
     }
