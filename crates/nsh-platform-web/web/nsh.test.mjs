@@ -3850,6 +3850,12 @@ test("share reports shared, dismissed and unavailable, never shared when it coul
     await player.share(5, null, "Hello", null, false);
     browser(async () => { throw Object.assign(new Error("no activation"), { name: "NotAllowedError" }); });
     await player.share(6, null, "Hello", null, false);
+    // An earlier share's sheet still open.
+    browser(async () => { throw Object.assign(new Error("in progress"), { name: "InvalidStateError" }); });
+    await player.share(7, null, "Hello", null, false);
+    // Anything else is a failure without a code.
+    browser(async () => { throw new TypeError("bad data"); });
+    await player.share(8, null, "Hello", null, false);
     const unavailable = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
     assert.deepEqual(got.map(([name, v]) => [name, v.id, v.action ?? v.code ?? "error"]), [
       ["onShare", 1, "shared"],
@@ -3858,6 +3864,8 @@ test("share reports shared, dismissed and unavailable, never shared when it coul
       ["onShare", 4, unavailable],
       ["onShare", 5, unavailable],
       ["onShare", 6, unavailable],
+      ["onShare", 7, unavailable],
+      ["onShare", 8, "error"],
     ]);
   } finally {
     if (saved) Object.defineProperty(globalThis, "navigator", saved);

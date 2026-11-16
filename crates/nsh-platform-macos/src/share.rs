@@ -1,11 +1,14 @@
 //! `Share.show`: AppKit's share menu, `NSSharingServicePicker`
 //! ([`nsh_core::share`]). The text, the link and the files' URLs are its
 //! items; the title becomes the subject of the service the user chooses (a
-//! mail's subject line). The menu shows below the anchor's own view, in
-//! whatever window it is, or at the middle of the surface. The share is
-//! answered once on the root's `Share` event: shared with the service's
-//! title once the service finished, dismissed when the menu closed without
-//! a choice or the service was cancelled, else the service's error.
+//! mail's subject line). The menu shows on a later turn of the run loop,
+//! never from the batch that asked for it, below the anchor's own view, in
+//! whatever window it is, or at the middle of the surface. A new share
+//! replaces the menu of one still open. The share is answered once on the
+//! root's `Share` event: shared with the service's title once the service
+//! finished, or, for a service that reports nothing, once the user is back
+//! from it; dismissed when the menu closed without a choice or the service
+//! was cancelled; else the service's error.
 
 use std::{
     cell::{Cell, RefCell},
@@ -22,9 +25,10 @@ use objc2::{
     rc::{Allocated, Retained},
     runtime::{AnyClass, AnyObject},
 };
-use objc2_app_kit::NSView;
+use objc2_app_kit::{NSApplication, NSModalPanelRunLoopMode, NSView};
 use objc2_foundation::{
-    NSArray, NSError, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL,
+    NSArray, NSDefaultRunLoopMode, NSError, NSObject, NSObjectProtocol, NSPoint, NSRect, NSRunLoop,
+    NSSize, NSString, NSURL,
 };
 
 use crate::surface::Surface;
@@ -34,6 +38,18 @@ const BELOW: isize = 3;
 
 /// `NSUserCancelledError`: the user cancelled the service (Cocoa's domain).
 const USER_CANCELLED: isize = 3072;
+
+/// How often a chosen service that has not answered is looked after.
+const WATCH_MS: u64 = 250;
+
+/// Looks after a chosen service the user never left the window for, after
+/// which a service that reported nothing counts as done (it acted at once).
+const STAYED: u32 = 8;
+
+/// Looks the window must be back for before a service that reported
+/// nothing counts as done: its own answer, a cancel, may come just after
+/// its window closed.
+const BACK: u32 = 2;
 
 /// A surface's share: the menu while it shows and its delegate until the
 /// share is answered (the picker and the service hold it weakly). One per
@@ -52,6 +68,13 @@ pub(crate) struct DelegateIvars {
     /// The chosen service's title, the share's target.
     service: RefCell<Option<String>>,
     answered: Cell<bool>,
+    /// Whether the user went to the chosen service: another app, a sheet on
+    /// the window or a window of its own.
+    left: Cell<bool>,
+    /// Looks taken since the service was chosen, and those in a row that
+    /// found the user back in the window.
+    looks: Cell<u32>,
+    back: Cell<u32>,
 }
 
 define_class!(
@@ -88,9 +111,11 @@ define_class!(
                     if title.is_some() {
                         *self.ivars().service.borrow_mut() = title;
                     }
-                    // The menu is done; the service answers the share.
+                    // The menu is done; the service answers the share, or
+                    // the user coming back from it does.
                     if let Some(surface) = self.ivars().surface.upgrade() {
                         release_later(surface.share.picker.borrow_mut().take());
+                        watch(surface.key(), self.ivars().id);
                     }
                 }
                 None => self.finish(ShareOutcome::dismissed().payload(self.ivars().id)),
@@ -144,6 +169,62 @@ impl PickerDelegate {
     }
 }
 
+impl PickerDelegate {
+    /// Looks whether the user is back from a chosen service that has not
+    /// answered: the app active, the surface's window key and no sheet on
+    /// it. Some services (adding to a list, copying) never tell their
+    /// delegate; they count as done once the user is back, or at once when
+    /// the user never left. Returns whether to look again.
+    fn look(&self, surface: &Surface) -> bool {
+        let ivars = self.ivars();
+        if ivars.answered.get() {
+            return false;
+        }
+        let active = NSApplication::sharedApplication(surface.mtm).isActive();
+        let root: &NSView = &surface.root;
+        let here = root
+            .window()
+            .is_some_and(|w| w.isKeyWindow() && w.attachedSheet().is_none());
+        let looks = ivars.looks.get() + 1;
+        ivars.looks.set(looks);
+        if active && here {
+            let back = ivars.back.get() + 1;
+            ivars.back.set(back);
+            let done = if ivars.left.get() {
+                back >= BACK
+            } else {
+                looks >= STAYED
+            };
+            if done {
+                let target = ivars.service.borrow().clone();
+                self.finish(ShareOutcome::shared(target).payload(ivars.id));
+                return false;
+            }
+        } else {
+            ivars.left.set(true);
+            ivars.back.set(0);
+        }
+        true
+    }
+}
+
+/// Looks after share `id`'s chosen service every [`WATCH_MS`] until the
+/// share is answered or replaced ([`PickerDelegate::look`]).
+fn watch(key: u64, id: u32) {
+    crate::input::later(WATCH_MS, move || {
+        let Some(surface) = Surface::with_key(key) else {
+            return;
+        };
+        let delegate = surface.share.delegate.borrow().clone();
+        let Some(delegate) = delegate.filter(|d| d.ivars().id == id) else {
+            return;
+        };
+        if delegate.look(&surface) {
+            watch(key, id);
+        }
+    });
+}
+
 /// A service's display title (`NSSharingService.title`).
 fn service_title(service: &AnyObject) -> Option<String> {
     // SAFETY: NSSharingService's documented `title`.
@@ -164,9 +245,35 @@ fn release_later<T: 'static>(object: Option<T>) {
     }
 }
 
+/// Shows the share menu for `sheet` in `surface` on a later turn of the
+/// main run loop, and answers request `id`.
+///
+/// Not now: the batch that asked for it holds the surface's mounter, which
+/// finding the anchor's view borrows, and the menu tracks the mouse inside
+/// the call that shows it, where the batches that come meanwhile borrow
+/// the mounter again. In the default and modal modes, as alerts: not while
+/// another menu or a drag tracks the mouse.
+pub(crate) fn schedule(surface: &Rc<Surface>, id: u32, sheet: &ShareSheet) {
+    let held = RefCell::new(Some((Rc::downgrade(surface), sheet.clone())));
+    let block = block2::RcBlock::new(move || {
+        let Some((surface, sheet)) = held.borrow_mut().take() else {
+            return;
+        };
+        match surface.upgrade() {
+            Some(surface) => show(&surface, id, &sheet),
+            None => log::warn!("share: the surface closed; request {id} is not answered"),
+        }
+    });
+    // SAFETY: immutable constants of Foundation and AppKit.
+    let (default, modal) = unsafe { (NSDefaultRunLoopMode, NSModalPanelRunLoopMode) };
+    let modes = NSArray::from_slice(&[default, modal]);
+    // SAFETY: the block runs on the main thread, where it was made.
+    unsafe { NSRunLoop::mainRunLoop().performInModes_block(&modes, &block) };
+}
+
 /// Shows the share menu for `sheet` in `surface`, below the view of node
 /// `sheet.anchor` where it is in a window, and answers request `id`.
-pub(crate) fn show(surface: &Rc<Surface>, id: u32, sheet: &ShareSheet) {
+fn show(surface: &Rc<Surface>, id: u32, sheet: &ShareSheet) {
     let Some(control) = surface.event_control() else {
         // No engine runs to hear an answer (the command came from one).
         log::warn!("share: no app runs in this surface; request {id} is not answered");
@@ -194,9 +301,14 @@ pub(crate) fn show(surface: &Rc<Surface>, id: u32, sheet: &ShareSheet) {
     if items.is_empty() {
         return fail(ShareError::failed("share: nothing to share"));
     }
+    // No batch holds the mounter on this turn; were one to, the menu shows
+    // at the middle rather than wait.
     let anchor = sheet
         .anchor
-        .and_then(|anchor| surface.mounter.borrow().views.get(&anchor).cloned())
+        .and_then(|anchor| {
+            let mounter = surface.mounter.try_borrow().ok()?;
+            mounter.views.get(&anchor).cloned()
+        })
         .filter(|view| view.ns().window().is_some());
     let (view, rect): (Retained<NSView>, NSRect) = match &anchor {
         Some(anchor) => (anchor.ns().retain(), anchor.ns().bounds()),
@@ -225,6 +337,9 @@ pub(crate) fn show(surface: &Rc<Surface>, id: u32, sheet: &ShareSheet) {
         surface: Rc::downgrade(surface),
         service: RefCell::new(None),
         answered: Cell::new(false),
+        left: Cell::new(false),
+        looks: Cell::new(0),
+        back: Cell::new(0),
     });
     // SAFETY: NSObject's designated initializer.
     let delegate: Retained<PickerDelegate> = unsafe { msg_send![super(delegate), init] };

@@ -2575,8 +2575,10 @@ pub enum Command {
     /// [`crate::platform::Environment::share`] is set. The platform answers
     /// every request exactly once, failures included (a sheet it could not
     /// present is an error): one it never answers leaves its promise
-    /// pending. A new request while a sheet shows replaces that sheet (the
-    /// core has already answered the old one as dismissed).
+    /// pending. The core answers a request still pending as dismissed
+    /// before it sends a new one; the platform then shows the new sheet in
+    /// the earlier one's place where it can (iOS, macOS), and answers
+    /// whatever the earlier sheet reports later under its own id.
     Share {
         /// The request.
         id: u32,

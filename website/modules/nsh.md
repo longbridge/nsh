@@ -2148,7 +2148,8 @@ an answer to await in a task (`spawn`, or an `async` module function).
 
 | Platform | `"shared"` means |
 |---|---|
-| iOS, macOS | The target finished sharing (a cancelled mail or message is `"dismissed"`) |
+| iOS | The target finished sharing (a cancelled mail or message is `"dismissed"`) |
+| macOS | The service finished sharing (a cancelled mail or message is `"dismissed"`); a service that reports nothing (adding to a list, copying) is `"shared"` once the user is back in the app's window |
 | Android | The user chose an app; Android tells nothing of what the app does next |
 | Web | `navigator.share` resolved |
 
@@ -2159,11 +2160,12 @@ an answer to await in a task (`spawn`, or an `async` module function).
 - more than 100 files, text or a title past 1 MiB, or a URL past 16 KiB: a `RangeError`;
 - a file the app's `capabilities.fs.read` does not grant: `ERR_ACCESS_DENIED`, and a file that does not exist: `ENOENT`;
 - a share where the platform has no share sheet, or of content it does not share (a file outside an Android app's own
-  storage, files in a browser, a browser that does not allow sharing here): an `Error` whose `code` is
-  `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. `Share.available()` tells beforehand where the platform has no sheet.
+  storage, files in a browser, a browser that does not allow sharing here or still shows an earlier share's sheet): an
+  `Error` whose `code` is `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. `Share.available()` tells beforehand where the platform has no sheet.
 
-One sheet shows at a time: a `show` while a sheet is open replaces it, and the earlier promise resolves
-`"dismissed"`. On an iPad and on macOS the sheet is a popover: give `anchor` the view that opened it (the share button,
+A `show` while a sheet is open resolves the earlier promise `"dismissed"` at once. On iOS and macOS the new sheet takes
+the earlier one's place; on Android and the web the earlier sheet stays until the user closes it, and a browser
+refuses the new share while it is open. On an iPad and on macOS the sheet is a popover: give `anchor` the view that opened it (the share button,
 in a page, a header, a dialog or another window), and without one it shows at the middle of the window.
 
 On iOS the sheet offers saving an image to Photos when the app says why it adds to the photo library:

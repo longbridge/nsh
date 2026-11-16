@@ -2079,7 +2079,8 @@ Rust：`share(request)`，在任务中 await 的回答（`spawn`，或 `async` �
 
 | 平台 | `"shared"` 表示 |
 |---|---|
-| iOS、macOS | 目标已完成分享（取消的邮件或消息为 `"dismissed"`） |
+| iOS | 目标已完成分享（取消的邮件或消息为 `"dismissed"`） |
+| macOS | 服务已完成分享（取消的邮件或消息为 `"dismissed"`）；不报告结果的服务（加入列表、拷贝）在用户回到应用窗口后为 `"shared"` |
 | Android | 用户选了一个应用；Android 不告诉该应用之后做了什么 |
 | Web | `navigator.share` 已 resolve |
 
@@ -2089,10 +2090,11 @@ Rust：`share(request)`，在任务中 await 的回答（`spawn`，或 `async` �
   请用 `files` 分享）：`TypeError`；
 - 超过 100 个文件、文本或标题超过 1 MiB、URL 超过 16 KiB：`RangeError`；
 - 应用的 `capabilities.fs.read` 没有授予的文件：`ERR_ACCESS_DENIED`；不存在的文件：`ENOENT`；
-- 平台没有分享面板时的分享，或平台不分享的内容（Android 应用自有存储之外的文件、浏览器里的文件、浏览器在此不允许分享）：
+- 平台没有分享面板时的分享，或平台不分享的内容（Android 应用自有存储之外的文件、浏览器里的文件、浏览器在此不允许分享或仍在显示之前那次分享的面板）：
   一个 `code` 为 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 的 `Error`。平台没有面板时，`Share.available()` 可以事先判断。
 
-同一时间只显示一个面板：面板打开时再调用 `show` 会替换它，之前的 promise resolve 为 `"dismissed"`。iPad 和 macOS 上面板是
+面板打开时再调用 `show`，之前的 promise 立即 resolve 为 `"dismissed"`。iOS 和 macOS 上新面板取代旧面板；Android 和
+Web 上旧面板留到用户关掉为止，旧面板打开期间浏览器拒绝新的分享。iPad 和 macOS 上面板是
 popover：把打开它的视图（分享按钮，可以在页面、标题栏、对话框或另一个窗口里）交给 `anchor`，没有时显示在窗口中央。
 
 iOS 上，应用说明了写入相册的理由时，面板才提供把图片存到“照片”：在 `ios.infoPlist` 中写

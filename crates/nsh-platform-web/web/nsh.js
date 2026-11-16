@@ -7027,6 +7027,10 @@ class Player {
         // The browser refuses the sheet here: the page's permissions policy
         // (a frame without `web-share`) or a share without a user gesture.
         unavailable(`share: the browser does not allow sharing here (${err?.message ?? err})`);
+      } else if (err?.name === "InvalidStateError") {
+        // An earlier share's sheet is still open: a browser shows one at a
+        // time and keeps it until the user closes it.
+        unavailable(`share: the browser still shows an earlier share (${err?.message ?? err})`);
       } else {
         this.event(ROOT_ID, "onShare", { id: request, error: `share: ${err?.message ?? err}` });
       }

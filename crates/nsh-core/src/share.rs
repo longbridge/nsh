@@ -15,13 +15,17 @@
 //! payload [`ShareOutcome::payload`] / [`ShareError::payload`] make and
 //! the core reads: shared (with the target the user chose, where the
 //! platform names it), dismissed, or why it could not share. A platform
-//! answers every request it gets, once. One sheet shows at a time: a new
-//! share answers the one still showing as dismissed, and the platform
-//! replaces its sheet.
+//! answers every request it gets, once. A new share answers the one still
+//! showing as dismissed at once; iOS and macOS show the new sheet in the
+//! earlier one's place, while on Android and the web the earlier sheet
+//! stays until the user closes it (a browser refuses the new share
+//! meanwhile).
 //!
-//! What `shared` means is as much as the platform knows: on iOS and macOS
-//! the target finished sharing; Android tells only which app the user
-//! chose; the web, that `navigator.share` resolved.
+//! What `shared` means is as much as the platform knows: on iOS the target
+//! finished sharing; on macOS the service did, or, for a service that
+//! reports nothing, the user came back to the window from it; Android tells
+//! only which app the user chose; the web, that `navigator.share`
+//! resolved.
 //!
 //! Only platforms whose
 //! [`Environment::share`](crate::platform::Environment::share) is set get
