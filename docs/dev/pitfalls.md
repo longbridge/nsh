@@ -222,6 +222,9 @@ Things that were found the hard way. Read the section of the area you change bef
   range the text never had (`NSMutableRLEArray` out of bounds). Inserting other text from the delegate during that
   paste crashes the same way. An input with `maxLength` therefore pastes by itself (`input::paste_text`): it clips the
   text, asks the delegate and calls `insertText:`, whose undo is right.
+- **UIKit passes nil where `UITextInput` declares a position or range nonnull** (a secondary click on selectable text
+  with nothing selected moves a nil position): a method a class defines with `define_class!` takes these as `Option`,
+  since a `&T` is a null reference then and objc2's debug-build nil check on messaging it aborts the app.
 - **UIKit implements the `UITextInputTraits` setters of `UITextField` by message forwarding**: objc2's debug-build signature
   check cannot find them on the class and panics, so `input.rs` sends them with a raw `objc_msgSend`.
 - **objc2 crates are used with `default-features = false`** and an explicit feature list in the root `Cargo.toml` (one feature per
