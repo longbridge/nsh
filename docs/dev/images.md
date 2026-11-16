@@ -11,7 +11,10 @@
   divisor) played by a discrete `CAKeyframeAnimation` on `contents` (a tinted animated image shows its first frame); Android
   (API 28+) uses `ImageDecoder` → `AnimatedImageDrawable`, not cached (each view plays its own copy; no blur); a GIF below
   API 30 (from API 26) plays from a `Movie` of its own (see the pitfall in `pitfalls.md`). `onLoad` reports the
-  source's size in pixels on both platforms, whatever size the view decodes at. Downloads are shared per URI (also between
+  source's size in pixels on both platforms, whatever size the view decodes at. On iOS and macOS only the formats that
+  animate (GIF, APNG, WebP, HEIF and AVIF sequences, JPEG XL) play their images as frames; a still file of several
+  images shows one, the icon size that fits for ICO, ICNS and CUR and the primary image otherwise (a TIFF's first
+  page), and `onLoad` reports that image's size (`nsh_platform_apple::image_source`). Downloads are shared per URI (also between
   views decoding at different sizes) and report `onProgress` at most every 100ms; `Image.getSize` / `Image.prefetch` (Rust,
   `nsh_core::runtime`) ask with `Command::ImageInfo`, are answered by the root's `ImageInfo` event (which the core
   resolves, never JS) and keep the downloaded bytes in a data cache (32 MB) until a view

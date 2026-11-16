@@ -343,10 +343,10 @@ pub struct Environment {
     /// ([`crate::Command::RenderCanvas`], `OffscreenCanvas`); without it,
     /// a render fails at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
     pub canvas_render: bool,
-    /// The platform shows the system's open and save dialogs and opens,
-    /// reveals and trashes local paths ([`crate::Command::FileRequest`],
-    /// the desktops); without it, those requests answer at once with an
-    /// error.
+    /// The platform handles file requests ([`crate::Command::FileRequest`]).
+    /// Desktops implement the full set; mobile platforms answer the open
+    /// dialog and reject operations they do not support. Without it, all
+    /// file requests answer at once with an error.
     pub file_requests: bool,
     /// The platform recognizes speech ([`crate::Command::Speech`],
     /// [`crate::speech`]); without it, a session ends at once
@@ -360,6 +360,20 @@ pub struct Environment {
     /// [`crate::audio`]); without it, sounds and players fail at once
     /// (`unavailable`) unless the core has a [`crate::audio::AudioBackend`].
     pub audio: bool,
+    /// The platform shows the system's tab bar on iOS and Android
+    /// (`nsh/mobile`'s `TabBar`: it registers [`TAB_BAR_COMPONENT`]). On by
+    /// default, as NSH's own iOS and Android backends do; a platform built
+    /// outside NSH that runs on those OSes without one turns it off, and
+    /// `TabBar` then takes no room and `nsh/mobile`'s `isAvailable` is false,
+    /// so the app shows its tabs with `nsh/base`'s `Tabs`. Read only on iOS
+    /// and Android.
+    pub tab_bar: bool,
+    /// The platform puts images on the system clipboard and reads them back
+    /// (`Clipboard.readImage`, `writeImage`, `hasImage`). On by default;
+    /// off on Android, whose backend holds text only, and on a platform
+    /// built outside NSH without images (its image calls then reject with
+    /// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`, `hasImage` is false).
+    pub clipboard_images: bool,
     /// The size of one Cell of a grid surface (a terminal, whose content is
     /// whole character Cells), in points; `None` on every other surface.
     /// With it the core lays out with its terminal algorithm, ratatui's
@@ -466,6 +480,8 @@ impl Default for Environment {
             speech: false,
             notifications: false,
             audio: false,
+            tab_bar: true,
+            clipboard_images: true,
             cell: None,
             web_input: false,
             web_evaluate: false,

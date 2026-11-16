@@ -619,12 +619,34 @@ impl AttributedText {
 
     /// The text a screen reader reads: all of it but its hidden runs
     /// ([`ResolvedTextStyle::hidden`]); borrowed when none is.
+    ///
+    /// Empty attachments (no height: a span's padding) are no content and
+    /// are left out too.
     pub fn visible_text(&self) -> std::borrow::Cow<'_, str> {
-        if !self.has_hidden() {
+        let spacers = self.attachments.iter().any(|a| a.height <= Points::ZERO);
+        if !self.has_hidden() && !spacers {
             return std::borrow::Cow::Borrowed(&self.text);
         }
         let mut out = String::with_capacity(self.text.len());
         self.each_shown(0..self.len_utf16(), |s| out.push_str(s));
+        if spacers {
+            // Offsets in `out` shift where hidden runs were dropped: find the
+            // empty attachments by counting placeholders instead.
+            let shown: Vec<bool> = self
+                .attachments
+                .iter()
+                .filter(|a| !self.hidden_at(a.index))
+                .map(|a| a.height > Points::ZERO)
+                .collect();
+            let mut nth = 0;
+            out.retain(|c| {
+                if c != ATTACHMENT_CHAR {
+                    return true;
+                }
+                nth += 1;
+                shown.get(nth - 1).copied().unwrap_or(true)
+            });
+        }
         std::borrow::Cow::Owned(out)
     }
 

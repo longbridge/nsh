@@ -2058,6 +2058,14 @@ Rust 代码使用 `nsh_core::prelude` 的 `request_notification_permission`、`s
 await Notifications.show({ id: "sync", title: "Synced", body: "12 new photos", silent: true });
 ```
 
+`sound` 播放应用自带的声音来代替系统默认提示音，让用户分辨出这个应用的通知（例如新的客户消息）；`silent: true` 优先于它。传入打包的资源路径或导入的声音。`nsh package` 会把应用的声音复制到系统读取的位置：Apple 平台从 `Library/Sounds` 按文件名播放不超过 30 秒的 `.caf`、`.aiff`、`.wav`，所以每个声音的文件名要不同；Android 播放 `.ogg`、`.mp3`、`.wav` 原始资源，每个声音一个通知渠道，用户可在系统设置里修改；Linux 把文件交给通知服务（`sound-file`）。Windows（未打包的应用）、Web，以及找不到声音的平台播放默认提示音。
+
+```tsx
+import ding from "./sounds/message.caf";
+
+await Notifications.show({ id: "chat:42", title: "Ada", body: "Are you there?", sound: ding });
+```
+
 ### Notifications.closeAll
 
 `closeAll()` 移除应用显示的全部通知，包括已显示的和等待显示的。在用户退出登录时调用，让通知里的内容随账号一起清掉。Apple 平台、Windows 和 Android 的系统通知中心会跨运行保留通知，`closeAll()` 在这些平台上移除 NSH 显示的通知，包括应用上一次运行留下的，嵌入方自己的通知保留。Linux 和 Web 上它移除当前运行的应用显示的通知。
@@ -2138,7 +2146,7 @@ const UrlScheme: {
 | 平台 | `url()` | `setUrl(url)` |
 | --- | --- | --- |
 | Web，应用占据整个页面 | 页面的地址：加载时的地址、`setUrl` 设置的地址，或浏览器后退回到的那条记录的地址 | 替换当前历史记录的地址，与 `history.replaceState` 一样解析（相对于页面的 `<base href>`），在同一轮压入或弹出的页面的历史记录之后生效；带 `history: "push"` 时，像 `history.pushState` 一样在它之后新建一条自己的记录（见下文） |
-| 原生平台，以及 iframe 中的 Web | 最后一个打开应用的链接（启动应用的链接同时作为第一个 `open` 到达），或之后 `setUrl` 设置的地址；两者都没有时为 `null` | 为 `url()` 保存这个 URL，带 `history: "push"` 时也一样（没有可以压入的历史记录）；把它交给系统（Handoff、App Links）由嵌入应用负责 |
+| 原生平台，以及 iframe 中的 Web | 最后一个打开应用的链接（启动应用的链接同时作为第一个 `open` 到达），或之后 `setUrl` 设置的地址；两者都没有时为 `null` | 为 `url()` 保存这个 URL，带 `history: "push"` 时也一样（没有可以压入的历史记录）；在 iOS 和 macOS 上，开启了的应用还会把它交给系统（[见下文](#handoff)） |
 
 URL 不是字符串、超过 16 KiB 或含有空白字符时抛出 `TypeError`；在 Web 上应用占据整个页面时，不是页面同源 URL 的地址同样抛出 `TypeError`。
 应用只有一个地址，Rust 读的也是它，`url()` 直接读取它：链接、Rust 的 `set_app_url` 和 `setUrl` 的改动都立即可见。在上表的平台上，启动应用的链接在应用的代码运行之前就已到达，所以第一次调用 `url()` 就能读到它，它同时也作为第一个 `open` 到达（在 Web 上，页面的地址从一开始就在）。
@@ -2197,6 +2205,10 @@ UrlScheme.on("change", ({ url }) => current.set(tabOf(url)));
 地址归页面的记录，不另建记录（就像 `onChange` 设置的那样）；在弹出页面的那一轮，它是后退落到的那条记录之后的一条记录。压入当前显示的
 地址不会新建记录；同一轮里最后的地址生效，压入优先于替换。`history` 为其他值时抛出 `TypeError`。Rust 调用
 `set_app_url_with(url, HistoryBehavior::Push)`（`nsh_core::url_scheme`）。
+
+#### Handoff
+
+在 iOS 和 macOS 上，应用用 `nsh.json` 的 `"handoff": true` 把地址交给系统（嵌入应用设置 `NshAppView.handoff`，或 Rust 选项中的 `handoff`）：`setUrl` 设置的地址成为当前的 `NSUserActivity`，Handoff 可以在用户的其他设备上接着打开它。`http(s)` 地址是网页，另一台设备在浏览器中打开它。其他绝对地址由另一台设备上的应用自己接着打开（Handoff 只在同一开发团队签名的应用之间进行），作为 `open` 到达的链接（属于 `schemes` 中的 scheme）；`nsh package` 会在 `NSUserActivityTypes` 中声明它的活动类型 `<id>.url`。相对地址只属于应用自己。Android 没有 App Links 的对外对应物，只为 `url()` 保存地址。
 
 ### UrlScheme.on("change")
 

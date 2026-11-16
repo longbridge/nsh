@@ -242,6 +242,13 @@ pub struct AppOptions {
     /// too, but never changes the host's window: the embedding app makes its
     /// window nonopaque and clear itself where it wants that.
     pub transparent: bool,
+    /// Gives the app's address (`UrlScheme.setUrl`) to the system as the
+    /// current `NSUserActivity`, so Handoff continues it on the user's other
+    /// devices (`nsh_platform_apple::handoff`). An address that is no web page needs
+    /// `<bundle id>.url` in the app's Info.plist `NSUserActivityTypes`.
+    /// False by default; [`run_app`] sets it when the bundle declares that
+    /// type (`nsh.json` `"handoff": true`).
+    pub handoff: bool,
 }
 
 impl Default for AppOptions {
@@ -270,6 +277,7 @@ impl Default for AppOptions {
             login_item: false,
             host: nsh_engine::HostChannel::default(),
             transparent: false,
+            handoff: false,
         }
     }
 }
@@ -359,6 +367,9 @@ impl AppView {
         let surface = Surface::new(mtm, initial_environment());
         surface.appearance.set(options.appearance);
         surface.transparent.set(options.transparent);
+        if options.handoff {
+            *surface.handoff.borrow_mut() = Some(Default::default());
+        }
         let frame = NSRect::new(
             NSPoint::new(0.0, 0.0),
             NSSize::new(options.size.0 as f64, options.size.1 as f64),
@@ -841,6 +852,24 @@ define_class!(
             }
         }
 
+        // An address continued from another device (Handoff,
+        // `AppOptions::handoff`): a link like the others.
+        #[unsafe(method(application:continueUserActivity:restorationHandler:))]
+        fn continue_user_activity(
+            &self,
+            _app: &NSApplication,
+            activity: &objc2_foundation::NSUserActivity,
+            _restoration: &block2::DynBlock<dyn Fn(std::ptr::NonNull<AnyObject>)>,
+        ) -> bool {
+            match nsh_platform_apple::handoff::continued_url(activity) {
+                Some(url) => {
+                    url_scheme(url);
+                    true
+                }
+                None => false,
+            }
+        }
+
         // The app starts once the links it was launched with came.
         #[unsafe(method(applicationDidFinishLaunching:))]
         fn did_finish_launching(&self, _notification: &NSNotification) {
@@ -1227,6 +1256,7 @@ fn name_app(name: &str) {
 /// The caller can finish cleanup or restart after this function returns.
 pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::ExitCode {
     options.notifications = true;
+    options.handoff |= nsh_platform_apple::handoff::declared();
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(activation_policy(&options));

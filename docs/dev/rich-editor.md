@@ -23,7 +23,7 @@ what is ported. A module ported from one names its source in its module doc; kee
 | `commands/` | prosemirror-commands and prosemirror-schema-list: `Command`s over a state and an optional dispatch, `chain_commands`, `base_keymap` |
 | `extensions/` | optional behavior as plugins: `history`, `keymap`, `input_rules`, `markdown` (Markdown shortcuts as you type, Markdown paste and copy, mapped by `MarkdownNames`); `starter`, the optional starter schema (paragraphs, headings, quotes, code, lists, images, the common marks) with its keymap and input rules |
 | `tables/` | prosemirror-tables: `TableMap`, `CellSelection`, `fix_tables`, the `table_editing` plugin, the table commands and Tiptap's table node specs (see "Tables") |
-| `formats/` | `DocFormat`: `JsonFormat`, `PlainTextFormat`, `MarkdownFormat` (names mapped by `MarkdownNames`; GFM task items read as `taskList` / `taskItem`, a run of them splitting a bullet list, and write as `- [x]` / `- [ ]`), the clipboard's `slice_to_text` / `slice_from_text` |
+| `formats/` | `DocFormat`: `JsonFormat`, `PlainTextFormat`, `MarkdownFormat` (names mapped by `MarkdownNames`; GFM task items read as `taskList` / `taskItem`, a run of them splitting a bullet list, and write as `- [x]` / `- [ ]`; Markdown read to 64 levels of blocks and inline content, deeper content as its text, so a paste of thousands of nested quotes cannot run the stack out), the clipboard's `slice_to_text` / `slice_from_text` |
 
 ## Documents defined by the schema
 
@@ -158,12 +158,23 @@ restyles.
 Geometry (`geometry.rs`): maps document positions to the laid-out text's lines and back from the blocks' and texts'
 layouts, so the caret and hit tests follow the app's fonts (classes included). A position at a wrap shows at the
 upper line's end with `Affinity::Upstream`.
+The view reports `contentSizeChange({ contentSize })` (as `Input`'s `onContentSizeChange`) when the laid-out
+document's size changes, at most once per engine frame. `contentSize` is the full flow extent in points, including
+offscreen blocks and independent of the viewport's minimum height; it excludes the `content` part's padding.
+Scrolling does not report (`onScroll` does). The event stops at idle and its pending task is canceled with the view.
+Rust uses `RichEditor::on_content_size_change`, whose listener receives
+`RichEditorEvent::ContentSizeChange { content_size }`.
 
 Input (`controller.rs`): as the code `Editor`, an invisible native input at the caret (the sink) takes typed text
 and input methods. Typed text goes to plugins' `handle_text_input` (input rules), else is inserted with the stored
 marks (origin `Input`). While an input method composes, its text shows in the line at the caret with the block's
 typography, and the document waits; the commit is one transaction tagged with the composition's id (`composition`
-meta, which the history groups). Keys: the view binds, while focused, every keystroke a keymap could use (`keys.rs`)
+meta, which the history groups). `RichEditorEvent::CompositionChange(bool)` (Rust
+`.on_composition_change`, JS `onCompositionChange({ composing })`) reports each view's start/end transitions,
+including cancellation, after its session flag, held input and composition signal are updated. Updates within an
+active composition keep the same state and emit no further transition. Starting and canceling composition leave
+the document and transaction revision unchanged; a text commit remains a normal transaction. Observers can retain
+the view while composing and release it on the end notification. Keys: the view binds, while focused, every keystroke a keymap could use (`keys.rs`)
 and offers each as a `KeyEvent` to the selected node's view, the plugins' `handle_key_down`, the base keymap, then
 copy / cut / select all and the caret movement (graphemes, words, line ends, lines and pages by geometry, keeping the
 goal x, the document's ends). An Escape none of them takes collapses a selection to its head; with nothing selected,
@@ -330,6 +341,10 @@ JS describes.
   nothing. `pageCoordsAtPos` / `posAtPageCoords` answer the same in page (root) points, for UI an app places
   outside the editor (a block handle): the view keeps the content's page offset, measured after each layout of the
   content and as a handle drag starts, and moved by the scroll since.
+  Scrolling an ancestor or a sibling's layout can move the editor on the page with every editor-local frame
+  unchanged, so the view also measures its placement when its viewport lays out and after each page query
+  (`Rv::place`, one measurement in flight): a query after such a move answers by the new placement a frame
+  later, with no app call. Local coordinates, document and selection remain unchanged.
   A query's position outside `0..=doc.content.size` throws a `RangeError` (ProseMirror's `resolve`;
   `RichEditorSession::check_pos`), never a `null`: `null` is an answer (no node after the position, no view, no
   such parent). `run` / `can` throw a `TypeError` for a command, node or mark type the editor does not know.

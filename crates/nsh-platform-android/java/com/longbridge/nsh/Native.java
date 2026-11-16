@@ -416,8 +416,9 @@ final class Native {
     /**
      * Touches for the JS responder system. phase: 0 start, 1 move, 2 end,
      * 3 cancel. Per finger: id, target node, path length (in {@code paths},
-     * innermost first), pageX, pageY, locationX, locationY (in
-     * {@code coords}, dp) and whether it changed. {@code time}: ms.
+     * innermost first), pageX, pageY, locationX, locationY (dp), pressure,
+     * tiltX, tiltY (degrees) and kind (0 touch, 1 pen, 2 mouse) (8 floats
+     * in {@code coords}) and whether it changed. {@code time}: ms.
      */
     static native void touch(long handle, int phase, int[] ids, int[] targets, int[] pathLengths, int[] paths,
             float[] coords, boolean[] changed, long time, int activated);

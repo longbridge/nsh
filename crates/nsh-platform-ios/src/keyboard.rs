@@ -77,7 +77,8 @@
 //! back only where no view in the window is first responder, so a transfer
 //! to a native input, a hosted view or another custom view keeps its focus.
 //! A modal's view is its own scope and is never replaced by the background
-//! surface root.
+//! surface root. Window attachment and explicit keyboard dismissal use the
+//! same restoration, including when the root itself gave up the keyboard.
 
 use std::cell::{Cell, RefCell};
 

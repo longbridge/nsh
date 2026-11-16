@@ -147,6 +147,9 @@ fn touch(
             location: nsh_core::geometry::point(px(x), px(y)),
             changed: true,
             pointer_type: nsh_core::PointerType::Touch,
+            pressure: 0.5,
+            tilt_x: 0.0,
+            tilt_y: 0.0,
         }],
     }))
 }

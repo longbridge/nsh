@@ -775,7 +775,8 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     | Command::ScrollToEnd { .. }
                     // Desktops only.
                     | Command::Desktop(_)
-                    // The web's history entries; the core sends it there only.
+                    // The app's address: Android keeps none (App Links only
+                    // come in).
                     | Command::SetAppUrl(_)
                     | Command::PushAppUrl(_)
                     // No host answers `nsh/host` here (`Environment::host`):
@@ -796,9 +797,16 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     }
                     // `SystemUi.openPath`: the file at the path, a `content:`
                     // URI the app's FilesProvider serves, to the system's
-                    // viewer (`ACTION_VIEW`). `OpenPath` alone; the dialogs
-                    // have no answer on Android.
+                    // viewer (`ACTION_VIEW`); open dialogs use `Picker.java`
+                    // to copy provider streams into app-owned paths.
                     Command::FileRequest { id, request } => match *request {
+                        nsh_core::file_dialog::FileRequest::OpenDialog(dialog) => {
+                            e.int(57);
+                            e.int(id as i32);
+                            e.bool(dialog.multiple);
+                            e.bool(dialog.kind == nsh_core::file_dialog::OpenDialogKind::Folders);
+                            e.string(nsh_core::file_dialog::extensions(&dialog.filters).join(","));
+                        }
                         nsh_core::file_dialog::FileRequest::OpenPath(path) => {
                             e.int(28);
                             e.int(id as i32);
@@ -861,12 +869,18 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                                 e.bool(ask);
                             }
                             N::Show { id, notification } => {
+                                let sound = notification
+                                    .sound_path()
+                                    .map(nsh_core::notifications::Notification::sound_resource_name)
+                                    .unwrap_or_default();
                                 e.int(1);
                                 e.int(id as i32);
                                 e.string(notification.id);
                                 e.string(notification.title);
                                 e.string(notification.body);
                                 e.bool(notification.silent);
+                                // The app's sound as a raw resource name, "" for none.
+                                e.string(sound);
                             }
                             N::Close(id) => {
                                 e.int(2);
@@ -2104,7 +2118,7 @@ mod tests {
     }
 
     #[test]
-    fn open_path_is_sent_and_the_other_file_requests_fail() {
+    fn open_requests_are_sent_and_the_other_file_requests_fail() {
         // `COMMAND`, the view id, op 28, the request id, the path's
         // object index: `Mounter.java` opens the file and answers.
         assert_eq!(
@@ -2112,12 +2126,21 @@ mod tests {
             vec![COMMAND, 3, 28, 7, 0]
         );
 
+        assert_eq!(
+            ints(FileRequest::OpenDialog(file_dialog::OpenDialog::files())),
+            vec![COMMAND, 3, 57, 7, 0, 0, 0]
+        );
+        assert_eq!(
+            ints(FileRequest::OpenDialog(
+                file_dialog::OpenDialog::folders().multiple(true)
+            )),
+            vec![COMMAND, 3, 57, 7, 1, 1, 0]
+        );
         // `Environment::file_requests` is set, so the core waits for an
         // answer to every request: op 30 fails the rest instead of leaving
-        // `pick_paths`, `pick_save_path`, `reveal_path` and `move_to_trash`
+        // `pick_save_path`, `reveal_path` and `move_to_trash`
         // pending forever.
         for request in [
-            FileRequest::OpenDialog(file_dialog::OpenDialog::default()),
             FileRequest::SaveDialog(file_dialog::SaveDialog::default()),
             FileRequest::RevealPath("a".into()),
             FileRequest::MoveToTrash("a".into()),

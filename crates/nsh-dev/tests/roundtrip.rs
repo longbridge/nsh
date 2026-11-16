@@ -582,6 +582,91 @@ fn the_websocket_refuses_other_web_pages() {
     }
 }
 
+/// A page whose own name DNS rebinds to this machine sends its requests
+/// same-origin, without an `Origin`, under that name as its `Host`: it reads
+/// none of the server's files, while the hosts on devices and the web host's
+/// pages, which name the server by its address or `localhost`, read them as
+/// before.
+#[test]
+fn a_name_rebound_to_this_machine_reads_nothing() {
+    let dir = std::env::temp_dir().join(format!("nsh-dev-rebound-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("logo.png"), b"png").unwrap();
+    let server = DevServer::start(
+        "127.0.0.1:0".parse().unwrap(),
+        "bc-1",
+        Some(dir.clone()),
+        |_| {},
+    )
+    .unwrap();
+    server.publish(
+        vec![1, 2, 3],
+        "the app's source".into(),
+        None,
+        AppInfo::default(),
+        None,
+        Vec::new(),
+    );
+    server.serve_web("<p>page</p>".into(), [("nsh.js".into(), b"js".to_vec())]);
+    let addr = server.local_addr();
+    let port = addr.port();
+    let paths = ["/bundle.js", "/assets/logo.png", "/", "/nsh.js"];
+    for host in [
+        format!("evil.example:{port}"),
+        format!("rebind.127.0.0.1.nip.io:{port}"),
+        format!("my-mac.local:{port}"),
+    ] {
+        for path in paths {
+            let (line, body) = request(addr, path, &host, "");
+            assert!(line.contains("403"), "{path} at {host}: {line}");
+            assert!(!body.contains("source"), "{path} at {host}");
+        }
+    }
+    for host in [addr.to_string(), format!("localhost:{port}")] {
+        for path in paths {
+            let (line, _) = request(addr, path, &host, "");
+            assert!(line.contains("200"), "{path} at {host}: {line}");
+        }
+    }
+    // `/ws` is left to its `Origin` check: a native host's handshake under
+    // any name still opens.
+    let handshake = "Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: \
+                     13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n";
+    let (line, _) = request(addr, WS_PATH, &format!("dev.example:{port}"), handshake);
+    assert!(line.contains("101"), "{line}");
+    drop(server);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The status line and body of `GET path` with `Host: host` and the
+/// `headers` (lines ending with `\r\n`), over a plain HTTP/1.1 connection.
+fn request(addr: std::net::SocketAddr, path: &str, host: &str, headers: &str) -> (String, String) {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(addr).unwrap();
+    stream.set_read_timeout(Some(TIMEOUT)).unwrap();
+    let close = if headers.is_empty() {
+        "Connection: close\r\n"
+    } else {
+        ""
+    };
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\n{close}{headers}\r\n"
+    )
+    .unwrap();
+    let mut response = Vec::new();
+    // A WebSocket stays open: what arrived before the timeout is enough.
+    let _ = stream.read_to_end(&mut response);
+    let response = String::from_utf8_lossy(&response);
+    let line = response.lines().next().unwrap_or_default().to_owned();
+    let body = response
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body.to_owned())
+        .unwrap_or_default();
+    (line, body)
+}
+
 /// The status line and body of `GET path` with `accept`, over a plain
 /// HTTP/1.1 connection.
 fn get(addr: std::net::SocketAddr, path: &str, accept: &str) -> (String, String) {

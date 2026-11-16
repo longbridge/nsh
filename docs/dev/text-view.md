@@ -28,6 +28,10 @@ colored with the theme's tokens; the app restyles each part over it.
   that grew at its end is read from where it can still change ("Reading only what can change", below); the view
   holds its blocks shared (`Parsed`, `SharedBlock`: an `Rc` each), so the document's and the rows' comparisons are
   of pointers for the blocks kept.
+  Markdown is read to a depth (32 levels of blocks and inline content): what lies deeper is its text, gathered without
+  recursion, and markdown-rs's tree, as deep as the input nests, is dropped without it (`mdast_tree.rs`, which
+  `RichEditor`'s Markdown format uses too), so a reply of thousands of nested quotes or lists cannot run the stack
+  out. Streaming repair removes trailing marker runs (`a * * *`) in a loop for the same reason.
 - **Blocks are rows of an `Each`, keyed by position and kind** (`(index, block.kind())`). A streamed reply grows at its
   end: the blocks before it parse to equal values and keep their nodes, the block being written keeps its row (same
   position, same kind) and only that row is made again. A block that changes kind mid-stream (a paragraph becoming a

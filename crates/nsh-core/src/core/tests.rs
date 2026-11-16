@@ -18307,6 +18307,9 @@ mod touch {
                 location: point(px(x - 10.0), px(5.0)),
                 changed: true,
                 pointer_type: crate::PointerType::Touch,
+                pressure: 0.5,
+                tilt_x: 0.0,
+                tilt_y: 0.0,
             }],
         }))
     }
@@ -26219,6 +26222,109 @@ mod rust_windows {
         assert_eq!(table.bindings().len(), 3);
     }
 
+    /// Counts the Escapes it is bound to.
+    #[component]
+    fn EscapeCount() -> impl IntoElement {
+        let count = signal(0);
+        on_key("escape", move |_| count.update(|n| *n += 1));
+        text(move || format!("escape {}", count.get()))
+    }
+
+    /// A component JS places in a window of the app's own (TS `<Window>`)
+    /// has no `WindowRef` around it in Rust, yet its shortcuts are that
+    /// window's, as an `Editor`'s arrows in a `Window` are; the same
+    /// component in the main window keeps the main window's.
+    #[test]
+    fn a_component_js_places_in_a_window_binds_its_keys_there() {
+        use super::views::texts;
+        use crate::{
+            element::Registry,
+            keymap::{KeyMatch, Keystroke},
+        };
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.set_viewport(size(px(800.0), px(600.0)));
+        let mut registry = Registry::new();
+        registry.register::<EscapeCount>();
+        c.set_components(registry);
+        let mut open = OpenWindow::default();
+        open.options.id = "panel".into();
+        open.options.default_size = Some(size(px(300.0), px(100.0)));
+        let component = || crate::Prop::Component(std::any::type_name::<EscapeCount>().into());
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::Modal,
+                },
+                Op::Command {
+                    id: 2,
+                    command: Command::Desktop(Box::new(DesktopCommand::OpenWindow(Box::new(open)))),
+                },
+                Op::Create {
+                    id: 4,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 4,
+                    prop: component(),
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 4,
+                    before: None,
+                },
+                Op::Create {
+                    id: 6,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 6,
+                    prop: component(),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 6,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let mut table = None;
+        for _ in 0..3 {
+            if let Some(b) = c.commit() {
+                table = b
+                    .items
+                    .iter()
+                    .rev()
+                    .find_map(|i| match i {
+                        MountItem::Keymap(k) => Some(k.clone()),
+                        _ => None,
+                    })
+                    .or(table);
+            }
+        }
+        let table = table.expect("a table");
+        let escape = Keystroke::parse_with("escape", true).unwrap();
+        let fired = |window: NodeId| match table.find_in(window, escape, false, false) {
+            KeyMatch::Fire(id) => id,
+            other => panic!("Escape in window {window}: {other:?}"),
+        };
+        let (in_panel, in_main) = (fired(2), fired(ROOT_ID));
+        assert_ne!(in_panel, in_main, "each window has its own");
+        let key = |id: u32| EventPayload::Value(crate::PayloadValue::Number(id as f64));
+        assert!(c.component_event(ROOT_ID, EventKind::KeyCommand, &key(in_panel)));
+        assert_eq!(texts(&c.commit().unwrap()), ["escape 1"]);
+    }
+
     /// A popover anchored to a button and a dialog, both in a window's
     /// content, below a tall view of the main window.
     #[component]
@@ -29884,6 +29990,9 @@ fn touch_down(path: Vec<NodeId>) -> EventPayload {
             location: point(px(5.0), px(6.0)),
             changed: true,
             pointer_type: crate::PointerType::Touch,
+            pressure: 0.5,
+            tilt_x: 0.0,
+            tilt_y: 0.0,
         }],
         modifiers: Default::default(),
         activated: None,
@@ -45250,42 +45359,119 @@ mod positional_regressions {
 }
 
 #[test]
-fn padding_on_a_span_is_warned_once() {
+fn span_padding_widens_its_box_in_the_line() {
+    // <Text>a <Text bg paddingHorizontal=4>b</Text> c</Text>
     let mut c = core();
-    let span = |id, padding: f32| {
-        [
-            Op::Create { id, tag: Tag::Text },
-            style_op(id, &[("paddingLeft", StyleValue::Number(padding))]),
-        ]
+    let span_style = |padding: f32| {
+        style_op(
+            4,
+            &[
+                ("backgroundColor", StyleValue::Str("#ff0000")),
+                ("paddingHorizontal", StyleValue::Number(padding)),
+            ],
+        )
     };
-    let mut ops = vec![Op::Create {
-        id: 2,
-        tag: Tag::Text,
-    }];
-    ops.extend(span(3, 0.0));
-    ops.extend([
-        Op::Insert {
-            parent: 2,
-            child: 3,
-            before: None,
-        },
-        Op::Insert {
-            parent: ROOT_ID,
-            child: 2,
-            before: None,
-        },
-    ]);
-    apply(&mut c, ops);
-    let _ = c.commit();
-    assert!(!c.span_padding_warned);
-    // Styled before it is inserted into its text, then made a span.
-    let mut ops: Vec<Op> = span(4, 4.0).into();
-    ops.push(Op::Insert {
-        parent: 2,
-        child: 4,
-        before: None,
-    });
-    apply(&mut c, ops);
-    let _ = c.commit();
-    assert!(c.span_padding_warned);
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 3,
+                text: "a ".into(),
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            span_style(4.0),
+            Op::CreateText {
+                id: 5,
+                text: "b".into(),
+            },
+            Op::CreateText {
+                id: 6,
+                text: " c".into(),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 5,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 6,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let text = text_item(&batch).unwrap();
+    // An empty attachment at each end of the span takes its padding in the
+    // line, in the span's background.
+    assert_eq!(text.text, "a \u{FFFC}b\u{FFFC} c");
+    let pads: Vec<_> = text
+        .attachments
+        .iter()
+        .map(|a| (a.index, a.width, a.height))
+        .collect();
+    assert_eq!(
+        pads,
+        [(2, Points(4.0), Points(0.0)), (4, Points(4.0), Points(0.0))]
+    );
+    for i in 2..5 {
+        assert_eq!(text.background_at(i).map(|b| b.node), Some(4));
+    }
+    assert_eq!(text.background_at(5), None);
+    // Copies and reads without them.
+    assert_eq!(text.copied_text(0..text.len_utf16()), "a b c");
+    assert_eq!(text.visible_text(), "a b c");
+
+    // Another padding lays the text out again.
+    apply(&mut c, vec![span_style(6.0)]);
+    let text = text_item(&c.commit().unwrap()).unwrap();
+    assert_eq!(text.attachments[0].width, Points(6.0));
+
+    // No padding, no attachments.
+    apply(&mut c, vec![span_style(0.0)]);
+    let text = text_item(&c.commit().unwrap()).unwrap();
+    assert_eq!(text.text, "a b c");
+    assert!(text.attachments.is_empty());
+}
+
+#[test]
+fn node_record_sizes() {
+    // #1345: the per-node records the core keeps for every node.
+    let node = std::mem::size_of::<super::Node>();
+    eprintln!("Node {node} B");
+    assert!(node <= 600, "Node grew to {node} bytes");
+}
+
+#[test]
+fn style_constants_match_default() {
+    assert_eq!(
+        crate::style::ViewStyle::DEFAULT,
+        crate::style::ViewStyle::default()
+    );
+    assert_eq!(
+        crate::style::TextStyle::DEFAULT,
+        crate::style::TextStyle::default()
+    );
 }

@@ -1546,37 +1546,47 @@ setTimeout(async () => {
 mount(() => <Text>{shown()}</Text>);
 "#;
 
+/// Android's backend, and a platform built outside NSH that says so
+/// (`Environment::clipboard_images`), hold text only on the clipboard.
 #[test]
 fn clipboard_images_are_unavailable_where_the_clipboard_holds_text_only() {
-    let (_engine, rx) = start_in(
-        CLIPBOARD_IMAGE_TEXT_ONLY,
-        Environment {
-            os: nsh_engine::Os::Android,
-            ..Environment::default()
-        },
-    );
-    // Writing and reading reject, `hasImage` answers no; nothing reaches
-    // the platform.
-    let wanted = "Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM | Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM | ok false";
-    let mut commands = 0;
-    let batches = until(&rx, |batch| {
-        commands += batch
-            .items
-            .iter()
-            .filter(|i| {
-                matches!(
-                    i,
-                    MountItem::Command {
-                        id: ROOT_ID,
-                        command: Command::SetClipboardImage(_) | Command::ReadClipboardImage { .. },
-                    }
-                )
-            })
-            .count();
-        shows(batch, wanted)
-    });
-    assert!(batches.iter().any(|b| shows(b, wanted)), "{wanted}");
-    assert_eq!(commands, 0, "an image call reached the platform");
+    for (os, platform) in [
+        (nsh_engine::Os::Android, None),
+        (nsh_engine::Os::Ios, Some("miniprogram")),
+    ] {
+        let (_engine, rx) = start_in(
+            CLIPBOARD_IMAGE_TEXT_ONLY,
+            Environment {
+                os,
+                platform,
+                clipboard_images: false,
+                ..Environment::default()
+            },
+        );
+        // Writing and reading reject, `hasImage` answers no; nothing reaches
+        // the platform.
+        let wanted = "Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM | Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM | ok false";
+        let mut commands = 0;
+        let batches = until(&rx, |batch| {
+            commands += batch
+                .items
+                .iter()
+                .filter(|i| {
+                    matches!(
+                        i,
+                        MountItem::Command {
+                            id: ROOT_ID,
+                            command: Command::SetClipboardImage(_)
+                                | Command::ReadClipboardImage { .. },
+                        }
+                    )
+                })
+                .count();
+            shows(batch, wanted)
+        });
+        assert!(batches.iter().any(|b| shows(b, wanted)), "{os:?} {wanted}");
+        assert_eq!(commands, 0, "an image call reached the platform on {os:?}");
+    }
 }
 
 const CLIPBOARD_REFUSED: &str = r#"import { mount, signal, Text } from "nsh";
@@ -5697,6 +5707,9 @@ fn a_base_slider_moves_the_nearer_thumb_and_tells_screen_readers_each_value() {
                 location: nsh_core::geometry::point(px(150.0), px(10.0)),
                 changed: true,
                 pointer_type: nsh_core::PointerType::Touch,
+                pressure: 0.5,
+                tilt_x: 0.0,
+                tilt_y: 0.0,
             }],
         }))
     };
@@ -5817,6 +5830,9 @@ fn a_base_sliders_drag_ends_on_the_apps_answer_to_its_last_move() {
                 location: at,
                 changed: true,
                 pointer_type: nsh_core::PointerType::Touch,
+                pressure: 0.5,
+                tilt_x: 0.0,
+                tilt_y: 0.0,
             }],
         }))
     };
@@ -6861,6 +6877,31 @@ fn the_tab_bar_renders_nothing_on_the_desktops_and_the_web() {
             .iter()
             .any(|batch| batch.items.iter().any(is_tab_bar));
         assert!(!platform, "no system bar on {os:?}, no component");
+    }
+    // A platform built outside NSH on iOS or Android without the system's
+    // tab bar: nothing mounts, and `isAvailable` sends the app to `Tabs`.
+    for os in [Os::Ios, Os::Android] {
+        let (_engine, rx) = start_in(
+            &app,
+            Environment {
+                os,
+                platform: Some("miniprogram"),
+                tab_bar: false,
+                ..Environment::default()
+            },
+        );
+        let batches = until(&rx, |batch| shows(batch, "Ready: false"));
+        assert!(
+            batches.iter().any(|batch| shows(batch, "Ready: false")),
+            "{os:?}"
+        );
+        let platform = batches
+            .iter()
+            .any(|batch| batch.items.iter().any(is_tab_bar));
+        assert!(
+            !platform,
+            "no system bar on miniprogram ({os:?}), no component"
+        );
     }
 }
 

@@ -24,7 +24,11 @@ use ed25519_dalek::{Signature, Signer as _, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+#[cfg(any(
+    all(target_os = "linux", not(target_env = "ohos")),
+    target_os = "macos",
+    windows
+))]
 pub mod install;
 
 /// The name of the manifest, next to the release's assets.
@@ -381,11 +385,17 @@ pub struct Available {
 }
 
 /// This machine's key in [`Manifest::platforms`]: `<os>-<arch>` on the
-/// desktop; `android` or `ios`, which update through a store or a page.
+/// desktop; `android`, `ios` or `harmonyos`, which update through a store or
+/// a page (HarmonyOS's Rust target counts as Linux: `target_env = "ohos"`).
 pub fn platform() -> String {
-    let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
+    let os = if cfg!(target_env = "ohos") {
+        "harmonyos"
+    } else {
+        std::env::consts::OS
+    };
+    let arch = std::env::consts::ARCH;
     match os {
-        "android" | "ios" => os.to_owned(),
+        "android" | "ios" | "harmonyos" => os.to_owned(),
         _ => format!("{os}-{arch}"),
     }
 }

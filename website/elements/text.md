@@ -87,8 +87,9 @@ text("Run ")
 </Text>
 ```
 
-The Tailwind classes work the same way: `<Text class="bg-gray-100 rounded">`. Padding and borders are box styles and
-leave spans as they are; spaces inside the span give the box room on its sides.
+The Tailwind classes work the same way: `<Text class="bg-gray-100 rounded px-1">`. Horizontal padding takes room in the
+line at the span's two ends and its background covers it, as a CSS inline box's does; vertical padding and borders
+leave spans as they are.
 
 ### Hidden spans
 

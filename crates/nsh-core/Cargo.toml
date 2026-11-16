@@ -66,7 +66,6 @@ websocket = [
   "dep:tokio-tungstenite",
   "dep:rustls",
   "dep:rustls-platform-verifier",
-  "dep:webpki-roots",
 ]
 # App self-updates (`nsh/updater`, on nsh-updater). Without it a check finds
 # nothing and downloads, installs and package restarts reject.
@@ -92,13 +91,9 @@ nsh-updater = { workspace = true, optional = true }
 # `process`'s children: their process groups and exits (`runtime/process.rs`);
 # the names of Unix error numbers (`element/system.rs`). Emscripten is wasm32
 # and `unix` both, so it needs libc for the `cfg(unix)` code too.
-# WebSocket TLS roots: the system trust store, except on Android, whose
-# verifier needs a JNI init the host does not run; there the bundled roots.
-[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
+# WebSocket TLS roots: the system trust store. On Android the host
+# initializes it over JNI (nsh-platform-android).
 rustls-platform-verifier = { workspace = true, optional = true }
-
-[target.'cfg(target_os = "android")'.dependencies]
-webpki-roots = { workspace = true, optional = true }
 
 [target.'cfg(any(not(target_arch = "wasm32"), target_os = "emscripten"))'.dependencies]
 libc.workspace = true

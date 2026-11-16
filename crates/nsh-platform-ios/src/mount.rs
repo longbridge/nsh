@@ -777,6 +777,9 @@ pub(crate) struct Mounter {
     /// `SplitView`s' splits, by their native component's node
     /// ([`crate::split`]).
     splits: rustc_hash::FxHashMap<NodeId, crate::split::SplitHost>,
+    /// The app's address given to the system ([`crate::SurfaceOptions::handoff`]):
+    /// `None` while the app has not opted in.
+    handoff: Option<nsh_platform_apple::handoff::Activity>,
     mtm: MainThreadMarker,
 }
 
@@ -865,8 +868,15 @@ impl Mounter {
             areas: Vec::new(),
             fps: None,
             splits: Default::default(),
+            handoff: None,
             mtm,
         }
+    }
+
+    /// Gives the app's addresses to the system from now on
+    /// ([`crate::SurfaceOptions::handoff`]).
+    pub(crate) fn hand_off(&mut self) {
+        self.handoff.get_or_insert_default();
     }
 
     /// Measures the surface's frames and commits with a performance
@@ -1918,6 +1928,7 @@ impl Mounter {
                         modal.view.endEditing(true);
                     }
                 }
+                self.restore_root_focus();
             }
             (Command::ScrollTo { x, y, animated }, Native::Scroll(scroll)) => {
                 let inset = scroll.adjustedContentInset();
@@ -1963,6 +1974,22 @@ impl Mounter {
             ) if id == nsh_core::ROOT_ID => {
                 crate::picker::pick_images(request, asked, native.view(), &self.control);
             }
+            (
+                Command::FileRequest {
+                    id: request_id,
+                    request,
+                },
+                native,
+            ) if id == nsh_core::ROOT_ID => match *request {
+                nsh_core::file_dialog::FileRequest::OpenDialog(dialog) => {
+                    crate::picker::pick_paths(request_id, dialog, native.view(), &self.control);
+                }
+                _ => self.control.dispatch_event(
+                    nsh_core::ROOT_ID,
+                    nsh_core::EventKind::FileRequest,
+                    nsh_core::EventPayload::file_failed(request_id, "not supported on iOS"),
+                ),
+            },
             (Command::Notification(command), _) if id == nsh_core::ROOT_ID => {
                 crate::notifications::command(&self.control, &command);
             }
@@ -2042,6 +2069,11 @@ impl Mounter {
             (Command::Haptic(haptic), _) => crate::system::haptic(haptic),
             (Command::Orientations(bits), _) if id == nsh_core::ROOT_ID => {
                 self.orientations = Some(bits);
+            }
+            (Command::SetAppUrl(url) | Command::PushAppUrl(url), _) if id == nsh_core::ROOT_ID => {
+                if let Some(activity) = &mut self.handoff {
+                    activity.publish(&url);
+                }
             }
             (Command::PerfMonitor(true), _) => self.measure(),
             (Command::PerfMonitor(false), _) => self.stop_measuring(),
@@ -2675,10 +2707,32 @@ impl Mounter {
         }
     }
 
+    /// Restore hardware-key delivery after a window or root-wide blur,
+    /// including when the root itself was the only first responder.
+    fn restore_root_focus(&self) {
+        // A presented modal owns its responder scope, even with no input
+        // focused. Do not route its keys to the background surface.
+        if self
+            .views
+            .iter()
+            .flatten()
+            .any(|slot| matches!(&slot.native, Native::Modal(modal) if modal.presented))
+        {
+            return;
+        }
+        if let Some(root) = self.slot(nsh_core::ROOT_ID)
+            && let Some(window) = root.native.view().window()
+        {
+            self.target
+                .restore_root_focus(root.native.view().retain(), window);
+        }
+    }
+
     pub(crate) fn dismiss_keyboard(&self) {
         if let Some(root) = self.slot(nsh_core::ROOT_ID) {
             root.native.view().window().map(|w| w.endEditing(true));
         }
+        self.restore_root_focus();
     }
 
     /// Where a fling of scroll view `id` ends when it snaps: `target` is
@@ -3079,6 +3133,7 @@ impl Mounter {
     /// take the pictures they missed.
     pub(crate) fn window_changed(&mut self) {
         self.shaders.revisit();
+        self.restore_root_focus();
     }
 
     /// The surface's traits changed: on a screen of another scale (an
