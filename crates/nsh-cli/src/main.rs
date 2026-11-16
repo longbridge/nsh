@@ -235,6 +235,19 @@ enum Command {
         /// from 8790; with --server-only, 8790.
         #[arg(long)]
         port: Option<u16>,
+        /// The address the dev server listens on, such as a Tailscale or a
+        /// LAN address, so that only the network it belongs to reaches the
+        /// server. Default: every address for `--target ios`, `android` and
+        /// `web`, the loopback one for the others.
+        #[arg(long, value_name = "ADDR")]
+        host: Option<std::net::IpAddr>,
+        /// A DNS name a browser may open the web page at, besides IP
+        /// addresses and `localhost` (repeatable): the machine's own name on
+        /// a Tailscale network, for example. The server refuses every other
+        /// name, which DNS could rebind to this machine; allow only names
+        /// you control.
+        #[arg(long = "allow-host", value_name = "NAME", value_parser = parse_host_name)]
+        allow_host: Vec<String>,
         /// Minify and strip debug info.
         #[arg(long)]
         release: bool,
@@ -273,6 +286,19 @@ enum Command {
         /// from 8790; with --server-only, 8790.
         #[arg(long)]
         port: Option<u16>,
+        /// The address the dev server listens on, such as a Tailscale or a
+        /// LAN address, so that only the network it belongs to reaches the
+        /// server. Default: every address for `--target ios`, `android` and
+        /// `web`, the loopback one for the others.
+        #[arg(long, value_name = "ADDR")]
+        host: Option<std::net::IpAddr>,
+        /// A DNS name a browser may open the web page at, besides IP
+        /// addresses and `localhost` (repeatable): the machine's own name on
+        /// a Tailscale network, for example. The server refuses every other
+        /// name, which DNS could rebind to this machine; allow only names
+        /// you control.
+        #[arg(long = "allow-host", value_name = "NAME", value_parser = parse_host_name)]
+        allow_host: Vec<String>,
         /// Minify and strip debug info.
         #[arg(long)]
         release: bool,
@@ -662,6 +688,26 @@ fn main() -> ExitCode {
     }
 }
 
+/// `--allow-host`'s value: a DNS name (letters, digits, `-` and `.`, as a
+/// `Host` header carries it without its port), in lower case.
+fn parse_host_name(name: &str) -> Result<String, String> {
+    let valid = !name.is_empty()
+        && name.len() <= 253
+        && !name.starts_with(['.', '-'])
+        && !name.ends_with(['.', '-'])
+        && !name.contains("..")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.');
+    if valid {
+        Ok(name.to_ascii_lowercase())
+    } else {
+        Err(format!(
+            "`{name}` is not a host name: give the name alone, without a port, a scheme or a wildcard (box.example.net)"
+        ))
+    }
+}
+
 /// `--limits`' value ([`nsh_core::js::HostLimits::parse`]).
 fn parse_limits(spec: &str) -> Result<nsh_core::js::HostLimits, String> {
     nsh_core::js::HostLimits::parse(spec)
@@ -918,6 +964,8 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
         Command::Dev {
             entry,
             port,
+            host,
+            allow_host,
             release,
             limits,
             target,
@@ -931,6 +979,8 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             let listen = dev::Listen {
                 port: port.unwrap_or_default(),
                 network: server_only || target.uses_network(),
+                address: host,
+                allowed_hosts: allow_host,
             };
             if server_only {
                 let session = dev::DevSession::start(&entry, listen, release, limits)?;
@@ -1005,6 +1055,8 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
         Command::Run {
             entry,
             port,
+            host,
+            allow_host,
             release,
             limits,
             trace,
@@ -1022,6 +1074,8 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 dev::Listen {
                     port: port.unwrap_or_default(),
                     network: target.uses_network(),
+                    address: host,
+                    allowed_hosts: allow_host,
                 },
                 release,
                 run::HostFlags {
@@ -1331,5 +1385,68 @@ mod command_tests {
             }
         ));
         assert!(Cli::try_parse_from(["nsh", "dev", "--server-only", "--target", "ios"]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser as _;
+
+    use super::{Cli, Command, parse_host_name};
+
+    #[test]
+    fn run_and_dev_take_an_address_and_host_names() {
+        for command in ["run", "dev"] {
+            let cli = Cli::try_parse_from([
+                "nsh",
+                command,
+                "--target",
+                "web",
+                "--host",
+                "100.64.0.1",
+                "--allow-host",
+                "Box.Example.net",
+                "--allow-host",
+                "other",
+            ])
+            .unwrap();
+            let (Command::Run {
+                host, allow_host, ..
+            }
+            | Command::Dev {
+                host, allow_host, ..
+            }) = cli.command
+            else {
+                panic!("{command}");
+            };
+            assert_eq!(host, Some("100.64.0.1".parse().unwrap()));
+            assert_eq!(allow_host, ["box.example.net", "other"]);
+        }
+        assert!(Cli::try_parse_from(["nsh", "run", "--host", "box.example.net"]).is_err());
+        assert!(Cli::try_parse_from(["nsh", "run", "--allow-host", "box:8790"]).is_err());
+    }
+
+    #[test]
+    fn allow_host_takes_a_dns_name_alone() {
+        assert_eq!(
+            parse_host_name("Box.Example.net").as_deref(),
+            Ok("box.example.net")
+        );
+        assert_eq!(parse_host_name("my-mac").as_deref(), Ok("my-mac"));
+        for bad in [
+            "",
+            "box.example.net:8790",
+            "http://box.example.net",
+            "box.example.net/",
+            "*.example.net",
+            ".example.net",
+            "example.net.",
+            "-box.example.net",
+            "box..example.net",
+            "box example.net",
+            "box@example.net",
+        ] {
+            assert!(parse_host_name(bad).is_err(), "{bad}");
+        }
     }
 }

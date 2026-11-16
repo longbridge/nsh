@@ -127,7 +127,9 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
 - Without `--port`, `nsh run` and `nsh dev` take the port their app (its entry) had last, else the first free one from
   8790; `nsh dev --server-only` takes 8790, which embedding apps keep in their code. `nsh run` and `nsh dev` bind to
   loopback, with `--target ios`, `android` or `web` and `nsh dev --server-only` to every address, for other machines
-  (`dev::Listen`, `run::Target::uses_network`).
+  (`dev::Listen`, `run::Target::uses_network`); `--host <ADDR>` listens on that one address instead. The server refuses a
+  page opened at a DNS name (DNS rebinding: `allowed_origin`, `address_host` in `nsh-dev/src/server.rs`); `--allow-host
+  <NAME>` (repeatable, `DevServer::allow_hosts`) names the machine's own names it accepts, such as a tailnet's.
 - `nsh run` and `nsh dev` replace the previous NSH development command on the chosen port. The CLI
   holds an OS file lock in the existing NSH cache's `dev-sessions/` directory for the entire command,
   including Rust rebuilds and host / Android forwarding cleanup. A local stop file asks the owner to

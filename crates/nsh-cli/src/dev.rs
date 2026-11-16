@@ -1,7 +1,7 @@
 use std::{
     cell::Cell,
     collections::HashSet,
-    net::{Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
@@ -45,13 +45,19 @@ pub(crate) struct DevSession {
     rust_root: bool,
 }
 
-/// Where a dev server listens.
-#[derive(Clone, Copy)]
+/// Where a dev server listens, and the names it answers to.
+#[derive(Clone)]
 pub(crate) struct Listen {
     /// Its port, zero for one the OS allocates.
     pub(crate) port: u16,
     /// Whether other machines may connect, or only this one.
     pub(crate) network: bool,
+    /// The address to listen on, in place of every address (`network`) or
+    /// the loopback one.
+    pub(crate) address: Option<IpAddr>,
+    /// DNS names browsers may open the web page at, besides addresses and
+    /// `localhost` ([`DevServer::allow_hosts`]).
+    pub(crate) allowed_hosts: Vec<String>,
 }
 
 impl DevSession {
@@ -71,7 +77,8 @@ impl DevSession {
             .context("entry has no directory")?
             .to_path_buf();
         let devices = Arc::<Devices>::default();
-        let server = start_server(listen, &src_dir, devices.clone())?;
+        let server = start_server(&listen, &src_dir, devices.clone())?;
+        server.allow_hosts(listen.allowed_hosts.iter().cloned());
         server.serve_files(crate::build::crate_assets().map(|a| (a.path, a.source)));
         server.install_commands(install_commands(&src_dir));
         server.set_limits(limits.map(|l| l.to_string()));
@@ -109,22 +116,51 @@ impl DevSession {
         self.server.local_addr().port()
     }
 
+    /// The address this machine's own hosts and browsers reach the server
+    /// on: the loopback one, or the one it was told to listen on
+    /// (`--host`).
+    fn own_address(&self) -> String {
+        match self.server.local_addr().ip() {
+            ip if ip.is_unspecified() => "127.0.0.1".to_owned(),
+            IpAddr::V6(ip) => format!("[{ip}]"),
+            IpAddr::V4(ip) => ip.to_string(),
+        }
+    }
+
     /// WebSocket URL for hosts on this machine.
     pub(crate) fn local_url(&self) -> String {
         format!(
-            "ws://127.0.0.1:{}{WS_PATH}",
+            "ws://{}:{}{WS_PATH}",
+            self.own_address(),
             self.server.local_addr().port()
         )
     }
 
     /// The web host's page for browsers on this machine.
     pub(crate) fn web_url(&self) -> String {
-        format!("http://127.0.0.1:{}/", self.server.local_addr().port())
+        format!(
+            "http://{}:{}/",
+            self.own_address(),
+            self.server.local_addr().port()
+        )
     }
 
-    /// This machine's addresses other machines reach the server on.
+    /// This machine's addresses other machines reach the server on: its
+    /// network ones, or the one it was told to listen on (`--host`) when
+    /// that is not a loopback address.
     fn network_ips(&self) -> Vec<Ipv4Addr> {
-        if self.network { lan_ips() } else { Vec::new() }
+        match self.server.local_addr().ip() {
+            IpAddr::V4(ip) if !ip.is_unspecified() => {
+                if ip.is_loopback() {
+                    Vec::new()
+                } else {
+                    vec![ip]
+                }
+            }
+            IpAddr::V6(ip) if !ip.is_unspecified() => Vec::new(),
+            _ if self.network => lan_ips(),
+            _ => Vec::new(),
+        }
     }
 
     /// Prints where hosts can connect.
@@ -469,22 +505,27 @@ fn install_commands(dir: &Path) -> Vec<(HostPlatform, String)> {
 }
 
 fn start_server(
-    listen: Listen,
+    listen: &Listen,
     assets_root: &Path,
     devices: Arc<Devices>,
 ) -> anyhow::Result<DevServer> {
-    let Listen { port, network } = listen;
+    let Listen {
+        port,
+        network,
+        address,
+        ..
+    } = *listen;
     if ui::stop_requested() {
         anyhow::bail!("development session is stopping");
     }
-    let addr = SocketAddr::from((
-        if network {
+    let addr = SocketAddr::new(
+        address.unwrap_or(IpAddr::from(if network {
             [0, 0, 0, 0]
         } else {
             [127, 0, 0, 1]
-        },
+        })),
         port,
-    ));
+    );
     DevServer::start(
         addr,
         nsh_js::BYTECODE_VERSION,
@@ -647,6 +688,8 @@ mod tests {
         Listen {
             port,
             network: true,
+            address: None,
+            allowed_hosts: Vec::new(),
         }
     }
 
@@ -656,11 +699,26 @@ mod tests {
         let local = Listen {
             port: 0,
             network: false,
+            address: None,
+            allowed_hosts: Vec::new(),
         };
-        let server = super::start_server(local, &dir, Default::default()).unwrap();
+        let server = super::start_server(&local, &dir, Default::default()).unwrap();
         assert!(server.local_addr().ip().is_loopback());
-        let server = super::start_server(on_network(0), &dir, Default::default()).unwrap();
+        let server = super::start_server(&on_network(0), &dir, Default::default()).unwrap();
         assert!(server.local_addr().ip().is_unspecified());
+    }
+
+    #[test]
+    fn an_address_chosen_with_host_is_the_one_listened_on() {
+        let dir = std::env::temp_dir();
+        // On a target that listens on the network, `--host` narrows it to
+        // the address asked for.
+        let chosen = Listen {
+            address: Some([127, 0, 0, 1].into()),
+            ..on_network(0)
+        };
+        let server = super::start_server(&chosen, &dir, Default::default()).unwrap();
+        assert_eq!(server.local_addr().ip(), std::net::Ipv4Addr::LOCALHOST);
     }
 
     #[test]
@@ -668,7 +726,7 @@ mod tests {
         let taken = std::net::TcpListener::bind(("0.0.0.0", 0)).unwrap();
         let port = taken.local_addr().unwrap().port();
         let error =
-            super::start_server(on_network(port), &std::env::temp_dir(), Default::default())
+            super::start_server(&on_network(port), &std::env::temp_dir(), Default::default())
                 .err()
                 .expect("must not move to another port");
         assert!(error.to_string().contains(&format!("port {port}")));
@@ -686,11 +744,11 @@ mod tests {
     #[test]
     fn zero_allocates_a_port_and_an_explicit_port_is_kept() {
         let dir = std::env::temp_dir();
-        let server = super::start_server(on_network(0), &dir, Default::default()).unwrap();
+        let server = super::start_server(&on_network(0), &dir, Default::default()).unwrap();
         let port = server.local_addr().port();
         assert_ne!(port, 0);
         drop(server);
-        let server = super::start_server(on_network(port), &dir, Default::default()).unwrap();
+        let server = super::start_server(&on_network(port), &dir, Default::default()).unwrap();
         assert_eq!(server.local_addr().port(), port);
     }
 

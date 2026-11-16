@@ -554,6 +554,52 @@ fn the_assets_root_follows_the_build() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The names the machine's owner allows (`allow_hosts`: a tailnet's DNS
+/// name) reach the server's files and the web host's WebSocket from a page
+/// at that name; every other name still reads nothing.
+#[test]
+fn a_name_the_machine_allows_is_opened_and_others_are_not() {
+    use tungstenite::client::IntoClientRequest;
+    let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, |_| {}).unwrap();
+    server.serve_web("<p>page</p>".into(), [("nsh.js".into(), b"js".to_vec())]);
+    let addr = server.local_addr();
+    let port = addr.port();
+    let name = format!("box.example.net:{port}");
+    let socket = |host: &str| {
+        let mut request = format!("ws://{addr}{WS_PATH}")
+            .into_client_request()
+            .unwrap();
+        request.headers_mut().insert("Host", host.parse().unwrap());
+        request
+            .headers_mut()
+            .insert("Origin", format!("http://{host}").parse().unwrap());
+        tungstenite::connect(request).map(|_| ())
+    };
+    let refused = |result: Result<(), tungstenite::Error>| matches!(result, Err(tungstenite::Error::Http(response)) if response.status() == 403);
+    // Refused as any name is, until it is allowed.
+    assert!(request(addr, "/nsh.js", &name, "").0.contains("403"));
+    assert!(refused(socket(&name)));
+    server.allow_hosts(["Box.Example.net".to_owned()]);
+    assert!(request(addr, "/", &name, "").0.contains("200"));
+    assert!(request(addr, "/nsh.js", &name, "").0.contains("200"));
+    assert!(socket(&name).is_ok());
+    // Another name, and the allowed one under another origin.
+    let other = format!("evil.example:{port}");
+    assert!(request(addr, "/nsh.js", &other, "").0.contains("403"));
+    assert!(refused(socket(&other)));
+    let mut forged = format!("ws://{addr}{WS_PATH}")
+        .into_client_request()
+        .unwrap();
+    forged.headers_mut().insert("Host", name.parse().unwrap());
+    forged
+        .headers_mut()
+        .insert("Origin", "http://evil.example".parse().unwrap());
+    assert!(refused(tungstenite::connect(forged).map(|_| ())));
+    // Taken away again.
+    server.allow_hosts([]);
+    assert!(request(addr, "/nsh.js", &name, "").0.contains("403"));
+}
+
 #[test]
 fn the_websocket_refuses_other_web_pages() {
     use tungstenite::client::IntoClientRequest;

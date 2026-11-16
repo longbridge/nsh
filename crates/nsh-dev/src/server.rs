@@ -137,6 +137,9 @@ struct Shared {
     install: Mutex<std::collections::HashMap<HostPlatform, String>>,
     /// The limits hosts run apps with ([`DevServer::set_limits`]).
     limits: Mutex<Option<String>>,
+    /// The host names, besides addresses and `localhost`, a browser may
+    /// open the web host at ([`DevServer::allow_hosts`]), in lower case.
+    hosts: Mutex<Vec<String>>,
     /// The state a newly connected client must see first.
     latest: Mutex<Option<Event>>,
     /// The hot updates of the latest builds, oldest first, each from the
@@ -204,8 +207,8 @@ impl DevServer {
     /// hidden directories ([`asset_in_root`]): never the app's sources, its
     /// `nsh.json`, `.env` or other configuration. `/ws` refuses browsers
     /// whose page is not the server's own ([`allowed_origin`]); the other
-    /// paths refuse a `Host` that is not an IP address or `localhost`
-    /// ([`address_host`]).
+    /// paths refuse a `Host` that is not an IP address, `localhost` or a
+    /// name [`DevServer::allow_hosts`] gave ([`address_host`]).
     pub fn start(
         addr: SocketAddr,
         bytecode_version: impl Into<String>,
@@ -223,6 +226,7 @@ impl DevServer {
             web: Mutex::default(),
             install: Mutex::default(),
             limits: Mutex::default(),
+            hosts: Mutex::default(),
             latest: Mutex::new(None),
             patches: Mutex::default(),
             events: broadcast::channel(16).0,
@@ -248,7 +252,10 @@ impl DevServer {
             .route("/bundle.js", get(bundle_source))
             .route("/assets/{*path}", get(asset))
             .fallback(web_file)
-            .layer(axum::middleware::from_fn(addresses_only))
+            .layer(axum::middleware::from_fn_with_state(
+                shared.clone(),
+                addresses_only,
+            ))
             .route(WS_PATH, get(upgrade))
             .with_state(shared.clone());
         runtime.spawn(async move {
@@ -302,6 +309,20 @@ impl DevServer {
     /// ([`ClientEvent::CannotRun`]).
     pub fn install_commands(&self, commands: impl IntoIterator<Item = (HostPlatform, String)>) {
         *self.shared.install.lock().expect("install lock") = commands.into_iter().collect();
+    }
+
+    /// The host names, besides IP addresses and `localhost`, that browsers
+    /// may open the web host at, from the next request on: the machine's
+    /// own DNS names (a tailnet's, a VPN's), which the server otherwise
+    /// refuses as it refuses every name ([`address_host`]). A name here is
+    /// trusted to resolve to this machine and to nobody else, so it must
+    /// be one the machine's owner controls. Names match whole, with no
+    /// port and no wildcard, in any case.
+    pub fn allow_hosts(&self, names: impl IntoIterator<Item = String>) {
+        *self.shared.hosts.lock().expect("hosts lock") = names
+            .into_iter()
+            .map(|name| name.to_ascii_lowercase())
+            .collect();
     }
 
     /// The VM limits hosts run the apps with, from the next bundle on:
@@ -681,7 +702,8 @@ async fn upgrade(
     State(shared): State<Arc<Shared>>,
 ) -> Response {
     let header = |name| headers.get(name).and_then(|v| v.to_str().ok());
-    if !allowed_origin(header(header::ORIGIN), header(header::HOST)) {
+    let hosts = shared.hosts.lock().expect("hosts lock").clone();
+    if !allowed_origin(header(header::ORIGIN), header(header::HOST), &hosts) {
         log::warn!(
             "dev server: refused a WebSocket from the page at {}",
             header(header::ORIGIN).unwrap_or_default()
@@ -701,10 +723,11 @@ async fn upgrade(
 /// may connect. Native hosts send no `Origin`. A browser always does: its
 /// page must be the dev server's own (the web host, which connects to
 /// `location.host`), so the origin is `http(s)://` and the very host the
-/// request names, and that host an IP address or `localhost`. Any other
+/// request names, and that host an IP address, `localhost` or one of the
+/// names `hosts` allows ([`DevServer::allow_hosts`]). Any other
 /// page open in a browser on this machine or the network is refused, even
 /// one whose name resolves to this machine (DNS rebinding).
-pub(crate) fn allowed_origin(origin: Option<&str>, host: Option<&str>) -> bool {
+pub(crate) fn allowed_origin(origin: Option<&str>, host: Option<&str>, hosts: &[String]) -> bool {
     let Some(origin) = origin else {
         return true;
     };
@@ -720,23 +743,31 @@ pub(crate) fn allowed_origin(origin: Option<&str>, host: Option<&str>) -> bool {
     if !origin_host.eq_ignore_ascii_case(host) {
         return false;
     }
-    address_host(host)
+    address_host(host, hosts)
 }
 
-/// Refuses (`403`) a request whose `Host` is not an IP address or
-/// `localhost` ([`address_host`]). Under DNS rebinding a page's own name
+/// Refuses (`403`) a request whose `Host` is not an IP address,
+/// `localhost` or an allowed name ([`address_host`]). Under DNS rebinding a page's own name
 /// resolves to this machine, so its requests are same-origin and carry no
 /// `Origin`: only the `Host`, that name, tells them apart from the server's
 /// own pages and the hosts on devices, which name it by its address.
-async fn addresses_only(request: axum::extract::Request, next: axum::middleware::Next) -> Response {
+async fn addresses_only(
+    State(shared): State<Arc<Shared>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let hosts = shared.hosts.lock().expect("hosts lock").clone();
     let allowed = match request.headers().get(header::HOST) {
-        Some(host) => host.to_str().is_ok_and(address_host),
+        Some(host) => host.to_str().is_ok_and(|host| address_host(host, &hosts)),
         // HTTP/1.0, or an absolute URI that names the host.
-        None => request.uri().host().is_none_or(address_host),
+        None => request
+            .uri()
+            .host()
+            .is_none_or(|host| address_host(host, &hosts)),
     };
     if !allowed {
         log::warn!(
-            "dev server: refused {} for the host {}: connect by the machine's IP address",
+            "dev server: refused {} for the host {}: connect by the machine's IP address, or allow its name (nsh run --allow-host)",
             request.uri().path(),
             request
                 .headers()
@@ -750,14 +781,20 @@ async fn addresses_only(request: axum::extract::Request, next: axum::middleware:
 }
 
 /// Whether `host` (a `Host` header, maybe with its port) is an IP address
-/// or `localhost`: names that no other site's DNS gives. A name may be
-/// rebound to this machine by its site's DNS (a public name) or by anyone
-/// on the network (`.local`, a name of one label), so only these pass.
-pub(crate) fn address_host(host: &str) -> bool {
+/// or `localhost`: names that no other site's DNS gives, or one of the
+/// names `hosts` allows ([`DevServer::allow_hosts`]: lower case, whole). A
+/// name may be rebound to this machine by its site's DNS (a public name) or
+/// by anyone on the network (`.local`, a name of one label), so only these
+/// pass.
+pub(crate) fn address_host(host: &str, hosts: &[String]) -> bool {
     let Some(name) = host_name(host) else {
         return false;
     };
-    name.eq_ignore_ascii_case("localhost") || name.parse::<std::net::IpAddr>().is_ok()
+    name.eq_ignore_ascii_case("localhost")
+        || name.parse::<std::net::IpAddr>().is_ok()
+        || hosts
+            .iter()
+            .any(|allowed| name.eq_ignore_ascii_case(allowed))
 }
 
 /// The name or address of a `Host` without its port: `[::1]:80` → `::1`,
@@ -1210,7 +1247,10 @@ mod tests {
 
     #[test]
     fn only_the_dev_servers_own_pages_and_native_hosts_open_the_websocket() {
-        use super::allowed_origin;
+        // With no extra host names.
+        fn allowed_origin(origin: Option<&str>, host: Option<&str>) -> bool {
+            super::allowed_origin(origin, host, &[])
+        }
         // Native hosts send no Origin.
         assert!(allowed_origin(None, Some("127.0.0.1:18790")));
         assert!(allowed_origin(None, None));
@@ -1256,7 +1296,10 @@ mod tests {
 
     #[test]
     fn only_addresses_and_localhost_reach_the_servers_files() {
-        use super::address_host;
+        // With no extra host names.
+        fn address_host(host: &str) -> bool {
+            super::address_host(host, &[])
+        }
         // What the hosts on devices and the web host's pages name the
         // server by: the addresses the CLI prints, and `localhost`.
         for host in [
@@ -1288,6 +1331,47 @@ mod tests {
         ] {
             assert!(!address_host(host), "{host}");
         }
+    }
+
+    #[test]
+    fn the_names_the_machine_allows_are_opened_whole_and_nothing_else_is() {
+        use super::{address_host, allowed_origin};
+        let names = ["box.example.net".to_owned()];
+        // The allowed name, in any case, with or without a port.
+        for host in [
+            "box.example.net",
+            "BOX.example.net:8790",
+            "box.example.net:80",
+        ] {
+            assert!(address_host(host, &names), "{host}");
+            assert!(
+                allowed_origin(Some(&format!("http://{host}")), Some(host), &names),
+                "{host}"
+            );
+        }
+        // Another name, a name around it, or an origin that is not the
+        // host's: refused as before.
+        for host in [
+            "other.example.net:8790",
+            "evil.box.example.net",
+            "box.example.net.evil.example",
+            "example.net",
+            "box",
+        ] {
+            assert!(!address_host(host, &names), "{host}");
+        }
+        assert!(!allowed_origin(
+            Some("http://evil.example"),
+            Some("box.example.net:8790"),
+            &names
+        ));
+        assert!(!allowed_origin(
+            Some("http://box.example.net:8790"),
+            Some("evil.example"),
+            &names
+        ));
+        // Addresses and `localhost` still pass.
+        assert!(address_host("127.0.0.1:8790", &names));
     }
 
     #[test]
