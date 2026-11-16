@@ -377,7 +377,7 @@ function ProgressiveBlur(props: { radius: number; style: ViewStyle }) {
 }
 ```
 
-在 Rust 中，`.mask_image(…)` 接受一个 `Gradient`：每层的遮罩是 `Gradient::linear(deg(180.0), [(transparent_black(), percentage(start)), (black(), percentage(end))])`，两侧都渐隐的边缘是 `Gradient::linear(deg(90.0), [transparent_black(), black(), transparent_black()])`。
+在 Rust 中，用 `.mask_linear(deg(90.0), [transparent_black(), black(), transparent_black()])` 让两侧渐隐，`.mask_radial([black(), transparent_black()])` 从中心径向渐隐，`.mask_none()` 清除遮罩。角度和色标向量接受信号或闭包；空色标向量清除遮罩。位置使用 `(color, percentage(0.2))` 或 `(color, px(12.0))`。
 
 带遮罩的 `backdropFilter` 只绘制模糊本身，不带系统材质的色调，半径也是精确的，iOS 和 macOS 同样如此。每一层在每帧都要模糊窗口内容，所以层数要少、面积要小。Linux 和 GPUI 不绘制 `backdropFilter`，如果上面的文字必须清晰可读，请给这块区域加上渐隐的 `backgroundImage`。
 

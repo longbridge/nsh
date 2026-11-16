@@ -24553,7 +24553,7 @@ mod views {
         assert_eq!(view_style_of(&batch, nested).map(|s| s.opacity), Some(1.0));
     }
 
-    /// Fades its edges with a bound mask; a press removes it.
+    /// Fades its edges with a bound mask; presses turn, remove and restore it.
     #[derive(Default)]
     struct Faded;
 
@@ -24565,23 +24565,38 @@ mod views {
         type Event = NoEvent;
 
         fn view(_: FadedProps, _: Scope<NoEvent>) -> impl IntoElement {
-            let masked = signal(true);
+            let phase = signal(0);
+            let angle = signal(deg(90.0));
             view()
-                .on_press(move |_: &()| masked.update(|m| *m = !*m))
-                .w(px(10.0))
-                .mask_image(move || {
-                    masked.get().then(|| {
-                        Gradient::linear(
-                            deg(90.0),
-                            [transparent_black(), black(), transparent_black()],
-                        )
-                    })
+                .on_press(move |_: &()| {
+                    phase.update(|n| *n = (*n + 1) % 3);
+                    angle.set(if phase.get() == 0 {
+                        deg(90.0)
+                    } else {
+                        deg(180.0)
+                    });
                 })
+                .w(px(10.0))
+                .bg_linear(deg(180.0))
+                .gradient_from(white())
+                .gradient_to(black())
+                .mask_linear(angle, move || {
+                    if phase.get() == 2 {
+                        Vec::new()
+                    } else {
+                        vec![
+                            transparent_black().into(),
+                            black().into(),
+                            transparent_black().into(),
+                        ]
+                    }
+                })
+                .style_when(move || phase.get() == 2, |s| s.mask_none())
         }
     }
 
     #[test]
-    fn a_bound_mask_image_is_mounted_and_removed() {
+    fn a_bound_mask_is_mounted_removed_and_restored() {
         let mut c = core();
         c.mount_root(&Root::new::<Faded>(|| FadedProps {}));
         let batch = c.commit().unwrap();
@@ -24593,14 +24608,30 @@ mod views {
         };
         let mounted = masks(&batch).expect("the mask is mounted");
         assert_eq!(mounted.len(), 1);
-        assert_eq!(mounted[0].kind, GradientKind::Linear { angle: deg(90.0) });
+        assert_eq!(
+            mounted[0].kind,
+            crate::effects::GradientKind::Linear { angle: deg(90.0) }
+        );
         assert_eq!(
             mounted[0].stops.iter().map(|s| s.color).collect::<Vec<_>>(),
             [Color::TRANSPARENT, Color::from(black()), Color::TRANSPARENT]
         );
         assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
         let batch = c.commit().unwrap();
+        let turned = masks(&batch).unwrap();
+        assert_eq!(
+            turned[0].kind,
+            crate::effects::GradientKind::Linear { angle: deg(180.0) }
+        );
+        assert_eq!(turned[0].stops, mounted[0].stops);
+        assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
         assert!(masks(&batch).is_none_or(|m| m.is_empty()));
+        assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert_eq!(masks(&batch), Some(mounted));
+        let effects = view_style_of(&batch, host).unwrap().effects.unwrap();
+        assert_eq!(effects.background_images.len(), 1);
     }
 
     /// Counts back presses while its view lives.
