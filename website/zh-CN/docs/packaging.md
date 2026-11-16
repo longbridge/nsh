@@ -104,6 +104,8 @@ nsh package --target ios \
 
 写出 `.nsh/out/<Name>.ipa`，可用于 TestFlight、App Store 上传工具或直接安装（取决于描述文件）。具体过程如下：
 
+- 检查可执行文件包含 `arm64` 架构。`UIRequiredDeviceCapabilities` 默认为 `["arm64"]`，可通过
+  `ios.infoPlist` 替换。签名前，从当前 Xcode 工具链读取 Xcode 和 SDK 构建信息并写入 `Info.plist`。
 - 描述文件以 `embedded.mobileprovision` 的名称复制进应用。
 - entitlements 取自描述文件，加上 `nsh.json` `ios.entitlements` 中应用自己的项，并对照描述文件检查（见[下文](#infoplist-键与-entitlements)）。NSH 会检查描述文件的 application identifier 是否覆盖应用的 `id`（`TEAMID.*` 或
   `TEAMID.com.example.*` 这样的通配描述文件也可以），不覆盖则报错退出。
