@@ -311,6 +311,26 @@ editor.setDecorations("suggestions", [{ from: 5, to: 9, kind: "inline", attrs: {
 - `editor.setDecorations(key, decorations)`：视图绘制在文档之上、不改变文档的行内属性、节点属性和小部件。它们随每次修改移动，直到再次设置。
 - `filterTransaction(hook)` 和 `appendTransaction(hook)` 在应用自己的调用（`run`、`dispatch`、`setContent`……）中看到这些调用产生的事务：`filterTransaction` 可以丢弃一个事务，`appendTransaction` 可以返回一个与之一起应用的事务。`on("revision", …)` 收到每次修改，包括输入。
 
+#### 粘贴
+
+插件可以用 ProseMirror 的 `transformPasted` 和 `handlePaste` 参与粘贴：
+
+```tsx
+const paste = new RichEditorPlugin("paste")
+  .transformPasted((slice) => slice)
+  // Word 的列表项、Google Docs 的加粗、单独粘贴的视频链接：由应用自己读取剪贴板。
+  .handlePaste((slice, clipboard) => {
+    if (!isVideoLink(clipboard.text)) return false;
+    editor.run(insertContent({ type: "video", attrs: { src: clipboard.text } }));
+    return true;
+  });
+```
+
+- `transformPasted(slice)` 在内容插入前修改它，各插件依次运行。内容是 `RichSliceJSON`（`{ content, openStart, openEnd }`），优先按 schema 的规则从剪贴板的 HTML 解析，没有 HTML 时从纯文本解析。
+- `handlePaste(slice, clipboard)` 返回 `true` 表示应用已经处理了这次粘贴，编辑器不再插入内容。`clipboard` 是 `{ text, html }`，即剪贴板里的内容。应用如果要按自己的方式读取 Word 或 Google Docs 的 HTML、Markdown 或链接，就自己插入结果（`editor.run(insertContent(...))`）并返回 `true`。
+
+粘贴是唯一会等待 JS 的输入：插件一旦有粘贴钩子，粘贴就会在钩子都给出结果之后（晚一个 JS 轮次）才插入。多次粘贴按发生的顺序插入。钩子运行期间文档或选区发生变化的粘贴，会按编辑器当时的状态重新执行。打字和按键从不等待。要插入需要更长时间的内容（例如上传），就让 `handlePaste` 返回 `true`，由应用在内容准备好时再插入。
+
 ## 链接、字数统计与建议
 
 三个插件提供 Tiptap 的 Link、CharacterCount 和 Suggestion 行为，全部原生运行：

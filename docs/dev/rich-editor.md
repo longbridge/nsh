@@ -180,7 +180,13 @@ a drag extends through `create_selection_between`, and past the viewport's top o
 `clipboard_parser` (else the schema's), read by `DomParser::parse_from_clipboard`: HTML an editor copied carries
 `data-pm-slice` and comes back as the copied slice (its open depths, its whitespace, wrapped in its context again),
 other HTML is fitted to the selection (`parse_with_context`); else text through `transform_pasted_text`,
-`clipboard_text_parser` (else `slice_from_text`); then `transform_pasted`, `handle_paste`, else a replace of the selection (origin `Paste`). Files
+`clipboard_text_parser` (else `slice_from_text`); then `transform_pasted`, `handle_paste`, else a replace of the selection (origin `Paste`).
+A JS plugin's paste hooks (`RichEditorPlugin.transformPasted` / `handlePaste`; `PluginSpec::__js_hooks` hands them
+to the view) cannot run in the paste event, where JS is not running: when a plugin has one, pastes queue
+(`Rv::pastes`) and one task (`drain_pastes`) takes them in order through the same steps, awaiting each JS hook
+(`Callback::call_async`). After each await it checks the state: a document or selection changed meanwhile means the
+content was made for another place, so the paste starts over from the current state (dropped after three tries);
+Rust hooks so always see the current state. Typing never waits; a paste waits a JS turn.
 (images with their bytes, `file:` URLs from a file manager) go to the app as `onPasteFiles` and insert nothing,
 as Tiptap's file handler leaves them to its `onPaste`. Files dropped on the desktops are the host's `onFileDrop`
 (a component's host takes a view's file drop events, `ComponentHostProps`): the root listens only when the app

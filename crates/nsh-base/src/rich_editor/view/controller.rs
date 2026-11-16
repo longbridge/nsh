@@ -6,7 +6,7 @@
 
 use std::{
     cell::{Cell, RefCell},
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     rc::Rc,
     sync::Arc,
     time::Duration,
@@ -34,6 +34,7 @@ use crate::{
         commands::base_keymap,
         extensions::{HistoryOptions, Keymap, KeymapOptions, history, starter},
         formats::{DomParser, DomSerializer, slice_from_text, slice_to_text},
+        js::{RichClipboardContent, SliceJson, paste_hooks},
         model::{Fragment, Mark, Node, SchemaSpec, Slice},
         state::{
             Affinity, ClickEvent, Decoration, EditorState, EditorStateConfig, GapCursor, KeyEvent,
@@ -171,6 +172,10 @@ pub(crate) struct Rv {
     sink: Rc<RefCell<Sink>>,
     next_composition: Rc<Cell<i64>>,
     drag: Rc<RefCell<Option<Drag>>>,
+    /// Pastes waiting for the app's JS paste hooks, in order (text, HTML).
+    pastes: Rc<RefCell<VecDeque<(String, String)>>>,
+    /// A task is pasting the waiting pastes.
+    pasting: Rc<Cell<bool>>,
     /// The content point less the page point of the last pointer over the
     /// content, and the scroll offset then: how a drag the app starts
     /// from a page point (a drag handle's) maps into the content.
@@ -242,6 +247,8 @@ impl Rv {
             sink: Rc::default(),
             next_composition: Rc::new(Cell::new(1)),
             drag: Rc::default(),
+            pastes: Rc::default(),
+            pasting: Rc::default(),
             pointer: Rc::default(),
             drop_at: signal(None),
             goal_x: Rc::default(),
@@ -1326,34 +1333,20 @@ impl Rv {
             return;
         }
         let state = self.session.state();
-        let from = state.selection().resolved_from().clone();
-        let in_code = from.parent().ty().spec().code;
-        let mut slice = None;
-        if !html.is_empty() && !in_code {
-            let mut html = html.to_owned();
-            for plugin in state.plugins() {
-                html = plugin.transform_pasted_html(&state, html);
+        // The app's JS hooks answer in a JS turn: the pastes wait in order
+        // and go in one after another once they did.
+        if state.plugins().iter().any(|p| paste_hooks(p).is_some()) {
+            self.pastes
+                .borrow_mut()
+                .push_back((text.to_owned(), html.to_owned()));
+            if !self.pasting.replace(true) {
+                let rv = self.clone();
+                spawn(async move { rv.drain_pastes().await });
             }
-            let parser = state
-                .some_prop(|p| p.clipboard_parser(&state))
-                .unwrap_or_else(|| DomParser::from_schema(state.schema()));
-            slice = Some(parser.parse_from_clipboard(&html, &from))
-                .filter(|s: &Slice| s.content.size() > 0);
+            return;
         }
-        let mut slice = match slice {
-            Some(slice) => slice,
-            None => {
-                if text.is_empty() {
-                    return;
-                }
-                let mut text = text.to_owned();
-                for plugin in state.plugins() {
-                    text = plugin.transform_pasted_text(&state, text, false);
-                }
-                state
-                    .some_prop(|p| p.clipboard_text_parser(&state, &text, &from, false))
-                    .unwrap_or_else(|| slice_from_text(state.schema(), &text, &from))
-            }
+        let Some(mut slice) = self.parsed_paste(&state, text, html) else {
+            return;
         };
         for plugin in state.plugins() {
             slice = plugin.transform_pasted(&state, slice);
@@ -1361,6 +1354,46 @@ impl Rv {
         if self.some_hook(&state, |p, d| p.handle_paste(&state, &slice, d)) {
             return;
         }
+        self.insert_paste(&state, slice);
+    }
+
+    /// What a paste of `text` and `html` is in `state`: HTML through the
+    /// plugins' `transform_pasted_html` and the clipboard parser (the
+    /// schema's parse rules), else plain text through
+    /// `transform_pasted_text` and `clipboard_text_parser`. Into code, HTML
+    /// is skipped; HTML that parses to nothing falls back to the text.
+    fn parsed_paste(&self, state: &EditorState, text: &str, html: &str) -> Option<Slice> {
+        let from = state.selection().resolved_from().clone();
+        let in_code = from.parent().ty().spec().code;
+        if !html.is_empty() && !in_code {
+            let mut html = html.to_owned();
+            for plugin in state.plugins() {
+                html = plugin.transform_pasted_html(state, html);
+            }
+            let parser = state
+                .some_prop(|p| p.clipboard_parser(state))
+                .unwrap_or_else(|| DomParser::from_schema(state.schema()));
+            let slice = parser.parse_from_clipboard(&html, &from);
+            if slice.content.size() > 0 {
+                return Some(slice);
+            }
+        }
+        if text.is_empty() {
+            return None;
+        }
+        let mut text = text.to_owned();
+        for plugin in state.plugins() {
+            text = plugin.transform_pasted_text(state, text, false);
+        }
+        Some(
+            state
+                .some_prop(|p| p.clipboard_text_parser(state, &text, &from, false))
+                .unwrap_or_else(|| slice_from_text(state.schema(), &text, &from)),
+        )
+    }
+
+    /// Replaces the selection of `state` (the current one) with `slice`.
+    fn insert_paste(&self, state: &EditorState, slice: Slice) {
         let mut tr = state.tr();
         tr.replace_selection(slice);
         tr.set_origin(TransactionOrigin::Paste);
@@ -1368,6 +1401,106 @@ impl Rv {
         tr.scroll_into_view();
         self.dispatch(tr);
         self.empty_sink();
+    }
+
+    /// Pastes the waiting pastes in order, each once its JS hooks answered.
+    async fn drain_pastes(&self) {
+        loop {
+            let next = self.pastes.borrow_mut().pop_front();
+            let Some((text, html)) = next else { break };
+            self.paste_through_js(&text, &html).await;
+        }
+        self.pasting.set(false);
+    }
+
+    /// [`Rv::paste`] through plugins some of whose hooks are the app's JS
+    /// functions (`transformPasted`, `handlePaste`): the same steps in the
+    /// same order, each JS hook awaited (what it throws or answers wrong is
+    /// logged, and the step goes on as without it). A JS turn passes while
+    /// a hook answers: when the document or the selection changed
+    /// meanwhile (typing, another change of the app's), the content was
+    /// made for a place that is not the paste's any more, and the paste
+    /// starts over from the current state; one that keeps changing is
+    /// dropped after a few tries.
+    async fn paste_through_js(&self, text: &str, html: &str) {
+        const TRIES: usize = 3;
+        'paste: for _ in 0..TRIES {
+            let state = self.session.state();
+            if !self.editable() {
+                return;
+            }
+            let changed = |rv: &Rv| {
+                let now = rv.session.state();
+                !now.doc().ptr_eq(state.doc()) || !now.selection().eq(state.selection())
+            };
+            let schema = state.schema().clone();
+            let slice_of = |json: &Value| match Slice::from_json(&schema, json) {
+                Ok(slice) => Some(slice),
+                Err(e) => {
+                    log::warn!(
+                        "RichEditor: transformPasted's slice is not one of the schema's: {e}"
+                    );
+                    None
+                }
+            };
+            let Some(mut slice) = self.parsed_paste(&state, text, html) else {
+                return;
+            };
+            let plugins: Vec<Plugin> = state.plugins().to_vec();
+            for plugin in &plugins {
+                slice = match paste_hooks(plugin).and_then(|h| h.transform) {
+                    Some(hook) => {
+                        let answered = hook.call_async(SliceJson(slice.to_json())).await;
+                        if changed(self) {
+                            continue 'paste;
+                        }
+                        answer(answered, "transformPasted")
+                            .and_then(|json| slice_of(&json.0))
+                            .unwrap_or(slice)
+                    }
+                    None => plugin.transform_pasted(&state, slice),
+                };
+            }
+            let clipboard = RichClipboardContent {
+                text: text.to_owned(),
+                html: html.to_owned(),
+            };
+            for plugin in &plugins {
+                let handled = match paste_hooks(plugin).and_then(|h| h.handle) {
+                    Some(hook) => {
+                        let answered = hook
+                            .call_async((SliceJson(slice.to_json()), clipboard.clone()))
+                            .await;
+                        let handled = answer(answered, "handlePaste").unwrap_or(false);
+                        // What a hook that handled the paste changed is its
+                        // own; one that did not leaves the paste to the
+                        // state now.
+                        if !handled && changed(self) {
+                            continue 'paste;
+                        }
+                        handled
+                    }
+                    // The state is the current one: every await above
+                    // checked it.
+                    None => {
+                        let mut trs = Vec::new();
+                        let handled = plugin.handle_paste(&state, &slice, &mut |tr| trs.push(tr));
+                        for tr in trs {
+                            self.dispatch(tr);
+                        }
+                        handled
+                    }
+                };
+                if handled {
+                    return;
+                }
+            }
+            self.insert_paste(&state, slice);
+            return;
+        }
+        log::warn!(
+            "RichEditor: a paste was dropped: the document kept changing while its hooks ran"
+        );
     }
 
     // Presses.
@@ -2851,4 +2984,12 @@ impl ViewGeometry for GeometryHandle {
         let (_, frame) = geo.frames.get(&b.id)?;
         Some(Bounds::new(origin, frame.size))
     }
+}
+
+/// What a paste hook of the app's answered, or `None` (logged) when it
+/// threw or answered something else.
+fn answer<T>(result: Result<T, String>, hook: &str) -> Option<T> {
+    result
+        .map_err(|e| log::warn!("RichEditor: {hook} threw or answered wrong: {e}"))
+        .ok()
 }

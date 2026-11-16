@@ -30,7 +30,8 @@ use nsh_core::{
 
 pub(crate) use self::{
     commands::{RichCommand, RichCommandName, RichFormat},
-    plugins::{RichEditorPlugin, RichPluginSpec},
+    json::SliceJson,
+    plugins::{RichClipboardContent, RichEditorPlugin, RichPluginSpec, paste_hooks},
 };
 use self::{
     commands::{doc_of, fragment_of, resolve_with},

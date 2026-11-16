@@ -4526,6 +4526,10 @@ tap text:UndoTicker
 expect Ticker IBMX selected
 covers [nsh/base] RichNodeViewProps
 
+# base-rich-editor-paste-hooks
+tap id:case-base-rich-editor-paste-hooks
+expect PasteHooks true paste true
+
 # base-rich-editor-view
 tap id:case-base-rich-editor-view
 expect BubbleMenu

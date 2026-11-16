@@ -416,6 +416,33 @@ editor.setDecorations("suggestions", [{ from: 5, to: 9, kind: "inline", attrs: {
   `dispatch`, `setContent`, …) in that call: `filterTransaction` may drop one, `appendTransaction` may return one
   more to apply with it. `on("revision", …)` hears every change, typing included.
 
+#### Paste
+
+A plugin can take part in a paste with ProseMirror's `transformPasted` and `handlePaste`:
+
+```tsx
+const paste = new RichEditorPlugin("paste")
+  .transformPasted((slice) => slice)
+  // Word's list items, Google Docs' bold, a video link pasted on its own: the app reads the clipboard itself.
+  .handlePaste((slice, clipboard) => {
+    if (!isVideoLink(clipboard.text)) return false;
+    editor.run(insertContent({ type: "video", attrs: { src: clipboard.text } }));
+    return true;
+  });
+```
+
+- `transformPasted(slice)` changes the content before it goes in, each plugin's in turn. The content is a
+  `RichSliceJSON` (`{ content, openStart, openEnd }`), parsed from the clipboard's HTML by the schema's rules, else
+  from its text.
+- `handlePaste(slice, clipboard)` returning `true` means the app handled the paste and the editor inserts nothing.
+  `clipboard` is `{ text, html }`, what the clipboard held: an app that reads Word or Google Docs HTML, Markdown or a
+  link in its own way inserts the result itself (`editor.run(insertContent(...))`) and returns `true`.
+
+Paste is the one input that waits for JS: once a plugin has a paste hook, the paste goes in after the hooks have
+answered, a JS turn later. Pastes go in in the order they were made. A paste whose document or selection changes
+while its hooks answer starts over from the editor as it is then. Typing and keys never wait. To insert something
+that takes longer, such as an upload, `handlePaste` returns `true` and the app inserts it when it is ready.
+
 ## Links, character counts and suggestions
 
 Three plugins carry Tiptap's Link, CharacterCount and Suggestion behavior, all of it native:
