@@ -5615,6 +5615,7 @@ dependencies = [
  "unicode-properties",
  "ureq",
  "url",
+ "webpki-roots 1.0.9",
  "windows-sys 0.61.2",
  "wuff",
 ]
@@ -5655,7 +5656,6 @@ dependencies = [
  "tokio",
  "ureq",
  "wgpu 29.0.4",
- "windows 0.62.2",
  "windows-sys 0.61.2",
 ]
 
