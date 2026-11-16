@@ -6,7 +6,7 @@
 //! answers the root's `Share` event: shared with the activity type that
 //! finished, or dismissed.
 
-use std::{cell::Cell, rc::Rc};
+use std::{cell::Cell, ptr::NonNull, rc::Rc};
 
 use block2::RcBlock;
 use nsh_core::{
@@ -17,13 +17,14 @@ use nsh_engine::EngineControl;
 use objc2::{
     AnyThread, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
     rc::Retained,
-    runtime::{AnyObject, Bool},
+    runtime::{AnyObject, Bool, ProtocolObject},
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{NSArray, NSBundle, NSError, NSObject, NSObjectProtocol, NSString, NSURL};
 use objc2_ui_kit::{
     UIActivityItemSource, UIActivityType, UIActivityTypeSaveToCameraRoll, UIActivityViewController,
-    UIPopoverArrowDirection, UIView,
+    UIPopoverArrowDirection, UIView, UIViewController, UIViewControllerTransitionCoordinator,
+    UIViewControllerTransitionCoordinatorContext,
 };
 
 /// What one shared item holds: the item and the subject it gives.
@@ -100,7 +101,7 @@ pub(crate) fn show(
     let Some(mtm) = MainThreadMarker::new() else {
         return fail(ShareError::failed("share: not on the main thread"));
     };
-    let Some(mut top) = crate::system::top_controller(root) else {
+    let Some(top) = crate::system::top_controller(root) else {
         return fail(ShareError::failed("share: the surface is in no window"));
     };
     let mut items: Vec<Retained<AnyObject>> = Vec::new();
@@ -207,22 +208,126 @@ pub(crate) fn show(
             }
         }
     }
+    let presenting = Rc::new(Presenting {
+        id,
+        controller,
+        answered,
+        waits: Cell::new(0),
+        control: control.clone(),
+    });
     // A share sheet still showing gives way to this one (the core answered
-    // it already).
+    // it already): present once it is gone.
     if top.isKindOfClass(UIActivityViewController::class())
         && let Some(presenter) = top.presentingViewController()
     {
-        top.dismissViewControllerAnimated_completion(false, None);
-        top = presenter;
+        let presenting = presenting.clone();
+        let once = Cell::new(Some(presenter));
+        let then = RcBlock::new(move || {
+            if let Some(presenter) = once.take() {
+                presenting.clone().present_over(presenter);
+            }
+        });
+        top.dismissViewControllerAnimated_completion(false, Some(&then));
+        return;
     }
-    top.presentViewController_animated_completion(&controller, true, None);
-    // UIKit refuses a presentation over a controller that is presenting or
-    // dismissing another one, and then never calls the completion: answer
-    // the request now.
-    if controller.presentingViewController().is_none() && !answered.replace(true) {
-        fail(ShareError::failed(
+    presenting.present_over(top);
+}
+
+/// A share sheet on its way to the screen.
+struct Presenting {
+    id: u32,
+    controller: Retained<UIActivityViewController>,
+    /// The request was answered (by the sheet, or as refused).
+    answered: Rc<Cell<bool>>,
+    /// The turns spent waiting for transitions to end.
+    waits: Cell<u32>,
+    control: EngineControl,
+}
+
+/// The most turns a share waits for a transition before it gives up (a
+/// transition takes a few).
+const MAX_WAITS: u32 = 120;
+
+impl Presenting {
+    /// Presents the sheet over `top`, once a transition `top` is in ends.
+    /// UIKit presents nothing over a controller that is presenting another
+    /// one, being presented, or out of the window (and then calls no
+    /// completion), so those are decided here, before presenting: what
+    /// passes is presented, what cannot is answered as refused.
+    fn present_over(self: Rc<Self>, top: Retained<UIViewController>) {
+        // A transition still running: present once it ends.
+        let moving = match top.presentedViewController() {
+            Some(leaving) if leaving.isBeingDismissed() => Some(leaving),
+            Some(_) => return self.refuse(),
+            None if top.isBeingPresented() => Some(top.clone()),
+            None => None,
+        };
+        if moving.is_some() && self.waits.replace(self.waits.get() + 1) >= MAX_WAITS {
+            return self.refuse();
+        }
+        let Some(moving) = moving else {
+            if top.viewIfLoaded().and_then(|view| view.window()).is_none() {
+                return self.refuse();
+            }
+            return self.present(&top);
+        };
+        let once = Cell::new(Some((self, top)));
+        let then = Rc::new(move || {
+            if let Some((this, top)) = once.take() {
+                this.present_over(top);
+            }
+        });
+        let done = {
+            let then = then.clone();
+            RcBlock::new(
+                move |_: NonNull<
+                    ProtocolObject<dyn UIViewControllerTransitionCoordinatorContext>,
+                >| { then() },
+            )
+        };
+        // Refused when the transition is already ending: look again on the
+        // next turn.
+        let waiting = moving.transitionCoordinator().is_some_and(|coordinator| {
+            coordinator.animateAlongsideTransition_completion(None, Some(&done))
+        });
+        if !waiting {
+            next_turn(move || then());
+        }
+    }
+
+    /// Presents the sheet over `top`. Its answer comes from the sheet's
+    /// completion. (A popover's presentation starts some turns later on an
+    /// iPad, so the controller says nothing of it right after this call.)
+    fn present(self: Rc<Self>, top: &UIViewController) {
+        top.presentViewController_animated_completion(&self.controller, true, None);
+    }
+
+    /// Answers the request as a sheet UIKit cannot show.
+    fn refuse(&self) {
+        if self.answered.replace(true) {
+            return;
+        }
+        let error = ShareError::failed(
             "share: the share sheet could not be presented (another view is being presented)",
-        ));
+        );
+        self.control
+            .dispatch_event(ROOT_ID, EventKind::Share, error.payload(self.id));
+    }
+}
+
+/// Runs `f` on a later turn of the main run loop.
+fn next_turn(f: impl FnOnce() + 'static) {
+    let once = Cell::new(Some(f));
+    let block = RcBlock::new(move || {
+        if let Some(f) = once.take() {
+            f();
+        }
+    });
+    // SAFETY: NSRunLoop's documented `performBlock:` on the main run loop,
+    // called on the main thread.
+    unsafe {
+        let run_loop: Retained<AnyObject> = msg_send![objc2::class!(NSRunLoop), mainRunLoop];
+        let _: () = msg_send![&run_loop, performBlock: &*block];
     }
 }
 
