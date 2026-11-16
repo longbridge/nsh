@@ -57,6 +57,8 @@ const FOCUSED = 4;
  * modality as it is (`inputWith`). */
 const MODALITY_KEYS_SKIPPED = new Set(["Shift", "Control", "Alt", "AltGraph", "Meta", "CapsLock", "Fn", "Hyper", "Super", "OS"]);
 const PRESS_EVENTS = ["onPress", "onLongPress", "onPressIn", "onPressOut"];
+/** The press listeners other than `onLongPress`, which alone leaves the taps to the views around. */
+const TAP_EVENTS = ["onPress", "onPressIn", "onPressOut"];
 const MOUSE_EVENTS = ["onMouseEnter", "onMouseLeave", "onMouseMove"];
 /** The DOM's `buttons` bits, in the order a held button is named by. */
 const MOUSE_BUTTONS = [[1, "left"], [2, "right"], [4, "middle"], [8, "back"], [16, "forward"]];
@@ -2818,6 +2820,10 @@ class Player {
       pagePosition: { x: pageX, y: pageY },
       modifiers: { control: !!e.ctrlKey, alt: !!e.altKey, shift: !!e.shiftKey, platform: !!e.metaKey },
       pressedButton: held ? held[1] : null,
+      pointerType: e.pointerType === "pen" ? "pen" : "mouse",
+      pressure: e.pressure ?? (held ? 0.5 : 0),
+      tiltX: e.tiltX || 0,
+      tiltY: e.tiltY || 0,
     };
   }
 
@@ -9019,6 +9025,7 @@ class Player {
         y: p.y - top,
         changed: id === changedId,
         pointerType: p.pointerType,
+        pressure: p.pressure, tiltX: p.tiltX, tiltY: p.tiltY,
       });
     }
     if (!points.length) return;
@@ -9074,11 +9081,13 @@ class Player {
     // touches scroll natively, except in zoomable views, which pan and
     // pinch here.
     const scrollView = isField ? null : chain.find((v) => v._kind === "scroll") ?? null;
+    const link = isField ? null : this.linkPress(e.target, target);
     const p = {
       x, y, layer, startX: x, startY: y, t: performance.now(), vx: 0, vy: 0,
       pointerType: e.pointerType,
+      pressure: e.pressure, tiltX: e.tiltX || 0, tiltY: e.tiltY || 0,
       touchPath: chain.filter((v) => v._events.has("onTouch")).map((v) => v._id),
-      press: isField ? null : this.linkPress(e.target, target) ?? chain.find((v) => PRESS_EVENTS.some((n) => v._events.has(n)) && !v._props?.disabled) ?? null,
+      ...(isField ? { press: null } : link ? { press: link } : this.pickPress(chain)),
       // What presses report: the modifier keys at the press and its clicks.
       modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
       clicks: e.pointerType === "mouse" ? this.clickCount(x, y) : 1,
@@ -9104,6 +9113,27 @@ class Player {
     if ((p.scroll || p.pan) && !isField) e.preventDefault();
   }
 
+  /** The press of the views in `chain` (innermost first): `{ press,
+   * longPress }`. The innermost enabled view with a press listener gets it;
+   * one that listens only to `onLongPress` leaves the taps to the nearest
+   * enabled view outwards that listens to them, as a long press recognizer
+   * takes no taps from the views around it, and keeps the long press
+   * (`input::pick_press`). */
+  pickPress(chain) {
+    const taps = (v) => TAP_EVENTS.some((n) => v._events.has(n));
+    let long = null;
+    for (const v of chain) {
+      if (v._props?.disabled || !PRESS_EVENTS.some((n) => v._events.has(n))) continue;
+      if (!long) {
+        if (taps(v)) return { press: v, longPress: null };
+        long = v;
+      } else if (taps(v)) {
+        return { press: v, longPress: long };
+      }
+    }
+    return { press: long, longPress: null };
+  }
+
   /** The press target of a press on a link's run in text view `view`: the
    * link's node, its events, placed as the text (as on the other
    * platforms, a link's press reports positions in its text). */
@@ -9122,11 +9152,12 @@ class Player {
     const el = p.press;
     p.pressed = true;
     if (el._events.has("onPressIn")) this.event(el._id, "onPressIn", this.pressPayload(p));
-    if (el._events.has("onLongPress")) {
+    const long = p.longPress ?? el;
+    if (long._events.has("onLongPress")) {
       p.longTimer = setTimeout(() => {
         p.long = true;
-        this.event(el._id, "onLongPress", this.pressPayload(p));
-      }, el._props?.longPressDelay ?? 500);
+        this.event(long._id, "onLongPress", this.pressPayload(p));
+      }, long._props?.longPressDelay ?? 500);
     }
   }
 
@@ -9202,6 +9233,9 @@ class Player {
     p.x = x;
     p.y = y;
     p.t = now;
+    p.pressure = e.pressure;
+    p.tiltX = e.tiltX || 0;
+    p.tiltY = e.tiltY || 0;
     this.track(p, now);
     const tx = x - p.startX;
     const ty = y - p.startY;
@@ -9356,6 +9390,7 @@ class Player {
       return;
     }
     if (cancelled && p.scrolls?.length) this.touchScroll(p, this.point(e, p.layer));
+    p.pressure = 0;
     if (p.touchPath.length) this.touchEvent(cancelled ? 3 : 2, e.pointerId);
     this.pointers.delete(e.pointerId);
     if (this.twoFinger) {

@@ -3134,6 +3134,11 @@ final class Mounter {
                 || wants(id, Native.PRESS_IN) || wants(id, Native.PRESS_OUT);
     }
 
+    /** Listens to taps: a press listener other than `onLongPress`, which alone leaves the taps to the views around. */
+    boolean handlesTap(int id) {
+        return wants(id, Native.PRESS) || wants(id, Native.PRESS_IN) || wants(id, Native.PRESS_OUT);
+    }
+
     boolean hasPan(int id) {
         return Native.hasPan(handle(), id);
     }

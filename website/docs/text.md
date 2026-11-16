@@ -106,23 +106,23 @@ its font; the text lays out the same and copies whole, so inline code is a span
 
 ```rust tabs
 text("Run ")
-    .child(text(" npm test ").font_family("ui-monospace").bg(rgb(0xeff1f3)).rounded(px(4.0)))
+    .child(text("npm test").font_family("ui-monospace").bg(rgb(0xeff1f3)).rounded(px(4.0)).px(px(4.0)))
     .child(" first.")
 ```
 
 ```tsx tabs
 <Text>
-  Run <Text style={{ fontFamily: "ui-monospace", backgroundColor: "#eff1f3", borderRadius: 4 }}> npm test </Text> first.
+  Run <Text style={{ fontFamily: "ui-monospace", backgroundColor: "#eff1f3", borderRadius: 4, paddingHorizontal: 4 }}>npm test</Text> first.
 </Text>
 ```
 
-A span has no box of its own, so padding on it is ignored (a warning says so). The spaces at its ends pad the
-background instead; a narrow no-break space (`"\u202F"`) or a thin space (`"\u2009"`) gives less room than a space. A
-relative `fontSize` keeps the span in proportion to its paragraph wherever it is used:
+Horizontal padding on a span takes room in its line at the span's two ends, and its background covers it, as a CSS
+inline box's does; vertical padding and borders leave a span as it is. A relative `fontSize` keeps the span in
+proportion to its paragraph wherever it is used:
 
 ```tsx
 <Text style={{ fontSize: 16 }}>
-  Run <Text style={{ fontSize: "0.875em", backgroundColor: "#eff1f3", borderRadius: 4 }}>{"\u202Fnpm test\u202F"}</Text> first.
+  Run <Text style={{ fontSize: "0.875em", backgroundColor: "#eff1f3", borderRadius: 4, paddingHorizontal: 3 }}>npm test</Text> first.
 </Text>
 ```
 

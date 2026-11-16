@@ -158,6 +158,10 @@ pub(crate) struct AppConfig {
     pub(crate) icon: Option<AppIcon>,
     /// The lowest runtime that runs a signed package (`nsh publish`).
     pub(crate) min_runtime: Option<String>,
+    /// The NSH versions the app is written for (`">=0.5"`), which every
+    /// command checks this CLI against first ([`check_nsh_version`]).
+    #[serde(default, rename = "nsh")]
+    _nsh: Option<serde_json::Value>,
     /// Read and checked by the bundler.
     #[serde(default, rename = "tailwind")]
     _tailwind: Option<serde_json::Value>,
@@ -214,6 +218,13 @@ pub(crate) struct AppConfig {
     /// release runner reads it; macOS runs one instance of an app already.
     #[serde(default)]
     pub(crate) single_instance: bool,
+    /// Gives the app's address (`UrlScheme.setUrl`) to the system on iOS
+    /// and macOS (`"handoff": true`), so Handoff continues it on the user's
+    /// other devices. iOS and macOS
+    /// packages declare `<id>.url` in `NSUserActivityTypes`
+    /// ([`activity_types`]), which the release runners read.
+    #[serde(default)]
+    pub(crate) handoff: bool,
     /// Native features a package always includes (`"features": ["plot"]`),
     /// which nothing in the bundle shows it uses: what its Rust code or a
     /// computed import needs (`native_features`).
@@ -529,6 +540,25 @@ fn url_types(info: &mut plist::Dictionary, id: &str, schemes: &[String]) {
     );
 }
 
+/// Declares the activity type of the app's addresses that are no web pages
+/// (`<id>.url`, `nsh_platform_apple::handoff`) in an Apple `Info.plist`
+/// (`NSUserActivityTypes`, after those `infoPlist` gives) for `nsh.json`
+/// `"handoff": true`.
+fn activity_types(info: &mut plist::Dictionary, id: &str, handoff: bool) {
+    use plist::Value;
+    if !handoff {
+        return;
+    }
+    let kind = Value::String(format!("{id}.url"));
+    match info.get_mut("NSUserActivityTypes") {
+        Some(Value::Array(types)) if types.contains(&kind) => {}
+        Some(Value::Array(types)) => types.push(kind),
+        _ => {
+            info.insert("NSUserActivityTypes".into(), Value::Array(vec![kind]));
+        }
+    }
+}
+
 /// `nsh.json` `"web"`.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -641,6 +671,46 @@ impl AppConfig {
         }
         args
     }
+}
+
+/// Fails when the `nsh.json` next to `entry` asks for NSH versions
+/// (`"nsh": ">=0.5"`) this CLI is not one of, with one message that names
+/// both, before a build fails on what the other version lacks.
+pub(crate) fn check_nsh_version(entry: &Path) -> anyhow::Result<()> {
+    let dir = entry.parent().unwrap_or(Path::new("."));
+    let path = dir.join("nsh.json");
+    let Ok(text) = fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    // A file that does not read is reported by the command itself.
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Ok(());
+    };
+    nsh_version_error(&value["nsh"], env!("CARGO_PKG_VERSION"))
+        .map_or(Ok(()), |e| Err(anyhow::anyhow!("{}: {e}", path.display())))
+}
+
+/// Why `required` (`nsh.json` `"nsh"`) does not take NSH `version`, if it
+/// does not.
+fn nsh_version_error(required: &serde_json::Value, version: &str) -> Option<String> {
+    if required.is_null() {
+        return None;
+    }
+    let Some(text) = required.as_str() else {
+        return Some("\"nsh\" must be a version requirement string, e.g. \">=0.5\"".into());
+    };
+    let req = match semver::VersionReq::parse(text) {
+        Ok(req) => req,
+        Err(e) => {
+            return Some(format!(
+                "\"nsh\": invalid version requirement {text:?}: {e}"
+            ));
+        }
+    };
+    // A nightly or other prerelease counts as its release.
+    let mut this = semver::Version::parse(version).ok()?;
+    this.pre = semver::Prerelease::EMPTY;
+    (!req.matches(&this)).then(|| format!("this app requires nsh {text}; this is nsh {version}"))
 }
 
 /// Reads `nsh.json` next to `entry`, if any; relative paths become absolute.
@@ -1148,6 +1218,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         }
         fs::copy(&asset.source, &dest).with_context(|| format!("copy {}", asset.path))?;
     }
+    copy_apple_sounds(config, &built, &app)?;
 
     let sdk = match options.target {
         PackageTarget::Ios => "iphoneos",
@@ -1161,6 +1232,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     };
     let mut info = info_plist(&name, &id, &executable, config, sdk)?;
     url_types(&mut info, &id, &schemes);
+    activity_types(&mut info, &id, config.handoff);
     document_types(&mut info, &config.file_types());
     if let Some(icon) = config.icon(PackageTarget::Ios) {
         let partial = compile_icon(icon, &app, sdk, minimum_os(&info))?;
@@ -1368,6 +1440,7 @@ fn package_android(
             abis: &abis,
             icon: config.icon(PackageTarget::Android),
             assets,
+            sounds: android_sounds(config, built),
             signing,
         },
         options.format,
@@ -1503,6 +1576,67 @@ fn package_linux(
     Ok(())
 }
 
+/// The file types Apple platforms play as a notification's sound.
+const APPLE_SOUNDS: &[&str] = &["caf", "aiff", "aif", "wav"];
+/// The file types Android plays as a notification channel's sound.
+const ANDROID_SOUNDS: &[&str] = &["ogg", "mp3", "wav"];
+
+/// The app's sounds a notification can play (`Notifications.show`'s
+/// `sound`), of the file types in `extensions`: none without the
+/// `notifications` capability.
+fn notification_sounds<'a>(
+    config: &AppConfig,
+    built: &'a crate::build::Built,
+    extensions: &'static [&'static str],
+) -> impl Iterator<Item = &'a crate::build::Asset> {
+    let on = config.notifications();
+    built.assets.iter().filter(move |asset| {
+        on && Path::new(&asset.path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| extensions.contains(&e.to_ascii_lowercase().as_str()))
+    })
+}
+
+/// Copies the app's notification sounds into `dir`, the app's main bundle
+/// on Apple platforms, where the system finds them by file name.
+fn copy_apple_sounds(
+    config: &AppConfig,
+    built: &crate::build::Built,
+    dir: &Path,
+) -> anyhow::Result<()> {
+    let mut names = std::collections::HashMap::new();
+    for asset in notification_sounds(config, built, APPLE_SOUNDS) {
+        let name = nsh_core::notifications::Notification::sound_file_name(&asset.path);
+        if let Some(other) = names.insert(name.to_owned(), asset.path.clone()) {
+            ui::warn(format!(
+                "notification sounds {other} and {} share the file name {name}: only the last plays",
+                asset.path
+            ));
+        }
+        fs::copy(&asset.source, dir.join(name)).with_context(|| format!("copy {}", asset.path))?;
+    }
+    Ok(())
+}
+
+/// The app's notification sounds as Android raw resources: (resource
+/// name, file).
+fn android_sounds(config: &AppConfig, built: &crate::build::Built) -> Vec<(String, PathBuf)> {
+    let mut sounds: Vec<(String, PathBuf)> = Vec::new();
+    for asset in notification_sounds(config, built, ANDROID_SOUNDS) {
+        let name = nsh_core::notifications::Notification::sound_resource_name(&asset.path);
+        if sounds.iter().any(|(n, _)| *n == name) {
+            ui::warn(format!(
+                "notification sound {} has the resource name {name} of another: only the first plays",
+                asset.path
+            ));
+            continue;
+        }
+        sounds.push((name, asset.source.clone()));
+    }
+    sounds
+}
+
 /// `<out>/<name>.app`, a macOS app bundle: the release runner as
 /// `Contents/MacOS/<executable>`, the bundle and assets in
 /// `Contents/Resources/nsh/` (where the runner looks), `nsh/app.json` (the
@@ -1547,6 +1681,7 @@ fn package_macos(
         }
         fs::copy(&asset.source, &dest).with_context(|| format!("copy {}", asset.path))?;
     }
+    copy_apple_sounds(config, built, &resources)?;
     let version = config.version.as_deref().unwrap_or("1.0.0");
     let mut info = serde_json::json!({ "name": name, "id": id, "version": version });
     if let Some(appearance) = &config.appearance {
@@ -1568,6 +1703,7 @@ fn package_macos(
     };
     let mut plist = macos_info_plist(name, id, executable, config, icon)?;
     url_types(&mut plist, id, &schemes);
+    activity_types(&mut plist, id, config.handoff);
     document_types(&mut plist, &config.file_types());
     plist::Value::Dictionary(plist)
         .to_file_xml(contents.join("Info.plist"))
@@ -2162,6 +2298,34 @@ fn make_ipa(app: &Path, ipa: &Path) -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn nsh_json_names_the_nsh_versions_it_needs() {
+        let ok = |r: serde_json::Value, v| nsh_version_error(&r, v);
+        assert_eq!(ok(serde_json::Value::Null, "0.4.0"), None);
+        assert_eq!(ok(serde_json::json!(">=0.5"), "0.5.0"), None);
+        assert_eq!(ok(serde_json::json!(">=0.5, <0.7"), "0.6.3"), None);
+        assert_eq!(ok(serde_json::json!("0.5"), "0.5.2"), None);
+        // A prerelease counts as its release.
+        assert_eq!(ok(serde_json::json!(">=0.5"), "0.5.0-nightly.1"), None);
+        assert_eq!(
+            ok(serde_json::json!(">=0.5"), "0.4.0").as_deref(),
+            Some("this app requires nsh >=0.5; this is nsh 0.4.0")
+        );
+        assert!(
+            ok(serde_json::json!("latest"), "0.5.0")
+                .unwrap()
+                .contains("invalid")
+        );
+        assert!(
+            ok(serde_json::json!(5), "0.5.0")
+                .unwrap()
+                .contains("must be")
+        );
+        // The key is known: no "unknown key" warning.
+        let (_, ignored) = parse_config(r#"{ "nsh": ">=0.5" }"#).unwrap();
+        assert!(ignored.is_empty(), "{ignored:?}");
+    }
+
     /// Each processor is a build for its Rust target, this Mac's own
     /// without `--target` (the build `nsh run` shares), named as `lipo`
     /// and the updater name it.
@@ -2461,6 +2625,30 @@ mod tests {
         let config: AppConfig =
             serde_json::from_str(r#"{ "schemes": ["https", "myapp"] }"#).unwrap();
         assert_eq!(config.url_schemes(), ["myapp"]);
+    }
+
+    #[test]
+    fn handoff_declares_the_apps_activity_type() {
+        let types = |json: &str| {
+            let config: AppConfig = serde_json::from_str(json).unwrap();
+            let mut info = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+            activity_types(&mut info, "com.a", config.handoff);
+            info.get("NSUserActivityTypes").map(|types| {
+                types
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(plist::Value::as_string)
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+        };
+        // Off by default: nothing declared, so the runner gives nothing.
+        assert_eq!(types("{}"), None);
+        assert_eq!(types(r#"{ "handoff": true }"#).unwrap(), ["com.a.url"]);
+        // After the app's own types, once.
+        let own = r#"{ "handoff": true, "ios": { "infoPlist": { "NSUserActivityTypes": ["com.a.edit", "com.a.url"] } } }"#;
+        assert_eq!(types(own).unwrap(), ["com.a.edit", "com.a.url"]);
     }
 
     #[test]

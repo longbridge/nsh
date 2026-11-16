@@ -200,6 +200,7 @@ final class EmbedController: UIViewController {
 | `init(frame: CGRect = .zero, trace: Bool = false)` | 创建视图。`trace` 会记录每次提交的耗时。`init?(coder:)` 支持 storyboard 和 nib。 |
 | `onError: ((String) -> Void)?` | 在主线程上接收应用的致命错误（bundle 加载失败、未捕获的 JS 异常、VM 因触及限制而停止）。错误总会写入日志；开发构建还会把错误显示在应用上方。 |
 | `limits: NshLimits` | 此后加载的应用的 VM 限制。 |
+| `handoff: Bool` | 把此后加载的应用用 [`UrlScheme.setUrl`](../modules/nsh.md#handoff) 设置的地址交给系统，Handoff 可以在用户的其他设备上接着打开它。应用自己 scheme 的地址需要在你的 Info.plist 的 `NSUserActivityTypes` 中声明 `<bundle id>.url`，它会带着 `userInfo["url"]` 中的 URL 回到另一台设备的 `scene(_:continue:)`：把它传给 `openURL(_:)`。默认关闭。 |
 | `grantCapabilities(_ json: String?) throws` | 此后加载的应用最多能做什么，JSON 格式与 `nsh.json` 的 `capabilities` 相同；`nil` 表示授予每个应用所声明的能力。JSON 无效时抛出 `NshError`。 |
 | `locale: Locale?` | 代替用户设置的语言和地区：`Intl`、`locale()` 和组件立即跟随，此后加载的应用也从它开始。`nil` 跟随系统。 |
 | `fontScale: CGFloat?` | 代替动态字体的文字大小（1 为默认）：文字和输入框按它重新排版，`fontScale()` 读到它，立即生效，此后加载的应用也一样；长度保持原样。`nil` 跟随系统。 |
@@ -224,7 +225,7 @@ final class EmbedController: UIViewController {
 > `bundle.nshc`（字节码）只能从应用包内部加载。QuickJS 不校验字节码，其他来源的字节码可能破坏内存：对于应用包之外的文件，请加载
 > `bundle.js`（JS 源码），更好的做法是使用[签名包](./signed-packages.md)。
 
-`limits`、`grantCapabilities`、`storageDirectory` 和 `cacheOptions` 从下一次加载开始生效：请在 `loadBundle` / `run` 之前设置。
+`limits`、`handoff`、`grantCapabilities`、`storageDirectory` 和 `cacheOptions` 从下一次加载开始生效：请在 `loadBundle` / `run` 之前设置。
 
 每个应用无需任何设置就按自己的 id 保存存储：签名包使用其发布密钥证书担保的 id，bundle 使用其 `nsh.json` 中的 `id`（`nsh build` 写在它旁边的 `app.json`）。如果宿主想把应用的数据放到自己选择的位置，设置 `storageDirectory`：
 

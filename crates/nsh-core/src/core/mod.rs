@@ -152,6 +152,9 @@ struct RootState {
     nav_shader: Option<crate::NavShader>,
     /// Where a header item goes (header items).
     slot: HeaderSlot,
+    /// A leading or trailing header item laid out with no width: nothing
+    /// of it shows, so the screen's options leave it out of the bar.
+    empty: bool,
     /// `nativeID` (input accessories).
     native_id: Option<Box<str>>,
     /// `statusBar` (screens and modals).
@@ -523,6 +526,61 @@ struct ImageState {
     svg_current_color: bool,
 }
 
+/// A style most nodes leave at its default: stored only once set to
+/// something else, read through the shared default otherwise.
+#[derive(Default)]
+struct Sparse<T: 'static>(Option<Box<T>>);
+
+trait SharedDefault: Sized + PartialEq + 'static {
+    fn shared_default() -> &'static Self;
+}
+
+impl SharedDefault for ViewStyle {
+    fn shared_default() -> &'static Self {
+        &ViewStyle::DEFAULT
+    }
+}
+
+impl SharedDefault for TextStyle {
+    fn shared_default() -> &'static Self {
+        &TextStyle::DEFAULT
+    }
+}
+
+impl<T: SharedDefault> Sparse<T> {
+    fn set(&mut self, value: T) {
+        // A node restyled once keeps its box: only a node without one pays
+        // for the comparison with the default.
+        if let Some(b) = &mut self.0 {
+            **b = value;
+        } else if value != *T::shared_default() {
+            self.0 = Some(Box::new(value));
+        }
+    }
+}
+
+impl<T: SharedDefault> std::ops::Deref for Sparse<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        match &self.0 {
+            Some(b) => b,
+            None => T::shared_default(),
+        }
+    }
+}
+
+impl<T: SharedDefault + std::fmt::Debug> std::fmt::Debug for Sparse<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (**self).fmt(f)
+    }
+}
+
+impl<T: SharedDefault> PartialEq<T> for Sparse<T> {
+    fn eq(&self, other: &T) -> bool {
+        **self == *other
+    }
+}
+
 struct Node {
     id: NodeId,
     kind: Kind,
@@ -537,8 +595,8 @@ struct Node {
     /// and views made overlays by `position: fixed`; for a span, which has
     /// no layout node, what a layout node takes when it is a block again.
     base_layout: Option<Box<taffy::Style>>,
-    view_style: ViewStyle,
-    text_style: TextStyle,
+    view_style: Sparse<ViewStyle>,
+    text_style: Sparse<TextStyle>,
     /// SVG's paint properties as written on the node (inherited by the
     /// canvases inside it); `None` while it sets none.
     paint: Option<Box<PaintStyle>>,
@@ -886,8 +944,8 @@ impl Node {
             children: Vec::new(),
             layout: None,
             base_layout: None,
-            view_style: ViewStyle::default(),
-            text_style: TextStyle::default(),
+            view_style: Sparse::default(),
+            text_style: Sparse::default(),
             paint: None,
             animated: Vec::new(),
             drawing: None,
@@ -981,6 +1039,9 @@ impl Node {
 struct TextContext<P> {
     text: Arc<AttributedText>,
     alignments: crate::AttachmentAlignments,
+    /// The UTF-16 offsets of the attachments of [`Self::text`] that are
+    /// the horizontal padding of a span ([`span_padding`]), not views.
+    spacers: Vec<u32>,
     /// `text.layout_hash()`, computed once per content.
     layout_hash: u64,
     /// Platform typesetting state, created on first use.
@@ -1045,6 +1106,7 @@ impl<P> TextContext<P> {
         Self {
             layout_hash: text.layout_hash(),
             alignments: Default::default(),
+            spacers: Vec::new(),
             text,
             prepared: None,
             same_lines: None,
@@ -1229,8 +1291,6 @@ pub struct Core<M: TextEngine> {
     /// The warning about animated insets of views that are not sticky, or
     /// on the axis their scroll view does not scroll, was logged.
     inset_warned: bool,
-    /// The warning about padding on a span was logged.
-    span_padding_warned: bool,
     /// Compiled shaders by the hash of their source, with their errors
     /// (an app setting the same source again compiles it once).
     shaders: rustc_hash::FxHashMap<u64, Result<crate::shader::Shader, crate::shader::ShaderError>>,
@@ -1560,7 +1620,6 @@ impl<M: TextEngine> Core<M> {
             follow_changed: false,
             sticky_warned: false,
             inset_warned: false,
-            span_padding_warned: false,
             shaders: Default::default(),
             transition_starts: Vec::new(),
             pictured: Default::default(),
@@ -1818,6 +1877,8 @@ impl<M: TextEngine> Core<M> {
     /// `restoreBounds` its placement is kept from then on as the platform
     /// reports it (the environment's window state), for the next launch
     /// to open it there ([`crate::desktop::MainWindowOptions::kept_placement`]).
+    /// Set it after the environment ([`Core::set_environment`]): a surface
+    /// without a window, a phone's, takes no attributes.
     pub fn set_main_window(&mut self, options: &crate::desktop::MainWindowOptions) {
         self.keep_main_placement = options.restore_bounds;
         self.main_shown |= options.visible_at_launch();
@@ -2736,6 +2797,9 @@ impl<M: TextEngine> Core<M> {
             window::{WindowRecord, placement_key},
         };
         match command {
+            DesktopCommand::SetAttributes(_) if !self.has_window() => {
+                log::debug!("window attributes of view {id}: the surface has no window");
+            }
             DesktopCommand::SetAttributes(mut attributes) => {
                 attributes.sanitize();
                 let denied = self.access.deny_window_attributes(&mut attributes);
@@ -2840,12 +2904,26 @@ impl<M: TextEngine> Core<M> {
             let Some(diff) = self.windows.get_mut(&id).and_then(|r| r.take_diff()) else {
                 continue;
             };
-            self.commands.push((
-                id,
-                Command::Desktop(Box::new(crate::desktop::DesktopCommand::SetAttributes(
-                    Box::new(diff),
-                ))),
-            ));
+            // Before the commit's first request to the window, so a window
+            // shown in the commit that set `activate: false` is not activated.
+            let at = self
+                .commands
+                .iter()
+                .position(|(to, c)| {
+                    *to == id
+                        && matches!(c, Command::Desktop(d)
+                            if matches!(**d, crate::desktop::DesktopCommand::Request(_)))
+                })
+                .unwrap_or(self.commands.len());
+            self.commands.insert(
+                at,
+                (
+                    id,
+                    Command::Desktop(Box::new(crate::desktop::DesktopCommand::SetAttributes(
+                        Box::new(diff),
+                    ))),
+                ),
+            );
         }
     }
 
@@ -2916,6 +2994,16 @@ impl<M: TextEngine> Core<M> {
             k = n.parent;
         }
         crate::ROOT_ID
+    }
+
+    /// The surface is in a window whose attributes its platform applies: a
+    /// desktop's (the OSes `nsh/desktop`'s `isAvailable` answers for), or
+    /// a browser's page, whose title is the main window's. A mobile surface
+    /// is a view in its app's screen: window attributes have nothing to
+    /// apply to there, so none are kept or sent.
+    fn has_window(&self) -> bool {
+        let os = self.components.environment.os;
+        os.is_desktop() || os == crate::platform::Os::Web
     }
 
     /// Keeps the placement of window `id` (its root node) a platform
@@ -3211,6 +3299,10 @@ impl<M: TextEngine> Core<M> {
         // And their transitions' time, with this commit's styles.
         for (id, answer) in std::mem::take(&mut self.components.transition_times) {
             answer.borrow_mut().deliver(self.transition_time(id));
+        }
+        // And their texts, with this commit's.
+        for (id, answer) in std::mem::take(&mut self.components.text_contents) {
+            answer.borrow_mut().deliver(self.text_content(id));
         }
         // Into the scroll commands of the scroll views around, in place,
         // with this commit's layout and the scrolls of the commands before.
@@ -4104,9 +4196,6 @@ impl<M: TextEngine> Core<M> {
         let rtl = self.resolved_rtl(key);
         crate::style::resolve_normal_alignment(&mut layout);
         crate::style::apply_direction(&mut layout, &mut view, &logical, rtl);
-        if self.nodes[key as usize].inline && padded_inline(&layout) {
-            self.warn_span_padding(key);
-        }
         // A sticky box's insets say where it sticks, not where it is laid
         // out.
         let sticky = pending.sticky_position.then(|| Box::new(layout.inset));
@@ -4239,8 +4328,8 @@ impl<M: TextEngine> Core<M> {
             node.vertical_align != vertical_align && node.inline && node.kind != Kind::Text;
         // ... and so is the content's of a render placed there.
         let content_align_changed = node.vertical_align != vertical_align && !node.inline;
-        node.view_style = view;
-        node.text_style = text;
+        node.view_style.set(view);
+        node.text_style.set(text);
         node.paint = paint;
         node.animated = animated;
         node.z_index = z_index;
@@ -4281,8 +4370,14 @@ impl<M: TextEngine> Core<M> {
                 self.needs_layout = true;
             }
         } else if node.kind == Kind::Text {
-            // A span: kept for when it is a block again.
+            // A span: kept for when it is a block again. Its horizontal
+            // padding is part of its block's text.
+            let padding = |l: &taffy::Style| (l.padding.left, l.padding.right);
+            let padded = node.base_layout.as_deref().map(padding) != Some(padding(&layout));
             node.base_layout = Some(Box::new(layout));
+            if padded && node.inline {
+                self.mark_text_block(key);
+            }
         }
         let mut flags = 0;
         if view_changed {
@@ -5368,6 +5463,13 @@ impl<M: TextEngine> Core<M> {
                 if let Some(list) = node.list.as_mut() {
                     list.loads_at_start = loads_at_start;
                     list.splice(at, removed, inserted);
+                }
+            }
+            Prop::ListDiff(diff) => {
+                let loads_at_start = node.events.contains(EventKind::LoadMoreAtStart);
+                if let Some(list) = node.list.as_mut() {
+                    list.loads_at_start = loads_at_start;
+                    list.reorder(&diff);
                 }
             }
             Prop::Columns(columns) => {
@@ -6812,22 +6914,6 @@ impl<M: TextEngine> Core<M> {
             .count() as u32
     }
 
-    /// Warns once of horizontal padding on a span (`key`): its characters
-    /// flow in its block's lines, so it has no box to pad (#1902); space
-    /// characters at its ends pad it instead.
-    fn warn_span_padding(&mut self, key: Key) {
-        let node = &self.nodes[key as usize];
-        if self.span_padding_warned || node.kind != Kind::Text {
-            return;
-        }
-        self.span_padding_warned = true;
-        log::warn!(
-            target: "js",
-            "padding on a nested <Text> is ignored (view {}): its characters flow in the text's lines; put spaces (U+202F, U+2009) at its ends to pad its background",
-            node.id
-        );
-    }
-
     /// Moves `key` (and its subtree) into or out of an inline context.
     fn set_inline(&mut self, key: Key, inline: bool) {
         let node = &mut self.nodes[key as usize];
@@ -6842,20 +6928,15 @@ impl<M: TextEngine> Core<M> {
         if inline {
             // Block -> span: spans have no layout node or native view; the
             // span keeps the style for when it is a block again.
-            let mut padded = false;
             if let Some(l) = node.layout.take() {
                 if node.base_layout.is_none() {
                     node.base_layout = Some(Box::new(self.layout.style(l).clone()));
                 }
-                padded = node.base_layout.as_deref().is_some_and(padded_inline);
                 self.layout.remove(l);
             }
             if node.created {
                 node.created = false;
                 self.mount.push(MountItem::Delete { id: node.id });
-            }
-            if padded {
-                self.warn_span_padding(key);
             }
         } else {
             // A fixed text keeps its style: the layout node takes it with
@@ -7675,7 +7756,8 @@ impl<M: TextEngine> Core<M> {
         let multiplier = node.paragraph.font_multiplier(self.font_scale);
         let inserted = self.update_attachments(key);
         let mut alignments = crate::AttachmentAlignments::default();
-        self.collect_text(key, base, &mut text, &mut alignments, false);
+        let mut spacers = Vec::new();
+        self.collect_text(key, base, &mut text, &mut alignments, &mut spacers, false);
         self.hide_attachments(key, false);
         if multiplier != 1.0 {
             for span in &mut text.spans {
@@ -7688,6 +7770,7 @@ impl<M: TextEngine> Core<M> {
         let colors_at_draw = self.text_engine.draws_colors_from_text();
         let cx = self.text_cx(layout);
         cx.deferred = deferred;
+        cx.spacers = spacers;
         if *cx.text == text && cx.alignments == alignments {
             if inserted {
                 // New attachment views: placed with the next final layout.
@@ -7767,6 +7850,7 @@ impl<M: TextEngine> Core<M> {
         style: ResolvedTextStyle,
         out: &mut AttributedText,
         alignments: &mut crate::AttachmentAlignments,
+        spacers: &mut Vec<u32>,
         in_press: bool,
     ) {
         for &c in &self.nodes[key as usize].children {
@@ -7793,7 +7877,19 @@ impl<M: TextEngine> Core<M> {
                     // updated after this merge in the same commit.
                     let tracked = child.classes.as_ref().map_or(0, |c| c.tracked_states());
                     let hovers = tracked & crate::tailwind::state::HOVERED != 0;
-                    self.collect_text(c, inner, out, alignments, in_press || press);
+                    // Horizontal padding takes room in the line, as a CSS
+                    // inline box's does: an empty attachment at each end in
+                    // the span's style, so its background spans it too.
+                    let (first, last) = span_padding(child, out.rtl);
+                    let pad = |out: &mut AttributedText, spacers: &mut Vec<u32>, w: f32| {
+                        if w > 0.0 {
+                            spacers.push(out.len_utf16());
+                            out.push_attachment(crate::geometry::size_pt(w, 0.0), inner);
+                        }
+                    };
+                    pad(out, spacers, first);
+                    self.collect_text(c, inner, out, alignments, spacers, in_press || press);
+                    pad(out, spacers, last);
                     // A link with a hint (its URL) hears the pointer come
                     // over its characters and leave them. A span that takes
                     // no presses (a `RichEditor`'s link mark: the editor's
@@ -8496,15 +8592,36 @@ impl<M: TextEngine> Core<M> {
             self.fit_window(key, layout);
         }
         self.emit_frames(key);
-        if kind == Kind::Screen && header_changed {
-            let id = self.nodes[key as usize].id;
-            if let Some(config) = self.screen_config(key) {
+        let screen = match kind {
+            Kind::Screen if header_changed => Some(key),
+            Kind::HeaderItem if self.header_item_emptied(key) => Some(parent),
+            _ => None,
+        };
+        if let Some(screen) = screen {
+            let id = self.nodes[screen as usize].id;
+            if let Some(config) = self.screen_config(screen) {
                 self.mount.push(MountItem::ScreenConfig {
                     id,
                     config: Box::new(config),
                 });
             }
         }
+    }
+
+    /// Header item `key` was laid out: records whether a leading or
+    /// trailing one has no width (its content is gone, or shows nothing)
+    /// and answers whether that changed, so its screen's options go out
+    /// again with the bar's item left out or put back.
+    fn header_item_emptied(&mut self, key: Key) -> bool {
+        let width = self.nodes[key as usize]
+            .layout
+            .map_or(0.0, |l| self.rounded_layout(l).size.width);
+        let root = self.nodes[key as usize].root.as_mut().expect("root state");
+        if !matches!(root.slot, HeaderSlot::Left | HeaderSlot::Right) {
+            return false;
+        }
+        let empty = width <= 0.0;
+        std::mem::replace(&mut root.empty, empty) != empty
     }
 
     /// The width a native header leaves screen `key`'s title view: the
@@ -8568,6 +8685,22 @@ impl<M: TextEngine> Core<M> {
                 continue;
             }
             let slot = child.root.as_ref().map_or(HeaderSlot::Left, |r| r.slot);
+            // A side's item with nothing to show leaves the bar without a
+            // button there, unless the platform's own button stands in for
+            // it (and presses it).
+            let empty = child.root.as_ref().is_some_and(|r| r.empty);
+            let system = match slot {
+                HeaderSlot::Left => {
+                    config.left_system_item.is_some() || config.left_symbol.is_some()
+                }
+                HeaderSlot::Right => {
+                    config.right_system_item.is_some() || config.right_symbol.is_some()
+                }
+                _ => true,
+            };
+            if empty && !system {
+                continue;
+            }
             let target = match slot {
                 HeaderSlot::Left => &mut config.left,
                 HeaderSlot::Right => &mut config.right,
@@ -8900,7 +9033,15 @@ impl<M: TextEngine> Core<M> {
     /// placeholders in `layout` (content box `content`); cut off ones out
     /// of sight.
     fn place_attachments(&mut self, key: Key, layout: &TextLayout, content: Bounds<Points>) {
-        let points = self.text_engine.attachments(layout);
+        let mut points = self.text_engine.attachments(layout);
+        if let Some(l) = self.nodes[key as usize].layout {
+            // Padding of spans is no view's.
+            let cx = self.text_cx(l);
+            if !cx.spacers.is_empty() {
+                let mut indices = cx.text.attachments.iter().map(|a| a.index);
+                points.retain(|_| indices.next().is_none_or(|i| !cx.spacers.contains(&i)));
+            }
+        }
         let attached = std::mem::take(&mut self.nodes[key as usize].attached);
         for (i, &id) in attached.iter().enumerate() {
             let Ok(a) = self.key(id) else { continue };
@@ -10409,53 +10550,89 @@ fn measure_leaf_size<M: TextEngine>(
         }
         _ => None,
     };
+    // Taffy hands a size it asks for (`RunMode::ComputeSize`) the known
+    // sizes of the border box, as a stretched item's width is, and the
+    // available space of the content box. What is measured fits the
+    // content box: a text measured as wide as its border box wraps fewer
+    // lines than it is laid out in, and the platforms cut the rest.
+    let inset = {
+        let parent = input.parent_size.width;
+        let mut inset = (style.padding.resolve_or_zero(parent, |_, _| 0.0)
+            + style.border.resolve_or_zero(parent, |_, _| 0.0))
+        .sum_axes();
+        // Scroll bars' gutters, as Taffy reserves them.
+        if style.overflow.y == taffy::Overflow::Scroll {
+            inset.width += style.scrollbar_width;
+        }
+        if style.overflow.x == taffy::Overflow::Scroll {
+            inset.height += style.scrollbar_width;
+        }
+        inset
+    };
     taffy::compute_leaf_layout(
         input,
         style,
         |_, _| 0.0,
-        |known, available| match cx {
-            Some(LeafContext::Text(cx)) => {
-                // An input's text scrolls in it (or wraps at its width):
-                // the input's width does not come from the text.
-                let field = cx
-                    .field
-                    .as_deref_mut()
-                    .map(|field| measure_text(engine, cache, field, None).width.0);
-                let max_width = if cx.text.no_wrap {
-                    None
-                } else {
-                    known.width.or(match (available.width, field) {
-                        (AvailableSpace::Definite(w), Some(field)) => Some(field.min(w)),
-                        (AvailableSpace::Definite(w), None) => Some(w),
-                        (_, Some(field)) => Some(field),
-                        (AvailableSpace::MinContent, None) => {
-                            Some(min_content_width(engine, cache, cx).0)
-                        }
-                        (AvailableSpace::MaxContent, None) => None,
-                    })
-                };
-                let measured = measure_text(engine, cache, cx, max_width);
-                taffy::Size {
-                    width: known
-                        .width
-                        .or(field.and(max_width))
-                        .unwrap_or(measured.width.0),
-                    height: known.height.unwrap_or(match input_max_height {
-                        Some(max) => measured.height.0.min(max),
-                        None => measured.height.0,
-                    }),
-                }
-            }
-            Some(LeafContext::Image(Some(natural))) => {
-                image_size(*natural, known.width, known.height)
-            }
-            Some(LeafContext::Native(Some(own))) => taffy::Size {
-                width: known.width.unwrap_or(own.width.0),
-                height: known.height.unwrap_or(own.height.0),
-            },
-            _ => taffy::Size::ZERO,
+        |known, available| {
+            let known = taffy::Size {
+                width: known.width.map(|w| (w - inset.width).max(0.0)),
+                height: known.height.map(|h| (h - inset.height).max(0.0)),
+            };
+            measure_content(engine, cache, cx, known, available, input_max_height)
         },
     )
+}
+
+/// The size of a leaf's content: `known` and `available` are its content
+/// box's ([`measure_leaf_size`]).
+fn measure_content<M: TextEngine>(
+    engine: &M,
+    cache: &mut MeasureCache,
+    cx: Option<&mut LeafContext<M::Prepared>>,
+    known: taffy::Size<Option<f32>>,
+    available: taffy::Size<AvailableSpace>,
+    input_max_height: Option<f32>,
+) -> taffy::Size<f32> {
+    match cx {
+        Some(LeafContext::Text(cx)) => {
+            // An input's text scrolls in it (or wraps at its width):
+            // the input's width does not come from the text.
+            let field = cx
+                .field
+                .as_deref_mut()
+                .map(|field| measure_text(engine, cache, field, None).width.0);
+            let max_width = if cx.text.no_wrap {
+                None
+            } else {
+                known.width.or(match (available.width, field) {
+                    (AvailableSpace::Definite(w), Some(field)) => Some(field.min(w)),
+                    (AvailableSpace::Definite(w), None) => Some(w),
+                    (_, Some(field)) => Some(field),
+                    (AvailableSpace::MinContent, None) => {
+                        Some(min_content_width(engine, cache, cx).0)
+                    }
+                    (AvailableSpace::MaxContent, None) => None,
+                })
+            };
+            let measured = measure_text(engine, cache, cx, max_width);
+            taffy::Size {
+                width: known
+                    .width
+                    .or(field.and(max_width))
+                    .unwrap_or(measured.width.0),
+                height: known.height.unwrap_or(match input_max_height {
+                    Some(max) => measured.height.0.min(max),
+                    None => measured.height.0,
+                }),
+            }
+        }
+        Some(LeafContext::Image(Some(natural))) => image_size(*natural, known.width, known.height),
+        Some(LeafContext::Native(Some(own))) => taffy::Size {
+            width: known.width.unwrap_or(own.width.0),
+            height: known.height.unwrap_or(own.height.0),
+        },
+        _ => taffy::Size::ZERO,
+    }
 }
 
 fn measure_text<M: TextEngine>(
@@ -10743,10 +10920,19 @@ fn disabling_changes(events: EventMask) -> bool {
     DISABLED_OFF.iter().any(|&e| events.contains(e))
 }
 
-/// Whether `layout` pads its left or right side (a span cannot).
-fn padded_inline(layout: &taffy::Style) -> bool {
-    let zero = taffy::LengthPercentage::length(0.0);
-    layout.padding.left != zero || layout.padding.right != zero
+/// A span's horizontal padding at its first and last character, in
+/// points (its block is right to left when `rtl`). Percentages, of no box
+/// a span has, count as none.
+fn span_padding(node: &Node, rtl: bool) -> (f32, f32) {
+    let Some(style) = node.base_layout.as_deref() else {
+        return (0.0, 0.0);
+    };
+    let len = |p: taffy::LengthPercentage| match p.into_raw().tag() {
+        taffy::CompactLength::LENGTH_TAG => p.into_raw().value().max(0.0),
+        _ => 0.0,
+    };
+    let (left, right) = (len(style.padding.left), len(style.padding.right));
+    if rtl { (right, left) } else { (left, right) }
 }
 
 /// The background a nested text's view style gives its characters.

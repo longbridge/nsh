@@ -777,6 +777,9 @@ pub(crate) struct Mounter {
     /// `SplitView`s' splits, by their native component's node
     /// ([`crate::split`]).
     splits: rustc_hash::FxHashMap<NodeId, crate::split::SplitHost>,
+    /// The app's address given to the system ([`crate::SurfaceOptions::handoff`]):
+    /// `None` while the app has not opted in.
+    handoff: Option<nsh_platform_apple::handoff::Activity>,
     mtm: MainThreadMarker,
 }
 
@@ -865,8 +868,15 @@ impl Mounter {
             areas: Vec::new(),
             fps: None,
             splits: Default::default(),
+            handoff: None,
             mtm,
         }
+    }
+
+    /// Gives the app's addresses to the system from now on
+    /// ([`crate::SurfaceOptions::handoff`]).
+    pub(crate) fn hand_off(&mut self) {
+        self.handoff.get_or_insert_default();
     }
 
     /// Measures the surface's frames and commits with a performance
@@ -1918,6 +1928,7 @@ impl Mounter {
                         modal.view.endEditing(true);
                     }
                 }
+                self.restore_root_focus();
             }
             (Command::ScrollTo { x, y, animated }, Native::Scroll(scroll)) => {
                 let inset = scroll.adjustedContentInset();
@@ -2042,6 +2053,11 @@ impl Mounter {
             (Command::Haptic(haptic), _) => crate::system::haptic(haptic),
             (Command::Orientations(bits), _) if id == nsh_core::ROOT_ID => {
                 self.orientations = Some(bits);
+            }
+            (Command::SetAppUrl(url) | Command::PushAppUrl(url), _) if id == nsh_core::ROOT_ID => {
+                if let Some(activity) = &mut self.handoff {
+                    activity.publish(&url);
+                }
             }
             (Command::PerfMonitor(true), _) => self.measure(),
             (Command::PerfMonitor(false), _) => self.stop_measuring(),
@@ -2675,10 +2691,32 @@ impl Mounter {
         }
     }
 
+    /// Restore hardware-key delivery after a window or root-wide blur,
+    /// including when the root itself was the only first responder.
+    fn restore_root_focus(&self) {
+        // A presented modal owns its responder scope, even with no input
+        // focused. Do not route its keys to the background surface.
+        if self
+            .views
+            .iter()
+            .flatten()
+            .any(|slot| matches!(&slot.native, Native::Modal(modal) if modal.presented))
+        {
+            return;
+        }
+        if let Some(root) = self.slot(nsh_core::ROOT_ID)
+            && let Some(window) = root.native.view().window()
+        {
+            self.target
+                .restore_root_focus(root.native.view().retain(), window);
+        }
+    }
+
     pub(crate) fn dismiss_keyboard(&self) {
         if let Some(root) = self.slot(nsh_core::ROOT_ID) {
             root.native.view().window().map(|w| w.endEditing(true));
         }
+        self.restore_root_focus();
     }
 
     /// Where a fling of scroll view `id` ends when it snaps: `target` is
@@ -3079,6 +3117,7 @@ impl Mounter {
     /// take the pictures they missed.
     pub(crate) fn window_changed(&mut self) {
         self.shaders.revisit();
+        self.restore_root_focus();
     }
 
     /// The surface's traits changed: on a screen of another scale (an
@@ -3451,7 +3490,7 @@ impl Mounter {
         }
         if let Some(press) = &g.press {
             press.set_long_press(events.contains(EventKind::LongPress) || links_long_press);
-            press.set_own(own_press, handles_press);
+            press.set_own(own_press, handles_press, nsh_core::input::has_tap(events));
             press.set_long_press_delay(slot.long_press_delay);
         }
         let wants_hover = nsh_core::input::hoverable(slot.tracked, events);
@@ -4827,7 +4866,8 @@ impl Mounter {
     /// keyboard focus without claiming the touch. The pressable path
     /// ([`Mounter::press_changed`]) focuses those with press handlers.
     pub(crate) fn focus_node(&mut self, id: NodeId) {
-        if let Some(view) = self.slot(id).and_then(|s| s.native.focus_view())
+        if !self.typing()
+            && let Some(view) = self.slot(id).and_then(|s| s.native.focus_view())
             && view.is_focus_stop()
             && view.becomeFirstResponder()
         {
@@ -4839,8 +4879,10 @@ impl Mounter {
     pub(crate) fn press_changed(&mut self, id: NodeId, pressed: bool, at: PressAt) {
         // A press on a focusable view gives it the keyboard focus, as a
         // click does on the desktops (and a tap on an iPad with a hardware
-        // keyboard should).
+        // keyboard should). Not while the software keyboard types into an
+        // input: as with UIKit's controls, the input keeps it.
         if pressed
+            && !self.typing()
             && let Some(view) = self.slot(id).and_then(|s| s.native.focus_view())
             && view.is_focus_stop()
             && view.becomeFirstResponder()
@@ -4858,6 +4900,13 @@ impl Mounter {
             let payload = self.press_payload(id, at);
             self.control.dispatch_event(id, event, payload);
         }
+    }
+
+    /// Whether the software keyboard is up for the focused input: a touch
+    /// on a control leaves it there, as UIKit's controls do, so the
+    /// keyboard stays and the layout does not move under the finger.
+    fn typing(&self) -> bool {
+        self.focused.is_some() && self.keyboard > 0.0
     }
 
     /// A press event on pressable text span `node` of text view `view`.

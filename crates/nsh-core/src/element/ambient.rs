@@ -458,6 +458,15 @@ pub fn platform_name() -> &'static str {
         .with_untracked(|e| e.platform_name())
 }
 
+/// The platform shows the system's tab bar: iOS and Android, unless a
+/// platform built outside NSH has none
+/// ([`crate::platform::Environment::tab_bar`]); it does not change.
+pub(crate) fn has_tab_bar() -> bool {
+    with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .expect("the core sets the environment")
+        .with_untracked(|e| matches!(e.os, Os::Ios | Os::Android) && e.tab_bar)
+}
+
 /// [`os`] where an engine runs (its thread, while it runs Rust code),
 /// else `None`: for code that also runs outside an engine (a unit test of
 /// a component's model).
@@ -1642,10 +1651,10 @@ pub fn try_apple_keys() -> Option<bool> {
 /// lives (TS: `keymap.bind`): `"mod+k"` (`mod` is Command on Apple
 /// platforms, Control elsewhere), `"shift+mod+l"`, `"escape"`, ... (the
 /// keystrokes of `nsh/keymap`). The handler gets the keystroke as written.
-/// It belongs to the window bound in ([`super::desktop::current_window`])
-/// and fires only for keys pressed there; a key it does not take goes on
-/// as usual. Desktop platforms fire them; elsewhere they are kept but no
-/// key does.
+/// It belongs to the window bound in ([`super::desktop::current_window`];
+/// in a component JS places in a window, that window) and fires only for
+/// keys pressed there; a key it does not take goes on as usual. Desktop
+/// platforms fire them; elsewhere they are kept but no key does.
 ///
 /// # Panics
 ///
@@ -1671,7 +1680,9 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
     }
     let owner = Owner::current();
     let handler: super::keys::KeyHandler = Rc::new(move |k: &str| owner.run(|| handler(k)));
-    // It belongs to the window whose tree binds it (`current_window`).
+    // It belongs to the window whose tree binds it (`current_window`); with
+    // no window around it in Rust (a component JS placed in a `Window`),
+    // the core finds the window its owner's component shows in.
     let window = super::use_context::<super::desktop::WindowRef>().and_then(|w| w.dialog_root());
     let keys = executor().keys.clone();
     let id = keys.borrow_mut().add(
@@ -1683,6 +1694,7 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
         keystroke.into(),
         handler,
         window,
+        owner,
     );
     let weak = Rc::downgrade(&keys);
     cleanup(move || {

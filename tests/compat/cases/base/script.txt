@@ -4475,6 +4475,33 @@ covers [nsh/base] createRichEditor
 covers [nsh/base] defineExtension
 covers [nsh/base] richExtension
 
+# base-rich-editor-composition
+tap id:case-base-rich-editor-composition
+expect Observed: none
+# Drive the native input sink, so the generated RichEditor event observes
+# the session after the platform's composition transition has settled.
+listens label:CompositionSink onCompositionChange
+event label:CompositionSink onCompositionChange composing=true text=n
+expect Transitions: true
+expect Observed: true 0 Seed
+event label:CompositionSink onCompositionChange composing=true text=ni
+expect Transitions: true
+event label:CompositionSink onCompositionChange composing=false text=""
+expect Transitions: true,false
+expect Observed: true 0 Seed
+event label:CompositionSink onCompositionChange composing=false text=""
+expect Transitions: true,false
+# A later composition's held text commits before its end observer runs.
+event label:CompositionSink onCompositionChange composing=true text=ri
+expect Transitions: true,false,true
+event label:CompositionSink onChange text=日
+event label:CompositionSink onCompositionChange composing=false text=""
+expect Transitions: true,false,true,false
+expect Observed: true 1 日Seed
+# Host event names have one shared coverage key, including a component
+# that emits its own payload under that name.
+covers [events] onCompositionChange
+
 # base-rich-editor-node-view
 tap id:case-base-rich-editor-node-view
 # The app's component renders the atom with its props, once.
@@ -4620,3 +4647,13 @@ covers [props] accessibilityLabel
 covers [events] Terminal.onData
 covers [events] Terminal.onResize
 covers [events] Terminal.onTitleChange
+
+# base-rich-editor-content-size
+# The extent excludes the viewport's minimum height and follows width.
+tap id:case-base-rich-editor-content-size
+expect Extent: true true
+expect Width: false
+tap id:content-size-narrow
+expect Width: true
+covers [events] onContentSizeChange
+covers [nsh/base] createRichEditor

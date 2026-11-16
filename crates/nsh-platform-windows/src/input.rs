@@ -422,6 +422,42 @@ impl Item {
     }
 }
 
+/// What a touch or pen contact last reported besides its position
+/// (`WM_POINTER*`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PenSample {
+    /// A pen rather than a finger.
+    pub(crate) pen: bool,
+    /// From 0 to 1, when the device senses it.
+    pub(crate) pressure: Option<f32>,
+    /// A pen's tilt in degrees (x, y).
+    pub(crate) tilt: (f32, f32),
+}
+
+thread_local! {
+    static PEN_SAMPLES: RefCell<Vec<(u32, PenSample)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Keeps what contact `pointer` ([`PointerEvent::pointer`]) reported,
+/// `None` once it lifted.
+pub(crate) fn set_pen_sample(pointer: u32, sample: Option<PenSample>) {
+    PEN_SAMPLES.with_borrow_mut(|samples| {
+        samples.retain(|(id, _)| *id != pointer);
+        if let Some(sample) = sample {
+            samples.push((pointer, sample));
+        }
+    });
+}
+
+fn pen_sample(pointer: u32) -> Option<PenSample> {
+    PEN_SAMPLES.with_borrow(|samples| {
+        samples
+            .iter()
+            .find(|(id, _)| *id == pointer)
+            .map(|(_, s)| *s)
+    })
+}
+
 /// A pointer that is down.
 struct Pointer {
     key: Key,
@@ -1278,7 +1314,8 @@ pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
 /// surface shows, the app's keymap, the focused custom view's raw
 /// `KeyDown` and `capture_keys` rules ([`crate::keyboard`]), the
 /// application menu's shortcuts, and the native defaults (a focused
-/// field's editing, selectable text, navigation, scrolling, Tab). A
+/// field's editing, selectable text, navigation, scrolling, Tab), Return
+/// and Space pressing a focused control first. A
 /// capture consumes the key before the menu's shortcuts and defaults; a
 /// key the keymap took is not reported to the raw listeners too. A key up
 /// is reported to the focused custom view (or heard for Alt's release)
@@ -1313,6 +1350,7 @@ pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
         // The focused custom view's raw keys, and the capture rules that
         // take a key before the menu's shortcuts and the defaults.
         || crate::keyboard::press(surface, &event)
+        || crate::keyboard::activate(surface, &event)
         || crate::chrome::shortcut(surface, &event)
         || crate::text_input::key(surface, &event)
         || crate::text::key(surface, &event)
@@ -1930,6 +1968,10 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
             .map(|p| {
                 let is_changed = std::ptr::eq(p, changed);
                 let (lx, ly) = local(&p.target, p.x, p.y);
+                let sample = match p.key {
+                    Key::Touch(id) => pen_sample(id),
+                    Key::Mouse => None,
+                };
                 TouchPoint {
                     id: p.id,
                     target: p.target.id(),
@@ -1942,11 +1984,22 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     page: point(Points(p.x), Points(p.y)),
                     location: point(Points(lx), Points(ly)),
                     changed: is_changed,
-                    pointer_type: if p.key == Key::Mouse {
-                        nsh_core::PointerType::Mouse
-                    } else {
-                        nsh_core::PointerType::Touch
+                    pointer_type: match (p.key, sample.map(|s| s.pen)) {
+                        (Key::Mouse, _) => nsh_core::PointerType::Mouse,
+                        (Key::Touch(_), Some(true)) => nsh_core::PointerType::Pen,
+                        (Key::Touch(_), _) => nsh_core::PointerType::Touch,
                     },
+                    pressure: match sample.and_then(|s| s.pressure) {
+                        Some(pressure)
+                            if !(is_changed
+                                && matches!(phase, TouchPhase::End | TouchPhase::Cancel)) =>
+                        {
+                            pressure
+                        }
+                        _ => TouchPoint::default_pressure(phase, is_changed),
+                    },
+                    tilt_x: sample.map_or(0.0, |s| s.tilt.0),
+                    tilt_y: sample.map_or(0.0, |s| s.tilt.1),
                 }
             })
             .collect()
@@ -2034,18 +2087,19 @@ fn find_press(
             }
         }
     }
-    views.iter().find_map(|v| {
-        let s = v.state();
-        (has_press(s.events) && !s.props.accessibility.state.disabled).then(|| {
-            Press::new(
+    nsh_core::input::pick_press(
+        views.iter().map(|v| {
+            let s = v.state();
+            (
                 v.clone(),
                 s.id,
                 s.events,
                 s.props.long_press_delay,
-                generation,
+                s.props.accessibility.state.disabled,
             )
-        })
-    })
+        }),
+        generation,
+    )
 }
 
 /// Presses in: `onPressDown`, the first time. `at` is the pointer in root
@@ -2074,7 +2128,7 @@ fn press_event(surface: &Surface, press: &Press, kind: EventKind, (x, y): (f32, 
         modifiers: press.modifiers,
         clicks: press.clicks,
     };
-    surface.event(press.node, kind, EventPayload::Press(event));
+    surface.event(press.target(kind), kind, EventPayload::Press(event));
 }
 
 fn cancel_press(surface: &Rc<Surface>, p: &mut Pointer) {

@@ -2171,14 +2171,16 @@ impl<M: TextEngine + 'static> Driver<M> {
         core.set_audio(config.audio.clone());
         core.set_window_backend(config.windows.clone());
         core.set_login_item(config.login_item.clone());
-        if let Some(window) = config.app.main_window() {
-            core.set_main_window(window);
-        }
         core.set_font_scale(config.environment.font_scale);
         core.set_class_environment(class_environment(&config.environment));
         core.set_header_heights(config.header_heights.0, config.header_heights.1);
         core.set_safe_area(insets(&config.environment));
         core.set_environment(ui_environment(&config.environment, config.viewport));
+        // After the environment: a surface without a window takes no
+        // attributes.
+        if let Some(window) = config.app.main_window() {
+            core.set_main_window(window);
+        }
         // WebAssembly has no threads for a runtime: tasks' timers are
         // `nsh_core::time`'s there, fired by the driver.
         #[cfg(not(target_arch = "wasm32"))]
@@ -3708,6 +3710,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         speech: env.speech,
         notifications: env.notifications,
         audio: env.audio,
+        tab_bar: env.tab_bar,
         cell: env.cell,
         web_input: env.web_input,
         web_evaluate: env.web_evaluate,

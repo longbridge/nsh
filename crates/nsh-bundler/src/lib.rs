@@ -78,6 +78,33 @@ mod tests {
     }
 
     #[test]
+    fn compile_module_compiles_enums() {
+        let code = super::compile_module(
+            "App.ts",
+            "enum Side { Buy, Sell = 4 }\n\
+             const enum Trend { Up = 1, Down }\n\
+             export const values = [Side.Sell, Side[0], Trend.Down];\n",
+            &[],
+        )
+        .unwrap();
+        assert!(!code.contains("enum "), "enums are compiled: {code}");
+        // Each member gets its value and its reverse mapping (`Side[0]`):
+        // the first is 0, an explicit value is kept, and the next one counts
+        // on from the member before it.
+        assert!(code.contains(r#"Side[Side["Buy"] = 0] = "Buy""#), "{code}");
+        assert!(
+            code.contains(r#"Side[Side["Sell"] = 4] = "Sell""#),
+            "{code}"
+        );
+        // A `const enum` is compiled as an object too (oxc does not inline its
+        // members here), with `Down` counted on from `Up = 1`.
+        assert!(
+            code.contains(r#"Trend[Trend["Down"] = 2] = "Down""#),
+            "{code}"
+        );
+    }
+
+    #[test]
     fn compile_module_errors_have_a_code_frame_without_colors() {
         let err = super::compile_module("App.tsx", "const = ;", &[]).unwrap_err();
         assert!(err.contains("const = ;"), "{err}");

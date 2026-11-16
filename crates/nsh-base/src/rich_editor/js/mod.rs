@@ -710,7 +710,7 @@ impl RichEditorSession {
     /// The caret's box `{ x, y, width, height }` at `pos` in page
     /// coordinates (the root view's, as `onHoverMove`'s `pagePosition` and
     /// a responder's `pageX` / `pageY`; ProseMirror's `coordsAtPos` in the
-    /// window's), or `null` before the pointer has been over the editor.
+    /// window's), or `null` before the mounted view measures its placement.
     /// Throws a `RangeError` for a position outside the document.
     pub(crate) fn page_coords_at_pos(&self, pos: usize) -> Result<Option<JsonValue>, JsError> {
         self.check_pos("pageCoordsAtPos", pos)?;
@@ -729,7 +729,7 @@ impl RichEditorSession {
 
     /// The box `{ x, y, width, height }` of the block starting at `pos` in
     /// page coordinates (ProseMirror's `nodeDOM(pos)` measured in the
-    /// window's), or `null` before the pointer has been over the editor.
+    /// window's), or `null` before the mounted view measures its placement.
     /// Throws a `RangeError` for a position outside the document.
     pub(crate) fn page_node_rect(&self, pos: usize) -> Result<Option<JsonValue>, JsError> {
         self.check_pos("pageNodeRect", pos)?;

@@ -161,6 +161,8 @@ pub(crate) struct ViewState {
     pub(crate) shift: (f32, f32),
     /// Extra opacity (screen and modal transitions).
     pub(crate) fade: f32,
+    /// A modal retained only for its exit animation, outside keyboard navigation.
+    pub(crate) modal_exiting: bool,
     /// Scroll state (scroll views). Boxed, as the image, canvas and
     /// shader states: few views have one, and every view's state is
     /// allocated with its AppKit view.
@@ -194,6 +196,7 @@ pub(crate) struct ViewState {
 impl ViewState {
     pub(crate) fn new(id: NodeId, kind: ViewKind) -> Self {
         ViewState {
+            modal_exiting: false,
             id,
             kind,
             frame: Bounds::default(),
@@ -2670,7 +2673,7 @@ impl NshView {
         }
         let mut at = Some(self.clone());
         while let Some(view) = at {
-            if view.state().style.hidden {
+            if view.state().style.hidden || view.state().modal_exiting {
                 return false;
             }
             at = view.parent_view();

@@ -165,7 +165,8 @@ traits in Rust). Element pages list only their own props. The Rust column names 
 ### Presses and feedback
 
 Press handling runs natively: the platform recognizes the press and applies the app's press styles, and the app's code
-only hears about it afterwards. Only the innermost pressable view responds; inside scroll views a press-in waits about
+only hears about it afterwards. Only the innermost pressable view responds, except that one listening only to `onLongPress` leaves
+the taps to the pressable view around it; inside scroll views a press-in waits about
 130 ms so a scroll can start first.
 
 | Prop | Rust | Type | Default | Description |
@@ -460,7 +461,7 @@ position in the text.
 
 ### Keyboard focus
 
-On macOS, the web and Android, Tab moves the keyboard focus between its stops in tree order: the inputs, the views
+On macOS, Windows, the web and Android, Tab moves the keyboard focus between its stops in tree order: the inputs, the views
 that take presses, and every `focusable` view. Focus styles (`focus:`, `.focus(..)`) style the focused view, and
 Return or Space presses it when it takes presses. A click presses a view without focusing it, so focus styles show
 for keyboard focus only. On Android a pressable view is a hardware-keyboard stop, while a touch-mode tap focuses

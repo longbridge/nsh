@@ -775,7 +775,8 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                     | Command::ScrollToEnd { .. }
                     // Desktops only.
                     | Command::Desktop(_)
-                    // The web's history entries; the core sends it there only.
+                    // The app's address: Android keeps none (App Links only
+                    // come in).
                     | Command::SetAppUrl(_)
                     | Command::PushAppUrl(_)
                     // No host answers `nsh/host` here (`Environment::host`):
@@ -861,12 +862,18 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                                 e.bool(ask);
                             }
                             N::Show { id, notification } => {
+                                let sound = notification
+                                    .sound_path()
+                                    .map(nsh_core::notifications::Notification::sound_resource_name)
+                                    .unwrap_or_default();
                                 e.int(1);
                                 e.int(id as i32);
                                 e.string(notification.id);
                                 e.string(notification.title);
                                 e.string(notification.body);
                                 e.bool(notification.silent);
+                                // The app's sound as a raw resource name, "" for none.
+                                e.string(sound);
                             }
                             N::Close(id) => {
                                 e.int(2);

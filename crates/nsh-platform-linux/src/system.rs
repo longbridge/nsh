@@ -826,7 +826,8 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         }),
         Command::Notification(command) => surface.control(|c| {
             let root = surface.root.upcast_ref::<gtk::Widget>();
-            crate::notifications::command(c, root, command);
+            let base = surface.asset_base.borrow().clone();
+            crate::notifications::command(c, root, command, base.as_ref());
         }),
         Command::Back => crate::navigation::default_back(surface),
         Command::Tokens(tokens) => set_menu_tokens(tokens),
@@ -842,7 +843,10 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::StatusBar(_)
         | Command::SetStatusBar(_)
         | Command::LayoutAnimation(_)
-        | Command::CancelPress => {}
+        | Command::CancelPress
+        // The app's address: this platform keeps none.
+        | Command::SetAppUrl(_)
+        | Command::PushAppUrl(_) => {}
         other => log::debug!("linux: command {other:?} is not supported"),
     }
 }

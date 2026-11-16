@@ -60,7 +60,11 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     let editing = crate::text_input::focused(surface).is_some();
     // Only the bindings of the window the key is in (and JS's) take it.
     let window = surface.input_root().id();
-    let found = table.find_in(window, keystroke, editing, event.repeat);
+    // Return and Space press a focused control: a binding of the focus
+    // takes them first, any other leaves them to the control
+    // (`crate::keyboard::activate`).
+    let control = crate::keyboard::focused_control(surface).is_some();
+    let found = table.find_at(window, keystroke, editing, control, event.repeat);
     if let Some(id) = found.fired() {
         surface.event(
             ROOT_ID,
