@@ -88,8 +88,20 @@ mod tests {
         )
         .unwrap();
         assert!(!code.contains("enum "), "enums are compiled: {code}");
-        assert!(code.contains("Side[\"Sell\"] = 4"), "{code}");
-        assert!(code.contains("Trend.Down") || code.contains("2"), "{code}");
+        // Each member gets its value and its reverse mapping (`Side[0]`):
+        // the first is 0, an explicit value is kept, and the next one counts
+        // on from the member before it.
+        assert!(code.contains(r#"Side[Side["Buy"] = 0] = "Buy""#), "{code}");
+        assert!(
+            code.contains(r#"Side[Side["Sell"] = 4] = "Sell""#),
+            "{code}"
+        );
+        // A `const enum` is compiled as an object too (oxc does not inline its
+        // members here), with `Down` counted on from `Up = 1`.
+        assert!(
+            code.contains(r#"Trend[Trend["Down"] = 2] = "Down""#),
+            "{code}"
+        );
     }
 
     #[test]
