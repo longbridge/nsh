@@ -39,7 +39,7 @@ use std::rc::Rc;
 
 use gpui::{
     App, Bounds, ContentMask, Corners, Edges, Element, ElementId, GlobalElementId, Hitbox,
-    HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels, Point,
+    HitboxBehavior, Hsla, InspectorElementId, LayoutId, PaintQuad, Pixels, Point,
     Window, point, px, size,
 };
 use nsh_core::{Color, Points};
@@ -740,14 +740,6 @@ pub(crate) struct SurfaceElement {
     pub(crate) surface: Rc<Surface>,
     pub(crate) focus: gpui::FocusHandle,
     pub(crate) view: gpui::WeakEntity<crate::app::AppView>,
-}
-
-impl IntoElement for SurfaceElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
 }
 
 impl Element for SurfaceElement {

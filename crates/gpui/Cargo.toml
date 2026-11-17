@@ -52,8 +52,8 @@ futures-channel = "0.3"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # GPUI Fast (Zed's GPUI with retained rendering), the renderer; the published
 # crates under GPUI's library names, as GPUI Kit apps use them.
-gpui = { package = "gpui-fast", version = "0.1.14", default-features = false, features = ["font-kit", "wayland", "x11"] }
-gpui_platform = { package = "gpui-fast-platform", version = "0.1.14", default-features = false, features = ["font-kit", "wayland", "x11"] }
+gpui = { package = "gpui-fast", version = "0.1.16", default-features = false, features = ["font-kit", "wayland", "x11"] }
+gpui_platform = { package = "gpui-fast-platform", version = "0.1.16", default-features = false, features = ["font-kit", "wayland", "x11"] }
 # Tests check the accessibility tree as the platforms' adapters do (the
 # version GPUI's adapters use).
 accesskit_consumer = "0.38"
