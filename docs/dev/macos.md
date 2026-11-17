@@ -39,6 +39,19 @@ A dialog's ordinary fade out retains its native view hierarchy until the animati
 compositing glass and backdrop materials. It leaves the input scope immediately; reopening a retained modal
 finishes its previous fade before presenting it again. Slide and shader transitions keep their snapshot path.
 
+## Short pointer presses
+
+The pointer adapter keeps a successful short press's `active:` feedback visible
+briefly when AppKit delivers down and up together, as with trackpad tap-to-click.
+Press and touch callbacks still run at release. A new press or cancellation clears
+pending feedback, and removed views and stopped surfaces leave no retained feedback.
+Reduced motion and the native test driver keep immediate visual release; the
+headless driver is unchanged. The ordinary-window checks in
+`tests/native/tap_feedback.rs` exercise same-turn events, a following held press,
+drag cancellation and teardown (`NSH_TAP_FEEDBACK_CHECK_ONLY=1`).
+`NSH_TAP_FEEDBACK_PLAIN_ONLY=1` restricts that check to non-transition styles;
+animated feedback requires a window connected to a screen.
+
 ## Nested shaders
 
 When a nested shader's GPU frame arrives, content readers around it take their pictures again. Screen-effect
