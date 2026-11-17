@@ -337,6 +337,7 @@ const player = await createPlayer(document.querySelector("#phone"), {
   // idiom: "phone",        // force "phone", "pad" or "desktop"; otherwise the pointer and the size decide
   // history: false,        // pages and dialogs as browser history entries; by default only when the app is the page, not in an iframe
   // dialogs: "viewport",   // Dialog, Sheet and AlertDialog over the whole browser window; by default over the container
+  // overlays: "viewport",  // popovers, menus, tooltips and other anchored overlays over the whole browser window; by default inside the container
 });
 await player.runModule(new URL("./bundle.js", location.href).href);
 ```
@@ -356,6 +357,8 @@ the app under capabilities without `"application": true` (`runModule(url, { capa
 without the app being asked, and its `quit` listeners still run as the page goes.
 
 Dialogs and alerts cover the container. With `dialogs: "viewport"` they cover the whole browser window, as a page's own modal dialogs do, while the app keeps the container as its window: a `Dialog` lays out at the window's size and safe area and slides in from its bottom edge, its backdrop covers the whole page, and the mouse wheel over it leaves the page in place. The dialog shows in the browser's top layer (Chrome 114, Safari 17, Firefox 125 and later), so it is above the rest of the page wherever the container is; in earlier browsers it covers the container.
+
+Popovers, menus, tooltips, a `Select`'s or a `Combobox`'s list, an editor's suggestions and every other overlay placed against an anchor (`<Overlay anchor>`) show inside the container. A page that gives the app a small part of its layout, such as a post composer 250 pixels high whose topic picker is 360 pixels high, sets `overlays: "viewport"`: they then show over the whole browser window, where the container would cut them off. They are placed and flipped by the window's edges and safe area rather than the container's, stay next to their anchor as the page scrolls or moves the container, and a press anywhere on the page outside them closes them as a press in the app does. Presses, the keyboard focus and Escape on them work as before, and dialogs over the window stay above them, so a page that sets `overlays: "viewport"` sets `dialogs: "viewport"` too. They show in the browser's top layer (Chrome 114, Safari 17, Firefox 125 and later); in earlier browsers they stay inside the container. Overlays without an anchor, such as a `fixed` view or a sheet's backdrop, stay in the container.
 
 
 `Sheet` follows the same presentation setting as `Dialog` and `AlertDialog`. In a same-origin iframe,
