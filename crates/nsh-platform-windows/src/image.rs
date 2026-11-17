@@ -247,6 +247,16 @@ impl Frame {
         })
     }
 
+    /// A frame of premultiplied BGRA pixels, rows packed.
+    #[cfg(test)]
+    pub(crate) fn from_bgra(width: u32, height: u32, data: Vec<u8>) -> Arc<Frame> {
+        Frame::new(Pixels {
+            width,
+            height,
+            data,
+        })
+    }
+
     /// Its size in pixels (one point each, at 96 DPI).
     pub(crate) fn size(&self) -> (u32, u32) {
         (self.pixels.width, self.pixels.height)
@@ -875,20 +885,50 @@ pub(crate) fn load_menu_icon(
     )
 }
 
+/// An image a canvas draws: its pixels, and how many of them make one unit
+/// of the image's own size (what `drawImage`'s source rectangle and its
+/// default size are in).
+#[derive(Clone)]
+pub(crate) struct CanvasBitmap {
+    pub(crate) frame: Arc<Frame>,
+    /// 1 for a bitmap decoded whole, whose units are its pixels; an SVG's
+    /// pixels per point, as it was rasterized.
+    pub(crate) scale: f32,
+}
+
 /// Loads the bitmap `uri` (`https://…`, `asset:/…`, a file path, `data:`)
 /// for a canvas off the UI thread, at its natural size; `done` runs on
 /// the surface's UI thread with the image (an animation's first frame). An
-/// SVG is rasterized by the shared SVG renderer and handed over as its
-/// bitmap.
+/// SVG is rasterized by the shared SVG renderer at `scale` pixels per
+/// point (the canvas's), so that it stays sharp on the screen, and handed
+/// over as its bitmap.
 ///
 /// A cached image is handed over before this returns: callers must not
 /// hold a borrow of view state that `done` takes.
 pub(crate) fn load_bitmap(
     surface: &Rc<Surface>,
     uri: &str,
-    done: impl FnOnce(Result<Arc<Frame>, String>) + 'static,
+    scale: f32,
+    done: impl FnOnce(Result<CanvasBitmap, String>) + 'static,
 ) {
-    let done = move |result: Result<(Picture, Lease), String>| done(result.map(|(p, _)| p.frame));
+    let done = move |result: Result<(Picture, Lease), String>| {
+        done(result.map(|(p, _)| {
+            // What it was decoded at over its own size.
+            let own = match p.natural {
+                Natural::Vector(points) => points.width.0,
+                Natural::Pixels(width, _) => width as f32,
+            };
+            let scale = if own > 0.0 {
+                p.frame.size().0 as f32 / own
+            } else {
+                1.0
+            };
+            CanvasBitmap {
+                frame: p.frame,
+                scale,
+            }
+        }))
+    };
     let source = ImageSource {
         uri: uri.into(),
         size: None,
@@ -899,7 +939,7 @@ pub(crate) fn load_bitmap(
     if let Some(load) = fetch(
         surface,
         &source,
-        Want::natural(1.0),
+        Want::natural(scale.max(1.0)),
         Frames::First,
         Priority::Normal,
         None,
