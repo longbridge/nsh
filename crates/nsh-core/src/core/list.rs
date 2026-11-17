@@ -1281,7 +1281,9 @@ impl ListState {
         }
     }
 
-    pub(super) fn set_columns(&mut self, columns: u32) {
+    /// Whether the cells change width: they are laid out again
+    /// (`Core::layout_cells`), which only runs in a turn that lays out.
+    pub(super) fn set_columns(&mut self, columns: u32) -> bool {
         let columns = columns.max(1);
         if columns != self.columns {
             // The first visible item stays where it is (a window resized to
@@ -1304,22 +1306,27 @@ impl ListState {
             if let Some((index, from_top)) = anchor {
                 self.keep_in_place(index, from_top);
             }
+            true
+        } else {
+            false
         }
     }
 
-    /// `contentStyle`: it wins over `contentClass` when set.
-    pub(super) fn set_content(&mut self, content: ListContentStyle) {
+    /// `contentStyle`: it wins over `contentClass` when set. Whether the
+    /// cells change width, as [`Self::set_columns`].
+    pub(super) fn set_content(&mut self, content: ListContentStyle) -> bool {
         self.content_style = content;
-        self.apply_content();
+        self.apply_content()
     }
 
-    /// What `contentClass` sets.
-    pub(super) fn set_class_content(&mut self, content: ListContentStyle) {
+    /// What `contentClass` sets. Whether the cells change width, as
+    /// [`Self::set_columns`].
+    pub(super) fn set_class_content(&mut self, content: ListContentStyle) -> bool {
         self.content_class = content;
-        self.apply_content();
+        self.apply_content()
     }
 
-    fn apply_content(&mut self) {
+    fn apply_content(&mut self) -> bool {
         let content = if self.content_style != ListContentStyle::default() {
             self.content_style
         } else {
@@ -1344,6 +1351,9 @@ impl ListState {
                 self.cells_cross = f32::NAN;
             }
             self.rebuild_offsets();
+            cross_changed
+        } else {
+            false
         }
     }
 

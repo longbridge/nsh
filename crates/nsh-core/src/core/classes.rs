@@ -854,8 +854,10 @@ impl<M: TextEngine> Core<M> {
             }
             Part::Content => {
                 let content = self.list_content(key);
-                if let Some(list) = self.nodes[key as usize].list.as_mut() {
-                    list.set_class_content(content);
+                if let Some(list) = self.nodes[key as usize].list.as_mut()
+                    && list.set_class_content(content)
+                {
+                    self.needs_layout = true;
                 }
             }
             _ => {}
