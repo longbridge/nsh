@@ -3472,6 +3472,41 @@ mod tests {
         out
     }
 
+    /// A dashed border on one side draws only that side: the sides without
+    /// a border show no dashes of it.
+    #[test]
+    fn a_dashed_border_on_one_side_draws_only_that_side() {
+        let Ok(gfx) = gfx::get() else {
+            return;
+        };
+        for scale in [1.0f32, 2.0] {
+            let size = ((120.0 * scale).ceil() as u32, (80.0 * scale).ceil() as u32);
+            let surface = Surface::new(Default::default());
+            surface.resized(size, scale);
+            let root = surface.root.clone();
+            let line = view(
+                Some(&root),
+                2,
+                ViewKind::View,
+                rect(10.0, 10.0, 100.0, 60.0),
+            );
+            {
+                let mut s = line.state_mut();
+                s.style.borders.widths.left = Points(2.0);
+                s.style.borders.colors = [Color(0xff0000ff); 4];
+                s.style.borders.style = nsh_core::BorderStyle::Dashed;
+            }
+            let into = target(&gfx, size);
+            draw_into(&surface, &gfx, &into, scale, false, None, None, None).unwrap();
+            let (x0, _, x1, _) =
+                red_extent(&read(&gfx, &into, size), size).expect("the left side is drawn");
+            assert!(
+                x0 as f32 >= 10.0 * scale - 1.0 && x1 as f32 <= 12.0 * scale + 1.0,
+                "scale {scale}: red from x {x0} to {x1}"
+            );
+        }
+    }
+
     #[test]
     fn a_tinted_image_fills_its_frame_at_any_scale() {
         let Ok(gfx) = gfx::get() else {
