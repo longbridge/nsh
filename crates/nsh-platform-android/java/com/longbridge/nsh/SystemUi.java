@@ -132,6 +132,7 @@ final class SystemUi {
         }
         b.setOnDismissListener(d -> {
             if (TestAgent.shownDialog == d) TestAgent.shownDialog = null;
+            if (mounter.dialogs.get(dialogId) == d) mounter.dialogs.remove(dialogId);
             if (!answered[0]) {
                 answered[0] = true;
                 answer(mounter, dialogId, -1);
@@ -139,6 +140,7 @@ final class SystemUi {
         });
         AlertDialog shown = b.show();
         TestAgent.shownDialog = shown;
+        mounter.dialogs.put(dialogId, shown);
         if (surface != 0 && shown.getWindow() != null) {
             // The theme's shape (corners, insets), filled with the app's color.
             Drawable background = shown.getWindow().getDecorView().getBackground();
@@ -153,6 +155,17 @@ final class SystemUi {
                 if (button != null && color != 0) button.setTextColor(color);
             }
         }
+    }
+
+    /**
+     * Takes back the alert {@link #dialog} showed as {@code dialogId}: the core answered it already, so the
+     * dismissal it reports goes unheard.
+     */
+    static void closeDialog(Mounter mounter, int dialogId) {
+        AlertDialog shown = mounter.dialogs.get(dialogId);
+        if (shown == null) return;
+        mounter.dialogs.remove(dialogId);
+        shown.dismiss();
     }
 
     /** {@code text} in {@code color} (0: the theme's). */
