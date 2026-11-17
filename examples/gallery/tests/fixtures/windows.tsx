@@ -17,6 +17,17 @@ const describe = (s: WindowState | null | undefined) =>
       `content=${round(s.contentBounds.size.width)}x${round(s.contentBounds.size.height)}`
     : "none";
 
+/** Where a window is on its display: `fills` when it covers just the display's work area (what a maximized
+ * window shows of itself), else its offset from the work area's corner. */
+const onDisplay = (s: WindowState | null | undefined) => {
+  const area = s?.display?.visibleBounds;
+  if (!s || !area) return "none";
+  const b = s.bounds;
+  const near = (a: number, b: number) => Math.abs(a - b) < 1;
+  if (near(b.origin.x, area.origin.x) && near(b.origin.y, area.origin.y) && near(b.size.width, area.size.width) && near(b.size.height, area.size.height)) return "fills";
+  return `at=${round(b.origin.x - area.origin.x)},${round(b.origin.y - area.origin.y)}`;
+};
+
 const opened = signal("none");
 const notesSeen = signal("none");
 const panelSeen = signal("none");
@@ -116,6 +127,7 @@ function App() {
         <Text>{`Outside: ${outside()}`}</Text>
         <Text>{`Overlay: ${overlay()}`}</Text>
         <Text>{`Notes: ${describe(notes()?.state())}`}</Text>
+        <Text>{`Notes on display: ${onDisplay(notes()?.state())}`}</Text>
         <Text>{`Panel: ${describe(Window.get("panel")?.state())}`}</Text>
         <Text>{`Palette: ${describe(Window.get("palette")?.state())}`}</Text>
         <Text>{`Popup: ${describe(Window.get("popup")?.state())}`}</Text>
