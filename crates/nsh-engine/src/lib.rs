@@ -969,11 +969,15 @@ pub struct EngineConfig {
     /// ([`App::app_id`]; `default` without one), its storage
     /// (`nsh/storage`) in `storage.json` there. The platform's: the
     /// system's data directory ([`data_dir`]) for apps of their own,
-    /// `…/nsh` in an embedding app's. `None`: nothing is kept.
+    /// `…/nsh` in an embedding app's. This is a parent directory, not
+    /// `nsh.json` `"dataDir"`. `None`: nothing is kept unless `app_dir`
+    /// or `storage` is set.
     pub data_dir: Option<std::path::PathBuf>,
     /// The app's own directory, in place of `<data_dir>/<app id>`: where
     /// its storage, `${dataDir}` and the files it keeps there live (the
-    /// desktop runners' `nsh.json` `"dataDir"`). `None`: the convention.
+    /// desktop runners' `nsh.json` `"dataDir"`). Takes precedence over
+    /// `data_dir`; no app id is appended. `None`: use `<data_dir>/<app id>`.
+    /// `process.dataDir` and `${dataDir}` expose this resolved directory.
     pub app_dir: Option<std::path::PathBuf>,
     /// Where the app's caches are kept and how much each keeps: the engine
     /// opens them in `<root>/<app id>/<kind>` ([`Engine::image_cache`]).
@@ -1199,7 +1203,7 @@ fn app_dir(config: &EngineConfig) -> Option<std::path::PathBuf> {
 }
 
 /// The storage of the app `config` runs: [`EngineConfig::storage`], or a
-/// file in its directory of [`EngineConfig::data_dir`].
+/// file in its resolved app directory (`app_dir`, then `<data_dir>/<app id>`).
 fn app_storage(config: &EngineConfig) -> Option<Arc<dyn nsh_core::storage::StorageBackend>> {
     if let Some(storage) = &config.storage {
         return Some(storage.clone());
@@ -4299,6 +4303,17 @@ mod tests {
         // `"dataDir"`: storage, `${dataDir}` and its files all live there.
         config.app_dir = Some("/home/a/.myapp".into());
         assert_eq!(super::app_dir(&config), Some("/home/a/.myapp".into()));
+        config.data_dir = None;
+        assert_eq!(super::app_dir(&config), Some("/home/a/.myapp".into()));
+        config.app = app().with_app_id(Some("com.b")).into();
+        assert_eq!(super::app_dir(&config), Some("/home/a/.myapp".into()));
+        config.app_dir = None;
+        assert_eq!(super::app_dir(&config), None);
+        config.data_dir = Some("/data".into());
+        assert_eq!(
+            super::app_dir(&config),
+            Some(std::path::Path::new("/data").join("com.b"))
+        );
     }
 
     #[test]

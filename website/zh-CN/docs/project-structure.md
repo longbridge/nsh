@@ -131,7 +131,7 @@ mount(App);
 | `fileTypes` | object[] | `package`、`run` | 应用打开的文件类型，`[{ "name": "Video", "extensions": ["mp4"], "mimeTypes": ["video/mp4"] }]`，由包声明给系统；文件送到 [`Application.on("openFiles")`](../modules/nsh-desktop.md#打开文件)。 |
 | `handoff` | boolean | `package` | `true`：在 iOS 和 macOS 上，应用用 [`UrlScheme.setUrl`](../modules/nsh.md#handoff) 设置的地址交给系统，Handoff 可以在用户的其他设备上接着打开它；打包时在 `NSUserActivityTypes` 中声明它的活动类型 `<id>.url`。 |
 | `singleInstance` | boolean | `package` | `true`：应用在 Windows 和 Linux 上只运行一份；第二次启动把参数和工作目录交给正在运行的应用后退出（[单实例](../modules/nsh-desktop.md#单实例)）。 |
-| `dataDir` | string | `package` | 打包后的桌面应用（macOS、Windows、Linux）把数据放在这里：存储（`nsh/storage`）、日志和 `${dataDir}`（应用在那里读写的文件），而不是系统数据目录里以应用 id 命名的目录：绝对路径，或用户主目录下的路径，如 `"${homeDir}/.myapp"`。除非应用已经有自己的数据目录（例如配套 CLI 的 `~/.myapp`），否则不要设置：默认位置就是各平台约定的应用数据目录，VS Code、Zed 等应用也放在这里（macOS 为 `~/Library/Application Support/<id>`，Linux 为 `$XDG_DATA_HOME/<id>` 即 `~/.local/share/<id>`，Windows 为 `%APPDATA%\<id>`），在主目录新建点目录会给用户添乱。应用 id 变了数据也不动。不能有 `..` 或其他 `${...}`；runner 不接受的值，`package` 会警告并忽略。 |
+| `dataDir` | string | `package` | 打包后的桌面应用（macOS、Windows、Linux）可选的完整数据目录：存储（`nsh/storage`）、日志和通过 `${dataDir}` 访问的文件。接受绝对路径或 `"${homeDir}/.myapp"`；不能包含 `..` 或其他 `${...}`，无效值会警告并忽略。不设置则保留平台约定：macOS 为 `~/Library/Application Support/<id>`，Linux 为 `$XDG_DATA_HOME/<id>`（默认 `~/.local/share/<id>`），Windows 为 `%APPDATA%\<id>`。仅在需要共用已有应用或 CLI 目录时使用主目录点目录。指定路径不再追加应用 id，id 改变时路径不变；不会自动迁移旧数据。 |
 | `features` | string[] | `package` | 打包时 release runner 始终保留的原生功能（应用带 Rust crate，或本机装有 `cargo` 且打包目标是本机系统时，在本地构建 runner），如 `["plot"]`：只有 Rust 代码或动态 import 才用到的功能写在这里。其余功能中，bundle 用不到的（`shader`、`editor`、`plot` 等）`package` 会去掉，并输出原因。 |
 | `icon` | string \| object | `package`、`run` | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`；也可按平台分别提供（`{ "macos": "…", "windows": "…" }`，[打包](./packaging.md#图标)）。 |
 | `tailwind` | object | 每次构建 | 扩展 `class` 字符串所依据的 Tailwind 主题（[Tailwind](./tailwind.md)）。 |
@@ -148,6 +148,10 @@ mount(App);
 | `android` | object | `package` | Android 包的设置：`targetSdk`，应用的目标 API 级别，也是编译所用的级别（默认 35）（[打包](./packaging.md#目标-api-级别)）；`usesCleartextTraffic`，是否允许普通的 `http://` 请求（默认 `false`）（[打包](./packaging.md#明文-http)）。 |
 | `macos` | object | `package`、`run`、`test` | macOS 包添加的内容：`infoPlist` 和 `entitlements`，与 `ios` 的相同（[打包](./packaging.md#infoplist-键与-entitlements)），`infoPlist` 的 `LSMinimumSystemVersion` 提高应用所需的 macOS 版本（[最低系统版本](./packaging.md#最低系统版本)）；以及 `activationPolicy`，即无论 NSH 以哪种方式启动应用，它如何参与系统界面：`"regular"`（默认），有 Dock 图标和菜单栏；或 `"accessory"`，即菜单栏应用（[macOS](./macos.md#菜单栏应用)）。 |
 | `root` | string | `run`, `package` | Rust 应用的根组件，即它在 `rust` crate（列表时为第一个）中的路径（`App`、`shell::Gallery`）：对应用目录执行 `nsh run` 和 `nsh package` 时，在所有平台上直接挂载它，不使用 QuickJS；`nsh run App.tsx` 仍然运行 TSX 入口（[用 Rust 开发](./rust.md)）。 |
+
+`nsh.json` 的 `dataDir` 是应用层唯一的配置入口。CLI 中 Rust 的 `AppConfig::data_dir` 保存同一个 JSON 值，桌面 runner 将它解析后传给 `AppOptions::app_dir` 和 `EngineConfig::app_dir`。已有 Rust 字段 `AppOptions::data_dir` / `EngineConfig::data_dir` 则表示多个应用共用的**父目录**，引擎会追加各应用 id。两个 Rust 字段同时设置时，应用数据优先使用 `app_dir`。`process.dataDir` 与 `${dataDir}` 表示最终的完整目录，不是另外两个配置项。缓存和下载的更新包仍使用原有位置。
+
+Linux 通过相应的 XDG 变量区分配置（`~/.config`）、数据（`~/.local/share`）、缓存（`~/.cache`）和状态（`~/.local/state`），见 [XDG 规范](https://specifications.freedesktop.org/basedir/latest/)。具体应用并不完全一致：[VS Code](https://code.visualstudio.com/docs/setup/portable) 和 [Chrome](https://chromium.googlesource.com/chromium/src/+/main/docs/user_data_dir.md) 把 Linux 用户数据放在 `~/.config` 下，[Zed](https://github.com/zed-industries/zed/blob/main/crates/paths/src/paths.rs) 则区分配置与数据。macOS 上三者的数据都使用 Application Support，Zed 的配置使用 `~/.config/zed`。NSH 保留已有的平台数据目录约定，不默认新建主目录点目录。
 
 `nsh package` 和 `nsh publish` 的参数（`--name`、`--id`、`--app-version`、`--build`、`--icon`、`--min-runtime`）会覆盖文件中的值（[CLI](./cli.md)）。
 

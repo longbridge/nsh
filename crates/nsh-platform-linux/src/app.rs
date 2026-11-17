@@ -147,7 +147,8 @@ pub struct AppOptions {
     pub data_dir: Option<PathBuf>,
     /// The app's own directory, in place of `<data_dir>/<app id>`
     /// ([`nsh_engine::EngineConfig::app_dir`]): the release runner's
-    /// `nsh.json` `"dataDir"`.
+    /// `nsh.json` `"dataDir"`. Takes precedence over `data_dir`; no app id
+    /// is appended. `None` keeps the existing `<data_dir>/<app id>` convention.
     pub app_dir: Option<PathBuf>,
     /// Where the apps it runs keep their caches (the images they
     /// downloaded) and how much each keeps: by default the system's cache
