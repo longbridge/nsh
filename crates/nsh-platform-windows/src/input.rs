@@ -991,7 +991,7 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
             return;
         }
         if input {
-            crate::text_input::context_menu(surface, &v);
+            crate::text_input::context_menu(surface, &v, None);
             return;
         }
         if (selectable || area) && !app_menu {

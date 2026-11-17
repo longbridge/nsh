@@ -883,7 +883,8 @@ pub(crate) fn activate(surface: &std::rc::Rc<Surface>, event: &KeyEvent) -> bool
 /// opens the context menu of what has the keyboard focus, with no
 /// pointer, as a secondary click does: the focused view or the nearest
 /// around it that listens to `onContextMenu` ([`crate::input::show_context_menu`]);
-/// a focused text field shows its edit menu unless it listens itself.
+/// a focused text field shows its edit menu at its bottom-start corner
+/// unless it listens itself.
 /// True when handled.
 pub(crate) fn context_menu(surface: &std::rc::Rc<Surface>, event: &KeyEvent) -> bool {
     if !opens_context_menu(event) {
@@ -896,7 +897,13 @@ pub(crate) fn context_menu(surface: &std::rc::Rc<Surface>, event: &KeyEvent) -> 
         return false;
     };
     if !crate::input::show_context_menu(surface, &field) {
-        crate::text_input::context_menu(surface, &field);
+        // At the field's bottom-start corner, where the app's menus open
+        // without a pointer.
+        let rtl = surface.mounter.try_borrow().is_ok_and(|m| m.rtl);
+        let size = field.state().frame.size;
+        let corner = nsh_core::input::context_menu_anchor(size, rtl);
+        let at = field.to_root().and_then(|m| m.map(corner.x.0, corner.y.0));
+        crate::text_input::context_menu(surface, &field, at);
     }
     true
 }

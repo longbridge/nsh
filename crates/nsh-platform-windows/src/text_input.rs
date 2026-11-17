@@ -1757,10 +1757,11 @@ pub(crate) fn scroll_to(view: &NshView, y: Points) {
     }
 }
 
-/// A right click on field `view`: it takes the focus (keeping its
-/// selection) and shows Windows' edit menu, each item RichEdit's own
-/// command.
-pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
+/// A right click on field `view`, or the Menu key or Shift+F10 in it: it
+/// takes the focus (keeping its selection) and shows Windows' edit menu,
+/// each item RichEdit's own command, at `at` (in the window's points) or
+/// at the pointer.
+pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView, at: Option<(f32, f32)>) {
     use nsh_core::desktop::MenuRole;
 
     use crate::chrome::{Action, LocalItem};
@@ -1804,7 +1805,7 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
             enabled,
             action,
         };
-    crate::chrome::popup_actions(
+    crate::chrome::popup_actions_at(
         surface,
         vec![
             item(
@@ -1849,6 +1850,7 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
                 command(EM_SETSEL, 0, -1),
             ),
         ],
+        at,
     );
 }
 

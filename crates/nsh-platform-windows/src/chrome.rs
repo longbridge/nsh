@@ -514,6 +514,12 @@ pub(crate) enum LocalItem {
 /// Shows a context menu of the platform's own (a text field's) at the
 /// pointer.
 pub(crate) fn popup_actions(surface: &Surface, items: Vec<LocalItem>) {
+    popup_actions_at(surface, items, None);
+}
+
+/// Shows a context menu of the platform's own at `at` (in the window's
+/// points), or at the pointer.
+pub(crate) fn popup_actions_at(surface: &Surface, items: Vec<LocalItem>, at: Option<(f32, f32)>) {
     let mut actions = Vec::new();
     let items: Vec<MenuItem> = items
         .into_iter()
@@ -550,7 +556,7 @@ pub(crate) fn popup_actions(surface: &Surface, items: Vec<LocalItem>) {
         surface,
         Popup {
             items: items.into(),
-            at: None,
+            at,
             actions,
             area: None,
             awaited: false,
