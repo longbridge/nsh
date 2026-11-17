@@ -2276,7 +2276,10 @@ fn finish(surface: &Rc<Surface>, mut p: Pointer, cancelled: bool) {
         };
         report(surface, phase, &p, None);
     }
-    finish_pressed(surface, &mut p, cancelled);
+    // Double-click and Shift-click can select without a move event. End
+    // selection before deciding whether this release deserves a tap pulse.
+    let selected = matches!(&p.mode, Mode::Select(view) if selection_up(surface, view));
+    finish_pressed(surface, &mut p, cancelled || selected);
     let mode = std::mem::replace(&mut p.mode, Mode::Free);
     match mode {
         Mode::Pan(view) => {
@@ -2285,9 +2288,7 @@ fn finish(surface: &Rc<Surface>, mut p: Pointer, cancelled: bool) {
         }
         Mode::Thumb(view, _) => crate::scroll::thumb_end(surface, &view),
         Mode::Idle | Mode::Free | Mode::Select(_) => {
-            if let Mode::Select(view) = &mode
-                && selection_up(surface, view)
-            {
+            if selected {
                 // A selecting drag ended: no press.
                 cancel_press(surface, &mut p);
             }

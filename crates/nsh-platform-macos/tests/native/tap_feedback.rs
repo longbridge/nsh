@@ -42,6 +42,7 @@ fn Pad() -> impl IntoElement {
         .child(
             view()
                 .test_id("plain")
+                .selectable(true)
                 .w(px(100.0))
                 .h(px(100.0))
                 .bg(rgb(0x336699))
@@ -71,9 +72,13 @@ fn find(view: &NSView, id: &str) -> Option<Retained<NSView>> {
 }
 
 fn mouse(window: &NSWindow, kind: NSEventType, x: f64) -> Retained<NSEvent> {
+    mouse_at(window, kind, NSPoint::new(x, 150.0), 1)
+}
+
+fn mouse_at(window: &NSWindow, kind: NSEventType, at: NSPoint, clicks: isize) -> Retained<NSEvent> {
     NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
-        kind, NSPoint::new(x, 150.0), NSEventModifierFlags::empty(),
-        NSProcessInfo::processInfo().systemUptime(), window.windowNumber(), None, 1, 1, 0.0,
+        kind, at, NSEventModifierFlags::empty(),
+        NSProcessInfo::processInfo().systemUptime(), window.windowNumber(), None, 1, clicks, 0.0,
     ).unwrap()
 }
 
@@ -194,6 +199,33 @@ fn check(animated: bool) {
     pump(250);
     assert!(!EVENTS.lock().unwrap().contains(&"press"));
     assert!((opacity() - 1.0).abs() < 0.01);
+
+    if !animated {
+        // A double-click selects without a drag event, cancelling the
+        // press. It must not get a completed tap's visual pulse.
+        EVENTS.lock().unwrap().clear();
+        root.mouseDown(&mouse_at(
+            &window,
+            NSEventType::LeftMouseDown,
+            NSPoint::new(220.0, 190.0),
+            2,
+        ));
+        root.mouseUp(&mouse_at(
+            &window,
+            NSEventType::LeftMouseUp,
+            NSPoint::new(220.0, 190.0),
+            2,
+        ));
+        let deadline = Instant::now() + Duration::from_millis(250);
+        while Instant::now() < deadline {
+            pump(2);
+            assert!(
+                (opacity() - 1.0).abs() < 0.01,
+                "a selecting click must not pulse"
+            );
+        }
+        assert!(!EVENTS.lock().unwrap().contains(&"press"));
+    }
 
     // A timer that outlives its app must not retain it or touch a new tree.
     root.mouseDown(&mouse(&window, NSEventType::LeftMouseDown, x));
