@@ -511,7 +511,12 @@ fn restore_focus(surface: &Surface, scope: &NSView, view: Option<objc2::rc::Weak
         return;
     }
     if view.kind() == ViewKind::Input {
-        if view.can_target() && !view.ns().isHiddenOrHasHiddenAncestor() {
+        // Editor caret sinks reject pointer targeting but still take
+        // keyboard focus. Visibility and exit state decide restoration.
+        if view.seen_by_keys()
+            && !view.state().live.as_ref().is_some_and(|l| l.dying())
+            && !view.ns().isHiddenOrHasHiddenAncestor()
+        {
             crate::text_input::focus(&view);
         }
     } else if crate::input::is_key_stop(&view) {
