@@ -1422,6 +1422,19 @@ impl Modal {
         self.bind_prop(close, |v: bool| Prop::Modal(ModalProp::CloseOnSwipe(v)))
     }
 
+    /// iOS 16 and later: the height in points a page or form sheet rests at
+    /// instead of the system's large one; `None` keeps that.
+    pub fn sheet_height(self, height: impl IntoReactive<Option<f32>>) -> Self {
+        self.bind_prop(height, |v: Option<f32>| {
+            Prop::Modal(ModalProp::SheetHeight(v.map(Points)))
+        })
+    }
+
+    /// iOS: shows the system's grabber at the top of a page or form sheet.
+    pub fn sheet_grabber(self, grabber: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(grabber, |v: bool| Prop::Modal(ModalProp::SheetGrabber(v)))
+    }
+
     /// The user tried to close it (Escape or back, a backdrop press, a
     /// swipe down), whether or not it closed: leave it out of the view
     /// (its region) to close it.

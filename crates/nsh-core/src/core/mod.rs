@@ -6089,6 +6089,8 @@ impl<M: TextEngine> Core<M> {
                         ModalProp::CloseOnEscape(v) => c.close_on_escape = v,
                         ModalProp::CloseOnBackdropPress(v) => c.close_on_backdrop_press = v,
                         ModalProp::CloseOnSwipe(v) => c.close_on_swipe = v,
+                        ModalProp::SheetHeight(v) => c.sheet_height = v,
+                        ModalProp::SheetGrabber(v) => c.sheet_grabber = v,
                     }
                     flags |= dirty::MODAL;
                 }

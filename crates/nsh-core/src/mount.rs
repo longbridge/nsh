@@ -522,6 +522,11 @@ pub struct ModalConfig {
     pub close_on_backdrop_press: bool,
     /// Swiping a sheet down closes it natively (`closeOnSwipe`).
     pub close_on_swipe: bool,
+    /// iOS: the height a sheet rests at (`sheetHeight`); `None` is the
+    /// system's large one.
+    pub sheet_height: Option<crate::Points>,
+    /// iOS: the sheet shows the system's grabber (`sheetGrabber`).
+    pub sheet_grabber: bool,
     /// The window it shows in (desktops): [`crate::ROOT_ID`], the main
     /// window, or the root of the app's window of its own that holds it
     /// (a dialog opened from a `<Window>`'s content shows over that
@@ -540,6 +545,8 @@ impl Default for ModalConfig {
             close_on_escape: true,
             close_on_backdrop_press: true,
             close_on_swipe: true,
+            sheet_height: None,
+            sheet_grabber: false,
             window: crate::ROOT_ID,
         }
     }

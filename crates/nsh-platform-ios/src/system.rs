@@ -96,10 +96,31 @@ pub(crate) fn set_appearance(appearance: Appearance, root: &UIView) {
                     .is_some_and(|v| !v.isDescendantOfView(root) && !root.isDescendantOfView(&v))
             {
                 // Modals the surface presented.
-                c.setOverrideUserInterfaceStyle(style);
+                style_presented(&c, style);
             }
             c.setNeedsStatusBarAppearanceUpdate();
             controller = c.presentedViewController();
+        }
+    }
+}
+
+/// Gives a modal the app's appearance, and its presentation's container
+/// too: a sheet's background (iOS 26's glass) is drawn there, which takes
+/// the window's appearance, not the modal's.
+pub(crate) fn style_presented(c: &UIViewController, style: UIUserInterfaceStyle) {
+    c.setOverrideUserInterfaceStyle(style);
+    if let Some(p) = c.presentationController() {
+        if let Some(container) = p.containerView() {
+            container.setOverrideUserInterfaceStyle(style);
+        }
+        // The view UIKit wraps a sheet in (its background, iOS 26's glass).
+        let mut view = p.presentedView();
+        while let Some(v) = view {
+            if p.containerView().is_some_and(|c| *c == *v) {
+                break;
+            }
+            v.setOverrideUserInterfaceStyle(style);
+            view = v.superview();
         }
     }
 }

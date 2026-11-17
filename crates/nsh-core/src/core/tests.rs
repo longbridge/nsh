@@ -27171,6 +27171,40 @@ mod rust_windows {
         assert_eq!(frame_of(&batch, dialog), Some(rect(0.0, 0.0, 900.0, 700.0)));
     }
 
+    #[component]
+    fn ShortSheet() -> impl IntoElement {
+        #[allow(deprecated)]
+        modal()
+            .presentation(ModalPresentation::PageSheet)
+            .sheet_height(Some(320.0))
+            .sheet_grabber(true)
+            .child(text("short sheet"))
+    }
+
+    #[test]
+    fn a_sheet_carries_its_height_and_grabber_to_the_platform() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::Ios,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<ShortSheet>());
+        let batch = c.commit().unwrap();
+        let config = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ModalConfig { config, .. } => Some(*config),
+                _ => None,
+            })
+            .expect("the sheet's config");
+        assert_eq!(config.presentation, ModalPresentation::PageSheet);
+        assert_eq!(config.sheet_height, Some(Points(320.0)));
+        assert!(config.sheet_grabber);
+        assert_eq!(ModalConfig::default().sheet_height, None);
+        assert!(!ModalConfig::default().sheet_grabber);
+    }
+
     #[test]
     fn rust_windows_render_nothing_off_desktops() {
         let mut c = core();

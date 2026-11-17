@@ -44,8 +44,10 @@ use objc2_ui_kit::{
     UIMenuOptions, UIModalPresentationStyle, UIModalTransitionStyle, UINavigationBar,
     UINavigationBarAppearance, UINavigationController, UINavigationControllerDelegate,
     UINavigationItem, UINavigationItemLargeTitleDisplayMode, UIPresentationController, UIResponder,
-    UIScrollView, UIView, UIViewAutoresizing, UIViewController,
-    UIViewControllerTransitionCoordinator, UIViewControllerTransitionCoordinatorContext,
+    UIScrollView, UISheetPresentationControllerDetent,
+    UISheetPresentationControllerDetentResolutionContext, UIView, UIViewAutoresizing,
+    UIViewController, UIViewControllerTransitionCoordinator,
+    UIViewControllerTransitionCoordinatorContext,
 };
 
 use crate::{mount::SharedMounter, native_view::NshView};
@@ -1979,8 +1981,11 @@ impl ModalHost {
             ModalAnimation::Fade => UIModalTransitionStyle::CrossDissolve,
             _ => UIModalTransitionStyle::CoverVertical,
         });
+        apply_sheet(controller, &c);
         if let Some(view) = controller.view() {
-            let color = if sheet {
+            // A short sheet on iOS 26 is the system's glass, which a fill
+            // would hide; earlier ones and the large sheet are opaque.
+            let color = if sheet && !(c.sheet_height.is_some() && glass_sheets()) {
                 UIColor::systemBackgroundColor()
             } else {
                 UIColor::clearColor()
@@ -1995,17 +2000,36 @@ impl ModalHost {
         // Presented outside the surface: the app's appearance is set on
         // it too.
         controller.setOverrideUserInterfaceStyle(crate::system::appearance());
+        // Its container (a sheet's glass) is styled again once shown: UIKit
+        // makes the views of the presentation as it runs.
+        let shown = controller.clone();
+        let done = RcBlock::new(move || {
+            crate::system::style_presented(&shown, crate::system::appearance());
+        });
         presenter.presentViewController_animated_completion(
             controller,
             c.animation != ModalAnimation::None && !at_once,
-            None,
+            Some(&done),
         );
+        crate::system::style_presented(controller, crate::system::appearance());
         self.presented = true;
     }
 
     /// Applies `config` (the close flags also while presented).
     pub(crate) fn configure(&mut self, config: ModalConfig) {
         self.controller.set_flags(&config);
+        if self.presented
+            && (config.sheet_height != self.config.sheet_height
+                || config.sheet_grabber != self.config.sheet_grabber)
+        {
+            let controller = &self.controller;
+            match controller.sheetPresentationController() {
+                Some(sheet) => {
+                    sheet.animateChanges(&RcBlock::new(|| apply_sheet(controller, &config)))
+                }
+                None => apply_sheet(controller, &config),
+            }
+        }
         self.config = config;
     }
 
@@ -2104,4 +2128,37 @@ pub(crate) fn controller_of(view: &UIView) -> Option<Retained<UIViewController>>
         responder = r.nextResponder();
     }
     None
+}
+
+/// The height and grabber of a page or form sheet (`sheetHeight`,
+/// `sheetGrabber`); iOS 16 and later, as custom detents are.
+fn apply_sheet(controller: &UIViewController, c: &ModalConfig) {
+    if c.presentation == ModalPresentation::FullScreen {
+        return;
+    }
+    let Some(sheet) = controller.sheetPresentationController() else {
+        return;
+    };
+    let mtm = MainThreadMarker::from(controller);
+    sheet.setPrefersGrabberVisible(c.sheet_grabber);
+    let detent = match c.sheet_height {
+        Some(height) => {
+            let height = f64::from(height.0.max(0.0));
+            let resolve = RcBlock::new(
+                move |_: NonNull<
+                    ProtocolObject<dyn UISheetPresentationControllerDetentResolutionContext>,
+                >| { height as CGFloat },
+            );
+            UISheetPresentationControllerDetent::customDetentWithIdentifier_resolver(
+                None, &resolve, mtm,
+            )
+        }
+        None => UISheetPresentationControllerDetent::largeDetent(mtm),
+    };
+    sheet.setDetents(&NSArray::from_retained_slice(&[detent]));
+}
+
+/// iOS 26 and later draw a short sheet as glass: UIKit has its glass there.
+fn glass_sheets() -> bool {
+    objc2::runtime::AnyClass::get(c"UIGlassEffect").is_some()
 }

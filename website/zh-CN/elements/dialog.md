@@ -102,6 +102,8 @@ function Example() {
 | `closeOnEscape` | `.close_on_escape(..)` | `boolean` | `true` | Escape 和 Android 返回键在原生侧关闭它。 |
 | `closeOnBackdropPress` | `.close_on_backdrop_press(..)` | `boolean` | `true` | 按下背景层时关闭它。 |
 | `closeOnSwipe` | `.close_on_swipe(..)` | `boolean` | `true` | 下滑 sheet（iOS、手机浏览器）时在原生侧关闭它。 |
+| `sheetHeight` | `.sheet_height(Some(320.0))` | `number` | 系统的大尺寸 | iOS 16 及以上：`pageSheet` / `formSheet` 停留的高度（点，不含底部安全区）。iOS 26 上比屏幕矮的 sheet 是系统的悬浮玻璃，对话框不再画自己的背景。其他平台和 `fullScreen` 忽略。 |
+| `sheetGrabber` | `.sheet_grabber(true)` | `boolean` | `false` | iOS：在 `pageSheet` / `formSheet` 顶部显示系统的拖动条。 |
 | `statusBar` | `.status_bar(..)` | `{ foreground?, hidden?, animated? }` | 无 | iOS 和 Android：对话框打开期间的状态栏，位于页面的设置之上（[状态栏](../modules/nsh-base.md#status-bar)）。 |
 | `accessibilityLabel` | `.label(..)` | `string` | 无 | 焦点进入对话框时读屏软件读出的名字：它的标题。 |
 | `accessibilityDescription` | `.accessibility_description(..)` | `string` | 无 | 读屏软件在名字之后读出的内容：它的说明文字。 |

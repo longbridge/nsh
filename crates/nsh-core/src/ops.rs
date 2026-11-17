@@ -2101,6 +2101,17 @@ pub enum ModalProp {
     /// natively (default true); either way it calls `onCancel`.
     #[prop(js = "closeOnSwipe", default = true, on = MODAL)]
     CloseOnSwipe(bool),
+    /// `sheetHeight` (iOS 16 and later): the height in points a
+    /// `"pageSheet"` / `"formSheet"` rests at instead of the system's large
+    /// one, above the bottom safe area; on iOS 26 a sheet shorter than the
+    /// screen floats as the system's glass. Ignored elsewhere and for a
+    /// full-screen dialog.
+    #[prop(js = "sheetHeight", on = MODAL)]
+    SheetHeight(Option<Points>),
+    /// `sheetGrabber` (iOS): the system's grabber at the top of a
+    /// `"pageSheet"` / `"formSheet"` (default false).
+    #[prop(js = "sheetGrabber", on = MODAL)]
+    SheetGrabber(bool),
 }
 
 /// An overlay option (`<Overlay …>`, [`crate::overlay`]).

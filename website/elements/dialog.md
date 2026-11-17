@@ -111,6 +111,8 @@ and the explicit import takes its place. For the system's alert or action sheet,
 | `closeOnEscape` | `.close_on_escape(..)` | `boolean` | `true` | Escape and the Android back button close it natively. |
 | `closeOnBackdropPress` | `.close_on_backdrop_press(..)` | `boolean` | `true` | A press on the backdrop closes it. |
 | `closeOnSwipe` | `.close_on_swipe(..)` | `boolean` | `true` | Swiping a sheet down (iOS, phone browsers) closes it natively. |
+| `sheetHeight` | `.sheet_height(Some(320.0))` | `number` | system's large | iOS 16 and later: the height in points a `pageSheet` / `formSheet` rests at, above the bottom safe area. On iOS 26 a sheet shorter than the screen is the system's floating glass, so the dialog draws no background of its own. Ignored elsewhere and for `fullScreen`. |
+| `sheetGrabber` | `.sheet_grabber(true)` | `boolean` | `false` | iOS: shows the system's grabber at the top of a `pageSheet` / `formSheet`. |
 | `statusBar` | `.status_bar(..)` | `{ foreground?, hidden?, animated? }` | none | iOS and Android: the status bar while the dialog is open, over the pages' ([Status bar](../modules/nsh-base.md#status-bar)). |
 | `accessibilityLabel` | `.label(..)` | `string` | none | What screen readers call the dialog as the focus enters it: its title. |
 | `accessibilityDescription` | `.accessibility_description(..)` | `string` | none | What screen readers read after its name: its message. |
