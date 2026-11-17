@@ -12,6 +12,9 @@ import logoLight from "./logo-light.svg";
 
 export * from "../nsh-gallery-ui";
 
+/** `n` and `word`, in the plural unless `n` is one, kept on one line: "1 card", "3 cards". */
+export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
 /**
  * A page's header where the app draws it (desktops, the web: `<NavPage
  * header>`): a back button while the page is above another, the title, and

@@ -3,7 +3,7 @@ import { Button as BaseButton, Checkbox, Collapsible, Combobox, type DateMatcher
 import { reduceMotion } from "nsh";
 import { keymap, platform, windowSize } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, backdrop, Badge, Button, CalendarItem, Kbd, calendarLook, Chevron, Caption, Card, chart, checkboxLook, DateTrigger, CheckboxMark, density, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxPopupStarting, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderFill, solidTint, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep, LastEvent } from "../ui";
+import { alpha, backdrop, Badge, plural, Button, CalendarItem, Kbd, calendarLook, Chevron, Caption, Card, chart, checkboxLook, DateTrigger, CheckboxMark, density, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxPopupStarting, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderFill, solidTint, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep, LastEvent } from "../ui";
 import { play as sound } from "../../nsh-gallery-ui/sound";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
@@ -2996,7 +2996,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
       );
     }
     return (
-      <Card title="Cart" subtitle="Held to the stock; totals roll to new values" right={<Badge label={`${qty().reduce<number>((a, b) => a + (b ?? 0), 0)} items`} />}>
+      <Card title="Cart" subtitle="Held to the stock; totals roll to new values" right={<Badge label={plural(qty().reduce<number>((a, b) => a + (b ?? 0), 0), "item")} />}>
         <View>
           <Each of={CART}>{(_, i) => <Line i={i()} first={i() === 0} />}</Each>
         </View>
