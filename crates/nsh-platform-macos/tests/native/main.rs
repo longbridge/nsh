@@ -25,6 +25,8 @@ mod input_hidden;
 #[cfg(target_os = "macos")]
 mod keyboard;
 #[cfg(target_os = "macos")]
+mod keymap_ime;
+#[cfg(target_os = "macos")]
 mod menu_labels;
 #[cfg(target_os = "macos")]
 mod modal_fade;
@@ -104,6 +106,8 @@ fn main() {
                 zoom::run();
             } else if std::env::var_os("NSH_IME_CHECK_ONLY").is_some() {
                 ime::run();
+            } else if std::env::var_os("NSH_IME_KEYMAP_CHECK_ONLY").is_some() {
+                keymap_ime::run();
             } else if std::env::var_os("NSH_KEYBOARD_CHECK_ONLY").is_some() {
                 window_press::run();
                 keyboard::run();

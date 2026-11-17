@@ -23,9 +23,9 @@ use nsh_core::{
     keymap::{Key, Keymap, Keystroke, Modifiers},
     platform::Os,
 };
-use objc2_app_kit::{
-    NSEvent, NSEventModifierFlags, NSTextInputClient, NSTextView, NSView, NSWindow,
-};
+use objc2::{ProtocolType, msg_send};
+use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSTextInputClient, NSView, NSWindow};
+use objc2_foundation::NSObjectProtocol;
 
 use crate::surface::Surface;
 
@@ -118,16 +118,24 @@ pub(crate) fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
     found.consumed()
 }
 
-/// Whether an input method is composing in the focused text view (it has
+/// Whether an input method is composing in the focused input client (it has
 /// marked text: pinyin, kana). Every key is then the input method's:
 /// Backspace deletes a letter of the composition, Return and Space
 /// commit it, arrows move through its candidates. A binding taking one
 /// first would leave the composition stuck.
 fn composing(window: &NSWindow) -> bool {
-    window
-        .firstResponder()
-        .and_then(|r| r.downcast::<NSTextView>().ok())
-        .is_some_and(|t| t.hasMarkedText())
+    window.firstResponder().is_some_and(|responder| {
+        // Hosted inputs can implement the text input protocol without
+        // inheriting from NSTextView (a terminal, for example).
+        if !responder.conformsToProtocol(
+            <dyn NSTextInputClient>::protocol().expect("AppKit's text input protocol"),
+        ) {
+            return false;
+        }
+        // SAFETY: The responder conforms to NSTextInputClient, whose required
+        // hasMarkedText method is called on the main thread.
+        unsafe { msg_send![&*responder, hasMarkedText] }
+    })
 }
 
 /// Where the keyboard focus is: `Some(true)` in a text input or hosted

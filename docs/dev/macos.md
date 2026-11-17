@@ -469,6 +469,9 @@ The paths below keep their existing behavior:
   without modifiers (`charactersByApplyingModifiers:` with none when Shift is held, so Shift+/ is `shift+/`), the US
   layout's (`input::us_key`) when that is not ASCII. The monitor lives as long as the surface: an empty table costs a
   map lookup per key, and the app stopping removes it.
+  While the first responder has marked text, the input method keeps its keys before shortcut matching,
+  including `when: "always"` bindings. This follows `NSTextInputClient` conformance for hosted inputs as well as
+  AppKit text views; shortcuts resume once the client no longer has marked text.
 - Shortcuts NSH matches itself (Cmd+A / C / [ / R) read `input::shortcut_key`: the character without modifiers, or on
   a layout that types none in ASCII the US layout's key, as menus do.
 
@@ -814,6 +817,14 @@ and a named capture matching `shift+a` through the shortcut vocabulary. The port
 and verifies that the focused portal's logical ancestor (`ViewProps::key_parent`) hears its keys and captures `x`,
 while the other portal's `tab` rule neither hears nor captures (Tab is reported uncaptured). Menus' key equivalents under
 a capture and the input method are not in it.
+
+`tests/native/keymap_ime.rs` runs on its own with `NSH_IME_KEYMAP_CHECK_ONLY=1`: a hosted `NSView` implementing
+`NSTextInputClient` keeps Enter, Escape, Left, Space and Backspace while marked text is set, and its shortcuts
+resume after unmarking. It also checks a standard `NSTextView` and an ordinary focus stop. It needs an unlocked
+desktop and the test window to be key so AppKit runs the actual keyboard monitor; when a terminal keeps the
+keyboard focus, launch the built native test as a macOS app through LaunchServices. Set
+`NSH_IME_KEYMAP_SCREENSHOT` to a PNG path to capture the results. Marked text is set through the protocol,
+so this checks native dispatch deterministically rather than a particular system input method.
 
 For a real surface, with a window server and a keyboard:
 

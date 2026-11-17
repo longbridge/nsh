@@ -270,6 +270,9 @@ VoiceOver 和 UI 自动化工具将 `Table` 和 `Grid` 读取为 `AXTable`，将
 
 应用自己的快捷键（[`keymap`](../modules/nsh.md#keymap)）先于以上按键处理，但聚焦的可按压视图优先接收其激活键；退出、隐藏、最小化和全屏不能被绑定。
 
+输入法正在组字时，按键先交给输入控件，包括 `when: "always"` 在内的应用快捷键暂时让路。
+实现 `NSTextInputClient` 的自定义原生输入控件也遵循这一规则；组字结束后，快捷键恢复正常。
+
 快捷键在任何键盘布局下都可用（在西里尔或希腊字母布局下，Cmd+C 是美式布局中输入 C 的那个键）。确认输入法组字（中文、日文等）的
 Return 不会提交。`onKeyPress` 报告的内容与 React Native 一致：输入的文本、`"Enter"`、`"Backspace"` 以及 `"Escape"`。
 
