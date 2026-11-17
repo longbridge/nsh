@@ -20,10 +20,9 @@ use objc2::{
 use objc2_core_foundation::CGPoint;
 use objc2_foundation::{NSArray, NSCopying, NSObject, NSObjectProtocol, NSString};
 use objc2_ui_kit::{
-    UIBezierPath, UIContextMenuConfiguration, UIContextMenuInteraction,
-    UIContextMenuInteractionAnimating, UIContextMenuInteractionAppearance,
-    UIContextMenuInteractionDelegate, UIInteraction, UIMenu, UIMenuElement, UIPreviewParameters,
-    UIResponder, UITargetedPreview, UIView, UIWindow,
+    UIContextMenuConfiguration, UIContextMenuInteraction, UIContextMenuInteractionAnimating,
+    UIContextMenuInteractionAppearance, UIContextMenuInteractionDelegate, UIInteraction, UIMenu,
+    UIMenuElement, UIPreviewParameters, UIResponder, UITargetedPreview, UIView, UIWindow,
 };
 
 use crate::{
@@ -278,18 +277,15 @@ impl NshContextMenu {
         Some(configuration)
     }
 
-    /// The trigger as the system lifts it: itself, clipped to its rounded
-    /// corners, on the system's platter behind what it leaves transparent.
+    /// The trigger as the system lifts it: itself, clipped to its outline
+    /// (each corner as drawn), on the system's platter behind what it
+    /// leaves transparent.
     fn preview(&self) -> Option<Retained<UITargetedPreview>> {
         let trigger = self.ivars().trigger.borrow().as_ref()?.load()?;
         trigger.window()?;
         let mtm = self.mtm();
         let parameters = UIPreviewParameters::new(mtm);
-        let path = UIBezierPath::bezierPathWithRoundedRect_cornerRadius(
-            trigger.bounds(),
-            trigger.layer().cornerRadius(),
-        );
-        parameters.setVisiblePath(Some(&path));
+        parameters.setVisiblePath(Some(&crate::decor::outline(&trigger)));
         Some(UITargetedPreview::initWithView_parameters(
             UITargetedPreview::alloc(mtm),
             &trigger,
