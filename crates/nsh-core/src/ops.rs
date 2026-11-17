@@ -273,6 +273,7 @@ events! {
     DownloadEnd = "onDownloadEnd" as "": "A platform's download ended (payload: [`EventPayload::Json`], [`crate::webview::DownloadEnd`]; never reaches a listener).",
     Share = "onShare": "A [`Command::Share`] request finished (root only; payload: `id`, then `action` (`\"shared\"` with the `target` where the platform names it, or `\"dismissed\"`), or `error` with its `code`; [`crate::share`]).",
     DetentChange = "onDetentChange": "The user moved an iOS sheet dialog to another of its `detents` (dragging it, its grabber, a scroll at its edge, a screen reader; payload: [`EventPayload::Json`], `{ detent }`, [`SheetDetent::change_payload`]).",
+    AuthSession = "onAuthSession" as "": "A [`Command::AuthSession`] request finished (root only; payload: `id`, then the callback `url`, `action` `\"cancelled\"`, or `error` with its `code`; [`crate::auth_session`]; never reaches a listener).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -2735,6 +2736,24 @@ pub enum Command {
         id: u32,
         /// What to share and where the sheet points.
         sheet: Box<crate::share::ShareSheet>,
+    },
+    /// Show a web sign-in session for `page` (on the root;
+    /// [`crate::element::open_auth_session`], [`crate::auth_session`]) and
+    /// report how it ended as [`EventKind::AuthSession`] `id`
+    /// ([`crate::auth_session::AuthSessionOutcome::payload`],
+    /// [`crate::auth_session::AuthSessionError::payload`]). Sent only on
+    /// platforms whose [`crate::platform::Environment::auth_session`] is
+    /// set. iOS answers with the callback URL or a cancellation; Android
+    /// answers a cancellation when the user comes back to the app without
+    /// a callback, and the callback comes as a link of the app's scheme
+    /// ([`EventKind::UrlScheme`]), which ends the session first. A new
+    /// request replaces the one still showing: the core has answered it
+    /// as cancelled already, and the platform closes it where it can.
+    AuthSession {
+        /// The request.
+        id: u32,
+        /// The page and the callback scheme.
+        page: Box<crate::auth_session::AuthSessionPage>,
     },
     /// Let the user pick a color anywhere on the screen (on the root; a
     /// color picker's eyedropper, [`crate::element::ambient::pick_screen_color`]):

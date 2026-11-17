@@ -304,6 +304,12 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
   "NSUserDefaults",
   "NSValue",
 ] }
+# `ASWebAuthenticationSession` (iOS sign-in sessions).
+objc2-authentication-services = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "block2",
+  "ASWebAuthenticationSession",
+] }
 objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
   "std",
   "block2",

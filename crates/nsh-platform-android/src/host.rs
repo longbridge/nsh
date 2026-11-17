@@ -1338,6 +1338,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
     environment.audio = true;
     // A chooser over `ACTION_SEND` (`Share.java`).
     environment.share = true;
+    // A Custom Tab, ended by the callback link (`AuthSession.java`).
+    environment.auth_session = true;
     environment.os_version = (v[11] as u16, 0);
     environment.idiom = match v[12] as u8 {
         1 => Idiom::Pad,
