@@ -314,6 +314,10 @@ frame id:tab-bar 0 784 390 60
 covers [nsh/mobile] isAvailable
 covers [nsh/mobile] TabBar
 covers [nsh/mobile] SegmentedControl
+# The system's switch shows the app's value.
+expect Wi-Fi: true
+covers [nsh/mobile] Switch
+
 # The system's date and time picker shows the app's value.
 expect When: 2026-11-17T09:30
 covers [nsh/mobile] DateTimePicker

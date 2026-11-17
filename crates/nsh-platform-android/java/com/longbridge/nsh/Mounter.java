@@ -272,6 +272,7 @@ final class Mounter {
         this.density = host.getResources().getDisplayMetrics().density;
         this.images = images;
         components.put(TabBarComponent.NAME, c -> new TabBarComponent(context, c, this::night));
+        components.put(SwitchComponent.NAME, c -> new SwitchComponent(context, c, this::night));
         components.put(DateTimePickerComponent.NAME, c -> new DateTimePickerComponent(context, c, this::night));
         images.redirects = (base, location) -> Native.mediaRedirect(handle(), base, location);
         images.inline = uri -> {
@@ -471,6 +472,9 @@ final class Mounter {
                         View v = views.valueAt(i);
                         if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof TabBarComponent) {
                             ((TabBarComponent) ((ComponentBox) v).component).appearanceChanged();
+                        }
+                        if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof SwitchComponent) {
+                            ((SwitchComponent) ((ComponentBox) v).component).appearanceChanged();
                         }
                         if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof DateTimePickerComponent) {
                             ((DateTimePickerComponent) ((ComponentBox) v).component).appearanceChanged();

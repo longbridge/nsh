@@ -17,7 +17,7 @@ use nsh_core::{
     EventKind, EventPayload, JsonValue, NodeId, Points, Size,
     platform::{
         CONTEXT_MENU_COMPONENT, DATE_TIME_PICKER_COMPONENT, MENU_BUTTON_COMPONENT,
-        SEGMENTED_CONTROL_COMPONENT, TAB_BAR_COMPONENT, is_reserved_component,
+        SEGMENTED_CONTROL_COMPONENT, SWITCH_COMPONENT, TAB_BAR_COMPONENT, is_reserved_component,
     },
 };
 use nsh_engine::EngineControl;
@@ -129,6 +129,7 @@ impl Default for Components {
             SEGMENTED_CONTROL_COMPONENT,
             crate::system_segmented_control::factory(),
         );
+        components.insert(SWITCH_COMPONENT, crate::system_switch::factory());
         components.insert(
             DATE_TIME_PICKER_COMPONENT,
             crate::system_date_time_picker::factory(),

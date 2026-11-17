@@ -98,6 +98,7 @@ mod system_context_menu;
 mod system_date_time_picker;
 mod system_menu_button;
 mod system_segmented_control;
+mod system_switch;
 mod system_tab_bar;
 mod target;
 mod text;
