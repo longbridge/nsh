@@ -1276,6 +1276,11 @@ enum Message {
     /// The displays (desktops).
     Displays(Arc<[nsh_core::desktop::Display]>),
     RootSize(NodeId, Size<Points>, EdgeInsets),
+    /// Where the root view's anchored overlays may go
+    /// ([`EngineControl::set_overlay_area`]).
+    OverlayArea(Option<nsh_core::Bounds<Points>>),
+    /// A press beyond the root view ([`EngineControl::press_beyond_root`]).
+    PressBeyondRoot(nsh_core::Point<Points>),
     ScreenHeader(NodeId, Option<Points>),
     Frame,
     States(NodeId, u16),
@@ -1477,6 +1482,22 @@ impl EngineControl {
     /// of it covered by system UI.
     pub fn set_root_size(&self, id: NodeId, size: Size<Points>, insets: EdgeInsets) {
         let _ = self.tx.send(Message::RootSize(id, size, insets));
+    }
+
+    /// Where the root view's anchored overlays may be placed, in its
+    /// coordinates, when the platform shows them beyond it (the web's
+    /// `overlays: "viewport"`: the window); `None` keeps them to the root
+    /// view ([`nsh_core::Core::set_overlay_area`]).
+    pub fn set_overlay_area(&self, area: Option<nsh_core::Bounds<Points>>) {
+        let _ = self.tx.send(Message::OverlayArea(area));
+    }
+
+    /// A press at `page` (in the root view's coordinates) beyond the root
+    /// view, where the platform shows its anchored overlays too (the web
+    /// page around the player): the overlays watching presses hear
+    /// `onPressOutside` ([`nsh_core::Core::presses_beyond_root`]).
+    pub fn press_beyond_root(&self, page: nsh_core::Point<Points>) {
+        let _ = self.tx.send(Message::PressBeyondRoot(page));
     }
 
     /// The platform measured where the content of screen `id` starts below
@@ -3868,6 +3889,23 @@ fn dispatch_key<M: TextEngine>(
     path.clear();
 }
 
+/// Hands out the `onPressOutside` events of a press the core worked out
+/// (`context_menu_presses_outside`, `presses_beyond_root`): to the
+/// overlay's Rust component, else to JS.
+fn press_outside<M: TextEngine>(
+    script: Option<&Script>,
+    core: &mut nsh_core::Core<M>,
+    pressed: Vec<(NodeId, EventPayload)>,
+) {
+    for (overlay, payload) in pressed {
+        if !core.component_event(overlay, EventKind::PressOutside, &payload)
+            && let Some(script) = script
+        {
+            script.dispatch_event(overlay, EventKind::PressOutside, &payload);
+        }
+    }
+}
+
 /// Returns false on shutdown.
 fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message: Message) -> bool {
     match message {
@@ -3913,15 +3951,8 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             // `onContextMenu`, so a context menu open on the view closes
             // before the view asks for one again where the pointer is.
             if let EventPayload::ContextMenu(menu) = &payload {
-                for (overlay, pressed) in state.core.context_menu_presses_outside(id, menu) {
-                    if !state
-                        .core
-                        .component_event(overlay, EventKind::PressOutside, &pressed)
-                        && let Some(script) = script
-                    {
-                        script.dispatch_event(overlay, EventKind::PressOutside, &pressed);
-                    }
-                }
+                let pressed = state.core.context_menu_presses_outside(id, menu);
+                press_outside(script, &mut state.core, pressed);
             }
             // Key transitions bubble to the focused view's enabled
             // ancestors within its window, for Rust and JS listeners
@@ -4043,6 +4074,11 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::RootSize(id, size, insets) => state.core.set_root_size(id, size, insets),
+        Message::OverlayArea(area) => state.core.set_overlay_area(area),
+        Message::PressBeyondRoot(page) => {
+            let pressed = state.core.presses_beyond_root(page);
+            press_outside(script, &mut state.core, pressed);
+        }
         Message::ScreenHeader(id, height) => state.core.set_screen_header(id, height),
         Message::Frame => {
             state.frame_requested = false;

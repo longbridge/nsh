@@ -30234,6 +30234,86 @@ fn anchored_overlays_go_beside_their_anchor_and_follow_it() {
 }
 
 #[test]
+fn anchored_overlays_go_within_the_area_the_platform_shows_them_in() {
+    use StyleValue::Number;
+    // A 320 × 480 root, 100 points from the left of a 1280 × 800 window and
+    // 50 from its top (the web's `overlays: "viewport"`), with a 40 point
+    // trigger near its bottom, 120 points from its left.
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(420.0))]);
+    add(
+        &mut c,
+        4,
+        Tag::View,
+        ROOT_ID,
+        &[
+            ("width", Number(80.0)),
+            ("height", Number(40.0)),
+            ("marginLeft", Number(120.0)),
+        ],
+    );
+    add(&mut c, 10, Tag::Overlay, 4, &[]);
+    add(
+        &mut c,
+        12,
+        Tag::View,
+        10,
+        &[("width", Number(360.0)), ("height", Number(200.0))],
+    );
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                10,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(4)),
+            ),
+            overlay_prop(10, crate::OverlayProp::Align(crate::overlay::Align::Start)),
+            overlay_prop(10, crate::OverlayProp::Margin(px(8.0))),
+            Op::Listen {
+                id: 10,
+                event: EventKind::PressOutside,
+                enabled: true,
+            },
+        ],
+    );
+    // In the root view: no room below, above it, and wider than the root,
+    // from the margin.
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(8.0, 220.0, 360.0, 200.0)));
+
+    // Over the window: below the trigger, past the root's bottom, and
+    // from the trigger's start, past the root's right edge.
+    c.set_overlay_area(Some(rect(-100.0, -50.0, 1280.0, 800.0)));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(120.0, 460.0, 360.0, 200.0)));
+
+    // The page moved the root down to 300 points from the window's top:
+    // no room below in the window, above it.
+    c.set_overlay_area(Some(rect(-100.0, -300.0, 1280.0, 800.0)));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(120.0, 220.0, 360.0, 200.0)));
+
+    // Near the window's right edge: kept inside it less the margin.
+    c.set_overlay_area(Some(rect(-900.0, -50.0, 1280.0, 800.0)));
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        frame_of(&batch, 10).map(|f| f.origin.x),
+        Some(px(380.0 - 360.0 - 8.0))
+    );
+
+    // A press on the page around the root: outside the overlay.
+    js_events(&mut c);
+    let pressed = c.presses_beyond_root(point(px(500.0), px(-20.0)));
+    assert_eq!(pressed.len(), 1);
+    assert_eq!(pressed[0].0, 10);
+
+    // Back to the root view.
+    c.set_overlay_area(None);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(8.0, 220.0, 360.0, 200.0)));
+}
+
+#[test]
 fn an_anchored_overlay_wider_than_its_room_wraps_within_the_margin() {
     use StyleValue::Number;
     let mut c = core();

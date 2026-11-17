@@ -154,6 +154,9 @@ function tooLarge(width, height) {
   return `this browser cannot make a ${width} × ${height} pixel canvas (${width * height} pixels): it is over the browser's canvas size limit`;
 }
 
+/** A listener that does nothing: a blocking `wheel` listener's presence. */
+const noop = () => {};
+
 /** Whether `src` is on the page's origin. */
 function sameOrigin(src) {
   try {
@@ -343,6 +346,12 @@ img.nsh-fill { pointer-events: none; }
    backdrop below and the views' own classes override it. */
 .nsh-root > .nsh-viewport { position: fixed; inset: 0; width: auto; height: auto; margin: 0; }
 .nsh-viewport { touch-action: none; border: 0; padding: 0; overflow: visible; color: inherit; background-color: transparent; }
+/* Anchored overlays over the window (overlays: "viewport", syncFloats) are popovers in the top layer too, at their
+   frames in the root moved by where the root is in the window (--nsh-float-x / -y, placeFloats). The second rule
+   undoes the popover's own box where the view's classes say nothing. */
+.nsh-root > .nsh-float { position: fixed; inset: auto; margin: var(--nsh-float-y, 0px) 0 0 var(--nsh-float-x, 0px);
+  touch-action: none; }
+:where(.nsh-float) { border: 0; padding: 0; overflow: visible; color: inherit; background-color: transparent; }
 .nsh-dialog-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.35); display: flex;
   align-items: center; justify-content: center; z-index: 1000; }
 .nsh-dialog { width: 270px; border-radius: 14px; background: rgba(245,245,245,.97); color: #000; text-align: center;
@@ -1060,6 +1069,12 @@ class Player {
     if (options.dialogs === "viewport" && !this.viewportDialogs) {
       console.warn("[nsh] this browser has no popovers: dialogs cover the player, not the window");
     }
+    // Anchored overlays (popovers, menus, tooltips, a select's list) over
+    // the whole window rather than inside the container (`syncFloats`).
+    this.viewportOverlays = options.overlays === "viewport" && typeof HTMLElement.prototype.showPopover === "function";
+    if (options.overlays === "viewport" && !this.viewportOverlays) {
+      console.warn("[nsh] this browser has no popovers: overlays stay inside the player, not over the window");
+    }
     // Host events sent before the app runs (`begin`).
     this.hostEvents = [];
     if (window.top === window) document.documentElement.classList.add("nsh-page");
@@ -1754,6 +1769,11 @@ class Player {
     } finally {
       this.starting = false;
     }
+    // The new engine's overlays go over the window too.
+    if (this.viewportOverlays) {
+      this.floatArea = null;
+      this.placeFloats();
+    }
     if (!deferEvents) this.startedApp();
   }
 
@@ -1839,6 +1859,8 @@ class Player {
     this.frameLayers?.clear();
     if (this.viewportDialogs) this.dialogs = [];
     this.viewportObserver?.disconnect();
+    for (const el of this.floats ?? []) this.sinkFloat(el);
+    this.floats = [];
     this.fileOperations.clear();
     for (const id of [...this.requests.keys()]) this.fetchCancel(id);
     for (const id of [...this.websockets.keys()]) this.websocketCancel(id);
@@ -1969,6 +1991,7 @@ class Player {
     this.size = [width, height];
     this.call((w) => w.nsh_resize(width, height));
     this.environmentChanged();
+    if (this.viewportOverlays) this.placeFloats();
     for (const el of this.views.values()) if (el._kind === "modal" && el.isConnected && !el._leaving) this.placeModal(el);
   }
 
@@ -2015,6 +2038,7 @@ class Player {
     this.safeProbe = document.createElement("div");
     this.safeProbe.className = "nsh-probe";
     document.body.append(this.safeProbe);
+    if (this.viewportOverlays) this.installFloats();
   }
 
   /** The page's insets covered by system UI, where they overlap the root
@@ -2187,6 +2211,7 @@ class Player {
     if (this.removals.length) this.finishRemovals();
     if (this.readingHosts?.size) this.orderReading();
     if (this.relating?.size) this.linkRelations();
+    if (this.viewportOverlays) this.syncFloats();
   }
 
   /** The DOM id of view `id`: unique on the page, beside other players. */
@@ -6514,6 +6539,125 @@ class Player {
     el.style.height = scaled ? `${100 / sy}%` : "";
     el.style.scale = scaled ? `${sx} ${sy}` : "";
     el.style.transformOrigin = scaled ? "0 0" : "";
+  }
+
+  // Overlays over the window ------------------------------------------
+
+  /** `overlays: "viewport"`: follows where the root is in the window, which
+   * the page's scrolling and layout move, and the presses on the page
+   * around it. */
+  installFloats() {
+    const moved = () => this.placeFloats();
+    // Any scroll view of the page around the container moves it: a
+    // capturing listener hears them all.
+    addEventListener("scroll", moved, { capture: true, passive: true });
+    addEventListener("resize", moved);
+    // What is above the container on the page changing size moves it
+    // without a scroll.
+    new ResizeObserver(moved).observe(document.documentElement);
+    document.addEventListener("pointerdown", (e) => this.pressAround(e), true);
+    this.placeFloats();
+  }
+
+  /**
+   * Anchored overlays drawn over the window (`overlays: "viewport"`): the
+   * root's children from its first overlay placed against an anchor on
+   * (the core puts the overlays above the root's own views, in the order
+   * they stack) are manual popovers in the browser's top layer, so the
+   * container's clipping, stacking and transforms leave them whole. Each
+   * stays where it is in the root, so its events, focus and `inert` are as
+   * before; the overlays shown after it are lifted with it, to stay above
+   * it. Overlays without an anchor before the first (a fixed view, a
+   * backdrop) stay in the container. A lifted view the batch moved in the
+   * DOM left the top layer, and is raised again with those above it.
+   */
+  syncFloats() {
+    const lifted = [];
+    for (const child of this.root.children) {
+      if (child._id === undefined || child._kind === "modal") continue;
+      if (lifted.length || child._props?.anchored) lifted.push(child);
+    }
+    const before = this.floats ?? [];
+    let kept = 0;
+    while (kept < lifted.length && lifted[kept] === before[kept] && lifted[kept].matches(":popover-open")) kept++;
+    for (const el of before) if (!lifted.includes(el)) this.sinkFloat(el);
+    if (kept === lifted.length) {
+      this.floats = lifted;
+      return;
+    }
+    // Raising again what is open takes the focus out of it.
+    const focus = document.activeElement;
+    for (const el of lifted.slice(kept)) this.liftFloat(el);
+    this.floats = lifted;
+    // Dialogs and alerts over the window stay above them.
+    for (const layer of this.root.children) {
+      if (layer.classList.contains("nsh-viewport") && layer.matches(":popover-open")) {
+        layer.hidePopover();
+        layer.showPopover();
+      }
+    }
+    if (focus && focus !== document.activeElement && focus.isConnected) focus.focus({ preventScroll: true });
+    this.placeFloats();
+  }
+
+  /** Shows overlay `el` in the top layer, above what is there already. */
+  liftFloat(el) {
+    el.classList.add("nsh-float");
+    el.popover = "manual";
+    // As a dialog's layer (`raise`): the browser waits for the root's
+    // blocking `wheel` listener only over the root's box. Added once, and
+    // again to a view drawn as another element since (`retag`).
+    el.addEventListener("wheel", noop, { passive: false });
+    if (el.matches(":popover-open")) el.hidePopover();
+    el.showPopover();
+  }
+
+  /** Overlay `el` is drawn in the container again (or went). */
+  sinkFloat(el) {
+    if (!el.classList.contains("nsh-float")) return;
+    if (el.matches(":popover-open")) el.hidePopover();
+    el.removeAttribute("popover");
+    el.classList.remove("nsh-float");
+    el.removeEventListener("wheel", noop);
+  }
+
+  /**
+   * Where the lifted overlays go: their frames are in the root's
+   * coordinates, moved by where the root is in the window (its CSS
+   * variables), and the core places them in the window less its safe
+   * area, in those coordinates (`nsh_overlay_area`), so they flip and
+   * stay inside it by the window's edges rather than the container's.
+   */
+  placeFloats() {
+    if (!this.wasm || this.stopping) return;
+    const r = this.root.getBoundingClientRect();
+    const x = `${r.left}px`, y = `${r.top}px`;
+    if (this.floatOrigin !== x + y) {
+      this.floatOrigin = x + y;
+      this.root.style.setProperty("--nsh-float-x", x);
+      this.root.style.setProperty("--nsh-float-y", y);
+    }
+    // The window without its scroll bars, less its safe area.
+    const doc = document.documentElement;
+    const [w, h] = [doc.clientWidth, doc.clientHeight];
+    const [top, right, bottom, left] = this.safeProbe
+      ? this.safeArea({ left: 0, top: 0, right: w, bottom: h })
+      : [0, 0, 0, 0];
+    const area = [left - r.left, top - r.top, Math.max(0, w - left - right), Math.max(0, h - top - bottom)];
+    const key = area.join();
+    if (this.floatArea === key) return;
+    this.floatArea = key;
+    this.call((wasm) => wasm.nsh_overlay_area(...area));
+  }
+
+  /** A press on the page around the container while overlays are lifted
+   * over it: they hear `onPressOutside`, as for a press in the root
+   * outside them (a popover closes). */
+  pressAround(e) {
+    if (!this.floats?.length || this.stopping || !this.wasm) return;
+    if (e.target instanceof Node && this.root.contains(e.target)) return;
+    const [x, y] = this.point(e, null);
+    this.call((w) => w.nsh_press_outside(x, y));
   }
 
   /** Going back or Escape on a modal: it asks to close (`onRequestClose`,

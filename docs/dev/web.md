@@ -832,6 +832,28 @@ browsers' touches into what phones report:
   itself crosses another origin needs that outer embedder's cooperation; it cannot bypass that boundary.
   `Sheet` uses a web modal root around its existing overlays, with its own animation and close lifecycle.
   The documentation player enables viewport dialogs, so the website's iframe demos use this path.
+- **Overlays over the window** (`createPlayer`'s `overlays: "viewport"`, `viewportOverlays`): the root view's anchored
+  overlays (`Popover`, menus, hints, a select's list: `elements.md` "Overlays") show over the whole window rather than
+  inside the container, which clips them (an app given a small part of a page: a 250 point composer whose topic list is
+  360 high). The core puts a root view's overlays above its own children, in the order they stack; `syncFloats`, after
+  each batch, lifts the root's children from the first overlay with an anchor on (`ViewProps::overlay_anchor`, the
+  `vp` op's `anchored`) into the top layer as manual popovers (`liftFloat`, class `.nsh-float`), the overlays shown after
+  it with it so they stay above it; overlays without an anchor before it (a `fixed` view, a popover's backdrop on touch
+  screens) stay in the container. Each stays where it is in the root, so its events, pointer coordinates (the root's:
+  `point`), focus and `inert` are as before. A lifted view the batch moved in the DOM left the top layer and is raised
+  again with those after it (the focus kept), and dialogs over the window are raised again above them. Their frames
+  are the root's coordinates; `.nsh-float` is `position: fixed` with the root's place in the window as its margins
+  (`--nsh-float-x` / `-y` on the root, `placeFloats`), so the views' own `left` / `top` and layout animations are
+  untouched. `placeFloats` also reports the window less its safe area in the root's coordinates (`nsh_overlay_area`,
+  `Core::set_overlay_area`), where the core places and flips the root's anchored overlays instead of the root's safe
+  area (`overlay_area`; it lays them out again only while one is shown), on start, on every scroll of the page
+  (a capturing `scroll` listener: any scroll view around the container moves it), on `resize` and when the root or
+  the document's box changes size. A press on the page outside the root while overlays are lifted
+  (`pressAround`, a capturing `pointerdown` on the document) reaches the core as `nsh_press_outside` /
+  `Core::presses_beyond_root`: the overlays watching presses hear `onPressOutside` as for a press in the root outside
+  them, and the press goes on to the page. A lifted view has a blocking `wheel` listener of its own, as a dialog's
+  layer. Without popovers they stay in the container, with a warning. In an iframe the window is the iframe's (the
+  iframe is not lifted as for dialogs); a container the page scales with a CSS transform is not accounted for.
 - **History**: when the app is the page (`window.top === window`, or `createPlayer`'s `history` option) every page
   above a stack's first and every dialog is a history entry (`pushState`, state `{ nsh: depth }`), so the browser's
   back button and the mouse's go back in the app; entries the app takes away itself are gone back over with
