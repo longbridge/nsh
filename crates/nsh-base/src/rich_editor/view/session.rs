@@ -99,7 +99,7 @@ pub trait ViewGeometry: Send + Sync {
     fn coords_at_pos(&self, pos: usize) -> Option<Bounds<Points>>;
     /// The document position at `point`.
     fn pos_at_coords(&self, point: Point<Points>) -> Option<usize>;
-    /// The box around the selection.
+    /// The box around the selection (a node selection's: its node's).
     fn selection_rect(&self) -> Option<Bounds<Points>>;
     /// The box of the block starting at `pos`, as it is laid out.
     fn node_rect(&self, pos: usize) -> Option<Bounds<Points>> {
@@ -597,7 +597,9 @@ impl EditorSession {
         self.geometry()?.pos_at_coords(point)
     }
 
-    /// The box around the selection in the view showing the session.
+    /// The box around the selection in the view showing the session: a
+    /// node selection's is its node's box, as Tiptap's bubble menu places
+    /// itself by the node's DOM.
     pub fn selection_rect(&self) -> Option<Bounds<Points>> {
         self.geometry()?.selection_rect()
     }

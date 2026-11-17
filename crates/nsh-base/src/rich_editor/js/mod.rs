@@ -745,8 +745,9 @@ impl RichEditorSession {
             .pos_at_page_coords(nsh_core::prelude::point(px(x), px(y)))
     }
 
-    /// The box around the selection, in points of the content box of the
-    /// view showing the editor, or `null`.
+    /// The box around the selection (a node selection's: its node's box),
+    /// in points of the content box of the view showing the editor, or
+    /// `null`.
     pub(crate) fn selection_rect(&self) -> Option<JsonValue> {
         self.session.selection_rect().map(|b| rect_json(&b))
     }
