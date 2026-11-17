@@ -1676,7 +1676,6 @@ fn sort_button(
             .h(px(SORT_WIDTH))
             .items_center()
             .justify_center()
-            .cursor_pointer()
             .role(AccessibilityRole::Button)
             .test_id(&id)
             .focusable(false)

@@ -143,6 +143,35 @@ pub enum AccessibilityRole {
     AlertDialog,
 }
 
+impl AccessibilityRole {
+    /// Whether the role is a control the pointer presses (a button, link,
+    /// tab, menu item…): text inside one shows the control's pointer, not
+    /// the I-beam of a selectable area around it, as a browser's
+    /// `<button>` text does.
+    pub fn is_control(self) -> bool {
+        matches!(
+            self,
+            Self::Button
+                | Self::Link
+                | Self::ImageButton
+                | Self::KeyboardKey
+                | Self::Checkbox
+                | Self::Combobox
+                | Self::Menuitem
+                | Self::MenuItemCheckbox
+                | Self::MenuItemRadio
+                | Self::Radio
+                | Self::Switch
+                | Self::Tab
+                | Self::Option
+                | Self::TreeItem
+                | Self::Adjustable
+                | Self::Spinbutton
+                | Self::Scrollbar
+        )
+    }
+}
+
 /// Whether a checkable element is checked (`accessibilityState.checked`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Checked {

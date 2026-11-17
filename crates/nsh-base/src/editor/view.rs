@@ -508,7 +508,6 @@ fn fold_hit(
                 .top(move || Length::from(lh() * slot.get().1 as f32))
                 .w(move || Length::from(fold_width()))
                 .h(move || Length::from(lh2()))
-                .cursor_pointer()
                 .on_mouse_enter(move |_: &MouseEvent| pointer.hover.set(Some(row())))
                 .on_mouse_leave(move |_: &MouseEvent| {
                     if pointer.hover.get_untracked() == Some(row()) {
