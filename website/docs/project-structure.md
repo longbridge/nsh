@@ -252,7 +252,7 @@ Imports of `nsh` and `nsh/...` are not bundled: the runtime provides them native
 | `nsh/mobile` | What iOS and Android have: `TabBar`, `InputAccessoryView` (iOS), `BackHandler` (Android) ([reference](../modules/nsh-mobile.md)) |
 | `nsh/desktop` | What macOS, Windows and Linux have: windows (`Window`, `currentWindow`, `windows`), `titleBar`, `displays`, `Menu`, `Tray`, `GlobalShortcut` ([reference](../modules/nsh-desktop.md)) |
 | `nsh/i18n` | The app's translations (its `locales/` files) and the language it shows: `t`, `setLocale`, `availableLocales` ([I18n](./i18n.md), [reference](../modules/nsh-i18n.md)) |
-| `nsh/updater` | A packaged app updates itself: `checkForUpdate`, `downloadUpdate`, `installAndRestart` ([reference](../modules/nsh-updater.md)) |
+| `nsh/updater` | A packaged app updates itself: `checkForUpdate`, `downloadUpdate`, `installAndRestart`, `installOnQuit` ([reference](../modules/nsh-updater.md)) |
 
 The [modules reference](../modules/index.md) documents each one. Importing a module NSH does not have (`nsh/foo`) is a build error. So is a name your code uses that the module does not export (`import { Buton } from "nsh/base"`): the error points at the import and names the closest export (``did you mean `Button`?``). Names used only as types are checked by `nsh check`.
 

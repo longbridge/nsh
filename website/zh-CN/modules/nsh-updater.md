@@ -11,13 +11,13 @@ order: 12.7
 它也能只更新应用的代码：一个更新构建号的[签名包](../docs/signed-packages.md)，应用在所有原生平台（包括 iOS 和 Android）下次启动时运行它（见 [OTA 更新](#ota-更新)）。
 
 ```tsx
-import { checkForUpdate, downloadUpdate, installAndRestart } from "nsh/updater";
+import { checkForUpdate, downloadUpdate, installAndRestart, installOnQuit } from "nsh/updater";
 import { checkForPackage, downloadPackage, restartToPackage, runningPackage, shellInfo } from "nsh/updater";
 ```
 
 这个模块在所有平台上都可以导入：
 
-| 平台 | `checkForUpdate` | `downloadUpdate`、`installAndRestart` | 包 |
+| 平台 | `checkForUpdate` | `downloadUpdate`、`installAndRestart`、`installOnQuit` | 包 |
 | --- | --- | --- | --- |
 | macOS、Windows、Linux（打包后） | 检查来源 | 下载并替换应用 | 检查、下载，`restartToPackage` 重启进入新包 |
 | iOS、Android | 检查来源；`url` 是应用商店链接（`nsh update-manifest --link`） | 拒绝：引导用户打开 `url` | 检查并下载；包在下次启动时运行 |
@@ -50,12 +50,12 @@ interface AppUpdate {
 | `version` | 新版本号，semver |
 | `notes` | 更新说明，即清单的 `--notes` 文件内容 |
 | `url` | 用户手动获取的地址：压缩包，或 iOS、Android 上的商店页面。`canInstall` 为 false 时交给 [`openUrl`](./nsh.md#openurl) |
-| `canInstall` | 本次运行中 `downloadUpdate` 和 `installAndRestart` 是否可用：装在用户可写位置的桌面打包应用为 true。iOS、Android 上为 false，装在只有系统可写的目录（系统包）时也为 false |
+| `canInstall` | 本次运行中 `downloadUpdate`、`installAndRestart` 和 `installOnQuit` 是否可用：装在用户可写位置的桌面打包应用为 true。iOS、Android 上为 false，装在只有系统可写的目录（系统包）时也为 false |
 | `shell` | 是否只有已安装的应用落后：本次运行的[包](#checkforpackage)已是该版本或更高，更新带来的是更新的运行时和原生外壳，而不是新代码。用包更新的应用可以把它作为更安静的可选步骤提供 |
 
 来源无法访问或清单不可接受时会 reject：设置了 `publicKey` 但签名错误或缺失、清单属于其他应用、URL 不是 HTTPS。版本相同或更旧的清单不算更新，因此过期的清单无法让应用降级。
 
-`channel` 改查 `nsh.json` 声明的某个[频道](#频道)，而不是默认来源。它只能是名字，不能是地址：包里没有声明的名字在发出任何请求之前就会 reject。`downloadUpdate` 和 `installAndRestart` 使用上一次检查找到的结果，不管它读的是哪个来源。
+`channel` 改查 `nsh.json` 声明的某个[频道](#频道)，而不是默认来源。它只能是名字，不能是地址：包里没有声明的名字在发出任何请求之前就会 reject。`downloadUpdate`、`installAndRestart` 和 `installOnQuit` 使用上一次检查找到的结果，不管它读的是哪个来源。
 
 ### 频道
 
@@ -94,6 +94,21 @@ function installAndRestart(): Promise<void>;
 把下载好的压缩包解压到应用旁边，校验新应用（id、可执行文件，macOS 上还有代码签名），替换进去，然后像 `Application.restart()` 一样重启应用：当前进程像用户退出时那样退出，进程结束后新版本启动。Promise 只在失败时才会结束，失败时已安装的应用保持原样：没有下载过更新或应用无法替换时 reject。
 
 Linux 和 macOS 上整个目录或 `.app` 一起替换，保留用户给它起的名字；Windows 上逐个文件替换，有一个失败就全部恢复。
+
+## installOnQuit
+
+```ts
+function installOnQuit(): Promise<void>;
+```
+
+在应用退出时用下载好的更新替换应用，不重新启动：用户下次打开的就是新版本。用于和「安装并重启」并列的「退出时安装」按钮。压缩包现在就解压到应用旁边，并像 `installAndRestart` 那样校验，更新就绪后 Promise resolve；退出时只是把它移到位。没有下载过更新时 reject，`canInstall` 为 false 时以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` reject，更新被拒绝时也 reject，应用保持原样。
+
+再次调用会替换等待中的更新（下载了更新的版本后再调一次），调用 `installAndRestart` 则改为立即安装。只有应用正常退出时才会安装，包括为重启而退出（`Application.restart()`，随后启动的就是新版本）；崩溃或被强制结束时不会安装，下一次 `checkForUpdate` 会再次提供这个更新。如果退出时移到位失败（比如用户期间移动了应用），应用保持原样并照常退出，失败写入日志。
+
+```tsx
+await downloadUpdate();
+await installOnQuit(); // 应用继续运行；下次打开时是新版本
+```
 
 ## OTA 更新
 
