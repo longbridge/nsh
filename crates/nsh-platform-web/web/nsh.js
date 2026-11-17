@@ -1569,10 +1569,45 @@ class Player {
       this.measure.font = font;
       const t = this.measure.measureText("Hg");
       const x = this.measure.measureText("x");
-      m = [t.fontBoundingBoxAscent ?? 0, t.fontBoundingBoxDescent ?? 0, x.actualBoundingBoxAscent ?? 0];
+      // Ascent and descent as the DOM draws a run (`.nsh-run`: absolutely
+      // placed, `font` shorthand, so `line-height: normal`): where its
+      // baseline falls in its box. Canvas rounds its font box to whole
+      // pixels (Chrome), each font its own way, which put runs of two fonts
+      // on one line up to a pixel and a half apart on a phone.
+      const dom = this.domMetrics(font);
+      m = dom
+        ? [dom[0], dom[1], x.actualBoundingBoxAscent ?? 0]
+        : [t.fontBoundingBoxAscent ?? 0, t.fontBoundingBoxDescent ?? 0, x.actualBoundingBoxAscent ?? 0];
       this.metricsCache.set(font, m);
     }
     return m;
+  }
+
+  /** `[ascent, descent]` of a run in `font` as the DOM lays it out, or
+   * null without a document to measure in. */
+  domMetrics(font) {
+    if (typeof document === "undefined" || !document.body) return null;
+    let probe = this.metricsProbe;
+    if (!probe || !probe.box.isConnected) {
+      const box = document.createElement("div");
+      box.setAttribute("aria-hidden", "true");
+      box.style.cssText = "position:absolute;left:-10000px;top:0;visibility:hidden;pointer-events:none";
+      const run = document.createElement("span");
+      run.className = "nsh-run";
+      run.style.cssText = "left:0;top:0";
+      run.textContent = "Hg";
+      const mark = document.createElement("i");
+      mark.style.cssText = "display:inline-block;width:0;height:0;vertical-align:baseline";
+      run.append(mark);
+      box.append(run);
+      document.body.append(box);
+      probe = this.metricsProbe = { box, run, mark };
+    }
+    probe.run.style.font = font;
+    const top = probe.run.getBoundingClientRect();
+    const ascent = probe.mark.getBoundingClientRect().top - top.top;
+    if (!(top.height > 0)) return null;
+    return [ascent, top.height - ascent];
   }
 
   /**
