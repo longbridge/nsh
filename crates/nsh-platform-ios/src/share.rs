@@ -70,7 +70,7 @@ define_class!(
             _controller: &UIActivityViewController,
             _activity: Option<&UIActivityType>,
         ) -> Retained<NSString> {
-            self.ivars().subject.clone().unwrap_or_else(NSString::new)
+            self.ivars().subject.clone().unwrap_or_default()
         }
     }
 );
