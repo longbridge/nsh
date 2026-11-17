@@ -1166,6 +1166,24 @@ pub struct ListBind {
     pub binds: Vec<(u32, u32)>,
 }
 
+/// Takes list `list`'s binds still queued (`Core::list_binds`, a
+/// component's list's that a commit's last round asked for), as its items
+/// change: the runtime moves its cells with the items before they could
+/// run, so they would show items at indices that are no longer theirs. The
+/// list asks for its cells again ([`ListState::unrequest`]). Returns their
+/// slots.
+fn take_queued_binds(binds: &mut Vec<ListBind>, list: NodeId) -> Vec<u32> {
+    let mut slots = Vec::new();
+    binds.retain(|b| {
+        if b.list != list {
+            return true;
+        }
+        slots.extend(b.binds.iter().map(|&(slot, _)| slot));
+        false
+    });
+    slots
+}
+
 /// An op referenced a node in an impossible way. This is a renderer bug;
 /// the op is skipped and the tree stays consistent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -5534,7 +5552,10 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Prop::Count(count) => {
-                if let Some(list) = node.list.as_mut() {
+                if let Some(list) = node.list.as_mut()
+                    && list.count != count
+                {
+                    list.unrequest(&take_queued_binds(&mut self.list_binds, node.id));
                     list.set_count(count);
                 }
             }
@@ -5558,6 +5579,7 @@ impl<M: TextEngine> Core<M> {
                 let loads_at_start = node.events.contains(EventKind::LoadMoreAtStart);
                 if let Some(list) = node.list.as_mut() {
                     list.loads_at_start = loads_at_start;
+                    list.unrequest(&take_queued_binds(&mut self.list_binds, node.id));
                     list.splice(at, removed, inserted);
                 }
             }
@@ -5565,6 +5587,7 @@ impl<M: TextEngine> Core<M> {
                 let loads_at_start = node.events.contains(EventKind::LoadMoreAtStart);
                 if let Some(list) = node.list.as_mut() {
                     list.loads_at_start = loads_at_start;
+                    list.unrequest(&take_queued_binds(&mut self.list_binds, node.id));
                     list.reorder(&diff);
                 }
             }
