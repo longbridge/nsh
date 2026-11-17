@@ -797,6 +797,10 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         None => None,
     };
     warn_ignored(&path, &ignored);
+    config.ios.launch_screen = config
+        .ios
+        .launch_screen
+        .map(|screen| screen.relative_to(dir));
     config.ios.check(ApplePlatform::Ios)?;
     config.macos.check()?;
     config.web.host = config.web.host.map(|host| dir.join(host));
@@ -1268,8 +1272,10 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     url_types(&mut info, &id, &schemes);
     activity_types(&mut info, &id, config.handoff);
     document_types(&mut info, &config.file_types());
-    if let Some(icon) = config.icon(PackageTarget::Ios) {
-        let partial = compile_icon(icon, &app, sdk, minimum_os(&info))?;
+    let icon = config.icon(PackageTarget::Ios);
+    let launch_screen = config.ios.launch_screen.as_ref();
+    if icon.is_some() || launch_screen.is_some() {
+        let partial = compile_assets(icon, launch_screen, &app, sdk, minimum_os(&info))?;
         for (key, value) in partial {
             info.insert(key, value);
         }
@@ -2168,10 +2174,12 @@ fn info_plist(
     d.insert("LSRequiresIPhoneOS".into(), true.into());
     config.usage_descriptions(&mut d);
     bundle_localizations(&mut d, config);
-    // A launch screen entry opts into the full screen (no letterboxing).
+    // A launch screen entry opts into the full screen (no letterboxing);
+    // the app's color and image are in its asset catalog
+    // ([`launch_screen_sets`]).
     d.insert(
         "UILaunchScreen".into(),
-        Value::Dictionary(Default::default()),
+        Value::Dictionary(launch_screen_info(config.ios.launch_screen.as_ref())),
     );
     d.insert("UIApplicationSupportsMultipleScenes".into(), false.into());
     // ProMotion iPhones run display links above 60 Hz only with this:
@@ -2232,35 +2240,153 @@ fn minimum_os(info: &plist::Dictionary) -> &str {
         .unwrap_or(IOS_MINIMUM)
 }
 
-/// Compiles `icon` into the app's asset catalog (`Assets.car`) with
-/// `actool`, for `minimum`, the oldest iOS the app declares (as Xcode
-/// compiles it for the deployment target), returning the Info.plist keys
-/// it produces.
-fn compile_icon(
-    icon: &Path,
+/// The asset catalog's name of the launch screen's color.
+const LAUNCH_BACKGROUND: &str = "LaunchBackground";
+/// The asset catalog's name of the launch screen's image.
+const LAUNCH_IMAGE: &str = "LaunchImage";
+
+/// `UILaunchScreen`: the names of the app's launch screen color and image
+/// in its asset catalog, none for the system's background.
+fn launch_screen_info(screen: Option<&crate::apple::LaunchScreen>) -> plist::Dictionary {
+    let mut d = plist::Dictionary::new();
+    if let Some(screen) = screen {
+        if screen.background.is_some() {
+            d.insert("UIColorName".into(), LAUNCH_BACKGROUND.into());
+        }
+        if screen.image.is_some() {
+            d.insert("UIImageName".into(), LAUNCH_IMAGE.into());
+        }
+    }
+    d
+}
+
+/// A set of an asset catalog, as [`compile_assets`] writes it.
+#[derive(Debug)]
+struct CatalogSet {
+    /// Its directory in the catalog (`LaunchImage.imageset`).
+    dir: String,
+    /// Its `Contents.json`.
+    contents: serde_json::Value,
+    /// The images it copies in: the source and its file name in the set.
+    files: Vec<(PathBuf, String)>,
+}
+
+/// The asset catalog sets of a launch screen.
+fn launch_screen_sets(screen: &crate::apple::LaunchScreen) -> Vec<CatalogSet> {
+    use serde_json::json;
+    let info = json!({ "author": "nsh", "version": 1 });
+    let dark = json!([{ "appearance": "luminosity", "value": "dark" }]);
+    let mut sets = Vec::new();
+    if let Some(background) = &screen.background {
+        let color = |color: &crate::apple::Color| {
+            let [r, g, b, a] = color.0;
+            json!({
+                "color-space": "srgb",
+                "components": {
+                    "red": format!("0x{r:02X}"),
+                    "green": format!("0x{g:02X}"),
+                    "blue": format!("0x{b:02X}"),
+                    "alpha": format!("{:.3}", f32::from(a) / 255.0),
+                },
+            })
+        };
+        let (light, dark_color) = background.variants();
+        let mut colors = vec![json!({ "idiom": "universal", "color": color(light) })];
+        if let Some(dark_color) = dark_color {
+            colors.push(json!({
+                "idiom": "universal",
+                "appearances": dark,
+                "color": color(dark_color),
+            }));
+        }
+        sets.push(CatalogSet {
+            dir: format!("{LAUNCH_BACKGROUND}.colorset"),
+            contents: json!({ "colors": colors, "info": info }),
+            files: Vec::new(),
+        });
+    }
+    if let Some(image) = &screen.image {
+        let (light, dark_image) = image.variants();
+        let mut images =
+            vec![json!({ "idiom": "universal", "filename": "light.png", "scale": "3x" })];
+        let mut files = vec![(light.clone(), "light.png".to_owned())];
+        if let Some(dark_image) = dark_image {
+            images.push(json!({
+                "idiom": "universal",
+                "filename": "dark.png",
+                "scale": "3x",
+                "appearances": dark,
+            }));
+            files.push((dark_image.clone(), "dark.png".to_owned()));
+        }
+        sets.push(CatalogSet {
+            dir: format!("{LAUNCH_IMAGE}.imageset"),
+            contents: json!({ "images": images, "info": info }),
+            files,
+        });
+    }
+    sets
+}
+
+/// Compiles the app's asset catalog (`Assets.car`) with `actool`: its
+/// `icon` and its `launch_screen`'s color and image, for `minimum`, the
+/// oldest iOS the app declares (as Xcode compiles it for the deployment
+/// target), returning the Info.plist keys it produces.
+fn compile_assets(
+    icon: Option<&Path>,
+    launch_screen: Option<&crate::apple::LaunchScreen>,
     app: &Path,
     sdk: &str,
     minimum: &str,
 ) -> anyhow::Result<plist::Dictionary> {
     let work = app.with_extension("xcassets-work");
-    let set = work.join("Assets.xcassets/AppIcon.appiconset");
-    fs::create_dir_all(&set)?;
-    fs::copy(icon, set.join("icon.png")).with_context(|| format!("copy {}", icon.display()))?;
+    let catalog = work.join("Assets.xcassets");
+    fs::create_dir_all(&catalog)?;
     fs::write(
-        work.join("Assets.xcassets/Contents.json"),
+        catalog.join("Contents.json"),
         r#"{"info":{"author":"nsh","version":1}}"#,
     )?;
-    // One 1024 pt image; actool derives every size (Xcode 14+ catalogs).
-    fs::write(
-        set.join("Contents.json"),
-        r#"{"images":[{"filename":"icon.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"nsh","version":1}}"#,
-    )?;
+    if let Some(icon) = icon {
+        let set = catalog.join("AppIcon.appiconset");
+        fs::create_dir_all(&set)?;
+        fs::copy(icon, set.join("icon.png")).with_context(|| format!("copy {}", icon.display()))?;
+        // One 1024 pt image; actool derives every size (Xcode 14+ catalogs).
+        fs::write(
+            set.join("Contents.json"),
+            r#"{"images":[{"filename":"icon.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"nsh","version":1}}"#,
+        )?;
+    }
+    for CatalogSet {
+        dir,
+        contents,
+        files,
+    } in launch_screen.map(launch_screen_sets).unwrap_or_default()
+    {
+        let set = catalog.join(dir);
+        fs::create_dir_all(&set)?;
+        fs::write(set.join("Contents.json"), contents.to_string())?;
+        for (source, file) in files {
+            fs::copy(&source, set.join(file)).with_context(|| {
+                format!(
+                    "copy {} (nsh.json ios.launchScreen.image)",
+                    source.display()
+                )
+            })?;
+        }
+    }
     let partial = work.join("partial.plist");
-    let output = Command::new("xcrun")
-        .args(["actool", "--compile"])
-        .arg(app)
-        .args(["--platform", sdk, "--minimum-deployment-target", minimum])
-        .args(["--app-icon", "AppIcon", "--output-partial-info-plist"])
+    let mut command = Command::new("xcrun");
+    command.args(["actool", "--compile"]).arg(app).args([
+        "--platform",
+        sdk,
+        "--minimum-deployment-target",
+        minimum,
+    ]);
+    if icon.is_some() {
+        command.args(["--app-icon", "AppIcon"]);
+    }
+    let output = command
+        .arg("--output-partial-info-plist")
         .arg(&partial)
         .args([
             "--target-device",
@@ -2270,7 +2396,7 @@ fn compile_icon(
             "--output-format",
             "human-readable-text",
         ])
-        .arg(work.join("Assets.xcassets"))
+        .arg(&catalog)
         .output()
         .context("run xcrun actool (is Xcode installed?)")?;
     if !output.status.success() || !partial.exists() {
@@ -2409,6 +2535,70 @@ fn make_ipa(app: &Path, ipa: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Without `ios.launchScreen` the launch screen is the system's
+    /// background; with it `UILaunchScreen` names the catalog's color and
+    /// image, which are sets for both appearances or one for each.
+    #[test]
+    fn launch_screens_become_named_colors_and_images() {
+        let info = info_plist("A", "com.a", "a", &AppConfig::default(), "iphoneos").unwrap();
+        assert_eq!(
+            info["UILaunchScreen"],
+            plist::Value::Dictionary(Default::default())
+        );
+
+        let (config, ignored) = parse_config(
+            r##"{ "ios": { "launchScreen": {
+                "background": { "light": "#ffffff", "dark": "#13131280" },
+                "image": "launch.png"
+            } } }"##,
+        )
+        .unwrap();
+        assert!(ignored.is_empty(), "{ignored:?}");
+        let info = info_plist("A", "com.a", "a", &config, "iphoneos").unwrap();
+        let screen = info["UILaunchScreen"].as_dictionary().unwrap();
+        assert_eq!(
+            screen["UIColorName"],
+            plist::Value::String(LAUNCH_BACKGROUND.into())
+        );
+        assert_eq!(
+            screen["UIImageName"],
+            plist::Value::String(LAUNCH_IMAGE.into())
+        );
+
+        let sets = launch_screen_sets(config.ios.launch_screen.as_ref().unwrap());
+        let CatalogSet {
+            dir,
+            contents: color,
+            files,
+        } = &sets[0];
+        assert_eq!(dir, "LaunchBackground.colorset");
+        assert!(files.is_empty());
+        assert_eq!(color["colors"][0]["color"]["components"]["red"], "0xFF");
+        assert_eq!(color["colors"][0].get("appearances"), None);
+        assert_eq!(color["colors"][1]["appearances"][0]["value"], "dark");
+        assert_eq!(color["colors"][1]["color"]["components"]["blue"], "0x12");
+        assert_eq!(color["colors"][1]["color"]["components"]["alpha"], "0.502");
+        let CatalogSet {
+            dir,
+            contents: image,
+            files,
+        } = &sets[1];
+        assert_eq!(dir, "LaunchImage.imageset");
+        assert_eq!(image["images"].as_array().unwrap().len(), 1);
+        assert_eq!(image["images"][0]["scale"], "3x");
+        assert_eq!(
+            files,
+            &[(PathBuf::from("launch.png"), "light.png".to_owned())]
+        );
+
+        // A color that does not read is left out with a warning, as other
+        // values are.
+        let (config, ignored) =
+            parse_config(r#"{ "ios": { "launchScreen": { "background": "white" } } }"#).unwrap();
+        assert_eq!(config.ios.launch_screen.unwrap().background, None);
+        assert_eq!(ignored.len(), 1, "{ignored:?}");
+    }
 
     #[test]
     fn ios_device_capabilities_and_overrides() {
