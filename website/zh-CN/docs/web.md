@@ -310,7 +310,7 @@ await player.runModule(new URL("./bundle.js", location.href).href);
 
 `player.runSource(code, { name, sourceMap, capabilities, appId })` 运行以源码文本给出的 ES 模块，选项相同。使用 `nsh-playground.wasm` 时，`player.compileAndRun(tsx, name, options)` 会先编译 TSX，再用 `runSource` 的选项运行，结果是编译错误或 `null`；`player.compile(tsx)` 返回 `{ code }` 或 `{ error }`。
 
-容器的尺寸就是应用的窗口（`windowSize()`），调整容器大小会同步调整应用。`player.setDark(true)` 可在运行时切换外观，应用通过 `colorScheme()` 和 `dark:` 类感知到变化。外观会一直保持到下一次 `setDark`：之后浏览器配色方案的变化不会撤销它，与 `dark` 选项相同。
+容器的尺寸就是应用的窗口（`windowSize()`），调整容器大小会同步调整应用。`player.setAppearance("dark")`（`"light"`、`"dark"` 或 `"system"`）在运行时设置页面的外观，在下一次调用之前代替浏览器的配色方案；应用通过 `colorScheme()` 和 `dark:` 类感知变化，`"system"` 重新跟随浏览器。`createPlayer` 的 `appearance` 选项从一开始就设置它。应用自己设置的外观（`nsh.json` 的 `"appearance"`、`setColorScheme`）仍然优先。
 
 应用的生命周期就是页面的生命周期。监听退出请求的应用（`Application.on("quitRequest")`，见
 [退出](../modules/nsh-desktop.md#退出)）在用户离开嵌入它的页面时会被询问，浏览器可能询问用户是否离开；页面离开时它的

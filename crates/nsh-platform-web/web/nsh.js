@@ -32,7 +32,8 @@
 // by default `nsh-<name>.bin` next to this file), `prepareChunk(id)` (a
 // promise for what chunk `id` needs once it
 // runs, such as fonts for `readAsset`; awaited with the chunk's download),
-// `dark`, `idiom` ("phone", "pad" or "desktop" instead of the one the
+// `appearance` ("light" or "dark" instead of the browser's color scheme;
+// "system", the default, follows it), `idiom` ("phone", "pad" or "desktop" instead of the one the
 // pointer and the viewport suggest), `dialogs` ("viewport": `Dialog`,
 // `Sheet` and `AlertDialog` cover the whole window, in the browser's top layer, rather
 // than the container, which they cover by default and in browsers without
@@ -969,6 +970,13 @@ function parseCssColor(value) {
   return [p[0] / 255, p[1] / 255, p[2] / 255, p.length > 3 ? p[3] : 1];
 }
 
+/** Whether `appearance` ("light", "dark" or "system") is dark, given the browser's scheme. */
+function resolveAppearance(appearance, systemDark) {
+  if (appearance === "light") return false;
+  if (appearance === "dark") return true;
+  return systemDark;
+}
+
 class Player {
   /** The player that last took input (keys go to it while nothing has the focus). */
   static active = null;
@@ -1036,7 +1044,8 @@ class Player {
     this.requests = new Map();
     this.websockets = new Map();
     this.fileOperations = new Map();
-    this.dark = options.dark ?? matchMedia("(prefers-color-scheme: dark)").matches;
+    this.hostAppearance = options.appearance ?? "system";
+    this.dark = resolveAppearance(this.hostAppearance, matchMedia("(prefers-color-scheme: dark)").matches);
     // The navigation stacks and modals are the browser's history: by
     // default only when the app is the page (in an iframe each push would
     // be an entry of the embedding page's history too).
@@ -1282,7 +1291,7 @@ class Player {
     // browser, as it was when the player started.
     this.withStrings([this.baseURL], (p, l) => this.wasm.nsh_set_base_url(p, l));
     new ResizeObserver(() => this.resized()).observe(this.root);
-    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => this.schemeChanged(e.matches));
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => this.setAppearance(this.hostAppearance));
     this.installEnvironment();
     this.installInput();
   }
@@ -2038,18 +2047,15 @@ class Player {
   }
 
   /**
-   * Switches the appearance at run time. It stays until the next `setDark`:
-   * the browser's color scheme changing later does not undo it, as it does
-   * not undo the `dark` option.
+   * The page's appearance, which stands in for the browser's color scheme:
+   * "light" or "dark", or "system" to follow the browser's again. It stays
+   * until the next call. An appearance the app sets itself (`nsh.json`
+   * `"appearance"`, `setColorScheme`) still wins.
    */
-  setDark(dark) {
-    this.darkChosen = true;
-    this.applyDark(dark);
-  }
-
-  /** The browser's color scheme changed: the app follows it unless the page chose its appearance. */
-  schemeChanged(dark) {
-    if (this.options.dark === undefined && !this.darkChosen) this.applyDark(dark);
+  setAppearance(appearance) {
+    this.hostAppearance = appearance;
+    const dark = resolveAppearance(appearance, matchMedia("(prefers-color-scheme: dark)").matches);
+    if (dark !== this.dark) this.applyDark(dark);
   }
 
   applyDark(dark) {

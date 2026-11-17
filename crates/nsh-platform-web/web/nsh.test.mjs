@@ -612,29 +612,36 @@ test("a face registered while another loads keeps the app hidden until both have
   clearTimeout(player.fontTimer);
 });
 
-test("setDark stays when the browser's color scheme changes, and the scheme is followed until then", () => {
-  const { player } = fakePlayer();
-  const set = [];
-  player.wasm.nsh_set_dark = (dark) => set.push(dark);
-  player.call = (f) => f(player.wasm);
-  // Nothing chosen: the app follows the browser.
-  player.schemeChanged(true);
-  player.schemeChanged(false);
-  assert.deepEqual(set, [1, 0]);
-  assert.equal(player.dark, false);
-  // The page chose: the browser's changes leave it as it is.
-  player.setDark(true);
-  player.schemeChanged(false);
-  player.schemeChanged(true);
-  player.schemeChanged(false);
-  assert.deepEqual(set, [1, 0, 1]);
-  assert.equal(player.dark, true);
-  // The `dark` option is the same choice, made at the start.
-  const { player: fixed } = fakePlayer({ dark: false });
-  fixed.wasm.nsh_set_dark = (dark) => set.push(dark);
-  fixed.call = (f) => f(fixed.wasm);
-  fixed.schemeChanged(true);
-  assert.deepEqual(set, [1, 0, 1]);
+test("setAppearance stands in for the browser's color scheme until set back to system", () => {
+  const saved = globalThis.matchMedia;
+  let systemDark = false;
+  globalThis.matchMedia = () => ({ matches: systemDark });
+  try {
+    const { player } = fakePlayer();
+    const set = [];
+    player.wasm.nsh_set_dark = (dark) => set.push(dark);
+    player.call = (f) => f(player.wasm);
+    player.dark = false;
+    player.hostAppearance = "system";
+    // "system": the app follows the browser.
+    systemDark = true;
+    player.setAppearance(player.hostAppearance);
+    assert.deepEqual(set, [1]);
+    // "light" stays whatever the browser does.
+    player.setAppearance("light");
+    systemDark = false;
+    player.setAppearance(player.hostAppearance);
+    systemDark = true;
+    player.setAppearance(player.hostAppearance);
+    assert.deepEqual(set, [1, 0]);
+    assert.equal(player.dark, false);
+    // Back to "system": the browser's scheme again.
+    player.setAppearance("system");
+    assert.deepEqual(set, [1, 0, 1]);
+    assert.equal(player.dark, true);
+  } finally {
+    globalThis.matchMedia = saved;
+  }
 });
 
 test("compileAndRun hands the compiled module to runSource, or returns the compile error", async () => {

@@ -347,7 +347,7 @@ await player.runModule(new URL("./bundle.js", location.href).href);
 
 `player.runSource(code, { name, sourceMap, capabilities, appId })` runs an ES module given as source text, with the same options. With `nsh-playground.wasm`, `player.compileAndRun(tsx, name, options)` compiles TSX first, runs it with `runSource`'s options and resolves to the compile error, or `null`; `player.compile(tsx)` returns `{ code }` or `{ error }`.
 
-The container's size is the app's window (`windowSize()`); resizing the container resizes the app. `player.setDark(true)` switches the appearance at run time, which apps observe through `colorScheme()` and `dark:` classes. It stays until the next `setDark`: the browser's color scheme changing later does not undo it, as it does not undo the `dark` option.
+The container's size is the app's window (`windowSize()`); resizing the container resizes the app. `player.setAppearance("dark")` (`"light"`, `"dark"` or `"system"`) sets the page's appearance at run time, standing in for the browser's color scheme until the next call; apps observe it through `colorScheme()` and `dark:` classes, and `"system"` follows the browser again. The `appearance` option of `createPlayer` sets it from the start. An appearance the app sets itself (`nsh.json` `"appearance"`, `setColorScheme`) still wins.
 
 The app's lifecycle is the page's. An app that listens to quit requests (`Application.on("quitRequest")`,
 [Quitting](../modules/nsh-desktop.md#quitting)) is asked as the user leaves the page it is embedded in, and the browser
