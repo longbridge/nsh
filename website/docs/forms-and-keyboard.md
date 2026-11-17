@@ -185,7 +185,7 @@ In Rust, each prop is a method of `input()` named in snake case (`.placeholder(.
 | `autoCorrect` | `boolean` | `true` | The system's corrections: spelling and, on iOS and macOS, smart quotes, dashes and text replacement. Turn it off for code and identifiers. |
 | `autoComplete` | `AutoComplete` | | What the input holds, for autofill. |
 | `multiline` | `boolean` | `false` | Several lines; return inserts a line break unless `submitBehavior` says otherwise. |
-| `maxLength` | `number` | | The most characters the user can enter. A longer paste goes in cut to what fits, as in a browser. |
+| `maxLength` | `number` | | The most characters the user can enter, counted as Unicode code points on every platform: an emoji such as 😀 or a rare CJK character counts once. A longer paste goes in cut to what fits, as in a browser, never inside a character such as an emoji with its skin tone. |
 | `readonly` | `boolean` | `false` | The user can select and copy the text but not change it. |
 | `autoFocus` | `boolean` | `false` | Focused when it appears. |
 | `submitBehavior` | `"submit" \| "blurAndSubmit" \| "newline"` | single line `"blurAndSubmit"`, multiline `"newline"` | What return does: submit and keep the focus, submit and unfocus, or insert a line break (multiline only). |

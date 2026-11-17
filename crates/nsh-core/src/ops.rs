@@ -3322,7 +3322,10 @@ pub enum Prop {
     /// `multiline`: several lines; return inserts a line break.
     #[prop(js = "multiline", on = INPUT)]
     Multiline(bool),
-    /// `maxLength`: the most characters the user can enter.
+    /// `maxLength`: the most characters the user can enter, counted as
+    /// Unicode code points on every platform (an emoji such as 😀 is one).
+    /// A longer paste goes in cut to what fits, never inside a character
+    /// such as an emoji with its skin tone.
     #[prop(js = "maxLength", on = INPUT)]
     MaxLength(Option<u32>),
     /// `readonly`: the user can select and copy the text but not change it.

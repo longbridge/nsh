@@ -601,7 +601,9 @@ pub struct InputConfig {
     pub auto_correct: bool,
     /// Several lines (return inserts a line break).
     pub multiline: bool,
-    /// Maximum length in UTF-16 units.
+    /// The most characters the user's edits leave (`maxLength`), counted
+    /// as Unicode scalar values ([`crate::text_edit::char_len`]); an
+    /// insertion is cut by [`crate::text_edit::clip_chars`].
     pub max_length: Option<u32>,
     /// The user can edit the text.
     pub editable: bool,

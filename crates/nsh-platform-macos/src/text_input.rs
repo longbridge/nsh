@@ -65,6 +65,7 @@ use nsh_core::{
     TextAlign,
     geometry::{Point, Size, px},
     tailwind::state,
+    text_edit::{char_len, clip_chars},
 };
 use objc2::{
     AnyThread, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
@@ -725,8 +726,14 @@ impl Ctx {
         let max = input.config.borrow().max_length;
         let fit = match max {
             Some(max) => {
-                let kept = text_view.string().length().saturating_sub(range.length);
-                clip_utf16(&text, (max as usize).saturating_sub(kept))
+                // `maxLength` counts characters: those the edit keeps.
+                let string = text_view.string();
+                let all = string.length();
+                let start = range.location.min(all);
+                let end = range.location.saturating_add(range.length).min(all);
+                let kept = char_len(&input_text(&string, NSRange::new(0, start)))
+                    + char_len(&input_text(&string, NSRange::new(end, all - end)));
+                clip_chars(&text, (max as usize).saturating_sub(kept))
             }
             None => &text[..],
         };
@@ -3228,19 +3235,6 @@ fn utf16_len(s: &str) -> usize {
     s.chars().map(char::len_utf16).sum()
 }
 
-/// The longest prefix of `s` that fits in `max` UTF-16 units, cut between
-/// characters.
-fn clip_utf16(s: &str, max: usize) -> &str {
-    let mut units = 0;
-    for (i, c) in s.char_indices() {
-        units += c.len_utf16();
-        if units > max {
-            return &s[..i];
-        }
-    }
-    s
-}
-
 /// The editor's UTF-16 range as the text an app receives.
 fn input_text(string: &NSString, range: NSRange) -> String {
     // Input methods can leave an unpaired surrogate in their text or marked
@@ -3355,13 +3349,7 @@ mod tests {
     }
 
     #[test]
-    fn max_length_clipping() {
-        assert_eq!(clip_utf16("hello", 3), "hel");
-        assert_eq!(clip_utf16("hello", 9), "hello");
-        assert_eq!(clip_utf16("hello", 0), "");
-        // A pair is never split.
-        assert_eq!(clip_utf16("a😀", 2), "a");
-        assert_eq!(clip_utf16("a😀", 3), "a😀");
+    fn utf16_length() {
         assert_eq!(utf16_len("a😀"), 3);
     }
 
