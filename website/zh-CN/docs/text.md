@@ -114,7 +114,7 @@ text("先运行 ")
 </Text>
 ```
 
-span 上的水平 padding 会在它两端的行内占位，背景也覆盖这段空间，与 CSS 行内盒一致；垂直 padding 和边框对 span 不起作用。`fontSize` 用相对值时，span 无论放在哪里都和所在段落保持比例：
+span 上的水平 padding 会在它两端的行内占位，背景也覆盖这段空间，与 CSS 行内盒一致；垂直 padding 会让背景向文字上下延伸，但不改变行高；边框对 span 不起作用。`fontSize` 用相对值时，span 无论放在哪里都和所在段落保持比例：
 
 ```tsx
 <Text style={{ fontSize: 16 }}>

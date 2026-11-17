@@ -4422,9 +4422,10 @@ impl<M: TextEngine> Core<M> {
                 self.needs_layout = true;
             }
         } else if node.kind == Kind::Text {
-            // A span: kept for when it is a block again. Its horizontal
-            // padding is part of its block's text.
-            let padding = |l: &taffy::Style| (l.padding.left, l.padding.right);
+            // A span: kept for when it is a block again. Its padding is
+            // part of its block's text (horizontal: room in the line;
+            // vertical: its background's).
+            let padding = |l: &taffy::Style| l.padding;
             let padded = node.base_layout.as_deref().map(padding) != Some(padding(&layout));
             node.base_layout = Some(Box::new(layout));
             if padded && node.inline {
@@ -7930,7 +7931,8 @@ impl<M: TextEngine> Core<M> {
                 Kind::Text => {
                     let start = out.len_utf16();
                     let mut inner = style.inherit(&child.text_style);
-                    if let Some(b) = span_background(&child.view_style, child.id) {
+                    if let Some(mut b) = span_background(&child.view_style, child.id) {
+                        (b.top, b.bottom) = span_vertical_padding(child);
                         inner.background = Some(b);
                     }
                     // `visibility: "hidden"` on a span hides its characters,
@@ -11078,12 +11080,28 @@ fn span_padding(node: &Node, rtl: bool) -> (f32, f32) {
     if rtl { (right, left) } else { (left, right) }
 }
 
+/// A span's top and bottom padding, which only its background takes (as
+/// a CSS inline box's): the line keeps its height. Percentages count as
+/// none.
+fn span_vertical_padding(node: &Node) -> (Points, Points) {
+    let Some(style) = node.base_layout.as_deref() else {
+        return (Points::ZERO, Points::ZERO);
+    };
+    let len = |p: taffy::LengthPercentage| match p.into_raw().tag() {
+        taffy::CompactLength::LENGTH_TAG => Points(p.into_raw().value().max(0.0)),
+        _ => Points::ZERO,
+    };
+    (len(style.padding.top), len(style.padding.bottom))
+}
+
 /// The background a nested text's view style gives its characters.
 fn span_background(style: &ViewStyle, node: NodeId) -> Option<crate::text::TextBackground> {
     (style.background_color.0 & 0xff != 0).then_some(crate::text::TextBackground {
         color: style.background_color,
         radius: style.border_radius.max(Points::ZERO),
         node,
+        top: Points::ZERO,
+        bottom: Points::ZERO,
     })
 }
 

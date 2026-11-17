@@ -792,6 +792,8 @@ impl Driver for Remote {
                 color: nsh_core::Color(color),
                 radius: nsh_core::Points::ZERO,
                 node: 0,
+                top: Default::default(),
+                bottom: Default::default(),
             }),
             ..ResolvedTextStyle::default()
         })

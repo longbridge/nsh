@@ -1329,6 +1329,8 @@ fn span_backgrounds_style_their_characters() {
         color: Color(0xff00_00ff),
         radius: Points(4.0),
         node: 4,
+        top: Default::default(),
+        bottom: Default::default(),
     });
     // The block's own background is its view's; the bold span inside the
     // red one keeps the red one's.
@@ -1668,6 +1670,8 @@ fn background_boxes_join_pieces_of_one_span() {
         color: Color(0xff00_00ff),
         radius: Points(3.0),
         node,
+        top: Points::ZERO,
+        bottom: Points::ZERO,
     };
     let code = ResolvedTextStyle {
         background: Some(bg(4)),
@@ -1726,6 +1730,21 @@ fn background_boxes_join_pieces_of_one_span() {
     );
     assert_eq!(boxes.len(), 1);
     assert_eq!((boxes[0].x.0, boxes[0].width.0), (20.0, 5.0));
+    // A background's top and bottom room (its span's vertical padding)
+    // grows the box past the font's ascent and descent.
+    let padded = |i: u32| crate::text::LinePiece {
+        background: t.background_at(i).map(|b| crate::text::TextBackground {
+            top: Points(3.0),
+            bottom: Points(1.0),
+            ..b
+        }),
+        ..piece(i, 10.0)
+    };
+    let mut boxes = Vec::new();
+    crate::text::BackgroundBox::join((0..7).map(padded), (Points(0.0), Points(70.0)), |b| {
+        boxes.push(b)
+    });
+    assert_eq!((boxes[0].ascent.0, boxes[0].descent.0), (13.0, 3.0));
 }
 
 #[test]
@@ -46196,6 +46215,25 @@ fn span_padding_widens_its_box_in_the_line() {
     let text = text_item(&c.commit().unwrap()).unwrap();
     assert_eq!(text.text, "a b c");
     assert!(text.attachments.is_empty());
+
+    // Vertical padding is the background's only: no attachments, the
+    // room above and below in the background.
+    apply(
+        &mut c,
+        vec![style_op(
+            4,
+            &[
+                ("backgroundColor", StyleValue::Str("#ff0000")),
+                ("paddingTop", StyleValue::Number(3.0)),
+                ("paddingBottom", StyleValue::Number(1.0)),
+            ],
+        )],
+    );
+    let text = text_item(&c.commit().unwrap()).unwrap();
+    assert_eq!(text.text, "a b c");
+    assert!(text.attachments.is_empty());
+    let b = text.background_at(2).unwrap();
+    assert_eq!((b.top, b.bottom), (Points(3.0), Points(1.0)));
 }
 
 #[test]
