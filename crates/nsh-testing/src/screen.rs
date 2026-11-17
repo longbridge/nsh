@@ -233,6 +233,8 @@ struct View {
     selected: bool,
     /// Its `accessibilityState`.
     accessibility_state: AccessibilityState,
+    /// A composite input's document text, distinct from its keyboard sink.
+    value_text: Option<Arc<str>>,
     /// Its `accessibilityLevel`.
     level: Option<u32>,
     /// Its `accessibilityDescription`.
@@ -591,6 +593,11 @@ impl Screen {
                 view.key_parent = props.key_parent;
                 view.selected = props.accessibility.state.selected;
                 view.accessibility_state = props.accessibility.state;
+                view.value_text = props
+                    .accessibility
+                    .value
+                    .as_ref()
+                    .and_then(|v| v.text.clone());
                 view.level = props.accessibility.level;
                 view.description = props.accessibility.description.clone();
                 view.active_descendant = props.accessibility.active_descendant;
@@ -1731,13 +1738,33 @@ impl Screen {
         }
     }
 
+    #[cfg(feature = "agent")]
+    pub(crate) fn semantic_input_text(&self, id: NodeId) -> Option<&str> {
+        self.nodes.get(&id)?.value_text.as_deref()
+    }
+
+    #[cfg(feature = "agent")]
+    pub(crate) fn input_cover(&self, id: NodeId) -> Option<NodeId> {
+        let at = self.visible_bounds_in_root(id)?.center();
+        if !self.receives_pointer(id) {
+            // Composite editors place the caret through their own hit layer.
+            return self.covering(id, at);
+        }
+        let hit = self.hit_pointer(at, self.window_of(id));
+        (hit != id && !self.is_inside(hit, id) && !self.is_inside(id, hit)).then_some(hit)
+    }
+
     /// The text of the input `selector` names ([`Screen::matches`]'s
     /// selectors; `text:` matches an input's text or placeholder); an
     /// error when it names several.
     pub fn input_text(&self, selector: &str) -> Result<Option<&str>, String> {
         let parsed = Selector::parse(selector)?;
         match self.input_view(&parsed) {
-            Pick::One(id) => Ok(self.input(id).map(|input| input.text.as_str())),
+            Pick::One(id) => Ok(self
+                .nodes
+                .get(&id)
+                .and_then(|v| v.value_text.as_deref())
+                .or_else(|| self.input(id).map(|input| input.text.as_str()))),
             Pick::Many(n) => Err(format!("`{selector}` matches {n} inputs")),
             Pick::None | Pick::Disabled => Ok(None),
         }

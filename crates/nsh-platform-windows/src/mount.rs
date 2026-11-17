@@ -529,7 +529,9 @@ enum Redraw {
 
 /// What `item` may change on screen once applied. Insertions and removals
 /// draw their parents again themselves ([`NshView::insert_before`],
-/// [`NshView::unparent`]); a new view is drawn when it is inserted.
+/// [`NshView::unparent`]), and so does a shader's layer, only when it
+/// changes what is drawn before its next frame ([`crate::shader::set`]); a
+/// new view is drawn when it is inserted.
 fn redrawn(item: &MountItem) -> Redraw {
     match item {
         MountItem::Create { .. }
@@ -547,6 +549,7 @@ fn redrawn(item: &MountItem) -> Redraw {
         | MountItem::ComponentPropSlots { .. }
         | MountItem::TreeOrder(_)
         | MountItem::ProjectStates { .. }
+        | MountItem::Shader { .. }
         | MountItem::NavShader { .. } => Redraw::Nothing,
         MountItem::Frame { id, .. }
         | MountItem::ViewStyle { id, .. }
@@ -560,7 +563,6 @@ fn redrawn(item: &MountItem) -> Redraw {
         | MountItem::ScrollBehavior { id, .. }
         | MountItem::Refreshing { id, .. }
         | MountItem::Canvas { id, .. }
-        | MountItem::Shader { id, .. }
         | MountItem::ShaderInput { id }
         | MountItem::ShaderTransition { id, .. }
         | MountItem::ViewProps { id, .. }

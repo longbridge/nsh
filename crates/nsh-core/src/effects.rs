@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use crate::{
+    color::Hsla,
     geometry::{DefiniteLength, Percentage, Points, REM_SIZE, Radians, Size, deg},
     style::{BorderStyle, Color},
 };
@@ -140,7 +141,7 @@ pub struct ColorStop {
     pub position: Option<DefiniteLength>,
 }
 
-/// A gradient image (`backgroundImage`).
+/// A gradient image (`backgroundImage`, `maskImage`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Gradient {
     /// Geometry.
@@ -149,6 +150,39 @@ pub struct Gradient {
     pub stops: Vec<ColorStop>,
     /// Repeats past the last stop.
     pub repeating: bool,
+}
+
+/// A stop at no position of its own: spread evenly between its neighbors.
+impl From<Hsla> for ColorStop {
+    fn from(color: Hsla) -> Self {
+        ColorStop {
+            color: color.into(),
+            position: None,
+        }
+    }
+}
+
+/// A stop at a fraction of the gradient line (`percentage(0.2)`) or a
+/// length from its start (`px(12.0)`).
+impl<P: Into<DefiniteLength>> From<(Hsla, P)> for ColorStop {
+    fn from((color, position): (Hsla, P)) -> Self {
+        ColorStop {
+            color: color.into(),
+            position: Some(position.into()),
+        }
+    }
+}
+
+impl<T: Into<ColorStop>, const N: usize> crate::element::IntoReactive<Vec<ColorStop>> for [T; N] {
+    fn into_reactive(self) -> crate::element::Reactive<Vec<ColorStop>> {
+        crate::element::Reactive::Static(self.into_iter().map(Into::into).collect())
+    }
+}
+
+impl<T: Into<ColorStop>> crate::element::IntoReactive<Vec<ColorStop>> for Vec<T> {
+    fn into_reactive(self) -> crate::element::Reactive<Vec<ColorStop>> {
+        crate::element::Reactive::Static(self.into_iter().map(Into::into).collect())
+    }
 }
 
 impl Gradient {

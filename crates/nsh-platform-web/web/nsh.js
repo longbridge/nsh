@@ -1569,10 +1569,45 @@ class Player {
       this.measure.font = font;
       const t = this.measure.measureText("Hg");
       const x = this.measure.measureText("x");
-      m = [t.fontBoundingBoxAscent ?? 0, t.fontBoundingBoxDescent ?? 0, x.actualBoundingBoxAscent ?? 0];
+      // Ascent and descent as the DOM draws a run (`.nsh-run`: absolutely
+      // placed, `font` shorthand, so `line-height: normal`): where its
+      // baseline falls in its box. Canvas rounds its font box to whole
+      // pixels (Chrome), each font its own way, which put runs of two fonts
+      // on one line up to a pixel and a half apart on a phone.
+      const dom = this.domMetrics(font);
+      m = dom
+        ? [dom[0], dom[1], x.actualBoundingBoxAscent ?? 0]
+        : [t.fontBoundingBoxAscent ?? 0, t.fontBoundingBoxDescent ?? 0, x.actualBoundingBoxAscent ?? 0];
       this.metricsCache.set(font, m);
     }
     return m;
+  }
+
+  /** `[ascent, descent]` of a run in `font` as the DOM lays it out, or
+   * null without a document to measure in. */
+  domMetrics(font) {
+    if (typeof document === "undefined" || !document.body) return null;
+    let probe = this.metricsProbe;
+    if (!probe || !probe.box.isConnected) {
+      const box = document.createElement("div");
+      box.setAttribute("aria-hidden", "true");
+      box.style.cssText = "position:absolute;left:-10000px;top:0;visibility:hidden;pointer-events:none";
+      const run = document.createElement("span");
+      run.className = "nsh-run";
+      run.style.cssText = "left:0;top:0";
+      run.textContent = "Hg";
+      const mark = document.createElement("i");
+      mark.style.cssText = "display:inline-block;width:0;height:0;vertical-align:baseline";
+      run.append(mark);
+      box.append(run);
+      document.body.append(box);
+      probe = this.metricsProbe = { box, run, mark };
+    }
+    probe.run.style.font = font;
+    const top = probe.run.getBoundingClientRect();
+    const ascent = probe.mark.getBoundingClientRect().top - top.top;
+    if (!(top.height > 0)) return null;
+    return [ascent, top.height - ascent];
   }
 
   /**
@@ -8694,10 +8729,16 @@ class Player {
     const pos = h ? el.scrollLeft : el.scrollTop;
     const max = h ? el.scrollWidth - el.clientWidth : el.scrollHeight - el.clientHeight;
     const page = (h ? el.clientWidth : el.clientHeight) * 0.875;
-    const d = { ArrowUp: -40, ArrowLeft: -40, ArrowDown: 40, ArrowRight: 40, PageUp: -page, PageDown: page,
-      " ": e.shiftKey ? -page : page, Home: -pos, End: max - pos }[k];
+    // The key's move, as `nsh_key_scroll` takes it: by points (0), by
+    // pages (1), to the start (2), to the end (3).
+    const [kind, amount] = { ArrowUp: [0, -40], ArrowLeft: [0, -40], ArrowDown: [0, 40], ArrowRight: [0, 40],
+      PageUp: [1, -1], PageDown: [1, 1], " ": [1, e.shiftKey ? -1 : 1], Home: [2, 0], End: [3, 0] }[k];
+    const d = [amount, amount * page, -pos, max - pos][kind];
     if (el._snapPoints) this.snapStep(el, Math.sign(d));
     else this.scrollSmoothly(el, h ? d : 0, h ? 0 : d, true);
+    // A list follows its real end from here on (rows never rendered are
+    // only estimated), and the other keys leave it.
+    this.call((w) => w.nsh_key_scroll(el._id, kind, amount));
     return true;
   }
 
