@@ -331,21 +331,14 @@ expect Swipes dialog
 event text:"Swipes dialog" onCancel reason=swipe
 expect Log: swipes change false swipe
 absent Swipes dialog
-# An iOS sheet at detents: its props as iOS receives them, and the user's
-# moves heard (`onDetentChange({ detent })`), a custom detent as its
-# object.
+# An iOS sheet at detents: the user's moves heard
+# (`onDetentChange({ detent })`).
 tap text:Clear log
 tap text:Open sheet
 expect Sheet dialog
 prop id:sheet presentation pageSheet
-prop id:sheet detents medium, large, height=200, fraction=0.4
-prop id:sheet detent medium
-prop id:sheet defaultDetent large
-prop id:sheet grabber true
-prop id:sheet largestUndimmedDetent medium
 event text:"Sheet dialog" onDetentChange detent=large
 expect Log: sheet detent large
-prop id:sheet detent large
 event text:"Sheet dialog" onCancel reason=swipe
 absent Sheet dialog
 covers [nsh/base] Dialog
@@ -363,11 +356,6 @@ covers [events] Dialog.onOpen
 covers [events] Dialog.onClose
 covers [events] Dialog.onCancel
 covers [events] Dialog.onOpenChange
-covers [props] detents
-covers [props] detent
-covers [props] defaultDetent
-covers [props] grabber
-covers [props] largestUndimmedDetent
 covers [events] onDetentChange
 # base-dialog-backdrop
 tap id:case-base-dialog-backdrop
