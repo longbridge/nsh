@@ -159,6 +159,13 @@ belong to the app, which owns retention and its storage budget.
   draws the finished `CTLine`s. A final layout is made when first read (`CoreTextLayout`), so text nothing shows is
   not typeset twice; when that read is the main thread's, it holds the text's lock for the time of one layout. Texts
   with attachments are made at once on the engine.
+- **Texts are painted off the main thread** (`text/raster.rs`): a content layer's delegate draws during Core
+  Animation's commit, so a page of new texts would spend its first frame there. The engine thread paints the texts of
+  a batch whose views get a frame in it into IOSurfaces at the window's backing scale (`text::prerender`, in the sink,
+  spread over a few threads) before the batch leaves; the main thread sets a surface as the content layer's
+  `contents` when the text first draws (`text::show_raster`). Whatever a raster cannot know draws in the commit as
+  before: a layer of another size or density, a selection, an animated or transitioning color, and every later
+  redraw. A text out of sight when its batch is applied drops its raster.
 - **Frames**: native animations, JS frame requests, scroll glides and transitions run on one display link per surface
   (`NSView::displayLinkWithTarget_selector`) while something animates, which drives every window of the surface, the
   app's own (`Window.open`) too. AppKit fires a view's link only while some of the view's window shows on a screen
@@ -241,8 +248,8 @@ belong to the app, which owns retention and its storage budget.
 | Transitions | `transition.rs` | `LayoutAnimation`, style transitions and keyframes on frame callbacks (Linux's); curves, interpolation and timing are `nsh_core::transition`'s, and native animation values are written through `nsh_core::animation` (`animation.rs`), as on the other desktops |
 | Alerts (`AlertDialog`) | `system.rs` | `NSAlert`, placed as open and save panels are (next row: `window::panel_window`): a sheet of the window the user is in while the user sees it, else (a tray app's hidden main window, the app hidden, the window minimized or off every screen, a surface in no window) on its own, in front, an inactive app activated first. On its own an alert is app-modal (`runModal`, `system::run_alone`), one at a time, and the app's batches go on while it shows (`pitfalls.md`); the app stopping or its surface dropped takes its alerts away unanswered. NSAlert puts two buttons in a row, its first rightmost, and stacks more, its first on top but the Return button moved above all: up to two alert buttons are added in reverse with the cancel button last (they read in order, cancel leftmost) and the last regular one is the default; more, and action sheets' options, are added in order with the cancel button last and no default (iOS's order). Cancel is Escape; destructive buttons have `hasDestructiveAction`. |
 | Open and save panels (`pick_paths`, `pick_save_path`, `Picker.pickFiles`, `Picker.pickImages`) | `file_requests.rs`, `picker.rs` | `NSOpenPanel` / `NSSavePanel` as a sheet of the window the user is in (`window::sheet_window`: the app's own titled window that has the keyboard, else the main window) while the user sees that window. A sheet of a window out of sight would stay out of sight with it: while the window is hidden (a tray app's main window, `defaultVisible: false`, or the app hidden), minimized or wholly off every screen (`NSWindow.screen` nil), the panel shows in a window of its own, and an inactive app is activated first as `focus()` activates it (`activateIgnoringOtherApps:`; never in the background, as `nsh test` runs it), since such a panel opens behind the front app's windows (`window::panel_window`, `panel_placement`). Alerts follow the same rule (previous row). |
-| Video | `native.rs` | AVFoundation (loaded at run time, as on iOS): an `AVPlayerLayer` in a view that lets the mouse through, or AVKit's `AVPlayerView` with `controls` |
-| Web views | `native.rs` | `WKWebView` (iOS's bridge: `window.nsh.postMessage`, injected JS, the `webview` capability's navigation policy, every prop, event and command iOS has; the URL schemes the app serves, `url_scheme`, through `nsh-platform-apple`'s `web_scheme`, one `WKURLSchemeHandler` per web view set on its configuration before it is made, shared with iOS); a `file://` `src` loads with `loadFileURL`, reading the file's own folder and nothing above it (`file_read_scope`: `file://localhost/` is the same local path as `file:///`; none for another host, a file at the root or a path with a `.` or `..` segment, which load as plain requests), and the navigation policy lets that web view open any file in that folder or below it, so a local multi-page HTML document can link between its pages; any file URL outside it is refused (`navigation_allowed`); a web view is transparent by default (`drawsBackground = false`), a page without a background showing the view behind it; macOS's web view has no scroll view to turn off, so with `scrollable={false}` the root's `hitTest:` keeps wheel and trackpad scrolls from it (`passes_wheel`) and they scroll the app's scroll views around it (the page's own keys and scripts still scroll it; swipes between pages, `allowsBackForwardNavigationGestures`, are scrolls too) |
+| Video | `native.rs` | AVFoundation (loaded at run time, as on iOS): an `AVPlayerLayer` in a view that lets the mouse through, or AVKit's `AVPlayerView` with `controls`; the player is made on a frame after the one that mounts the video, once the framework is in (`start_later`, see "First native views") |
+| Web views | `native.rs` | `WKWebView` (WebKit loaded at run time, the configuration and the `WKWebView` each made on a frame after the mount: `start_later`, see "First native views"; iOS's bridge: `window.nsh.postMessage`, injected JS, the `webview` capability's navigation policy, every prop, event and command iOS has; the URL schemes the app serves, `url_scheme`, through `nsh-platform-apple`'s `web_scheme`, one `WKURLSchemeHandler` per web view set on its configuration before it is made, shared with iOS); a `file://` `src` loads with `loadFileURL`, reading the file's own folder and nothing above it (`file_read_scope`: `file://localhost/` is the same local path as `file:///`; none for another host, a file at the root or a path with a `.` or `..` segment, which load as plain requests), and the navigation policy lets that web view open any file in that folder or below it, so a local multi-page HTML document can link between its pages; any file URL outside it is refused (`navigation_allowed`); a web view is transparent by default (`drawsBackground = false`), a page without a background showing the view behind it; macOS's web view has no scroll view to turn off, so with `scrollable={false}` the root's `hitTest:` keeps wheel and trackpad scrolls from it (`passes_wheel`) and they scroll the app's scroll views around it (the page's own keys and scripts still scroll it; swipes between pages, `allowsBackForwardNavigationGestures`, are scrolls too) |
 | Native components | `native.rs` | `AppView::register_component(name, factory)`; a `NativeComponent`'s `NSView` fills the node's view; `ComponentContext::emit` / `set_size` from any thread |
 | Accessibility | `access.rs` | `NSAccessibility` setters on the views: roles and subroles, labels, values, states, `testID` as the identifier; a scroll view is an `AXScrollArea` whose scroll bar on its axis (`access/scroll_bar.rs`, an `NSAccessibilityElement` made when a client first asks) has where it is scrolled to as its value, 0 to 1, and posts its value's changes as it scrolls; `accessible={true}` hides the children, `accessibilityElementsHidden` and `visibility: hidden` the view and its subtree (as in a browser), the view answering `accessibilityChildren` itself: a scroll view's and a page list's (`ViewProps::screen_order`) as they are on screen (`nsh_core::scroll::reading_order`, by the frame of the child each element is in), every other view's in tree order; live regions announced, and an alert (`role="alert"`) read whole as it appears and as its content changes, once the batch is in; `AXShowMenu` (VoiceOver's VO-Shift-M) on a view that listens to `onContextMenu` raises it with no pointer (`input::accessibility_show_menu`), which is how the keyboard reaches context menus on a Mac (AppKit has no Shift+F10) |
 | Environment | `system.rs` | Color scheme: the app's appearance when it forces one, else the root's effective appearance (the root's appearance is set to the app's, so hosted controls follow); locale and RTL from `NSLocale`, reduce motion and VoiceOver from `NSWorkspace` (live), the backing scale factor (again when the window moves to another screen: `pixelRatio()`), the OS version; whether the app is in use (`lifecycle()`: `background` while none of it shows, hidden or `NSApplication.occlusionState` without `visible` (its windows minimized or covered), `active` while it is the active app, else `inactive`; live, from `NSApplication`'s activation, hiding and occlusion notifications, the embedding app's for an embedded surface); the preferred languages (`localeSettings()`'s `languages`: `NSLocale.preferredLanguages`, read again with the other settings); the regional preferences (`localeSettings()`'s `hourCycle` and the like: the hours of `NSDateFormatter`'s `j` format, `NSCalendar.firstWeekday`, `NSLocale`'s measurement system and the `AppleTemperatureUnit` default, over `LocaleSettings::parse` of the locale's identifier; read again with the other settings); the time zone (`localeSettings()`'s `timeZone`: `NSTimeZone.systemTimeZone`'s name, live from `NSSystemTimeZoneDidChangeNotification`, Foundation's cached zone reset first); `platform.os` `"macos"`, idiom `desktop`, font scale 1, safe area and keyboard height 0; the wake count (`wakeCount()`: one more on every `NSWorkspaceDidWakeNotification`) |
@@ -267,6 +274,44 @@ Clicking an input ends a drawn-text selection; programmatic focus keeps it. Head
 and expose only link children. Selectable drawn text whose accessibility value
 is its text, and its link elements, expose `AXSelectedTextRange` and
 `AXSelectedText` through the same enclosing selection.
+
+## First native views
+
+The first web view, video or multi-line input of a process sets up system state the main thread pays for once:
+the first `WKWebView` 123 ms (loading WebKit, its process pool and default website data store, the page), the first
+video 21 ms (loading AVFoundation, the `AVPlayer`), the first `NSTextView` 11 ms (TextKit). Paid in the frame that
+mounts the page, it would hold that frame, so it is paid elsewhere:
+
+- A video's or web view's player or `WKWebView` is made a few frames after the frame that mounts it
+  (`native::start_later`), one costly step per frame: its framework loaded with `dlopen` when it is not yet
+  (`native::Framework`); for a web view its configuration, the `WKWebView`, the props sent before any command with the
+  load held, then the load (`web_step`); for a video the player (`AVURLAsset`, `AVPlayerItem`, `AVPlayer`), then the
+  props, which show it in its layer (`video_step`). The page shows at once and the view fills in a few frames later.
+  Props and commands sent meanwhile (`play`, `seek`, a ref's `postMessage`, `reload`, requests) wait in order and are
+  applied when it is made; events come as before, only later. The loads stay on the main thread: a `dlopen` of WebKit
+  on a background queue was seen never to return, and every later `dlopen` waited behind it.
+- An app whose capabilities declare `webview` (not one whose policy restricts nothing, as a Rust app's) has WebKit's
+  process-wide state warmed at idle moments after it starts (`native::warm_web_later`), one step per moment: WebKit loaded and `WKWebView`'s class initialized, the default website data store, a
+  process pool (which every web view's configuration then uses), the configuration's other parts, then one spare
+  `WKWebView` with nothing loaded (`native::make_spare_web`). The first web view that can use it takes it instead of
+  making one (`WebHost::adopt`): one without URL schemes of its own and not `incognito`, since a configuration's
+  scheme handlers and data store are set before a web view is made; the message handler, scripts and preferences are
+  set on the made view. Another spare is made at the next idle moment, one at a time. Making the spare starts
+  WebKit's GPU process (about 8 MB); the web content and networking processes start with a web view's first load.
+  Apps that never declare web views never load WebKit for it.
+- A web view's first load launches its web content and networking processes, which the main thread prepares in the
+  load call (tens of milliseconds for the first web view of a process): that call is a frame of its own, which waits
+  while the surface moves (`Surface::moving`), at most half a second (`LOAD_WAIT`), so it does not land in the page's
+  transition. It is not moved to idle moments: those processes (about 35 MB) would run in apps that never show a
+  page.
+- AppKit's text system is warmed once per process a while after the first batch (`text_input::warm_later`): one
+  throwaway `NSTextView` in an `NSScrollView`, laid out.
+- Idle moments (`surface::when_idle`) are when nothing on the surface moves (`Surface::moving`): no batch waits, no
+  frame JS asked for, no animation of the graph or the platform (transitions, navigation, scroll glides, keyframes),
+  no mouse button held; the per-frame steps of native views being made do not count
+  (`Surface::add_background_callback`). A warm-up waits for one as long as it takes, and never runs once its
+  surface is gone: on a surface that always animates it does not run, and the views it would warm are made in their
+  own frames.
 
 ## Keyboard
 

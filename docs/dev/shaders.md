@@ -123,6 +123,26 @@ an adapter that refuses its device gives the next backend its turn; on Windows a
 WARP, its only one on Haswell's integrated GPUs and in many virtual machines) is tried only from the last entry, where
 a hardware Vulkan or GL adapter sorts ahead of it (`takes`); where none opens it is `None` and shader views show their background and children. Uncaptured device errors are warnings, never panics.
 
+Neither opening the device nor compiling a pipeline happens on the main thread, where each took tens of
+milliseconds (opening the device about 60 ms on a Mac, a pipeline 7–16 ms):
+
+- **Opening.** `Renderer::open(format, done)` runs `Renderer::new` on a thread of its own and calls `done` there; the
+  backend sends the renderer back to its main thread. macOS and iOS open this way, from the first shader (macOS: or
+  the first page's or dialog's `transitionShader`) mounted. While the device opens, a shader view shows its
+  background and children as they are, a transition starts no run and a page or a dialog comes and goes with its own
+  `animation`, as without a device, but the app is not told there is none: `shaders_unavailable` is reported only
+  once `done` says so. Once it is open, every shader view mounted meanwhile renders, and effects and transitions hide
+  their children as their frames show. Windows, Linux, Android and GPUI still open it with `Renderer::new` when the
+  first shader is mounted.
+- **Pipelines.** A pipeline the cache does not hold is compiled on the renderer's worker thread (one per renderer,
+  started with the first pipeline asked for, ended when the renderer drops); the cache marks it compiling, so it is
+  asked for once. `ShaderView::render` renders nothing for a view whose pipeline compiles: it stays due
+  (`ShaderView::compiling`), and a later call renders it. Backends that render on every display frame while a view
+  `wants_frame` (iOS, Windows, Linux, Android, GPUI) need nothing more; macOS, which renders a view that changed once
+  after the batch, waits for `Renderer::on_pipeline_ready`, which the worker calls after each pipeline it compiled,
+  and renders the views then (`Drive::Compiling`). A refused pipeline is reported once and cached as refused, as
+  before. Tests that render right after setting a shader wait with `Renderer::wait_for_pipelines`.
+
 `nsh_engine::shader::ShaderView` is one view's state on the main thread: the layer, its uniforms, size and scale, the
 clock of `nsh.time` (kept while paused), and its frames.
 
@@ -202,9 +222,9 @@ web page, nor backdrop blur or glass. The pictures of views AppKit has just show
 under the top one) wait for the next display frame: until AppKit displays the window their layers are out of the tree,
 where they draw y up.
 
-Where there is no GPU device (`Renderer::new` is `None`) macOS masks no children: an effect or a screen effect
-shows them as they are, a transition starts no run, and a page's or a dialog's `transitionShader` leaves the change
-to its own `animation`.
+Where there is no GPU device (`Renderer::new` is `None`), and while it opens, macOS masks no children: an effect or a
+screen effect shows them as they are, a transition starts no run, and a page's or a dialog's `transitionShader`
+leaves the change to its own `animation`.
 
 iOS retakes an effect's pictures on the display frame after the core says they changed (`MountItem::ShaderInput`) or
 the platform changed a view in them (animated values, scrolling, image loads), at most once per frame, and only those
@@ -219,9 +239,9 @@ dialog released while it shows closes through its shader too. The overlays leave
 reloads (`Shaders` drops them), and the root's children leave the view screen shaders draw them from
 (`Decor::set_effect`) when the last screen shader goes.
 
-Where there is no GPU device (`Renderer::new` is `None`) iOS masks no children: an effect or a screen effect shows
-them as they are, a transition starts no run, and a page's or a dialog's `transitionShader` leaves the change to
-its own `animation`, as it does when Reduce Motion is on.
+Where there is no GPU device (`Renderer::new` is `None`), and while it opens, iOS masks no children: an effect or a
+screen effect shows them as they are, a transition starts no run, and a page's or a dialog's `transitionShader`
+leaves the change to its own `animation`, as it does when Reduce Motion is on.
 
 On Android the layer stays in `libnsh`: the encoder sends Java only whether a view shows a shader (opcode `SHADER`,
 35, in `encode.rs` ↔ `Mounter.java`), Java reports the size in pixels (`Native.shaderSize`), and the layer goes to
