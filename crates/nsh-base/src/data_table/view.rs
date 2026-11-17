@@ -56,6 +56,13 @@ fn parts<E: Element>(
     parts_with(el, props, list, || None)
 }
 
+fn part_styled(props: DataTableProps, which: DataTablePart) -> bool {
+    props
+        .classes
+        .with(|c| c.get(which).is_some_and(|s| !s.is_empty()))
+        || props.styles.with(|s| s.get(which).is_some())
+}
+
 /// [`parts`], with `own` classes after the parts' (a row's `rowClasses`).
 fn parts_with<E: Element>(
     el: E,
@@ -64,8 +71,9 @@ fn parts_with<E: Element>(
     own: impl Fn() -> Option<SharedString> + 'static,
 ) -> E {
     let styles = list.clone();
+    let own = computed(own);
     el.app_class(move || {
-        let own = own();
+        let own = own.get();
         props.classes.with(|c| {
             let list = list();
             let mut joined: Vec<&str> = list
@@ -80,6 +88,9 @@ fn parts_with<E: Element>(
     })
     .inline_style(move || {
         props.styles.with(|s| {
+            if s.is_empty() {
+                return Style::default();
+            }
             Style::from_decls(
                 styles()
                     .iter()
@@ -108,7 +119,7 @@ fn column_parts<E: Element>(
     let props = dt.props;
     let dt = dt.clone();
     let styles = list.clone();
-    let extra = move || {
+    let extra = computed(move || {
         dt.layout_rev.get();
         let def = def.get()?;
         let (own, positive, negative) = {
@@ -153,9 +164,9 @@ fn column_parts<E: Element>(
             (Some(a), Some(b)) => Some(format!("{a} {b}").into()),
             (a, b) => a.or(b),
         }
-    };
+    });
     el.app_class(move || {
-        let own = extra();
+        let own = extra.get();
         props.classes.with(|c| {
             let list = list();
             let mut joined: Vec<&str> = list
@@ -170,6 +181,9 @@ fn column_parts<E: Element>(
     })
     .inline_style(move || {
         props.styles.with(|s| {
+            if s.is_empty() {
+                return Style::default();
+            }
             Style::from_decls(
                 styles()
                     .iter()
@@ -724,7 +738,7 @@ fn body(dt: Dt, custom: bool) -> impl IntoElement {
 /// leading edge of those at the end; `in_row`, in a row of that region.
 fn edge(dt: Dt, props: DataTableProps, which: Region, in_row: bool) -> impl IntoElement {
     let left_dt = dt.clone();
-    let shown = move || dt.has_fixed(which);
+    let shown = move || dt.has_fixed(which) && part_styled(props, DataTablePart::FixedEdge);
     when(shown, move || {
         let dt = left_dt.clone();
         part(
@@ -857,22 +871,29 @@ fn region(dt: Dt, which: Region, w: Windows, custom: bool) -> impl IntoElement {
     })
 }
 
-/// The `cell_state` of a row of the three regions.
+/// The `cell_state` of a row of the three regions, and its `selected` memo.
 fn row_parts(
     dt: &Dt,
     row: Memo<Option<usize>>,
-) -> impl Fn() -> Vec<DataTablePart> + Clone + 'static {
+) -> (
+    Memo<bool>,
+    impl Fn() -> Vec<DataTablePart> + Clone + 'static,
+) {
     let props = dt.props;
     let hovered = {
         let hover = dt.hover;
         computed(move || row.get().is_some() && hover.get() == row.get())
     };
-    let selected = {
-        let dt = dt.clone();
-        computed(move || matches!(dt.selection(), Selection::Row(r) if Some(r) == row.get()))
-    };
-    let active = row_active(dt, row);
-    move || {
+    let row_marks = dt.row_marks;
+    let selected = computed(move || {
+        let r = row.get();
+        r.is_some() && row_marks.get().0 == r
+    });
+    let active = computed(move || {
+        let r = row.get();
+        r.is_some() && row_marks.get().1 == r
+    });
+    let list = move || {
         let mut list = vec![DataTablePart::Row];
         if props.stripe.get() && row.get().is_some_and(|r| r % 2 == 1) {
             list.push(DataTablePart::RowOdd);
@@ -887,16 +908,8 @@ fn row_parts(
             list.push(DataTablePart::RowActive);
         }
         list
-    }
-}
-
-/// Whether row `row` is the one a context menu was asked for.
-fn row_active(dt: &Dt, row: Memo<Option<usize>>) -> Memo<bool> {
-    let dt = dt.clone();
-    computed(move || {
-        dt.data_rev.get();
-        row.get().is_some() && dt.st.borrow().active == Some((row.get(), None))
-    })
+    };
+    (selected, list)
 }
 
 /// How a press in a row of `which` region finds its column.
@@ -920,11 +933,7 @@ fn body_row(
 ) -> impl IntoElement {
     let props = dt.props;
     let (top_dt, height_dt, width_dt) = (dt.clone(), dt.clone(), dt.clone());
-    let list = row_parts(&dt, row);
-    let row_selected = {
-        let dt = dt.clone();
-        computed(move || matches!(dt.selection(), Selection::Row(r) if Some(r) == row.get()))
-    };
+    let (row_selected, list) = row_parts(&dt, row);
     let (press_dt, menu_dt, class_dt) = (dt.clone(), dt.clone(), dt.clone());
     let el = parts_with(
         view()
@@ -1061,17 +1070,16 @@ fn cell(
         })
     };
     let flags = {
-        let dt = dt.clone();
+        let cell_marks = dt.cell_marks;
         computed(move || {
-            dt.data_rev.get();
+            let (sel_cell, sel_col, active_cell) = cell_marks.get();
             let (Some(row), Some(def)) = (row.get(), def.get()) else {
                 return CellFlags::default();
             };
-            let st = dt.st.borrow();
             CellFlags {
-                selected: st.selection == Selection::Cell(row, def),
-                column_selected: st.selection == Selection::Column(def),
-                active: st.active == Some((Some(row), Some(def))),
+                selected: sel_cell == Some((row, def)),
+                column_selected: sel_col == Some(def),
+                active: active_cell == Some((row, def)),
             }
         })
     };
@@ -1612,42 +1620,61 @@ fn title_content(
     sortable: bool,
     custom: bool,
     selected: Memo<bool>,
-) -> impl IntoElement {
+) -> AnyElement {
     let props = dt.props;
-    let label_dt = dt.clone();
-    let label: AnyElement = if custom {
-        let render_dt = dt.clone();
-        dynamic(move || {
-            let render = props.render_header_cell.get()?;
-            let value = DataTableHeaderCell {
-                column: def as u32,
-                key: render_dt.st.borrow().defs.get(def)?.key.clone(),
-                title: render_dt.title(def),
-                sort: sorted.get(),
-                selected: selected.get(),
-            };
-            Some(
-                render
-                    .render(format!("head:{def}"), value)
-                    .flex_1()
-                    .min_w(px(0.0)),
-            )
-        })
-        .into_element()
-    } else {
-        // The title takes the room the sort button leaves, aligned as the
-        // column's cells.
-        text(move || label_dt.title(def))
-            .number_of_lines(1)
-            .flex_1()
-            .min_w(px(0.0))
-            .map(move |t| match align {
-                DataTableAlign::Start => t.text_left(),
-                DataTableAlign::Center => t.text_center(),
-                DataTableAlign::End => t.text_right(),
+    let make_label = move |dt: Dt| -> AnyElement {
+        if custom {
+            dynamic(move || {
+                let render = props.render_header_cell.get()?;
+                let value = DataTableHeaderCell {
+                    column: def as u32,
+                    key: dt.st.borrow().defs.get(def)?.key.clone(),
+                    title: dt.title(def),
+                    sort: sorted.get(),
+                    selected: selected.get(),
+                };
+                Some(
+                    render
+                        .render(format!("head:{def}"), value)
+                        .flex_1()
+                        .min_w(px(0.0)),
+                )
             })
             .into_element()
+        } else {
+            // The title takes the room the sort button leaves, aligned as the
+            // column's cells.
+            text(move || dt.title(def))
+                .number_of_lines(1)
+                .flex_1()
+                .min_w(px(0.0))
+                .map(move |t| match align {
+                    DataTableAlign::Start => t.text_left(),
+                    DataTableAlign::Center => t.text_center(),
+                    DataTableAlign::End => t.text_right(),
+                })
+                .into_element()
+        }
     };
+    if !sortable {
+        let wrapped = computed(move || part_styled(props, DataTablePart::HeaderContent));
+        return dynamic(move || {
+            let label = make_label(dt.clone());
+            if wrapped.get() {
+                part(
+                    view().flex_1().flex_row().items_center().min_w(px(0.0)),
+                    props,
+                    DataTablePart::HeaderContent,
+                )
+                .child(label)
+                .into_element()
+            } else {
+                label
+            }
+        })
+        .into_element();
+    }
+    let label = make_label(dt.clone());
     let indicator_dt = dt;
     part(
         view().flex_1().flex_row().items_center().min_w(px(0.0)),
@@ -1655,9 +1682,8 @@ fn title_content(
         DataTablePart::HeaderContent,
     )
     .child(label)
-    .when(sortable, move |v| {
-        v.child(sort_button(indicator_dt.clone(), def, sorted))
-    })
+    .child(sort_button(indicator_dt, def, sorted))
+    .into_element()
 }
 
 /// The sort button at the end of a sortable title: its hit area and
@@ -1671,6 +1697,7 @@ fn sort_button(
     let id = format!("sort:{}", dt.st.borrow().defs[def].key);
     part(
         view()
+            .relative()
             .flex_none()
             .w(px(SORT_WIDTH))
             .h(px(SORT_WIDTH))
@@ -1680,7 +1707,7 @@ fn sort_button(
             .test_id(&id)
             .focusable(false)
             .on_press(move || dt.sort_next(def))
-            .child(sort_icon(props, sorted)),
+            .children(sort_icons(props, sorted)),
         props,
         DataTablePart::SortIndicator,
     )
@@ -1691,30 +1718,38 @@ fn sort_button(
 /// In a terminal, one glyph: `▲` ascending, `▼` descending, `↕` unsorted,
 /// each the part of its direction (an unsorted column's `↕` the ascending
 /// part's, not selected: as faint as an unsorted chevron).
-fn sort_icon(props: DataTableProps, sorted: Memo<Option<DataTableSortDirection>>) -> AnyElement {
+fn sort_icons(
+    props: DataTableProps,
+    sorted: Memo<Option<DataTableSortDirection>>,
+) -> Vec<AnyElement> {
     // A terminal draws no chevrons: the direction is one Cell's glyph.
     if crate::terminal::is_terminal() {
-        return dynamic(move || {
-            let (glyph, which) = match sorted.get() {
-                Some(DataTableSortDirection::Ascending) => ("▲", DataTablePart::SortAscending),
-                Some(DataTableSortDirection::Descending) => ("▼", DataTablePart::SortDescending),
-                None => ("↕", DataTablePart::SortAscending),
-            };
-            Some(part(
-                text(glyph)
-                    .number_of_lines(1)
-                    .accessible(false)
-                    .accessibility_state(move || AccessibilityState {
-                        selected: sorted.get().is_some(),
-                        ..AccessibilityState::default()
-                    }),
-                props,
-                which,
-            ))
-        })
-        .into_element();
+        return vec![
+            dynamic(move || {
+                let (glyph, which) = match sorted.get() {
+                    Some(DataTableSortDirection::Ascending) => ("▲", DataTablePart::SortAscending),
+                    Some(DataTableSortDirection::Descending) => {
+                        ("▼", DataTablePart::SortDescending)
+                    }
+                    None => ("↕", DataTablePart::SortAscending),
+                };
+                Some(part(
+                    text(glyph)
+                        .number_of_lines(1)
+                        .accessible(false)
+                        .accessibility_state(move || AccessibilityState {
+                            selected: sorted.get().is_some(),
+                            ..AccessibilityState::default()
+                        }),
+                    props,
+                    which,
+                ))
+            })
+            .into_element(),
+        ];
     }
     const K: f32 = 12.0 / 24.0;
+    let inset = px((SORT_WIDTH - 12.0) * 0.5);
     let chevron = move |points: [f32; 6], direction, which| {
         part(
             canvas(move || {
@@ -1730,7 +1765,7 @@ fn sort_icon(props: DataTableProps, sorted: Memo<Option<DataTableSortDirection>>
                     .stroke()
             })
             .absolute()
-            .inset_0()
+            .inset(inset)
             .accessible(false)
             .pointer_events(PointerEvents::None)
             .accessibility_state(move || AccessibilityState {
@@ -1740,22 +1775,20 @@ fn sort_icon(props: DataTableProps, sorted: Memo<Option<DataTableSortDirection>>
             props,
             which,
         )
+        .into_element()
     };
-    view()
-        .relative()
-        .w(px(12.0))
-        .h(px(12.0))
-        .child(chevron(
+    vec![
+        chevron(
             [7.0, 9.0, 12.0, 4.0, 17.0, 9.0],
             DataTableSortDirection::Ascending,
             DataTablePart::SortAscending,
-        ))
-        .child(chevron(
+        ),
+        chevron(
             [7.0, 15.0, 12.0, 20.0, 17.0, 15.0],
             DataTableSortDirection::Descending,
             DataTablePart::SortDescending,
-        ))
-        .into_element()
+        ),
+    ]
 }
 
 /// The band at a title's trailing edge that a drag resizes the column
