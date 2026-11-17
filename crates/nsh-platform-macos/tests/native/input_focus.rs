@@ -7,7 +7,10 @@
 //! with `nsh build`, set `NSH_INPUT_FOCUS_GALLERY` to its `bundle.js`, and
 //! `NSH_INPUT_FOCUS_SHOTS` to a PNG path prefix outside the repository.
 //! `NSH_INPUT_FOCUS_DARK=1` uses the dark appearance.
-use std::time::{Duration, Instant};
+use std::{
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 
 use nsh_base::input;
 use nsh_core::prelude::*;
@@ -23,6 +26,9 @@ use nsh_platform_macos::{
 
 const LONG: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789";
 
+static CARET: Mutex<Option<Bounds<Points>>> = Mutex::new(None);
+static SELECTION: Mutex<Option<Selection>> = Mutex::new(None);
+
 #[component]
 fn Page() -> impl IntoElement {
     let field = |id, value| {
@@ -36,7 +42,11 @@ fn Page() -> impl IntoElement {
     view()
         .size_full()
         .gap(px(8.0))
-        .child(field("long", LONG))
+        .child(
+            field("long", LONG)
+                .on_caret_move(|event: &CaretEvent| *CARET.lock().unwrap() = Some(event.bounds))
+                .on_selection_change(|range: &Selection| *SELECTION.lock().unwrap() = Some(*range)),
+        )
         .child(field("reference", LONG))
         .child(field("short", "ABC"))
         .child(field("center", "Centered").text_center())
@@ -157,6 +167,7 @@ pub(super) fn run() {
     let root = surface.view();
     window.setContentView(Some(&root));
     let bundle = std::env::var_os("NSH_INPUT_FOCUS_GALLERY");
+    let native_fixture = bundle.is_none();
     surface.load(match bundle {
         Some(path) => {
             platform::App::Js(nsh_engine::Bundle::read(std::path::Path::new(&path)).unwrap())
@@ -214,6 +225,50 @@ pub(super) fn run() {
             elapsed * f64::from(sample.cpu.unwrap_or(0.0)) * 10.0
         );
     }
+    // Switching between two overflowing fields must not depend on a short
+    // field first resetting the shared clip. Check before and after layout.
+    let reference = field(&root, "reference").unwrap();
+    for target in [&reference, &long, &reference, &long] {
+        focus(&window, target);
+        assert!(
+            (character_x(target, 0) - 2.0).abs() < 0.5,
+            "long-to-long initial origin"
+        );
+        settle();
+        assert!(
+            (character_x(target, 0) - 2.0).abs() < 0.5,
+            "long-to-long settled origin"
+        );
+    }
+    if native_fixture {
+        // Selection and caret events still describe the actual native editor
+        // after resolving it once per notification. The short field has no
+        // listeners, exercising the notification fast path as focus moves.
+        let text = editor(&long);
+        text.setSelectedRange(NSRange::new(3, 4));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while *SELECTION.lock().unwrap() != Some(Selection { start: 3, end: 7 }) {
+            assert!(Instant::now() < deadline, "selection event missing");
+            settle();
+        }
+        settle();
+        // SAFETY: NSTextInputClient character geometry; no actual range requested.
+        let rect = unsafe {
+            text.firstRectForCharacterRange_actualRange(NSRange::new(7, 0), std::ptr::null_mut())
+        };
+        // SAFETY: the field's parent getter on the main thread.
+        let pad = unsafe { long.superview() }.unwrap();
+        let expected = pad.convertRect_fromView(window.convertRectFromScreen(rect), None);
+        let caret = CARET.lock().unwrap().expect("caret event missing");
+        assert!(
+            (f64::from(caret.origin.x.0) - expected.origin.x).abs() < 0.5,
+            "caret event x"
+        );
+        assert!(
+            (f64::from(caret.origin.y.0) - expected.origin.y).abs() < 0.5,
+            "caret event y"
+        );
+    }
     // End-of-line scrolling remains AppKit's while editing, and typing
     // at that caret still appends rather than resetting to the beginning.
     let text = editor(&long);
@@ -237,6 +292,18 @@ pub(super) fn run() {
         (character_x(&long, 0) - scrolled_x).abs() < 0.5,
         "editing scroll was reset"
     );
+    // Returning to the first character uses the same native scroll path as
+    // focus. It must align with the idle cell, then still scroll to the end.
+    text.setSelectedRange(NSRange::new(0, 0));
+    text.scrollRangeToVisible(NSRange::new(0, 0));
+    settle();
+    assert!(
+        (character_x(&long, 0) - 2.0).abs() < 0.5,
+        "scroll-to-start origin"
+    );
+    text.setSelectedRange(NSRange::new(LONG.len(), 0));
+    text.scrollRangeToVisible(NSRange::new(LONG.len(), 0));
+    settle();
     // SAFETY: NSTextInputClient insertion on the active field editor.
     let _: () = unsafe {
         platform::objc2::msg_send![&*text, insertText: &*NSString::from_str("!"), replacementRange: NSRange::new(isize::MAX as usize, 0)]

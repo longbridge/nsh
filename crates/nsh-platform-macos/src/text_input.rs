@@ -203,8 +203,7 @@ impl Editor {
 
     /// The caret at the selection's end in `target`'s coordinates, while
     /// the editor edits: where the text system draws its insertion point.
-    fn caret(&self, target: &NSView) -> Option<Bounds<Points>> {
-        let editing = self.editing()?;
+    fn caret(editing: &NSText, target: &NSView) -> Option<Bounds<Points>> {
         let text_view = editing.downcast_ref::<NSTextView>()?;
         let window = text_view.window()?;
         let range = text_view.selectedRange();
@@ -498,57 +497,88 @@ impl Ctx {
 
     /// The caret or selection may have moved.
     fn selection_changed(&self) {
-        let Some((_, view, input)) = self.get() else {
+        let Some((surface, view, input)) = self.get() else {
             return;
         };
         // A programmatic change is reported once, where it ends.
         if input.applying.get() || input.focusing.get() {
             return;
         }
+        let (id, selection, caret) = {
+            let state = view.state();
+            (
+                state.id,
+                state.events.contains(EventKind::SelectionChange),
+                state.events.contains(EventKind::CaretMove),
+            )
+        };
+        // Native selection notifications also arrive while focus is moving.
+        // Without either listener, there is no geometry or selection to report.
+        if !selection && !caret {
+            return;
+        }
         let editor = input.editor.borrow().clone();
+        let Some(editing) = editor.editing() else {
+            return;
+        };
         // A field's editor selects its text as editing ends: no change of
-        // the user's.
-        if let Editor::Line { field, .. } = &editor
-            && !field.currentEditor().is_some_and(|e| {
-                e.window()
-                    .and_then(|w| w.firstResponder())
-                    .is_some_and(|r| std::ptr::eq(&*r, &**e as &NSResponder))
-            })
+        // the user's. Keep this editor for all queries in the notification.
+        if matches!(editor, Editor::Line { .. })
+            && !editing
+                .window()
+                .and_then(|w| w.firstResponder())
+                .is_some_and(|r| std::ptr::eq(&*r, &*editing as &NSResponder))
         {
             return;
         }
-        if view.state().events.contains(EventKind::SelectionChange)
-            && let Some(range) = editor.selection()
-            && input.selection.replace(range) != range
-        {
-            self.send(EventKind::SelectionChange, || {
-                EventPayload::Map(vec![
-                    ("start", PayloadValue::Number(range.0 as f64)),
-                    ("end", PayloadValue::Number(range.1 as f64)),
-                ])
-            });
+        if selection {
+            let range = editing.selectedRange();
+            let range = (
+                range.location as u32,
+                (range.location + range.length) as u32,
+            );
+            if input.selection.replace(range) != range {
+                surface.event(
+                    id,
+                    EventKind::SelectionChange,
+                    EventPayload::Map(vec![
+                        ("start", PayloadValue::Number(range.0 as f64)),
+                        ("end", PayloadValue::Number(range.1 as f64)),
+                    ]),
+                );
+            }
         }
-        self.caret_moved();
+        if caret {
+            Self::report_caret(&surface, &view, &input, &editing);
+        }
     }
 
     /// `onCaretMove` if the caret moved: with the selection, or as the text
     /// view scrolled or the input was laid out again. Only an editor that
     /// edits has a caret.
     fn caret_moved(&self) {
-        let Some((_, view, input)) = self.get() else {
+        let Some((surface, view, input)) = self.get() else {
             return;
         };
         if !view.state().events.contains(EventKind::CaretMove) {
             return;
         }
-        let editor = input.editor.borrow().clone();
+        let editing = input.editor.borrow().editing();
+        if let Some(editing) = editing {
+            Self::report_caret(&surface, &view, &input, &editing);
+        }
+    }
+
+    /// Reports geometry from the editor already resolved for this callback.
+    fn report_caret(surface: &Surface, view: &NshView, input: &InputState, editing: &NSText) {
         // The pad's space is the input view's, while the pad may be hosted
         // above the transforms around it.
-        let Some(caret) = editor.caret(&input.pad) else {
+        let Some(caret) = Editor::caret(editing, &input.pad) else {
             return;
         };
         if input.caret.replace(caret) != caret {
-            self.send(EventKind::CaretMove, || EventPayload::caret(caret));
+            let id = view.state().id;
+            surface.event(id, EventKind::CaretMove, EventPayload::caret(caret));
         }
     }
 
@@ -586,11 +616,13 @@ impl Ctx {
             return;
         };
         if focused {
-            input.style_editor();
+            let editor = input.style_editor();
             if let Some((start, end)) = input.pending_selection.take() {
                 input.editor.borrow().select(start, end);
             }
-            input.align_editor();
+            if let Some(editor) = editor {
+                input.align_editor(&editor);
+            }
         }
         if !focused {
             // Leaving the input ends its composition.
@@ -1876,15 +1908,9 @@ impl InputState {
     /// origin. Restore the idle cell's text origin on focus, after any
     /// pending selection, unless that would hide a visible caret. Do not
     /// reset scrolling while the user edits.
-    fn align_editor(&self) {
+    fn align_editor(&self, view: &NSTextView) {
         let editor = self.editor.borrow();
         let Editor::Line { field, .. } = &*editor else {
-            return;
-        };
-        let Some(view) = editor
-            .editing()
-            .and_then(|e| e.downcast::<NSTextView>().ok())
-        else {
             return;
         };
         if !matches!(
@@ -1898,7 +1924,8 @@ impl InputState {
             return;
         };
         let rest = clip.frame().origin.x + view.frame().origin.x + view.textContainerOrigin().x;
-        let from = clip.bounds().origin.x;
+        let bounds = clip.bounds();
+        let from = bounds.origin.x;
         if (rest - from).abs() <= 0.25 {
             return;
         }
@@ -1906,10 +1933,10 @@ impl InputState {
         // Only a pending caret or partial selection needs a layout query.
         let selection = view.selectedRange();
         let selects_all = selection.location == 0 && selection.length == view.string().length();
-        if !selects_all && let Some(caret) = editor.caret(field) {
+        if !selects_all && let Some(caret) = Editor::caret(view, field) {
             // AppKit's clip extends slightly past the borderless field.
             // Use its viewport rather than the field's narrower bounds.
-            let viewport = field.convertRect_fromView(clip.bounds(), Some(&clip));
+            let viewport = field.convertRect_fromView(bounds, Some(&clip));
             let shown = |x: f64| {
                 (viewport.origin.x..=viewport.origin.x + viewport.size.width - 1.0).contains(&x)
             };
@@ -1918,19 +1945,16 @@ impl InputState {
                 return;
             }
         }
-        clip.setBoundsOrigin(NSPoint::new(rest, clip.bounds().origin.y));
+        // SAFETY: the field editor is hosted in AppKit's clip view.
+        let _: () = unsafe { msg_send![&clip, scrollToPoint: NSPoint::new(rest, bounds.origin.y)] };
     }
 
     /// Caret and selection colors of the view that edits now (the window's
     /// field editor is shared, so a field sets them when it takes the
     /// focus).
-    fn style_editor(&self) {
-        let Some(editor) = self.editor.borrow().editing() else {
-            return;
-        };
-        let Ok(view) = editor.downcast::<NSTextView>() else {
-            return;
-        };
+    fn style_editor(&self) -> Option<Retained<NSTextView>> {
+        let editor = self.editor.borrow().editing()?;
+        let view = editor.downcast::<NSTextView>().ok()?;
         let config = self.config.borrow();
         let caret = if config.caret_hidden {
             NSColor::clearColor()
@@ -1951,6 +1975,7 @@ impl InputState {
             NSDictionary::from_slices(&[key], &[AsRef::<AnyObject>::as_ref(&*selection)]);
         // SAFETY: valid text attributes.
         unsafe { view.setSelectedTextAttributes(&attributes) };
+        Some(view)
     }
 }
 
@@ -2289,7 +2314,7 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
     }
     *input.config.borrow_mut() = config.clone();
     if editor.focused() {
-        input.style_editor();
+        let _ = input.style_editor();
         // A new font or paragraph style lays the text out again from
         // estimates: keep the line being edited in view.
         if let Editor::Area { view, .. } = &editor {

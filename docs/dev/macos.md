@@ -321,7 +321,9 @@ layout. Multiline text views use the configured paragraph line height.
 
 The shared single-line field editor starts left-aligned text at the idle cell's origin. On focus,
 `text_input.rs` restores its clip origin after applying a pending selection, preserving a visible caret.
-Scrolling during editing remains AppKit's; centered and right-aligned text keep their native origins.
+Styling and alignment share the active editor; selection notifications resolve it once for selection
+and caret events, and skip native queries when neither event has a listener. Scrolling during editing
+remains AppKit's; centered and right-aligned text keep their native origins.
 
 A key goes to the window's first responder: a field's editor (the window's shared field editor, an `NSTextView`), a
 multiline input's `NshTextView`, a hosted view, or the surface's root. Four steps decide it, in order:
