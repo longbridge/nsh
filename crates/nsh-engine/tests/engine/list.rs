@@ -125,7 +125,7 @@ fn config(app: &str) -> (EngineConfig, std::path::PathBuf) {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
-        data_dir: None,
+        support_dir: None,
         cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
@@ -138,6 +138,7 @@ fn config(app: &str) -> (EngineConfig, std::path::PathBuf) {
         audio: None,
         windows: None,
         login_item: None,
+        data_dir: None,
     };
     (config, dir)
 }

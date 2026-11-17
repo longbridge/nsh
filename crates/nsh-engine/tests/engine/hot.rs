@@ -173,7 +173,7 @@ fn edits_replace_modules_and_keep_unrelated_state() {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
-        data_dir: None,
+        support_dir: None,
         cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
@@ -186,6 +186,7 @@ fn edits_replace_modules_and_keep_unrelated_state() {
         audio: None,
         windows: None,
         login_item: None,
+        data_dir: None,
     };
     let engine = Engine::start(
         config,
@@ -337,7 +338,7 @@ fn entry_edits_keep_navigation_and_state() {
             limits: nsh_engine::Limits::default(),
             ui_sets: sets.to_vec(),
             runtime: None,
-            data_dir: None,
+            support_dir: None,
             cache: nsh_engine::CacheOptions::off(),
             storage: None,
             clock: Default::default(),
@@ -350,6 +351,7 @@ fn entry_edits_keep_navigation_and_state() {
             audio: None,
             windows: None,
             login_item: None,
+            data_dir: None,
         };
         let engine = Engine::start(
             config,
@@ -485,7 +487,7 @@ fn nested_hot_components_render_the_stacks_screen() {
         limits: nsh_engine::Limits::default(),
         ui_sets: sets.to_vec(),
         runtime: None,
-        data_dir: None,
+        support_dir: None,
         cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
@@ -498,6 +500,7 @@ fn nested_hot_components_render_the_stacks_screen() {
         audio: None,
         windows: None,
         login_item: None,
+        data_dir: None,
     };
     let engine = Engine::start(
         config,
