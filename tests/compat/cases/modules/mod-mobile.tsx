@@ -8,11 +8,16 @@
 // the system's segmented control on iOS: its segments (`items`, each
 // `{ title, icon, disabled }`), the selected one (`selectedIndex`), which
 // the app sets, `disabled`, and `onChange` with the index the user chose.
+// `DateTimePicker`, the system's date and time picker on iOS and Android:
+// what it picks (`mode`), its value and bounds (`value`, `min`, `max`: ISO
+// strings in the mode's form), `minuteInterval`, `disabled`, and
+// `onChange({ value })` with the user's pick.
 import { Text, View, signal } from "nsh";
-import { SegmentedControl, TabBar, isAvailable } from "nsh/mobile";
+import { DateTimePicker, SegmentedControl, TabBar, isAvailable } from "nsh/mobile";
 
 function App() {
   const selected = signal(0);
+  const when = signal("2026-11-17T09:30");
   const items = signal([
     { title: "Records", icon: "list.bullet" },
     { title: "Stats", icon: "chart.bar", badge: "3" },
@@ -31,6 +36,18 @@ function App() {
         selectedIndex={selected()}
         onChange={({ index }) => selected.set(index)}
         style={{ marginHorizontal: 16, height: 32 }}
+      />
+      <Text>{`When: ${when()}`}</Text>
+      <DateTimePicker
+        testID="when"
+        mode="dateTime"
+        value={when()}
+        min="2026-11-01T00:00"
+        max="2027-11-01T00:00"
+        minuteInterval={5}
+        disabled={false}
+        onChange={({ value }) => when.set(value)}
+        style={{ marginHorizontal: 16 }}
       />
       <TabBar
         testID="tab-bar"

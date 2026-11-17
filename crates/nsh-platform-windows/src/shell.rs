@@ -762,19 +762,32 @@ fn set_tab(hwnd: HWND, show: bool) {
     }
 }
 
+/// The window's material is the bare one's while it is zoomed
+/// ([`set_material`]).
+///
+/// - A frameless window's client area is the monitor's then: the extended
+///   frame's border would run along the screen's edges and the rounded
+///   corners would cut them (a system-framed window hides both beyond the
+///   monitor, which a frameless one has no room for).
+/// - A window with its title bar hidden over a backdrop has its frame
+///   extended into the whole client area, and zoomed, DWM draws its own
+///   caption buttons there, laid out for a maximized caption: a couple of
+///   pixels off the ones drawn over the app ([`crate::chrome::draw`]),
+///   both showing wherever the app lets the backdrop through. Without the
+///   non-client rendering DWM draws none; the backdrop stays.
+///
+/// A zoomed window has no use for its shadow or rounded corners either.
+fn bare_when_zoomed(attrs: &Attrs) -> bool {
+    attrs.frameless() || (attrs.hidden_title_bar() && attrs.backdrop != Backdrop::None)
+}
+
 /// The system backdrop (Windows 11 22H2's Mica and Acrylic; nothing
 /// before), the shadow of a frameless window and its corners.
 fn set_material(hwnd: HWND, attrs: &Attrs) {
     let frameless = attrs.frameless();
     let backdrop = attrs.backdrop != Backdrop::None;
-    // A zoomed frameless window's client area is the monitor's: the
-    // extended frame's border would run along the screen's edges and the
-    // rounded corners would cut them (a system-framed window hides both
-    // beyond the monitor, which a frameless one has no room for). A
-    // zoomed window has no use for its shadow either, so its material is
-    // the bare one's while zoomed.
     // SAFETY: a plain query on a live window.
-    let zoomed = frameless && unsafe { IsZoomed(hwnd) }.as_bool();
+    let zoomed = bare_when_zoomed(attrs) && unsafe { IsZoomed(hwnd) }.as_bool();
     // A frameless window's shadow is the frame's, extended by a pixel;
     // a backdrop shows through the whole client area.
     let margin = if backdrop {
@@ -826,7 +839,7 @@ pub(crate) fn zoom_changed(hwnd: HWND) {
         return;
     };
     // SAFETY: a plain query on a live window.
-    let zoomed = shell.attrs().frameless() && unsafe { IsZoomed(hwnd) }.as_bool();
+    let zoomed = bare_when_zoomed(&shell.attrs()) && unsafe { IsZoomed(hwnd) }.as_bool();
     if shell.zoomed_material.get() != zoomed {
         set_material(hwnd, &shell.attrs());
     }
@@ -1094,6 +1107,20 @@ mod tests {
             WS_POPUP.0 | WS_SYSMENU.0 | WS_VISIBLE.0 | WS_MAXIMIZE.0 | WS_DISABLED.0
         );
         assert_eq!(ex, WS_EX_TOOLWINDOW.0 | WS_EX_NOREDIRECTIONBITMAP.0);
+    }
+
+    #[test]
+    fn a_hidden_title_bar_over_a_backdrop_goes_bare_when_zoomed() {
+        let mut attrs = Attrs::of_kind(WindowKind::Normal);
+        assert!(!bare_when_zoomed(&attrs), "the system's title bar");
+        attrs.title_bar.style = TitleBarStyle::Hidden;
+        assert!(!bare_when_zoomed(&attrs), "hidden, over no backdrop");
+        attrs.backdrop = Backdrop::Window;
+        assert!(bare_when_zoomed(&attrs), "hidden, over a backdrop");
+        attrs.title_bar.style = TitleBarStyle::Default;
+        assert!(!bare_when_zoomed(&attrs), "the system's, over a backdrop");
+        attrs.frame = WindowFrameStyle::None;
+        assert!(bare_when_zoomed(&attrs), "frameless");
     }
 
     #[test]

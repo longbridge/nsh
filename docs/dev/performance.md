@@ -4,6 +4,34 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Out-of-line rare attributes (`core/element/builder.rs`, 2026-11-18, macOS arm64, release `bench_components`
+and `size_of` on the same machine, `main` against the change): `Attrs` keeps its common
+fields inline and boxes eighteen rare ones (`src`, `drawing`, `element_ref`, `animated`, `bound`, `inset_*`,
+`projected_*`, `render`, `window`, the accessibility set) behind `Option<Box<RareAttrs>>`, allocated on first
+non-default write; `Expanded` boxes its `VirtualList`-only `ListConfig` the same way. `Attrs::PartialEq`,
+`Attrs::changes`, `slots::split` / `merged` and attribute application take a `rare.is_none()` fast path, and
+`None` equals an all-default box, so cleared rare fields do not keep a node unequal.
+
+| Record | Before | After |
+|---|---:|---:|
+| `Attrs` | 360 B | 104 B (-71%) |
+| `Expanded` | 624 B | 312 B (-50%) |
+| `BoundNode` | 464 B | 208 B (-55%) |
+
+`size_tests::rare_attrs_keep_element_records_compact_and_default_equal` pins the ceilings. In the 45,304-node
+case of `#1345` the smaller `Expanded` saves ~16 MiB of resident heap. `component_bench` (`cargo test --release
+-p nsh-engine --test engine bench_components -- --ignored --nocapture`, min / median, the same ops and mount
+items both ways):
+
+| Phase | Before | After | Ops | Mount items |
+|---|---:|---:|---:|---:|
+| `GridRust.tsx` first frame core | 1.166 / 1.285 ms | 1.090 / 1.118 ms (-6.5%) | 1016 | 387 |
+| `GridRust.tsx` update 200 titles core | 169.7 / 177.8 µs | 152.0 / 157.0 µs (-10.5%) | 200 | 63 |
+| `RowsRust.tsx` first frame core | 147.2 / 157.1 µs | 142.2 / 145.4 µs | 264 | 324 |
+| `RowsRust.tsx` scrolling core | 7.885 µs/frame | 7.443 µs/frame | — | — |
+
+The `*Ts.tsx` runs, which build their views without Rust component nodes, stayed within their run-to-run
+spread (`GridTs` first frame 764.5 / 750.7 µs, `RowsTs` 120.1 / 119.0 µs).
 Rows an `each` keeps (2026-11-17, Linux x86_64, Ryzen 9 7950X, release, against `e2479085c`): every update of an
 `each` (the rows of Rust components, `element/flow.rs`; TSX's `<Each>` is `nsh-js`'s own) built a map of all its
 rows, wrote each row's item and index, and sent the core an element per kept row, which the core copied, matched
@@ -69,6 +97,22 @@ step equal. `Bench.tsx` and the counter are plain debug builds; the two entries 
 
 The first commits keep their counts (19 ops / 4,220 items / 5,406 nodes, 20 / 13,058 / 5,013, 756 / 622 / 252 and
 57 / 51 / 21). The last two rows are controls of unchanged work.
+
+Per-block RichEditor updates (2026-11-17, macOS arm64, against `126d7701`): block offsets moved out
+of the reactive block items into `Tree`, the blocks' `selectedNode`/`focusedNode` state and each
+textblock's selection boxes are per-block signals updated only for the blocks a selection or an edit
+touches, and the geometry's ordered textblock index turns `text_at` / `range_rects` into binary
+searches. Headless `nsh test examples/bench/… --trace`, debug profile:
+
+| Phase | Before | After | Ops | Mount items | Nodes |
+|---|---:|---:|---:|---:|---:|
+| `RichEditorMount.tsx` initial population | 353,344 µs | 34,293 µs | 10 | 2,648 → 2,644 | 1,010 → 1,009 |
+| `RichEditor.tsx` initial commit (1,000 paragraphs) | 8,346,483 µs, test failed | 216,569 µs | 20 | 13,058 → 13,054 | 5,013 → 5,012 |
+| `RichEditor.tsx` single-character edit ×8 | — (never reached) | 995–1,563 µs, 3–4 items | 0 | 3–4 | 5,012 |
+
+The 1,000-paragraph run is `for (let i = 0; i < 8; i++) await app.press("id:edit")` on standard input;
+the before version's initial commit alone exceeds the step timeout, so its edits never ran. Every
+edit's batch carries one Text op and its selection frames.
 
 Batched region cleanup (2026-11-15, macOS arm64, Apple M4 Pro, against `9efc3a2c`): three interleaved before / after
 pairs, a fresh headless CLI process per sample. Both builds use the workspace's development profile with

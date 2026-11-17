@@ -3862,6 +3862,7 @@ name = "nsh-core"
 version = "0.5.0"
 dependencies = [
  "cap-std",
+ "chrono",
  "crc32fast",
  "flate2",
  "futures-util",

@@ -163,7 +163,7 @@ impl<T: JsValue + Clone + PartialEq + 'static> Renderer<T> {
         match &self.kind {
             Kind::Rust(f) => node.children.push(f(&value).0),
             Kind::Js { prop, host } => {
-                node.attrs.render = Some(RenderAt(Rc::new(RenderPlace {
+                node.attrs.rare_mut().render = Some(RenderAt(Rc::new(RenderPlace {
                     host: *host,
                     prop,
                     key: key.into(),
@@ -172,7 +172,7 @@ impl<T: JsValue + Clone + PartialEq + 'static> Renderer<T> {
                 })));
             }
             Kind::JsFn { prop, host, func } => {
-                node.attrs.render = Some(RenderAt(Rc::new(RenderPlace {
+                node.attrs.rare_mut().render = Some(RenderAt(Rc::new(RenderPlace {
                     host: *host,
                     prop,
                     key: key.into(),
