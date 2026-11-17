@@ -879,6 +879,46 @@ pub(crate) fn activate(surface: &std::rc::Rc<Surface>, event: &KeyEvent) -> bool
     true
 }
 
+/// The Menu key or Shift+F10 ([`nsh_core::input::opens_context_menu`])
+/// opens the context menu of what has the keyboard focus, with no
+/// pointer, as a secondary click does: the focused view or the nearest
+/// around it that listens to `onContextMenu` ([`crate::input::show_context_menu`]);
+/// a focused text field shows its edit menu unless it listens itself.
+/// True when handled.
+pub(crate) fn context_menu(surface: &std::rc::Rc<Surface>, event: &KeyEvent) -> bool {
+    if !opens_context_menu(event) {
+        return false;
+    }
+    if let Some(view) = focused_in(surface, surface.input_root().id()) {
+        return crate::input::show_context_menu(surface, &view);
+    }
+    let Some(field) = crate::text_input::focused(surface) else {
+        return false;
+    };
+    if !crate::input::show_context_menu(surface, &field) {
+        crate::text_input::context_menu(surface, &field);
+    }
+    true
+}
+
+/// Whether key down `event` asks for a context menu: the Menu key
+/// (`VK_APPS`) or Shift+F10.
+fn opens_context_menu(event: &KeyEvent) -> bool {
+    use nsh_core::keymap::{Key, Modifiers};
+    if !event.down {
+        return false;
+    }
+    let m = event.modifiers;
+    let held = Modifiers {
+        ctrl: m.ctrl,
+        alt: m.alt,
+        shift: m.shift,
+        cmd: m.meta,
+    };
+    let function = (event.vk == 0x79).then_some(Key::F(10));
+    nsh_core::input::opens_context_menu(event.vk == 0x5D, function, held)
+}
+
 /// A key up: the focused custom view hears it (whichever view has the
 /// focus now), with the capture rule that matches the release.
 pub(crate) fn release(surface: &std::rc::Rc<Surface>, event: &KeyEvent) {
@@ -1027,6 +1067,33 @@ mod tests {
 
     fn stroke(text: &str) -> Keystroke {
         Keystroke::parse_with(text, false).expect(text)
+    }
+
+    #[test]
+    fn the_menu_key_and_shift_f10_open_a_context_menu() {
+        let with = |vk: u16, modifiers: Modifiers| KeyEvent {
+            modifiers,
+            ..key(vk)
+        };
+        let shift = Modifiers {
+            shift: true,
+            ..Modifiers::default()
+        };
+        assert!(opens_context_menu(&key(0x5D)));
+        assert!(opens_context_menu(&with(0x5D, shift)));
+        assert!(opens_context_menu(&with(0x79, shift)));
+        // F10 alone is the menu bar's; Control or Alt make another shortcut.
+        assert!(!opens_context_menu(&key(0x79)));
+        let ctrl_shift = Modifiers {
+            ctrl: true,
+            ..shift
+        };
+        assert!(!opens_context_menu(&with(0x79, ctrl_shift)));
+        let up = KeyEvent {
+            down: false,
+            ..key(0x5D)
+        };
+        assert!(!opens_context_menu(&up));
     }
 
     #[test]

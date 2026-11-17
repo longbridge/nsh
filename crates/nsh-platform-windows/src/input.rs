@@ -1316,7 +1316,8 @@ pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
 /// `KeyDown` and `capture_keys` rules ([`crate::keyboard`]), the
 /// application menu's shortcuts, and the native defaults (a focused
 /// field's editing, selectable text, navigation, scrolling, Tab), Return
-/// and Space pressing a focused control first. A
+/// and Space pressing a focused control and the Menu key or Shift+F10
+/// opening the focus' context menu first. A
 /// capture consumes the key before the menu's shortcuts and defaults; a
 /// key the keymap took is not reported to the raw listeners too. A key up
 /// is reported to the focused custom view (or heard for Alt's release)
@@ -1352,6 +1353,7 @@ pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
         // take a key before the menu's shortcuts and the defaults.
         || crate::keyboard::press(surface, &event)
         || crate::keyboard::activate(surface, &event)
+        || crate::keyboard::context_menu(surface, &event)
         || crate::chrome::shortcut(surface, &event)
         || crate::text_input::key(surface, &event)
         || crate::text::key(surface, &event)
