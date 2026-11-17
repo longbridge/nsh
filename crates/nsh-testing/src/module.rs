@@ -1990,7 +1990,9 @@ const CLOSED: &str = "the app is closed: the test that opened it ended";
 #[class]
 impl App {
     /// Presses what `selector` names (or the nearest view around it that
-    /// hears presses, as a tap on a button's text does).
+    /// hears presses, as a tap on a button's text does). On iOS, a header
+    /// button of `ios.headerRightItems` is pressed too, by `id:<key>` or
+    /// its label: it presses it, or opens its menu.
     pub async fn press(this: Instance<Self>, selector: String) -> Result<(), JsError> {
         step(&this, move |app| app.press(&selector)).await
     }
@@ -2104,7 +2106,9 @@ impl App {
 
     /// Chooses the open context menu's action labelled `label` (a
     /// submenu's: `"Share > Mail"`), as a click on it: the app hears
-    /// `onMenu`, then the menu closes.
+    /// `onMenu`, then the menu closes. On iOS it is a menu the system
+    /// shows (a `MenuButton`'s, a `ContextMenu`'s, a header button's),
+    /// chosen from as a tap does.
     pub async fn choose_menu_item(this: Instance<Self>, label: String) -> Result<(), JsError> {
         step(&this, move |app| app.choose_menu_item(&label)).await
     }
@@ -2287,7 +2291,8 @@ impl App {
     }
 
     /// Goes back as the user does (a header's back button, swiping a sheet
-    /// down): the innermost stack of the newest modal (else of the screen)
+    /// down; in a sheet showing a pushed page, its header's back button):
+    /// the innermost stack of the newest modal (else of the screen)
     /// pops its top screen, or asks it when it prevents going back; without
     /// one, the newest modal asks to close. Rejects (`ERR_NSH_TEST_NO_BACK`)
     /// when there is nothing to go back from.
