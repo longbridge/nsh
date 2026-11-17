@@ -12075,6 +12075,136 @@ fn the_segmented_control_shows_nothing_off_ios() {
     }
 }
 
+const SWITCH: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { Switch } from "nsh/mobile";
+const on = signal(false);
+const locked = signal(false);
+mount(() => <View>
+  <Switch checked={on()} accessibilityLabel="Notifications"
+    onChange={({ checked }) => on.set(checked)} />
+  <Switch checked={locked()} disabled accessibilityLabel="Locked"
+    onChange={() => {}} />
+  <Text>{`On: ${on()}`}</Text>
+</View>);
+"#;
+
+/// The native switches mounted in `batches`, in order.
+fn switches(batches: &[MountBatch]) -> Vec<u32> {
+    batches
+        .iter()
+        .flat_map(|batch| &batch.items)
+        .filter_map(|item| match item {
+            MountItem::Component { id, name }
+                if &**name == nsh_core::platform::SWITCH_COMPONENT =>
+            {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// `nsh/mobile`'s `Switch` is the system's switch on iOS and Android: its
+/// value, `disabled` and label reach it, the user's flip comes back as
+/// `onChange({ checked })`, the app's new value reaches the same switch,
+/// and a flip the app has heard bumps `revision`, so the switch shows
+/// a value the app kept again.
+#[test]
+fn the_switch_is_the_systems_on_mobile_and_follows_the_app() {
+    use nsh_core::platform::Os;
+
+    for os in [Os::Ios, Os::Android] {
+        let (engine, rx) = start_in(
+            SWITCH,
+            Environment {
+                os,
+                ..Environment::default()
+            },
+        );
+        let initial = until(&rx, |batch| shows(batch, "On: false"));
+        let ids = switches(&initial);
+        assert_eq!(ids.len(), 2, "two switches on {os:?}");
+        // Each switch by its label: the mount order is not the tree's.
+        let by_label = |label: &str| {
+            *ids.iter()
+                .find(|&&id| {
+                    component_prop(&initial, id, "accessibilityLabel")
+                        == Some(serde_json::json!(label))
+                })
+                .unwrap_or_else(|| panic!("the {label} switch on {os:?}"))
+        };
+        let (on, locked) = (by_label("Notifications"), by_label("Locked"));
+        assert_eq!(
+            component_prop(&initial, on, "checked"),
+            Some(serde_json::json!(false))
+        );
+        assert_eq!(
+            component_prop(&initial, on, "disabled"),
+            Some(serde_json::json!(false))
+        );
+        assert_eq!(
+            component_prop(&initial, locked, "disabled"),
+            Some(serde_json::json!(true))
+        );
+        // The app follows the flip.
+        engine.control().dispatch_event(
+            on,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: "change".into(),
+                data: serde_json::json!(true),
+            },
+        );
+        let updates = until(&rx, |batch| shows(batch, "On: true"));
+        assert_eq!(
+            component_prop(&updates, on, "checked"),
+            Some(serde_json::json!(true)),
+            "{os:?}"
+        );
+        // The app keeps its value: the switch is told it again.
+        engine.control().dispatch_event(
+            locked,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: "change".into(),
+                data: serde_json::json!(true),
+            },
+        );
+        let kept = until(&rx, |batch| {
+            component_prop(std::slice::from_ref(batch), locked, "revision").is_some()
+        });
+        assert_eq!(
+            component_prop(&kept, locked, "revision"),
+            Some(serde_json::json!(1)),
+            "{os:?}"
+        );
+        assert_eq!(
+            component_prop(&kept, locked, "checked"),
+            None,
+            "the kept value stays as it was on {os:?}"
+        );
+    }
+}
+
+/// The desktops and the web have no system switch: it takes no room and
+/// makes no component.
+#[test]
+fn the_switch_shows_nothing_off_mobile() {
+    use nsh_core::platform::Os;
+
+    for os in [Os::MacOs, Os::Web] {
+        let (_engine, rx) = start_in(
+            SWITCH,
+            Environment {
+                os,
+                ..Environment::default()
+            },
+        );
+        let batches = until(&rx, |batch| shows(batch, "On: false"));
+        assert!(switches(&batches).is_empty(), "{os:?}");
+    }
+}
+
 const DATE_TIME_PICKER: &str = r#"import { mount, signal, Text, View } from "nsh";
 import { DateTimePicker } from "nsh/mobile";
 const value = signal("2026-11-17T09:30");

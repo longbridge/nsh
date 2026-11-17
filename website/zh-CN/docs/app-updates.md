@@ -84,6 +84,8 @@ nsh update-manifest *.tar.gz *.zip \
 
 把压缩包、`latest.json` 和 `latest.json.sig`（使用 `--key` 时）上传为 GitHub Release 的附件，或放到自己服务器的同一目录。GitHub 上标记为 draft 或 prerelease 的版本不会被推送。
 
+更新说明有多种语言时，每种语言加一个 `--notes <标签>=<文件>`，标签用 BCP 47，例如 `--notes zh-TW=CHANGES.zh-TW.md`。每种语言写成 `latest.json` 旁边的 `notes.<标签>.md`，清单里记录它的 SHA-256；和清单一起上传。用 `checkForUpdate({ locale })` 检查时，`update.notes` 就是该语言的说明，只下载这一个文件；没有该语言时用不带标签的说明。旧版运行时的应用照旧显示不带标签的说明。
+
 ## OTA 更新
 
 只改了 TSX 的版本不需要新应用：[OTA 更新](/zh-CN/docs/ota-updates)把它作为签名包下发，已安装的应用从下次启动开始运行它，所有原生平台（包括 iOS 和 Android）都适用。优先用 OTA，改动需要更新的 NSH 运行时或原生代码时再发新应用。一份清单可以同时包含两者，应用先检查包，再检查新应用：

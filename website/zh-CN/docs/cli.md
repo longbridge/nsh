@@ -279,10 +279,11 @@ nsh keygen <NAME>
 ### nsh update-manifest
 
 ```sh
-nsh update-manifest [<ARCHIVE>...] [--package <FILE.nshpkg>] [--entry <DIR>] [--key <FILE>] [--notes <FILE>] [--link ios=<URL>] [--link android=<URL>] [--base-url <URL>] [-o <DIR>]
+nsh update-manifest [<ARCHIVE>...] [--package <FILE.nshpkg>] [--entry <DIR>] [--key <FILE>] [--notes <FILE>] [--notes <TAG>=<FILE>]... [--link ios=<URL>] [--link android=<URL>] [--base-url <URL>] [-o <DIR>]
 ```
 
 根据各平台 `nsh package` 产出的压缩包写出 `latest.json`（加 `--key` 时还有 `latest.json.sig`）；加 `--package` 时还写入应用代码的签名包（`nsh publish` 产出），写入前会按应用 id 和 `updater.packages.roots` 校验它，详见 [OTA 更新](/zh-CN/docs/ota-updates)。一个版本可以只有包。
+`--notes <TAG>=<FILE>` 加入另一种语言（BCP 47 标签）的更新说明，写在清单旁边的 `notes.<TAG>.md`；需要同时给不带标签的 `--notes`。
 
 ### nsh certify
 

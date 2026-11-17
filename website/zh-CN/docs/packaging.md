@@ -286,6 +286,7 @@ NSH 根据 `nsh.json` 其他键设置的键、以及打包后的应用所依赖�
 | iOS：`CFBundleIcons`、`CFBundleIcons~ipad`、`CFBundleIconName`；macOS：`CFBundleIconFile` | `icon` |
 | iOS：`UIUserInterfaceStyle` | `appearance` |
 | iOS：`UIStatusBarStyle`、`UIStatusBarHidden` | `statusBar` |
+| iOS：`UILaunchScreen`（设置了 `ios.launchScreen` 时） | `ios.launchScreen`（[启动画面](#启动画面)） |
 | macOS：`LSUIElement` | `macos.activationPolicy`（见[菜单栏应用](./macos.md#菜单栏应用)） |
 | `CFBundleExecutable`、`CFBundlePackageType`、`CFBundleSupportedPlatforms`；iOS：`LSRequiresIPhoneOS`、`UIApplicationSceneManifest`、`UIApplicationSupportsMultipleScenes`；macOS：`NSPrincipalClass` | 包本身 |
 | entitlements：`application-identifier`、`com.apple.application-identifier`、`com.apple.developer.team-identifier` | `id` 和描述文件 |
@@ -341,6 +342,26 @@ entitlements：
 `--icon` 会替换它，用于本次打包的目标。
 
 没有图标时，系统显示默认图标。
+
+## 启动画面
+
+从点下图标到应用画出第一帧，iOS 显示应用的启动画面：`nsh.json` 没给时，是系统在应用外观下的背景色。`ios.launchScreen` 设置它的颜色和屏幕中央的一张图，浅色、深色外观可以共用一个，也可以各给一个：
+
+```json
+{
+  "ios": {
+    "launchScreen": {
+      "background": { "light": "#ffffff", "dark": "#131312" },
+      "image": { "light": "launch.png", "dark": "launch-dark.png" }
+    }
+  }
+}
+```
+
+- `background` 是 `#rrggbb` 或 `#rrggbbaa`，或带 `light` 和 `dark` 的对象。
+- `image` 是相对 `nsh.json` 的 PNG，或带 `light` 和 `dark` 的对象。它按 3 倍屏绘制：系统按像素尺寸的三分之一显示，所以 288×288 的 PNG 是 96×96 点，居中。
+
+两者和图标一起编译进应用的资源目录，并写进 `UILaunchScreen`，应用就不再在 `ios.infoPlist` 里设置它。启动画面与应用第一帧一致（同样的背景、同一张图在同一位置）时，启动看起来没有跳变。系统显示哪一套由 `appearance` 决定。
 
 ## 相机、蓝牙和其他硬件
 

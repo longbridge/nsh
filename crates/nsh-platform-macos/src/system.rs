@@ -634,6 +634,7 @@ fn os_version() -> (u16, u16) {
 pub(crate) fn command(surface: &Rc<Surface>, id: NodeId, command: &Command) {
     match command {
         Command::Dialog(dialog) => show_dialog(surface, dialog),
+        Command::CloseDialog(dialog) => close_dialog(surface, *dialog),
         Command::Desktop(command) => crate::chrome::command(surface, command),
         Command::PerfMonitor(show) => {
             if let Some(toggle) = &*surface.perf_toggle.borrow() {
@@ -756,6 +757,19 @@ pub(crate) fn end_batch(surface: &Surface) {
 /// loop is over ([`run_alone`]), so the next one does not show inside it;
 /// one waiting to show never shows.
 pub(crate) fn clear(surface: &Surface) {
+    end_dialogs(surface, None);
+}
+
+/// Takes back the dialog [`show_dialog`] showed on `surface` as `id`
+/// (`Command::CloseDialog`), as [`clear`] does, reporting nothing: the core
+/// answered it.
+fn close_dialog(surface: &Surface, id: u32) {
+    end_dialogs(surface, Some(id));
+}
+
+/// Ends `surface`'s dialogs unanswered (and those of surfaces gone), or
+/// only its dialog `only`: see [`clear`].
+fn end_dialogs(surface: &Surface, only: Option<u32>) {
     // `try_with`: also as the surface drops, which may be as the thread
     // ends.
     let ended = SYSTEM.try_with(|s| {
@@ -764,10 +778,13 @@ pub(crate) fn clear(surface: &Surface) {
         };
         let mut ended = Vec::new();
         s.dialogs.retain(|d| {
-            let ours = d
-                .surface
-                .upgrade()
-                .is_none_or(|s| std::ptr::eq(&*s, surface));
+            let shown_on = d.surface.upgrade();
+            let ours = match only {
+                None => shown_on.is_none_or(|s| std::ptr::eq(&*s, surface)),
+                Some(id) => {
+                    d.answer.id == id && shown_on.is_some_and(|s| std::ptr::eq(&*s, surface))
+                }
+            };
             // Answered: an alert on its own already told to stop.
             if !ours || d.answer.answered.replace(true) {
                 return true;

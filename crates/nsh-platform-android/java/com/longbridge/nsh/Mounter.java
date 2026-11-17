@@ -79,6 +79,8 @@ final class Mounter {
      * its message, its buttons and a destructive action, each light then dark ARGB (0: the system's).
      */
     final int[] dialogColors = new int[10];
+    /** The alerts shown and not answered yet, by dialog id: what {@link SystemUi#closeDialog} takes back. */
+    final SparseArray<android.app.AlertDialog> dialogs = new SparseArray<>();
     /** The status bar the app asked for last (style, hidden), applied again when the appearance changes. */
     private int barStyle = -1;
     private boolean barHidden;
@@ -272,6 +274,7 @@ final class Mounter {
         this.density = host.getResources().getDisplayMetrics().density;
         this.images = images;
         components.put(TabBarComponent.NAME, c -> new TabBarComponent(context, c, this::night));
+        components.put(SwitchComponent.NAME, c -> new SwitchComponent(context, c, this::night));
         components.put(DateTimePickerComponent.NAME, c -> new DateTimePickerComponent(context, c, this::night));
         images.redirects = (base, location) -> Native.mediaRedirect(handle(), base, location);
         images.inline = uri -> {
@@ -471,6 +474,9 @@ final class Mounter {
                         View v = views.valueAt(i);
                         if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof TabBarComponent) {
                             ((TabBarComponent) ((ComponentBox) v).component).appearanceChanged();
+                        }
+                        if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof SwitchComponent) {
+                            ((SwitchComponent) ((ComponentBox) v).component).appearanceChanged();
                         }
                         if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof DateTimePickerComponent) {
                             ((DateTimePickerComponent) ((ComponentBox) v).component).appearanceChanged();
@@ -2467,6 +2473,9 @@ final class Mounter {
                 SystemUi.dialog(this, dialog, title, message, cancelable, sheet, texts, styles);
                 break;
             }
+            case 60:
+                SystemUi.closeDialog(this, b.getInt());
+                break;
             case 14: {
                 boolean block = b.getInt() != 0;
                 clearJsResponder();

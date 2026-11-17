@@ -2582,6 +2582,10 @@ pub enum Command {
     /// Show an alert or action sheet (on the root); the answer comes back
     /// as [`EventKind::Dialog`].
     Dialog(Box<Dialog>),
+    /// Close the dialog [`Command::Dialog`] showed with this id (on the
+    /// root), as if dismissed, without reporting an answer: the app no
+    /// longer wants one, and the core has already answered it.
+    CloseDialog(u32),
     /// A JS responder took the touches on this view: `block` keeps native
     /// scroll views around it from taking them over.
     SetJsResponder {

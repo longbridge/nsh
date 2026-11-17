@@ -320,6 +320,7 @@ says what to set instead:
 | iOS: `CFBundleIcons`, `CFBundleIcons~ipad`, `CFBundleIconName`; macOS: `CFBundleIconFile` | `icon` |
 | iOS: `UIUserInterfaceStyle` | `appearance` |
 | iOS: `UIStatusBarStyle`, `UIStatusBarHidden` | `statusBar` |
+| iOS: `UILaunchScreen`, when `ios.launchScreen` is set | `ios.launchScreen` ([Launch screen](#launch-screen)) |
 | macOS: `LSUIElement` | `macos.activationPolicy` ([Menu bar apps](./macos.md#menu-bar-apps)) |
 | `CFBundleExecutable`, `CFBundlePackageType`, `CFBundleSupportedPlatforms`; iOS: `LSRequiresIPhoneOS`, `UIApplicationSceneManifest`, `UIApplicationSupportsMultipleScenes`; macOS: `NSPrincipalClass` | the package itself |
 | Entitlements: `application-identifier`, `com.apple.application-identifier`, `com.apple.developer.team-identifier` | `id` and the provisioning profile |
@@ -386,6 +387,31 @@ Windows, Linux and Android fill it. Give `icon` an object to use a PNG per platf
 `--icon` replaces it for the target being packaged.
 
 Without an icon, the system shows its default.
+
+## Launch screen
+
+From the tap on the icon until the app's first frame, iOS shows the app's launch screen: the system's background
+color in the app's appearance unless `nsh.json` gives one. `ios.launchScreen` sets its color and an image in the
+middle of the screen, the same in both appearances or one for each:
+
+```json
+{
+  "ios": {
+    "launchScreen": {
+      "background": { "light": "#ffffff", "dark": "#131312" },
+      "image": { "light": "launch.png", "dark": "launch-dark.png" }
+    }
+  }
+}
+```
+
+- `background` is `#rrggbb` or `#rrggbbaa`, or an object with `light` and `dark`.
+- `image` is a PNG relative to `nsh.json`, or an object with `light` and `dark`. It is drawn for 3x screens: the
+  system shows it at a third of its size in pixels, so a 288×288 PNG is 96×96 points, centered.
+
+Both are compiled into the app's asset catalog with its icon and named in `UILaunchScreen`, which the app no longer
+sets in `ios.infoPlist`. A launch screen that matches the app's first frame (its background, the same image in the
+same place) makes the start look seamless. `appearance` picks which of the two the system shows.
 
 ## Camera, Bluetooth and other hardware
 

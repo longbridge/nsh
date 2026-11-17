@@ -1503,6 +1503,13 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             out.s.push(']');
             out.bool(d.cancelable).bool(d.sheet).end();
         }
+        Command::CloseDialog(dialog) => {
+            out.item("cmd")
+                .num(id)
+                .str("closeDialog")
+                .num(*dialog)
+                .end();
+        }
         Command::SetJsResponder { block } => {
             out.item("cmd")
                 .num(id)

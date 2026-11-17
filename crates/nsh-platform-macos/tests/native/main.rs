@@ -13,6 +13,8 @@
 //! NSH_MOUNT_BENCH_ONLY=1 cargo test --release -p nsh-platform-macos --test native -- --ignored
 //! ```
 #[cfg(target_os = "macos")]
+mod canvas_bounds;
+#[cfg(target_os = "macos")]
 mod embedded_scroll;
 #[cfg(target_os = "macos")]
 mod fps_collapse;
@@ -24,6 +26,8 @@ mod input_focus;
 mod input_hidden;
 #[cfg(target_os = "macos")]
 mod keyboard;
+#[cfg(target_os = "macos")]
+mod keymap_ime;
 #[cfg(target_os = "macos")]
 mod menu_labels;
 #[cfg(target_os = "macos")]
@@ -104,11 +108,15 @@ fn main() {
                 zoom::run();
             } else if std::env::var_os("NSH_IME_CHECK_ONLY").is_some() {
                 ime::run();
+            } else if std::env::var_os("NSH_IME_KEYMAP_CHECK_ONLY").is_some() {
+                keymap_ime::run();
             } else if std::env::var_os("NSH_KEYBOARD_CHECK_ONLY").is_some() {
                 window_press::run();
                 keyboard::run();
             } else if std::env::var_os("NSH_EMBEDDED_SCROLL_CHECK_ONLY").is_some() {
                 embedded_scroll::run();
+            } else if std::env::var_os("NSH_CANVAS_BOUNDS_CHECK_ONLY").is_some() {
+                canvas_bounds::run();
             } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
                 press_momentum::run();
             } else {
@@ -121,6 +129,7 @@ fn main() {
                 modal_focus::run();
                 #[cfg(feature = "shader")]
                 shader_content::run();
+                canvas_bounds::run();
                 menu_labels::run();
                 window_frames::run();
                 keyboard::run();

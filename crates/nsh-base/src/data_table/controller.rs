@@ -100,6 +100,13 @@ pub(crate) struct MoveDrag {
     pub(crate) moving: bool,
 }
 
+pub(crate) type CellMarks = (
+    Option<(usize, usize)>,
+    Option<usize>,
+    Option<(usize, usize)>,
+);
+pub(crate) type RowMarks = (Option<usize>, Option<usize>);
+
 #[derive(Clone)]
 pub(crate) struct Dt {
     pub(crate) props: DataTableProps,
@@ -109,6 +116,10 @@ pub(crate) struct Dt {
     pub(crate) layout_rev: Signal<u64>,
     /// The data or what is drawn over it (selection, hover) changed.
     pub(crate) data_rev: Signal<u64>,
+    /// Cell/column selection and cell menu target; unchanged on row selection.
+    pub(crate) cell_marks: Signal<CellMarks>,
+    /// Row selection and row menu target; unchanged on cell/column selection.
+    pub(crate) row_marks: Signal<RowMarks>,
     pub(crate) scroll_x: Signal<Points>,
     pub(crate) scroll_y: Signal<Points>,
     pub(crate) viewport: Signal<Size<Points>>,
@@ -207,6 +218,8 @@ impl Dt {
             })),
             layout_rev: signal(0),
             data_rev: signal(0),
+            cell_marks: signal((None, None, None)),
+            row_marks: signal((None, None)),
             scroll_x: signal(Points::ZERO),
             scroll_y: signal(Points::ZERO),
             viewport: signal(Size::default()),
@@ -250,6 +263,32 @@ impl Dt {
     }
 
     pub(crate) fn bump_data(&self) {
+        let (cell_marks, row_marks) = {
+            let st = self.st.borrow();
+            let sel_cell = match st.selection {
+                Selection::Cell(r, c) => Some((r, c)),
+                _ => None,
+            };
+            let sel_col = match st.selection {
+                Selection::Column(c) => Some(c),
+                _ => None,
+            };
+            let sel_row = match st.selection {
+                Selection::Row(r) => Some(r),
+                _ => None,
+            };
+            let active_cell = match st.active {
+                Some((Some(r), Some(c))) => Some((r, c)),
+                _ => None,
+            };
+            let active_row = match st.active {
+                Some((Some(r), None)) => Some(r),
+                _ => None,
+            };
+            ((sel_cell, sel_col, active_cell), (sel_row, active_row))
+        };
+        self.cell_marks.set(cell_marks);
+        self.row_marks.set(row_marks);
         self.data_rev.update(|r| *r += 1);
     }
 
@@ -301,10 +340,16 @@ impl Dt {
             let given = dt.props.selection.get();
             let allowed = dt.selectable_kinds();
             untracked(|| {
+                let mut changed = false;
                 if let Some(given) = given {
-                    dt.st.borrow_mut().selection = from_public(given);
+                    let next = from_public(given);
+                    let mut st = dt.st.borrow_mut();
+                    changed = st.selection != next;
+                    st.selection = next;
                 }
-                dt.clamp_selection(allowed);
+                if !dt.clamp_selection_quiet(allowed) && changed {
+                    dt.bump_data();
+                }
             });
         });
         let dt = self.clone();
@@ -335,6 +380,10 @@ impl Dt {
     }
 
     fn clamp_selection(&self, allowed: Selectable) {
+        let _ = self.clamp_selection_quiet(allowed);
+    }
+
+    fn clamp_selection_quiet(&self, allowed: Selectable) -> bool {
         let rows = self.row_count();
         let changed = {
             let mut st = self.st.borrow_mut();
@@ -347,6 +396,7 @@ impl Dt {
         if changed {
             self.bump_data();
         }
+        changed
     }
 
     // Counts and cells.
@@ -392,6 +442,9 @@ impl Dt {
         let row = u32::try_from(row).ok()?;
         let def = u32::try_from(def).ok()?;
         self.props.cell_classes.with(|list| {
+            if list.is_empty() {
+                return None;
+            }
             list.iter()
                 .find(|c| c.row == row && c.column == def && !c.class.is_empty())
                 .map(|c| c.class.clone())
@@ -1148,9 +1201,11 @@ impl Dt {
     /// when `selectOnModifierPress`; the press is reported either way.
     fn press_hit(&self, hit: Hit, clicks: u32, modifiers: Modifiers) {
         self.set_focus(true);
-        self.st.borrow_mut().active = None;
+        let cleared_active = self.st.borrow_mut().active.take().is_some();
         let Some(row) = hit.row else {
-            self.bump_data();
+            if cleared_active {
+                self.bump_data();
+            }
             return;
         };
         let allowed = untracked(|| self.selectable_kinds());
@@ -1179,7 +1234,10 @@ impl Dt {
         };
         if let Some(next) = next {
             self.set_selection(next, true);
-        } else {
+            if cleared_active {
+                self.bump_data();
+            }
+        } else if cleared_active {
             self.bump_data();
         }
         self.cx.emit(DataTableEvent::RowPress(DataTablePress {

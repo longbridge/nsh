@@ -76,7 +76,7 @@ use crate::{
 /// (`setNeedsDisplayInRect`) may run only while it matches the layer.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Painted {
-    pub(crate) size: CGSize,
+    pub(crate) frame: CGRect,
     pub(crate) scale: f64,
     pub(crate) prefix_only: bool,
 }
@@ -112,6 +112,8 @@ pub(crate) struct CanvasState {
     /// A bounded, source-over animated suffix that can draw in its own layer.
     layer_split: Option<usize>,
     layer_scan: RefCell<DamageScan>,
+    /// Cached painted bounds when no operation reads an animated slot.
+    static_bounds: Cell<Option<Damage>>,
 }
 
 /// How many paints a second make a canvas draw on Core Animation's threads.
@@ -205,12 +207,22 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, drawing: Arc<Drawing>) 
             }
         }
         c.split = first_animated(&drawing.ops);
+        let animated = c.split < drawing.ops.len();
         c.layer_split = layer_split(&drawing.ops, c.split);
         // Short static parts replay faster than a layer draws.
         if c.split < MIN_PREFIX || !drawing.ops[..c.split].iter().any(CanvasOp::paints) {
             c.split = 0;
         }
         c.split_path = prefix_path_needed(&drawing.ops, c.split);
+        c.static_bounds.set(if animated {
+            None
+        } else {
+            Some(
+                c.layer_scan
+                    .borrow_mut()
+                    .painted_after(&drawing.ops, 0, |_| 0.0),
+            )
+        });
         c.redrawn.set(0);
         c.painted.set(None);
         c.drawing = Some(drawing);
@@ -322,40 +334,40 @@ fn layer_split(ops: &[CanvasOp], split: usize) -> Option<usize> {
     Some(split)
 }
 
-/// Whether `dirty` covers the layer's `size` at `scale` (within the pixel
-/// rounding of the backing store's integer bounds).
-fn covers(dirty: CGRect, size: CGSize, scale: f64) -> bool {
+/// Whether `dirty` (in the view's space) covers the layer's `frame` at
+/// `scale` (within the pixel rounding of the backing store's integer bounds).
+fn covers(dirty: CGRect, frame: CGRect, scale: f64) -> bool {
     let pixel = 1.0 / scale.max(1.0);
-    size.width > 0.0
-        && size.height > 0.0
+    frame.size.width > 0.0
+        && frame.size.height > 0.0
         && dirty.size.width > 0.0
         && dirty.size.height > 0.0
-        && dirty.origin.x <= pixel
-        && dirty.origin.y <= pixel
-        && dirty.origin.x + dirty.size.width >= size.width - pixel
-        && dirty.origin.y + dirty.size.height >= size.height - pixel
+        && dirty.origin.x <= frame.origin.x + pixel
+        && dirty.origin.y <= frame.origin.y + pixel
+        && dirty.origin.x + dirty.size.width >= frame.origin.x + frame.size.width - pixel
+        && dirty.origin.y + dirty.size.height >= frame.origin.y + frame.size.height - pixel
 }
 
 /// Draws a canvas view's drawing (in its content layer's
-/// `drawLayer:inContext:`; the context is y down, in points, `size` points
-/// at `scale` pixels each) where it is `dirty`: Core Graphics skips the
-/// rest. `base` takes the view's space to the context's base space, in
-/// which Core Graphics takes shadow offsets and blurs (no transform
-/// reaches them).
+/// `drawLayer:inContext:`; the context is y down, translated into the view's
+/// space, `frame` in points at `scale` pixels each) where it is `dirty`: Core
+/// Graphics skips the rest. `base` takes the view's space to the context's
+/// base space, in which Core Graphics takes shadow offsets and blurs (no
+/// transform reaches them).
 pub(crate) fn draw(
     cx: &CGContext,
     state: &ViewState,
     dirty: CGRect,
-    size: CGSize,
+    frame: CGRect,
     scale: f64,
     base: CGAffineTransform,
     part: LayerPart,
 ) {
     if let Some(canvas) = state.canvas.as_ref() {
         if let LayerPart::Whole { asynchronous } = part {
-            canvas.paint(cx, dirty, size, scale, asynchronous, base);
+            canvas.paint_in(cx, dirty, frame, scale, asynchronous, base);
         } else {
-            canvas.paint_layer(cx, dirty, size, scale, part, base);
+            canvas.paint_layer(cx, dirty, frame, scale, part, base);
         }
     }
 }
@@ -365,6 +377,10 @@ impl CanvasState {
     /// is invalidated or its draw was skipped).
     pub(crate) fn clear_painted(&self) {
         self.painted.set(None);
+    }
+
+    pub(crate) fn has_layer_split(&self) -> bool {
+        self.layer_split.is_some()
     }
 
     fn set_args(&mut self, values: &[(u16, AnimationValue)], target: Option<Painted>) -> Damage {
@@ -412,6 +428,56 @@ impl CanvasState {
         before.union(after)
     }
 
+    /// Bounds of everything this canvas paints inside `size`, rounded out to
+    /// stable 32-point tiles, or `None` when nothing visible is painted so no
+    /// content layer or backing store is allocated.
+    pub(crate) fn content_bounds(&self, size: CGSize) -> Option<CGRect> {
+        if size.width <= 0.0 || size.height <= 0.0 {
+            return None;
+        }
+        let drawing = self.drawing.as_ref()?;
+        if drawing.ops.is_empty() {
+            return None;
+        }
+        if 0 < self.split || self.layer_split.is_some() {
+            return Some(CGRect::new(CGPoint::ZERO, size));
+        }
+        let painted = match self.static_bounds.get() {
+            Some(painted) => painted,
+            None => {
+                let painted = self
+                    .layer_scan
+                    .borrow_mut()
+                    .painted_after(&drawing.ops, 0, |s| slot_number(&self.args, s));
+                if first_animated(&drawing.ops) == drawing.ops.len() {
+                    self.static_bounds.set(Some(painted));
+                }
+                painted
+            }
+        };
+        match painted {
+            Damage::None => None,
+            Damage::All => Some(CGRect::new(CGPoint::ZERO, size)),
+            Damage::Rect(rect) => {
+                let x = ((f64::from(rect.origin.x.0) / 32.0).floor() * 32.0).max(0.0);
+                let y = ((f64::from(rect.origin.y.0) / 32.0).floor() * 32.0).max(0.0);
+                let right = ((f64::from(rect.origin.x.0 + rect.size.width.0) / 32.0).ceil() * 32.0)
+                    .min(size.width);
+                let bottom = ((f64::from(rect.origin.y.0 + rect.size.height.0) / 32.0).ceil()
+                    * 32.0)
+                    .min(size.height);
+                let (w, h) = (right - x, bottom - y);
+                if w <= 0.0 || h <= 0.0 {
+                    return None;
+                }
+                if w * h >= size.width * size.height * 0.75 {
+                    return Some(CGRect::new(CGPoint::ZERO, size));
+                }
+                Some(CGRect::new(CGPoint::new(x, y), CGSize::new(w, h)))
+            }
+        }
+    }
+
     /// Bounds in canvas coordinates, rounded out to stable 32-point tiles.
     /// A growing ring then keeps its backing store through most frames.
     pub(crate) fn layer_bounds(&self, size: CGSize) -> Option<CGRect> {
@@ -446,7 +512,7 @@ impl CanvasState {
         &self,
         cx: &CGContext,
         dirty: CGRect,
-        size: CGSize,
+        frame: CGRect,
         scale: f64,
         part: LayerPart,
         base: CGAffineTransform,
@@ -456,9 +522,9 @@ impl CanvasState {
         };
         let suffix = part == LayerPart::Suffix;
         self.cadence.paint(Instant::now());
-        if !suffix && covers(dirty, size, scale) {
+        if !suffix && covers(dirty, frame, scale) {
             self.painted.set(Some(Painted {
-                size,
+                frame,
                 scale,
                 prefix_only: true,
             }));
@@ -509,8 +575,7 @@ impl CanvasState {
         self.cadence.frequent.get() && !self.keeps_prefix()
     }
 
-    /// [`draw`]'s replay; `asynchronous`: `cx` records for Core Animation's
-    /// drawing threads.
+    /// Replays `self` into an unshifted bitmap of `size` points (`offscreen`).
     fn paint(
         &self,
         cx: &CGContext,
@@ -520,14 +585,36 @@ impl CanvasState {
         asynchronous: bool,
         base: CGAffineTransform,
     ) {
+        self.paint_in(
+            cx,
+            dirty,
+            CGRect::new(CGPoint::ZERO, size),
+            scale,
+            asynchronous,
+            base,
+        );
+    }
+
+    /// [`draw`]'s replay; `asynchronous`: `cx` records for Core Animation's
+    /// drawing threads.
+    fn paint_in(
+        &self,
+        cx: &CGContext,
+        dirty: CGRect,
+        frame: CGRect,
+        scale: f64,
+        asynchronous: bool,
+        base: CGAffineTransform,
+    ) {
+        let size = frame.size;
         self.cadence.paint(Instant::now());
         let canvas = self;
         let Some(drawing) = canvas.drawing.as_ref() else {
             return;
         };
-        if covers(dirty, size, scale) {
+        if covers(dirty, frame, scale) {
             canvas.painted.set(Some(Painted {
-                size,
+                frame,
                 scale,
                 prefix_only: false,
             }));
@@ -1666,20 +1753,14 @@ mod tests {
                 canvas.paint_layer(
                     &cx,
                     CGRect::new(CGPoint::ZERO, size),
-                    size,
+                    CGRect::new(CGPoint::ZERO, size),
                     scale,
                     LayerPart::Prefix,
                     base,
                 );
                 CGContext::begin_transparency_layer(Some(&cx), None);
-                canvas.paint_layer(
-                    &cx,
-                    canvas.layer_bounds(size).unwrap(),
-                    size,
-                    scale,
-                    LayerPart::Suffix,
-                    base,
-                );
+                let sub = canvas.layer_bounds(size).unwrap();
+                canvas.paint_layer(&cx, sub, sub, scale, LayerPart::Suffix, base);
                 CGContext::end_transparency_layer(Some(&cx));
             } else {
                 canvas.paint(
@@ -1982,7 +2063,7 @@ mod tests {
         };
         let size = CGSize::new(100.0, 40.0);
         let target = Some(Painted {
-            size,
+            frame: CGRect::new(CGPoint::ZERO, size),
             scale: 2.0,
             prefix_only: false,
         });
@@ -2049,7 +2130,7 @@ mod tests {
         // A new size, scale or invalidated backing store demands a whole
         // paint again before partial redraws resume.
         let resized = Some(Painted {
-            size: CGSize::new(120.0, 48.0),
+            frame: CGRect::new(CGPoint::ZERO, CGSize::new(120.0, 48.0)),
             scale: 2.0,
             prefix_only: false,
         });
@@ -2062,5 +2143,140 @@ mod tests {
             canvas.set_args(&[(0, AnimationValue::Number(24.0))], target),
             Damage::All
         );
+    }
+
+    #[test]
+    fn content_bounds_crops_sparse_drawings_and_omits_empty_ones() {
+        let c = Num::Const;
+        let full = CGSize::new(1000.0, 500.0);
+
+        let empty = CanvasState {
+            drawing: Some(Arc::new(Drawing {
+                ops: vec![
+                    CanvasOp::FillStyle(Paint::Color(Color::TRANSPARENT)),
+                    CanvasOp::FillRect([c(0.0), c(0.0), c(1000.0), c(500.0)]),
+                ],
+                ..Drawing::default()
+            })),
+            ..CanvasState::default()
+        };
+        assert_eq!(empty.content_bounds(full), None);
+
+        let mut sparse = CanvasState {
+            drawing: Some(Arc::new(Drawing {
+                ops: vec![
+                    CanvasOp::FillStyle(Paint::Color(Color(0xff0000ff))),
+                    CanvasOp::FillRect([Num::Slot(0), c(40.0), c(10.0), c(20.0)]),
+                ],
+                ..Drawing::default()
+            })),
+            args: vec![Some(AnimationValue::Number(70.0))],
+            ..CanvasState::default()
+        };
+        let sub = CGRect::new(CGPoint::new(64.0, 32.0), CGSize::new(32.0, 32.0));
+        assert_eq!(sparse.content_bounds(full), Some(sub));
+
+        // Unclipped paint of an offset tile satisfies `Painted` for that tile,
+        // and moving into another tile requires a whole paint again.
+        let space = CGColorSpace::new_device_rgb().unwrap();
+        // SAFETY: Core Graphics allocates and owns the 64 × 64 pixel buffer.
+        let cx = unsafe {
+            CGBitmapContextCreate(
+                std::ptr::null_mut(),
+                64,
+                64,
+                8,
+                256,
+                Some(&space),
+                CGImageAlphaInfo::PremultipliedFirst.0 | CGImageByteOrderInfo::Order32Little.0,
+            )
+        }
+        .unwrap();
+        CGContext::translate_ctm(Some(&cx), 0.0, 64.0);
+        CGContext::scale_ctm(Some(&cx), 2.0, -2.0);
+        let base = CGContext::ctm(Some(&cx));
+        CGContext::translate_ctm(Some(&cx), -sub.origin.x, -sub.origin.y);
+        let dirty = CGContext::clip_bounding_box(Some(&cx));
+        sparse.paint_in(&cx, dirty, sub, 2.0, false, base);
+
+        let painted_sub = Some(Painted {
+            frame: sub,
+            scale: 2.0,
+            prefix_only: false,
+        });
+        assert!(matches!(
+            sparse.set_args(&[(0, AnimationValue::Number(72.0))], painted_sub),
+            Damage::Rect(_)
+        ));
+        let shifted_sub = Some(Painted {
+            frame: CGRect::new(CGPoint::new(96.0, 32.0), CGSize::new(32.0, 32.0)),
+            scale: 2.0,
+            prefix_only: false,
+        });
+        assert_eq!(
+            sparse.set_args(&[(0, AnimationValue::Number(100.0))], shifted_sub),
+            Damage::All
+        );
+
+        // Shadows cast from a cropped offset tile land at the exact same view
+        // pixels as a full-view paint in both flipped and unflipped contexts.
+        let shadowed = CanvasState {
+            drawing: Some(Arc::new(Drawing {
+                ops: vec![
+                    CanvasOp::ShadowColor(Color(0xff0000ff)),
+                    CanvasOp::ShadowBlur(Points(0.0)),
+                    CanvasOp::ShadowOffset(Point::new(Points(12.0), Points(10.0))),
+                    CanvasOp::FillStyle(Paint::Color(Color(0x000000ff))),
+                    CanvasOp::FillRect([c(40.0), c(10.0), c(10.0), c(10.0)]),
+                ],
+                ..Drawing::default()
+            })),
+            ..CanvasState::default()
+        };
+        let sub_shadow = shadowed.content_bounds(CGSize::new(100.0, 40.0)).unwrap();
+        assert_eq!(
+            sub_shadow,
+            CGRect::new(CGPoint::new(32.0, 0.0), CGSize::new(32.0, 32.0))
+        );
+        for flipped in [true, false] {
+            let full_bytes = pixels_in(&shadowed, flipped);
+            // SAFETY: Core Graphics allocates and owns the 200 × 80 pixel buffer.
+            let cx = unsafe {
+                CGBitmapContextCreate(
+                    std::ptr::null_mut(),
+                    200,
+                    80,
+                    8,
+                    800,
+                    Some(&space),
+                    CGImageAlphaInfo::PremultipliedFirst.0 | CGImageByteOrderInfo::Order32Little.0,
+                )
+            }
+            .unwrap();
+            // Place the 32 × 32 sublayer at (32, 0) inside the 100 × 40 view.
+            if flipped {
+                CGContext::translate_ctm(Some(&cx), 32.0 * 2.0, 80.0 - 0.0);
+                CGContext::scale_ctm(Some(&cx), 2.0, -2.0);
+            } else {
+                CGContext::translate_ctm(Some(&cx), 32.0 * 2.0, 0.0);
+                CGContext::scale_ctm(Some(&cx), 2.0, 2.0);
+            }
+            let base = CGContext::ctm(Some(&cx));
+            CGContext::translate_ctm(Some(&cx), -sub_shadow.origin.x, -sub_shadow.origin.y);
+            let dirty = CGRect::new(sub_shadow.origin, sub_shadow.size);
+            shadowed.paint_in(&cx, dirty, sub_shadow, 2.0, false, base);
+            // SAFETY: Core Graphics allocates and owns the 200 × 80 pixel buffer while read.
+            let sub_bytes: &[u8] = unsafe {
+                std::slice::from_raw_parts(
+                    CGBitmapContextGetData(Some(&cx)).cast::<u8>(),
+                    200 * 80 * 4,
+                )
+            };
+            assert_eq!(
+                sub_bytes,
+                full_bytes.as_slice(),
+                "cropped tile matches full paint (flipped={flipped})"
+            );
+        }
     }
 }

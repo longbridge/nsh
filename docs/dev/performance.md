@@ -32,6 +32,7 @@ items both ways):
 
 The `*Ts.tsx` runs, which build their views without Rust component nodes, stayed within their run-to-run
 spread (`GridTs` first frame 764.5 / 750.7 µs, `RowsTs` 120.1 / 119.0 µs).
+
 Rows an `each` keeps (2026-11-17, Linux x86_64, Ryzen 9 7950X, release, against `e2479085c`): every update of an
 `each` (the rows of Rust components, `element/flow.rs`; TSX's `<Each>` is `nsh-js`'s own) built a map of all its
 rows, wrote each row's item and index, and sent the core an element per kept row, which the core copied, matched
@@ -113,6 +114,21 @@ searches. Headless `nsh test examples/bench/… --trace`, debug profile:
 The 1,000-paragraph run is `for (let i = 0; i < 8; i++) await app.press("id:edit")` on standard input;
 the before version's initial commit alone exceeds the step timeout, so its edits never ran. Every
 edit's batch carries one Text op and its selection frames.
+
+Leaner data-table views (`base/data_table`, 2026-11-18, macOS arm64, debug `nsh test --trace` on
+`examples/bench/data-table/App.tsx`, 100,000 rows × 20 columns with the first column fixed, `main` against
+the change): `fixedEdge` separators and the `headerContent` wrapper of a non-sortable column mount only when
+the app styles their part, the sort chevrons position inside `SortIndicator` without a wrapping view, row
+marks and cell marks are separate signals so a row selection does not wake every cell's flags memo, and
+`Cell::Text` shares its `Arc<str>`.
+
+| Phase | Before | After |
+|---|---:|---:|
+| First commit | mount items 1,962 / nodes 594 | mount items 1,854 (-108) / nodes 558 (-36) |
+| Press row `#1` commit | 354 µs | 301 µs |
+
+`examples/counter/App.tsx` is unchanged (57 / 10 ops, 51 / 7 mount items, 21 / 24 nodes). macOS window
+screenshots of the bench before and after are pixel-identical.
 
 Batched region cleanup (2026-11-15, macOS arm64, Apple M4 Pro, against `9efc3a2c`): three interleaved before / after
 pairs, a fresh headless CLI process per sample. Both builds use the workspace's development profile with
