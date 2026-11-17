@@ -125,8 +125,9 @@ pub struct SheetProps {
     /// `closeOnSwipe` allows. On iOS, a scroll inside it hands the
     /// downward drag over at its top. While the software keyboard is up,
     /// it rests at the largest, and back at its detent once the keyboard
-    /// goes. Given to an open sheet that had
-    /// none, or all taken away, they take effect at once and the sheet
+    /// goes (the grabber goes on from that detent). Given to an open sheet
+    /// that had none, or all taken away, or a `side` changing between the
+    /// bottom and another edge, they take effect at once and the sheet
     /// makes its content again.
     #[prop(default)]
     pub detents: Prop<Vec<SheetDetent>>,
@@ -155,8 +156,8 @@ pub struct SheetProps {
     /// What shows at the bottom of the panel, after the content (an input
     /// bar, the sheet's actions). With `detents` it stays at the bottom of
     /// the part of the panel that shows, at every detent and while a drag
-    /// moves the panel between them; below the smallest it goes with the
-    /// panel.
+    /// moves the panel between them (make the smallest detent tall enough
+    /// to show it); below the smallest it goes with the panel.
     pub footer: Prop<Option<Slot>>,
     /// The classes of the footer.
     pub footer_class: Prop<Option<SharedString>>,

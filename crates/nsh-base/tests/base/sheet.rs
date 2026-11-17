@@ -649,12 +649,17 @@ fn bounds_of(app: &Headless, test_id: &str) -> nsh_core::Bounds<Points> {
 /// The software keyboard comes up `height` points high (the bottom safe
 /// area under it included), moving for 250 ms, and the frames settle.
 fn keyboard(app: &mut Headless, height: f32) {
+    start_keyboard(app, height);
+    app.run_for(std::time::Duration::from_millis(400)).unwrap();
+}
+
+/// [`keyboard`] without waiting: the keyboard starts to move.
+fn start_keyboard(app: &mut Headless, height: f32) {
     app.set_environment("keyboard", |e| {
         e.keyboard_height = px(height);
         e.keyboard_duration = 250.0;
     })
     .unwrap();
-    app.run_for(std::time::Duration::from_millis(400)).unwrap();
 }
 
 /// A bottom sheet padded by the safe area, open at first.
@@ -1396,7 +1401,29 @@ fn the_keyboard_raises_the_sheet_to_its_largest_detent_and_back() {
     );
     app.run_for(std::time::Duration::from_millis(400)).unwrap();
     assert_rests(&replica, 422.0);
-    keyboard(&mut app, 300.0);
+    // Frame by frame as the sheet rises, once its panel ends at the
+    // keyboard, the footer is above the keyboard: it follows the panel all
+    // the way while the keyboard is up, not only to the smallest detent's
+    // place (which the shorter panel makes 122).
+    start_keyboard(&mut app, 300.0);
+    let mut seen = 0;
+    for _ in 0..40 {
+        app.run_for(std::time::Duration::from_millis(16)).unwrap();
+        let lifted = {
+            let mut replica = replica.lock().unwrap();
+            replica.frame();
+            replica.now().1 == 544.0
+        };
+        if lifted {
+            seen += 1;
+            let bottom = footer_bottom(&app, &replica);
+            assert!(
+                bottom <= 544.5,
+                "the footer ends at {bottom}, below the keyboard at 544"
+            );
+        }
+    }
+    assert!(seen > 0, "the panel ends at the keyboard");
     let (translation, height) = replica.lock().unwrap().rest();
     assert_eq!(height, 544.0, "as tall as the room above the keyboard");
     assert!(translation.abs() < 0.5, "at the largest, not {translation}");

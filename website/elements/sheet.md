@@ -103,7 +103,8 @@ and the web.
 Without `detent`, the sheet keeps its own detent, starting from `defaultDetent` (the smallest by default). With
 `detent`, the app owns it: change it in `onDetentChange({ detent })`, which reports each detent the user moves it
 to; a detent the app keeps brings the panel back. `detents` may change while the sheet is open: given to a sheet
-that had none, or all taken away, they take effect at once, and the sheet makes its content again.
+that had none, or all taken away, they take effect at once, and the sheet makes its content again; so does a `side`
+changing between the bottom and another edge.
 
 `grabber` shows a handle at the top of the panel, before the content. Like the rest of the sheet it looks like
 nothing: style it with `grabberClass` / `grabberStyle` and name it with `grabberAccessibilityLabel`. Screen readers
@@ -112,8 +113,8 @@ reduced motion the sheet moves between detents at once.
 
 `footer` shows at the bottom of the panel, after the content: an input bar, the sheet's actions. With detents it stays
 at the bottom of the part of the panel that shows, at every detent and while a drag or a spring moves the panel
-between them, moving natively with the panel; below the smallest detent it goes with the panel. Style it with
-`footerClass` / `footerStyle`.
+between them, moving natively with the panel; below the smallest detent it goes with the panel. Give the smallest
+detent room for it. Style it with `footerClass` / `footerStyle`.
 
 ```tsx
 const detent = signal<SheetDetent>("medium");
@@ -139,7 +140,8 @@ const detent = signal<SheetDetent>("medium");
 
 The software keyboard lifts a sheet with detents as any bottom sheet, below the status bar at most. While it is up the
 sheet rests at its largest detent, so what is typed in the footer or the content shows, and it goes back to its detent
-once the keyboard goes; the detent the app reads stays the same.
+once the keyboard goes. The raise leaves the detent the app reads as it is, and the grabber reads and changes that
+detent meanwhile.
 
 ## The software keyboard
 
