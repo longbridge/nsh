@@ -449,6 +449,10 @@ struct DragState {
     from: Points,
     /// Every panel's then.
     before: Vec<Points>,
+    /// The size each panel wanted from an earlier drag then: a panel the
+    /// drag brings back to its size at the press wants it again, not the
+    /// size a move in between gave it.
+    wanted: Vec<Option<Points>>,
     /// The sizes as `gpui-base`'s rules move them.
     state: ResizableState,
     /// The one panel without a size, when there was one: it stays without
@@ -750,10 +754,16 @@ impl Model {
             .copied()
             .filter(|&id| self.entry(id).is_some_and(|e| e.wanted().is_none()))
             .collect();
+        let wanted = self
+            .ids
+            .iter()
+            .map(|&id| self.entry(id).and_then(|e| e.dragged))
+            .collect();
         self.drag = Some(DragState {
             ix,
             from: sizes[ix],
             before: sizes,
+            wanted,
             state,
             flexible: (flexible.len() == 1).then(|| flexible[0]),
         });
@@ -767,13 +777,17 @@ impl Model {
         };
         drag.state.resize_panel_at_handle(drag.ix, drag.from + by);
         let sizes = drag.state.sizes().to_vec();
-        let (before, flexible) = (drag.before.clone(), drag.flexible);
-        for ((&id, &now), &was) in self.ids.iter().zip(&sizes).zip(&before) {
-            if now == was || Some(id) == flexible {
+        let (before, wanted, flexible) = (drag.before.clone(), drag.wanted.clone(), drag.flexible);
+        for (((&id, &now), &was), &then) in self.ids.iter().zip(&sizes).zip(&before).zip(&wanted) {
+            if Some(id) == flexible {
                 continue;
             }
             if let Some(entry) = self.entries.iter_mut().find(|e| e.id == id) {
-                entry.dragged = Some(now);
+                // Back at its size at the press (dragged out and back, or past
+                // a limit and back to it), it wants what it wanted then: the
+                // size an earlier move gave it would hold it away from the
+                // handle, and the drag's end reports no change to correct it.
+                entry.dragged = if now == was { then } else { Some(now) };
             }
         }
         self.expected = Some(sizes);
@@ -861,5 +875,66 @@ impl PanelFlex {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nsh_core::geometry::{Size, point};
+
+    use super::*;
+
+    /// A frame in the group: `w` wide from `x`, 100 tall.
+    fn frame(x: f32, w: f32) -> Bounds<Points> {
+        Bounds::new(point(px(x), px(0.0)), Size::new(px(w), px(100.0)))
+    }
+
+    /// A sidebar `width` wide (100 to 200) and a flexible panel, laid out
+    /// side by side in a group 400 wide.
+    fn sidebar(width: f32) -> Model {
+        let mut model = Model::default();
+        let props = |size: Option<Points>, max: Option<Points>| PanelProps {
+            size,
+            min: PANEL_MIN_SIZE,
+            max,
+            fixed: false,
+            visible: true,
+        };
+        model.register(0, props(Some(px(width)), Some(px(200.0))), Rc::new(|_| {}));
+        model.register(1, props(None, None), Rc::new(|_| {}));
+        model.set_container(frame(0.0, 400.0));
+        model.set_frame(0, frame(0.0, width));
+        model.set_frame(1, frame(width, 400.0 - width));
+        model
+    }
+
+    #[test]
+    fn a_drag_back_to_the_size_at_the_press_lays_the_panel_out_there() {
+        // At its minimum, dragged out, then back past the minimum: the last
+        // move gives it its size at the press again.
+        let mut model = sidebar(100.0);
+        model.start_drag(0);
+        model.drag(px(40.0));
+        assert_eq!(model.flex(0).basis, Some(px(140.0)));
+        model.drag(px(-30.0));
+        assert_eq!(model.current_sizes(), Some(vec![px(100.0), px(300.0)]));
+        assert_eq!(model.flex(0).basis, Some(px(100.0)));
+        assert!(model.end_drag().is_none());
+    }
+
+    #[test]
+    fn a_drag_back_keeps_the_size_an_earlier_drag_gave() {
+        let mut model = sidebar(150.0);
+        model.start_drag(0);
+        model.drag(px(30.0));
+        assert!(model.end_drag().is_some());
+        model.set_frame(0, frame(0.0, 180.0));
+        model.set_frame(1, frame(180.0, 220.0));
+        // The app has not passed the reported size back: 180 is the user's.
+        model.start_drag(0);
+        model.drag(px(-50.0));
+        model.drag(px(0.0));
+        assert_eq!(model.flex(0).basis, Some(px(180.0)));
+        assert!(model.end_drag().is_none());
     }
 }
