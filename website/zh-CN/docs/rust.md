@@ -210,35 +210,6 @@ fn open_notes() {
 }
 ```
 
-## 在网页上登录
-
-`open_auth_session` 打开服务方的登录页（OAuth 授权地址），结果是登录页跳回的回调地址：iOS 用
-`ASWebAuthenticationSession` 弹层显示（`.ephemeral(true)` 不与用户的 Safari 共用数据），Android 用 Custom Tab，
-其他平台用系统浏览器。iOS 以外，回调以应用声明的 scheme（`nsh.json` 的 `schemes`）的链接回到应用，由会话收下，
-`next_url_scheme_open` 收不到它。结果是 `Completed(url)` 或 `Cancelled`（用户关掉了页面，或没登录就回到应用）；
-回调回不到应用时以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 失败。登录页的地址同 `open_url` 一样要 `openUrl` 能力。
-
-```rust
-use nsh_core::{
-    auth_session::{AuthSessionOutcome, AuthSessionRequest},
-    prelude::*,
-};
-
-fn sign_in(authorize_url: String) {
-    let session = open_auth_session(AuthSessionRequest::new(authorize_url, "myapp"));
-    spawn(async move {
-        match session.await {
-            Ok(AuthSessionOutcome::Completed(callback)) => log::info!("signed in: {callback}"),
-            Ok(_) => {} // 取消了。
-            Err(error) => log::warn!("no sign-in page: {error}"),
-        }
-    });
-}
-```
-
-测试里 `Headless::on_auth_session` 让平台有应用内会话、每个会话按给定的结果结束；不设时登录页记在
-`opened_urls()` 里，用 `open_with_url` 送回调。
-
 ## 用 TSX 扩展 Rust 应用
 
 crate 的 `#[native_module("app/native")]` 函数声明 TSX 可以导入的内容：组件（`registry.register::<Chart>()`）、函数模块
