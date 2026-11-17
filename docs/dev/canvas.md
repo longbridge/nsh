@@ -92,7 +92,10 @@ replays only the damaged area; Linux and macOS (`canvas.rs` `Prefix`) also keep 
 animated operation, for long drawings; canvases macOS repaints often are replayed by Core Animation on its threads (`canvas.rs` `Cadence`)
 (`docs/dev/macos.md`). macOS can split a small source-over animated suffix of a shorter drawing into its own
 content layer, retaining the preceding picture between drawing changes. `DamageScan::painted_after` bounds all
-suffix paints in the preceding state; unsupported or large suffixes keep the whole-canvas path.
+suffix paints in the preceding state; unsupported or large suffixes keep the whole-canvas path. Unsplit canvases on
+macOS also size their content layer to the 32-point-tile-aligned bounds from `DamageScan::painted_after` (and omit the
+layer when `Damage::None`), skipping unshadowed `source-over` paints with constant transparent colors or zero
+`globalAlpha` so stacked per-mark canvases do not allocate full-view backing stores.
 On Linux, a canvas out of sight (outside a clipping ancestor or the window) is not
 drawn until it comes into sight: its animations ask for no frames. Android, the web runtime and the GPUI backend (which rasterizes the drawing, text outlines
 included, with tiny-skia into a pixmap in device pixels: `nsh-platform-gpui` `canvas.rs`) still redraw the
