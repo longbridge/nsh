@@ -3764,6 +3764,75 @@ fn bottom_aligned_list_does_not_mount_scrolls_during_native_bounce() {
     }
 }
 
+/// List 2 (follow_end 80 pt) at its end, then its last row grows by
+/// 300 pt, under its own layout animation when `revealing`: where the list
+/// is after that commit, and the end it could follow to.
+fn last_row_grows_at_end(revealing: bool) -> (f32, f32) {
+    let mut c = core();
+    estimated_list(&mut c);
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::FollowEnd(Some(px(80.0))),
+        }],
+    );
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+    c.commit();
+    c.apply(Op::Command {
+        id: 2,
+        command: Command::ScrollToEnd { animated: false },
+    })
+    .unwrap();
+    let mut at = scrolled(&c.commit().unwrap(), 0.0);
+    for _ in 0..4 {
+        render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+        if let Some(batch) = c.commit() {
+            at = scrolled(&batch, at);
+        }
+    }
+    c.set_scroll_offset(2, point(px(0.0), px(at)), u32::MAX);
+    c.commit();
+    assert_eq!(at, 100.0 * 50.0 - 400.0, "at the end");
+    // The cell placed last shows the last row.
+    let last = *cells
+        .iter()
+        .max_by(|&&a, &&b| {
+            let y = |id| c.nodes[c.key(id).unwrap() as usize].frame.origin.y.0;
+            y(a).total_cmp(&y(b))
+        })
+        .unwrap();
+    let mut ops = vec![style_op(last, &[("height", StyleValue::Number(350.0))])];
+    if revealing {
+        ops.push(Op::Command {
+            id: last,
+            command: Command::LayoutAnimation(crate::LayoutAnimation {
+                update: Some(crate::LayoutTransition::new(
+                    crate::LayoutCurve::FittedSpring { damping_ratio: 1.0 },
+                    265.0,
+                )),
+                ..Default::default()
+            }),
+        });
+    }
+    apply(&mut c, ops);
+    let after = c.commit().map_or(at, |b| scrolled(&b, at));
+    (after, 100.0 * 50.0 + 300.0 - 400.0)
+}
+
+#[test]
+fn follow_end_keeps_its_place_while_the_last_row_reveals() {
+    // #2218: a scroll to the new end lands at once while the row slides
+    // open, so the content above jumps by the row's growth.
+    let (after, _) = last_row_grows_at_end(true);
+    assert_eq!(after, 100.0 * 50.0 - 400.0);
+    // Without its own animation, the row grows and the list follows.
+    let (after, end) = last_row_grows_at_end(false);
+    assert_eq!(after, end);
+}
+
 #[test]
 fn scroll_commands_follow_their_target_as_rows_are_measured() {
     let mut c = core();

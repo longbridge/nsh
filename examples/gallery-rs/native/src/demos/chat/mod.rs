@@ -1568,8 +1568,13 @@ impl ChatState {
             .gap_3()
             .child(reply_header(model, stopped))
             .child(when(reasoned, move || {
-                view()
+                // A reveal: at the end of the conversation the list keeps
+                // its place while the reasoning slides open below (#2218).
+                nsh_base::collapsible()
+                    .open(open)
+                    .reveal(true)
                     .gap_2()
+                    .content(reasoning_text(reason))
                     .child(
                         press()
                             .scale(0.98)
@@ -1582,7 +1587,6 @@ impl ChatState {
                             })
                             .child(reasoning_toggle(label, thinking_now, open)),
                     )
-                    .child(when(open, move || reasoning_text(reason)))
             }))
             .child(each(
                 move || {
