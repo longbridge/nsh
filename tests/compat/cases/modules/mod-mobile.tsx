@@ -13,7 +13,8 @@
 // the user asked for. `DateTimePicker`, the system's date and time picker
 // on iOS and Android: what it picks (`mode`), its value and bounds (`value`,
 // `min`, `max`: ISO strings in the mode's form), `minuteInterval`,
-// `disabled`, and `onChange({ value })` with the user's pick.
+// `disabled`, `accessibilityLabel`, and `onChange({ value })` with the
+// user's pick.
 import { Text, View, signal } from "nsh";
 import { DateTimePicker, SegmentedControl, Switch, TabBar, isAvailable } from "nsh/mobile";
 
@@ -52,6 +53,7 @@ function App() {
         max="2027-11-01T00:00"
         minuteInterval={5}
         disabled={false}
+        accessibilityLabel="When"
         onChange={({ value }) => when.set(value)}
         style={{ marginHorizontal: 16 }}
       />
