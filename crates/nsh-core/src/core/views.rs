@@ -584,10 +584,10 @@ impl<M: TextEngine> Core<M> {
                 let (attrs, old) = match &cx {
                     Some(cx) => {
                         let mut old = old;
-                        (old.inset_padding, old.inset_margin) = inst.root_insets_applied;
+                        old.set_insets(inst.root_insets_applied);
                         let old = super::components::with_test_id(old, &inst.root_test_id_applied);
                         let attrs = cx.over(attrs);
-                        inst.root_insets_applied = (attrs.inset_padding, attrs.inset_margin);
+                        inst.root_insets_applied = attrs.insets();
                         inst.root_test_id_applied = super::components::test_id_of(&attrs);
                         (attrs, old)
                     }
@@ -860,4 +860,38 @@ pub(super) fn region_placeholder(region: u32) -> Expanded {
     let mut e = Expanded::js(0, Part::Region(region));
     e.tag = Tag::View;
     e
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+
+    #[test]
+    fn rare_attrs_keep_element_records_compact_and_default_equal() {
+        let attrs_bytes = std::mem::size_of::<Attrs>();
+        let expanded_bytes = std::mem::size_of::<Expanded>();
+        let bound_bytes = std::mem::size_of::<BoundNode>();
+        eprintln!(
+            "sizes: Attrs={attrs_bytes}B Expanded={expanded_bytes}B BoundNode={bound_bytes}B"
+        );
+        assert!(attrs_bytes <= 120, "Attrs grew back to {attrs_bytes} bytes");
+        assert!(
+            expanded_bytes <= 320,
+            "Expanded grew back to {expanded_bytes} bytes"
+        );
+        assert!(
+            bound_bytes <= 240,
+            "BoundNode grew back to {bound_bytes} bytes"
+        );
+
+        let mut cleared = Attrs::default();
+        cleared.rare_mut().selectable_view = true;
+        assert_ne!(cleared, Attrs::default());
+        cleared.rare_mut().selectable_view = false;
+        assert_eq!(cleared, Attrs::default());
+
+        let mut props = Vec::new();
+        cleared.changes(&Attrs::default(), &mut props);
+        assert!(props.is_empty());
+    }
 }

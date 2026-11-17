@@ -209,28 +209,17 @@ impl<E: Event> AnyEvent for E {
     }
 }
 
-/// The props of an element the core diffs field by field (opaque).
-#[doc(hidden)]
+/// Rare attributes most elements leave at their defaults, allocated on first
+/// non-default write.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct Attrs {
-    pub(crate) disabled: bool,
+pub(crate) struct RareAttrs {
     pub(crate) accessible: Option<bool>,
-    pub(crate) label: Option<SharedString>,
     pub(crate) hint: Option<SharedString>,
     pub(crate) description: Option<SharedString>,
-    pub(crate) role: AccessibilityRole,
-    pub(crate) state: AccessibilityState,
     pub(crate) value: Option<AccessibilityValue>,
-    /// The core's own (a tooltip's hint); apps' are the style's.
-    pub(crate) pointer_events: PointerEvents,
     pub(crate) src: Option<super::ImageSrc>,
     pub(crate) inset_padding: Option<EdgeInsets>,
     pub(crate) inset_margin: Option<EdgeInsets>,
-    /// An inline style (a `Style` prop), over the styles.
-    pub(crate) inline: Option<std::rc::Rc<crate::StylePatch>>,
-    /// The props of host elements (inputs, scroll views, ...), one per
-    /// property ([`super::host`]).
-    pub(crate) props: Vec<Prop>,
     /// A canvas's drawing.
     pub(crate) drawing: Option<Arc<crate::canvas::Drawing>>,
     /// What the ref the view put on the element names (not a prop): held
@@ -241,9 +230,6 @@ pub struct Attrs {
     pub(crate) animated: Vec<(crate::StyleDecl, super::LiveNode)>,
     /// Animated nodes host props read (drags, scroll offsets), held.
     pub(crate) bound: Vec<super::LiveNode>,
-    /// Tailwind classes the app gave through a prop (a component's part),
-    /// after the element's own styles.
-    pub(crate) class: Option<SharedString>,
     /// The view is a selectable view ([`crate::selection`]).
     pub(crate) selectable_view: bool,
     /// The text continues the one before it ([`Element::continues_text`]).
@@ -265,29 +251,158 @@ pub struct Attrs {
     pub(crate) window: Option<Box<crate::desktop::WindowOptions>>,
 }
 
+impl RareAttrs {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.accessible.is_none()
+            && self.hint.is_none()
+            && self.description.is_none()
+            && self.value.is_none()
+            && self.src.is_none()
+            && self.inset_padding.is_none()
+            && self.inset_margin.is_none()
+            && self.drawing.is_none()
+            && self.element_ref.is_none()
+            && self.animated.is_empty()
+            && self.bound.is_empty()
+            && !self.selectable_view
+            && !self.continues_text
+            && self.projected_states == 0
+            && self.projected_data.is_empty()
+            && self.projected_active.is_none()
+            && self.render.is_none()
+            && self.window.is_none()
+    }
+
+    pub(crate) fn boxed(self) -> Option<Box<Self>> {
+        (!self.is_empty()).then(|| Box::new(self))
+    }
+}
+
+/// The props of an element the core diffs field by field (opaque).
+#[doc(hidden)]
+#[derive(Debug, Clone, Default)]
+pub struct Attrs {
+    pub(crate) disabled: bool,
+    pub(crate) role: AccessibilityRole,
+    pub(crate) state: AccessibilityState,
+    /// The core's own (a tooltip's hint); apps' are the style's.
+    pub(crate) pointer_events: PointerEvents,
+    pub(crate) label: Option<SharedString>,
+    /// An inline style (a `Style` prop), over the styles.
+    pub(crate) inline: Option<std::rc::Rc<crate::StylePatch>>,
+    /// Tailwind classes the app gave through a prop (a component's part),
+    /// after the element's own styles.
+    pub(crate) class: Option<SharedString>,
+    /// The props of host elements (inputs, scroll views, ...), one per
+    /// property ([`super::host`]).
+    pub(crate) props: Vec<Prop>,
+    pub(crate) rare: Option<Box<RareAttrs>>,
+}
+
+impl PartialEq for Attrs {
+    fn eq(&self, other: &Self) -> bool {
+        self.disabled == other.disabled
+            && self.role == other.role
+            && self.state == other.state
+            && self.pointer_events == other.pointer_events
+            && self.label == other.label
+            && self.inline == other.inline
+            && self.class == other.class
+            && self.props == other.props
+            && match (&self.rare, &other.rare) {
+                (None, None) => true,
+                (Some(a), None) => a.is_empty(),
+                (None, Some(b)) => b.is_empty(),
+                (Some(a), Some(b)) => a == b,
+            }
+    }
+}
+
 impl Attrs {
+    #[inline]
+    pub(crate) fn rare_mut(&mut self) -> &mut RareAttrs {
+        self.rare.get_or_insert_with(Box::default)
+    }
+
+    #[inline]
+    pub(crate) fn animated(&self) -> &[(crate::StyleDecl, super::LiveNode)] {
+        self.rare.as_deref().map_or(&[], |r| r.animated.as_slice())
+    }
+
+    #[cfg(test)]
+    #[inline]
+    pub(crate) fn bound(&self) -> &[super::LiveNode] {
+        self.rare.as_deref().map_or(&[], |r| r.bound.as_slice())
+    }
+
+    #[inline]
+    pub(crate) fn element_ref(&self) -> Option<&super::element_ref::RefTarget> {
+        self.rare.as_ref().and_then(|r| r.element_ref.as_ref())
+    }
+
+    #[inline]
+    pub(crate) fn set_element_ref(&mut self, target: Option<super::element_ref::RefTarget>) {
+        if target.is_some() || self.rare.is_some() {
+            self.rare_mut().element_ref = target;
+        }
+    }
+
+    #[inline]
+    pub(crate) fn take_element_ref(&mut self) -> Option<super::element_ref::RefTarget> {
+        self.rare.as_mut().and_then(|r| r.element_ref.take())
+    }
+
+    #[inline]
+    pub(crate) fn insets(&self) -> (Option<EdgeInsets>, Option<EdgeInsets>) {
+        match &self.rare {
+            Some(r) => (r.inset_padding, r.inset_margin),
+            None => (None, None),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn set_insets(&mut self, insets: (Option<EdgeInsets>, Option<EdgeInsets>)) {
+        if insets != (None, None) || self.rare.is_some() {
+            let r = self.rare_mut();
+            r.inset_padding = insets.0;
+            r.inset_margin = insets.1;
+        }
+    }
+
     /// The props of the fields that differ from `old`, in a fixed order.
     pub(crate) fn changes(&self, old: &Attrs, out: &mut Vec<Prop>) {
         use AccessibilityProp as A;
         if self.disabled != old.disabled {
             out.push(Prop::Native(NativeProp::Disabled(self.disabled)));
         }
-        if self.accessible != old.accessible {
-            out.push(Prop::Accessibility(A::Accessible(self.accessible)));
+        let check_rare = self.rare.is_some() || old.rare.is_some();
+        let default_rare;
+        let (sr, or) = if check_rare {
+            default_rare = RareAttrs::default();
+            (
+                self.rare.as_deref().unwrap_or(&default_rare),
+                old.rare.as_deref().unwrap_or(&default_rare),
+            )
+        } else {
+            default_rare = RareAttrs::default();
+            (&default_rare, &default_rare)
+        };
+        if check_rare && sr.accessible != or.accessible {
+            out.push(Prop::Accessibility(A::Accessible(sr.accessible)));
         }
         if self.label != old.label {
             out.push(Prop::Accessibility(A::Label(
                 self.label.as_ref().map(SharedString::to_arc),
             )));
         }
-        if self.hint != old.hint {
+        if check_rare && sr.hint != or.hint {
             out.push(Prop::Accessibility(A::Hint(
-                self.hint.as_ref().map(SharedString::to_arc),
+                sr.hint.as_ref().map(SharedString::to_arc),
             )));
         }
-        if self.description != old.description {
+        if check_rare && sr.description != or.description {
             out.push(Prop::Accessibility(A::Description(
-                self.description.as_ref().map(SharedString::to_arc),
+                sr.description.as_ref().map(SharedString::to_arc),
             )));
         }
         if self.role != old.role {
@@ -296,40 +411,42 @@ impl Attrs {
         if self.state != old.state {
             out.push(Prop::Accessibility(A::State(self.state)));
         }
-        if self.value != old.value {
-            out.push(Prop::Accessibility(A::Value(self.value.clone())));
+        if check_rare && sr.value != or.value {
+            out.push(Prop::Accessibility(A::Value(sr.value.clone())));
         }
         if self.pointer_events != old.pointer_events {
             out.push(Prop::PointerEvents(self.pointer_events));
         }
-        if self.src != old.src {
-            out.push(Prop::Source(self.src.as_ref().map(|src| ImageSource {
-                uri: src.uri.to_arc(),
-                size: src.size.map(|(w, h)| crate::geometry::size_pt(w, h)),
-                scales: src.scales,
-                data: src.data.clone(),
-            })));
-        }
-        if self.inset_padding != old.inset_padding {
-            out.push(Prop::InsetPadding(self.inset_padding.unwrap_or_default()));
-        }
-        if self.inset_margin != old.inset_margin {
-            out.push(Prop::InsetMargin(self.inset_margin.unwrap_or_default()));
-        }
-        if self.selectable_view != old.selectable_view {
-            out.push(Prop::SelectableView(self.selectable_view));
-        }
-        if self.continues_text != old.continues_text {
-            out.push(Prop::ContinuesText(self.continues_text));
-        }
-        if self.projected_states != old.projected_states {
-            out.push(Prop::ProjectedStates(self.projected_states));
-        }
-        if self.projected_data != old.projected_data {
-            out.push(Prop::ProjectedData(self.projected_data.as_slice().into()));
-        }
-        if self.projected_active != old.projected_active {
-            out.push(Prop::ProjectedActive(self.projected_active));
+        if check_rare {
+            if sr.src != or.src {
+                out.push(Prop::Source(sr.src.as_ref().map(|src| ImageSource {
+                    uri: src.uri.to_arc(),
+                    size: src.size.map(|(w, h)| crate::geometry::size_pt(w, h)),
+                    scales: src.scales,
+                    data: src.data.clone(),
+                })));
+            }
+            if sr.inset_padding != or.inset_padding {
+                out.push(Prop::InsetPadding(sr.inset_padding.unwrap_or_default()));
+            }
+            if sr.inset_margin != or.inset_margin {
+                out.push(Prop::InsetMargin(sr.inset_margin.unwrap_or_default()));
+            }
+            if sr.selectable_view != or.selectable_view {
+                out.push(Prop::SelectableView(sr.selectable_view));
+            }
+            if sr.continues_text != or.continues_text {
+                out.push(Prop::ContinuesText(sr.continues_text));
+            }
+            if sr.projected_states != or.projected_states {
+                out.push(Prop::ProjectedStates(sr.projected_states));
+            }
+            if sr.projected_data != or.projected_data {
+                out.push(Prop::ProjectedData(sr.projected_data.as_slice().into()));
+            }
+            if sr.projected_active != or.projected_active {
+                out.push(Prop::ProjectedActive(sr.projected_active));
+            }
         }
         // Host props: the ones no longer set go back to their defaults,
         // then the new and changed ones.
@@ -811,7 +928,7 @@ pub trait Element: IntoElement + Sized {
     fn bind(mut self, prop: crate::animation::AnimationProp, value: &impl super::Animated) -> Self {
         if let Some(node) = value.animated_node().live() {
             let decl = crate::StyleDecl::Animated(prop, node.id());
-            self.node().attrs.animated.push((decl, node));
+            self.node().attrs.rare_mut().animated.push((decl, node));
         }
         self
     }
@@ -834,7 +951,7 @@ pub trait Element: IntoElement + Sized {
     fn bind_transform(mut self, kind: crate::TransformKind, value: &impl super::Animated) -> Self {
         if let Some(node) = value.animated_node().live() {
             let decl = crate::StyleDecl::Transform(kind, kind.identity(), Some(node.id()));
-            self.node().attrs.animated.push((decl, node));
+            self.node().attrs.rare_mut().animated.push((decl, node));
         }
         self
     }
@@ -884,22 +1001,23 @@ pub trait Element: IntoElement + Sized {
     /// Puts `handle` on this element: its commands (`focus`, `scroll_to`)
     /// go here (nothing once the ref's owner is gone).
     fn element_ref(mut self, handle: &super::ElementRef) -> Self {
-        self.node().attrs.element_ref = handle.target();
+        self.node().attrs.set_element_ref(handle.target());
         self
     }
 
     /// Padding added to the element's own (from styles): insets of system
     /// UI, a keyboard.
     fn inset_padding(mut self, insets: impl IntoReactive<EdgeInsets>) -> Self {
-        self.node()
-            .bind_attr(insets, |a, insets| a.inset_padding = Some(insets));
+        self.node().bind_attr(insets, |a, insets| {
+            a.rare_mut().inset_padding = Some(insets)
+        });
         self
     }
 
     /// Margin added to the element's own.
     fn inset_margin(mut self, insets: impl IntoReactive<EdgeInsets>) -> Self {
         self.node()
-            .bind_attr(insets, |a, insets| a.inset_margin = Some(insets));
+            .bind_attr(insets, |a, insets| a.rare_mut().inset_margin = Some(insets));
         self
     }
 
@@ -932,8 +1050,11 @@ pub trait Element: IntoElement + Sized {
     /// across views and `TextView`s; texts that are not selectable stay
     /// out of it ([`crate::selection`]).
     fn selectable(mut self, area: impl IntoReactive<bool>) -> Self {
-        self.node()
-            .bind_attr(area, |a, area| a.selectable_view = area);
+        self.node().bind_attr(area, |a, area| {
+            if area || a.rare.is_some() {
+                a.rare_mut().selectable_view = area;
+            }
+        });
         self
     }
 
@@ -972,8 +1093,11 @@ pub trait Element: IntoElement + Sized {
     /// selects a word or the whole line across them
     /// ([`crate::selection::SelectionTexts::continues`]). Off by default.
     fn continues_text(mut self, continues: impl IntoReactive<bool>) -> Self {
-        self.node()
-            .bind_attr(continues, |a, continues| a.continues_text = continues);
+        self.node().bind_attr(continues, |a, continues| {
+            if continues || a.rare.is_some() {
+                a.rare_mut().continues_text = continues;
+            }
+        });
         self
     }
 
@@ -1320,8 +1444,9 @@ pub trait ParentElement: Element {
 pub trait Accessible: Element {
     /// Whether assistive technologies see it as one element.
     fn accessible(mut self, accessible: impl IntoReactive<bool>) -> Self {
-        self.node()
-            .bind_attr(accessible, |a, accessible| a.accessible = Some(accessible));
+        self.node().bind_attr(accessible, |a, accessible| {
+            a.rare_mut().accessible = Some(accessible)
+        });
         self
     }
 
@@ -1341,7 +1466,8 @@ pub trait Accessible: Element {
 
     /// What happens when activated, for screen readers.
     fn hint(mut self, hint: impl IntoReactive<SharedString>) -> Self {
-        self.node().bind_attr(hint, |a, hint| a.hint = Some(hint));
+        self.node()
+            .bind_attr(hint, |a, hint| a.rare_mut().hint = Some(hint));
         self
     }
 
@@ -1350,7 +1476,7 @@ pub trait Accessible: Element {
     /// a dialog's message, what a field expects.
     fn accessibility_description(mut self, description: impl IntoReactive<SharedString>) -> Self {
         self.node().bind_attr(description, |a, description| {
-            a.description = Some(description)
+            a.rare_mut().description = Some(description)
         });
         self
     }
@@ -1362,8 +1488,11 @@ pub trait Accessible: Element {
         mut self,
         description: impl IntoReactive<Option<SharedString>>,
     ) -> Self {
-        self.node()
-            .bind_attr(description, |a, description| a.description = description);
+        self.node().bind_attr(description, |a, description| {
+            if description.is_some() || a.rare.is_some() {
+                a.rare_mut().description = description;
+            }
+        });
         self
     }
 
@@ -1466,7 +1595,11 @@ pub trait Accessible: Element {
     /// slider: `min`, `max` and `now`) or as a text; `None` has none (an
     /// indeterminate progress bar keeps its range and leaves out `now`).
     fn accessibility_value(mut self, value: impl IntoReactive<Option<AccessibilityValue>>) -> Self {
-        self.node().bind_attr(value, |a, value| a.value = value);
+        self.node().bind_attr(value, |a, value| {
+            if value.is_some() || a.rare.is_some() {
+                a.rare_mut().value = value;
+            }
+        });
         self
     }
 
@@ -1890,9 +2023,11 @@ pub trait Interactive: Element {
         let y = y.and_then(|v| v.node().live());
         let prop = Prop::PanValues(x.as_ref().map(|n| n.id()), y.as_ref().map(|n| n.id()));
         super::host::set(self.node(), prop);
-        let bound = &mut self.node().attrs.bound;
-        bound.extend(x);
-        bound.extend(y);
+        if x.is_some() || y.is_some() {
+            let bound = &mut self.node().attrs.rare_mut().bound;
+            bound.extend(x);
+            bound.extend(y);
+        }
         self
     }
 
@@ -1919,7 +2054,7 @@ pub trait Interactive: Element {
     fn pinch_value(mut self, scale: &super::AnimatedValue) -> Self {
         if let Some(node) = scale.node().live() {
             super::host::set(self.node(), Prop::PinchValue(Some(node.id())));
-            self.node().attrs.bound.push(node);
+            self.node().attrs.rare_mut().bound.push(node);
         }
         self
     }
@@ -1930,7 +2065,7 @@ pub trait Interactive: Element {
     fn rotation_value(mut self, angle: &super::AnimatedValue) -> Self {
         if let Some(node) = angle.node().live() {
             super::host::set(self.node(), Prop::RotationValue(Some(node.id())));
-            self.node().attrs.bound.push(node);
+            self.node().attrs.rare_mut().bound.push(node);
         }
         self
     }
@@ -2279,8 +2414,9 @@ pub trait Interactive: Element {
     /// colors, opacity), and layout (a width) changes at once. Screen
     /// readers hear nothing of it; the control takes the presses.
     fn project_group_active(mut self, group: &'static str) -> Self {
-        self.node()
-            .bind_attr(true, move |a, _: bool| a.projected_active = Some(group));
+        self.node().bind_attr(true, move |a, _: bool| {
+            a.rare_mut().projected_active = Some(group)
+        });
         self
     }
 
@@ -2294,11 +2430,15 @@ pub trait Interactive: Element {
     /// attributes sends nothing when they change.
     fn project_data(mut self, name: &'static str, on: impl IntoReactive<bool>) -> Self {
         self.node().bind_attr(on, move |a, on| {
-            let at = a.projected_data.binary_search(&name);
+            if !on && a.rare.is_none() {
+                return;
+            }
+            let data = &mut a.rare_mut().projected_data;
+            let at = data.binary_search(&name);
             match (at, on) {
-                (Err(i), true) => a.projected_data.insert(i, name),
+                (Err(i), true) => data.insert(i, name),
                 (Ok(i), false) => {
-                    a.projected_data.remove(i);
+                    data.remove(i);
                 }
                 _ => {}
             }
@@ -2310,9 +2450,9 @@ pub trait Interactive: Element {
 /// Sets or clears `bit` of the states an element shows as a part.
 fn project(a: &mut Attrs, bit: u16, on: bool) {
     if on {
-        a.projected_states |= bit;
-    } else {
-        a.projected_states &= !bit;
+        a.rare_mut().projected_states |= bit;
+    } else if let Some(r) = &mut a.rare {
+        r.projected_states &= !bit;
     }
 }
 
@@ -2673,7 +2813,7 @@ pub fn text(content: impl IntoReactive<SharedString>) -> Text {
 /// natural size before it loads.
 pub fn image(src: impl IntoReactive<super::ImageSrc>) -> Image {
     let mut node = ElNode::new(Tag::Image);
-    node.bind_attr(src, |a, src| a.src = Some(src));
+    node.bind_attr(src, |a, src| a.rare_mut().src = Some(src));
     Image(node)
 }
 
@@ -2845,7 +2985,7 @@ impl<C: Component> ComponentElement<C> {
 
     /// Puts `handle` on this component: its updates go to it.
     pub fn component_ref(mut self, handle: &super::ComponentRef<C>) -> Self {
-        self.node.attrs.element_ref = handle.element().target();
+        self.node.attrs.set_element_ref(handle.element().target());
         self
     }
 
@@ -3096,7 +3236,10 @@ pub trait ComponentBuilder: Element {
 
     /// Puts `handle` on this component: its updates go to it.
     fn component_ref(mut self, handle: &super::ComponentRef<Self::Component>) -> Self {
-        self.__element().node.attrs.element_ref = handle.element().target();
+        self.__element()
+            .node
+            .attrs
+            .set_element_ref(handle.element().target());
         self
     }
 }
