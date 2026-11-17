@@ -23,8 +23,9 @@
 //! themselves ([`Item`]): a press on them goes to them until it ends.
 //! Presses, pans and scroll drags never start on hosted items and text
 //! fields (they handle their own clicks, focus and selection drags), as
-//! native widgets keep theirs on Linux; mouse drags over selectable text
-//! select it rather than pan.
+//! native widgets keep theirs on Linux, except that an `Input` listening
+//! to presses hears its own (a view around it does not); mouse drags over
+//! selectable text select it rather than pan.
 //!
 //! Presses follow React Native and the other backends: the innermost view
 //! listening to press events gets them (or the pressable text span under
@@ -1744,10 +1745,19 @@ fn down(
         gate,
         ..
     } = grab;
-    let press = if native {
+    // A text field takes its own clicks (focus, caret, selection drags);
+    // the `Input` itself hears them as a press too (a combobox opens its
+    // list), but no view around it does.
+    let input_view = matches!(item, Some(Item::Input(_)));
+    let press = if native && !input_view {
         None
     } else {
-        find_press(surface, &hit.view, &views, x, y).map(|p| p.clicked(modifiers.core(), clicks))
+        let pressable = if input_view {
+            std::slice::from_ref(&hit.view)
+        } else {
+            &views[..]
+        };
+        find_press(surface, &hit.view, pressable, x, y).map(|p| p.clicked(modifiers.core(), clicks))
     };
     let id = input.next_id.get();
     input.next_id.set(id.wrapping_add(1));
@@ -2922,6 +2932,51 @@ mod tests {
         let input = view(&area, 12, ViewKind::Input, rect(0.0, 60.0, 200.0, 20.0));
         input.state_mut().events.set(EventKind::ContextMenu, true);
         assert!(menu_area(&input).is_none());
+    }
+
+    /// A click on a text field starts a press on its `Input` when it
+    /// listens (a combobox opens its list), never on a view around it.
+    #[test]
+    fn a_click_on_an_input_presses_only_the_input() {
+        let surface = Surface::new(nsh_core::platform::Environment::default());
+        surface.root.state_mut().frame = rect(0.0, 0.0, 400.0, 400.0);
+        let row = view(
+            &surface.root,
+            2,
+            ViewKind::View,
+            rect(0.0, 0.0, 400.0, 100.0),
+        );
+        row.state_mut().events.set(EventKind::Press, true);
+        let listening = view(&row, 4, ViewKind::Input, rect(0.0, 0.0, 200.0, 40.0));
+        listening.state_mut().events.set(EventKind::Press, true);
+        view(&row, 6, ViewKind::Input, rect(0.0, 50.0, 200.0, 40.0));
+        let pressed = |y: f32| {
+            let event = |kind| PointerEvent {
+                kind,
+                x: 10.0,
+                y,
+                button: 0,
+                buttons: if kind == PointerKind::Down { 1 } else { 0 },
+                pointer: 1,
+                touch: false,
+                pen: false,
+                time: 0.0,
+                clicks: 1,
+                modifiers: Modifiers::default(),
+            };
+            pointer(&surface, event(PointerKind::Down));
+            let node = surface
+                .input
+                .pointers
+                .borrow()
+                .first()
+                .and_then(|p| p.press.as_ref().map(|press| press.node));
+            pointer(&surface, event(PointerKind::Up));
+            node
+        };
+        assert_eq!(pressed(10.0), Some(4));
+        // A field that does not listen: the row around it is not pressed.
+        assert_eq!(pressed(60.0), None);
     }
 
     #[test]
