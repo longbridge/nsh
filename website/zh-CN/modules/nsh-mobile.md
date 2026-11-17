@@ -1,25 +1,25 @@
 ---
 title: nsh/mobile
-description: iOS 和 Android 的 API：系统标签栏 TabBar、iOS 的系统分段控件 SegmentedControl、触感反馈 Haptics、iOS 的 InputAccessoryView、Android 的 BackHandler，以及 isAvailable。
+description: iOS 和 Android 的 API：系统标签栏 TabBar、iOS 的系统分段控件 SegmentedControl、系统开关 Switch、触感反馈 Haptics、iOS 的 InputAccessoryView、Android 的 BackHandler，以及 isAvailable。
 order: 12.2
 ---
 
 # nsh/mobile
 
-`nsh/mobile` 收录 iOS 和 Android 的专属能力：两者都有的系统标签栏 `TabBar` 和设备的触感反馈 [`Haptics`](#haptics)；iOS 的系统分段控件 [`SegmentedControl`](#segmentedcontrol) 和 [`InputAccessoryView`](#inputaccessoryview)，键盘上方的工具栏；Android 的 [`BackHandler`](#backhandler)，返回键。Rust 代码使用 `nsh_core::mobile` 和 `nsh_core::prelude`；TSX 导入 `nsh/mobile`。这个模块在所有平台上都可以导入，所以同一个 bundle 能在各处运行：在其他平台上，它的组件不占空间、调用立即返回，`isAvailable` 告诉你当前是否在 iOS 或 Android 上（`nsh` 的 `platform.os` 区分具体平台）。桌面的能力在 [nsh/desktop](./nsh-desktop.md) 中。
+`nsh/mobile` 收录 iOS 和 Android 的专属能力：两者都有的系统标签栏 `TabBar`、系统开关 [`Switch`](#switch) 和设备的触感反馈 [`Haptics`](#haptics)；iOS 的系统分段控件 [`SegmentedControl`](#segmentedcontrol) 和 [`InputAccessoryView`](#inputaccessoryview)，键盘上方的工具栏；Android 的 [`BackHandler`](#backhandler)，返回键。Rust 代码使用 `nsh_core::mobile` 和 `nsh_core::prelude`；TSX 导入 `nsh/mobile`。这个模块在所有平台上都可以导入，所以同一个 bundle 能在各处运行：在其他平台上，它的组件不占空间、调用立即返回，`isAvailable` 告诉你当前是否在 iOS 或 Android 上（`nsh` 的 `platform.os` 区分具体平台）。桌面的能力在 [nsh/desktop](./nsh-desktop.md) 中。
 
 ```rust tabs
-use nsh_core::mobile::{SegmentedControlItem, TabBarItem, segmented_control, tab_bar};
+use nsh_core::mobile::{SegmentedControlItem, TabBarItem, segmented_control, switch, tab_bar};
 ```
 
 ```tsx tabs
-import { BackHandler, Haptics, InputAccessoryView, isAvailable, SegmentedControl, TabBar } from "nsh/mobile";
-import type { SegmentedControlItem, SegmentedControlProps, TabBarItem, TabBarProps } from "nsh/mobile";
+import { BackHandler, Haptics, InputAccessoryView, isAvailable, SegmentedControl, Switch, TabBar } from "nsh/mobile";
+import type { SegmentedControlItem, SegmentedControlProps, SwitchProps, TabBarItem, TabBarProps } from "nsh/mobile";
 ```
 
 ## 模块范围
 
-这个模块提供移动平台专属的能力，例如用于应用顶层导航的系统标签栏。通用控件属于 [`nsh/base`](./nsh-base.md)：例如 [Switch](../elements/switch.md) 在手机、桌面和 Web 上共享行为与 API，轨道、滑块和各状态的样式由应用提供。`TabBar` 服务于移动应用导航，`Tabs` 服务于跨平台的标签内容切换。这个模块仅接受具有移动平台专属交互语义的能力。系统外观、尺寸或动画本身仍属于通用控件的共享职责。这个职责区别决定哪些能力适合放在这里（[目标与设计原则](../docs/goals.md)）。`SegmentedControl` 是系统自己的控件，供确实需要 iOS 原生分段控件的应用使用；在所有平台上以应用自己的外观做选择，用 `nsh/base` 的 [ToggleGroup](../elements/toggle.md) 或 [RadioGroup](../elements/radio.md)。
+这个模块提供移动平台专属的能力，例如用于应用顶层导航的系统标签栏。通用控件属于 [`nsh/base`](./nsh-base.md)：例如 [Switch](../elements/switch.md) 在手机、桌面和 Web 上共享行为与 API，轨道、滑块和各状态的样式由应用提供。`TabBar` 服务于移动应用导航，`Tabs` 服务于跨平台的标签内容切换。这个模块仅接受具有移动平台专属交互语义的能力。系统外观、尺寸或动画本身仍属于通用控件的共享职责。这个职责区别决定哪些能力适合放在这里（[目标与设计原则](../docs/goals.md)）。`SegmentedControl` 是系统自己的控件，供确实需要 iOS 原生分段控件的应用使用；在所有平台上以应用自己的外观做选择，用 `nsh/base` 的 [ToggleGroup](../elements/toggle.md) 或 [RadioGroup](../elements/radio.md)。`Switch` 同理：它是系统自己的开关，供确实需要 iOS 和 Android 原生开关的应用使用；在所有平台上以应用自己的外观显示开关，用 `nsh/base` 的 [Switch](../elements/switch.md)。
 
 ## isAvailable
 
@@ -169,6 +169,43 @@ const appearance = signal(0);
 
 - **iOS 和 Mac Catalyst**：`UISegmentedControl`，外观取决于 iOS 版本和应用链接的 SDK：iOS 26 及以后为 Liquid Glass。
 - **Android、桌面和 Web**：`SegmentedControl` 不占空间、不显示，因此同一布局可兼顾两者：在这些平台上用 [ToggleGroup](../elements/toggle.md) 或 [RadioGroup](../elements/radio.md) 显示选择，按 `platform.os` 选用。
+
+## Switch
+
+开关打开或关闭一项设置。`Switch` 是系统自己的开关：iOS 和 iPadOS 上是 `UISwitch`，Android 上是 Material 3 的开关。它有系统的外观（iOS 26 及以后为 Liquid Glass）、拨动和拖动时的动效、触感反馈和读屏朗读（“无线局域网，开关按钮，开”）。
+
+```tsx
+import { signal } from "nsh";
+import { Switch } from "nsh/mobile";
+
+const wifi = signal(true);
+
+<Switch accessibilityLabel="无线局域网" checked={wifi()} onChange={({ checked }) => wifi.set(checked)} />;
+```
+
+值由应用掌握：拨动时 `onChange` 报告用户要的值（`{ checked }`），开关像系统的一样立即移过去，应用再把值作为 `checked` 传回。应用不采纳（拒绝这次拨动）时，开关移回原值。样式未指定的尺寸取系统的尺寸，所以一行里可以和其他内容一起摆放。打开时用主题的 `primary` 色；没有时用系统的颜色。在 Rust 中，`switch()` 创建一个，每个属性有对应的 setter，事件用 `.on_change(..)`。
+
+### 属性
+
+| 属性 | Rust | 类型 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `checked` | `.checked(..)` | `boolean` | `false` | 开或关。 |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | 不能拨动：系统将它调暗。 |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 读屏随状态朗读的名字：它打开的那项设置。 |
+| `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 开关的位置。外观和尺寸由系统决定。 |
+| `testID` | `.test_id(..)` | `string` | 无 | 在测试和 `nsh test --trace` 中找到这个开关。 |
+
+### 事件
+
+| 事件 | Rust | 说明 |
+|---|---|---|
+| `onChange` | `.on_change(\|checked: &bool\| ..)` | 用户拨动了开关：`{ checked }`，它要的值。开关立即移过去；应用设置 `checked`。 |
+
+### 平台说明
+
+- **iOS 和 Mac Catalyst**：`UISwitch`，外观取决于 iOS 版本和应用链接的 SDK：iOS 26 及以后为 Liquid Glass。
+- **Android**：框架的开关，画成 Material 3 的轨道和滑块，Android 12 及以后用系统的动态颜色（之前用 Material 的基准颜色），跟随应用的浅色或深色外观。
+- **桌面和 Web**：`Switch` 不占空间、不显示，因此同一布局可兼顾两者：在这些平台上用 `nsh/base` 的 [Switch](../elements/switch.md) 显示这项设置，按 `isAvailable` 选用。
 
 ## InputAccessoryView
 

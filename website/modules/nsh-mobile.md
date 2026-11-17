@@ -1,13 +1,13 @@
 ---
 title: nsh/mobile
-description: "What iOS and Android have: TabBar, the system's tab bar, SegmentedControl, the system's segmented control on iOS, Haptics, InputAccessoryView on iOS, BackHandler on Android, and isAvailable."
+description: "What iOS and Android have: TabBar, the system's tab bar, SegmentedControl, the system's segmented control on iOS, Switch, the system's switch, Haptics, InputAccessoryView on iOS, BackHandler on Android, and isAvailable."
 order: 12.2
 ---
 
 # nsh/mobile
 
-`nsh/mobile` holds the capabilities specific to iOS and Android: the system's tab bar, `TabBar`, and
-[`Haptics`](#haptics), the device's haptic feedback, on both;
+`nsh/mobile` holds the capabilities specific to iOS and Android: the system's tab bar, `TabBar`,
+[`Switch`](#switch), the system's switch, and [`Haptics`](#haptics), the device's haptic feedback, on both;
 [`SegmentedControl`](#segmentedcontrol), the system's segmented control, and
 [`InputAccessoryView`](#inputaccessoryview), a bar over the keyboard, on iOS; and [`BackHandler`](#backhandler), the
 back button, on Android. Rust code uses `nsh_core::mobile` and `nsh_core::prelude`; TSX imports `nsh/mobile`. The
@@ -16,17 +16,17 @@ room and its calls return at once, and `isAvailable` tells you whether you are o
 `nsh` tells which). What desktops have is in [nsh/desktop](./nsh-desktop.md).
 
 ```rust tabs
-use nsh_core::mobile::{SegmentedControlItem, TabBarItem, segmented_control, tab_bar};
+use nsh_core::mobile::{SegmentedControlItem, TabBarItem, segmented_control, switch, tab_bar};
 ```
 
 ```tsx tabs
-import { BackHandler, Haptics, InputAccessoryView, isAvailable, SegmentedControl, TabBar } from "nsh/mobile";
-import type { SegmentedControlItem, SegmentedControlProps, TabBarItem, TabBarProps } from "nsh/mobile";
+import { BackHandler, Haptics, InputAccessoryView, isAvailable, SegmentedControl, Switch, TabBar } from "nsh/mobile";
+import type { SegmentedControlItem, SegmentedControlProps, SwitchProps, TabBarItem, TabBarProps } from "nsh/mobile";
 ```
 
 ## Scope
 
-This module exposes capabilities specific to mobile platforms, such as the system tab bar for top-level app navigation. Common controls belong to [`nsh/base`](./nsh-base.md): its [Switch](../elements/switch.md), for example, shares behavior and API across phones, desktops and the web, with the track, thumb and state styles supplied by the app. `TabBar` serves mobile app navigation; `Tabs` serves tabbed content across platforms. Only capabilities with mobile-specific interaction semantics belong here. A system appearance, size or animation alone does not change a common control’s shared role. This distinction guides which capabilities belong here ([Goals and design principles](../docs/goals.md)). `SegmentedControl` is the system's own control for an app that needs exactly the iOS one; a choice in the app's look, on every platform, is `nsh/base`'s [ToggleGroup](../elements/toggle.md) or [RadioGroup](../elements/radio.md).
+This module exposes capabilities specific to mobile platforms, such as the system tab bar for top-level app navigation. Common controls belong to [`nsh/base`](./nsh-base.md): its [Switch](../elements/switch.md), for example, shares behavior and API across phones, desktops and the web, with the track, thumb and state styles supplied by the app. `TabBar` serves mobile app navigation; `Tabs` serves tabbed content across platforms. Only capabilities with mobile-specific interaction semantics belong here. A system appearance, size or animation alone does not change a common control’s shared role. This distinction guides which capabilities belong here ([Goals and design principles](../docs/goals.md)). `SegmentedControl` is the system's own control for an app that needs exactly the iOS one; a choice in the app's look, on every platform, is `nsh/base`'s [ToggleGroup](../elements/toggle.md) or [RadioGroup](../elements/radio.md). `Switch` is the same: the system's own switch for an app that wants exactly the iOS and Android ones; a switch in the app's look, on every platform, is `nsh/base`'s [Switch](../elements/switch.md).
 
 ## isAvailable
 
@@ -209,6 +209,52 @@ Rust, `segmented_control()` makes one, with a setter per prop and `.on_change(..
 - **Android, the desktops and the web**: `SegmentedControl` takes no room and shows nothing, so one layout holds both:
   show the choice with [ToggleGroup](../elements/toggle.md) or [RadioGroup](../elements/radio.md) there, picked by
   `platform.os`.
+
+## Switch
+
+A switch turns one setting on or off. `Switch` is the system's own: a `UISwitch` on iOS and iPadOS, Material 3's
+switch on Android. It has the system's look (Liquid Glass on iOS 26 and later), its motion as it is flipped or
+dragged, its haptics and the screen reader's reading ("Wi-Fi, switch button, on").
+
+```tsx
+import { signal } from "nsh";
+import { Switch } from "nsh/mobile";
+
+const wifi = signal(true);
+
+<Switch accessibilityLabel="Wi-Fi" checked={wifi()} onChange={({ checked }) => wifi.set(checked)} />;
+```
+
+The value is the app's: a flip reports `onChange` with the value the user asked for (`{ checked }`), the switch
+moves at once, as the system's does, and the app passes the value back as `checked`. A value the app keeps (it turns
+the flip down) moves the switch back. Its size is the system's where the style leaves it open, so a row places it with
+its other content. It is on in the theme's `primary` color; without one, the system's. In Rust, `switch()` makes one,
+with a setter per prop and `.on_change(..)`.
+
+### Props
+
+| Prop | Rust | Type | Default | Description |
+|---|---|---|---|---|
+| `checked` | `.checked(..)` | `boolean` | `false` | On or off. |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | It cannot be flipped: the system dims it. |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say with its state: the setting it turns on. |
+| `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | Where the switch is. Its look and size are the system's. |
+| `testID` | `.test_id(..)` | `string` | none | Finds the switch in tests and `nsh test --trace`. |
+
+### Events
+
+| Event | Rust | Description |
+|---|---|---|
+| `onChange` | `.on_change(\|checked: &bool\| ..)` | The user flipped the switch: `{ checked }`, the value it asks for. The switch moves at once; the app sets `checked`. |
+
+### Platform notes
+
+- **iOS and Mac Catalyst**: `UISwitch` in the system's appearance for the iOS version and the SDK the app is linked
+  with: Liquid Glass on iOS 26 and later.
+- **Android**: the framework's switch drawn as Material 3's: its track and thumb, in the system's dynamic colors on
+  Android 12 and later (Material's baseline colors before), following the app's light or dark appearance.
+- **The desktops and the web**: `Switch` takes no room and shows nothing, so one layout holds both: show the setting
+  with `nsh/base`'s [Switch](../elements/switch.md) there, picked with `isAvailable`.
 
 ## InputAccessoryView
 

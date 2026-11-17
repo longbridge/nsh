@@ -8,11 +8,15 @@
 // the system's segmented control on iOS: its segments (`items`, each
 // `{ title, icon, disabled }`), the selected one (`selectedIndex`), which
 // the app sets, `disabled`, and `onChange` with the index the user chose.
+// `Switch`, the system's switch on iOS and Android: `checked`, which the
+// app sets, `disabled`, `accessibilityLabel`, and `onChange` with the value
+// the user asked for.
 import { Text, View, signal } from "nsh";
-import { SegmentedControl, TabBar, isAvailable } from "nsh/mobile";
+import { SegmentedControl, Switch, TabBar, isAvailable } from "nsh/mobile";
 
 function App() {
   const selected = signal(0);
+  const wifi = signal(true);
   const items = signal([
     { title: "Records", icon: "list.bullet" },
     { title: "Stats", icon: "chart.bar", badge: "3" },
@@ -32,6 +36,9 @@ function App() {
         onChange={({ index }) => selected.set(index)}
         style={{ marginHorizontal: 16, height: 32 }}
       />
+      <Text>{`Wi-Fi: ${wifi()}`}</Text>
+      <Switch testID="wifi" accessibilityLabel="Wi-Fi" checked={wifi()} onChange={({ checked }) => wifi.set(checked)} />
+      <Switch testID="locked" accessibilityLabel="Locked" disabled />
       <TabBar
         testID="tab-bar"
         items={items()}
