@@ -902,17 +902,48 @@ pub(crate) fn context_menu(surface: &std::rc::Rc<Surface>, event: &KeyEvent) -> 
         let rtl = surface.mounter.try_borrow().is_ok_and(|m| m.rtl);
         let size = field.state().frame.size;
         let corner = nsh_core::input::context_menu_anchor(size, rtl);
-        let at = field.to_root().and_then(|m| m.map(corner.x.0, corner.y.0));
+        let at = field
+            .to_root()
+            .and_then(|m| m.map(corner.x.0, corner.y.0))
+            .map(|at| in_main_window(surface, &field, at));
         crate::text_input::context_menu(surface, &field, at);
     }
     true
+}
+
+/// `at`, a point in the window `view` shows in (the window's points), in
+/// the main window's points, where the platform's menus are placed from:
+/// the app's own windows are top-level windows of their own.
+fn in_main_window(surface: &Surface, view: &NshView, (x, y): (f32, f32)) -> (f32, f32) {
+    use windows::Win32::{
+        Foundation::POINT,
+        Graphics::Gdi::{ClientToScreen, ScreenToClient},
+    };
+    let window = crate::app_window::hwnd_showing(surface, view);
+    let main = surface.hwnd();
+    if window == main {
+        return (x, y);
+    }
+    let scale = surface.scale();
+    let mut p = POINT {
+        x: (x * scale).round() as i32,
+        y: (y * scale).round() as i32,
+    };
+    // SAFETY: plain coordinate queries on windows of this thread, with a
+    // local point.
+    unsafe {
+        let _ = ClientToScreen(window, &mut p);
+        let _ = ScreenToClient(main, &mut p);
+    }
+    (p.x as f32 / scale, p.y as f32 / scale)
 }
 
 /// Whether key down `event` asks for a context menu: the Menu key
 /// (`VK_APPS`) or Shift+F10.
 fn opens_context_menu(event: &KeyEvent) -> bool {
     use nsh_core::keymap::{Key, Modifiers};
-    if !event.down {
+    // Held down, the key opens the menu once.
+    if !event.down || event.repeat {
         return false;
     }
     let m = event.modifiers;
@@ -1101,6 +1132,11 @@ mod tests {
             ..key(0x5D)
         };
         assert!(!opens_context_menu(&up));
+        let repeat = KeyEvent {
+            repeat: true,
+            ..key(0x5D)
+        };
+        assert!(!opens_context_menu(&repeat));
     }
 
     #[test]
