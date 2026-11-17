@@ -472,6 +472,12 @@ sends 2631 mount items instead of 2885 (no `ViewProps` set and set back in one c
   framestats` over the 300 ms slide, three runs each): 23 → 33 frames, mean frame time ~35 → ~13 ms, RenderThread
   issue ~12 → ~5.5 ms a frame once the slides move by whole pixels; after a back gesture's release ~13–19 → ~4–5 ms.
   The first frame still records the index again (it was `INVISIBLE`): 20–44 ms of UI-thread drawing.
+- Android, push and back (Pixel 10 Pro, Android 17, 120 Hz, packaged release, the gallery's Text, Image, Scroll,
+  List, Stocks and Canvas from the index and back with the back key, five rounds each, `gfxinfo framestats`): the
+  screen a pop reveals keeping its display list (`StackBox.dispatchDraw`, `Decor.setVisible`) and the slides moving
+  hardware layers take the slowest back frame's UI thread from 22–36 ms to 2–5 ms and missed frames from 23–32 to
+  7–14 per page (p90 frame 35–58 → 14–32 ms). What remains is the RenderThread drawing both screens into their layers
+  in the slide's first frames (14–29 ms). Pushes are unchanged (no push frame over 25 ms on the UI thread).
 - Android emulator (arm64, release): rebinding one gallery row while scrolling ~0.3–0.4ms (JS ~60µs); text costs per new
   text: `PrecomputedText` ~120µs, measure ~50µs, final layout reused. First gallery frame 20–50ms (noisy on the emulator).
 
