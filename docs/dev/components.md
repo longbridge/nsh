@@ -292,8 +292,12 @@ reasons: `reactive-components.md`.
   stack (an `Each` of the routes: the screens below keep their state; `on_dismiss` reports a native pop). The root
   can be any element: the host becomes it (a screen, a modal, a text, a list); a component as the root is made on
   the host itself (no view of its own); a region as the root goes in the host view.
-  The core reuses retained `each` rows in the same key order while their item bindings update the content
-  (`core/components.rs`). Region placement checks the actual child order before moving nodes
+  An update of an `each` passes its rows in order and keeps each one while the key in its place is its own: no map
+  of the rows, and nothing written for a row whose item is equal. Only from the first place whose key is another
+  are the rows left looked up by key (`Rows::update`, `element/flow.rs`; with a key twice among the rows the map
+  of them all decides, as before). The core likewise leaves the elements a run starts with, kept in their places,
+  as they are while their item bindings update the content, and matches only what follows them
+  (`reconcile_region`, `core/views.rs`). Region placement checks the actual child order before moving nodes
   (`core/views.rs`), after updating anchors and slots. Regions that only populate or retain nodes skip listener and
   binding cleanup. When nodes leave, affected views are cleaned once per binding batch; recycled list cells use the
   same boundary when their static children leave.
