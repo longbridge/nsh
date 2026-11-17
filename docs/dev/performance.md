@@ -4,6 +4,27 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Words fading into a long paragraph (`text_view` with a Markdown plugin, 2026-11-18, Linux x86_64, Ryzen 9 7950X,
+release, one CPU): a streamed paragraph whose newest words are spans, hidden until their turn and then fading in
+by their text color, about 30 frames a second, two words arriving a frame; a word done fading joins the plain text
+again. The text engine is `ApproxTextEngine` drawing colors from the text, as the desktop engines do; it counts
+the characters it typesets. `cargo test --release -p nsh-base --test base bench_word_fade -- --ignored
+--nocapture`, µs a frame, medians of three rounds of fading off and on in turn (the paragraph grows by 240 words
+over a round):
+
+| Words at first | Arrival: reading + commit, off / on | Frame (colors only), on | Extra a frame | Characters typeset a frame |
+|---:|---:|---:|---:|---:|
+| 200 | 85.8 + 3.5 / 101.1 + 21.3 | 13.7 | +46.5 | 6,053 both |
+| 800 | 222.6 + 6.2 / 235.6 + 24.0 | 14.5 | +45.1 | 16,403 both |
+| 1,600 | 397.8 + 9.7 / 413.6 + 27.8 | 15.6 | +49.3 | 30,203 both |
+| 3,200 | 753.1 + 16.0 / 769.4 + 35.5 | 18.1 | +53.7 | 57,803 both |
+
+Fading costs the engine about 50 µs a frame whatever the paragraph's length: the frames of colors and hidden runs
+typeset nothing and mount the text once with the layout drawn, and arriving words typeset the paragraph once
+either way (`fading_words_typeset_the_paragraph_only_for_new_words` keeps both). What grows with the paragraph is
+each arrival, fading or not: reading the Markdown again and one typesetting of the whole paragraph. Where a
+platform's cost of a fading frame grows with the paragraph, it is its drawing, not the engine.
+
 Out-of-line rare attributes (`core/element/builder.rs`, 2026-11-18, macOS arm64, release `bench_components`
 and `size_of` on the same machine, `main` against the change): `Attrs` keeps its common
 fields inline and boxes eighteen rare ones (`src`, `drawing`, `element_ref`, `animated`, `bound`, `inset_*`,
