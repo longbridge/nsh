@@ -39,6 +39,8 @@ mod scaled_input;
 #[cfg(all(target_os = "macos", feature = "shader"))]
 mod shader_content;
 #[cfg(target_os = "macos")]
+mod tap_feedback;
+#[cfg(target_os = "macos")]
 mod title_bar;
 #[cfg(target_os = "macos")]
 mod window_alert;
@@ -58,7 +60,9 @@ fn main() {
     } else {
         #[cfg(target_os = "macos")]
         {
-            if std::env::var_os("NSH_QUIT_CHECK_CASE").is_some() {
+            if std::env::var_os("NSH_TAP_FEEDBACK_CHECK_ONLY").is_some() {
+                tap_feedback::run();
+            } else if std::env::var_os("NSH_QUIT_CHECK_CASE").is_some() {
                 quit_requests::run_case();
             } else if std::env::var_os("NSH_QUIT_CHECK_ONLY").is_some() {
                 quit_requests::run();
@@ -126,6 +130,7 @@ fn main() {
                 embedded_scroll::run();
                 // Last: it leaves the app an accessory, never activated.
                 press_momentum::run();
+                tap_feedback::run();
             }
         }
     }
