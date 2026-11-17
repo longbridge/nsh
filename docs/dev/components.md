@@ -739,6 +739,11 @@ it changes, and they are resolved again when the tokens change (`Components::app
   `.project_checked(props.checked)` / `.project_indeterminate(props.indeterminate)` / `.project_disabled(props.disabled)`
   (`gpui-base`'s `SwitchThumb::new(checked)`, `CheckboxIndicator::state(..)`): the app writes `checked:` /
   `indeterminate:` / `disabled:` in the part's class, and only the control's root is an accessibility element.
+  The control's press, which only the platform knows, reaches a part through a group: the root is
+  `.group_named("nsh-switch")` and each part `.project_group_active("nsh-switch")`, so the part's `active:` applies
+  while the control is held wherever the press went down (the label included), changing as for any other state (a
+  transform animates with `transition-*`, layout at once). A name of NSH's keeps the app's own `group` classes
+  around or inside the control the app's.
   `.project_focused(..)` does the same for `focus:` on the part the keys act on while the control keeps the
   platform's focus (a list's highlighted option, the cell of a code input that takes the next character): NSH has
   no active descendant, and the platform's focus stays where it is. While that focus shows the part shows
