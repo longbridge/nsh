@@ -13,13 +13,14 @@ use std::{ptr::NonNull, rc::Rc};
 use block2::RcBlock;
 use nsh_core::JsonValue;
 use objc2::{
-    MainThreadMarker, MainThreadOnly,
+    MainThreadMarker, MainThreadOnly, msg_send,
     rc::{Retained, Weak},
 };
 use objc2_core_foundation::{CGRect, CGSize};
-use objc2_foundation::{NSCalendar, NSCalendarUnit, NSDate, NSDateComponents};
+use objc2_foundation::{NSCalendar, NSCalendarUnit, NSDate, NSDateComponents, NSString};
 use objc2_ui_kit::{
-    UIAction, UIControlEvents, UIDatePicker, UIDatePickerMode, UIDatePickerStyle, UIView,
+    UIAccessibilityContainerType, UIAction, UIControlEvents, UIDatePicker, UIDatePickerMode,
+    UIDatePickerStyle, UIView,
 };
 
 use crate::component::{ComponentContext, ComponentFactory, NativeComponent};
@@ -138,6 +139,23 @@ impl NativeComponent for SystemDateTimePicker {
             "disabled" => {
                 let disabled = value.and_then(JsonValue::as_bool).unwrap_or(false);
                 self.picker.setEnabled(!disabled);
+            }
+            "accessibilityLabel" => {
+                let label = value.and_then(JsonValue::as_str).map(NSString::from_str);
+                // VoiceOver moves to the capsules inside a compact picker, so
+                // the picker names them as a group, read as VoiceOver enters it.
+                let group = if label.is_some() {
+                    UIAccessibilityContainerType::SemanticGroup
+                } else {
+                    UIAccessibilityContainerType::None
+                };
+                // SAFETY: `accessibilityLabel` and `accessibilityContainerType`
+                // are UIAccessibility's properties, which every NSObject has;
+                // a nil label removes it.
+                unsafe {
+                    let () = msg_send![&*self.picker, setAccessibilityLabel: label.as_deref()];
+                    let () = msg_send![&*self.picker, setAccessibilityContainerType: group];
+                }
             }
             _ => {}
         }
