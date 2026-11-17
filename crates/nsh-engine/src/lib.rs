@@ -3753,6 +3753,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         screen_color: env.screen_color,
         canvas_render: env.canvas_render,
         share: env.share,
+        auth_session: env.auth_session,
         file_requests: env.file_requests,
         speech: env.speech,
         notifications: env.notifications,

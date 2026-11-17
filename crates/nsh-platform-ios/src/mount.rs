@@ -779,6 +779,8 @@ pub(crate) struct Mounter {
     /// The surface's share sheet, which a new share replaces
     /// ([`crate::share`]).
     share: crate::share::Current,
+    /// The sign-in session showing ([`crate::auth_session`]).
+    auth_session: crate::auth_session::Current,
     /// `SplitView`s' splits, by their native component's node
     /// ([`crate::split`]).
     splits: rustc_hash::FxHashMap<NodeId, crate::split::SplitHost>,
@@ -852,6 +854,7 @@ impl Mounter {
             leaving_screens: rustc_hash::FxHashMap::default(),
             alert_tint: None,
             share: Default::default(),
+            auth_session: Default::default(),
             hosts: Default::default(),
             dirty_stacks: Vec::new(),
             bottom_bar_dirty: false,
@@ -2008,6 +2011,15 @@ impl Mounter {
                 native,
             ) if id == nsh_core::ROOT_ID => {
                 crate::picker::pick_files(request, asked, native.view(), &self.control);
+            }
+            (Command::AuthSession { id: request, page }, native) if id == nsh_core::ROOT_ID => {
+                crate::auth_session::open(
+                    request,
+                    &page,
+                    native.view(),
+                    &self.auth_session,
+                    &self.control,
+                );
             }
             (Command::Share { id: request, sheet }, native) if id == nsh_core::ROOT_ID => {
                 let anchor = sheet.anchor.and_then(|anchor| self.ui_view(anchor));
