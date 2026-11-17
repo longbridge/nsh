@@ -2119,14 +2119,14 @@ impl SheetDetent {
 
     /// `{ height }`, a height a sheet can rest at: finite, 0 or more.
     pub(crate) fn of_height(height: f64) -> Option<Self> {
-        (height.is_finite() && height >= 0.0).then(|| Self::Height(Points(height as f32)))
+        (height.is_finite() && height >= 0.0).then_some(Self::Height(Points(height as f32)))
     }
 
     /// `{ fraction }`, a share from 0 to 1 (`NaN` is none).
     pub(crate) fn of_fraction(fraction: f64) -> Option<Self> {
         (0.0..=1.0)
             .contains(&fraction)
-            .then(|| Self::Fraction(Percentage(fraction as f32)))
+            .then_some(Self::Fraction(Percentage(fraction as f32)))
     }
 
     /// The payload of [`EventKind::DetentChange`]: `{ detent }`.
