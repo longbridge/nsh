@@ -1278,18 +1278,28 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
         Cursor::NwseResize => 17,
         Cursor::NeswResize => 18,
     });
-    match s.transition.filter(|t| t.duration > 0.0) {
+    // The duration a spring takes to settle; then the curve: 0 a cubic
+    // Bézier's control points, 1 a spring's stiffness, damping and mass.
+    match s.transition.filter(|t| t.run_ms() > 0.0) {
         Some(t) => {
             e.int(t.properties.0 as i32);
-            e.float(t.duration);
+            e.float(t.run_ms());
             e.float(t.delay);
-            for v in t.easing {
+            let (curve, values) = match t.spring {
+                Some(spring) => (1, [spring.stiffness, spring.damping, spring.mass, 0.0]),
+                None => (0, t.easing),
+            };
+            e.int(curve);
+            for v in values {
                 e.float(v);
             }
         }
         None => {
             e.int(0);
-            for _ in 0..6 {
+            e.float(0.0);
+            e.float(0.0);
+            e.int(0);
+            for _ in 0..4 {
                 e.float(0.0);
             }
         }

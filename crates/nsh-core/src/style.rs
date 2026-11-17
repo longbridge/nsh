@@ -1854,7 +1854,7 @@ style_keys! {
     TransitionProperty = "transitionProperty": View "string" "The properties that animate when they change (`\"opacity, transform\"`, `\"all\"`, `\"colors\"`).",
     TransitionDuration = "transitionDuration": View "number | `${number}ms` | `${number}s`" "Milliseconds as a number, or `\"150ms\"` / `\"0.2s\"`.",
     TransitionDelay = "transitionDelay": View "number | `${number}ms` | `${number}s`",
-    TransitionTimingFunction = "transitionTimingFunction": View "\"linear\" | \"ease\" | \"ease-in\" | \"ease-out\" | \"ease-in-out\" | `cubic-bezier(${string})`",
+    TransitionTimingFunction = "transitionTimingFunction": View "\"linear\" | \"ease\" | \"ease-in\" | \"ease-out\" | \"ease-in-out\" | `cubic-bezier(${string})` | `spring(${string})`" "CSS's keywords and `cubic-bezier(x1, y1, x2, y2)` (a `y` outside 0..1 overshoots), or NSH's `spring(stiffness, damping)` / `spring(stiffness, damping, mass)`: a spring's physics (a mass of 1 by default) that times itself, lasting until it settles, so `transitionDuration` is not used.",
     AnimationName = "animationName": View "\"none\" | \"spin\" | \"ping\" | \"pulse\" | \"bounce\"" "A built-in keyframe animation, run natively.",
     AnimationDuration = "animationDuration": View "number | `${number}ms` | `${number}s`",
     AnimationDelay = "animationDelay": View "number | `${number}ms` | `${number}s`",
@@ -2100,6 +2100,8 @@ pub enum PropertyValue {
     Ms(OrderedFloat<f32>),
     /// A timing function's cubic Bézier control points.
     Easing([OrderedFloat<f32>; 4]),
+    /// `transitionTimingFunction`'s `spring(stiffness, damping, mass)`.
+    Spring(crate::element::Spring),
     /// `animationName`.
     Keyframes(Option<Keyframes>),
     /// `animationIterationCount` (`None`: forever).
@@ -2814,6 +2816,37 @@ fn timing_function(v: StyleValue<'_>) -> Result<[f32; 4], StyleError> {
     })
 }
 
+/// `spring(stiffness, damping)` or `spring(stiffness, damping, mass)`, NSH's
+/// timing function past CSS's: `None` for any other value, an error for a
+/// spring that cannot settle (a stiffness, damping or mass that is not
+/// positive).
+fn spring_function(s: &str) -> Option<Result<crate::element::Spring, StyleError>> {
+    let args = s.trim().strip_prefix("spring(")?.strip_suffix(')')?;
+    let n: Option<Vec<f32>> = args.split(',').map(css::number).collect();
+    let spring = match n.as_deref() {
+        Some(&[stiffness, damping]) => (stiffness, damping, 1.0),
+        Some(&[stiffness, damping, mass]) => (stiffness, damping, mass),
+        _ => return Some(Err(StyleError::InvalidValue)),
+    };
+    Some(spring_of(spring).ok_or(StyleError::InvalidValue))
+}
+
+/// A spring of `(stiffness, damping, mass)` that settles: each positive
+/// and finite.
+pub(crate) fn spring_of(
+    (stiffness, damping, mass): (f32, f32, f32),
+) -> Option<crate::element::Spring> {
+    [stiffness, damping, mass]
+        .iter()
+        .all(|v| v.is_finite() && *v > 0.0)
+        .then(|| crate::element::Spring {
+            stiffness,
+            damping,
+            mass,
+            ..crate::element::Spring::default()
+        })
+}
+
 /// `transitionProperty`: CSS property names, mapped to the groups that
 /// transition natively.
 fn transition_properties(s: &str) -> Option<TransitionProps> {
@@ -3415,9 +3448,11 @@ impl StyleKey {
             | K::TransitionDelay
             | K::AnimationDuration
             | K::AnimationDelay => PropertyValue::Ms(of(duration(value)?)),
-            K::TransitionTimingFunction | K::AnimationTimingFunction => {
-                PropertyValue::Easing(timing_function(value)?.map(of))
-            }
+            K::TransitionTimingFunction => match keyword(value)?.and_then(spring_function) {
+                Some(spring) => PropertyValue::Spring(spring?),
+                None => PropertyValue::Easing(timing_function(value)?.map(of)),
+            },
+            K::AnimationTimingFunction => PropertyValue::Easing(timing_function(value)?.map(of)),
             K::AnimationName => PropertyValue::Keyframes(match keyword(value)? {
                 None | Some("none") => None,
                 Some("spin") => Some(Keyframes::Spin),
@@ -3689,6 +3724,7 @@ impl Style {
             duration: 0.0,
             delay: 0.0,
             easing: Transition::EASE,
+            spring: None,
         })
     }
 
@@ -4086,7 +4122,12 @@ impl Style {
             (K::TransitionDuration, V::Ms(ms)) => self.transition_mut().duration = ms.0,
             (K::TransitionDelay, V::Ms(ms)) => self.transition_mut().delay = ms.0,
             (K::TransitionTimingFunction, V::Easing(e)) => {
-                self.transition_mut().easing = e.map(|n| n.0)
+                let t = self.transition_mut();
+                t.easing = e.map(|n| n.0);
+                t.spring = None;
+            }
+            (K::TransitionTimingFunction, V::Spring(spring)) => {
+                self.transition_mut().spring = Some(*spring)
             }
             (K::AnimationName, V::Keyframes(keyframes)) => {
                 // An animation already running (a class's) keeps its
@@ -4989,8 +5030,52 @@ mod tests {
                 assert_eq!(t.duration, 300.0);
                 assert_eq!(t.delay, 50.0);
                 assert_eq!(t.easing, [0.0, 0.0, 1.0, 1.0]);
+                assert_eq!(t.spring, None);
             },
         );
+    }
+
+    #[test]
+    fn transitions_take_a_spring_and_curves_that_overshoot() {
+        use StyleValue::Str;
+        let mut s = Style::default();
+        s.set("transitionTimingFunction", Str("spring(620, 36)"))
+            .unwrap();
+        let t = s.view.transition.unwrap();
+        let spring = t.spring.expect("a spring");
+        assert_eq!(
+            (spring.stiffness, spring.damping, spring.mass),
+            (620.0, 36.0, 1.0)
+        );
+        // It times itself: about 380 ms whatever the duration says.
+        assert!((t.run_ms() - 383.8).abs() < 1.0, "{}", t.run_ms());
+        s.set("transitionTimingFunction", Str("spring(992, 45, 2)"))
+            .unwrap();
+        assert_eq!(s.view.transition.unwrap().spring.unwrap().mass, 2.0);
+        for bad in [
+            "spring(620)",
+            "spring(620, 0)",
+            "spring(-1, 36)",
+            "spring(a, b)",
+        ] {
+            assert!(
+                s.set("transitionTimingFunction", Str(bad)).is_err(),
+                "{bad}"
+            );
+        }
+        // Keyframes have no spring.
+        assert!(
+            s.set("animationTimingFunction", Str("spring(620, 36)"))
+                .is_err()
+        );
+        // A Bézier's y past 0..1 is kept: it overshoots.
+        s.set(
+            "transitionTimingFunction",
+            Str("cubic-bezier(0.3, 1.25, 0.6, 1)"),
+        )
+        .unwrap();
+        let t = s.view.transition.unwrap();
+        assert_eq!((t.easing, t.spring), ([0.3, 1.25, 0.6, 1.0], None));
     }
 
     #[test]

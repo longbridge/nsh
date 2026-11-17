@@ -1289,7 +1289,7 @@ final class Mounter {
         ValueAnimator a = ValueAnimator.ofFloat(0, 1);
         a.setDuration((long) fx.transitionDuration);
         a.setStartDelay((long) fx.transitionDelay);
-        a.setInterpolator(Effects.interpolator(fx.transitionEasing));
+        a.setInterpolator(fx.transitionInterpolator());
         Dynamic now = new Dynamic();
         a.addUpdateListener(animation -> {
             float t = (float) animation.getAnimatedValue();

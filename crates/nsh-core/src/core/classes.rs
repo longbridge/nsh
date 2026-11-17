@@ -1024,9 +1024,7 @@ impl<M: TextEngine> Core<M> {
             .transition
             .filter(|t| t.properties.0 != 0)
             .map_or(std::time::Duration::ZERO, |t| {
-                std::time::Duration::from_secs_f32(
-                    (t.duration.max(0.0) + t.delay.max(0.0)) / 1000.0,
-                )
+                std::time::Duration::from_secs_f32((t.run_ms() + t.delay.max(0.0)) / 1000.0)
             })
     }
 

@@ -327,7 +327,7 @@ mount(App);
 | `transitionProperty` | `.transition()`, `.transition_all()`, `.transition_colors()`, `.transition_opacity()`, `.transition_transform()`, `.transition_shadow()` | `string` | What animates, comma-separated: `"all"`, `"colors"`, `"opacity"`, `"transform"`, `"box-shadow"`, `"border-radius"`, ... |
 | `transitionDuration` | `.duration(ms)` | `number \| "150ms" \| "0.2s"` | Milliseconds as a number, or a CSS time. |
 | `transitionDelay` | `.delay(ms)` | `number \| "150ms" \| "0.2s"` | Before it starts. |
-| `transitionTimingFunction` | `.ease_linear()`, `.ease_in()`, `.ease_out()`, `.ease_in_out()`, `.ease_bezier(..)` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(…)"` | The curve. |
+| `transitionTimingFunction` | `.ease_linear()`, `.ease_in()`, `.ease_out()`, `.ease_in_out()`, `.ease_bezier(..)`, `.ease_spring(..)` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(…)" \| "spring(…)"` | The curve, or a spring (stiffness, damping, mass) that times itself until it settles, the duration unused. |
 
 Properties that transition, by group: **colors** (background, border, outline, shadow and text colors, gradient stops), **opacity**, **transform**, **shadows** (`box-shadow`) and **shape** (border radius and width). CSS names and their camel-case forms both work (`background-color`, `backgroundColor`, `transform`, `scale`, ...). Layout changes animate with [layout animations](#layoutanimation).
 
@@ -379,7 +379,7 @@ view().h_4().w_40().rounded(px(4.0)).bg(ZINC.shade(200)).animate_pulse()
 | `animationName` | `.animate_spin()`, `.animate_ping()`, `.animate_pulse()`, `.animate_bounce()`, `.animate_none()`, or `.animation(KeyframeAnimation::new(Keyframes::Spin))` | `"none" \| "spin" \| "ping" \| "pulse" \| "bounce"` | The animation. |
 | `animationDuration` | `KeyframeAnimation::duration(ms)` | `number \| "1s" \| …` | One iteration. |
 | `animationDelay` | `KeyframeAnimation::delay(ms)` | `number \| "200ms" \| …` | Before it starts. |
-| `animationTimingFunction` | `KeyframeAnimation::easing([x1, y1, x2, y2])` | as `transitionTimingFunction` | The curve. |
+| `animationTimingFunction` | `KeyframeAnimation::easing([x1, y1, x2, y2])` | as `transitionTimingFunction`, without `spring()` | The curve. |
 | `animationIterationCount` | `KeyframeAnimation::iterations(n)` | `number \| "infinite"` | Default `"infinite"`. |
 | `animationFrameRate` | `KeyframeAnimation::frame_rate(hz)` | `number` | The highest frame rate it needs, in Hz ([Frame rate](#frame-rate)). Default: the screen's highest. |
 
