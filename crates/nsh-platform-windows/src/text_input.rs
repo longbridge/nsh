@@ -1851,6 +1851,9 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView, at: Option<(f3
             ),
         ],
         at,
+        // At a corner of the field (the keyboard's menu): a right-to-left
+        // layout's is its bottom-end one, which the menu opens leftwards from.
+        at.is_some() && surface.mounter.try_borrow().is_ok_and(|m| m.rtl),
     );
 }
 
