@@ -273,6 +273,7 @@ final class Mounter {
         this.images = images;
         components.put(TabBarComponent.NAME, c -> new TabBarComponent(context, c, this::night));
         components.put(SwitchComponent.NAME, c -> new SwitchComponent(context, c, this::night));
+        components.put(DateTimePickerComponent.NAME, c -> new DateTimePickerComponent(context, c, this::night));
         images.redirects = (base, location) -> Native.mediaRedirect(handle(), base, location);
         images.inline = uri -> {
             long handle = handle();
@@ -474,6 +475,9 @@ final class Mounter {
                         }
                         if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof SwitchComponent) {
                             ((SwitchComponent) ((ComponentBox) v).component).appearanceChanged();
+                        }
+                        if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof DateTimePickerComponent) {
+                            ((DateTimePickerComponent) ((ComponentBox) v).component).appearanceChanged();
                         }
                         if (v instanceof StackBox.ScreenBox) ((StackBox.ScreenBox) v).appearanceChanged();
                     }
@@ -1293,7 +1297,7 @@ final class Mounter {
         ValueAnimator a = ValueAnimator.ofFloat(0, 1);
         a.setDuration((long) fx.transitionDuration);
         a.setStartDelay((long) fx.transitionDelay);
-        a.setInterpolator(Effects.interpolator(fx.transitionEasing));
+        a.setInterpolator(fx.transitionInterpolator());
         Dynamic now = new Dynamic();
         a.addUpdateListener(animation -> {
             float t = (float) animation.getAnimatedValue();

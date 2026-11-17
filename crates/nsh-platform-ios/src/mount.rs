@@ -2848,7 +2848,7 @@ impl Mounter {
         // `transition::restyle` and Android's mounter skip it the same way).
         let transition = style
             .transition
-            .filter(|t| t.duration > 0.0 && s.styled && view.window().is_some());
+            .filter(|t| t.run_ms() > 0.0 && s.styled && view.window().is_some());
         s.style = style;
         s.styled = true;
         view.setHidden(s.style.hidden);

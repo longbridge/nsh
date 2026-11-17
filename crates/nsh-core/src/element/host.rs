@@ -368,8 +368,9 @@ pub fn input_accessory_view(native_id: &str) -> InputAccessoryView {
 pub fn canvas(painter: impl IntoReactive<Painter>) -> CanvasView {
     let mut node = ElNode::new(Tag::Canvas);
     node.bind_attr(painter, |attrs, painter: Painter| {
-        attrs.drawing = Some(Arc::new(painter.drawing));
-        attrs.bound = painter.nodes;
+        let r = attrs.rare_mut();
+        r.drawing = Some(Arc::new(painter.drawing));
+        r.bound = painter.nodes;
     });
     CanvasView(node)
 }
@@ -402,7 +403,11 @@ pub fn svg(src: impl IntoReactive<super::ImageSrc>) -> Svg {
         let shown = svg_drawing(src);
         node.bind_attr(
             move || shown.get(),
-            |attrs, drawing| attrs.drawing = drawing,
+            |attrs, drawing: Option<Arc<crate::canvas::Drawing>>| {
+                if drawing.is_some() || attrs.rare.is_some() {
+                    attrs.rare_mut().drawing = drawing;
+                }
+            },
         );
         Svg(node)
     }
@@ -413,7 +418,7 @@ pub fn svg(src: impl IntoReactive<super::ImageSrc>) -> Svg {
             crate::StyleKey::ObjectFit,
             crate::PropertyValue::ObjectFit(Some(ResizeMode::Contain)),
         );
-        node.bind_attr(src, |attrs, src| attrs.src = Some(src));
+        node.bind_attr(src, |attrs, src| attrs.rare_mut().src = Some(src));
         // The platform draws it: its `currentColor` is the text color.
         set(
             &mut node,
@@ -578,7 +583,7 @@ impl ShaderView {
                 let value = match node.live() {
                     Some(node) => {
                         let id = node.id();
-                        self.0.attrs.bound.push(node);
+                        self.0.attrs.rare_mut().bound.push(node);
                         crate::shader::UniformValue::Animated(id)
                     }
                     None => crate::shader::UniformValue::Number(0.0),
@@ -623,7 +628,7 @@ impl ShaderView {
         let progress = match value.animated_node().live() {
             Some(node) => {
                 let id = node.id();
-                self.0.attrs.bound.push(node);
+                self.0.attrs.rare_mut().bound.push(node);
                 crate::shader::ShaderProgress::Animated(id)
             }
             None => crate::shader::ShaderProgress::Number(Percentage(0.0)),
@@ -1854,7 +1859,7 @@ impl NativeView {
                 &mut self.0,
                 Prop::ComponentPropBinding(name.into(), Some(node.id())),
             );
-            self.0.attrs.bound.push(node);
+            self.0.attrs.rare_mut().bound.push(node);
         }
         self
     }
@@ -2756,7 +2761,7 @@ mod tests {
         let id = wave.node().live().expect("live").id();
         assert_eq!(value(&set, "wave"), Some(UniformValue::Animated(id)));
         assert_eq!(
-            node.attrs.bound.len(),
+            node.attrs.bound().len(),
             1,
             "the element holds the animated node"
         );

@@ -149,6 +149,15 @@
   draws the whole text in over its runs (`Live::text_color`, `transition::recolor`: when the text is one color before
   and after), the way it draws an animated `color`, so no frame typesets the text again; `nsh_core::animation::Animator` holds the graph with its bindings to views, gestures and scroll views
   and hands each bound view its `AnimValues`.
+- **Style transitions on a spring** (`Transition::spring`: `transitionTimingFunction: "spring(k, c, m)"`, the class
+  `ease-spring-[k,c,m]`, `Styled::ease_spring`): the same `Spring` a layout spring takes, released at rest, lasting
+  `Spring::settle_ms` (`Transition::run_ms`, which `transition::restyle` / `recolor`, the exit's
+  `ElementRef::transition_time` and the platforms time by; `transitionDuration` is not used). The desktops step
+  `Spring::progress` (`Curve::Physical`); iOS gives the physics to a `CASpringAnimation` per layer property (sublayer
+  paths through `animate_geometry` too; implicit sublayer animations take a curve, `SPRING_CURVE`, without the
+  overshoot); Android interpolates the closed form in `Effects.transitionInterpolator` over the settle time it is
+  sent; the web a CSS `linear()` of its samples. Keyframes take no spring. A `cubic-bezier()` whose `y` leaves 0..1
+  overshoots everywhere (nothing clamps `y`; colors and opacity clamp their values, as CSS does).
 - **Mobile backends**: style transitions are the platform's (Core Animation on iOS, `ValueAnimator`s in
   `Mounter.java` on Android), and a view's first style does not transition (the desktops' `transition::restyle` skips it,
   iOS waits for a view it has styled before, Android for one with a style to transition from). A text's color follows the same rules as on the desktops and is drawn the same way,

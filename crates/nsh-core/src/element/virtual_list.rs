@@ -338,7 +338,7 @@ impl VirtualList {
     pub fn bind_sticky_header_offset(mut self, value: &impl super::Animated) -> Self {
         if let Some(node) = value.animated_node().live() {
             super::host::set(&mut self.0, Prop::StickyOffsetNode(Some(node.id())));
-            self.0.attrs.bound.push(node);
+            self.0.attrs.rare_mut().bound.push(node);
         }
         self
     }

@@ -3,6 +3,7 @@ import { Button as BaseButton, Checkbox, Collapsible, Combobox, type DateMatcher
 import { reduceMotion } from "nsh";
 import { isAvailable as mobile, Switch as SystemSwitch } from "nsh/mobile";
 import { keymap, platform, windowSize } from "nsh";
+import { DateTimePicker, isAvailable } from "nsh/mobile";
 import { Icon, type IconName } from "../icons";
 import { alpha, backdrop, Badge, plural, Button, CalendarItem, Kbd, calendarLook, Chevron, Caption, Card, chart, checkboxLook, DateTrigger, CheckboxMark, density, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxPopupStarting, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderFill, solidTint, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep, LastEvent } from "../ui";
 import { play as sound } from "../../nsh-gallery-ui/sound";
@@ -2171,6 +2172,67 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     );
   }
 
+  /**
+   * A reminder set with the system's own picker (`nsh/mobile`'s
+   * `DateTimePicker`, on phones): its first day and time, the time it
+   * repeats at and the day it ends, each in the system's look; the summary
+   * follows them.
+   */
+  function Reminder() {
+    const today = new Date();
+    const starts = signal(`${iso(addDays(today, 1))}T08:00`);
+    const at = signal("09:30");
+    const until = signal(iso(addDays(today, 30)));
+    const t = settleOn(() => `${starts()} ${at()} ${until()}`);
+    const days = () => daysBetween(starts().slice(0, 10), until()) + 1;
+    return (
+      <Card title="Reminder" subtitle="The system's picker: a day, a time, or both" right={<View style={settle(t)}><Badge label={days() > 0 ? `${days()} days` : "Ends before it starts"} tone={days() > 0 ? "neutral" : "warn"} /></View>}>
+        <View>
+          <View style={row(true)}>
+            <RowLabel label="Starts" detail="The first reminder" />
+            <DateTimePicker
+              testID="reminder-starts"
+              mode="dateTime"
+              value={starts()}
+              min={`${iso(today)}T00:00`}
+              minuteInterval={15}
+              onChange={({ value }) => {
+                starts.set(value);
+                last.set(`Starts: ${value}`);
+              }}
+            />
+          </View>
+          <View style={row(false)}>
+            <RowLabel label="Every day at" detail="Five-minute steps" />
+            <DateTimePicker
+              testID="reminder-at"
+              mode="time"
+              value={at()}
+              minuteInterval={5}
+              onChange={({ value }) => {
+                at.set(value);
+                last.set(`Every day at: ${value}`);
+              }}
+            />
+          </View>
+          <View style={row(false)}>
+            <RowLabel label="Until" detail="No later than a year" />
+            <DateTimePicker
+              testID="reminder-until"
+              value={until()}
+              min={starts().slice(0, 10)}
+              max={iso(addDays(today, 365))}
+              onChange={({ value }) => {
+                until.set(value);
+                last.set(`Until: ${value}`);
+              }}
+            />
+          </View>
+        </View>
+      </Card>
+    );
+  }
+
   function Deadline() {
     const today = new Date();
     const due = signal<string | null>(iso(addDays(today, 2)));
@@ -3519,7 +3581,8 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     Tabs: [Sections, Project],
     Select: [Choices, Downloads, Shipping, Issue],
     Combobox: [Tags, People, Labels, Commands],
-    DatePicker: [Dates, Booking, Deadline, Slots],
+    // The system's picker is on phones only: elsewhere the drawn ones stand alone.
+    DatePicker: [Dates, ...(isAvailable ? [Reminder] : []), Booking, Deadline, Slots],
     Collapsible: [Disclosure, Faq],
     Progress: [Transfers, Uploads, Steps, Meters],
     Slider: [Levels, Equalizer],

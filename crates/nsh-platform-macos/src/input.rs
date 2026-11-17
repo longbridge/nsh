@@ -128,6 +128,9 @@ pub(crate) struct Input {
     window_control: RefCell<Option<(NshView, WindowControl)>>,
     /// The mouse, while its left button is down.
     pointer: RefCell<Option<Pointer>>,
+    /// A completed short press whose visual feedback is still showing.
+    /// Its pointer id prevents an old timer from releasing a later press.
+    tap_feedback: RefCell<Option<(u32, Vec<NshView>)>>,
     /// A trackpad pinch.
     pinch: RefCell<Option<Transform>>,
     /// A trackpad rotation.
@@ -250,6 +253,8 @@ struct Pointer {
     y: f32,
     start: (f32, f32),
     time: f64,
+    /// The down event's timestamp; `time` follows moves and the release.
+    down_time: f64,
     velocity: VelocityTracker,
     /// The innermost view under it when it went down.
     target: NshView,
@@ -292,6 +297,7 @@ pub(crate) fn reset(surface: &Surface) {
     input.window_root.borrow_mut().take();
     input.window_control.borrow_mut().take();
     input.pointer.borrow_mut().take();
+    input.tap_feedback.borrow_mut().take();
     input.pinch.borrow_mut().take();
     input.rotation.borrow_mut().take();
     input.zoom.borrow_mut().take();
@@ -351,6 +357,11 @@ fn update_hover_tracking(surface: &Surface, view: &NshView) {
 pub(crate) fn removed(surface: &Surface, view: &NshView) {
     let input = &surface.input;
     let inside = |v: &NshView| v.ns().isDescendantOf(view.ns());
+    if let Some((_, views)) = input.tap_feedback.borrow_mut().as_mut() {
+        for v in views.extract_if(.., |v| inside(v)) {
+            set_state(surface, &v, PRESSED, false);
+        }
+    }
     if !input.hovered.borrow().is_empty() {
         let left: Vec<NshView> = input
             .hovered
@@ -1764,6 +1775,7 @@ fn down(
     clicks: usize,
     flags: NSEventModifierFlags,
 ) {
+    clear_tap_feedback(surface);
     let shift = flags.contains(NSEventModifierFlags::Shift);
     // A release we never saw.
     if let Some(stale) = take(surface) {
@@ -1818,6 +1830,7 @@ fn down(
             y,
             start: (x, y),
             time,
+            down_time: time,
             velocity: VelocityTracker::default(),
             target: view.clone(),
             path: Vec::new(),
@@ -1906,6 +1919,7 @@ fn down(
         y,
         start: (x, y),
         time,
+        down_time: time,
         velocity: VelocityTracker::default(),
         target: hit.view,
         reporting: !path.is_empty(),
@@ -2246,6 +2260,7 @@ fn up(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {
 /// Cancels the press in progress, whose release will not come: a menu
 /// that popped up during it tracked the mouse and took the release.
 pub(crate) fn cancel_pointer(surface: &Rc<Surface>) {
+    clear_tap_feedback(surface);
     if let Some(p) = take(surface) {
         finish(surface, p, true);
     }
@@ -2261,7 +2276,10 @@ fn finish(surface: &Rc<Surface>, mut p: Pointer, cancelled: bool) {
         };
         report(surface, phase, &p, None);
     }
-    release_pressed(surface, &mut p);
+    // Double-click and Shift-click can select without a move event. End
+    // selection before deciding whether this release deserves a tap pulse.
+    let selected = matches!(&p.mode, Mode::Select(view) if selection_up(surface, view));
+    finish_pressed(surface, &mut p, cancelled || selected);
     let mode = std::mem::replace(&mut p.mode, Mode::Free);
     match mode {
         Mode::Pan(view) => {
@@ -2270,9 +2288,7 @@ fn finish(surface: &Rc<Surface>, mut p: Pointer, cancelled: bool) {
         }
         Mode::Thumb(view, _) => crate::scroll::thumb_end(surface, &view),
         Mode::Idle | Mode::Free | Mode::Select(_) => {
-            if let Mode::Select(view) = &mode
-                && selection_up(surface, view)
-            {
+            if selected {
                 // A selecting drag ended: no press.
                 cancel_press(surface, &mut p);
             }
@@ -2430,6 +2446,64 @@ pub(crate) fn later(ms: u64, f: impl FnOnce() + Send + 'static) {
     let when = DispatchTime::NOW.time(Duration::from_millis(ms).as_nanos() as i64);
     if let Err(err) = DispatchQueue::main().after(when, f) {
         log::warn!("input: cannot schedule a timer: {err:?}");
+    }
+}
+
+/// A recognized trackpad tap delivers down/up together. Keep its visual
+/// state briefly so the engine and display link can draw the app's active
+/// style. Press/touch callbacks still run at release, with no extra events.
+fn finish_pressed(surface: &Rc<Surface>, p: &mut Pointer, cancelled: bool) {
+    let delay = tap_feedback_delay(
+        p.time - p.down_time,
+        cancelled || !matches!(p.mode, Mode::Idle | Mode::Select(_)),
+        surface.environment.get().reduce_motion || surface.testing(),
+    );
+    let Some(delay) = delay.filter(|_| !p.pressed.is_empty()) else {
+        release_pressed(surface, p);
+        return;
+    };
+    // Only views still under the release get feedback; a short drag out
+    // must clear immediately, just like a cancelled gesture.
+    for v in p
+        .pressed
+        .extract_if(.., |v| !released_inside(surface, v, p.x, p.y))
+    {
+        set_state(surface, &v, PRESSED, false);
+    }
+    if p.pressed.is_empty() {
+        return;
+    }
+    let id = p.id;
+    *surface.input.tap_feedback.borrow_mut() = Some((id, std::mem::take(&mut p.pressed)));
+    let key = surface.key();
+    later(delay, move || {
+        let Some(surface) = Surface::with_key(key) else {
+            return;
+        };
+        let current = surface
+            .input
+            .tap_feedback
+            .borrow()
+            .as_ref()
+            .map(|(id, _)| *id);
+        if current == Some(id) {
+            clear_tap_feedback(&surface);
+        }
+    });
+}
+
+fn tap_feedback_delay(elapsed: f64, cancelled: bool, immediate: bool) -> Option<u64> {
+    const MINIMUM: f64 = 64.0;
+    (!cancelled && !immediate && elapsed.is_finite() && elapsed < MINIMUM)
+        .then(|| (MINIMUM - elapsed.max(0.0)).ceil() as u64)
+}
+
+fn clear_tap_feedback(surface: &Surface) {
+    let feedback = surface.input.tap_feedback.borrow_mut().take();
+    if let Some((_, views)) = feedback {
+        for view in views {
+            set_state(surface, &view, PRESSED, false);
+        }
     }
 }
 
@@ -3779,5 +3853,24 @@ mod tests {
         let mut m = nsh_core::Matrix::IDENTITY;
         m.0[3] = -0.5;
         assert_eq!(project(&m, (2.0, 3.0)), None);
+    }
+}
+
+#[cfg(test)]
+mod tap_feedback_tests {
+    use super::tap_feedback_delay;
+
+    #[test]
+    fn short_presses_only_hold_the_remaining_visual_time() {
+        assert_eq!(tap_feedback_delay(0.3, false, false), Some(64));
+        assert_eq!(tap_feedback_delay(40.0, false, false), Some(24));
+        assert_eq!(tap_feedback_delay(64.0, false, false), None);
+        assert_eq!(tap_feedback_delay(120.0, false, false), None);
+    }
+
+    #[test]
+    fn cancellation_reduced_motion_and_test_drivers_release_immediately() {
+        assert_eq!(tap_feedback_delay(0.3, true, false), None);
+        assert_eq!(tap_feedback_delay(0.3, false, true), None);
     }
 }

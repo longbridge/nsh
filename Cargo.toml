@@ -334,6 +334,7 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
   "UIPreviewParameters",
   "UISegmentedControl",
   "UISwitch",
+  "UIDatePicker",
   "UISheetPresentationController",
   "UISplitViewController",
   "UIAlertController",
