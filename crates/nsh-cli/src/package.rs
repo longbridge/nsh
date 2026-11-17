@@ -1723,6 +1723,7 @@ fn package_macos(
     }
     config.macos.add_to_app_json(&mut info);
     config.add_file_types_to_app_json(&mut info);
+    config.add_data_dir_to_app_json(&mut info);
     let schemes = config.url_schemes();
     fs::write(
         nsh.join("app.json"),
