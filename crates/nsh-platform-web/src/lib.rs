@@ -711,8 +711,8 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         limits,
         ui_sets: ui_sets(),
         runtime: None,
-        data_dir: Some("/app-data".into()),
-        app_dir: None,
+        support_dir: Some("/app-data".into()),
+        data_dir: None,
         // The browser keeps what it downloads in its HTTP cache.
         cache: nsh_engine::CacheOptions::off(),
         filesystem: Some(std::sync::Arc::new(filesystem::BrowserFileSystem {

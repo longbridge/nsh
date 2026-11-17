@@ -25,8 +25,8 @@ pub fn main() -> std::process::ExitCode {
             return std::process::ExitCode::FAILURE;
         }
     };
-    let data_dir = options.data_dir.clone().or_else(nsh_engine::data_dir);
-    let launch = nsh_engine::updates::launch(bundle, &dir, data_dir.as_deref());
+    let support_dir = options.support_dir.clone().or_else(nsh_engine::support_dir);
+    let launch = nsh_engine::updates::launch(bundle, &dir, support_dir.as_deref());
     options.asset_base = Some(AssetBase::Directory(launch.assets));
     run_app(AppSource::Bundle(launch.bundle), options)
 }
@@ -88,12 +88,11 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     if let Some(id) = field("id") {
         options.app_id = id;
     }
-    // `nsh.json` `"dataDir"`: the app's directory (its storage, logs and
-    // `${dataDir}`) rather than `<data_dir>/<app id>`.
-    let data_dir = field("dataDir")
+    // `nsh.json` `"dataDir"`: the app's data directory (its storage, logs
+    // and `${dataDir}`) rather than the one under its id.
+    options.data_dir = field("dataDir")
         .as_deref()
-        .and_then(nsh_engine::app_data_dir);
-    options.app_dir = data_dir.clone();
+        .and_then(nsh_engine::resolve_data_dir);
     if let Some(name) = field("name") {
         options.title = name;
     }
@@ -122,7 +121,7 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     // app's own runtime-delivered modules (the bundle's resources are
     // read-only).
     options.chunks = std::env::var_os("NSH_CHUNK_DIR").map(std::path::PathBuf::from);
-    install_logger(developing, &options.app_id, data_dir.as_deref());
+    install_logger(developing, &options.app_id, options.data_dir.as_deref());
     (dir, options)
 }
 

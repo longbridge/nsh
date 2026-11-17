@@ -47,10 +47,10 @@ pub struct AppOptions {
     /// Where bundled image assets are (for [`AppSource::Bundle`]); dev
     /// servers serve them themselves.
     pub asset_base: Option<AssetBase>,
-    /// Where the apps keep their data, each in `<data_dir>/<app id>`:
+    /// Where the apps keep their data, each in `<support_dir>/<app id>`:
     /// `None` uses the app's own data directory
-    /// ([`SurfaceOptions::data_dir`]'s default).
-    pub data_dir: Option<std::path::PathBuf>,
+    /// ([`SurfaceOptions::support_dir`]'s default).
+    pub support_dir: Option<std::path::PathBuf>,
     /// Where the apps keep their caches (the images they downloaded) and
     /// how much each keeps ([`SurfaceOptions::cache`]).
     pub cache: nsh_engine::CacheOptions,
@@ -276,9 +276,9 @@ fn connect(mtm: MainThreadMarker, scene: &UIWindowScene) {
             trace: options.trace,
             fps: options.fps,
             asset_base: options.asset_base,
-            data_dir: options
-                .data_dir
-                .or_else(|| SurfaceOptions::default().data_dir),
+            support_dir: options
+                .support_dir
+                .or_else(|| SurfaceOptions::default().support_dir),
             cache: options.cache,
             // An app on its own (the development host, the release runner),
             // not a module embedded in another app.

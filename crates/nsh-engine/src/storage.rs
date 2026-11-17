@@ -15,8 +15,9 @@ use std::{
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::storage::{StorageBackend, StorageChange};
 
-/// An app's storage kept in `storage.json` of a directory: the app's in
-/// [`crate::EngineConfig::data_dir`], or one the embedding app chooses.
+/// An app's storage kept in `storage.json` of a directory: the app's data
+/// directory ([`crate::EngineConfig::data_dir`]), or one the embedding app
+/// chooses.
 pub struct FileStorage {
     path: PathBuf,
     /// The entries as changed so far, once read.
@@ -61,19 +62,21 @@ impl FileStorage {
     }
 }
 
-/// The system's directory for apps' data: Application Support on Apple
-/// platforms, `%APPDATA%` on Windows, `$XDG_DATA_HOME` (`~/.local/share`)
-/// elsewhere. `None` on Android, whose files directory only the platform
-/// knows, and without a home directory. An app of its own keeps its data in
-/// `<data_dir>/<app id>` ([`crate::EngineConfig::data_dir`]).
-pub fn data_dir() -> Option<PathBuf> {
-    data_dir_in(std::env::consts::OS, |name| {
+/// The system's directory for apps' data, where each app keeps its own
+/// under its id unless it names one (what the platforms give as
+/// [`crate::EngineConfig::support_dir`]): Application Support on Apple platforms, `%APPDATA%` on
+/// Windows, `$XDG_DATA_HOME` (`~/.local/share`) elsewhere. `None` on
+/// Android, whose files directory only the platform knows, and without a
+/// home directory.
+pub fn support_dir() -> Option<PathBuf> {
+    support_dir_in(std::env::consts::OS, |name| {
         std::env::var_os(name).map(PathBuf::from)
     })
 }
 
-/// [`data_dir`] on `os` (`std::env::consts::OS`) with the environment `env`.
-fn data_dir_in(os: &str, env: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
+/// [`support_dir`] on `os` (`std::env::consts::OS`) with the environment
+/// `env`.
+fn support_dir_in(os: &str, env: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
     let env = |name| env(name).filter(|v| !v.as_os_str().is_empty());
     match os {
         "android" => None,
@@ -83,25 +86,23 @@ fn data_dir_in(os: &str, env: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBu
     }
 }
 
-/// The directory an app's `nsh.json` `"dataDir"` names (`template`), where
-/// its release runner keeps the app's storage (`nsh/storage`) and logs in
-/// place of `<data_dir>/<app id>`: `${homeDir}` at its start is this user's
-/// home directory (`$HOME`; `%USERPROFILE%` on Windows). `None` for a
-/// template [`app_data_dir_in`] refuses.
-pub fn app_data_dir(template: &str) -> Option<PathBuf> {
+/// The data directory `nsh.json` `"dataDir"` names (`template`), which the
+/// desktop runners give the engine ([`crate::EngineConfig::data_dir`]): an
+/// absolute path, or `${homeDir}` followed by one under this user's home
+/// directory (`$HOME`; `%USERPROFILE%` on Windows). `None` for anything
+/// else (a relative path, `..`, another `${...}`) and for `${homeDir}`
+/// without a home: the app then keeps its data where it would without
+/// `"dataDir"`, rather than somewhere relative to where it started.
+pub fn resolve_data_dir(template: &str) -> Option<PathBuf> {
     let home = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
     let home = std::env::var_os(home)
         .filter(|v| !v.is_empty())
         .map(PathBuf::from);
-    app_data_dir_in(template, home.as_deref())
+    resolve_data_dir_in(template, home.as_deref())
 }
 
-/// [`app_data_dir`] with the home directory `home`: `template` is an
-/// absolute path or `${homeDir}` followed by one under it, with no `..`
-/// component and no other `${...}`. `None` for anything else, and for
-/// `${homeDir}` without a home: the app then keeps its data where it would
-/// without `"dataDir"`, rather than somewhere relative to where it started.
-pub fn app_data_dir_in(template: &str, home: Option<&std::path::Path>) -> Option<PathBuf> {
+/// [`resolve_data_dir`] with the home directory `home`.
+fn resolve_data_dir_in(template: &str, home: Option<&Path>) -> Option<PathBuf> {
     const HOME: &str = "${homeDir}";
     let path = match template.strip_prefix(HOME) {
         Some("") => home?.to_path_buf(),
@@ -319,7 +320,7 @@ mod tests {
     #[test]
     fn an_apps_data_dir_is_absolute_or_under_the_home_directory() {
         let home = std::env::temp_dir().join("home");
-        let resolve = |template| app_data_dir_in(template, Some(&home));
+        let resolve = |template| resolve_data_dir_in(template, Some(&home));
         assert_eq!(resolve("${homeDir}/.myapp"), Some(home.join(".myapp")));
         assert_eq!(
             resolve("${homeDir}/.myapp/ui"),
@@ -328,7 +329,7 @@ mod tests {
         assert_eq!(resolve("${homeDir}"), Some(home.clone()));
         let absolute = std::env::temp_dir().join("myapp");
         assert_eq!(
-            app_data_dir_in(absolute.to_str().unwrap(), None),
+            resolve_data_dir_in(absolute.to_str().unwrap(), None),
             Some(absolute.clone())
         );
         // Refused: relative, other placeholders, `..`, a home that is not there.
@@ -337,7 +338,7 @@ mod tests {
         assert_eq!(resolve("${appId}/data"), None);
         assert_eq!(resolve("${homeDir}/${appId}"), None);
         assert_eq!(resolve("${homeDir}/../elsewhere"), None);
-        assert_eq!(app_data_dir_in("${homeDir}/.myapp", None), None);
+        assert_eq!(resolve_data_dir_in("${homeDir}/.myapp", None), None);
     }
 
     #[test]
@@ -354,11 +355,11 @@ mod tests {
             ("APPDATA", r"C:\Users\a\AppData\Roaming"),
         ]);
         assert_eq!(
-            data_dir_in("linux", home),
+            support_dir_in("linux", home),
             Some(PathBuf::from("/home/a/.local/share"))
         );
         assert_eq!(
-            data_dir_in(
+            support_dir_in(
                 "linux",
                 env(&[("XDG_DATA_HOME", "/data"), ("HOME", "/home/a")])
             ),
@@ -366,19 +367,19 @@ mod tests {
         );
         // An empty variable counts as unset.
         assert_eq!(
-            data_dir_in("linux", env(&[("XDG_DATA_HOME", ""), ("HOME", "/home/a")])),
+            support_dir_in("linux", env(&[("XDG_DATA_HOME", ""), ("HOME", "/home/a")])),
             Some(PathBuf::from("/home/a/.local/share"))
         );
         let support = Some(PathBuf::from("/home/a/Library/Application Support"));
-        assert_eq!(data_dir_in("macos", home), support);
-        assert_eq!(data_dir_in("ios", home), support);
+        assert_eq!(support_dir_in("macos", home), support);
+        assert_eq!(support_dir_in("ios", home), support);
         assert_eq!(
-            data_dir_in("windows", home),
+            support_dir_in("windows", home),
             Some(PathBuf::from(r"C:\Users\a\AppData\Roaming"))
         );
         // Android's files directory is the platform's to give.
-        assert_eq!(data_dir_in("android", home), None);
-        assert_eq!(data_dir_in("linux", env(&[])), None);
+        assert_eq!(support_dir_in("android", home), None);
+        assert_eq!(support_dir_in("linux", env(&[])), None);
     }
 
     #[test]

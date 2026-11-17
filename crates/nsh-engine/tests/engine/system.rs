@@ -22,13 +22,13 @@ fn filesystem_startup(override_directory: bool) {
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&dir);
-    let app_dir = if override_directory {
+    let data_dir = if override_directory {
         dir.join("custom")
     } else {
         dir.join("data/com.example.system")
     };
-    std::fs::create_dir_all(&app_dir).unwrap();
-    std::fs::write(app_dir.join("input.txt"), "native file ready").unwrap();
+    std::fs::create_dir_all(&data_dir).unwrap();
+    std::fs::write(data_dir.join("input.txt"), "native file ready").unwrap();
     let entry = dir.join("App.tsx");
     std::fs::write(
         &entry,
@@ -83,7 +83,7 @@ mount(() => <Text>{status()}</Text>);
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
-        data_dir: Some(dir.join("data")),
+        support_dir: Some(dir.join("data")),
         cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
@@ -96,7 +96,7 @@ mount(() => <Text>{status()}</Text>);
         audio: None,
         windows: None,
         login_item: None,
-        app_dir: override_directory.then_some(app_dir),
+        data_dir: override_directory.then_some(data_dir),
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -180,7 +180,7 @@ mount(() => <Text>{status()}</Text>);"#,
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
-        data_dir: Some(root.join("data")),
+        support_dir: Some(root.join("data")),
         cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
@@ -193,7 +193,7 @@ mount(() => <Text>{status()}</Text>);"#,
         audio: None,
         windows: None,
         login_item: None,
-        app_dir: None,
+        data_dir: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);

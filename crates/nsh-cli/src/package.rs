@@ -218,14 +218,14 @@ pub(crate) struct AppConfig {
     /// release runner reads it; macOS runs one instance of an app already.
     #[serde(default)]
     pub(crate) single_instance: bool,
-    /// Where the packaged app keeps its storage (`nsh/storage`) and logs
-    /// instead of the system's data directory under its id
-    /// (`"dataDir": "${homeDir}/.myapp"`): an absolute path, or `${homeDir}`
-    /// followed by one under the user's home ([`nsh_engine::app_data_dir`]).
-    /// The data then stays put when the app's id changes, and sits beside
-    /// the rest of what the app keeps there. Written into `app.json`, where
-    /// the desktop release runners (macOS, Windows, Linux) read it;
-    /// [`read_config`] drops a value they would refuse.
+    /// The packaged app's data directory (`"dataDir": "${homeDir}/.myapp"`),
+    /// in place of the one under its id in the system's directory for apps'
+    /// data: its storage (`nsh/storage`), logs, `process.dataDir` and
+    /// `${dataDir}`. An absolute path, or `${homeDir}` followed by one under
+    /// the user's home ([`nsh_engine::resolve_data_dir`]); it stays put when
+    /// the app's id changes. Written into `app.json`, where the desktop
+    /// release runners (macOS, Windows, Linux) read it; [`read_config`]
+    /// drops a value they would refuse.
     pub(crate) data_dir: Option<String>,
     /// Gives the app's address (`UrlScheme.setUrl`) to the system on iOS
     /// and macOS (`"handoff": true`), so Handoff continues it on the user's
@@ -770,14 +770,9 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         ignored.push(format!("window: {e}"));
         config.window = None;
     }
-    // Checked against a stand-in home: what matters is the form, which the
-    // runner checks again against the real one.
+    // The runner resolves it again on the user's machine, with their home.
     if let Some(dir) = &config.data_dir
-        && nsh_engine::app_data_dir_in(
-            dir,
-            Some(Path::new(if cfg!(windows) { r"C:\home" } else { "/home" })),
-        )
-        .is_none()
+        && nsh_engine::resolve_data_dir(dir).is_none()
     {
         ignored.push(format!(
             "dataDir: `{dir}` is neither an absolute path nor `${{homeDir}}/...` (no `..`, no other `${{...}}`)"

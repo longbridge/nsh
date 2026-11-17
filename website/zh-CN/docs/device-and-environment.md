@@ -500,7 +500,7 @@ const hapticsSupported = platform.os === "ios" || (platform.os === "android" && 
 
 ## 应用数据目录
 
-Rust 中的 `data_dir()`，即 TSX 中的 `process.dataDir`，是应用存放自己文件（例如 SQLite 数据库）的目录：`<数据目录>/<应用 id>`，与 `storage.json` 同一目录，在所有原生平台上可用，包括 Android 和 iOS。宿主不为应用保存文件时（例如 Web）为 `None`（`undefined`）。目录可能尚未创建，写入前先创建。
+Rust 中的 `data_dir()`，即 TSX 中的 `process.dataDir`，是应用存放自己文件（例如 SQLite 数据库）的目录，与 `storage.json` 同一目录，在所有原生平台上可用，包括 Android 和 iOS。默认是系统应用数据目录下以应用 id 命名的目录：macOS 为 `~/Library/Application Support/<id>`，Windows 为 `%APPDATA%\<id>`，Linux 为 `$XDG_DATA_HOME/<id>`（`~/.local/share/<id>`）；嵌入到其他应用中时，位于宿主应用的数据目录下。桌面应用可以用 `nsh.json` 的 `dataDir` 指定自己的目录（见[项目结构](./project-structure.md)），`process.dataDir` 和 `${dataDir}` 随之改变。宿主不为应用保存文件时（例如 Web）为 `None`（`undefined`）。目录可能尚未创建，写入前先创建。
 
 打包的桌面应用把日志写到其中的 `logs/app.log`：Rust 中是 `log_file()`，TSX 中是 `process.logFile`
 （[桌面上的日志文件和级别](./dev-server-and-debugging.md#log-files-and-levels-on-the-desktop)）。
