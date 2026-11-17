@@ -146,16 +146,14 @@ pub struct AppOptions {
     /// embedded in a host app) unless set; the development host runs
     /// apps on their own, with none ([`Limits::standalone`]). See [`AppView::set_limits`].
     pub limits: Limits,
-    /// Where the apps it runs keep their data unless
-    /// [`data_dir`](Self::data_dir) names one: each in `<dir>/<app id>`
-    /// (`nsh.json` `"id"`, which travels with the bundle). `None`: the
-    /// system's directory for apps' data ([`nsh_engine::support_dir`]); an
-    /// app that embeds nsh gives its own (its data directory + `/nsh`, say).
-    pub support_dir: Option<PathBuf>,
     /// Where the apps it runs keep their caches (the images they
     /// downloaded) and how much each keeps: by default the system's cache
     /// directory, each app's in `<dir>/<app id>`. See [`AppView::set_cache`].
     pub cache: nsh_engine::CacheOptions,
+    /// The app's data directory, used as it is
+    /// ([`nsh_engine::EngineConfig::data_dir`]); `None`: the one under its
+    /// id in the system's directory for apps' data.
+    pub data_dir: Option<PathBuf>,
     /// The apps' storage (`nsh/storage`), overriding the `storage.json` in
     /// their data directory.
     pub storage: Option<Arc<dyn nsh_engine::StorageBackend>>,
@@ -231,7 +229,7 @@ impl std::fmt::Debug for AppOptions {
             .field("appearance", &self.appearance)
             .field("fps", &self.fps)
             .field("limits", &self.limits)
-            .field("support_dir", &self.support_dir)
+            .field("data_dir", &self.data_dir)
             .field("cache", &self.cache)
             .field("storage", &self.storage)
             .field("context", &self.context)
@@ -257,8 +255,8 @@ impl Default for AppOptions {
             appearance: Appearance::System,
             fps: false,
             limits: Limits::default(),
-            support_dir: None,
             cache: Default::default(),
+            data_dir: None,
             storage: None,
             context: Default::default(),
             host: nsh_engine::HostChannel::default(),
@@ -1112,8 +1110,8 @@ fn engine_config(options: &AppOptions, app: App) -> EngineConfig {
         limits: options.limits,
         ui_sets: ui_sets(),
         runtime: None,
-        support_dir: options.support_dir.clone().or_else(nsh_engine::support_dir),
-        data_dir: None,
+        support_dir: nsh_engine::support_dir(),
+        data_dir: options.data_dir.clone(),
         cache: options.cache.clone(),
         storage: options.storage.clone(),
         clock: Default::default(),

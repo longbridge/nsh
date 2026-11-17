@@ -39,10 +39,10 @@ pub struct Args {
     /// Where the host writes its log; a file in the temporary directory when absent.
     #[arg(long)]
     pub log_file: Option<PathBuf>,
-    /// The directory apps keep their data in, each under its id (a run's
-    /// own, from `nsh test`); the system's when absent.
-    #[arg(long = "data-dir")]
-    pub support_dir: Option<PathBuf>,
+    /// The app's data directory (a run's own, from `nsh test`); the one
+    /// under its id in the system's when absent.
+    #[arg(long)]
+    pub data_dir: Option<PathBuf>,
     /// Log at trace level.
     #[arg(long)]
     pub trace: bool,
@@ -92,7 +92,7 @@ pub fn main_with_args(mut options: AppOptions, args: Args) -> io::Result<()> {
     });
     logging::init(&log_file, args.trace)?;
     options.limits = Limits::standalone();
-    options.support_dir = args.support_dir.clone().or_else(nsh_engine::support_dir);
+    options.data_dir = args.data_dir.clone();
     options.trace = args.trace;
     options.fps = args.fps;
     options.cells = args.points_per_cell;

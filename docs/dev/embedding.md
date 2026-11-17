@@ -391,8 +391,8 @@ NSH draws (`src/layers.rs`).
   without a valid id): the id travels with the app
   (`app.json` next to a bundle, written by `nsh build` / `nsh package`; the dev server's bundle message; a verified
   package's id; `Root::app_id` in Rust apps' generated code). Platforms only give the support dir: the system's
-  (`None`) on the desktops (`AppOptions::support_dir` to change it; the release runners set `AppOptions::data_dir` from
-  `nsh.json` `dataDir`), `Application Support/nsh` on iOS,
+  (`nsh_engine::support_dir()`) on the desktops, where `AppOptions::data_dir` names one app's directory instead (the
+  release runners set it from `nsh.json` `dataDir`, the development hosts from `--data-dir`), `Application Support/nsh` on iOS,
   `filesDir/nsh` on Android. `AppOptions::storage`, `NshAppView.storageDirectory` and `NshView.setStorageDirectory`
   override one app's place; all from the next load.
 - **Notifications.** The process's notifications (`nsh`'s `Notifications`) belong to the embedding app unless it

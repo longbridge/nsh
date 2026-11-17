@@ -25,7 +25,7 @@ pub fn main() -> std::process::ExitCode {
             return std::process::ExitCode::FAILURE;
         }
     };
-    let support_dir = options.support_dir.clone().or_else(nsh_engine::support_dir);
+    let support_dir = nsh_engine::support_dir();
     let launch = nsh_engine::updates::launch(bundle, &dir, support_dir.as_deref());
     options.asset_base = Some(AssetBase::Directory(launch.assets));
     run_app(AppSource::Bundle(launch.bundle), options)

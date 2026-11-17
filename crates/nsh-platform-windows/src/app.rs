@@ -169,15 +169,10 @@ pub struct AppOptions {
     /// release runner run apps on their own, with none
     /// ([`Limits::standalone`]). See [`AppView::set_limits`].
     pub limits: Limits,
-    /// Where the apps it runs keep their data unless
-    /// [`data_dir`](Self::data_dir) names one: each in `<dir>/<app id>`
-    /// (`nsh.json` `"id"`, which travels with the bundle). `None`: the
-    /// system's directory for apps' data ([`nsh_engine::support_dir`]); an
-    /// app that embeds nsh gives its own (its data directory + `/nsh`, say).
-    pub support_dir: Option<PathBuf>,
     /// The app's own data directory, used as it is
     /// ([`nsh_engine::EngineConfig::data_dir`]): the release runner's
-    /// `nsh.json` `"dataDir"`. `None`: `<support_dir>/<app id>`.
+    /// `nsh.json` `"dataDir"`, the development host's `--data-dir`. `None`:
+    /// the one under its id in the system's directory for apps' data.
     pub data_dir: Option<PathBuf>,
     /// Where the apps it runs keep their caches (the images they
     /// downloaded) and how much each keeps: by default the system's cache
@@ -248,7 +243,6 @@ impl Default for AppOptions {
             components: Default::default(),
             appearance: Appearance::System,
             limits: Limits::default(),
-            support_dir: None,
             data_dir: None,
             cache: Default::default(),
             storage: None,
@@ -481,7 +475,7 @@ impl AppView {
             limits: options.limits,
             ui_sets: ui_sets(),
             runtime: None,
-            support_dir: options.support_dir.clone().or_else(nsh_engine::support_dir),
+            support_dir: nsh_engine::support_dir(),
             data_dir: options.data_dir.clone(),
             cache: options.cache.clone(),
             storage: options.storage.clone(),
@@ -750,7 +744,7 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     let kept = match app {
         Some(app) if launch.restore_bounds => {
             let mut config = EngineConfig::new(app);
-            config.support_dir = options.support_dir.clone().or_else(nsh_engine::support_dir);
+            config.support_dir = nsh_engine::support_dir();
             config.data_dir = options.data_dir.clone();
             config.storage = options.storage.clone();
             config.main_window_placement(&crate::window_state::displays())

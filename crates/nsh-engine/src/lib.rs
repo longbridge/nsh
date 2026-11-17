@@ -972,7 +972,10 @@ pub struct EngineConfig {
     /// embeds nsh gives its own (`…/nsh` in its data directory), as do
     /// development hosts that keep a run's data apart; it is known before
     /// the app's id is. `None` with no `data_dir` either: nothing is kept
-    /// on disk (an engine made for a test).
+    /// on disk (an engine made for a test). The platforms' to set, not
+    /// apps': an app names its own directory with
+    /// [`data_dir`](Self::data_dir).
+    #[doc(hidden)]
     pub support_dir: Option<std::path::PathBuf>,
     /// The app's own data directory, used as it is (no app id appended):
     /// its storage (`nsh/storage`, `storage.json` there), `process.dataDir`

@@ -68,6 +68,7 @@ impl FileStorage {
 /// Windows, `$XDG_DATA_HOME` (`~/.local/share`) elsewhere. `None` on
 /// Android, whose files directory only the platform knows, and without a
 /// home directory.
+#[doc(hidden)]
 pub fn support_dir() -> Option<PathBuf> {
     support_dir_in(std::env::consts::OS, |name| {
         std::env::var_os(name).map(PathBuf::from)
