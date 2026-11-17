@@ -1436,9 +1436,10 @@ impl Modal {
         })
     }
 
-    /// The detent of [`Self::detents`] the sheet rests at, controlled: it
-    /// moves there when the value changes; follow
-    /// [`Self::on_detent_change`] to keep it in step with the user's moves.
+    /// The detent of [`Self::detents`] the sheet rests at: it moves there
+    /// when the value changes. The user's moves stand even when the app
+    /// does not follow them; follow [`Self::on_detent_change`] to keep the
+    /// value in step.
     pub fn detent(self, detent: impl IntoReactive<Option<SheetDetent>>) -> Self {
         self.bind_prop(detent, |v: Option<SheetDetent>| {
             Prop::Modal(ModalProp::Detent(v))

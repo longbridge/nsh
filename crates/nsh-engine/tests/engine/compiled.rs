@@ -1237,6 +1237,82 @@ fn dialogs_report_cancels_and_closes_with_their_reason() {
     });
 }
 
+const SHEET_DETENTS: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { Dialog } from "nsh/base";
+
+const log = signal<string[]>([]);
+
+mount(() => (
+  <View style={{ flex: 1 }}>
+    <Text>{`log ${log().join(",")}`}</Text>
+    <Dialog
+      presentation="pageSheet"
+      detents={["medium", { height: 200 }, { fraction: 0.4 }, "bogus", { fraction: 3 }, { height: -1 }, { height: NaN }] as any}
+      detent="medium"
+      defaultDetent="large"
+      grabber
+      largestUndimmedDetent={{ fraction: 0.4 }}
+      onDetentChange={({ detent }) => log.update((l) => [...l, JSON.stringify(detent)])}
+    >
+      <Text>in sheet</Text>
+    </Dialog>
+  </View>
+));
+"#;
+
+/// A dialog's sheet options reach the platform from TSX as the core's
+/// `SheetDetent`s, detents that are not one left out; the platform's
+/// `DetentChange` payload reaches the app as the same JS value.
+#[test]
+fn sheet_detents_reach_the_platform_and_the_users_moves_the_app() {
+    use nsh_core::{SheetDetent, geometry::Percentage};
+    let (engine, rx) = start_app(SHEET_DETENTS);
+    let control = engine.control();
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let modal = modal_of(&first).expect("a dialog");
+    let config = first
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::ModalConfig { id, config } if *id == modal => Some(config.clone()),
+            _ => None,
+        })
+        .expect("its config");
+    assert_eq!(
+        config.detents,
+        vec![
+            SheetDetent::Medium,
+            SheetDetent::Height(Points(200.0)),
+            SheetDetent::Fraction(Percentage(0.4)),
+        ]
+    );
+    assert_eq!(config.detent, Some(SheetDetent::Medium));
+    assert_eq!(config.default_detent, Some(SheetDetent::Large));
+    assert!(config.grabber);
+    assert_eq!(
+        config.largest_undimmed_detent,
+        Some(SheetDetent::Fraction(Percentage(0.4)))
+    );
+    control.dispatch_event(
+        modal,
+        EventKind::DetentChange,
+        SheetDetent::Height(Points(200.0)).change_payload(),
+    );
+    next(&rx, |b| {
+        log_of(b).as_deref() == Some(r#"log {"height":200}"#)
+    });
+    control.dispatch_event(
+        modal,
+        EventKind::DetentChange,
+        SheetDetent::Large.change_payload(),
+    );
+    next(&rx, |b| {
+        log_of(b).as_deref() == Some(r#"log {"height":200},"large""#)
+    });
+}
+
 /// The children `Insert`ed into `parent`, in order.
 fn children_of(batch: &MountBatch, parent: u32) -> Vec<u32> {
     batch

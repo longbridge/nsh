@@ -1072,7 +1072,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         EventKind::DetentChange,
         on::MODAL,
         "(e: { detent: SheetDetent }) => void",
-        "The user moved an iOS sheet to another of its `detents` (dragging it, its grabber, a scroll at its edge, a screen reader): set `detent` to it to keep a controlled sheet in step.",
+        "The user moved an iOS sheet to another of its `detents` (dragging it, its grabber, a scroll at its edge, a screen reader): set `detent` to it to keep the app's value in step.",
     ),
     (
         EventKind::Position,

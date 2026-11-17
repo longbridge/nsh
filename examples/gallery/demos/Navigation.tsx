@@ -544,7 +544,7 @@ type Sheet = "fullScreen" | "pageSheet" | "stacked" | "formSheet" | "fade" | "di
 const modals: { key: Exclude<Sheet, null>; title: string; note: string; icon: IconName }[] = [
   { key: "fullScreen", title: "Full screen", note: "Slides up", icon: "mobile" },
   { key: "pageSheet", title: "Page sheet", note: hint("iOS sheet", "A tall centered card"), icon: "components" },
-  { key: "stacked", title: "Half-height sheet", note: hint("iOS detents, pages inside", "Pages inside"), icon: "lists" },
+  { key: "stacked", title: "Half-height sheet", note: platform.os === "ios" ? "iOS detents, pages inside" : "Pages inside", icon: "lists" },
   { key: "formSheet", title: "Form sheet", note: hint("iOS, centered", "A smaller centered card"), icon: "form" },
   { key: "fade", title: "Fade", note: "Fades in", icon: "spark" },
   { key: "dialog", title: "Card dialog", note: "Over the page", icon: "bell" },
@@ -592,6 +592,8 @@ function StackedSheet(props: { open: boolean; onClose: () => void }) {
   const chosen = signal<Record<string, string>>({});
   const choice = (name: string) => chosen()[name] ?? sheetPages.find((p) => p.name === name)?.choices[0] ?? "";
   const full = () => detent() === "large";
+  // Only iOS's system sheet rests at detents: elsewhere it is full height.
+  const detents = platform.os === "ios";
   // The next opening starts at half height, on the first page.
   const done = () => {
     detent.set("medium");
@@ -614,18 +616,19 @@ function StackedSheet(props: { open: boolean; onClose: () => void }) {
         {(route) => (
           <NavPage
             title={route}
-            header={<Text style={{ padding: 16, fontSize: 17, fontWeight: "600", color: colors.text }}>{route}</Text>}
+            {...header}
+            header={<PageHeader title={route} root={route === "Settings"} onBack={() => pages.pop()} />}
             style={{ backgroundColor: colors.background }}
           >
             {route === "Settings" ? (
               <Scroll style={{ flex: 1 }}>
                 <View style={{ padding: 16, gap: 16 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <Badge label={full() ? "Full height" : "Half height"} tone="accent" />
-                    <Text style={{ flex: 1, fontSize: 13, color: colors.muted }}>
-                      {hint("Drag the grabber, or scroll up, to change the height.", "The sheet's heights are iOS's.")}
-                    </Text>
-                  </View>
+                  {detents ? (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <Badge label={full() ? "Full height" : "Half height"} tone="accent" />
+                      <Text style={{ flex: 1, fontSize: 13, color: colors.muted }}>Drag the grabber, or scroll up, to change the height.</Text>
+                    </View>
+                  ) : null}
                   <Card title="Settings" subtitle="Each opens a page" flush>
                     <View>
                       <Each of={sheetPages}>
@@ -634,7 +637,7 @@ function StackedSheet(props: { open: boolean; onClose: () => void }) {
                     </View>
                   </Card>
                   <View style={{ flexDirection: "row", gap: 8 }}>
-                    <Button flex={1} label={full() ? "Half height" : "Full height"} variant="secondary" onPress={() => detent.set(full() ? "medium" : "large")} />
+                    {detents ? <Button flex={1} label={full() ? "Half height" : "Full height"} variant="secondary" onPress={() => detent.set(full() ? "medium" : "large")} /> : null}
                     <Button flex={1} label="Done" onPress={done} />
                   </View>
                 </View>
@@ -642,7 +645,7 @@ function StackedSheet(props: { open: boolean; onClose: () => void }) {
             ) : (
               <Scroll style={{ flex: 1 }}>
                 <View style={{ padding: 16, gap: 16 }}>
-                  <Card title={route} subtitle="Back with the header's button or a swipe from the edge" flush>
+                  <Card title={route} subtitle={hint("Back with the header's button or a swipe from the edge", "Back with the header's button")} flush>
                     <View>
                       <Each of={sheetPages.find((p) => p.name === route)?.choices ?? []}>
                         {(name, i) => (

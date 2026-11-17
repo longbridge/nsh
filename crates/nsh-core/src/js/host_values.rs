@@ -214,14 +214,17 @@ impl HostValue for crate::SheetDetent {
             }
         } else if input.is_object() {
             let number = |key| input.field(key).and_then(|v| v.as_number());
-            if let Some(height) = number("height") {
-                return Some(SheetDetent::Height(Points(height as f32)));
-            }
-            if let Some(fraction) = number("fraction") {
-                return Some(SheetDetent::Fraction(Percentage(fraction as f32)));
+            let detent = match number("height") {
+                Some(height) => SheetDetent::of_height(height),
+                None => number("fraction").and_then(SheetDetent::of_fraction),
+            };
+            if detent.is_some() {
+                return detent;
             }
         }
-        cx.warn(r#"detent: expected "medium", "large", `{ height }` or `{ fraction }`"#);
+        cx.warn(
+            r#"detent: expected "medium", "large", `{ height }` (0 or more) or `{ fraction }` (0 to 1)"#,
+        );
         None
     }
 

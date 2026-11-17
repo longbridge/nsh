@@ -2112,10 +2112,21 @@ impl SheetDetent {
             };
         }
         if let Some(height) = value.get("height").and_then(|v| v.as_f64()) {
-            return Some(Self::Height(Points(height as f32)));
+            return Self::of_height(height);
         }
-        let fraction = value.get("fraction").and_then(|v| v.as_f64())?;
-        Some(Self::Fraction(Percentage(fraction as f32)))
+        Self::of_fraction(value.get("fraction").and_then(|v| v.as_f64())?)
+    }
+
+    /// `{ height }`, a height a sheet can rest at: finite, 0 or more.
+    pub(crate) fn of_height(height: f64) -> Option<Self> {
+        (height.is_finite() && height >= 0.0).then(|| Self::Height(Points(height as f32)))
+    }
+
+    /// `{ fraction }`, a share from 0 to 1 (`NaN` is none).
+    pub(crate) fn of_fraction(fraction: f64) -> Option<Self> {
+        (0.0..=1.0)
+            .contains(&fraction)
+            .then(|| Self::Fraction(Percentage(fraction as f32)))
     }
 
     /// The payload of [`EventKind::DetentChange`]: `{ detent }`.
@@ -2137,7 +2148,7 @@ impl crate::element::JsValue for SheetDetent {
 
     fn from_js(value: crate::element::JsIn<'_>) -> Result<Self, crate::element::PropError> {
         use crate::element::JsKind;
-        let wanted = r#""medium", "large", `{ height }` or `{ fraction }`"#;
+        let wanted = r#""medium", "large", `{ height }` (0 or more) or `{ fraction }` (0 to 1)"#;
         match value.kind() {
             JsKind::String => match value.as_string().as_deref() {
                 Some("medium") => Ok(Self::Medium),
@@ -2147,13 +2158,14 @@ impl crate::element::JsValue for SheetDetent {
             JsKind::Object => {
                 let height = value.field("height")?;
                 if let Some(height) = height.get().as_number() {
-                    return Ok(Self::Height(Points(height as f32)));
+                    return Self::of_height(height).ok_or_else(|| value.expected(wanted));
                 }
                 let fraction = value.field("fraction")?;
-                match fraction.get().as_number() {
-                    Some(fraction) => Ok(Self::Fraction(Percentage(fraction as f32))),
-                    None => Err(value.expected(wanted)),
-                }
+                fraction
+                    .get()
+                    .as_number()
+                    .and_then(Self::of_fraction)
+                    .ok_or_else(|| value.expected(wanted))
             }
             _ => Err(value.expected(wanted)),
         }
@@ -2221,9 +2233,10 @@ pub enum ModalProp {
     /// presentations: there, `Sheet` (`nsh/base`) rests at detents.
     #[prop(js = "detents", on = MODAL)]
     Detents(Vec<SheetDetent>),
-    /// `detent`: the detent of `detents` the sheet rests at, controlled: it
-    /// moves there when the value changes; follow `onDetentChange` to keep
-    /// it in step with the user's moves.
+    /// `detent`: the detent of `detents` the sheet rests at: it moves there
+    /// when the value changes. The user's moves stand even when the app
+    /// does not follow them; follow `onDetentChange` to keep the value in
+    /// step.
     #[prop(js = "detent", on = MODAL)]
     Detent(Option<SheetDetent>),
     /// `defaultDetent`: the detent it opens at without `detent` (default

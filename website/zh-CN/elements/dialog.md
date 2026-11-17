@@ -102,8 +102,8 @@ function Example() {
 | `closeOnEscape` | `.close_on_escape(..)` | `boolean` | `true` | Escape 和 Android 返回键在原生侧关闭它。 |
 | `closeOnBackdropPress` | `.close_on_backdrop_press(..)` | `boolean` | `true` | 按下背景层时关闭它。 |
 | `closeOnSwipe` | `.close_on_swipe(..)` | `boolean` | `true` | 下滑 sheet（iOS、手机浏览器）时在原生侧关闭它。 |
-| `detents` | `.detents(vec![SheetDetent::Medium, SheetDetent::Large])` | `SheetDetent[]` | `[]` | iOS sheet（`pageSheet`、`formSheet`）停靠的高度，与 [`Sheet`](./sheet.md) 相同：`"medium"`（约半屏）、`"large"`、以点为单位的 `{ height }`，或占 large 高度比例的 `{ fraction }`。不设时为系统的全高。见[半屏 sheet](#半屏-sheet)。 |
-| `detent` | `.detent(..)` | `SheetDetent` | | 停靠的档位，受控：值变化时移到该档。 |
+| `detents` | `.detents(vec![SheetDetent::Medium, SheetDetent::Large])` | `SheetDetent[]` | `[]` | iOS sheet（`pageSheet`、`formSheet`）停靠的高度，取值和 [`Sheet`](./sheet.md) 的 `SheetDetent` 一样：`"medium"`（约半屏）、`"large"`、以点为单位的 `{ height }`，或占 large 高度比例的 `{ fraction }`。不设时为系统的全高。见[半屏 sheet](#半屏-sheet)。 |
+| `detent` | `.detent(..)` | `SheetDetent` | | 停靠的档位：值变化时移到该档。用户拖到别处而 app 不跟时，sheet 停在用户拖到的那档。 |
 | `defaultDetent` | `.default_detent(..)` | `SheetDetent` | 最小的一档 | 没有 `detent` 时打开所在的档位。 |
 | `grabber` | `.grabber(..)` | `boolean` | `false` | 在 sheet 顶部显示系统抓手。 |
 | `largestUndimmedDetent` | `.largest_undimmed_detent(..)` | `SheetDetent` | 无 | 在这一档及以下，sheet 后面的内容不变暗，并且可以接收触摸。 |
@@ -223,6 +223,8 @@ dialog()
   </NavStack>
 </Dialog>
 ```
+
+`detent` 的值变化时 sheet 移过去，如上用 `onDetentChange` 跟随用户的拖动；app 不跟的拖动不会被撤销，sheet 停在用户拖到的那档。
 
 内容按 sheet 所停的高度排版。其他平台忽略 detents，dialog 保持它在那里的形式；需要在所有平台上都按档位停靠的底部 sheet，请用 [`Sheet`](./sheet.md)。
 

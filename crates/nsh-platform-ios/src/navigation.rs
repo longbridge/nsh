@@ -45,8 +45,10 @@ use objc2_ui_kit::{
     UINavigationBarAppearance, UINavigationController, UINavigationControllerDelegate,
     UINavigationItem, UINavigationItemLargeTitleDisplayMode, UIPresentationController, UIResponder,
     UIScrollView, UISheetPresentationController, UISheetPresentationControllerDelegate,
-    UISheetPresentationControllerDetent, UISheetPresentationControllerDetentResolutionContext,
-    UIView, UIViewAutoresizing, UIViewController, UIViewControllerTransitionCoordinator,
+    UISheetPresentationControllerDetent, UISheetPresentationControllerDetentIdentifierLarge,
+    UISheetPresentationControllerDetentIdentifierMedium,
+    UISheetPresentationControllerDetentResolutionContext, UIView, UIViewAutoresizing,
+    UIViewController, UIViewControllerTransitionCoordinator,
     UIViewControllerTransitionCoordinatorContext,
 };
 
@@ -426,8 +428,8 @@ impl ModalController {
         let identifier = |detent: Option<SheetDetent>| {
             let detent = detent?;
             made.iter()
-                .find(|(_, d)| *d == detent)
-                .map(|(native, _)| native.identifier())
+                .find(|d| d.detent == detent)
+                .map(|d| d.identifier.clone())
         };
         let selected = match old {
             None => Some(identifier(c.detent.or(c.default_detent))),
@@ -439,12 +441,10 @@ impl ModalController {
             // UIKit's default: the full height.
             vec![UISheetPresentationControllerDetent::largeDetent(mtm)]
         } else {
-            made.iter().map(|(native, _)| native.clone()).collect()
+            made.iter().map(|d| d.native.clone()).collect()
         };
-        *self.ivars().detents.borrow_mut() = made
-            .iter()
-            .map(|(native, detent)| (native.identifier(), *detent))
-            .collect();
+        *self.ivars().detents.borrow_mut() =
+            made.into_iter().map(|d| (d.identifier, d.detent)).collect();
         let apply = || {
             sheet.setDetents(&NSArray::from_retained_slice(&natives));
             sheet.setPrefersGrabberVisible(c.grabber);
@@ -511,74 +511,119 @@ impl ModalController {
     }
 }
 
-/// The UIKit detents of `detents`, each with the detent it stands for:
-/// UIKit's medium and large, and a custom detent of the height asked for
-/// (iOS 16 and later; before, the nearer of medium and large). A detent
-/// that comes out the same as an earlier one is left out. `screen`: the
-/// height of the window, against which a height is a share before iOS 16.
+/// A UIKit detent made for a [`SheetDetent`], with its identifier.
+struct MadeDetent {
+    native: Retained<UISheetPresentationControllerDetent>,
+    /// Known when it is made: `-[UISheetPresentationControllerDetent
+    /// identifier]` needs iOS 16.
+    identifier: Retained<NSString>,
+    detent: SheetDetent,
+}
+
+/// The UIKit detents of `detents`: UIKit's medium and large, and a custom
+/// detent of the height asked for (iOS 16 and later; before, the nearer
+/// of medium and large). A detent that comes out the same as an earlier
+/// one is left out. `screen`: the height of the window, against which a
+/// height is a share before iOS 16.
 fn sheet_detents(
     mtm: MainThreadMarker,
     detents: &[SheetDetent],
     screen: CGFloat,
-) -> Vec<(Retained<UISheetPresentationControllerDetent>, SheetDetent)> {
+) -> Vec<MadeDetent> {
     let class = <UISheetPresentationControllerDetent as ClassType>::class();
     // SAFETY: `respondsToSelector:` on the class object.
     let custom: bool =
         unsafe { msg_send![class, respondsToSelector: sel!(customDetentWithIdentifier:resolver:)] };
     let screen = screen.max(1.0);
-    let mut out: Vec<(Retained<UISheetPresentationControllerDetent>, SheetDetent)> = Vec::new();
-    for (index, &detent) in detents.iter().enumerate() {
-        let native = match detent {
-            SheetDetent::Medium => UISheetPresentationControllerDetent::mediumDetent(mtm),
-            SheetDetent::Large => UISheetPresentationControllerDetent::largeDetent(mtm),
-            SheetDetent::Height(_) | SheetDetent::Fraction(_) if custom => {
-                let identifier = NSString::from_str(&format!("nsh.detent.{index}"));
-                let resolver = RcBlock::new(
-                    move |context: NonNull<
-                        ProtocolObject<dyn UISheetPresentationControllerDetentResolutionContext>,
-                    >|
-                          -> CGFloat {
-                        // SAFETY: UIKit passes a live context for the call.
-                        let max = unsafe { context.as_ref() }.maximumDetentValue();
-                        let height = match detent {
-                            SheetDetent::Height(height) => height.0 as CGFloat,
-                            SheetDetent::Fraction(fraction) => {
-                                max * fraction.0.clamp(0.0, 1.0) as CGFloat
-                            }
-                            SheetDetent::Medium | SheetDetent::Large => max,
-                        };
-                        height.clamp(0.0, max)
-                    },
-                );
-                UISheetPresentationControllerDetent::customDetentWithIdentifier_resolver(
-                    Some(&identifier),
-                    &resolver,
-                    mtm,
-                )
-            }
+    let medium = || {
+        // SAFETY: a constant of UIKit since iOS 15, the oldest NSH runs on.
+        let identifier = unsafe { UISheetPresentationControllerDetentIdentifierMedium }.retain();
+        (
+            UISheetPresentationControllerDetent::mediumDetent(mtm),
+            identifier,
+        )
+    };
+    let large = || {
+        // SAFETY: as `medium`'s.
+        let identifier = unsafe { UISheetPresentationControllerDetentIdentifierLarge }.retain();
+        (
+            UISheetPresentationControllerDetent::largeDetent(mtm),
+            identifier,
+        )
+    };
+    let mut out: Vec<MadeDetent> = Vec::new();
+    for &detent in detents {
+        let (native, identifier) = match detent {
+            SheetDetent::Medium => medium(),
+            SheetDetent::Large => large(),
+            // Named by their value, so a detent the app moves in its list
+            // keeps its identifier and UIKit keeps it selected.
+            SheetDetent::Height(height) if custom => custom_detent(
+                mtm,
+                &format!("nsh.height.{:08x}", height.0.to_bits()),
+                detent,
+            ),
+            SheetDetent::Fraction(fraction) if custom => custom_detent(
+                mtm,
+                &format!("nsh.fraction.{:08x}", fraction.0.to_bits()),
+                detent,
+            ),
             SheetDetent::Height(_) | SheetDetent::Fraction(_) => {
                 let share = match detent {
                     SheetDetent::Height(height) => height.0 as CGFloat / screen,
                     SheetDetent::Fraction(fraction) => fraction.0 as CGFloat,
                     SheetDetent::Medium | SheetDetent::Large => 1.0,
                 };
-                if share < 0.75 {
-                    UISheetPresentationControllerDetent::mediumDetent(mtm)
-                } else {
-                    UISheetPresentationControllerDetent::largeDetent(mtm)
-                }
+                if share < 0.75 { medium() } else { large() }
             }
         };
-        let identifier = native.identifier();
         if out
             .iter()
-            .any(|(made, _)| made.identifier().isEqualToString(&identifier))
+            .any(|made| made.identifier.isEqualToString(&identifier))
         {
             continue;
         }
-        out.push((native, detent));
+        out.push(MadeDetent {
+            native,
+            identifier,
+            detent,
+        });
     }
     out
+}
+
+/// A custom UIKit detent (iOS 16 and later) named `name`, at the height
+/// of `detent` (`Height` or `Fraction`) within the sheet's room.
+fn custom_detent(
+    mtm: MainThreadMarker,
+    name: &str,
+    detent: SheetDetent,
+) -> (
+    Retained<UISheetPresentationControllerDetent>,
+    Retained<NSString>,
+) {
+    let identifier = NSString::from_str(name);
+    let resolver = RcBlock::new(
+        move |context: NonNull<
+            ProtocolObject<dyn UISheetPresentationControllerDetentResolutionContext>,
+        >|
+              -> CGFloat {
+            // SAFETY: UIKit passes a live context for the call.
+            let max = unsafe { context.as_ref() }.maximumDetentValue();
+            let height = match detent {
+                SheetDetent::Height(height) => height.0 as CGFloat,
+                SheetDetent::Fraction(fraction) => max * fraction.0 as CGFloat,
+                SheetDetent::Medium | SheetDetent::Large => max,
+            };
+            height.clamp(0.0, max)
+        },
+    );
+    let native = UISheetPresentationControllerDetent::customDetentWithIdentifier_resolver(
+        Some(&identifier),
+        &resolver,
+        mtm,
+    );
+    (native, identifier)
 }
 
 pub(crate) struct NavIvars {

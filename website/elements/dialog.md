@@ -111,8 +111,8 @@ and the explicit import takes its place. For the system's alert or action sheet,
 | `closeOnEscape` | `.close_on_escape(..)` | `boolean` | `true` | Escape and the Android back button close it natively. |
 | `closeOnBackdropPress` | `.close_on_backdrop_press(..)` | `boolean` | `true` | A press on the backdrop closes it. |
 | `closeOnSwipe` | `.close_on_swipe(..)` | `boolean` | `true` | Swiping a sheet down (iOS, phone browsers) closes it natively. |
-| `detents` | `.detents(vec![SheetDetent::Medium, SheetDetent::Large])` | `SheetDetent[]` | `[]` | iOS sheets (`pageSheet`, `formSheet`): the heights it rests at, `"medium"` (about half the screen), `"large"`, `{ height }` in points or `{ fraction }` of the large one, as [`Sheet`](./sheet.md)'s. None: the system's full height. See [A sheet at half height](#a-sheet-at-half-height). |
-| `detent` | `.detent(..)` | `SheetDetent` | | The detent it rests at, controlled: it moves there when the value changes. |
+| `detents` | `.detents(vec![SheetDetent::Medium, SheetDetent::Large])` | `SheetDetent[]` | `[]` | iOS sheets (`pageSheet`, `formSheet`): the heights it rests at, `"medium"` (about half the screen), `"large"`, `{ height }` in points or `{ fraction }` of the large one (the `SheetDetent` values [`Sheet`](./sheet.md) takes). None: the system's full height. See [A sheet at half height](#a-sheet-at-half-height). |
+| `detent` | `.detent(..)` | `SheetDetent` | | The detent it rests at: it moves there when the value changes. The user's moves stand even when the app does not follow them. |
 | `defaultDetent` | `.default_detent(..)` | `SheetDetent` | the smallest | The detent it opens at without `detent`. |
 | `grabber` | `.grabber(..)` | `boolean` | `false` | The system's grabber at the top of the sheet. |
 | `largestUndimmedDetent` | `.largest_undimmed_detent(..)` | `SheetDetent` | none | Up to this detent, what is behind the sheet stays undimmed and takes touches. |
@@ -242,6 +242,9 @@ dialog()
   </NavStack>
 </Dialog>
 ```
+
+`detent` moves the sheet when its value changes, and follows the user with `onDetentChange` as above; a drag the app
+does not follow stays where the user left it.
 
 The content is laid out at the height the sheet rests at. Elsewhere the detents are ignored and the dialog keeps its
 form there; for a bottom sheet that rests at detents on every platform, use [`Sheet`](./sheet.md).
