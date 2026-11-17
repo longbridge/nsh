@@ -32,8 +32,8 @@
 //! as on iOS.
 //!
 //! Animated GIF and WebP images decode every frame (composited, at most
-//! [`MAX_FRAMES`] and [`MAX_ANIMATION_BYTES`]: larger ones show their first
-//! frame) with its delay, as browsers and iOS time them (under 20ms: 100ms),
+//! [`MAX_FRAMES`]; past [`MAX_ANIMATION_BYTES`] they decode smaller until
+//! they fit) with its delay, as browsers and iOS time them (under 20ms: 100ms),
 //! and play their loop count. A view advances its frames with a thread
 //! timer at each frame's delay, not on the frame ticker (a 10 fps GIF need
 //! not keep the ticker running at the display's rate), measured on the
@@ -173,8 +173,8 @@ fn context(surface: &Surface, uri: &str) -> Context {
 /// at the last of them).
 const MAX_FRAMES: usize = 600;
 
-/// The most bytes one animation's frames take: larger animations show
-/// their first frame.
+/// The most bytes one animation's frames take: larger animations decode
+/// smaller (half the side at a time) until their frames fit.
 const MAX_ANIMATION_BYTES: usize = 48 << 20;
 
 /// Decoded pixels: premultiplied BGRA, rows packed.
@@ -488,13 +488,14 @@ fn animation(
         LoopCount::Finite(n) if format == image::ImageFormat::Gif => n.get().saturating_add(1),
         LoopCount::Finite(n) => n.get(),
     };
-    let (mut pixels, mut delays, mut total) = (Vec::new(), Vec::new(), 0);
+    let (mut buffers, mut delays, mut total) = (Vec::<image::RgbaImage>::new(), Vec::new(), 0);
     let mut natural = None;
+    let mut longest = longest;
     for frame in frames.take(MAX_FRAMES) {
         let frame = match frame {
             Ok(frame) => frame,
             // A damaged frame ends the animation; what decoded plays.
-            Err(e) if !pixels.is_empty() => {
+            Err(e) if !buffers.is_empty() => {
                 log::debug!("image: animation cut short: {e}");
                 break;
             }
@@ -506,18 +507,27 @@ fn animation(
         natural.get_or_insert(Natural::Pixels(w, h));
         let buffer = shrunk(buffer, longest);
         total += buffer.as_raw().len();
-        if total > MAX_ANIMATION_BYTES {
-            log::debug!("image: animation over {MAX_ANIMATION_BYTES} bytes: its first frame shows");
-            pixels.truncate(1);
-            delays.truncate(1);
-            if pixels.is_empty() {
-                pixels.push(Pixels::from_rgba(buffer));
-            }
-            break;
-        }
-        pixels.push(Pixels::from_rgba(buffer));
+        buffers.push(buffer);
         delays.push(delay);
+        // Over budget: the frames take half the side (a quarter of the
+        // bytes) until they fit, so a large animation plays as sharp as
+        // the budget allows rather than stopping on its first frame.
+        while total > MAX_ANIMATION_BYTES {
+            let (w, h) = buffers[0].dimensions();
+            let side = w.max(h);
+            if side <= 1 {
+                break;
+            }
+            longest = (side / 2).max(1);
+            log::debug!("image: animation over {MAX_ANIMATION_BYTES} bytes: decoding at {longest}");
+            total = 0;
+            for buffer in &mut buffers {
+                *buffer = shrunk(std::mem::take(buffer), longest);
+                total += buffer.as_raw().len();
+            }
+        }
     }
+    let pixels: Vec<Pixels> = buffers.into_iter().map(Pixels::from_rgba).collect();
     let Some(natural) = natural.filter(|_| !pixels.is_empty()) else {
         return Err("no frames".into());
     };
@@ -1462,11 +1472,13 @@ pub(crate) fn resized(surface: &Rc<Surface>, view: &NshView) {
         image.load = None;
         let Ok((picture, lease)) = result else { return };
         // The same image, larger: no new load events; an animation plays
-        // on from the frame it was.
-        if let (Some(p), Some(animation)) = (image.playback.as_mut(), picture.animation.clone())
-            && animation.frames.len() == p.animation.frames.len()
-        {
-            p.animation = animation;
+        // on from the frame it was. A decode that cannot play the same
+        // frames keeps the one playing (its frames are what draws).
+        if let Some(p) = image.playback.as_mut() {
+            match picture.animation.clone() {
+                Some(a) if a.frames.len() == p.animation.frames.len() => p.animation = a,
+                _ => return,
+            }
         }
         image.image = Some(picture);
         image.lease = lease;
@@ -2162,6 +2174,37 @@ mod tests {
             let (w, h) = small.frame.size();
             assert!(w.max(h) <= 8);
         }
+    }
+
+    #[test]
+    fn large_animations_shrink_to_fit_and_keep_playing() {
+        // #2248: 20 frames of 800x800 take ~48.8 MiB, over the budget.
+        use image::{Delay, Frame, codecs::gif::GifEncoder};
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = GifEncoder::new(&mut bytes);
+            for i in 0..20u32 {
+                let rgba = image::RgbaImage::from_fn(800, 800, |x, _| {
+                    image::Rgba(if (x / 16 + i) % 2 == 0 {
+                        [0, 0, 0, 255]
+                    } else {
+                        [255; 4]
+                    })
+                });
+                let frame = Frame::from_parts(rgba, 0, 0, Delay::from_numer_denom_ms(100, 1));
+                encoder.encode_frame(frame).unwrap();
+            }
+        }
+        let picture = animation(&bytes, image::ImageFormat::Gif, 800)
+            .unwrap()
+            .unwrap();
+        let a = picture.animation.as_ref().expect("still animates");
+        assert_eq!(a.frames.len(), 20);
+        assert!(picture.cost() <= MAX_ANIMATION_BYTES);
+        let (w, h) = picture.frame.size();
+        assert_eq!((w, h), (400, 400), "the largest size that fits");
+        assert!(a.frames.iter().all(|f| f.size() == (w, h)));
+        assert_eq!(picture.natural, Natural::Pixels(800, 800));
     }
 
     #[test]
