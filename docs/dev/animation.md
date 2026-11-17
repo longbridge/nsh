@@ -123,8 +123,11 @@
   transition's `duration_ms` otherwise. The core's `transition.rs` (the desktops) and the web (a `linear()` easing of
   its samples) follow `progress`; Android draws its samples piecewise linear (curve 6 of `Mounter.Transition`); iOS
   gives the physics to `UISpringTimingParameters` in a `UIViewPropertyAnimator`, which settles by its own threshold,
-  a few milliseconds from `settle_ms`. No JS config names one: JS's `type: "spring"` is `LayoutCurve::FittedSpring
-  { damping_ratio }`, a spring fitted to the given duration (React Native's `springDamping`).
+  a few milliseconds from `settle_ms`. JS names one by its physics: a `type: "spring"` phase with `stiffness`,
+  `damping` (the coefficient) or `mass`, the others `Animated.spring`'s defaults (170, 26, 1), decodes to
+  `LayoutTransition::spring` (`duration` and `springDamping` unused), in `configureNext` and `ViewRef.animateLayout`
+  alike (`js/animation.rs`); without them `type: "spring"` is `LayoutCurve::FittedSpring { damping_ratio }`, a
+  spring fitted to the given duration (React Native's `springDamping`).
 - **A view that follows another** (`View::follow(target)`, `core/follow.rs`; `nsh/base`'s `Tabs` indicator): its frame
   along its parent's main axis is the target's, placed by the core after layout, with no layout of its own and no
   JS. Following another element runs its `follow_transition` as a layout animation of its own frame alone (a scope of
