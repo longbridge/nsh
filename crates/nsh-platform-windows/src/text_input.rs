@@ -836,7 +836,19 @@ impl Hosted for InputState {
         // shows, the background is transparent), or its first caret keeps
         // the height of the default font. The recording is in the content
         // box's points, as this item draws.
-        if let Some(drawn) = &*self.drawn.borrow() {
+        // RichEdit takes the text color as a COLORREF, which has no alpha
+        // (`colorref`): it would draw a transparent or translucent color
+        // opaque. The color's alpha is applied to its drawing here instead,
+        // so a field whose text is transparent (`OtpInput`'s, over its
+        // cells) shows nothing of its text.
+        let text_alpha = alpha(color);
+        if text_alpha > 0.0
+            && let Some(drawn) = &*self.drawn.borrow()
+        {
+            let faded = text_alpha < 1.0;
+            if faded {
+                cx.push_opacity(text_alpha);
+            }
             // SAFETY: a COM call between BeginDraw and EndDraw.
             unsafe {
                 cx.dc.DrawImage(
@@ -846,6 +858,9 @@ impl Hosted for InputState {
                     D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
                     D2D1_COMPOSITE_MODE_SOURCE_OVER,
                 );
+            }
+            if faded {
+                cx.pop();
             }
         }
 
@@ -901,6 +916,11 @@ fn base_bits(config: &InputConfig) -> u32 {
         bits |= TXTBIT_USEPASSWORD;
     }
     bits
+}
+
+/// The alpha of a color, 0 to 1: what [`colorref`] leaves out.
+fn alpha(c: Color) -> f32 {
+    (c.0 & 0xff) as f32 / 255.0
 }
 
 fn colorref(c: Color) -> COLORREF {
@@ -2295,6 +2315,12 @@ mod tests {
             colorref(Color::rgba(0x11, 0x22, 0x33, 0xff)),
             COLORREF(0x332211)
         );
+        // A COLORREF has no alpha: transparent comes out black, so the
+        // drawing takes the alpha apart.
+        assert_eq!(colorref(Color::rgba(0, 0, 0, 0)), COLORREF(0));
+        assert_eq!(alpha(Color::rgba(0, 0, 0, 0)), 0.0);
+        assert_eq!(alpha(Color::rgba(0x11, 0x22, 0x33, 0xff)), 1.0);
+        assert!((alpha(Color::rgba(0, 0, 0, 0x80)) - 0.502).abs() < 0.001);
     }
 
     #[test]
