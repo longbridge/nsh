@@ -1,7 +1,8 @@
 // The DatePicker demo: a due date on weekdays with a clear button, a
 // trip's range with presets, and a meeting's day and time; a booking's stay
 // priced by the night, a deadline with quick presets and a locked start, and
-// a weekday's time slots. On a phone
+// a weekday's time slots; on phones, a reminder set with the system's
+// picker (`nsh/mobile`'s `DateTimePicker`). On a phone
 // (headless runs are touch screens) the calendar is a sheet; on a desktop
 // a popup. The app's clock starts on Wednesday 2026-10-28, so today and
 // the presets are known; days are named by their ISO dates.
@@ -131,11 +132,11 @@ test("on a phone a reminder is set with the system's picker, which desktops leav
   const phone = await open("../App.tsx", { clock: { time: new Date(2026, 9, 28, 12) } });
   await phone.press("role:button[DatePicker]");
   await phone.waitFor("Reminder");
-  // Each part is the system's picker, a native component headless runs do
-  // not draw; the summary is the app's.
-  expect(phone.shows("id:reminder-starts")).toBe(true);
-  expect(phone.shows("id:reminder-at")).toBe(true);
-  expect(phone.shows("id:reminder-until")).toBe(true);
+  // Each row's picker is the system's, a native component headless runs do
+  // not size or draw; the rows and the summary are the app's.
+  expect(phone.shows("Starts")).toBe(true);
+  expect(phone.shows("Every day at")).toBe(true);
+  expect(phone.shows("Until")).toBe(true);
   expect(phone.shows("30 days")).toBe(true);
   const desk = await open("../App.tsx", { platform: "macos", width: 1200, height: 1700, clock: { time: new Date(2026, 9, 28, 12) } });
   await desk.press("role:button[DatePicker]");
