@@ -79,6 +79,7 @@ pub fn registries() -> &'static [Registry] {
         mobile
             .register::<crate::mobile::TabBar>()
             .register::<crate::mobile::SegmentedControl>()
+            .register::<crate::mobile::DateTimePicker>()
             .module::<android::BackHandler>()
             .module::<haptics::Haptics>();
         let mut os = Registry::runtime("os");
