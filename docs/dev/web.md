@@ -714,6 +714,9 @@ browsers' touches into what phones report:
   the page neither scrolls, zooms nor refreshes under the app and presses and pans get no `pointercancel`. Touch
   scrolling is the browser's: a `pointercancel` in a scroll view starts its drag, `touchend` ends it, a scroll within
   150 ms after it begins the glide, `scrollend` ends it (`touchScroll`, `scrolled`, `scrollEnded`).
+  A touch responder that blocks native scrolling (`setResponder`: a `TouchClaim` with `block_native`, JS's
+  `onResponderGrant` returning true) keeps its touches: a non-passive `touchmove` on the root prevents the browser's
+  scroll while it holds them (`responderBlocks`), unless the browser already scrolls (`cancelable` false).
 - **Wheels and touchpads** (`wheel`) go to the innermost scroll view along their axis that can move that way (a
   vertical wheel scrolls a horizontal view when no vertical one can) and stay on it while events come within 200 ms;
   notches glide, touchpads follow the fingers; snapping views move one snap point per scroll. Nothing to scroll: the

@@ -6757,6 +6757,8 @@ class Player {
         break;
       }
       case "zoomTo": if (el) this.zoomCommand(el, ...args); break;
+      case "setResponder": this.responderBlocks = !!args[0]; break;
+      case "clearResponder": this.responderBlocks = false; break;
       case "dialog": this.dialog(args[0], args[1], args[2], args[3], args[4] ?? [], args[5] ?? true, args[6] ?? false); break;
       case "reload": {
         const frame = el?._frameEl;
@@ -8280,6 +8282,14 @@ class Player {
     root.addEventListener("pointerdown", () => this.inputWith(1), true);
     window.addEventListener("keydown", (e) => MODALITY_KEYS_SKIPPED.has(e.key) || this.inputWith(0), true);
     root.addEventListener("pointerdown", (e) => this.pointerDown(e));
+    // A responder that blocks native scrolling (`setResponder`, a
+    // `TouchClaim`'s `block_native`) keeps its touches: the browser would
+    // scroll the scroll view around it and cancel them. One the browser
+    // already scrolls (`cancelable` false) stays the browser's, as a
+    // native scroll view that started dragging first takes them over.
+    root.addEventListener("touchmove", (e) => {
+      if (this.responderBlocks && e.cancelable) e.preventDefault();
+    }, { passive: false });
     // A link (`Link` with an `href`) is the app's to press: a plain click
     // stays in the app (its `onPress`), a click with a modifier or the
     // middle button opens its `href` as the browser would.
