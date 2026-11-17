@@ -22,7 +22,7 @@ use block2::RcBlock;
 use nsh_core::{
     Color, EdgeInsets, EventKind, EventPayload, HeaderItem, HeaderItemContent, HeaderSystemItem,
     ModalAnimation, ModalConfig, ModalPresentation, NavShader, NodeId, PayloadValue, Points,
-    ScreenAnimation, ScreenConfig, Size,
+    ScreenAnimation, ScreenConfig, SheetDetent, Size,
     desktop::{MenuAction, MenuItem},
     element::header::{KeptContent, same_right_buttons},
 };
@@ -44,8 +44,12 @@ use objc2_ui_kit::{
     UIMenuOptions, UIModalPresentationStyle, UIModalTransitionStyle, UINavigationBar,
     UINavigationBarAppearance, UINavigationController, UINavigationControllerDelegate,
     UINavigationItem, UINavigationItemLargeTitleDisplayMode, UIPresentationController, UIResponder,
-    UIScrollView, UIView, UIViewAutoresizing, UIViewController,
-    UIViewControllerTransitionCoordinator, UIViewControllerTransitionCoordinatorContext,
+    UIScrollView, UISheetPresentationController, UISheetPresentationControllerDelegate,
+    UISheetPresentationControllerDetent, UISheetPresentationControllerDetentIdentifierLarge,
+    UISheetPresentationControllerDetentIdentifierMedium,
+    UISheetPresentationControllerDetentResolutionContext, UIView, UIViewAutoresizing,
+    UIViewController, UIViewControllerTransitionCoordinator,
+    UIViewControllerTransitionCoordinatorContext,
 };
 
 use crate::{mount::SharedMounter, native_view::NshView};
@@ -213,6 +217,12 @@ pub(crate) struct ModalIvars {
     animated: Cell<bool>,
     /// The user closed it natively; the app has not hidden it yet.
     closed: Cell<bool>,
+    /// The identifiers of the sheet's UIKit detents and the detents
+    /// (`detents`) they stand for, to report the one the user picks.
+    detents: RefCell<Vec<(Retained<NSString>, SheetDetent)>>,
+    /// The height of the window it was presented over, which decides
+    /// between medium and large for a custom detent before iOS 16.
+    screen: Cell<CGFloat>,
 }
 
 define_class!(
@@ -327,6 +337,31 @@ define_class!(
                 .dispatch_event(id, EventKind::RequestClose, close_reason("swipe"));
         }
     }
+
+    unsafe impl UISheetPresentationControllerDelegate for ModalController {
+        /// The user moved the sheet to another detent (a drag, the
+        /// grabber, a scroll at its edge, a screen reader).
+        #[unsafe(method(sheetPresentationControllerDidChangeSelectedDetentIdentifier:))]
+        fn did_change_detent(&self, sheet: &UISheetPresentationController) {
+            let Some(selected) = sheet.selectedDetentIdentifier() else {
+                return;
+            };
+            let ivars = self.ivars();
+            let detent = ivars
+                .detents
+                .borrow()
+                .iter()
+                .find(|(identifier, _)| identifier.isEqualToString(&selected))
+                .map(|&(_, detent)| detent);
+            if let Some(detent) = detent {
+                ivars.control.dispatch_event(
+                    ivars.id,
+                    EventKind::DetentChange,
+                    detent.change_payload(),
+                );
+            }
+        }
+    }
 );
 
 impl ModalController {
@@ -340,6 +375,8 @@ impl ModalController {
             close_on_escape: Cell::new(false),
             animated: Cell::new(true),
             closed: Cell::new(false),
+            detents: RefCell::new(Vec::new()),
+            screen: Cell::new(0.0),
         });
         // SAFETY: UIViewController's designated initializer.
         unsafe {
@@ -356,6 +393,71 @@ impl ModalController {
         // A sheet that stays only reports the swipe
         // (`presentationControllerDidAttemptToDismiss:`).
         self.setModalInPresentation(!c.close_on_swipe);
+    }
+
+    /// Applies the sheet's detents, grabber and undimmed detent of `c`
+    /// (a sheet presentation only), against `old`, what it had (`None`
+    /// before it is presented: it opens at `detent`, else `defaultDetent`,
+    /// else the smallest). The app's `detent` moves it when it changes.
+    fn apply_sheet(&self, c: &ModalConfig, old: Option<&ModalConfig>) {
+        let Some(sheet) = self.sheetPresentationController() else {
+            return;
+        };
+        let has = |c: &ModalConfig| {
+            !c.detents.is_empty()
+                || c.grabber
+                || c.detent.is_some()
+                || c.default_detent.is_some()
+                || c.largest_undimmed_detent.is_some()
+        };
+        // A sheet without the options keeps UIKit's own defaults untouched.
+        if !has(c) && !old.is_some_and(has) {
+            return;
+        }
+        let same = old.is_some_and(|o| {
+            o.detents == c.detents
+                && o.grabber == c.grabber
+                && o.detent == c.detent
+                && o.largest_undimmed_detent == c.largest_undimmed_detent
+        });
+        if same {
+            return;
+        }
+        let mtm = self.mtm();
+        let made = sheet_detents(mtm, &c.detents, self.ivars().screen.get());
+        let identifier = |detent: Option<SheetDetent>| {
+            let detent = detent?;
+            made.iter()
+                .find(|d| d.detent == detent)
+                .map(|d| d.identifier.clone())
+        };
+        let selected = match old {
+            None => Some(identifier(c.detent.or(c.default_detent))),
+            Some(o) if o.detent != c.detent && c.detent.is_some() => Some(identifier(c.detent)),
+            Some(_) => None,
+        };
+        let undimmed = identifier(c.largest_undimmed_detent);
+        let natives: Vec<Retained<UISheetPresentationControllerDetent>> = if made.is_empty() {
+            // UIKit's default: the full height.
+            vec![UISheetPresentationControllerDetent::largeDetent(mtm)]
+        } else {
+            made.iter().map(|d| d.native.clone()).collect()
+        };
+        *self.ivars().detents.borrow_mut() =
+            made.into_iter().map(|d| (d.identifier, d.detent)).collect();
+        let apply = || {
+            sheet.setDetents(&NSArray::from_retained_slice(&natives));
+            sheet.setPrefersGrabberVisible(c.grabber);
+            sheet.setLargestUndimmedDetentIdentifier(undimmed.as_deref());
+            if let Some(selected) = &selected {
+                sheet.setSelectedDetentIdentifier(selected.as_deref());
+            }
+        };
+        if old.is_some() && self.presentingViewController().is_some() {
+            sheet.animateChanges(&RcBlock::new(apply));
+        } else {
+            apply();
+        }
     }
 
     /// Escape: reported as `cancel`, and closed natively with
@@ -407,6 +509,121 @@ impl ModalController {
             .control
             .dispatch_event(ivars.id, EventKind::Insets, insets_payload(insets));
     }
+}
+
+/// A UIKit detent made for a [`SheetDetent`], with its identifier.
+struct MadeDetent {
+    native: Retained<UISheetPresentationControllerDetent>,
+    /// Known when it is made: `-[UISheetPresentationControllerDetent
+    /// identifier]` needs iOS 16.
+    identifier: Retained<NSString>,
+    detent: SheetDetent,
+}
+
+/// The UIKit detents of `detents`: UIKit's medium and large, and a custom
+/// detent of the height asked for (iOS 16 and later; before, the nearer
+/// of medium and large). A detent that comes out the same as an earlier
+/// one is left out. `screen`: the height of the window, against which a
+/// height is a share before iOS 16.
+fn sheet_detents(
+    mtm: MainThreadMarker,
+    detents: &[SheetDetent],
+    screen: CGFloat,
+) -> Vec<MadeDetent> {
+    let class = <UISheetPresentationControllerDetent as ClassType>::class();
+    // SAFETY: `respondsToSelector:` on the class object.
+    let custom: bool =
+        unsafe { msg_send![class, respondsToSelector: sel!(customDetentWithIdentifier:resolver:)] };
+    let screen = screen.max(1.0);
+    let medium = || {
+        // SAFETY: a constant of UIKit since iOS 15, the oldest NSH runs on.
+        let identifier = unsafe { UISheetPresentationControllerDetentIdentifierMedium }.retain();
+        (
+            UISheetPresentationControllerDetent::mediumDetent(mtm),
+            identifier,
+        )
+    };
+    let large = || {
+        // SAFETY: as `medium`'s.
+        let identifier = unsafe { UISheetPresentationControllerDetentIdentifierLarge }.retain();
+        (
+            UISheetPresentationControllerDetent::largeDetent(mtm),
+            identifier,
+        )
+    };
+    let mut out: Vec<MadeDetent> = Vec::new();
+    for &detent in detents {
+        let (native, identifier) = match detent {
+            SheetDetent::Medium => medium(),
+            SheetDetent::Large => large(),
+            // Named by their value, so a detent the app moves in its list
+            // keeps its identifier and UIKit keeps it selected.
+            SheetDetent::Height(height) if custom => custom_detent(
+                mtm,
+                &format!("nsh.height.{:08x}", height.0.to_bits()),
+                detent,
+            ),
+            SheetDetent::Fraction(fraction) if custom => custom_detent(
+                mtm,
+                &format!("nsh.fraction.{:08x}", fraction.0.to_bits()),
+                detent,
+            ),
+            SheetDetent::Height(_) | SheetDetent::Fraction(_) => {
+                let share = match detent {
+                    SheetDetent::Height(height) => height.0 as CGFloat / screen,
+                    SheetDetent::Fraction(fraction) => fraction.0 as CGFloat,
+                    SheetDetent::Medium | SheetDetent::Large => 1.0,
+                };
+                if share < 0.75 { medium() } else { large() }
+            }
+        };
+        if out
+            .iter()
+            .any(|made| made.identifier.isEqualToString(&identifier))
+        {
+            continue;
+        }
+        out.push(MadeDetent {
+            native,
+            identifier,
+            detent,
+        });
+    }
+    out
+}
+
+/// A custom UIKit detent (iOS 16 and later) named `name`, at the height
+/// of `detent` (`Height` or `Fraction`) within the sheet's room.
+fn custom_detent(
+    mtm: MainThreadMarker,
+    name: &str,
+    detent: SheetDetent,
+) -> (
+    Retained<UISheetPresentationControllerDetent>,
+    Retained<NSString>,
+) {
+    let identifier = NSString::from_str(name);
+    let resolver = RcBlock::new(
+        move |context: NonNull<
+            ProtocolObject<dyn UISheetPresentationControllerDetentResolutionContext>,
+        >|
+              -> CGFloat {
+            // SAFETY: UIKit passes a live context for the call.
+            let max = unsafe { context.as_ref() }.maximumDetentValue();
+            let height = match detent {
+                SheetDetent::Height(height) => height.0 as CGFloat,
+                SheetDetent::Fraction(fraction) => max * fraction.0 as CGFloat,
+                SheetDetent::Medium | SheetDetent::Large => max,
+            };
+            height.clamp(0.0, max)
+        },
+    );
+    let native = UISheetPresentationControllerDetent::customDetentWithIdentifier_resolver(
+        Some(&identifier),
+        &resolver,
+        mtm,
+    );
+    (native, identifier)
 }
 
 pub(crate) struct NavIvars {
@@ -1356,12 +1573,21 @@ impl StackHost {
     /// the stack (appearance callbacks, safe areas, rotation).
     pub(crate) fn contain(&mut self) {
         // A split's column: the split is its parent.
-        if self.contained || self.split.is_some() || self.container.window().is_none() {
+        if self.contained || self.split.is_some() {
             return;
         }
         let Some(parent) = controller_of(&self.container) else {
             return;
         };
+        // Off screen, the controller found may not be the one that shows
+        // the stack yet; a dialog's is (its views are its own), and its
+        // stack joins it before the dialog is presented, which happens
+        // after its first screens are given, in the same batch.
+        if self.container.window().is_none()
+            && !parent.isKindOfClass(<ModalController as ClassType>::class())
+        {
+            return;
+        }
         parent.addChildViewController(&self.nav);
         self.nav.didMoveToParentViewController(Some(&parent));
         self.contained = true;
@@ -1947,13 +2173,13 @@ impl ModalHost {
         while let Some(next) = presenter.presentedViewController() {
             presenter = next;
         }
-        let c = self.config;
+        let c = &self.config;
         let controller = &self.controller;
         controller
             .ivars()
             .orientations
             .set(crate::system::orientation_mask(c.orientations));
-        controller.set_flags(&c);
+        controller.set_flags(c);
         // Full screen, the modal has no look of its own: the app's popup
         // and backdrop show over what is behind. Sheets are the system's.
         let sheet = c.presentation != ModalPresentation::FullScreen;
@@ -1992,20 +2218,37 @@ impl ModalHost {
             // presentation.
             unsafe { p.setDelegate(Some(ProtocolObject::from_ref(&**controller))) };
         }
+        // Its detents and grabber, set before it is presented, as UIKit
+        // asks.
+        if let Some(window) = from.window() {
+            controller.ivars().screen.set(window.bounds().size.height);
+        }
+        controller.apply_sheet(c, None);
         // Presented outside the surface: the app's appearance is set on
         // it too.
         controller.setOverrideUserInterfaceStyle(crate::system::appearance());
+        // Its container (a sheet's glass) is styled again once shown: UIKit
+        // makes the views of the presentation as it runs.
+        let shown = controller.clone();
+        let done = RcBlock::new(move || {
+            crate::system::style_presented(&shown, crate::system::appearance());
+        });
         presenter.presentViewController_animated_completion(
             controller,
             c.animation != ModalAnimation::None && !at_once,
-            None,
+            Some(&done),
         );
+        crate::system::style_presented(controller, crate::system::appearance());
         self.presented = true;
     }
 
-    /// Applies `config` (the close flags also while presented).
+    /// Applies `config` (the close flags and the sheet's detents also
+    /// while presented).
     pub(crate) fn configure(&mut self, config: ModalConfig) {
         self.controller.set_flags(&config);
+        if self.presented && !self.controller.ivars().closed.get() {
+            self.controller.apply_sheet(&config, Some(&self.config));
+        }
         self.config = config;
     }
 

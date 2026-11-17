@@ -37,7 +37,9 @@
   `transform` lists, `translate` / `scale` pairs, shadows' layers (`{ x, y, blur, spread, color, inset }`),
   `pointerEvents`' `box-none` / `box-only` (React Native's, for the view alone), `textOverflow`'s `ellipsis-start` /
   `ellipsis-middle` (where a clamped text is cut), `textAlign`'s `auto` (React Native's: the text's natural side, by its
-  direction); variants past Tailwind's: `selected:` (`accessibilityState.selected`, `selectedStyle`), `ios:` /
+  direction), `transitionTimingFunction`'s `spring(stiffness, damping[, mass])` (class `ease-spring-[k,c]` /
+  `ease-spring-[k,c,m]`, `Styled::ease_spring`: a transition on a spring's physics that times itself,
+  `Transition::spring`; `animation.md`); variants past Tailwind's: `selected:` (`accessibilityState.selected`, `selectedStyle`), `ios:` /
   `android:` / `web:` (the platform), `terminal:` (drawn in a terminal, `Idiom::Terminal`). A new one joins this list.
 - **CSS's meanings**: inline styles mean what classes mean: a style key is the CSS property of its name (or of the form
   "Forms past CSS's" gives it). Every view, however it is styled, keeps

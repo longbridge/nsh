@@ -99,7 +99,7 @@ fn app_config(
         limits: nsh_engine::Limits::default(),
         ui_sets,
         runtime: None,
-        data_dir: None,
+        support_dir: None,
         cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
@@ -112,6 +112,7 @@ fn app_config(
         audio: None,
         windows: None,
         login_item: None,
+        data_dir: None,
     }
 }
 
@@ -12069,6 +12070,233 @@ fn the_segmented_control_shows_nothing_off_ios() {
                 .items
                 .iter()
                 .any(|i| is_component(i, SEGMENTED_CONTROL_COMPONENT))),
+            "{os:?}"
+        );
+    }
+}
+
+const SWITCH: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { Switch } from "nsh/mobile";
+const on = signal(false);
+const locked = signal(false);
+mount(() => <View>
+  <Switch checked={on()} accessibilityLabel="Notifications"
+    onChange={({ checked }) => on.set(checked)} />
+  <Switch checked={locked()} disabled accessibilityLabel="Locked"
+    onChange={() => {}} />
+  <Text>{`On: ${on()}`}</Text>
+</View>);
+"#;
+
+/// The native switches mounted in `batches`, in order.
+fn switches(batches: &[MountBatch]) -> Vec<u32> {
+    batches
+        .iter()
+        .flat_map(|batch| &batch.items)
+        .filter_map(|item| match item {
+            MountItem::Component { id, name }
+                if &**name == nsh_core::platform::SWITCH_COMPONENT =>
+            {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// `nsh/mobile`'s `Switch` is the system's switch on iOS and Android: its
+/// value, `disabled` and label reach it, the user's flip comes back as
+/// `onChange({ checked })`, the app's new value reaches the same switch,
+/// and a flip the app has heard bumps `revision`, so the switch shows
+/// a value the app kept again.
+#[test]
+fn the_switch_is_the_systems_on_mobile_and_follows_the_app() {
+    use nsh_core::platform::Os;
+
+    for os in [Os::Ios, Os::Android] {
+        let (engine, rx) = start_in(
+            SWITCH,
+            Environment {
+                os,
+                ..Environment::default()
+            },
+        );
+        let initial = until(&rx, |batch| shows(batch, "On: false"));
+        let ids = switches(&initial);
+        assert_eq!(ids.len(), 2, "two switches on {os:?}");
+        // Each switch by its label: the mount order is not the tree's.
+        let by_label = |label: &str| {
+            *ids.iter()
+                .find(|&&id| {
+                    component_prop(&initial, id, "accessibilityLabel")
+                        == Some(serde_json::json!(label))
+                })
+                .unwrap_or_else(|| panic!("the {label} switch on {os:?}"))
+        };
+        let (on, locked) = (by_label("Notifications"), by_label("Locked"));
+        assert_eq!(
+            component_prop(&initial, on, "checked"),
+            Some(serde_json::json!(false))
+        );
+        assert_eq!(
+            component_prop(&initial, on, "disabled"),
+            Some(serde_json::json!(false))
+        );
+        assert_eq!(
+            component_prop(&initial, locked, "disabled"),
+            Some(serde_json::json!(true))
+        );
+        // The app follows the flip.
+        engine.control().dispatch_event(
+            on,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: "change".into(),
+                data: serde_json::json!(true),
+            },
+        );
+        let updates = until(&rx, |batch| shows(batch, "On: true"));
+        assert_eq!(
+            component_prop(&updates, on, "checked"),
+            Some(serde_json::json!(true)),
+            "{os:?}"
+        );
+        // The app keeps its value: the switch is told it again.
+        engine.control().dispatch_event(
+            locked,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: "change".into(),
+                data: serde_json::json!(true),
+            },
+        );
+        let kept = until(&rx, |batch| {
+            component_prop(std::slice::from_ref(batch), locked, "revision").is_some()
+        });
+        assert_eq!(
+            component_prop(&kept, locked, "revision"),
+            Some(serde_json::json!(1)),
+            "{os:?}"
+        );
+        assert_eq!(
+            component_prop(&kept, locked, "checked"),
+            None,
+            "the kept value stays as it was on {os:?}"
+        );
+    }
+}
+
+/// The desktops and the web have no system switch: it takes no room and
+/// makes no component.
+#[test]
+fn the_switch_shows_nothing_off_mobile() {
+    use nsh_core::platform::Os;
+
+    for os in [Os::MacOs, Os::Web] {
+        let (_engine, rx) = start_in(
+            SWITCH,
+            Environment {
+                os,
+                ..Environment::default()
+            },
+        );
+        let batches = until(&rx, |batch| shows(batch, "On: false"));
+        assert!(switches(&batches).is_empty(), "{os:?}");
+    }
+}
+
+const DATE_TIME_PICKER: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { DateTimePicker } from "nsh/mobile";
+const value = signal("2026-11-17T09:30");
+mount(() => <View>
+  <DateTimePicker mode="dateTime" value={value()} min="2026-11-01T00:00" max="bogus"
+    minuteInterval={7} onChange={({ value: v }) => value.set(v)} />
+  <Text>{`Picked: ${value()}`}</Text>
+</View>);
+"#;
+
+/// `nsh/mobile`'s `DateTimePicker` is the system's picker on iOS and
+/// Android: its value and bounds reach it as fields, a minute step that
+/// does not divide an hour and a bound that is no date are not passed on,
+/// and the user's pick comes back as `onChange({ value })` in the mode's
+/// form.
+#[test]
+fn the_date_time_picker_is_the_systems_on_mobile_and_reports_the_pick() {
+    use nsh_core::platform::{DATE_TIME_PICKER_COMPONENT, Os};
+
+    for os in [Os::Ios, Os::Android] {
+        let (engine, rx) = start_in(
+            DATE_TIME_PICKER,
+            Environment {
+                os,
+                ..Environment::default()
+            },
+        );
+        let initial = until(&rx, |batch| shows(batch, "Picked: 2026-11-17T09:30"));
+        let picker = component_id(&initial, DATE_TIME_PICKER_COMPONENT).expect("the picker");
+        assert_eq!(
+            component_prop(&initial, picker, "mode"),
+            Some(serde_json::json!("dateTime"))
+        );
+        assert_eq!(
+            component_prop(&initial, picker, "value"),
+            Some(
+                serde_json::json!({ "year": 2026, "month": 11, "day": 17, "hour": 9, "minute": 30 })
+            )
+        );
+        assert_eq!(
+            component_prop(&initial, picker, "min"),
+            Some(
+                serde_json::json!({ "year": 2026, "month": 11, "day": 1, "hour": 0, "minute": 0 })
+            )
+        );
+        assert_eq!(
+            component_prop(&initial, picker, "max"),
+            Some(serde_json::json!(null))
+        );
+        assert_eq!(
+            component_prop(&initial, picker, "minuteInterval"),
+            Some(serde_json::json!(1))
+        );
+        engine.control().dispatch_event(
+            picker,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: "change".into(),
+                data: serde_json::json!({ "year": 2026, "month": 12, "day": 1, "hour": 18, "minute": 45 }),
+            },
+        );
+        let updates = until(&rx, |batch| shows(batch, "Picked: 2026-12-01T18:45"));
+        assert_eq!(
+            component_prop(&updates, picker, "value"),
+            Some(
+                serde_json::json!({ "year": 2026, "month": 12, "day": 1, "hour": 18, "minute": 45 })
+            ),
+            "{os:?}"
+        );
+    }
+}
+
+/// The desktops and the web have no system date picker: it takes no room
+/// and makes no component.
+#[test]
+fn the_date_time_picker_shows_nothing_off_mobile() {
+    use nsh_core::platform::{DATE_TIME_PICKER_COMPONENT, Os};
+
+    for os in [Os::MacOs, Os::Web] {
+        let (_engine, rx) = start_in(
+            DATE_TIME_PICKER,
+            Environment {
+                os,
+                ..Environment::default()
+            },
+        );
+        let batches = until(&rx, |batch| shows(batch, "Picked: 2026-11-17T09:30"));
+        assert!(
+            !batches.iter().any(|b| b
+                .items
+                .iter()
+                .any(|i| is_component(i, DATE_TIME_PICKER_COMPONENT))),
             "{os:?}"
         );
     }

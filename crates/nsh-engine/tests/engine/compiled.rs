@@ -75,7 +75,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
-        data_dir: None,
+        support_dir: None,
         cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
@@ -88,6 +88,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         audio: None,
         windows: None,
         login_item: None,
+        data_dir: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -255,7 +256,7 @@ fn start_app_culling(
         limits: nsh_engine::Limits::default(),
         ui_sets: vec![nsh_base::registry(), crate::test_ui::registry()],
         runtime: None,
-        data_dir: None,
+        support_dir: None,
         cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
@@ -268,6 +269,7 @@ fn start_app_culling(
         audio: None,
         windows: None,
         login_item: None,
+        data_dir: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -1200,7 +1202,7 @@ fn dialogs_report_cancels_and_closes_with_their_reason() {
         .items
         .iter()
         .find_map(|i| match i {
-            MountItem::ModalConfig { id, config } if *id == modal => Some(*config),
+            MountItem::ModalConfig { id, config } if *id == modal => Some(config.clone()),
             _ => None,
         })
         .expect("its config");
@@ -1234,6 +1236,82 @@ fn dialogs_report_cancels_and_closes_with_their_reason() {
     control.dispatch_event(modal, EventKind::RequestClose, EventPayload::None);
     next(&rx, |b| {
         log_of(b).is_some_and(|l| l.ends_with(",cancel,cancel,change false cancel"))
+    });
+}
+
+const SHEET_DETENTS: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { Dialog } from "nsh/base";
+
+const log = signal<string[]>([]);
+
+mount(() => (
+  <View style={{ flex: 1 }}>
+    <Text>{`log ${log().join(",")}`}</Text>
+    <Dialog
+      presentation="pageSheet"
+      detents={["medium", { height: 200 }, { fraction: 0.4 }, "bogus", { fraction: 3 }, { height: -1 }, { height: NaN }] as any}
+      detent="medium"
+      defaultDetent="large"
+      grabber
+      largestUndimmedDetent={{ fraction: 0.4 }}
+      onDetentChange={({ detent }) => log.update((l) => [...l, JSON.stringify(detent)])}
+    >
+      <Text>in sheet</Text>
+    </Dialog>
+  </View>
+));
+"#;
+
+/// A dialog's sheet options reach the platform from TSX as the core's
+/// `SheetDetent`s, detents that are not one left out; the platform's
+/// `DetentChange` payload reaches the app as the same JS value.
+#[test]
+fn sheet_detents_reach_the_platform_and_the_users_moves_the_app() {
+    use nsh_core::{SheetDetent, geometry::Percentage};
+    let (engine, rx) = start_app(SHEET_DETENTS);
+    let control = engine.control();
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let modal = modal_of(&first).expect("a dialog");
+    let config = first
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::ModalConfig { id, config } if *id == modal => Some(config.clone()),
+            _ => None,
+        })
+        .expect("its config");
+    assert_eq!(
+        config.detents,
+        vec![
+            SheetDetent::Medium,
+            SheetDetent::Height(Points(200.0)),
+            SheetDetent::Fraction(Percentage(0.4)),
+        ]
+    );
+    assert_eq!(config.detent, Some(SheetDetent::Medium));
+    assert_eq!(config.default_detent, Some(SheetDetent::Large));
+    assert!(config.grabber);
+    assert_eq!(
+        config.largest_undimmed_detent,
+        Some(SheetDetent::Fraction(Percentage(0.4)))
+    );
+    control.dispatch_event(
+        modal,
+        EventKind::DetentChange,
+        SheetDetent::Height(Points(200.0)).change_payload(),
+    );
+    next(&rx, |b| {
+        log_of(b).as_deref() == Some(r#"log {"height":200}"#)
+    });
+    control.dispatch_event(
+        modal,
+        EventKind::DetentChange,
+        SheetDetent::Large.change_payload(),
+    );
+    next(&rx, |b| {
+        log_of(b).as_deref() == Some(r#"log {"height":200},"large""#)
     });
 }
 

@@ -67,6 +67,7 @@ mod offscreen;
 pub(crate) use offscreen::render as render_offscreen;
 
 use crate::{
+    image::CanvasBitmap,
     surface::Surface,
     view::{NshView, ViewState},
 };
@@ -89,7 +90,7 @@ pub(crate) struct CanvasState {
     args: Vec<Option<AnimationValue>>,
     /// The images the drawing names, by URI: `None` while loading (or
     /// when they failed to load).
-    images: FxHashMap<Arc<str>, Option<CFRetained<CGImage>>>,
+    images: FxHashMap<Arc<str>, Option<CanvasBitmap>>,
     /// Finds what a change of slots redraws ([`set_args`]).
     scan: DamageScan,
     /// The slots that changed (scratch space of [`set_args`]).
@@ -214,10 +215,12 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, drawing: Arc<Drawing>) 
         c.painted.set(None);
         c.drawing = Some(drawing);
     }
+    // An SVG is rasterized for the screen it shows on.
+    let scale = view.ns().window().map_or(2.0, |w| w.backingScaleFactor()) as f32;
     for uri in load {
         let view = view.clone();
         let key = uri.clone();
-        crate::image::load(surface, &uri, move |result| {
+        crate::image::load(surface, &uri, scale, move |result| {
             let image = match result {
                 Ok(image) => image,
                 Err(e) => {
@@ -745,7 +748,7 @@ impl Default for State {
 struct Replay<'a> {
     c: &'a CGContext,
     args: &'a [Option<AnimationValue>],
-    images: &'a FxHashMap<Arc<str>, Option<CFRetained<CGImage>>>,
+    images: &'a FxHashMap<Arc<str>, Option<CanvasBitmap>>,
     state: State,
     stack: Vec<State>,
     /// The current path, in the view's space.
@@ -1359,22 +1362,24 @@ impl<'a> Replay<'a> {
     }
 
     fn image(&self, uri: &str, density: f32, source: Option<[f32; 4]>, dest: &[Num; 4]) {
-        let Some(Some(image)) = self.images.get(uri) else {
+        let Some(Some(CanvasBitmap { image, scale })) = self.images.get(uri) else {
             return;
         };
         let mut part: Option<CFRetained<CGImage>> = None;
         // Its pixels over its file name's density (`@3x`), as an `Image`'s,
-        // never the screen's: the same size on every display.
+        // never the screen's: the same size on every display. The source
+        // rectangle and the default size are in the image's own units: an
+        // SVG drawn sharp has `scale` pixels to each.
         let density = f64::from(density);
         let size = (
-            CGImage::width(Some(image)) as f64 / density,
-            CGImage::height(Some(image)) as f64 / density,
+            CGImage::width(Some(image)) as f64 / scale / density,
+            CGImage::height(Some(image)) as f64 / scale / density,
         );
         let [dx, dy, mut dw, mut dh] = dest.map(|v| self.n(v));
         if let Some([sx, sy, sw, sh]) = source {
             let rect = CGRect::new(
-                CGPoint::new(sx as f64, sy as f64),
-                CGSize::new(sw as f64, sh as f64),
+                CGPoint::new(sx as f64 * scale, sy as f64 * scale),
+                CGSize::new(sw as f64 * scale, sh as f64 * scale),
             );
             part = CGImage::with_image_in_rect(Some(image), rect);
             if part.is_none() {
@@ -1937,9 +1942,15 @@ mod tests {
                     }],
                     ..Drawing::default()
                 })),
-                images: [(Arc::from(uri), Some(opaque_image(60, 30)))]
-                    .into_iter()
-                    .collect(),
+                images: [(
+                    Arc::from(uri),
+                    Some(CanvasBitmap {
+                        image: opaque_image(60, 30),
+                        scale: 1.0,
+                    }),
+                )]
+                .into_iter()
+                .collect(),
                 ..CanvasState::default()
             };
             let bytes = pixels(&canvas);

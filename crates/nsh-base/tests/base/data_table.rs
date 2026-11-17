@@ -518,3 +518,49 @@ fn web_scaled_scrollbar_does_not_follow_the_hit_layers_recenter() {
     control.scroll(bar, Point::default(), 0);
     app.wait_for("First row 0").unwrap();
 }
+
+#[component]
+fn ToggleFixedEdge() -> impl IntoElement {
+    let edge_on = signal(false);
+    let mut fixed = column("id");
+    fixed.fixed = nsh_base::data_table::ColumnFixed::Left;
+    fixed.width = Some(px(80.0));
+    let cols = vec![fixed, column("val")];
+    let rows = DataTableRows::new(4)
+        .texts("id", ["#0", "#1", "#2", "#3"])
+        .numbers("val", [1.0, 2.0, 3.0, 4.0]);
+    view()
+        .size_full()
+        .child(
+            view()
+                .on_press(move || edge_on.set(!edge_on.get()))
+                .child(text("Toggle edge")),
+        )
+        .child(
+            data_table()
+                .columns(cols)
+                .data(rows)
+                .classes(move || {
+                    let mut c = nsh_base::DataTableClasses::default();
+                    if edge_on.get() {
+                        c.fixed_edge = Some("bg-border".into());
+                    }
+                    c
+                })
+                .flex_1(),
+        )
+}
+
+#[test]
+fn unstyled_fixed_edge_mounts_no_separator_views_until_styled() {
+    let mut app = start::<ToggleFixedEdge>();
+    let without_edge = app.screen().layout_nodes().len();
+    app.press("text:Toggle edge").unwrap();
+    let with_edge = app.screen().layout_nodes().len();
+    assert!(
+        with_edge >= without_edge + 5,
+        "expected body + row fixedEdge views when styled ({without_edge} -> {with_edge})"
+    );
+    app.press("text:Toggle edge").unwrap();
+    assert_eq!(app.screen().layout_nodes().len(), without_edge);
+}

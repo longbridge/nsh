@@ -67,8 +67,8 @@ pub(crate) struct Host {
     /// The embedding app's runtime for apps loaded from now on.
     runtime: Mutex<Option<tokio::runtime::Handle>>,
     /// Where loaded apps keep their data, each in a directory named by its
-    /// id ([`EngineConfig::data_dir`]): `nsh` in the files directory.
-    pub(crate) data_dir: Option<std::path::PathBuf>,
+    /// id ([`EngineConfig::support_dir`]): `nsh` in the files directory.
+    pub(crate) support_dir: Option<std::path::PathBuf>,
     /// The directory loaded apps keep their storage in, overriding their own
     /// (`NshView.setStorageDirectory`); `None`: theirs.
     storage: Mutex<Option<std::path::PathBuf>>,
@@ -234,7 +234,8 @@ impl Host {
             limits: *self.limits.lock().expect("limits"),
             ui_sets: crate::ui_sets(),
             runtime: self.runtime.lock().expect("runtime").clone(),
-            data_dir: self.data_dir.clone(),
+            support_dir: self.support_dir.clone(),
+            data_dir: None,
             cache,
             storage: self.storage.lock().expect("storage").as_ref().map(|dir| {
                 nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>
@@ -664,7 +665,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
     view: JObject<'_>,
     density: jfloat,
     trace: jboolean,
-    data_dir: JString<'_>,
+    support_dir: JString<'_>,
     cache_dir: JString<'_>,
 ) -> jlong {
     #[cfg(feature = "websocket")]
@@ -672,8 +673,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
     let Ok(view) = env.new_global_ref(view) else {
         return 0;
     };
-    let data_dir = env
-        .get_string(&data_dir)
+    let support_dir = env
+        .get_string(&support_dir)
         .ok()
         .map(|dir| std::path::PathBuf::from(String::from(dir)));
     let cache_dir = (!cache_dir.is_null())
@@ -711,7 +712,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         granted: Mutex::new(None),
         limits: Mutex::new(nsh_engine::Limits::default()),
         runtime: Mutex::new(None),
-        data_dir,
+        support_dir,
         storage: Mutex::new(None),
         access: Mutex::new(Arc::default()),
         host_tokens: Mutex::new(None),
@@ -1337,6 +1338,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
     environment.audio = true;
     // A chooser over `ACTION_SEND` (`Share.java`).
     environment.share = true;
+    // A Custom Tab, ended by the callback link (`AuthSession.java`).
+    environment.auth_session = true;
     environment.os_version = (v[11] as u16, 0);
     environment.idiom = match v[12] as u8 {
         1 => Idiom::Pad,

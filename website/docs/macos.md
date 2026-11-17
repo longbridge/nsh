@@ -293,6 +293,7 @@ The environment is a desktop's: the safe area and the keyboard height are 0, `id
 [Device and environment](./device-and-environment.md).
 
 Input is a desktop's: the mouse, the trackpad (scrolling with momentum, pinch and rotation) and the keyboard.
+Trackpad tap-to-click briefly shows the app’s `active:` feedback even when the press and release arrive together; press callbacks run at release. Reduced motion keeps immediate visual release.
 A zoomable scroll view zooms with a trackpad pinch or Control + wheel around the pointer, and scrolls both ways while
 zoomed.
 Selectable text is selected by dragging, double- and triple-clicking, and copied with Cmd+C. Escape, Option+Left,

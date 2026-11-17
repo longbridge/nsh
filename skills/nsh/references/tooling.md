@@ -226,7 +226,7 @@ nsh package --target web              # static site
 { "version": "1.2.0", "updater": { "github": "owner/repo" } }
 ```
 
-With your own host, `"updater": { "url": "https://dl.example.com/app/latest.json", "publicKey": "<keys/update.pub>" }`; the key is required there.
+With your own host, `"updater": { "url": "https://dl.example.com/app/latest.json", "publicKey": "<keys/update.pub>" }`; the key is required there. A beta for users who opt in: add `"channels": { "beta": "<its latest.json URL>" }` (needs `publicKey`) and call `checkForUpdate({ channel: "beta" })`; the code can pass only a declared name.
 
 ```tsx
 import { openUrl } from "nsh";
@@ -242,6 +242,8 @@ export async function update() {
   }
 }
 ```
+
+`installOnQuit()` instead of `installAndRestart()` checks the update now and installs it when the app quits, without a restart (an "Install on Quit" button).
 
 Release: raise `version` (semver), run `nsh package` per platform to get its archive, then run `nsh update-manifest *.tar.gz *.zip --notes CHANGES.md --key keys/update.secret`, and upload the archives, `latest.json` and `latest.json.sig`. In a development run, `checkForUpdate` resolves `null`. Drafts and prereleases on GitHub are not offered.
 

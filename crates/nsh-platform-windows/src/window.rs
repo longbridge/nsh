@@ -127,6 +127,9 @@ struct WindowData {
     /// placed again yet) its rects say nothing about it, and the system
     /// asks for its track sizes then.
     extents: Cell<Option<(i32, i32, i32, i32)>>,
+    /// What its rectangle took beyond its visible edge the last time it was
+    /// in the normal mode, and at what DPI ([`normal_margins`]).
+    margins: Cell<Option<(crate::window_state::Margins, u32)>>,
     /// Where the window was before it went full screen.
     windowed: Cell<Option<WINDOWPLACEMENT>>,
     /// Its frame's style bits before it went full screen.
@@ -243,6 +246,7 @@ pub(crate) fn create(
         surrogate: Cell::new(0),
         sys_char: Cell::new(false),
         extents: Cell::new(None),
+        margins: Cell::new(None),
         windowed: Cell::new(None),
         windowed_style: Cell::new(0),
         shell: crate::shell::Shell::new(nsh_core::desktop::WindowKind::Normal),
@@ -350,6 +354,7 @@ pub(crate) fn create_app_window(
         surrogate: Cell::new(0),
         sys_char: Cell::new(false),
         extents: Cell::new(None),
+        margins: Cell::new(None),
         windowed: Cell::new(None),
         windowed_style: Cell::new(0),
         shell,
@@ -457,6 +462,22 @@ pub(crate) fn app_window_root(hwnd: HWND) -> Option<NodeId> {
 pub(crate) fn set_windowed_style(hwnd: HWND, style: isize) {
     if let Some(data) = data(hwnd) {
         data.windowed_style.set(style);
+    }
+}
+
+/// What `hwnd`'s rectangle took beyond its visible edge the last time it
+/// was in the normal mode, at `dpi` (the frame scales with the window).
+pub(crate) fn normal_margins(hwnd: HWND, dpi: u32) -> Option<crate::window_state::Margins> {
+    let ((l, t, r, b), at) = data(hwnd)?.margins.get()?;
+    let scale = |v: i32| (v as f32 * dpi as f32 / at as f32).round() as i32;
+    Some((scale(l), scale(t), scale(r), scale(b)))
+}
+
+/// Keeps what `hwnd`'s rectangle takes beyond its visible edge in the
+/// normal mode, at `dpi` ([`normal_margins`]).
+pub(crate) fn set_normal_margins(hwnd: HWND, margins: crate::window_state::Margins, dpi: u32) {
+    if let Some(data) = data(hwnd) {
+        data.margins.set(Some((margins, dpi)));
     }
 }
 

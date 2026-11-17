@@ -80,7 +80,7 @@ pub use nsh_js::BYTECODE_VERSION;
 pub use nsh_package as package;
 use rustc_hash::FxHashMap;
 #[cfg(not(target_arch = "wasm32"))]
-pub use storage::{FileStorage, data_dir};
+pub use storage::{FileStorage, resolve_data_dir, support_dir};
 
 use crate::script::{NetworkQueue, RequestId, Script};
 pub use crate::{
@@ -965,19 +965,31 @@ pub struct EngineConfig {
     /// The tokio runtime the components' async tasks use (timers, IO,
     /// background work); `None`: one shared by the engines of the process.
     pub runtime: Option<tokio::runtime::Handle>,
-    /// Where apps keep their data: each app in `<data_dir>/<app id>`
-    /// ([`App::app_id`]; `default` without one), its storage
-    /// (`nsh/storage`) in `storage.json` there. The platform's: the
-    /// system's data directory ([`data_dir`]) for apps of their own,
-    /// `…/nsh` in an embedding app's. `None`: nothing is kept.
+    /// Where apps keep their data when [`EngineConfig::data_dir`] names
+    /// none: each app in `<support_dir>/<app id>` ([`App::app_id`];
+    /// `default` without one). The platforms give the system's directory
+    /// for apps' data ([`support_dir`]) unless told otherwise; an app that
+    /// embeds nsh gives its own (`…/nsh` in its data directory), as do
+    /// development hosts that keep a run's data apart; it is known before
+    /// the app's id is. `None` with no `data_dir` either: nothing is kept
+    /// on disk (an engine made for a test). The platforms' to set, not
+    /// apps': an app names its own directory with
+    /// [`data_dir`](Self::data_dir).
+    #[doc(hidden)]
+    pub support_dir: Option<std::path::PathBuf>,
+    /// The app's own data directory, used as it is (no app id appended):
+    /// its storage (`nsh/storage`, `storage.json` there), `process.dataDir`
+    /// and the `${dataDir}` of its file grants. The desktop runners set it
+    /// from `nsh.json` `"dataDir"`. `None`: `<support_dir>/<app id>`.
     pub data_dir: Option<std::path::PathBuf>,
     /// Where the app's caches are kept and how much each keeps: the engine
     /// opens them in `<root>/<app id>/<kind>` ([`Engine::image_cache`]).
     /// [`EngineConfig::new`]: none.
     pub cache: CacheOptions,
-    /// The app's storage, overriding the one [`EngineConfig::data_dir`]
-    /// names (the browser's `localStorage`, an embedder's own); `None`
-    /// with no data directory either: in memory, for the engine's life.
+    /// The app's storage, overriding the `storage.json` in its data
+    /// directory (the browser's `localStorage`, an embedder's own, a
+    /// test's stand-in); `None` where the system has no data directory
+    /// either: in memory, for the engine's life.
     pub storage: Option<Arc<dyn nsh_core::storage::StorageBackend>>,
     /// The time the app runs on: the system's, or a manual clock a test
     /// moves (`nsh_core::time::Clock::manual`), which its timers, frames
@@ -1149,6 +1161,7 @@ impl EngineConfig {
             limits: Limits::default(),
             ui_sets: Vec::new(),
             runtime: None,
+            support_dir: None,
             data_dir: None,
             cache: CacheOptions::off(),
             storage: None,
@@ -1167,8 +1180,8 @@ impl EngineConfig {
 
     /// Where a runner opens the main window of an app with nsh.json
     /// `window.restoreBounds`: the placement its last run kept in its
-    /// storage ([`EngineConfig::storage`], or the file in its directory of
-    /// [`EngineConfig::data_dir`]), fitted on `displays`, the ones there
+    /// storage ([`EngineConfig::storage`], or the file in its data
+    /// directory), fitted on `displays`, the ones there
     /// are now. Read before making the window; `None` without
     /// `restoreBounds` or a kept placement. The engine keeps it as the
     /// window changes (the environment's window state).
@@ -1182,15 +1195,25 @@ impl EngineConfig {
     }
 }
 
+/// The data directory of the app `config` runs: [`EngineConfig::data_dir`],
+/// or `<support_dir>/<app id>`; `None` with neither.
+fn data_dir(config: &EngineConfig) -> Option<std::path::PathBuf> {
+    config.data_dir.clone().or_else(|| {
+        config
+            .support_dir
+            .as_ref()
+            .map(|root| root.join(app_dir_name(config.app.app_id())))
+    })
+}
+
 /// The storage of the app `config` runs: [`EngineConfig::storage`], or a
-/// file in its directory of [`EngineConfig::data_dir`].
+/// file in its data directory.
 fn app_storage(config: &EngineConfig) -> Option<Arc<dyn nsh_core::storage::StorageBackend>> {
     if let Some(storage) = &config.storage {
         return Some(storage.clone());
     }
     #[cfg(not(target_arch = "wasm32"))]
-    if let Some(root) = &config.data_dir {
-        let dir = root.join(app_dir_name(config.app.app_id()));
+    if let Some(dir) = data_dir(config) {
         return Some(FileStorage::open(dir));
     }
     None
@@ -1276,6 +1299,11 @@ enum Message {
     /// The displays (desktops).
     Displays(Arc<[nsh_core::desktop::Display]>),
     RootSize(NodeId, Size<Points>, EdgeInsets),
+    /// Where the root view's anchored overlays may go
+    /// ([`EngineControl::set_overlay_area`]).
+    OverlayArea(Option<nsh_core::Bounds<Points>>),
+    /// A press beyond the root view ([`EngineControl::press_beyond_root`]).
+    PressBeyondRoot(nsh_core::Point<Points>),
     ScreenHeader(NodeId, Option<Points>),
     Frame,
     States(NodeId, u16),
@@ -1477,6 +1505,22 @@ impl EngineControl {
     /// of it covered by system UI.
     pub fn set_root_size(&self, id: NodeId, size: Size<Points>, insets: EdgeInsets) {
         let _ = self.tx.send(Message::RootSize(id, size, insets));
+    }
+
+    /// Where the root view's anchored overlays may be placed, in its
+    /// coordinates, when the platform shows them beyond it (the web's
+    /// `overlays: "viewport"`: the window); `None` keeps them to the root
+    /// view ([`nsh_core::Core::set_overlay_area`]).
+    pub fn set_overlay_area(&self, area: Option<nsh_core::Bounds<Points>>) {
+        let _ = self.tx.send(Message::OverlayArea(area));
+    }
+
+    /// A press at `page` (in the root view's coordinates) beyond the root
+    /// view, where the platform shows its anchored overlays too (the web
+    /// page around the player): the overlays watching presses hear
+    /// `onPressOutside` ([`nsh_core::Core::presses_beyond_root`]).
+    pub fn press_beyond_root(&self, page: nsh_core::Point<Points>) {
+        let _ = self.tx.send(Message::PressBeyondRoot(page));
     }
 
     /// The platform measured where the content of screen `id` starts below
@@ -2165,12 +2209,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             transport: None,
         });
         core.set_storage(app_storage(&config));
-        core.set_data_dir(
-            config
-                .data_dir
-                .as_ref()
-                .map(|root| root.join(app_dir_name(config.app.app_id()))),
-        );
+        core.set_data_dir(data_dir(&config));
         core.set_clipboard(config.clipboard.clone());
         core.set_picker(config.picker.clone());
         core.set_speech(config.speech.clone());
@@ -2362,10 +2401,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                             bundle,
                         ),
                         app_url: app_url.clone(),
-                        data_dir: config
-                            .data_dir
-                            .as_ref()
-                            .map(|root| root.join(app_dir_name(config.app.app_id()))),
+                        data_dir: data_dir(&config),
                         paths: bundle_system_paths(bundle),
                         wake: Arc::new(move || {
                             let _ = system_tx.send(Message::Wake);
@@ -3717,6 +3753,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         screen_color: env.screen_color,
         canvas_render: env.canvas_render,
         share: env.share,
+        auth_session: env.auth_session,
         file_requests: env.file_requests,
         speech: env.speech,
         notifications: env.notifications,
@@ -3868,6 +3905,23 @@ fn dispatch_key<M: TextEngine>(
     path.clear();
 }
 
+/// Hands out the `onPressOutside` events of a press the core worked out
+/// (`context_menu_presses_outside`, `presses_beyond_root`): to the
+/// overlay's Rust component, else to JS.
+fn press_outside<M: TextEngine>(
+    script: Option<&Script>,
+    core: &mut nsh_core::Core<M>,
+    pressed: Vec<(NodeId, EventPayload)>,
+) {
+    for (overlay, payload) in pressed {
+        if !core.component_event(overlay, EventKind::PressOutside, &payload)
+            && let Some(script) = script
+        {
+            script.dispatch_event(overlay, EventKind::PressOutside, &payload);
+        }
+    }
+}
+
 /// Returns false on shutdown.
 fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message: Message) -> bool {
     match message {
@@ -3913,15 +3967,8 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             // `onContextMenu`, so a context menu open on the view closes
             // before the view asks for one again where the pointer is.
             if let EventPayload::ContextMenu(menu) = &payload {
-                for (overlay, pressed) in state.core.context_menu_presses_outside(id, menu) {
-                    if !state
-                        .core
-                        .component_event(overlay, EventKind::PressOutside, &pressed)
-                        && let Some(script) = script
-                    {
-                        script.dispatch_event(overlay, EventKind::PressOutside, &pressed);
-                    }
-                }
+                let pressed = state.core.context_menu_presses_outside(id, menu);
+                press_outside(script, &mut state.core, pressed);
             }
             // Key transitions bubble to the focused view's enabled
             // ancestors within its window, for Rust and JS listeners
@@ -4043,6 +4090,11 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::RootSize(id, size, insets) => state.core.set_root_size(id, size, insets),
+        Message::OverlayArea(area) => state.core.set_overlay_area(area),
+        Message::PressBeyondRoot(page) => {
+            let pressed = state.core.presses_beyond_root(page);
+            press_outside(script, &mut state.core, pressed);
+        }
         Message::ScreenHeader(id, height) => state.core.set_screen_header(id, height),
         Message::Frame => {
             state.frame_requested = false;
@@ -4262,21 +4314,13 @@ fn media_files(config: &EngineConfig, access: &Access) -> nsh_core::access::Medi
     match &config.app {
         App::Js(bundle) => nsh_core::access::MediaFiles::new(
             access,
-            config
-                .data_dir
-                .as_ref()
-                .map(|root| root.join(app_dir_name(config.app.app_id())))
-                .as_deref(),
+            data_dir(config).as_deref(),
             &bundle_system_paths(bundle),
             nsh_core::access::native_files(config.environment.os),
         ),
         App::Rust(root) if root.capabilities_ref().is_some() => nsh_core::access::MediaFiles::new(
             access,
-            config
-                .data_dir
-                .as_ref()
-                .map(|root| root.join(app_dir_name(config.app.app_id())))
-                .as_deref(),
+            data_dir(config).as_deref(),
             &system_paths(nsh_core::access::TrustedPaths::default(), false),
             nsh_core::access::native_files(config.environment.os),
         ),
@@ -4286,6 +4330,32 @@ fn media_files(config: &EngineConfig, access: &Access) -> nsh_core::access::Medi
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "js-core")]
+    #[test]
+    fn an_apps_directory_is_its_own_or_the_one_named_by_its_id() {
+        let app = || super::Bundle::source(String::new()).with_app_id(Some("com.a"));
+        let mut config = super::EngineConfig::new(app());
+        assert_eq!(super::data_dir(&config), None);
+        config.support_dir = Some("/data".into());
+        assert_eq!(
+            super::data_dir(&config),
+            Some(std::path::Path::new("/data").join("com.a"))
+        );
+        // `"dataDir"`: storage, `${dataDir}` and its files all live there,
+        // whatever the app's id.
+        config.data_dir = Some("/home/a/.myapp".into());
+        assert_eq!(super::data_dir(&config), Some("/home/a/.myapp".into()));
+        config.app = app().with_app_id(Some("com.b")).into();
+        assert_eq!(super::data_dir(&config), Some("/home/a/.myapp".into()));
+        config.data_dir = None;
+        assert_eq!(
+            super::data_dir(&config),
+            Some(std::path::Path::new("/data").join("com.b"))
+        );
+        config.support_dir = None;
+        assert_eq!(super::data_dir(&config), None);
+    }
+
     #[test]
     fn an_emptied_op_buffer_gives_back_what_a_large_commit_grew() {
         let mut ops: Vec<super::Op> = Vec::with_capacity(super::RETAINED_OPS * 8);

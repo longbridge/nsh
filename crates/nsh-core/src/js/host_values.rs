@@ -197,6 +197,42 @@ impl HostValue for MacOsBackdrop {
     }
 }
 
+/// A dialog's `detents`, `detent`, `defaultDetent` and
+/// `largestUndimmedDetent`: `"medium"`, `"large"`, `{ height }` or
+/// `{ fraction }`; anything else is left out with a warning.
+impl HostValue for crate::SheetDetent {
+    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
+        use crate::SheetDetent;
+        if input.is_nullish() {
+            return None;
+        }
+        if let Some(name) = input.as_string() {
+            match name.as_str() {
+                "medium" => return Some(SheetDetent::Medium),
+                "large" => return Some(SheetDetent::Large),
+                _ => {}
+            }
+        } else if input.is_object() {
+            let number = |key| input.field(key).and_then(|v| v.as_number());
+            let detent = match number("height") {
+                Some(height) => SheetDetent::of_height(height),
+                None => number("fraction").and_then(SheetDetent::of_fraction),
+            };
+            if detent.is_some() {
+                return detent;
+            }
+        }
+        cx.warn(
+            r#"detent: expected "medium", "large", `{ height }` (0 or more) or `{ fraction }` (0 to 1)"#,
+        );
+        None
+    }
+
+    fn ts_type(types: &mut TsTypes) -> String {
+        <crate::SheetDetent as crate::element::JsValue>::ts_type(types)
+    }
+}
+
 /// A page's or dialog's `statusBar`: `{ foreground, hidden, animated }`
 /// (`StatusBar`, declared with the navigation in `nsh/base`); the fields
 /// left out keep what is below. An unknown `foreground` is left out.

@@ -47,6 +47,43 @@ pub fn program_path() -> io::Result<PathBuf> {
     }
 }
 
+/// What runs once the app's run has ended ([`run_at_exit`]): an update
+/// waiting to replace the app as it quits (`installOnQuit`). One per
+/// process, as the program on disk is one per process.
+static AT_EXIT: Mutex<Option<Box<dyn FnOnce() + Send>>> = Mutex::new(None);
+
+/// Sets what runs once the app's run has ended, replacing (and dropping)
+/// what was set before; `None` clears it. Only `nsh/updater` sets any, on
+/// the desktops.
+#[cfg(all(
+    feature = "updater",
+    any(
+        all(target_os = "linux", not(target_env = "ohos")),
+        target_os = "macos",
+        windows
+    )
+))]
+pub(crate) fn set_at_exit(work: Option<Box<dyn FnOnce() + Send>>) {
+    let previous = std::mem::replace(
+        &mut *AT_EXIT.lock().unwrap_or_else(|e| e.into_inner()),
+        work,
+    );
+    drop(previous);
+}
+
+/// Runs what the app left to do as it quits (an update to install,
+/// `installOnQuit`). Called by a runner when its run has ended, the
+/// windows closed and storage written, before it starts the app again
+/// ([`spawn_after_exit`]) so that a restart starts the new version. Blocks
+/// for as long as the work takes; it reports its own failures, so the app
+/// still exits.
+pub fn run_at_exit() {
+    let work = AT_EXIT.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(work) = work {
+        work();
+    }
+}
+
 /// The environment variable that names the process a restarted app
 /// replaces (its id, in decimal). Set by [`spawn_after_exit`] on Windows;
 /// the runner of the new process takes it ([`wait_for_pid`]) and waits for
@@ -235,5 +272,48 @@ mod tests {
         assert!(waiter.wait().unwrap().success());
         assert!(marker.exists(), "not started after the old process exited");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// What runs at exit runs once, the latest set; what it replaced is
+    /// dropped unrun.
+    #[cfg(all(
+        feature = "updater",
+        any(
+            all(target_os = "linux", not(target_env = "ohos")),
+            target_os = "macos",
+            windows
+        )
+    ))]
+    #[test]
+    fn the_latest_work_runs_once_at_exit() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicU32, Ordering},
+        };
+        let ran = Arc::new(AtomicU32::new(0));
+        let dropped = Arc::new(AtomicU32::new(0));
+        struct Dropped(Arc<AtomicU32>);
+        impl Drop for Dropped {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        let first = Dropped(dropped.clone());
+        let ran_first = ran.clone();
+        set_at_exit(Some(Box::new(move || {
+            let _first = first;
+            ran_first.fetch_add(10, Ordering::SeqCst);
+        })));
+        let ran_second = ran.clone();
+        set_at_exit(Some(Box::new(move || {
+            ran_second.fetch_add(1, Ordering::SeqCst);
+        })));
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+        run_at_exit();
+        run_at_exit();
+        assert_eq!(ran.load(Ordering::SeqCst), 1);
+        set_at_exit(Some(Box::new(|| panic!("cleared"))));
+        set_at_exit(None);
+        run_at_exit();
     }
 }

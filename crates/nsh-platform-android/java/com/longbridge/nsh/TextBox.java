@@ -637,7 +637,7 @@ final class TextBox extends android.view.ViewGroup implements Node {
         android.animation.ValueAnimator a = android.animation.ValueAnimator.ofFloat(0, 1);
         a.setDuration((long) fx.transitionDuration);
         a.setStartDelay((long) fx.transitionDelay);
-        a.setInterpolator(Effects.interpolator(fx.transitionEasing));
+        a.setInterpolator(fx.transitionInterpolator());
         a.addUpdateListener(animation -> {
             if (colorTransition != animation) return;
             transitionColor = Mounter.lerpColor(start, end, (float) animation.getAnimatedValue());

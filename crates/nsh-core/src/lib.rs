@@ -13,6 +13,7 @@ pub use byte_size::ByteSize;
 pub mod access;
 pub mod animation;
 pub mod audio;
+pub mod auth_session;
 pub mod canvas;
 pub mod clipboard;
 pub mod color;
@@ -116,9 +117,9 @@ pub use crate::{
         NativeProp, NodeId, Op, OverlayProp, PasteBehavior, PasteEvent, PastedFile, PayloadValue,
         PinchEvent, PinchPhase, PointerType, PressEvent, Prop, ROOT_ID, ResizeMode, ReturnKeyType,
         RevealOptions, ScreenAnimation, ScreenProp, ScrollAlignment, ScrollProp, ScrollbarSetting,
-        SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, Tag,
-        TouchEvent, TouchPhase, TouchPoint, TransitionFallback, Viewability, WebElement, WebInput,
-        WebKey, WebLoad, WebSource, WheelDelta, WheelEvent,
+        SheetDetent, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
+        SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint, TransitionFallback, Viewability,
+        WebElement, WebInput, WebKey, WebLoad, WebSource, WheelDelta, WheelEvent,
     },
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityCurrent, AccessibilityProp,

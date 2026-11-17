@@ -73,9 +73,9 @@ use windows::{
 };
 
 use super::{TextCache, record};
-use crate::{gfx, image::Frame, render::color_f, surface::Surface};
+use crate::{gfx, image::CanvasBitmap, render::color_f, surface::Surface};
 
-type Images = FxHashMap<Arc<str>, Option<Arc<Frame>>>;
+type Images = FxHashMap<Arc<str>, Option<CanvasBitmap>>;
 
 /// Renders `drawing` into a `width` × `height` pixel image at `scale`
 /// pixels per point and answers request `id`.
@@ -129,7 +129,7 @@ pub(crate) fn render(
         let key = uri.clone();
         // A cached image is handed over before `load_bitmap` returns: the
         // loop holds no borrow of `waiting`.
-        crate::image::load_bitmap(surface, &uri, move |result| {
+        crate::image::load_bitmap(surface, &uri, scale, move |result| {
             let mut w = waiting.borrow_mut();
             let image = result
                 .inspect_err(|e| log::warn!("offscreen canvas: {e}"))
@@ -591,6 +591,69 @@ mod tests {
         assert_red(&data, 60, (5, 5));
         assert_red(&data, 60, (59, 19));
         assert_eq!(pixel(&data, 60, 5, 25)[3], 0);
+    }
+
+    /// An SVG drawn sharp is rasterized with more pixels than its own size
+    /// has points: `drawImage`'s source rectangle and its default size stay
+    /// in its own units.
+    #[test]
+    fn an_image_rasterized_at_a_scale_is_drawn_in_its_own_units() {
+        if gfx::get().is_err() {
+            return;
+        }
+        // 20 × 10 units at 2 pixels each: the left half red, the right blue.
+        let (w, h) = (40u32, 20u32);
+        let mut data = Vec::with_capacity((w * h * 4) as usize);
+        for _ in 0..h {
+            for x in 0..w {
+                data.extend_from_slice(if x < w / 2 {
+                    &[0, 0, 255, 255]
+                } else {
+                    &[255, 0, 0, 255]
+                });
+            }
+        }
+        let image = CanvasBitmap {
+            frame: crate::image::Frame::from_bgra(w, h, data),
+            scale: 2.0,
+        };
+        let uri: Arc<str> = Arc::from("asset:/mark.svg");
+        let draw = |source, dest: [f32; 4]| CanvasOp::DrawImage {
+            image: nsh_core::canvas::CanvasImage { uri: uri.clone() },
+            source,
+            dest: dest.map(Num::Const),
+        };
+        let nan = f32::NAN;
+        let ops = vec![
+            // Its own size: 20 × 10.
+            draw(None, [0.0, 0.0, nan, nan]),
+            // Its right half (units 10 to 20), 10 × 10 at (0, 20).
+            draw(
+                Some(nsh_core::geometry::Bounds::new(
+                    nsh_core::geometry::point(
+                        nsh_core::geometry::ScaledPixels(10.0),
+                        nsh_core::geometry::ScaledPixels(0.0),
+                    ),
+                    nsh_core::geometry::size(
+                        nsh_core::geometry::ScaledPixels(10.0),
+                        nsh_core::geometry::ScaledPixels(10.0),
+                    ),
+                )),
+                [0.0, 20.0, 10.0, 10.0],
+            ),
+        ];
+        let mut job = job(ops, (40, 40), 1.0);
+        job.images.insert(uri.clone(), Some(image));
+        let data = job.paint().unwrap().read().unwrap();
+        assert_red(&data, 40, (5, 5));
+        assert_eq!(pixel(&data, 40, 15, 5), [255, 0, 0, 255], "the blue half");
+        assert_eq!(pixel(&data, 40, 25, 5)[3], 0, "no wider than 20");
+        assert_eq!(pixel(&data, 40, 5, 15)[3], 0, "no taller than 10");
+        assert_eq!(
+            pixel(&data, 40, 5, 25),
+            [255, 0, 0, 255],
+            "the source's blue"
+        );
     }
 
     #[test]

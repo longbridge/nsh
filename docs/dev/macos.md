@@ -19,6 +19,8 @@ cargo clippy -p nsh-platform-macos -p nsh-macos-host -p nsh-macos-app --all-targ
 cargo test -p nsh-platform-macos --features dev   # needs no window server: tests do not start AppKit
 cargo build -p nsh-macos-host                     # ./target/debug/nsh-macos-host
 cargo test -p nsh-platform-macos --test native -- --ignored # desktop session required
+# Editor/RichEditor focus restoration and stale-target checks:
+NSH_MODAL_FOCUS_CHECK_ONLY=1 cargo test -p nsh-platform-macos --test native -- --ignored
 # Mounting rows that are not virtualized, measured alone (tests/native/mount.rs):
 NSH_MOUNT_BENCH_ONLY=1 cargo test --release -p nsh-platform-macos --test native -- --ignored
 ```
@@ -28,9 +30,27 @@ server client, log forwarding, the error overlay: `dev.rs`). The runtime needs m
 
 ## Dialog fades
 
+Closing a modal restores the previous keyboard focus inside the remaining scope when no other control has
+taken it. Editor and RichEditor caret sinks reject pointer targeting but still receive keyboard focus;
+restoration checks keyboard visibility, attachment and exit state independently of pointer targeting.
+Hidden or removed inputs stay unfocused.
+
 A dialog's ordinary fade out retains its native view hierarchy until the animation ends, so AppKit keeps
 compositing glass and backdrop materials. It leaves the input scope immediately; reopening a retained modal
 finishes its previous fade before presenting it again. Slide and shader transitions keep their snapshot path.
+
+## Short pointer presses
+
+The pointer adapter keeps a successful short press's `active:` feedback visible
+briefly when AppKit delivers down and up together, as with trackpad tap-to-click.
+Press and touch callbacks still run at release. A new press or cancellation clears
+pending feedback, and removed views and stopped surfaces leave no retained feedback.
+Reduced motion and the native test driver keep immediate visual release; the
+headless driver is unchanged. The ordinary-window checks in
+`tests/native/tap_feedback.rs` exercise same-turn events, a following held press,
+drag cancellation and teardown (`NSH_TAP_FEEDBACK_CHECK_ONLY=1`).
+`NSH_TAP_FEEDBACK_PLAIN_ONLY=1` restricts that check to non-transition styles;
+animated feedback requires a window connected to a screen.
 
 ## Nested shaders
 
@@ -318,6 +338,12 @@ mounts the page, it would hold that frame, so it is paid elsewhere:
 Single-line fields center the native font's line in the input's content box. Their attributed placeholders use
 the same natural line height as the field editor, including when `text-base` supplies a larger `lineHeight` for
 layout. Multiline text views use the configured paragraph line height.
+
+The shared single-line field editor starts left-aligned text at the idle cell's origin. On focus,
+`text_input.rs` restores its clip origin after applying a pending selection, preserving a visible caret.
+Styling and alignment share the active editor; selection notifications resolve it once for selection
+and caret events, and skip native queries when neither event has a listener. Scrolling during editing
+remains AppKit's; centered and right-aligned text keep their native origins.
 
 A key goes to the window's first responder: a field's editor (the window's shared field editor, an `NSTextView`), a
 multiline input's `NshTextView`, a hosted view, or the surface's root. Four steps decide it, in order:

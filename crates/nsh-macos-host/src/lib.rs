@@ -97,8 +97,8 @@ pub fn main() -> std::process::ExitCode {
             "--icon" => options.icon = args.next().map(PathBuf::from),
             // The performance monitor over the app.
             "--fps" => options.fps = true,
-            // Where apps keep their data (`nsh test --target` gives each app
-            // a fresh one); the system's data directory otherwise.
+            // The app's data directory (`nsh test --target` gives each app a
+            // fresh one); the one under its id in the system's otherwise.
             "--data-dir" => {
                 options.data_dir = args.next().map(std::path::PathBuf::from);
                 // Its caches too (downloaded images): a test's app starts with none.

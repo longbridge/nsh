@@ -327,7 +327,7 @@ mount(App);
 | `transitionProperty` | `.transition()`、`.transition_all()`、`.transition_colors()`、`.transition_opacity()`、`.transition_transform()`、`.transition_shadow()` | `string` | 参与动画的属性，用逗号分隔：`"all"`、`"colors"`、`"opacity"`、`"transform"`、`"box-shadow"`、`"border-radius"` 等。 |
 | `transitionDuration` | `.duration(ms)` | `number \| "150ms" \| "0.2s"` | 数字表示毫秒，或 CSS 时间。 |
 | `transitionDelay` | `.delay(ms)` | `number \| "150ms" \| "0.2s"` | 开始前的延迟。 |
-| `transitionTimingFunction` | `.ease_linear()`、`.ease_in()`、`.ease_out()`、`.ease_in_out()`、`.ease_bezier(..)` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(…)"` | 缓动曲线。 |
+| `transitionTimingFunction` | `.ease_linear()`、`.ease_in()`、`.ease_out()`、`.ease_in_out()`、`.ease_bezier(..)`、`.ease_spring(..)` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(…)" \| "spring(…)"` | 缓动曲线，或一个弹簧（刚度、阻尼、质量）：它自己决定时长，持续到稳定为止，不使用时长。 |
 
 可过渡的属性按组划分：**颜色**（背景、边框、轮廓、阴影和文字的颜色，渐变色标）、**不透明度**、**变换**、**阴影**（`box-shadow`）以及**形状**（圆角和边框宽度）。CSS 名称及其驼峰形式都可以用（`background-color`、`backgroundColor`、`transform`、`scale` 等）。布局的变化用[布局动画](#layoutanimation)来呈现。
 
@@ -379,7 +379,7 @@ view().h_4().w_40().rounded(px(4.0)).bg(ZINC.shade(200)).animate_pulse()
 | `animationName` | `.animate_spin()`、`.animate_ping()`、`.animate_pulse()`、`.animate_bounce()`、`.animate_none()`，或 `.animation(KeyframeAnimation::new(Keyframes::Spin))` | `"none" \| "spin" \| "ping" \| "pulse" \| "bounce"` | 动画名称。 |
 | `animationDuration` | `KeyframeAnimation::duration(ms)` | `number \| "1s" \| …` | 一次迭代的时长。 |
 | `animationDelay` | `KeyframeAnimation::delay(ms)` | `number \| "200ms" \| …` | 开始前的延迟。 |
-| `animationTimingFunction` | `KeyframeAnimation::easing([x1, y1, x2, y2])` | 同 `transitionTimingFunction` | 缓动曲线。 |
+| `animationTimingFunction` | `KeyframeAnimation::easing([x1, y1, x2, y2])` | 同 `transitionTimingFunction`，但不接受 `spring()` | 缓动曲线。 |
 | `animationIterationCount` | `KeyframeAnimation::iterations(n)` | `number \| "infinite"` | 默认 `"infinite"`。 |
 | `animationFrameRate` | `KeyframeAnimation::frame_rate(hz)` | `number` | 它需要的最高帧率，单位 Hz（见[帧率](#帧率)）。默认为屏幕的最高帧率。 |
 

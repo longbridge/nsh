@@ -42,6 +42,18 @@ runs (`nsh keygen keys/update`, keep the `.secret` out of your repository):
 
 `publicKey` also works with `github`: unsigned manifests are then refused.
 
+To offer a beta to the users who opt in, add a channel: another manifest, by name. The app's code passes the user's
+choice as a name (`checkForUpdate({ channel: "beta" })`), never an address, so the package still decides where updates
+come from ([channels](../modules/nsh-updater.md#channels)).
+
+```json
+"updater": {
+  "url": "https://dl.example.com/app/latest.json",
+  "channels": { "beta": "https://dl.example.com/app/beta/latest.json" },
+  "publicKey": "<contents of keys/update.pub>"
+}
+```
+
 ## Use it
 
 ```tsx
@@ -62,7 +74,9 @@ the app is installed where the user cannot write, such as by a system package. I
 resolves `null`.
 
 `installAndRestart` restarts the app as `Application.restart()` does: this run quits as when the user quits it, and
-the new version starts once it has exited. If it fails, the app stays as it was. The
+the new version starts once it has exited. If it fails, the app stays as it was. To install without interrupting the
+user, call `installOnQuit()` instead: the update is checked now and replaces the app when it quits, and the next start
+opens the new version. The
 [nsh/updater reference](../modules/nsh-updater.md) has every function, its errors and the `nsh.json` keys.
 
 ## Publish a release

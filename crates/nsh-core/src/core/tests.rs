@@ -3764,6 +3764,75 @@ fn bottom_aligned_list_does_not_mount_scrolls_during_native_bounce() {
     }
 }
 
+/// List 2 (follow_end 80 pt) at its end, then its last row grows by
+/// 300 pt, under its own layout animation when `revealing`: where the list
+/// is after that commit, and the end it could follow to.
+fn last_row_grows_at_end(revealing: bool) -> (f32, f32) {
+    let mut c = core();
+    estimated_list(&mut c);
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::FollowEnd(Some(px(80.0))),
+        }],
+    );
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+    c.commit();
+    c.apply(Op::Command {
+        id: 2,
+        command: Command::ScrollToEnd { animated: false },
+    })
+    .unwrap();
+    let mut at = scrolled(&c.commit().unwrap(), 0.0);
+    for _ in 0..4 {
+        render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+        if let Some(batch) = c.commit() {
+            at = scrolled(&batch, at);
+        }
+    }
+    c.set_scroll_offset(2, point(px(0.0), px(at)), u32::MAX);
+    c.commit();
+    assert_eq!(at, 100.0 * 50.0 - 400.0, "at the end");
+    // The cell placed last shows the last row.
+    let last = *cells
+        .iter()
+        .max_by(|&&a, &&b| {
+            let y = |id| c.nodes[c.key(id).unwrap() as usize].frame.origin.y.0;
+            y(a).total_cmp(&y(b))
+        })
+        .unwrap();
+    let mut ops = vec![style_op(last, &[("height", StyleValue::Number(350.0))])];
+    if revealing {
+        ops.push(Op::Command {
+            id: last,
+            command: Command::LayoutAnimation(crate::LayoutAnimation {
+                update: Some(crate::LayoutTransition::new(
+                    crate::LayoutCurve::FittedSpring { damping_ratio: 1.0 },
+                    265.0,
+                )),
+                ..Default::default()
+            }),
+        });
+    }
+    apply(&mut c, ops);
+    let after = c.commit().map_or(at, |b| scrolled(&b, at));
+    (after, 100.0 * 50.0 + 300.0 - 400.0)
+}
+
+#[test]
+fn follow_end_keeps_its_place_while_the_last_row_reveals() {
+    // #2218: a scroll to the new end lands at once while the row slides
+    // open, so the content above jumps by the row's growth.
+    let (after, _) = last_row_grows_at_end(true);
+    assert_eq!(after, 100.0 * 50.0 - 400.0);
+    // Without its own animation, the row grows and the list follows.
+    let (after, end) = last_row_grows_at_end(false);
+    assert_eq!(after, end);
+}
+
 #[test]
 fn scroll_commands_follow_their_target_as_rows_are_measured() {
     let mut c = core();
@@ -26990,13 +27059,13 @@ mod rust_windows {
         // The dialog shows over the window, not the main one.
         let dialog = text_parent(&batch, "dialog").expect("the dialog's root");
         let config = batch.items.iter().find_map(|i| match i {
-            MountItem::ModalConfig { id, config } if *id == dialog => Some(*config),
+            MountItem::ModalConfig { id, config } if *id == dialog => Some(config.clone()),
             _ => None,
         });
         assert_eq!(config.map(|c| c.window), Some(window));
         // The window's own root: in the main window.
         let config = batch.items.iter().find_map(|i| match i {
-            MountItem::ModalConfig { id, config } if *id == window => Some(*config),
+            MountItem::ModalConfig { id, config } if *id == window => Some(config.clone()),
             _ => None,
         });
         assert_eq!(config.map(|c| c.window), Some(ROOT_ID));
@@ -27277,7 +27346,7 @@ mod rust_windows {
             Some(rect(0.0, 0.0, 1100.0, 820.0))
         );
         let config = batch.items.iter().find_map(|i| match i {
-            MountItem::ModalConfig { id, config } if *id == dialog => Some(*config),
+            MountItem::ModalConfig { id, config } if *id == dialog => Some(config.clone()),
             _ => None,
         });
         assert_eq!(config.map(|c| c.window), Some(ROOT_ID));
@@ -30347,6 +30416,86 @@ fn anchored_overlays_go_beside_their_anchor_and_follow_it() {
     );
     let batch = c.commit().unwrap();
     assert_eq!(frame_of(&batch, 10), Some(rect(192.0, 74.0, 120.0, 60.0)));
+}
+
+#[test]
+fn anchored_overlays_go_within_the_area_the_platform_shows_them_in() {
+    use StyleValue::Number;
+    // A 320 × 480 root, 100 points from the left of a 1280 × 800 window and
+    // 50 from its top (the web's `overlays: "viewport"`), with a 40 point
+    // trigger near its bottom, 120 points from its left.
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(420.0))]);
+    add(
+        &mut c,
+        4,
+        Tag::View,
+        ROOT_ID,
+        &[
+            ("width", Number(80.0)),
+            ("height", Number(40.0)),
+            ("marginLeft", Number(120.0)),
+        ],
+    );
+    add(&mut c, 10, Tag::Overlay, 4, &[]);
+    add(
+        &mut c,
+        12,
+        Tag::View,
+        10,
+        &[("width", Number(360.0)), ("height", Number(200.0))],
+    );
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                10,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(4)),
+            ),
+            overlay_prop(10, crate::OverlayProp::Align(crate::overlay::Align::Start)),
+            overlay_prop(10, crate::OverlayProp::Margin(px(8.0))),
+            Op::Listen {
+                id: 10,
+                event: EventKind::PressOutside,
+                enabled: true,
+            },
+        ],
+    );
+    // In the root view: no room below, above it, and wider than the root,
+    // from the margin.
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(8.0, 220.0, 360.0, 200.0)));
+
+    // Over the window: below the trigger, past the root's bottom, and
+    // from the trigger's start, past the root's right edge.
+    c.set_overlay_area(Some(rect(-100.0, -50.0, 1280.0, 800.0)));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(120.0, 460.0, 360.0, 200.0)));
+
+    // The page moved the root down to 300 points from the window's top:
+    // no room below in the window, above it.
+    c.set_overlay_area(Some(rect(-100.0, -300.0, 1280.0, 800.0)));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(120.0, 220.0, 360.0, 200.0)));
+
+    // Near the window's right edge: kept inside it less the margin.
+    c.set_overlay_area(Some(rect(-900.0, -50.0, 1280.0, 800.0)));
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        frame_of(&batch, 10).map(|f| f.origin.x),
+        Some(px(380.0 - 360.0 - 8.0))
+    );
+
+    // A press on the page around the root: outside the overlay.
+    js_events(&mut c);
+    let pressed = c.presses_beyond_root(point(px(500.0), px(-20.0)));
+    assert_eq!(pressed.len(), 1);
+    assert_eq!(pressed[0].0, 10);
+
+    // Back to the root view.
+    c.set_overlay_area(None);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(8.0, 220.0, 360.0, 200.0)));
 }
 
 #[test]
@@ -37335,6 +37484,92 @@ mod built_in_scrollbars {
     }
 
     #[test]
+    fn a_culled_scroll_pins_its_bar_only_after_it_is_created() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.scrollbars_from(bars);
+        c.set_components(registry);
+        c.set_builtin_scrollbars(Some(app_theme()));
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            style_op(2, &[("height", StyleValue::Number(100.0))]),
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ];
+        ops.extend(child_view(4, 2, 1000.0, &[]));
+        ops.extend([
+            Op::Create {
+                id: 6,
+                tag: Tag::Scroll,
+            },
+            style_op(6, &[("height", StyleValue::Number(100.0))]),
+            Op::Insert {
+                parent: 2,
+                child: 6,
+                before: None,
+            },
+        ]);
+        ops.extend(child_view(8, 6, 1000.0, &[]));
+        apply(&mut c, ops);
+        let batch = c.commit().unwrap();
+        assert!(!created_in(&batch).contains(&6));
+        assert!(
+            !batch
+                .items
+                .iter()
+                .any(|item| matches!(item, MountItem::StickyCells { id: 6, .. })),
+            "a scroll view that has no native view cannot pin its bar"
+        );
+        let key = c.key(6).unwrap();
+        let bar = c.nodes[key as usize]
+            .scroll
+            .as_ref()
+            .unwrap()
+            .bar
+            .as_ref()
+            .unwrap()
+            .0;
+        c.set_scroll_offset(2, point(Points::ZERO, Points(1000.0)), 0);
+        for remount in [false, true] {
+            if remount {
+                c.remount();
+            }
+            let batch = c.commit().unwrap();
+            let pins: Vec<_> = batch
+                .items
+                .iter()
+                .enumerate()
+                .filter_map(|(at, item)| match item {
+                    MountItem::StickyCells { id: 6, cells } => Some((at, cells)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(pins.len(), 1, "remount={remount}");
+            assert_eq!(pins[0].1.len(), 1);
+            assert_eq!(pins[0].1[0].cell, bar);
+            if !remount {
+                for id in [6, bar] {
+                    let made = batch
+                        .items
+                        .iter()
+                        .position(|item| {
+                            matches!(item, MountItem::Create { id: made, .. } if *made == id)
+                        })
+                        .expect("the scroll view and its bar are made when they come into view");
+                    assert!(made < pins[0].0);
+                }
+            }
+            assert!(c.commit().is_none());
+        }
+    }
+
+    #[test]
     fn what_the_app_appends_goes_below_the_bar() {
         let (mut c, batch) = scroll_view(true, None);
         let [bar] = bars_in(&batch)[..] else {
@@ -43808,6 +44043,698 @@ mod each_order {
     }
 }
 
+/// What an update of an [`each`] costs and sends for the rows it keeps.
+mod each_updates {
+    use std::{
+        cell::RefCell,
+        collections::HashMap,
+        time::{Duration, Instant},
+    };
+
+    use super::*;
+    use crate::{
+        element::{Root, cleanup, effect},
+        prelude::*,
+    };
+
+    /// What a row of [`Listed`] makes.
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    enum Shape {
+        /// A text.
+        Text,
+        /// A text and a view.
+        Pair,
+        /// A region showing its text while the item's value is not a
+        /// multiple of three.
+        Region,
+        /// By its key: nothing, a text, or a text and a view.
+        Mixed,
+    }
+
+    /// An item of [`Listed`]: its key and its value.
+    type Item = (u32, u32);
+
+    thread_local! {
+        static START: RefCell<Vec<Item>> = const { RefCell::new(Vec::new()) };
+        static SHAPE: Cell<Shape> = const { Cell::new(Shape::Text) };
+        static LISTED: Cell<Option<Signal<Vec<Item>>>> = const { Cell::new(None) };
+        /// Rows made, rows disposed and calls of the key function.
+        static MADE: Cell<usize> = const { Cell::new(0) };
+        static GONE: Cell<usize> = const { Cell::new(0) };
+        static KEYED: Cell<usize> = const { Cell::new(0) };
+        /// What the rows' effects saw, in the order they ran.
+        static SEEN: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// The elements a row of `shape` makes for a key (`Mixed` decides by it).
+    fn parts(shape: Shape, key: u32) -> usize {
+        match shape {
+            Shape::Text | Shape::Region => 1,
+            Shape::Pair => 2,
+            Shape::Mixed => (key % 3) as usize,
+        }
+    }
+
+    /// The rows of `START`, then of what `LISTED` is set to, between two
+    /// texts. A row shows the order it was made in, its key, value and
+    /// index: `2:7:0@1` is the third row made, of key 7, second in the list.
+    #[component]
+    fn Listed() -> impl IntoElement {
+        let items = signal(START.with(|start| start.borrow().clone()));
+        LISTED.with(|listed| listed.set(Some(items)));
+        let shape = SHAPE.with(Cell::get);
+        let rows = each(
+            items,
+            |item: &Item| {
+                KEYED.with(|keyed| keyed.set(keyed.get() + 1));
+                item.0
+            },
+            move |item, index| {
+                let made = MADE.with(|made| made.replace(made.get() + 1));
+                cleanup(|| GONE.with(|gone| gone.set(gone.get() + 1)));
+                let key = item.get_untracked().0;
+                effect(move || {
+                    let seen = format!("{made} is {}", item.get().1);
+                    SEEN.with(|all| all.borrow_mut().push(seen));
+                });
+                effect(move || {
+                    let seen = format!("{made} at {}", index.get());
+                    SEEN.with(|all| all.borrow_mut().push(seen));
+                });
+                let caption = move || {
+                    let (key, value) = item.get();
+                    format!("{made}:{key}:{value}@{}", index.get())
+                };
+                let mark = move || view().child(text(format!("/{made}"))).into_element();
+                match (shape, parts(shape, key)) {
+                    (Shape::Region, _) => vec![dynamic(move || {
+                        (item.get().1 % 3 != 0).then(|| text(caption()))
+                    })],
+                    (_, 0) => Vec::new(),
+                    (_, 1) => vec![text(caption).into_element()],
+                    _ => vec![text(caption).into_element(), mark()],
+                }
+            },
+        );
+        view()
+            .child(text("before"))
+            .child(rows)
+            .child(text("after"))
+    }
+
+    /// [`Listed`] mounted with `start`'s rows of `shape`, and the view its
+    /// rows are in.
+    fn mounted(shape: Shape, start: &[Item]) -> (Core<FakeEngine>, NodeId) {
+        START.with(|s| *s.borrow_mut() = start.to_vec());
+        SHAPE.with(|s| s.set(shape));
+        for count in [&MADE, &GONE, &KEYED] {
+            count.with(|count| count.set(0));
+        }
+        SEEN.with(|seen| seen.borrow_mut().clear());
+        let mut c = core();
+        c.set_content_culling(false);
+        c.mount_root(&Root::new::<Listed>(|| ()));
+        let parent = views::root_host(&c.commit().unwrap());
+        (c, parent)
+    }
+
+    /// Sets the items; the commit's mount items.
+    fn set(c: &mut Core<FakeEngine>, items: &[Item]) -> Vec<MountItem> {
+        write(c, items);
+        c.commit().map(|batch| batch.items).unwrap_or_default()
+    }
+
+    /// Sets the items, without a commit.
+    fn write(c: &mut Core<FakeEngine>, items: &[Item]) {
+        let _entered = c.components.runtime.enter();
+        LISTED.with(Cell::get).unwrap().set(items.to_vec());
+    }
+
+    /// The children of `parent`, in order.
+    fn children(c: &Core<FakeEngine>, parent: NodeId) -> Vec<NodeId> {
+        let key = c.key(parent).unwrap();
+        c.nodes[key as usize]
+            .children
+            .iter()
+            .map(|&child| c.nodes[child as usize].id)
+            .collect()
+    }
+
+    /// The texts under `parent`, in the tree's order.
+    fn shown(c: &Core<FakeEngine>, parent: NodeId) -> Vec<String> {
+        fn collect(c: &Core<FakeEngine>, key: u32, out: &mut Vec<String>) {
+            let node = &c.nodes[key as usize];
+            if !node.text.is_empty() {
+                out.push(node.text.clone());
+            }
+            for &child in &node.children {
+                collect(c, child, out);
+            }
+        }
+        let mut out = Vec::new();
+        collect(c, c.key(parent).unwrap(), &mut out);
+        out
+    }
+
+    /// What the rows' effects saw since the last call.
+    fn seen() -> Vec<String> {
+        SEEN.with(|seen| std::mem::take(&mut *seen.borrow_mut()))
+    }
+
+    fn structural(item: &MountItem) -> bool {
+        matches!(
+            item,
+            MountItem::Create { .. }
+                | MountItem::Delete { .. }
+                | MountItem::Insert { .. }
+                | MountItem::Remove { .. }
+        )
+    }
+
+    fn texts_of(items: &[MountItem]) -> Vec<&str> {
+        items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::Text { text, .. } => Some(text.text.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn equal_items_send_no_mount_items() {
+        let (mut c, parent) = mounted(Shape::Pair, &[(1, 0), (2, 0), (3, 0)]);
+        let nodes = children(&c, parent);
+        seen();
+        // An equal list set again: the signal notifies no one.
+        assert!(set(&mut c, &[(1, 0), (2, 0), (3, 0)]).is_empty());
+        assert_eq!(KEYED.with(Cell::get), 3, "the rows were not looked at");
+        // The same list written as a change: every row is looked at, and
+        // each is as it was.
+        {
+            let _entered = c.components.runtime.enter();
+            LISTED.with(Cell::get).unwrap().update(|_| {});
+        }
+        let items = c.commit().map(|batch| batch.items).unwrap_or_default();
+        assert!(items.is_empty(), "{items:?}");
+        assert_eq!(KEYED.with(Cell::get), 6);
+        assert_eq!(children(&c, parent), nodes);
+        assert_eq!((MADE.with(Cell::get), GONE.with(Cell::get)), (3, 0));
+        assert!(seen().is_empty(), "no row's item or index was written");
+    }
+
+    #[test]
+    fn a_row_changed_in_the_middle_sends_its_text_alone() {
+        let start: Vec<Item> = (0..40).map(|key| (key, 0)).collect();
+        let (mut c, parent) = mounted(Shape::Text, &start);
+        let nodes = children(&c, parent);
+        seen();
+        let mut items = start.clone();
+        items[17].1 = 5;
+        let batch = set(&mut c, &items);
+        assert_eq!(texts_of(&batch), ["17:17:5@17"]);
+        assert!(!batch.iter().any(structural), "{batch:?}");
+        assert_eq!(children(&c, parent), nodes);
+        assert_eq!((MADE.with(Cell::get), GONE.with(Cell::get)), (40, 0));
+        assert_eq!(seen(), ["17 is 5"]);
+        // The first and the last, in one update.
+        items[0].1 = 1;
+        items[39].1 = 2;
+        let batch = set(&mut c, &items);
+        assert_eq!(texts_of(&batch), ["0:0:1@0", "39:39:2@39"]);
+        assert!(!batch.iter().any(structural), "{batch:?}");
+        assert_eq!(seen(), ["0 is 1", "39 is 2"]);
+    }
+
+    #[test]
+    fn an_appended_row_is_made_after_the_rows_that_stay() {
+        let start: Vec<Item> = (0..30).map(|key| (key, 0)).collect();
+        let (mut c, parent) = mounted(Shape::Pair, &start);
+        let nodes = children(&c, parent);
+        seen();
+        let mut items = start.clone();
+        // The last row changes as one comes after it.
+        items[29].1 = 4;
+        items.push((30, 0));
+        let batch = set(&mut c, &items);
+        // (The row made is applied as the region is; the row that stays
+        // follows with its binding's patch.)
+        assert_eq!(texts_of(&batch), ["30:30:0@30", "/30", "29:29:4@29"]);
+        let now = children(&c, parent);
+        // "before", 30 rows of two, the new row's two, "after".
+        assert_eq!(now.len(), nodes.len() + 2);
+        assert_eq!(now[..61], nodes[..61], "the rows before it stay");
+        assert_eq!(now[63], nodes[61], "what follows the rows stays");
+        let inserted: Vec<NodeId> = batch
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::Insert {
+                    parent: p, child, ..
+                } if *p == parent => Some(*child),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(inserted.len(), 2, "only the new row's nodes are placed");
+        assert!(inserted.contains(&now[61]) && inserted.contains(&now[62]));
+        assert!(
+            !batch
+                .iter()
+                .any(|item| matches!(item, MountItem::Delete { .. } | MountItem::Remove { .. }))
+        );
+        assert_eq!((MADE.with(Cell::get), GONE.with(Cell::get)), (31, 0));
+        assert_eq!(seen(), ["29 is 4", "30 is 0", "30 at 30"]);
+        // The next update finds every row, the new one too.
+        items[30].1 = 1;
+        let batch = set(&mut c, &items);
+        assert_eq!(texts_of(&batch), ["30:30:1@30"]);
+        assert!(!batch.iter().any(structural), "{batch:?}");
+        assert_eq!(children(&c, parent), now);
+    }
+
+    #[test]
+    fn a_removed_row_goes_and_the_rows_after_it_follow() {
+        let start: Vec<Item> = (0..6).map(|key| (key, 0)).collect();
+        let (mut c, parent) = mounted(Shape::Text, &start);
+        let nodes = children(&c, parent);
+        seen();
+        let mut items = start.clone();
+        items.remove(2);
+        let batch = set(&mut c, &items);
+        assert_eq!(
+            shown(&c, parent),
+            [
+                "before", "0:0:0@0", "1:1:0@1", "3:3:0@2", "4:4:0@3", "5:5:0@4", "after"
+            ]
+        );
+        assert_eq!(texts_of(&batch), ["3:3:0@2", "4:4:0@3", "5:5:0@4"]);
+        let now = children(&c, parent);
+        assert_eq!(now[..3], nodes[..3]);
+        assert_eq!(now[3..], nodes[4..], "the rows after it keep their nodes");
+        assert!(c.key(nodes[3]).is_err(), "its node is released");
+        assert!(
+            !batch
+                .iter()
+                .any(|item| matches!(item, MountItem::Create { .. } | MountItem::Insert { .. }))
+        );
+        assert_eq!((MADE.with(Cell::get), GONE.with(Cell::get)), (6, 1));
+        assert_eq!(seen(), ["3 at 2", "4 at 3", "5 at 4"]);
+        // The last rows go, then all of them.
+        items.truncate(2);
+        set(&mut c, &items);
+        assert_eq!(shown(&c, parent), ["before", "0:0:0@0", "1:1:0@1", "after"]);
+        assert_eq!(GONE.with(Cell::get), 4);
+        set(&mut c, &[]);
+        assert_eq!(shown(&c, parent), ["before", "after"]);
+        assert_eq!((MADE.with(Cell::get), GONE.with(Cell::get)), (6, 6));
+    }
+
+    #[test]
+    fn moved_rows_keep_their_nodes_and_follow_their_places() {
+        let start: Vec<Item> = (0..5).map(|key| (key, 0)).collect();
+        let (mut c, parent) = mounted(Shape::Text, &start);
+        let nodes = children(&c, parent);
+        seen();
+        // The last row comes first, changed on the way.
+        let batch = set(&mut c, &[(4, 9), (0, 0), (1, 0), (2, 0), (3, 0)]);
+        assert_eq!(
+            shown(&c, parent),
+            [
+                "before", "4:4:9@0", "0:0:0@1", "1:1:0@2", "2:2:0@3", "3:3:0@4", "after"
+            ]
+        );
+        assert_eq!(
+            children(&c, parent),
+            [
+                nodes[0], nodes[5], nodes[1], nodes[2], nodes[3], nodes[4], nodes[6]
+            ]
+        );
+        assert!(
+            !batch
+                .iter()
+                .any(|item| matches!(item, MountItem::Create { .. } | MountItem::Delete { .. }))
+        );
+        assert_eq!(
+            seen(),
+            ["4 is 9", "4 at 0", "0 at 1", "1 at 2", "2 at 3", "3 at 4"]
+        );
+        // Two rows in the middle change places; the others are not written.
+        set(&mut c, &[(4, 9), (1, 0), (0, 0), (2, 0), (3, 0)]);
+        assert_eq!(
+            children(&c, parent),
+            [
+                nodes[0], nodes[5], nodes[2], nodes[1], nodes[3], nodes[4], nodes[6]
+            ]
+        );
+        assert_eq!(seen(), ["1 at 1", "0 at 2"]);
+        // A row comes in the middle, among rows that stay.
+        set(&mut c, &[(4, 9), (1, 0), (7, 0), (0, 0), (2, 0), (3, 0)]);
+        assert_eq!(
+            shown(&c, parent),
+            [
+                "before", "4:4:9@0", "1:1:0@1", "5:7:0@2", "0:0:0@3", "2:2:0@4", "3:3:0@5", "after"
+            ]
+        );
+        let now = children(&c, parent);
+        assert_eq!(
+            [now[1], now[2], now[4], now[5], now[6]],
+            [nodes[5], nodes[2], nodes[1], nodes[3], nodes[4]]
+        );
+        assert_eq!((MADE.with(Cell::get), GONE.with(Cell::get)), (6, 0));
+        assert_eq!(seen(), ["5 is 0", "5 at 2", "0 at 3", "2 at 4", "3 at 5"]);
+    }
+
+    #[test]
+    fn rows_set_twice_before_a_commit_show_the_last_list() {
+        let (mut c, parent) = mounted(Shape::Pair, &[(1, 0), (2, 0), (3, 0)]);
+        let nodes = children(&c, parent);
+        // A row comes and goes before the core places it; another stays.
+        write(&mut c, &[(1, 0), (8, 0), (2, 0), (3, 0)]);
+        write(&mut c, &[(1, 0), (2, 0), (3, 1), (9, 0)]);
+        let batch = c.commit().unwrap().items;
+        assert_eq!(
+            shown(&c, parent),
+            [
+                "before", "0:1:0@0", "/0", "1:2:0@1", "/1", "2:3:1@2", "/2", "4:9:0@3", "/4",
+                "after"
+            ]
+        );
+        let now = children(&c, parent);
+        assert_eq!(now[..7], nodes[..7]);
+        assert_eq!(now[9], nodes[7]);
+        assert!(
+            !texts_of(&batch).iter().any(|text| text.starts_with("3:8")),
+            "the row that went was never shown"
+        );
+        assert_eq!((MADE.with(Cell::get), GONE.with(Cell::get)), (5, 1));
+    }
+
+    /// The rows an update keeps, as a map of the rows by key decides it:
+    /// a key that stays keeps its row, the others are made. With a key
+    /// twice the second is a row of its own, and the map then holds the
+    /// last row of that key.
+    #[derive(Default)]
+    struct Model {
+        /// The key and the order it was made in, of each row.
+        rows: Vec<(u32, usize)>,
+        made: usize,
+        /// The calls of the key function: one for each item of an update.
+        keyed: usize,
+        /// The rows disposed; `None` once a key came twice (the rows the
+        /// map dropped are not counted here).
+        gone: Option<usize>,
+    }
+
+    impl Model {
+        fn update(&mut self, items: &[Item]) {
+            let count = self.rows.len();
+            self.keyed += items.len();
+            let mut old: HashMap<u32, usize> = self.rows.drain(..).collect();
+            if old.len() != count {
+                self.gone = None;
+            }
+            for &(key, _) in items {
+                let made = old.remove(&key).unwrap_or_else(|| {
+                    self.made += 1;
+                    self.made - 1
+                });
+                self.rows.push((key, made));
+            }
+            if let Some(gone) = &mut self.gone {
+                *gone += old.len();
+            }
+        }
+
+        /// What [`Listed`] shows for `items`.
+        fn shown(&self, shape: Shape, items: &[Item]) -> Vec<String> {
+            let mut out = vec!["before".to_owned()];
+            for (index, (&(key, made), &(_, value))) in self.rows.iter().zip(items).enumerate() {
+                let caption = format!("{made}:{key}:{value}@{index}");
+                match (shape, parts(shape, key)) {
+                    (Shape::Region, _) if value % 3 == 0 => {}
+                    (_, 0) => {}
+                    (_, 1) => out.push(caption),
+                    _ => out.extend([caption, format!("/{made}")]),
+                }
+            }
+            out.push("after".to_owned());
+            out
+        }
+    }
+
+    /// A small generator (xorshift): the same lists on every run.
+    struct Random(u64);
+
+    impl Random {
+        fn next(&mut self, below: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % below.max(1) as u64) as usize
+        }
+    }
+
+    /// The next list after `items`: one of the changes a list goes
+    /// through. `twice` lets a key come a second time.
+    fn changed(random: &mut Random, items: &[Item], fresh: &mut u32, twice: bool) -> Vec<Item> {
+        let mut items = items.to_vec();
+        let len = items.len();
+        let new = |fresh: &mut u32| {
+            *fresh += 1;
+            (*fresh, 1)
+        };
+        match random.next(if twice { 14 } else { 13 }) {
+            // The streamed reply's: the last row changes, or one comes.
+            0 | 1 if len > 0 => items[len - 1].1 += 1,
+            2 | 3 => items.push(new(fresh)),
+            4 if len > 0 => {
+                items[len - 1].1 += 1;
+                items.push(new(fresh));
+            }
+            5 if len > 0 => items[random.next(len)].1 += 1,
+            6 => {
+                let at = random.next(len + 1);
+                items.insert(at, new(fresh));
+            }
+            7 if len > 0 => {
+                items.remove(random.next(len));
+            }
+            8 if len > 1 => {
+                let (a, b) = (random.next(len), random.next(len));
+                items.swap(a, b);
+            }
+            9 if len > 1 => {
+                let by = random.next(len);
+                items.rotate_left(by);
+            }
+            10 => items.reverse(),
+            11 => {
+                // Several rows go and several come, wherever.
+                for _ in 0..random.next(4) {
+                    if !items.is_empty() {
+                        items.remove(random.next(items.len()));
+                    }
+                }
+                for _ in 0..random.next(4) {
+                    let at = random.next(items.len() + 1);
+                    items.insert(at, new(fresh));
+                }
+            }
+            12 => match random.next(8) {
+                0 => items.clear(),
+                _ => items.truncate(len.saturating_sub(random.next(3))),
+            },
+            13 if len > 0 => {
+                let key = items[random.next(len)].0;
+                let at = random.next(len + 1);
+                items.insert(at, (key, 2));
+            }
+            _ => items.push(new(fresh)),
+        }
+        items
+    }
+
+    /// Lists changed at random, checked after every commit against
+    /// [`Model`]: which rows stay, are made and go, what is shown and in
+    /// which order. `twice` lets keys come twice. With `NSH_EACH_ITEMS`
+    /// naming a file, every commit's mount items are added to it, to
+    /// compare two builds.
+    fn follows_the_model(twice: bool) {
+        let mut record = String::new();
+        for (seed, shape) in [Shape::Text, Shape::Pair, Shape::Region, Shape::Mixed]
+            .into_iter()
+            .cycle()
+            .enumerate()
+            .take(24)
+        {
+            let mut random = Random(0x9E37_79B9_7F4A_7C15 ^ (seed as u64 + 1) << 20 | 1);
+            let mut fresh = 100;
+            let mut items: Vec<Item> = (0..random.next(12) as u32).map(|key| (key, 1)).collect();
+            let (mut c, parent) = mounted(shape, &items);
+            let mut model = Model {
+                gone: Some(0),
+                ..Model::default()
+            };
+            model.update(&items);
+            assert_eq!(shown(&c, parent), model.shown(shape, &items));
+            for step in 0..160 {
+                // Mostly one list a commit; sometimes two or three.
+                for _ in 0..[1, 1, 1, 2, 3][random.next(5)] {
+                    let next = changed(&mut random, &items, &mut fresh, twice);
+                    if next != items {
+                        model.update(&next);
+                    }
+                    write(&mut c, &next);
+                    items = next;
+                }
+                let batch = c.commit().map(|batch| batch.items).unwrap_or_default();
+                record.push_str(&format!("{shape:?} {seed} {step} {items:?}\n{batch:#?}\n"));
+                let context = format!("{shape:?}, seed {seed}, step {step}: {items:?}");
+                assert_eq!(shown(&c, parent), model.shown(shape, &items), "{context}");
+                assert_eq!(MADE.with(Cell::get), model.made, "{context}");
+                assert_eq!(KEYED.with(Cell::get), model.keyed, "{context}");
+                if let Some(gone) = model.gone {
+                    assert_eq!(GONE.with(Cell::get), gone, "{context}");
+                }
+            }
+        }
+        if let Ok(path) = std::env::var("NSH_EACH_ITEMS") {
+            let path = format!("{path}.{}", if twice { "twice" } else { "once" });
+            std::fs::write(path, record).unwrap();
+        }
+    }
+
+    #[test]
+    fn random_lists_keep_the_rows_a_map_by_key_keeps() {
+        follows_the_model(false);
+    }
+
+    #[test]
+    fn random_lists_with_a_key_twice_keep_the_rows_a_map_by_key_keeps() {
+        follows_the_model(true);
+    }
+
+    /// What a press of [`BenchRows`] does.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Change {
+        /// The last row's item changes; the keys stay.
+        Last,
+        /// A row is added after the others.
+        Append,
+        /// A text beside the rows changes, the items are not set: what a
+        /// commit of the same tree costs without the `each`.
+        Beside,
+        /// A view after the rows changes its height, the items are not
+        /// set: what laying the rows' parent out again costs, as a row
+        /// added to it does.
+        Resize,
+    }
+
+    thread_local! {
+        static ROWS: Cell<usize> = const { Cell::new(0) };
+        static CHANGE: Cell<Change> = const { Cell::new(Change::Last) };
+        /// Keys as `TextView`'s rows have them: a position and a name.
+        static NAMED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    fn press(items: Signal<Vec<(usize, u32)>>, beside: Signal<u32>) {
+        match CHANGE.with(Cell::get) {
+            Change::Last => items.update(|items| {
+                if let Some(last) = items.last_mut() {
+                    last.1 += 1;
+                }
+            }),
+            Change::Append => items.update(|items| items.push((items.len(), 0))),
+            Change::Beside | Change::Resize => beside.update(|n| *n += 1),
+        }
+    }
+
+    fn row(item: ReadSignal<(usize, u32)>) -> impl IntoElement {
+        view().p_1().child(text(move || {
+            let (at, n) = item.get();
+            format!("row {at} {n}")
+        }))
+    }
+
+    /// `ROWS` rows of an `each`, changed by a press as `CHANGE` says.
+    #[component]
+    fn BenchRows() -> impl IntoElement {
+        let items = signal(
+            (0..ROWS.with(Cell::get))
+                .map(|i| (i, 0u32))
+                .collect::<Vec<_>>(),
+        );
+        let beside = signal(0u32);
+        let rows = if NAMED.with(Cell::get) {
+            each(
+                items,
+                |item| (item.0, "paragraph".to_owned()),
+                |item, _| row(item),
+            )
+        } else {
+            each(items, |item| item.0, |item, _| row(item))
+        };
+        let resized = CHANGE.with(Cell::get) == Change::Resize;
+        view()
+            .on_press(move |_: &()| press(items, beside))
+            .child(text(move || {
+                format!("beside {}", if resized { 0 } else { beside.get() })
+            }))
+            .child(rows)
+            .child(view().h(move || {
+                px(if resized {
+                    4.0 + (beside.get() % 2) as f32
+                } else {
+                    4.0
+                })
+            }))
+    }
+
+    /// `cargo test --release -p nsh-core bench_each_update -- --ignored --nocapture`;
+    /// the numbers are in `docs/dev/performance.md`.
+    #[test]
+    #[ignore]
+    fn bench_each_update() {
+        println!("µs an update: the event (the rows' pass) + the commit | mount items");
+        for named in [false, true] {
+            for rows in [640, 1_280, 5_000] {
+                for (change, label) in [
+                    (Change::Beside, "no row set"),
+                    (Change::Resize, "parent laid out"),
+                    (Change::Last, "last row changed"),
+                    (Change::Append, "row appended"),
+                ] {
+                    ROWS.with(|r| r.set(rows));
+                    CHANGE.with(|c| c.set(change));
+                    NAMED.with(|n| n.set(named));
+                    let mut c = core();
+                    c.mount_root(&Root::new::<BenchRows>(|| ()));
+                    let host = views::root_host(&c.commit().unwrap());
+                    let n = 200;
+                    let (mut event, mut commit) = (Duration::ZERO, Duration::ZERO);
+                    let mut items = 0;
+                    for _ in 0..n {
+                        let start = Instant::now();
+                        c.component_event(host, EventKind::Press, &EventPayload::None);
+                        let mid = Instant::now();
+                        items += c.commit().map_or(0, |b| b.items.len());
+                        event += mid - start;
+                        commit += mid.elapsed();
+                    }
+                    let us = |d: Duration| d.as_secs_f64() * 1e6 / f64::from(n);
+                    println!(
+                        "{} keys, {rows:>5} rows, {label:<16} | {:>8.1} + {:>8.1} = {:>8.1} | {}",
+                        if named { "named" } else { "plain" },
+                        us(event),
+                        us(commit),
+                        us(event + commit),
+                        items / n as usize
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// The default `evaluate` timeout.
 const T: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -44964,6 +45891,17 @@ fn a_list_bound_after_the_mount_budget_gives_its_row_a_frame() {
         }
     }
     assert!(!c.has_paced_mounts());
+    let mut made = vec![ROOT_ID];
+    for item in &items {
+        match item {
+            MountItem::Create { id, .. } => made.push(*id),
+            MountItem::Frame { id, .. } => assert!(
+                made.contains(id),
+                "a paced list cell receives its native frame only after Create: {item:?}"
+            ),
+            _ => {}
+        }
+    }
     let row = items
         .iter()
         .find_map(|item| match item {
@@ -44982,6 +45920,24 @@ fn a_list_bound_after_the_mount_budget_gives_its_row_a_frame() {
         })
         .expect("row received a frame");
     assert_eq!(frame.size, size_pt(1000.0, 26.0));
+    // The list's cell waited too: its cached logical frame must become
+    // its native frame after Create, not just the frames of its children.
+    let cell = items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::Insert { parent, child, .. } if *child == row => Some(*parent),
+            _ => None,
+        })
+        .expect("the row is inserted into its cell");
+    let frame = items
+        .iter()
+        .rev()
+        .find_map(|item| match item {
+            MountItem::Frame { id, frame } if *id == cell => Some(*frame),
+            _ => None,
+        })
+        .expect("the cell received a frame after Create");
+    assert_eq!(frame, rect(0.0, 0.0, 1000.0, 26.0));
     // What the row holds, made in a later turn still, is placed too.
     let frame_of = |test_id: &str| {
         let id = items

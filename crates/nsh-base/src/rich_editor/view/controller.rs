@@ -59,31 +59,55 @@ const DIRECT_SLACK: f32 = 6.0;
 const GAP_PROBES: usize = 64;
 
 /// A rendered block: its id (kept while the block is the same block across
-/// changes), its node and where it starts.
+/// changes), its node and the box its frame is measured in.
 #[derive(Clone, Debug)]
 pub(crate) struct BlockItem {
     pub(crate) id: u64,
     pub(crate) node: Node,
-    /// The position before the node.
-    pub(crate) pos: usize,
     /// The id of the box its frame is measured in.
     pub(crate) parent: u64,
 }
 
 impl PartialEq for BlockItem {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-            && self.pos == other.pos
-            && self.parent == other.parent
-            && self.node.ptr_eq(&other.node)
+        self.id == other.id && self.parent == other.parent && self.node.ptr_eq(&other.node)
     }
 }
 
-/// The blocks' ids: the children of each rendered container.
+/// The blocks' ids, positions and tables.
 #[derive(Default)]
 pub(crate) struct Tree {
     pub(crate) children: HashMap<u64, Vec<BlockItem>>,
+    pub(crate) positions: rustc_hash::FxHashMap<u64, usize>,
+    pub(crate) by_pos: rustc_hash::FxHashMap<usize, u64>,
+    pub(crate) tables: Vec<(u64, Node)>,
     next: u64,
+}
+
+impl Tree {
+    pub(crate) fn pos(&self, id: u64) -> Option<usize> {
+        self.positions.get(&id).copied()
+    }
+
+    pub(crate) fn id_at(&self, pos: usize) -> Option<u64> {
+        self.by_pos.get(&pos).copied()
+    }
+}
+
+type BlockActive = (bool, bool);
+type BlockRects = Vec<Bounds<Points>>;
+
+#[derive(Default)]
+pub(crate) struct ActiveBlocks {
+    signals: rustc_hash::FxHashMap<u64, Signal<BlockActive>>,
+    selected: Option<u64>,
+    focused: rustc_hash::FxHashSet<u64>,
+}
+
+#[derive(Default)]
+pub(crate) struct SelRects {
+    signals: rustc_hash::FxHashMap<u64, Signal<BlockRects>>,
+    active: rustc_hash::FxHashSet<u64>,
 }
 
 /// The id of the slot a node view with an editable content slot renders
@@ -215,6 +239,12 @@ pub(crate) struct Rv {
     pub(crate) table_preview: Signal<Option<TablePreview>>,
     /// The selection a touch made, its handles and edit menu.
     pub(crate) touch: super::touch::Touch,
+    /// Per-block `(selected, focused)` state, notified only for changed blocks.
+    active_blocks: Rc<RefCell<ActiveBlocks>>,
+    /// Per-textblock range selection rectangles, notified only for overlapped blocks.
+    sel_rects: Rc<RefCell<SelRects>>,
+    /// Position of the current `NodeSelection`, `None` for any other selection.
+    pub(crate) node_sel_pos: Signal<Option<usize>>,
 }
 
 impl Rv {
@@ -275,9 +305,13 @@ impl Rv {
             table_gesture: Rc::default(),
             table_preview: signal(None),
             touch: super::touch::Touch::new(),
+            active_blocks: Rc::default(),
+            sel_rects: Rc::default(),
+            node_sel_pos: signal(None),
         };
         rv.sync_tree(&state);
         rv.sync_decorations(&state);
+        rv.sync_active_blocks();
         rv.connect();
         rv
     }
@@ -383,6 +417,13 @@ impl Rv {
                 untracked(|| rv.scroll_into_view());
             }
         });
+        let rv = self.clone();
+        effect(move || {
+            rv.focused.get();
+            rv.props.editable.get();
+            rv.props.focus_mode.get();
+            untracked(|| rv.sync_active_blocks());
+        });
         // Native layout reports many block/text frames in one commit. Apps
         // need a settled size, not an event per paragraph: the change is
         // reported once a frame, and only when the size differs from the
@@ -432,6 +473,8 @@ impl Rv {
             || old.selection().affinity() != state.selection().affinity();
         if selection_changed {
             self.sel_rev.update(|r| *r += 1);
+            self.sync_active_blocks();
+            self.sync_selection_rects();
             self.sync_node_selection(&state);
             self.touch_follow();
         }
@@ -462,8 +505,14 @@ impl Rv {
         let mut tree = self.tree.borrow_mut();
         let mut geo = self.geo.borrow_mut();
         let views = self.node_views.borrow();
-        let mut alive = HashSet::new();
-        let mut texts = HashMap::new();
+        let prev_blocks = tree.positions.len();
+        let prev_texts = geo.texts.len();
+        tree.positions.clear();
+        tree.by_pos.clear();
+        tree.tables.clear();
+        geo.text_order.clear();
+        let mut alive = HashSet::with_capacity(prev_blocks);
+        let mut texts = HashMap::with_capacity(prev_texts);
         let mut atoms = HashMap::new();
         walk(
             &mut tree,
@@ -474,6 +523,7 @@ impl Rv {
             0,
             &mut alive,
             &mut texts,
+            &mut geo.text_order,
             &mut atoms,
         );
         tree.children
@@ -487,6 +537,212 @@ impl Rv {
             geo.texts.insert(id, entry);
         }
         geo.atoms = atoms;
+    }
+
+    pub(crate) fn block_pos(&self, id: u64) -> Option<usize> {
+        self.tree.borrow().pos(id)
+    }
+
+    pub(crate) fn watch_block(&self, id: u64) -> ReadSignal<(bool, bool)> {
+        let sig = {
+            let mut ab = self.active_blocks.borrow_mut();
+            let init = (ab.selected == Some(id), ab.focused.contains(&id));
+            let sig = signal(init);
+            ab.signals.insert(id, sig);
+            sig
+        };
+        let active = self.active_blocks.clone();
+        cleanup(move || {
+            active.borrow_mut().signals.remove(&id);
+        });
+        sig.read_only()
+    }
+
+    pub(crate) fn sync_active_blocks(&self) {
+        let (new_selected, new_focused, sel_pos) = {
+            let state = self.st.borrow();
+            let tree = self.tree.borrow();
+            let sel = state.selection();
+            let sel_pos = sel.as_node().map(|_| sel.from());
+            let new_selected = sel_pos.and_then(|pos| tree.id_at(pos));
+            let mut new_focused = rustc_hash::FxHashSet::default();
+            if self.focused.get_untracked() && self.props.editable.get_untracked() {
+                let (from, to) = (sel.from(), sel.to());
+                let doc = state.doc();
+                let mode = self.props.focus_mode.get_untracked();
+                if from == to {
+                    if let Ok(rp) = doc.resolve(from) {
+                        let deepest = rp.depth.max(1);
+                        for d in 1..=rp.depth {
+                            let keep = match mode.as_deref() {
+                                Some("shallowest") => d == 1,
+                                Some("deepest") => d == deepest,
+                                _ => true,
+                            };
+                            if keep && let Some(id) = tree.id_at(rp.before(d)) {
+                                new_focused.insert(id);
+                            }
+                        }
+                    }
+                } else {
+                    let depth = |pos: usize| doc.resolve(pos).map(|r| r.depth).unwrap_or(0);
+                    let from_depth = depth(from).max(1);
+                    doc.nodes_between(from, to, &mut |n, pos, _, _| {
+                        if n.is_inline() {
+                            return false;
+                        }
+                        if let Some(id) = tree.id_at(pos) {
+                            let keep = match mode.as_deref() {
+                                Some("shallowest") => depth(pos) == 0,
+                                Some("deepest") => depth(pos) + 1 == from_depth,
+                                _ => true,
+                            };
+                            if keep {
+                                new_focused.insert(id);
+                            }
+                        }
+                        true
+                    });
+                }
+            }
+            (new_selected, new_focused, sel_pos)
+        };
+        self.node_sel_pos.set(sel_pos);
+        let updates: Vec<(Signal<BlockActive>, BlockActive)> = {
+            let mut ab = self.active_blocks.borrow_mut();
+            if ab.selected == new_selected && ab.focused == new_focused {
+                return;
+            }
+            let mut dirty = rustc_hash::FxHashSet::default();
+            if ab.selected != new_selected {
+                dirty.extend(ab.selected);
+                dirty.extend(new_selected);
+            }
+            for &id in ab.focused.symmetric_difference(&new_focused) {
+                dirty.insert(id);
+            }
+            ab.selected = new_selected;
+            ab.focused = new_focused;
+            dirty
+                .into_iter()
+                .filter_map(|id| {
+                    let sig = *ab.signals.get(&id)?;
+                    Some((sig, (ab.selected == Some(id), ab.focused.contains(&id))))
+                })
+                .collect()
+        };
+        for (sig, state) in updates {
+            sig.set(state);
+        }
+    }
+
+    pub(crate) fn text_selection_range(&self) -> Option<(usize, usize)> {
+        let state = self.st.borrow();
+        let s = state.selection();
+        let (from, to) = (s.from(), s.to());
+        (from < to && s.as_node().is_none() && s.as_custom::<CellSelection>().is_none())
+            .then_some((from, to))
+    }
+
+    pub(crate) fn watch_selection_rects(&self, id: u64) -> ReadSignal<Vec<Bounds<Points>>> {
+        let init = self
+            .text_selection_range()
+            .map(|(from, to)| self.geo.borrow().text_range_rects(id, from, to))
+            .unwrap_or_default();
+        let sig = signal(init.clone());
+        {
+            let mut sr = self.sel_rects.borrow_mut();
+            if !init.is_empty() {
+                sr.active.insert(id);
+            }
+            sr.signals.insert(id, sig);
+        }
+        let rects = self.sel_rects.clone();
+        cleanup(move || {
+            let mut sr = rects.borrow_mut();
+            sr.signals.remove(&id);
+            sr.active.remove(&id);
+        });
+        sig.read_only()
+    }
+
+    pub(crate) fn sync_selection_rects(&self) {
+        let Some((from, to)) = self.text_selection_range() else {
+            let cleared: Vec<Signal<Vec<Bounds<Points>>>> = {
+                let mut sr = self.sel_rects.borrow_mut();
+                if sr.active.is_empty() {
+                    return;
+                }
+                let active = std::mem::take(&mut sr.active);
+                active
+                    .into_iter()
+                    .filter_map(|id| sr.signals.get(&id).copied())
+                    .collect()
+            };
+            for sig in cleared {
+                sig.set(Vec::new());
+            }
+            return;
+        };
+        let computed: Vec<(u64, Vec<Bounds<Points>>)> = {
+            let geo = self.geo.borrow();
+            geo.text_ids_in(from, to)
+                .into_iter()
+                .map(|id| (id, geo.text_range_rects(id, from, to)))
+                .collect()
+        };
+        let updates: Vec<(Signal<BlockRects>, BlockRects)> = {
+            let mut sr = self.sel_rects.borrow_mut();
+            let mut next_active = rustc_hash::FxHashSet::default();
+            let mut seen = rustc_hash::FxHashSet::default();
+            let mut out = Vec::new();
+            for (id, rects) in computed {
+                seen.insert(id);
+                if !rects.is_empty() {
+                    next_active.insert(id);
+                }
+                if (!rects.is_empty() || sr.active.contains(&id))
+                    && let Some(&sig) = sr.signals.get(&id)
+                {
+                    out.push((sig, rects));
+                }
+            }
+            for &old_id in &sr.active {
+                if !seen.contains(&old_id)
+                    && let Some(&sig) = sr.signals.get(&old_id)
+                {
+                    out.push((sig, Vec::new()));
+                }
+            }
+            sr.active = next_active;
+            out
+        };
+        for (sig, rects) in updates {
+            sig.set(rects);
+        }
+    }
+
+    pub(crate) fn refresh_block_selection_rects(&self, id: u64) {
+        let Some((from, to)) = self.text_selection_range() else {
+            return;
+        };
+        let rects = self.geo.borrow().text_range_rects(id, from, to);
+        let sig = {
+            let mut sr = self.sel_rects.borrow_mut();
+            let was_active = sr.active.contains(&id);
+            if rects.is_empty() && !was_active {
+                return;
+            }
+            if rects.is_empty() {
+                sr.active.remove(&id);
+            } else {
+                sr.active.insert(id);
+            }
+            sr.signals.get(&id).copied()
+        };
+        if let Some(sig) = sig {
+            sig.set(rects);
+        }
     }
 
     /// The plugins' decorations of `state`: whether they changed.
@@ -1725,7 +1981,7 @@ impl Rv {
                             && at.y < b.origin.y + b.size.height
                             && at.x < b.origin.x
                         {
-                            return Some(item.pos);
+                            return tree.pos(item.id);
                         }
                     }
                 }
@@ -1737,7 +1993,7 @@ impl Rv {
             if !container {
                 return None;
             }
-            found = Some(item.pos);
+            found = tree.pos(item.id);
             parent = item.id;
         }
     }
@@ -2044,10 +2300,13 @@ impl Rv {
         let mut inside: Option<(usize, usize)> = None;
         let mut nearest: Option<(Points, usize)> = None;
         for b in tree.children.values().flatten() {
+            let Some(b_pos) = tree.pos(b.id) else {
+                continue;
+            };
             let (Some(origin), Some((_, frame))) = (geo.origin(b.id), geo.frames.get(&b.id)) else {
                 continue;
             };
-            let Ok(rp) = doc.resolve(b.pos) else {
+            let Ok(rp) = doc.resolve(b_pos) else {
                 continue;
             };
             let index = rp.index(rp.depth);
@@ -2065,9 +2324,9 @@ impl Rv {
             }
             let (top, bottom) = (origin.y, origin.y + frame.size.height);
             let boundary = if at.y < top + frame.size.height * 0.5 {
-                b.pos
+                b_pos
             } else {
-                b.pos + b.node.node_size()
+                b_pos + b.node.node_size()
             };
             if at.y >= top && at.y < bottom {
                 if inside.is_none_or(|(depth, _)| rp.depth > depth) {
@@ -2216,17 +2475,24 @@ impl Rv {
     pub(crate) fn block_edge_rect(&self, pos: usize) -> Option<Bounds<Points>> {
         let tree = self.tree.borrow();
         let geo = self.geo.borrow();
-        let blocks = || tree.children.values().flatten();
         let place = |id: u64| -> Option<Bounds<Points>> {
             let origin = geo.origin(id)?;
             let (_, frame) = geo.frames.get(&id)?;
             Some(Bounds::new(origin, frame.size))
         };
-        if let Some(b) = blocks().filter(|b| b.pos == pos).find_map(|b| place(b.id)) {
+        if let Some(id) = tree.id_at(pos)
+            && let Some(b) = place(id)
+        {
             return Some(Bounds::new(b.origin, Size::new(b.size.width, px(0.0))));
         }
-        let b = blocks()
-            .filter(|b| b.pos + b.node.node_size() == pos)
+        let b = tree
+            .children
+            .values()
+            .flatten()
+            .filter(|b| {
+                tree.pos(b.id)
+                    .is_some_and(|p| p + b.node.node_size() == pos)
+            })
             .find_map(|b| place(b.id))?;
         Some(Bounds::new(
             Point::new(b.origin.x, b.origin.y + b.size.height),
@@ -2237,12 +2503,7 @@ impl Rv {
     /// Block `pos`'s top left in the content box.
     fn node_origin(&self, pos: usize) -> Point<Points> {
         let tree = self.tree.borrow();
-        let id = tree
-            .children
-            .values()
-            .flatten()
-            .find(|b| b.pos == pos)
-            .map(|b| b.id);
+        let id = tree.id_at(pos);
         let geo = self.geo.borrow();
         // An inline node's box is where its one position is drawn.
         id.and_then(|id| geo.origin(id))
@@ -2339,10 +2600,14 @@ impl Rv {
     }
 
     /// The box around the selection in the content box: its cells' (a
-    /// cell selection), its text's lines, else the caret's box.
+    /// cell selection), its node's (a node selection), its text's lines,
+    /// else the caret's box.
     pub(crate) fn selection_box(&self) -> Option<Bounds<Points>> {
         if let Some(cells) = self.cells_box() {
             return Some(cells);
+        }
+        if let Some(node) = self.node_selection_box() {
+            return Some(node);
         }
         let state = self.st.borrow();
         let sel = state.selection();
@@ -2353,7 +2618,26 @@ impl Rv {
             .or_else(|| geo.caret_rect(sel.head(), sel.affinity()))
     }
 
-    /// Scrolls the head into view, once it is laid out.
+    /// The box of the node at `pos` in the content box: a block's, else an
+    /// inline view's or image's on its line.
+    pub(crate) fn node_box(&self, pos: usize) -> Option<Bounds<Points>> {
+        node_box(&self.tree.borrow(), &self.geo.borrow(), pos)
+    }
+
+    /// The selected node's box in the content box, for a node selection:
+    /// a block atom has no text and no caret to place things by.
+    pub(crate) fn node_selection_box(&self) -> Option<Bounds<Points>> {
+        let pos = {
+            let state = self.st.borrow();
+            let sel = state.selection();
+            sel.as_node()?;
+            sel.from()
+        };
+        self.node_box(pos)
+    }
+
+    /// Scrolls the head into view, once it is laid out: a selected node
+    /// whole, as ProseMirror scrolls its DOM node, else the caret.
     fn scroll_into_view(&self) {
         let state = self.session.state();
         if state
@@ -2364,7 +2648,7 @@ impl Rv {
             self.scroll_pending.set(false);
             return;
         }
-        let Some(caret) = self.caret_rect() else {
+        let Some(caret) = self.node_selection_box().or_else(|| self.caret_rect()) else {
             return;
         };
         self.scroll_pending.set(false);
@@ -2397,10 +2681,12 @@ fn walk(
     start: usize,
     alive: &mut HashSet<u64>,
     texts: &mut HashMap<u64, usize>,
+    text_order: &mut Vec<(usize, u64)>,
     atoms: &mut HashMap<u64, usize>,
 ) {
     let old = tree.children.remove(&id).unwrap_or_default();
     let mut used = vec![false; old.len()];
+    let mut by_ptr: Option<rustc_hash::FxHashMap<usize, VecDeque<usize>>> = None;
     // A table's children are its cells, row after row: rows have no view,
     // the table is the grid its cells are placed in.
     let children: Vec<(Node, usize)> = if is_table(node) {
@@ -2429,17 +2715,38 @@ fn walk(
     let mut items = Vec::with_capacity(children.len());
     for (index, (child, pos)) in children.iter().enumerate() {
         let (child, pos) = (child, *pos);
-        // The same node first, then the node at its index with its type.
-        let matched = old
-            .iter()
-            .enumerate()
-            .find(|(i, b)| !used[*i] && b.node.ptr_eq(child))
-            .map(|(i, _)| i)
-            .or_else(|| {
-                old.get(index)
-                    .filter(|b| !used[index] && b.node.ty() == child.ty())
-                    .map(|_| index)
+        // The same node first (at the same index in O(1), else indexed by
+        // pointer), then the node at its index with its type.
+        let same_ptr = if old
+            .get(index)
+            .is_some_and(|b| !used[index] && b.node.ptr_eq(child))
+        {
+            Some(index)
+        } else {
+            let map = by_ptr.get_or_insert_with(|| {
+                let mut m: rustc_hash::FxHashMap<usize, VecDeque<usize>> =
+                    rustc_hash::FxHashMap::default();
+                for (i, b) in old.iter().enumerate() {
+                    if !used[i] {
+                        m.entry(b.node.as_ptr()).or_default().push_back(i);
+                    }
+                }
+                m
             });
+            map.get_mut(&child.as_ptr()).and_then(|q| {
+                while let Some(i) = q.pop_front() {
+                    if !used[i] {
+                        return Some(i);
+                    }
+                }
+                None
+            })
+        };
+        let matched = same_ptr.or_else(|| {
+            old.get(index)
+                .filter(|b| !used[index] && b.node.ty() == child.ty())
+                .map(|_| index)
+        });
         let child_id = match matched {
             Some(i) => {
                 used[i] = true;
@@ -2451,13 +2758,17 @@ fn walk(
             }
         };
         alive.insert(child_id);
+        tree.positions.insert(child_id, pos);
+        tree.by_pos.insert(pos, child_id);
         items.push(BlockItem {
             id: child_id,
             node: child.clone(),
-            pos,
             parent,
         });
         let view = views.get(child.ty().name());
+        if is_table(child) && view.is_none() {
+            tree.tables.push((child_id, child.clone()));
+        }
         let atom = match view {
             Some(v) => !v.editable_content_slot(),
             None => child.is_leaf() || child.is_atom() && !child.is_textblock(),
@@ -2466,6 +2777,7 @@ fn walk(
             atoms.insert(child_id, pos);
         } else if child.is_textblock() {
             texts.insert(child_id, pos + 1);
+            text_order.push((pos + 1, child_id));
         } else {
             let box_id = if view.is_some() {
                 slot_id(child_id)
@@ -2481,6 +2793,7 @@ fn walk(
                 pos + 1,
                 alive,
                 texts,
+                text_order,
                 atoms,
             );
         }
@@ -2888,16 +3201,29 @@ mod tests {
         use crate::rich_editor::tables::test_util::{cell_pos, doc, grid, p};
         let d = doc(vec![p("x"), grid(&[&["a", "b"], &["c", "d"]])]);
         let mut tree = Tree::default();
-        let (mut alive, mut texts, mut atoms) = (HashSet::new(), HashMap::new(), HashMap::new());
+        let (mut alive, mut texts, mut text_order, mut atoms) =
+            (HashSet::new(), HashMap::new(), Vec::new(), HashMap::new());
         let views = NodeViews::default();
         walk(
-            &mut tree, &views, DOC, DOC, &d, 0, &mut alive, &mut texts, &mut atoms,
+            &mut tree,
+            &views,
+            DOC,
+            DOC,
+            &d,
+            0,
+            &mut alive,
+            &mut texts,
+            &mut text_order,
+            &mut atoms,
         );
         let table = tree.children[&DOC][1].clone();
         let cells = &tree.children[&table.id];
         // Rows have no blocks: the cells, row after row, at their positions.
         assert_eq!(
-            cells.iter().map(|c| c.pos).collect::<Vec<_>>(),
+            cells
+                .iter()
+                .filter_map(|c| tree.pos(c.id))
+                .collect::<Vec<_>>(),
             ["a", "b", "c", "d"].map(|t| cell_pos(&d, t))
         );
         assert!(cells.iter().all(|c| c.parent == table.id));
@@ -2996,10 +3322,15 @@ impl ViewGeometry for GeometryHandle {
         if !self.here() {
             return None;
         }
-        let (from, to) = {
+        let (from, to, node) = {
             let state = self.state.borrow();
-            (state.selection().from(), state.selection().to())
+            let sel = state.selection();
+            (sel.from(), sel.to(), sel.as_node().is_some())
         };
+        // A node selection's box is its node's: a block atom has no text.
+        if node {
+            return self.node_rect(from);
+        }
         let geo = self.geo.borrow();
         if from == to {
             return geo.caret_rect(from, Affinity::Downstream);
@@ -3020,16 +3351,20 @@ impl ViewGeometry for GeometryHandle {
         if !self.here() {
             return None;
         }
-        let tree = self.tree.borrow();
-        let geo = self.geo.borrow();
-        let Some(b) = tree.children.values().flatten().find(|b| b.pos == pos) else {
-            // Not a block: an inline view or image, on its line.
-            return geo.inline_rect(pos);
-        };
-        let origin = geo.origin(b.id)?;
-        let (_, frame) = geo.frames.get(&b.id)?;
-        Some(Bounds::new(origin, frame.size))
+        node_box(&self.tree.borrow(), &self.geo.borrow(), pos)
     }
+}
+
+/// The box of the node at `pos` in the content box: a block's, else an
+/// inline view's or image's on its line.
+fn node_box(tree: &Tree, geo: &Geometry, pos: usize) -> Option<Bounds<Points>> {
+    let Some(id) = tree.id_at(pos) else {
+        // Not a block: an inline view or image, on its line.
+        return geo.inline_rect(pos);
+    };
+    let origin = geo.origin(id)?;
+    let (_, frame) = geo.frames.get(&id)?;
+    Some(Bounds::new(origin, frame.size))
 }
 
 /// What a paste hook of the app's answered, or `None` (logged) when it

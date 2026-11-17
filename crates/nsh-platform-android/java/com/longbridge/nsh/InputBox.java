@@ -8,6 +8,7 @@ import android.text.Editable;
 import android.text.InputFilter;
 import android.text.InputType;
 import android.text.Layout;
+import android.text.Spanned;
 import android.text.TextWatcher;
 import android.text.method.ArrowKeyMovementMethod;
 import android.util.TypedValue;
@@ -21,6 +22,7 @@ import android.view.inputmethod.InputConnectionWrapper;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import java.text.BreakIterator;
 
 /** `<input>`: an EditText inside a container that carries the decoration. */
 @SuppressLint("ViewConstructor")
@@ -366,7 +368,7 @@ final class InputBox extends FrameLayout implements Node {
             default: ime = multiline && submit == NEWLINE ? EditorInfo.IME_ACTION_NONE : EditorInfo.IME_ACTION_DONE;
         }
         edit.setImeOptions(ime);
-        edit.setFilters(maxLength >= 0 ? new InputFilter[] {new InputFilter.LengthFilter(maxLength)} : new InputFilter[0]);
+        edit.setFilters(maxLength >= 0 ? new InputFilter[] {new CharLengthFilter(maxLength)} : new InputFilter[0]);
         // `readonly` keeps focus and selection, as the docs say: the text selects as a selectable TextView's does (a
         // long press on a word, the handles, Copy) while no key listener edits it and no keyboard comes up. Disabling
         // the EditText instead, as before, took the selection away too.
@@ -485,6 +487,42 @@ final class InputBox extends FrameLayout implements Node {
         String text = pendingText;
         pendingText = null;
         setValue(text, pendingCount);
+    }
+
+    /**
+     * `maxLength`: the user's edits keep the text within {@code max} characters, counted as Unicode code points (an
+     * emoji is one, though a Java string holds two chars for it), as on every platform; `LengthFilter` counts chars.
+     * An insertion longer than the room left goes in cut between user-perceived characters, never inside one (a
+     * letter with its accent, an emoji with its skin tone), as the core's `clip_chars` cuts. The app's value is
+     * never cut, as nowhere else.
+     */
+    private final class CharLengthFilter implements InputFilter {
+        private final int max;
+
+        CharLengthFilter(int max) {
+            this.max = max;
+        }
+
+        @Override
+        public CharSequence filter(CharSequence source, int start, int end, Spanned dest, int dstart, int dend) {
+            if (applying) return null;
+            int kept = Character.codePointCount(dest, 0, dstart)
+                    + Character.codePointCount(dest, dend, dest.length());
+            int room = max - kept;
+            if (Character.codePointCount(source, start, end) <= room) return null;
+            if (room <= 0) return "";
+            BreakIterator graphemes = BreakIterator.getCharacterInstance();
+            String text = source.subSequence(start, end).toString();
+            graphemes.setText(text);
+            int cut = 0;
+            int used = 0;
+            for (int next = graphemes.next(); next != BreakIterator.DONE; next = graphemes.next()) {
+                used += text.codePointCount(cut, next);
+                if (used > room) break;
+                cut = next;
+            }
+            return source.subSequence(start, start + cut);
+        }
     }
 
     /**

@@ -25,8 +25,8 @@ pub fn main() -> std::process::ExitCode {
             return std::process::ExitCode::FAILURE;
         }
     };
-    let data_dir = options.data_dir.clone().or_else(nsh_engine::data_dir);
-    let launch = nsh_engine::updates::launch(bundle, &dir, data_dir.as_deref());
+    let support_dir = nsh_engine::support_dir();
+    let launch = nsh_engine::updates::launch(bundle, &dir, support_dir.as_deref());
     options.asset_base = Some(AssetBase::Directory(launch.assets));
     run(AppSource::Bundle(launch.bundle), options)
 }
@@ -80,6 +80,11 @@ fn setup() -> Option<(std::path::PathBuf, nsh_platform_linux::AppOptions)> {
     if let Some(id) = field("id") {
         options.app_id = id;
     }
+    // `nsh.json` `"dataDir"`: the app's data directory (its storage, logs
+    // and `${dataDir}`) rather than the one under its id.
+    options.data_dir = field("dataDir")
+        .as_deref()
+        .and_then(nsh_engine::resolve_data_dir);
     if let Some(name) = field("name") {
         options.title = name;
     }
@@ -109,7 +114,7 @@ fn setup() -> Option<(std::path::PathBuf, nsh_platform_linux::AppOptions)> {
         Some("dark") => options.appearance = Appearance::Dark,
         _ => {}
     }
-    install_logger(developing, &options.app_id);
+    install_logger(developing, &options.app_id, options.data_dir.as_deref());
     Some((dir, options))
 }
 
@@ -118,10 +123,13 @@ fn setup() -> Option<(std::path::PathBuf, nsh_platform_linux::AppOptions)> {
 /// directory, and standard error. An app that installed its own logger
 /// (from its native module, which runs first) keeps it, and its level.
 #[cfg(target_os = "linux")]
-fn install_logger(development: bool, app_id: &str) {
+fn install_logger(development: bool, app_id: &str, data_dir: Option<&std::path::Path>) {
     let mut logging = nsh_engine::logging::LogOptions::default();
     logging.development = development;
-    logging.directory = nsh_engine::logging::log_dir(app_id);
+    logging.directory = match data_dir {
+        Some(dir) => Some(dir.join("logs")),
+        None => nsh_engine::logging::log_dir(app_id),
+    };
     logging.output = Some(Box::new(|r: &log::Record<'_>| {
         eprintln!("{} {}: {}", r.level(), r.target(), r.args());
     }));

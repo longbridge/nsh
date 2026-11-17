@@ -93,7 +93,7 @@ mount(() => <Text>{{shown()}}</Text>);
             limits: nsh_engine::Limits::default(),
             ui_sets: Vec::new(),
             runtime: None,
-            data_dir: Some(root.join("data")),
+            support_dir: Some(root.join("data")),
             cache: nsh_engine::CacheOptions::off(),
             storage: None,
             clock: Default::default(),
@@ -104,6 +104,7 @@ mount(() => <Text>{{shown()}}</Text>);
             picker: None,
             speech: None,
             audio: None,
+            data_dir: None,
         };
         let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
         let data = root.join("data/com.example.process");

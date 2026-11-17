@@ -69,10 +69,12 @@ pub struct LogOptions {
     pub output: Option<LogOutput>,
 }
 
-/// The directory of the log files of app `app_id`: `logs` in its data
-/// directory (`<data_dir>/<app id>/logs`). `None` without a data directory.
+/// The directory of the log files of app `app_id` when it names no data
+/// directory of its own: `logs` in the one under the system's directory
+/// for apps' data (`<support dir>/<app id>/logs`). `None` where the system
+/// has none.
 pub fn log_dir(app_id: &str) -> Option<PathBuf> {
-    crate::data_dir().map(|dir| dir.join(crate::app_dir_name(Some(app_id))).join("logs"))
+    crate::support_dir().map(|dir| dir.join(crate::app_dir_name(Some(app_id))).join("logs"))
 }
 
 /// Makes the runners' logger the process's logger, filtered by `RUST_LOG`
@@ -622,7 +624,7 @@ mod tests {
 
     #[test]
     fn the_log_directory_is_in_the_apps_data_directory() {
-        let Some(data) = crate::data_dir() else {
+        let Some(data) = crate::support_dir() else {
             return;
         };
         assert_eq!(

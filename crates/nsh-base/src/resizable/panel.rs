@@ -449,6 +449,9 @@ struct DragState {
     from: Points,
     /// Every panel's then.
     before: Vec<Points>,
+    /// Every panel's user size then, given back to a panel the drag
+    /// brings back to its size at the press.
+    held: Vec<Option<Points>>,
     /// The sizes as `gpui-base`'s rules move them.
     state: ResizableState,
     /// The one panel without a size, when there was one: it stays without
@@ -750,10 +753,16 @@ impl Model {
             .copied()
             .filter(|&id| self.entry(id).is_some_and(|e| e.wanted().is_none()))
             .collect();
+        let held = self
+            .ids
+            .iter()
+            .map(|&id| self.entry(id).and_then(|e| e.dragged))
+            .collect();
         self.drag = Some(DragState {
             ix,
             from: sizes[ix],
             before: sizes,
+            held,
             state,
             flexible: (flexible.len() == 1).then(|| flexible[0]),
         });
@@ -767,13 +776,15 @@ impl Model {
         };
         drag.state.resize_panel_at_handle(drag.ix, drag.from + by);
         let sizes = drag.state.sizes().to_vec();
-        let (before, flexible) = (drag.before.clone(), drag.flexible);
-        for ((&id, &now), &was) in self.ids.iter().zip(&sizes).zip(&before) {
-            if now == was || Some(id) == flexible {
+        let (before, held, flexible) = (drag.before.clone(), drag.held.clone(), drag.flexible);
+        for (((&id, &now), &was), &held) in self.ids.iter().zip(&sizes).zip(&before).zip(&held) {
+            if Some(id) == flexible {
                 continue;
             }
             if let Some(entry) = self.entries.iter_mut().find(|e| e.id == id) {
-                entry.dragged = Some(now);
+                // Back at its size at the press: it wants what it wanted
+                // then, not the size an earlier move of this drag gave it.
+                entry.dragged = if now == was { held } else { Some(now) };
             }
         }
         self.expected = Some(sizes);
@@ -861,5 +872,76 @@ impl PanelFlex {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A group 600 wide: a panel of 200 (200 to 400) and one taking the rest.
+    fn model() -> Model {
+        let mut m = Model {
+            axis: Axis::Horizontal,
+            ..Model::default()
+        };
+        let props = |size, min, max| PanelProps {
+            size,
+            min,
+            max,
+            fixed: false,
+            visible: true,
+        };
+        m.set_container(Bounds::new(
+            point(px(0.0), px(0.0)),
+            size(px(600.0), px(100.0)),
+        ));
+        m.register(
+            0,
+            props(Some(px(200.0)), px(200.0), Some(px(400.0))),
+            Rc::new(|_| {}),
+        );
+        m.register(1, props(None, Points::ZERO, None), Rc::new(|_| {}));
+        m.set_frame(
+            0,
+            Bounds::new(point(px(0.0), px(0.0)), size(px(200.0), px(100.0))),
+        );
+        m.set_frame(
+            1,
+            Bounds::new(point(px(200.0), px(0.0)), size(px(400.0), px(100.0))),
+        );
+        m
+    }
+
+    #[test]
+    fn a_drag_back_to_the_size_at_the_press_lays_the_panel_out_there() {
+        let mut m = model();
+        m.start_drag(0);
+        m.drag(px(50.0));
+        assert_eq!(m.flex(0).basis, Some(px(250.0)));
+        // Back past its minimum: clamped to 200, its size at the press.
+        m.drag(px(-30.0));
+        assert_eq!(m.flex(0).basis, Some(px(200.0)));
+        assert!(m.end_drag().is_none());
+        assert_eq!(m.entry(0).unwrap().dragged, None);
+    }
+
+    #[test]
+    fn a_drag_back_keeps_the_size_an_earlier_drag_gave() {
+        let mut m = model();
+        m.step(0, px(100.0)).expect("the step resized");
+        m.set_frame(
+            0,
+            Bounds::new(point(px(0.0), px(0.0)), size(px(300.0), px(100.0))),
+        );
+        m.set_frame(
+            1,
+            Bounds::new(point(px(300.0), px(0.0)), size(px(300.0), px(100.0))),
+        );
+        m.start_drag(0);
+        m.drag(px(50.0));
+        m.drag(px(0.0));
+        assert_eq!(m.flex(0).basis, Some(px(300.0)));
+        assert!(m.end_drag().is_none());
     }
 }

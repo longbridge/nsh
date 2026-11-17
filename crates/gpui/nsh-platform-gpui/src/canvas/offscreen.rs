@@ -30,7 +30,7 @@ use tiny_skia as sk;
 use super::{IRect, Key, Replay, load_image, wait_for_fonts_here};
 use crate::surface::Surface;
 
-type Images = FxHashMap<Arc<str>, Option<Arc<sk::Pixmap>>>;
+type Images = FxHashMap<Arc<str>, Option<super::CanvasBitmap>>;
 
 /// The longest a render waits for the system's fonts.
 const FONTS_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -93,12 +93,11 @@ pub(crate) fn render(
     for uri in uris {
         let waiting = waiting.clone();
         let key = uri.clone();
-        load_image(surface, &uri, move |result| {
+        load_image(surface, &uri, scale, move |result| {
             let mut w = waiting.borrow_mut();
             let image = result
                 .inspect_err(|e| log::warn!("offscreen canvas: {e}"))
-                .ok()
-                .map(Arc::new);
+                .ok();
             w.1.insert(key, image);
             w.0 -= 1;
             if w.0 == 0

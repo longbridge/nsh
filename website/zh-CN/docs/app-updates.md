@@ -38,6 +38,16 @@ group: delivery
 
 `github` 也可以配 `publicKey`，配了之后会拒绝未签名的清单。
 
+想让自愿参加的用户收到 beta，再加一个频道：按名字声明的另一份清单。应用代码把用户的选择作为名字传入（`checkForUpdate({ channel: "beta" })`），不能传地址，所以更新从哪来仍由包决定（[频道](../modules/nsh-updater.md#频道)）。
+
+```json
+"updater": {
+  "url": "https://dl.example.com/app/latest.json",
+  "channels": { "beta": "https://dl.example.com/app/beta/latest.json" },
+  "publicKey": "<keys/update.pub 的内容>"
+}
+```
+
 ## 使用
 
 ```tsx
@@ -55,7 +65,7 @@ if (update?.canInstall) {
 
 `update` 包含 `version`、`notes`、`url` 和 `canInstall`。iOS、Android 上 `canInstall` 为 false；桌面端如果应用装在用户无法写入的位置（如系统包），也为 false。开发运行时 `checkForUpdate` 返回 `null`。
 
-`installAndRestart` 像 `Application.restart()` 一样重启应用：当前进程像用户退出时那样退出，进程结束后新版本启动。如果失败，应用保持原样。每个函数、它的错误以及 `nsh.json` 的键见 [nsh/updater 参考](../modules/nsh-updater.md)。
+`installAndRestart` 像 `Application.restart()` 一样重启应用：当前进程像用户退出时那样退出，进程结束后新版本启动。如果失败，应用保持原样。不想打断用户时改用 `installOnQuit()`：更新现在就校验好，应用退出时替换，下次启动就是新版本。每个函数、它的错误以及 `nsh.json` 的键见 [nsh/updater 参考](../modules/nsh-updater.md)。
 
 ## 发布新版本
 

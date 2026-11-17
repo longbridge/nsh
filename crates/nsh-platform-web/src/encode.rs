@@ -561,11 +561,21 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
         if p.has(TransitionProps::SHAPE) {
             props.extend(["border-radius", "outline-width"]);
         }
+        let easing = match t.spring {
+            // It times itself: its progress over the time it settles in.
+            Some(spring) => sampled_easing(|x| {
+                if x >= 1.0 {
+                    1.0
+                } else {
+                    spring.progress(x * spring.settle_ms())
+                }
+            }),
+            None => bezier(t.easing),
+        };
         let timing = format!(
-            "transition-duration:{}ms;transition-delay:{}ms;transition-timing-function:{};",
-            t.duration,
+            "transition-duration:{}ms;transition-delay:{}ms;transition-timing-function:{easing};",
+            t.run_ms(),
             t.delay,
-            bezier(t.easing)
         );
         let _ = write!(css, "transition-property:{};{timing}", props.join(","));
         // The overlay draws the border.
@@ -838,6 +848,11 @@ fn props_json(p: &ViewProps) -> String {
     }
     if let Some(t) = &p.test_id {
         let _ = write!(s, ",\"testID\":{}", json_str(t));
+    }
+    // An overlay placed against its anchor: `overlays: "viewport"` draws
+    // it over the window (`syncFloats`).
+    if p.overlay_anchor.is_some() {
+        s.push_str(",\"anchored\":true");
     }
     // The HTML element the view is drawn as (`web={{ element }}`), and a
     // link's target (`Link`'s `href`).

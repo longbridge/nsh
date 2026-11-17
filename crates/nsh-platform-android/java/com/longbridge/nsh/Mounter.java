@@ -272,6 +272,8 @@ final class Mounter {
         this.density = host.getResources().getDisplayMetrics().density;
         this.images = images;
         components.put(TabBarComponent.NAME, c -> new TabBarComponent(context, c, this::night));
+        components.put(SwitchComponent.NAME, c -> new SwitchComponent(context, c, this::night));
+        components.put(DateTimePickerComponent.NAME, c -> new DateTimePickerComponent(context, c, this::night));
         images.redirects = (base, location) -> Native.mediaRedirect(handle(), base, location);
         images.inline = uri -> {
             long handle = handle();
@@ -470,6 +472,12 @@ final class Mounter {
                         View v = views.valueAt(i);
                         if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof TabBarComponent) {
                             ((TabBarComponent) ((ComponentBox) v).component).appearanceChanged();
+                        }
+                        if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof SwitchComponent) {
+                            ((SwitchComponent) ((ComponentBox) v).component).appearanceChanged();
+                        }
+                        if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof DateTimePickerComponent) {
+                            ((DateTimePickerComponent) ((ComponentBox) v).component).appearanceChanged();
                         }
                         if (v instanceof StackBox.ScreenBox) ((StackBox.ScreenBox) v).appearanceChanged();
                     }
@@ -1289,7 +1297,7 @@ final class Mounter {
         ValueAnimator a = ValueAnimator.ofFloat(0, 1);
         a.setDuration((long) fx.transitionDuration);
         a.setStartDelay((long) fx.transitionDelay);
-        a.setInterpolator(Effects.interpolator(fx.transitionEasing));
+        a.setInterpolator(fx.transitionInterpolator());
         Dynamic now = new Dynamic();
         a.addUpdateListener(animation -> {
             float t = (float) animation.getAnimatedValue();
@@ -2631,6 +2639,15 @@ final class Mounter {
                 for (int i = 0; i < request.files.length; i++) request.files[i] = (String) objects[b.getInt()];
                 request.mounter = this;
                 Share.show(context, request);
+                break;
+            }
+            case 59: {
+                // `encode.rs` `Command::AuthSession`: the request, the page, the callback scheme, ephemeral.
+                int request = b.getInt();
+                String url = (String) objects[b.getInt()];
+                String scheme = (String) objects[b.getInt()];
+                boolean ephemeral = b.getInt() != 0;
+                AuthSession.open(context, this, request, url, scheme, ephemeral);
                 break;
             }
             case 26: {

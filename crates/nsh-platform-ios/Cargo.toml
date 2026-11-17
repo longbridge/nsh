@@ -83,5 +83,6 @@ block2.workspace = true
 objc2-foundation.workspace = true
 objc2-quartz-core.workspace = true
 objc2-ui-kit.workspace = true
+objc2-authentication-services.workspace = true
 rustc-hash.workspace = true
 libc.workspace = true

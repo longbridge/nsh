@@ -1468,7 +1468,7 @@ pub(crate) fn modal_config(surface: &Rc<Surface>, view: &NshView, config: &Modal
     }
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
-    nav.modals.entry(id).or_default().config = *config;
+    nav.modals.entry(id).or_default().config = config.clone();
     nav.size_modal(surface, id);
 }
 

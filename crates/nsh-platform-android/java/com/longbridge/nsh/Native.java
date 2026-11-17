@@ -100,6 +100,8 @@ final class Native {
     static final int DOWNLOAD_PROGRESS = 88;
     static final int DOWNLOAD_END = 89;
     static final int SHARE = 90;
+    static final int DETENT_CHANGE = 91;
+    static final int AUTH_SESSION = 92;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long

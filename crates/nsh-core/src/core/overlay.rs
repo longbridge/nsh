@@ -1303,8 +1303,34 @@ impl<M: TextEngine> Core<M> {
             path.push(self.nodes[key as usize].id);
             key = self.nodes[key as usize].parent;
         }
+        self.presses_outside(event.page_position, &path)
+    }
+
+    /// A press beyond the root view, at `page` in its coordinates: on what
+    /// is around the surface, where the platform draws the root view's
+    /// anchored overlays too (the web page around the player's container,
+    /// `overlays: "viewport"`). It misses every view, so each shown
+    /// overlay watching presses hears `onPressOutside`, as a press in the
+    /// root view outside it.
+    ///
+    /// Returns those events (each overlay and its payload) for the caller
+    /// to hand out, as [`Core::context_menu_presses_outside`].
+    pub fn presses_beyond_root(&mut self, page: Point<Points>) -> Vec<(NodeId, EventPayload)> {
+        if self.overlay_state.watched.is_empty() {
+            return Vec::new();
+        }
+        self.presses_outside(page, &[])
+    }
+
+    /// The `onPressOutside` events of a press at `page` on the views of
+    /// `path`, taken from the queue for the caller to hand out.
+    fn presses_outside(
+        &mut self,
+        page: Point<Points>,
+        path: &[NodeId],
+    ) -> Vec<(NodeId, EventPayload)> {
         let from = self.events.len();
-        self.press_outside(event.page_position, &path);
+        self.press_outside(page, path);
         self.events
             .drain(from..)
             .filter_map(|event| match event {
@@ -1362,11 +1388,20 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The room overlay `key` shown in `host` keeps to beside its anchor:
-    /// the root view's safe area less the overlay's `margin`.
+    /// the root view's safe area less the overlay's `margin`, or the area
+    /// the platform shows the root view's overlays in
+    /// ([`Core::set_overlay_area`]).
     fn overlay_area(&self, key: Key, host: NodeId) -> Option<Bounds<Points>> {
         let config = self.overlay(key)?.config;
-        let (size, insets) = self.overlay_host_size(host)?;
         let m = config.margin.0;
+        // Shown beyond the root view (the web's `overlays: "viewport"`):
+        // the platform's area, its safe area already left out.
+        if host == ROOT_ID
+            && let Some(area) = self.overlay_bounds
+        {
+            return Some(inset(area, [m, m, m, m]));
+        }
+        let (size, insets) = self.overlay_host_size(host)?;
         Some(inset(
             rect(0.0, 0.0, size.width.0, size.height.0),
             [
@@ -2105,6 +2140,15 @@ impl<M: TextEngine> Core<M> {
                 origin: own.page,
                 size: own.frame.size,
             },
+        })
+    }
+
+    /// Whether an overlay with an anchor is shown in the root view (not in
+    /// a modal): one whose room [`Core::set_overlay_area`] changes.
+    pub(super) fn root_overlay_shown(&self) -> bool {
+        self.overlays.iter().any(|&key| {
+            self.overlay(key).is_some_and(|s| s.host == Some(ROOT_ID))
+                && self.resolved_anchor(key) != OverlayAnchor::None
         })
     }
 

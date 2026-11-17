@@ -99,7 +99,7 @@ fn headless_preserves_environment_and_data_and_stops_on_process_exit() {
         .unwrap();
     let mut config = EngineConfig::new(bundle);
     config.environment.os = Os::MacOs;
-    config.data_dir = Some(root.clone());
+    config.support_dir = Some(root.clone());
     let started = Instant::now();
     let mut app = Headless::start(config).unwrap();
     let result = app.wait(Duration::from_secs(10));
@@ -513,7 +513,7 @@ fn a_paste_goes_in_clipped_to_max_length() {
     .unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 4);
+    assert_eq!(results.len(), 7);
 }
 
 #[test]

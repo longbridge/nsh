@@ -78,7 +78,7 @@ use nsh_core::{
     SubmitBehavior, TextAlign,
     geometry::{Point, Size},
     tailwind::state,
-    text_edit::{key_of, pasted},
+    text_edit::{clip_chars, key_of, pasted},
 };
 use rustc_hash::FxHashMap;
 use windows::{
@@ -351,6 +351,56 @@ impl InputState {
         self.editor.as_ref().map_or((0, 0), Editor::selection)
     }
 
+    /// What of `text` may replace the selection: cut to what `maxLength`
+    /// (characters, Unicode scalar values) leaves room for.
+    fn fit<'a>(&self, text: &'a str) -> &'a str {
+        let Some(max) = self.config.borrow().max_length else {
+            return text;
+        };
+        let units = self.units();
+        let (a, b) = self.selection();
+        let start = (a.min(b) as usize).min(units.len());
+        let end = (a.max(b) as usize).min(units.len());
+        let kept = char_count(&units[..start]) + char_count(&units[end..]);
+        clip_chars(text, (max as usize).saturating_sub(kept))
+    }
+
+    /// RichEdit's limit (`TxGetMaxLength`) for `maxLength`. RichEdit counts
+    /// UTF-16 units, `maxLength` characters: the limit is the units the
+    /// text has plus one per character of room left, set again after each
+    /// edit, so what RichEdit inserts by itself (an input method's
+    /// composition and commit, the emoji panel, a drop) stays within
+    /// `maxLength` characters. A character of one unit leaves the limit as
+    /// it was; one of two (an emoji) raises it by one, though RichEdit
+    /// takes such a character by itself only while two characters of room
+    /// are left. The field's own insertions (typing, pastes, `insertText`)
+    /// cut their text by characters first ([`InputState::fit`]) and lift
+    /// the limit ([`uncut`]), so they fill the room exactly.
+    fn limit(&self) -> u32 {
+        let Some(max) = self.config.borrow().max_length else {
+            return i32::MAX as u32;
+        };
+        let units = self.units();
+        let room = (max as usize).saturating_sub(char_count(&units));
+        (units.len() + room).min(i32::MAX as usize) as u32
+    }
+
+    fn set_limit(&self, units: u32) {
+        if let Some(e) = &self.editor
+            && e.props().max_length != units
+        {
+            e.update(|p| p.max_length = units, TXTBIT_MAXLENGTHCHANGE);
+        }
+    }
+
+    /// Sets RichEdit's limit for the text it holds now
+    /// ([`InputState::limit`]).
+    fn follow_limit(&self) {
+        if self.config.borrow().max_length.is_some() {
+            self.set_limit(self.limit());
+        }
+    }
+
     /// The text being composed, while there is any.
     fn composed_text(&self) -> Option<String> {
         let (before, after) = self.composing.get()?;
@@ -560,6 +610,7 @@ impl InputState {
         let color = self.anim_color.get().unwrap_or(style.color);
         let face = family(style.font_family.map(|f| f.name()).as_deref());
         let bits = base_bits(&config);
+        let limit = self.limit();
         e.update(
             |p| {
                 let cf = &mut p.char_format;
@@ -608,7 +659,7 @@ impl InputState {
                     pf.dyLineSpacing = 0;
                 }
                 p.bits = bits;
-                p.max_length = config.max_length.unwrap_or(i32::MAX as u32);
+                p.max_length = limit;
                 p.scroll = if config.multiline {
                     ES_AUTOVSCROLL
                 } else {
@@ -785,7 +836,19 @@ impl Hosted for InputState {
         // shows, the background is transparent), or its first caret keeps
         // the height of the default font. The recording is in the content
         // box's points, as this item draws.
-        if let Some(drawn) = &*self.drawn.borrow() {
+        // RichEdit takes the text color as a COLORREF, which has no alpha
+        // (`colorref`): it would draw a transparent or translucent color
+        // opaque. The color's alpha is applied to its drawing here instead,
+        // so a field whose text is transparent (`OtpInput`'s, over its
+        // cells) shows nothing of its text.
+        let text_alpha = alpha(color);
+        if text_alpha > 0.0
+            && let Some(drawn) = &*self.drawn.borrow()
+        {
+            let faded = text_alpha < 1.0;
+            if faded {
+                cx.push_opacity(text_alpha);
+            }
             // SAFETY: a COM call between BeginDraw and EndDraw.
             unsafe {
                 cx.dc.DrawImage(
@@ -795,6 +858,9 @@ impl Hosted for InputState {
                     D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
                     D2D1_COMPOSITE_MODE_SOURCE_OVER,
                 );
+            }
+            if faded {
+                cx.pop();
             }
         }
 
@@ -850,6 +916,11 @@ fn base_bits(config: &InputConfig) -> u32 {
         bits |= TXTBIT_USEPASSWORD;
     }
     bits
+}
+
+/// The alpha of a color, 0 to 1: what [`colorref`] leaves out.
+fn alpha(c: Color) -> f32 {
+    (c.0 & 0xff) as f32 / 255.0
 }
 
 fn colorref(c: Color) -> COLORREF {
@@ -1302,6 +1373,9 @@ fn process(surface: &Surface, view: &NshView, input: &InputState) -> bool {
     } else if notes.composition_start.is_some() {
         report_composition(surface, view, input);
     }
+    if notes.changed || notes.composition_end {
+        input.follow_limit();
+    }
     if notes.changed || notes.selection {
         input.wake_caret();
         report_selection(surface, view, input);
@@ -1313,11 +1387,32 @@ fn process(surface: &Surface, view: &NshView, input: &InputState) -> bool {
     changed
 }
 
-/// Replaces the selection with `text` (undo takes it back; `maxLength`
-/// clips it).
+/// Replaces the selection with `text`, cut to what `maxLength` leaves room
+/// for ([`InputState::fit`]); undo takes it back.
 fn replace_selection(input: &InputState, text: &str) {
-    let wide: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
-    input.send(EM_REPLACESEL, 1, wide.as_ptr() as isize);
+    let wide: Vec<u16> = input.fit(text).encode_utf16().chain(Some(0)).collect();
+    uncut(input, || {
+        input.send(EM_REPLACESEL, 1, wide.as_ptr() as isize);
+    });
+}
+
+/// Runs `insert`, an insertion of text [`InputState::fit`] cut already, with
+/// RichEdit's limit lifted, so that its count of UTF-16 units does not cut
+/// it again; then sets the limit for the text it made.
+fn uncut(input: &InputState, insert: impl FnOnce()) {
+    if input.config.borrow().max_length.is_none() {
+        insert();
+        return;
+    }
+    input.set_limit(i32::MAX as u32);
+    insert();
+    input.set_limit(input.limit());
+}
+
+/// The characters (Unicode scalar values) of UTF-16 `units`; an unpaired
+/// surrogate counts as one.
+fn char_count(units: &[u16]) -> usize {
+    char::decode_utf16(units.iter().copied()).count()
 }
 
 /// Return submitted the input (`blur`: and unfocuses it).
@@ -1464,7 +1559,8 @@ fn set_value(view: &NshView, input: &InputState, text: &str, count: u32) {
     }
     let Some(e) = &input.editor else { return };
     input.programmatic.set(true);
-    e.set_text(text);
+    // The app's value is never cut to `maxLength`, as on every platform.
+    uncut(input, || e.set_text(text));
     input.send(EM_SETSEL, usize::MAX >> 1, -1);
     input.programmatic.set(false);
     input.reported_text.replace(input.text());
@@ -1583,12 +1679,15 @@ pub(crate) fn char_input(surface: &Rc<Surface>, text: &str) {
         return;
     }
     input.follow(&view);
-    for unit in text.encode_utf16() {
-        input.send(WM_CHAR, unit as usize, 1);
-    }
+    let fit = input.fit(&text);
+    uncut(&input, || {
+        for unit in fit.encode_utf16() {
+            input.send(WM_CHAR, unit as usize, 1);
+        }
+    });
     let changed = process(surface, &view, &input);
     if changed {
-        key_press(surface, &view, key_of(&text));
+        key_press(surface, &view, key_of(fit));
     }
 }
 
@@ -2216,6 +2315,12 @@ mod tests {
             colorref(Color::rgba(0x11, 0x22, 0x33, 0xff)),
             COLORREF(0x332211)
         );
+        // A COLORREF has no alpha: transparent comes out black, so the
+        // drawing takes the alpha apart.
+        assert_eq!(colorref(Color::rgba(0, 0, 0, 0)), COLORREF(0));
+        assert_eq!(alpha(Color::rgba(0, 0, 0, 0)), 0.0);
+        assert_eq!(alpha(Color::rgba(0x11, 0x22, 0x33, 0xff)), 1.0);
+        assert!((alpha(Color::rgba(0, 0, 0, 0x80)) - 0.502).abs() < 0.001);
     }
 
     #[test]

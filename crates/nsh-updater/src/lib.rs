@@ -78,9 +78,14 @@ pub struct Config {
     /// The manifest's URL on a host of the app's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Other manifests the app may check instead, by name (`"beta"`): the
+    /// app's code picks one by its name ([`Config::channel`]), never by its
+    /// URL. Each needs HTTPS and `public_key`, as `url` does.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub channels: BTreeMap<String, String>,
     /// The Ed25519 key manifests are signed with (`nsh keygen`'s `.pub`).
-    /// Required with `url`; with `github`, unsigned manifests are refused
-    /// once it is set.
+    /// Required with `url` and `channels`; with `github`, unsigned manifests
+    /// are refused once it is set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_key: Option<String>,
     /// The build number of the bundle shipped in the app (`nsh.json`
@@ -112,8 +117,9 @@ impl Config {
         Ok(config)
     }
 
-    /// Exactly one source, a well-formed repository or URL, the key a
-    /// custom host needs, a version that compares.
+    /// Exactly one source, a well-formed repository or URL, channels with
+    /// names and HTTPS URLs, the key a custom host needs, a version that
+    /// compares.
     pub fn validate(&self) -> Result<(), Error> {
         semver::Version::parse(&self.version)
             .map_err(|e| Error::Config(format!("version {:?}: {e}", self.version)))?;
@@ -147,6 +153,23 @@ impl Config {
                 return Err(Error::Config("set one of github and url".into()));
             }
         }
+        for (name, url) in &self.channels {
+            let valid = !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
+            if !valid {
+                return Err(Error::Config(format!(
+                    "channels: {name:?} is not a name (letters, digits, \"-\", \"_\", \".\")"
+                )));
+            }
+            check_url(url).map_err(|e| Error::Config(format!("channels.{name}: {e}")))?;
+        }
+        if !self.channels.is_empty() && self.public_key.is_none() {
+            return Err(Error::Config(
+                "channels: they need publicKey (`nsh keygen`'s .pub), as url does".into(),
+            ));
+        }
         if let Some(key) = &self.public_key {
             public_key(key)?;
         }
@@ -167,6 +190,25 @@ impl Config {
     /// no packages.
     pub fn package_roots(&self) -> &[String] {
         self.packages.as_ref().map_or(&[], |p| &p.roots)
+    }
+
+    /// This configuration with the manifest of channel `name` (one of
+    /// [`Config::channels`]) as its source: what [`Config::check`] and the
+    /// other methods then read. Fails for a name the package does not
+    /// declare, so the app's code chooses among the package's sources and
+    /// cannot add one.
+    pub fn channel(&self, name: &str) -> Result<Config, Error> {
+        let url = self.channels.get(name).ok_or_else(|| {
+            Error::Config(format!(
+                "channel {name:?}: the package declares no such channel (`\"updater\": {{ \"channels\" }}`)"
+            ))
+        })?;
+        Ok(Config {
+            github: None,
+            url: Some(url.clone()),
+            channels: BTreeMap::new(),
+            ..self.clone()
+        })
     }
 
     /// The manifest's URL.
@@ -613,6 +655,86 @@ mod tests {
             custom("https://x.dev/latest.json", Some(public()))
                 .validate()
                 .is_ok()
+        );
+    }
+
+    fn with_channels(channels: &[(&str, &str)]) -> Config {
+        Config {
+            public_key: Some(public()),
+            channels: channels
+                .iter()
+                .map(|(name, url)| ((*name).to_owned(), (*url).to_owned()))
+                .collect(),
+            ..config()
+        }
+    }
+
+    #[test]
+    fn channels_need_names_https_and_a_key() {
+        assert!(
+            with_channels(&[("beta", "https://x.dev/beta/latest.json")])
+                .validate()
+                .is_ok()
+        );
+        assert!(
+            with_channels(&[("beta", "http://x.dev/beta/latest.json")])
+                .validate()
+                .is_err()
+        );
+        for name in ["", "a b", "a/b"] {
+            assert!(
+                with_channels(&[(name, "https://x.dev/l.json")])
+                    .validate()
+                    .is_err(),
+                "{name:?}"
+            );
+        }
+        let unsigned = Config {
+            public_key: None,
+            ..with_channels(&[("beta", "https://x.dev/beta/latest.json")])
+        };
+        assert!(unsigned.validate().is_err());
+        // The packaged file keeps them; one without any reads as before.
+        let beta = with_channels(&[("beta", "https://x.dev/beta/latest.json")]);
+        let bytes = serde_json::to_vec(&beta).unwrap();
+        assert_eq!(Config::parse(&bytes).unwrap(), beta);
+        let plain = serde_json::to_value(config()).unwrap();
+        assert!(plain.get("channels").is_none());
+    }
+
+    #[test]
+    fn a_channel_is_chosen_by_a_declared_name_only() {
+        let config = with_channels(&[("beta", "https://x.dev/beta/latest.json")]);
+        let beta = config.channel("beta").unwrap();
+        assert_eq!(beta.manifest_url(), "https://x.dev/beta/latest.json");
+        assert_eq!(
+            beta.signature_url().as_deref(),
+            Some("https://x.dev/beta/latest.json.sig")
+        );
+        assert!(beta.validate().is_ok());
+        assert!(config.channel("nightly").is_err());
+        assert!(config.channel("https://evil.dev/latest.json").is_err());
+        // The default source stays the package's own.
+        assert_eq!(
+            config.manifest_url(),
+            "https://github.com/owner/repo/releases/latest/download/latest.json"
+        );
+        // Archives resolve next to the channel's manifest; the signature,
+        // the id and the newer version are checked as on the default.
+        let bytes = manifest("2.0.0", "a.tar.gz");
+        let signature = sign(SECRET, &bytes).unwrap();
+        let available = beta
+            .check(&bytes, Some(signature.as_bytes()), "linux-x86_64")
+            .unwrap()
+            .unwrap();
+        assert_eq!(available.url, "https://x.dev/beta/a.tar.gz");
+        assert!(beta.check(&bytes, None, "linux-x86_64").is_err());
+        let older = manifest("1.1.0", "a.tar.gz");
+        let signature = sign(SECRET, &older).unwrap();
+        assert!(
+            beta.check(&older, Some(signature.as_bytes()), "linux-x86_64")
+                .unwrap()
+                .is_none()
         );
     }
 

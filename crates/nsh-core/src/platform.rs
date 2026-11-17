@@ -16,6 +16,16 @@ pub const TAB_BAR_COMPONENT: &str = "nsh/tab-bar";
 /// backend registers itself (`UISegmentedControl`).
 pub const SEGMENTED_CONTROL_COMPONENT: &str = "nsh/segmented-control";
 
+/// The native component of `nsh/mobile`'s `Switch`, which the iOS backend
+/// (`UISwitch`) and the Android backend register themselves
+/// (`SwitchComponent.java`'s `NAME` keeps the same name).
+pub const SWITCH_COMPONENT: &str = "nsh/switch";
+
+/// The native component of `nsh/mobile`'s `DateTimePicker`, which the iOS
+/// backend (`UIDatePicker`) and the Android backend register themselves
+/// (`DateTimePickerComponent.java`'s `NAME` keeps the same name).
+pub const DATE_TIME_PICKER_COMPONENT: &str = "nsh/date-time-picker";
+
 /// The native component of `nsh/base`'s `MenuButton`, which the iOS backend
 /// registers itself (a `UIButton` showing its `UIMenu` as its primary
 /// action).
@@ -352,6 +362,12 @@ pub struct Environment {
     /// ([`crate::Command::Share`], `Share.show`); without it, a share fails
     /// at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
     pub share: bool,
+    /// The platform shows web sign-in sessions
+    /// ([`crate::Command::AuthSession`]: iOS's
+    /// `ASWebAuthenticationSession`, Android's Custom Tabs); without it,
+    /// a session opens the system browser and waits for a link of a scheme
+    /// the app claims ([`crate::auth_session`]).
+    pub auth_session: bool,
     /// The platform handles file requests ([`crate::Command::FileRequest`]).
     /// Desktops implement the full set; mobile platforms answer the open
     /// dialog and reject operations they do not support. Without it, all
@@ -488,6 +504,7 @@ impl Default for Environment {
             screen_color: false,
             canvas_render: false,
             share: false,
+            auth_session: false,
             file_requests: false,
             speech: false,
             notifications: false,
