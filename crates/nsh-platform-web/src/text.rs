@@ -19,7 +19,8 @@ use std::{
 
 use nsh_core::{
     AttributedText, Bounds, EllipsizeMode, Point, Points, ResolvedTextStyle, Size, TextAlign,
-    TextEngine, TextLayout, TextLine, TextPosition, text_edit::next_cluster,
+    TextEngine, TextLayout, TextLine, TextPosition,
+    text_edit::{next_cluster, prev_cluster},
 };
 use rustc_hash::FxHashMap;
 
@@ -150,7 +151,12 @@ impl WebTextEngine {
     }
 
     fn run_width(&self, run: &RunStyle, text: &str) -> f32 {
-        self.width(&run.font, run.numeric.as_ref(), text)
+        let advance = self.width(&run.font, run.numeric.as_ref(), text);
+        if text.is_empty() || run.style.letter_spacing.0 == 0.0 {
+            advance
+        } else {
+            advance + run.style.letter_spacing.0 * cluster_count(text) as f32
+        }
     }
 
     fn metrics(&self, font: &Arc<str>, size: f32) -> (f32, f32) {
@@ -514,6 +520,25 @@ struct Part {
     ellipsis: bool,
 }
 
+/// Number of extended grapheme clusters in `text`. CSS `letter-spacing`
+/// applies once per typographic character unit (grapheme cluster), not once
+/// per Unicode scalar value.
+fn cluster_count(text: &str) -> usize {
+    if text.is_empty() {
+        return 0;
+    }
+    if text.is_ascii() {
+        return text.len();
+    }
+    let mut at = 0;
+    let mut count = 0;
+    while at < text.len() {
+        at = next_cluster(text, at);
+        count += 1;
+    }
+    count
+}
+
 /// The end of the paragraph atom `from` is in: its break, or the end.
 fn paragraph_end(atoms: &[Atom], from: usize) -> usize {
     atoms[from..]
@@ -598,25 +623,18 @@ impl WebTextEngine {
                 break;
             };
             let index = index as u16;
-            let style = run.style;
-            let font = run.font.clone();
-            let numeric = run.numeric.clone();
             let start = (span.start.max(range.start)) as usize;
             let end = (span.end.min(range.end) as usize).min(units.len());
             if start >= end {
                 continue;
             }
             let s = String::from_utf16_lossy(&units[start..end]);
-            let spacing = style.letter_spacing.0;
             let mut at = start as u32;
             let mut word = String::new();
             let mut word_start = at;
             let push = |atoms: &mut Vec<Atom>, text: String, kind, start, end| {
                 let width = match kind {
-                    AtomKind::Text | AtomKind::Space => {
-                        self.width(&font, numeric.as_ref(), &text)
-                            + spacing * text.chars().count() as f32
-                    }
+                    AtomKind::Text | AtomKind::Space => self.run_width(run, &text),
                     // Its placeholder's room on the line.
                     AtomKind::Attachment(w, ..) => w,
                     AtomKind::Newline => 0.0,
@@ -630,11 +648,25 @@ impl WebTextEngine {
                     end,
                 });
             };
-            let mut chars = s.chars().peekable();
-            while let Some(c) = chars.next() {
-                let len = c.len_utf16() as u32;
-                let attachment = (c == OBJECT).then(|| attachments.get(&at)).flatten();
-                if c == '\n' || c == ' ' || c == '\t' || wrap::is_cjk(c) || attachment.is_some() {
+            // Walk by extended grapheme clusters so CJK base characters stay
+            // joined with trailing combining marks or variation selectors.
+            let mut pos = 0;
+            while pos < s.len() {
+                let next = next_cluster(&s, pos);
+                let Some(cluster) = s.get(pos..next).filter(|_| next > pos) else {
+                    break;
+                };
+                let Some(c) = cluster.chars().next() else {
+                    break;
+                };
+                let len = u32::try_from(cluster.encode_utf16().count()).unwrap_or(0);
+                let attachment = (c == OBJECT && len == 1)
+                    .then(|| attachments.get(&at))
+                    .flatten();
+                let newline = c == '\n' || cluster == "\r\n";
+                let space = cluster == " " || cluster == "\t";
+                let cjk = wrap::is_cjk(c);
+                if newline || space || cjk || attachment.is_some() {
                     if !word.is_empty() {
                         push(
                             out,
@@ -644,8 +676,9 @@ impl WebTextEngine {
                             at,
                         );
                     }
-                    if c == '\n' {
+                    if newline {
                         push(out, String::new(), AtomKind::Newline, at, at + len);
+                        pos = next;
                     } else if let Some(&(w, top, up, down)) = attachment {
                         push(
                             out,
@@ -654,18 +687,27 @@ impl WebTextEngine {
                             at,
                             at + len,
                         );
-                    } else if wrap::is_cjk(c) {
-                        push(out, c.to_string(), AtomKind::Text, at, at + len);
+                        pos = next;
+                    } else if cjk {
+                        push(out, cluster.to_owned(), AtomKind::Text, at, at + len);
+                        pos = next;
                     } else {
                         // A run of spaces is one atom.
-                        let mut spaces = c.to_string();
+                        let mut spaces = cluster.to_owned();
                         let mut end = at + len;
-                        while let Some(&n) = chars.peek()
-                            && (n == ' ' || n == '\t')
-                        {
-                            spaces.push(n);
+                        pos = next;
+                        while pos < s.len() {
+                            let peek_next = next_cluster(&s, pos);
+                            let Some(peek) = s.get(pos..peek_next).filter(|_| peek_next > pos)
+                            else {
+                                break;
+                            };
+                            if peek != " " && peek != "\t" {
+                                break;
+                            }
+                            spaces.push_str(peek);
                             end += 1;
-                            chars.next();
+                            pos = peek_next;
                         }
                         push(out, spaces, AtomKind::Space, at, end);
                         at = end;
@@ -678,10 +720,13 @@ impl WebTextEngine {
                     if word.is_empty() {
                         word_start = at;
                     }
-                    word.push(c);
+                    word.push_str(cluster);
                     at += len;
+                    pos = next;
                     // A hyphen ends a word (the line may break after it).
-                    if c == '-' && chars.peek().is_some_and(|n| n.is_alphanumeric()) {
+                    if cluster == "-"
+                        && s[pos..].chars().next().is_some_and(|n| n.is_alphanumeric())
+                    {
                         push(
                             out,
                             std::mem::take(&mut word),
@@ -936,8 +981,7 @@ impl WebTextEngine {
                         };
                         let len = u32::try_from(cluster.encode_utf16().count()).unwrap_or(0);
                         atoms.push(Atom {
-                            width: self.run_width(run, cluster)
-                                + run.style.letter_spacing.0 * cluster.chars().count() as f32,
+                            width: self.run_width(run, cluster),
                             text: cluster.into(),
                             style: atom.style,
                             kind: AtomKind::Text,
@@ -1257,11 +1301,16 @@ impl TextEngine for WebTextEngine {
                     width -= piece.width;
                     if fits(width) && piece.kind == AtomKind::Text {
                         let mut shorter = piece.text.to_string();
-                        while shorter.chars().count() > 1 {
-                            shorter.pop();
-                            let w = self.run_width(&styles[piece.style as usize], &shorter);
+                        while !shorter.is_empty() {
+                            let prev = prev_cluster(&shorter, shorter.len());
+                            shorter.truncate(prev);
+                            let trimmed = shorter.trim_end();
+                            if trimmed.is_empty() {
+                                break;
+                            }
+                            let w = self.run_width(&styles[piece.style as usize], trimmed);
                             if fits(width + w) {
-                                piece.text = shorter.into();
+                                piece.text = trimmed.into();
                                 piece.width = w;
                                 width += w;
                                 pieces.push(piece);
