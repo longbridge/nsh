@@ -249,7 +249,7 @@ const open = async () => {
 | `nsh/mobile` | iOS 和 Android 的 API：`TabBar`、`InputAccessoryView`（iOS）、`BackHandler`（Android）（[参考](../modules/nsh-mobile.md)） |
 | `nsh/desktop` | macOS、Windows 和 Linux 的 API：窗口（`Window`、`currentWindow`、`windows`）、`titleBar`、`displays`、`Menu`、`Tray`、`GlobalShortcut`（[参考](../modules/nsh-desktop.md)） |
 | `nsh/i18n` | 应用的翻译（它的 `locales/` 文件）和它显示的语言：`t`、`setLocale`、`availableLocales`（[I18n](./i18n.md)、[参考](../modules/nsh-i18n.md)） |
-| `nsh/updater` | 打包后的应用自我更新：`checkForUpdate`、`downloadUpdate`、`installAndRestart`（[参考](../modules/nsh-updater.md)） |
+| `nsh/updater` | 打包后的应用自我更新：`checkForUpdate`、`downloadUpdate`、`installAndRestart`、`installOnQuit`（[参考](../modules/nsh-updater.md)） |
 
 [模块参考](../modules/index.md) 逐一介绍了它们。导入 NSH 没有的模块（`nsh/foo`）会导致构建错误。代码用到、但模块没有导出的名字（`import { Buton } from "nsh/base"`）同样是构建错误：错误指向这条导入，并给出最接近的导出名（``did you mean `Button`?``）。只当作类型用的名字由 `nsh check` 检查。
 

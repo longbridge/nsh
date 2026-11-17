@@ -81,7 +81,7 @@ pub use self::{
 };
 use crate::{
     failure,
-    screen::{Back, Pick, Screen},
+    screen::{Back, Pick, Screen, SystemBar},
     selector::Selector,
 };
 
@@ -168,6 +168,18 @@ fn link_payload(url: &str) -> EventPayload {
     )])
 }
 
+/// The header bar `config`'s platform draws over its stacks' screens,
+/// placing their header items in it: only iOS and Android draw one;
+/// elsewhere a page's `header` sits at its top as wide as the window, as
+/// those backends configure the engine.
+fn system_bar(config: &EngineConfig) -> Option<SystemBar> {
+    let os = config.environment.os;
+    matches!(os, Os::Ios | Os::Android).then_some(SystemBar {
+        heights: config.header_heights,
+        toolbar: os == Os::Android,
+    })
+}
+
 /// [`start`], the platform reporting `displays` before the app first
 /// renders, laying text out with the engine `text_engine` makes; `link`:
 /// the root's `UrlScheme` event that launched it (a link, a page's
@@ -182,10 +194,7 @@ where
     M: TextEngine + 'static,
     F: FnOnce() -> M + Send + 'static,
 {
-    // Only iOS and Android draw a header of their own; elsewhere a page's
-    // `header` sits at its top as wide as the window, as those backends
-    // configure the engine.
-    if !matches!(config.environment.os, Os::Ios | Os::Android) {
+    if system_bar(&config).is_none() {
         config.header_heights = nsh_core::NO_NATIVE_HEADER;
     }
     let (batches, batches_rx) = crossbeam_channel::unbounded();
@@ -459,6 +468,7 @@ impl Headless {
         let viewport = config.viewport;
         let clock = config.clock.clone();
         let host = config.host.clone();
+        let system_bar = system_bar(&config);
         let Launched {
             engine,
             batches,
@@ -467,6 +477,9 @@ impl Headless {
         } = launch(config, displays, text_engine, link)?;
         let mut screen = Screen::default();
         screen.set_viewport(viewport);
+        if let Some(bar) = system_bar {
+            screen.set_system_bar(bar);
+        }
         if main_hidden && windows.is_some() {
             screen.set_window_hidden(ROOT_ID, true);
         }
@@ -1547,6 +1560,28 @@ impl Headless {
                 self.on_screen()
             ));
         }
+        self.done()
+    }
+
+    /// The step `setSheetDetent(<selector>, <detent>)`: the user moves the
+    /// dialog `selector` names, presented as an iOS sheet with `detents`,
+    /// to `detent`, one of them (a drag, its grabber, a screen reader), as
+    /// iOS reports it: it rests there ([`Screen::sheet_detent`]) and the
+    /// dialog hears `onDetentChange({ detent })`. Fails for a dialog that
+    /// is no such sheet, or a detent not among its `detents`.
+    pub fn set_sheet_detent(
+        &mut self,
+        selector: &str,
+        detent: nsh_core::SheetDetent,
+    ) -> Result<(), String> {
+        self.step(format!("setSheetDetent({selector}, {detent:?})"));
+        let id = self.screen.id(selector)?;
+        self.screen
+            .move_sheet(id, detent)
+            .map_err(|e| format!("setSheetDetent({selector}): {e}"))?;
+        self.engine
+            .control()
+            .dispatch_event(id, EventKind::DetentChange, detent.change_payload());
         self.done()
     }
 
@@ -2926,6 +2961,84 @@ mod tests {
                 "the button after the title at {width}"
             );
             assert_eq!(bounds("title").size.width, px(width - 88.0));
+        }
+    }
+
+    /// A page whose system header holds a button at each end and a title
+    /// view with a dot to press, each counting its presses.
+    #[component]
+    fn HeaderSlots() -> impl IntoElement {
+        let presses = signal(String::new());
+        let pressable = move |id: &'static str, size: f32| {
+            view()
+                .test_id(id)
+                .size(px(size))
+                .on_press(move || presses.update(|p| p.push_str(id)))
+        };
+        nsh_core::element::stack().flex_1().child(
+            nsh_core::element::screen()
+                .header_left(pressable("menu", 40.0))
+                .header_title(
+                    view()
+                        .test_id("tabs")
+                        .flex_row()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(text("Tabs"))
+                        .child(pressable("dot", 8.0)),
+                )
+                .header_right(pressable("action", 46.0))
+                .child(text(move || format!("pressed {}", presses.get()))),
+        )
+    }
+
+    /// iOS and Android place a page's header items in their bar side by
+    /// side, the leading one at its start, the trailing one at its end and
+    /// the title between them: headless runs place them so too, and a
+    /// press reaches each of them.
+    #[test]
+    fn system_header_items_sit_side_by_side() {
+        for os in [Os::Ios, Os::Android] {
+            let mut config = EngineConfig::new(Root::of::<HeaderSlots>());
+            config.viewport = Size::new(px(390.0), px(800.0));
+            config.environment.os = os;
+            let mut app = Headless::start(config).unwrap();
+            app.first_render().unwrap();
+            let nodes = app.screen().layout_nodes();
+            let bounds = |id: &str| {
+                nodes
+                    .iter()
+                    .find(|n| n.test_id.as_deref() == Some(id))
+                    .unwrap_or_else(|| panic!("no {id} on {os:?}"))
+                    .bounds
+            };
+            let (menu, tabs, action) = (bounds("menu"), bounds("tabs"), bounds("action"));
+            let end = |b: Bounds<Points>| b.origin.x + b.size.width;
+            assert!(end(menu) <= tabs.origin.x, "{os:?}: {menu:?} {tabs:?}");
+            assert!(end(tabs) <= action.origin.x, "{os:?}: {tabs:?} {action:?}");
+            assert!(end(action) < px(390.0), "{os:?}: {action:?}");
+            assert!(menu.origin.x > px(0.0), "{os:?}: {menu:?}");
+            // The bar's height, from the screen's top: each item stands in
+            // its middle.
+            let bar = 44.0;
+            for item in [menu, tabs, action] {
+                let middle = item.origin.y + item.size.height / 2.0;
+                assert_eq!(middle, px(bar / 2.0), "{os:?}: {item:?}");
+            }
+            if os == Os::Ios {
+                // iOS centers the title in the bar.
+                assert_eq!(tabs.origin.x + tabs.size.width / 2.0, px(195.0));
+            }
+            for (selector, pressed) in [
+                ("id:dot", "pressed dot"),
+                ("id:action", "pressed dotaction"),
+                ("id:menu", "pressed dotactionmenu"),
+            ] {
+                app.press(selector)
+                    .unwrap_or_else(|e| panic!("{os:?}: {selector}: {e}"));
+                app.wait_for(pressed)
+                    .unwrap_or_else(|e| panic!("{os:?}: {e}"));
+            }
         }
     }
 

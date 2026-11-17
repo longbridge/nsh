@@ -15,7 +15,9 @@ in `crates/nsh-core/src/runtime/updater.rs`, the toolchain's side in `crates/nsh
 4. `downloadUpdate` streams the asset into `<data dir>/updates`, checking its size and SHA-256.
 5. `installAndRestart` unpacks next to the app, checks the new app, swaps it in, then restarts the app as
    `Application.restart()` does (`DesktopCommand::Restart`): this run quits, and the new version starts once it has
-   exited (`nsh_core::restart`).
+   exited (`nsh_core::restart`). Or `installOnQuit` unpacks and checks it now (`Installation::stage`) and leaves the
+   swap (`Staged::finish`) for when the app quits: the desktop runners call `nsh_core::restart::run_at_exit` once
+   their run has ended, before a restart, and the user's next start opens the new version.
 
 HTTP is the platform's `Network`, as `fetch`'s, through `UpdaterHost`, which the engine gives `System`: no second HTTP
 or TLS stack, and it works on iOS and Android, where `ureq` is not linked. These requests are not subject to the app's
@@ -84,6 +86,17 @@ packages' are removed at launch). `runningPackage()` is `Bundle::package`. `shel
   quit does (storage written, windows closed), and the new version starts only after this process has exited, so the
   two never run side by side. Everything that can refuse the new app (its id, its executable, its signature) is
   checked before the swap; after it the app is the new one, whether or not it starts.
+- **Installing on quit** stages now and swaps at exit, rather than doing the whole install at exit: everything that can
+  refuse the update (the archive, the id, the executable, `codesign`) refuses while the app can still say so, and
+  quitting only renames, so it adds no visible delay. The swap runs in the runner after its run loop returns, not in a
+  quit listener, which gets 200 ms while the main thread waits. It runs in the process still holding the old
+  executable, as `installAndRestart`'s swap does: on Windows the entries in use are renamed aside and removed by the
+  next run. A swap that fails at exit (the app moved meanwhile) leaves the app as it was, is logged, and does not keep
+  the app from exiting; nothing is recorded for the next start, whose check offers the update again. Only a quit
+  installs: a crash or a kill leaves the stage beside the app (`.nsh-updater-staged-<pid>-<name>`), which
+  `remove_leftovers` removes at the app's next check. A process stages one update per app, so calling `installOnQuit`
+  again replaces it, and `installAndRestart` drops it before installing. A view embedded in another app never quits
+  as an app, but has no installation either, so it cannot stage one.
 - **macOS** checks the new app with `codesign --verify --deep --strict` and starts it with `open -n`. Whether Gatekeeper
   accepts it is the developer's signing and notarization.
 - **No Cargo feature.** `zip`, `tar`, `semver` and `nsh-updater` add about 125 KB to a 51 MB Linux runner (`nm -S`), and
@@ -91,7 +104,7 @@ packages' are removed at launch). `runningPackage()` is `Bundle::package`. `shel
   `checkForUpdate` resolves `null`.
 - **Rust apps** (`nsh.json` `"root"`) have no JS modules: they use `nsh-updater` directly and bring their own HTTP.
   After verifying the archive, they call `Installation::install`, then `nsh_core::element::desktop::restart()` as
-  `installAndRestart` does.
+  `installAndRestart` does, or `Installation::stage` and, when their app quits, `Staged::finish`.
 - **Concurrent calls** are refused while a check, download or install is in progress. Downloads use exclusively
   created unique files, so a retry cannot truncate a previously verified archive.
 - **Packages run on trial, by file name.** Renaming `next.nshpkg` to `trying.nshpkg` marks the trial in one step, and

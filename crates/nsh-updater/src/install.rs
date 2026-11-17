@@ -10,6 +10,11 @@
 //! entries), undone if one fails, and what is still in use is removed by the
 //! next run ([`Installation::remove_leftovers`]).
 //!
+//! Installing may be split in two ([`Installation::stage`],
+//! [`Staged::finish`]): unpacked and checked now, swapped in later, as the
+//! app quits, so that what can fail fails while the app can still say so
+//! and quitting only renames.
+//!
 //! The same machinery replaces a plain directory holding an executable
 //! ([`Installation::directory`]): the `nsh` distribution, which `nsh update`
 //! replaces with a release's archive.
@@ -29,6 +34,9 @@ use crate::Error;
 /// Names what this code leaves next to the app or in it.
 const STAGING: &str = ".nsh-updater-";
 const OLD: &str = ".nsh-updater-old-";
+/// An update unpacked and checked, waiting to replace the app
+/// (`<STAGED><pid>-<app's directory name>`, [`Installation::stage`]).
+const STAGED: &str = ".nsh-updater-staged-";
 
 /// The app on disk.
 #[derive(Debug, Clone)]
@@ -100,8 +108,29 @@ impl Installation {
     }
 
     /// Removes what an earlier update could not (Windows: the old
-    /// executable, in use until the app exited).
+    /// executable, in use until the app exited), and updates of this app
+    /// that other processes staged and never finished (one that crashed
+    /// before it quit).
     pub fn remove_leftovers(&self) {
+        if let (Ok(own), Some(name), Ok(entries)) = (
+            self.staged_dir(),
+            self.root.file_name(),
+            fs::read_dir(self.scratch_parent()),
+        ) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let file_name = entry.file_name();
+                let file_name = file_name.to_string_lossy();
+                let theirs = file_name.strip_prefix(STAGED).is_some_and(|rest| {
+                    rest.split_once('-').is_some_and(|(pid, app)| {
+                        pid.parse::<u32>().is_ok() && *app == *name.to_string_lossy()
+                    })
+                });
+                if theirs && path != own {
+                    let _ = fs::remove_dir_all(&path);
+                }
+            }
+        }
         let mut dir = self.root.clone();
         let mut components = self.executable.components();
         components.next_back();
@@ -124,21 +153,44 @@ impl Installation {
     /// already verified, as `nsh package` makes them). The running app is
     /// left as it is: the caller restarts it (`nsh_core::restart`).
     pub fn install(&self, archive: &Path) -> Result<(), Error> {
-        let scratch = staging(self.scratch_parent())?;
-        let result = self.install_from(archive, &scratch);
-        let _ = fs::remove_dir_all(&scratch);
-        result
+        self.stage(archive)?.finish()
     }
 
-    fn install_from(&self, archive: &Path, scratch: &Path) -> Result<(), Error> {
-        unpack(archive, scratch)?;
-        let new = single_entry(scratch)?;
-        self.check_new(&new)?;
-        if cfg!(windows) {
-            swap_entries(&self.root, &new, &self.executable)
-        } else {
-            swap_directory(&self.root, &new)
-        }
+    /// The first half of [`Installation::install`]: unpacks `archive` next
+    /// to the app and checks the new app as `install` does, without
+    /// touching the installed one. [`Staged::finish`] then swaps it in, for
+    /// instance as the app quits; dropping the [`Staged`] removes what was
+    /// unpacked. A process stages one update per installation at a time: a
+    /// second stage replaces the first's directory. What a process that
+    /// ended without finishing or dropping left is removed by the next
+    /// [`Installation::remove_leftovers`].
+    pub fn stage(&self, archive: &Path) -> Result<Staged, Error> {
+        let scratch = self.staged_dir()?;
+        let _ = fs::remove_dir_all(&scratch);
+        fs::create_dir(&scratch)?;
+        // Removes the directory again if a step below fails.
+        let mut staged = Staged {
+            installation: self.clone(),
+            scratch,
+            new: PathBuf::new(),
+        };
+        unpack(archive, &staged.scratch)?;
+        staged.new = single_entry(&staged.scratch)?;
+        self.check_new(&staged.new)?;
+        Ok(staged)
+    }
+
+    /// Where this process stages an update of this app: beside it, named
+    /// after the process and the app so that the next run of the app (and
+    /// no other app sharing the directory) knows it for its own.
+    fn staged_dir(&self) -> Result<PathBuf, Error> {
+        let name = self
+            .root
+            .file_name()
+            .ok_or_else(|| Error::Install("the app has no directory name".into()))?;
+        let mut staged = OsString::from(format!("{STAGED}{}-", std::process::id()));
+        staged.push(name);
+        Ok(self.scratch_parent().join(staged))
     }
 
     /// Whether `new` is this app, runnable.
@@ -181,6 +233,41 @@ impl Installation {
             }
         }
         Ok(())
+    }
+}
+
+/// An update unpacked and checked beside the app ([`Installation::stage`]),
+/// not yet in its place. Dropping it removes what was unpacked.
+#[derive(Debug)]
+pub struct Staged {
+    installation: Installation,
+    /// The directory unpacked into, beside the app.
+    scratch: PathBuf,
+    /// The new app, in `scratch`.
+    new: PathBuf,
+}
+
+impl Staged {
+    /// Swaps the staged app in for the installed one, as
+    /// [`Installation::install`] does: on Linux and macOS two renames, on
+    /// Windows the entries of the directory. Fails, leaving the installed
+    /// app as it was, when either moved meanwhile (another update, the user
+    /// moving the app). The running app is left as it is.
+    pub fn finish(self) -> Result<(), Error> {
+        let Installation {
+            root, executable, ..
+        } = &self.installation;
+        if cfg!(windows) {
+            swap_entries(root, &self.new, executable)
+        } else {
+            swap_directory(root, &self.new)
+        }
+    }
+}
+
+impl Drop for Staged {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.scratch);
     }
 }
 
@@ -624,6 +711,94 @@ mod tests {
         let installation = Installation::of(&exe, "com.example.app", CONFIG).unwrap();
         assert!(installation.install(&archive).is_err());
         assert_eq!(fs::read_to_string(&exe).unwrap(), "1.0.0");
+    }
+
+    /// What `.nsh-updater` left beside the app.
+    fn left_beside(dir: &Path) -> Vec<String> {
+        let mut left: Vec<_> = fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains(".nsh-updater"))
+            .collect();
+        left.sort();
+        left
+    }
+
+    #[test]
+    fn a_staged_update_replaces_the_app_only_when_finished() {
+        let dir = TempDir::new();
+        let (root, exe) = package(dir.path(), name(), "com.example.app", "1.0.0");
+        let build = dir.path().join("build");
+        let (new, _) = package(&build, name(), "com.example.app", "2.0.0");
+        sign(&new);
+        let archive = tar_gz(&build, &new, "new.tar.gz");
+        let installation = Installation::of(&exe, "com.example.app", CONFIG).unwrap();
+
+        // Dropped: the app stays, nothing is left.
+        drop(installation.stage(&archive).unwrap());
+        assert_eq!(version(&root), "1.0.0");
+        assert_eq!(left_beside(dir.path()), Vec::<String>::new());
+
+        // Staged again (replacing an earlier stage), then finished.
+        let first = installation.stage(&archive).unwrap();
+        std::mem::forget(first);
+        let staged = installation.stage(&archive).unwrap();
+        assert_eq!(version(&root), "1.0.0");
+        assert_eq!(left_beside(dir.path()).len(), 1);
+        staged.finish().unwrap();
+        assert_eq!(version(&root), "2.0.0");
+        assert_eq!(left_beside(dir.path()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_staged_update_is_checked_when_staged() {
+        let dir = TempDir::new();
+        let (root, exe) = package(dir.path(), name(), "com.example.app", "1.0.0");
+        let build = dir.path().join("build");
+        let (new, _) = package(&build, name(), "com.other", "2.0.0");
+        let archive = tar_gz(&build, &new, "new.tar.gz");
+        let installation = Installation::of(&exe, "com.example.app", CONFIG).unwrap();
+        assert!(installation.stage(&archive).is_err());
+        assert_eq!(version(&root), "1.0.0");
+        assert_eq!(left_beside(dir.path()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn finishing_after_the_app_moved_changes_nothing() {
+        let dir = TempDir::new();
+        let (root, exe) = package(dir.path(), name(), "com.example.app", "1.0.0");
+        let build = dir.path().join("build");
+        let (new, _) = package(&build, name(), "com.example.app", "2.0.0");
+        sign(&new);
+        let archive = tar_gz(&build, &new, "new.tar.gz");
+        let installation = Installation::of(&exe, "com.example.app", CONFIG).unwrap();
+        let staged = installation.stage(&archive).unwrap();
+        let moved = dir.path().join("moved");
+        fs::rename(&root, &moved).unwrap();
+        assert!(staged.finish().is_err());
+        assert!(!root.exists());
+        assert_eq!(version(&moved), "1.0.0");
+        assert_eq!(left_beside(dir.path()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn leftovers_are_stages_of_this_app_by_other_processes() {
+        let dir = TempDir::new();
+        let (_, exe) = package(dir.path(), name(), "com.example.app", "1.0.0");
+        let installation = Installation::of(&exe, "com.example.app", CONFIG).unwrap();
+        let own = installation.staged_dir().unwrap();
+        let crashed = dir.path().join(format!("{STAGED}1-{}", name()));
+        let other_app = dir.path().join(format!("{STAGED}1-Other{}", name()));
+        let other_app_dashed = dir.path().join(format!("{STAGED}1-x-{}", name()));
+        for path in [&own, &crashed, &other_app, &other_app_dashed] {
+            fs::create_dir_all(path).unwrap();
+        }
+        installation.remove_leftovers();
+        assert!(own.exists());
+        assert!(!crashed.exists());
+        assert!(other_app.exists());
+        assert!(other_app_dashed.exists());
     }
 
     #[test]

@@ -16,13 +16,13 @@ It also updates the app's code alone: a [signed package](../docs/signed-packages
 runs from its next start on every native platform, iOS and Android included ([OTA updates](#ota-updates)).
 
 ```tsx
-import { checkForUpdate, downloadUpdate, installAndRestart } from "nsh/updater";
+import { checkForUpdate, downloadUpdate, installAndRestart, installOnQuit } from "nsh/updater";
 import { checkForPackage, downloadPackage, restartToPackage, runningPackage, shellInfo } from "nsh/updater";
 ```
 
 The module can be imported on every platform:
 
-| Platform | `checkForUpdate` | `downloadUpdate`, `installAndRestart` | Packages |
+| Platform | `checkForUpdate` | `downloadUpdate`, `installAndRestart`, `installOnQuit` | Packages |
 | --- | --- | --- | --- |
 | macOS, Windows, Linux (packaged) | Checks the source | Download and replace the app | Check, download, `restartToPackage` restarts into it |
 | iOS, Android | Checks the source; `url` is the store link (`nsh update-manifest --link`) | Reject: send the user to `url` | Check and download; the package runs from the next start |
@@ -60,7 +60,7 @@ native shell) is behind.
 | `version` | The new version, semver |
 | `notes` | What changed, as the manifest's `--notes` file says it |
 | `url` | Where the user can get it by hand: the archive, or the store page on iOS and Android. Pass it to [`openUrl`](./nsh.md#openurl) when `canInstall` is false |
-| `canInstall` | Whether `downloadUpdate` and `installAndRestart` work in this run: a packaged desktop app installed where the user can write. False on iOS and Android, and under a directory only the system writes (a system package) |
+| `canInstall` | Whether `downloadUpdate`, `installAndRestart` and `installOnQuit` work in this run: a packaged desktop app installed where the user can write. False on iOS and Android, and under a directory only the system writes (a system package) |
 | `shell` | Whether only the installed app is behind: this run's [package](#checkforpackage) is already this version or later, so the update brings a newer runtime and native shell, not newer code. Apps that update by package can offer it as a quieter, optional step |
 
 It rejects when the source cannot be reached or its manifest is not acceptable: a bad or missing signature when
@@ -119,6 +119,29 @@ as it was: it rejects when nothing was downloaded or the app cannot be replaced.
 
 On Linux and macOS the whole directory or `.app` is replaced, keeping the name the user gave it; on Windows the files
 are replaced one by one and put back if one fails.
+
+## installOnQuit
+
+```ts
+function installOnQuit(): Promise<void>;
+```
+
+Replaces the app with the downloaded update when the app quits, without starting it again: the user's next start opens
+the new version. For an "Install on Quit" button beside "Install and Relaunch". The archive is unpacked next to the app
+and checked now, as `installAndRestart` checks it, and the promise resolves once the update waits; quitting then only
+moves it into place. It rejects when nothing was downloaded, with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` when
+`canInstall` is false, and when the update is refused, which leaves the app as it was.
+
+Calling it again replaces the update that waits (call it after downloading a newer one), and `installAndRestart`
+installs at once instead. An app that quits normally installs it, also when it quits to restart
+(`Application.restart()`, which then starts the new version); a crash or a kill does not, and the next `checkForUpdate`
+offers the update again. If moving it into place fails as the app quits (the user moved the app meanwhile), the app
+stays as it was and quits all the same; the failure is logged.
+
+```tsx
+await downloadUpdate();
+await installOnQuit(); // the app keeps running; the new version opens next time
+```
 
 ## OTA updates
 

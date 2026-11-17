@@ -19,6 +19,8 @@ cargo clippy -p nsh-platform-macos -p nsh-macos-host -p nsh-macos-app --all-targ
 cargo test -p nsh-platform-macos --features dev   # needs no window server: tests do not start AppKit
 cargo build -p nsh-macos-host                     # ./target/debug/nsh-macos-host
 cargo test -p nsh-platform-macos --test native -- --ignored # desktop session required
+# Editor/RichEditor focus restoration and stale-target checks:
+NSH_MODAL_FOCUS_CHECK_ONLY=1 cargo test -p nsh-platform-macos --test native -- --ignored
 # Mounting rows that are not virtualized, measured alone (tests/native/mount.rs):
 NSH_MOUNT_BENCH_ONLY=1 cargo test --release -p nsh-platform-macos --test native -- --ignored
 ```
@@ -27,6 +29,11 @@ Features: `js` (default; JS apps; without it the crate only runs Rust apps and l
 server client, log forwarding, the error overlay: `dev.rs`). The runtime needs macOS 14 (`NSView`'s display links).
 
 ## Dialog fades
+
+Closing a modal restores the previous keyboard focus inside the remaining scope when no other control has
+taken it. Editor and RichEditor caret sinks reject pointer targeting but still receive keyboard focus;
+restoration checks keyboard visibility, attachment and exit state independently of pointer targeting.
+Hidden or removed inputs stay unfocused.
 
 A dialog's ordinary fade out retains its native view hierarchy until the animation ends, so AppKit keeps
 compositing glass and backdrop materials. It leaves the input scope immediately; reopening a retained modal

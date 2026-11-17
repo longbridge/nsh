@@ -3764,6 +3764,75 @@ fn bottom_aligned_list_does_not_mount_scrolls_during_native_bounce() {
     }
 }
 
+/// List 2 (follow_end 80 pt) at its end, then its last row grows by
+/// 300 pt, under its own layout animation when `revealing`: where the list
+/// is after that commit, and the end it could follow to.
+fn last_row_grows_at_end(revealing: bool) -> (f32, f32) {
+    let mut c = core();
+    estimated_list(&mut c);
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::FollowEnd(Some(px(80.0))),
+        }],
+    );
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+    c.commit();
+    c.apply(Op::Command {
+        id: 2,
+        command: Command::ScrollToEnd { animated: false },
+    })
+    .unwrap();
+    let mut at = scrolled(&c.commit().unwrap(), 0.0);
+    for _ in 0..4 {
+        render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+        if let Some(batch) = c.commit() {
+            at = scrolled(&batch, at);
+        }
+    }
+    c.set_scroll_offset(2, point(px(0.0), px(at)), u32::MAX);
+    c.commit();
+    assert_eq!(at, 100.0 * 50.0 - 400.0, "at the end");
+    // The cell placed last shows the last row.
+    let last = *cells
+        .iter()
+        .max_by(|&&a, &&b| {
+            let y = |id| c.nodes[c.key(id).unwrap() as usize].frame.origin.y.0;
+            y(a).total_cmp(&y(b))
+        })
+        .unwrap();
+    let mut ops = vec![style_op(last, &[("height", StyleValue::Number(350.0))])];
+    if revealing {
+        ops.push(Op::Command {
+            id: last,
+            command: Command::LayoutAnimation(crate::LayoutAnimation {
+                update: Some(crate::LayoutTransition::new(
+                    crate::LayoutCurve::FittedSpring { damping_ratio: 1.0 },
+                    265.0,
+                )),
+                ..Default::default()
+            }),
+        });
+    }
+    apply(&mut c, ops);
+    let after = c.commit().map_or(at, |b| scrolled(&b, at));
+    (after, 100.0 * 50.0 + 300.0 - 400.0)
+}
+
+#[test]
+fn follow_end_keeps_its_place_while_the_last_row_reveals() {
+    // #2218: a scroll to the new end lands at once while the row slides
+    // open, so the content above jumps by the row's growth.
+    let (after, _) = last_row_grows_at_end(true);
+    assert_eq!(after, 100.0 * 50.0 - 400.0);
+    // Without its own animation, the row grows and the list follows.
+    let (after, end) = last_row_grows_at_end(false);
+    assert_eq!(after, end);
+}
+
 #[test]
 fn scroll_commands_follow_their_target_as_rows_are_measured() {
     let mut c = core();
@@ -26874,13 +26943,13 @@ mod rust_windows {
         // The dialog shows over the window, not the main one.
         let dialog = text_parent(&batch, "dialog").expect("the dialog's root");
         let config = batch.items.iter().find_map(|i| match i {
-            MountItem::ModalConfig { id, config } if *id == dialog => Some(*config),
+            MountItem::ModalConfig { id, config } if *id == dialog => Some(config.clone()),
             _ => None,
         });
         assert_eq!(config.map(|c| c.window), Some(window));
         // The window's own root: in the main window.
         let config = batch.items.iter().find_map(|i| match i {
-            MountItem::ModalConfig { id, config } if *id == window => Some(*config),
+            MountItem::ModalConfig { id, config } if *id == window => Some(config.clone()),
             _ => None,
         });
         assert_eq!(config.map(|c| c.window), Some(ROOT_ID));
@@ -27161,7 +27230,7 @@ mod rust_windows {
             Some(rect(0.0, 0.0, 1100.0, 820.0))
         );
         let config = batch.items.iter().find_map(|i| match i {
-            MountItem::ModalConfig { id, config } if *id == dialog => Some(*config),
+            MountItem::ModalConfig { id, config } if *id == dialog => Some(config.clone()),
             _ => None,
         });
         assert_eq!(config.map(|c| c.window), Some(ROOT_ID));
@@ -27169,40 +27238,6 @@ mod rust_windows {
         c.set_viewport(size(px(900.0), px(700.0)));
         let batch = c.commit().unwrap();
         assert_eq!(frame_of(&batch, dialog), Some(rect(0.0, 0.0, 900.0, 700.0)));
-    }
-
-    #[component]
-    fn ShortSheet() -> impl IntoElement {
-        #[allow(deprecated)]
-        modal()
-            .presentation(ModalPresentation::PageSheet)
-            .sheet_height(Some(Points(320.0)))
-            .sheet_grabber(true)
-            .child(text("short sheet"))
-    }
-
-    #[test]
-    fn a_sheet_carries_its_height_and_grabber_to_the_platform() {
-        let mut c = core();
-        c.set_environment(crate::element::Environment {
-            os: crate::platform::Os::Ios,
-            ..Default::default()
-        });
-        c.mount_root(&Root::of::<ShortSheet>());
-        let batch = c.commit().unwrap();
-        let config = batch
-            .items
-            .iter()
-            .find_map(|i| match i {
-                MountItem::ModalConfig { config, .. } => Some(*config),
-                _ => None,
-            })
-            .expect("the sheet's config");
-        assert_eq!(config.presentation, ModalPresentation::PageSheet);
-        assert_eq!(config.sheet_height, Some(Points(320.0)));
-        assert!(config.sheet_grabber);
-        assert_eq!(ModalConfig::default().sheet_height, None);
-        assert!(!ModalConfig::default().sheet_grabber);
     }
 
     #[test]
@@ -30265,6 +30300,86 @@ fn anchored_overlays_go_beside_their_anchor_and_follow_it() {
     );
     let batch = c.commit().unwrap();
     assert_eq!(frame_of(&batch, 10), Some(rect(192.0, 74.0, 120.0, 60.0)));
+}
+
+#[test]
+fn anchored_overlays_go_within_the_area_the_platform_shows_them_in() {
+    use StyleValue::Number;
+    // A 320 × 480 root, 100 points from the left of a 1280 × 800 window and
+    // 50 from its top (the web's `overlays: "viewport"`), with a 40 point
+    // trigger near its bottom, 120 points from its left.
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(420.0))]);
+    add(
+        &mut c,
+        4,
+        Tag::View,
+        ROOT_ID,
+        &[
+            ("width", Number(80.0)),
+            ("height", Number(40.0)),
+            ("marginLeft", Number(120.0)),
+        ],
+    );
+    add(&mut c, 10, Tag::Overlay, 4, &[]);
+    add(
+        &mut c,
+        12,
+        Tag::View,
+        10,
+        &[("width", Number(360.0)), ("height", Number(200.0))],
+    );
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                10,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(4)),
+            ),
+            overlay_prop(10, crate::OverlayProp::Align(crate::overlay::Align::Start)),
+            overlay_prop(10, crate::OverlayProp::Margin(px(8.0))),
+            Op::Listen {
+                id: 10,
+                event: EventKind::PressOutside,
+                enabled: true,
+            },
+        ],
+    );
+    // In the root view: no room below, above it, and wider than the root,
+    // from the margin.
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(8.0, 220.0, 360.0, 200.0)));
+
+    // Over the window: below the trigger, past the root's bottom, and
+    // from the trigger's start, past the root's right edge.
+    c.set_overlay_area(Some(rect(-100.0, -50.0, 1280.0, 800.0)));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(120.0, 460.0, 360.0, 200.0)));
+
+    // The page moved the root down to 300 points from the window's top:
+    // no room below in the window, above it.
+    c.set_overlay_area(Some(rect(-100.0, -300.0, 1280.0, 800.0)));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(120.0, 220.0, 360.0, 200.0)));
+
+    // Near the window's right edge: kept inside it less the margin.
+    c.set_overlay_area(Some(rect(-900.0, -50.0, 1280.0, 800.0)));
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        frame_of(&batch, 10).map(|f| f.origin.x),
+        Some(px(380.0 - 360.0 - 8.0))
+    );
+
+    // A press on the page around the root: outside the overlay.
+    js_events(&mut c);
+    let pressed = c.presses_beyond_root(point(px(500.0), px(-20.0)));
+    assert_eq!(pressed.len(), 1);
+    assert_eq!(pressed[0].0, 10);
+
+    // Back to the root view.
+    c.set_overlay_area(None);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(8.0, 220.0, 360.0, 200.0)));
 }
 
 #[test]
@@ -37250,6 +37365,92 @@ mod built_in_scrollbars {
             _ => None,
         });
         assert_eq!(content, Some(size_pt(300.0, 1000.0)));
+    }
+
+    #[test]
+    fn a_culled_scroll_pins_its_bar_only_after_it_is_created() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.scrollbars_from(bars);
+        c.set_components(registry);
+        c.set_builtin_scrollbars(Some(app_theme()));
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            style_op(2, &[("height", StyleValue::Number(100.0))]),
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ];
+        ops.extend(child_view(4, 2, 1000.0, &[]));
+        ops.extend([
+            Op::Create {
+                id: 6,
+                tag: Tag::Scroll,
+            },
+            style_op(6, &[("height", StyleValue::Number(100.0))]),
+            Op::Insert {
+                parent: 2,
+                child: 6,
+                before: None,
+            },
+        ]);
+        ops.extend(child_view(8, 6, 1000.0, &[]));
+        apply(&mut c, ops);
+        let batch = c.commit().unwrap();
+        assert!(!created_in(&batch).contains(&6));
+        assert!(
+            !batch
+                .items
+                .iter()
+                .any(|item| matches!(item, MountItem::StickyCells { id: 6, .. })),
+            "a scroll view that has no native view cannot pin its bar"
+        );
+        let key = c.key(6).unwrap();
+        let bar = c.nodes[key as usize]
+            .scroll
+            .as_ref()
+            .unwrap()
+            .bar
+            .as_ref()
+            .unwrap()
+            .0;
+        c.set_scroll_offset(2, point(Points::ZERO, Points(1000.0)), 0);
+        for remount in [false, true] {
+            if remount {
+                c.remount();
+            }
+            let batch = c.commit().unwrap();
+            let pins: Vec<_> = batch
+                .items
+                .iter()
+                .enumerate()
+                .filter_map(|(at, item)| match item {
+                    MountItem::StickyCells { id: 6, cells } => Some((at, cells)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(pins.len(), 1, "remount={remount}");
+            assert_eq!(pins[0].1.len(), 1);
+            assert_eq!(pins[0].1[0].cell, bar);
+            if !remount {
+                for id in [6, bar] {
+                    let made = batch
+                        .items
+                        .iter()
+                        .position(|item| {
+                            matches!(item, MountItem::Create { id: made, .. } if *made == id)
+                        })
+                        .expect("the scroll view and its bar are made when they come into view");
+                    assert!(made < pins[0].0);
+                }
+            }
+            assert!(c.commit().is_none());
+        }
     }
 
     #[test]
@@ -44882,6 +45083,17 @@ fn a_list_bound_after_the_mount_budget_gives_its_row_a_frame() {
         }
     }
     assert!(!c.has_paced_mounts());
+    let mut made = vec![ROOT_ID];
+    for item in &items {
+        match item {
+            MountItem::Create { id, .. } => made.push(*id),
+            MountItem::Frame { id, .. } => assert!(
+                made.contains(id),
+                "a paced list cell receives its native frame only after Create: {item:?}"
+            ),
+            _ => {}
+        }
+    }
     let row = items
         .iter()
         .find_map(|item| match item {
@@ -44900,6 +45112,24 @@ fn a_list_bound_after_the_mount_budget_gives_its_row_a_frame() {
         })
         .expect("row received a frame");
     assert_eq!(frame.size, size_pt(1000.0, 26.0));
+    // The list's cell waited too: its cached logical frame must become
+    // its native frame after Create, not just the frames of its children.
+    let cell = items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::Insert { parent, child, .. } if *child == row => Some(*parent),
+            _ => None,
+        })
+        .expect("the row is inserted into its cell");
+    let frame = items
+        .iter()
+        .rev()
+        .find_map(|item| match item {
+            MountItem::Frame { id, frame } if *id == cell => Some(*frame),
+            _ => None,
+        })
+        .expect("the cell received a frame after Create");
+    assert_eq!(frame, rect(0.0, 0.0, 1000.0, 26.0));
     // What the row holds, made in a later turn still, is placed too.
     let frame_of = |test_id: &str| {
         let id = items

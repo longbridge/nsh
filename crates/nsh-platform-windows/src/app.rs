@@ -787,6 +787,9 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     unsafe { windows::Win32::System::Ole::OleUninitialize() };
     STANDALONE.set(false);
     // The new process waits for this one to exit ([`wait_for_replaced_process`]).
+    // An update waiting for the app to quit replaces it now, before a
+    // restart starts it again.
+    nsh_core::restart::run_at_exit();
     if RESTART.take() {
         if cfg!(feature = "dev") {
             // `nsh run` ends with its host and stops the dev server: a host

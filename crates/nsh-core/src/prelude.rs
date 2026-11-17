@@ -171,6 +171,7 @@ pub use crate::element::{
     Selection,
     ShaderView,
     SharedString,
+    SheetDetent,
     Size,
     SizeClass,
     Slot,
