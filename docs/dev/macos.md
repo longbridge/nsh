@@ -110,7 +110,10 @@ belong to the app, which owns retention and its storage budget.
   sibling content layer (`canvas.rs` `layer_split`, `NshView::update_canvas_overlay`). Animated values redraw only
   that surface; a new drawing redraws both. The geometry scan includes every suffix paint, including constant
   shapes after animated ones. Complex compositing, unbounded or large suffixes, and long prefixes use the existing
-  path. Both surfaces follow the view's clipping, opacity, scale and visibility. Contents stay in the screen's format.
+  path. An unsplit canvas whose visible operations cover less than three quarters of the view sizes its content layer
+  to their 32-point-tile-aligned bounds (`CanvasState::content_bounds`, translating the context by `-frame.origin`),
+  and a canvas that paints nothing visible removes its content layer instead of allocating a backing store. Both
+  surfaces follow the view's clipping, opacity, scale and visibility. Contents stay in the screen's format.
 - **No masks on what scrolls, where avoidable** (`visual.rs`): the window server pays for a mask on every frame its
   layer moves, so shadows and inset shadows avoid masks where their background allows.
 - **Out-of-sight content is not drawn** (`Mounter::draw_when_shown`): text and canvases whose content changes (a

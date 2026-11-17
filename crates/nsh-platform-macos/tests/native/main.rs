@@ -13,6 +13,8 @@
 //! NSH_MOUNT_BENCH_ONLY=1 cargo test --release -p nsh-platform-macos --test native -- --ignored
 //! ```
 #[cfg(target_os = "macos")]
+mod canvas_bounds;
+#[cfg(target_os = "macos")]
 mod embedded_scroll;
 #[cfg(target_os = "macos")]
 mod fps_collapse;
@@ -97,6 +99,8 @@ fn main() {
                 keyboard::run();
             } else if std::env::var_os("NSH_EMBEDDED_SCROLL_CHECK_ONLY").is_some() {
                 embedded_scroll::run();
+            } else if std::env::var_os("NSH_CANVAS_BOUNDS_CHECK_ONLY").is_some() {
+                canvas_bounds::run();
             } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
                 press_momentum::run();
             } else {
@@ -108,6 +112,7 @@ fn main() {
                 modal_fade::run();
                 #[cfg(feature = "shader")]
                 shader_content::run();
+                canvas_bounds::run();
                 menu_labels::run();
                 window_frames::run();
                 keyboard::run();
