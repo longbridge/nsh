@@ -590,6 +590,7 @@ impl Ctx {
             if let Some((start, end)) = input.pending_selection.take() {
                 input.editor.borrow().select(start, end);
             }
+            input.align_editor();
         }
         if !focused {
             // Leaving the input ends its composition.
@@ -1869,6 +1870,55 @@ impl InputState {
                 .get()
                 .unwrap_or(self.config.borrow().style.color),
         )
+    }
+
+    /// The window shares its field editor, including its clip view's scroll
+    /// origin. Restore the idle cell's text origin on focus, after any
+    /// pending selection, unless that would hide a visible caret. Do not
+    /// reset scrolling while the user edits.
+    fn align_editor(&self) {
+        let editor = self.editor.borrow();
+        let Editor::Line { field, .. } = &*editor else {
+            return;
+        };
+        let Some(view) = editor
+            .editing()
+            .and_then(|e| e.downcast::<NSTextView>().ok())
+        else {
+            return;
+        };
+        if !matches!(
+            view.alignment(),
+            NSTextAlignment::Left | NSTextAlignment::Natural | NSTextAlignment::Justified
+        ) {
+            return;
+        }
+        // SAFETY: AppKit's getter on the main thread.
+        let Some(clip) = (unsafe { view.superview() }) else {
+            return;
+        };
+        let rest = clip.frame().origin.x + view.frame().origin.x + view.textContainerOrigin().x;
+        let from = clip.bounds().origin.x;
+        if (rest - from).abs() <= 0.25 {
+            return;
+        }
+        // AppKit selects all on focus: show the start of that selection.
+        // Only a pending caret or partial selection needs a layout query.
+        let selection = view.selectedRange();
+        let selects_all = selection.location == 0 && selection.length == view.string().length();
+        if !selects_all && let Some(caret) = editor.caret(field) {
+            // AppKit's clip extends slightly past the borderless field.
+            // Use its viewport rather than the field's narrower bounds.
+            let viewport = field.convertRect_fromView(clip.bounds(), Some(&clip));
+            let shown = |x: f64| {
+                (viewport.origin.x..=viewport.origin.x + viewport.size.width - 1.0).contains(&x)
+            };
+            let x = f64::from(caret.origin.x.0);
+            if shown(x) && !shown(x + from - rest) {
+                return;
+            }
+        }
+        clip.setBoundsOrigin(NSPoint::new(rest, clip.bounds().origin.y));
     }
 
     /// Caret and selection colors of the view that edits now (the window's

@@ -19,6 +19,8 @@ mod fps_collapse;
 #[cfg(target_os = "macos")]
 mod ime;
 #[cfg(target_os = "macos")]
+mod input_focus;
+#[cfg(target_os = "macos")]
 mod input_hidden;
 #[cfg(target_os = "macos")]
 mod keyboard;
@@ -80,6 +82,8 @@ fn main() {
                 window_frames::run();
             } else if std::env::var_os("NSH_WINDOW_ALERT_CHECK_ONLY").is_some() {
                 window_alert::run();
+            } else if std::env::var_os("NSH_INPUT_FOCUS_CHECK_ONLY").is_some() {
+                input_focus::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
             } else if std::env::var_os("NSH_FPS_COLLAPSE_CHECK_ONLY").is_some() {
@@ -113,6 +117,7 @@ fn main() {
                 keyboard::run();
                 ime::run();
                 input_hidden::run();
+                input_focus::run();
                 fps_collapse::run();
                 scaled_input::run();
                 zoom::run();
