@@ -769,6 +769,11 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                         e.string(page.callback_scheme);
                         e.bool(page.ephemeral);
                     }
+                    // `AuthSession.java`: the request the app closed.
+                    Command::CloseAuthSession(id) => {
+                        e.int(61);
+                        e.int(id as i32);
+                    }
                     // Answered by the sink (`host::answer_clipboard_reads`);
                     // images are not written to Android's clipboard.
                     Command::ReadClipboardImage { .. }

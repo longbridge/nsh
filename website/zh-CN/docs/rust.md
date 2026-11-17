@@ -218,6 +218,9 @@ fn open_notes() {
 `next_url_scheme_open` 收不到它。结果是 `Completed(url)` 或 `Cancelled`（用户关掉了页面，或没登录就回到应用）；
 回调回不到应用时以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 失败。登录页的地址同 `open_url` 一样要 `openUrl` 能力。
 
+登录页还开着、应用已从别处得知用户登录了（在不会跳回的页面上批准了设备码）时，`close_auth_session()` 关掉它：会话以
+`Cancelled` 结束，iOS 和 Android 收起页面、回到应用；桌面浏览器里的页面不动。没有会话在等时什么也不做。
+
 ```rust
 use nsh_core::{
     auth_session::{AuthSessionOutcome, AuthSessionRequest},
@@ -236,8 +239,9 @@ fn sign_in(authorize_url: String) {
 }
 ```
 
-测试里 `Headless::on_auth_session` 让平台有应用内会话、每个会话按给定的结果结束；不设时登录页记在
-`opened_urls()` 里，用 `open_with_url` 送回调。
+测试里 `Headless::on_auth_session` 让平台有应用内会话、每个会话按给定的结果结束，`keep_auth_sessions_open` 则让
+每个会话一直开着、直到应用关掉它（`screen().auth_session_showing()`）；都不设时登录页记在 `opened_urls()` 里，用
+`open_with_url` 送回调。
 
 ## 用 TSX 扩展 Rust 应用
 

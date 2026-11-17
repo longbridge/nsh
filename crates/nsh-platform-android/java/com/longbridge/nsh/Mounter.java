@@ -2655,6 +2655,10 @@ final class Mounter {
                 AuthSession.open(context, this, request, url, scheme, ephemeral);
                 break;
             }
+            case 61:
+                // `encode.rs` `Command::CloseAuthSession`: the request the app closed.
+                AuthSession.close(b.getInt());
+                break;
             case 26: {
                 int request = b.getInt();
                 String url = (String) objects[b.getInt()];

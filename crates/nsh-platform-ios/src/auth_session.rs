@@ -2,8 +2,9 @@
 //! `ASWebAuthenticationSession`, presented over the surface's window. Its
 //! completion answers the root's `AuthSession` event: the callback URL, a
 //! cancellation (the user closed the page or declined the alert asking to
-//! sign in), or why it failed. A new session cancels the surface's session
-//! still showing, whose late answer the core ignores.
+//! sign in), or why it failed. A new session, or the app closing it,
+//! cancels the surface's session still showing, whose late answer the core
+//! ignores.
 
 use std::{cell::RefCell, rc::Rc};
 
@@ -153,6 +154,23 @@ pub(crate) fn open(
         session,
         _provider: provider,
     });
+}
+
+/// Closes session `id` if the surface still shows it: the app closed it,
+/// and the core answered it already. Its completion still comes, under
+/// its id, which the core no longer waits for.
+pub(crate) fn close(id: u32, current: &Current) {
+    let running = {
+        let mut current = current.0.borrow_mut();
+        if current.as_ref().is_none_or(|r| r.id != id) {
+            return;
+        }
+        current.take()
+    };
+    if let Some(running) = running {
+        // SAFETY: a session the surface started, on the main thread.
+        unsafe { running.session.cancel() };
+    }
 }
 
 /// Whether `error` is the user's cancellation: the page closed, or the

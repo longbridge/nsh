@@ -2033,6 +2033,9 @@ impl Mounter {
                     &self.control,
                 );
             }
+            (Command::CloseAuthSession(request), _) if id == nsh_core::ROOT_ID => {
+                crate::auth_session::close(request, &self.auth_session);
+            }
             (Command::Share { id: request, sheet }, native) if id == nsh_core::ROOT_ID => {
                 let anchor = sheet.anchor.and_then(|anchor| self.ui_view(anchor));
                 crate::share::show(

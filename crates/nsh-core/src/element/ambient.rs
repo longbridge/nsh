@@ -845,6 +845,18 @@ pub fn open_auth_session(
     answer
 }
 
+/// Closes the app's web sign-in session ([`open_auth_session`]) while it
+/// still waits, as when the app learned the user signed in some other way
+/// (a device code approved on the page, which never redirects back): its
+/// answer resolves now as
+/// [`Cancelled`](crate::auth_session::AuthSessionOutcome::Cancelled), and
+/// iOS and Android take the page off the screen, bringing the app back.
+/// A page in the system browser elsewhere stays open. Only the app's own
+/// session closes; with none waiting, nothing happens.
+pub fn close_auth_session() {
+    act(Action::CloseAuthSession);
+}
+
 /// Whether the system's share sheet shows here (TS: `Share.available()`):
 /// the platform has one (iOS, Android, macOS, browsers with
 /// `navigator.share`) and the app's capabilities grant `share`. To await

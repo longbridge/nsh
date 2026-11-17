@@ -145,6 +145,9 @@ pub(crate) enum Action {
             Result<crate::auth_session::AuthSessionOutcome, crate::auth_session::AuthSessionError>,
         >,
     ),
+    /// Closes the app's waiting web sign-in session, answering it as
+    /// cancelled ([`crate::element::close_auth_session`]).
+    CloseAuthSession,
     /// Renders a drawing offscreen into an image
     /// ([`crate::canvas::render`]); the image's bytes, or why not, resolve
     /// the slot.
