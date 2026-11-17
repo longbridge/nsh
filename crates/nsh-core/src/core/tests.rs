@@ -3104,6 +3104,124 @@ fn list_renders_window_and_recycles_cells() {
     assert_eq!(c.node_count(), 2 + cells.len());
 }
 
+/// A list whose columns or content padding change with nothing else in
+/// the turn (columns worked out from a width an `onLayout` measured) lays
+/// its cells out again at the new column width, not only at the new
+/// column positions.
+#[test]
+fn a_lists_cells_take_a_new_column_width_with_nothing_else_changed() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::List,
+            },
+            style_op(2, &[("height", StyleValue::Number(400.0))]),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::EstimatedItemSize(px(50.0)),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Columns(2),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Count(4),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 4);
+    // A card filling each cell.
+    for (i, &cell) in cells.iter().enumerate() {
+        let card = 200 + i as u32;
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: card,
+                    tag: Tag::View,
+                },
+                style_op(card, &[("height", StyleValue::Number(50.0))]),
+                Op::Insert {
+                    parent: cell,
+                    child: card,
+                    before: None,
+                },
+            ],
+        );
+    }
+    let batch = c.commit().unwrap();
+    for (i, &cell) in cells.iter().enumerate() {
+        let (x, y) = ((i % 2) as f32 * 160.0, (i / 2) as f32 * 50.0);
+        assert_eq!(frame_of(&batch, cell), Some(rect(x, y, 160.0, 50.0)));
+        assert_eq!(
+            frame_of(&batch, 200 + i as u32),
+            Some(rect(0.0, 0.0, 160.0, 50.0))
+        );
+    }
+
+    // Four columns, and nothing else.
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::Columns(4),
+    })
+    .unwrap();
+    let batch = c.commit().unwrap();
+    for (i, &cell) in cells.iter().enumerate() {
+        assert_eq!(
+            frame_of(&batch, cell),
+            Some(rect(i as f32 * 80.0, 0.0, 80.0, 50.0)),
+            "cell {i}"
+        );
+        // The card laid out at the new column width, not the old one.
+        assert_eq!(
+            frame_of(&batch, 200 + i as u32),
+            Some(rect(0.0, 0.0, 80.0, 50.0)),
+            "card {i}"
+        );
+    }
+
+    // The same columns again change nothing.
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::Columns(4),
+    })
+    .unwrap();
+    assert!(c.commit().is_none());
+
+    // Padding across the content, and nothing else: the columns narrow.
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::ListContent(crate::ListContentStyle {
+            padding: crate::props::EdgeInsets {
+                left: px(20.0),
+                right: px(20.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    })
+    .unwrap();
+    let batch = c.commit().unwrap();
+    for i in 0..cells.len() {
+        assert_eq!(
+            frame_of(&batch, 200 + i as u32),
+            Some(rect(0.0, 0.0, 70.0, 50.0)),
+            "card {i}"
+        );
+    }
+}
+
 /// With tree order tracked (a platform's focus traversal), a list's
 /// recycled cells come in the order they are on screen, not in the order
 /// they were made, and their moves send the order again.
