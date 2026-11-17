@@ -350,7 +350,7 @@ img.nsh-fill { pointer-events: none; }
 .nsh-dialog h3 { font-size: 17px; font-weight: 600; margin: 18px 16px 4px; }
 .nsh-dialog p { margin: 0 16px 18px; }
 .nsh-dialog button { display: block; width: 100%; border: 0; border-top: 0.5px solid rgba(0,0,0,.2); background: none;
-  font: 17px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #007aff; padding: 11px; cursor: pointer; }
+  font: 17px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #007aff; padding: 11px; cursor: default; }
 /* Dialogs on desktop browsers: the in-surface cards of the Linux and macOS backends. */
 .nsh-desktop .nsh-dialog-backdrop { background: rgba(0,0,0,.4); }
 .nsh-desktop .nsh-dialog { width: min(340px, calc(100% - 64px)); border-radius: 12px; padding: 20px; text-align: left;
@@ -393,7 +393,7 @@ img.nsh-fill { pointer-events: none; }
 .nsh-sheet > div { border-radius: 14px; background: rgba(245,245,245,.97); color: #000; overflow: hidden; text-align: center; }
 .nsh-sheet .nsh-sheet-head { padding: 12px 16px; color: #8a8a8e; border-bottom: 0.5px solid rgba(0,0,0,.2); }
 .nsh-sheet .nsh-sheet-head b { display: block; font-weight: 600; }
-.nsh-sheet button { display: block; width: 100%; border: 0; background: none; padding: 16px; cursor: pointer;
+.nsh-sheet button { display: block; width: 100%; border: 0; background: none; padding: 16px; cursor: default;
   font: 19px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #007aff; }
 .nsh-sheet button + button { border-top: 0.5px solid rgba(0,0,0,.2); }
 .nsh-sheet button.cancel { font-weight: 600; }
@@ -443,7 +443,7 @@ img.nsh-fill { pointer-events: none; }
   border-left: 3px solid #ff6b6b; border-radius: 10px; white-space: pre-wrap; -webkit-user-select: text; user-select: text; }
 .nsh-error-copy { float: right; position: sticky; top: 0; margin: 0 0 6px 10px; border: 0; border-radius: 6px;
   background: rgba(255,255,255,.12); color: #fff; font: 600 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  padding: 4px 12px; cursor: pointer; }
+  padding: 4px 12px; cursor: default; }
 .nsh-error-copy:hover { background: rgba(255,255,255,.2); }
 `;
 

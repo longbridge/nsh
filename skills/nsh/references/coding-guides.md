@@ -669,6 +669,10 @@ Rules:
   interaction states; they apply natively, with no round trip to app code. `focus-visible:` is the keyboard's ring:
   it shows when the keyboard moved the focus, not after a click or a tap; keep `focus:` for any focus (an input's
   edge, a list's highlighted row);
+- leave `cursor` unset on buttons, rows, tabs, menu items and other controls: the platforms already give the
+  default arrow there, the I-beam over inputs and selectable text, and the pointing hand over `Link` and text links.
+  Set `cursor-pointer` only on content that behaves as a link (opens a URL or leaves the app), and resize, grab or
+  `not-allowed` only while they describe the actual manipulation;
 - use a component's semantic state styles (`selected:`, `checked:`, `disabled:`) for checked, selected, pressed, or
   disabled appearance;
 - keep popup ownership in explicit state (`open` with `onOpenChange`) so its trigger can render the open or pressed
