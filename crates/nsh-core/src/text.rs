@@ -1382,8 +1382,9 @@ mod estimate {
 }
 
 /// A deterministic, platform-free [`TextEngine`] for headless runs and
-/// tests: every character is `0.55 × font size` wide and lines are
-/// `1.2 × font size` tall; a text with line breaks measures as wide as its
+/// tests: every character is `0.55 × font size` wide and lines use the
+/// first span's resolved line height, or `1.2 × font size` when unset;
+/// a text with line breaks measures as wide as its
 /// widest line and as tall as its lines (each wrapped on its own), their baseline at the bottom (the font's ascent
 /// is the line, its descent 0, its x height `0.5 × font size`), where
 /// attachments are placed by [`TextAttachment::ascent`] on the line their
@@ -1394,7 +1395,7 @@ pub struct ApproxTextEngine;
 impl TextEngine for ApproxTextEngine {
     /// `(character count, font size, max lines, attachments, the indices of
     /// the characters two UTF-16 units long, each line's character count
-    /// when the text has line breaks)`.
+    /// when the text has line breaks, resolved line height)`.
     type Prepared = (
         usize,
         Points,
@@ -1402,6 +1403,7 @@ impl TextEngine for ApproxTextEngine {
         Vec<TextAttachment>,
         Vec<u32>,
         Vec<usize>,
+        Points,
     );
 
     fn prepare(&self, text: &AttributedText) -> Self::Prepared {
@@ -1414,6 +1416,13 @@ impl TextEngine for ApproxTextEngine {
         alignments: &AttachmentAlignments,
     ) -> Self::Prepared {
         let size = text.spans.first().map_or(px(14.0), |s| s.style.font_size);
+        let line = text.spans.first().map_or(size * 1.2, |s| {
+            if s.style.line_height > Points::ZERO {
+                s.style.line_height
+            } else {
+                size * 1.2
+            }
+        });
         // Empty (no allocation) for text in the Basic Multilingual Plane.
         let astral = text
             .text
@@ -1434,7 +1443,7 @@ impl TextEngine for ApproxTextEngine {
             text.attachments
                 .iter()
                 .map(|a| {
-                    let metrics = FontExtent::new(size * 1.2, Points::ZERO, size * 0.5);
+                    let metrics = FontExtent::new(line, Points::ZERO, size * 0.5);
                     TextAttachment {
                         height: alignments.ascent(a, metrics),
                         ..*a
@@ -1443,17 +1452,22 @@ impl TextEngine for ApproxTextEngine {
                 .collect(),
             astral,
             lines,
+            line,
         )
     }
 
     /// The bottom of the first line: the font's ascent is the line.
-    fn first_baseline(&self, &(_, font, ..): &Self::Prepared, _: Points) -> Option<Points> {
-        Some(font * 1.2)
+    fn first_baseline(
+        &self,
+        &(_, _, _, _, _, _, line): &Self::Prepared,
+        _: Points,
+    ) -> Option<Points> {
+        Some(line)
     }
 
     fn measure(
         &self,
-        &(chars, font, max_lines, _, _, ref breaks): &Self::Prepared,
+        &(chars, font, max_lines, _, _, ref breaks, line): &Self::Prepared,
         max_width: Option<Points>,
     ) -> Size<Points> {
         // The order of the products is kept: it decides the last bit.
@@ -1464,7 +1478,6 @@ impl TextEngine for ApproxTextEngine {
                 _ => (width, 1.0),
             }
         };
-        let line = font * 1.2;
         let (width, mut lines) = match breaks.is_empty() {
             true => wrap(chars),
             false => breaks.iter().fold((Points::ZERO, 0.0), |(w, n), &c| {
@@ -1480,8 +1493,8 @@ impl TextEngine for ApproxTextEngine {
 
     fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout {
         // Each character as wide as the others, reported as one line.
-        let (chars, font, max_lines, attachments, astral, breaks) = prepared;
-        let line = *font * 1.2;
+        let (chars, font, max_lines, attachments, astral, breaks, line) = prepared;
+        let line = *line;
         let advance = *font * 0.55;
         // Baseline at the bottom of the line: the ascent is the line and
         // the descent is 0, the same extent attachments are placed against.
@@ -2057,6 +2070,70 @@ mod tests {
         assert_eq!(
             small.extent(font, VerticalAlign::TextBottom),
             (px(0.0), px(3.0))
+        );
+    }
+
+    #[test]
+    fn approx_engine_respects_explicit_line_height() {
+        let engine = ApproxTextEngine;
+        for (line_height, expected) in [(0.0, 12.0), (8.0, 8.0), (50.0, 50.0)] {
+            let mut text = AttributedText::default();
+            text.push(
+                "abcd\nef",
+                ResolvedTextStyle {
+                    font_size: px(10.0),
+                    line_height: px(line_height),
+                    ..ResolvedTextStyle::default()
+                },
+            );
+            let prepared = engine.prepare(&text);
+            assert_eq!(engine.measure(&prepared, None).height, px(expected * 2.0));
+            assert_eq!(
+                engine.measure(&prepared, Some(px(11.0))).height,
+                px(expected * 3.0)
+            );
+            assert_eq!(
+                engine.first_baseline(&prepared, px(11.0)),
+                Some(px(expected))
+            );
+            let layout = engine.layout(&prepared, engine.measure(&prepared, None));
+            assert_eq!(engine.lines(&layout)[0].height, px(expected));
+            assert_eq!(
+                engine
+                    .caret_rect(&layout, TextPosition::new(0, Affinity::Downstream))
+                    .unwrap()
+                    .size
+                    .height,
+                px(expected)
+            );
+            text.max_lines = 1;
+            assert_eq!(
+                engine
+                    .measure(&engine.prepare(&text), Some(px(11.0)))
+                    .height,
+                px(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn approx_engine_places_attachments_with_explicit_line_height() {
+        let engine = ApproxTextEngine;
+        let style = ResolvedTextStyle {
+            font_size: px(10.0),
+            line_height: px(50.0),
+            ..ResolvedTextStyle::default()
+        };
+        let mut text = AttributedText::default();
+        text.push("ab\n", style);
+        text.push_attachment(size(px(8.0), px(6.0)), style);
+        let prepared = engine.prepare(&text);
+        let measured = engine.measure(&prepared, None);
+        assert_eq!(measured.height, px(100.0));
+        let layout = engine.layout(&prepared, measured);
+        assert_eq!(
+            engine.attachments(&layout),
+            [Some(point(px(0.0), px(94.0)))]
         );
     }
 

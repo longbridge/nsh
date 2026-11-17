@@ -1,5 +1,10 @@
 # Text
 
+Headless runs use `ApproxTextEngine`: characters are 0.55 em wide, and the first span's resolved
+`lineHeight` sets the line height, falling back to 1.2 em when unset. Measurement, the first baseline,
+reported line and caret heights, and attachment placement use that height. Font metrics and hit testing
+remain approximations; use a real platform to verify typography.
+
 - **Text**: `<Text>`; styles `numberOfLines`, `textOverflow` (`ellipsis|clip|ellipsis-start|ellipsis-middle`: `EllipsizeMode`'s
   `Tail|Clip|Head|Middle`), `fontFamily` (system or imported fonts:
   `import Inter from "./Inter.ttf"` evaluates to the family name and registers the font before the first frame; a host can register the same files itself, `NshView.registerFont` / `NshAppView.registerFont`, and the app names the family), `fontWeight`,
