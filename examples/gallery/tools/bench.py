@@ -16,9 +16,11 @@ timed-out sample is kept rather than dropped.
 
 Each command writes `<out>.json` (schema `nsh-bench/1`: conditions, every raw
 sample with its status, and the summary) and `<out>.csv` (one row per sample).
-Milestones that cannot be observed are `null`, never estimated: there is no
-first-presented-frame or interactive signal outside the app, so only
-`window_ms` (window mapped) and `exit` are recorded here. Memory on Linux is
+Milestones that cannot be observed are `null`, never estimated: `window_ms`
+(window mapped) is seen from outside; `first_frame_ms` is the app's own
+`nsh::startup first_frame <ms>` log line (first presented frame, from the
+process start, 10 ms resolution; Linux GTK and GPUI runtimes only, enabled
+here through `RUST_LOG`); there is no interactive signal yet. Memory on Linux is
 the tree's sum of `smaps_rollup` RSS / PSS / USS (Private_Clean+Private_Dirty)
 in MiB; GPU memory is not included. Other systems: N/A in this tool.
 """
@@ -30,6 +32,7 @@ import csv
 import json
 import os
 import platform
+import re
 import resource
 import signal
 import statistics
@@ -97,7 +100,30 @@ def window_of(pids: list[int]) -> dict | None:
     return next((c for c in clients if c.get("pid") in pids and c.get("mapped", True)), None)
 
 
+STARTUP_LOG = "nsh::startup=info"
+FIRST_FRAME = re.compile(r"nsh::startup\S*:? first_frame (\d+(?:\.\d+)?)")
+
+
+def startup_env(env: dict | None) -> dict:
+    """`env` (else ours) with the runtime's startup milestones logged."""
+    env = dict(os.environ if env is None else env)
+    current = env.get("RUST_LOG")
+    env["RUST_LOG"] = f"{current},{STARTUP_LOG}" if current else f"warn,js=info,{STARTUP_LOG}"
+    return env
+
+
+def first_frame(log: Path) -> float | None:
+    """The `first_frame` milestone the app logged, in ms from its start."""
+    try:
+        m = FIRST_FRAME.search(log.read_text(errors="replace"))
+    except OSError:
+        return None
+    return float(m.group(1)) if m else None
+
+
 def launch(command: list[str], log: Path, env: dict | None = None) -> subprocess.Popen:
+    env = startup_env(env)
+    log.parent.mkdir(parents=True, exist_ok=True)
     out = log.open("w")
     # Its own process group, so cleanup reaches every child.
     return subprocess.Popen(command, stdout=out, stderr=subprocess.STDOUT, env=env, start_new_session=True)
@@ -218,12 +244,12 @@ def cmd_startup(args, command) -> dict:
         mem = memory(children(proc.pid)) if status == "ok" else {}
         left = stop(proc)
         samples.append({"run": i, "status": status, "window_ms": round(ms, 1) if ms else None,
-                        "first_frame_ms": None, "interactive_ms": None, **mem,
+                        "first_frame_ms": first_frame(log) if status == "ok" else None, "interactive_ms": None, **mem,
                         "exit_code": proc.returncode, "leaked": len(left), "log": str(log)})
         print(json.dumps(samples[-1]), flush=True)
         time.sleep(args.gap)
     return {"kind": "startup", "samples": samples,
-            "summary": summarize(samples, ["window_ms", "rss_mib", "pss_mib", "uss_mib"])}
+            "summary": summarize(samples, ["window_ms", "first_frame_ms", "rss_mib", "pss_mib", "uss_mib"])}
 
 
 def cmd_run(args, command) -> dict:
