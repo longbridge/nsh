@@ -1352,7 +1352,7 @@ pub(crate) fn modal_config(surface: &Rc<Surface>, view: &NshView, config: &Modal
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
     let m = nav.modals.entry(id).or_default();
-    m.config = *config;
+    m.config = config.clone();
     // Presented in a window of the app's own: it shows there (a window's
     // own root leaves for its window when it opens).
     if let Some(view) = &m.view {

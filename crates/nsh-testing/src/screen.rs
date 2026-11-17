@@ -14,8 +14,8 @@ use std::{
 
 use nsh_core::{
     AccessibilityRole, AccessibilityState, Bounds, Command, Dialog, EventKind, EventMask,
-    GestureValues, InputConfig, KeyCapture, MountBatch, MountItem, NodeId, PanActivation, Point,
-    PointerEvents, Points, Size, ViewKind,
+    GestureValues, InputConfig, KeyCapture, ModalConfig, ModalPresentation, MountBatch, MountItem,
+    NodeId, PanActivation, Point, PointerEvents, Points, SheetDetent, Size, ViewKind,
     element::{ClipboardItem, PropEnum},
     keymap::Keystroke,
 };
@@ -72,6 +72,61 @@ fn utf16_slice(text: &str, start: u32, end: u32) -> String {
             here >= start && at <= end
         })
         .collect()
+}
+
+/// A dialog presented as an iOS sheet with detents: what the platform
+/// shows of it.
+#[derive(Debug, Clone, PartialEq)]
+struct SheetState {
+    /// `detents`.
+    detents: Vec<SheetDetent>,
+    /// The detent it rests at; `None` for the smallest.
+    resting: Option<SheetDetent>,
+    /// The app's `detent` it was last given, which moves it when it
+    /// changes.
+    app: Option<SheetDetent>,
+    /// `grabber`.
+    grabber: bool,
+}
+
+impl SheetState {
+    /// What a sheet that was `old` shows once given `config`, as iOS
+    /// applies it: it opens at `detent`, else `defaultDetent`, else the
+    /// smallest; later the app's `detent` moves it when it changes, and a
+    /// detent no longer among `detents` leaves it at the smallest. `None`
+    /// for a dialog that is no sheet or has no detents.
+    fn configured(old: Option<Self>, config: &ModalConfig) -> Option<Self> {
+        if config.presentation == ModalPresentation::FullScreen || config.detents.is_empty() {
+            return None;
+        }
+        let resting = match &old {
+            None => config.detent.or(config.default_detent),
+            Some(old) if old.app != config.detent && config.detent.is_some() => config.detent,
+            Some(old) => old.resting,
+        };
+        Some(Self {
+            resting: resting.filter(|d| config.detents.contains(d)),
+            detents: config.detents.clone(),
+            app: config.detent,
+            grabber: config.grabber,
+        })
+    }
+
+    /// The detent it rests at, on a screen `screen` tall.
+    fn resting(&self, screen: Points) -> Option<SheetDetent> {
+        self.resting.or_else(|| {
+            let height = |d: &SheetDetent| match *d {
+                SheetDetent::Medium => screen.0 * 0.5,
+                SheetDetent::Large => screen.0,
+                SheetDetent::Height(height) => height.0.min(screen.0),
+                SheetDetent::Fraction(fraction) => screen.0 * fraction.0.clamp(0.0, 1.0),
+            };
+            self.detents
+                .iter()
+                .copied()
+                .min_by(|a, b| height(a).total_cmp(&height(b)))
+        })
+    }
 }
 
 /// What a back does ([`Screen::back_target`]).
@@ -214,6 +269,8 @@ struct View {
     prevent_back: bool,
     /// A modal the user's back closes natively (`ModalConfig::close_on_escape`).
     close_on_escape: bool,
+    /// A dialog presented as a sheet with detents, as iOS shows it.
+    sheet: Option<SheetState>,
     /// Its `role`.
     role: AccessibilityRole,
     /// It takes no presses (`disabled`, its accessibility state).
@@ -565,7 +622,9 @@ impl Screen {
                 self.nodes.entry(*id).or_default().prevent_back = config.prevent_back;
             }
             MountItem::ModalConfig { id, config } => {
-                self.nodes.entry(*id).or_default().close_on_escape = config.close_on_escape;
+                let view = self.nodes.entry(*id).or_default();
+                view.close_on_escape = config.close_on_escape;
+                view.sheet = SheetState::configured(view.sheet.take(), config);
             }
             MountItem::Frame { id, frame } => {
                 self.nodes.entry(*id).or_default().frame = *frame;
@@ -1894,6 +1953,49 @@ impl Screen {
             [] => Err(crate::failure::not_found("view", selector)),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }
+    }
+
+    /// The detent the dialog `selector` names rests at as an iOS sheet
+    /// with `detents` (`presentation` `"pageSheet"` / `"formSheet"`): the
+    /// app's `detent`, else `defaultDetent`, else the smallest, until the
+    /// user moves it ([`crate::Headless::set_sheet_detent`]); `None` for a
+    /// dialog that is no such sheet. An error when none or several match.
+    pub fn sheet_detent(&self, selector: &str) -> Result<Option<SheetDetent>, String> {
+        let id = self.id(selector)?;
+        let screen = self.viewport.map_or(Points(0.0), |size| size.height);
+        Ok(self
+            .nodes
+            .get(&id)
+            .and_then(|v| v.sheet.as_ref())
+            .and_then(|sheet| sheet.resting(screen)))
+    }
+
+    /// Whether the dialog `selector` names shows the system's grabber as an
+    /// iOS sheet with `detents`. An error when none or several match.
+    pub fn sheet_grabber(&self, selector: &str) -> Result<bool, String> {
+        let id = self.id(selector)?;
+        Ok(self
+            .nodes
+            .get(&id)
+            .and_then(|v| v.sheet.as_ref())
+            .is_some_and(|sheet| sheet.grabber))
+    }
+
+    /// The user moved the sheet `id` to `detent`, one of its `detents`.
+    pub(crate) fn move_sheet(&mut self, id: NodeId, detent: SheetDetent) -> Result<(), String> {
+        let sheet = self
+            .nodes
+            .get_mut(&id)
+            .and_then(|v| v.sheet.as_mut())
+            .ok_or("not a dialog presented as a sheet with detents")?;
+        if !sheet.detents.contains(&detent) {
+            return Err(format!(
+                "{detent:?} is not one of the sheet's detents {:?}",
+                sheet.detents
+            ));
+        }
+        sheet.resting = Some(detent);
+        Ok(())
     }
 
     /// The id of the one view `selector` names: what

@@ -1069,6 +1069,12 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         "Escape or the Android back button, while this is the top overlay listening to it (it takes the key from the overlays below, the pages and `BackHandler`). Closing is the app's.",
     ),
     (
+        EventKind::DetentChange,
+        on::MODAL,
+        "(e: { detent: SheetDetent }) => void",
+        "The user moved an iOS sheet to another of its `detents` (dragging it, its grabber, a scroll at its edge, a screen reader): set `detent` to it to keep a controlled sheet in step.",
+    ),
+    (
         EventKind::Position,
         on::OVERLAY,
         "(e: OverlayPosition) => void",

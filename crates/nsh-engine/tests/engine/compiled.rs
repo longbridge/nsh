@@ -1200,7 +1200,7 @@ fn dialogs_report_cancels_and_closes_with_their_reason() {
         .items
         .iter()
         .find_map(|i| match i {
-            MountItem::ModalConfig { id, config } if *id == modal => Some(*config),
+            MountItem::ModalConfig { id, config } if *id == modal => Some(config.clone()),
             _ => None,
         })
         .expect("its config");

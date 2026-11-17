@@ -1,11 +1,10 @@
 //! `Sheet`: a panel at an edge of the screen, over a backdrop, in
 //! overlays.
 
-use nsh_core::{
-    AccessibilityActionDef, AccessibilityValue,
-    element::{JsHost, JsIn, JsKind, JsOwned, JsValue, PropError, Style, TsTypes},
-    prelude::*,
-};
+/// A height a bottom sheet rests at (`detents`; TS `SheetDetent`): the
+/// core's, which dialogs presented as iOS sheets take too.
+pub use nsh_core::SheetDetent;
+use nsh_core::{AccessibilityActionDef, AccessibilityValue, element::Style, prelude::*};
 
 use crate::{
     popup::{
@@ -14,82 +13,17 @@ use crate::{
     roving::leave_bar,
 };
 
-/// A height a bottom sheet rests at (`detents`; TS `SheetDetent`), measured
-/// from the bottom of the screen and never taller than the screen below
-/// the status bar.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SheetDetent {
-    /// About half the screen (TS `"medium"`).
-    Medium,
-    /// The screen below the status bar (TS `"large"`).
-    Large,
-    /// This many points tall (TS `{ height }`).
-    Height(Points),
-    /// This share, from 0 to 1, of the screen below the status bar (TS
-    /// `{ fraction }`).
-    Fraction(Percentage),
-}
-
-impl SheetDetent {
-    /// Its height in a room `room` tall (the screen below the status bar)
-    /// on a screen `screen` tall.
-    fn height(self, room: Points, screen: Points) -> Points {
-        let room = room.0.max(0.0);
-        let height = match self {
-            Self::Medium => Points(screen.0 * 0.5),
-            Self::Large => Points(room),
-            Self::Height(height) => height,
-            Self::Fraction(fraction) => Points(room * fraction.0.clamp(0.0, 1.0)),
-        };
-        Points(height.0.clamp(0.0, room))
-    }
-}
-
-impl JsValue for SheetDetent {
-    fn ts_type(types: &mut TsTypes) -> String {
-        types.declare("SheetDetent", |_| {
-            "/** A height a bottom sheet rests at: `\"medium\"` (about half the screen), `\"large\"` (the screen below the status bar), `{ height }` in points or `{ fraction }` (0 to 1) of the large one. */\n\
-             export type SheetDetent = \"medium\" | \"large\" | { height: number } | { fraction: number };\n"
-                .to_owned()
-        })
-    }
-
-    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
-        let wanted = r#""medium", "large", `{ height }` or `{ fraction }`"#;
-        match value.kind() {
-            JsKind::String => match value.as_string().as_deref() {
-                Some("medium") => Ok(Self::Medium),
-                Some("large") => Ok(Self::Large),
-                _ => Err(value.expected(wanted)),
-            },
-            JsKind::Object => {
-                let height = value.field("height")?;
-                if let Some(height) = height.get().as_number() {
-                    return Ok(Self::Height(Points(height as f32)));
-                }
-                let fraction = value.field("fraction")?;
-                match fraction.get().as_number() {
-                    Some(fraction) => Ok(Self::Fraction(Percentage(fraction as f32))),
-                    None => Err(value.expected(wanted)),
-                }
-            }
-            _ => Err(value.expected(wanted)),
-        }
-    }
-
-    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
-        let object = |key: &str, n: f32| -> Result<JsOwned<'a>, PropError> {
-            let owned = JsOwned::new(host, host.new_object()?);
-            host.set_field(owned.get().raw(), key, host.new_number(f64::from(n)))?;
-            Ok(owned)
-        };
-        match *self {
-            Self::Medium => "medium".to_owned().to_js(host),
-            Self::Large => "large".to_owned().to_js(host),
-            Self::Height(height) => object("height", height.0),
-            Self::Fraction(fraction) => object("fraction", fraction.0),
-        }
-    }
+/// The height of `detent` in a room `room` tall (the screen below the
+/// status bar) on a screen `screen` tall.
+fn detent_height(detent: SheetDetent, room: Points, screen: Points) -> Points {
+    let room = room.0.max(0.0);
+    let height = match detent {
+        SheetDetent::Medium => Points(screen.0 * 0.5),
+        SheetDetent::Large => Points(room),
+        SheetDetent::Height(height) => height,
+        SheetDetent::Fraction(fraction) => Points(room * fraction.0.clamp(0.0, 1.0)),
+    };
+    Points(height.0.clamp(0.0, room))
 }
 
 /// The props of [`Sheet`].
@@ -515,7 +449,10 @@ impl Detents {
             }
             let screen = window().height;
             let room = screen - safe_area().top;
-            list.get().iter().map(|d| d.height(room, screen)).collect()
+            list.get()
+                .iter()
+                .map(|&d| detent_height(d, room, screen))
+                .collect()
         });
         let own = signal(props.default_detent.get_untracked());
         let current = computed(move || {
@@ -934,14 +871,17 @@ mod tests {
     #[test]
     fn detents_resolve_within_the_room_below_the_status_bar() {
         let (room, screen) = (Points(797.0), Points(844.0));
-        assert_eq!(SheetDetent::Medium.height(room, screen), Points(422.0));
-        assert_eq!(SheetDetent::Large.height(room, screen), room);
         assert_eq!(
-            SheetDetent::Height(Points(900.0)).height(room, screen),
+            detent_height(SheetDetent::Medium, room, screen),
+            Points(422.0)
+        );
+        assert_eq!(detent_height(SheetDetent::Large, room, screen), room);
+        assert_eq!(
+            detent_height(SheetDetent::Height(Points(900.0)), room, screen),
             room
         );
         assert_eq!(
-            SheetDetent::Fraction(Percentage(0.5)).height(room, screen),
+            detent_height(SheetDetent::Fraction(Percentage(0.5)), room, screen),
             Points(398.5)
         );
     }

@@ -272,6 +272,7 @@ events! {
     DownloadProgress = "onDownloadProgress" as "": "A held download received bytes (payload: [`EventPayload::Json`], [`crate::webview::DownloadProgress`]; never reaches a listener).",
     DownloadEnd = "onDownloadEnd" as "": "A platform's download ended (payload: [`EventPayload::Json`], [`crate::webview::DownloadEnd`]; never reaches a listener).",
     Share = "onShare": "A [`Command::Share`] request finished (root only; payload: `id`, then `action` (`\"shared\"` with the `target` where the platform names it, or `\"dismissed\"`), or `error` with its `code`; [`crate::share`]).",
+    DetentChange = "onDetentChange": "The user moved an iOS sheet dialog to another of its `detents` (dragging it, its grabber, a scroll at its edge, a screen reader; payload: [`EventPayload::Json`], `{ detent }`, [`SheetDetent::change_payload`]).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -2065,8 +2066,120 @@ pub enum ModalPresentation {
     FormSheet,
 }
 
+/// A height a bottom sheet rests at (TS `SheetDetent`): `nsh-base`'s
+/// `Sheet` and a dialog presented as an iOS sheet
+/// ([`ModalPresentation::PageSheet`] / [`ModalPresentation::FormSheet`])
+/// take a list of them as `detents`. Measured from the bottom of the
+/// screen, never taller than the screen below the status bar.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SheetDetent {
+    /// About half the screen (TS `"medium"`).
+    Medium,
+    /// The screen below the status bar (TS `"large"`).
+    Large,
+    /// This many points tall (TS `{ height }`).
+    Height(Points),
+    /// This share, from 0 to 1, of the screen below the status bar (TS
+    /// `{ fraction }`).
+    Fraction(Percentage),
+}
+
+impl SheetDetent {
+    /// As JSON: `"medium"`, `"large"`, `{ "height": n }` or
+    /// `{ "fraction": n }`, as JS has it (the payload of
+    /// [`EventKind::DetentChange`]).
+    pub fn to_json(self) -> crate::JsonValue {
+        let object = |key: &str, n: f32| {
+            let mut map = serde_json::Map::new();
+            map.insert(key.to_owned(), serde_json::json!(n));
+            crate::JsonValue::Object(map)
+        };
+        match self {
+            Self::Medium => crate::JsonValue::from("medium"),
+            Self::Large => crate::JsonValue::from("large"),
+            Self::Height(height) => object("height", height.0),
+            Self::Fraction(fraction) => object("fraction", fraction.0),
+        }
+    }
+
+    /// The detent JSON [`Self::to_json`] gives; `None` for anything else.
+    pub fn from_json(value: &crate::JsonValue) -> Option<Self> {
+        if let Some(name) = value.as_str() {
+            return match name {
+                "medium" => Some(Self::Medium),
+                "large" => Some(Self::Large),
+                _ => None,
+            };
+        }
+        if let Some(height) = value.get("height").and_then(|v| v.as_f64()) {
+            return Some(Self::Height(Points(height as f32)));
+        }
+        let fraction = value.get("fraction").and_then(|v| v.as_f64())?;
+        Some(Self::Fraction(Percentage(fraction as f32)))
+    }
+
+    /// The payload of [`EventKind::DetentChange`]: `{ detent }`.
+    pub fn change_payload(self) -> EventPayload {
+        let mut map = serde_json::Map::new();
+        map.insert("detent".to_owned(), self.to_json());
+        EventPayload::Json(crate::JsonValue::Object(map))
+    }
+}
+
+impl crate::element::JsValue for SheetDetent {
+    fn ts_type(types: &mut crate::element::TsTypes) -> String {
+        types.declare("SheetDetent", |_| {
+            "/** A height a bottom sheet rests at: `\"medium\"` (about half the screen), `\"large\"` (the screen below the status bar), `{ height }` in points or `{ fraction }` (0 to 1) of the large one. */\n\
+             export type SheetDetent = \"medium\" | \"large\" | { height: number } | { fraction: number };\n"
+                .to_owned()
+        })
+    }
+
+    fn from_js(value: crate::element::JsIn<'_>) -> Result<Self, crate::element::PropError> {
+        use crate::element::JsKind;
+        let wanted = r#""medium", "large", `{ height }` or `{ fraction }`"#;
+        match value.kind() {
+            JsKind::String => match value.as_string().as_deref() {
+                Some("medium") => Ok(Self::Medium),
+                Some("large") => Ok(Self::Large),
+                _ => Err(value.expected(wanted)),
+            },
+            JsKind::Object => {
+                let height = value.field("height")?;
+                if let Some(height) = height.get().as_number() {
+                    return Ok(Self::Height(Points(height as f32)));
+                }
+                let fraction = value.field("fraction")?;
+                match fraction.get().as_number() {
+                    Some(fraction) => Ok(Self::Fraction(Percentage(fraction as f32))),
+                    None => Err(value.expected(wanted)),
+                }
+            }
+            _ => Err(value.expected(wanted)),
+        }
+    }
+
+    fn to_js<'a>(
+        &self,
+        host: &'a dyn crate::element::JsHost,
+    ) -> Result<crate::element::JsOwned<'a>, crate::element::PropError> {
+        use crate::element::JsOwned;
+        let object = |key: &str, n: f32| -> Result<JsOwned<'a>, crate::element::PropError> {
+            let owned = JsOwned::new(host, host.new_object()?);
+            host.set_field(owned.get().raw(), key, host.new_number(f64::from(n)))?;
+            Ok(owned)
+        };
+        match *self {
+            Self::Medium => "medium".to_owned().to_js(host),
+            Self::Large => "large".to_owned().to_js(host),
+            Self::Height(height) => object("height", height.0),
+            Self::Fraction(fraction) => object("fraction", fraction.0),
+        }
+    }
+}
+
 /// A modal option (`<Dialog …>`).
-#[derive(Debug, Clone, Copy, PartialEq, HostProps)]
+#[derive(Debug, Clone, PartialEq, HostProps)]
 pub enum ModalProp {
     /// `animation`: how the dialog appears. Pages and dialogs share the
     /// name, so JS's value arrives as [`ScreenProp::Animation`], which the
@@ -2101,6 +2214,31 @@ pub enum ModalProp {
     /// natively (default true); either way it calls `onCancel`.
     #[prop(js = "closeOnSwipe", default = true, on = MODAL)]
     CloseOnSwipe(bool),
+    /// `detents`: the heights an iOS sheet (`presentation` `"pageSheet"` /
+    /// `"formSheet"`) rests at (none by default: the system's full height).
+    /// The user drags it between them, the system way; past the smallest
+    /// it closes when `closeOnSwipe` allows. Ignored on other platforms and
+    /// presentations: there, `Sheet` (`nsh/base`) rests at detents.
+    #[prop(js = "detents", on = MODAL)]
+    Detents(Vec<SheetDetent>),
+    /// `detent`: the detent of `detents` the sheet rests at, controlled: it
+    /// moves there when the value changes; follow `onDetentChange` to keep
+    /// it in step with the user's moves.
+    #[prop(js = "detent", on = MODAL)]
+    Detent(Option<SheetDetent>),
+    /// `defaultDetent`: the detent it opens at without `detent` (default
+    /// the smallest).
+    #[prop(js = "defaultDetent", on = MODAL)]
+    DefaultDetent(Option<SheetDetent>),
+    /// `grabber`: the sheet shows the system's grabber at its top (default
+    /// false); screen readers move it between detents with it.
+    #[prop(js = "grabber", on = MODAL)]
+    Grabber(bool),
+    /// `largestUndimmedDetent`: up to this detent of `detents`, what is
+    /// behind the sheet is not dimmed and takes touches (default: dimmed at
+    /// every detent).
+    #[prop(js = "largestUndimmedDetent", on = MODAL)]
+    LargestUndimmedDetent(Option<SheetDetent>),
 }
 
 /// An overlay option (`<Overlay …>`, [`crate::overlay`]).

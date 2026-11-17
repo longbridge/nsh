@@ -448,6 +448,14 @@ pub(crate) fn typed<T: ?Sized + ToOwned + 'static>(
 }
 
 /// Events without data.
+/// A sheet's new detent (`{ detent }`, [`crate::SheetDetent::change_payload`]).
+pub(crate) fn sheet_detent(p: &EventPayload) -> Option<Cow<'_, crate::SheetDetent>> {
+    let EventPayload::Json(value) = p else {
+        return None;
+    };
+    crate::SheetDetent::from_json(value.get("detent")?).map(Cow::Owned)
+}
+
 pub(crate) fn unit(_: &EventPayload) -> Option<Cow<'_, ()>> {
     Some(Cow::Owned(()))
 }
