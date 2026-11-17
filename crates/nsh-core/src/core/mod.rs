@@ -11227,6 +11227,7 @@ fn shown_by(item: &MountItem) -> Shown {
                 | C::PickFiles { .. }
                 | C::OpenUrl { .. }
                 | C::PickScreenColor { .. }
+                | C::Share { .. }
                 | C::RenderCanvas { .. }
                 | C::FileRequest { .. }
                 | C::Speech { .. }

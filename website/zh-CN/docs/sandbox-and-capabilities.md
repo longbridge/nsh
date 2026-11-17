@@ -117,6 +117,7 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
     "statusBar": true,
     "clipboard": true,
     "picker": true,
+    "share": true,
     "speech": true,
     "notifications": true,
     "audio": true,
@@ -228,6 +229,10 @@ blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
 
 `"picker": true` 允许应用显示系统的照片选择器（[`Picker`](../modules/nsh.md#picker)）：由用户决定哪些内容交给应用。
 
+### `share`
+
+`"share": true` 允许应用显示系统的分享面板（[`Share`](../modules/nsh.md#share)）：由用户决定内容发往哪里。分享的文件还需要能在 `fs.read` 下读取。
+
 ### `speech`
 
 `"speech": true` 允许应用识别用户说的话（[`Speech`](../modules/nsh.md#speech)）：使用麦克风和系统的语音识别器，转写文本交给应用。系统仍会向用户请求一次权限。
@@ -303,6 +308,7 @@ if (host.available()) {
 | 状态栏修改、画布图片 | 不修改也不绘制任何东西；拒绝会记录在日志中。 |
 | 剪贴板 | `Clipboard` 的每个函数都以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"clipboard"`，`resource` 为 `""`；不会访问系统剪贴板。 |
 | 选择器 | `pickImages` 和 `pickFiles` 不显示任何内容，以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"picker"`，`resource` 为 `""`。 |
+| 分享 | `Share.available()` resolve 为 `false`，`Share.show` 不显示任何内容，以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"share"`，`resource` 为 `""`。 |
 | 声音 | `Sound.load` reject、`new AudioPlayer` 抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"audio"`，`resource` 为音源；不读取也不播放任何内容。 |
 | 语音 | `Speech.start` 抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"speech"`，`resource` 为 `""`；麦克风不会打开。 |
 | 通知 | `Notifications` 的函数 reject 或抛出 `ERR_ACCESS_DENIED`，`permission` 为 `"notifications"`，`resource` 为 `""`；不会显示任何东西。 |

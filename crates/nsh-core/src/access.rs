@@ -23,6 +23,9 @@
 //! }
 //! ```
 //!
+//! `share` lets the app show the system's share sheet (`Share` of `nsh`,
+//! [`crate::share`]): what it shares leaves the app where the user sends
+//! it, and the files it shares are also checked against `fs.read`.
 //! `openUrl` lets the app open URLs outside it (`openUrl` of `nsh/device`,
 //! [`crate::open_url`]: the browser, the mail or phone app, other apps'
 //! schemes): `true` for every scheme, `{ "schemes": [...] }` for those
@@ -48,8 +51,8 @@
 //! the windows `windows` grants need none); `homeDir` lets `os.homedir()` tell the
 //! user's home directory. An app without `"capabilities"` (a standalone
 //! app, its developer's own) retains unrestricted HTTP, web views, the
-//! status bar, the clipboard, the picker, speech recognition, opening URLs,
-//! the application and the home directory; raw sockets, processes, the
+//! status bar, the clipboard, the picker, the share sheet, speech
+//! recognition, opening URLs, the application and the home directory; raw sockets, processes, the
 //! filesystem and the host's functions always require an explicit
 //! declaration.
 
@@ -647,6 +650,10 @@ pub struct Capabilities {
     /// The app may show the system's picker (`nsh/picker`): the files the
     /// user picks in it reach the app.
     pub picker: bool,
+    /// The app may show the system's share sheet (`Share` of `nsh`): the
+    /// text, links and files it shares leave the app where the user sends
+    /// them.
+    pub share: bool,
     /// The app may recognize the user's speech (`Speech` of `nsh`): the
     /// microphone listens while a session runs, and the transcript reaches
     /// the app.
@@ -1088,6 +1095,7 @@ impl Capabilities {
             status_bar: true,
             clipboard: true,
             picker: true,
+            share: true,
             speech: true,
             notifications: true,
             audio: true,
@@ -1147,13 +1155,14 @@ impl Capabilities {
     /// `dropped`: lenient, recording what unknown keys dropped; `None`:
     /// strict.
     fn parse(value: &Value, mut dropped: Option<&mut Vec<String>>) -> Result<Self, String> {
-        const KNOWN: [&str; 15] = [
+        const KNOWN: [&str; 16] = [
             "windows",
             "network",
             "webview",
             "statusBar",
             "clipboard",
             "picker",
+            "share",
             "speech",
             "notifications",
             "audio",
@@ -1294,6 +1303,11 @@ impl Capabilities {
             caps.picker = picker
                 .as_bool()
                 .ok_or("capabilities.picker must be a boolean")?;
+        }
+        if let Some(share) = obj.get("share") {
+            caps.share = share
+                .as_bool()
+                .ok_or("capabilities.share must be a boolean")?;
         }
         if let Some(speech) = obj.get("speech") {
             caps.speech = speech
@@ -1563,6 +1577,9 @@ impl Capabilities {
         obj.insert("clipboard".into(), self.clipboard.into());
         obj.insert("picker".into(), self.picker.into());
         // Only when granted: older runtimes read what newer signers write.
+        if self.share {
+            obj.insert("share".into(), true.into());
+        }
         if self.speech {
             obj.insert("speech".into(), true.into());
         }
@@ -2435,6 +2452,12 @@ impl Access {
         self.each(|c| c.status_bar)
     }
 
+    /// Whether the app may show the system's share sheet (`Share` of
+    /// `nsh`).
+    pub fn allows_share(&self) -> bool {
+        self.each(|c| c.share)
+    }
+
     /// Whether the app may read and write the system clipboard.
     pub fn allows_clipboard(&self) -> bool {
         self.each(|c| c.clipboard)
@@ -3037,6 +3060,31 @@ mod tests {
     }
 
     #[test]
+    fn the_share_sheet_is_granted_by_both_sides() {
+        let declared = caps(r#"{ "share": true }"#);
+        assert!(declared.share);
+        assert_eq!(declared.to_json()["share"], serde_json::json!(true));
+        assert!(
+            Access {
+                declared: declared.clone(),
+                granted: None,
+            }
+            .allows_share()
+        );
+        // The embedding app grants less.
+        assert!(
+            !Access {
+                declared,
+                granted: Some(caps("{}")),
+            }
+            .allows_share()
+        );
+        // Apps without a declaration keep it.
+        assert!(Access::all().allows_share());
+        assert!(Capabilities::from_json(&serde_json::json!({ "share": "yes" })).is_err());
+    }
+
+    #[test]
     fn denies_unless_listed() {
         let access = Access {
             declared: caps("{}"),
@@ -3056,6 +3104,7 @@ mod tests {
         assert!(!access.allows_status_bar());
         assert!(!access.allows_clipboard());
         assert!(!access.allows_picker());
+        assert!(!access.allows_share());
         assert!(!access.allows_speech());
         assert!(!access.allows_audio());
         assert!(!access.allows_application());

@@ -683,6 +683,7 @@ pub(crate) fn command(surface: &Rc<Surface>, id: NodeId, command: &Command) {
             crate::file_requests::pick_files(surface, *id, request);
         }
         Command::PickScreenColor { id } => crate::screen_color::pick_screen_color(surface, *id),
+        Command::Share { id, sheet } => crate::share::schedule(surface, *id, sheet),
         Command::RenderCanvas {
             id,
             drawing,

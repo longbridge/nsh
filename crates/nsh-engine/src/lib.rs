@@ -3716,6 +3716,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         wake_count: env.wake_count,
         screen_color: env.screen_color,
         canvas_render: env.canvas_render,
+        share: env.share,
         file_requests: env.file_requests,
         speech: env.speech,
         notifications: env.notifications,

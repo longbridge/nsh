@@ -271,6 +271,7 @@ events! {
     DownloadOffer = "onDownloadOffer" as "": "A platform holds a download for the core (payload: [`EventPayload::Json`], [`crate::webview::DownloadOffer`]; never reaches a listener).",
     DownloadProgress = "onDownloadProgress" as "": "A held download received bytes (payload: [`EventPayload::Json`], [`crate::webview::DownloadProgress`]; never reaches a listener).",
     DownloadEnd = "onDownloadEnd" as "": "A platform's download ended (payload: [`EventPayload::Json`], [`crate::webview::DownloadEnd`]; never reaches a listener).",
+    Share = "onShare": "A [`Command::Share`] request finished (root only; payload: `id`, then `action` (`\"shared\"` with the `target` where the platform names it, or `\"dismissed\"`), or `error` with its `code`; [`crate::share`]).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -2566,6 +2567,23 @@ pub enum Command {
         id: u32,
         /// The URL ([`crate::open_url::check_url`] passed it).
         url: String,
+    },
+    /// Show the system's share sheet for `sheet` (on the root;
+    /// `Share.show`, [`crate::share`]) and report how it ended as
+    /// [`EventKind::Share`] `id` ([`crate::share::ShareOutcome::payload`],
+    /// [`crate::share::ShareError::payload`]). Sent only on platforms whose
+    /// [`crate::platform::Environment::share`] is set. The platform answers
+    /// every request exactly once, failures included (a sheet it could not
+    /// present is an error): one it never answers leaves its promise
+    /// pending. The core answers a request still pending as dismissed
+    /// before it sends a new one; the platform then shows the new sheet in
+    /// the earlier one's place where it can (iOS, macOS), and answers
+    /// whatever the earlier sheet reports later under its own id.
+    Share {
+        /// The request.
+        id: u32,
+        /// What to share and where the sheet points.
+        sheet: Box<crate::share::ShareSheet>,
     },
     /// Let the user pick a color anywhere on the screen (on the root; a
     /// color picker's eyedropper, [`crate::element::ambient::pick_screen_color`]):
