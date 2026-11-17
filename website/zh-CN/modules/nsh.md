@@ -619,6 +619,7 @@ interface MotionOptions extends MotionPlayOptions {
 }
 
 interface MotionPlayOptions extends KeyframeTiming {
+  spring?: MotionSpring;             // 用这个弹簧播放每个通道
   ignoreReduceMotion?: boolean;      // 即使用户要求减少动态效果也照常播放
 }
 
@@ -675,8 +676,10 @@ type MotionChannel = "opacity" | "translateX" | "translateY" | "rotate" | "rotat
 
 interface MotionSpec extends KeyframeTiming {
   keyframes: { [C in MotionChannel]?: KeyframeValue[] } | MotionFrame[];
+  spring?: MotionSpring;
   ignoreReduceMotion?: boolean;
 }
+type MotionSpring = { stiffness?: number; damping?: number; mass?: number };   // 170、26、1
 type MotionFrame = { [C in MotionChannel]?: number | string } & { offset?: number; easing?: Easing };
 
 interface MotionPreset extends MotionSpec {
@@ -687,6 +690,22 @@ interface MotionPreset extends MotionSpec {
 现成的动效，以数据形式提供：`motion.play("shake")` 播放的就是 `motions.shake`。`MotionName` 是以下之一：`fadeIn`、`fadeInUp`、`fadeInDown`、`fadeInLeft`、`fadeInRight`、`zoomIn`、`popIn`、`bounceIn`、`slideInUp`、`slideInDown`、`flipInX`、`flipInY`（入场）；`fadeOut`、`fadeOutUp`、`fadeOutDown`、`fadeOutLeft`、`fadeOutRight`、`zoomOut`、`popOut`、`slideOutDown`、`slideOutUp`（退场）；`shake`、`headShake`、`wiggle`、`swing`、`pulse`、`heartbeat`、`rubberBand`、`jello`、`tada`、`jump`、`flash`（吸引注意）；`spin`、`float`、`breathe`、`sway`、`bob`、`glow`（循环）。[动画](../docs/animation.md#预设)逐一介绍了它们。展开一个预设即可修改它：`motion.play({ ...motions.fadeInUp, duration: 600 })`。
 
 `MotionSpec` 是你自己的动效：按通道写的关键帧（`{ opacity: [0, 1], translateY: [24, 0] }`），或像 Web Animations API 那样写的一组帧（`[{ opacity: 0, translateY: 24 }, { opacity: 1, translateY: 0 }]`，没有 offset 的帧按它在列表中的位置排布），再加上[关键帧的时间参数](#关键帧)。Rust：`MotionSpec::new(KeyframeTiming)` 配合 `.values(channel, values)`（均匀分布）、`.track(channel, keyframes)` 和 `.timing(|t| …)`；`MotionPreset::FadeInUp`（或 `.spec()`）是一个预设，`MotionChannel` 命名各通道。
+
+设置 `spring` 后，每个通道从当前所在的位置以弹簧运动到它的关键帧终点，而不是逐帧经过各关键帧：打断另一个动效时，会从那个动效留下的值和速度继续，而关键帧动效会从第一帧重新开始。第一个关键帧仍是 `enter` 让视图起步的位置；`delay` 在弹簧开始前等待，`direction: "reverse"` 让弹簧运动到第一个关键帧，中间的关键帧以及 `duration`、`easing`、`iterations` 不参与。刚度、阻尼和质量与 `Animated.spring` 的相同（默认 170、26、1）。Rust：在 `MotionSpec` 上调用 `.spring(Spring { stiffness, damping, ..Spring::default() })`。用户要求减少动态效果时，弹簧动效和其他动效一样立即落在终点。
+
+```rust tabs
+let spring = Spring { stiffness: 620.0, damping: 36.0, ..Spring::default() };
+let sheet = motion().entering(MotionPreset::SlideInUp.spec().spring(spring));
+// 还在上升时就被收起：从当前位置掉头，保留原有的速度。
+let _ = sheet.play(MotionPreset::SlideOutDown.spec().spring(spring));
+```
+
+```tsx tabs
+const spring = { stiffness: 620, damping: 36 };
+const sheet = createMotion({ enter: "slideInUp", spring });
+// 还在上升时就被收起：从当前位置掉头，保留原有的速度。
+sheet.play("slideOutDown", { spring });
+```
 
 ```rust tabs
 let rise = MotionSpec::new(KeyframeTiming::new(400.0))

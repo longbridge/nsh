@@ -208,11 +208,12 @@ pub fn keyframes_composite<I: HostInput>(input: &I, node: NodeId) -> Composite {
     keyframes(node, &frames, &keyframe_timing(input))
 }
 
-/// A motion: a preset's name, or `{ keyframes, ...timing }` where
+/// A motion: a preset's name, or `{ keyframes, spring, ...timing }` where
 /// `keyframes` is an object of channels' keyframes (`{ opacity: [0, 1] }`)
 /// or a list of frames of channels (`[{ opacity: 0 }, { opacity: 1,
-/// offset: 1, easing }]`, as the Web Animations API's). Unknown channels
-/// are left out.
+/// offset: 1, easing }]`, as the Web Animations API's), and `spring` (`{
+/// stiffness, damping, mass }`, `Animated.spring`'s defaults) plays each
+/// channel on that spring. Unknown channels are left out.
 pub fn motion_spec<I: HostInput>(input: &I) -> Option<MotionSpec> {
     if let Some(name) = input.as_string() {
         return MotionPreset::parse(&name).map(MotionPreset::spec);
@@ -221,6 +222,10 @@ pub fn motion_spec<I: HostInput>(input: &I) -> Option<MotionSpec> {
         return None;
     }
     let mut spec = MotionSpec::new(keyframe_timing(input));
+    spec.spring = input
+        .field("spring")
+        .filter(|s| s.is_object())
+        .map(|s| motion_spring(&s));
     let frames = input.field("keyframes")?;
     if let Some(list) = frames.as_list() {
         // Frames of channels: each channel's keyframes are the frames that
@@ -267,6 +272,25 @@ pub fn motion_spec<I: HostInput>(input: &I) -> Option<MotionSpec> {
         }
     }
     Some(spec)
+}
+
+/// A motion's `spring`: `{ stiffness, damping, mass }`, each finite or
+/// `Animated.spring`'s default.
+fn motion_spring<I: HostInput>(input: &I) -> Spring {
+    let defaults = Spring::default();
+    let number = |key, default| {
+        input
+            .field(key)
+            .and_then(|v| v.as_number())
+            .filter(|n| n.is_finite())
+            .map_or(default, |n| n as f32)
+    };
+    Spring {
+        stiffness: number("stiffness", defaults.stiffness),
+        damping: number("damping", defaults.damping),
+        mass: number("mass", defaults.mass),
+        ..defaults
+    }
 }
 
 /// Where a staggered group counts from: `"first"`, `"last"`, `"center"` or
@@ -707,4 +731,30 @@ pub fn tables() -> crate::JsonValue {
             .map(|p| (p.name.to_string(), motion_json(p)))
             .collect::<Map<String, Value>>(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::element::animated::JsonInput;
+
+    #[test]
+    fn a_motion_reads_its_spring() {
+        let motion = serde_json::json!({
+            "keyframes": { "opacity": [0, 1] },
+            "spring": { "stiffness": 620, "damping": 36 },
+        });
+        let spec = motion_spec(&JsonInput(Some(&motion))).unwrap();
+        let spring = spec.spring.unwrap();
+        assert_eq!(
+            (spring.stiffness, spring.damping, spring.mass),
+            (620.0, 36.0, 1.0)
+        );
+        let keyframes = serde_json::json!({ "keyframes": { "opacity": [0, 1] }, "spring": 1 });
+        assert_eq!(
+            motion_spec(&JsonInput(Some(&keyframes))).unwrap().spring,
+            None
+        );
+        assert_eq!(motion_spec(&JsonInput(None)), None);
+    }
 }

@@ -448,6 +448,10 @@ expect Steps: 0 0.25 0.5 0.75 1
 expect Transform steps: 7
 expect Bound: true
 expect Started: yes
+expect Sprung: yes
+# The exit interrupts the entrance and springs on from there to its end.
+animated id:sprung opacity 0
+animated id:sprung transform.1 24
 expect Staggered: function function
 covers [nsh] createMotion
 covers [nsh] motions
