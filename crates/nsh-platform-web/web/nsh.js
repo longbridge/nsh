@@ -301,8 +301,11 @@ img.nsh-fill { pointer-events: none; }
 .nsh-fit-none { object-fit: none; }
 .nsh-spacer { position: absolute; left: 0; top: 0; width: 1px; height: 1px; pointer-events: none; visibility: hidden; }
 /* Over the style's \`overflow: clip\`. */
-.nsh-scroll.nsh-ox.nsh-ox { overflow-x: auto; overflow-y: hidden; }
-.nsh-scroll.nsh-oy.nsh-oy { overflow-x: hidden; overflow-y: auto; }
+/* A one-axis scroll view keeps only its own axis's overscroll: a swipe
+   across it (vertical over a horizontal one, as over an editor's text
+   inside its vertical scroll) scrolls the scroll view around it. */
+.nsh-scroll.nsh-ox.nsh-ox { overflow-x: auto; overflow-y: hidden; overscroll-behavior-y: auto; }
+.nsh-scroll.nsh-oy.nsh-oy { overflow-x: hidden; overflow-y: auto; overscroll-behavior-x: auto; }
 .nsh-scroll.nsh-oxy.nsh-oxy { overflow: auto; }
 .nsh-scroll.nsh-onone.nsh-onone { overflow: hidden; }
 .nsh-scroll.nsh-zoom.nsh-zoom { touch-action: none; }
