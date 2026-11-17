@@ -457,7 +457,7 @@ function ModifierChords() {
         <View style={{ padding: 12, gap: 12 }}>
           <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
             <Keycap label={MOD} name="Modifier" down={modDown()} wide />
-            <Keycap label="⇧" name="Shift" down={modifiers().shift} />
+            <Keycap label={APPLE ? "⇧" : "Shift"} name="Shift" down={modifiers().shift} wide={!APPLE} />
             <Keycap label={OPTION} name="Alt" down={modifiers().alt} wide={APPLE} />
             <If when={!APPLE}>
               <Keycap label="Super" name="Platform key" down={modifiers().platform} wide />

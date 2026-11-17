@@ -1,4 +1,4 @@
-import { cleanup, signal, Text, View } from "nsh";
+import { cleanup, keymap, signal, Text, View } from "nsh";
 import { TextView, type TextViewImage, type TextViewRef } from "nsh/base";
 import { Button, Caption, Card, colors, DemoPage, Segmented, textViewCaretClass, textViewLinkClasses } from "../ui";
 import { ImageViewer } from "./ImageViewer";
@@ -6,7 +6,7 @@ import { LucideIcon } from "../icons";
 
 const MARKDOWN = `# Native Shell
 
-**NSH** loads apps written in *TSX* into native apps at run time and renders them with each platform's ~~web views~~ own views. Press <kbd>⌘K</kbd> to search the docs, or read [the guide](https://github.com/longbridge/nsh).
+**NSH** loads apps written in *TSX* into native apps at run time and renders them with each platform's ~~web views~~ own views. Press <kbd>${keymap.label("mod+k")}</kbd> to search the docs, or read [the guide](https://github.com/longbridge/nsh).
 
 ## How it works
 

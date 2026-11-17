@@ -1,7 +1,7 @@
 import { type AnimatedValue, cleanup, computed, createAnimatedValue, createMotion, effect, type JSX, LayoutAnimation, Scroll, signal, Text, token, View } from "nsh";
 import { Button as BaseButton, Checkbox, Collapsible, Combobox, type DateMatcher, DatePicker, type DateRangePreset, NumberInput, OtpInput, type OtpInputRef, Progress, Radio, RadioGroup, Select, Slider, Switch, Tab, Tabs } from "nsh/base";
 import { reduceMotion } from "nsh";
-import { platform, windowSize } from "nsh";
+import { keymap, platform, windowSize } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { alpha, backdrop, Badge, Button, CalendarItem, Kbd, calendarLook, Chevron, Caption, Card, chart, checkboxLook, DateTrigger, CheckboxMark, density, type CheckboxMarkKind, ChoiceLight, choiceTileLook, choiceWell, clearButtonLook, colors, comboboxLook, ComboToggle, controlSize, DemoPage, finish, focusRing, follow, hovered, IconTile, insetSurface, labelColumn, ListboxEmpty, ListboxHeader, listboxPopup, listboxPopupStarting, listboxSearch, listRow, MARK_WEIGHT, mono, motion, numberInputClasses, numberInputSteps, numberInputText, optionClass, OptionRow, otpCellLook, otpCells, Picker, plainRow, RadioRing, radius, RowDivider, RowLabel, Segmented, sliderFill, solidTint, sliderLook, switchLook, TAB_ICON_ROOM, tabsLook, TabTitle, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, timeFieldClass, TimeSegment, tints, type Tone, toneColor, toneTint, underlineTabsLook, DisclosureChevron, disclosureTriggerLook, progressLook, progressSweep, LastEvent } from "../ui";
 import { play as sound } from "../../nsh-gallery-ui/sound";
@@ -538,10 +538,10 @@ const NEW_TONES: Tone[] = ["accent", "info", "up", "warn", "down"];
 const NEW_LABEL = "new:";
 
 const COMMANDS: { value: string; title: string; group: string; icon: IconName; keys?: string; disabled?: boolean }[] = [
-  { value: "new-file", title: "New file", group: "Suggestions", icon: "document", keys: "⌘N" },
-  { value: "search", title: "Search everywhere", group: "Suggestions", icon: "search", keys: "⇧⌘F" },
-  { value: "sidebar", title: "Toggle sidebar", group: "View", icon: "sidebar", keys: "⌘B" },
-  { value: "terminal", title: "Toggle terminal", group: "View", icon: "terminal", keys: "⌃`" },
+  { value: "new-file", title: "New file", group: "Suggestions", icon: "document", keys: keymap.label("mod+n") },
+  { value: "search", title: "Search everywhere", group: "Suggestions", icon: "search", keys: keymap.label("mod+shift+f") },
+  { value: "sidebar", title: "Toggle sidebar", group: "View", icon: "sidebar", keys: keymap.label("mod+b") },
+  { value: "terminal", title: "Toggle terminal", group: "View", icon: "terminal", keys: keymap.label("ctrl+`") },
   { value: "zoom", title: "Reset zoom", group: "View", icon: "search", disabled: true },
   { value: "dark", title: "Use the dark theme", group: "Appearance", icon: "moon" },
   { value: "light", title: "Use the light theme", group: "Appearance", icon: "sun" },
@@ -1801,7 +1801,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           triggerButton={
             pointer && !terminal ? (
               <View testID="command-toggle">
-                <Kbd label="⌘K" style={{ marginLeft: 6, marginRight: 2 }} />
+                <Kbd label={keymap.label("mod+k")} style={{ marginLeft: 6, marginRight: 2 }} />
               </View>
             ) : (
               <ComboToggle id="command-toggle" open={open()} />
@@ -1817,7 +1817,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           }
           suffix={
             <If when={pointer && terminal}>
-              <Text style={{ marginRight: TERMINAL_COLUMN, color: colors.muted }}>⌘K</Text>
+              <Text style={{ marginRight: TERMINAL_COLUMN, color: colors.muted }}>{keymap.label("mod+k")}</Text>
             </If>
           }
           empty={<ListboxEmpty label="No command matches" />}
