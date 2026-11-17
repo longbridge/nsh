@@ -2305,7 +2305,7 @@ scheme 以字母开头，后面是字母、数字、`+`、`-` 或 `.`，按小�
 | iOS、Mac Catalyst | 应用 `Info.plist` 中的 `CFBundleURLTypes`；包括启动应用的链接和运行中到达的链接 |
 | Android | `nsh package` 写入清单的 `ACTION_VIEW` intent filter；Activity 以 `singleTask` 运行，链接会交给正在运行的应用 |
 | Windows | 应用每次启动时写入 `HKEY_CURRENT_USER\\Software\\Classes`；第二次启动会把 URL 交给正在运行的应用 |
-| Linux | 应用启动时在 `~/.local/share/applications` 写入带 `x-scheme-handler/<scheme>` 的桌面文件并设为默认处理程序；`nsh run` 以同样方式注册开发宿主。第二次启动会把 URL 交给正在运行的应用 |
+| Linux | 应用启动时在 `~/.local/share/applications` 写入带 `x-scheme-handler/<scheme>` 的桌面文件（`<应用 id>.desktop`）。安装器为本可执行文件放在那里的条目会保留，只补上它缺少的 scheme；属于应用另一份副本的条目不会改动。只有某个 scheme 还没有任何应用处理时，应用才设为它的默认处理程序。`nsh run` 以同样方式注册开发宿主。第二次启动会把 URL 交给正在运行的应用 |
 
 `nsh test` 可以把链接交给测试中的应用：`App.open(entry, { url })` 用一个链接启动应用，`app.openWithUrl(url)`
 在运行中打开一个链接，两者都在无头模式下运行。
