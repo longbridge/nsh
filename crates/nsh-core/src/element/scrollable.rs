@@ -162,7 +162,7 @@ pub trait Scrollable: Element {
     fn scroll_value(mut self, value: &AnimatedValue) -> Self {
         if let Some(node) = value.node().live() {
             host::set(self.node(), Prop::ScrollValue(Some(node.id())));
-            self.node().attrs.bound.push(node);
+            self.node().attrs.rare_mut().bound.push(node);
         }
         self
     }
@@ -174,7 +174,7 @@ pub trait Scrollable: Element {
     fn pull_value(mut self, value: &AnimatedValue) -> Self {
         if let Some(node) = value.node().live() {
             host::set(self.node(), Prop::PullValue(Some(node.id())));
-            self.node().attrs.bound.push(node);
+            self.node().attrs.rare_mut().bound.push(node);
         }
         self
     }

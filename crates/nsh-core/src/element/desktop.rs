@@ -670,7 +670,7 @@ impl IntoElement for Window {
                     o
                 };
                 let apply = |attrs: &mut super::Attrs, o: WindowOptions| {
-                    attrs.window = Some(Box::new(o));
+                    attrs.rare_mut().window = Some(Box::new(o));
                 };
                 // Bound even with static options: what its content sets
                 // while it first renders (`early`) joins them.

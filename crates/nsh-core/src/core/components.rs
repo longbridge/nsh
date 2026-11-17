@@ -250,10 +250,10 @@ impl RootContext {
     /// `attrs` (a root's) with the insets given it.
     pub(super) fn over(&self, mut attrs: Attrs) -> Attrs {
         if let Some(insets) = self.inset_padding {
-            attrs.inset_padding = Some(insets);
+            attrs.rare_mut().inset_padding = Some(insets);
         }
         if let Some(insets) = self.inset_margin {
-            attrs.inset_margin = Some(insets);
+            attrs.rare_mut().inset_margin = Some(insets);
         }
         if let Some(id) = &self.test_id {
             crate::element::host::set_in(&mut attrs.props, Prop::TestId(Some(id.clone())));
@@ -384,8 +384,8 @@ pub(super) struct Expanded {
     style: StyleRefinement,
     classes: Classes,
     events: EventMask,
-    /// A list's layout.
-    list: ListConfig,
+    /// A list's layout, when this element is a `VirtualList`.
+    list: Option<Box<ListConfig>>,
     pub(super) part: Part,
     pub(super) children: Vec<Expanded>,
 }
@@ -402,7 +402,7 @@ impl Expanded {
             style: StyleRefinement::default(),
             classes: (None, None),
             events: EventMask::default(),
-            list: ListConfig::default(),
+            list: None,
             part,
             children: Vec::new(),
         }
@@ -1463,7 +1463,7 @@ impl<M: TextEngine> Core<M> {
                     self.components.instances[&base].app_style.clone()
                 };
                 let (inline, animated) = match &self.components.instances[&base].root {
-                    Some(root) => (root.attrs.inline.clone(), root.attrs.animated.clone()),
+                    Some(root) => (root.attrs.inline.clone(), root.attrs.animated().to_vec()),
                     None => (None, Vec::new()),
                 };
                 Ok(Some(inline_style(
@@ -2290,13 +2290,14 @@ impl<M: TextEngine> Core<M> {
             let _ = self.apply_op(inline_style(
                 host,
                 attrs.inline.as_deref(),
-                &attrs.animated,
+                attrs.animated(),
                 app,
             ));
             let applied = inst.root_insets_applied;
+            let own_insets = attrs.insets();
             let insets = (
-                cx.inset_padding.or(attrs.inset_padding),
-                cx.inset_margin.or(attrs.inset_margin),
+                cx.inset_padding.or(own_insets.0),
+                cx.inset_margin.or(own_insets.1),
             );
             if insets.0 != applied.0 {
                 let _ = self.apply_op(Op::SetProp {
@@ -2757,7 +2758,13 @@ impl<M: TextEngine> Core<M> {
         let (old_attrs, old_style, old_classes, old_events, old_children, old_text, old_list) =
             match old {
                 Some(e) => (
-                    e.attrs, e.style, e.classes, e.events, e.children, e.text, e.list,
+                    e.attrs,
+                    e.style,
+                    e.classes,
+                    e.events,
+                    e.children,
+                    e.text,
+                    e.list.map(|l| *l).unwrap_or_default(),
                 ),
                 None => (
                     Attrs::default(),
@@ -2780,12 +2787,12 @@ impl<M: TextEngine> Core<M> {
         let attrs = cx.over(el.attrs.clone());
         // As it was applied: with the insets its node got.
         let mut old_over = old_attrs.clone();
-        (old_over.inset_padding, old_over.inset_margin) = inst.root_insets_applied;
+        old_over.set_insets(inst.root_insets_applied);
         let old_over = with_test_id(old_over, &inst.root_test_id_applied);
         if !self.apply_target_attrs(host, &attrs, &old_over, app) {
             self.apply_attrs_over(host, &attrs, &old_over, app);
         }
-        inst.root_insets_applied = (attrs.inset_padding, attrs.inset_margin);
+        inst.root_insets_applied = attrs.insets();
         inst.root_test_id_applied = test_id_of(&attrs);
         // Given an inline style or animated values while its own did not
         // change: they go now.
@@ -2793,12 +2800,12 @@ impl<M: TextEngine> Core<M> {
         if cx.given
             && given_changed
             && attrs.inline == old_over.inline
-            && attrs.animated == old_over.animated
+            && attrs.animated() == old_over.animated()
         {
             let _ = self.apply_op(inline_style(
                 host,
                 attrs.inline.as_deref(),
-                &attrs.animated,
+                attrs.animated(),
                 app,
             ));
         }
@@ -2842,9 +2849,9 @@ impl<M: TextEngine> Core<M> {
             ElKind::VirtualList(list) => {
                 let config = list.config;
                 self.update_virtual_list(self.native_id(host), host, *list, &old_list);
-                (config, Part::VirtualList)
+                (Some(Box::new(config)), Part::VirtualList)
             }
-            _ => (ListConfig::default(), Part::Node),
+            _ => (None, Part::Node),
         };
         inst.root = Some(Expanded {
             id: host,
@@ -2939,9 +2946,11 @@ impl<M: TextEngine> Core<M> {
             if let Some(inline) = &given.inline {
                 decls.extend(inline.decls().iter().cloned());
             }
-            decls.extend(given.animated.iter().map(|(d, _)| d.clone()));
-            cx.inset_padding = given.inset_padding.or(cx.inset_padding);
-            cx.inset_margin = given.inset_margin.or(cx.inset_margin);
+            if let Some(r) = &given.rare {
+                decls.extend(r.animated.iter().map(|(d, _)| d.clone()));
+                cx.inset_padding = r.inset_padding.or(cx.inset_padding);
+                cx.inset_margin = r.inset_margin.or(cx.inset_margin);
+            }
             cx.test_id = test_id_of(given).or(cx.test_id.take());
         };
         if let Some(given) = &inst.given {
@@ -2998,7 +3007,7 @@ impl<M: TextEngine> Core<M> {
     /// What the view `host` is in gives its element besides styles is `attrs`:
     /// its root takes them.
     pub(super) fn set_given(&mut self, host: NodeId, mut attrs: Attrs) {
-        attrs.element_ref = None;
+        attrs.set_element_ref(None);
         let given = (attrs != Attrs::default()).then(|| Box::new(attrs));
         let Some(inst) = self.components.instances.get_mut(&host) else {
             return;
@@ -3132,16 +3141,22 @@ impl<M: TextEngine> Core<M> {
     ) {
         // An element's ref names its node by its own id.
         let node = self.native_id(id);
-        if old.element_ref != new.element_ref
-            && let Some(r) = &old.element_ref
-        {
-            r.detach(node);
-        }
-        if let Some(r) = &new.element_ref {
-            r.attach(node);
-        }
-        if new.render != old.render {
-            self.update_render(node, old.render.as_ref(), new.render.as_ref());
+        let has_rare = new.rare.is_some() || old.rare.is_some();
+        if has_rare {
+            let empty = crate::element::builder::RareAttrs::default();
+            let nr = new.rare.as_deref().unwrap_or(&empty);
+            let or = old.rare.as_deref().unwrap_or(&empty);
+            if or.element_ref != nr.element_ref
+                && let Some(r) = &or.element_ref
+            {
+                r.detach(node);
+            }
+            if let Some(r) = &nr.element_ref {
+                r.attach(node);
+            }
+            if nr.render != or.render {
+                self.update_render(node, or.render.as_ref(), nr.render.as_ref());
+            }
         }
         let mut props = std::mem::take(&mut self.components.props);
         new.changes(old, &mut props);
@@ -3149,34 +3164,44 @@ impl<M: TextEngine> Core<M> {
             let _ = self.apply_op(Op::SetProp { id, prop });
         }
         self.components.props = props;
-        if new.inline != old.inline || new.animated != old.animated {
-            let _ = self.apply_op(inline_style(id, new.inline.as_deref(), &new.animated, app));
+        let animated_changed = has_rare && new.animated() != old.animated();
+        if new.inline != old.inline || animated_changed {
+            let _ = self.apply_op(inline_style(id, new.inline.as_deref(), new.animated(), app));
         }
-        if new.drawing != old.drawing
-            && let Some(drawing) = &new.drawing
-        {
-            let _ = self.apply_op(Op::Draw {
-                id,
-                drawing: Box::new((**drawing).clone()),
-            });
-        }
-        if new.window != old.window
-            && let Some(window) = &new.window
-        {
-            // Opened once; then only its attributes follow (the record sends
-            // what changed).
-            let command = if old.window.is_none() {
-                crate::desktop::DesktopCommand::OpenWindow(Box::new(crate::desktop::OpenWindow {
-                    options: (**window).clone(),
-                    ..Default::default()
-                }))
-            } else {
-                crate::desktop::DesktopCommand::SetAttributes(Box::new(window.attributes.clone()))
-            };
-            let _ = self.apply_op(Op::Command {
-                id,
-                command: crate::Command::Desktop(Box::new(command)),
-            });
+        if has_rare {
+            let empty = crate::element::builder::RareAttrs::default();
+            let nr = new.rare.as_deref().unwrap_or(&empty);
+            let or = old.rare.as_deref().unwrap_or(&empty);
+            if nr.drawing != or.drawing
+                && let Some(drawing) = &nr.drawing
+            {
+                let _ = self.apply_op(Op::Draw {
+                    id,
+                    drawing: Box::new((**drawing).clone()),
+                });
+            }
+            if nr.window != or.window
+                && let Some(window) = &nr.window
+            {
+                // Opened once; then only its attributes follow (the record sends
+                // what changed).
+                let command = if or.window.is_none() {
+                    crate::desktop::DesktopCommand::OpenWindow(Box::new(
+                        crate::desktop::OpenWindow {
+                            options: (**window).clone(),
+                            ..Default::default()
+                        },
+                    ))
+                } else {
+                    crate::desktop::DesktopCommand::SetAttributes(Box::new(
+                        window.attributes.clone(),
+                    ))
+                };
+                let _ = self.apply_op(Op::Command {
+                    id,
+                    command: crate::Command::Desktop(Box::new(command)),
+                });
+            }
         }
     }
 
@@ -3707,7 +3732,10 @@ impl<M: TextEngine> Core<M> {
                         .is_some_and(|o| o.part == Part::Slot && o.id == node)
                 });
                 let prev = at.and_then(|j| old[j].take());
-                let old_config = prev.as_ref().map(|p| p.list).unwrap_or_default();
+                let old_config = prev
+                    .as_ref()
+                    .and_then(|p| p.list.as_deref().copied())
+                    .unwrap_or_default();
                 // Its bound layout is a binding.
                 let parts = std::mem::take(&mut el.bound_list);
                 let config = if parts.is_empty() {
@@ -3722,7 +3750,7 @@ impl<M: TextEngine> Core<M> {
                 }
                 self.components.props = props;
                 let mut e = self.reconcile_slot(prev, node, el, host, inst);
-                e.list = config;
+                e.list = Some(Box::new(config));
                 let rows = self.rows_of_list(node);
                 self.components.lists.insert(node, (list.row.clone(), rows));
                 // Rows of the component whose view has this one: its
@@ -4329,7 +4357,7 @@ impl<M: TextEngine> Core<M> {
             style: el.style,
             classes,
             events,
-            list: ListConfig::default(),
+            list: None,
             part: Part::Slot,
             children: Vec::new(),
         }
@@ -4422,7 +4450,10 @@ impl<M: TextEngine> Core<M> {
             raw.kind = ElKind::Raw;
             el.children.insert(0, raw);
         }
-        let old_list = prev.as_ref().map(|p| p.list).unwrap_or_default();
+        let old_list = prev
+            .as_ref()
+            .and_then(|p| p.list.as_deref().copied())
+            .unwrap_or_default();
         let kept = prev.is_some();
         let (id, old_attrs, old_style, old_classes, old_events, old_children, old_text) = match prev
         {
@@ -4490,9 +4521,9 @@ impl<M: TextEngine> Core<M> {
             inst.event_handlers
                 .extend(c.on_event.into_iter().map(|listener| (id, listener)));
             // Its `ComponentRef`.
-            let element_ref = el.attrs.element_ref.take();
-            if old_attrs.element_ref != element_ref
-                && let Some(r) = &old_attrs.element_ref
+            let element_ref = el.attrs.take_element_ref();
+            if old_attrs.element_ref() != element_ref.as_ref()
+                && let Some(r) = old_attrs.element_ref()
             {
                 r.detach(id);
             }
@@ -4543,19 +4574,18 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             let children = self.reconcile_children(id, old_children, content, host, inst);
+            let mut kept_attrs = Attrs::default();
+            kept_attrs.set_element_ref(element_ref);
             return Expanded {
                 id,
                 tag: el.tag,
                 key: el.key,
                 text: None,
-                attrs: Attrs {
-                    element_ref,
-                    ..Attrs::default()
-                },
+                attrs: kept_attrs,
                 style: el.style,
                 classes: (None, None),
                 events: EventMask::default(),
-                list: ListConfig::default(),
+                list: None,
                 part,
                 children,
             };
@@ -4589,9 +4619,9 @@ impl<M: TextEngine> Core<M> {
             Some(list) => {
                 let config = list.config;
                 self.update_virtual_list(id, host, *list, &old_list);
-                config
+                Some(Box::new(config))
             }
-            None => ListConfig::default(),
+            None => None,
         };
         Expanded {
             id,
@@ -4641,7 +4671,7 @@ impl<M: TextEngine> Core<M> {
             style: StyleRefinement::default(),
             classes: (None, None),
             events: EventMask::default(),
-            list: ListConfig::default(),
+            list: None,
             part: Part::Raw,
             children: Vec::new(),
         }
@@ -5099,7 +5129,7 @@ impl<M: TextEngine> Core<M> {
                 }
             }
         }
-        if let Some(r) = &e.attrs.element_ref {
+        if let Some(r) = e.attrs.rare.as_ref().and_then(|r| r.element_ref.as_ref()) {
             r.detach(e.id);
         }
         for c in e.children {
@@ -5177,7 +5207,12 @@ impl<M: TextEngine> Core<M> {
                 return;
             }
             let node = self.native_id(host);
-            if let Some(r) = &root.attrs.element_ref {
+            if let Some(r) = root
+                .attrs
+                .rare
+                .as_ref()
+                .and_then(|r| r.element_ref.as_ref())
+            {
                 r.detach(node);
             }
             if root.part == Part::VirtualList {
