@@ -111,13 +111,20 @@ export function createBrowserHost(player) {
         frame = document.createElement("iframe");
         frame.hidden = true;
         frame.setAttribute("aria-hidden", "true");
-        player.container.append(frame);
+        // In the document's body, not the player's container: a page that
+        // keeps one player moves `player.root` from view to view, and the
+        // container the player was made in leaves the document with its
+        // view. A frame outside the document has no window. Nor in the
+        // root, which moves: moving a frame discards its document.
+        (document.body ?? document.documentElement).append(frame);
         let realm = frame.contentWindow, doc;
-        try { doc = realm.document; } catch {
+        try { doc = realm.document; } catch (error) {
           // A page with an opaque origin (a `sandbox` without
           // `allow-same-origin`) cannot reach its own frames, so the app
           // runs in the page's realm. A document keeps the modules and the
-          // import map it loaded, so that realm runs one app.
+          // import map it loaded, so that realm runs one app. Any other
+          // failure is not that.
+          if (error?.name !== "SecurityError") throw error;
           if (pageRealmUsed) throw new Error("this page has an opaque origin and runs one app; reload it to run another");
           pageRealmUsed = true;
           frame.remove();
