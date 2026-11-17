@@ -37219,6 +37219,92 @@ mod built_in_scrollbars {
     }
 
     #[test]
+    fn a_culled_scroll_pins_its_bar_only_after_it_is_created() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.scrollbars_from(bars);
+        c.set_components(registry);
+        c.set_builtin_scrollbars(Some(app_theme()));
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            style_op(2, &[("height", StyleValue::Number(100.0))]),
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ];
+        ops.extend(child_view(4, 2, 1000.0, &[]));
+        ops.extend([
+            Op::Create {
+                id: 6,
+                tag: Tag::Scroll,
+            },
+            style_op(6, &[("height", StyleValue::Number(100.0))]),
+            Op::Insert {
+                parent: 2,
+                child: 6,
+                before: None,
+            },
+        ]);
+        ops.extend(child_view(8, 6, 1000.0, &[]));
+        apply(&mut c, ops);
+        let batch = c.commit().unwrap();
+        assert!(!created_in(&batch).contains(&6));
+        assert!(
+            !batch
+                .items
+                .iter()
+                .any(|item| matches!(item, MountItem::StickyCells { id: 6, .. })),
+            "a scroll view that has no native view cannot pin its bar"
+        );
+        let key = c.key(6).unwrap();
+        let bar = c.nodes[key as usize]
+            .scroll
+            .as_ref()
+            .unwrap()
+            .bar
+            .as_ref()
+            .unwrap()
+            .0;
+        c.set_scroll_offset(2, point(Points::ZERO, Points(1000.0)), 0);
+        for remount in [false, true] {
+            if remount {
+                c.remount();
+            }
+            let batch = c.commit().unwrap();
+            let pins: Vec<_> = batch
+                .items
+                .iter()
+                .enumerate()
+                .filter_map(|(at, item)| match item {
+                    MountItem::StickyCells { id: 6, cells } => Some((at, cells)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(pins.len(), 1, "remount={remount}");
+            assert_eq!(pins[0].1.len(), 1);
+            assert_eq!(pins[0].1[0].cell, bar);
+            if !remount {
+                for id in [6, bar] {
+                    let made = batch
+                        .items
+                        .iter()
+                        .position(|item| {
+                            matches!(item, MountItem::Create { id: made, .. } if *made == id)
+                        })
+                        .expect("the scroll view and its bar are made when they come into view");
+                    assert!(made < pins[0].0);
+                }
+            }
+            assert!(c.commit().is_none());
+        }
+    }
+
+    #[test]
     fn what_the_app_appends_goes_below_the_bar() {
         let (mut c, batch) = scroll_view(true, None);
         let [bar] = bars_in(&batch)[..] else {
@@ -44848,6 +44934,17 @@ fn a_list_bound_after_the_mount_budget_gives_its_row_a_frame() {
         }
     }
     assert!(!c.has_paced_mounts());
+    let mut made = vec![ROOT_ID];
+    for item in &items {
+        match item {
+            MountItem::Create { id, .. } => made.push(*id),
+            MountItem::Frame { id, .. } => assert!(
+                made.contains(id),
+                "a paced list cell receives its native frame only after Create: {item:?}"
+            ),
+            _ => {}
+        }
+    }
     let row = items
         .iter()
         .find_map(|item| match item {
@@ -44866,6 +44963,24 @@ fn a_list_bound_after_the_mount_budget_gives_its_row_a_frame() {
         })
         .expect("row received a frame");
     assert_eq!(frame.size, size_pt(1000.0, 26.0));
+    // The list's cell waited too: its cached logical frame must become
+    // its native frame after Create, not just the frames of its children.
+    let cell = items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::Insert { parent, child, .. } if *child == row => Some(*parent),
+            _ => None,
+        })
+        .expect("the row is inserted into its cell");
+    let frame = items
+        .iter()
+        .rev()
+        .find_map(|item| match item {
+            MountItem::Frame { id, frame } if *id == cell => Some(*frame),
+            _ => None,
+        })
+        .expect("the cell received a frame after Create");
+    assert_eq!(frame, rect(0.0, 0.0, 1000.0, 26.0));
     // What the row holds, made in a later turn still, is placed too.
     let frame_of = |test_id: &str| {
         let id = items
