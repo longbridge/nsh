@@ -486,9 +486,18 @@ impl Headless {
             .bounds_in_root(target)
             .ok_or_else(|| format!("`{selector}` is not on screen"))?;
         let at = bounds.center();
+        // A view around the target that takes the pointer hears it with the
+        // target inside (a chart's plot over its labels): only a view over
+        // it (a hit layer) takes its place.
         let target = match self.screen.receives_pointer(target) {
             true => target,
-            false => self.screen.hit_pointer(at, self.screen.window_of(target)),
+            false => {
+                let hit = self.screen.hit_pointer(at, self.screen.window_of(target));
+                match self.screen.chain(target).contains(&hit) {
+                    true => target,
+                    false => hit,
+                }
+            }
         };
         let views = self.screen.hoverable(&self.screen.chain(target));
         let old = self.screen.set_hovered(views.clone());
