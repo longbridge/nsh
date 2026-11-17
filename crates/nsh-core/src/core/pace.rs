@@ -262,12 +262,17 @@ impl<M: TextEngine> Core<M> {
                     continue;
                 };
                 // Made by now, gone, or its parent given up (its parent
-                // holds it back again when it is made).
+                // holds it back again when it is made). Taken out of its
+                // parent, or its parent released, it has none: it waits
+                // again when it is inserted somewhere.
                 if node.id != id
                     || node.created
                     || !node.culled
                     || node.layout.is_none()
-                    || !self.nodes[node.parent as usize].created
+                    || !self
+                        .nodes
+                        .get(node.parent as usize)
+                        .is_some_and(|parent| parent.created)
                     || !self.in_tree(key)
                 {
                     continue;
