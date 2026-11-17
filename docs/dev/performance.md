@@ -1133,3 +1133,19 @@ stale-records part was not measured alone, as what it fixes shows when panels mo
 and this scenario moves nothing. CPU differs by −4.5 points between revisions, about one
 standard error of its own spread (3–37% within one run): this bench shows no CPU difference
 either way; paint and frame times are what it resolves.
+
+## Cross-platform baseline sampler (`bench.py`)
+
+`examples/gallery/tools/bench.py` measures fresh processes from outside, in one versioned format (`nsh-bench/1`,
+`<out>.json` plus `<out>.csv`), next to `perf.py` (per-page frame rate through `nsh test`) and `memory.py` (smaps by file):
+
+- `startup --runs 10`: one new process per run; `window_ms` is when the compositor maps a window of the process tree
+  (Hyprland), never a test handshake. First presented frame and interactive are `null`: nothing outside the app
+  observes them yet.
+- `run --rounds 5 --seconds 30 [--action <cmd>]`: process-tree CPU (utime+stime over wall time, 100% = one core) and
+  memory (Linux: summed `smaps_rollup` RSS / PSS / USS in MiB, GPU excluded), with the sampler's own CPU reported.
+- `size name=path ...`: file or directory bytes.
+
+Every process runs in its own group and is killed with its descendants (SIGTERM, then SIGKILL) after each sample;
+timeouts, exits and leaked processes stay in the samples and the summary counts them apart. Tests:
+`python3 examples/gallery/tools/bench_test.py`. Compare optimizations with alternating A/B runs on the same machine.
