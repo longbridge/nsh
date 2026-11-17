@@ -220,7 +220,9 @@ is for springs given by their stiffness, as design systems give them. Not follow
 runs from rest to its target and settles within a thousandth of it (`settle_ms`), so a layout transition needs no
 more. The same `Spring` drives the animation graph (`stiffness`, `damping` the coefficient, `mass`, as React Native
 and the platforms' spring APIs). `LayoutCurve::FittedSpring { damping_ratio }` is the spring whose stiffness is
-fitted to a given duration, JS's `type: "spring"` with React Native's `springDamping`.
+fitted to a given duration, JS's `type: "spring"` with React Native's `springDamping`; a JS phase that names
+`stiffness`, `damping` or `mass` is the physical `Spring`, with the names and defaults of `Animated.spring`'s
+config.
 
 `DataTable`'s column `fixed` uses `nsh_base::data_table::ColumnFixed`, scoped to its
 component module like GPUI Kit's `gpui_component::table::ColumnFixed`, and follows its

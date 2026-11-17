@@ -16,7 +16,7 @@ use crate::{
         MotionSpec, NodeId, PRESETS as MOTIONS, PlaybackDirection, StaggerFrom, StepPosition,
         keyframes,
     },
-    element::TsTypes,
+    element::{Spring, TsTypes},
 };
 
 /// A curve of `Easing`: its name, its parameter (name and default) and
@@ -312,6 +312,23 @@ const LAYOUT_PROPERTIES: &[(&str, LayoutProperty, bool)] = &[
 /// React Native's default damping of layout springs.
 const SPRING_DAMPING: f32 = 0.7;
 
+/// A `spring` phase's physics, when it names any of `stiffness`, `damping`
+/// and `mass` (the others `Animated.spring`'s defaults).
+fn physical_spring<I: HostInput>(part: &I, cx: &mut HostCx) -> Option<Spring> {
+    let [stiffness, damping, mass] =
+        ["stiffness", "damping", "mass"].map(|key| field::<f32, _>(part, key, cx));
+    if stiffness.is_none() && damping.is_none() && mass.is_none() {
+        return None;
+    }
+    let default = Spring::default();
+    Some(Spring {
+        stiffness: stiffness.unwrap_or(default.stiffness),
+        damping: damping.unwrap_or(default.damping),
+        mass: mass.unwrap_or(default.mass),
+        ..default
+    })
+}
+
 /// One phase of `{ duration, create, update, delete }`.
 fn transition<I: HostInput>(part: &I, duration: f32, cx: &mut HostCx) -> LayoutTransition {
     // The entry named by `key`, or the first.
@@ -330,8 +347,14 @@ fn transition<I: HostInput>(part: &I, duration: f32, cx: &mut HostCx) -> LayoutT
         .unwrap_or(SPRING_DAMPING)
         .clamp(0.01, 1.0);
     let kind = LAYOUT_TYPES[named("type", &mut LAYOUT_TYPES.iter().map(|t| t.0))].0;
-    let curve = match part.field("bezier").and_then(|b| b.as_list()) {
-        Some(list) if kind == "bezier" && list.len() == 4 => {
+    let spring = if kind == "spring" {
+        physical_spring(part, cx)
+    } else {
+        None
+    };
+    let curve = match (spring, part.field("bezier").and_then(|b| b.as_list())) {
+        (Some(spring), _) => LayoutCurve::Spring(spring),
+        (None, Some(list)) if kind == "bezier" && list.len() == 4 => {
             let p = |i| list.item(i).and_then(|v| v.as_number()).unwrap_or(0.0) as f32;
             LayoutCurve::bezier(p(0), p(1), p(2), p(3))
         }
@@ -342,17 +365,23 @@ fn transition<I: HostInput>(part: &I, duration: f32, cx: &mut HostCx) -> LayoutT
     };
     let property =
         LAYOUT_PROPERTIES[named("property", &mut LAYOUT_PROPERTIES.iter().map(|p| p.0))].1;
+    // A physical spring times itself, as `LayoutTransition::spring`'s.
+    let duration_ms = match spring {
+        Some(spring) => spring.settle_ms(),
+        None => field(part, "duration", cx).unwrap_or(duration),
+    };
     LayoutTransition {
         curve,
         property,
-        duration_ms: field(part, "duration", cx).unwrap_or(duration),
+        duration_ms,
         delay_ms: field(part, "delay", cx).unwrap_or(0.0),
     }
 }
 
 /// `LayoutAnimation.configureNext(config)`: `{ duration, create, update,
-/// delete }`, each phase `{ type, property, duration, delay, springDamping
-/// }` (without one, that kind of change is not animated).
+/// delete }`, each phase `{ type, property, duration, delay, springDamping,
+/// stiffness, damping, mass, bezier }` (without one, that kind of change is
+/// not animated).
 impl HostValue for LayoutAnimation {
     fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
         let duration = field(input, "duration", cx).unwrap_or(300.0);
@@ -395,7 +424,13 @@ impl HostValue for LayoutAnimation {
                  type?: {curve};\n  /** What appearing and disappearing views animate. */\n  \
                  property?: {property};\n  /** Milliseconds (the config's by default). */\n  \
                  duration?: number;\n  delay?: number;\n  /** The `spring`'s damping ratio, 0..1 \
-                 ({SPRING_DAMPING} by default; 1 does not overshoot). */\n  springDamping?: number;\n  \
+                 ({SPRING_DAMPING} by default; 1 does not overshoot), the spring fitted into `duration`. */\n  \
+                 springDamping?: number;\n  /** A physical `spring`'s stiffness `k` (170 by default). With \
+                 `stiffness`, `damping` or `mass` the `spring` moves on its physics and lasts until it \
+                 settles: `duration` and `springDamping` are not used. */\n  stiffness?: number;\n  \
+                 /** A physical `spring`'s damping coefficient `c` (26 by default; the ratio is \
+                 `c / (2 √(k m))`). */\n  damping?: number;\n  /** A physical `spring`'s mass `m` \
+                 (1 by default). */\n  mass?: number;\n  \
                  /** The `bezier`'s control points `[x1, y1, x2, y2]`, as CSS `cubic-bezier()` \
                  (each `x` clamped to 0..1); without them it eases in and out. */\n  \
                  bezier?: [number, number, number, number];\n}}"
@@ -596,7 +631,7 @@ fn easing_json(e: Easing) -> crate::JsonValue {
 pub fn tables() -> crate::JsonValue {
     use serde_json::{Map, Value, json};
     let transition = |t: &LayoutTransition| {
-        let mut bezier = None;
+        let (mut bezier, mut physics) = (None, None);
         let (kind, damping) = match t.curve {
             LayoutCurve::Linear => ("linear", None),
             LayoutCurve::EaseIn => ("easeIn", None),
@@ -604,8 +639,10 @@ pub fn tables() -> crate::JsonValue {
             LayoutCurve::EaseInEaseOut => ("easeInEaseOut", None),
             LayoutCurve::FittedSpring { damping_ratio } => ("spring", Some(damping_ratio)),
             LayoutCurve::Keyboard => ("keyboard", None),
-            // JS names no spring by its physics, and no preset is one.
-            LayoutCurve::Spring(_) => ("spring", None),
+            LayoutCurve::Spring(spring) => {
+                physics = Some(spring);
+                ("spring", None)
+            }
             LayoutCurve::Bezier(points) => {
                 bezier = Some(points);
                 ("bezier", None)
@@ -626,6 +663,11 @@ pub fn tables() -> crate::JsonValue {
         }
         if let Some(points) = bezier {
             o["bezier"] = json!(points);
+        }
+        if let Some(spring) = physics {
+            o["stiffness"] = json!(spring.stiffness);
+            o["damping"] = json!(spring.damping);
+            o["mass"] = json!(spring.mass);
         }
         o
     };
