@@ -52,7 +52,16 @@ pub(crate) struct Mounter {
     /// it is applied they are drawn if they show, with one [`Sights`] pass
     /// for all of them ([`Mounter::draw_shown`]).
     drawn: RefCell<Vec<(NshView, Damage)>>,
+    /// Views the batches deleted, out of their window and the table, whose
+    /// release waits for the frames after the batch ([`release_later`]).
+    released: Rc<RefCell<Vec<NshView>>>,
+    /// The pictures of the batch's texts the engine thread painted
+    /// ([`crate::text::prerender`]), until their items are applied.
+    pub(crate) rasters: crate::text::Rasters,
 }
+
+/// The time a frame spends releasing deleted views ([`release_later`]).
+const RELEASE_TIME: std::time::Duration = std::time::Duration::from_millis(1);
 
 impl Mounter {
     pub(crate) fn new(root: NshView) -> Self {
@@ -71,6 +80,8 @@ impl Mounter {
             deleting: FxHashSet::default(),
             batching: Cell::new(false),
             drawn: RefCell::default(),
+            released: Rc::default(),
+            rasters: crate::text::Rasters::default(),
         }
     }
 
@@ -123,8 +134,12 @@ impl Mounter {
                 Damage::Rect(r) => view.redraw_rect(r),
                 _ => view.redraw(),
             }
-        } else if view.set_stale(true) {
-            self.stale.borrow_mut().push(view.clone());
+        } else {
+            // Drawn when it shows, if ever: no picture waits for it.
+            crate::text::drop_raster(view);
+            if view.set_stale(true) {
+                self.stale.borrow_mut().push(view.clone());
+            }
         }
     }
 
@@ -289,6 +304,8 @@ impl Mounter {
     /// The batch is applied.
     pub(crate) fn end_batch(&mut self, surface: &Rc<Surface>) {
         self.batching.set(false);
+        // Pictures of items the batch did not apply (their views gone).
+        self.rasters = crate::text::Rasters::default();
         self.draw_shown();
         self.deleting.clear();
         self.layout_animation = None;
@@ -297,6 +314,7 @@ impl Mounter {
         crate::system::end_batch(surface);
         crate::input::content_moved(surface, false);
         crate::selectable_view::end_batch(surface);
+        release_later(surface, &self.released);
     }
 
     fn get(&self, id: NodeId) -> Option<&NshView> {
@@ -412,6 +430,9 @@ impl Mounter {
                     // After the detach: a dialog closing through its shader
                     // has read it.
                     crate::navigation::deleted(surface, &view);
+                    // Out of its window and of every table: what is left is
+                    // freeing it, which waits ([`release_later`]).
+                    self.released.borrow_mut().push(view);
                 }
             }
             MountItem::Frame { id, frame } => {
@@ -490,10 +511,13 @@ impl Mounter {
                 layout,
                 content,
             } => {
+                let raster = self.rasters.take(*id, text, layout);
                 if let Some(view) = self.get(*id) {
                     let old = view.state().text.as_ref().map(|t| t.text.clone());
                     let damage = crate::text::damage(view, text, layout, *content);
-                    crate::text::set(view, text, layout, *content);
+                    // A text that draws the same keeps its picture.
+                    let raster = raster.filter(|_| damage != Damage::None);
+                    crate::text::set(view, text, layout, *content, raster);
                     if let Some(old) = old {
                         crate::transition::text_changed(surface, view, &old, text);
                     }
@@ -763,4 +787,40 @@ impl Mounter {
             other => crate::system::command(surface, id, other),
         }
     }
+}
+
+/// Frees the views the batch deleted over the frames after it, at most
+/// [`RELEASE_TIME`] a frame. A page replaced by another deletes thousands
+/// of views: they left their window with their subtree's root in one
+/// `removeFromSuperview`, but freeing each (its layer tree, its state, the
+/// subviews it holds) cost milliseconds more in the frame that shows the
+/// new page. Nothing reads them any longer: they are out of the view table
+/// and their window, and every module let go of them in
+/// [`MountItem::Delete`].
+fn release_later(surface: &Rc<Surface>, released: &Rc<RefCell<Vec<NshView>>>) {
+    // None deleted, or already waiting for a frame callback.
+    if released.borrow().is_empty() || Rc::strong_count(released) > 1 {
+        return;
+    }
+    let released = released.clone();
+    let after = objc2_quartz_core::CACurrentMediaTime();
+    surface.add_frame_callback(move |_, now| {
+        // Not in the frame that applied the batch.
+        if now <= after {
+            return crate::surface::Next::At(after + 0.004);
+        }
+        let start = std::time::Instant::now();
+        loop {
+            // Never borrowed while a view is freed: freeing may run code
+            // that deletes views.
+            let view = released.borrow_mut().pop();
+            let Some(view) = view else {
+                return crate::surface::Next::Done;
+            };
+            drop(view);
+            if start.elapsed() >= RELEASE_TIME {
+                return crate::surface::Next::At(now + 0.004);
+            }
+        }
+    });
 }

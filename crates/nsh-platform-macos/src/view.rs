@@ -432,6 +432,10 @@ pub(crate) struct Ivars {
     /// `drawLayer:inContext:` returned while `state` was borrowed, leaving
     /// Core Animation's cleared region unpainted.
     dropped_draw: Cell<bool>,
+    /// Its content layer shows a text painted off the main thread
+    /// ([`crate::text::show_raster`]), not a backing store of Core
+    /// Animation's, which a partial redraw would start empty.
+    rastered: Cell<bool>,
     /// Deferred drawing and placement marks in this subtree, including
     /// this view. Only their transforms can reveal deferred work.
     waiting: Cell<usize>,
@@ -464,6 +468,9 @@ define_class!(
                 view.ivars().dropped_draw.set(true);
                 return;
             };
+            // Core Animation's own backing store takes the layer's whole
+            // picture (redraws of a part wait until it holds it).
+            view.ivars().rastered.set(false);
             let c = Some(cx);
             CGContext::save_g_state(c);
             // The layer's space, in points, is the context's base space:
@@ -1268,6 +1275,15 @@ define_class!(
         #[unsafe(method(viewDidMoveToWindow))]
         fn view_did_move_to_window(&self) {
             crate::sight::moved();
+            // Out of its window: AppKit tells every view under a removed
+            // one, a whole page's thousands when it is replaced. Nothing
+            // below matters off screen (geometry and density are set again
+            // when it is attached, which tells it again), and each view's
+            // walk of its ancestors cost milliseconds per page removed. A
+            // surface's root still hears it.
+            if self.window().is_none() && self.ivars().surface.borrow().strong_count() == 0 {
+                return;
+            }
             NshView(self.retain()).set_layer_geometry();
             NshView(self.retain()).rescale();
             if self.ivars().window.borrow().strong_count() > 0 {
@@ -1743,6 +1759,7 @@ impl NshView {
             // Not known until a first scan.
             foreign: Cell::new(true),
             dropped_draw: Cell::new(false),
+            rastered: Cell::new(false),
             waiting: Cell::new(0),
             sharpened: Cell::new(0.0),
         });
@@ -2005,10 +2022,23 @@ impl NshView {
             return;
         }
         if let Some(layer) = self.content_layer() {
+            if self.show_raster(&layer) {
+                return;
+            }
             self.update_canvas_overlay();
             self.clear_canvas_painted();
             layer.setNeedsDisplay();
         }
+    }
+
+    /// Shows the picture of its text the engine thread painted, if it has
+    /// one that fits `layer` ([`crate::text::show_raster`]); whether it did.
+    fn show_raster(&self, layer: &CALayer) -> bool {
+        let shown = crate::text::show_raster(self, layer);
+        if shown {
+            self.ivars().rastered.set(true);
+        }
+        shown
     }
 
     /// Forgets what its canvas's content layer painted when the whole layer
@@ -2222,6 +2252,11 @@ impl NshView {
     /// Its window, screen or content size changed: the content layers
     /// draw at the new density.
     fn rescale(&self) {
+        // Most views draw no content of their own: their ancestors' scale
+        // (a walk to the root, for each view a page attaches) is not needed.
+        if self.ivars().content.borrow().is_none() && self.ivars().overlay.borrow().is_none() {
+            return;
+        }
         let zoom = raster_zoom(self.inherited_scale() * self.layer_scale());
         self.draw_zoomed(self.backing_scale(), zoom);
     }
@@ -2256,12 +2291,21 @@ impl NshView {
         let Some(layer) = self.content_layer() else {
             return;
         };
+        if self.show_raster(&layer) {
+            return;
+        }
         let changed = self.update_canvas_overlay();
-        if fresh || changed {
+        // A picture painted off the main thread is not Core Animation's
+        // backing store: a part redrawn would start from an empty one.
+        if fresh || changed || self.ivars().rastered.get() {
             self.clear_canvas_painted();
             layer.setNeedsDisplay();
         }
-        if fresh || self.ivars().overlay.borrow().is_some() || changed {
+        if fresh
+            || self.ivars().overlay.borrow().is_some()
+            || changed
+            || self.ivars().rastered.get()
+        {
             return;
         }
         // Layer space is y up unless its contents are flipped

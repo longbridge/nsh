@@ -32,6 +32,10 @@ use objc2_core_text::{
 };
 use rustc_hash::FxHashMap;
 
+mod raster;
+
+pub(crate) use raster::{Rasters, prerender};
+
 /// Attribute marking struck through characters: [`draw`] draws the line, in
 /// the drawn text's decoration color.
 pub(crate) fn strikethrough_key() -> &'static CFString {
@@ -1326,14 +1330,19 @@ pub(crate) struct DrawnText {
     /// The part of a selectable view's selection in this text
     /// ([`crate::selectable_view`]).
     area_range: std::cell::Cell<Option<(u32, u32)>>,
+    /// Its picture painted off the main thread, until it is first drawn
+    /// ([`show_raster`]).
+    raster: std::cell::Cell<Option<raster::Raster>>,
 }
 
-/// A text view got new text or a new layout.
+/// A text view got new text or a new layout, and the picture of it the
+/// engine thread painted, if it did ([`prerender`]).
 pub(crate) fn set(
     view: &crate::view::NshView,
     text: &std::sync::Arc<AttributedText>,
     layout: &TextLayout,
     content: nsh_core::Bounds<nsh_core::Points>,
+    raster: Option<raster::Raster>,
 ) {
     let old = view.state_mut().text.take();
     let was = old.as_ref().is_some_and(|o| o.text.is_selectable());
@@ -1366,6 +1375,7 @@ pub(crate) fn set(
         cut: std::cell::Cell::new(cut),
         selection,
         area_range: std::cell::Cell::new(area_range),
+        raster: std::cell::Cell::new(raster),
     });
     if was != text.is_selectable() {
         // The I-beam.
@@ -1544,38 +1554,103 @@ pub(crate) fn selectable(state: &crate::view::ViewState) -> bool {
     state.text.as_ref().is_some_and(|t| t.text.is_selectable())
 }
 
+/// Shows the picture of `view`'s text painted off the main thread in its
+/// content `layer`, instead of drawing it there; whether it did. Only the
+/// text's first drawing may: the raster goes either way, and it holds
+/// nothing of a selection or of an animated or transitioning color.
+pub(crate) fn show_raster(view: &crate::view::NshView, layer: &objc2_quartz_core::CALayer) -> bool {
+    let state = view.state();
+    let Some(drawn) = &state.text else {
+        return false;
+    };
+    let Some(raster) = drawn.raster.take() else {
+        return false;
+    };
+    let plain = drawn
+        .selection
+        .as_ref()
+        .is_none_or(|s| s.range.get().is_none())
+        && drawn.area_range.get().is_none()
+        && state.anim.color.is_none()
+        && state.live.as_ref().and_then(|l| l.text_color()).is_none();
+    if !plain || !raster::show(layer, &raster) {
+        return false;
+    }
+    drawn.cut.set(cut(drawn.content, layer.bounds().size));
+    true
+}
+
+/// Drops the picture of `view`'s text painted off the main thread: it is
+/// out of sight, and is drawn when it shows.
+pub(crate) fn drop_raster(view: &crate::view::NshView) {
+    if let Some(drawn) = &view.state().text {
+        drawn.raster.take();
+    }
+}
+
 /// Draws a text view's text (in its content layer's `drawLayer:inContext:`;
 /// the context is y down). `layer` is that layer's size, which says whether
 /// the picture holds all of the text; the context's clip does not, as a
 /// redraw of a few recolored lines ([`damage`]) clips to them.
 pub(crate) fn draw(cx: &CGContext, state: &crate::view::ViewState, layer: CGSize) {
-    use objc2_core_foundation::CGAffineTransform;
     let Some(drawn) = &state.text else { return };
     let Some(text) = drawn.layout.downcast::<CoreTextLayout>() else {
         return;
     };
-    let content = drawn.content;
-    let c = Some(cx);
-    // A layer on its way to the box's size (a `LayoutAnimation`'s frames)
-    // counts as smaller even where its picture, in whole pixels, reaches
-    // the box: the text is drawn again at the size it stays at.
-    drawn.cut.set(
-        layer.width < (content.origin.x.0 + content.size.width.0) as CGFloat
-            || layer.height < (content.origin.y.0 + content.size.height.0) as CGFloat,
-    );
-    CGContext::save_g_state(c);
-    if drawn.text.has_backgrounds() {
-        draw_backgrounds(cx, &drawn.text, text, content);
-    }
+    drawn.cut.set(cut(drawn.content, layer));
     let range = drawn.selection.as_ref().and_then(|s| s.range.get());
-    if let Some(range) = range.or(drawn.area_range.get()) {
+    // An animated color, or a transition of the text's color.
+    let color = state
+        .anim
+        .color
+        .or_else(|| state.live.as_ref()?.text_color());
+    paint(
+        cx,
+        &drawn.text,
+        text,
+        drawn.content,
+        range.or(drawn.area_range.get()),
+        color,
+    );
+}
+
+/// Whether a picture drawn in a layer of `layer`'s size misses some of a
+/// text whose box is `content`. A layer on its way to the box's size (a
+/// `LayoutAnimation`'s frames) counts as smaller even where its picture,
+/// in whole pixels, reaches the box: the text is drawn again at the size it
+/// stays at.
+fn cut(content: nsh_core::Bounds<nsh_core::Points>, layer: CGSize) -> bool {
+    layer.width < (content.origin.x.0 + content.size.width.0) as CGFloat
+        || layer.height < (content.origin.y.0 + content.size.height.0) as CGFloat
+}
+
+/// Paints `text` laid out as `layout` in its box `content` (the context is
+/// y down, in points): its span backgrounds, the `selected` characters'
+/// highlight and the glyphs, in `color` over the spans' own when one is
+/// given. Main-thread state stays out of it, so a text can be painted off
+/// the main thread ([`raster`]).
+fn paint(
+    cx: &CGContext,
+    attributed: &AttributedText,
+    text: &CoreTextLayout,
+    content: nsh_core::Bounds<nsh_core::Points>,
+    selected: Option<(u32, u32)>,
+    color: Option<Color>,
+) {
+    use objc2_core_foundation::CGAffineTransform;
+    let c = Some(cx);
+    CGContext::save_g_state(c);
+    if attributed.has_backgrounds() {
+        draw_backgrounds(cx, attributed, text, content);
+    }
+    if let Some(range) = selected {
         // iOS tints the selection with the view's tint at about 30%.
-        let tint = drawn.text.selection_color.unwrap_or(SYSTEM_BLUE);
+        let tint = attributed.selection_color.unwrap_or(SYSTEM_BLUE);
         let alpha = (tint.0 & 0xff) as f32 / 255.0 * 0.3;
         let tint = Color((tint.0 & !0xff) | (alpha * 255.0).round() as u32);
         CGContext::set_fill_color_with_color(c, Some(&cg_color(tint)));
         // Hidden characters show no highlight, as nothing of them shows.
-        for shown in drawn.text.visible_ranges(range.0..range.1) {
+        for shown in attributed.visible_ranges(range.0..range.1) {
             for rect in selection_rects(text, content, (shown.start, shown.end)) {
                 CGContext::fill_rect(c, rect);
             }
@@ -1600,7 +1675,7 @@ pub(crate) fn draw(cx: &CGContext, state: &crate::view::ViewState, layer: CGSize
         (content.origin.y.0 + content.size.height.0) as CGFloat,
     );
     CGContext::scale_ctm(c, 1.0, -1.0);
-    if let Some(shadow) = drawn.text.shadow {
+    if let Some(shadow) = attributed.shadow {
         // Shadow offsets are in the layer's base space, which is y up under
         // AppKit's flipped context: a positive offset must still go down.
         CGContext::set_shadow_with_color(
@@ -1614,15 +1689,11 @@ pub(crate) fn draw(cx: &CGContext, state: &crate::view::ViewState, layer: CGSize
     // (decorations too) drawn as is into a layer, then painted over in the
     // color where it drew, so its antialiasing stays; the layer casts the
     // shadow.
-    let color = state
-        .anim
-        .color
-        .or_else(|| state.live.as_ref()?.text_color());
     if color.is_some() {
         // SAFETY: no auxiliary info.
         unsafe { CGContext::begin_transparency_layer(c, None) };
     }
-    let mut stretches = Stretches::new(&drawn.text);
+    let mut stretches = Stretches::new(attributed);
     for line in &text.lines {
         draw_glyphs(cx, line, &mut stretches);
         if text.strikethrough {
@@ -3569,6 +3640,7 @@ mod tests {
             cut: Cell::new(false),
             selection: None,
             area_range: Cell::new(None),
+            raster: Cell::new(None),
         });
 
         // Draws in a layer of `w` by `h`; `dirty` is the height a partial
