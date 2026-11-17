@@ -543,9 +543,6 @@ pub(crate) enum ElKind {
     /// [`super::Each`]): a region of its parent's children, reconciled on
     /// its own.
     Region(super::flow::Region),
-    /// In a region: the element of this key stays as it is (an `Each` row
-    /// that was there before).
-    Keep,
 }
 
 /// An element as the core expands it (opaque).
