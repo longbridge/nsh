@@ -243,6 +243,8 @@ export async function update() {
 }
 ```
 
+`installOnQuit()` instead of `installAndRestart()` checks the update now and installs it when the app quits, without a restart (an "Install on Quit" button).
+
 Release: raise `version` (semver), run `nsh package` per platform to get its archive, then run `nsh update-manifest *.tar.gz *.zip --notes CHANGES.md --key keys/update.secret`, and upload the archives, `latest.json` and `latest.json.sig`. In a development run, `checkForUpdate` resolves `null`. Drafts and prereleases on GitHub are not offered.
 
 ## Signed packages

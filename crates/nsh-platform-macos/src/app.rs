@@ -1400,6 +1400,9 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     drop(delegate);
     // The new process waits for this one to exit, so the caller's cleanup
     // after `run_app` returns still comes first.
+    // An update waiting for the app to quit replaces it now, before a
+    // restart starts it again.
+    nsh_core::restart::run_at_exit();
     if RESTART.take() {
         if cfg!(feature = "dev") {
             // `nsh run` ends with its host and stops the dev server: a host

@@ -74,7 +74,9 @@ the app is installed where the user cannot write, such as by a system package. I
 resolves `null`.
 
 `installAndRestart` restarts the app as `Application.restart()` does: this run quits as when the user quits it, and
-the new version starts once it has exited. If it fails, the app stays as it was. The
+the new version starts once it has exited. If it fails, the app stays as it was. To install without interrupting the
+user, call `installOnQuit()` instead: the update is checked now and replaces the app when it quits, and the next start
+opens the new version. The
 [nsh/updater reference](../modules/nsh-updater.md) has every function, its errors and the `nsh.json` keys.
 
 ## Publish a release
