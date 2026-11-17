@@ -2419,6 +2419,42 @@ impl App {
         }
     }
 
+    /// The OS asks the app to show itself (`Application.on("reopen")`);
+    /// headless runs only. Resolves once the app is quiet.
+    pub async fn reopen(this: Instance<Self>) -> Result<(), JsError> {
+        let steps = this.with(|app| app.steps.clone());
+        steps.run(move |app| app.reopen()).await
+    }
+
+    /// The user asks to quit as the Quit item or the platform's quit key
+    /// does (`Application.on("quitRequest")`); headless runs only. Resolves
+    /// once the app is quiet.
+    pub async fn quit_request(this: Instance<Self>) -> Result<(), JsError> {
+        step(&this, |app| app.quit_request()).await
+    }
+
+    /// The ids of the app's open windows, in opening order
+    /// (`app.windowIds()`).
+    pub fn window_ids(this: Instance<Self>) -> Result<Vec<String>, JsError> {
+        let steps = this.with(|app| app.steps.clone());
+        let mut app = steps.app.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(app) = app.as_deref_mut() else {
+            return Err(JsError::Error(CLOSED.to_owned()));
+        };
+        app.window_ids().map_err(step_error)
+    }
+
+    /// Whether the app quit: `Application.quit()`, its Quit item, or the
+    /// core quitting on the app's last window's close (`app.quit()`).
+    pub fn quit(this: Instance<Self>) -> Result<bool, JsError> {
+        let steps = this.with(|app| app.steps.clone());
+        let mut app = steps.app.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(app) = app.as_deref_mut() else {
+            return Err(JsError::Error(CLOSED.to_owned()));
+        };
+        app.quit().map_err(step_error)
+    }
+
     /// The app's keyboard, whose keys the test presses.
     #[getter]
     pub fn keyboard(&self) -> Keyboard {

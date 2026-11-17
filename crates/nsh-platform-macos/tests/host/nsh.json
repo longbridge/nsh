@@ -2,6 +2,7 @@
   "name": "macOS Host Input",
   "id": "com.example.macos-host-input",
   "capabilities": {
+    "windows": true,
     "webview": {
       "hosts": ["example.com"],
       "input": true,

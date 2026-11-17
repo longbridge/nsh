@@ -12,9 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use nsh_base::{accordion, accordion_header, accordion_item, accordion_panel, accordion_trigger};
 use nsh_core::{
-    AccessibilityRole, LayoutCurve, MountItem, NodeId, Size,
-    element::{Root, Spring},
-    platform::Os,
+    AccessibilityRole, LayoutCurve, MountItem, NodeId, Size, element::Spring, platform::Os,
     prelude::*,
 };
 use nsh_engine::EngineConfig;
@@ -141,7 +139,9 @@ fn start(props: HarnessProps, reduce_motion: bool) -> App {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::new::<Harness>(move || props.clone()))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            props.clone()
+        }))
     };
     config.environment.os = Os::MacOs;
     config.environment.reduce_motion = reduce_motion;

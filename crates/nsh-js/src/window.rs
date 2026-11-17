@@ -1,15 +1,18 @@
 //! `nsh/desktop`'s windows: `<Window>` and `Window.open` (a dialog root the
 //! platform shows in a window of its own, rendered from the app's one
-//! engine), the `WindowRef` handles of the main window and the app's own,
+//! engine), the `WindowRef` handles of the app's windows,
 //! `currentWindow()` (the window a component renders in, through context),
-//! `windows()`, `focusedWindow()`, `windowState()` and `titleBar()`.
+//! `windows()`, `focusedWindow()`, `windowState()` and `titleBar()`. Off
+//! the desktops there are no windows: `<Window>` renders its content in the
+//! app's one surface, `currentWindow()` is that surface and `windows()` lists
+//! it.
 //!
 //! The attributes, the options and the requests are the core's types
 //! (`nsh_core::desktop`): a handle only decodes its arguments and queues
 //! the command; the core keeps one attribute record per window and sends
 //! the platform what changed. What the platform reports of a window comes
-//! natively ([`platform_event`]; the main window's in the environment,
-//! [`main_changed`]) and runs the listeners registered with `on`.
+//! natively ([`platform_event`]) and runs the listeners registered with
+//! `on`.
 
 use std::{
     cell::{Cell, RefCell},
@@ -118,6 +121,20 @@ pub(crate) struct Windows {
     /// A signal of a number counting changes to the list (owned; made on
     /// first use): `windows()` reads it.
     version: Cell<JsValue>,
+    /// The app root's `WindowRef` (owned; made on first use): the main
+    /// window of a released app, which the app root renders in when it
+    /// declares no window of its own.
+    main: Cell<JsValue>,
+    /// The implicit first window `mount` declared but has not opened yet
+    /// (its node, the attributes the app set while the root rendered, and
+    /// the requests it made): opened when the root turns out to return
+    /// plain content, dropped when it declares windows of its own.
+    pending: RefCell<Option<(NodeId, WindowAttributes, Vec<WindowRequest>)>>,
+    /// The `WindowRef`s of implicit first windows that were dropped
+    /// unopened (owned). The app root's context may still hold one: a
+    /// callback of the root that calls `currentWindow()` finds it rather
+    /// than a freed object. A window ref is not a window: it is never open.
+    unopened: RefCell<Vec<JsValue>>,
     /// The windows of the app's own, oldest first.
     list: RefCell<Vec<Own>>,
     listeners: RefCell<Vec<Listener>>,
@@ -129,6 +146,9 @@ impl Default for Windows {
         Windows {
             key: Cell::new(UNDEFINED),
             version: Cell::new(UNDEFINED),
+            main: Cell::new(UNDEFINED),
+            pending: RefCell::default(),
+            unopened: RefCell::default(),
             list: RefCell::default(),
             listeners: RefCell::default(),
             next: Cell::new(0),
@@ -141,8 +161,11 @@ impl Windows {
     pub(crate) fn free_all(&mut self, raw: *mut JsContext) {
         // SAFETY: owned values; no JS runs from here on.
         unsafe {
-            for c in [&self.key, &self.version] {
+            for c in [&self.key, &self.version, &self.main] {
                 qjs::JS_FreeValue(raw, c.replace(UNDEFINED));
+            }
+            for v in self.unopened.get_mut().drain(..) {
+                qjs::JS_FreeValue(raw, v);
             }
             for w in self.list.get_mut().drain(..) {
                 qjs::JS_FreeValue(raw, w.handle);
@@ -339,6 +362,28 @@ fn bump(cx: *mut JsContext) {
     reactive::set_signal(cx, v, number(n + 1.0));
 }
 
+/// The app root's `WindowRef` (owned): the main window a released app
+/// renders in when it declares no window of its own. On the desktops it is
+/// the runtime's implicit first window when one is open (`mount` opens it
+/// for a plain root), else the hidden host's ref; off them it is the app's
+/// one surface, as the old model's main window was.
+fn main_ref(cx: *mut JsContext) -> JsValue {
+    let open = windows(cx)
+        .list
+        .borrow()
+        .iter()
+        .find(|w| w.key == "main")
+        .map(|w| dup(cx, w.handle));
+    if let Some(handle) = open {
+        return handle;
+    }
+    let w = windows(cx);
+    if nullish(w.main.get()) {
+        w.main.set(make_handle(cx, "main", ROOT_ID, qjs::JS_NULL));
+    }
+    dup(cx, w.main.get())
+}
+
 /// The node of the window with `key`, if it is open.
 fn node_of_key(cx: *mut JsContext, key: &str) -> Option<NodeId> {
     windows(cx)
@@ -418,9 +463,16 @@ fn make_handle(cx: *mut JsContext, key: &str, id: NodeId, parent: JsValue) -> Js
     handle
 }
 
-/// Whether node `id` is a window that is open.
+/// Whether node `id` is a window that is open (off the desktops the app
+/// root's ref is the app's one surface, which is always open).
 fn is_open(cx: *mut JsContext, id: NodeId) -> bool {
-    windows(cx).list.borrow().iter().any(|w| w.id == id)
+    (id == ROOT_ID && !windows_supported(cx))
+        || windows(cx).list.borrow().iter().any(|w| w.id == id)
+        || windows(cx)
+            .pending
+            .borrow()
+            .as_ref()
+            .is_some_and(|(pending, _, _)| *pending == id)
 }
 
 /// A `WindowRef`'s methods: `METHODS[magic]` of the window at the node
@@ -440,6 +492,14 @@ unsafe extern "C" fn ref_call(
         if !is_open(cx, id) {
             return UNDEFINED;
         }
+        // The implicit first window has not opened yet: what the app asks
+        // of it goes to it once it opens.
+        if let Some((pending, _, requests)) = windows(cx).pending.borrow_mut().as_mut()
+            && *pending == id
+        {
+            requests.push(r);
+            return UNDEFINED;
+        }
         match send(cx, id, DesktopCommand::Request(r)) {
             Ok(()) => UNDEFINED,
             Err(e) => e,
@@ -455,6 +515,15 @@ unsafe extern "C" fn ref_call(
                 Err(e) => return type_error(cx, &format!("WindowRef.set: {e}")),
             };
             if attributes.is_empty() || !is_open(cx, id) {
+                return UNDEFINED;
+            }
+            // The implicit first window has not opened yet: what the app
+            // sets joins the options it opens with.
+            if let Some((pending, pending_attributes, _)) =
+                windows(cx).pending.borrow_mut().as_mut()
+                && *pending == id
+            {
+                pending_attributes.merge(&attributes);
                 return UNDEFINED;
             }
             match send(cx, id, DesktopCommand::SetAttributes(Box::new(attributes))) {
@@ -762,7 +831,7 @@ pub(crate) fn platform_event(cx: *mut JsContext, id: NodeId, event: &WindowEvent
             }
         }
         // The root's: `Application`'s listeners hear them from the core.
-        WindowEvent::QuitRequest | WindowEvent::Reopen | WindowEvent::LastWindowClosed => {}
+        WindowEvent::QuitRequest | WindowEvent::Reopen => {}
     }
     let r = reactive::finish_value(cx, UNDEFINED);
     if is_exception(r) {
@@ -774,7 +843,7 @@ pub(crate) fn platform_event(cx: *mut JsContext, id: NodeId, event: &WindowEvent
 /// or as the platform reports.
 fn close_own(cx: *mut JsContext, id: NodeId, cause: Option<WindowCloseCause>) -> JsValue {
     enum Then {
-        Opened(JsValue, u32),
+        Opened(JsValue),
         Element(JsValue),
     }
     let then = {
@@ -783,14 +852,13 @@ fn close_own(cx: *mut JsContext, id: NodeId, cause: Option<WindowCloseCause>) ->
             return UNDEFINED;
         };
         match &w.how {
-            How::Opened { node, owner } => Then::Opened(dup(cx, *node), *owner),
+            How::Opened { node, .. } => Then::Opened(dup(cx, *node)),
             How::Element { close, .. } => Then::Element(dup(cx, *close)),
         }
     };
     match then {
-        Then::Opened(node, owner) => {
+        Then::Opened(node) => {
             unregister(cx, id);
-            reactive::dispose_owner(cx, owner);
             let r = dom::remove_node(cx, dom::root_value(cx), node);
             free(cx, node);
             match r {
@@ -839,8 +907,12 @@ fn unregister(cx: *mut JsContext, id: NodeId) {
     free(cx, w.state);
     free(cx, w.title_bar);
     match w.how {
-        // The caller removes the node.
-        How::Opened { node, .. } => free(cx, node),
+        // The caller removes the node; its content's signals, effects and
+        // bindings go with the window.
+        How::Opened { node, owner } => {
+            free(cx, node);
+            reactive::dispose_owner(cx, owner);
+        }
         How::Element { close, owner } => {
             free(cx, close);
             // Its content's signals, effects and bindings go with it.
@@ -854,7 +926,7 @@ fn unregister(cx: *mut JsContext, id: NodeId) {
 /// The options' checks shared by `<Window>` and `Window.open`: decoded,
 /// on a desktop, granted by the app's capabilities. Throws otherwise.
 fn checked_options(cx: *mut JsContext, what: &str, o: JsValue) -> Result<WindowOptions, JsValue> {
-    if !crate::env::current(cx).os.is_desktop() {
+    if !windows_supported(cx) {
         let error = JsError::Error(format!(
             "{what}: windows of the app's own open on the desktops (`isAvailable`)"
         ))
@@ -930,6 +1002,116 @@ fn open_node(
     });
     bump(cx);
     Ok((node, id, handle))
+}
+
+/// The first window a desktop app that declares none renders in: its
+/// released main window. `mount` opens it before the app root renders (so
+/// `currentWindow()` in the root is it) and closes it unshown when the
+/// root turns out to declare `<Window>` scenes of its own.
+pub(crate) struct Implicit {
+    /// Its root node (owned), which `mount` inserts into the app root
+    /// before the root renders: the app root's content inserts into it, so
+    /// its dynamics keep updating the window.
+    pub(crate) node: JsValue,
+    /// Its `WindowRef` (owned), listed when it opens.
+    handle: JsValue,
+    id: NodeId,
+}
+
+/// Declares the implicit first window (`id` "main"), pending: it is
+/// opened when the app root turns out to return plain content, and its
+/// `WindowRef` is the window of the render in progress (released apps
+/// call `currentWindow()` in the root).
+pub(crate) fn begin_implicit(cx: *mut JsContext) -> Result<Implicit, JsValue> {
+    let node = dom::create_element(cx, Tag::Modal)?;
+    let Some(id) = dom::node_id(cx, node) else {
+        free(cx, node);
+        return Err(type_error(cx, "mount: no node for the first window"));
+    };
+    let handle = make_handle(cx, "main", id, qjs::JS_NULL);
+    // Not a window `keymap.bind` scopes to: a released app's root bindings
+    // stay app-wide, as the old model's were.
+    set(cx, handle, c"implicit", qjs::JS_TRUE);
+    *windows(cx).pending.borrow_mut() = Some((id, WindowAttributes::default(), Vec::new()));
+    reactive::provide(cx, context_key(cx), handle);
+    Ok(Implicit { node, handle, id })
+}
+
+/// Drops the implicit first window, unopened: the app declared windows of
+/// its own, so it never was the app's. Its node leaves the app root.
+pub(crate) fn discard_implicit(cx: *mut JsContext, implicit: Implicit) {
+    windows(cx).pending.borrow_mut().take();
+    let _ = dom::remove_node(cx, dom::root_value(cx), implicit.node);
+    free(cx, implicit.node);
+    // Its ref stays alive: the app root's context points at it.
+    windows(cx).unopened.borrow_mut().push(implicit.handle);
+}
+
+/// Keeps the implicit first window unopened: the app declares `<Window>`
+/// scenes of its own, whose nodes were inserted into its node (the app
+/// root's only content). The node stays in the app root as their home.
+pub(crate) fn forget_implicit(cx: *mut JsContext, implicit: Implicit) {
+    windows(cx).pending.borrow_mut().take();
+    // The app root's context points at its ref.
+    windows(cx).unopened.borrow_mut().push(implicit.handle);
+    free(cx, implicit.node);
+}
+
+/// Opens the implicit first window, around its node in the app root, with
+/// what the app set and asked while it rendered. `mount_owner` is the
+/// root owner: the window goes when the mount does.
+pub(crate) fn finish_implicit(cx: *mut JsContext, implicit: Implicit, mount_owner: u32) {
+    let (attributes, requests) = windows(cx).pending.borrow_mut().take().map_or_else(
+        || (WindowAttributes::default(), Vec::new()),
+        |(_, attributes, requests)| (attributes, requests),
+    );
+    let mut options = WindowOptions::default();
+    options.id = "main".to_owned();
+    options.attributes = attributes;
+    let mut open = OpenWindow::default();
+    // The first window of a released app is not a window of its own for
+    // `capabilities.windows`: the old main window needed no grant.
+    open.implicit = true;
+    open.options = options;
+    if let Err(e) = send(cx, implicit.id, DesktopCommand::OpenWindow(Box::new(open))) {
+        // The app root's context points at its ref.
+        windows(cx).unopened.borrow_mut().push(implicit.handle);
+        free(cx, e);
+        return;
+    }
+    for request in requests {
+        if let Err(e) = send(cx, implicit.id, DesktopCommand::Request(request)) {
+            free(cx, e);
+        }
+    }
+    let (owner, ()) = reactive::with_root(cx, || ());
+    windows(cx).list.borrow_mut().push(Own {
+        key: "main".to_owned(),
+        id: implicit.id,
+        handle: implicit.handle,
+        state: reactive::new_signal(cx, qjs::JS_NULL),
+        last: None,
+        title_bar: {
+            let zeros = title_bar_value(cx, &Edges::default());
+            let signal = reactive::new_signal(cx, zeros);
+            free(cx, zeros);
+            signal
+        },
+        how: How::Opened {
+            node: dup(cx, implicit.node),
+            owner,
+        },
+    });
+    // Unmounted (closed, hot reloaded or disposed): out of the list. The
+    // cleanup belongs to the mount's owner, not the ambient one.
+    reactive::with_root_under(cx, mount_owner, || {
+        reactive::add_cleanup(
+            cx,
+            native(cx, element_gone, 0, 0, &mut [number(implicit.id as f64)]),
+        );
+    });
+    bump(cx);
+    free(cx, implicit.node);
 }
 
 /// A window's `onDismiss`: the user closed it.
@@ -1053,17 +1235,21 @@ unsafe extern "C" fn window_component(
     argv: *mut JsValue,
 ) -> JsValue {
     let props = arg(argc, argv, 0);
-    let desktop = crate::env::current(cx).os.is_desktop();
-    if !desktop {
-        if !window_is_open(cx, props) {
-            return qjs::JS_NULL;
-        }
-        return get(cx, props, c"children");
+    // The app root declares the app's windows, open or not: `mount` makes
+    // no implicit first window for a root that does.
+    dom::note_declared_window(cx);
+    // A terminal app fills the terminal: its one surface is the app's, as
+    // on the phones and the web, and no window root is made.
+    if !windows_supported(cx) {
+        // One surface: the scene is its content while `open`, and follows
+        // `open` as a scene does on the desktops.
+        let run = native(cx, mobile_window_run, 0, 0, &mut [props]);
+        let shown = reactive::memo(cx, run, false);
+        return reactive::finish_value(cx, shown);
     }
     // A `<Window>` is a scene wherever it is declared: a top-level one
     // belongs to the app root, a nested one to the window around it (it
     // closes with it). It is never inserted as a view in its parent.
-    dom::note_app_window(cx);
     // Closed by the user while `open` stayed true: `closed` (a plain
     // object's flag) and `tick`, which runs the memo again.
     let state = new_object(cx);
@@ -1073,6 +1259,23 @@ unsafe extern "C" fn window_component(
     free(cx, tick);
     let shown = reactive::memo(cx, run, false);
     reactive::finish_value(cx, shown)
+}
+
+/// `<Window>`'s scene off the desktops: its content while open, else null.
+unsafe extern "C" fn mobile_window_run(
+    cx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: one data value (props).
+    let props = unsafe { *data };
+    if !window_is_open(cx, props) {
+        return qjs::JS_NULL;
+    }
+    get(cx, props, c"children")
 }
 
 /// Whether a `<Window>`'s `open` (or `defaultOpen`) lets it open.
@@ -1306,13 +1509,32 @@ pub(crate) fn window_export(cx: *mut JsContext) -> JsValue {
     window
 }
 
-/// The window the calling code renders in (owned), the main window
-/// outside any window of the app's own; `None` outside a reactive owner.
+/// The window the calling code renders in (owned); `None` outside a
+/// reactive owner. In the app root it is the main window: the implicit
+/// first window a plain root renders in, as released apps expect.
 fn current(cx: *mut JsContext) -> Option<JsValue> {
     if !reactive::has_owner(cx) {
         return None;
     }
-    reactive::lookup(cx, context_key(cx))
+    Some(reactive::lookup(cx, context_key(cx)).unwrap_or_else(|| main_ref(cx)))
+}
+
+/// The root node of the focused window of the app's own, if one has the
+/// keyboard focus. App-level popups act in that window, not the hidden host.
+pub(crate) fn focused_node(cx: *mut JsContext) -> Option<NodeId> {
+    windows(cx)
+        .list
+        .borrow()
+        .iter()
+        .find(|w| w.last.as_ref().is_some_and(|state| state.focused))
+        .map(|w| w.id)
+}
+
+/// Whether the platform has windows at all: the desktops, but not a
+/// terminal app, which fills the terminal with its one surface.
+pub(crate) fn windows_supported(cx: *mut JsContext) -> bool {
+    let env = crate::env::current(cx);
+    env.os.is_desktop() && env.idiom != nsh_core::platform::Idiom::Terminal
 }
 
 /// `currentWindow()`.
@@ -1338,12 +1560,13 @@ pub(crate) unsafe extern "C" fn all_windows(
     _argv: *mut JsValue,
 ) -> JsValue {
     free(cx, read(cx, version(cx)));
-    let mut handles: Vec<JsValue> = windows(cx)
-        .list
-        .borrow()
-        .iter()
-        .map(|w| dup(cx, w.handle))
-        .collect();
+    let mut handles: Vec<JsValue> = Vec::new();
+    // Off the desktops the app's one surface is its main window, first as
+    // the old model listed it.
+    if !windows_supported(cx) {
+        handles.push(main_ref(cx));
+    }
+    handles.extend(windows(cx).list.borrow().iter().map(|w| dup(cx, w.handle)));
     // SAFETY: a new array taking the handles.
     unsafe { qjs::JS_NewArrayFrom(cx, handles.len() as c_int, handles.as_mut_ptr()) }
 }
@@ -1381,10 +1604,13 @@ pub(crate) unsafe extern "C" fn window_state(
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
-    let Some(id) = current_id(cx) else {
+    if !windows_supported(cx) {
+        return qjs::JS_NULL;
+    }
+    let Some(id) = current_ref_id(cx) else {
         return type_error(
             cx,
-            "windowState() reads the window a component renders in: call it inside <Window>",
+            "windowState() reads the current window: call it inside <Window>, or use focusedWindow()/windows() in the app root",
         );
     };
     state_of(cx, id)
@@ -1397,10 +1623,13 @@ pub(crate) unsafe extern "C" fn title_bar(
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
-    let Some(id) = current_id(cx) else {
+    if !windows_supported(cx) {
+        return title_bar_value(cx, &Edges::default());
+    }
+    let Some(id) = current_ref_id(cx) else {
         return type_error(
             cx,
-            "titleBar() reads the window a component renders in: call it inside <Window>",
+            "titleBar() reads the current window: call it inside <Window>, or use focusedWindow()/windows() in the app root",
         );
     };
     title_bar_of(cx, id)
@@ -1412,12 +1641,55 @@ pub(crate) fn current_node(cx: *mut JsContext) -> Option<NodeId> {
     current_id(cx)
 }
 
-/// The node of the current window, if code renders in one.
+/// The node of the window the code renders in, if it renders inside one:
+/// the context a `<Window>` provides, not the app root's main window
+/// (`current`), so bindings at the app root stay app-wide as released
+/// apps made them.
 fn current_id(cx: *mut JsContext) -> Option<NodeId> {
-    let handle = current(cx)?;
+    if !reactive::has_owner(cx) {
+        return None;
+    }
+    let handle = reactive::lookup(cx, context_key(cx))?;
+    let implicit = get(cx, handle, c"implicit");
+    let is_implicit = truthy(cx, implicit);
+    free(cx, implicit);
+    if is_implicit {
+        free(cx, handle);
+        return None;
+    }
+    let id = key_node(cx, handle);
+    free(cx, handle);
+    id
+}
+
+/// The node of the window the code renders in, the implicit first window
+/// included (`windowState`, `titleBar`): while the app root renders it is
+/// the pending window, and where the root declares windows it is the
+/// window named `"main"`, if the app has one open.
+fn current_ref_id(cx: *mut JsContext) -> Option<NodeId> {
+    if !reactive::has_owner(cx) {
+        return None;
+    }
+    let handle = reactive::lookup(cx, context_key(cx))?;
+    let pending = {
+        let implicit = get(cx, handle, c"implicit");
+        let is_implicit = truthy(cx, implicit);
+        free(cx, implicit);
+        if is_implicit {
+            windows(cx).pending.borrow().as_ref().map(|(id, _, _)| *id)
+        } else {
+            None
+        }
+    };
+    let id = pending.or_else(|| key_node(cx, handle));
+    free(cx, handle);
+    id
+}
+
+/// The node of the window `handle` names, if it is open.
+fn key_node(cx: *mut JsContext, handle: JsValue) -> Option<NodeId> {
     let id = get(cx, handle, c"id");
     let key = dom::string_arg(cx, id);
     free(cx, id);
-    free(cx, handle);
     key.and_then(|k| node_of_key(cx, &k))
 }

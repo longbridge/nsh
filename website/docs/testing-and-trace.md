@@ -475,10 +475,14 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.wake()` | Wakes the system from sleep, as when the user opens a laptop's lid: `wakeCount()` counts one more and `lifecycle()` stays as it was. Headless runs only. |
 | `await app.setLocaleSettings(settings)` | Changes the locale settings `settings` names (`{ hourCycle: "h23", timeZone: "Asia/Tokyo" }`; also `languages`, `firstDayOfWeek`, `measurementSystem` and `temperatureUnit`, as `open`'s `localeSettings` takes them), as when the user changes the system's or travels; the others stay (`localeSettings()`). Headless runs only. |
 | `await app.screenshot(path?)` | A picture of the app as a `Uint8Array`: PNG of its window on graphical targets, UTF-8 Cell JSON on `tui`, also saved at `path` on this machine when given (relative to the current directory). Only a real platform draws the app: see [On a real platform](#on-a-real-platform). |
-| `app.window(id)` | A window of the app on a desktop, by the id the app gave it (`"main"`: the main window). Headless runs play a desktop's windows: one display, each window opening where it asks to be, focused unless it is a panel or asks not to be. |
+| `app.windowIds()` | The ids of the app's open windows, in opening order; empty off the desktops and while the app has none. |
+| `app.window(id)` | A window of the app on a desktop, by the id the app gave it (`"main"`: a conventional first-window id). Headless runs play a desktop's windows: one display, each window opening where it asks to be, focused unless it is a panel or asks not to be. |
+| `await app.reopen()` | Sends the app the OS reopen event, as a Dock/Finder reopen or a later launch does (`Application.on("reopen")`). Headless runs only. |
+| `await app.quitRequest()` | Asks the app to quit, as the Quit item does while it listens: `Application.on("quitRequest")` runs, and the app quits only if it calls `Application.quit()`. Headless runs only. |
+| `app.quit()` | Whether the app ended (`Application.quit()`, the Quit item, or the last-window policy). Once it has, further steps report a stopped app. |
 | `app.window(id).state()` | The window's state as the platform reports it to the app (`WindowState`: `mode`, `minimized`, `visible`, `focused`, `bounds`, `contentBounds`, `display`), `null` while it is not open. |
 | `await app.window(id).pressClose()` | Presses the window's close button as the user does: the window reports the press (`onClosePress`, reason `"closeButton"`) and closes when its `closeOnPress` lets it. |
-| `await app.window(id).screenshot(path?)` | A picture of the window's content as a `Uint8Array` (PNG), as `app.screenshot` takes of the main window, also saved at `path` when given. Only a real platform draws the app. |
+| `await app.window(id).screenshot(path?)` | A picture of the window's content as a `Uint8Array` (PNG), as `app.screenshot` takes of the app's surface, also saved at `path` when given. Only a real platform draws the app. |
 
 A step resolves once the app rendered nothing for 100 ms and no native animation runs that ends by itself (2 s at
 most, for apps that render all the time; on a manual clock, also 2 s of the app's time), so what it changed is on

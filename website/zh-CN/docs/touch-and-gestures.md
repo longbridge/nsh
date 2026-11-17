@@ -43,6 +43,7 @@ fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const count = signal(0);
@@ -61,7 +62,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 | Rust | TSX | 默认值 | 说明 |
@@ -267,6 +272,7 @@ fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, View } from "nsh";
 import { createAnimatedValue } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const x = createAnimatedValue(0);
@@ -286,7 +292,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 | Rust | TSX | 说明 |
@@ -489,6 +499,7 @@ fn sketch() -> impl IntoElement {
 
 ```tsx tabs
 import { Canvas, type GestureResponderEvent, mount, signal } from "nsh";
+import { Window } from "nsh/desktop";
 
 function Sketch() {
   const strokes = signal<[number, number][][]>([]);
@@ -518,7 +529,11 @@ function Sketch() {
   );
 }
 
-mount(Sketch);
+mount(() => (
+  <Window id="main">
+    <Sketch />
+  </Window>
+));
 ```
 
 运行方式：带有任何触摸或响应者处理函数的视图会在原生端监听触摸；平台把发生在它上面（及其内部）的触摸连同沿途正在监听的视图路径一起上报，协商过程在 NSH 的 Rust 核心中进行，按顺序询问接管声明并调用你的处理函数：先从最外层视图向内处理捕获阶段，再从目标向外处理其他的。由此有两个结果：
@@ -562,6 +577,7 @@ fn ball() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, View } from "nsh";
 import { PanResponder } from "nsh";
+import { Window } from "nsh/desktop";
 
 function Ball() {
   const pos = signal({ x: 0, y: 0 });
@@ -582,7 +598,11 @@ function Ball() {
   );
 }
 
-mount(Ball);
+mount(() => (
+  <Window id="main">
+    <Ball />
+  </Window>
+));
 ```
 
 手势状态：

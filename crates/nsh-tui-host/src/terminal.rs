@@ -402,6 +402,9 @@ pub(crate) struct Replies {
 /// Reads OSC 10 / 11 color answers (`ESC ] 1x ; rgb:RRRR/GGGG/BBBB` ended by ST or BEL),
 /// the kitty flags answer (`CSI ? flags u`), the mode 2026 report (`CSI ? 2026 ; Ps $ y`)
 /// and DA1 (`CSI ? … c`) from `bytes`.
+// Only the Unix host queries the terminal; the Windows host and this module's
+// tests are the other callers.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub(crate) fn parse_replies(bytes: &[u8]) -> Replies {
     let mut replies = Replies::default();
     let mut i = 0;

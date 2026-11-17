@@ -61,6 +61,7 @@ fn inbox(rows: impl IntoElement) -> impl IntoElement {
 ```tsx tabs
 import { mount, Scroll, Text, View, type YNode } from "nsh";
 import { Scrollbar } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   let list: YNode | undefined;
@@ -83,7 +84,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `Scrollbar` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. In Rust, `scrollbar()` makes

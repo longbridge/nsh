@@ -211,14 +211,21 @@ fn start(props: HarnessProps) -> Headless {
 }
 
 fn start_with(props: HarnessProps, screen_reader: bool) -> Headless {
-    let mut app = launch_with(Root::new::<Harness>(move || props.clone()), screen_reader);
+    let mut app = launch_with(
+        nsh_testing::windowed_root_with::<Harness>(move || props.clone()),
+        screen_reader,
+    );
     app.wait_for("role:treeitem[src]").unwrap();
     app
 }
 
 /// [`start`] in a right-to-left layout.
 fn start_rtl(props: HarnessProps) -> Headless {
-    let mut app = launch_in(Root::new::<Harness>(move || props.clone()), false, true);
+    let mut app = launch_in(
+        nsh_testing::windowed_root_with::<Harness>(move || props.clone()),
+        false,
+        true,
+    );
     app.wait_for("role:treeitem[src]").unwrap();
     app
 }
@@ -973,7 +980,9 @@ type Measure = Box<dyn Fn(&mut Headless, &dyn Fn(&mut Headless)) -> Cost>;
 /// to it cost.
 fn measured(props: ManyProps) -> (Headless, Measure) {
     let run = props.run;
-    let mut app = launch(Root::new::<Many>(move || props.clone()));
+    let mut app = launch(nsh_testing::windowed_root_with::<Many>(move || {
+        props.clone()
+    }));
     app.wait_for("role:treeitem[Folder 0]").unwrap();
     let counts = Arc::new([const { AtomicUsize::new(0) }; 3]);
     let into = counts.clone();
@@ -1106,7 +1115,9 @@ fn expanding_makes_the_rows_of_the_children_only() {
 #[test]
 fn a_large_tree_makes_only_the_rows_in_view() {
     let props = sized(200, 50);
-    let mut app = launch(Root::new::<Many>(move || props.clone()));
+    let mut app = launch(nsh_testing::windowed_root_with::<Many>(move || {
+        props.clone()
+    }));
     app.wait_for("role:treeitem[Folder 0]").unwrap();
     // 10 200 items, 249 rows shown (Folder 0's 50 files): only those near
     // the 300-point viewport are made.

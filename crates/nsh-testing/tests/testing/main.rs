@@ -508,7 +508,25 @@ fn headless_desktops_play_the_platform_s_windows() {
     let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 7);
+    assert_eq!(results.len(), 10);
+}
+
+#[test]
+fn a_desktop_app_root_renders_in_the_implicit_first_window() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/app-root");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 3);
+}
+
+#[test]
+fn the_app_hears_reopens_and_its_last_window_closing() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/lifecycle");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 2);
 }
 
 #[test]

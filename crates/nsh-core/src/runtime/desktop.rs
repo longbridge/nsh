@@ -10,10 +10,10 @@ use std::{
 
 use crate::{
     Command, ROOT_ID,
-    desktop::{DesktopCommand, LaunchAtLoginError, QuitRequestOptions},
+    desktop::{DesktopCommand, LaunchAtLoginError, QuitOnLastWindowClosed, QuitRequestOptions},
     element::{
         CallCx, Callback, JsError, JsHost, JsIn, JsObject, JsOwned, JsValue, Local, ModuleCx,
-        PropEnum, PropError, Ret, Stop, System, TsTypes, codes, io_code, module,
+        PropEnum, PropError, Ret, Settles, Stop, System, TsTypes, codes, io_code, module,
         quit::{QuitRequestListener, Subscription},
         task::Action,
     },
@@ -50,10 +50,10 @@ pub(crate) struct Application;
 #[module]
 impl Application {
     /// Quits the app, as the application menu's `quit` role and the
-    /// platform's quit key do: its windows close and the app stops as when
-    /// its last window closes, then its run ends, also while closing the
-    /// window alone would leave it running (a window kept hidden, a tray
-    /// icon). It quits while the app listens to `quitRequest` too: that is
+    /// platform's quit key do: it ends the app, not its windows one by one
+    /// (their `onOpenChange` may not run), and its run ends, also while
+    /// closing the window alone would leave it running (a window kept
+    /// hidden, a tray icon). It quits while the app listens to `quitRequest` too: that is
     /// how an app that asks first quits once it is ready. A view embedded
     /// in another app leaves the app's lifecycle to that app. On the web,
     /// called while a `quitRequest` listener runs, it lets the page leave
@@ -71,23 +71,16 @@ impl Application {
         let policy = options
             .quit_on_last_window_closed
             .unwrap_or(QuitOnLastWindowClosed::Platform);
-        let quit = match policy {
-            QuitOnLastWindowClosed::Platform => matches!(
-                sys.os,
-                crate::platform::Os::Windows | crate::platform::Os::Linux
-            ),
-            QuitOnLastWindowClosed::Always => true,
-            QuitOnLastWindowClosed::Never => false,
-        };
+        let quit = policy.quits(sys.os);
         desktop(cx, DesktopCommand::SetQuitOnLastWindowClosed(quit));
     }
 
     /// Sets the additional sources of `quitRequest` on standalone macOS
-    /// apps. `system` includes logout, restart and shutdown;
-    /// `mainWindowClose` includes a user closing the main window when that
-    /// would end the app. Both default to false, and each call replaces
-    /// them. A window with `closeOnPress: false` keeps its own close
-    /// handler; a window kept alive on close still hides. Requires a
+    /// apps. `system` includes logout, restart and shutdown. Both default to
+    /// false, and each call replaces them. `mainWindowClose` is legacy in
+    /// window model v2: there is no user-closable main window, so it has no
+    /// close to intercept. A window with `closeOnPress: false` keeps its own
+    /// close handler; a window kept alive on close still hides. Requires a
     /// `quitRequest` listener. Changing the options cancels a pending
     /// request. Replacing the app cancels its request and restores the
     /// default options. Other platforms and embedded views ignore it.
@@ -144,9 +137,9 @@ impl Application {
     /// `"singleInstance": true`, the app was launched again on Windows or
     /// Linux; that launch exited without opening a window and handed this
     /// one its `args` (the program's path not included) and `cwd`, the
-    /// directory relative paths among them are relative to. The main window
-    /// is already brought forward (shown when hidden); what else the launch
-    /// means is the app's. Anyone can start the app with any arguments:
+    /// directory relative paths among them are relative to. The app has
+    /// already heard `reopen`; nothing is brought forward implicitly. What
+    /// else the launch means is the app's. Anyone can start the app with any arguments:
     /// treat them as untrusted input. Launches while nothing listened go to
     /// the next listener (at most 16, the oldest dropped). macOS runs one
     /// instance of an app on its own and reports nothing; files and links
@@ -157,12 +150,14 @@ impl Application {
     /// absolute. Files that came while nothing listened, those that launched
     /// the app included, go to the next listener at once (at most 64, the
     /// oldest dropped). The app reads them with `fs`, which their opening
-    /// does not grant. `quit`: the app is quitting (its Quit
+    /// does not grant. On the desktops a link, a file or a second launch that
+    /// brings the app forward also reports `reopen` first. `quit`: the app is quitting (its Quit
     /// item, `quit()`, its last window closing, the system ending it, a host
     /// app removing its view, on the web the page going, once, however the
     /// user left it; a page the browser keeps to come back to keeps the app
-    /// running), for its cleanup, as GPUI's `on_app_quit`: it
-    /// cannot keep the app running (an app that asks first listens to
+    /// running), for its cleanup, as GPUI's `on_app_quit`: it cannot keep
+    /// the app running, and it is not a per-window close sequence (its
+    /// windows' `onOpenChange` may not run); an app that asks first listens to
     /// `quitRequest`). A promise the listener returns is awaited, 200 ms at
     /// most for all of them, while the platform waits too. `quitRequest`:
     /// the user asked to quit the app with its Quit item or the platform's
@@ -171,23 +166,35 @@ impl Application {
     /// longer quit: the app decides (it asks the user, saves, waits for work
     /// to finish), then calls `quit()`. The system ending the app (logging
     /// out, shutting down) does not ask by default. On macOS,
-    /// `setQuitRequestOptions` includes system requests and main-window
-    /// closes; answer with `quit()` or `cancelQuitRequest()`.
+    /// `setQuitRequestOptions` includes system requests; answer with `quit()`
+    /// or `cancelQuitRequest()`. Its `mainWindowClose` option is legacy in
+    /// window model v2: there is no user-closable main window.
     /// Standalone apps on macOS, Windows and Linux; on the web, the user
     /// leaving the page (closing its tab,
     /// reloading) is the request: a `quit()` the listener calls at once lets
     /// the page go without a question, otherwise the browser asks the user
     /// whether to leave; `quit` listeners run once the page is gone.
+    /// `reopen`: the OS asked the app to show itself (a macOS Dock or Finder
+    /// reopen, or a later launch on Windows or Linux); the app opens or
+    /// focuses the window it wants. `lastWindowClosed`: the app's last
+    /// window closed, after its own close path. The quit policy is decided
+    /// at that close; a JS listener runs in a later commit, after the
+    /// decision, so an app that stays alive with no windows sets
+    /// `quitOnLastWindowClosed: false` before the last close. (A Rust
+    /// listener runs synchronously, before the decision.) Only a `quit`
+    /// listener's returned promise is awaited; the other events run their
+    /// listeners as void, so listening for them is not a way to delay the
+    /// event.
     /// Returns a function that stops listening.
-    #[overload(fn(event: ApplicationSecondInstanceEvent, #[args(launch)] listener: Callback<ApplicationSecondInstance>) -> Stop)]
-    #[overload(fn(event: ApplicationOpenFilesEvent, #[args(files)] listener: Callback<ApplicationOpenFiles>) -> Stop)]
-    #[overload(fn(event: ApplicationQuitEvent, listener: Callback<()>) -> Stop)]
-    #[overload(fn(event: ApplicationQuitRequestEvent, listener: Callback<()>) -> Stop)]
-    #[overload(fn(event: ApplicationReopenEvent, listener: Callback<()>) -> Stop)]
-    #[overload(fn(event: ApplicationLastWindowClosedEvent, listener: Callback<()>) -> Stop)]
+    #[overload(fn(event: ApplicationSecondInstanceEvent, #[args(launch)] listener: Callback<ApplicationSecondInstance, Settles>) -> Stop)]
+    #[overload(fn(event: ApplicationOpenFilesEvent, #[args(files)] listener: Callback<ApplicationOpenFiles, Settles>) -> Stop)]
+    #[overload(fn(event: ApplicationQuitEvent, listener: Callback<(), Settles>) -> Stop)]
+    #[overload(fn(event: ApplicationQuitRequestEvent, listener: Callback<(), Settles>) -> Stop)]
+    #[overload(fn(event: ApplicationReopenEvent, listener: Callback<(), Settles>) -> Stop)]
+    #[overload(fn(event: ApplicationLastWindowClosedEvent, listener: Callback<(), Settles>) -> Stop)]
     pub(crate) fn on(
         event: ApplicationEvent,
-        #[args(payload)] listener: Callback<Payload>,
+        #[args(payload)] listener: Callback<Payload, Settles>,
         sys: System,
         cx: CallCx<'_>,
     ) -> Stop {
@@ -202,7 +209,7 @@ impl Application {
     }
 }
 
-fn second_instance(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) -> Stop {
+fn second_instance(listener: Callback<Payload, Settles>, sys: &System, cx: CallCx<'_>) -> Stop {
     let launches = sys.locals.get::<Launches>();
     let id = launches.next.get();
     launches.next.set(id.wrapping_add(1));
@@ -221,7 +228,7 @@ fn second_instance(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) ->
     })
 }
 
-fn open_files(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) -> Stop {
+fn open_files(listener: Callback<Payload, Settles>, sys: &System, cx: CallCx<'_>) -> Stop {
     let files = sys.locals.get::<Files>();
     let id = files.next.get();
     files.next.set(id.wrapping_add(1));
@@ -241,7 +248,7 @@ fn open_files(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) -> Stop
     })
 }
 
-fn quit(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) -> Stop {
+fn quit(listener: Callback<Payload, Settles>, sys: &System, cx: CallCx<'_>) -> Stop {
     let quits = sys.locals.get::<Quits>();
     let id = quits.next.get();
     quits.next.set(id.wrapping_add(1));
@@ -259,7 +266,7 @@ fn quit(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) -> Stop {
 
 /// Hears the user ask to quit while the listener lasts: as long as one
 /// is there, the platform leaves quitting to the app.
-fn quit_request(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) -> Stop {
+fn quit_request(listener: Callback<Payload, Settles>, sys: &System, cx: CallCx<'_>) -> Stop {
     let requests = sys.locals.get::<QuitRequests>();
     let id = requests.next.get();
     requests.next.set(id.wrapping_add(1));
@@ -286,7 +293,7 @@ fn quit_request(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) -> St
     })
 }
 
-fn reopen(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) -> Stop {
+fn reopen(listener: Callback<Payload, Settles>, sys: &System, cx: CallCx<'_>) -> Stop {
     let reopens = sys.locals.get::<Reopens>();
     let id = reopens.next.get();
     reopens.next.set(id.wrapping_add(1));
@@ -309,7 +316,7 @@ fn reopen(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) -> Stop {
     })
 }
 
-fn last_window_closed(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) -> Stop {
+fn last_window_closed(listener: Callback<Payload, Settles>, sys: &System, cx: CallCx<'_>) -> Stop {
     let closed = sys.locals.get::<Closed>();
     let id = closed.next.get();
     closed.next.set(id.wrapping_add(1));
@@ -335,7 +342,7 @@ fn last_window_closed(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>)
 /// The VM's `reopen` listeners.
 #[derive(Default)]
 struct Reopens {
-    listeners: RefCell<Vec<(u32, Callback<Payload>)>>,
+    listeners: RefCell<Vec<(u32, Callback<Payload, Settles>)>>,
     next: Cell<u32>,
     subscription: RefCell<Option<Subscription<crate::element::quit::ReopenListener>>>,
     adding: Cell<bool>,
@@ -352,7 +359,7 @@ impl Local for Reopens {
 /// The VM's `lastWindowClosed` listeners.
 #[derive(Default)]
 struct Closed {
-    listeners: RefCell<Vec<(u32, Callback<Payload>)>>,
+    listeners: RefCell<Vec<(u32, Callback<Payload, Settles>)>>,
     next: Cell<u32>,
     subscription: RefCell<Option<Subscription<crate::element::quit::LastWindowClosedListener>>>,
     adding: Cell<bool>,
@@ -408,7 +415,7 @@ async fn subscribe_closed(closed: Weak<Closed>) {
 /// The VM's `quitRequest` listeners.
 #[derive(Default)]
 struct QuitRequests {
-    listeners: RefCell<Vec<(u32, Callback<Payload>)>>,
+    listeners: RefCell<Vec<(u32, Callback<Payload, Settles>)>>,
     next: Cell<u32>,
     /// The core's listener, while the VM's has any: the platform asks the
     /// app while it is there.
@@ -452,17 +459,6 @@ async fn subscribe(requests: Weak<QuitRequests>) {
 pub(crate) struct QuitPolicyOptions {
     /// `"platform"` (the default), `true` or `false`.
     quit_on_last_window_closed: Option<QuitOnLastWindowClosed>,
-}
-
-/// When closing the last window quits the app.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum QuitOnLastWindowClosed {
-    /// As the platform does: macOS stays, Windows and Linux quit.
-    Platform,
-    /// Every platform quits.
-    Always,
-    /// Never: the app decides.
-    Never,
 }
 
 impl JsValue for QuitOnLastWindowClosed {
@@ -595,7 +591,7 @@ impl From<SecondInstance> for ApplicationSecondInstance {
 /// The VM's `secondInstance` listeners.
 #[derive(Default)]
 struct Launches {
-    listeners: RefCell<Vec<(u32, Callback<Payload>)>>,
+    listeners: RefCell<Vec<(u32, Callback<Payload, Settles>)>>,
     next: Cell<u32>,
     /// The task waiting for the core's launches started; it lasts as the
     /// VM does.
@@ -653,7 +649,7 @@ impl ApplicationOpenFiles {
 /// The VM's `openFiles` listeners.
 #[derive(Default)]
 struct Files {
-    listeners: RefCell<Vec<(u32, Callback<Payload>)>>,
+    listeners: RefCell<Vec<(u32, Callback<Payload, Settles>)>>,
     next: Cell<u32>,
     /// The task waiting for the core's files started; it lasts as the VM
     /// does.
@@ -693,7 +689,7 @@ async fn deliver_files(files: Weak<Files>) {
 /// The VM's `quit` listeners.
 #[derive(Default)]
 struct Quits {
-    listeners: RefCell<Vec<(u32, Callback<Payload>)>>,
+    listeners: RefCell<Vec<(u32, Callback<Payload, Settles>)>>,
     next: Cell<u32>,
     /// The task holding the core's quit listener started; it lasts as the
     /// VM does.

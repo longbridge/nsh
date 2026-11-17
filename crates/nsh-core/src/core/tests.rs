@@ -22820,6 +22820,7 @@ mod views {
         let shown = texts(&batch);
         assert!(shown[0].starts_with("light 0 "), "{shown:?}");
         c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
             dark: true,
             ..Default::default()
         });
@@ -27110,12 +27111,10 @@ mod rust_desktop {
 
     use super::*;
     use crate::{
-        desktop::{
-            DesktopCommand, TitleBarOptions, TitleBarStyle, WindowAttributes, WindowRequest,
-        },
+        desktop::{DesktopCommand, TitleBarOptions, TitleBarStyle, WindowAttributes, WindowEvent},
         element::{
             Root,
-            desktop::{current_window, quit, restart, title_bar},
+            desktop::{current_window, quit, restart, title_bar, window},
         },
         geometry::{Edges, Points},
         prelude::*,
@@ -27128,6 +27127,11 @@ mod rust_desktop {
 
     #[component]
     fn Chrome() -> impl IntoElement {
+        window().id("main").title("Chrome").content(chrome_body)
+    }
+
+    #[component]
+    fn ChromeBody() -> impl IntoElement {
         let window = current_window();
         window.set(WindowAttributes {
             title_bar: Some(TitleBarOptions {
@@ -27155,23 +27159,72 @@ mod rust_desktop {
             .child(text("Restart").on_press(|_: &()| restart()))
     }
 
+    /// Commits until a text shows `wanted`: an update may land in a later
+    /// commit than the event that caused it.
+    fn commit_showing(c: &mut Core<FakeEngine>, wanted: &str) -> bool {
+        for _ in 0..3 {
+            let Some(batch) = c.commit() else { continue };
+            if batch
+                .items
+                .iter()
+                .any(|item| matches!(item, MountItem::Text { text, .. } if text.text == wanted))
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     #[test]
     fn rust_title_bar_commands_and_reactive_drag_props_reach_the_platform() {
         let mut c = core();
         READS.set(0);
         c.set_environment(crate::element::Environment {
             os: crate::platform::Os::MacOs,
-            title_bar: Edges {
-                top: Points(42.0),
-                left: Points(78.0),
-                right: Points(0.0),
-                bottom: Points(0.0),
-            },
             ..Default::default()
         });
         c.mount_root(&Root::of::<Chrome>());
         let batch = c.commit().unwrap();
-        assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id: crate::ROOT_ID, command: Command::Desktop(command)} if matches!(&**command, DesktopCommand::SetAttributes(a) if a.title_bar.is_some_and(|t| t.style == TitleBarStyle::Hidden && t.height == Some(px(42.0)))))));
+        // The window opens with the attributes its content set while it
+        // first rendered (the effect may land in the next commit).
+        let mut commands: Vec<(crate::NodeId, DesktopCommand)> = batch
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::Command {
+                    id,
+                    command: Command::Desktop(command),
+                } => Some((*id, (**command).clone())),
+                _ => None,
+            })
+            .collect();
+        if let Some(next) = c.commit() {
+            commands.extend(next.items.iter().filter_map(|item| match item {
+                MountItem::Command {
+                    id,
+                    command: Command::Desktop(command),
+                } => Some((*id, (**command).clone())),
+                _ => None,
+            }));
+        }
+        let mut window = None;
+        let mut merged = WindowAttributes::default();
+        for (at, command) in &commands {
+            match command {
+                DesktopCommand::OpenWindow(open) => {
+                    window = Some(*at);
+                    merged.merge(&open.options.attributes);
+                }
+                DesktopCommand::SetAttributes(a) if Some(*at) == window => merged.merge(a),
+                _ => {}
+            }
+        }
+        let window = window.expect("the window opens");
+        assert!(
+            merged
+                .title_bar
+                .is_some_and(|t| t.style == TitleBarStyle::Hidden && t.height == Some(px(42.0)))
+        );
         let header = batch
             .items
             .iter()
@@ -27205,12 +27258,25 @@ mod rust_desktop {
                 _ => None,
             })
             .unwrap();
+        // Its title bar area starts empty: the platform reports it.
         assert!(
             batch
                 .items
                 .iter()
-                .any(|item| matches!(item, MountItem::Text {text, .. } if text.text == "42 78 0"))
+                .any(|item| matches!(item, MountItem::Text {text, .. } if text.text == "0 0 0"))
         );
+        let area = |top: f32, left: f32, right: f32| Edges {
+            top: Points(top),
+            left: Points(left),
+            right: Points(right),
+            bottom: Points(0.0),
+        };
+        c.component_event(
+            window,
+            EventKind::Window,
+            &EventPayload::Window(Box::new(WindowEvent::TitleBar(area(42.0, 78.0, 0.0)))),
+        );
+        assert!(commit_showing(&mut c, "42 78 0"));
         {
             let _entered = c.components.runtime.enter();
             DRAG.get().unwrap().set(false);
@@ -27225,13 +27291,8 @@ mod rust_desktop {
         );
         let reads = READS.get();
         c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
             dark: true,
-            title_bar: Edges {
-                top: Points(42.0),
-                left: Points(78.0),
-                right: Points(0.0),
-                bottom: Points(0.0),
-            },
             ..Default::default()
         });
         assert!(c.commit().is_none());
@@ -27240,33 +27301,18 @@ mod rust_desktop {
             reads,
             "other environment changes do not rerun title_bar readers"
         );
-        c.set_environment(crate::element::Environment {
-            title_bar: Edges {
-                top: Points(42.0),
-                left: Points(0.0),
-                right: Points(138.0),
-                bottom: Points(0.0),
-            },
-            ..Default::default()
-        });
-        let batch = c.commit().unwrap();
-        assert!(
-            batch
-                .items
-                .iter()
-                .any(|item| matches!(item, MountItem::Text {text, .. } if text.text == "42 0 138"))
+        c.component_event(
+            window,
+            EventKind::Window,
+            &EventPayload::Window(Box::new(WindowEvent::TitleBar(area(42.0, 0.0, 138.0)))),
         );
-        c.set_environment(crate::element::Environment::default());
-        let batch = c.commit().unwrap();
-        assert!(
-            batch
-                .items
-                .iter()
-                .any(|item| matches!(item, MountItem::Text {text, .. } if text.text == "0 0 0"))
+        assert!(commit_showing(&mut c, "42 0 138"));
+        c.component_event(
+            window,
+            EventKind::Window,
+            &EventPayload::Window(Box::new(WindowEvent::TitleBar(Edges::default()))),
         );
-        assert!(c.component_event(close, EventKind::Press, &EventPayload::None));
-        let batch = c.commit().unwrap();
-        assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id:crate::ROOT_ID, command:Command::Desktop(command)} if **command == DesktopCommand::Request(WindowRequest::Close))));
+        assert!(commit_showing(&mut c, "0 0 0"));
         // Quitting is a command of its own: the platform ends the app's run,
         // not only its window.
         assert!(c.component_event(quit_button, EventKind::Press, &EventPayload::None));
@@ -27287,6 +27333,14 @@ mod rust_desktop {
         assert!(c.component_event(restart_button, EventKind::Press, &EventPayload::None));
         let batch = c.commit().unwrap();
         assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id: crate::ROOT_ID, command: Command::Desktop(command)} if **command == DesktopCommand::Restart)));
+        // Closing a window of the app's own removes its root: the platform
+        // closes the native window when it goes.
+        assert!(c.component_event(close, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert!(batch.items.iter().any(|item| matches!(
+            item,
+            MountItem::Remove { id } | MountItem::Delete { id } if *id == window
+        )));
     }
 }
 
@@ -27876,31 +27930,243 @@ mod rust_windows {
         assert_eq!(request(&mut c), [DesktopCommand::Quit]);
     }
 
+    #[test]
+    fn the_app_hears_reopens_and_its_last_window_closing() {
+        use crate::element::desktop::open_window;
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::Linux,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Empty>());
+        let _ = c.commit().unwrap();
+        let reopens = Rc::new(Cell::new(0));
+        let closes = Rc::new(Cell::new(0));
+        let (owner, subscriptions) = {
+            let _entered = c.components.runtime.enter();
+            let reopens = reopens.clone();
+            let closes = closes.clone();
+            crate::element::create_root(move || {
+                let reopen = crate::element::desktop::add_reopen_listener(Rc::new(move || {
+                    reopens.set(reopens.get() + 1);
+                }));
+                let closed =
+                    crate::element::desktop::add_last_window_closed_listener(Rc::new(move || {
+                        closes.set(closes.get() + 1);
+                    }));
+                (reopen, closed)
+            })
+        };
+        let _ = c.commit();
+        c.reopened();
+        assert_eq!(reopens.get(), 1, "the app heard the reopen");
+        assert_eq!(closes.get(), 0);
+        // A window of the app's own goes: the app hears the last one only.
+        let first = {
+            let _entered = c.components.runtime.enter();
+            open_window(window().id("one").content(view))
+        };
+        let second = {
+            let _entered = c.components.runtime.enter();
+            open_window(window().id("two").content(view))
+        };
+        assert!(first.is_some() && second.is_some(), "two windows open");
+        let _ = c.commit();
+        {
+            let _entered = c.components.runtime.enter();
+            first.as_ref().unwrap().close();
+        }
+        let batch = c.commit().unwrap();
+        assert_eq!(closes.get(), 0, "a window is still open");
+        assert!(
+            app_commands(&batch).is_empty(),
+            "the core's default policy leaves quitting to the engine"
+        );
+        {
+            let _entered = c.components.runtime.enter();
+            second.as_ref().unwrap().close();
+        }
+        let _ = c.commit();
+        assert_eq!(closes.get(), 1, "the app heard its last window close");
+        // The listeners that went stop hearing: the app's owner is gone.
+        drop(subscriptions);
+        let _ = owner;
+        c.reopened();
+        let _ = c.commit();
+        assert_eq!(reopens.get(), 1);
+        assert_eq!(closes.get(), 1);
+    }
+
+    #[test]
+    fn closing_the_last_window_quits_under_the_policy() {
+        use crate::element::desktop::open_window;
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::Linux,
+            ..Default::default()
+        });
+        c.apply(Op::Command {
+            id: crate::ROOT_ID,
+            command: Command::Desktop(Box::new(DesktopCommand::SetQuitOnLastWindowClosed(true))),
+        })
+        .unwrap();
+        c.mount_root(&Root::of::<Empty>());
+        let _ = c.commit().unwrap();
+        let open = |c: &mut Core<FakeEngine>, id: &'static str| {
+            let _entered = c.components.runtime.enter();
+            open_window(window().id(id).content(view)).unwrap()
+        };
+        let first = open(&mut c, "one");
+        let second = open(&mut c, "two");
+        let _ = c.commit().unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            first.close();
+        }
+        let batch = c.commit().unwrap();
+        assert!(
+            app_commands(&batch).is_empty(),
+            "one window still open: no quit"
+        );
+        {
+            let _entered = c.components.runtime.enter();
+            second.close();
+        }
+        let batch = c.commit().unwrap();
+        assert!(
+            app_commands(&batch).contains(&DesktopCommand::Quit),
+            "the last window went under the policy: the app quits"
+        );
+    }
+
+    #[test]
+    fn a_last_window_listener_opens_the_next_window() {
+        use crate::element::desktop::open_window;
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::Linux,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Empty>());
+        let _ = c.commit().unwrap();
+        let reopened: Rc<RefCell<Option<crate::element::desktop::WindowRef>>> =
+            Rc::new(RefCell::new(None));
+        let _subscription = {
+            let _entered = c.components.runtime.enter();
+            let reopened = reopened.clone();
+            crate::element::desktop::add_last_window_closed_listener(Rc::new(move || {
+                let next = open_window(window().id("next").content(view));
+                *reopened.borrow_mut() = next;
+            }))
+        };
+        let only = {
+            let _entered = c.components.runtime.enter();
+            open_window(window().id("only").content(view)).unwrap()
+        };
+        let _ = c.commit().unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            only.close();
+        }
+        // The policy is off (the core's default): the app stays and the
+        // listener's window opens in the commit after it.
+        let batch = c.commit();
+        assert!(
+            batch
+                .as_ref()
+                .is_none_or(|b| !app_commands(b).contains(&DesktopCommand::Quit)),
+            "the app decides: no quit"
+        );
+        let batch = c.commit().unwrap();
+        assert!(
+            window_commands(&batch).iter().any(
+                |(_, c)| matches!(c, DesktopCommand::OpenWindow(open) if open.options.id == "next")
+            ),
+            "{:?}",
+            batch.items
+        );
+        assert!(reopened.borrow().is_some(), "the next window is open");
+    }
+
+    /// Two windows the app declares, the first with nothing of its own.
+    #[component]
+    fn TwoWindows() -> impl IntoElement {
+        view().child(window().id("main").content(view)).child(
+            window()
+                .id("aside")
+                .title("Aside")
+                .default_size(size(px(300.0), px(200.0)))
+                .content(view),
+        )
+    }
+
+    #[test]
+    fn the_first_app_window_inherits_the_launch_defaults() {
+        use crate::desktop::{MainWindowOptions, WindowAttributes};
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::MacOs,
+            ..Default::default()
+        });
+        c.set_main_window(&MainWindowOptions {
+            default_size: Some(size(px(900.0), px(600.0))),
+            attributes: WindowAttributes {
+                title: Some("Mail".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<TwoWindows>());
+        let batch = c.commit().unwrap();
+        let commands = window_commands(&batch);
+        let open = |wanted: &str| {
+            commands
+                .iter()
+                .find_map(|(_, c)| match c {
+                    DesktopCommand::OpenWindow(open) if open.options.id == wanted => {
+                        Some(&open.options)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{wanted} opens: {commands:?}"))
+        };
+        let main = open("main");
+        assert_eq!(main.default_size, Some(size(px(900.0), px(600.0))));
+        assert_eq!(main.attributes.title.as_deref(), Some("Mail"));
+        // The next window is the app's own: the launch defaults are for the
+        // first one only.
+        let aside = open("aside");
+        assert_eq!(aside.default_size, Some(size(px(300.0), px(200.0))));
+        assert_eq!(aside.attributes.title.as_deref(), Some("Aside"));
+    }
+
     thread_local! {
         static FITTED: RefCell<Option<crate::element::desktop::WindowRef>> =
             const { RefCell::new(None) };
     }
 
-    /// A main window as tall as its content, and a panel as large as its
+    /// A first window as tall as its content, and a panel as large as its
     /// content.
     #[component]
     fn Fitted() -> impl IntoElement {
-        current_window().set(WindowAttributes {
-            size_to_content: Some(SizeToContent::Height),
-            ..Default::default()
-        });
-        view().child(view().h(px(120.0))).child(
-            window()
-                .id("fitted")
-                .attributes(WindowAttributes {
-                    size_to_content: Some(SizeToContent::Both),
-                    ..Default::default()
-                })
-                .content(|| {
-                    FITTED.with(|f| *f.borrow_mut() = Some(current_window()));
-                    view().w(px(300.0)).h(px(200.0))
-                }),
-        )
+        window().id("main").content(|| {
+            current_window().set(WindowAttributes {
+                size_to_content: Some(SizeToContent::Height),
+                ..Default::default()
+            });
+            view().child(view().h(px(120.0))).child(
+                window()
+                    .id("fitted")
+                    .attributes(WindowAttributes {
+                        size_to_content: Some(SizeToContent::Both),
+                        ..Default::default()
+                    })
+                    .content(|| {
+                        FITTED.with(|f| *f.borrow_mut() = Some(current_window()));
+                        view().w(px(300.0)).h(px(200.0))
+                    }),
+            )
+        })
     }
 
     #[test]
@@ -27920,18 +28186,22 @@ mod rust_windows {
                 height: h.map(Points),
             })
         };
-        // The main window: only its height, its content's.
+        // The first window: only its height, its content's.
+        let open_id = |wanted: &str| {
+            commands
+                .iter()
+                .find_map(|(id, c)| match c {
+                    DesktopCommand::OpenWindow(open) if open.options.id == wanted => Some(*id),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{wanted} opens: {commands:?}"))
+        };
+        let main = open_id("main");
+        let id = open_id("fitted");
         assert!(
-            commands.contains(&(ROOT_ID, fit(None, Some(120.0)))),
+            commands.contains(&(main, fit(None, Some(120.0)))),
             "{commands:?}"
         );
-        let Some((id, _)) = commands
-            .iter()
-            .find(|(_, c)| matches!(c, DesktopCommand::OpenWindow(_)))
-        else {
-            panic!("the panel opens: {commands:?}");
-        };
-        let id = *id;
         assert!(
             commands.contains(&(id, fit(Some(300.0), Some(200.0)))),
             "{commands:?}"
@@ -27970,8 +28240,8 @@ mod rust_windows {
         assert_eq!(handle.title_bar(), area);
     }
 
-    /// Escape bound in the main window and in two windows of the app's own
-    /// (#1343), Mod+K only in the main window; a press closes "about".
+    /// Escape bound in the app root and in two windows of the app's own
+    /// (#1343), Mod+K app-wide from the app root; a press closes "about".
     #[component]
     fn WindowKeys() -> impl IntoElement {
         let main = signal(0);
@@ -27991,6 +28261,15 @@ mod rust_windows {
                     .default_size(size(px(300.0), px(100.0)))
                     .content(move || {
                         on_key("escape", move |_| settings.update(|n| *n += 1));
+                        on_key("mod+l", move |_| settings.update(|n| *n += 100));
+                        on_key_with(
+                            "mod+j",
+                            KeyOptions {
+                                scope: KeyScope::App,
+                                ..Default::default()
+                            },
+                            |_| {},
+                        );
                         view()
                     }),
             )
@@ -28057,10 +28336,21 @@ mod rust_windows {
         assert_ne!(in_main, in_settings);
         assert_ne!(in_settings, in_about);
         assert_eq!(table.find(escape, false, false), KeyMatch::Fire(in_main));
-        // The main window's Mod+K is not the other windows', and keys no
-        // binding takes go on in every window.
-        assert!(fired(ROOT_ID, mod_k).is_some());
-        assert_eq!(fired(settings, mod_k), None);
+        // Mod+K, bound in the app root, is every window's; keys no binding
+        // takes go on in every window.
+        let app_mod_k = fired(settings, mod_k).expect("the app's Mod+K");
+        assert_eq!(fired(ROOT_ID, mod_k), Some(app_mod_k));
+        assert_eq!(fired(about, mod_k), Some(app_mod_k));
+        // A window's own binding stays there; an explicit app scope from
+        // inside a window is every window's.
+        let mod_l = Keystroke::parse_with("mod+l", true).unwrap();
+        assert!(fired(settings, mod_l).is_some());
+        assert_eq!(fired(ROOT_ID, mod_l), None);
+        assert_eq!(fired(about, mod_l), None);
+        let mod_j = Keystroke::parse_with("mod+j", true).unwrap();
+        let app_mod_j = fired(ROOT_ID, mod_j).expect("the app's Mod+J");
+        assert_eq!(fired(settings, mod_j), Some(app_mod_j));
+        assert_eq!(fired(about, mod_j), Some(app_mod_j));
         assert_eq!(fired(about, tab), None);
         assert_eq!(fired(ROOT_ID, tab), None);
         // Each runs its own window's handler.
@@ -28073,7 +28363,7 @@ mod rust_windows {
             assert!(c.component_event(ROOT_ID, EventKind::KeyCommand, &key(id)));
             assert_eq!(texts(&c.commit().unwrap()), [shown]);
         }
-        // A closed window's binding goes with it.
+        // A closed window's binding goes with it; the app's stays.
         assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
         let mut table = None;
         for _ in 0..3 {
@@ -28082,12 +28372,15 @@ mod rust_windows {
             }
         }
         let table = table.expect("a new table");
-        assert_eq!(table.find_in(about, escape, false, false), KeyMatch::None);
+        assert_eq!(
+            table.find_in(about, escape, false, false),
+            KeyMatch::Fire(in_main)
+        );
         assert_eq!(
             table.find_in(settings, escape, false, false),
             KeyMatch::Fire(in_settings)
         );
-        assert_eq!(table.bindings().len(), 3);
+        assert_eq!(table.bindings().len(), 5);
     }
 
     /// Counts the Escapes it is bound to.
@@ -28438,6 +28731,87 @@ mod rust_windows {
         }
     }
 
+    /// Every window request the app root's ref takes, and an attribute it
+    /// sets and an attention request it asks for.
+    #[component]
+    fn AppRootRef() -> impl IntoElement {
+        use crate::{
+            desktop::{WindowAttributes, WindowMode},
+            element::desktop::main_window,
+        };
+        let main = main_window();
+        main.show();
+        main.hide();
+        main.focus();
+        main.minimize();
+        main.restore();
+        main.set_mode(WindowMode::Maximized);
+        main.close();
+        main.request_attention(false);
+        main.set(WindowAttributes {
+            title: Some("App".into()),
+            ..Default::default()
+        });
+        view()
+    }
+
+    /// The app root's ref is not a user window: its window requests reach no
+    /// platform command, so they cannot present or close the hidden host.
+    /// Its attributes and its attention request are the app's and still
+    /// reach the platform.
+    #[test]
+    fn app_root_window_requests_do_nothing() {
+        use crate::{
+            desktop::{DesktopCommand, WindowRequest},
+            platform::Os,
+        };
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: Os::Windows,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<AppRootRef>());
+        let sent: Vec<DesktopCommand> =
+            c.commit()
+                .map(|batch| batch.items)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|item| match item {
+                    MountItem::Command {
+                        id: ROOT_ID,
+                        command: Command::Desktop(command),
+                    } => match *command {
+                        command @ (DesktopCommand::Request(_)
+                        | DesktopCommand::SetAttributes(_)) => Some(command),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .collect();
+        let allowed = |command: &DesktopCommand| {
+            matches!(
+                command,
+                DesktopCommand::SetAttributes(_)
+                    | DesktopCommand::Request(WindowRequest::RequestAttention { .. })
+            )
+        };
+        assert!(sent.iter().all(allowed), "{sent:?}");
+        assert!(
+            sent.iter().any(|command| matches!(
+                command,
+                DesktopCommand::Request(WindowRequest::RequestAttention { .. })
+            )),
+            "{sent:?}"
+        );
+        assert!(
+            sent.iter().any(|command| matches!(
+                command,
+                DesktopCommand::SetAttributes(attributes) if attributes.title.as_deref() == Some("App")
+            )),
+            "{sent:?}"
+        );
+    }
+
     /// A window with no size of the app's, and one with a `defaultSize`,
     /// each filled by a view.
     #[component]
@@ -28587,7 +28961,7 @@ mod rust_menus {
         desktop::{DesktopCommand, MenuItem as Item, MenuRole},
         element::{
             Root,
-            desktop::{MenuItem, current_window, popup_menu_at, set_application_menu},
+            desktop::{MenuItem, popup_menu_at, set_application_menu, window},
         },
         keymap::Modifiers,
         platform::Os,
@@ -28598,12 +28972,13 @@ mod rust_menus {
     /// a press, which says whether Shift was held.
     #[component]
     fn Menus() -> impl IntoElement {
+        window().id("main").title("Notes").content(menus_body)
+    }
+
+    #[component]
+    fn MenusBody() -> impl IntoElement {
         let wrap = signal(false);
         let log = signal(String::from("ready"));
-        current_window().set(crate::desktop::WindowAttributes {
-            title: Some("Notes".into()),
-            ..Default::default()
-        });
         effect(move || {
             set_application_menu(vec![MenuItem::submenu(
                 "View",
@@ -28769,9 +29144,21 @@ mod rust_menus {
         });
         c.mount_root(&Root::of::<Menus>());
         let batch = c.commit().unwrap();
-        assert!(batch.items.iter().filter_map(desktop).any(
-            |c| matches!(c, DesktopCommand::SetAttributes(a) if a.title.as_deref() == Some("Notes"))
-        ));
+        let open = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Command {
+                    command: Command::Desktop(command),
+                    ..
+                } => match &**command {
+                    DesktopCommand::OpenWindow(open) => Some(open.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("the window opens");
+        assert_eq!(open.options.attributes.title.as_deref(), Some("Notes"));
         let (id, checked) = first_action(&batch);
         assert!(id >= 1 << 31, "views' ids are above JS's: {id}");
         assert_eq!(checked, Some(false));

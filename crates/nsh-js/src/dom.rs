@@ -100,9 +100,10 @@ pub(crate) struct Dom {
     /// whose they are (not owned: a row taken out of its `each`, or the
     /// object's finalizer, takes its entry out).
     pending_rows: RefCell<FxHashMap<NodeId, JsValue>>,
-    /// How many top-level `<Window>` scenes the app root declared while it
-    /// mounted (desktop apps must declare one; reset by `mount`).
-    app_windows: Cell<u32>,
+    /// How many `<Window>` scenes the app root declared while it mounted,
+    /// open or not (reset by `mount`): one that starts closed is still the
+    /// app's window, not a plain root.
+    declared_windows: Cell<u32>,
 }
 
 #[derive(Clone, Copy)]
@@ -159,20 +160,20 @@ fn dom<'a>(cx: *mut JsContext) -> &'a Dom {
     unsafe { &(*crate::state::state(cx)).dom }
 }
 
-/// Starts counting the top-level `<Window>` scenes of a mount.
-pub(crate) fn reset_app_windows(cx: *mut JsContext) {
-    dom(cx).app_windows.set(0);
+/// Starts counting the app root's `<Window>` declarations.
+pub(crate) fn reset_declared_windows(cx: *mut JsContext) {
+    dom(cx).declared_windows.set(0);
 }
 
-/// A top-level `<Window>` scene of the app root declared itself.
-pub(crate) fn note_app_window(cx: *mut JsContext) {
+/// The app root declared a `<Window>` (open or not).
+pub(crate) fn note_declared_window(cx: *mut JsContext) {
     let d = dom(cx);
-    d.app_windows.set(d.app_windows.get() + 1);
+    d.declared_windows.set(d.declared_windows.get() + 1);
 }
 
-/// How many top-level `<Window>` scenes the app root declared.
-pub(crate) fn app_windows(cx: *mut JsContext) -> u32 {
-    dom(cx).app_windows.get()
+/// How many `<Window>` scenes the app root declared while it mounted.
+pub(crate) fn declared_windows(cx: *mut JsContext) -> u32 {
+    dom(cx).declared_windows.get()
 }
 
 /// The node data an object holds, or null for other values.
@@ -330,7 +331,7 @@ impl Dom {
             dialogs: Cell::new(0),
             lazy_rows: Cell::new(false),
             pending_rows: RefCell::new(FxHashMap::default()),
-            app_windows: Cell::new(0),
+            declared_windows: Cell::new(0),
         }
     }
 
@@ -3595,78 +3596,91 @@ pub(crate) unsafe extern "C" fn mount(
     if let Some(dispose) = crate::hot::reuse(cx, app, props) {
         return dispose;
     }
-    reset_app_windows(cx);
     let root = d.root.get();
+    let windowed = {
+        let env = crate::env::current(cx);
+        env.os.is_desktop() && env.idiom != nsh_core::platform::Idiom::Terminal
+    };
     // SAFETY: reads of the root's children; dups for the dispose function.
     let before: Vec<JsValue> = unsafe { &(*node_ptr(cx, root)).children }
         .iter()
         .map(|&v| unsafe { qjs::JS_DupValue(cx, v) })
         .collect();
-    let (owner, result) = reactive::with_root(cx, || {
-        let props = if unsafe { qjs::JS_IsObject(props) } {
-            unsafe { qjs::JS_DupValue(cx, props) }
-        } else {
-            unsafe { qjs::JS_NewObject(cx) }
-        };
-        let mut args = [props];
-        let out = reactive::untracked_with(cx, || unsafe {
-            qjs::JS_Call(cx, app, UNDEFINED, 1, args.as_mut_ptr())
-        });
-        unsafe { qjs::JS_FreeValue(cx, props) };
-        if unsafe { qjs::JS_IsException(out) } {
-            return Err(out);
-        }
-        let r = insert_value(cx, root, out, None);
-        unsafe { qjs::JS_FreeValue(cx, out) };
-        r
-    });
-    if let Err(e) = result {
-        free_values(cx, before);
-        reactive::dispose_owner(cx, owner);
-        return e;
-    }
-    // A desktop app root is a host: its content is top-level `<Window>`
-    // scenes, each with a root of its own. It never renders a view or text
-    // itself, and it declares at least one scene (else there is no window
-    // to show, and no implicit first window to fall back to).
-    if crate::env::current(cx).os.is_desktop() {
-        let current: Vec<JsValue> = unsafe { &(*node_ptr(cx, root)).children }
-            .iter()
-            .map(|&v| unsafe { qjs::JS_DupValue(cx, v) })
-            .collect();
-        let mut invalid = false;
-        for &c in &current {
-            if node_tag(cx, c) != Some(Tag::Modal) {
-                invalid = true;
-            }
-        }
-        let declared = app_windows(cx);
-        free_values(cx, current);
-        let message = if invalid {
-            Some(
-                "mount: a desktop app renders its UI in top-level <Window> scenes; the app root returned a view or text of its own",
-            )
-        } else if declared == 0 {
-            Some(
-                "mount: a desktop app declares at least one top-level <Window>; no implicit first window is made",
-            )
-        } else {
-            None
-        };
-        if let Some(message) = message {
-            let current: Vec<JsValue> = unsafe { &(*node_ptr(cx, root)).children }
-                .iter()
-                .map(|&v| unsafe { qjs::JS_DupValue(cx, v) })
-                .collect();
-            for &c in &current {
-                if !before.iter().any(|&b| same(b, c)) {
-                    let _ = remove_child(cx, root, c);
+    let (owner, result) = reactive::with_root(
+        cx,
+        || -> Result<Option<crate::window::Implicit>, JsValue> {
+            // A desktop app root is a host: its content is top-level
+            // `<Window>` scenes, each with a root of its own. A released
+            // app that returns views instead is the content of its first
+            // window, as it was the main window's before: the runtime
+            // opens that window (`main`) around it, unless the root turns
+            // out to declare windows of its own.
+            let mut implicit = if windowed {
+                Some(crate::window::begin_implicit(cx)?)
+            } else {
+                None
+            };
+            reset_declared_windows(cx);
+            // The first window's node joins the app root before the root
+            // renders: what the root inserts, and the effects its dynamics
+            // make, go into it rather than the invisible host. A root that
+            // declares windows keeps the node as their home, unopened.
+            let joined = match implicit.as_ref() {
+                Some(implicit) => insert_value(cx, root, implicit.node, None),
+                None => Ok(()),
+            };
+            if let Err(e) = joined {
+                if let Some(implicit) = implicit.take() {
+                    crate::window::discard_implicit(cx, implicit);
                 }
+                return Err(e);
             }
-            free_values(cx, current);
+            let props = if unsafe { qjs::JS_IsObject(props) } {
+                unsafe { qjs::JS_DupValue(cx, props) }
+            } else {
+                unsafe { qjs::JS_NewObject(cx) }
+            };
+            let mut args = [props];
+            let out = reactive::untracked_with(cx, || unsafe {
+                qjs::JS_Call(cx, app, UNDEFINED, 1, args.as_mut_ptr())
+            });
+            unsafe { qjs::JS_FreeValue(cx, props) };
+            if unsafe { qjs::JS_IsException(out) } {
+                if let Some(implicit) = implicit.take() {
+                    crate::window::discard_implicit(cx, implicit);
+                }
+                return Err(out);
+            }
+            let parent = implicit.as_ref().map_or(root, |implicit| implicit.node);
+            let r = insert_value(cx, parent, out, None);
+            unsafe { qjs::JS_FreeValue(cx, out) };
+            if let Err(e) = r {
+                if let Some(implicit) = implicit.take() {
+                    crate::window::discard_implicit(cx, implicit);
+                }
+                return Err(e);
+            }
+            Ok(implicit)
+        },
+    );
+    let implicit = match result {
+        Ok(implicit) => implicit,
+        Err(e) => {
             free_values(cx, before);
             reactive::dispose_owner(cx, owner);
-            return throw_type(cx, message);
+            return e;
+        }
+    };
+    if let Some(implicit) = implicit {
+        if declared_windows(cx) > 0 {
+            // The root declares the app's windows: they live in its node,
+            // which stays unopened. The old model's main window was not
+            // one of an app's windows either.
+            crate::window::forget_implicit(cx, implicit);
+        } else {
+            // Views and text, or nothing: the main window a released app
+            // rendered in, opened around its content.
+            crate::window::finish_implicit(cx, implicit, owner);
         }
     }
     let mut data = [qjs::JS_NewFloat64(owner as f64), new_array(cx, before)];

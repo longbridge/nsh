@@ -1,10 +1,8 @@
-// A tray app: nsh.json's `window.defaultVisible: false` starts it with only
-// its icon in the tray (the menu bar on macOS, the notification area on
-// Windows, a StatusNotifierItem on Linux); the main window is made and the
-// app runs in it, unseen. A click on the icon shows the window. Closing the
-// window hides it (nsh.json's `closeOnPress: false`, then `hide()` when the
-// app hears `closePress`), so the app keeps running in the tray; the tray's
-// menu quits it. The window is a focus timer, whose time left the icon's
+// A tray app: it starts with its window and its icon in the tray (the menu
+// bar on macOS, the notification area on Windows, a StatusNotifierItem on
+// Linux). Closing the window hides it (nsh.json's `closeOnPress: false`,
+// then `hide()` when the app hears `closePress`), so the app keeps running
+// in the tray; the tray's menu shows the window again or quits it. The window is a focus timer, whose time left the icon's
 // tooltip shows, and which comes forward when a session ends. The menu also
 // opens the app when the user logs in (`Application.setLaunchAtLogin`), in
 // the app `nsh package` builds.

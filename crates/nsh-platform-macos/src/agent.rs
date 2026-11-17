@@ -643,7 +643,16 @@ impl Native for MacNative {
     }
 
     fn resize(&self, width: Points, height: Points) -> Result<(), String> {
-        self.on_main(|_, window| {
+        // `setViewport` resizes the window the app shows, not the hidden
+        // host: the targeted window, else the key one (the frontmost of the
+        // app's own windows).
+        let id = self.target();
+        let which = if id == ROOT_ID {
+            Which::Key
+        } else {
+            Which::Target(id)
+        };
+        self.on_window(which, |_, window| {
             let content = NSSize::new(f64::from(width.0), f64::from(height.0));
             let old = window.frame();
             let size = window

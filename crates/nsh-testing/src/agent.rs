@@ -518,11 +518,28 @@ pub trait Scene: Send + Sync {
     fn send_host_event(&self, name: &str, data: serde_json::Value) -> Result<(), String>;
     /// The URLs the app opened ([`Model::opened_urls`]).
     fn opened_urls(&self) -> Result<Vec<String>, String>;
+    /// The ids of the app's open windows, in opening order
+    /// (`app.windowIds()`). Off the desktops (the web) there are none.
+    fn window_ids(&self) -> Result<Vec<String>, String> {
+        Ok(Vec::new())
+    }
     /// The root of the app's window `id` while it is open (`"main"`: the
     /// main window's, [`nsh_core::ROOT_ID`]). Without windows of the app's
     /// own (the web), only the main one.
     fn window_root(&self, id: &str) -> Result<Option<NodeId>, String> {
         Ok((id == "main").then_some(nsh_core::ROOT_ID))
+    }
+    /// Tells the scene a window of the app's own is `size` points: its
+    /// views are clipped to that, not to the host surface's viewport.
+    fn set_window_size(&self, root: NodeId, size: Size<Points>) -> Result<(), String> {
+        let _ = (root, size);
+        Ok(())
+    }
+    /// The size of the window `root` shows (`None`: the platform cannot
+    /// tell, and the host surface's viewport is used).
+    fn window_size(&self, root: NodeId) -> Option<Size<Points>> {
+        let _ = root;
+        None
     }
     /// The root of the window view `id` is in (the main window's when it is
     /// in none of the app's own).
@@ -540,8 +557,19 @@ impl Scene for Model {
         };
         Ok(state.screen.semantic_input_text(id).map(str::to_owned))
     }
+    fn window_ids(&self) -> Result<Vec<String>, String> {
+        Ok(self.lock().screen.window_ids())
+    }
     fn window_root(&self, id: &str) -> Result<Option<NodeId>, String> {
         Ok(self.lock().screen.window_root(id))
+    }
+    fn set_window_size(&self, root: NodeId, size: Size<Points>) -> Result<(), String> {
+        let mut state = self.lock();
+        state.screen.set_window_size(root, size);
+        Ok(())
+    }
+    fn window_size(&self, root: NodeId) -> Option<Size<Points>> {
+        self.lock().screen.window_size(root)
     }
     fn window_of(&self, id: NodeId) -> Result<NodeId, String> {
         Ok(self.lock().screen.window_of(id))
@@ -1686,6 +1714,7 @@ impl Agent {
                 self.native.quit();
                 Ok(Value::Null)
             }
+            TestStep::WindowIds => Ok(serde_json::json!(self.scene.window_ids()?)),
             TestStep::WindowState { id } => match self.scene.window_root(&id)? {
                 Some(root) => Ok(self
                     .native
@@ -1723,13 +1752,33 @@ impl Agent {
         }
     }
 
-    /// Tells the scene the window's size when it changed.
+    /// Tells the scene the host surface's size and each app window's when
+    /// they changed.
     fn sync_viewport(&self) -> Result<(), String> {
         let size = self.native.viewport();
-        let mut told = self.viewport.lock().unwrap_or_else(|e| e.into_inner());
-        if *told != Some(size) {
-            self.scene.set_viewport(size)?;
-            *told = Some(size);
+        {
+            let mut told = self.viewport.lock().unwrap_or_else(|e| e.into_inner());
+            if *told != Some(size) {
+                self.scene.set_viewport(size)?;
+                *told = Some(size);
+            }
+        }
+        // The app's windows are not the host surface: clip each to the
+        // content size the platform reports, so what is on screen in it is
+        // found by selectors and reads as shown.
+        for id in self.scene.window_ids()? {
+            let Some(root) = self.scene.window_root(&id)? else {
+                continue;
+            };
+            // A platform that reads no window state, or has not sized this
+            // window yet (Linux before GTK maps it), keeps the host
+            // surface's clip (its own window is the surface).
+            if let Ok(Some(state)) = self.native.window_state(root)
+                && !state.content_bounds.is_empty()
+            {
+                self.scene
+                    .set_window_size(root, state.content_bounds.size)?;
+            }
         }
         Ok(())
     }
@@ -1938,6 +1987,13 @@ impl Agent {
             )
         };
         let scrollers = self.scene.scroll_ancestors(id)?;
+        // The window the view is in: a window of the app's own is not the
+        // host surface, and its points are its own content's.
+        let window_root = self.scene.window_of(id)?;
+        let window = self
+            .scene
+            .window_size(window_root)
+            .unwrap_or_else(|| self.native.viewport());
         let mut before: Option<Point<Points>> = None;
         // The gestures that moved nothing: each moves the finger elsewhere
         // ([`anchor`]).
@@ -1945,8 +2001,7 @@ impl Agent {
         for _ in 0..SCROLLS_INTO_VIEW {
             let bounds = self.native.bounds(id).ok_or_else(not_on_screen)?;
             let at = local.map_or(bounds.center(), |p| bounds.origin + p);
-            let viewport = self.native.viewport();
-            let window = Bounds::new(Point::new(Points(0.0), Points(0.0)), viewport);
+            let window = Bounds::new(Point::new(Points(0.0), Points(0.0)), window);
             if let Some(b) = before
                 && (b.x.0 - at.x.0).abs() < 1.0
                 && (b.y.0 - at.y.0).abs() < 1.0
@@ -2469,7 +2524,6 @@ mod tests {
 
     use nsh_core::{
         EventKind, EventPayload,
-        element::Root,
         geometry::{Size, point},
         prelude::*,
     };
@@ -2819,7 +2873,8 @@ mod tests {
         let remote = Arc::new(RemoteScene::new(move |step| {
             answer(&remote_model, &step).unwrap()
         }));
-        let (engine, _batches) = crate::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
+        let (engine, _batches) =
+            crate::start(EngineConfig::new(crate::windowed_root::<Tally>())).unwrap();
         for scene in [model as Arc<dyn Scene>, remote as Arc<dyn Scene>] {
             let agent = Agent::new(
                 scene,
@@ -2905,7 +2960,8 @@ mod tests {
 
     #[test]
     fn the_agent_presses_and_chooses_from_what_the_platform_draws() {
-        let (engine, batches) = crate::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
+        let (engine, batches) =
+            crate::start(EngineConfig::new(crate::windowed_root::<Tally>())).unwrap();
         let model = Arc::new(Model::default());
         let feeding = model.clone();
         std::thread::spawn(move || {
@@ -2965,7 +3021,8 @@ mod tests {
 
     #[test]
     fn the_agent_finds_views_in_the_model_and_acts_where_they_are() {
-        let (engine, batches) = crate::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
+        let (engine, batches) =
+            crate::start(EngineConfig::new(crate::windowed_root::<Tally>())).unwrap();
         let model = Arc::new(Model::default());
         let feeding = model.clone();
         std::thread::spawn(move || {

@@ -253,6 +253,11 @@ pub(crate) struct AppConfig {
     /// [`read_config`]): written into `app.json` and the dev server's app
     /// info, where the runners read them before the app's code runs.
     pub(crate) window: Option<serde_json::Value>,
+    /// The app's lifecycle (`"application"`, checked by [`read_config`]):
+    /// `{ "quitOnLastWindowClosed": "platform" | true | false }`. Written
+    /// into `app.json` and the dev server's app info, where the engine sets
+    /// the quit policy before the app's code runs.
+    pub(crate) application: Option<serde_json::Value>,
     /// What iOS packages add to their `Info.plist` and entitlements.
     #[serde(default)]
     pub(crate) ios: AppleConfig,
@@ -521,6 +526,9 @@ pub(crate) fn desktop_app_json(
     if let Some(window) = &config.window {
         info["window"] = window.clone();
     }
+    if let Some(application) = &config.application {
+        info["application"] = application.clone();
+    }
     if config.single_instance {
         info["singleInstance"] = true.into();
     }
@@ -536,10 +544,16 @@ pub(crate) fn window_json(entry: &Path) -> Option<String> {
     read_config(&entry).ok()?.window.map(|w| w.to_string())
 }
 
-/// Says, once per app, that the main window of the app at `entry` starts
-/// hidden (`nsh.json` `window.defaultVisible: false`): the desktop hosts of
-/// `nsh run` and `nsh test --target` open it so, as its package does, and
-/// only the app shows it.
+/// `nsh.json` `"application"` of the app at `entry` (checked), as JSON: the
+/// dev server's app info carries it.
+pub(crate) fn application_json(entry: &Path) -> Option<String> {
+    let entry = dunce::canonicalize(entry).ok()?;
+    read_config(&entry).ok()?.application.map(|a| a.to_string())
+}
+
+/// Says, once per app, that `nsh.json` `window.defaultVisible: false` has no
+/// effect in window model v2: the app host never shows, and the app opens the
+/// windows it declares with `<Window>`.
 pub(crate) fn note_hidden_main_window(entry: &Path) {
     static NOTED: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
     let Ok(entry) = dunce::canonicalize(entry) else {
@@ -548,13 +562,13 @@ pub(crate) fn note_hidden_main_window(entry: &Path) {
     let hidden = read_config(&entry)
         .ok()
         .and_then(|config| config.window)
-        .and_then(|window| nsh_core::desktop::MainWindowOptions::from_json(&window).ok())
-        .is_some_and(|window| !window.visible_at_launch());
+        .and_then(|window| window.get("defaultVisible").and_then(|v| v.as_bool()))
+        == Some(false);
     let mut noted = NOTED.lock().unwrap_or_else(|e| e.into_inner());
     if hidden && !noted.contains(&entry) {
         noted.push(entry);
         crate::ui::note(
-            "the main window starts hidden (nsh.json window.defaultVisible: false) until the app shows it",
+            "nsh.json window.defaultVisible has no effect in window model v2: the app host never shows; the app opens its <Window> when ready",
         );
     }
 }
@@ -824,6 +838,12 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     {
         ignored.push(format!("window: {e}"));
         config.window = None;
+    }
+    if let Some(application) = &config.application
+        && let Err(e) = nsh_core::desktop::ApplicationOptions::from_json(application)
+    {
+        ignored.push(format!("application: {e}"));
+        config.application = None;
     }
     // The runner resolves it again on the user's machine, with their home.
     if let Some(dir) = &config.data_dir
@@ -1299,6 +1319,9 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
                 let mut info = serde_json::json!({ "id": id, "name": name });
                 config.add_file_types_to_app_json(&mut info);
                 config.add_data_dir_to_app_json(&mut info);
+                if let Some(application) = &config.application {
+                    info["application"] = application.clone();
+                }
                 info
             },
             &schemes,
@@ -1490,7 +1513,13 @@ fn package_android(
     assets.push((
         "nsh/app.json".to_owned(),
         app_json(
-            serde_json::json!({ "id": id }),
+            {
+                let mut info = serde_json::json!({ "id": id });
+                if let Some(application) = &config.application {
+                    info["application"] = application.clone();
+                }
+                info
+            },
             &config.schemes,
             config.window.as_ref(),
         )
@@ -1791,6 +1820,9 @@ fn package_macos(
     config.macos.add_to_app_json(&mut info);
     config.add_file_types_to_app_json(&mut info);
     config.add_data_dir_to_app_json(&mut info);
+    if let Some(application) = &config.application {
+        info["application"] = application.clone();
+    }
     let schemes = config.url_schemes();
     fs::write(
         nsh.join("app.json"),
@@ -3104,7 +3136,7 @@ mod tests {
     #[test]
     fn desktop_packages_carry_the_main_windows_options() {
         let config: AppConfig = serde_json::from_str(
-            r#"{ "appearance": "dark", "window": { "title": "Focus", "closeOnPress": false } }"#,
+            r#"{ "appearance": "dark", "window": { "title": "Focus", "closeOnPress": false }, "application": { "quitOnLastWindowClosed": false } }"#,
         )
         .unwrap();
         let info = desktop_app_json(&config, "Focus", "com.a", "1.0.0");
@@ -3116,6 +3148,7 @@ mod tests {
                 "version": "1.0.0",
                 "appearance": "dark",
                 "window": { "title": "Focus", "closeOnPress": false },
+                "application": { "quitOnLastWindowClosed": false },
             })
         );
         // The runner opens the main window with them (`Bundle::read_trusted`).

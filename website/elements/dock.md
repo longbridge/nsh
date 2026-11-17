@@ -47,6 +47,7 @@ fn workspace() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
 import { DockArea, type DockAreaLayout } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 const titles: Record<string, string> = {
   files: "Files", readme: "README.md", main: "main.rs", preview: "Preview", terminal: "Terminal",
@@ -80,7 +81,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `DockArea` and the values it takes come from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust

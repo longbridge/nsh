@@ -11,11 +11,11 @@
 //!   it before the app's code first runs; the core keeps it until JS listens.
 //! - One instance: the first instance of an app with schemes owns a named
 //!   mutex keyed by the app id and marks its top-level window with a property
-//!   ([`attach`]). A later launch with a URL finds that window, lets it take
-//!   the foreground, hands it the URL in a `WM_COPYDATA` and exits; the
-//!   running instance shows its window (restored, or shown when hidden),
-//!   brings it to the front and sends the URL. A launch without a URL opens
-//!   another window, as before.
+//!   ([`attach`]). A later launch with a URL finds that window, hands it the
+//!   URL in a `WM_COPYDATA` and exits; the running instance fires the app
+//!   root's `reopen` event (the hidden host does not show) and sends the URL,
+//!   so the app opens or focuses the window it wants. A launch without a URL
+//!   opens another window.
 //! - Files (nsh.json `fileTypes`): `HKCU\Software\Classes\<app id>.<n>` is a
 //!   ProgID per file type whose `shell\open\command` runs the executable with
 //!   the file, listed under each extension's `OpenWithProgids`, so the app
@@ -299,11 +299,9 @@ fn relaunched(surface: &Surface, launch: nsh_core::single_instance::SecondInstan
     }
 }
 
-/// A URL or a launch from a later launch: shows the window, brings it to the
-/// front and hands `deliver` the surface. A hidden window shows as the app's
-/// `focus()` shows it (one hidden since launch, nsh.json
-/// `window.defaultVisible: false`, drawn before DWM composites it), as a
-/// link shows it on macOS and Linux.
+/// A URL or a launch from a later launch: fires the app root's `reopen`
+/// (the host stays hidden; the app opens or focuses the window it wants)
+/// and hands `deliver` the surface.
 fn received(_window: HWND, deliver: impl FnOnce(&Surface)) {
     let surface = SURFACE.with(|s| s.borrow().as_ref().and_then(Weak::upgrade));
     // The host is not a user window: the app root's `reopen` listeners

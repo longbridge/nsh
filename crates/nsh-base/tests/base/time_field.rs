@@ -13,7 +13,7 @@ use std::{
 
 use chrono::NaiveTime;
 use nsh_base::{HourCycle, TimeFieldSegmentEntry, TimeOfDay, TimePrecision, time_field};
-use nsh_core::{MountItem, NodeId, Size, element::Root, platform::Os, prelude::*};
+use nsh_core::{MountItem, NodeId, Size, platform::Os, prelude::*};
 use nsh_engine::EngineConfig;
 use nsh_testing::{Headless, Screen};
 
@@ -106,7 +106,9 @@ impl std::ops::DerefMut for App {
 fn start(props: HarnessProps) -> App {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::new::<Harness>(move || props.clone()))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            props.clone()
+        }))
     };
     config.environment.os = Os::MacOs;
     let mut app = Headless::start(config).expect("the engine starts");
@@ -273,7 +275,7 @@ fn editing_makes_no_views() {
 
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::of::<Plain>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<Plain>())
     };
     config.environment.os = Os::MacOs;
     let mut app = Headless::start(config).expect("the engine starts");
@@ -362,7 +364,9 @@ fn moving_between_segments_and_the_focus_draws_no_segment_again() {
     };
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::new::<Counted>(move || CountedProps { run }))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Counted>(move || {
+            CountedProps { run }
+        }))
     };
     config.environment.os = Os::MacOs;
     let mut app = Headless::start(config).expect("the engine starts");

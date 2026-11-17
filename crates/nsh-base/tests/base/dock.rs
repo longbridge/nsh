@@ -13,7 +13,6 @@ use nsh_base::dock::{
 };
 use nsh_core::{
     Size, ViewKind,
-    element::Root,
     geometry::{Axis, point},
     platform::{Idiom, Os},
     prelude::*,
@@ -290,11 +289,13 @@ fn start_in(
 ) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(width), px(900.0)),
-        ..EngineConfig::new(Root::new::<Workspace>(move || WorkspaceProps {
-            layout: layout.clone(),
-            width: frame.map(|f| f.0),
-            height: frame.map(|f| f.1),
-            compact,
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Workspace>(move || {
+            WorkspaceProps {
+                layout: layout.clone(),
+                width: frame.map(|f| f.0),
+                height: frame.map(|f| f.1),
+                compact,
+            }
         }))
     };
     config.environment.os = Os::MacOs;
@@ -310,11 +311,13 @@ fn start_manual(layout: DockAreaLayout, width: f32) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(width), px(900.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::new::<Workspace>(move || WorkspaceProps {
-            layout: layout.clone(),
-            width: None,
-            height: None,
-            compact: None,
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Workspace>(move || {
+            WorkspaceProps {
+                layout: layout.clone(),
+                width: None,
+                height: None,
+                compact: None,
+            }
         }))
     };
     config.environment.os = Os::MacOs;
@@ -661,11 +664,13 @@ fn a_terminals_compact_sheet_gives_its_panel_the_sheets_rows() {
     // fills the rows under its tab bar, not none.
     let mut config = EngineConfig {
         viewport: Size::new(px(400.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Workspace>(move || WorkspaceProps {
-            layout: with_two_docks(),
-            width: None,
-            height: None,
-            compact: Some(true),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Workspace>(move || {
+            WorkspaceProps {
+                layout: with_two_docks(),
+                width: None,
+                height: None,
+                compact: Some(true),
+            }
         }))
     };
     config.environment.os = Os::Linux;
@@ -698,11 +703,13 @@ fn a_terminals_compact_sheet_gives_its_panel_the_sheets_rows() {
 fn start_web_phone(layout: DockAreaLayout) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(400.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Workspace>(move || WorkspaceProps {
-            layout: layout.clone(),
-            width: None,
-            height: None,
-            compact: None,
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Workspace>(move || {
+            WorkspaceProps {
+                layout: layout.clone(),
+                width: None,
+                height: None,
+                compact: None,
+            }
         }))
     };
     config.environment.os = Os::Web;
@@ -736,11 +743,13 @@ fn a_compact_bottom_dock_lifted_by_the_keyboard_stays_below_the_status_bar() {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::new::<Workspace>(move || WorkspaceProps {
-            layout: layout.clone(),
-            width: None,
-            height: None,
-            compact: Some(true),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Workspace>(move || {
+            WorkspaceProps {
+                layout: layout.clone(),
+                width: None,
+                height: None,
+                compact: Some(true),
+            }
         }))
     };
     config.environment.os = Os::Ios;
@@ -833,7 +842,7 @@ fn frame_of(app: &Headless, id: &str) -> nsh_core::Bounds<Points> {
 fn tabs_that_do_not_fit_scroll_in_their_bar_and_the_displayed_one_comes_into_view() {
     let mut config = EngineConfig {
         viewport: Size::new(px(1000.0), px(900.0)),
-        ..EngineConfig::new(Root::of::<Strip>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<Strip>())
     };
     config.environment.os = Os::MacOs;
     config.environment.idiom = Idiom::Desktop;

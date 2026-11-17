@@ -178,8 +178,9 @@ pub struct AppOptions {
     /// second launch hands its arguments and working directory to the
     /// first (GApplication's `command-line`, over D-Bus, keyed on
     /// [`app_id`](Self::app_id)) and exits before it opens a window; the
-    /// first brings its window forward and tells the app
-    /// (`Application.on("secondInstance", ...)`).
+    /// first reports `reopen` and hands the launch to the app
+    /// (`Application.on("secondInstance", ...)`); the host itself stays
+    /// hidden.
     pub single_instance: bool,
     /// The file types the app opens (nsh.json `fileTypes`), for
     /// [`run_app`]: its desktop entry lists their MIME types, it runs once,
@@ -642,7 +643,8 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             for file in files {
                 view.open_url(&file.uri());
             }
-            crate::window::activate_main(&view.surface);
+            // The host stays hidden: the app's `reopen` listeners choose.
+            crate::window::reopen(&view.surface);
         }
     });
     let shown_line = shown.clone();
@@ -765,12 +767,9 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
         // A development host's window waits for its app, which brings the
         // window's options ([`crate::dev`]).
         let held = app_of.is_err();
-        // nsh.json `window.defaultVisible: false`: the window is made and
-        // the app runs in it, unseen, until it shows it (a tray app). GTK
-        // keeps the mode `launch_main` asked for until it first shows.
+        // The host never shows: the app opens the windows it declares.
         let present = !held && launch.visible_at_launch();
         if !held && !present {
-            log::info!("the main window starts hidden (nsh.json window.defaultVisible: false)");
             crate::window::launch_hidden(&view.surface);
         }
         match app_of {

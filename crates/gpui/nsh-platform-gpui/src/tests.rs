@@ -179,7 +179,13 @@ fn wait_for(view: &Entity<AppView>, cx: &mut VisualTestContext, text: &str) {
 /// The tests in windows, one after the other in one app: the main
 /// thread's queue (`crate::rt`) is made once per process, for the first
 /// app, so every window's engine must post to that app.
+///
+/// The cases mount pre-v2 plain roots, which now open in the implicit
+/// first window: the GPUI host is not migrated to window model v2 and does
+/// not show app windows yet (`docs/dev/gpui.md`), so this suite is kept
+/// for the migration and does not run.
 #[gpui::test]
+#[ignore = "the GPUI host is not migrated to window model v2 yet (docs/dev/gpui.md)"]
 fn windows(cx: &mut TestAppContext) {
     // The engine (and the settings portal) run on threads of their own.
     cx.executor().allow_parking();

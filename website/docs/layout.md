@@ -227,7 +227,7 @@ const width = signal(0);
 </View>
 ```
 
-The frame is in points: `Bounds<Points>` in Rust, `{ bounds }` in TSX, a `Bounds` (`{ origin: { x, y }, size: { width, height } }`). For the whole window, read `window()` in Rust or `windowSize()` from [`nsh`](../modules/nsh.md#device) in TSX; both follow rotation and window resizing, and a style that reads them changes with the window:
+The frame is in points: `Bounds<Points>` in Rust, `{ bounds }` in TSX, a `Bounds` (`{ origin: { x, y }, size: { width, height } }`). For the whole surface, read `window()` in Rust or `windowSize()` from [`nsh`](../modules/nsh.md#device) in TSX; both follow rotation and resizing, and a style that reads them changes with the surface. On the desktops the host is invisible: a window's own size is its `WindowRef.state()?.contentBounds` (Rust `WindowRef::state()`), which follows that window's resizes:
 
 ```rust tabs
 view().style_when(|| window().width > px(600.0), |s| s.flex_row())

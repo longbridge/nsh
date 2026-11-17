@@ -731,7 +731,7 @@ Things that were found the hard way. Read the section of the area you change bef
   moves the children into a container that clips, and keeps the shadow on its own layer.
 - `NSView`'s display link fires only while some of the view's window shows on a screen: not while the window is
   hidden (ordered out, or never shown), minimized, wholly covered or off every screen, or the screen is locked. A
-  surface's one link drives all of its windows, so a link made from the root of a hidden main window (a tray app's,
+  surface's one link drives all of its windows, so a link made from the root of the hidden host (a tray app
   `window.defaultVisible: false`) gave the app's other windows no frames at all: made from the hidden window's view
   it fired 0 times in a second, from a shown window's 126, and in a `Window.open` window a trackpad scroll froze
   under the fingers and jumped into place when the gesture ended (`settle`), and animations did not run. The link is

@@ -158,6 +158,16 @@ impl App {
         }
     }
 
+    /// The app's lifecycle options (`nsh.json` `"application"`): a Rust
+    /// app root's ([`nsh_core::element::Root::application`]), a bundle's
+    /// ([`Bundle::application`]).
+    pub fn application(&self) -> Option<&nsh_core::desktop::ApplicationOptions> {
+        match self {
+            App::Rust(root) => root.application_ref(),
+            App::Js(bundle) => bundle.application.as_ref(),
+        }
+    }
+
     /// The URL schemes the app claims (`nsh.json` `schemes`):
     /// the links the core lets through (`nsh_core::url_scheme`).
     pub fn url_schemes(&self) -> &[String] {
@@ -219,8 +229,12 @@ pub struct Bundle {
     /// The main window's launch-time options (`nsh.json` `"window"`, an
     /// app's `app.json`, the dev server's app info): runners read them
     /// before they make the window; the engine sends their attributes to
-    /// the main window with the first frame.
+    /// the first window.
     pub main_window: Option<nsh_core::desktop::MainWindowOptions>,
+    /// The app's lifecycle options (`nsh.json` `"application"`, an app's
+    /// `app.json`, the dev server's app info): the engine sets the quit
+    /// policy before the app's code runs.
+    pub application: Option<nsh_core::desktop::ApplicationOptions>,
 }
 
 /// How long an app on [`Bundle::trial`] runs past its first frame without
@@ -364,6 +378,7 @@ impl Bundle {
             updater_config: None,
             trial: None,
             main_window: None,
+            application: None,
         }
     }
 
@@ -382,6 +397,7 @@ impl Bundle {
             updater_config: None,
             trial: None,
             main_window: None,
+            application: None,
         }
     }
 
@@ -412,6 +428,21 @@ impl Bundle {
                 .map_err(|e| e.to_string())
                 .and_then(|v| nsh_core::desktop::MainWindowOptions::from_json(&v));
             parsed.map_err(|e| log::warn!("nsh.json window: {e}")).ok()
+        });
+        self
+    }
+
+    /// The app's lifecycle options from their JSON (`nsh.json`
+    /// `"application"`, as the dev server's app info carries it); a wrong
+    /// one is logged and left out.
+    pub fn with_application(mut self, json: Option<&str>) -> Self {
+        self.application = json.and_then(|json| {
+            let parsed = serde_json::from_str(json)
+                .map_err(|e| e.to_string())
+                .and_then(|v| nsh_core::desktop::ApplicationOptions::from_json(&v));
+            parsed
+                .map_err(|e| log::warn!("nsh.json application: {e}"))
+                .ok()
         });
         self
     }
@@ -497,6 +528,12 @@ impl Bundle {
         if let Some(window) = info.as_ref().and_then(|info| info.get("window")) {
             bundle.main_window = Some(
                 nsh_core::desktop::MainWindowOptions::from_json(window)
+                    .map_err(|e| io::Error::other(format!("app.json: {e}")))?,
+            );
+        }
+        if let Some(application) = info.as_ref().and_then(|info| info.get("application")) {
+            bundle.application = Some(
+                nsh_core::desktop::ApplicationOptions::from_json(application)
                     .map_err(|e| io::Error::other(format!("app.json: {e}")))?,
             );
         }
@@ -2186,12 +2223,19 @@ impl<M: TextEngine + 'static> Driver<M> {
         let text_engine = Rc::new(text_engine);
         let access = Arc::new(app_access(&config.app));
         let mut core = Core::new(text_engine.clone(), config.viewport);
-        // The desktops' `"platform"` quit policy: Windows and Linux quit
-        // when the last window closes; macOS stays in the Dock.
-        core.set_quit_on_last_window_closed(matches!(
-            config.environment.os,
-            nsh_core::platform::Os::Windows | nsh_core::platform::Os::Linux
-        ));
+        // nsh.json's `application.quitOnLastWindowClosed`, else the
+        // desktops' `"platform"`: Windows and Linux quit when the last
+        // window closes; macOS stays in the Dock. The app can change it at
+        // run time with `Application.setQuitPolicy`.
+        let policy = config
+            .app
+            .application()
+            .map(|options| options.quit_on_last_window_closed)
+            .map_or_else(
+                || nsh_core::desktop::QuitOnLastWindowClosed::Platform.quits(config.environment.os),
+                |policy| policy.quits(config.environment.os),
+            );
+        core.set_quit_on_last_window_closed(policy);
         core.set_content_culling(config.content_culling);
         core.set_tree_order_tracking(sink.needs_tree_order());
         core.set_projected_state_mounting(sink.needs_projected_states());

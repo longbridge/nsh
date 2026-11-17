@@ -5,8 +5,8 @@
 // keeps itself open. Each window's button sits where the main window's
 // does: a press goes to the window the view is in. The app root declares
 // every window; there is no implicit main window.
-import { mount, signal, Text, View } from "nsh";
-import { currentWindow, focusedWindow, Window } from "nsh/desktop";
+import { keymap, mount, signal, Text, View } from "nsh";
+import { Application, currentWindow, focusedWindow, Window } from "nsh/desktop";
 
 const presses = signal("none");
 const notesOpen = signal(false);
@@ -26,18 +26,26 @@ function Button(props: { label: string; onPress: () => void }) {
 /** A window's one button, where the main window's first is. */
 function Inside(props: { name: string }) {
   const win = currentWindow();
+  // A binding made in a window's content fires only in that window.
+  keymap.bind("mod+shift+k", () => log.set(`key in ${win.id}`));
   return <Button label={`In ${props.name}`} onPress={() => presses.set(`${props.name} in ${win.id}`)} />;
 }
 
 function Main() {
+  keymap.bind("mod+shift+k", () => log.set("key in main"));
   return (
     <View style={{ flex: 1 }}>
       <Button label="Main button" onPress={() => presses.set("main")} />
       <Button label="Open notes" onPress={() => notesOpen.set(true)} />
+      <Button
+        label="Open notes again"
+        onPress={() => Window.open(() => <Inside name="notes" />, { id: "notes" })}
+      />
       <Button label="Open popup" onPress={() => popupOpen.set(true)} />
       <Button label="Open dialog" onPress={() => dialogOpen.set(true)} />
       <Button label="Open guard" onPress={() => guardOpen.set(true)} />
       <Button label="Close guard" onPress={() => Window.get("guard")?.close()} />
+      <Button label="Quit" onPress={() => Application.quit()} />
       <Text>{`Presses: ${presses()}`}</Text>
       <Text>{`Focused: ${focusedWindow()?.id ?? "none"}`}</Text>
       <Text>{`Log: ${log()}`}</Text>
@@ -46,6 +54,8 @@ function Main() {
 }
 
 function App() {
+  // An app-level shortcut is explicit and fires from every window.
+  keymap.bind("mod+shift+a", () => log.set("app key"), { scope: "app" });
   const changed = (name: string, flag: { set(open: boolean): void }) => ({ open, reason }: { open: boolean; reason: string }) => {
     flag.set(open);
     log.set(`${name} ${reason}`);

@@ -673,22 +673,20 @@ impl WindowOptions {
     }
 }
 
-/// The main window's launch-time options: nsh.json `"window"`, which the
-/// command line writes into the app's `app.json` (and the dev server's
-/// app info) and the runners read before any JS runs, so the first frame
-/// shows the window as the app wants it. The same keys as `WindowOptions`
-/// without `id`, `kind`, `parent` and `modal`: every attribute,
-/// `defaultSize`, `defaultPosition`, `display`, `defaultMode` and
-/// `restoreBounds`; and `defaultVisible`, which only the main window takes
-/// (the app opens its other windows when it wants them). At run time the
-/// app changes it with `currentWindow().set()`; the engine also sends its
-/// attributes to the main window with the first frame
-/// ([`crate::Core::set_main_window`]), so a window made before the app was
-/// known (a development host's) follows them too.
+/// Launch-time options for the first app window: nsh.json `"window"`, which
+/// the command line writes into the app's `app.json` (and the dev server's
+/// app info) and the runners read before any JS runs. The same keys as
+/// `WindowOptions` without `id`, `kind`, `parent` and `modal`: every
+/// attribute, `defaultSize`, `defaultPosition`, `display`, `defaultMode`
+/// and `restoreBounds`. The app declares the window with `<Window>` or
+/// [`crate::element::desktop::window()`] and inherits these; its own options
+/// override them. `defaultVisible` is parsed but has no effect in window
+/// model v2: the app host never shows. An unmodified window made before the
+/// app was known (a development host's) follows the attributes the engine
+/// sends with the first frame ([`crate::Core::set_main_window`]).
 ///
 /// Only standalone builds read it (their `app.json`). Signed packages
-/// (`.nshpkg`) carry none: they run in host apps, which own the main
-/// window.
+/// (`.nshpkg`) carry none: they run in host apps, which own their windows.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MainWindowOptions {
@@ -700,10 +698,9 @@ pub struct MainWindowOptions {
     pub display: Option<DisplayId>,
     /// The mode it opens in.
     pub default_mode: Option<WindowMode>,
-    /// The first app window's `defaultVisible` (kept for the window the app
-    /// declares; the host itself never shows). The window model v2 opens
-    /// windows from JS: the app hides the one it wants unseen with
-    /// `hide()`. Read at launch only.
+    /// Parsed for compatibility and has no effect in window model v2: the
+    /// host never shows, and the app declares its windows with `<Window>`
+    /// (hide one with `hide()`). Read at launch only.
     pub default_visible: Option<bool>,
     /// Opens where the user left it (the runner keeps its placement).
     pub restore_bounds: bool,
@@ -737,10 +734,9 @@ impl MainWindowOptions {
         Some(placement.fit_on_displays(displays))
     }
 
-    /// Whether the main window shows when the app starts: never in the
-    /// window model v2, where it is the invisible app host. `defaultVisible`
-    /// describes the first app window (the app declares it with `<Window>`),
-    /// not the host.
+    /// Whether the host shows when the app starts: never in the window model
+    /// v2, where it is the invisible app host. `defaultVisible` is parsed but
+    /// has no effect; the app declares its windows with `<Window>`.
     #[doc(hidden)]
     pub fn visible_at_launch(&self) -> bool {
         false
@@ -848,7 +844,8 @@ pub fn declarations() -> String {
          * also changes, and its attributes. */\n\
          export interface WindowOptions extends Partial<WindowAttributes> {{\n  \
          /** The app's id for it: one window per id, the key its bounds are kept\n   \
-         * under (`restoreBounds`). `\"main\"` is the main window's. */\n  \
+         * under (`restoreBounds`). `\"main\"` is a conventional first-window id,\n   \
+         * with no special behavior. */\n  \
          id: string;\n  \
          /** What it is for: its attributes' defaults (`\"normal\"`). */\n  \
          kind?: WindowKind;\n  \
@@ -975,8 +972,12 @@ impl JsValue for WindowOptions {
 pub struct OpenWindow {
     /// The options, [`WindowOptions::attributes`] resolved.
     pub options: WindowOptions,
-    /// The root node of the parent window ([`crate::ROOT_ID`] for the main
-    /// window), if it has one.
+    /// The implicit first window `mount` opens around a released app's
+    /// plain root: the main window that app always had, not a window of
+    /// its own, so `capabilities.windows` does not grant it.
+    #[doc(hidden)]
+    pub implicit: bool,
+    /// The root node of the parent window, if the app has it open.
     pub parent: Option<NodeId>,
     /// The placement kept for its id ([`WindowOptions::restore_bounds`]),
     /// fitted on the displays there are now: it wins over the default size,
@@ -1068,11 +1069,6 @@ pub enum WindowEvent {
     /// The app opens or focuses the window it wants; NSH shows none by
     /// itself ([`crate::element::desktop::on_reopen`]).
     Reopen,
-    /// The app's last window went: the app root is still alive. Reported on
-    /// the root, after the window's own close path, whether or not the
-    /// quit policy then quits the app
-    /// ([`DesktopCommand::SetQuitOnLastWindowClosed`]).
-    LastWindowClosed,
     /// The user asked to quit the app (its Quit item, the platform's quit
     /// key) while the app listens to quit requests
     /// ([`super::DesktopCommand::SetQuitOnRequest`]): the platform did not

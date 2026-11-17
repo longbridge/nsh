@@ -186,10 +186,11 @@ The `cursor` style follows updates while the mouse rests over a view. When a bat
 Windows applies the new shape or `"none"` after the whole batch, using the view under the pointer.
 The title bar and resize borders keep their system cursors.
 
-An app opens windows of its own with [`<Window>` and `Window.open`](../modules/nsh-desktop.md#windows): each is a
+An app declares its windows with [`<Window>` and `Window.open`](../modules/nsh-desktop.md#windows): each is a
 top-level window drawn by the app's engine and running in its one JS runtime, so it shares the app's signals and
-modules directly. A normal window has its own taskbar button; dialogs, panels and popups are owned by their parent
-window. Closing the main window closes them and ends the app.
+modules directly. A normal window has its own taskbar button; dialogs, panels and popups with a parent are owned by
+that window. The app host is an invisible message-only dispatcher with a hidden surface: closing any user window
+closes only that window, and closing the last one quits only when the app's quit policy says so (the Windows default).
 
 ### Keyboard
 

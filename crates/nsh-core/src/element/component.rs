@@ -578,6 +578,7 @@ pub struct Root {
     capabilities: Option<crate::access::Capabilities>,
     status_bar: Option<crate::StatusBarSetting>,
     main_window: Option<crate::desktop::MainWindowOptions>,
+    application: Option<crate::desktop::ApplicationOptions>,
     translations: Option<crate::i18n::Translations>,
 }
 
@@ -594,6 +595,7 @@ impl Root {
             capabilities: None,
             status_bar: None,
             main_window: None,
+            application: None,
             translations: None,
         }
     }
@@ -749,6 +751,38 @@ impl Root {
     /// The main window's launch options ([`Root::main_window`]).
     pub fn main_window_ref(&self) -> Option<&crate::desktop::MainWindowOptions> {
         self.main_window.as_ref()
+    }
+
+    /// The app's lifecycle options (`nsh.json` `"application"`, which nsh's
+    /// generated code sets): the engine sets the quit policy before the app
+    /// runs, as for a TSX app's bundle.
+    pub fn application(mut self, options: crate::desktop::ApplicationOptions) -> Self {
+        self.application = Some(options);
+        self
+    }
+
+    /// [`Root::application`] from `nsh.json`'s `"application"` object as
+    /// JSON text, which nsh's generated code compiles in (checked when it
+    /// was generated). A wrong one is logged and left out.
+    #[doc(hidden)]
+    pub fn application_json(self, json: &str) -> Self {
+        let options = serde_json::from_str::<serde_json::Value>(json)
+            .map_err(|e| e.to_string())
+            .and_then(|v| {
+                crate::desktop::ApplicationOptions::from_json(&v).map_err(|e| e.to_string())
+            });
+        match options {
+            Ok(options) => self.application(options),
+            Err(e) => {
+                log::warn!("nsh.json: application: {e}");
+                self
+            }
+        }
+    }
+
+    /// The app's lifecycle options ([`Root::application`]).
+    pub fn application_ref(&self) -> Option<&crate::desktop::ApplicationOptions> {
+        self.application.as_ref()
     }
 
     /// The status bar's default ([`Root::status_bar`]).

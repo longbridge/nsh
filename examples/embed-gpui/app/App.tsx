@@ -2,6 +2,11 @@
 // Kit window. Its controls are its own (`ui.tsx`) and follow the host's
 // light or dark mode (`AppView::set_appearance`).
 //
+// Not migrated to window model v2: GPUI still runs the app in its host
+// window, and `<Window>` would open a separate OS window instead of the
+// embedding pane. `mount(App)` here needs a GPUI backend with the v2 host
+// (see docs/dev/gpui.md).
+//
 // The host provides the rest by name, at run time, so this app builds with
 // the stock `nsh build`: its desk (`nativeModule("host/trading")`, Rust
 // functions the host registers) and two GPUI Kit widgets (`nativeComponent`).
@@ -9,7 +14,6 @@
 // or an order placed here shows in the host and in the other tickets.
 
 import { effect, mount, Scroll, signal, Text, View } from "nsh";
-import { Window } from "nsh/desktop";
 import { nativeComponent, nativeModule } from "nsh";
 import { Button, Card, Stepper, TextField } from "./ui";
 
@@ -145,4 +149,4 @@ function App() {
   );
 }
 
-mount(() => <Window id="main">{App}</Window>);
+mount(App);

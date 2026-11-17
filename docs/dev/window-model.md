@@ -1,18 +1,55 @@
 # The window model: app host and app windows (design)
 
-Status: proposed, 2026-11-17. This is a major-version change to the desktop
-window model. It replaces the privileged main window with an app host and
-first-class app windows. No code is implemented yet.
+Status: implemented in code, 2026-11-17 (major-version change); the native
+window lifecycles are 待平台验证 on macOS and Linux. On Windows the crate's
+tests ran in this delivery; the real-host window behaviours are still
+待平台验证. The macOS host fixtures and native tests are updated; running them
+needs macOS and Linux.
+This replaces the privileged main window with an app host and first-class app
+windows.
+
+Delivered: the invisible host; per-window roots, owners, key scopes,
+placement and close policy; the window registry and explicit `<Window>`
+scenes; `Application.setQuitPolicy`, `on("reopen")` and
+`on("lastWindowClosed")`; nsh.json `application.quitOnLastWindowClosed`;
+window-scoped and app-scoped `keymap.bind` (JS and Rust); the headless model
+with zero, one and N windows; and the macOS/Windows/Linux backends' window
+lifecycles.
+
+Not delivered in this version (recorded, not hidden):
+**per-window menu bars** on Windows and Linux (`<MenuBar>` /
+`WindowRef.setMenuBar(items)`) are not implemented; `Menu.setApplicationMenu`
+belongs to the hidden app host and is not shown on the platforms' own bars,
+so an app that needs a visible menu bar uses its own controls and shortcuts.
+**Menu roles** (Close, Minimize, Zoom) on Windows and Linux still act on the
+host's window rather than the focused window; macOS's responder chain acts on
+the key window. **GPUI** is not migrated: its host and Linux window behavior
+follow the old model. **`windowSize()`/`pixelRatio()`** still report the host
+surface and the host display, not the calling window's. **`defaultVisible`**
+no longer applies: the host never shows, and an app that starts without a
+window opens none; the key is still parsed but has no effect.
+
+Rust app roots have no implicit window: a Rust root that returns a plain
+view renders into the hidden host, invisible on the desktops, and
+`current_window()` there is [`main_window`] (the app root's ref). A
+cross-platform Rust app declares `element::desktop::window()` there; it
+renders its content off the desktops. The Rust `main_window()` ref remains for
+app-root commands and is not a user window: its window requests (`show`,
+`hide`, `focus`, `close`, `minimize`, `restore`, modes and bounds) do
+nothing, though attributes and `request_attention` still reach the app
+(the page title, the Dock icon or the launcher entry; the hidden host has no
+taskbar button on Windows), and `quit()` ends the app. `current_window()`
+in the app root is that ref, as `currentWindow()` is the main window's there.
 
 ## Summary
 
-Today an NSH app is one engine root: the main window is the root view tree and
-every app-owned window is a dialog root inserted into that tree. Closing the
-main window ends the app and closes every other window; menus, menu roles and
-keyboard bindings are app-level and main-centric.
+The model this replaces had one engine root: the main window was the root
+view tree and every app-owned window was a dialog root inserted into that
+tree. Closing the main window ended the app and closed every other window;
+menus, menu roles and keyboard bindings were app-level and main-centric.
 
-That model fits single-window apps, mobile apps and apps whose extra windows
-are tools. It does not fit document-based desktop apps: a project manager that
+That model fit single-window apps, mobile apps and apps whose extra windows
+are tools. It did not fit document-based desktop apps: a project manager that
 opens one window per project, a launcher that gives way to a document, or any
 app where "closing this window" must not mean "quit and close everything".
 
@@ -30,7 +67,7 @@ The design keeps one app JS context, as Qt and AppKit keep one application
 process. Window isolation comes from one root tree and one reactive owner per
 window, not from one JS VM per window.
 
-## What we have
+## What the model replaced
 
 - `Core` creates one root view (`ROOT_ID`, `crates/nsh-core/src/core/mod.rs`)
   and lays out the app in it.
@@ -72,13 +109,16 @@ the main-centric lifecycle, menus and keys.
 4. Each window has its own keyboard scope. App-level shortcuts are explicit.
 5. Windows and Linux can give any window its own menu bar; macOS keeps the
    global application menu and a Window menu generated from the registry.
+   (Per-window menu bars are not implemented in this delivery.)
 6. Window roles, menu accelerators and focus resolve to the focused or owning
-   window, never to a hidden "main" window.
+   window, never to a hidden "main" window. (Windows and Linux roles still
+   target the host in this delivery; macOS follows the key window.)
 7. Every app declares its windows explicitly with `<Window>`; NSH does not
    create or wrap an implicit window. Migrating an existing app is a
    major-version change.
 8. The model works on macOS, Windows, Linux and the headless desktop model;
-   iOS, Android and the web keep one window and degrade gracefully.
+   iOS, Android and the web keep one surface, where `<Window>` renders its
+   content and the window APIs report no window.
 
 ## Non-goals
 
@@ -122,9 +162,10 @@ The app host is not a user window. It owns:
 - the window registry and focus;
 - tray, global shortcuts, single-instance and file-open routing.
 
-On Windows the host is a message-only window (`HWND_MESSAGE`); on Linux it is
-the `GtkApplication`; on macOS it is the `NSApplication` delegate. None of
-them is a visible top-level window.
+On Windows the host's dispatcher is a message-only window (`HWND_MESSAGE`)
+and the engine surface is a hidden top-level window; on Linux the host is the
+`GtkApplication`; on macOS it is the `NSApplication` delegate. None of them is
+a visible top-level window.
 
 ### App root
 
@@ -136,14 +177,28 @@ and close.
 `<Window>` elements in that tree are **scenes**: they are not mounted into a
 parent view. Each one creates a window root. A `<Window>` declared inside
 another window's content is a scene of that window (it closes with it), not
-a view. A normal view returned by `mount` outside a `<Window>` is an error:
-every app declares at least one top-level `<Window>`, and NSH does not
-create an implicit first window.
+a view. A normal view returned by `mount` outside a `<Window>` is a released
+app's main window: `mount` wraps it in an implicit first window (`id`
+`"main"`, as `<Window id="main">` declares) unless the root turns out to
+declare `<Window>` scenes of its own. The implicit window's content is the
+views and text the root returned; an empty root gets an empty window, as the
+old main window was. It opens with what the root set and asked of it
+(`set`, `setMode`, `hide`, ...), `titleBar()` and `windowState()` read it,
+and `capabilities.windows` does not gate it: it is the main window the app
+always had. A `<Window>` that starts closed still makes the root a window
+app, so no implicit window opens for it.
 
-`currentWindow()` is valid while rendering inside a `<Window>`; outside a
-window (in the app root) it throws with a message pointing at
-`focusedWindow()` and `windows()`. Components that may be used in either place
-take a `WindowRef` as a prop.
+`currentWindow()` is valid while rendering inside a `<Window>`, and in the
+app root it is the main window's ref (the implicit first window, or the
+app's one surface off the desktops); it throws only when called outside a
+render. Components that may be used in either place take a `WindowRef` as a
+prop.
+
+Off the desktops (iOS, Android, the web and a terminal app) there are no
+windows: a `<Window>` renders its content, while open, as part of the app's one
+surface; `currentWindow()` is the app's one surface, as the old main window
+was, and `windows()` lists only it; `focusedWindow()` is `null`,
+`windowState()` is `null` and `titleBar()` is all 0.
 
 ### Window roots
 
@@ -228,9 +283,10 @@ Events:
   the Quit item and the platform quit key ask the app instead of quitting.
 - `Application.on("quit")` remains a best-effort cleanup hook with the
   existing bounded budget; real saving belongs in `quitRequest`.
-- `Application.quit()` closes every window (through the normal close path,
-  including `closeOnPress`) and quits even if a close fails; the process exit
-  releases OS locks.
+- `Application.quit()` ends the app; it is not a per-window close sequence,
+  and its windows' `onOpenChange` may not run. The process exit releases OS
+  locks. Apps that must save per-window state do it in `quitRequest`, where
+  the windows still exist.
 
 ### Startup
 
@@ -240,8 +296,8 @@ Events:
   a window. The app declares the window explicitly.
 - An app can start with zero visible windows (macOS), one window, or several
   windows created from app-level code.
-- `defaultVisible: false` is valid for any window, including the first. It
-  does not hide an engine root; there is no such root.
+- `defaultVisible` is retired: it is still parsed but has no effect. The host
+  is never visible, and an app that starts without a window opens none.
 
 ## Window registry and focus
 
@@ -254,11 +310,13 @@ The registry is the source of truth for:
 - the Window menu;
 - "open in this app" checks (a window already open is focused, not
   duplicated);
-- quit coordination: every open window is closed through its own close path.
+- quit coordination: `quitRequest` lets the app save every window;
+  `quit` itself ends the app without a per-window close path (a window's
+  `onOpenChange` may not run).
 
 Each entry carries the id, title, kind, parent, `WindowRef`, state and
 placement. Window ids are stable and app-chosen. `"main"` is the first
-window's default id and has no special meaning. `restoreBounds` keeps a
+window's conventional id (the id is required) and has no special meaning. `restoreBounds` keeps a
 placement per id and fits it on the displays present; the app saves the set of
 open windows if it wants session restoration.
 
@@ -275,7 +333,7 @@ open windows if it wants session restoration.
 - A per-window menu bar is not a macOS convention; `<MenuBar>` renders nothing
   there and apps use the application menu.
 
-### Windows and Linux
+### Windows and Linux (design target; not implemented in this delivery)
 
 - Every window can have its own menu bar. Declarative form:
 
@@ -342,20 +400,23 @@ namespace, and objects owned by windows or by the application.
 
 | Area | macOS | Windows | Linux | Headless | iOS/Android/Web |
 |---|---|---|---|---|---|
-| App host | NSApplication delegate | message-only window | GtkApplication | engine + window model | app host |
-| Visible windows | NSWindows | HWNDs | GtkWindows | model windows | one window |
+| App host | NSApplication delegate | message-only dispatcher + hidden surface | GtkApplication | engine + window model | app host |
+| Visible windows | NSWindows | HWNDs | GtkWindows | model windows | the app surface; `<Window>` renders its content |
 | Closing a normal window | removes that window | destroys that HWND | destroys that GtkWindow | removes that window | n/a |
 | Last window | app stays (default) | quits (default) | quits (default) | policy is testable | app lifecycle |
-| Application menu | system menu bar | default menu bar / per-window | default menu bar / per-window | model | none |
-| Per-window menu bar | not rendered | client-area menu bar | client-area menu bar | model | none |
-| Window roles | key window (responder chain) | owning/focused window | owning/focused window | model | none |
+| Application menu | system menu bar | host only, not shown | host only, not shown | model | none |
+| Per-window menu bar | not rendered | not implemented | not implemented | model | none |
+| Window roles | key window (responder chain) | host (deviation) | host (deviation) | model | none |
 | Reopen | Dock/Finder `reopen` | second launch shows? app decides | second launch shows? app decides | no | n/a |
 | Session end | system quit request | WM_QUERYENDSESSION | SIGTERM/quit request | n/a | n/a |
 | Placement | `restoreBounds` per id | same | same | model | n/a |
 
 Windows and Linux do not show a menu bar for a window that has none. The
 default application menu is a convenience, not a native menu attached to a
-window.
+window. GPUI is not migrated: it still shows
+the host as a window on Linux and has no app-window roots. This delivery
+marks the native macOS/Windows/Linux behavior 待平台验证; the headless model
+and the TSX/Rust API are covered.
 
 ## API
 
@@ -395,9 +456,9 @@ mount(App);
 ```
 
 - `<Window>` is a scene. `open` controls it; `defaultOpen` is allowed.
-- `<MenuBar>` is available for apps that want a per-window menu bar on
-  Windows and Linux; it renders nothing on macOS. Apps that do not need it
-  omit it.
+- `<MenuBar>` and `WindowRef.setMenuBar(items)` are design targets for
+  Windows and Linux, not available in this delivery; apps that need a visible
+  bar draw their own controls.
 - `Application` is an imperative module, not a JSX element:
   `Application.setQuitPolicy(...)`, `Application.on(...)` and
   `Application.quit()`.
@@ -420,17 +481,22 @@ mount(App);
 ```
 
 `"window"` supplies launch defaults for the first window; it does not create
-one. Every app declares its windows in JS with `<Window>`. An app that
-returns a normal view tree, or no `<Window>` at all, fails with a clear
-error: there is no implicit first window to fall back to.
+one. A JS app declares its windows with `<Window>`; an app that returns a
+normal view tree (or no `<Window>` at all) gets the implicit first window, in
+which its content renders as the old main window's. A Rust app root has no
+implicit window: it renders into the hidden host, so a Rust desktop app must
+declare `element::desktop::window()`.
 
-### No implicit window
+### The implicit first window (compatibility)
 
-Window model v2 is a major-version break. Existing apps add a top-level
-`<Window id="main" ...>` around their view tree and move app-level state to
-the app root. The first window inherits the `"window"` launch defaults; its
-`<Window>` attributes override them. An app that needs the old "quit when the
-first window closes" behavior sets `quitOnLastWindowClosed: true`.
+Window model v2 is a major-version break for apps that declare windows, but
+released apps keep running: `mount` gives a plain root the implicit first
+window, `currentWindow()` in the app root is its ref, and root keymap
+bindings stay app-wide as they were. Apps that declare `<Window>` scenes do
+not get it (the runtime drops it unshown). The first window inherits the
+`"window"` launch defaults; its `<Window>` attributes override them. An app
+that needs the old "quit when the first window closes" behavior sets
+`quitOnLastWindowClosed: true`.
 
 ## Compatibility and migration
 
@@ -442,13 +508,14 @@ are real:
 | Main window is the engine root; closing it quits | App host is the root; the first window is ordinary; quitting follows policy |
 | App windows are dialog roots; close with main | App windows have their own roots; normal windows are independent |
 | Closing the last app window leaves the app running | Last-window policy decides; macOS stays, Windows/Linux quit by default |
-| Application menu is the main window's | macOS global menu; Windows/Linux default or per-window menu bars |
-| Menu roles target the main window on Windows/Linux | Roles target the owning/focused window |
+| Application menu is the main window's | macOS global menu; Windows/Linux host-only in this version (per-window bars deferred) |
+| Menu roles target the main window on Windows/Linux | Target the owning/focused window (macOS); Windows/Linux still target the host in this version |
 | `keymap.bind` is application-wide | Defaults to the current window; `scope: "app"` is explicit |
 | `Window.open` with an open id returns it without focus | Focuses the open window |
-| `currentWindow()` outside a window means main | Throws in the app root; use `focusedWindow()`/`windows()` |
-| `mount(App)` renders the main window | `mount` renders the app root; every app declares `<Window>` scenes explicitly |
-| `defaultVisible` only for the main window | Any window |
+| `currentWindow()` outside a window means main | Still the main window's ref in the app root; components inside `<Window>` get that window |
+| Off the desktops `<Window>` rendered nothing and `currentWindow()` was main | `<Window>` renders its content in the app's one surface; `currentWindow()` is the app's one surface, and `windows()` lists it |
+| `mount(App)` renders the main window | `mount` renders the app root; a plain root gets the implicit first window, and apps that declare `<Window>` scenes get those |
+| `defaultVisible` only for the main window | Retired; no effect |
 | `"main"` is reserved and privileged | `"main"` is a conventional first-window id, with no special behavior |
 
 Documentation, types, examples, `tests/compat/` and the website need the same
@@ -463,10 +530,12 @@ migrations are documented by the app; this page records only the NSH contract.
   text and mount work only for the windows that change.
 - The platform applies one mount batch per changed window; a change in project
   A does not redraw project B.
-- The app host is a message-only window on Windows and no NSWindow on macOS;
-  it adds no visible window and no taskbar entry.
-- The optional per-window menu bar is a native popup menu plus a small
-  in-content bar; it costs nothing in apps that do not use it.
+- The app host is a message-only dispatcher plus a hidden surface on Windows
+  and a hidden NSWindow on macOS; it adds no visible window and no taskbar
+  entry.
+- The optional per-window menu bar (not implemented in this delivery) is a
+  native popup menu plus a small in-content bar; it costs nothing in apps
+  that do not use it.
 - Per-window JS VMs are not part of this design, so the binary and start-up
   cost do not grow with the window count.
 
@@ -480,38 +549,48 @@ migrations are documented by the app; this page records only the NSH contract.
   root state surviving window closure; per-window keymaps; per-window menu
   models; an app that declares no top-level `<Window>` fails with a clear
   error.
-- macOS native tests: independent NSWindows, key-window menu roles, Window
-  menu, Dock reopen, last-window behavior, Cmd+W and Cmd+Q.
-- Windows native tests: message-only host, N HWNDs, taskbar entries,
-  client-area menu bars, Alt+F4, last-window policy, session end, second
-  instance.
-- Linux native tests: GtkApplication with N windows, focus, menu bar,
-  last-window policy.
+- macOS native tests: updated in this delivery (the host fixtures declare
+  `<Window>`, and the native quit and title-bar tests expect app windows) but
+  待平台验证: independent NSWindows, key-window menu roles, Window menu, Dock
+  reopen, last-window behavior, Cmd+W and Cmd+Q need a macOS run.
+- Windows native tests: the crate's unit tests ran on Windows in this
+  delivery. The message-only dispatcher, N HWNDs, taskbar entries, Alt+F4,
+  last-window policy, session end and second instance still need a real-host
+  Windows run; per-window menu bars are not implemented.
+- Linux native tests: 待平台验证. GtkApplication with N windows, focus and
+  last-window policy need a Linux run; per-window menu bars are not
+  implemented.
 - Example app tests: a launcher/document app opens and closes windows,
   supports several documents, quits with several windows, and uses menus and
-  shortcuts.
+  shortcuts (headless/TSX coverage in this delivery).
 
 Acceptance criteria:
 
 1. A macOS app with two windows survives closing either one, including the
-   first; Dock reopen reaches the app's `reopen` handler.
+   first; Dock reopen reaches the app's `reopen` handler. (待平台验证)
 2. A Windows app with two windows destroys only the closed window; closing the
    last one quits under `"platform"`; menu Close/Minimize/Zoom act on the
-   focused window.
-3. A Linux app behaves as on Windows.
+   focused window. (待平台验证; roles still target the host — not met)
+3. A Linux app behaves as on Windows. (待平台验证; roles still target the
+   host — not met)
 4. A window-scoped shortcut fires only in its window; an app-scoped shortcut
-   fires in every window.
-5. A per-window menu bar opens the right menus and roles.
+   fires in every window. (Headless/TSX and Rust tests pass.)
+5. A per-window menu bar opens the right menus and roles. (Not implemented.)
 6. An example document app opens a document, closes it back to the launcher,
    opens two documents, quits with both, and never shows a hidden "main"
-   window.
+   window. (Example apps cover the model headlessly; native UI 待平台验证.)
 7. An app that declares no top-level `<Window>` fails with a clear error
-   instead of receiving an implicit window.
+   instead of receiving an implicit window. (JS; Rust renders into the hidden
+   host as recorded above.)
 
 ## Implementation phases
 
 These are engineering stages inside one major-version effort; the target model
-is not partially shipped as a product.
+is not partially shipped as a product. Status in this delivery: phases 1, 2 and
+7 are done (the outstanding docs/compat items and native verification are
+listed above); phases 4–6 are done in code with their native tests 待平台验证;
+phase 3 is done for the application menu and role resolution, while per-window
+menu bars are deferred; phase 8 (release) is outside this delivery.
 
 1. **Core app host and window roots** — split `Core` into an app root and a
    window registry; move dialog roots to window roots; keep owned
@@ -523,8 +602,8 @@ is not partially shipped as a product.
    Window menu, `nsh.json` application block.
 4. **macOS backend** — app delegate, NSWindows, menu, Dock reopen, last-window
    behavior.
-5. **Windows backend** — message-only host, N HWNDs, taskbar, menu bars,
-   last-window behavior, session end.
+5. **Windows backend** — message-only dispatcher with a hidden surface, N
+   HWNDs, taskbar, menu bars, last-window behavior, session end.
 6. **Linux backend** — GtkApplication, N windows, focus, menu bars,
    last-window behavior.
 7. **Headless model, docs, types and compatibility tests** — update
@@ -541,7 +620,8 @@ is not partially shipped as a product.
 - Menu bars with a hidden title bar need a client-area design on Windows and
   Linux; the native popup path must keep keyboard and accessibility behavior.
 - The explicit-window migration and the keymap default change need careful
-  release notes; there is no implicit first window.
+  release notes; a plain root keeps the implicit first window for released
+  apps.
 - One engine thread means a busy window can still stall the others; that is a
   known property of the single-context design, not a regression.
 - Mobile and web must keep compiling and behaving as single-window apps.

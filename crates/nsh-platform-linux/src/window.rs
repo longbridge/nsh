@@ -1634,6 +1634,13 @@ fn hidden(window: &gtk::Window, seen: Option<WindowState>) -> Option<WindowState
     if window.is_visible() {
         return None;
     }
+    state_before_show(window, seen)
+}
+
+/// The state of a window GTK has no size for: where it was left (`seen`),
+/// or, not shown yet, as GTK holds it for its next show: in its mode, at
+/// its default size.
+fn state_before_show(window: &gtk::Window, seen: Option<WindowState>) -> Option<WindowState> {
     if let Some(mut state) = seen {
         state.visible = false;
         state.focused = false;
@@ -2075,12 +2082,16 @@ pub(crate) fn current_state(surface: &Surface, id: NodeId) -> Option<WindowState
         )
     })?;
     let now = view.and_then(|view| state_of(&window, view.upcast_ref(), &mut normal));
-    // Not shown yet: no size of its own.
-    Some(now.or(last).unwrap_or_else(|| {
-        let mut state = WindowState::new(Bounds::default(), WindowPlacement::default());
-        state.visible = false;
-        state
-    }))
+    // Not shown yet: GTK sizes a window only as it maps it, so where it
+    // was left, or the size it opens at, stands in.
+    Some(
+        now.or_else(|| state_before_show(&window, last))
+            .unwrap_or_else(|| {
+                let mut state = WindowState::new(Bounds::default(), WindowPlacement::default());
+                state.visible = false;
+                state
+            }),
+    )
 }
 
 // --- Removal ----------------------------------------------------------------------------

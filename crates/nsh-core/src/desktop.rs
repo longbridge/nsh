@@ -35,6 +35,75 @@ pub use window::{
 };
 pub use window_state::{Display, DisplayId, WindowPlacement, WindowState, notch};
 
+/// When closing the app's last window quits it: nsh.json's
+/// `application.quitOnLastWindowClosed`, and the runtime's
+/// `Application.setQuitPolicy` once the app runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum QuitOnLastWindowClosed {
+    /// As the platform does: macOS stays, Windows and Linux quit.
+    #[default]
+    Platform,
+    /// Every platform quits.
+    Always,
+    /// Never: the app decides.
+    Never,
+}
+
+impl QuitOnLastWindowClosed {
+    /// Whether closing the last window quits on `os`.
+    pub fn quits(self, os: crate::platform::Os) -> bool {
+        match self {
+            Self::Platform => matches!(
+                os,
+                crate::platform::Os::Windows | crate::platform::Os::Linux
+            ),
+            Self::Always => true,
+            Self::Never => false,
+        }
+    }
+
+    /// Reads the option: `"platform"`, `true` or `false`.
+    pub fn from_json(value: &serde_json::Value) -> Result<Self, String> {
+        if let Some(quit) = value.as_bool() {
+            return Ok(if quit { Self::Always } else { Self::Never });
+        }
+        match value.as_str() {
+            Some("platform") => Ok(Self::Platform),
+            _ => Err("expected \"platform\", true or false".to_owned()),
+        }
+    }
+}
+
+/// The app's `"application"` block of nsh.json (or `app.json`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct ApplicationOptions {
+    /// When closing the last window quits.
+    pub quit_on_last_window_closed: QuitOnLastWindowClosed,
+}
+
+impl ApplicationOptions {
+    /// Reads `"application"`: an unknown key or a wrong value is an error.
+    pub fn from_json(value: &serde_json::Value) -> Result<Self, String> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| "expected an object".to_owned())?;
+        let mut options = Self::default();
+        for (key, value) in object {
+            match key.as_str() {
+                "quitOnLastWindowClosed" => {
+                    options.quit_on_last_window_closed =
+                        QuitOnLastWindowClosed::from_json(value)
+                            .map_err(|e| format!("quitOnLastWindowClosed: {e}"))?;
+                }
+                other => return Err(format!("unknown key `{other}`")),
+            }
+        }
+        Ok(options)
+    }
+}
+
 /// Additional sources of quit requests on standalone macOS apps. Both
 /// options default to false and require a quit request listener. Other
 /// platforms and embedded views keep their existing lifecycle.
@@ -45,9 +114,9 @@ pub struct QuitRequestOptions {
     /// approve, or `cancel_quit_request()` to cancel the system request.
     #[prop(default)]
     pub system: bool,
-    /// Asks before a user closes the main window when that would end the
-    /// app. A window with `close_on_press: false` uses its close handler
-    /// instead; a window kept alive on close still hides as before.
+    /// Legacy in window model v2: there is no user-closable main window, so
+    /// this asks for nothing. A window with `close_on_press: false` uses its
+    /// close handler; a window kept alive on close still hides.
     #[prop(default)]
     pub main_window_close: bool,
 }
@@ -59,8 +128,8 @@ impl QuitRequestOptions {
         self
     }
 
-    /// Whether closing the main window asks the quit listener when that
-    /// close would end the app.
+    /// Whether closing the main window asks the quit listener: legacy, and
+    /// no window is the main one in window model v2.
     pub fn main_window_close(mut self, main_window_close: bool) -> Self {
         self.main_window_close = main_window_close;
         self
@@ -1063,10 +1132,10 @@ pub enum DesktopCommand {
     SetAttributes(Box<WindowAttributes>),
     /// A request to the window.
     Request(WindowRequest),
-    /// Quits the app, as its `quit` menu role does: its windows close and
-    /// its run ends, also when closing the window would leave it running
-    /// (a window kept hidden, a tray icon). A view embedded in another app
-    /// leaves the app's lifecycle to that app.
+    /// Quits the app, as its `quit` menu role does: the app ends without a
+    /// per-window close path, also when closing the window would leave it
+    /// running (a window kept hidden, a tray icon). A view embedded in
+    /// another app leaves the app's lifecycle to that app.
     Quit,
     /// Quits the app as [`DesktopCommand::Quit`] does, then starts it again
     /// with the same arguments once this process has exited
@@ -1143,12 +1212,16 @@ impl DesktopCommand {
         )
     }
 
-    pub(crate) fn is_windows(&self) -> bool {
+    /// Whether the core carries the command out itself (the windows it
+    /// keeps records of, the app-wide quit policy) instead of handing it
+    /// to the platform.
+    pub(crate) fn is_core_handled(&self) -> bool {
         matches!(
             self,
             DesktopCommand::OpenWindow(_)
                 | DesktopCommand::SetAttributes(_)
                 | DesktopCommand::Request(WindowRequest::SetPlacement(_))
+                | DesktopCommand::SetQuitOnLastWindowClosed(_)
         )
     }
 }
@@ -1229,6 +1302,41 @@ pub(crate) fn title_bar_height(height: Option<Points>) -> Option<Points> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_application_block_reads_the_last_window_policy() {
+        let read = |json: &str| {
+            ApplicationOptions::from_json(&serde_json::from_str::<crate::JsonValue>(json).unwrap())
+        };
+        assert_eq!(
+            read(r#"{"quitOnLastWindowClosed":"platform"}"#)
+                .unwrap()
+                .quit_on_last_window_closed,
+            QuitOnLastWindowClosed::Platform
+        );
+        assert_eq!(
+            read(r#"{"quitOnLastWindowClosed":true}"#)
+                .unwrap()
+                .quit_on_last_window_closed,
+            QuitOnLastWindowClosed::Always
+        );
+        assert_eq!(
+            read(r#"{"quitOnLastWindowClosed":false}"#)
+                .unwrap()
+                .quit_on_last_window_closed,
+            QuitOnLastWindowClosed::Never
+        );
+        assert!(read(r#"{"quitOnLastWindowClosed":"sometimes"}"#).is_err());
+        assert!(read(r#"{"quitOnLastWindowClose":true}"#).is_err());
+        assert!(read("[]").is_err());
+
+        use crate::platform::Os;
+        assert!(QuitOnLastWindowClosed::Platform.quits(Os::Windows));
+        assert!(QuitOnLastWindowClosed::Platform.quits(Os::Linux));
+        assert!(!QuitOnLastWindowClosed::Platform.quits(Os::MacOs));
+        assert!(QuitOnLastWindowClosed::Always.quits(Os::MacOs));
+        assert!(!QuitOnLastWindowClosed::Never.quits(Os::Windows));
+    }
+
     #[test]
     fn built_in_menu_labels_follow_locale_fallbacks_and_platform_titles() {
         for (locale, copy, quit) in [

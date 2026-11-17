@@ -176,10 +176,11 @@ pub struct AppOptions {
     /// runs, so the Dock never shows an accessory app.
     /// [`background`](Self::background) takes precedence.
     pub activation_policy: ActivationPolicy,
-    /// Hides the standalone window on close while retaining its engine.
-    /// Reopening from the Dock shows the same window (an accessory app,
-    /// which has no Dock icon, shows it itself: from its tray, say). Quit
-    /// still stops the app. Only used by [`run_app`]; defaults to false.
+    /// Hides the standalone window on close while retaining its engine. In
+    /// window model v2 the host never shows; a Dock reopen reaches the app's
+    /// `reopen` listeners, which open or focus the window they want (an
+    /// accessory app, which has no Dock icon, does it from its tray, say).
+    /// Quit still stops the app. Only used by [`run_app`]; defaults to false.
     pub keep_alive_on_close: bool,
     /// The native components apps can use (`nsh/native`); shared by the
     /// views made with these options. See [`AppView::register_component`].
@@ -713,8 +714,6 @@ pub(crate) fn dev_app_came(surface: &Surface, visible: bool) {
     if visible {
         show_launched(&window, surface, background);
         crate::window::main_shown(surface);
-    } else {
-        log::info!("the main window starts hidden (nsh.json window.defaultVisible: false)");
     }
 }
 
@@ -838,21 +837,24 @@ define_class!(
                     url_scheme(url.to_string());
                 }
             }
-            // A link opened while the app runs brings it forward.
+            // A link opened while the app runs brings it forward. The host
+            // stays hidden: the app's `reopen` listeners open or focus the
+            // window they want.
             app.activate();
-            let shown = RUNNING.with(|running| {
+            let surface = RUNNING.with(|running| {
                 running
                     .borrow()
                     .as_ref()
-                    .map(|running| (running.window.clone(), running.view.clone()))
+                    .map(|running| running.view.surface().clone())
             });
-            if let Some((window, view)) = shown {
-                if window.isMiniaturized() {
-                    window.deminiaturize(None);
-                }
-                window.makeKeyAndOrderFront(None);
-                // Hidden since launch: it opens in its mode.
-                crate::window::main_shown(view.surface());
+            if let Some(surface) = surface {
+                surface.event(
+                    nsh_core::ROOT_ID,
+                    nsh_core::EventKind::Window,
+                    nsh_core::EventPayload::Window(Box::new(
+                        nsh_core::desktop::WindowEvent::Reopen,
+                    )),
+                );
             }
         }
 
@@ -1369,13 +1371,10 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     #[cfg(feature = "dev")]
     let pending = pending.or(dev_server.map(AppSource::DevServer));
     PENDING.with(|p| *p.borrow_mut() = pending);
-    // nsh.json `window.defaultVisible: false`: the window is made and the
-    // app runs in it, unseen, until it shows it (a tray app).
+    // The host never shows: the app opens the windows it declares.
     let shown = !held && launch.visible_at_launch();
     if shown {
         show_launched(&window, view.surface(), options.background);
-    } else if !held {
-        log::info!("the main window starts hidden (nsh.json window.defaultVisible: false)");
     }
     let view_surface = view.surface().clone();
     RUNNING.with(|r| {

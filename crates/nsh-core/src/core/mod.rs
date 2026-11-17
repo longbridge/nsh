@@ -1581,6 +1581,9 @@ pub struct Core<M: TextEngine> {
     /// the first app window inherits them, since the host has no visible
     /// window of its own.
     main_window_options: Option<crate::desktop::MainWindowOptions>,
+    /// The launch defaults were given to the first window that opened this
+    /// run: a later window after every window closed is not the first.
+    launch_defaults_applied: bool,
     /// The main window's placement is kept (nsh.json `window.restoreBounds`,
     /// [`Core::set_main_window`]).
     keep_main_placement: bool,
@@ -1672,6 +1675,7 @@ impl<M: TextEngine> Core<M> {
             folded: Default::default(),
             quit_on_last_window_closed: false,
             main_window_options: None,
+            launch_defaults_applied: false,
             keep_main_placement: false,
             main_shown: false,
             clipboard: None,
@@ -2953,7 +2957,7 @@ impl<M: TextEngine> Core<M> {
             Op::Command {
                 id,
                 command: Command::Desktop(desktop),
-            } if desktop.is_windows() => {
+            } if desktop.is_core_handled() => {
                 self.key(id)?;
                 self.window_command(id, *desktop);
                 Ok(())
@@ -2976,6 +2980,13 @@ impl<M: TextEngine> Core<M> {
             window::{WindowRecord, placement_key},
         };
         match command {
+            // The quit policy reaches past the app's view, as quitting does:
+            // a sandboxed app without `application` keeps the platform's.
+            DesktopCommand::SetQuitOnLastWindowClosed(_) if !self.access.allows_application() => {
+                self.deny(
+                    "the application (its main window, menu, tray, global shortcuts, quitting and restarting) is not granted: add `\"application\": true` to capabilities in nsh.json".into(),
+                );
+            }
             DesktopCommand::SetAttributes(_) if !self.has_window() => {
                 log::debug!("window attributes of view {id}: the surface has no window");
             }
@@ -3015,10 +3026,12 @@ impl<M: TextEngine> Core<M> {
                     .values()
                     .filter(|(node, _)| *node != id && self.key(*node).is_ok())
                     .count();
-                // The first app window inherits nsh.json's `"window"` launch
-                // defaults and the host's size: the host is invisible, so
-                // those defaults describe the window the app shows first.
-                if open_now == 0 {
+                // The first app window of the run inherits nsh.json's
+                // `"window"` launch defaults and the host's size: the host is
+                // invisible, so those defaults describe the window the app
+                // shows first. A later window after every one closed opens
+                // as it asked, not as the launch defaults say.
+                if !self.launch_defaults_applied {
                     if let Some(defaults) = self.main_window_options.clone() {
                         if options.default_size.is_none() {
                             options.default_size = defaults.default_size;
@@ -3031,6 +3044,9 @@ impl<M: TextEngine> Core<M> {
                         }
                         if options.default_mode.is_none() {
                             options.default_mode = defaults.default_mode;
+                        }
+                        if !options.restore_bounds {
+                            options.restore_bounds = defaults.restore_bounds;
                         }
                         let mut attributes = defaults.attributes;
                         attributes.merge(&options.attributes);
@@ -3046,21 +3062,28 @@ impl<M: TextEngine> Core<M> {
                         }
                     }
                 }
-                if let Err(message) =
-                    self.access
-                        .check_window(options.kind, &options.attributes, open_now)
+                // A released app's implicit first window is the main window
+                // it always had, not one of its own: no grant to check.
+                if !open.implicit
+                    && let Err(message) =
+                        self.access
+                            .check_window(options.kind, &options.attributes, open_now)
                 {
                     self.deny(format!("nsh/desktop: {message}: the window does not open"));
                     return;
                 }
+                // A refused first window does not consume the launch
+                // defaults: the next admitted window still gets them.
+                self.launch_defaults_applied = true;
                 options.attributes.sanitize();
                 options.attributes =
                     crate::desktop::WindowAttributes::resolve(options.kind, &options.attributes);
-                open.parent = match options.parent.as_deref() {
-                    None => None,
-                    Some("main") => Some(crate::ROOT_ID),
-                    Some(parent) => self.window_ids.get(parent).map(|(node, _)| *node),
-                };
+                // `"main"` is a window id like any other: a parent is the
+                // window the registry has open under that id.
+                open.parent = options
+                    .parent
+                    .as_deref()
+                    .and_then(|parent| self.window_ids.get(parent).map(|(node, _)| *node));
                 if options.restore_bounds {
                     let _entered = self.components.runtime.enter();
                     open.placement = crate::storage::Storage::get_item(&placement_key(&options.id))
@@ -3113,7 +3136,14 @@ impl<M: TextEngine> Core<M> {
             self.window_ids.retain(|_, (node, _)| *node != id);
         }
         // The last window went: the policy decides whether that ends the
-        // app. The app's own close path has run by now (its root is gone).
+        // app. The app's own close path has run by now (its root is gone),
+        // and the core's listeners had their turn (a Rust listener turning
+        // the policy off keeps the app running). A JS listener runs in a
+        // later commit, after this decision: an app that keeps running with
+        // no windows sets `quitOnLastWindowClosed: false` before the last
+        // close, not from `lastWindowClosed`. A listener that opens a window
+        // again does so in the next commit, which by then is not the last
+        // window (with the policy off).
         if had_windows && self.window_ids.is_empty() {
             self.last_window_closed();
             if self.quit_on_last_window_closed {

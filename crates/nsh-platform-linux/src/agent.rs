@@ -587,8 +587,20 @@ impl Native for LinuxNative {
     }
 
     fn resize(&self, width: Points, height: Points) -> Result<(), String> {
-        self.with_window(move |_, w| w.set_default_size(width.0 as i32, height.0 as i32))
-            .ok_or_else(|| "the window is gone".to_owned())
+        // `setViewport` resizes the window the app shows, not the hidden
+        // host: the targeted window, else the key one (the frontmost of the
+        // app's own windows, else the main window).
+        let target = self.target.load(Ordering::Relaxed);
+        self.on_main(move |surface| {
+            let window = if target != ROOT_ID {
+                crate::window::native_window(surface, target)
+            } else {
+                crate::window::key_window(surface)
+            };
+            window.map(|w| w.set_default_size(width.0 as i32, height.0 as i32))
+        })
+        .flatten()
+        .ok_or_else(|| "the window is gone".to_owned())
     }
 
     fn set_dark(&self, dark: bool) -> Result<(), String> {
