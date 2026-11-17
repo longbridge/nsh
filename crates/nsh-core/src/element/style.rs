@@ -474,6 +474,8 @@ pub(crate) enum Declaration {
     Duration(Bits),
     Delay(Bits),
     Ease([Bits; 4]),
+    /// A spring's stiffness, damping and mass (`ease-spring-[…]`).
+    EaseSpring([Bits; 3]),
     /// Tailwind's `ease-*`.
     EasePreset(&'static str),
     /// A keyframe animation (`None`: none).
@@ -712,6 +714,12 @@ impl Declaration {
             Declaration::Duration(ms) => part(out, Part::Duration(ms.0)),
             Declaration::Delay(ms) => part(out, Part::Delay(ms.0)),
             Declaration::Ease(curve) => part(out, Part::Ease(curve.map(|b| b.0))),
+            Declaration::EaseSpring(physics) => {
+                let [stiffness, damping, mass] = physics.map(|b| b.0);
+                if let Some(spring) = crate::style::spring_of((stiffness, damping, mass)) {
+                    part(out, Part::Spring(spring));
+                }
+            }
             Declaration::EasePreset(name) => {
                 if let Some(curve) = PRESETS.ease.get(*name) {
                     part(out, Part::Ease(*curve));
@@ -3215,10 +3223,25 @@ pub trait Styled: Sized {
         self
     }
 
-    /// Transitions along the cubic Bézier curve `x1, y1, x2, y2`.
+    /// Transitions along the cubic Bézier curve `x1, y1, x2, y2` (a `y`
+    /// outside 0..1 overshoots).
     fn ease_bezier(mut self, x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
         self.style()
             .push(Declaration::Ease([x1, y1, x2, y2].map(Bits)));
+        self
+    }
+
+    /// Transitions on a spring's physics (its stiffness, damping and mass;
+    /// Tailwind extension `ease-spring-[620,36]`): they time themselves,
+    /// lasting until the spring settles ([`Spring::settle_ms`]), so
+    /// [`Self::duration`] is not used. A spring that cannot settle (a
+    /// stiffness, damping or mass that is not positive) sets nothing.
+    ///
+    /// [`Spring::settle_ms`]: crate::element::Spring::settle_ms
+    fn ease_spring(mut self, spring: crate::element::Spring) -> Self {
+        self.style().push(Declaration::EaseSpring(
+            [spring.stiffness, spring.damping, spring.mass].map(Bits),
+        ));
         self
     }
 
@@ -4795,6 +4818,27 @@ mod tests {
         same(
             s().transition_transform().duration(200.0),
             "transition-transform duration-200",
+        );
+        let spring = crate::element::Spring {
+            stiffness: 620.0,
+            damping: 36.0,
+            ..crate::element::Spring::default()
+        };
+        same(
+            s().transition_transform().ease_spring(spring),
+            "transition-transform ease-spring-[620,36]",
+        );
+        same(
+            s().transition_opacity()
+                .ease_spring(crate::element::Spring {
+                    mass: 2.0,
+                    ..spring
+                }),
+            "transition-opacity ease-spring-[620,36,2]",
+        );
+        same(
+            s().transition().ease_bezier(0.3, 1.25, 0.6, 1.0),
+            "transition ease-[cubic-bezier(0.3,1.25,0.6,1)]",
         );
         for (typed, classes) in [
             (s().animate_spin(), "animate-spin"),

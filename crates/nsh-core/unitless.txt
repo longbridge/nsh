@@ -124,6 +124,7 @@ effects::KeyframeAnimation::frame_rate(hz)                       # a frame rate 
 effects::Transition.delay                                        # time
 effects::Transition.duration                                     # time
 effects::Transition.easing                                       # easing curve coordinates (unit square)
+effects::Transition::run_ms ->                                   # time
 effects::Transition::EASE                                        # easing curve coordinates (unit square)
 effects::compose_color_matrices ->                               # color components
 filesystem::FileMetadata.atime_ms                                # time (milliseconds since the epoch)

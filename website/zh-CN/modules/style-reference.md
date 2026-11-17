@@ -380,7 +380,7 @@ const angle = createAnimatedValue(0);
 | `transitionProperty` | `string` | `.transition()`、`.transition_all()`、`.transition_colors()`、`.transition_opacity()`、`.transition_shadow()`、`.transition_transform()`、`.transition_none()` | 参与动画的属性，用逗号分隔：`"all"`、`"colors"`（`color`、`backgroundColor`、`borderColor` 等）、`"opacity"`、`"transform"`（所有变换属性）、`"boxShadow"`、`"borderRadius"`、`"borderWidth"`，或 `"none"`。 |
 | `transitionDuration` | `number \| "${number}ms" \| "${number}s"` | `.duration(ms)` | 数字表示毫秒，也可写 `"150ms"` / `"0.2s"`。 |
 | `transitionDelay` | `number \| "${number}ms" \| "${number}s"` | `.delay(ms)` | 过渡开始前的延迟。 |
-| `transitionTimingFunction` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(...)"` | `.ease_linear()`、`.ease_in()`、`.ease_out()`、`.ease_in_out()`、`.ease_bezier(…)` | 缓动曲线。 |
+| `transitionTimingFunction` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(...)" \| "spring(...)"` | `.ease_linear()`、`.ease_in()`、`.ease_out()`、`.ease_in_out()`、`.ease_bezier(…)`、`.ease_spring(…)` | 缓动曲线（`cubic-bezier()` 的 `y` 超出 0..1 时会越过目标），或 NSH 的 `spring(stiffness, damping[, mass])`：弹簧自己决定时长，持续到稳定为止，不使用 `transitionDuration`。 |
 
 ```rust tabs
 view()
