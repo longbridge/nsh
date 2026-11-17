@@ -1563,6 +1563,28 @@ impl Headless {
         self.done()
     }
 
+    /// The step `setSheetDetent(<selector>, <detent>)`: the user moves the
+    /// dialog `selector` names, presented as an iOS sheet with `detents`,
+    /// to `detent`, one of them (a drag, its grabber, a screen reader), as
+    /// iOS reports it: it rests there ([`Screen::sheet_detent`]) and the
+    /// dialog hears `onDetentChange({ detent })`. Fails for a dialog that
+    /// is no such sheet, or a detent not among its `detents`.
+    pub fn set_sheet_detent(
+        &mut self,
+        selector: &str,
+        detent: nsh_core::SheetDetent,
+    ) -> Result<(), String> {
+        self.step(format!("setSheetDetent({selector}, {detent:?})"));
+        let id = self.screen.id(selector)?;
+        self.screen
+            .move_sheet(id, detent)
+            .map_err(|e| format!("setSheetDetent({selector}): {e}"))?;
+        self.engine
+            .control()
+            .dispatch_event(id, EventKind::DetentChange, detent.change_payload());
+        self.done()
+    }
+
     /// Goes back as a platform does; false when nothing could. `ask`: the
     /// root's back listener hears it first, outside dialogs (the overlays'
     /// `onCancel`, `BackHandler`; what none takes comes back as the app's

@@ -331,6 +331,16 @@ expect Swipes dialog
 event text:"Swipes dialog" onCancel reason=swipe
 expect Log: swipes change false swipe
 absent Swipes dialog
+# An iOS sheet at detents: the user's moves heard
+# (`onDetentChange({ detent })`).
+tap text:Clear log
+tap text:Open sheet
+expect Sheet dialog
+prop id:sheet presentation pageSheet
+event text:"Sheet dialog" onDetentChange detent=large
+expect Log: sheet detent large
+event text:"Sheet dialog" onCancel reason=swipe
+absent Sheet dialog
 covers [nsh/base] Dialog
 covers [props] presentation
 covers [props] animation
@@ -346,6 +356,7 @@ covers [events] Dialog.onOpen
 covers [events] Dialog.onClose
 covers [events] Dialog.onCancel
 covers [events] Dialog.onOpenChange
+covers [events] onDetentChange
 # base-dialog-backdrop
 tap id:case-base-dialog-backdrop
 expect Styled dialog
@@ -998,16 +1009,15 @@ wait 1000
 animated parent:text:DetentBody transform.1 0
 tap below:parent:text:DetentBody
 absent DetentBody
-covers [props] Sheet.detents
-covers [props] Sheet.detent
-covers [props] Sheet.grabber
+covers [props] detents
+covers [props] detent
+covers [props] grabber
 covers [props] Sheet.grabberClass
 covers [props] Sheet.grabberStyle
 covers [props] Sheet.grabberAccessibilityLabel
 covers [props] Sheet.footer
 covers [props] Sheet.footerClass
 covers [props] Sheet.footerStyle
-covers [events] Sheet.onDetentChange
 # Detents of points and of a share of the screen: the largest (half the
 # screen) is the panel's height, and `defaultDetent` the first rest.
 tap text:OpenCustomSheet
@@ -1017,7 +1027,7 @@ frame parent:text:CustomBody 0 422 390 422
 animated parent:text:CustomBody transform.1 0
 tap below:parent:text:CustomBody
 absent CustomBody
-covers [props] Sheet.defaultDetent
+covers [props] defaultDetent
 # `closeOnBackdropPress={false}`: its backdrop keeps it.
 tap below:parent:text:StuckSheet
 expect StuckSheet

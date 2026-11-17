@@ -500,7 +500,7 @@ impl Default for ScreenConfig {
 /// transparent layer over the whole window (no card, scrim, shadow or
 /// background; `presentation` is ignored), and what shows is the app's
 /// popup and backdrop, which the runtime renders inside it.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ModalConfig {
     /// How it appears.
     pub animation: ModalAnimation,
@@ -528,6 +528,20 @@ pub struct ModalConfig {
     /// window, not the main one). For a window's own root: the window
     /// holding its node. The core works it out from where the node is.
     pub window: NodeId,
+    /// iOS sheets: the heights it rests at (`detents`); empty for the
+    /// system's full height.
+    pub detents: Vec<crate::SheetDetent>,
+    /// iOS sheets: the detent the app keeps it at (`detent`); applied when
+    /// it changes.
+    pub detent: Option<crate::SheetDetent>,
+    /// iOS sheets: the detent it opens at without [`Self::detent`]
+    /// (`defaultDetent`); `None` for the smallest.
+    pub default_detent: Option<crate::SheetDetent>,
+    /// iOS sheets: the system's grabber shows (`grabber`).
+    pub grabber: bool,
+    /// iOS sheets: up to this detent what is behind is not dimmed and
+    /// takes touches (`largestUndimmedDetent`).
+    pub largest_undimmed_detent: Option<crate::SheetDetent>,
 }
 
 impl Default for ModalConfig {
@@ -541,6 +555,11 @@ impl Default for ModalConfig {
             close_on_backdrop_press: true,
             close_on_swipe: true,
             window: crate::ROOT_ID,
+            detents: Vec::new(),
+            detent: None,
+            default_detent: None,
+            grabber: false,
+            largest_undimmed_detent: None,
         }
     }
 }
