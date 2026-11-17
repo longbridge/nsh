@@ -1507,6 +1507,12 @@ fn handle(
             update_cursor(surface, hwnd, scale);
             return Some(LRESULT(1));
         }
+        // The Menu key's or Shift+F10's own request (no pointer: -1) after
+        // the key opened NSH's menu: answered here, as `DefWindowProc` would
+        // pass it on to the parent window of an embedded surface.
+        WM_CONTEXTMENU if lparam.0 == -1 && crate::input::keyboard_context_menu_opened(surface) => {
+            return Some(LRESULT(0));
+        }
         WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP => {
             let event = key_event(msg, wparam, lparam);
             let handled = crate::input::key(surface, event);

@@ -954,7 +954,7 @@ fn opens_context_menu(event: &KeyEvent) -> bool {
         cmd: m.meta,
     };
     let function = (event.vk == 0x79).then_some(Key::F(10));
-    nsh_core::input::opens_context_menu(event.vk == 0x5D, function, held)
+    nsh_core::input::opens_context_menu(event.vk == crate::input::VK_APPS, function, held)
 }
 
 /// A key up: the focused custom view hears it (whichever view has the
@@ -1308,6 +1308,40 @@ mod tests {
         );
         assert!(listens(&surface, &view));
         assert!(!press(&surface, &key(0x41)));
+    }
+
+    /// The Menu key asks the focused view for its context menu when it
+    /// listens; the window then answers the key's own `WM_CONTEXTMENU`,
+    /// once, rather than handing it on.
+    #[test]
+    fn the_menu_key_opens_the_focused_views_context_menu() {
+        let surface = surface();
+        let view = focusable(&surface, 2);
+        assert!(focus_control(&surface, &view));
+        let menu = key(crate::input::VK_APPS);
+        // Nothing listens: the key goes on, and so does its request.
+        assert!(!context_menu(&surface, &menu));
+        assert!(!crate::input::key(&surface, menu));
+        assert!(!crate::input::keyboard_context_menu_opened(&surface));
+        let mut mask = EventMask::default();
+        mask.set(EventKind::ContextMenu, true);
+        apply(
+            &surface,
+            &[MountItem::Events {
+                id: 2,
+                events: mask,
+            }],
+        );
+        assert!(crate::input::key(&surface, menu));
+        assert!(crate::input::keyboard_context_menu_opened(&surface));
+        assert!(
+            !crate::input::keyboard_context_menu_opened(&surface),
+            "only the request of the key that opened it"
+        );
+        // Another key in between: a later request is not NSH's.
+        assert!(crate::input::key(&surface, menu));
+        crate::input::key(&surface, key(0x41));
+        assert!(!crate::input::keyboard_context_menu_opened(&surface));
     }
 
     #[test]

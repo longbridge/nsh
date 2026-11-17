@@ -104,6 +104,8 @@ struct TwoFinger {
 const VK_TAB: u16 = 0x09;
 /// `VK_MENU` (Alt).
 const VK_MENU: u16 = 0x12;
+/// `VK_APPS` (the Menu key).
+pub(crate) const VK_APPS: u16 = 0x5D;
 /// The modifier keys' virtual key codes: Shift, Ctrl and Alt (and their
 /// left and right ones), and the Windows keys.
 const MODIFIER_KEYS: [u16; 11] = [
@@ -325,6 +327,11 @@ pub(crate) struct Input {
     /// A key with Alt was taken: Alt's release must not open the window
     /// menu.
     alt_combo: Cell<bool>,
+    /// The Menu key or Shift+F10 opened a context menu: the
+    /// `WM_CONTEXTMENU` Windows sends the window after the key is answered
+    /// ([`keyboard_context_menu_opened`]), so that it does not go on to the
+    /// window an embedded surface is in.
+    context_key: Cell<bool>,
     /// Next touch identifier.
     next_id: Cell<u32>,
     /// Next press generation (invalidates callbacks of earlier ones).
@@ -1340,6 +1347,8 @@ pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
     }
     if !MODIFIER_KEYS.contains(&event.vk) {
         surface.chrome.context_area.take();
+        // Only the `WM_CONTEXTMENU` of this key is NSH's to answer.
+        input.context_key.set(false);
     }
     // The window's shortcuts (full screen, the dev host's reload) work
     // wherever the focus is.
@@ -1353,7 +1362,13 @@ pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
         // take a key before the menu's shortcuts and the defaults.
         || crate::keyboard::press(surface, &event)
         || crate::keyboard::activate(surface, &event)
-        || crate::keyboard::context_menu(surface, &event)
+        || {
+            let opened = crate::keyboard::context_menu(surface, &event);
+            if opened {
+                input.context_key.set(true);
+            }
+            opened
+        }
         || crate::chrome::shortcut(surface, &event)
         || crate::text_input::key(surface, &event)
         || crate::text::key(surface, &event)
@@ -1369,6 +1384,16 @@ pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
         input.alt_combo.set(true);
     }
     handled
+}
+
+/// Whether a key (the Menu key or Shift+F10) opened a context menu since
+/// the last time this was asked: Windows then sends the window a
+/// `WM_CONTEXTMENU` of its own for the key, which the window answers
+/// rather than handing it to `DefWindowProc` (which passes it on to the
+/// parent window of an embedded surface, where the host could open a menu
+/// of its own over NSH's).
+pub(crate) fn keyboard_context_menu_opened(surface: &Surface) -> bool {
+    surface.input.context_key.replace(false)
 }
 
 /// Tab and Shift + Tab move the keyboard focus between the stops, in tree
