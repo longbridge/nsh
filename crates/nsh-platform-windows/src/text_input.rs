@@ -130,7 +130,7 @@ use windows::{
                 DefWindowProcW, GetCaretBlinkTime, KillTimer, SetTimer, WM_CHAR, WM_CLEAR, WM_COPY,
                 WM_CUT, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_SETCONTEXT,
                 WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
-                WM_LBUTTONUP, WM_MOUSEMOVE, WS_HSCROLL, WS_VSCROLL,
+                WM_LBUTTONUP, WM_MOUSEMOVE, WS_VSCROLL,
             },
         },
     },
@@ -956,11 +956,7 @@ fn scroll_flags(config: &InputConfig) -> u32 {
     if !config.multiline {
         return ES_AUTOHSCROLL;
     }
-    if config.soft_wrap {
-        ES_AUTOVSCROLL | WS_VSCROLL.0
-    } else {
-        ES_AUTOVSCROLL | ES_AUTOHSCROLL | WS_VSCROLL.0 | WS_HSCROLL.0
-    }
+    ES_AUTOVSCROLL | WS_VSCROLL.0
 }
 
 /// The horizontal alignment of the text (0: left, 1: right).
@@ -2264,7 +2260,6 @@ mod tests {
         for editable in [false, true] {
             let config = InputConfig {
                 multiline: true,
-                soft_wrap: false,
                 editable,
                 ..Default::default()
             };
@@ -2290,8 +2285,6 @@ mod tests {
             editor.send(0x00BA, 0, 0); // EM_GETLINECOUNT forces text layout.
             let (min, max, _, _) = editor.vscroll();
             assert!(max - min > 80, "vertical overflow missing: {min}..{max}");
-            let (min, max, _, _) = editor.hscroll();
-            assert!(max - min > 160, "horizontal overflow missing: {min}..{max}");
         }
     }
 
