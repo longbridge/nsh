@@ -53,7 +53,16 @@ pub fn program_path() -> io::Result<PathBuf> {
 static AT_EXIT: Mutex<Option<Box<dyn FnOnce() + Send>>> = Mutex::new(None);
 
 /// Sets what runs once the app's run has ended, replacing (and dropping)
-/// what was set before; `None` clears it.
+/// what was set before; `None` clears it. Only `nsh/updater` sets any, on
+/// the desktops.
+#[cfg(all(
+    feature = "updater",
+    any(
+        all(target_os = "linux", not(target_env = "ohos")),
+        target_os = "macos",
+        windows
+    )
+))]
 pub(crate) fn set_at_exit(work: Option<Box<dyn FnOnce() + Send>>) {
     let previous = std::mem::replace(
         &mut *AT_EXIT.lock().unwrap_or_else(|e| e.into_inner()),
@@ -267,6 +276,14 @@ mod tests {
 
     /// What runs at exit runs once, the latest set; what it replaced is
     /// dropped unrun.
+    #[cfg(all(
+        feature = "updater",
+        any(
+            all(target_os = "linux", not(target_env = "ohos")),
+            target_os = "macos",
+            windows
+        )
+    ))]
     #[test]
     fn the_latest_work_runs_once_at_exit() {
         use std::sync::{
