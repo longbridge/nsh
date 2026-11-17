@@ -40,10 +40,11 @@ define_class!(
     unsafe impl NSObjectProtocol for Provider {}
 
     // The protocol's one method is bound only for macOS (its anchor type
-    // is `UIWindow` here), so it is defined on the class below.
-    unsafe impl ASWebAuthenticationPresentationContextProviding for Provider {}
-
-    impl Provider {
+    // is `UIWindow` here), so the trait has no item for it; it is still
+    // defined in this block, which registers it for the protocol (a
+    // method defined elsewhere fails the protocol's check when the class
+    // is first used in debug builds).
+    unsafe impl ASWebAuthenticationPresentationContextProviding for Provider {
         #[unsafe(method_id(presentationAnchorForWebAuthenticationSession:))]
         fn anchor(&self, _session: &ASWebAuthenticationSession) -> Retained<UIWindow> {
             self.ivars().window.clone()
