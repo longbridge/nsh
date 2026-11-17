@@ -27,9 +27,11 @@ dispatch2.workspace = true
 objc2.workspace = true
 objc2-core-foundation.workspace = true
 objc2-core-graphics.workspace = true
+objc2-core-text.workspace = true
 objc2-foundation.workspace = true
 objc2-image-io.workspace = true
 serde_json.workspace = true
+unicode-bidi.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit.workspace = true
