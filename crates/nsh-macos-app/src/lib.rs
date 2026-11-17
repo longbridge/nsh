@@ -88,6 +88,16 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     if let Some(id) = field("id") {
         options.app_id = id;
     }
+    // `nsh.json` `"dataDir"`: the app keeps its storage and logs there
+    // rather than under its id in the system's data directory.
+    let data_dir = field("dataDir")
+        .as_deref()
+        .and_then(nsh_engine::app_data_dir);
+    if let Some(dir) = &data_dir {
+        let storage: std::sync::Arc<dyn nsh_engine::StorageBackend> =
+            nsh_engine::FileStorage::open(dir.clone());
+        options.storage = Some(storage);
+    }
     if let Some(name) = field("name") {
         options.title = name;
     }
@@ -116,7 +126,7 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     // app's own runtime-delivered modules (the bundle's resources are
     // read-only).
     options.chunks = std::env::var_os("NSH_CHUNK_DIR").map(std::path::PathBuf::from);
-    install_logger(developing, &options.app_id);
+    install_logger(developing, &options.app_id, data_dir.as_deref());
     (dir, options)
 }
 
@@ -128,14 +138,17 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
 /// app that installed its own logger (from its native module, which runs
 /// first) keeps it, and its level.
 #[cfg(target_os = "macos")]
-fn install_logger(development: bool, app_id: &str) {
+fn install_logger(development: bool, app_id: &str, data_dir: Option<&std::path::Path>) {
     let mut unified = nsh_platform_apple::unified_log::Options::default();
     unified.development = development;
     unified.filtered = true;
     let unified = nsh_platform_apple::unified_log::logger(unified);
     let mut logging = nsh_engine::logging::LogOptions::default();
     logging.development = development;
-    logging.directory = nsh_engine::logging::log_dir(app_id);
+    logging.directory = match data_dir {
+        Some(dir) => Some(dir.join("logs")),
+        None => nsh_engine::logging::log_dir(app_id),
+    };
     logging.output = Some(Box::new(move |r: &log::Record<'_>| unified.log(r)));
     nsh_engine::logging::install(logging);
 }

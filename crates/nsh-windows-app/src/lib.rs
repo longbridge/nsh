@@ -89,6 +89,16 @@ fn setup() -> (std::path::PathBuf, nsh_platform_windows::AppOptions) {
     if let Some(id) = field("id") {
         options.app_id = id;
     }
+    // `nsh.json` `"dataDir"`: the app keeps its storage and logs there
+    // rather than under its id in the system's data directory.
+    let data_dir = field("dataDir")
+        .as_deref()
+        .and_then(nsh_engine::app_data_dir);
+    if let Some(dir) = &data_dir {
+        let storage: std::sync::Arc<dyn nsh_engine::StorageBackend> =
+            nsh_engine::FileStorage::open(dir.clone());
+        options.storage = Some(storage);
+    }
     if let Some(name) = field("name") {
         options.title = name;
     }
@@ -119,7 +129,7 @@ fn setup() -> (std::path::PathBuf, nsh_platform_windows::AppOptions) {
         Some("dark") => options.appearance = Appearance::Dark,
         _ => {}
     }
-    install_logger(developing, &options.app_id);
+    install_logger(developing, &options.app_id, data_dir.as_deref());
     (dir, options)
 }
 
@@ -131,10 +141,13 @@ fn setup() -> (std::path::PathBuf, nsh_platform_windows::AppOptions) {
 /// its own logger (from its native module, which runs first) keeps it, and
 /// its level.
 #[cfg(windows)]
-fn install_logger(development: bool, app_id: &str) {
+fn install_logger(development: bool, app_id: &str, data_dir: Option<&std::path::Path>) {
     let mut logging = nsh_engine::logging::LogOptions::default();
     logging.development = development;
-    logging.directory = nsh_engine::logging::log_dir(app_id);
+    logging.directory = match data_dir {
+        Some(dir) => Some(dir.join("logs")),
+        None => nsh_engine::logging::log_dir(app_id),
+    };
     logging.output = Some(Box::new(move |r: &log::Record<'_>| {
         let line = format!("{} {}: {}\n", r.level(), r.target(), r.args());
         nsh_platform_windows::debug_output(&line);

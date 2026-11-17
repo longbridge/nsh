@@ -218,6 +218,15 @@ pub(crate) struct AppConfig {
     /// release runner reads it; macOS runs one instance of an app already.
     #[serde(default)]
     pub(crate) single_instance: bool,
+    /// Where the packaged app keeps its storage (`nsh/storage`) and logs
+    /// instead of the system's data directory under its id
+    /// (`"dataDir": "${homeDir}/.myapp"`): an absolute path, or `${homeDir}`
+    /// followed by one under the user's home ([`nsh_engine::app_data_dir`]).
+    /// The data then stays put when the app's id changes, and sits beside
+    /// the rest of what the app keeps there. Written into `app.json`, where
+    /// the desktop release runners (macOS, Windows, Linux) read it;
+    /// [`read_config`] drops a value they would refuse.
+    pub(crate) data_dir: Option<String>,
     /// Gives the app's address (`UrlScheme.setUrl`) to the system on iOS
     /// and macOS (`"handoff": true`), so Handoff continues it on the user's
     /// other devices. iOS and macOS
@@ -340,6 +349,14 @@ impl AppConfig {
         }
     }
 
+    /// Adds `"dataDir"` to a package's `app.json` `info`, where the desktop
+    /// release runners read it (their `setup`).
+    pub(crate) fn add_data_dir_to_app_json(&self, info: &mut serde_json::Value) {
+        if let Some(dir) = &self.data_dir {
+            info["dataDir"] = dir.as_str().into();
+        }
+    }
+
     /// The checked file types as JSON, for `app.json`; `None` without any.
     pub(crate) fn file_types_json(&self) -> Option<serde_json::Value> {
         let types = self.file_types();
@@ -453,6 +470,7 @@ pub(crate) fn desktop_app_json(
         info["singleInstance"] = true.into();
     }
     config.add_file_types_to_app_json(&mut info);
+    config.add_data_dir_to_app_json(&mut info);
     info
 }
 
@@ -751,6 +769,20 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     {
         ignored.push(format!("window: {e}"));
         config.window = None;
+    }
+    // Checked against a stand-in home: what matters is the form, which the
+    // runner checks again against the real one.
+    if let Some(dir) = &config.data_dir
+        && nsh_engine::app_data_dir_in(
+            dir,
+            Some(Path::new(if cfg!(windows) { r"C:\home" } else { "/home" })),
+        )
+        .is_none()
+    {
+        ignored.push(format!(
+            "dataDir: `{dir}` is neither an absolute path nor `${{homeDir}}/...` (no `..`, no other `${{...}}`)"
+        ));
+        config.data_dir = None;
     }
     config.icon = match config.icon {
         Some(AppIcon::All(icon)) => Some(AppIcon::All(dir.join(icon))),
@@ -1208,6 +1240,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
             {
                 let mut info = serde_json::json!({ "id": id, "name": name });
                 config.add_file_types_to_app_json(&mut info);
+                config.add_data_dir_to_app_json(&mut info);
                 info
             },
             &schemes,
@@ -2804,6 +2837,38 @@ mod tests {
         // An app without them has none.
         let info = desktop_app_json(&AppConfig::default(), "A", "com.a", "1.0.0");
         assert!(info.get("window").is_none());
+    }
+
+    #[test]
+    fn an_apps_data_dir_goes_into_app_json() {
+        let config: AppConfig =
+            serde_json::from_str(r#"{ "dataDir": "${homeDir}/.myapp" }"#).unwrap();
+        let info = desktop_app_json(&config, "A", "com.a", "1.0.0");
+        assert_eq!(info["dataDir"], serde_json::json!("${homeDir}/.myapp"));
+        let info = desktop_app_json(&AppConfig::default(), "A", "com.a", "1.0.0");
+        assert!(info.get("dataDir").is_none());
+    }
+
+    #[test]
+    fn a_data_dir_the_runner_would_refuse_is_dropped() {
+        let dir = std::env::temp_dir().join(format!("nsh-data-dir-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let entry = dir.join("App.tsx");
+        for (value, kept) in [
+            ("${homeDir}/.myapp", true),
+            (".myapp", false),
+            ("${homeDir}/../elsewhere", false),
+            ("${appId}/data", false),
+        ] {
+            std::fs::write(
+                dir.join("nsh.json"),
+                serde_json::json!({ "dataDir": value }).to_string(),
+            )
+            .unwrap();
+            let config = read_config(&entry).unwrap();
+            assert_eq!(config.data_dir.is_some(), kept, "{value}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

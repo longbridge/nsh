@@ -80,7 +80,7 @@ pub use nsh_js::BYTECODE_VERSION;
 pub use nsh_package as package;
 use rustc_hash::FxHashMap;
 #[cfg(not(target_arch = "wasm32"))]
-pub use storage::{FileStorage, data_dir};
+pub use storage::{FileStorage, app_data_dir, app_data_dir_in, data_dir};
 
 use crate::script::{NetworkQueue, RequestId, Script};
 pub use crate::{

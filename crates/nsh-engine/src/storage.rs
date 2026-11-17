@@ -83,6 +83,47 @@ fn data_dir_in(os: &str, env: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBu
     }
 }
 
+/// The directory an app's `nsh.json` `"dataDir"` names (`template`), where
+/// its release runner keeps the app's storage (`nsh/storage`) and logs in
+/// place of `<data_dir>/<app id>`: `${homeDir}` at its start is this user's
+/// home directory (`$HOME`; `%USERPROFILE%` on Windows). `None` for a
+/// template [`app_data_dir_in`] refuses.
+pub fn app_data_dir(template: &str) -> Option<PathBuf> {
+    let home = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    let home = std::env::var_os(home)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from);
+    app_data_dir_in(template, home.as_deref())
+}
+
+/// [`app_data_dir`] with the home directory `home`: `template` is an
+/// absolute path or `${homeDir}` followed by one under it, with no `..`
+/// component and no other `${...}`. `None` for anything else, and for
+/// `${homeDir}` without a home: the app then keeps its data where it would
+/// without `"dataDir"`, rather than somewhere relative to where it started.
+pub fn app_data_dir_in(template: &str, home: Option<&std::path::Path>) -> Option<PathBuf> {
+    const HOME: &str = "${homeDir}";
+    let path = match template.strip_prefix(HOME) {
+        Some("") => home?.to_path_buf(),
+        Some(rest) => {
+            let rest = rest.strip_prefix(['/', '\\'])?;
+            home?.join(rest)
+        }
+        None => PathBuf::from(template),
+    };
+    let rest = template.strip_prefix(HOME).unwrap_or(template);
+    if rest.contains("${") || !path.is_absolute() {
+        return None;
+    }
+    if path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return None;
+    }
+    Some(path)
+}
+
 /// The system's directory for caches: Caches on Apple platforms,
 /// `%LOCALAPPDATA%` on Windows, `$XDG_CACHE_HOME` (`~/.cache`) elsewhere.
 /// `None` on Android, whose cache directory only the platform knows, and
@@ -273,6 +314,30 @@ mod tests {
         drop(again);
         assert!(FileStorage::open(&dir).load().unwrap().is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_apps_data_dir_is_absolute_or_under_the_home_directory() {
+        let home = std::env::temp_dir().join("home");
+        let resolve = |template| app_data_dir_in(template, Some(&home));
+        assert_eq!(resolve("${homeDir}/.myapp"), Some(home.join(".myapp")));
+        assert_eq!(
+            resolve("${homeDir}/.myapp/ui"),
+            Some(home.join(".myapp/ui"))
+        );
+        assert_eq!(resolve("${homeDir}"), Some(home.clone()));
+        let absolute = std::env::temp_dir().join("myapp");
+        assert_eq!(
+            app_data_dir_in(absolute.to_str().unwrap(), None),
+            Some(absolute.clone())
+        );
+        // Refused: relative, other placeholders, `..`, a home that is not there.
+        assert_eq!(resolve(".myapp"), None);
+        assert_eq!(resolve("${homeDir}.myapp"), None);
+        assert_eq!(resolve("${appId}/data"), None);
+        assert_eq!(resolve("${homeDir}/${appId}"), None);
+        assert_eq!(resolve("${homeDir}/../elsewhere"), None);
+        assert_eq!(app_data_dir_in("${homeDir}/.myapp", None), None);
     }
 
     #[test]
