@@ -756,6 +756,15 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                             e.string(file);
                         }
                     }
+                    // `AuthSession.java`: the request, the page, the callback
+                    // scheme and whether it is ephemeral.
+                    Command::AuthSession { id, page } => {
+                        e.int(59);
+                        e.int(id as i32);
+                        e.string(page.url);
+                        e.string(page.callback_scheme);
+                        e.bool(page.ephemeral);
+                    }
                     // Answered by the sink (`host::answer_clipboard_reads`);
                     // images are not written to Android's clipboard.
                     Command::ReadClipboardImage { .. }

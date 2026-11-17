@@ -1105,6 +1105,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::OpenUrl,
     EventKind::ScreenColor,
     EventKind::Share,
+    EventKind::AuthSession,
     EventKind::CanvasImage,
     EventKind::FileRequest,
     EventKind::Speech,

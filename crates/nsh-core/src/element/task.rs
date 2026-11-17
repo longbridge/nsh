@@ -134,6 +134,14 @@ pub(crate) enum Action {
     /// Whether the platform shows a share sheet and the app's capabilities
     /// grant `share`.
     ShareAvailable(AnswerSlot<bool>),
+    /// Opens a web sign-in session ([`crate::auth_session`]); how it ended,
+    /// or why it could not run, resolves the slot.
+    AuthSession(
+        crate::auth_session::AuthSessionRequest,
+        AnswerSlot<
+            Result<crate::auth_session::AuthSessionOutcome, crate::auth_session::AuthSessionError>,
+        >,
+    ),
     /// Renders a drawing offscreen into an image
     /// ([`crate::canvas::render`]); the image's bytes, or why not, resolve
     /// the slot.

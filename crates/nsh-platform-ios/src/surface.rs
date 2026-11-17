@@ -486,6 +486,8 @@ impl RootView {
             canvas_render: true,
             // `UIActivityViewController` (`crate::share`).
             share: true,
+            // `ASWebAuthenticationSession` (`crate::auth_session`).
+            auth_session: true,
             // The Speech framework fed by the microphone.
             speech: true,
             // The notification center.
