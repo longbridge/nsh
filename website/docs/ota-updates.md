@@ -230,8 +230,8 @@ export async function checkForUpdates() {
       await downloadPackage();
       // iOS and Android: nothing to show, the package runs from the next cold start.
       packageReady.set(canRestart);
-      return;
     }
+    // `shell`: the code is current, only the installed app is behind; offer it quietly.
     appUpdate.set(await checkForUpdate());
   } catch (error) {
     console.warn("update check failed:", error); // the next check tries again

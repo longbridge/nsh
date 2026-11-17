@@ -35,10 +35,11 @@ interface AppUpdate {
   notes?: string | null;
   url: string;
   canInstall: boolean;
+  shell: boolean;
 }
 ```
 
-从 `nsh.json` 中的来源获取清单，返回其中描述的新版本；应用已是最新、没有 `"updater"`，或运行在不更新的环境（Web、`nsh run`）时返回 `null`。正在运行该版本或更高版本的[包](#checkforpackage)时也算最新：应用本身的版本仍是安装时的版本，但代码已经是该版本的。
+从 `nsh.json` 中的来源获取清单，返回其中描述的新版本；应用已是最新、没有 `"updater"`，或运行在不更新的环境（Web、`nsh run`）时返回 `null`。比较的是已安装应用自身的版本，即安装时的版本。正在运行该版本或更高版本的[包](#checkforpackage)时仍会返回更新，`shell` 为 true：代码已经是该版本的，只有已安装的应用（运行时和原生外壳）落后。
 
 | 字段 | 含义 |
 | --- | --- |
@@ -46,6 +47,7 @@ interface AppUpdate {
 | `notes` | 更新说明，即清单的 `--notes` 文件内容 |
 | `url` | 用户手动获取的地址：压缩包，或 iOS、Android 上的商店页面。`canInstall` 为 false 时交给 [`openUrl`](./nsh.md#openurl) |
 | `canInstall` | 本次运行中 `downloadUpdate` 和 `installAndRestart` 是否可用：装在用户可写位置的桌面打包应用为 true。iOS、Android 上为 false，装在只有系统可写的目录（系统包）时也为 false |
+| `shell` | 是否只有已安装的应用落后：本次运行的[包](#checkforpackage)已是该版本或更高，更新带来的是更新的运行时和原生外壳，而不是新代码。用包更新的应用可以把它作为更安静的可选步骤提供 |
 
 来源无法访问或清单不可接受时会 reject：设置了 `publicKey` 但签名错误或缺失、清单属于其他应用、URL 不是 HTTPS。版本相同或更旧的清单不算更新，因此过期的清单无法让应用降级。
 
