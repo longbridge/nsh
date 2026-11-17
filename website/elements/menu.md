@@ -435,7 +435,8 @@ import { ContextMenu, MenuItem } from "nsh/base";
   the menu is made from `items` (`MenuButtonItem`s, SF Symbol icons, `title` above them). `onOpenChange`, `onOpen`,
   `onSelect({ id })`, `onCancel` and `onClose` report what happened, as for the drawn menu. The system opens this menu
   only for the user: `open` set to `true` shows nothing, and `open` set to `false` closes it.
-- **Everywhere else**: `items` is not used, and the children are the menu, as without it.
+- **Android, the desktops and the web**: `items`, `title` and `onSelect` are not used. The children are the menu, drawn
+  as without `items`, and each `MenuItem`'s `onSelect` reports the choice.
 
 The trigger's own presses keep working beside the held finger. Without `items`, iOS shows the drawn menu, as the other
 platforms do.
@@ -469,8 +470,8 @@ platforms do.
 | `disabled` | `.disabled(..)` | `boolean` | `false` | Nothing opens it: not the secondary button, held fingers, the keyboard or a screen reader. |
 | `offset` | `.offset(..)` | `number` | `0` | As a popup: the gap between the pointer and the popup. |
 | `margin` | `.margin(..)` | `number` | `0` | As a popup: the distance it keeps from the edges of the safe area. |
-| `items` | `.items(..)` | `MenuButtonItem[]` | `[]` | iOS: the system's context menu, in place of the children. |
-| `title` | `.title(..)` | `string` | none | iOS: the system's menu's title, above its items. |
+| `items` | `.items(..)` | `MenuButtonItem[]` | `[]` | iOS only: the system's context menu, in place of the children. Not used on the other platforms, which draw the children. |
+| `title` | `.title(..)` | `string` | none | iOS only: the system's menu's title, above its items. Not used on the other platforms. |
 
 ### MenuItem
 
@@ -517,7 +518,7 @@ platforms do.
 | `onClose` (`Menu`, `ContextMenu`) | `.on_close(\|\| ..)` | It is gone: as a sheet once it went, as a popup after its exit. Also when the app closed it. |
 | `onPosition` (`Menu`, `ContextMenu`) | `.on_position(\|e\| ..)` | As a popup: the popup was placed: `placement` (the side it went on), `bounds`, `available`. |
 | `onCancel` (`Menu`, `ContextMenu`) | `.on_cancel(\|\| ..)` | The user tried to close it without choosing (Escape or back, a press outside or on the backdrop). |
-| `onSelect` (`ContextMenu`) | `.on_select(\|id: &SharedString\| ..)` | With `items`, on iOS: the item of this `id` was chosen in the system's menu. |
+| `onSelect` (`ContextMenu`) | `.on_select(\|id: &SharedString\| ..)` | iOS only, with `items`: the item of this `id` was chosen in the system's menu. Not sent on the other platforms, where the `MenuItem`s report the choice. |
 | `onSelect` (`MenuItem`) | `.on_select(\|\| ..)` | The item was chosen; a checkable item asks for its other value. |
 | `onOpenChange` (`Submenu`) | `.on_open_change(\|e\| ..)` | It opened or closed as the user asked, with why. |
 

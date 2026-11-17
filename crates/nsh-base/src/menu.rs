@@ -1952,8 +1952,9 @@ pub enum ContextMenuEvents {
     /// root view and the room on that side.
     #[args(placement, bounds, available)]
     Position(Placement, Bounds<Points>, Size<Points>),
-    /// The system's menu (`items`, on iOS): the user chose the item of
-    /// this `id`. The menu has closed.
+    /// iOS only: the user chose the item of this `id` in the system's
+    /// menu (`items`); the menu has closed. Not sent on the other
+    /// platforms, whose drawn menu reports through its items' `onSelect`.
     #[args(id)]
     Select(SharedString),
 }
@@ -2168,19 +2169,19 @@ pub struct ContextMenuProps {
     /// the focus (the web, Linux) or a screen reader's "show menu" action (macOS,
     /// Windows) opens the menu.
     pub trigger: Prop<Option<Slot>>,
-    /// The menu as data, for the system's own context menu where the
-    /// platform has one about a view: on iOS (and Mac Catalyst) any items
-    /// make the menu the system's (`UIContextMenuInteraction`: the trigger
-    /// lifts as its preview over the blurred screen, with the system's
-    /// haptics, placement and motion), in place of the children; a chosen
-    /// item comes back as `onSelect({ id })`. `MenuButton`'s items: ids,
-    /// labels, SF Symbols, checks, disabled and destructive items,
-    /// submenus and sections. Elsewhere the children are the menu and the
-    /// items are not used.
+    /// iOS only: the menu as data, for the system's own context menu. On
+    /// iOS (and Mac Catalyst) any items make the menu the system's
+    /// (`UIContextMenuInteraction`: the trigger lifts as its preview over
+    /// the blurred screen, with the system's haptics, placement and
+    /// motion), in place of the children; a chosen item comes back as
+    /// `onSelect({ id })`. `MenuButton`'s items: ids, labels, SF Symbols,
+    /// checks, disabled and destructive items, submenus and sections. On
+    /// every other platform `items`, `title` and `onSelect` are not used:
+    /// the children are the menu, drawn as without `items`.
     #[prop(default)]
     pub items: Prop<Vec<MenuButtonItem>>,
-    /// The system's menu's title, above its items (`items`); none when
-    /// unset.
+    /// iOS only: the system's menu's title, above its items (`items`);
+    /// none when unset. Not used on the other platforms.
     pub title: Prop<Option<SharedString>>,
     /// The items, made on each opening.
     #[prop(lazy)]
