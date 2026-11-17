@@ -874,7 +874,7 @@ fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4
     }
     // Sides that differ: the whole line stroked with each side's width and
     // color, clipped to that side's part of the box.
-    for (side, quad) in side_quads(w, h, widths).iter().enumerate() {
+    for (side, quad) in side_quads(w, h, dash_split(widths)).iter().enumerate() {
         let (bw, c) = (widths[side], b.colors[side]);
         if bw <= 0.0 || c.is_transparent() {
             continue;
@@ -981,6 +981,21 @@ fn fit_corners(w: f32, h: f32, c: Corners) -> Corners {
     } else {
         c
     }
+}
+
+/// The widths a dashed or dotted border's corners are split by: a side
+/// without a border takes the wider of its neighbors'. Its line is
+/// stroked whole and only clipped, so a split that hands a side the edge
+/// of a side without a border (as [`side_quads`] does for the solid ring,
+/// which is empty there) would draw that edge's dashes too.
+fn dash_split(widths: [f32; 4]) -> [f32; 4] {
+    let mut split = widths;
+    for (side, width) in split.iter_mut().enumerate() {
+        if *width <= 0.0 {
+            *width = widths[(side + 1) % 4].max(widths[(side + 3) % 4]);
+        }
+    }
+    split
 }
 
 /// Each side's part of a `w` x `h` box with border `widths`, clockwise from
@@ -1278,6 +1293,14 @@ mod tests {
         assert!(close(c[0].0, 5.0) && close(c[1].0, 5.0));
         let c = fit_corners(100.0, 100.0, [(10.0, 20.0); 4]);
         assert_eq!(c[0], (10.0, 20.0));
+    }
+
+    #[test]
+    fn a_dashed_side_without_a_border_splits_as_its_neighbors() {
+        // Only the left border: the corners split as between equal sides.
+        assert_eq!(dash_split([0.0, 0.0, 0.0, 2.0]), [2.0, 0.0, 2.0, 2.0]);
+        assert_eq!(dash_split([4.0, 2.0, 3.0, 1.0]), [4.0, 2.0, 3.0, 1.0]);
+        assert_eq!(dash_split([0.0, 3.0, 0.0, 1.0]), [3.0, 3.0, 3.0, 1.0]);
     }
 
     #[test]
