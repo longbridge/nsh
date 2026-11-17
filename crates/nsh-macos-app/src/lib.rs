@@ -88,16 +88,12 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     if let Some(id) = field("id") {
         options.app_id = id;
     }
-    // `nsh.json` `"dataDir"`: the app keeps its storage and logs there
-    // rather than under its id in the system's data directory.
+    // `nsh.json` `"dataDir"`: the app's directory (its storage, logs and
+    // `${dataDir}`) rather than `<data_dir>/<app id>`.
     let data_dir = field("dataDir")
         .as_deref()
         .and_then(nsh_engine::app_data_dir);
-    if let Some(dir) = &data_dir {
-        let storage: std::sync::Arc<dyn nsh_engine::StorageBackend> =
-            nsh_engine::FileStorage::open(dir.clone());
-        options.storage = Some(storage);
-    }
+    options.app_dir = data_dir.clone();
     if let Some(name) = field("name") {
         options.title = name;
     }

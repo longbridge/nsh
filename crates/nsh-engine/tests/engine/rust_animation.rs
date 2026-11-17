@@ -121,6 +121,7 @@ impl Platform {
             audio: None,
             windows: None,
             login_item: None,
+            app_dir: None,
         };
         let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
         let mut platform = Self {

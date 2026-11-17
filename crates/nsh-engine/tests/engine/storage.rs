@@ -86,6 +86,7 @@ fn launch(
         audio: None,
         windows: None,
         login_item: None,
+        app_dir: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -201,6 +202,7 @@ fn rust_shares_the_entries_of_js() {
         audio: None,
         windows: None,
         login_item: None,
+        app_dir: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(shown(&rx, "rust"), "rust saw 1 from_rust,launches");
@@ -307,6 +309,7 @@ fn rust_edits_the_storage() {
         audio: None,
         windows: None,
         login_item: None,
+        app_dir: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(shown(&rx, "rust"), "rust b true 0 true");
@@ -397,6 +400,7 @@ fn a_rust_root_keeps_its_data_under_its_id() {
         audio: None,
         windows: None,
         login_item: None,
+        app_dir: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(shown(&rx, "rust"), "rust wrote");

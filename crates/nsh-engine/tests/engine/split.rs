@@ -117,6 +117,7 @@ fn config(bundle: Bundle) -> EngineConfig {
         audio: None,
         windows: None,
         login_item: None,
+        app_dir: None,
     }
 }
 

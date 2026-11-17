@@ -75,6 +75,7 @@ fn config(app: App) -> EngineConfig {
         audio: None,
         windows: None,
         login_item: None,
+        app_dir: None,
     }
 }
 

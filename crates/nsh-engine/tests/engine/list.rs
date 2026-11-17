@@ -138,6 +138,7 @@ fn config(app: &str) -> (EngineConfig, std::path::PathBuf) {
         audio: None,
         windows: None,
         login_item: None,
+        app_dir: None,
     };
     (config, dir)
 }

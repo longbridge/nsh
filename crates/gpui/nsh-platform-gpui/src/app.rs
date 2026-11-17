@@ -1106,6 +1106,7 @@ fn engine_config(options: &AppOptions, app: App) -> EngineConfig {
         ui_sets: ui_sets(),
         runtime: None,
         data_dir: options.data_dir.clone().or_else(nsh_engine::data_dir),
+        app_dir: None,
         cache: options.cache.clone(),
         storage: options.storage.clone(),
         clock: Default::default(),

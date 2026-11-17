@@ -971,6 +971,10 @@ pub struct EngineConfig {
     /// system's data directory ([`data_dir`]) for apps of their own,
     /// `…/nsh` in an embedding app's. `None`: nothing is kept.
     pub data_dir: Option<std::path::PathBuf>,
+    /// The app's own directory, in place of `<data_dir>/<app id>`: where
+    /// its storage, `${dataDir}` and the files it keeps there live (the
+    /// desktop runners' `nsh.json` `"dataDir"`). `None`: the convention.
+    pub app_dir: Option<std::path::PathBuf>,
     /// Where the app's caches are kept and how much each keeps: the engine
     /// opens them in `<root>/<app id>/<kind>` ([`Engine::image_cache`]).
     /// [`EngineConfig::new`]: none.
@@ -1150,6 +1154,7 @@ impl EngineConfig {
             ui_sets: Vec::new(),
             runtime: None,
             data_dir: None,
+            app_dir: None,
             cache: CacheOptions::off(),
             storage: None,
             clock: Clock::system(),
@@ -1182,6 +1187,17 @@ impl EngineConfig {
     }
 }
 
+/// The directory of the app `config` runs: [`EngineConfig::app_dir`], or
+/// `<data_dir>/<app id>`.
+fn app_dir(config: &EngineConfig) -> Option<std::path::PathBuf> {
+    config.app_dir.clone().or_else(|| {
+        config
+            .data_dir
+            .as_ref()
+            .map(|root| root.join(app_dir_name(config.app.app_id())))
+    })
+}
+
 /// The storage of the app `config` runs: [`EngineConfig::storage`], or a
 /// file in its directory of [`EngineConfig::data_dir`].
 fn app_storage(config: &EngineConfig) -> Option<Arc<dyn nsh_core::storage::StorageBackend>> {
@@ -1189,8 +1205,7 @@ fn app_storage(config: &EngineConfig) -> Option<Arc<dyn nsh_core::storage::Stora
         return Some(storage.clone());
     }
     #[cfg(not(target_arch = "wasm32"))]
-    if let Some(root) = &config.data_dir {
-        let dir = root.join(app_dir_name(config.app.app_id()));
+    if let Some(dir) = app_dir(config) {
         return Some(FileStorage::open(dir));
     }
     None
@@ -2165,12 +2180,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             transport: None,
         });
         core.set_storage(app_storage(&config));
-        core.set_data_dir(
-            config
-                .data_dir
-                .as_ref()
-                .map(|root| root.join(app_dir_name(config.app.app_id()))),
-        );
+        core.set_data_dir(app_dir(&config));
         core.set_clipboard(config.clipboard.clone());
         core.set_picker(config.picker.clone());
         core.set_speech(config.speech.clone());
@@ -2362,10 +2372,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                             bundle,
                         ),
                         app_url: app_url.clone(),
-                        data_dir: config
-                            .data_dir
-                            .as_ref()
-                            .map(|root| root.join(app_dir_name(config.app.app_id()))),
+                        data_dir: app_dir(&config),
                         paths: bundle_system_paths(bundle),
                         wake: Arc::new(move || {
                             let _ = system_tx.send(Message::Wake);
@@ -4262,21 +4269,13 @@ fn media_files(config: &EngineConfig, access: &Access) -> nsh_core::access::Medi
     match &config.app {
         App::Js(bundle) => nsh_core::access::MediaFiles::new(
             access,
-            config
-                .data_dir
-                .as_ref()
-                .map(|root| root.join(app_dir_name(config.app.app_id())))
-                .as_deref(),
+            app_dir(config).as_deref(),
             &bundle_system_paths(bundle),
             nsh_core::access::native_files(config.environment.os),
         ),
         App::Rust(root) if root.capabilities_ref().is_some() => nsh_core::access::MediaFiles::new(
             access,
-            config
-                .data_dir
-                .as_ref()
-                .map(|root| root.join(app_dir_name(config.app.app_id())))
-                .as_deref(),
+            app_dir(config).as_deref(),
             &system_paths(nsh_core::access::TrustedPaths::default(), false),
             nsh_core::access::native_files(config.environment.os),
         ),
@@ -4286,6 +4285,22 @@ fn media_files(config: &EngineConfig, access: &Access) -> nsh_core::access::Medi
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "js-core")]
+    #[test]
+    fn an_apps_directory_is_its_own_or_the_one_named_by_its_id() {
+        let app = || super::Bundle::source(String::new()).with_app_id(Some("com.a"));
+        let mut config = super::EngineConfig::new(app());
+        assert_eq!(super::app_dir(&config), None);
+        config.data_dir = Some("/data".into());
+        assert_eq!(
+            super::app_dir(&config),
+            Some(std::path::Path::new("/data").join("com.a"))
+        );
+        // `"dataDir"`: storage, `${dataDir}` and its files all live there.
+        config.app_dir = Some("/home/a/.myapp".into());
+        assert_eq!(super::app_dir(&config), Some("/home/a/.myapp".into()));
+    }
+
     #[test]
     fn an_emptied_op_buffer_gives_back_what_a_large_commit_grew() {
         let mut ops: Vec<super::Op> = Vec::with_capacity(super::RETAINED_OPS * 8);

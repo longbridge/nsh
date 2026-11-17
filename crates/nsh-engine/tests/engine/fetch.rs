@@ -150,6 +150,7 @@ fn fetch_round_trips_through_the_platform_network() {
         audio: None,
         windows: None,
         login_item: None,
+        app_dir: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, Sink(tx)).unwrap();
     assert_eq!(
@@ -278,6 +279,7 @@ fn fetch_stays_within_the_capabilities() {
         audio: None,
         windows: None,
         login_item: None,
+        app_dir: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, Sink(tx)).unwrap();
     assert_eq!(
@@ -387,6 +389,7 @@ fn path_rules_hold_for_every_request() {
         audio: None,
         windows: None,
         login_item: None,
+        app_dir: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, Sink(tx)).unwrap();
     assert_eq!(
@@ -462,6 +465,7 @@ fn rust_components_fetch_through_the_platform_network() {
         audio: None,
         windows: None,
         login_item: None,
+        app_dir: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, Sink(tx)).unwrap();
     let mut shown = Vec::new();

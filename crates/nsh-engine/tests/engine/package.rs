@@ -68,6 +68,7 @@ fn first_texts(bundle: nsh_engine::Bundle) -> Vec<String> {
         audio: None,
         windows: None,
         login_item: None,
+        app_dir: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let first = rx

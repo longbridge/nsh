@@ -864,6 +864,7 @@ impl RootView {
             ui_sets: crate::ui_sets(),
             runtime: self.ivars().options.runtime.clone(),
             data_dir: self.ivars().options.data_dir.clone(),
+            app_dir: None,
             cache: system_cache(self.ivars().options.cache.clone()),
             storage: self.ivars().options.storage.as_ref().map(|dir| {
                 nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>

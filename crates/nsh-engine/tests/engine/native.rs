@@ -106,6 +106,7 @@ fn start_in(
         audio: None,
         windows: None,
         login_item: None,
+        app_dir: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),

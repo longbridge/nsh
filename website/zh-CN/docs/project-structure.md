@@ -131,7 +131,7 @@ mount(App);
 | `fileTypes` | object[] | `package`、`run` | 应用打开的文件类型，`[{ "name": "Video", "extensions": ["mp4"], "mimeTypes": ["video/mp4"] }]`，由包声明给系统；文件送到 [`Application.on("openFiles")`](../modules/nsh-desktop.md#打开文件)。 |
 | `handoff` | boolean | `package` | `true`：在 iOS 和 macOS 上，应用用 [`UrlScheme.setUrl`](../modules/nsh.md#handoff) 设置的地址交给系统，Handoff 可以在用户的其他设备上接着打开它；打包时在 `NSUserActivityTypes` 中声明它的活动类型 `<id>.url`。 |
 | `singleInstance` | boolean | `package` | `true`：应用在 Windows 和 Linux 上只运行一份；第二次启动把参数和工作目录交给正在运行的应用后退出（[单实例](../modules/nsh-desktop.md#单实例)）。 |
-| `dataDir` | string | `package` | 打包后的桌面应用（macOS、Windows、Linux）把存储（`nsh/storage`）和日志放在这里，而不是系统数据目录里以应用 id 命名的目录：绝对路径，或用户主目录下的路径，如 `"${homeDir}/.myapp"`。应用 id 变了数据也不动。不能有 `..` 或其他 `${...}`；runner 不接受的值，`package` 会警告并忽略。 |
+| `dataDir` | string | `package` | 打包后的桌面应用（macOS、Windows、Linux）把数据放在这里：存储（`nsh/storage`）、日志和 `${dataDir}`（应用在那里读写的文件），而不是系统数据目录里以应用 id 命名的目录：绝对路径，或用户主目录下的路径，如 `"${homeDir}/.myapp"`。应用 id 变了数据也不动。不能有 `..` 或其他 `${...}`；runner 不接受的值，`package` 会警告并忽略。 |
 | `features` | string[] | `package` | 打包时 release runner 始终保留的原生功能（应用带 Rust crate，或本机装有 `cargo` 且打包目标是本机系统时，在本地构建 runner），如 `["plot"]`：只有 Rust 代码或动态 import 才用到的功能写在这里。其余功能中，bundle 用不到的（`shader`、`editor`、`plot` 等）`package` 会去掉，并输出原因。 |
 | `icon` | string \| object | `package`、`run` | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`；也可按平台分别提供（`{ "macos": "…", "windows": "…" }`，[打包](./packaging.md#图标)）。 |
 | `tailwind` | object | 每次构建 | 扩展 `class` 字符串所依据的 Tailwind 主题（[Tailwind](./tailwind.md)）。 |

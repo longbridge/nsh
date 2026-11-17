@@ -64,6 +64,7 @@ fn start(app_theme: Option<Theme>, host_theme: Option<Theme>) -> (Engine, Receiv
         audio: None,
         windows: None,
         login_item: None,
+        app_dir: None,
     };
     let engine = Engine::start_with(
         config,
@@ -171,6 +172,7 @@ fn a_tsx_apps_token_classes_follow_the_host_theme() {
         audio: None,
         windows: None,
         login_item: None,
+        app_dir: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(backgrounds(&rx), vec![default_primary()]);
@@ -261,6 +263,7 @@ fn a_hosts_theme_overrides_win_over_the_apps_tokens_they_set_and_keep_the_rest()
         cache: Default::default(),
         windows: None,
         login_item: None,
+        app_dir: None,
     };
     // A brand's primary, light and dark, set before the app runs.
     let overrides = nsh_base::theme_overrides(
@@ -382,6 +385,7 @@ fn start_branded(
         cache: Default::default(),
         windows: None,
         login_item: None,
+        app_dir: None,
     };
     let engine = Engine::start_with(
         config,

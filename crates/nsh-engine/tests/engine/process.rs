@@ -104,6 +104,7 @@ mount(() => <Text>{{shown()}}</Text>);
             picker: None,
             speech: None,
             audio: None,
+            app_dir: None,
         };
         let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
         let data = root.join("data/com.example.process");

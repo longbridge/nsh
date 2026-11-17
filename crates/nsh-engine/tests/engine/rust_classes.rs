@@ -559,6 +559,7 @@ pub(crate) fn start_with(
         audio: None,
         windows: None,
         login_item: None,
+        app_dir: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),

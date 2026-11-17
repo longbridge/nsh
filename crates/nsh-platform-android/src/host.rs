@@ -235,6 +235,7 @@ impl Host {
             ui_sets: crate::ui_sets(),
             runtime: self.runtime.lock().expect("runtime").clone(),
             data_dir: self.data_dir.clone(),
+            app_dir: None,
             cache,
             storage: self.storage.lock().expect("storage").as_ref().map(|dir| {
                 nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>

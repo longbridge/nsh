@@ -174,6 +174,10 @@ pub struct AppOptions {
     /// system's data directory ([`nsh_engine::data_dir`]); an app that
     /// embeds nsh gives its own (its data directory + `/nsh`, say).
     pub data_dir: Option<PathBuf>,
+    /// The app's own directory, in place of `<data_dir>/<app id>`
+    /// ([`nsh_engine::EngineConfig::app_dir`]): the release runner's
+    /// `nsh.json` `"dataDir"`.
+    pub app_dir: Option<PathBuf>,
     /// Where the apps it runs keep their caches (the images they
     /// downloaded) and how much each keeps: by default the system's cache
     /// directory, each app's in `<dir>/<app id>`. See [`AppView::set_cache`].
@@ -244,6 +248,7 @@ impl Default for AppOptions {
             appearance: Appearance::System,
             limits: Limits::default(),
             data_dir: None,
+            app_dir: None,
             cache: Default::default(),
             storage: None,
             schemes: Vec::new(),
@@ -476,6 +481,7 @@ impl AppView {
             ui_sets: ui_sets(),
             runtime: None,
             data_dir: options.data_dir.clone().or_else(nsh_engine::data_dir),
+            app_dir: options.app_dir.clone(),
             cache: options.cache.clone(),
             storage: options.storage.clone(),
             clock: Default::default(),
@@ -744,6 +750,7 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
         Some(app) if launch.restore_bounds => {
             let mut config = EngineConfig::new(app);
             config.data_dir = options.data_dir.clone().or_else(nsh_engine::data_dir);
+            config.app_dir = options.app_dir.clone();
             config.storage = options.storage.clone();
             config.main_window_placement(&crate::window_state::displays())
         }
