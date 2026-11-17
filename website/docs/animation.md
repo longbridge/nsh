@@ -811,7 +811,7 @@ const remove = () => {
 | `easeInEaseOut(onEnd?)`, `linear(onEnd?)`, `spring(onEnd?)` | `animate_layout` with a preset | `configureNext` with a preset. |
 | `Types`, `Properties` | `LayoutCurve`, `LayoutProperty` | The names, for building configs. |
 
-A config is `{ duration, create?, update?, delete? }` (`LayoutAnimation { create, update, delete }` in Rust): `create` for inserted views, `update` for moved or resized ones, `delete` for removed ones. Each phase is `{ type?, property?, duration?, delay?, springDamping?, bezier? }` (`LayoutTransition { curve, property, duration_ms, delay_ms }`), where `type` is `"easeInEaseOut"`, `"spring"`, `"linear"`, `"easeIn"`, `"easeOut"`, `"bezier"` (a cubic Bézier: the phase's `bezier: [x1, y1, x2, y2]`, as CSS `cubic-bezier()`, each `x` clamped to 0..1; `LayoutCurve::bezier(x1, y1, x2, y2)`) or `"keyboard"` (the software keyboard's own curve, timed from when the keyboard started to move, so that what makes room for it moves with it; `LayoutCurve::Keyboard`), `property` is what appearing and disappearing views animate (`"opacity"`, `"scaleXY"`, `"scale"`), and `springDamping` (0..1, 0.7 by default; `LayoutCurve::FittedSpring { damping_ratio }`) sets the spring's overshoot.
+A config is `{ duration, create?, update?, delete? }` (`LayoutAnimation { create, update, delete }` in Rust): `create` for inserted views, `update` for moved or resized ones, `delete` for removed ones. Each phase is `{ type?, property?, duration?, delay?, springDamping?, stiffness?, damping?, mass?, bezier? }` (`LayoutTransition { curve, property, duration_ms, delay_ms }`), where `type` is `"easeInEaseOut"`, `"spring"`, `"linear"`, `"easeIn"`, `"easeOut"`, `"bezier"` (a cubic Bézier: the phase's `bezier: [x1, y1, x2, y2]`, as CSS `cubic-bezier()`, each `x` clamped to 0..1; `LayoutCurve::bezier(x1, y1, x2, y2)`) or `"keyboard"` (the software keyboard's own curve, timed from when the keyboard started to move, so that what makes room for it moves with it; `LayoutCurve::Keyboard`), `property` is what appearing and disappearing views animate (`"opacity"`, `"scaleXY"`, `"scale"`), and `springDamping` (0..1, 0.7 by default; `LayoutCurve::FittedSpring { damping_ratio }`) sets the overshoot of a spring fitted into the phase's duration. A `"spring"` with `stiffness`, `damping` or `mass` moves on that physics instead (below).
 
 ```rust tabs
 use nsh_core::element::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition};
@@ -868,14 +868,24 @@ const collapse = () => {
 <View ref={(r) => (header = r)} style={{ height: compact() ? 56 : 120 }} />;
 ```
 
-A spring given by its physics, as design systems give theirs, is `LayoutTransition::spring(spring)` with gpui-base's `Spring`: `Spring::new(response_ms)` (the period of the undamped spring, critically damped) or `Spring::from_stiffness(stiffness)` (a mass of 1), each shaped by `.damping_ratio(ζ)`. The animation lasts until the spring stays within a thousandth of its target (`Spring::settle_ms`), whatever duration the transition was given, and moves by the same physics on every platform (`LayoutCurve::Spring`). A `LayoutCurve::FittedSpring { damping_ratio }` is the spring JS configs name (`type: "spring"`): its stiffness is fitted to the transition's duration.
+A spring given by its physics, as design systems give theirs, is `LayoutTransition::spring(spring)` with gpui-base's `Spring`: `Spring::new(response_ms)` (the period of the undamped spring, critically damped) or `Spring::from_stiffness(stiffness)` (a mass of 1), each shaped by `.damping_ratio(ζ)`. The animation lasts until the spring stays within a thousandth of its target (`Spring::settle_ms`), whatever duration the transition was given, and moves by the same physics on every platform (`LayoutCurve::Spring`). In TSX, a `"spring"` phase that names `stiffness`, `damping` (the damping coefficient, not a ratio) or `mass` is that spring, the others `Animated.spring`'s defaults (170, 26 and 1); its `duration` and `springDamping` are not used. It works in `configureNext` and `ref.animateLayout` alike. A `LayoutCurve::FittedSpring { damping_ratio }` is the spring a `"spring"` phase without them names (`springDamping`): its stiffness is fitted to the transition's duration.
 
-```rust
+```rust tabs
 use nsh_core::element::{LayoutTransition, Spring};
 
 // Material 3 Expressive's fast spatial spring: stiffness 800, damping ratio 0.6.
 region.animate_layout(LayoutTransition::spring(Spring::from_stiffness(800.0).damping_ratio(0.6)));
 ```
+
+```tsx tabs
+// Stiffness 620, damping 36, mass 1: a damping ratio of about 0.72, settled in about 380 ms.
+const spring = { type: "spring", stiffness: 620, damping: 36, mass: 1 } as const;
+
+region?.animateLayout(spring);
+LayoutAnimation.configureNext({ duration: 380, update: spring });
+```
+
+`configureNext`'s `onEnd` runs after the config's `duration`, so give it the spring's settle time when something waits for it.
 
 ## What runs where
 

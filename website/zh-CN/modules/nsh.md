@@ -862,11 +862,15 @@ interface LayoutAnimationConfig {
 }
 
 interface LayoutAnimationAnimation {
-  type?: "easeInEaseOut" | "spring" | "linear" | "easeIn" | "easeOut" | "keyboard";
+  type?: "easeInEaseOut" | "spring" | "linear" | "easeIn" | "easeOut" | "keyboard" | "bezier";
   property?: "opacity" | "scaleXY" | "scale";
   duration?: number;
   delay?: number;
-  springDamping?: number;          // 0..1，默认 0.7
+  springDamping?: number;          // 0..1，默认 0.7：按 `duration` 拟合的弹簧
+  stiffness?: number;              // 物理弹簧（默认 170）：持续到停稳为止
+  damping?: number;                // 阻尼系数（默认 26）
+  mass?: number;                   // 质量（默认 1）
+  bezier?: [number, number, number, number];
 }
 ```
 

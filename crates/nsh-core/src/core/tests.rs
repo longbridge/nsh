@@ -34762,6 +34762,132 @@ fn the_content_of_attachments_made_past_the_pace_comes_too() {
     }
 }
 
+/// A list 400 tall of eight cells 100 tall, each bound with a column of
+/// 40 views: the cells in sight make more views than a turn's budget, so
+/// the views of the cells out of sight wait (`pace.rs`). Returns the core
+/// with views waiting, the last that waits and its parent's id.
+fn paced_cells() -> (Core<FakeEngine>, NodeId, NodeId) {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::List,
+            },
+            style_op(2, &[("height", StyleValue::Number(400.0))]),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::EstimatedItemSize(px(100.0)),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Count(8),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    let mut binds = Vec::new();
+    c.take_list_binds(&mut binds);
+    c.take_paced_list_binds(usize::MAX, &mut binds);
+    let mut ops = Vec::new();
+    for (slot, index) in binds.iter().flat_map(|b| b.binds.iter().copied()) {
+        let cell = 100 + slot * 100;
+        ops.extend([
+            Op::Create {
+                id: cell,
+                tag: Tag::Cell,
+            },
+            Op::SetProp {
+                id: cell,
+                prop: Prop::Slot(CellSlot::Item(slot)),
+            },
+            Op::Insert {
+                parent: 2,
+                child: cell,
+                before: None,
+            },
+        ]);
+        ops.push(style_op(cell, &[("height", StyleValue::Number(100.0))]));
+        for v in 1..=40 {
+            ops.extend(child_view(cell + v, cell, 2.5, &[]));
+        }
+        ops.push(Op::SetProp {
+            id: cell,
+            prop: Prop::CellIndex(index),
+        });
+    }
+    apply(&mut c, ops);
+    c.commit().unwrap();
+    let &(key, view) = c.pace.waiting.last().expect("views wait");
+    let parent = c.nodes[c.nodes[key as usize].parent as usize].id;
+    (c, view, parent)
+}
+
+/// Commits until nothing waits; `view` is never made.
+fn drain_paced_without(c: &mut Core<FakeEngine>, view: NodeId) {
+    for _ in 0..200 {
+        let batch = c.commit().unwrap();
+        assert!(!created_in(&batch).contains(&view));
+        if !c.has_paced_mounts() {
+            return;
+        }
+    }
+    panic!("views still wait");
+}
+
+#[test]
+fn a_waiting_view_taken_out_of_its_parent_is_not_made() {
+    // A view that waits, out of sight, is taken out of its parent and kept
+    // (a kept screen, a view moved later): it has no parent when the
+    // waiting views are made. It stays unmade, and the engine goes on
+    // (indexing its parent panicked the engine thread, every handler of
+    // the app with it).
+    let (mut c, view, parent) = paced_cells();
+    c.apply(Op::Remove {
+        parent,
+        child: view,
+    })
+    .unwrap();
+    drain_paced_without(&mut c, view);
+    // Put back, it is made.
+    c.apply(Op::Insert {
+        parent,
+        child: view,
+        before: None,
+    })
+    .unwrap();
+    let mut made = false;
+    for _ in 0..20 {
+        let Some(batch) = c.commit() else { break };
+        made |= created_in(&batch).contains(&view);
+    }
+    assert!(made);
+}
+
+#[test]
+fn a_waiting_view_whose_parent_is_released_is_not_made() {
+    // Its parent goes, released before it: the view is an orphan until its
+    // own release comes.
+    let (mut c, view, parent) = paced_cells();
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: 2,
+                child: parent,
+            },
+            Op::Release { id: parent },
+        ],
+    );
+    drain_paced_without(&mut c, view);
+}
+
 #[test]
 fn culled_text_is_estimated_and_measured_once_it_comes_near() {
     let mut c = core();

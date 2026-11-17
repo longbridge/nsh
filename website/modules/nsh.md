@@ -879,11 +879,15 @@ interface LayoutAnimationConfig {
 }
 
 interface LayoutAnimationAnimation {
-  type?: "easeInEaseOut" | "spring" | "linear" | "easeIn" | "easeOut" | "keyboard";
+  type?: "easeInEaseOut" | "spring" | "linear" | "easeIn" | "easeOut" | "keyboard" | "bezier";
   property?: "opacity" | "scaleXY" | "scale";
   duration?: number;
   delay?: number;
-  springDamping?: number;          // 0..1, default 0.7
+  springDamping?: number;          // 0..1, default 0.7: a spring fitted into `duration`
+  stiffness?: number;              // a physical spring (default 170): it lasts until it settles
+  damping?: number;                // its damping coefficient (default 26)
+  mass?: number;                   // its mass (default 1)
+  bezier?: [number, number, number, number];
 }
 ```
 

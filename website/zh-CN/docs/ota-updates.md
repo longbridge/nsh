@@ -201,8 +201,8 @@ export async function checkForUpdates() {
       await downloadPackage();
       // iOS 和 Android：无需提示，包在下次冷启动时运行。
       packageReady.set(canRestart);
-      return;
     }
+    // `shell`: the code is current, only the installed app is behind; offer it quietly.
     appUpdate.set(await checkForUpdate());
   } catch (error) {
     console.warn("update check failed:", error); // 下次检查时再试
