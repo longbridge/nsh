@@ -997,6 +997,73 @@ mod tests {
         let _ = unsafe { DestroyWindow(hwnd) };
     }
 
+    /// A window with its title bar hidden over a backdrop goes without
+    /// DWM's non-client rendering while zoomed, whose own caption buttons
+    /// would show beside the drawn ones, and has it again once restored.
+    #[test]
+    fn a_hidden_title_bar_over_a_backdrop_is_bare_while_zoomed() {
+        use windows::Win32::{
+            Foundation::{LPARAM, WPARAM},
+            Graphics::Dwm::{DWMWA_NCRENDERING_ENABLED, DwmGetWindowAttribute},
+            UI::WindowsAndMessaging::{
+                SIZE_MAXIMIZED, SIZE_RESTORED, SendMessageW, SetWindowLongPtrW, WM_SIZE,
+                WS_MAXIMIZE,
+            },
+        };
+        let view = AppView::make(
+            None,
+            AppOptions {
+                size: (200, 120),
+                skip_taskbar: true,
+                ..Default::default()
+            },
+            true,
+        )
+        .unwrap();
+        let hwnd = view.hwnd();
+        let mut attrs = nsh_core::desktop::WindowAttributes::default();
+        let mut title_bar = nsh_core::desktop::TitleBarOptions::default();
+        title_bar.style = nsh_core::desktop::TitleBarStyle::Hidden;
+        attrs.title_bar = Some(title_bar);
+        attrs.backdrop = Some(Backdrop::Window);
+        crate::shell::apply(view.surface(), hwnd, &attrs);
+        let rendering = || {
+            let mut enabled = windows::core::BOOL(0);
+            // SAFETY: a BOOL-sized out value, as the attribute is.
+            unsafe {
+                DwmGetWindowAttribute(
+                    hwnd,
+                    DWMWA_NCRENDERING_ENABLED,
+                    &mut enabled as *mut windows::core::BOOL as *mut _,
+                    std::mem::size_of::<windows::core::BOOL>() as u32,
+                )
+            }
+            .map(|()| enabled.as_bool())
+            .ok()
+        };
+        let (style, _) = styles(hwnd);
+        // Zoomed as `IsZoomed` reads it and told so, without showing it.
+        let zoom = |zoomed: bool| {
+            let (style, kind) = if zoomed {
+                (style | WS_MAXIMIZE.0, SIZE_MAXIMIZED)
+            } else {
+                (style & !WS_MAXIMIZE.0, SIZE_RESTORED)
+            };
+            // SAFETY: the test's own window, on its thread.
+            unsafe {
+                SetWindowLongPtrW(hwnd, GWL_STYLE, style as isize);
+                SendMessageW(hwnd, WM_SIZE, Some(WPARAM(kind as usize)), Some(LPARAM(0)));
+            }
+        };
+        assert_eq!(rendering(), Some(true), "framed");
+        zoom(true);
+        assert_eq!(rendering(), Some(false), "zoomed");
+        zoom(false);
+        assert_eq!(rendering(), Some(true), "restored");
+        // SAFETY: the test's own window.
+        let _ = unsafe { DestroyWindow(hwnd) };
+    }
+
     #[test]
     fn opaque_window_keeps_its_frame() {
         let view = AppView::new(None, AppOptions::default()).unwrap();
