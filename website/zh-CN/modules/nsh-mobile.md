@@ -1,25 +1,43 @@
 ---
 title: nsh/mobile
-description: iOS 和 Android 的 API：系统标签栏 TabBar、iOS 的系统分段控件 SegmentedControl、触感反馈 Haptics、iOS 的 InputAccessoryView、Android 的 BackHandler，以及 isAvailable。
+description: iOS 和 Android 的 API：系统标签栏 TabBar、系统日期时间选择器 DateTimePicker、iOS 的系统分段控件 SegmentedControl、触感反馈 Haptics、iOS 的 InputAccessoryView、Android 的 BackHandler，以及 isAvailable。
 order: 12.2
 ---
 
 # nsh/mobile
 
-`nsh/mobile` 收录 iOS 和 Android 的专属能力：两者都有的系统标签栏 `TabBar` 和设备的触感反馈 [`Haptics`](#haptics)；iOS 的系统分段控件 [`SegmentedControl`](#segmentedcontrol) 和 [`InputAccessoryView`](#inputaccessoryview)，键盘上方的工具栏；Android 的 [`BackHandler`](#backhandler)，返回键。Rust 代码使用 `nsh_core::mobile` 和 `nsh_core::prelude`；TSX 导入 `nsh/mobile`。这个模块在所有平台上都可以导入，所以同一个 bundle 能在各处运行：在其他平台上，它的组件不占空间、调用立即返回，`isAvailable` 告诉你当前是否在 iOS 或 Android 上（`nsh` 的 `platform.os` 区分具体平台）。桌面的能力在 [nsh/desktop](./nsh-desktop.md) 中。
+`nsh/mobile` 收录 iOS 和 Android 的专属能力：两者都有的系统标签栏 `TabBar`、系统日期时间选择器 [`DateTimePicker`](#datetimepicker) 和设备的触感反馈 [`Haptics`](#haptics)；iOS 的系统分段控件 [`SegmentedControl`](#segmentedcontrol) 和 [`InputAccessoryView`](#inputaccessoryview)，键盘上方的工具栏；Android 的 [`BackHandler`](#backhandler)，返回键。Rust 代码使用 `nsh_core::mobile` 和 `nsh_core::prelude`；TSX 导入 `nsh/mobile`。这个模块在所有平台上都可以导入，所以同一个 bundle 能在各处运行：在其他平台上，它的组件不占空间、调用立即返回，`isAvailable` 告诉你当前是否在 iOS 或 Android 上（`nsh` 的 `platform.os` 区分具体平台）。桌面的能力在 [nsh/desktop](./nsh-desktop.md) 中。
 
 ```rust tabs
-use nsh_core::mobile::{SegmentedControlItem, TabBarItem, segmented_control, tab_bar};
+use nsh_core::mobile::{
+    DateTimePickerMode, DateTimePickerValue, SegmentedControlItem, TabBarItem, date_time_picker, segmented_control,
+    tab_bar,
+};
 ```
 
 ```tsx tabs
-import { BackHandler, Haptics, InputAccessoryView, isAvailable, SegmentedControl, TabBar } from "nsh/mobile";
-import type { SegmentedControlItem, SegmentedControlProps, TabBarItem, TabBarProps } from "nsh/mobile";
+import {
+  BackHandler,
+  DateTimePicker,
+  Haptics,
+  InputAccessoryView,
+  isAvailable,
+  SegmentedControl,
+  TabBar,
+} from "nsh/mobile";
+import type {
+  DateTimePickerMode,
+  DateTimePickerProps,
+  SegmentedControlItem,
+  SegmentedControlProps,
+  TabBarItem,
+  TabBarProps,
+} from "nsh/mobile";
 ```
 
 ## 模块范围
 
-这个模块提供移动平台专属的能力，例如用于应用顶层导航的系统标签栏。通用控件属于 [`nsh/base`](./nsh-base.md)：例如 [Switch](../elements/switch.md) 在手机、桌面和 Web 上共享行为与 API，轨道、滑块和各状态的样式由应用提供。`TabBar` 服务于移动应用导航，`Tabs` 服务于跨平台的标签内容切换。这个模块仅接受具有移动平台专属交互语义的能力。系统外观、尺寸或动画本身仍属于通用控件的共享职责。这个职责区别决定哪些能力适合放在这里（[目标与设计原则](../docs/goals.md)）。`SegmentedControl` 是系统自己的控件，供确实需要 iOS 原生分段控件的应用使用；在所有平台上以应用自己的外观做选择，用 `nsh/base` 的 [ToggleGroup](../elements/toggle.md) 或 [RadioGroup](../elements/radio.md)。
+这个模块提供移动平台专属的能力，例如用于应用顶层导航的系统标签栏。通用控件属于 [`nsh/base`](./nsh-base.md)：例如 [Switch](../elements/switch.md) 在手机、桌面和 Web 上共享行为与 API，轨道、滑块和各状态的样式由应用提供。`TabBar` 服务于移动应用导航，`Tabs` 服务于跨平台的标签内容切换。这个模块仅接受具有移动平台专属交互语义的能力。系统外观、尺寸或动画本身仍属于通用控件的共享职责。这个职责区别决定哪些能力适合放在这里（[目标与设计原则](../docs/goals.md)）。`SegmentedControl` 是系统自己的控件，供确实需要 iOS 原生分段控件的应用使用；在所有平台上以应用自己的外观做选择，用 `nsh/base` 的 [ToggleGroup](../elements/toggle.md) 或 [RadioGroup](../elements/radio.md)。同样，`DateTimePicker` 是手机上系统自己的日期时间选择器；在所有平台上以应用自己的外观选择日期和时间，用 `nsh/base` 的 [DatePicker](../elements/date-picker.md) 或 [TimeField](../elements/time-field.md)。
 
 ## isAvailable
 
@@ -169,6 +187,52 @@ const appearance = signal(0);
 
 - **iOS 和 Mac Catalyst**：`UISegmentedControl`，外观取决于 iOS 版本和应用链接的 SDK：iOS 26 及以后为 Liquid Glass。
 - **Android、桌面和 Web**：`SegmentedControl` 不占空间、不显示，因此同一布局可兼顾两者：在这些平台上用 [ToggleGroup](../elements/toggle.md) 或 [RadioGroup](../elements/radio.md) 显示选择，按 `platform.os` 选用。
+
+## DateTimePicker
+
+日期时间选择器设置一个日期、一个时刻或两者：提醒的时间、日程的结束日期。`DateTimePicker` 是系统自己的选择器，因此有系统的外观、格式、日历和无障碍：在 iOS 和 iPadOS 上是紧凑样式的 `UIDatePicker`，值显示在胶囊里，点开是系统的日历或时间滚轮；在 Android 上值显示在字段里，点开是系统的日期或时间对话框。
+
+```tsx
+import { signal } from "nsh";
+import { DateTimePicker } from "nsh/mobile";
+
+const at = signal("2026-11-17T09:30");
+
+<DateTimePicker
+  mode="dateTime"
+  value={at()}
+  min="2026-11-17T00:00"
+  minuteInterval={5}
+  onChange={({ value }) => at.set(value)}
+/>;
+```
+
+值是对应模式的 ISO 字符串，与 HTML 的日期和时间输入框相同：`date` 是 `"2026-11-17"`，`time` 是 `"09:30"`，`dateTime` 是 `"2026-11-17T09:30"`。它们是挂钟时间：选择器原样显示，由应用对应到它所指的时区。值由应用掌握：选择后 `onChange` 报告新值（`{ value }`），选择器像系统的一样立即显示它，应用再把它作为 `value` 传回。没有值时选择器显示当前时刻。形式不属于当前模式的 `value`、`min` 或 `max` 不会被当作别的值显示：NSH 记录一条警告并忽略它。样式未指定的尺寸取系统的尺寸。在 Rust 中，`date_time_picker()` 创建一个，每个属性有对应的 setter，事件用 `.on_change(..)`；值是 `DateTimePickerValue`，可由 `chrono` 的 `NaiveDate`、`NaiveTime` 和 `NaiveDateTime` 得到。
+
+### 属性
+
+| 属性 | Rust | 类型 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `mode` | `.mode(..)` | `"date" \| "time" \| "dateTime"` | `"date"` | 选什么：日期、时刻，或两者。 |
+| `value` | `.value(..)` | `string \| null` | `null` | 显示的值，取当前模式的形式；`null` 显示当前时刻。 |
+| `min` | `.min(..)` | `string \| null` | `null` | 用户能选的最早的值。 |
+| `max` | `.max(..)` | `string \| null` | `null` | 用户能选的最晚的值。 |
+| `minuteInterval` | `.minute_interval(..)` | `number` | `1` | 可选的分钟之间相隔的分钟数：1 到 30 之间 60 的约数。其他数字记录警告，按 1 分钟。 |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | 不能修改：系统将它调暗。 |
+| `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 选择器的位置和尺寸。外观由系统决定。 |
+| `testID` | `.test_id(..)` | `string` | 无 | 在测试和 `nsh test --trace` 中找到这个选择器。 |
+
+### 事件
+
+| 事件 | Rust | 说明 |
+|---|---|---|
+| `onChange` | `.on_change(\|value: &DateTimePickerValue\| ..)` | 用户选了一个值：`{ value }`，取当前模式的形式。选择器立即显示它；应用设置 `value`。 |
+
+### 平台说明
+
+- **iOS 和 Mac Catalyst**：紧凑样式的 `UIDatePicker`；`dateTime` 时日期和时刻是两个胶囊。日历和时间滚轮是系统的，使用用户的语言区域、日历和时钟制式。
+- **Android**：值以系统的格式和用户的 12 或 24 小时制显示，每部分一个字段；按下时打开系统的日期或时间对话框。时间对话框提供每一分钟：落在 `minuteInterval` 两档之间的选择取前一档，超出 `min` 或 `max` 的选择取边界。
+- **桌面和 Web**：`DateTimePicker` 不占空间、不显示，因此同一布局可兼顾两者：在这些平台上用 [DatePicker](../elements/date-picker.md) 或 [TimeField](../elements/time-field.md) 选择，按 `platform.os` 选用。
 
 ## InputAccessoryView
 

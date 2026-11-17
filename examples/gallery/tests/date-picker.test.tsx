@@ -126,3 +126,19 @@ describe("on a phone", () => {
     expect(app.enabled("role:button[Pick a time]")).toBe(false);
   });
 });
+
+test("on a phone a reminder is set with the system's picker, which desktops leave out", async () => {
+  const phone = await open("../App.tsx", { clock: { time: new Date(2026, 9, 28, 12) } });
+  await phone.press("role:button[DatePicker]");
+  await phone.waitFor("Reminder");
+  // Each part is the system's picker, a native component headless runs do
+  // not draw; the summary is the app's.
+  expect(phone.shows("id:reminder-starts")).toBe(true);
+  expect(phone.shows("id:reminder-at")).toBe(true);
+  expect(phone.shows("id:reminder-until")).toBe(true);
+  expect(phone.shows("30 days")).toBe(true);
+  const desk = await open("../App.tsx", { platform: "macos", width: 1200, height: 1700, clock: { time: new Date(2026, 9, 28, 12) } });
+  await desk.press("role:button[DatePicker]");
+  await desk.waitFor("Deadline");
+  expect(desk.shows("Reminder")).toBe(false);
+});
