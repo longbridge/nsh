@@ -28,7 +28,11 @@ import { checkForPackage, downloadPackage, restartToPackage, runningPackage, she
 ## checkForUpdate
 
 ```ts
-function checkForUpdate(): Promise<AppUpdate | null>;
+function checkForUpdate(options?: UpdateCheckOptions | null): Promise<AppUpdate | null>;
+
+interface UpdateCheckOptions {
+  channel?: string | null;
+}
 
 interface AppUpdate {
   version: string;
@@ -50,6 +54,18 @@ interface AppUpdate {
 | `shell` | 是否只有已安装的应用落后：本次运行的[包](#checkforpackage)已是该版本或更高，更新带来的是更新的运行时和原生外壳，而不是新代码。用包更新的应用可以把它作为更安静的可选步骤提供 |
 
 来源无法访问或清单不可接受时会 reject：设置了 `publicKey` 但签名错误或缺失、清单属于其他应用、URL 不是 HTTPS。版本相同或更旧的清单不算更新，因此过期的清单无法让应用降级。
+
+`channel` 改查 `nsh.json` 声明的某个[频道](#频道)，而不是默认来源。它只能是名字，不能是地址：包里没有声明的名字在发出任何请求之前就会 reject。`downloadUpdate` 和 `installAndRestart` 使用上一次检查找到的结果，不管它读的是哪个来源。
+
+### 频道
+
+想让自愿参加的用户提前拿到新版本的应用，在 `nsh.json` 里再声明一份清单（`"channels": { "beta": "<url>" }`），每次检查时传入用户的选择：
+
+```tsx
+const update = await checkForUpdate(wantsBeta() ? { channel: "beta" } : undefined);
+```
+
+每个频道和默认来源按同样的规则检查：同一个 `publicKey`、同一个 id，只给更新的版本。所以离开频道不会降级：装着 `1.3.0-beta.2` 的应用改查默认来源后，拿到的是 `1.3.0`，不是 `1.2.0`。每个频道的清单照常用 `nsh update-manifest` 生成；频道里压缩包的相对 URL 按它自己的清单所在位置解析。
 
 ## downloadUpdate
 
@@ -195,7 +211,7 @@ export const install = () =>
 
 ## nsh.json
 
-`"updater"` 指定一个来源：`github`，即最新 GitHub Release 中带有 `latest.json` 的 `owner/repo`；或 `url`，即自己服务器上的清单，此时必须配 `publicKey`。`publicKey` 是 `nsh keygen` 生成的 `.pub` 文件内容；配了它，未签名的清单会被拒绝。
+`"updater"` 指定一个来源：`github`，即最新 GitHub Release 中带有 `latest.json` 的 `owner/repo`；或 `url`，即自己服务器上的清单，此时必须配 `publicKey`。`publicKey` 是 `nsh keygen` 生成的 `.pub` 文件内容；配了它，未签名的清单会被拒绝。`channels` 声明应用代码可以[按名字选择](#频道)的其他清单。
 
 ```json
 {
@@ -209,7 +225,8 @@ export const install = () =>
 | --- | --- | --- |
 | `github` | string | `owner/repo`：清单是其最新 Release 的附件 `latest.json`，跳过 draft 和 prerelease |
 | `url` | string | 自己服务器上清单的 HTTPS 地址；压缩包的相对地址相对它解析 |
-| `publicKey` | string | 给清单签名（`latest.json.sig`）的 Ed25519 公钥。使用 `url` 时必填 |
+| `channels` | object | 频道名（字母、数字、`-`、`_`、`.`）到它的清单 HTTPS URL，供 `checkForUpdate({ channel })` 使用。需要 `publicKey` |
+| `publicKey` | string | 给清单签名（`latest.json.sig`）的 Ed25519 公钥。使用 `url` 或 `channels` 时必填 |
 | `packages.roots` | string[] | 根公钥（`nsh keygen` 的 `root.pub`），由它们认证的发布密钥为应用的 [OTA 包](#ota-更新)签名。没有它时应用不运行任何包 |
 
 `nsh package` 会校验这些键，并把它们连同应用的 `build` 放进包里，所以来源在构建应用时就已确定。`version` 必须是 semver。`nsh update-manifest` 为一个版本的压缩包和包生成 `latest.json` 和签名（[CLI](../docs/cli.md#nsh-update-manifest)）。
