@@ -2406,7 +2406,7 @@ files and the system's apps (`http`, `https`, `file`, `mailto`, `tel`, `sms`, ..
 | iOS, Mac Catalyst | `CFBundleURLTypes` in the app's `Info.plist`; the link that launched the app and those that come while it runs |
 | Android | An `ACTION_VIEW` intent filter in the manifest `nsh package` writes; the activity runs as `singleTask`, so a link reaches the running app |
 | Windows | The app, under `HKEY_CURRENT_USER\\Software\\Classes`, each time it starts; a second launch hands its URL to the running app |
-| Linux | The app: its desktop entry in `~/.local/share/applications` with `x-scheme-handler/<scheme>`, made the default handler when it starts; `nsh run` registers the development host the same way. A second launch hands its URL to the running app |
+| Linux | The app: its desktop entry in `~/.local/share/applications` (`<app id>.desktop`) with `x-scheme-handler/<scheme>`, written when it starts. An entry an installer put there for this executable is kept, with the schemes it lacks added; one for another copy of the app is left alone. The app becomes a scheme's default handler only where no application handles it yet. `nsh run` registers the development host the same way. A second launch hands its URL to the running app |
 
 `nsh test` hands a test's app links: `App.open(entry, { url })` launches the app with one, and
 `app.openWithUrl(url)` opens one while it runs, both headless.
