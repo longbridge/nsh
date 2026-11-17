@@ -158,7 +158,8 @@ define_class!(
             // Told once the menu went, a turn later: a chosen action's
             // handler runs as the dismissal finishes, so its `select` comes
             // first and this closes nothing more (the component reports a
-            // closing once).
+            // closing once, and takes a `select` that still follows as what
+            // closed it).
             let context = ivars.context.clone();
             let close = move || {
                 let context = context.clone();

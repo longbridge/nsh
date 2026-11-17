@@ -1387,15 +1387,26 @@ fn SystemMenuRow() -> impl IntoElement {
 
 /// What the system's menu reports, as the iOS backend sends it.
 fn system_menu_event(app: &mut App, name: &str, data: serde_json::Value) {
+    system_menu_events(app, [(name, data)]);
+}
+
+/// Several reports of the system's menu, sent together (one main-thread
+/// turn), then settled.
+fn system_menu_events<'a>(
+    app: &mut App,
+    events: impl IntoIterator<Item = (&'a str, serde_json::Value)>,
+) {
     let id = app.seen.lock().unwrap().components[CONTEXT_MENU_COMPONENT];
-    app.app.engine().control().dispatch_event(
-        id,
-        EventKind::NativeEvent,
-        EventPayload::Native {
-            name: name.into(),
-            data,
-        },
-    );
+    for (name, data) in events {
+        app.app.engine().control().dispatch_event(
+            id,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: name.into(),
+                data,
+            },
+        );
+    }
     app.app.settle();
 }
 
@@ -1436,10 +1447,87 @@ fn with_items_ios_shows_the_systems_context_menu_and_draws_none() {
     app.app
         .wait_for(
             "text:heard: true:LongPress open false:Select select:delete close \
-             true:ContextMenu open false:PressOutside cancel close",
+             true:ContextMenu open cancel false:PressOutside close",
         )
         .unwrap();
     assert!(!app.app.shows("Drawn rename"), "still no drawn menu");
+}
+
+#[test]
+fn a_system_menus_dismissal_told_before_its_choice_is_no_cancel() {
+    let mut app = start_on(Root::of::<SystemMenuRow>(), Os::Ios);
+    system_menu_event(&mut app, "open", serde_json::json!("touch"));
+    app.app.wait_for("text:heard: true:LongPress open").unwrap();
+    // The platform may tell the dismissal first: the choice that follows
+    // it is what closed the menu, so nothing is cancelled.
+    system_menu_events(
+        &mut app,
+        [
+            ("close", serde_json::Value::Null),
+            ("select", serde_json::json!("rename")),
+        ],
+    );
+    app.app
+        .wait_for("text:heard: true:LongPress open false:Select select:rename close")
+        .unwrap();
+}
+
+/// A system menu the app owns the `open` of, and closes itself ("Close
+/// it").
+#[component]
+fn AppClosedSystemMenu() -> impl IntoElement {
+    let open = signal(false);
+    let heard = signal(String::from("heard:"));
+    let hear = move |what: String| {
+        heard.update(|h| {
+            h.push(' ');
+            h.push_str(&what);
+        })
+    };
+    view()
+        .pt(px(100.0))
+        .child(
+            context_menu()
+                .items(vec![MenuButtonItem::new("rename", "Rename")])
+                .open(move || Some(open.get()))
+                .on_open_change(move |e: &ContextMenuEvents| {
+                    if let ContextMenuEvents::OpenChange(next, reason) = e {
+                        open.set(*next);
+                        hear(format!("{next}:{reason:?}"));
+                    }
+                })
+                .on_cancel(move || hear("cancel".into()))
+                .on_close(move || hear("close".into()))
+                .trigger(
+                    view()
+                        .test_id("row")
+                        .w(px(200.0))
+                        .h(px(40.0))
+                        .child(text("Row")),
+                ),
+        )
+        .child(
+            view()
+                .on_press(move || open.set(false))
+                .child(text("Close it")),
+        )
+        .child(text(move || heard.get()))
+}
+
+#[test]
+fn a_system_menu_the_app_closes_reports_only_its_closing() {
+    let mut app = start_on(Root::of::<AppClosedSystemMenu>(), Os::Ios);
+    system_menu_event(&mut app, "open", serde_json::json!("touch"));
+    app.app.wait_for("text:heard: true:LongPress").unwrap();
+    // The app closes it: the platform dismisses the menu and tells.
+    app.app.press("text:Close it").unwrap();
+    app.app.settle();
+    system_menu_event(&mut app, "close", serde_json::Value::Null);
+    // As the drawn menu: the closing (`onClose`), no user's attempt
+    // (`onCancel`) and no change asked for.
+    app.app
+        .wait_for("text:heard: true:LongPress close")
+        .unwrap();
 }
 
 #[test]

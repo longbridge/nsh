@@ -2385,6 +2385,27 @@ fn system_menu(
     // Shown, as the platform last told: it reports the closing once,
     // whether a choice or a dismissal tells first.
     let shown = stored(false);
+    // A dismissal told and not yet reported: the platform may tell it
+    // before the choice that caused it, so it waits a turn, and a choice
+    // coming meanwhile replaces it.
+    let ending = stored(None::<Spawned<()>>);
+    // Gone without a choice. As the drawn menu's dismissal: the user's
+    // attempt (a tap outside, the preview's drag away) is reported, then
+    // it closes; when the app closed it, only the closing is.
+    let finish = {
+        let change = change.clone();
+        Rc::new(move || {
+            ending.replace(None);
+            if !shown.replace(false) {
+                return;
+            }
+            if open.get_untracked() {
+                cx.emit(ContextMenuEvents::Cancel);
+                change(false, OpenChangeReason::PressOutside);
+            }
+            cx.emit(ContextMenuEvents::Close);
+        })
+    };
     native(CONTEXT_MENU_COMPONENT)
         .absolute()
         .size_0()
@@ -2401,6 +2422,11 @@ fn system_menu(
         .on_native_event(move |event: &NativeEvent| {
             match &*event.name {
                 "open" => {
+                    // A dismissal still waiting belongs to the menu before.
+                    if let Some(task) = ending.replace(None) {
+                        task.cancel();
+                        finish();
+                    }
                     if !shown.replace(true) {
                         // A finger held (the lifted preview), or the
                         // secondary button (the compact menu at the pointer).
@@ -2414,6 +2440,10 @@ fn system_menu(
                 }
                 "select" => {
                     if let Some(id) = event.data.as_str() {
+                        // The dismissal told before it was this choice.
+                        if let Some(task) = ending.replace(None) {
+                            task.cancel();
+                        }
                         // As a drawn menu's item: closing with the choice,
                         // the choice, then gone.
                         let was = shown.replace(false);
@@ -2427,12 +2457,9 @@ fn system_menu(
                     }
                 }
                 "close" => {
-                    // Dismissed without a choice: a tap outside, the
-                    // preview's drag away.
-                    if shown.replace(false) {
-                        change(false, OpenChangeReason::PressOutside);
-                        cx.emit(ContextMenuEvents::Cancel);
-                        cx.emit(ContextMenuEvents::Close);
+                    if shown.get() && ending.with(|e| e.is_none()) {
+                        let finish = finish.clone();
+                        ending.replace(Some(set_timeout(Duration::ZERO, move || finish())));
                     }
                 }
                 _ => {}
