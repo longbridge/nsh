@@ -386,6 +386,8 @@ function ProgressiveBlur(props: { radius: number; style: ViewStyle }) {
 }
 ```
 
+In Rust, use `.mask_linear(deg(90.0), [transparent_black(), black(), transparent_black()])` to fade both edges, `.mask_radial([black(), transparent_black()])` for a centered radial fade, and `.mask_none()` to clear it. Angles and stop vectors accept signals or closures; an empty stop vector clears the mask. Positions use `(color, percentage(0.2))` or `(color, px(12.0))`.
+
 A masked `backdropFilter` draws the blur alone, without the system material's tint, at its exact radius, on iOS and macOS too. Each layer blurs what the window shows on every frame, so keep the layers few and the area small. Linux and GPUI draw no `backdropFilter`, so give the region a fading `backgroundImage` where the text over it must stay readable.
 
 GPUI draws no `maskImage` yet: a masked view draws whole, so a fade made with a mask is a hard edge there.
