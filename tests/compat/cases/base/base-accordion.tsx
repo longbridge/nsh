@@ -52,7 +52,7 @@ function App() {
         }}
       >
         {item("a", "Shipping", { keepMounted: true })}
-        {item("b", "Returns", { reveal: true, revealSpring: { stiffness: 620, damping: 36 } })}
+        {item("b", "Returns", { reveal: true, revealSpring: { stiffness: 100, damping: 20 } })}
         {item("c", "Billing", {}, true)}
       </Accordion>
       <View testID="multiple" style={{ height: 10 }} onPress={() => multiple.set(!multiple())} />

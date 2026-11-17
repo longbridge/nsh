@@ -1767,15 +1767,15 @@ frame id:region 0 20 390 54
 frame id:details 0 0 390 30
 frame id:after 0 74 390 20
 # Closed: the frames at once, the details out once the region has closed:
-# the app's spring (stiffness 620, damping 36) settles in about 384 ms,
-# so they are still there after 300 (the default's would have gone at
-# about 265).
+# the app's spring (stiffness 100, damping 20) settles in about 923 ms,
+# so they are still there after 600 (the default's would have gone at
+# about 265). `wait` is real time: either side of 600 leaves a busy
+# runner some 300 ms.
 tap id:trigger
 frame id:region 0 20 390 24
 frame id:after 0 44 390 20
-wait 300
+wait 600
 frame id:details 0 0 390 30
-wait 100
 absent Details
 covers [props] Collapsible.reveal
 covers [props] Collapsible.revealSpring
@@ -1834,15 +1834,15 @@ listens id:details-a onPress
 tap id:details-b
 expect Taps b: 1
 # The open item's trigger closes it; the revealed panel springs shut on
-# the app's spring (settling in about 384 ms, the default in about 265)
-# and its content leaves once it has.
+# the app's spring (settling in about 923 ms, the default in about 265)
+# and its content leaves once it has: still there after 600, with some
+# 300 ms either side for a busy runner.
 tap text:Returns
 expect Open: none
 frame id:item-b 0 20 390 20
 frame id:faq 0 20 390 60
-wait 300
+wait 600
 frame id:details-b 0 0 390 30
-wait 100
 absent Returns details
 # With `multiple`, opening one leaves the others open.
 tap id:multiple
