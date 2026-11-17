@@ -124,8 +124,7 @@ pub(crate) struct Props {
     pub(crate) bits: u32,
     /// The maximum length, in UTF-16 units.
     pub(crate) max_length: u32,
-    /// `ES_AUTOHSCROLL` / `ES_AUTOVSCROLL`: how the text scrolls (never a
-    /// scroll bar: there is no window to put one in).
+    /// Scroll-bar support and auto-scrolling flags. The host draws the indicators.
     pub(crate) scroll: u32,
     /// The character a password shows.
     pub(crate) password: u16,
