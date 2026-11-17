@@ -166,7 +166,9 @@ Rust uses `RichEditor::on_content_size_change`, whose listener receives
 `RichEditorEvent::ContentSizeChange { content_size }`.
 
 Input (`controller.rs`): as the code `Editor`, an invisible native input at the caret (the sink) takes typed text
-and input methods. Typed text goes to plugins' `handle_text_input` (input rules), else is inserted with the stored
+and input methods. A node selection of a block atom has no caret: the sink is at the node's box, where a platform
+that scrolls a field into view as it focuses it (a browser) finds it, and scrolling the selection into view
+(`scroll_into_view`) brings the node in whole, as ProseMirror scrolls a node selection's DOM node. Typed text goes to plugins' `handle_text_input` (input rules), else is inserted with the stored
 marks (origin `Input`). While an input method composes, its text shows in the line at the caret with the block's
 typography, and the document waits; the commit is one transaction tagged with the composition's id (`composition`
 meta, which the history groups). `RichEditorEvent::CompositionChange(bool)` (Rust
@@ -227,7 +229,8 @@ are the session's selection, which the view may not have rendered yet, grown by 
 while handles show, so the menu leaves them free to take a finger. Paste is the sink's own (its `onPaste`, with
 HTML and files); Cut, Copy and Select All come back as `EventKind::EditAction` and run as the keys' commands do.
 
-The bubble menu (`bubbleMenu`, a slot): an empty box over the selection's lines (`Rv::selection_box`), inside the
+The bubble menu (`bubbleMenu`, a slot): an empty box over the selection's lines, or its node's box for a node
+selection (`Rv::selection_box`; a block atom has no text or caret to go by), inside the
 content box so it scrolls with the text, anchors an `overlay()` holding the app's content (`bubbleMenuPlacement`,
 `bubbleMenuOffset`); the overlay flips and stays on screen as the core's overlays do. Whether it shows is the app's:
 it passes the slot while it wants the menu.

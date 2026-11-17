@@ -1603,7 +1603,13 @@ fn sink(rv: Rv) -> impl IntoElement {
         computed(move || {
             rv.sel_rev.get();
             rv.layout_rev.get();
-            let caret = rv.caret_rect().unwrap_or_default();
+            // A selected block atom has no caret: the sink is at its box, or
+            // the platform would scroll the page to the editor's top as
+            // it focuses the sink.
+            let caret = rv
+                .caret_rect()
+                .or_else(|| rv.node_selection_box())
+                .unwrap_or_default();
             let size = rv.viewport.get();
             // At the bottom of the caret's line: input methods open their
             // candidates under the field's line, which would cover the
