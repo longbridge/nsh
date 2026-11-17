@@ -21,6 +21,11 @@ pub const SEGMENTED_CONTROL_COMPONENT: &str = "nsh/segmented-control";
 /// action).
 pub const MENU_BUTTON_COMPONENT: &str = "nsh/menu-button";
 
+/// The native component of `nsh/base`'s `ContextMenu` given `items`, which
+/// the iOS backend registers itself (a `UIContextMenuInteraction` on the
+/// view around the trigger, the trigger lifted as its preview).
+pub const CONTEXT_MENU_COMPONENT: &str = "nsh/context-menu";
+
 /// The native component of `nsh/base`'s `SplitView`, which the iOS backend
 /// makes itself (a `UISplitViewController` whose columns are the
 /// navigation controllers of the stacks the view places before it).

@@ -1,6 +1,6 @@
 ---
 title: Menu
-description: Menu 和 ContextMenu，配合 MenuItem、MenuSeparator 和 Submenu：桌面和常规宽度的 iPad 上是带级联子菜单的弹出层，手机上是就地展开子菜单的 sheet，样式由应用决定。
+description: Menu 和 ContextMenu，配合 MenuItem、MenuSeparator 和 Submenu：桌面和常规宽度的 iPad 上是带级联子菜单的弹出层，手机上是就地展开子菜单的 sheet，样式由应用决定；ContextMenu 的 items 在 iOS 上显示系统的上下文菜单。
 group: base
 demo: el-menu
 ---
@@ -344,6 +344,34 @@ import { MenuButton } from "nsh/base";
 
 `MenuButtonItem` 为 `{ id, label, icon?, checked?, disabled?, destructive?, items?, inline? }`（Rust：`MenuButtonItem::new(id, label)`、`::submenu(label, items)`、`::section(label, items)`，再加 `.icon(..)`、`.checked(..)`、`.disabled(..)`、`.destructive(..)`）。唯一的事件是 `onSelect({ id })`（Rust：`.on_select(|id: &SharedString| ..)`），在菜单关闭后触发。
 
+## iOS 上的系统上下文菜单
+
+在 iOS 上，手指按住一条消息、一张照片或一行列表，通常会出现系统的上下文菜单：视图在模糊的屏幕上抬起，带着系统的触感和动效，菜单显示在它旁边。给 `ContextMenu` 传入与 `MenuButton` 相同的条目，iOS 就显示这个菜单，而 children 仍是其他平台上的菜单：
+
+```tsx
+import { ContextMenu, MenuItem } from "nsh/base";
+
+<ContextMenu
+  title={photo.name}
+  items={[
+    { id: "share", label: "Share", icon: "square.and.arrow.up" },
+    { id: "favorite", label: "Favorite", icon: "heart", checked: photo.favorite },
+    { id: "", label: "", inline: true, items: [{ id: "delete", label: "Delete", icon: "trash", destructive: true }] },
+  ]}
+  onSelect={({ id }) => act(photo, id)}
+  popupClass="min-w-40 rounded-lg bg-white p-1 shadow-lg"
+  trigger={<PhotoTile photo={photo} />}
+>
+  <MenuItem onSelect={() => act(photo, "share")}><Text>Share</Text></MenuItem>
+  <MenuItem onSelect={() => act(photo, "delete")}><Text>Delete</Text></MenuItem>
+</ContextMenu>
+```
+
+- **iOS 和 Mac Catalyst**：由 `UIContextMenuInteraction` 原生响应按住的手指，以及 iPad 指针或 Mac 上的辅助点按。系统抬起的预览就是触发器本身，按它自己的圆角裁剪；菜单由 `items` 生成（`MenuButtonItem`，图标是 SF Symbol，`title` 在条目上方）。`onOpenChange`、`onOpen`、`onSelect({ id })`、`onCancel` 和 `onClose` 报告发生了什么，与绘制的菜单一致。这个菜单只由用户打开：把 `open` 设为 `true` 不显示任何内容，设为 `false` 会关闭它。
+- **Android、桌面和 Web**：不使用 `items`、`title` 和 `onSelect`。children 就是菜单，与不传 `items` 时一样绘制，由各个 `MenuItem` 的 `onSelect` 报告选择。
+
+触发器自己的按压在按住手指的同时照常工作。不传 `items` 时，iOS 和其他平台一样显示绘制的菜单。
+
 ## 属性
 
 ### Menu
@@ -372,6 +400,8 @@ import { MenuButton } from "nsh/base";
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 什么都打不开它：辅助按键、按住的手指、键盘和读屏软件都不起作用。 |
 | `offset` | `.offset(..)` | `number` | `0` | 以弹出层呈现时：指针与弹出层之间的间距。 |
 | `margin` | `.margin(..)` | `number` | `0` | 以弹出层呈现时：它与安全区边缘保持的距离。 |
+| `items` | `.items(..)` | `MenuButtonItem[]` | `[]` | 仅 iOS：系统的上下文菜单，代替 children。其他平台不使用它，绘制 children。 |
+| `title` | `.title(..)` | `string` | 无 | 仅 iOS：系统菜单的标题，在条目上方。其他平台不使用它。 |
 
 ### MenuItem
 
@@ -420,6 +450,7 @@ import { MenuButton } from "nsh/base";
 | `onClose`（`Menu`、`ContextMenu`） | `.on_close(\|\| ..)` | 它已消失：以 sheet 呈现时在它离开之后，以弹出层呈现时在离开过渡之后。应用关闭它时也会触发。 |
 | `onPosition`（`Menu`、`ContextMenu`） | `.on_position(\|e\| ..)` | 以弹出层呈现时：弹出层已放置：`placement`（它所在的一侧）、`bounds`、`available`。 |
 | `onCancel`（`Menu`、`ContextMenu`） | `.on_cancel(\|\| ..)` | 用户没有选择条目就尝试关闭它（Escape 或返回键、外部按压或按下背景层）。 |
+| `onSelect`（`ContextMenu`） | `.on_select(\|id: &SharedString\| ..)` | 仅 iOS，传入 `items` 时：用户在系统菜单中选择了这个 `id` 的条目。其他平台不触发它，由 `MenuItem` 报告选择。 |
 | `onSelect`（`MenuItem`） | `.on_select(\|\| ..)` | 条目被选择；可勾选的条目请求它的另一个值。 |
 | `onOpenChange`（`Submenu`） | `.on_open_change(\|e\| ..)` | 它按用户的操作打开或关闭了，附带原因。 |
 
