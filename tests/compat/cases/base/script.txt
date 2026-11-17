@@ -967,6 +967,49 @@ listens parent:text:SwipeSheetBody onPanEnd
 tap below:parent:text:SwipeSheetBody
 absent SwipeSheetBody
 covers [props] closeOnSwipe
+# A bottom sheet with detents: as tall as the largest (the screen), resting
+# at the smallest (half of it, 422 points below its top), with a grabber
+# the app styles that screen readers adjust and a footer at the bottom of
+# what shows (as far up from the panel's bottom; its content is in the
+# slot's own view).
+tap text:OpenDetentSheet
+expect DetentBody
+wait 400
+frame parent:text:DetentBody 0 0 390 844
+animated parent:text:DetentBody transform.1 422
+animated parent:parent:text:DetentFooter transform.0 -422
+frame parent:parent:text:DetentFooter 0 804 390 40
+style parent:parent:text:DetentFooter backgroundColor #234567ff
+listens parent:text:DetentBody onPanEnd
+prop label:Resize role adjustable
+frame label:Resize 175 0 40 6
+style label:Resize backgroundColor #123456ff
+event label:Resize onAccessibilityAction actionName=increment
+expect Detent: large
+wait 1000
+animated parent:text:DetentBody transform.1 0
+tap below:parent:text:DetentBody
+absent DetentBody
+covers [props] Sheet.detents
+covers [props] Sheet.detent
+covers [props] Sheet.grabber
+covers [props] Sheet.grabberClass
+covers [props] Sheet.grabberStyle
+covers [props] Sheet.grabberAccessibilityLabel
+covers [props] Sheet.footer
+covers [props] Sheet.footerClass
+covers [props] Sheet.footerStyle
+covers [events] Sheet.onDetentChange
+# Detents of points and of a share of the screen: the largest (half the
+# screen) is the panel's height, and `defaultDetent` the first rest.
+tap text:OpenCustomSheet
+expect CustomBody
+wait 400
+frame parent:text:CustomBody 0 422 390 422
+animated parent:text:CustomBody transform.1 0
+tap below:parent:text:CustomBody
+absent CustomBody
+covers [props] Sheet.defaultDetent
 # `closeOnBackdropPress={false}`: its backdrop keeps it.
 tap below:parent:text:StuckSheet
 expect StuckSheet
