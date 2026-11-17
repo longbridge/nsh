@@ -503,6 +503,8 @@ With `pop_on_back(false)` (`popOnBack={false}`), the page stays on every way bac
 > [!IMPORTANT]
 > `pop_on_back` / `popOnBack` is a prop, not a callback that returns true or false, because the main thread never waits for app code. When the user starts a swipe or presses back, the system asks right away whether the page may go, and NSH answers natively from the props it already has. Set it as soon as there is something to lose (as above, from the text), before the user tries to leave.
 
+In Rust, an alert can also be taken back without the user, when what it asks about goes away (the user went elsewhere): keep the `closer()` of what `show()` returns before a task takes it, and `close()` it. The answer then comes at once as closed without an action.
+
 `pop_on_swipe(false)` (`popOnSwipe={false}`) is the lighter option: it turns off only the interactive gesture (iOS swipe back, Android's predictive back animation), and the back buttons still pop.
 
 ## Dialogs

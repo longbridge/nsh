@@ -176,6 +176,8 @@ pub struct Screen {
     /// The dialogs shown, in order, and how many were answered.
     dialogs: Vec<Dialog>,
     answered: usize,
+    /// The dialogs the app closed itself (`DialogCloser::close`), by id.
+    closed_dialogs: HashSet<u32>,
     /// The item on the clipboard: its text, and the HTML written with it
     /// (`Clipboard.write`).
     clipboard: Option<ClipboardItem>,
@@ -848,6 +850,9 @@ impl Screen {
     fn command(&mut self, id: NodeId, command: &Command) {
         match command {
             Command::Dialog(dialog) => self.dialogs.push((**dialog).clone()),
+            Command::CloseDialog(dialog) => {
+                self.closed_dialogs.insert(*dialog);
+            }
             Command::SetClipboard(text) => self.set_clipboard(Some(text.clone())),
             Command::SetClipboardItem(item) => self.clipboard = Some(item.clone()),
             // An image replaces the text.
@@ -1744,14 +1749,28 @@ impl Screen {
         &self.dialogs
     }
 
-    /// The oldest dialog not answered yet.
+    /// Whether the app closed the dialog with this id itself
+    /// (`DialogCloser::close`): it is no longer up, and no step answers it.
+    pub fn dialog_closed(&self, id: u32) -> bool {
+        self.closed_dialogs.contains(&id)
+    }
+
+    /// Where the oldest dialog neither answered nor closed is.
+    fn pending_dialog_at(&self) -> Option<usize> {
+        (self.answered..self.dialogs.len())
+            .find(|&at| !self.closed_dialogs.contains(&self.dialogs[at].id))
+    }
+
+    /// The oldest dialog neither answered nor closed yet.
     pub(crate) fn pending_dialog(&self) -> Option<&Dialog> {
-        self.dialogs.get(self.answered)
+        self.pending_dialog_at().map(|at| &self.dialogs[at])
     }
 
     /// The oldest dialog was answered.
     pub(crate) fn answered(&mut self) {
-        self.answered = (self.answered + 1).min(self.dialogs.len());
+        self.answered = self
+            .pending_dialog_at()
+            .map_or(self.dialogs.len(), |at| at + 1);
     }
 
     /// The picks the app asked for so far, in order (`Picker.pickImages`,

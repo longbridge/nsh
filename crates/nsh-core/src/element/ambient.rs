@@ -291,6 +291,15 @@ fn act(action: Action) {
     executor().act(action);
 }
 
+/// [`act`] while the engine runs Rust code, else nothing: for cleanups and
+/// handles that may outlive it.
+pub(super) fn act_if_running(action: Action) {
+    if let Some(executor) = super::reactive::try_with_data(|d| d.ambient.executor.clone()).flatten()
+    {
+        executor.act(action);
+    }
+}
+
 // --- The environment ---------------------------------------------------------
 
 /// The surface's size in points (TS: `windowSize()`).

@@ -629,6 +629,10 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                             });
                         }
                     }
+                    Command::CloseDialog(dialog) => {
+                        e.int(60);
+                        e.int(dialog as i32);
+                    }
                     Command::SetJsResponder { block } => {
                         e.int(14);
                         e.bool(block);

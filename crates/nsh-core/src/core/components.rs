@@ -6141,6 +6141,23 @@ impl<M: TextEngine> Core<M> {
                     command: Command::Dialog(Box::new(dialog)),
                 });
             }
+            Action::CloseDialog(answer) => {
+                // Answered already (or never shown): nothing to close.
+                let Some(id) = self
+                    .components
+                    .dialogs
+                    .iter()
+                    .find_map(|(id, slot)| Rc::ptr_eq(slot, &answer).then_some(*id))
+                else {
+                    return;
+                };
+                self.components.dialogs.remove(&id);
+                answer.borrow_mut().deliver(-1);
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::CloseDialog(id),
+                });
+            }
             Action::Return(call, result) => self.settle(call, result),
             Action::Animation(op) => {
                 let _ = self.apply_op(Op::Animation(op));

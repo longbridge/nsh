@@ -1,7 +1,8 @@
 //! System UI driven from JS: the status bar and alerts / action sheets.
 
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
+    collections::HashMap,
     ptr::NonNull,
     rc::Rc,
     time::{Duration, Instant},
@@ -319,12 +320,33 @@ struct DialogAnswer {
     id: u32,
     control: EngineControl,
     answered: Cell<bool>,
+    /// Its presentation finished: it can be dismissed.
+    presented: Cell<bool>,
+    /// The app closed it ([`close_dialog`]); dismissed as soon as it can be.
+    closed: Cell<bool>,
+    /// Its surface's alerts, which it leaves once answered.
+    dialogs: std::rc::Weak<RefCell<HashMap<u32, ShownDialog>>>,
+}
+
+/// A surface's alerts shown and not answered yet, by dialog id: what
+/// [`close_dialog`] takes back.
+pub(crate) type Dialogs = Rc<RefCell<HashMap<u32, ShownDialog>>>;
+
+/// An alert on the screen, for [`close_dialog`].
+pub(crate) struct ShownDialog {
+    alert: objc2::rc::Weak<UIAlertController>,
+    answer: Rc<DialogAnswer>,
 }
 
 impl DialogAnswer {
     fn answer(&self, index: i32) {
         if self.answered.replace(true) {
             return;
+        }
+        if let Some(dialogs) = self.dialogs.upgrade()
+            && let Ok(mut dialogs) = dialogs.try_borrow_mut()
+        {
+            dialogs.remove(&self.id);
         }
         self.control.dispatch_event(
             nsh_core::ROOT_ID,
@@ -344,12 +366,16 @@ pub(crate) fn show_dialog(
     tint: Option<nsh_core::element::AdaptiveColor>,
     view: &UIView,
     control: &EngineControl,
+    dialogs: &Dialogs,
 ) {
     let mtm = view.mtm();
     let answer = Rc::new(DialogAnswer {
         id: dialog.id,
         control: control.clone(),
         answered: Cell::new(false),
+        presented: Cell::new(false),
+        closed: Cell::new(false),
+        dialogs: Rc::downgrade(dialogs),
     });
     let Some(top) = top_controller(view) else {
         log::warn!("no window to show a dialog in");
@@ -433,7 +459,41 @@ pub(crate) fn show_dialog(
         ));
         popover.setPermittedArrowDirections(UIPopoverArrowDirection::empty());
     }
-    top.presentViewController_animated_completion(&alert, true, None);
+    let weak = objc2::rc::Weak::from_retained(&alert);
+    dialogs.borrow_mut().insert(
+        dialog.id,
+        ShownDialog {
+            alert: weak.clone(),
+            answer: answer.clone(),
+        },
+    );
+    // Closed while it was still coming up: UIKit cannot dismiss it before
+    // its presentation ends, so it goes then.
+    let presented = RcBlock::new(move || {
+        answer.presented.set(true);
+        if answer.closed.get()
+            && let Some(alert) = weak.load()
+        {
+            alert.dismissViewControllerAnimated_completion(true, None);
+        }
+    });
+    top.presentViewController_animated_completion(&alert, true, Some(&presented));
+}
+
+/// Takes back the alert [`show_dialog`] showed as `id` (`Command::CloseDialog`):
+/// the core answered it already, so it reports nothing.
+pub(crate) fn close_dialog(dialogs: &Dialogs, id: u32) {
+    let Some(shown) = dialogs.borrow_mut().remove(&id) else {
+        return;
+    };
+    shown.answer.answered.set(true);
+    shown.answer.closed.set(true);
+    if shown.answer.presented.get()
+        && let Some(alert) = shown.alert.load()
+        && !alert.isBeingDismissed()
+    {
+        alert.dismissViewControllerAnimated_completion(true, None);
+    }
 }
 
 /// Where a user taps to answer the alert shown over `window`: the middle
