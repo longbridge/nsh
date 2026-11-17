@@ -179,7 +179,7 @@ impl NodeView for JsNodeView {
             let (kept, get_pos, moves) = (shared.clone(), cx.get_pos(), cx.moves);
             effect(move || {
                 if let Some(moves) = moves {
-                    moves.with(|_| ());
+                    moves.get();
                 }
                 kept.pos.set(get_pos());
             });

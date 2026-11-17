@@ -126,6 +126,8 @@ pub(crate) struct Geometry {
     pub(crate) insets: HashMap<u64, Point<Points>>,
     /// The textblocks, by block id.
     pub(crate) texts: HashMap<u64, TextGeo>,
+    /// Textblock ids ordered by `TextGeo::start`.
+    pub(crate) text_order: Vec<(usize, u64)>,
     /// The atoms and node views edited as units, by block id: their
     /// position.
     pub(crate) atoms: HashMap<u64, usize>,
@@ -212,10 +214,42 @@ impl Geometry {
 
     /// The textblock holding position `pos` (its content's range).
     pub(crate) fn text_at(&self, pos: usize) -> Option<u64> {
-        self.texts
+        if self.text_order.len() != self.texts.len() {
+            return self
+                .texts
+                .iter()
+                .find(|(_, g)| pos >= g.start && pos <= g.start + g.map.size)
+                .map(|(id, _)| *id);
+        }
+        let idx = self.text_order.partition_point(|&(start, _)| start <= pos);
+        let &(_, id) = self.text_order.get(idx.checked_sub(1)?)?;
+        let g = self.texts.get(&id)?;
+        (pos >= g.start && pos <= g.start + g.map.size).then_some(id)
+    }
+
+    /// The textblock ids whose content overlaps `from..=to`, in document order.
+    pub(crate) fn text_ids_in(&self, from: usize, to: usize) -> Vec<u64> {
+        if self.text_order.len() != self.texts.len() {
+            let mut ids: Vec<(&u64, &TextGeo)> = self
+                .texts
+                .iter()
+                .filter(|(_, g)| g.start + g.map.size >= from && g.start <= to)
+                .collect();
+            crate::sort::sort_by_key(&mut ids, |(_, g)| g.start);
+            return ids.into_iter().map(|(id, _)| *id).collect();
+        }
+        let first = self
+            .text_order
+            .partition_point(|&(start, _)| start < from)
+            .saturating_sub(1);
+        let end_idx = self.text_order.partition_point(|&(start, _)| start <= to);
+        self.text_order[first.min(end_idx)..end_idx]
             .iter()
-            .find(|(_, g)| pos >= g.start && pos <= g.start + g.map.size)
-            .map(|(id, _)| *id)
+            .filter_map(|&(_, id)| {
+                let g = self.texts.get(&id)?;
+                (g.start + g.map.size >= from && g.start <= to).then_some(id)
+            })
+            .collect()
     }
 
     /// The caret's box at `pos`: as high as its line, without width.
@@ -276,15 +310,13 @@ impl Geometry {
     /// The boxes covering `from..to`, one per line of each textblock it
     /// crosses (through a line's end where it goes on).
     pub(crate) fn range_rects(&self, from: usize, to: usize) -> Vec<Bounds<Points>> {
-        let mut ids: Vec<(&u64, &TextGeo)> = self.texts.iter().collect();
-        crate::sort::sort_by_key(&mut ids, |(_, g)| g.start);
         let mut out = Vec::new();
-        for (id, _) in ids {
-            let Some((origin, _)) = self.text_box(*id) else {
+        for id in self.text_ids_in(from, to) {
+            let Some((origin, _)) = self.text_box(id) else {
                 continue;
             };
             out.extend(
-                self.text_range_rects(*id, from, to)
+                self.text_range_rects(id, from, to)
                     .into_iter()
                     .map(|b| Bounds::new(origin + b.origin, b.size)),
             );

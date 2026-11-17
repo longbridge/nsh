@@ -50,9 +50,9 @@ pub struct NodeViewCx {
     /// editor's node views (stable while the node stays where it is in
     /// its block): where an app's JS node view renders.
     pub(crate) at: (nsh_core::NodeId, SharedString),
-    /// What the node's position follows (its block's item): read before
+    /// What the node's position follows (the document revision): read before
     /// [`NodeViewCx::pos`] in an effect, it reruns when the node moves.
-    pub(crate) moves: Option<ReadSignal<super::controller::BlockItem>>,
+    pub(crate) moves: Option<ReadSignal<u64>>,
 }
 
 impl fmt::Debug for NodeViewCx {
@@ -89,7 +89,7 @@ impl NodeViewCx {
         mut self,
         host: nsh_core::NodeId,
         key: SharedString,
-        moves: ReadSignal<super::controller::BlockItem>,
+        moves: ReadSignal<u64>,
     ) -> Self {
         self.at = (host, key);
         self.moves = Some(moves);

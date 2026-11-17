@@ -98,6 +98,22 @@ step equal. `Bench.tsx` and the counter are plain debug builds; the two entries 
 The first commits keep their counts (19 ops / 4,220 items / 5,406 nodes, 20 / 13,058 / 5,013, 756 / 622 / 252 and
 57 / 51 / 21). The last two rows are controls of unchanged work.
 
+Per-block RichEditor updates (2026-11-17, macOS arm64, against `126d7701`): block offsets moved out
+of the reactive block items into `Tree`, the blocks' `selectedNode`/`focusedNode` state and each
+textblock's selection boxes are per-block signals updated only for the blocks a selection or an edit
+touches, and the geometry's ordered textblock index turns `text_at` / `range_rects` into binary
+searches. Headless `nsh test examples/bench/… --trace`, debug profile:
+
+| Phase | Before | After | Ops | Mount items | Nodes |
+|---|---:|---:|---:|---:|---:|
+| `RichEditorMount.tsx` initial population | 353,344 µs | 34,293 µs | 10 | 2,648 → 2,644 | 1,010 → 1,009 |
+| `RichEditor.tsx` initial commit (1,000 paragraphs) | 8,346,483 µs, test failed | 216,569 µs | 20 | 13,058 → 13,054 | 5,013 → 5,012 |
+| `RichEditor.tsx` single-character edit ×8 | — (never reached) | 995–1,563 µs, 3–4 items | 0 | 3–4 | 5,012 |
+
+The 1,000-paragraph run is `for (let i = 0; i < 8; i++) await app.press("id:edit")` on standard input;
+the before version's initial commit alone exceeds the step timeout, so its edits never ran. Every
+edit's batch carries one Text op and its selection frames.
+
 Batched region cleanup (2026-11-15, macOS arm64, Apple M4 Pro, against `9efc3a2c`): three interleaved before / after
 pairs, a fresh headless CLI process per sample. Both builds use the workspace's development profile with
 `CARGO_PROFILE_DEV_DEBUG=line-tables-only` and incremental compilation disabled. The 200-paragraph reproduction is

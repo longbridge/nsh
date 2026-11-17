@@ -788,3 +788,27 @@ fn a_selected_block_atom_out_of_view_is_scrolled_into_view() {
         "the picture at {picture:?}, the editor at {editor:?}"
     );
 }
+
+#[test]
+fn range_selection_boxes_update_only_overlapped_blocks_and_clear_on_collapse() {
+    let mut app = start(paragraphs(&["alpha", "bravo", "charlie"]));
+    focus_start(&mut app);
+    keys(&mut app, &["shift+down"]);
+    app.wait(Duration::from_millis(50)).unwrap();
+    assert_eq!(selection_boxes(&app, "alpha").1.len(), 1);
+    assert!(selection_boxes(&app, "charlie").1.is_empty());
+
+    keys(&mut app, &["ctrl+a"]);
+    app.wait(Duration::from_millis(50)).unwrap();
+    for text in ["alpha", "bravo", "charlie"] {
+        let (_, boxes) = selection_boxes(&app, text);
+        assert_eq!(boxes.len(), 1, "selected box under {text}");
+    }
+
+    keys(&mut app, &["left"]);
+    app.wait(Duration::from_millis(50)).unwrap();
+    for text in ["alpha", "bravo", "charlie"] {
+        let (_, boxes) = selection_boxes(&app, text);
+        assert!(boxes.is_empty(), "cleared box under {text}");
+    }
+}
