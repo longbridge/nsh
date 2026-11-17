@@ -133,6 +133,10 @@ struct Entry {
 struct Popup {
     items: Arc<[MenuItem]>,
     at: Option<(f32, f32)>,
+    /// `at` is the menu's top-end corner rather than its top-start one: it
+    /// opens towards the left (a right-to-left layout's, anchored to a
+    /// view's bottom-end corner).
+    end: bool,
     /// What the items of a menu of the platform's own do, by id - 1 (the
     /// app's menus report their ids instead).
     actions: Vec<Action>,
@@ -187,6 +191,7 @@ impl Chrome {
         Popup {
             items,
             at,
+            end: false,
             actions: Vec::new(),
             area: self.context_area.take(),
             awaited: true,
@@ -514,6 +519,18 @@ pub(crate) enum LocalItem {
 /// Shows a context menu of the platform's own (a text field's) at the
 /// pointer.
 pub(crate) fn popup_actions(surface: &Surface, items: Vec<LocalItem>) {
+    popup_actions_at(surface, items, None, false);
+}
+
+/// Shows a context menu of the platform's own at `at` (in the window's
+/// points), or at the pointer; with `end`, `at` is its top-end corner (it
+/// opens towards the left).
+pub(crate) fn popup_actions_at(
+    surface: &Surface,
+    items: Vec<LocalItem>,
+    at: Option<(f32, f32)>,
+    end: bool,
+) {
     let mut actions = Vec::new();
     let items: Vec<MenuItem> = items
         .into_iter()
@@ -550,7 +567,8 @@ pub(crate) fn popup_actions(surface: &Surface, items: Vec<LocalItem>) {
         surface,
         Popup {
             items: items.into(),
-            at: None,
+            at,
+            end,
             actions,
             area: None,
             awaited: false,
@@ -567,6 +585,7 @@ pub(crate) fn popup_tray(surface: &Surface, items: Arc<[MenuItem]>, at: (f32, f3
         Popup {
             items,
             at: Some(at),
+            end: false,
             actions: Vec::new(),
             area: None,
             awaited: false,
@@ -1805,6 +1824,7 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
     let Some(Popup {
         items,
         at,
+        end,
         actions,
         area,
         awaited,
@@ -1856,7 +1876,11 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
         }
         let chosen = TrackPopupMenuEx(
             menu,
-            (TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_TOPALIGN).0,
+            (TPM_RETURNCMD
+                | TPM_RIGHTBUTTON
+                | if end { TPM_RIGHTALIGN } else { TPM_LEFTALIGN }
+                | TPM_TOPALIGN)
+                .0,
             p.x,
             p.y,
             hwnd,

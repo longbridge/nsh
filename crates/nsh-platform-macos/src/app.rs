@@ -503,6 +503,7 @@ impl AppView {
             .native
             .set_asset_base(options.asset_base.clone());
         self.surface.native.set_app(&config.app);
+        crate::native::warm_web_later(&self.surface);
         self.surface.start(config);
     }
 

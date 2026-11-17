@@ -3231,7 +3231,7 @@ function App() {
   const changes = signal<boolean[]>([]);
   const parts = {
     trackClass: "w-[20px] checked:bg-[#00ff00]",
-    thumbClass: "w-[10px] checked:translate-x-[6px] disabled:opacity-50",
+    thumbClass: "w-[10px] checked:translate-x-[6px] disabled:opacity-50 active:w-[14px]",
   };
   return (
     <View>
@@ -3348,6 +3348,29 @@ fn a_base_switch_reports_the_next_value_and_styles_its_parts() {
     );
     let unchecked = std::slice::from_ref(&first);
     assert!(style(unchecked, thumb).transform.ops().is_empty());
+
+    // Held down (wherever on it): the parts' `active:` follows the
+    // switch's press as the platform reports it, until it is released.
+    let thumb_width = |b: &MountBatch| {
+        b.items.iter().rev().find_map(|i| match i {
+            MountItem::Frame { id, frame } if *id == thumb => Some(frame.size.width.0),
+            _ => None,
+        })
+    };
+    assert_eq!(thumb_width(&first), Some(10.0));
+    assert!(first.items.iter().any(|i| matches!(
+        i,
+        MountItem::TrackStates { id, states }
+            if *id == wifi && states & nsh_core::tailwind::state::PRESSED != 0
+    )));
+    engine
+        .control()
+        .set_states(wifi, nsh_core::tailwind::state::PRESSED);
+    let held = until(&rx, |b| thumb_width(b) == Some(14.0));
+    assert!(held.iter().any(|b| thumb_width(b) == Some(14.0)));
+    engine.control().set_states(wifi, 0);
+    let released = until(&rx, |b| thumb_width(b) == Some(10.0));
+    assert!(released.iter().any(|b| thumb_width(b) == Some(10.0)));
 
     // A press reports the next value; the app sets it, so the switch, its
     // `checkedStyle` and its parts' `checked:` classes follow.

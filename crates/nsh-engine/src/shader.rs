@@ -6,6 +6,12 @@
 //! shaders it drew), made the first time a shader is mounted, so an app
 //! without shaders opens no device; [`Renderer::new`] is `None` where no
 //! adapter is found, and shader views then show nothing of their own.
+//! Opening a device takes tens of milliseconds: [`Renderer::open`] opens
+//! it on a thread of its own and hands it over, so the main thread does
+//! not wait. Pipelines compile on the renderer's worker thread too: a
+//! view whose shader has none yet renders nothing and stays due
+//! ([`ShaderView::compiling`]), and the backend hears when one is ready
+//! ([`Renderer::on_pipeline_ready`]).
 //! Each shader view has a [`ShaderView`]: the mounted layer, its uniforms
 //! with the animated slots written in, its size and its clock. The backend
 //! calls [`ShaderView::render`] on its frame clock while
@@ -38,8 +44,9 @@
 use std::{
     borrow::Cow,
     sync::{
-        Arc,
+        Arc, Condvar, Mutex, OnceLock, PoisonError,
         atomic::{AtomicU8, Ordering},
+        mpsc,
     },
     time::{Duration, Instant},
 };
@@ -47,7 +54,7 @@ use std::{
 use nsh_core::{
     animation::AnimationValue,
     geometry::{Percentage, Points, Size},
-    shader::{PROGRESS_WORD, ShaderInput, ShaderLayer, ShaderRole, builtins},
+    shader::{PROGRESS_WORD, Shader, ShaderInput, ShaderLayer, ShaderRole, builtins},
 };
 use rustc_hash::FxHashMap;
 
@@ -77,8 +84,43 @@ fn texture_format(format: PixelFormat) -> wgpu::TextureFormat {
     }
 }
 
+/// A pipeline in the cache: compiling on the worker, or done (`None`: the
+/// device refused it, reported once).
+enum Compiled {
+    Compiling,
+    Done(Option<Arc<wgpu::RenderPipeline>>),
+}
+
 /// Render pipelines by their shader's hash and the format they render in.
-type Pipelines = FxHashMap<(u64, wgpu::TextureFormat), Option<Arc<wgpu::RenderPipeline>>>;
+type Pipelines = FxHashMap<(u64, wgpu::TextureFormat), Compiled>;
+
+/// What a lookup of a layer's pipeline found ([`Renderer::pipeline`]).
+enum Pipeline {
+    Ready(Arc<wgpu::RenderPipeline>),
+    /// The device refused it: the view renders nothing.
+    Refused,
+    /// On the worker: the view renders once it is ready.
+    Compiling,
+}
+
+/// A backend's callback for a pipeline compiled ([`Renderer::on_pipeline_ready`]).
+type ReadyCallback = Arc<dyn Fn() + Send + Sync>;
+
+/// What the renderer shares with its worker thread.
+#[derive(Default)]
+struct Cache {
+    pipelines: Mutex<Pipelines>,
+    /// Signalled whenever a pipeline is done ([`Renderer::wait_for_pipelines`]).
+    done: Condvar,
+    ready: Mutex<Option<ReadyCallback>>,
+}
+
+/// A pipeline to compile on the worker.
+struct Job {
+    shader: Shader,
+    format: wgpu::TextureFormat,
+    layout: wgpu::PipelineLayout,
+}
 
 /// The GPU device shader views render with, and the pipelines of the
 /// shaders it has drawn.
@@ -94,8 +136,11 @@ pub struct Renderer {
     empty: wgpu::TextureView,
     sampler: wgpu::Sampler,
     /// Pipelines by the hash of their shader's source and the format they
-    /// render in; `None` for one the device refused (reported once).
-    pipelines: std::cell::RefCell<Pipelines>,
+    /// render in, shared with the worker that compiles them.
+    cache: Arc<Cache>,
+    /// The worker thread's queue, started with the first pipeline asked for
+    /// (the thread ends when the renderer is dropped).
+    worker: OnceLock<Option<mpsc::Sender<Job>>>,
 }
 
 /// The backends to open a device on, in order: the renderer takes the
@@ -135,9 +180,10 @@ fn takes(device_type: wgpu::DeviceType, last_entry: bool) -> bool {
 }
 
 impl Renderer {
-    /// Opens a GPU device (blocking, once: adapters answer in milliseconds);
-    /// `None` when there is none, which the log says. The platform then
-    /// tells its engine ([`crate::EngineControl::shaders_unavailable`]).
+    /// Opens a GPU device, blocking (tens of milliseconds: off the main
+    /// thread, [`Self::open`]); `None` when there is none, which the log
+    /// says. The platform then tells its engine
+    /// ([`crate::EngineControl::shaders_unavailable`]).
     pub fn new(format: PixelFormat) -> Option<Renderer> {
         // The first backend that gives a device: an adapter found may still
         // refuse its device, and the next backend then gets its turn. On
@@ -274,8 +320,81 @@ impl Renderer {
             pipeline_layouts,
             empty,
             sampler,
-            pipelines: Default::default(),
+            cache: Default::default(),
+            worker: OnceLock::new(),
         })
+    }
+
+    /// Opens a GPU device as [`Self::new`] does, on a thread of its own,
+    /// and calls `done` there with it: opening takes tens of milliseconds
+    /// (an instance, an adapter, a device), which the main thread does not
+    /// wait for. A backend sends the renderer back to its main thread;
+    /// `done(None)` as [`Self::new`]'s `None` (also where no thread starts).
+    pub fn open(format: PixelFormat, done: impl FnOnce(Option<Renderer>) + Send + 'static) {
+        let done = Arc::new(Mutex::new(Some(done)));
+        let call = done.clone();
+        let spawned = std::thread::Builder::new()
+            .name("nsh-shader-device".into())
+            .spawn(move || {
+                let renderer = Renderer::new(format);
+                if let Some(done) = call.lock().unwrap_or_else(PoisonError::into_inner).take() {
+                    done(renderer);
+                }
+            });
+        if let Err(e) = spawned {
+            log::warn!("shaders: no thread to open a device on ({e})");
+            if let Some(done) = done.lock().unwrap_or_else(PoisonError::into_inner).take() {
+                done(None);
+            }
+        }
+    }
+
+    /// Calls `f`, on the renderer's worker thread, each time a pipeline it
+    /// compiles is done (ready or refused): a backend that renders only
+    /// when something is due renders the views whose shader was
+    /// [`ShaderView::compiling`] then. One that renders on every display
+    /// frame while views [`ShaderView::wants_frame`] needs none. Replaces
+    /// the last `f`.
+    pub fn on_pipeline_ready(&self, f: impl Fn() + Send + Sync + 'static) {
+        *self
+            .cache
+            .ready
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(f));
+    }
+
+    /// Whether a pipeline is compiling.
+    pub fn compiling(&self) -> bool {
+        self.cache
+            .pipelines
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .any(|c| matches!(c, Compiled::Compiling))
+    }
+
+    /// Blocks until no pipeline is compiling (at most `timeout`): for
+    /// tests, which render a frame right after a shader is set. Whether
+    /// none is.
+    pub fn wait_for_pipelines(&self, timeout: Duration) -> bool {
+        let start = Instant::now();
+        let mut pipelines = self
+            .cache
+            .pipelines
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        while pipelines.values().any(|c| matches!(c, Compiled::Compiling)) {
+            let Some(left) = timeout.checked_sub(start.elapsed()) else {
+                return false;
+            };
+            pipelines = self
+                .cache
+                .done
+                .wait_timeout(pipelines, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        true
     }
 
     /// The format of its frames.
@@ -304,62 +423,128 @@ impl Renderer {
         }
     }
 
-    fn pipeline(
-        &self,
-        layer: &ShaderLayer,
-        format: wgpu::TextureFormat,
-    ) -> Option<Arc<wgpu::RenderPipeline>> {
+    /// `layer`'s pipeline for `format`: one compiled, or one started on
+    /// the worker (asked for once: later lookups find it compiling).
+    fn pipeline(&self, layer: &ShaderLayer, format: wgpu::TextureFormat) -> Pipeline {
         let shader = &layer.shader;
-        if let Some(p) = self.pipelines.borrow().get(&(shader.hash(), format)) {
-            return p.clone();
-        }
-        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let module = self
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("nsh shader"),
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(shader.wgsl())),
-            });
-        let uniforms = layout_index(layer);
-        let pipeline = self
-            .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("nsh shader"),
-                layout: Some(&self.pipeline_layouts[uniforms]),
-                vertex: wgpu::VertexState {
-                    module: &module,
-                    entry_point: Some("nsh_vertex"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
-                },
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &module,
-                    entry_point: Some("nsh_fragment"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            });
-        let error = pollster::block_on(scope.pop());
-        let pipeline = match error {
-            Some(e) => {
-                log::warn!(target: "js", "a shader the GPU refused: {e}");
-                None
+        let key = (shader.hash(), format);
+        {
+            let mut pipelines = self
+                .cache
+                .pipelines
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            match pipelines.get(&key) {
+                Some(Compiled::Done(Some(p))) => return Pipeline::Ready(p.clone()),
+                Some(Compiled::Done(None)) => return Pipeline::Refused,
+                Some(Compiled::Compiling) => return Pipeline::Compiling,
+                None => {}
             }
-            None => Some(Arc::new(pipeline)),
+            pipelines.insert(key, Compiled::Compiling);
+        }
+        let job = Job {
+            shader: shader.clone(),
+            format,
+            layout: self.pipeline_layouts[layout_index(layer)].clone(),
         };
-        self.pipelines
-            .borrow_mut()
-            .insert((shader.hash(), format), pipeline.clone());
-        pipeline
+        let job = match self.worker() {
+            Some(worker) => match worker.send(job) {
+                Ok(()) => return Pipeline::Compiling,
+                Err(mpsc::SendError(job)) => job,
+            },
+            None => job,
+        };
+        // No worker: compiled here, as before there was one.
+        compile(&self.device, &self.cache, job);
+        self.pipeline(layer, format)
+    }
+
+    /// The worker's queue, its thread started the first time.
+    fn worker(&self) -> Option<&mpsc::Sender<Job>> {
+        self.worker
+            .get_or_init(|| {
+                let (tx, rx) = mpsc::channel::<Job>();
+                let device = self.device.clone();
+                let cache = self.cache.clone();
+                let spawned = std::thread::Builder::new()
+                    .name("nsh-shader-pipelines".into())
+                    .spawn(move || {
+                        // Ends once the renderer (the sender) is dropped.
+                        while let Ok(job) = rx.recv() {
+                            compile(&device, &cache, job);
+                        }
+                    });
+                match spawned {
+                    Ok(_) => Some(tx),
+                    Err(e) => {
+                        log::warn!("shaders: no thread to compile pipelines on ({e})");
+                        None
+                    }
+                }
+            })
+            .as_ref()
+    }
+}
+
+/// Compiles `job`'s pipeline into `cache` (on the renderer's worker) and
+/// tells the backend ([`Renderer::on_pipeline_ready`]). The error scope is
+/// this thread's: what it catches is this pipeline's alone.
+fn compile(device: &wgpu::Device, cache: &Cache, job: Job) {
+    let Job {
+        shader,
+        format,
+        layout,
+    } = job;
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("nsh shader"),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(shader.wgsl())),
+    });
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("nsh shader"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &module,
+            entry_point: Some("nsh_vertex"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &module,
+            entry_point: Some("nsh_fragment"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
+    let pipeline = match pollster::block_on(scope.pop()) {
+        Some(e) => {
+            log::warn!(target: "js", "a shader the GPU refused: {e}");
+            None
+        }
+        None => Some(Arc::new(pipeline)),
+    };
+    cache
+        .pipelines
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert((shader.hash(), format), Compiled::Done(pipeline));
+    cache.done.notify_all();
+    let ready = cache
+        .ready
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    if let Some(ready) = ready {
+        ready();
     }
 }
 
@@ -490,6 +675,8 @@ pub struct ShaderView {
     clock: Clock,
     /// Something it reads changed since the last frame rendered.
     dirty: bool,
+    /// The last [`Self::render`] found its pipeline compiling.
+    compiling: bool,
     target: Option<Target>,
     bindings: Option<Bindings>,
     serial: u64,
@@ -548,6 +735,7 @@ impl ShaderView {
             None => {
                 self.words.clear();
                 self.frame = Frame::default();
+                self.compiling = false;
             }
         }
         let paused = layer.as_ref().is_none_or(|l| l.paused);
@@ -782,7 +970,8 @@ impl ShaderView {
 
     /// Whether [`Self::render`] renders a new frame: something changed, or
     /// its time runs ([`Self::animates`]). One that is only
-    /// [`Self::pending`] waits for the GPU ([`Renderer::when_done`]).
+    /// [`Self::pending`] waits for the GPU ([`Renderer::when_done`]); one
+    /// whose pipeline compiles stays due ([`Self::compiling`]).
     pub fn due(&self) -> bool {
         self.layer.is_some() && (self.dirty || self.animates())
     }
@@ -795,6 +984,13 @@ impl ShaderView {
             return false;
         };
         (layer.shader.animated() && !layer.paused) || self.transition.is_some()
+    }
+
+    /// Whether it waits for its shader's pipeline, which the renderer's
+    /// worker compiles: it stays [`Self::due`], and renders nothing until
+    /// the pipeline is ready ([`Renderer::on_pipeline_ready`]).
+    pub fn compiling(&self) -> bool {
+        self.layer.is_some() && self.compiling
     }
 
     /// Whether a frame is on its way back from the GPU.
@@ -945,9 +1141,21 @@ impl ShaderView {
         } else {
             texture_format(renderer.format)
         };
-        let Some(pipeline) = renderer.pipeline(&layer, format) else {
-            self.dirty = false;
-            return collected;
+        let pipeline = match renderer.pipeline(&layer, format) {
+            Pipeline::Ready(pipeline) => {
+                self.compiling = false;
+                pipeline
+            }
+            Pipeline::Refused => {
+                self.compiling = false;
+                self.dirty = false;
+                return collected;
+            }
+            // Still due: rendered once the worker has it.
+            Pipeline::Compiling => {
+                self.compiling = true;
+                return collected;
+            }
         };
         // Where the frame goes: a free surface, or the texture and a free
         // read-back buffer. None free: the GPU is behind, skip this frame.
@@ -1333,6 +1541,16 @@ mod tests {
         panic!("no frame");
     }
 
+    /// Asks for the view's pipeline and waits for the worker to compile
+    /// it: the next [`ShaderView::render`] draws.
+    fn prepare(view: &mut ShaderView, renderer: &Renderer) {
+        let _ = view.render(renderer, Instant::now());
+        assert!(
+            renderer.wait_for_pipelines(Duration::from_secs(5)),
+            "compiled"
+        );
+    }
+
     fn pixel(frame: &Frame, x: u32, y: u32) -> [u8; 4] {
         let at = (y * frame.stride + x * 4) as usize;
         frame.pixels[at..at + 4].try_into().unwrap()
@@ -1671,6 +1889,8 @@ mod tests {
             &[("a", UniformValue::Number(1.0))],
         )));
         assert!(view.due() && !view.animates(), "a new layer: one frame");
+        prepare(&mut view, &renderer);
+        assert!(view.due(), "nothing rendered while it compiled");
         let _ = view.render(&renderer, Instant::now());
         assert!(!view.due(), "rendered: nothing new until something changes");
         let (tx, rx) = std::sync::mpsc::channel();
@@ -1688,6 +1908,54 @@ mod tests {
     }
 
     #[test]
+    fn a_pipeline_compiles_off_the_calling_thread_once() {
+        let Some(renderer) = Renderer::new(PixelFormat::Rgba) else {
+            eprintln!("no GPU: skipped");
+            return;
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = Mutex::new(tx);
+        renderer.on_pipeline_ready(move || {
+            let _ = tx.lock().unwrap().send(std::thread::current().id());
+        });
+        let mut view = ShaderView::default();
+        view.set_size(size(px(2.0), px(2.0)), 1.0);
+        view.set_layer(Some(layer(
+            "fn shade(uv: vec2f) -> vec4f { return vec4f(0.0, 1.0, 0.0, 1.0); }",
+            &[],
+        )));
+        assert!(!view.render(&renderer, Instant::now()), "nothing yet");
+        assert!(view.compiling() && view.due(), "it waits for its pipeline");
+        assert!(!view.pending(), "no frame was rendered");
+        // Asked again while it compiles: the worker compiles it once.
+        assert!(!view.render(&renderer, Instant::now()));
+        let thread = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("told once it is ready");
+        assert_ne!(thread, std::thread::current().id(), "on the worker");
+        assert!(!renderer.compiling());
+        let f = frame(&mut view, &renderer);
+        assert!(!view.compiling());
+        assert_eq!(pixel(&f, 0, 0), [0, 255, 0, 255]);
+        assert!(
+            rx.recv_timeout(Duration::from_millis(200)).is_err(),
+            "compiled once"
+        );
+    }
+
+    #[test]
+    fn a_device_opens_off_the_calling_thread() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        Renderer::open(PixelFormat::Rgba, move |renderer| {
+            let _ = tx.send((renderer.is_some(), std::thread::current().id()));
+        });
+        let (_, thread) = rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("opened or not");
+        assert_ne!(thread, std::thread::current().id());
+    }
+
+    #[test]
     fn collecting_a_frame_renders_none() {
         let Some(renderer) = Renderer::new(PixelFormat::Rgba) else {
             eprintln!("no GPU: skipped");
@@ -1700,6 +1968,8 @@ mod tests {
             "fn shade(uv: vec2f) -> vec4f { return vec4f(fract(nsh.time), 0.0, 0.0, 1.0); }",
             &[],
         )));
+        prepare(&mut view, &renderer);
+        assert!(!view.pending(), "nothing rendered while it compiled");
         // Direct3D 12 can hand a frame this small back within `render`.
         if !view.render(&renderer, Instant::now()) {
             let start = Instant::now();

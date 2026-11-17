@@ -16,7 +16,7 @@ const parts = {
   class: "flex-row items-center",
   trackClass: "p-[2px] checked:pl-[12px]",
   trackStyle: { marginRight: 8 },
-  thumbClass: "w-[20px] checked:w-[30px] disabled:w-[10px]",
+  thumbClass: "w-[20px] checked:w-[30px] disabled:w-[10px] active:w-[24px]",
   thumbStyle: { height: 20 },
 };
 

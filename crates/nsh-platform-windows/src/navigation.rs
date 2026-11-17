@@ -75,11 +75,13 @@ const VK_ESCAPE: u16 = 0x1B;
 const VK_LEFT: u16 = 0x25;
 const VK_BROWSER_BACK: u16 = 0xA6;
 
-/// The window's color, under a screen's content (the platform's, so a
-/// screen moving over another hides it).
+/// Windows 11's window color, under a screen's content, so a screen
+/// moving over another hides it: the system's, as the other desktops draw
+/// theirs there, rather than the color the app's window clears to
+/// ([`crate::system::window_background`], the default theme's).
 fn window_color(dark: bool) -> Color {
     if dark {
-        Color::rgba(0, 0, 0, 255)
+        Color::rgba(32, 32, 32, 255)
     } else {
         Color::rgba(255, 255, 255, 255)
     }

@@ -1233,7 +1233,6 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
             .py(px(9.0))
             .rounded(px(radius::CONTROL))
             .gap(px(2.0))
-            .cursor_pointer()
             .child(
                 text(label)
                     .number_of_lines(1)
@@ -1268,7 +1267,6 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                     .finish(Finish::Raised)
                     .border_1()
                     .border_color(colors::BORDER)
-                    .cursor_pointer()
                     .child(icon().name(IconName::Plus).size(15.0).tint(colors::TEXT))
                     .child(
                         text("New chat")

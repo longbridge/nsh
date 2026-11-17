@@ -555,8 +555,20 @@ frame on macOS, mostly the Core Animation commit). The core now spreads them (`c
 Views not made yet are not in the platform's accessibility tree, as culled content is not: they are out of sight and
 come within a few frames. Selection and select-all read the core's nodes, not native views. Test drivers turn content
 culling off, which turns pacing off, so their steps reach every view. Nothing waits that may show away from its frame
-(sticky, followers, overlays, screens, modals, transformed or animated views), nor anything outside scroll views and
-lists.
+(sticky, followers, overlays, screens, modals, views scaled, rotated or moved by a value of no known bound), nor
+anything outside scroll views and lists.
+
+A view translated by a value the core can bound waits like any other, its rectangle widened by how far it may move
+(`Core::reach_of`). The core follows every animation op on its way to the platform (`crates/nsh-core/src/animation/reach.rs`)
+and keeps the interval each value has held and may hold (its values, its animations' targets with their easings' and
+springs' overshoot, a decay's bounds) and how interpolations and math nodes map them; values a gesture or a scroll
+view drives, and decays without bounds, have none. Intervals only grow, and an op that widens one makes the core look at
+what it culls again in that commit, before the platform runs the animation. Animated opacity and colors move nothing.
+Before, a page of sections that fade and slide in (the gallery's `Appear`, every `DemoPage`) made every view of every
+section in one frame.
+
+A deleted subtree leaves its window with its root at once; on macOS the views are freed over the next frames, at most
+1 ms a frame (`nsh-platform-macos` `mount.rs`, `release_later`), not in the frame that shows what replaced them.
 
 Reproduce: `cargo test -p nsh-core --release --lib -- --ignored big_rows_bench --nocapture` (a 480 pt list of rows of
 420 views each, 5 rows bound). Linux x64, release:
@@ -1133,3 +1145,19 @@ stale-records part was not measured alone, as what it fixes shows when panels mo
 and this scenario moves nothing. CPU differs by −4.5 points between revisions, about one
 standard error of its own spread (3–37% within one run): this bench shows no CPU difference
 either way; paint and frame times are what it resolves.
+
+## Cross-platform baseline sampler (`bench.py`)
+
+`examples/gallery/tools/bench.py` measures fresh processes from outside, in one versioned format (`nsh-bench/1`,
+`<out>.json` plus `<out>.csv`), next to `perf.py` (per-page frame rate through `nsh test`) and `memory.py` (smaps by file):
+
+- `startup --runs 10`: one new process per run; `window_ms` is when the compositor maps a window of the process tree
+  (Hyprland), never a test handshake. First presented frame and interactive are `null`: nothing outside the app
+  observes them yet.
+- `run --rounds 5 --seconds 30 [--action <cmd>]`: process-tree CPU (utime+stime over wall time, 100% = one core) and
+  memory (Linux: summed `smaps_rollup` RSS / PSS / USS in MiB, GPU excluded), with the sampler's own CPU reported.
+- `size name=path ...`: file or directory bytes.
+
+Every process runs in its own group and is killed with its descendants (SIGTERM, then SIGKILL) after each sample;
+timeouts, exits and leaked processes stay in the samples and the summary counts them apart. Tests:
+`python3 examples/gallery/tools/bench_test.py`. Compare optimizations with alternating A/B runs on the same machine.

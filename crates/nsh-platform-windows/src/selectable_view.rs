@@ -214,7 +214,7 @@ pub(crate) fn is_area_text(view: &NshView) -> bool {
         .text
         .as_ref()
         .is_some_and(|d| takes_part(&d.text));
-    part && area_of(view).is_some()
+    part && area_of(view).is_some() && !in_control(view)
 }
 
 /// The current area: its selection and the mouse's press on it.
@@ -850,4 +850,27 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
         _ => return false,
     }
     true
+}
+
+/// Whether `view` sits in a control (a button, link, tab…) inside its
+/// area, or in a view that takes presses: its text then keeps the control's pointer, not the I-beam.
+fn in_control(view: &NshView) -> bool {
+    let mut current = Some(view.clone());
+    while let Some(v) = current {
+        let s = v.state();
+        if s.props.selectable_view {
+            return false;
+        }
+        // A role, or a press handler on a row the app built itself.
+        if s.props.accessibility.role.is_control()
+            || [EventKind::Press, EventKind::LongPress, EventKind::PressDown]
+                .iter()
+                .any(|&k| s.events.contains(k))
+        {
+            return true;
+        }
+        drop(s);
+        current = v.parent_view();
+    }
+    false
 }

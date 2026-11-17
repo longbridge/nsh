@@ -2242,7 +2242,7 @@ pub(crate) const EXPORTS: &[Item] = &[
         "createMotion",
         Export::Function(create_motion, 1),
         Ts::function(
-            "Creates a motion: an animated value for each channel (`opacity`, `translateX`,\n`translateY`, `rotate`, `rotateX`, `rotateY`, `scale`, `scaleX`, `scaleY`) at rest, bound\nwith `style={motion.style}` (or `opacity` and `transform` spread into a style), and\n`play(motion, options)` to run a preset (`\"shake\"`, `\"fadeInUp\"`, ...) or keyframes of\nyour own on them, natively. `enter` starts the values where that motion starts and\nplays it at once (the options also take its timing: `delay`, `duration`, ...). When the\nuser asks for less motion, motions land where they end without moving, unless\n`ignoreReduceMotion` is set.",
+            "Creates a motion: an animated value for each channel (`opacity`, `translateX`,\n`translateY`, `rotate`, `rotateX`, `rotateY`, `scale`, `scaleX`, `scaleY`) at rest, bound\nwith `style={motion.style}` (or `opacity` and `transform` spread into a style), and\n`play(motion, options)` to run a preset (`\"shake\"`, `\"fadeInUp\"`, ...) or keyframes of\nyour own on them, natively. `enter` starts the values where that motion starts and\nplays it at once (the options also take its timing: `delay`, `duration`, ..., or a\n`spring` to play it on: each channel then springs from where it is, keeping its velocity\nwhen it interrupts another motion). When the\nuser asks for less motion, motions land where they end without moving, unless\n`ignoreReduceMotion` is set.",
             &["(options?: MotionOptions): Motion"],
         ),
     ),
@@ -2381,11 +2381,21 @@ export interface KeyframesConfig extends KeyframeTiming {
  * `{ opacity: 0, translateY: 24 }`, with its `offset` and `easing`. */
 export type MotionFrame = { [C in MotionChannel]?: number | string } & { offset?: number; easing?: Easing };
 
+/** The spring a motion plays each channel on (`Animated.spring`'s
+ * `stiffness`, `damping` and `mass`, with its defaults: 170, 26, 1). */
+export type MotionSpring = Pick<SpringConfig, "stiffness" | "damping" | "mass">;
+
 /** A motion of your own: each channel's keyframes (`{ opacity: [0, 1],
  * translateY: [24, 0] }`) or a list of frames (`[{ opacity: 0 }, { opacity: 1
  * }]`), with how they play. */
 export interface MotionSpec extends KeyframeTiming {
   keyframes: { [C in MotionChannel]?: KeyframeValue[] } | MotionFrame[];
+  /** Plays each channel on this spring instead of through its keyframes:
+   * from where it is, keeping its velocity when the motion interrupts
+   * another, to where its keyframes end, after `delay`. The first keyframe
+   * is where `enter` starts it; `duration`, `easing`, `iterations` and the
+   * keyframes between are not used. */
+  spring?: MotionSpring;
   /** Plays even when the user asks for less motion. */
   ignoreReduceMotion?: boolean;
 }
@@ -2399,6 +2409,8 @@ export interface MotionPreset extends MotionSpec {
 
 /** Options of `play`: the motion's timing changed, and more. */
 export interface MotionPlayOptions extends KeyframeTiming {
+  /** Plays each channel on this spring (`MotionSpec`'s `spring`). */
+  spring?: MotionSpring;
   /** Plays even when the user asks for less motion. */
   ignoreReduceMotion?: boolean;
 }
