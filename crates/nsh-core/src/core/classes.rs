@@ -115,6 +115,17 @@ pub(super) struct NodeParts {
     /// `contentClass`; a typed list has none): they are parsed again when
     /// the theme or the design tokens they read change.
     class_names: Vec<(Part, Box<str>)>,
+    /// The group whose press it shows as a part (`Prop::ProjectedActive`).
+    active_group: Option<&'static str>,
+    /// It was last styled with that group's press.
+    group_pressed: bool,
+}
+
+impl NodeParts {
+    /// The group whose press it shows as a part.
+    pub(super) fn active_group(&self) -> Option<&'static str> {
+        self.active_group
+    }
 }
 
 /// The [`state`] bits an element is in by its accessibility state `s`:
@@ -396,7 +407,10 @@ impl<M: TextEngine> Core<M> {
     /// `focus-visible:` the cursor the keyboard is on.
     pub(super) fn styled_states(&self, key: Key) -> u16 {
         let node = &self.nodes[key as usize];
-        let states = node.states | node.projected;
+        let mut states = node.states | node.projected;
+        if let Some(group) = node.parts.as_ref().and_then(|p| p.active_group) {
+            states |= self.group_states(key, group) & state::PRESSED;
+        }
         if node.projected & state::FOCUSED != 0 && self.focus_visible_on.is_some() {
             states | state::FOCUS_VISIBLE
         } else {
@@ -580,6 +594,52 @@ impl<M: TextEngine> Core<M> {
             }
             self.states_changed(key);
         }
+    }
+
+    /// The group whose press `key` shows as a part of a control
+    /// (`Prop::ProjectedActive`).
+    pub(super) fn set_projected_active(&mut self, key: Key, group: Option<&'static str>) {
+        let node = &mut self.nodes[key as usize];
+        if node.parts.as_ref().and_then(|p| p.active_group) == group {
+            return;
+        }
+        let base = node.classes.clone();
+        let parts = node.parts.get_or_insert_with(|| {
+            Box::new(NodeParts {
+                base,
+                ..NodeParts::default()
+            })
+        });
+        parts.active_group = group;
+        parts.group_pressed = false;
+        self.states_changed(key);
+    }
+
+    /// A group around part `key` that shows its press changed its states:
+    /// restyled when the press it shows came or went.
+    fn group_press_changed(&mut self, key: Key) {
+        let Some(group) = self.nodes[key as usize]
+            .parts
+            .as_ref()
+            .and_then(|p| p.active_group)
+        else {
+            return;
+        };
+        let pressed = self.group_states(key, group) & state::PRESSED != 0;
+        let node = &mut self.nodes[key as usize];
+        let parts = node.parts.as_mut().expect("a part with its group");
+        if parts.group_pressed == pressed {
+            return;
+        }
+        parts.group_pressed = pressed;
+        if !node
+            .classes
+            .as_ref()
+            .is_some_and(|c| c.deps() & deps::STATE != 0)
+        {
+            return;
+        }
+        self.restyle(key);
     }
 
     /// The `data-*` attributes `key` shows as a part of a component
@@ -1116,12 +1176,20 @@ impl<M: TextEngine> Core<M> {
         while let Some(k) = stack.pop() {
             let node = &self.nodes[k as usize];
             stack.extend_from_slice(&node.children);
+            let follows = changed & deps::GROUP != 0
+                && node
+                    .parts
+                    .as_ref()
+                    .is_some_and(|p| p.active_group.is_some());
             if node
                 .classes
                 .as_ref()
                 .is_some_and(|c| c.deps() & changed != 0)
             {
                 self.restyle(k);
+            }
+            if follows {
+                self.group_press_changed(k);
             }
         }
     }

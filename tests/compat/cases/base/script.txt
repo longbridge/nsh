@@ -1114,6 +1114,12 @@ tap id:wifi
 expect Changes: 2
 prop id:wifi accessibilityState checked=false
 frame text:Wi-Fi 32 4 39 17
+# Held down, wherever on it: `active:` of the parts follows the switch
+# (the thumb 24 wide at once puts the label at 36), until it is released.
+state id:wifi pressed
+frame text:Wi-Fi 36 4 39 17
+state id:wifi none
+frame text:Wi-Fi 32 4 39 17
 # The app owns the value: a switch it keeps on asks for off and stays on.
 prop id:lights accessibilityLabel Lights
 prop id:lights accessibilityState checked=true

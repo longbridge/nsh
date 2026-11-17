@@ -5837,6 +5837,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_projected_data(key, data);
                 return Ok(());
             }
+            Prop::ProjectedActive(group) => {
+                self.set_projected_active(key, group);
+                return Ok(());
+            }
             Prop::HeaderStyle(patch) => {
                 self.set_part_style(key, classes::Part::Header, patch);
                 return Ok(());

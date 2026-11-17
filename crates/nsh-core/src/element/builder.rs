@@ -254,6 +254,9 @@ pub struct Attrs {
     /// The `data-*` attributes it shows as a component's part, sorted
     /// ([`Interactive::project_data`]).
     pub(crate) projected_data: Vec<&'static str>,
+    /// The group whose press it shows as a part
+    /// ([`Interactive::project_group_active`]).
+    pub(crate) projected_active: Option<&'static str>,
     /// Where a JS renderer's content goes (the element is its
     /// placeholder: [`super::Renderer::render`]).
     pub(crate) render: Option<super::renderer::RenderAt>,
@@ -324,6 +327,9 @@ impl Attrs {
         }
         if self.projected_data != old.projected_data {
             out.push(Prop::ProjectedData(self.projected_data.as_slice().into()));
+        }
+        if self.projected_active != old.projected_active {
+            out.push(Prop::ProjectedActive(self.projected_active));
         }
         // Host props: the ones no longer set go back to their defaults,
         // then the new and changed ones.
@@ -2260,6 +2266,21 @@ pub trait Interactive: Element {
         self.node().bind_attr(focused, |a, focused| {
             project(a, crate::tailwind::state::FOCUSED, focused)
         });
+        self
+    }
+
+    /// Styles it as pressed while the group `group` around it is (its
+    /// `active:` classes and [`Self::active`] styles), as a part of a
+    /// control held down: a switch's thumb that stretches while the switch
+    /// is held. The press is the group's as the platform reports it, the
+    /// one the group's own `active:` follows: it holds while the pointer is
+    /// down and ends on release or cancel. Its styles change as for any
+    /// other state: `transition-*` animates what it animates (a transform,
+    /// colors, opacity), and layout (a width) changes at once. Screen
+    /// readers hear nothing of it; the control takes the presses.
+    fn project_group_active(mut self, group: &'static str) -> Self {
+        self.node()
+            .bind_attr(true, move |a, _: bool| a.projected_active = Some(group));
         self
     }
 

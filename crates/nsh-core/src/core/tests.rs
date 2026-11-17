@@ -7896,6 +7896,76 @@ fn press_and_group_states() {
 }
 
 #[test]
+fn a_part_shows_its_groups_press() {
+    use crate::tailwind::state::PRESSED;
+    // A switch held down: its thumb stretches (`active:w-5`) wherever the
+    // press went down on it; a view inside it that is no part does not.
+    let mut c = core();
+    view_with_classes(&mut c, 2, "group/held flex-row items-start");
+    let child = |id, classes| {
+        vec![
+            Op::Create { id, tag: Tag::View },
+            class_op(id, classes),
+            Op::Insert {
+                parent: 2,
+                child: id,
+                before: None,
+            },
+        ]
+    };
+    let mut ops = child(3, "h-4 w-4 active:w-5 transition-all duration-200");
+    ops.push(Op::SetProp {
+        id: 3,
+        prop: Prop::ProjectedActive(Some("held")),
+    });
+    ops.extend(child(4, "h-4 w-4 active:w-5"));
+    ops.extend(child(5, "h-4 w-4 active:w-5"));
+    ops.push(Op::SetProp {
+        id: 5,
+        prop: Prop::ProjectedActive(Some("elsewhere")),
+    });
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 3).unwrap().size.width.0, 16.0);
+    // The group's press is reported: it tracks it.
+    assert!(
+        batch.items.iter().any(
+            |i| matches!(i, MountItem::TrackStates { id: 2, states } if states & PRESSED != 0)
+        )
+    );
+    c.set_states(2, PRESSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 3).unwrap().size.width.0, 20.0);
+    // Pushed along, their own size.
+    assert_eq!(frame_of(&batch, 4).unwrap().size.width.0, 16.0);
+    assert_eq!(frame_of(&batch, 5).unwrap().size.width.0, 16.0);
+    // Layout changes at once, `transition-all` or not, as for any state.
+    assert!(
+        !batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::LayoutAnimation(_)))
+    );
+    assert_eq!(frame_of(&batch, 4).unwrap().origin.x.0, 20.0);
+    // Released: back to its own size.
+    c.set_states(2, 0);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 3).unwrap().size.width.0, 16.0);
+    // No longer a part: the group's press is not its own.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 3,
+            prop: Prop::ProjectedActive(None),
+        }],
+    );
+    c.commit();
+    c.set_states(2, PRESSED);
+    let batch = c.commit();
+    assert!(batch.is_none_or(|b| frame_of(&b, 3).is_none()));
+}
+
+#[test]
 fn a_cancelled_press_resets_active_and_drops_its_release() {
     let mut c = core();
     view_with_classes(&mut c, 2, "bg-white active:bg-zinc-200");
