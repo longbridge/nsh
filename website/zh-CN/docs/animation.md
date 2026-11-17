@@ -179,6 +179,24 @@ card.play({
 card.play({ duration: 600, iterations: "infinite", keyframes: { rotateY: ["0deg", "180deg", "360deg"] } });
 ```
 
+### 弹簧动效
+
+给动效设置 `spring` 后，每个通道以弹簧运动到它的关键帧终点，而不是逐帧经过各关键帧。它从通道当前所在的位置出发并保留当前速度，所以一个动效打断另一个时（面板还在上升就被收起，卡片回弹途中又被按下）会平滑地转向，而不是从第一帧重新开始。第一个关键帧仍是 `enter` 让视图起步的位置；`delay` 在弹簧开始前等待；中间的关键帧以及 `duration`、`easing`、`iterations` 不参与，动效多久结束由弹簧决定。刚度、阻尼和质量与 [`spring`](#animatedvalue-的方法) 的相同（默认 170、26、1）。预设可以像接受时间参数一样接受弹簧选项。用户要求减少动态效果时，弹簧动效和其他动效一样立即落在终点。
+
+```rust tabs
+// 约 380 毫秒静止，过冲 3%。
+let spring = Spring { stiffness: 620.0, damping: 36.0, ..Spring::default() };
+let sheet = motion().entering(MotionPreset::SlideInUp.spec().spring(spring));
+let _ = sheet.play(MotionPreset::SlideOutDown.spec().spring(spring));
+```
+
+```tsx tabs
+// 约 380 毫秒静止，过冲 3%。
+const spring = { stiffness: 620, damping: 36 };
+const sheet = createMotion({ enter: "slideInUp", spring });
+sheet.play("slideOutDown", { spring });
+```
+
 ### 入场与列表的错开
 
 给每一行一个入场动效，延迟随行号增长：同时出现的行会依次进入。给延迟设个上限，这样加在列表靠后位置的行不必久等。

@@ -83,7 +83,11 @@
   StaggerFrom)` counts each item's intervals from the first, the last, the center (both middles of an even count at
   once) or an index; `Animated.stagger`'s `{ from }` and `Animation::stagger_from` use it. A `MotionSpec` is several
   `MotionChannel`s (opacity, then translations, rotations and scales, the order they bind in) through keyframes with
-  one timing, its `composite` a `Parallel` (stop together) over the channels' nodes; `start_values` is where an
+  one timing, its `composite` a `Parallel` (stop together) over the channels' nodes. With a `spring` (`MotionSpec::spring`,
+  JS `spring: { stiffness, damping, mass }`), each channel is one `Driver::Spring` to where its keyframes end (one
+  iteration, so `direction` still picks the end) with `velocity: None`, after a plain `Delay`: it starts from the
+  value and velocity the interrupted motion left (`Graph::start` replaces that run from its last frame), where
+  keyframes replay from their first; keyframes between, `duration`, easings and iterations are not used. `start_values` is where an
   entrance sets the values before its first frame (`createMotion`'s `initial` sets the others; `enter` wins on the
   channels it moves). `Motion::animation` / `motion.animation(..)` return the same tree as a composite, not started,
   so motions compose (`Animated.stagger(.., cards.map((m) => m.animation(..)))`); reduced motion is decided when it

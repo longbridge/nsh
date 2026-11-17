@@ -179,6 +179,24 @@ card.play({
 card.play({ duration: 600, iterations: "infinite", keyframes: { rotateY: ["0deg", "180deg", "360deg"] } });
 ```
 
+### Spring motions
+
+Give a motion a `spring` and each channel springs to where its keyframes end instead of running through them. It starts from where the channel is and keeps its velocity, so a motion that interrupts another (a sheet sent away while it still rises, a card pressed again mid-bounce) turns smoothly instead of starting again from its first frame. The first keyframe is still where `enter` starts a view; `delay` waits before the spring starts; the keyframes between, `duration`, `easing` and `iterations` are not used, since the spring decides how long the motion takes. The stiffness, damping and mass are [`spring`](#animatedvalue-methods)'s (170, 26 and 1 by default). Presets take a spring as an option, as they take a timing. When the user asks for less motion, a spring motion lands where it ends at once, as any motion does.
+
+```rust tabs
+// About 380 ms to settle, overshooting by 3 %.
+let spring = Spring { stiffness: 620.0, damping: 36.0, ..Spring::default() };
+let sheet = motion().entering(MotionPreset::SlideInUp.spec().spring(spring));
+let _ = sheet.play(MotionPreset::SlideOutDown.spec().spring(spring));
+```
+
+```tsx tabs
+// About 380 ms to settle, overshooting by 3 %.
+const spring = { stiffness: 620, damping: 36 };
+const sheet = createMotion({ enter: "slideInUp", spring });
+sheet.play("slideOutDown", { spring });
+```
+
 ### Entrances and staggered lists
 
 Give each row a motion that enters, with a delay that grows with its index: rows that appear together come in one after another. Cap the delay so that a row added far down the list does not wait.
