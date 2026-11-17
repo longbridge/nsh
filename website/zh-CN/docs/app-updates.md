@@ -63,7 +63,7 @@ if (update?.canInstall) {
 }
 ```
 
-`update` 包含 `version`、`notes`、`localizedNotes`、`url` 和 `canInstall`。iOS、Android 上 `canInstall` 为 false；桌面端如果应用装在用户无法写入的位置（如系统包），也为 false。开发运行时 `checkForUpdate` 返回 `null`。
+`update` 包含 `version`、`notes`、`url` 和 `canInstall`。iOS、Android 上 `canInstall` 为 false；桌面端如果应用装在用户无法写入的位置（如系统包），也为 false。开发运行时 `checkForUpdate` 返回 `null`。
 
 `installAndRestart` 像 `Application.restart()` 一样重启应用：当前进程像用户退出时那样退出，进程结束后新版本启动。如果失败，应用保持原样。不想打断用户时改用 `installOnQuit()`：更新现在就校验好，应用退出时替换，下次启动就是新版本。每个函数、它的错误以及 `nsh.json` 的键见 [nsh/updater 参考](../modules/nsh-updater.md)。
 
@@ -84,9 +84,7 @@ nsh update-manifest *.tar.gz *.zip \
 
 把压缩包、`latest.json` 和 `latest.json.sig`（使用 `--key` 时）上传为 GitHub Release 的附件，或放到自己服务器的同一目录。GitHub 上标记为 draft 或 prerelease 的版本不会被推送。
 
-更新说明有多种语言时，每种语言加一个 `--localized-notes <标签>=<文件>`，标签用 BCP 47，例如
-`--localized-notes zh-TW=CHANGES.zh-TW.md`。`update.localizedNotes` 按标签给出这些说明；显示用户所用语言的那一份，没有就用
-`notes`。只读 `notes` 的应用（包括旧版运行时）照旧显示它。
+更新说明有多种语言时，每种语言加一个 `--notes <标签>=<文件>`，标签用 BCP 47，例如 `--notes zh-TW=CHANGES.zh-TW.md`。每种语言写成 `latest.json` 旁边的 `notes.<标签>.md`，清单里记录它的 SHA-256；和清单一起上传。用 `checkForUpdate({ locale })` 检查时，`update.notes` 就是该语言的说明，只下载这一个文件；没有该语言时用不带标签的说明。旧版运行时的应用照旧显示不带标签的说明。
 
 ## OTA 更新
 

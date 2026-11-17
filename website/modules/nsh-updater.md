@@ -38,12 +38,12 @@ function checkForUpdate(options?: UpdateCheckOptions | null): Promise<AppUpdate 
 
 interface UpdateCheckOptions {
   channel?: string | null;
+  locale?: string | null;
 }
 
 interface AppUpdate {
   version: string;
   notes?: string | null;
-  localizedNotes: Record<string, string>;
   url: string;
   canInstall: boolean;
   shell: boolean;
@@ -59,8 +59,7 @@ native shell) is behind.
 | Field | Meaning |
 | --- | --- |
 | `version` | The new version, semver |
-| `notes` | What changed, as the manifest's `--notes` file says it |
-| `localizedNotes` | `notes` in other languages, by BCP 47 tag (`en`, `zh-TW`, `ja`), from the manifest's `--localized-notes` files; empty when it has none. Show the one in your user's language, else `notes` |
+| `notes` | What changed, as the manifest's `--notes` file says it; with `locale`, its notes in that language (or its base language, `zh` for `zh-TW`) when it has them, downloading only that file |
 | `url` | Where the user can get it by hand: the archive, or the store page on iOS and Android. Pass it to [`openUrl`](./nsh.md#openurl) when `canInstall` is false |
 | `canInstall` | Whether `downloadUpdate`, `installAndRestart` and `installOnQuit` work in this run: a packaged desktop app installed where the user can write. False on iOS and Android, and under a directory only the system writes (a system package) |
 | `shell` | Whether only the installed app is behind: this run's [package](#checkforpackage) is already this version or later, so the update brings a newer runtime and native shell, not newer code. Apps that update by package can offer it as a quieter, optional step |
@@ -72,6 +71,11 @@ update, so a stale manifest cannot downgrade the app.
 `channel` checks one of the [channels](#channels) `nsh.json` names instead of the default source. It is a name, never
 an address: a name the package does not declare rejects before any request. `downloadUpdate` and `installAndRestart`
 use what the last check found, whichever source it read.
+
+`locale` is the language the app shows, a BCP 47 tag such as `zh-TW`, which may differ from the system's. When the
+manifest has notes in it (`nsh update-manifest --notes zh-TW=<file>`), or in its base language (`zh`), `notes` is
+those: only that file is downloaded and checked against the SHA-256 in the signed manifest. Otherwise, and when that
+file cannot be had, `notes` is the manifest's default notes. `checkForPackage` takes `locale` too.
 
 ### Channels
 
@@ -156,13 +160,12 @@ build: each package names the lowest runtime it runs on, and older apps are not 
 ### checkForPackage
 
 ```ts
-function checkForPackage(): Promise<PackageUpdate | null>;
+function checkForPackage(options?: { locale?: string | null }): Promise<PackageUpdate | null>;
 
 interface PackageUpdate {
   version: string;
   build: number;
   notes?: string | null;
-  localizedNotes: Record<string, string>;
   size?: number | null;
 }
 ```

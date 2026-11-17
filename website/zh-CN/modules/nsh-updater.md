@@ -32,12 +32,12 @@ function checkForUpdate(options?: UpdateCheckOptions | null): Promise<AppUpdate 
 
 interface UpdateCheckOptions {
   channel?: string | null;
+  locale?: string | null;
 }
 
 interface AppUpdate {
   version: string;
   notes?: string | null;
-  localizedNotes: Record<string, string>;
   url: string;
   canInstall: boolean;
   shell: boolean;
@@ -49,8 +49,7 @@ interface AppUpdate {
 | 字段 | 含义 |
 | --- | --- |
 | `version` | 新版本号，semver |
-| `notes` | 更新说明，即清单的 `--notes` 文件内容 |
-| `localizedNotes` | 其他语言的 `notes`，按 BCP 47 标签（`en`、`zh-TW`、`ja`）索引，来自清单的 `--localized-notes` 文件；没有时为空对象。显示用户所用语言的那一份，没有则显示 `notes` |
+| `notes` | 更新说明，即清单的 `--notes` 文件内容；传了 `locale` 且清单有该语言（或其基础语言，如 `zh-TW` 的 `zh`）时为该语言的说明，只下载这一个文件 |
 | `url` | 用户手动获取的地址：压缩包，或 iOS、Android 上的商店页面。`canInstall` 为 false 时交给 [`openUrl`](./nsh.md#openurl) |
 | `canInstall` | 本次运行中 `downloadUpdate`、`installAndRestart` 和 `installOnQuit` 是否可用：装在用户可写位置的桌面打包应用为 true。iOS、Android 上为 false，装在只有系统可写的目录（系统包）时也为 false |
 | `shell` | 是否只有已安装的应用落后：本次运行的[包](#checkforpackage)已是该版本或更高，更新带来的是更新的运行时和原生外壳，而不是新代码。用包更新的应用可以把它作为更安静的可选步骤提供 |
@@ -58,6 +57,8 @@ interface AppUpdate {
 来源无法访问或清单不可接受时会 reject：设置了 `publicKey` 但签名错误或缺失、清单属于其他应用、URL 不是 HTTPS。版本相同或更旧的清单不算更新，因此过期的清单无法让应用降级。
 
 `channel` 改查 `nsh.json` 声明的某个[频道](#频道)，而不是默认来源。它只能是名字，不能是地址：包里没有声明的名字在发出任何请求之前就会 reject。`downloadUpdate`、`installAndRestart` 和 `installOnQuit` 使用上一次检查找到的结果，不管它读的是哪个来源。
+
+`locale` 是应用显示的语言，BCP 47 标签，例如 `zh-TW`，可以和系统语言不同。清单里有该语言（`nsh update-manifest --notes zh-TW=<文件>`）或其基础语言（`zh`）的说明时，`notes` 就是它：只下载这一个文件，并按签名清单里的 SHA-256 校验。否则，或者这个文件取不到时，`notes` 是清单的默认说明。`checkForPackage` 也接受 `locale`。
 
 ### 频道
 
@@ -119,13 +120,12 @@ OTA（over-the-air，空中下发）更新把打包应用的 TSX 作为签名包
 ### checkForPackage
 
 ```ts
-function checkForPackage(): Promise<PackageUpdate | null>;
+function checkForPackage(options?: { locale?: string | null }): Promise<PackageUpdate | null>;
 
 interface PackageUpdate {
   version: string;
   build: number;
   notes?: string | null;
-  localizedNotes: Record<string, string>;
   size?: number | null;
 }
 ```
