@@ -207,6 +207,9 @@ pub struct Screen {
     auth_sessions: Vec<nsh_core::auth_session::AuthSessionPage>,
     /// The sign-in sessions to answer.
     auth_session_answers: Vec<u32>,
+    /// The sign-in session showing: not answered, closed by the app nor
+    /// replaced yet.
+    auth_session_showing: Option<u32>,
     /// The requests on local paths that reached the platform
     /// (`pick_paths`, `open_path`, ...), in order.
     file_requests: Vec<nsh_core::file_dialog::FileRequest>,
@@ -890,7 +893,9 @@ impl Screen {
             Command::AuthSession { id, page } => {
                 self.auth_sessions.push((**page).clone());
                 self.auth_session_answers.push(*id);
+                self.auth_session_showing = Some(*id);
             }
+            Command::CloseAuthSession(id) => self.auth_session_ended(*id),
             // Recorded, never carried out: a test's machine opens, shows
             // and trashes nothing.
             Command::FileRequest { id, request } => {
@@ -1873,6 +1878,21 @@ impl Screen {
     /// elsewhere the page is in [`Screen::opened_urls`]).
     pub fn auth_sessions(&self) -> &[nsh_core::auth_session::AuthSessionPage] {
         &self.auth_sessions
+    }
+
+    /// Whether a sign-in session the app opened in the app still shows:
+    /// the user has not ended it (as
+    /// [`crate::Headless::keep_auth_sessions_open`] leaves it), and the app
+    /// has not closed it ([`nsh_core::element::close_auth_session`]).
+    pub fn auth_session_showing(&self) -> bool {
+        self.auth_session_showing.is_some()
+    }
+
+    /// Sign-in session `id` is no longer showing.
+    pub(crate) fn auth_session_ended(&mut self, id: u32) {
+        if self.auth_session_showing == Some(id) {
+            self.auth_session_showing = None;
+        }
     }
 
     /// The sign-in sessions to answer since the last call.

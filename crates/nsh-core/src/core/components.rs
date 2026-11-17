@@ -6489,6 +6489,7 @@ impl<M: TextEngine> Core<M> {
                 answer.borrow_mut().deliver(available);
             }
             Action::AuthSession(request, answer) => self.start_auth_session(request, answer),
+            Action::CloseAuthSession => self.close_auth_session(),
             Action::RenderCanvas(request, answer) => self.start_canvas_render(*request, answer),
             Action::FileRequest(request, answer) => {
                 use crate::file_dialog::FileRequest;
@@ -6654,6 +6655,25 @@ impl<M: TextEngine> Core<M> {
             answer,
             opening,
         });
+    }
+
+    /// Closes the app's waiting sign-in session, if any: answers it as
+    /// cancelled and, where the platform shows it, has the platform close
+    /// it. A page in the system browser stays open: nothing closes it.
+    fn close_auth_session(&mut self) {
+        let Some(session) = self.components.auth_session.take() else {
+            return;
+        };
+        session
+            .answer
+            .borrow_mut()
+            .deliver(Ok(crate::auth_session::AuthSessionOutcome::Cancelled));
+        if session.opening.is_none() {
+            let _ = self.apply_op(Op::Command {
+                id: crate::ROOT_ID,
+                command: Command::CloseAuthSession(session.id),
+            });
+        }
     }
 
     /// Ends the waiting sign-in session `id` (any, `None`) with `result`.

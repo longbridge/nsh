@@ -2759,6 +2759,11 @@ pub enum Command {
         /// The page and the callback scheme.
         page: Box<crate::auth_session::AuthSessionPage>,
     },
+    /// Close the sign-in session [`Command::AuthSession`] showed with this
+    /// id (on the root), without reporting how it ended: the app closed it
+    /// ([`crate::element::close_auth_session`]), and the core has answered
+    /// it as cancelled already. A session no longer showing is left alone.
+    CloseAuthSession(u32),
     /// Let the user pick a color anywhere on the screen (on the root; a
     /// color picker's eyedropper, [`crate::element::ambient::pick_screen_color`]):
     /// the system's color sampler or the browser's `EyeDropper`. Report it
