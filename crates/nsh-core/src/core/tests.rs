@@ -3548,6 +3548,200 @@ fn spare_list_cells_are_hidden_until_placed_again() {
     }
 }
 
+/// [`thousand_rows`] with a selection indicator (50) inset by margins of
+/// 8 across and 2 along, under row `selected`.
+fn indicated_rows(c: &mut Core<FakeEngine>, selected: u32) {
+    use StyleValue::Number;
+    thousand_rows(c);
+    apply(
+        c,
+        vec![
+            Op::Create {
+                id: 50,
+                tag: Tag::Cell,
+            },
+            style_op(
+                50,
+                &[
+                    ("marginLeft", Number(8.0)),
+                    ("marginRight", Number(8.0)),
+                    ("marginTop", Number(2.0)),
+                    ("marginBottom", Number(2.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 50,
+                prop: Prop::Slot(CellSlot::Indicator),
+            },
+            Op::Insert {
+                parent: 2,
+                child: 50,
+                before: None,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::ListSelected(Some(selected)),
+            },
+        ],
+    );
+}
+
+/// The layout animations the frames of view `id` in `batch` run with.
+fn indicator_moves(batch: &MountBatch, id: NodeId) -> Vec<Option<crate::LayoutTransition>> {
+    animated_frames(batch)
+        .into_iter()
+        .filter(|f| f.0 == id)
+        .map(|f| f.1)
+        .collect()
+}
+
+#[test]
+fn a_lists_selection_indicator_lies_under_the_selected_row() {
+    let mut c = core();
+    indicated_rows(&mut c, 3);
+    let batch = c.commit().unwrap();
+    // Row 3 by its estimate (50 from 150), inside the margins; drawn, but
+    // never read by screen readers.
+    assert_eq!(frame_of(&batch, 50), Some(rect(8.0, 152.0, 304.0, 46.0)));
+    assert_eq!(hidden_in(&batch, 50), (None, Some(true)));
+    // The rows measure 100: it follows its row at once.
+    let (mut next_id, mut cells) = (100, Vec::new());
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 100.0), 17);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 50), Some(rect(8.0, 302.0, 304.0, 96.0)));
+    assert_eq!(indicator_moves(&batch, 50), [None]);
+    // Scrolling moves the content it is in: nothing to send.
+    c.set_scroll_offset(2, point(px(0.0), px(120.0)), u32::MAX);
+    if let Some(batch) = c.commit() {
+        assert_eq!(frame_of(&batch, 50), None);
+    }
+    // Another row, out of the render window: it springs there, with the
+    // app's spring, by the rows' sizes it knows (17 measured, the rest
+    // estimated).
+    let spring = crate::element::Spring {
+        stiffness: 620.0,
+        damping: 36.0,
+        ..Default::default()
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::SetProp {
+                id: 2,
+                prop: Prop::ListSelectionSpring(Some(spring)),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::ListSelected(Some(500)),
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let at = 17.0 * 100.0 + 483.0 * 50.0;
+    assert_eq!(frame_of(&batch, 50), Some(rect(8.0, at + 2.0, 304.0, 46.0)));
+    assert_eq!(
+        indicator_moves(&batch, 50),
+        [Some(crate::LayoutTransition::spring(spring))]
+    );
+    // No row: hidden. Shown again, it is placed at once.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::ListSelected(None),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(hidden_in(&batch, 50), (Some(true), Some(true)));
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::ListSelected(Some(4)),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(hidden_in(&batch, 50), (Some(false), Some(true)));
+    assert_eq!(frame_of(&batch, 50), Some(rect(8.0, 402.0, 304.0, 96.0)));
+    assert_eq!(indicator_moves(&batch, 50), [None]);
+    // With reduced motion, a change of row moves it at once.
+    c.set_class_environment(crate::tailwind::ClassEnvironment {
+        reduce_motion: true,
+        ..Default::default()
+    });
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::ListSelected(Some(2)),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 50), Some(rect(8.0, 202.0, 304.0, 96.0)));
+    assert_eq!(indicator_moves(&batch, 50), [None]);
+}
+
+#[test]
+fn a_lists_selection_indicator_stays_with_its_row_as_rows_arrive_above() {
+    let mut c = core();
+    indicated_rows(&mut c, 3);
+    c.commit();
+    // Two rows arrive at the top and the app's selection follows its row
+    // there: the indicator moves with the row, at once.
+    apply(
+        &mut c,
+        vec![
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Splice(0, 0, 2),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Count(1002),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::ListSelected(Some(5)),
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 50), Some(rect(8.0, 252.0, 304.0, 46.0)));
+    assert_eq!(indicator_moves(&batch, 50), [None]);
+    // The selection goes to the row now at 3, another row: it springs.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::ListSelected(Some(3)),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 50), Some(rect(8.0, 152.0, 304.0, 46.0)));
+    assert!(matches!(
+        indicator_moves(&batch, 50)[..],
+        [Some(crate::LayoutTransition {
+            curve: crate::LayoutCurve::Spring(_),
+            ..
+        })]
+    ));
+}
+
+#[test]
+fn lists_without_a_selection_indicator_send_nothing_for_a_selection() {
+    let mut c = core();
+    thousand_rows(&mut c);
+    c.commit();
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::ListSelected(Some(3)),
+        }],
+    );
+    assert!(c.commit().is_none_or(|b| b.items.is_empty()));
+}
+
 #[test]
 fn scrolling_on_hides_no_cells() {
     let mut c = core();

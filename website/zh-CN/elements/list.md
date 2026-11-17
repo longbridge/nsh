@@ -95,6 +95,10 @@ virtual_list(move || messages.with(|m| m.len()), move |at| {
 | `stickyHeaderIndices` | `.sticky_header_indices([..])` | `number[]` | | 滚动经过时吸附在起始端的条目（单列、非倒序）。 |
 | `contentStyle` | `.content_padding(..)`、`.content_padding_x(..)`、`.row_gap(..)`、`.column_gap(..)` 等 | `ListContentStyle` | | 内容的内边距和间距（点）：`padding`、`paddingHorizontal`、`paddingVertical`、`paddingTop`、`paddingRight`、`paddingBottom`、`paddingLeft`、`gap`、`rowGap`、`columnGap`。 |
 | `contentClass` | | `string` | | 以类名（`p-*`、`gap-*`）给出的内容内边距和间距；`contentStyle` 优先。 |
+| `selectedIndex` | | `number \| null` | | 选中指示器所在的行；`null` 隐藏它。 |
+| `selectionIndicatorClass` | | `string` | | 选中指示器的类名：画在选中行下方、在行与行之间滑动的视图（见[选中指示器](../docs/lists.md#selection-indicator)）。创建列表时这个和 `selectionIndicatorStyle` 都没有，就没有指示器。 |
+| `selectionIndicatorStyle` | | `StyleProp<ViewStyle>` | | 指示器的样式，覆盖 `selectionIndicatorClass`。 |
+| `selectionIndicatorSpring` | | `{ stiffness?, damping?, mass? }` | `Tabs` 的弹簧 | 指示器移到另一行时用的弹簧；开启减弱动态效果时直接到位。 |
 | `header` | `.header(el)` | `ListSlot` | | 条目之前的内容：一个组件（`Header`）或一个元素（`<Header />`）。 |
 | `footer` | `.footer(el)` | `ListSlot` | | 条目之后的内容。 |
 | `empty` | `.empty(el)` | `ListSlot` | | `each` 为空时代替条目显示。 |

@@ -925,6 +925,11 @@ impl Node {
         if self.spare || self.hidden_in_text || self.left_behind {
             props.accessibility.hidden = true;
         }
+        if self.slot == Some(CellSlot::Indicator) {
+            // A list's selection indicator is drawn, never read or pressed.
+            props.accessibility.hidden = true;
+            props.pointer_events = crate::props::PointerEvents::None;
+        }
         if let Some(list) = self.list.as_ref().filter(|l| l.parent) {
             props.screen_order = Some(if list.horizontal {
                 crate::geometry::Axis::Horizontal
@@ -5530,6 +5535,16 @@ impl<M: TextEngine> Core<M> {
                     list.set_columns(columns);
                 }
             }
+            Prop::ListSelected(selected) => {
+                if let Some(list) = node.list.as_mut() {
+                    list.set_selected(selected);
+                }
+            }
+            Prop::ListSelectionSpring(spring) => {
+                if let Some(list) = node.list.as_mut() {
+                    list.indicator_spring = spring;
+                }
+            }
             Prop::Inverted(inverted) => {
                 if let Some(list) = node.list.as_mut() {
                     list.set_inverted(inverted);
@@ -7218,6 +7233,7 @@ impl<M: TextEngine> Core<M> {
             || node.spare
             || node.hidden_in_text
             || node.list.as_ref().is_some_and(|l| l.parent)
+            || node.slot == Some(CellSlot::Indicator)
         {
             flags |= dirty::VIEW_PROPS;
         }
@@ -9683,6 +9699,78 @@ impl<M: TextEngine> Core<M> {
         self.mount.push(MountItem::ViewProps { id, props });
     }
 
+    /// Places the selection indicator of list `key` under the selected row:
+    /// along the row and across its column (`cross` wide, on a grid of
+    /// `unit`), inside the indicator's own margins, `inset` into the list
+    /// in its parent's viewport. A row measured, or rows above it, move it
+    /// at once; a move to another row springs there, unless the user asks
+    /// for reduced motion. Hidden while no row is selected, and placed at
+    /// once when shown again.
+    fn place_selection_indicator(
+        &mut self,
+        key: Key,
+        cross: f32,
+        unit: Option<f32>,
+        inset: (f32, f32),
+    ) {
+        let list = self.nodes[key as usize].list.as_ref().expect("list");
+        let cell = list.indicator;
+        let Some(index) = list.indicated() else {
+            self.nodes[key as usize]
+                .list
+                .as_mut()
+                .expect("list")
+                .indicator_at = None;
+            self.set_spare(cell, true);
+            return;
+        };
+        let horizontal = list.horizontal;
+        let (extent, row) = (list.item_extent(index), list.row_extent(index));
+        let main = list.to_content(list.item_at(index), row.max(extent));
+        let (x, width) = list.column(cross, list.column_of(index), unit);
+        let (before, spring) = (list.indicator_at, list.indicator_spring);
+        let Some(layout) = self.nodes.get(cell as usize).and_then(|n| n.layout) else {
+            return;
+        };
+        let margin = {
+            use taffy::util::ResolveOrZero;
+            self.layout
+                .style(layout)
+                .margin
+                .resolve_or_zero(Some(width), |_: *const (), _: f32| 0.0)
+        };
+        let ((main_start, main_end), (cross_start, cross_end)) = if horizontal {
+            ((margin.left, margin.right), (margin.top, margin.bottom))
+        } else {
+            ((margin.top, margin.bottom), (margin.left, margin.right))
+        };
+        let main_at = main + main_start + inset.0;
+        let main_len = (extent - main_start - main_end).max(0.0);
+        let cross_at = x + cross_start + inset.1;
+        let cross_len = (width - cross_start - cross_end).max(0.0);
+        let frame = if horizontal {
+            rect(main_at, cross_at, main_len, cross_len)
+        } else {
+            rect(cross_at, main_at, cross_len, main_len)
+        };
+        self.nodes[key as usize]
+            .list
+            .as_mut()
+            .expect("list")
+            .indicator_at = Some(index);
+        let node = &self.nodes[cell as usize];
+        if before.is_some_and(|b| b != index)
+            && node.frame != frame
+            && !self.class_env.reduce_motion
+        {
+            let spring =
+                spring.unwrap_or_else(|| crate::element::Spring::new(280.0).damping_ratio(0.85));
+            self.scope_frame_animation(node.id, crate::LayoutTransition::spring(spring));
+        }
+        self.set_frame(cell, frame);
+        self.set_spare(cell, false);
+    }
+
     /// Hides list cell `key`, which the render window left behind, from
     /// assistive technology, or reads it again as its list places it: its
     /// frame is where its row was laid out last, which rows measured since
@@ -10130,6 +10218,13 @@ impl<M: TextEngine> Core<M> {
             }
         }
         self.cells_scratch = ready;
+        if self.nodes[key as usize]
+            .list
+            .as_ref()
+            .is_some_and(|l| l.indicator != u32::MAX)
+        {
+            self.place_selection_indicator(key, columns_cross, unit, inset);
+        }
 
         sticky_cells.sort_by_key(|c| c.cell);
         let list = self.nodes[key as usize].list.as_mut().expect("list");

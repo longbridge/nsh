@@ -223,6 +223,11 @@ mod tests {
                 "  onScroll?: (e: ScrollEvent) => void;",
             ),
             ("ListHostProps", "  contentStyle?: ListContentStyle;"),
+            ("ListHostProps", "  selectedIndex?: number | null;"),
+            (
+                "ListHostProps",
+                "  selectionIndicatorSpring?: { stiffness?: number; damping?: number; mass?: number };",
+            ),
             ("DialogHostProps", "  presentation?: ModalPresentation;"),
             ("DialogHostProps", "  closeOnEscape?: boolean;"),
             ("NavPageHostProps", "  headerBackTitle?: string;"),

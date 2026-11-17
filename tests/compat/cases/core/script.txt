@@ -239,6 +239,22 @@ scroll id:positioned 0 130
 tap id:read-position
 expect Row 2, 30 in; empty: null
 covers [nsh] List
+# core-list-selection
+tap id:case-core-list-selection
+expect Pick 0
+# The selection indicator, under the rows (below the first row's cell),
+# lies under the selected row 1 (40 high, from 40), inside its margins
+# of 8 across and 2 along.
+frame below:parent:id:pick-0 8 42 284 36
+style below:parent:id:pick-0 backgroundColor #ff0000ff
+tap id:select-3
+frame below:parent:id:pick-0 8 122 284 36
+# A row out of the render window: placed by the rows' sizes it knows.
+tap id:select-far
+frame below:parent:id:pick-0 8 1602 284 36
+covers [props] selectedIndex
+covers [props] List.selectionIndicatorClass
+covers [props] List.selectionIndicatorStyle
 # core-reactive
 tap id:case-core-reactive
 expect Sum: 3

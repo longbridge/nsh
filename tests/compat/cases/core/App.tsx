@@ -13,6 +13,7 @@ import CoreList from "./core-list";
 import CoreListAnchor from "./core-list-anchor";
 import CoreListInitialEnd from "./core-list-initial-end";
 import CoreListPosition from "./core-list-position";
+import CoreListSelection from "./core-list-selection";
 import CoreMotion from "./core-motion";
 import CoreOffscreenCanvas from "./core-offscreen-canvas";
 import CoreOverlay from "./core-overlay";
@@ -43,6 +44,7 @@ const cases: Record<string, () => JSX.Element> = {
   "core-list-anchor": CoreListAnchor,
   "core-list-position": CoreListPosition,
   "core-list-initial-end": CoreListInitialEnd,
+  "core-list-selection": CoreListSelection,
   "core-motion": CoreMotion,
   "core-offscreen-canvas": CoreOffscreenCanvas,
   "core-overlay": CoreOverlay,

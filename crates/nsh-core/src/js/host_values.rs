@@ -636,10 +636,36 @@ pub(crate) fn slot<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
         Some(role) => match role.as_str() {
             "header" => CellSlot::Header,
             "footer" => CellSlot::Footer,
+            "indicator" => CellSlot::Indicator,
             _ => CellSlot::Empty,
         },
         None => CellSlot::Item(input.as_number().unwrap_or(0.0) as u32),
     }))
+}
+
+/// `selectedIndex`: a row's index; anything else (`null`, a negative
+/// number) selects no row.
+pub(crate) fn selected_index<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
+    let index = input
+        .as_number()
+        .filter(|n| n.is_finite() && *n >= 0.0)
+        .map(|n| n.min(f64::from(u32::MAX)) as u32);
+    Some(Prop::ListSelected(index))
+}
+
+/// `selectionIndicatorSpring`: `{ stiffness, damping, mass }`, each
+/// defaulting to `Animated.spring`'s; not an object: the default spring.
+pub(crate) fn list_spring<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
+    if !input.is_object() {
+        return Some(Prop::ListSelectionSpring(None));
+    }
+    let default = crate::element::Spring::default();
+    Some(Prop::ListSelectionSpring(Some(crate::element::Spring {
+        stiffness: number(input, "stiffness").unwrap_or(default.stiffness),
+        damping: number(input, "damping").unwrap_or(default.damping),
+        mass: number(input, "mass").unwrap_or(default.mass),
+        ..default
+    })))
 }
 
 /// `splice`: `[at, removed, inserted]`.

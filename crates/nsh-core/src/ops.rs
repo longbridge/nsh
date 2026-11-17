@@ -1851,6 +1851,9 @@ pub enum CellSlot {
     Footer,
     /// `empty` (shown while there are no items).
     Empty,
+    /// The selection indicator (`selectionIndicatorClass`): under the row
+    /// at `selectedIndex`, placed by the core.
+    Indicator,
 }
 
 /// A list's `contentStyle` (or `contentClass`): padding around the content and gaps
@@ -3095,6 +3098,19 @@ pub enum Prop {
     /// far from the start of the viewport, following the value (below a
     /// header that moves); the platforms read it as they pin.
     StickyOffsetNode(Option<crate::animation::NodeId>),
+    /// `selectedIndex`: the row the list's selection indicator lies under
+    /// (`selectionIndicatorClass`); `null` (or none) hides it. The core
+    /// places it under that row, rendered or not, and moves it with the
+    /// row as rows above it change size; a change to another row moves it
+    /// there natively with `selectionIndicatorSpring`.
+    #[prop(js = "selectedIndex", with = crate::js::host_values::selected_index, reset = Prop::ListSelected(None), ts = "number | null", on = LIST)]
+    ListSelected(Option<u32>),
+    /// `selectionIndicatorSpring`: the spring the selection indicator
+    /// moves to another row with (by default a 280 ms response, a damping
+    /// ratio of 0.85: `Tabs`' indicator's); with reduced motion it moves
+    /// at once.
+    #[prop(js = "selectionIndicatorSpring", with = crate::js::host_values::list_spring, reset = Prop::ListSelectionSpring(None), ts = "{ stiffness?: number; damping?: number; mass?: number }", on = LIST)]
+    ListSelectionSpring(Option<crate::element::Spring>),
     /// `viewport`: `"parent"` lays the list out at its full length in its
     /// parent and renders the rows near the viewport of the scroll view
     /// around it, which scrolls it (a page of headers and lists); `"own"`

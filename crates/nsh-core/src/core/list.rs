@@ -35,7 +35,9 @@
 //! frame; cells never placed are skipped) and hides them from touches and
 //! screen readers until they are placed again (`Core::set_spare`). The
 //! header, footer and empty placeholder are cells with a role
-//! (`slot="header"`, ...) and are never recycled. Each cell is a Taffy root
+//! (`slot="header"`, ...) and are never recycled, as is the selection
+//! indicator (`slot="indicator"`), which the core places under the
+//! selected row (`Core::place_selection_indicator`). Each cell is a Taffy root
 //! of its own (its width follows the list's cross axis), so scrolling
 //! relays out dirty cells only.
 //!
@@ -437,6 +439,17 @@ pub(super) struct ListState {
     /// Ignored props set ([`ignored`] bits), and those already warned of.
     pub(super) ignored: u16,
     pub(super) warned: u16,
+    /// `selectedIndex`: the row the selection indicator lies under.
+    pub(super) selected: Option<u32>,
+    /// The selection indicator's cell (`selectionIndicatorClass`), or
+    /// `u32::MAX`.
+    pub(super) indicator: u32,
+    /// The row the indicator was last placed under, following its row as
+    /// the items change: placed under another one, it springs there.
+    /// `None` while hidden or never placed: it is placed at once.
+    pub(super) indicator_at: Option<u32>,
+    /// `selectionIndicatorSpring`.
+    pub(super) indicator_spring: Option<crate::element::Spring>,
 }
 
 impl ListState {
@@ -496,6 +509,10 @@ impl ListState {
             set_aside: None,
             ignored: 0,
             warned: 0,
+            selected: None,
+            indicator: u32::MAX,
+            indicator_at: None,
+            indicator_spring: None,
         }
     }
 
@@ -682,6 +699,7 @@ impl ListState {
     /// runtime is told follow them.
     fn follow_items(&mut self, shift: impl Fn(u32) -> Option<u32>) {
         self.kept = self.kept.iter().filter_map(|&i| shift(i)).collect();
+        self.indicator_at = self.indicator_at.and_then(&shift);
         self.by_index.clear();
         for (slot, s) in self.slots.iter_mut().enumerate() {
             s.placed = s.placed.and_then(&shift);
@@ -1233,6 +1251,28 @@ impl ListState {
         self.row_size(self.row_of(i))
     }
 
+    /// Main-axis size of item `i`: measured, else the estimate.
+    pub(super) fn item_extent(&self, i: u32) -> f32 {
+        self.sizes.get(i as usize).map_or(self.estimated, |&s| {
+            if s.is_nan() { self.estimated } else { s }
+        })
+    }
+
+    /// `selectedIndex`.
+    pub(super) fn set_selected(&mut self, selected: Option<u32>) {
+        if self.selected != selected {
+            self.selected = selected;
+            self.dirty = true;
+        }
+    }
+
+    /// The row the selection indicator goes under: the selected one, while
+    /// the list has an indicator and that row exists.
+    pub(super) fn indicated(&self) -> Option<u32> {
+        self.selected
+            .filter(|&i| i < self.count && self.indicator != u32::MAX)
+    }
+
     pub(super) fn column_of(&self, i: u32) -> u32 {
         i % self.columns
     }
@@ -1255,6 +1295,9 @@ impl ListState {
             if s.placed.is_some_and(|p| p >= count) {
                 s.placed = None;
             }
+        }
+        if self.indicator_at.is_some_and(|p| p >= count) {
+            self.indicator_at = None;
         }
         let old = self.sizes.len() as u32;
         self.sizes.resize(count as usize, f32::NAN);
@@ -1624,6 +1667,12 @@ impl ListState {
             CellSlot::Header => return self.set_extra(ExtraKind::Header, cell),
             CellSlot::Footer => return self.set_extra(ExtraKind::Footer, cell),
             CellSlot::Empty => return self.set_extra(ExtraKind::Empty, cell),
+            CellSlot::Indicator => {
+                self.indicator = cell;
+                self.indicator_at = None;
+                self.dirty = true;
+                return;
+            }
         };
         if s >= self.slots.len() {
             self.slots.resize(
@@ -1669,6 +1718,10 @@ impl ListState {
                 *extra = Extra::NONE;
                 self.dirty = true;
             }
+        }
+        if self.indicator == cell {
+            self.indicator = u32::MAX;
+            self.indicator_at = None;
         }
     }
 

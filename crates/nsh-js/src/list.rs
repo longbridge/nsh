@@ -54,6 +54,8 @@ const FORWARDED: &[&str] = &[
     "maintainVisibleContentPosition",
     "stickyHeaderIndices",
     "stickyHeaderOffset",
+    "selectedIndex",
+    "selectionIndicatorSpring",
     "contentStyle",
     "contentClass",
     "viewabilityConfig",
@@ -96,6 +98,8 @@ const OWN: &[&str] = &[
     "footer",
     "empty",
     "separator",
+    "selectionIndicatorClass",
+    "selectionIndicatorStyle",
 ];
 
 /// What the app passes a Rust component's rows (`listItemsProps` of the
@@ -309,6 +313,13 @@ pub(crate) fn render(cx: *mut JsContext, props: JsValue) -> Result<JsValue, JsVa
     }
     let r = reactive::render_effect(cx, func);
     unsafe { qjs::JS_FreeValue(cx, r) };
+    // The selection indicator's cell, first: drawn under the rows.
+    if has(cx, props, "selectionIndicatorClass") || has(cx, props, "selectionIndicatorStyle") {
+        let owner = indicator_cell(cx, id).map_err(fail)?;
+        if let Some(d) = lists(cx).map.borrow_mut().get_mut(&id) {
+            d.extras.push(owner);
+        }
+    }
     // Header and footer cells (always rendered), and the empty one.
     for (role, key) in [("header", "header"), ("footer", "footer")] {
         if has(cx, props, key) {
@@ -849,6 +860,61 @@ fn extra_cell(cx: *mut JsContext, id: NodeId, role: &str, key: &str) -> Result<u
         r
     });
     r.map(|()| root)
+}
+
+/// The selection indicator's cell, made as a root under the list's owner,
+/// its class and style following `selectionIndicatorClass` and
+/// `selectionIndicatorStyle`; returns the root. The core places it.
+fn indicator_cell(cx: *mut JsContext, id: NodeId) -> Result<u32, JsValue> {
+    let (props, list, owner) = {
+        let map = lists(cx).map.borrow();
+        let d = &map[&id];
+        (d.props, d.node, d.owner)
+    };
+    let (root, r) = reactive::with_root_under(cx, owner, || -> Result<(), JsValue> {
+        let cell = dom::create_element(cx, Tag::Cell)?;
+        let guard = Guard(cx, cell);
+        set(cx, cell, "slot", new_string(cx, "indicator"))?;
+        dom::insert_node(cx, list, cell, None)?;
+        // SAFETY: a new array of the previous values.
+        let prev = unsafe { qjs::JS_NewArray(cx) };
+        let func = native(cx, indicator_run, 0, &mut [cell, props, prev]);
+        // SAFETY: the function keeps dups; the effect keeps its own value.
+        unsafe {
+            qjs::JS_FreeValue(cx, prev);
+            let r = reactive::render_effect(cx, func);
+            qjs::JS_FreeValue(cx, r);
+        }
+        drop(guard);
+        Ok(())
+    });
+    r.map(|()| root)
+}
+
+/// A run of the indicator's effect: its class and style, when they changed.
+unsafe extern "C" fn indicator_run(
+    cx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: three data values (the cell, the list's props, the previous
+    // values), borrowed.
+    let (cell, props, prev) = unsafe { (*data, *data.add(1), *data.add(2)) };
+    for (at, (wire, key)) in [
+        ("class", "selectionIndicatorClass"),
+        ("style", "selectionIndicatorStyle"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if let Err(e) = forward(cx, cell, props, prev, at as u32, wire, key) {
+            return e;
+        }
+    }
+    UNDEFINED
 }
 
 /// A JS value freed when dropped.
@@ -1429,6 +1495,18 @@ export interface ListProps<T> extends Omit<ViewProps, "children" | "ref">, Scrol
   /** Padding and gaps of the content as classes (`p-*`, `gap-*`);
    * `contentStyle` wins over them. */
   contentClass?: string;
+  /** The Tailwind classes of the selection indicator: a view drawn under
+   * the row at `selectedIndex` (a highlight, a pill: `rounded-lg
+   * bg-accent`), which spans that row and its column, inside its own
+   * margins (`mx-2` for an inset pill). The list places it natively, rendered
+   * row or not, and moves it with the row as rows above it change size; a
+   * change of `selectedIndex` slides it to the new row with
+   * `selectionIndicatorSpring`, at once with reduced motion. It takes no
+   * presses and is hidden from screen readers. With neither this nor
+   * `selectionIndicatorStyle` when the list is made, it has none. */
+  selectionIndicatorClass?: string;
+  /** The style of the selection indicator, over `selectionIndicatorClass`. */
+  selectionIndicatorStyle?: StyleProp<ViewStyle>;
   /** The id UI tests find the list's scroll view by (`nsh test`'s `id:`, XCUITest, UI Automator). */
   testID?: string;
   /** How close to the end (in viewports) `onLoadMore` fires; default 1. */
@@ -1603,6 +1681,78 @@ mod tests {
                 .count()
         };
         assert_eq!((made("Head"), made("Foot")), (1, 1));
+    }
+
+    /// A list styled with a selection indicator makes its cell first,
+    /// under the header and the rows, its class and style the list's
+    /// props; `selectedIndex` goes to the list, none to its scroll view.
+    #[test]
+    fn a_lists_selection_indicator_is_a_cell_of_its_own() {
+        let host = Host::with_options(HostOptions::default()).unwrap();
+        host.eval_source(
+            r##"
+            import { List, mount } from "nsh";
+            import { text } from "nsh:rt";
+            mount(() => List({
+                each: [1, 2],
+                children: (n) => text(`Row ${n()}`),
+                get header() { return text("Head"); },
+                selectedIndex: 1,
+                selectionIndicatorClass: "mx-2 rounded-lg",
+                selectionIndicatorStyle: { backgroundColor: "#ff0000" },
+            }));
+            "##,
+        )
+        .unwrap();
+        for name in [
+            "selectedIndex",
+            "selectionIndicatorClass",
+            "selectionIndicatorStyle",
+        ] {
+            assert!(
+                !host.warned(&format!("unsupported prop `{name}`")),
+                "`{name}` went to the scroll view"
+            );
+        }
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        let list = ops
+            .iter()
+            .find_map(|op| match op {
+                Op::Create {
+                    id,
+                    tag: nsh_core::Tag::List,
+                } => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let indicator = ops
+            .iter()
+            .find_map(|op| match op {
+                Op::SetProp {
+                    id,
+                    prop: Prop::Slot(nsh_core::CellSlot::Indicator),
+                } => Some(*id),
+                _ => None,
+            })
+            .expect("the indicator's cell");
+        let first = ops.iter().find_map(|op| match op {
+            Op::Insert { parent, child, .. } if *parent == list => Some(*child),
+            _ => None,
+        });
+        assert_eq!(first, Some(indicator));
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            Op::SetProp { id, prop: Prop::Class(c) } if *id == indicator && &**c == "mx-2 rounded-lg"
+        )));
+        assert!(
+            ops.iter()
+                .any(|op| matches!(op, Op::SetStyle { id, .. } if *id == indicator))
+        );
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            Op::SetProp { id, prop: Prop::ListSelected(Some(1)) } if *id == list
+        )));
     }
 
     /// Rows rebuilt as new objects with the same keys are the same rows:

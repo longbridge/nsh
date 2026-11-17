@@ -1,7 +1,7 @@
 // The core chooses the visible indices and recycles slots. This facade owns
 // only app render closures and their reactive owners, as the QuickJS host does.
 export const itemsProps = ["each", "children", "keyExtractor", "stickyHeaderIndices", "initialScrollIndex", "initialScrollAtEnd", "onViewableItemsChange", "viewabilityConfig", "refreshing", "onRefresh", "onLoadMore", "loadMoreThreshold", "header", "footer", "empty"];
-const own = new Set([...itemsProps.filter(k => !["stickyHeaderIndices", "viewabilityConfig", "refreshing", "onRefresh", "onLoadMore"].includes(k)), "ref", "estimatedItemSize", "loadMoreAtStartThreshold", "separator"]);
+const own = new Set([...itemsProps.filter(k => !["stickyHeaderIndices", "viewabilityConfig", "refreshing", "onRefresh", "onLoadMore"].includes(k)), "ref", "estimatedItemSize", "loadMoreAtStartThreshold", "separator", "selectionIndicatorClass", "selectionIndicatorStyle"]);
 export function createLists(invoke, values, reactive, dom, live, wake) {
   const lists = new Map(), rt = dom.rt;
   // `<If>` and `<Each>` are memos, the insert's to track (as QuickJS's `slot`).
@@ -56,6 +56,18 @@ export function createLists(invoke, values, reactive, dom, live, wake) {
       catch (error) { try { dispose(); } catch {} throw error; }
       return { node: cell, dispose };
     }));
+    // The selection indicator's cell, first: drawn under the rows (as QuickJS's `indicator_cell`).
+    if ("selectionIndicatorClass" in props || "selectionIndicatorStyle" in props) state.extras.push(reactive.runWithOwner(state.owner, () => reactive.root(dispose => {
+      const cell = rt.element("cell");
+      try {
+        rt.prop(cell, "slot", "indicator"); rt.append(node, cell);
+        for (const [wire, key] of [["class", "selectionIndicatorClass"], ["style", "selectionIndicatorStyle"]]) {
+          let last;
+          reactive.renderEffect(() => { const value = props[key]; if (value !== last) { rt.prop(cell, wire, value); last = value; } });
+        }
+      } catch (error) { try { dispose(); } catch {} throw error; }
+      return { node: cell, dispose };
+    })));
     for (const role of ["header", "footer"]) if (role in props) state.extras.push(extra(role));
     if ("empty" in props) {
       let empty;

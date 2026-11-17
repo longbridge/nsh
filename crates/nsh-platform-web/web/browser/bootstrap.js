@@ -2269,7 +2269,9 @@
 		"ref",
 		"estimatedItemSize",
 		"loadMoreAtStartThreshold",
-		"separator"
+		"separator",
+		"selectionIndicatorClass",
+		"selectionIndicatorStyle"
 	]);
 	function createLists(invoke, values, reactive, dom, live, wake) {
 		const lists = /* @__PURE__ */ new Map(), rt = dom.rt;
@@ -2373,6 +2375,32 @@
 					dispose
 				};
 			}));
+			if ("selectionIndicatorClass" in props || "selectionIndicatorStyle" in props) state.extras.push(reactive.runWithOwner(state.owner, () => reactive.root((dispose) => {
+				const cell = rt.element("cell");
+				try {
+					rt.prop(cell, "slot", "indicator");
+					rt.append(node, cell);
+					for (const [wire, key] of [["class", "selectionIndicatorClass"], ["style", "selectionIndicatorStyle"]]) {
+						let last;
+						reactive.renderEffect(() => {
+							const value = props[key];
+							if (value !== last) {
+								rt.prop(cell, wire, value);
+								last = value;
+							}
+						});
+					}
+				} catch (error) {
+					try {
+						dispose();
+					} catch {}
+					throw error;
+				}
+				return {
+					node: cell,
+					dispose
+				};
+			})));
 			for (const role of ["header", "footer"]) if (role in props) state.extras.push(extra(role));
 			if ("empty" in props) {
 				let empty;
