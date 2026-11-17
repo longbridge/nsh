@@ -1424,9 +1424,9 @@ impl Modal {
 
     /// iOS 16 and later: the height in points a page or form sheet rests at
     /// instead of the system's large one; `None` keeps that.
-    pub fn sheet_height(self, height: impl IntoReactive<Option<f32>>) -> Self {
-        self.bind_prop(height, |v: Option<f32>| {
-            Prop::Modal(ModalProp::SheetHeight(v.map(Points)))
+    pub fn sheet_height(self, height: impl IntoReactive<Option<Points>>) -> Self {
+        self.bind_prop(height, |v: Option<Points>| {
+            Prop::Modal(ModalProp::SheetHeight(v))
         })
     }
 

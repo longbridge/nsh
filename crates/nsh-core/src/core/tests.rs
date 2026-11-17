@@ -27176,7 +27176,7 @@ mod rust_windows {
         #[allow(deprecated)]
         modal()
             .presentation(ModalPresentation::PageSheet)
-            .sheet_height(Some(320.0))
+            .sheet_height(Some(Points(320.0)))
             .sheet_grabber(true)
             .child(text("short sheet"))
     }
