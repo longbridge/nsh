@@ -197,6 +197,41 @@ pub struct Screen {
     main_hidden: bool,
     /// The id the next canvas node gets.
     next_canvas_node: NodeId,
+    /// The bar the platform draws over its stacks' screens (iOS, Android),
+    /// whose header items the model places as it does; `None` where NSH
+    /// lays a page's header out itself.
+    system_bar: Option<SystemBar>,
+    /// The header items of each screen under a system bar, from its
+    /// options.
+    headers: HashMap<NodeId, ScreenHeader>,
+}
+
+/// The header bar iOS and Android draw over a stack's screens: they place
+/// the header items the core sized in it ([`Screen::set_system_bar`]).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SystemBar {
+    /// The bar's height, and with a large title's row below it (the
+    /// engine's `header_heights`).
+    pub(crate) heights: (Points, Points),
+    /// Android's toolbar, which starts the title after the leading items;
+    /// else iOS's navigation bar, which centers it.
+    pub(crate) toolbar: bool,
+}
+
+/// The header items of a screen under a system bar, and what places them.
+#[derive(Debug, Clone, Copy)]
+struct ScreenHeader {
+    left: Option<NodeId>,
+    right: Option<NodeId>,
+    title: Option<NodeId>,
+    /// The header's height, the system UI above the bar included (none
+    /// when the header is hidden).
+    height: Points,
+    large_title: bool,
+    back_visible: bool,
+    /// How many trailing system buttons (`ios.headerRightItems`) stand at
+    /// the bar's end.
+    right_items: usize,
 }
 
 #[derive(Debug, Default)]
@@ -466,6 +501,7 @@ impl Screen {
         for item in &batch.items {
             self.apply_item(item);
         }
+        self.place_headers();
         self.auto_focus();
     }
 
@@ -548,6 +584,7 @@ impl Screen {
                 self.detach(*id);
                 self.nodes.remove(id);
                 self.children.remove(id);
+                self.headers.remove(id);
                 self.popped.remove(id);
                 self.closed.remove(id);
                 self.forget_window(*id);
@@ -563,6 +600,20 @@ impl Screen {
             },
             MountItem::ScreenConfig { id, config } => {
                 self.nodes.entry(*id).or_default().prevent_back = config.prevent_back;
+                if self.system_bar.is_some() {
+                    self.headers.insert(
+                        *id,
+                        ScreenHeader {
+                            left: config.left,
+                            right: config.right,
+                            title: config.title_view,
+                            height: config.header_height,
+                            large_title: config.large_title,
+                            back_visible: config.back_visible,
+                            right_items: config.right_items.len(),
+                        },
+                    );
+                }
             }
             MountItem::ModalConfig { id, config } => {
                 self.nodes.entry(*id).or_default().close_on_escape = config.close_on_escape;
@@ -1299,6 +1350,112 @@ impl Screen {
     /// The window is `size` (what lies outside it is not on screen).
     pub(crate) fn set_viewport(&mut self, size: Size<Points>) {
         self.viewport = Some(size);
+    }
+
+    /// The platform draws `bar` over its stacks' screens and places their
+    /// header items in it (iOS, Android).
+    pub(crate) fn set_system_bar(&mut self, bar: SystemBar) {
+        self.system_bar = Some(bar);
+    }
+
+    /// Places the header items of the screens under a system bar, as the
+    /// platform does: the core lays each one out on its own, at the origin,
+    /// and leaves where it goes in the bar to the platform.
+    fn place_headers(&mut self) {
+        let Some(bar) = self.system_bar else {
+            return;
+        };
+        let screens: Vec<NodeId> = self.headers.keys().copied().collect();
+        for screen in screens {
+            self.place_header(bar, screen);
+        }
+    }
+
+    /// Places the header items of `screen` in `bar`, side by side in the
+    /// middle of its row: the leading one at its start (after the back
+    /// button on Android, instead of it on iOS, as the core budgets the
+    /// title's room), the trailing one at its end, the title centered on
+    /// iOS between them, and on Android right after the leading ones.
+    fn place_header(&mut self, bar: SystemBar, screen: NodeId) {
+        /// iOS's bar: its inset at either end and after an item, its back
+        /// button (inset included) and one of its buttons (the core's
+        /// `title_room`).
+        const INSET: f32 = 16.0;
+        const BACK: f32 = 56.0;
+        const BUTTON: f32 = 48.0;
+        /// Android's toolbar: where its content starts without and with the
+        /// up arrow, and the margin after its trailing item.
+        const START: f32 = 16.0;
+        const START_AFTER_UP: f32 = 72.0;
+        const END: f32 = 12.0;
+        let Some(header) = self.headers.get(&screen).copied() else {
+            return;
+        };
+        let Some(view) = self.nodes.get(&screen) else {
+            return;
+        };
+        let width = view.frame.size.width.0;
+        // Not its stack's first screen: the bar leads with a back button.
+        let back = header.back_visible
+            && view
+                .parent
+                .is_some_and(|stack| self.screens(stack).first() != Some(&screen));
+        let size = |id: Option<NodeId>| {
+            let id = id?;
+            Some((id, self.nodes.get(&id)?.frame.size))
+        };
+        let (left, title, right) = (size(header.left), size(header.title), size(header.right));
+        let mut places = Vec::with_capacity(3);
+        if bar.toolbar {
+            let mut leading = if back { START_AFTER_UP } else { START };
+            if let Some((id, size)) = left {
+                places.push((id, leading, size));
+                leading += size.width.0;
+            }
+            if let Some((id, size)) = title {
+                places.push((id, leading, size));
+            }
+            if let Some((id, size)) = right {
+                places.push((id, width - END - size.width.0, size));
+            }
+        } else {
+            let leading = match left {
+                Some((id, size)) => {
+                    places.push((id, INSET, size));
+                    INSET + size.width.0 + INSET
+                }
+                None if back => INSET + BACK,
+                None => INSET,
+            };
+            let trailing = match right {
+                Some((id, size)) => {
+                    let x = width - INSET - size.width.0;
+                    places.push((id, x, size));
+                    x - INSET
+                }
+                None => width - INSET - header.right_items as f32 * BUTTON,
+            };
+            if let Some((id, size)) = title {
+                let w = size.width.0;
+                let x = ((width - w) / 2.0).min(trailing - w).max(leading);
+                places.push((id, x, size));
+            }
+        }
+        // The bar's row: the top of the header, below the system UI (a
+        // large title's row is under it). A hidden header has no height:
+        // its row is above the screen.
+        let row = if header.large_title {
+            bar.heights.1
+        } else {
+            bar.heights.0
+        };
+        let top = header.height.0 - row.0;
+        for (id, x, size) in places {
+            if let Some(item) = self.nodes.get_mut(&id) {
+                let y = top + (bar.heights.0.0 - size.height.0) / 2.0;
+                item.frame.origin = Point::new(Points(x), Points(y));
+            }
+        }
     }
 
     /// The screens stack `id` shows, bottom to top (without those a back
