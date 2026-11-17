@@ -45,7 +45,12 @@
 //! never rendered, so the first offset is off. Their target stays pinned:
 //! after each round of measurements the list follows it (`follow_pin`),
 //! retargeting an animated scroll in flight, until the rows in the
-//! viewport are measured, the user scrolls away or the items change.
+//! viewport are measured, the user scrolls away or the items change. The
+//! End key of the desktops and the web is one of them (`Core::key_scrolled`):
+//! the platform animates to the end it knows, the list follows the real
+//! one, and any other scroll key leaves the target. An animated scroll
+//! that moves away from its target once every scroll the core issued is
+//! applied was taken over by the user (a wheel, a drag, the scroll bar).
 //!
 //! # In its parent's viewport
 //!
@@ -263,9 +268,14 @@ struct Pin {
     target: PinTarget,
     at: f32,
     /// An animated scroll the platform has not finished: the pin follows
-    /// by retargeting it, and the user moving away is only noticed once
-    /// it landed.
+    /// by retargeting it.
     animating: bool,
+    /// While animating: the nearest to `at` the platform reported the
+    /// list since `at` was set, with every scroll the core issued applied
+    /// (infinite before the first such report). The animation only comes
+    /// nearer: a report farther away is the user taking over (a wheel, a
+    /// drag, the scroll bar).
+    nearest: f32,
 }
 
 /// How a pinned list follows its target (`ListState::follow_pin`).
@@ -400,6 +410,11 @@ pub(super) struct ListState {
     /// The target of the last scroll command, until it is reached with
     /// measured cells or the user scrolls away.
     pin: Option<Pin>,
+    /// The animated `scrollToEnd`s the End key queued for the list that
+    /// the next update resolves (`Core::key_scrolled`), by their place among
+    /// the list's queued commands: another scroll key before that takes
+    /// them back.
+    pub(super) key_ends: Vec<u32>,
     /// The item the last change of columns kept at the top: while its row
     /// is still the first visible one, the next change keeps it rather than
     /// the row's first item, so resizing back and forth does not drift.
@@ -471,6 +486,7 @@ impl ListState {
             lead: 0.0,
             splice_anchor: 0.0,
             pin: None,
+            key_ends: Vec::new(),
             columns_anchor: None,
             parent: false,
             outer: None,
@@ -875,6 +891,15 @@ impl ListState {
             } else if !pin.animating {
                 // The user scrolled away.
                 self.pin = None;
+            } else {
+                let distance = (at - pin.at).abs();
+                if distance > pin.nearest + PIN_SLACK {
+                    // Away from where the animation goes: the user took
+                    // over.
+                    self.pin = None;
+                } else {
+                    pin.nearest = pin.nearest.min(distance);
+                }
             }
         }
     }
@@ -889,7 +914,31 @@ impl ListState {
             target,
             at: offset,
             animating: animated,
+            nearest: f32::INFINITY,
         });
+    }
+
+    /// Whether the list's End key follows its end (`Core::key_scrolled`):
+    /// not in its parent's viewport (the key moves the view around it),
+    /// nor inverted (End shows its first items).
+    pub(super) fn follows_end_key(&self) -> bool {
+        !self.parent && !self.inverted
+    }
+
+    /// Whether the list follows its end (`scrollToEnd` or End).
+    pub(super) fn follows_end(&self) -> bool {
+        matches!(
+            self.pin,
+            Some(Pin {
+                target: PinTarget::End,
+                ..
+            })
+        )
+    }
+
+    /// The user scrolled away from the target the list followed.
+    pub(super) fn unpin(&mut self) {
+        self.pin = None;
     }
 
     /// The content offset for `target` with the sizes known now.
@@ -918,10 +967,14 @@ impl ListState {
         let target = self.target_offset(pin.target);
         if pin.animating {
             // The platform moves an animation in flight along with the
-            // anchoring scroll.
+            // anchoring scroll; the web moves only where it goes, so the
+            // list may report itself farther from there by as much.
             pin.at += anchored;
+            pin.nearest += anchored.abs();
             let follow = if (target - pin.at).abs() > PIN_SLACK {
                 pin.at = target;
+                // The retargeted animation comes nearer from where it is.
+                pin.nearest = f32::INFINITY;
                 Follow::To(target)
             } else {
                 Follow::Stay
@@ -2984,6 +3037,27 @@ mod tests {
         l.update_window(&mut binds);
         while l.take_paced(100, &mut binds) > 0 {}
         assert!(binds.iter().all(|&(_, i)| i < 3), "{binds:?}");
+    }
+
+    #[test]
+    fn an_animated_pin_ends_when_the_list_moves_away_from_it() {
+        let mut l = list(100, 50.0, 400.0);
+        l.pin(Some(PinTarget::End), 4600.0, true);
+        l.issue_scroll_to(4600.0);
+        l.reported(3000.0, 1);
+        l.reported(3500.0, 1);
+        // Rows above measured: the web moves only where the animation
+        // goes, not where the list is.
+        l.measured(0, 150.0);
+        assert_eq!(l.follow_pin(100.0), Follow::Stay);
+        l.issue_scroll_by(100.0);
+        l.reported(3500.0, 2);
+        assert!(l.pinned(), "anchoring is no move away");
+        l.reported(3900.0, 2);
+        assert!(l.pinned());
+        // A wheel turns it back.
+        l.reported(3700.0, 2);
+        assert!(!l.pinned());
     }
 
     #[test]

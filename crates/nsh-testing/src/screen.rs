@@ -142,6 +142,10 @@ pub struct Screen {
     url_opens: Vec<(u32, String)>,
     /// The screen colors asked for (`pick_screen_color`), to answer.
     screen_colors: Vec<u32>,
+    /// What the app shared (`Share.show`), in order.
+    shares: Vec<nsh_core::share::ShareSheet>,
+    /// The shares to answer.
+    share_answers: Vec<u32>,
     /// The requests on local paths that reached the platform
     /// (`pick_paths`, `open_path`, ...), in order.
     file_requests: Vec<nsh_core::file_dialog::FileRequest>,
@@ -233,6 +237,8 @@ struct View {
     selected: bool,
     /// Its `accessibilityState`.
     accessibility_state: AccessibilityState,
+    /// A composite input's document text, distinct from its keyboard sink.
+    value_text: Option<Arc<str>>,
     /// Its `accessibilityLevel`.
     level: Option<u32>,
     /// Its `accessibilityDescription`.
@@ -591,6 +597,11 @@ impl Screen {
                 view.key_parent = props.key_parent;
                 view.selected = props.accessibility.state.selected;
                 view.accessibility_state = props.accessibility.state;
+                view.value_text = props
+                    .accessibility
+                    .value
+                    .as_ref()
+                    .and_then(|v| v.text.clone());
                 view.level = props.accessibility.level;
                 view.description = props.accessibility.description.clone();
                 view.active_descendant = props.accessibility.active_descendant;
@@ -751,6 +762,11 @@ impl Screen {
                 self.url_opens.push((*id, url.clone()));
             }
             Command::PickScreenColor { id } => self.screen_colors.push(*id),
+            // Recorded, never shared: a test's machine has no share sheet.
+            Command::Share { id, sheet } => {
+                self.shares.push((**sheet).clone());
+                self.share_answers.push(*id);
+            }
             // Recorded, never carried out: a test's machine opens, shows
             // and trashes nothing.
             Command::FileRequest { id, request } => {
@@ -1598,6 +1614,19 @@ impl Screen {
         std::mem::take(&mut self.file_answers)
     }
 
+    /// What the app shared (`Share.show`, [`nsh_core::element::share`]),
+    /// in order: what reached the platform, past the content's checks and
+    /// the `share` capability (only once the environment has
+    /// [`nsh_core::platform::Environment::share`]).
+    pub fn shares(&self) -> &[nsh_core::share::ShareSheet] {
+        &self.shares
+    }
+
+    /// The share requests to answer since the last call.
+    pub(crate) fn take_share_answers(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.share_answers)
+    }
+
     /// The screen color requests to answer since the last call.
     pub(crate) fn take_screen_colors(&mut self) -> Vec<u32> {
         std::mem::take(&mut self.screen_colors)
@@ -1731,13 +1760,33 @@ impl Screen {
         }
     }
 
+    #[cfg(feature = "agent")]
+    pub(crate) fn semantic_input_text(&self, id: NodeId) -> Option<&str> {
+        self.nodes.get(&id)?.value_text.as_deref()
+    }
+
+    #[cfg(feature = "agent")]
+    pub(crate) fn input_cover(&self, id: NodeId) -> Option<NodeId> {
+        let at = self.visible_bounds_in_root(id)?.center();
+        if !self.receives_pointer(id) {
+            // Composite editors place the caret through their own hit layer.
+            return self.covering(id, at);
+        }
+        let hit = self.hit_pointer(at, self.window_of(id));
+        (hit != id && !self.is_inside(hit, id) && !self.is_inside(id, hit)).then_some(hit)
+    }
+
     /// The text of the input `selector` names ([`Screen::matches`]'s
     /// selectors; `text:` matches an input's text or placeholder); an
     /// error when it names several.
     pub fn input_text(&self, selector: &str) -> Result<Option<&str>, String> {
         let parsed = Selector::parse(selector)?;
         match self.input_view(&parsed) {
-            Pick::One(id) => Ok(self.input(id).map(|input| input.text.as_str())),
+            Pick::One(id) => Ok(self
+                .nodes
+                .get(&id)
+                .and_then(|v| v.value_text.as_deref())
+                .or_else(|| self.input(id).map(|input| input.text.as_str()))),
             Pick::Many(n) => Err(format!("`{selector}` matches {n} inputs")),
             Pick::None | Pick::Disabled => Ok(None),
         }

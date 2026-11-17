@@ -6,8 +6,11 @@
 // disabled and destructive items, submenus and inline sections), its
 // `title`, `disabled` and `accessibilityLabel`; `onSelect({ id })` reports
 // the chosen item (the platform's event, which the engine's tests send).
+// A `ContextMenu` given `items` is the system's context menu there: a held
+// finger is the system's to answer, and the children (the drawn menu of
+// the other platforms) never show.
 import { Text, View, signal } from "nsh";
-import { MenuButton } from "nsh/base";
+import { ContextMenu, MenuButton, MenuItem } from "nsh/base";
 
 function App() {
   const dark = signal(false);
@@ -38,6 +41,17 @@ function App() {
         <Text>Account trigger</Text>
       </MenuButton>
       <Text>{`Chosen: ${chosen()}`}</Text>
+      <ContextMenu
+        title="Notes.txt"
+        items={[
+          { id: "pin", label: "Pin", icon: "pin" },
+          { id: "", label: "", inline: true, items: [{ id: "delete", label: "Delete", destructive: true }] },
+        ]}
+        onSelect={({ id }) => chosen.set(id)}
+        trigger={<View style={{ height: 30 }}><Text>NoteRow</Text></View>}
+      >
+        <MenuItem><Text>DrawnPin</Text></MenuItem>
+      </ContextMenu>
     </View>
   );
 }

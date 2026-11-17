@@ -1505,6 +1505,7 @@ mod tests {
     use nsh_core::{
         LayoutCurve, LayoutProperty, LayoutTransition, PropertyValue, StyleKey,
         animation::{Curve, EaseMode},
+        element::Spring,
     };
     use rquickjs::{Context, Runtime};
 
@@ -1798,6 +1799,42 @@ mod tests {
         assert_eq!(d.update.map(|u| u.curve), Some(LayoutCurve::EaseInEaseOut));
     }
 
+    /// A `spring` phase with `stiffness`, `damping` or `mass` moves on its
+    /// physics and lasts until it settles, whatever its `duration`; the
+    /// members it leaves out are `Animated.spring`'s defaults.
+    #[test]
+    fn layout_springs_decode_by_their_physics() {
+        let a = layout(
+            "{ duration: 200, update: { type: 'spring', stiffness: 620, damping: 36, mass: 1, springDamping: 0.3, delay: 10 } }",
+        );
+        let spring = Spring {
+            stiffness: 620.0,
+            damping: 36.0,
+            ..Spring::default()
+        };
+        assert_eq!(
+            a.update,
+            Some(LayoutTransition {
+                delay_ms: 10.0,
+                ..LayoutTransition::spring(spring)
+            })
+        );
+        // ζ = 36 / (2 √620) ≈ 0.72: it settles in about 380 ms.
+        let settle = a.update.unwrap().run_ms();
+        assert!((350.0..420.0).contains(&settle), "{settle}");
+        let b = layout("{ update: { type: 'spring', stiffness: 300 } }");
+        assert_eq!(
+            b.update.map(|u| u.curve),
+            Some(LayoutCurve::Spring(Spring {
+                stiffness: 300.0,
+                ..Spring::default()
+            }))
+        );
+        // Only a `spring` takes them.
+        let c = layout("{ update: { type: 'linear', stiffness: 300 } }");
+        assert_eq!(c.update.map(|u| u.curve), Some(LayoutCurve::Linear));
+    }
+
     /// `ViewRef.animateLayout(transition)`: a layout animation sent to the
     /// node, `transition` its `update`; without one, easing in and out.
     #[test]
@@ -1822,6 +1859,20 @@ mod tests {
                 })
             );
             assert_eq!((a.create, a.delete), (None, None));
+            // A physical spring, as `configureNext`'s phases take it.
+            let arg = cx
+                .eval("({ update: { type: 'spring', stiffness: 620, damping: 36, mass: 1 } })")
+                .unwrap();
+            let Some(Command::LayoutAnimation(b)) = decode_command("layoutAnimation", arg).unwrap()
+            else {
+                panic!("not a layout animation");
+            };
+            let spring = Spring {
+                stiffness: 620.0,
+                damping: 36.0,
+                ..Spring::default()
+            };
+            assert_eq!(b.update, Some(LayoutTransition::spring(spring)));
         });
     }
 }

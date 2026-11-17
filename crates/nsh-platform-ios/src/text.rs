@@ -144,15 +144,26 @@ fn listed_fonts(
     size: CGFloat,
     weight: u16,
 ) -> Option<(CFRetained<CTFont>, Vec<CFRetained<CTFont>>)> {
-    let mut fonts = nsh_core::font_families(list).filter_map(|family| match family {
-        FamilyName::Named(name) => family_font(name, size, weight),
-        generic => Some(generic_font(generic, size, weight)),
+    let mut first = None;
+    let mut fallbacks = Vec::new();
+    nsh_core::for_each_font_family(list, |family| {
+        let font = match family {
+            FamilyName::Named(name) => family_font(name, size, weight),
+            generic => Some(generic_font(generic, size, weight)),
+        };
+        if let Some(font) = font {
+            if first.is_none() {
+                first = Some(font);
+            } else {
+                fallbacks.push(font);
+            }
+        }
     });
-    let Some(first) = fonts.next() else {
+    let Some(first) = first else {
         log::warn!("font family `{list}` is not available; using the system font");
         return None;
     };
-    Some((first, fonts.collect()))
+    Some((first, fallbacks))
 }
 
 /// `font` with `fallbacks` as its cascade list

@@ -378,6 +378,11 @@ impl Native for GpuiNative {
         true
     }
 
+    fn focused(&self) -> Option<NodeId> {
+        self.in_app(|surface, _| crate::text_input::focused(surface).map(|view| view.id()))
+            .flatten()
+    }
+
     fn right_click(&self, at: Point<Points>) -> Result<(), String> {
         // The secondary button.
         self.click(at, CLICK, 1);

@@ -1245,8 +1245,14 @@ pub struct Core<M: TextEngine> {
     /// Culled views were made in this round: their styles go out in
     /// another.
     cull_made: bool,
-    /// The walk of [`Core::sync_culled`], kept for its buffer.
-    cull_scratch: Vec<(Key, f32, f32)>,
+    /// The walk of [`Core::sync_culled`], kept for its buffer: each view
+    /// with where it is in the scroll view's content and how far the
+    /// transforms around it may move it (`cull.rs`).
+    cull_scratch: Vec<(Key, f32, f32, f32, f32)>,
+    /// How far the animation graph's values may go: how far an animated
+    /// transform may move a view culling looks at
+    /// (`animation/reach.rs`).
+    reach: crate::animation::Reach,
     /// Views out of sight spread over turns (`pace.rs`).
     pace: pace::Pace,
     /// Lists' rows under this turn's layout animation (`list_motion.rs`).
@@ -1436,6 +1442,9 @@ pub struct Core<M: TextEngine> {
     /// whatever is typed meanwhile: only such a focus shows the hint of
     /// the anchor it comes to (`overlay::focus_hints`).
     focus_by_keyboard: bool,
+    /// A shown modal closed; focus reports restore context until the next
+    /// user action, rather than requesting another hint.
+    restoring_modal_focus: bool,
     /// The view in the `FOCUS_VISIBLE` state, by key and id
     /// (`classes::update_focus_visible`).
     focus_visible_on: Option<(Key, NodeId)>,
@@ -1607,6 +1616,7 @@ impl<M: TextEngine> Core<M> {
             culls_content: true,
             culling: Vec::new(),
             cull_dirty: false,
+            reach: crate::animation::Reach::default(),
             cull_made: false,
             cull_scratch: Vec::new(),
             pace: pace::Pace::default(),
@@ -1679,6 +1689,7 @@ impl<M: TextEngine> Core<M> {
             modality: None,
             focus_visible: false,
             focus_by_keyboard: false,
+            restoring_modal_focus: false,
             focus_visible_on: None,
             focus_visible_moved: false,
             projected_focus: Vec::new(),
@@ -2083,6 +2094,54 @@ impl<M: TextEngine> Core<M> {
         // behind by the content (`Core::overlay_scrolled`).
         if moved && !self.overlays.is_empty() {
             self.overlay_scrolled(key);
+        }
+    }
+
+    /// The user moved scroll view `id` with scroll key move `key_move`, which
+    /// the platform animates to what it knows of the content. On a list of its
+    /// own End queues an animated `scrollToEnd`, in order with the app's
+    /// scroll commands, so the list follows its end and rows below that
+    /// were never rendered, sized by their estimate, do not stop it short;
+    /// a repeat while the list follows its end changes nothing. Any other
+    /// key takes back an End not resolved yet and ends the target the list
+    /// followed, as the user scrolling away does. Lists in their parent's
+    /// viewport and inverted lists are left to the platform.
+    pub fn key_scrolled(&mut self, id: NodeId, key_move: crate::scroll::KeyMove) {
+        let Ok(key) = self.key(id) else { return };
+        let queued = self.commands.iter().filter(|(to, _)| *to == id).count() as u32;
+        let Some(list) = self.nodes[key as usize].list.as_mut() else {
+            return;
+        };
+        if !list.follows_end_key() {
+            return;
+        }
+        if key_move == crate::scroll::KeyMove::End {
+            // A repeat: the last scroll queued or followed is the end.
+            let repeat = match list.key_ends.last() {
+                Some(&n) => n + 1 == queued,
+                None => queued == 0 && list.follows_end(),
+            };
+            if !repeat {
+                list.key_ends.push(queued);
+                self.commands
+                    .push((id, Command::ScrollToEnd { animated: true }));
+            }
+            return;
+        }
+        list.unpin();
+        let ends = std::mem::take(&mut list.key_ends);
+        // The latest first, so the places of the earlier ones hold.
+        for &n in ends.iter().rev() {
+            let at = self
+                .commands
+                .iter()
+                .enumerate()
+                .filter(|(_, (to, _))| *to == id)
+                .nth(n as usize)
+                .map(|(at, _)| at);
+            if let Some(at) = at {
+                self.commands.remove(at);
+            }
         }
     }
 
@@ -2611,6 +2670,11 @@ impl<M: TextEngine> Core<M> {
                 Ok(())
             }
             Op::Animation(op) => {
+                // A view culled for where its transform may take it may
+                // reach further now (`cull.rs`).
+                if self.reach.apply(&op) && !self.culling.is_empty() {
+                    self.cull_dirty = true;
+                }
                 self.mount.push(MountItem::Animation(op));
                 Ok(())
             }
@@ -4383,9 +4447,10 @@ impl<M: TextEngine> Core<M> {
                 self.needs_layout = true;
             }
         } else if node.kind == Kind::Text {
-            // A span: kept for when it is a block again. Its horizontal
-            // padding is part of its block's text.
-            let padding = |l: &taffy::Style| (l.padding.left, l.padding.right);
+            // A span: kept for when it is a block again. Its padding is
+            // part of its block's text (horizontal: room in the line;
+            // vertical: its background's).
+            let padding = |l: &taffy::Style| l.padding;
             let padded = node.base_layout.as_deref().map(padding) != Some(padding(&layout));
             node.base_layout = Some(Box::new(layout));
             if padded && node.inline {
@@ -5439,12 +5504,18 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Prop::ScrollValue(value) => {
+                if let Some(value) = value {
+                    self.reach.drive(value);
+                }
                 if let Some(scroll) = node.scroll.as_mut() {
                     scroll.scroll_value = value;
                     flags |= dirty::SCROLL;
                 }
             }
             Prop::PullValue(value) => {
+                if let Some(value) = value {
+                    self.reach.drive(value);
+                }
                 if let Some(scroll) = node.scroll.as_mut() {
                     scroll.pull_value = value;
                     flags |= dirty::SCROLL;
@@ -5571,6 +5642,10 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Prop::PanValues(x, y) => {
+                // A gesture drives them: no bound on where they take a view.
+                for value in [x, y].into_iter().flatten() {
+                    self.reach.drive(value);
+                }
                 (node.gestures.pan_x, node.gestures.pan_y) = (x, y);
                 flags |= dirty::PAN;
             }
@@ -5588,10 +5663,16 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Prop::PinchValue(value) => {
+                if let Some(value) = value {
+                    self.reach.drive(value);
+                }
                 node.gestures.pinch = value;
                 flags |= dirty::PAN;
             }
             Prop::RotationValue(value) => {
+                if let Some(value) = value {
+                    self.reach.drive(value);
+                }
                 node.gestures.rotation = value;
                 flags |= dirty::PAN;
             }
@@ -5795,6 +5876,10 @@ impl<M: TextEngine> Core<M> {
             }
             Prop::ProjectedData(data) => {
                 self.set_projected_data(key, data);
+                return Ok(());
+            }
+            Prop::ProjectedActive(group) => {
+                self.set_projected_active(key, group);
                 return Ok(());
             }
             Prop::HeaderStyle(patch) => {
@@ -6518,6 +6603,9 @@ impl<M: TextEngine> Core<M> {
     /// Unlinks `key` from its parent's children, layout and (optionally)
     /// native hierarchy.
     fn unlink(&mut self, key: Key, emit_remove: bool) {
+        if self.nodes[key as usize].kind == Kind::Modal && self.nodes[key as usize].created {
+            self.restoring_modal_focus = true;
+        }
         let parent = self.nodes[key as usize].parent;
         let siblings = &mut self.nodes[parent as usize].children;
         let pos = siblings
@@ -7141,6 +7229,9 @@ impl<M: TextEngine> Core<M> {
             && !parent_list
         {
             flags |= dirty::SCROLL;
+            if scroll.behavior != ScrollBehavior::default() {
+                flags |= dirty::SCROLL_BEHAVIOR;
+            }
             if scroll.refreshing {
                 flags |= dirty::REFRESHING;
             }
@@ -7207,8 +7298,13 @@ impl<M: TextEngine> Core<M> {
         let node = &mut self.nodes[key as usize];
         node.dirty |= flags;
         // A culled view given a transform or an animated value may show
-        // away from its frame now (`cull.rs`).
-        if node.culled && flags & (dirty::VIEW | dirty::ANIMATION) != 0 {
+        // away from its frame now, and so may what a view with one holds
+        // (`cull.rs`).
+        if flags & (dirty::VIEW | dirty::ANIMATION) != 0
+            && (node.culled
+                || !self.culling.is_empty()
+                    && (!node.animated.is_empty() || !node.view_style.transform.ops().is_empty()))
+        {
             self.cull_dirty = true;
         }
         if !node.queued {
@@ -7885,7 +7981,8 @@ impl<M: TextEngine> Core<M> {
                 Kind::Text => {
                     let start = out.len_utf16();
                     let mut inner = style.inherit(&child.text_style);
-                    if let Some(b) = span_background(&child.view_style, child.id) {
+                    if let Some(mut b) = span_background(&child.view_style, child.id) {
+                        (b.top, b.bottom) = span_vertical_padding(child);
                         inner.background = Some(b);
                     }
                     // `visibility: "hidden"` on a span hides its characters,
@@ -9758,6 +9855,9 @@ impl<M: TextEngine> Core<M> {
             Follow::To(offset) => retarget = Some(offset),
         }
 
+        // The End key's commands, if any, are resolved below with the
+        // rest (`Core::key_scrolled`).
+        list.key_ends.clear();
         // Scroll commands for the list, now that sizes are known: the
         // window follows a jump in this same commit. In its parent's
         // viewport, the view around it scrolls instead.
@@ -11030,12 +11130,28 @@ fn span_padding(node: &Node, rtl: bool) -> (f32, f32) {
     if rtl { (right, left) } else { (left, right) }
 }
 
+/// A span's top and bottom padding, which only its background takes (as
+/// a CSS inline box's): the line keeps its height. Percentages count as
+/// none.
+fn span_vertical_padding(node: &Node) -> (Points, Points) {
+    let Some(style) = node.base_layout.as_deref() else {
+        return (Points::ZERO, Points::ZERO);
+    };
+    let len = |p: taffy::LengthPercentage| match p.into_raw().tag() {
+        taffy::CompactLength::LENGTH_TAG => Points(p.into_raw().value().max(0.0)),
+        _ => Points::ZERO,
+    };
+    (len(style.padding.top), len(style.padding.bottom))
+}
+
 /// The background a nested text's view style gives its characters.
 fn span_background(style: &ViewStyle, node: NodeId) -> Option<crate::text::TextBackground> {
     (style.background_color.0 & 0xff != 0).then_some(crate::text::TextBackground {
         color: style.background_color,
         radius: style.border_radius.max(Points::ZERO),
         node,
+        top: Points::ZERO,
+        bottom: Points::ZERO,
     })
 }
 
@@ -11161,6 +11277,7 @@ fn shown_by(item: &MountItem) -> Shown {
                 | C::PickFiles { .. }
                 | C::OpenUrl { .. }
                 | C::PickScreenColor { .. }
+                | C::Share { .. }
                 | C::RenderCanvas { .. }
                 | C::FileRequest { .. }
                 | C::Speech { .. }

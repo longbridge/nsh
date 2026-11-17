@@ -22,9 +22,10 @@ use objc2_ui_kit::{
 
 use crate::component::{ComponentContext, ComponentFactory, NativeComponent};
 
-/// One entry of the menu as the props give it.
+/// One entry of the menu as the props give it (`ContextMenu`'s system menu
+/// reads the same items: `system_context_menu.rs`).
 #[derive(Debug, Clone, Default, PartialEq)]
-struct Entry {
+pub(crate) struct Entry {
     id: String,
     label: String,
     icon: String,
@@ -41,7 +42,7 @@ struct Entry {
 const MAX_DEPTH: usize = 8;
 
 /// The entries of an `items` prop; anything but objects is skipped.
-fn parse_items(items: &[JsonValue]) -> Vec<Entry> {
+pub(crate) fn parse_items(items: &[JsonValue]) -> Vec<Entry> {
     parse_level(items, 0)
 }
 
@@ -98,17 +99,20 @@ fn symbol(name: &str) -> Option<Retained<UIImage>> {
     }
     let image = UIImage::systemImageNamed(&NSString::from_str(name));
     if image.is_none() {
-        log::warn!(target: "js", "MenuButton: no SF Symbol is named `{name}`");
+        log::warn!(target: "js", "menu: no SF Symbol is named `{name}`");
     }
     image
 }
 
-/// The menu's elements for `entries`; each action emits `select` with its
-/// id through `context`.
-fn elements(
+/// What a chosen action does with its id.
+pub(crate) type Choose = Rc<dyn Fn(String)>;
+
+/// The menu's elements for `entries`; each action passes its id to
+/// `choose`.
+pub(crate) fn elements(
     entries: &[Entry],
     disabled: bool,
-    context: &ComponentContext,
+    choose: &Choose,
     mtm: MainThreadMarker,
 ) -> Retained<NSArray<UIMenuElement>> {
     let made: Vec<Retained<UIMenuElement>> = entries
@@ -117,10 +121,8 @@ fn elements(
             let image = symbol(&entry.icon);
             if entry.items.is_empty() {
                 let id = entry.id.clone();
-                let context = context.clone();
-                let handler = RcBlock::new(move |_: NonNull<UIAction>| {
-                    context.emit("select", JsonValue::from(id.clone()));
-                });
+                let choose = choose.clone();
+                let handler = RcBlock::new(move |_: NonNull<UIAction>| choose(id.clone()));
                 // SAFETY: the handler is a block UIKit copies and runs on
                 // the main thread once the menu closes with this action.
                 let action = unsafe {
@@ -147,7 +149,7 @@ fn elements(
                 } else {
                     UIMenuOptions::empty()
                 };
-                let children = elements(&entry.items, disabled || entry.disabled, context, mtm);
+                let children = elements(&entry.items, disabled || entry.disabled, choose, mtm);
                 let menu = UIMenu::menuWithTitle_image_identifier_options_children(
                     &NSString::from_str(&entry.label),
                     image.as_deref(),
@@ -237,7 +239,9 @@ struct SystemMenuButton {
 impl SystemMenuButton {
     /// Gives the button the menu of its entries and title.
     fn make_menu(&self) {
-        let children = elements(&self.entries, false, &self.context, self.mtm);
+        let context = self.context.clone();
+        let choose: Choose = Rc::new(move |id| context.emit("select", JsonValue::from(id)));
+        let children = elements(&self.entries, false, &choose, self.mtm);
         let menu =
             UIMenu::menuWithTitle_children(&NSString::from_str(&self.title), &children, self.mtm);
         self.button.setMenu(Some(&menu));

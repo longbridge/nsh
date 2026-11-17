@@ -121,7 +121,7 @@ the cell. Select by text there.
 | Step | Does |
 |---|---|
 | `press(sel)`, `long_press(sel)`, `press_at(sel, point)` | As a tap: press down, up, press, inside a finger's touch |
-| `type_text(sel, "text")` | Focuses, then a key and a change per character, at the end of the text. A line break in a single-line input is the return key |
+| `type_text(sel, "text")` | Focuses the input unless it has the focus already, then a key and a change per character, at its caret and over its selection (headless, the caret is at the end of the text). A line break in a single-line input is the return key |
 | `clear(sel)`, `submit(sel)` | Empties an input; the return key |
 | `press_key("cmd-k")`, `hold_keys(keys, down)` | The keymap |
 | `scroll(sel, px(3000.0))` | Scrolls the view, and lists bind the rows they reach |

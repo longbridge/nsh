@@ -159,9 +159,10 @@ final class TextLayouts {
 
     /**
      * The families of a `fontFamily` list, trimmed and unquoted, in order: a
-     * quoted name runs to its closing quote, commas and all (`'ACME, Inc'`),
-     * as `nsh_core::font_families` reads it. A quoted name is always a
-     * family's name, never a generic family (`"serif"`), as in CSS.
+     * quoted name runs to its closing quote, commas and `\` escapes included
+     * (`'ACME, Inc'`, `"A\"B"`), as `nsh_core::font_families` reads it. A
+     * quoted name is always a family's name, never a generic family
+     * (`"serif"`), as in CSS.
      */
     private static List<Family> families(String list) {
         List<Family> out = new ArrayList<>();
@@ -175,12 +176,30 @@ final class TextLayouts {
             int comma;
             boolean quoted = c == '"' || c == '\'';
             if (quoted) {
-                // To the closing quote (or the end, unclosed); what follows it
-                // up to the next comma is not part of the name.
-                int end = list.indexOf(c, i + 1);
-                if (end < 0) end = n;
-                name = list.substring(i + 1, end).trim();
-                comma = list.indexOf(',', Math.min(end + 1, n));
+                // To the unescaped closing quote (or the end, unclosed); what
+                // follows it up to the next comma is not part of the name.
+                StringBuilder decoded = new StringBuilder();
+                int p = i + 1;
+                while (p < n) {
+                    char ch = list.charAt(p);
+                    if (ch == '\\') {
+                        p++;
+                        if (p < n) {
+                            decoded.append(list.charAt(p));
+                            p++;
+                        } else {
+                            decoded.append('\\');
+                        }
+                    } else if (ch == c) {
+                        p++;
+                        break;
+                    } else {
+                        decoded.append(ch);
+                        p++;
+                    }
+                }
+                name = decoded.toString().trim();
+                comma = list.indexOf(',', p);
             } else {
                 comma = list.indexOf(',', i);
                 name = list.substring(i, comma < 0 ? n : comma).trim();
@@ -299,7 +318,7 @@ final class TextLayouts {
     // node. Floats: size, line height, letter spacing, decoration thickness,
     // underline offset, background radius.
     private static final int SPAN_INTS = 11;
-    private static final int SPAN_FLOATS = 6;
+    private static final int SPAN_FLOATS = 8;
     private static final int ITALIC = 1;
     private static final int UNDERLINE = 2;
     private static final int STRIKE = 4;
@@ -454,12 +473,14 @@ final class TextLayouts {
                 measure.setTextSize(size);
                 measure.getFontMetrics(metrics);
                 float radius = floats[i * SPAN_FLOATS + 5] * density;
-                if (background != null && background.same(ints[o + 9], ints[o + 10], radius) && backgroundEnd == start) {
+                float top = floats[i * SPAN_FLOATS + 6] * density;
+                float bottom = floats[i * SPAN_FLOATS + 7] * density;
+                if (background != null && background.same(ints[o + 9], ints[o + 10], radius, top, bottom) && backgroundEnd == start) {
                     background.ascentPx = Math.max(background.ascentPx, -metrics.ascent);
                     background.descentPx = Math.max(background.descentPx, metrics.descent);
                 } else {
                     if (background != null) s.setSpan(background, backgroundStart, backgroundEnd, f);
-                    background = new Background(ints[o + 9], ints[o + 10], radius, -metrics.ascent, metrics.descent);
+                    background = new Background(ints[o + 9], ints[o + 10], radius, top, bottom, -metrics.ascent, metrics.descent);
                     backgroundStart = start;
                 }
                 backgroundEnd = end;
@@ -1035,24 +1056,30 @@ final class TextLayouts {
 
     /** A span background (`backgroundColor` on a nested text), drawn by
      * {@code TextBox} behind each line's part of its characters, as tall as
-     * its fonts. One covers the neighboring runs of one span. */
+     * its fonts and the span's vertical padding. One covers the neighboring
+     * runs of one span. */
     static final class Background {
         final int color;
         /** The span that set it: neighbors that look the same stay apart. */
         final int node;
         final float radiusPx;
+        /** Room above the fonts' ascent and below their descent. */
+        final float topPx, bottomPx;
         float ascentPx, descentPx;
 
-        Background(int color, int node, float radiusPx, float ascentPx, float descentPx) {
+        Background(int color, int node, float radiusPx, float topPx, float bottomPx, float ascentPx, float descentPx) {
             this.color = color;
             this.node = node;
             this.radiusPx = radiusPx;
+            this.topPx = topPx;
+            this.bottomPx = bottomPx;
             this.ascentPx = ascentPx;
             this.descentPx = descentPx;
         }
 
-        boolean same(int color, int node, float radiusPx) {
-            return this.color == color && this.node == node && this.radiusPx == radiusPx;
+        boolean same(int color, int node, float radiusPx, float topPx, float bottomPx) {
+            return this.color == color && this.node == node && this.radiusPx == radiusPx
+                    && this.topPx == topPx && this.bottomPx == bottomPx;
         }
     }
 

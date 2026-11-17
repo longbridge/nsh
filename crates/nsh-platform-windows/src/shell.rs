@@ -625,6 +625,11 @@ pub(crate) fn sync(surface: &Surface, hwnd: HWND, before: Option<Attrs>, after: 
     }) && (before.is_some() || after.backdrop != Backdrop::None || after.frameless())
     {
         set_material(hwnd, &after);
+        // The background a composed window clears to follows its backdrop
+        // ([`crate::surface::Surface::transparent`]).
+        if before.is_some_and(|b| b.backdrop != after.backdrop) {
+            surface.invalidate();
+        }
     }
     if before.is_none() {
         set_color_scheme(surface, hwnd, Appearance::System);
@@ -714,18 +719,20 @@ pub(crate) fn clamped(size: (i32, i32), attrs: &Attrs, scale: f32) -> (i32, i32)
 }
 
 fn set_level(hwnd: HWND, level: WindowLevel) {
-    // SAFETY: a plain call on a live window.
-    let _ = unsafe {
-        SetWindowPos(
-            hwnd,
-            Some(level_order(level)),
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-        )
+    let order = level_order(level);
+    let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+    // SAFETY: plain calls and a query on a live window.
+    let topmost = unsafe {
+        if order == HWND_TOPMOST {
+            // HWND_TOPMOST alone was seen to do nothing under the foreground window; cause unknown.
+            let _ = SetWindowPos(hwnd, Some(HWND_TOP), 0, 0, 0, 0, flags);
+        }
+        let _ = SetWindowPos(hwnd, Some(order), 0, 0, 0, 0, flags);
+        GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 != 0
     };
+    if topmost != (order == HWND_TOPMOST) {
+        log::warn!("window: level {level:?} did not take (topmost: {topmost})");
+    }
 }
 
 /// Shows the window's taskbar button, or takes it away. The taskbar
@@ -986,6 +993,23 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn a_hidden_window_takes_and_leaves_the_topmost_levels() {
+        let surface = Surface::new(Default::default());
+        let hwnd = crate::window::create(&surface, "NSH level", (320, 240), None, false).unwrap();
+        // SAFETY: a plain query on the test's own window.
+        let topmost =
+            || unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32 & WS_EX_TOPMOST.0 != 0;
+        for level in [WindowLevel::Floating, WindowLevel::AboveDock] {
+            set_level(hwnd, level);
+            assert!(topmost(), "{level:?} makes the window topmost");
+            set_level(hwnd, WindowLevel::Normal);
+            assert!(!topmost(), "normal after {level:?} takes topmost away");
+        }
+        // SAFETY: the test's own window, destroyed once.
+        let _ = unsafe { DestroyWindow(hwnd) };
+    }
 
     #[test]
     fn kinds_have_their_styles() {

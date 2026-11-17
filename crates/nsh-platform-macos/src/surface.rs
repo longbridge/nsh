@@ -38,7 +38,7 @@ use std::{
     rc::{Rc, Weak},
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Instant,
 };
@@ -61,9 +61,10 @@ use crate::{animation::UiAnimation, mount::Mounter, text::CoreTextEngine, view::
 
 /// What the engine thread sends the main thread.
 enum Message {
-    /// A batch, and when the engine handed it over (while a performance
-    /// monitor measures).
-    Batch(MountBatch, Option<Instant>),
+    /// A batch, when the engine handed it over (while a performance
+    /// monitor measures), and the pictures of its texts the engine thread
+    /// painted ([`crate::text::prerender`]).
+    Batch(MountBatch, Option<Instant>, crate::text::Rasters),
     Error(String),
     Frame,
     HotUpdateFailed,
@@ -118,6 +119,9 @@ struct Sink {
     perf: Arc<AtomicBool>,
     /// The directory `import()` chunks load from ([`AppOptions::chunks`]).
     chunks: Option<PathBuf>,
+    /// The backing scale of the surface's window (`f64` bits), which its
+    /// texts are painted at ([`Surface::raster_scale`]).
+    raster_scale: Arc<AtomicU64>,
 }
 
 impl Sink {
@@ -136,8 +140,12 @@ impl Sink {
 
 impl MountSink for Sink {
     fn submit(&self, batch: MountBatch) {
+        // The texts are painted here, off the main thread, which then only
+        // shows them: Core Animation would draw each in its commit.
+        let scale = f64::from_bits(self.raster_scale.load(Ordering::Relaxed));
+        let rasters = crate::text::prerender(&batch, scale);
         let sent = self.perf.load(Ordering::Relaxed).then(Instant::now);
-        self.send(Message::Batch(batch, sent));
+        self.send(Message::Batch(batch, sent, rasters));
     }
 
     fn report_error(&self, message: &str) {
@@ -220,6 +228,9 @@ pub(crate) struct Surface {
     /// The app's own windows (`Window.open`), by the dialog root each
     /// shows ([`crate::window`]).
     pub(crate) windows: RefCell<rustc_hash::FxHashMap<NodeId, crate::window::AppWindow>>,
+    /// The share menu showing and the share it started
+    /// ([`crate::share`]).
+    pub(crate) share: crate::share::Showing,
     /// Pointer input state ([`crate::input`]).
     pub(crate) input: crate::input::Input,
     /// The text selection ([`crate::text::Selected`]).
@@ -259,6 +270,13 @@ pub(crate) struct Surface {
     /// transitions), called on every frame until they are done, each with
     /// its deadline ([`Next::At`]; a new one's is when it was added).
     frame_callbacks: RefCell<Vec<(FrameCallback, Option<f64>)>>,
+    /// How many of the frame callbacks are background work, not motion
+    /// ([`Surface::add_background_callback`]): what [`Surface::moving`]
+    /// does not count.
+    background_frames: Cell<usize>,
+    /// How many frame callbacks the frame running now took
+    /// ([`Surface::tick`]), which [`Surface::moving`] counts while they run.
+    ticking: Cell<usize>,
     /// How many of the frame callbacks have only cosmetic work left (a
     /// scroll indicator fading out, keyframes repeating forever): what
     /// [`Surface::animating`] does not count.
@@ -284,6 +302,10 @@ pub(crate) struct Surface {
     /// there is one (for the sink, on the engine thread).
     perf: RefCell<Option<Arc<PerfMonitor>>>,
     perf_on: Arc<AtomicBool>,
+    /// The backing scale of its window (`f64` bits; its environment's
+    /// pixel ratio until it has one), for the sink, on the engine thread,
+    /// which paints the texts of a batch at it ([`crate::text::prerender`]).
+    raster_scale: Arc<AtomicU64>,
     /// Shows or hides the view's performance monitor
     /// (`setFpsEnabled`): set by its [`crate::AppView`],
     /// which owns the panel.
@@ -385,6 +407,7 @@ impl Surface {
             anim: RefCell::new(UiAnimation::default()),
             nav: RefCell::default(),
             windows: RefCell::default(),
+            share: Default::default(),
             input: Default::default(),
             selection: Default::default(),
             engine: RefCell::new(None),
@@ -401,6 +424,8 @@ impl Surface {
             js_frame: Cell::new(false),
             queued: RefCell::default(),
             frame_callbacks: RefCell::default(),
+            background_frames: Cell::new(0),
+            ticking: Cell::new(0),
             #[cfg(feature = "dev")]
             cosmetic_frames: Cell::new(0),
             #[cfg(feature = "dev")]
@@ -411,6 +436,7 @@ impl Surface {
             capped_frames: Cell::new((0, 0.0)),
             perf: RefCell::new(None),
             perf_on: Arc::new(AtomicBool::new(false)),
+            raster_scale: Arc::new(AtomicU64::new(f64::from(environment.pixel_ratio).to_bits())),
             perf_toggle: RefCell::new(None),
             perf_mode: RefCell::new(None),
             last_tick: Cell::new(0.0),
@@ -478,6 +504,7 @@ impl Surface {
             pending: pending.clone(),
             perf: self.perf_on.clone(),
             chunks: self.chunks.borrow().clone(),
+            raster_scale: self.raster_scale.clone(),
         };
         *self.rx.borrow_mut() = Some(rx);
         *self.pending.borrow_mut() = pending;
@@ -549,6 +576,7 @@ impl Surface {
         self.queued.borrow_mut().clear();
         self.resize_late.set(false);
         self.frame_callbacks.borrow_mut().clear();
+        self.background_frames.set(0);
         #[cfg(feature = "dev")]
         self.cosmetic_frames.set(0);
         crate::shader::clear(self);
@@ -589,9 +617,19 @@ impl Surface {
     pub(crate) fn set_environment(&self, mut environment: Environment) {
         // The embedding app's settings over the system's.
         self.host_environment.get().apply(&mut environment);
+        self.set_raster_scale(f64::from(environment.pixel_ratio));
         if self.environment.replace(environment) != environment {
             self.control(|c| c.set_environment(environment));
             crate::system::environment_applied(self);
+        }
+    }
+
+    /// The scale the engine thread paints texts at: its window's backing
+    /// scale. A text painted at another (the first batch on a 1x screen)
+    /// draws on the main thread as before.
+    fn set_raster_scale(&self, scale: f64) {
+        if scale.is_finite() && scale > 0.0 {
+            self.raster_scale.store(scale.to_bits(), Ordering::Relaxed);
         }
     }
 
@@ -739,10 +777,11 @@ impl Surface {
     /// batch (applied).
     fn handle(self: &Rc<Self>, message: Message, monitor: Option<&PerfMonitor>) -> bool {
         match message {
-            Message::Batch(batch, sent) => {
+            Message::Batch(batch, sent, rasters) => {
                 if let (Some(monitor), Some(sent)) = (monitor, sent) {
                     monitor.record_latency(sent.elapsed());
                 }
+                self.mounter.borrow_mut().rasters = rasters;
                 self.apply(&batch);
                 return true;
             }
@@ -822,6 +861,10 @@ impl Surface {
             }
         }
         self.mounter.borrow_mut().end_batch(self);
+        crate::text_input::warm_later(self);
+        if let Some(window) = self.root.ns().window() {
+            self.set_raster_scale(window.backingScaleFactor());
+        }
         crate::access::batch_applied();
         crate::window::batch_applied(self);
         #[cfg(feature = "dev")]
@@ -864,6 +907,38 @@ impl Surface {
             .borrow_mut()
             .push((Box::new(f), Some(now)));
         self.ensure_ticking();
+    }
+
+    /// [`Self::add_frame_callback`] for work that moves nothing on screen
+    /// (a native view made a step per frame), which [`Self::moving`] does
+    /// not count.
+    pub(crate) fn add_background_callback(
+        self: &Rc<Self>,
+        mut f: impl FnMut(&Rc<Surface>, f64) -> Next + 'static,
+    ) {
+        self.background_frames.set(self.background_frames.get() + 1);
+        self.add_frame_callback(move |surface, now| {
+            let next = f(surface, now);
+            if next == Next::Done {
+                let n = surface.background_frames.get();
+                surface.background_frames.set(n.saturating_sub(1));
+            }
+            next
+        });
+    }
+
+    /// Whether something on the surface moves or is about to: batches
+    /// waiting, a frame JS asked for, the animation graph, the platform's
+    /// own animations (transitions, navigation, scroll glides, keyframes),
+    /// or a mouse button held (a drag, a gesture). Costly one-time work
+    /// waits for none of it ([`when_idle`]).
+    pub(crate) fn moving(&self) -> bool {
+        !self.queued.borrow().is_empty()
+            || self.js_frame.get()
+            || self.anim.borrow().animating()
+            || self.frame_callbacks.borrow().len() + self.ticking.get()
+                > self.background_frames.get()
+            || objc2_app_kit::NSEvent::pressedMouseButtons() != 0
     }
 
     /// Calls `f` on every display frame while it returns true, for what
@@ -1245,6 +1320,7 @@ impl Surface {
             self.write_animations();
         }
         let callbacks = std::mem::take(&mut *self.frame_callbacks.borrow_mut());
+        self.ticking.set(callbacks.len());
         // The callbacks kept say again which rate they need.
         self.capped_frames.set((0, 0.0));
         let mut kept: Vec<(FrameCallback, Option<f64>)> = callbacks
@@ -1255,6 +1331,7 @@ impl Surface {
                 Next::At(at) => Some((f, Some(at))),
             })
             .collect();
+        self.ticking.set(0);
         {
             let mut added = self.frame_callbacks.borrow_mut();
             kept.append(&mut added);
@@ -1363,6 +1440,32 @@ fn frame_rate_range(rate: Option<f32>, max: f32) -> objc2_quartz_core::CAFrameRa
         maximum: preferred,
         preferred,
     }
+}
+
+/// How long after it is asked a warm-up waits for the surface to be idle
+/// ([`when_idle`]), and again while something on it moves.
+const IDLE_DELAY_MS: u64 = 400;
+
+/// Runs `f` on the main queue once `surface` is idle: in
+/// [`IDLE_DELAY_MS`], and again later for as long as something on it moves
+/// ([`Surface::moving`]), so a costly step never holds an animation's
+/// frame; never once the surface is gone. For one-time warm-ups of system
+/// state a later frame would otherwise pay for.
+pub(crate) fn when_idle(surface: &Surface, f: fn()) {
+    when_idle_key(surface.key, f);
+}
+
+/// [`when_idle`] for the surface of `key` ([`Surface::key`]), which a
+/// warm-up of several steps keeps between them.
+pub(crate) fn when_idle_key(key: u64, f: fn()) {
+    fn wait(key: u64, f: fn()) {
+        after(IDLE_DELAY_MS, move || match find(key) {
+            None => {}
+            Some(surface) if surface.moving() => wait(key, f),
+            Some(_) => f(),
+        });
+    }
+    wait(key, f);
 }
 
 /// Runs `f` on the main queue after `ms` milliseconds.

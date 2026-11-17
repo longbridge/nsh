@@ -739,6 +739,11 @@ it changes, and they are resolved again when the tokens change (`Components::app
   `.project_checked(props.checked)` / `.project_indeterminate(props.indeterminate)` / `.project_disabled(props.disabled)`
   (`gpui-base`'s `SwitchThumb::new(checked)`, `CheckboxIndicator::state(..)`): the app writes `checked:` /
   `indeterminate:` / `disabled:` in the part's class, and only the control's root is an accessibility element.
+  The control's press, which only the platform knows, reaches a part through a group: the root is
+  `.group_named("nsh-switch")` and each part `.project_group_active("nsh-switch")`, so the part's `active:` applies
+  while the control is held wherever the press went down (the label included), changing as for any other state (a
+  transform animates with `transition-*`, layout at once). A name of NSH's keeps the app's own `group` classes
+  around or inside the control the app's.
   `.project_focused(..)` does the same for `focus:` on the part the keys act on while the control keeps the
   platform's focus (a list's highlighted option, the cell of a code input that takes the next character): NSH has
   no active descendant, and the platform's focus stays where it is. While that focus shows the part shows
@@ -970,10 +975,11 @@ what changed.
   sets when the nested component starts or stops placing its children (slots and rows stay), instead of telling JS.
 - Content that comes and goes with a reveal (`Collapsible`'s `reveal`, `gpui-base`'s `MotionReveal`): the view puts
   it in a clip view (`overflow_hidden`) whose height is zero while closed and the content's own while open, and calls
-  `ElementRef::animate_layout` on the clip with a critically damped spring in the effect that follows `open`, so the
+  `ElementRef::animate_layout` on the clip with a critically damped spring (or the app's `revealSpring`, read as
+  `open` changes) in the effect that follows `open`, so the
   commit that changes the height animates every frame it moves on the platform's animator (the clip's, the views
-  after it) and no other (a list updating in the same commit elsewhere changes at once), with no JS per frame. The content's region follows a signal that turns on with `open` and off after the motion's duration
-  (`set_timeout`, voided by a newer change: layout animations report no end), so it stays in the tree, clipped, while
+  after it) and no other (a list updating in the same commit elsewhere changes at once), with no JS per frame. The content's region follows a signal that turns on with `open` and off after the motion's duration (the
+  spring's `settle_ms`; `set_timeout`, voided by a newer change: layout animations report no end), so it stays in the tree, clipped, while
   the clip closes. Reduced motion skips both. Heights are not animated values, so this is how a component sizes
   something with motion. `collapsible::follow_open` is that signal and effect; `AccordionPanel` shares it, its own
   view the clip (zero high while closed, `invisible()` once the reveal has closed it, so content it keeps mounted takes
@@ -1201,7 +1207,9 @@ draws the menu. On iOS the app's content is covered by the native component `nsh
 (`nsh-platform-ios`'s `system_menu_button.rs`): a transparent `UIButton` whose `UIMenu`, made from the mounted items,
 is its primary action, so the tap is answered natively; the button sets itself as the element's only accessibility
 element, and an action emits `select` with the app's id. On a desktop OS a press shows the same items with
-`popup_menu`; elsewhere the content opens nothing. `nsh/mobile`'s `SegmentedControl` is the same kind of native
+`popup_menu`; elsewhere the content opens nothing. A `ContextMenu` given `items` is the same kind of menu on iOS: the native component
+`nsh/context-menu` (`system_context_menu.rs`) shows the system's context menu from `MenuButton`'s item data, and
+`menu.rs` reports it with the drawn menu's events; elsewhere, and without items, the menu is the drawn one. `nsh/mobile`'s `SegmentedControl` is the same kind of native
 component, `nsh/segmented-control` (`system_segmented_control.rs`), built as `TabBar` is.
 
 `HoverCard` (`hover_card.rs`) is `gpui-base`'s `HoverCard` on `Popover`'s overlay and presence. On the desktops the
@@ -1249,8 +1257,8 @@ starting from `defaultQuery`, or the app's `query`, whose changes highlight the 
 footer is a part of the popup after the rows (`listbox::Footer`). Mod+Return closes it with `"select"`. A press on
 the input opens and closes the list in every idiom, as `gpui-component`'s trigger does (`"triggerPress"`); on touch
 screens the focus a tap gives opens it, and the press of that tap is then skipped (`focus_opened`). The input reports
-the press after the focus it takes: the terminal (`docs/dev/tui.md`), Linux (`docs/dev/linux.md`) and the headless
-driver report an `Input`'s `onPress` today; the other backends follow in a later change, and until then a press on the
+the press after the focus it takes: the terminal (`docs/dev/tui.md`), Linux (`docs/dev/linux.md`), Windows
+(`docs/dev/windows.md`) and the headless driver report an `Input`'s `onPress` today; the other backends follow in a later change, and until then a press on the
 input there opens the list on touch screens only (through the focus).
 
 `DatePicker` (`date_picker.rs`) is `Select`'s popup (`popup::dropdown`, at least as wide as the trigger, a sheet on
@@ -1302,6 +1310,15 @@ descendant scroll's pan: its initial offset consumes the first part of the drag,
 distance moves the panel while the scroll stays at its adjusted top. Other backends retain their usual scroll
 arbitration. `SheetMotion` tags completion callbacks and fallback timers with a generation, so a prior exit cannot
 unmount a reopened sheet or its backdrop.
+
+With `detents` (bottom side), the panel is as tall as its largest detent and rests lower for a smaller one. The
+same native pan value moves it between detents, a release settles it at one or, past the smallest with
+`closeOnSwipe`, requests closing; sheets without detents keep the motion above unchanged and build none of the
+detents' animation graph (the detents' layers are a branch of their own, made again when a sheet gains or loses its
+detents or its bottom side). A `footer` stays at the bottom of what shows of the panel, moved by the same native value; while the
+software keyboard is up the sheet stands at its largest detent without changing the detent it reports. The detent is controlled
+or the sheet's own (`detent`, `defaultDetent`, `onDetentChange`), and the optional grabber is an adjustable part for
+screen readers. Code: `sheet.rs` (`Detents`), `popup.rs` (`SheetMotion`).
 
 `SheetMotion` derives the programmatic translation from the remaining fade fraction times the current measured
 distance from the edge. Lazy JS children can fill in over several layout rounds in one native batch; later content
@@ -1415,7 +1432,8 @@ pointer's offset; a press on the track puts the thumb's middle there and a drag 
 reports the scroll a frame or two later, and while it goes on the reports of earlier commands do not move it back.
 `mode` decides when it shows, as `gpui-base`'s: `scrolling` (a move of the target, until `motion.idle` after; the
 pointer on the bar while it shows keeps it), `hover` (also while the pointer is over the bar, which a hidden bar
-follows with a mouse) or `always`; a drag keeps it, and it never shows while the content fits. Its fades are
+follows with a mouse) or `always`; a drag keeps it. While the content fits, the bar stays hidden and passes pointer
+events through to the content in every mode. Its fades are
 `gpui-base`'s `VisibilityAnimation`: two animated values bound natively, the track's opacity and the rail's slide
 (across the axis by the track's thickness, which the track clips), started with `motion.enter` / `exit` scaled by
 the distance still to cover (the bar samples its fade to know where the native one is), linear / cubic out in and

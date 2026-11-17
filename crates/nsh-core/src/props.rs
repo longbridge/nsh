@@ -143,6 +143,35 @@ pub enum AccessibilityRole {
     AlertDialog,
 }
 
+impl AccessibilityRole {
+    /// Whether the role is a control the pointer presses (a button, link,
+    /// tab, menu item…): text inside one shows the control's pointer, not
+    /// the I-beam of a selectable area around it, as a browser's
+    /// `<button>` text does.
+    pub fn is_control(self) -> bool {
+        matches!(
+            self,
+            Self::Button
+                | Self::Link
+                | Self::ImageButton
+                | Self::KeyboardKey
+                | Self::Checkbox
+                | Self::Combobox
+                | Self::Menuitem
+                | Self::MenuItemCheckbox
+                | Self::MenuItemRadio
+                | Self::Radio
+                | Self::Switch
+                | Self::Tab
+                | Self::Option
+                | Self::TreeItem
+                | Self::Adjustable
+                | Self::Spinbutton
+                | Self::Scrollbar
+        )
+    }
+}
+
 /// Whether a checkable element is checked (`accessibilityState.checked`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Checked {
@@ -636,13 +665,15 @@ pub enum LayoutCurve {
     /// lasting until it settles ([`Spring::settle_ms`]), and moves the same
     /// on every platform. The transition's `duration_ms` is not used. Its
     /// `velocity` and `frame_rate` are not either: a layout moves from rest
-    /// at the screen's rate.
+    /// at the screen's rate. JS names it with a `type: "spring"` phase's
+    /// `stiffness`, `damping` or `mass`.
     ///
     /// [`Spring::settle_ms`]: crate::element::Spring::settle_ms
     Spring(crate::element::Spring),
     /// A spring of this damping ratio fitted into the transition's
     /// duration, which each platform draws with its own spring: the JS
-    /// `LayoutAnimation`'s `type: "spring"` (`springDamping`). Rust prefers
+    /// `LayoutAnimation`'s `type: "spring"` (`springDamping`) without a
+    /// stiffness, damping or mass. Rust prefers
     /// [`LayoutCurve::Spring`].
     FittedSpring {
         /// Damping ratio (0..1): 1 does not overshoot.

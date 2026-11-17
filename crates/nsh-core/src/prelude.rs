@@ -31,6 +31,7 @@ pub use crate::element::{
     Children,
     ClaimRequest,
     ClipboardItem,
+    ColorStop,
     Component,
     ComponentBuilder,
     ComponentElement,
@@ -274,10 +275,10 @@ pub use crate::element::{
     reveal_path, round_to_nearest_pixel, run_on_main_thread, safe_area, screen_reader, set_app_url,
     set_app_url_with, set_badge, set_clipboard, set_clipboard_image, set_clipboard_item,
     set_color_scheme, set_fps_enabled, set_fps_mode, set_interval, set_timeout, set_tokens,
-    shaders_available, show_notification, signal, signal_with, spawn, speech_available, stored,
-    text_metrics, timer, timer_until, tokens, try_apple_keys, try_global, try_os, untracked,
-    use_context, vertical_size_class, wake_count, watch_scroll, web_evaluate_available,
-    web_input_available, web_view_available, when, window,
+    shaders_available, share, share_available, show_notification, signal, signal_with, spawn,
+    speech_available, stored, text_metrics, timer, timer_until, tokens, try_apple_keys, try_global,
+    try_os, untracked, use_context, vertical_size_class, wake_count, watch_scroll,
+    web_evaluate_available, web_input_available, web_view_available, when, window,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::element::{background, blocking};

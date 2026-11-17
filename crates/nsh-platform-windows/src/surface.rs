@@ -839,17 +839,26 @@ impl Surface {
         items_placed(&self.placed, drawn, redrawn);
     }
 
-    /// The window is see-through where the app draws nothing.
+    /// The window is see-through where the app draws nothing: it is shown
+    /// by a composition of its own and is `transparent` or has a system
+    /// backdrop now. A composed window without either (a development
+    /// host's before its app's `window` options came, or after they
+    /// dropped the backdrop) draws on its opaque background.
     pub(crate) fn transparent(&self) -> bool {
         self.base.borrow().is_some()
+            && crate::window::shell(self.hwnd()).is_none_or(|shell| {
+                let attrs = shell.attrs();
+                attrs.transparent || attrs.backdrop != nsh_core::desktop::Backdrop::None
+            })
     }
 
-    /// The window's composition, if it has web views.
+    /// The window's composition, if it has web views or composed components.
     pub(crate) fn composition(&self) -> Option<Rc<crate::compose::Composition>> {
         self.composition.borrow().upgrade()
     }
 
-    /// The window's composition, made for a web view if there is none.
+    /// The window's composition, made for a web view or a composed component
+    /// if there is none.
     #[cfg_attr(not(feature = "webview"), allow(dead_code))]
     pub(crate) fn compose(&self) -> windows::core::Result<Rc<crate::compose::Composition>> {
         if let Some(c) = self.composition() {

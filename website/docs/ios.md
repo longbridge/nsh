@@ -97,6 +97,11 @@ holds the limits, the granted capabilities, the data directory and the native co
 below do; `AppView::set_locale`, `set_font_scale` and `set_error_handler` match `locale`, `fontScale` and `onError`.
 `nsh package --target ios` builds this kind of app for you, with your root mounted.
 
+Without `set_ui_sets`, an `AppView` serves `nsh/base`'s core part (`Button`, `Checkbox`, `Switch`, `Tabs`, `Slider`,
+`AlertDialog`, the navigation, `Input`, ...), all a Rust root needs, as Rust makes `nsh/base`'s components by type. A
+view that loads TSX importing more of `nsh/base` (`Select`, `TextView`, `EmojiPicker`, ...) passes all of it,
+`nsh_base::registry()`, as above.
+
 ## Get the framework
 
 The distribution contains both variants:
@@ -124,6 +129,10 @@ other Rust runtimes. Choose the Xcode embedding setting below to match the frame
 By default, each XCFramework has three arm64 slices: iOS devices, the iOS simulator (Apple silicon) and Mac Catalyst. The minimum
 deployment target is iOS 15.0. The Swift module is compiled with library evolution, so apps built with other Swift
 compiler versions can import it, and the framework links everything it needs: you add nothing else.
+
+`NshAppView` serves the apps it runs all of `nsh/base`, `nsh/base/plot` included, as Android's `NshView` does: an app
+imports any of its components. A host app that builds the runtime with Rust code of its own picks the UI sets with
+`nsh_platform_ios::set_ui_sets` before its first view ([Embedding a Rust app](#embedding-a-rust-app)).
 
 ## Add it to an Xcode project
 

@@ -2091,6 +2091,50 @@ thread_local! {
     static FORGOTTEN: RefCell<Vec<(NshView, Retained<NSView>)>> = const { RefCell::new(Vec::new()) };
 }
 
+/// Warms AppKit's text system once per process, a while after `surface`
+/// first showed and when it does not animate
+/// ([`crate::surface::when_idle`]): the first `NSTextView` (and
+/// `NSScrollView`) of a process sets up TextKit (its classes, the system
+/// font's cascade, the layout machinery), about 10 ms of the main thread
+/// that would otherwise hold the frame that mounts the first multi-line
+/// input. Nearly every app has inputs, so this is paid by an idle moment
+/// instead of a page's first frame. Process-wide, as what it warms is.
+pub(crate) fn warm_later(surface: &Surface) {
+    thread_local! {
+        static SCHEDULED: Cell<bool> = const { Cell::new(false) };
+    }
+    if !SCHEDULED.replace(true) {
+        crate::surface::when_idle(surface, warm_text);
+    }
+}
+
+fn warm_text() {
+    let mtm = MainThreadMarker::new().expect("main queue");
+    let scroller =
+        NSScrollView::initWithFrame(NSScrollView::alloc(mtm), ns_rect(0.0, 0.0, 100.0, 40.0));
+    scroller.setHasVerticalScroller(true);
+    let text = NSTextView::initWithFrame(NSTextView::alloc(mtm), ns_rect(0.0, 0.0, 100.0, 40.0));
+    text.setRichText(false);
+    text.setAllowsUndo(true);
+    text.setFont(Some(&objc2_app_kit::NSFont::systemFontOfSize(13.0)));
+    text.setString(&NSString::from_str("Aa"));
+    scroller.setDocumentView(Some(&text));
+    // SAFETY: NSTextView's TextKit 2 objects and their methods, when it has
+    // them (nil otherwise).
+    unsafe {
+        let manager: Option<Retained<AnyObject>> = msg_send![&text, textLayoutManager];
+        if let Some(manager) = manager {
+            let content: Option<Retained<AnyObject>> = msg_send![&manager, textContentManager];
+            if let Some(content) = content {
+                let all: Option<Retained<AnyObject>> = msg_send![&content, documentRange];
+                if let Some(all) = all {
+                    let _: () = msg_send![&manager, ensureLayoutForRange: &*all];
+                }
+            }
+        }
+    }
+}
+
 /// `Input`.
 pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig) {
     let Some(input) = view.state().input.clone() else {

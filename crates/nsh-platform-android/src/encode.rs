@@ -739,6 +739,23 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                         e.int(id as i32);
                         e.string(url);
                     }
+                    // `Share.java`: the request, the title and the text
+                    // (the text and the URL on lines of their own), each
+                    // after whether it is there, then the files. Android's
+                    // sheet is no popover: the anchor is not sent.
+                    Command::Share { id, sheet } => {
+                        e.int(58);
+                        e.int(id as i32);
+                        e.bool(sheet.title.is_some());
+                        e.string(sheet.title.clone().unwrap_or_default());
+                        let text = sheet.combined_text();
+                        e.bool(text.is_some());
+                        e.string(text.unwrap_or_default());
+                        e.int(sheet.files.len() as i32);
+                        for file in sheet.files {
+                            e.string(file);
+                        }
+                    }
                     // Answered by the sink (`host::answer_clipboard_reads`);
                     // images are not written to Android's clipboard.
                     Command::ReadClipboardImage { .. }

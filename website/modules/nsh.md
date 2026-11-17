@@ -6,7 +6,7 @@ order: 2
 
 # nsh
 
-`nsh` is the core module: the reactive API (signals, computed values, effects, context), `mount`, `token`, `setTheme`, the host elements `View`, `Text`, `Scroll` and `Overlay`, [selectable views](#selectable-views), [the safe area and the keyboard](#safe-area-and-keyboard), [animation](#animation), [the device and its environment](#device), [`PanResponder`](#panresponder), the [clipboard](#clipboard), the [photo picker](#picker), [speech recognition](#speech), [sound](#sound), [storage](#storage), the [host channel](#host), [keyboard shortcuts](#keymap), [native components and modules](#nativecomponent-and-nativemodule), [accessibility](#accessibility), and the TypeScript types of elements, styles and events. The reactive graph itself runs natively in Rust; reading a signal is a call into the runtime that costs a few nanoseconds, and only your own closures run in the JavaScript interpreter.
+`nsh` is the core module: the reactive API (signals, computed values, effects, context), `mount`, `token`, `setTheme`, the host elements `View`, `Text`, `Scroll` and `Overlay`, [selectable views](#selectable-views), [the safe area and the keyboard](#safe-area-and-keyboard), [animation](#animation), [the device and its environment](#device), [`PanResponder`](#panresponder), the [clipboard](#clipboard), the [photo picker](#picker), the [share sheet](#share), [speech recognition](#speech), [sound](#sound), [storage](#storage), the [host channel](#host), [keyboard shortcuts](#keymap), [native components and modules](#nativecomponent-and-nativemodule), [accessibility](#accessibility), and the TypeScript types of elements, styles and events. The reactive graph itself runs natively in Rust; reading a signal is a call into the runtime that costs a few nanoseconds, and only your own closures run in the JavaScript interpreter.
 
 ```ts
 import { batch, cleanup, computed, context, effect, ErrorBoundary, mount, Overlay, Scroll, signal, split, Text, token, untracked, View } from "nsh";
@@ -636,6 +636,7 @@ interface MotionOptions extends MotionPlayOptions {
 }
 
 interface MotionPlayOptions extends KeyframeTiming {
+  spring?: MotionSpring;             // play each channel on this spring
   ignoreReduceMotion?: boolean;      // play even when the user asks for less motion
 }
 
@@ -692,8 +693,10 @@ type MotionChannel = "opacity" | "translateX" | "translateY" | "rotate" | "rotat
 
 interface MotionSpec extends KeyframeTiming {
   keyframes: { [C in MotionChannel]?: KeyframeValue[] } | MotionFrame[];
+  spring?: MotionSpring;
   ignoreReduceMotion?: boolean;
 }
+type MotionSpring = { stiffness?: number; damping?: number; mass?: number };   // 170, 26, 1
 type MotionFrame = { [C in MotionChannel]?: number | string } & { offset?: number; easing?: Easing };
 
 interface MotionPreset extends MotionSpec {
@@ -704,6 +707,22 @@ interface MotionPreset extends MotionSpec {
 The ready-made motions as data: `motion.play("shake")` plays `motions.shake`. `MotionName` is one of `fadeIn`, `fadeInUp`, `fadeInDown`, `fadeInLeft`, `fadeInRight`, `zoomIn`, `popIn`, `bounceIn`, `slideInUp`, `slideInDown`, `flipInX`, `flipInY` (enter); `fadeOut`, `fadeOutUp`, `fadeOutDown`, `fadeOutLeft`, `fadeOutRight`, `zoomOut`, `popOut`, `slideOutDown`, `slideOutUp` (exit); `shake`, `headShake`, `wiggle`, `swing`, `pulse`, `heartbeat`, `rubberBand`, `jello`, `tada`, `jump`, `flash` (attention); `spin`, `float`, `breathe`, `sway`, `bob`, `glow` (loop). [Animation](../docs/animation.md#presets) describes each one. Spread a preset to change it: `motion.play({ ...motions.fadeInUp, duration: 600 })`.
 
 A `MotionSpec` is a motion of your own: each channel's keyframes (`{ opacity: [0, 1], translateY: [24, 0] }`), or a list of frames as the Web Animations API writes them (`[{ opacity: 0, translateY: 24 }, { opacity: 1, translateY: 0 }]`, a frame without an offset placed by its position in the list), with the [keyframe timing](#keyframes). Rust: `MotionSpec::new(KeyframeTiming)` with `.values(channel, values)` (spread evenly), `.track(channel, keyframes)` and `.timing(|t| …)`; `MotionPreset::FadeInUp` (or `.spec()`) is a preset, and `MotionChannel` names the channels.
+
+With `spring`, each channel springs from where it is to where its keyframes end, instead of running through them: a motion that interrupts another goes on from the values and velocities that one left, where keyframes start again from their first frame. The first keyframe is still where `enter` starts a view; `delay` waits before the spring starts, `direction: "reverse"` springs to the first keyframe, and the keyframes between, `duration`, `easing` and `iterations` are not used. The stiffness, damping and mass are `Animated.spring`'s (170, 26 and 1 by default). Rust: `.spring(Spring { stiffness, damping, ..Spring::default() })` on the `MotionSpec`. When the user asks for less motion, a sprung motion lands where it ends at once, as any motion does.
+
+```rust tabs
+let spring = Spring { stiffness: 620.0, damping: 36.0, ..Spring::default() };
+let sheet = motion().entering(MotionPreset::SlideInUp.spec().spring(spring));
+// Sent away while it still rises: it turns around from there, keeping its speed.
+let _ = sheet.play(MotionPreset::SlideOutDown.spec().spring(spring));
+```
+
+```tsx tabs
+const spring = { stiffness: 620, damping: 36 };
+const sheet = createMotion({ enter: "slideInUp", spring });
+// Sent away while it still rises: it turns around from there, keeping its speed.
+sheet.play("slideOutDown", { spring });
+```
 
 ```rust tabs
 let rise = MotionSpec::new(KeyframeTiming::new(400.0))
@@ -879,11 +898,15 @@ interface LayoutAnimationConfig {
 }
 
 interface LayoutAnimationAnimation {
-  type?: "easeInEaseOut" | "spring" | "linear" | "easeIn" | "easeOut" | "keyboard";
+  type?: "easeInEaseOut" | "spring" | "linear" | "easeIn" | "easeOut" | "keyboard" | "bezier";
   property?: "opacity" | "scaleXY" | "scale";
   duration?: number;
   delay?: number;
-  springDamping?: number;          // 0..1, default 0.7
+  springDamping?: number;          // 0..1, default 0.7: a spring fitted into `duration`
+  stiffness?: number;              // a physical spring (default 170): it lasts until it settles
+  damping?: number;                // its damping coefficient (default 26)
+  mass?: number;                   // its mass (default 1)
+  bezier?: [number, number, number, number];
 }
 ```
 
@@ -2086,6 +2109,175 @@ and without a handler a pick is cancelled. See [Testing](../docs/testing-and-tra
 > When your app declares `capabilities` in `nsh.json`, the picker must be granted with `"picker": true`. Without it
 > `pickImages` and `pickFiles` show nothing and reject with an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission`
 > `"picker"` and `resource` `""`. In Rust, `pick_images` and `pick_files` answer no files and the refusal is logged. See
+> [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).
+
+## Share
+
+The share API hands text, a link or local files to the system's share sheet, where the user sends them on: to another
+app, a message, a mail, AirDrop or a saved file. On iOS it is `UIActivityViewController`, on Android the chooser of
+`Intent.ACTION_SEND`, on macOS the share menu (`NSSharingServicePicker`) and in a browser `navigator.share`. Rust code
+calls `share` of `nsh_core::prelude`; TSX imports `Share` from `nsh`.
+
+```rust tabs
+use nsh_core::share::{ShareAction, ShareRequest};
+use nsh_core::prelude::*; // share, share_available
+```
+
+```tsx tabs
+import { Share, type ShareResult } from "nsh";
+```
+
+```ts
+const Share: {
+  available(): Promise<boolean>;
+  show(content: ShareContent): Promise<ShareResult>;
+};
+
+interface ShareContent {
+  title?: string; // the subject (a mail's subject line) and the sheet's title where it has one
+  text?: string;
+  url?: string; // a link: http(s), mailto, an app's own scheme
+  files?: string[]; // local files by absolute path (up to 100)
+  anchor?: ViewRef; // the view the sheet points at where it is a popover (iPad, macOS)
+}
+
+interface ShareResult {
+  action: "shared" | "dismissed";
+  target: string | null; // what the user shared with, as the platform names it
+}
+```
+
+| TS | Rust |
+|---|---|
+| `await Share.available()` | `share_available().await -> bool` |
+| `await Share.show(content)` | `share(request).await -> Result<ShareOutcome, ShareError>` |
+| `title`, `text`, `url`, `files` | `ShareRequest::new().title(..).text(..).url(..).file(..)` |
+| `anchor` | `.anchor(&element_ref)` |
+| `result.action`, `.target` | `outcome.action` (`ShareAction`), `outcome.target` |
+| `error.code` | `error.code` |
+
+### Share.show
+
+```ts
+show(content: ShareContent): Promise<ShareResult>;
+```
+
+Shows the share sheet and resolves with what the user did: `"shared"` with the `target` the user shared with (an
+activity type on iOS, an app's package on Android, a service's title on macOS, `null` where the platform does not say),
+or `"dismissed"` when the user closed the sheet. A dismissal is the user's answer, not a failure. Rust: `share(request)`,
+an answer to await in a task (`spawn`, or an `async` module function).
+
+`"shared"` says as much as the platform knows:
+
+| Platform | `"shared"` means |
+|---|---|
+| iOS | The target finished sharing (a cancelled mail or message is `"dismissed"`) |
+| macOS | The service reported that it finished, or it reported nothing and the user came back to the window the menu opened from (after copying or adding to a list, and also with a mail draft still open); a service that reports a cancel is `"dismissed"`, and so is one that reports nothing while the user stays away for ten minutes |
+| Android | The user chose an app; Android tells nothing of what the app does next |
+| Web | `navigator.share` resolved |
+
+`show` never throws; every failure rejects the promise:
+
+- content with none of `text`, `url` and `files` (empty text counts as none), or a URL that does not parse or that runs
+  code (`javascript:`) or names a local file (`file:`; share it as `files`): a `TypeError`;
+- more than 100 files, text or a title past 1 MiB, or a URL past 16 KiB: a `RangeError`;
+- a file the app's `capabilities.fs.read` does not grant: `ERR_ACCESS_DENIED`, and a file that does not exist: `ENOENT`;
+- a share where the platform has no share sheet, or of content it does not share (a file outside an Android app's own
+  storage, files in a browser, a browser that does not allow sharing here or still shows an earlier share's sheet): an
+  `Error` whose `code` is `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. `Share.available()` tells beforehand where the platform has no sheet.
+
+A `show` while a sheet is open resolves the earlier promise `"dismissed"` at once. On iOS and macOS the new sheet takes
+the earlier one's place; on Android and the web the earlier sheet stays until the user closes it, and a browser
+refuses the new share while it is open. On an iPad and on macOS the sheet is a popover: give `anchor` the view that opened it (the share button,
+in a page, a header, a dialog or another window), and without one it shows at the middle of the window.
+
+On iOS the sheet offers saving an image to Photos when the app says why it adds to the photo library:
+`NSPhotoLibraryAddUsageDescription` in `ios.infoPlist` ([Info.plist keys](../docs/packaging.md#infoplist-keys-and-entitlements)).
+
+A trip planner shares a trip from its share button:
+
+```rust tabs
+use nsh_core::prelude::*;
+use nsh_core::share::{ShareAction, ShareRequest};
+
+fn share_button(trip: &'static str) -> impl IntoElement {
+    let button = element_ref();
+    view()
+        .element_ref(&button)
+        .role(AccessibilityRole::Button)
+        .accessibility_label("Share")
+        .on_press(move || {
+            let request = ShareRequest::new()
+                .title("Weekend in Kyoto")
+                .url(format!("https://example.com/trips/{trip}"))
+                .anchor(&button);
+            let shared = share(request);
+            spawn(async move {
+                match shared.await {
+                    Ok(outcome) if outcome.action == ShareAction::Shared => log::info!("shared"),
+                    Ok(_) => {}
+                    Err(error) => log::warn!("cannot share: {error}"),
+                }
+            });
+        })
+        .child(text("Share"))
+}
+```
+
+```tsx tabs
+import { Share, Text, View, type ViewRef } from "nsh";
+
+function ShareButton(props: { trip: string }) {
+  let button: ViewRef | undefined;
+  const share = async () => {
+    try {
+      const { action } = await Share.show({
+        title: "Weekend in Kyoto",
+        url: `https://example.com/trips/${props.trip}`,
+        anchor: button,
+      });
+      if (action === "shared") console.log("shared");
+    } catch (e) {
+      console.warn("cannot share", e);
+    }
+  };
+  return (
+    <View ref={button} role="button" accessibilityLabel="Share" onPress={share}>
+      <Text>Share</Text>
+    </View>
+  );
+}
+```
+
+| Platform | Share sheet | Files |
+|---|---|---|
+| iOS | `UIActivityViewController`; a popover on an iPad | Any file the app reads |
+| Android | The chooser of `ACTION_SEND` (`ACTION_SEND_MULTIPLE` for several files) | Files in the app's own storage (`process.dataDir`, the cache), as `content:` URIs |
+| macOS | The share menu, `NSSharingServicePicker` | Any file the app reads |
+| Web | `navigator.share`, where the browser has it and the page allows `web-share` | Text and links |
+
+On Windows, Linux and in GPUI windows, `Share.available()` resolves `false` and `show` rejects with
+`ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`, so the app can offer another way (copying the link, say).
+
+### Share.available
+
+```ts
+available(): Promise<boolean>;
+```
+
+Whether `show` can show a share sheet here: the platform has one and the app's capabilities grant it. An app shows its
+share button by it. Rust: `share_available()`.
+
+### Tests
+
+`nsh test` answers shares in headless runs: `app.onShare({ action, target })` sets the answer (`"dismissed"` until one
+is set) and makes `Share.available()` true, and `app.shares()` returns what the app shared (`{ title, text, url, files }`).
+See [Testing](../docs/testing-and-trace.md).
+
+> [!NOTE]
+> When your app declares `capabilities` in `nsh.json`, the share sheet must be granted with `"share": true`, and each
+> shared file must also be readable by `fs.read`. Without the grant `Share.available()` resolves `false` and `show`
+> rejects with an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission` `"share"` and `resource` `""`. See
 > [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).
 
 ## Notifications

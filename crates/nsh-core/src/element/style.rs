@@ -23,7 +23,9 @@ use super::{IntoReactive, Reactive, SharedString};
 use crate::{
     BlendMode, BoxShadow, Cursor, FontVariant, ObjectPosition, TransformOrigin, TransitionProps,
     color::{Hsla, Rgba, transparent_black},
-    effects::{Filter, GradientKind, GradientSize, KeyframeAnimation, Keyframes},
+    effects::{
+        ColorStop, Filter, Gradient, GradientKind, GradientSize, KeyframeAnimation, Keyframes,
+    },
     geometry::{
         AbsoluteLength, DefiniteLength, Length, Percentage, Points, REM_SIZE, Radians, Rems, deg,
         percentage, px, relative,
@@ -2881,6 +2883,84 @@ pub trait Styled: Sized {
         self
     }
 
+    /// Masks the view and its content with a linear gradient's alpha:
+    /// opaque stops reveal it, transparent stops hide it. Colors do not tint it.
+    /// The angle follows CSS (0 up, `deg(90.0)` right). Stops accept colors or
+    /// `(color, position)` pairs, with typed fractions or lengths. Both arguments
+    /// accept signals and closures (`Vec<ColorStop>` for reactive stops); static
+    /// values create no binding.
+    /// `.mask_linear(deg(90.0), [transparent_black(), black(), transparent_black()])`.
+    /// An empty stop vector clears the mask reactively. Includes backdrop filters.
+    /// Not drawn on Windows and GPUI.
+    fn mask_linear(
+        mut self,
+        angle: impl IntoReactive<Radians>,
+        stops: impl IntoReactive<Vec<ColorStop>>,
+    ) -> Self {
+        let angle = angle.into_reactive();
+        let stops = stops.into_reactive();
+        let gradient = match (angle, stops) {
+            (Reactive::Static(angle), Reactive::Static(stops)) => Reactive::Static(Gradient {
+                kind: GradientKind::Linear { angle },
+                stops,
+                repeating: false,
+            }),
+            (angle, stops) => Reactive::Bound(Rc::new(move || Gradient {
+                kind: GradientKind::Linear { angle: angle.get() },
+                stops: stops.get(),
+                repeating: false,
+            })),
+        };
+        self.style().bind_value(gradient, |s, gradient| {
+            s.value(
+                StyleKey::MaskImage,
+                PropertyValue::Gradients(if gradient.stops.is_empty() {
+                    Vec::new().into()
+                } else {
+                    vec![gradient].into()
+                }),
+            );
+        });
+        self
+    }
+
+    /// Masks with an elliptical gradient from the center to the farthest corner.
+    /// Stops and platform support follow [`Styled::mask_linear`]. Use a
+    /// `Vec<ColorStop>` for signal/closure results, or an array of colors/pairs
+    /// for static stops. An empty vector clears the mask reactively.
+    fn mask_radial(mut self, stops: impl IntoReactive<Vec<ColorStop>>) -> Self {
+        self.style().bind_value(stops, |s, stops| {
+            let gradients = if stops.is_empty() {
+                Vec::new()
+            } else {
+                vec![Gradient {
+                    kind: GradientKind::Radial {
+                        circle: false,
+                        size: GradientSize::FarthestCorner,
+                        x: percentage(0.5),
+                        y: percentage(0.5),
+                    },
+                    stops,
+                    repeating: false,
+                }]
+            };
+            s.value(
+                StyleKey::MaskImage,
+                PropertyValue::Gradients(gradients.into()),
+            );
+        });
+        self
+    }
+
+    /// Clears the gradient mask, including in state styles.
+    fn mask_none(mut self) -> Self {
+        self.style().value(
+            StyleKey::MaskImage,
+            PropertyValue::Gradients(Vec::new().into()),
+        );
+        self
+    }
+
     /// Blurs it and its content by `radius` (Tailwind's `blur-sm` is 8
     /// points).
     fn blur(self, radius: impl Into<Points>) -> Self {
@@ -4372,7 +4452,7 @@ mod tests {
     use super::*;
     use crate::{
         Style,
-        color::rgba,
+        color::{black, rgba},
         element::palette::{EMERALD, PINK, RED, SKY, VIOLET},
         geometry::point,
         tailwind::{ClassEnvironment, ClassProps, Context},
@@ -4724,6 +4804,100 @@ mod tests {
         ] {
             same(typed, classes);
         }
+    }
+
+    #[test]
+    fn mask_gradients_match_css() {
+        let css = |value: &'static str| {
+            move |style: &mut Style| {
+                style
+                    .set_key(StyleKey::MaskImage, crate::StyleValue::Str(value))
+                    .unwrap();
+            }
+        };
+        same_with(
+            s().mask_linear(
+                deg(90.0),
+                [transparent_black(), black(), transparent_black()],
+            ),
+            "",
+            &css("linear-gradient(to right, transparent, black, transparent)"),
+        );
+        same_with(
+            s().mask_linear(
+                deg(180.0),
+                [
+                    (transparent_black(), percentage(0.2)),
+                    (black(), percentage(0.8)),
+                ],
+            ),
+            "",
+            &css("linear-gradient(to bottom, transparent 20%, black 80%)"),
+        );
+        same_with(
+            s().mask_linear(
+                deg(90.0),
+                [(transparent_black(), px(12.0)), (black(), px(24.0))],
+            ),
+            "",
+            &css("linear-gradient(to right, transparent 12px, black 24px)"),
+        );
+        same_with(
+            s().mask_radial([black(), transparent_black()]),
+            "",
+            &css("radial-gradient(black, transparent)"),
+        );
+        same_with(
+            s().mask_radial([black(), transparent_black()]).mask_none(),
+            "",
+            &css("none"),
+        );
+    }
+
+    #[test]
+    fn empty_stops_clear_masks_and_radial_accepts_reactive_stops() {
+        same_with(
+            s().mask_linear(deg(90.0), Vec::<ColorStop>::new()),
+            "",
+            &|style| {
+                style
+                    .set_key(StyleKey::MaskImage, crate::StyleValue::Str("none"))
+                    .unwrap();
+            },
+        );
+        same_with(s().mask_radial(Vec::<ColorStop>::new()), "", &|style| {
+            style
+                .set_key(StyleKey::MaskImage, crate::StyleValue::Str("none"))
+                .unwrap();
+        });
+        // Constructed inside a component in normal use; these static reactive
+        // wrappers exercise the same accepted type without needing an owner.
+        let stops = Reactive::Static(vec![ColorStop::from(black()), transparent_black().into()]);
+        same_with(s().mask_radial(stops), "", &|style| {
+            style
+                .set_key(
+                    StyleKey::MaskImage,
+                    crate::StyleValue::Str("radial-gradient(black, transparent)"),
+                )
+                .unwrap();
+        });
+    }
+
+    #[test]
+    fn masks_keep_background_stops_separate() {
+        let typed = s()
+            .bg_linear(deg(180.0))
+            .gradient_from(black())
+            .gradient_to(crate::color::white())
+            .mask_linear(deg(90.0), [black(), transparent_black()]);
+        same_with(typed, "bg-linear-180 from-black to-white", &|style| {
+            style
+                .set_key(
+                    StyleKey::MaskImage,
+                    crate::StyleValue::Str("linear-gradient(to right, black, transparent)"),
+                )
+                .unwrap();
+        });
     }
 
     #[test]

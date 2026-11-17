@@ -235,8 +235,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   JS cannot cancel the system's menu after the fact (the main thread never waits for JS), so the rule is what is
   mounted. iOS: a `UITapGestureRecognizer` for the secondary button per listening view (iPad pointers, Mac
   Catalyst's mouse). On touchscreens a menu belongs on `onLongPress`; Android raises `onContextMenu` for no input yet.
-  Without a pointer: the keyboard's Menu key and Shift+F10 on the focused view (the web and Linux, `key_focus.rs`, and the headless
-  driver's `keyboard.press("shift+f10")` there) and a screen reader's "show menu" action (macOS `AXShowMenu` on a view that
+  Without a pointer: the keyboard's Menu key and Shift+F10 on the focused view (the web, Linux, `key_focus.rs`, Windows,
+  `keyboard.rs`, where a focused text field without a listener shows its edit menu, and the headless driver's `keyboard.press("shift+f10")` there) and a screen reader's "show menu" action (macOS `AXShowMenu` on a view that
   listens, VoiceOver's VO-Shift-M; Windows UI Automation's `ShowContextMenu`) raise it too, walking out from that
   view as a click does.
   The payload's `pointerType` (`PointerType`: `"mouse"`, `"pen"`, `"touch"`, the DOM's) is `null` then, and the
@@ -705,7 +705,9 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   a press, a tap or a click that focuses the anchor (a click on a stop where the platform focuses it, a tap into a
   field, a component's or the app's `focus()` after a press) leaves the hint to the pointer, as Radix's tooltips do:
   the press hid it, and it stays hidden after the pointer left. A key typed later, the focus staying, shows
-  `focus-visible:` and no hint; the hint shows once the keyboard moves the focus to the anchor (a move inside the
+  `focus-visible:` and no hint. Closing a modal also restores focus without opening a hint,
+  including after Escape; the restored focus keeps its ring. The next user action resumes normal
+  hint handling, so fresh hover or keyboard navigation can show one again. The hint shows once the keyboard moves the focus to the anchor (a move inside the
   anchor decides nothing again). Before any input the focus counts as the keyboard's (an `autoFocus`), as it
   does for `focus-visible:`. While a hint is shown the core binds Escape (`Overlays::hint_escape`, the same
   `ESCAPE_BINDING`): Escape hides the top shown hint, or goes to `onCancel` when the top overlay is no hint

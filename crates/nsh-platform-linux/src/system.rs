@@ -40,7 +40,9 @@
 //!   background while the surface's window is not shown (the root
 //!   unmapped, the window minimized, or suspended: on another workspace or
 //!   covered, where the compositor says so), active while one of the
-//!   app's windows has the focus, inactive otherwise;
+//!   app's windows has the focus, inactive otherwise; background too from
+//!   the moment the session may end (signing out, shutting down:
+//!   [`crate::session`]);
 //! - the wake count (`wakeCount()`): one more for every surface when
 //!   systemd's `logind` reports the end of a sleep
 //!   (`org.freedesktop.login1.Manager`'s `PrepareForSleep` with `false`,
@@ -326,7 +328,7 @@ fn appearance() -> Appearance {
 }
 
 /// This thread's surfaces.
-fn surfaces() -> Vec<Rc<Surface>> {
+pub(crate) fn surfaces() -> Vec<Rc<Surface>> {
     SYSTEM.with(|s| {
         let mut s = s.borrow_mut();
         s.surfaces.retain(|w| w.strong_count() > 0);
@@ -351,10 +353,11 @@ fn woke() {
     }
 }
 
-/// A surface's window was focused, minimized, suspended, shown or hidden:
-/// tells every surface, as whether the app is the active one depends on
-/// all of its windows.
-fn lifecycle_changed() {
+/// A surface's window was focused, minimized, suspended, shown or hidden,
+/// or the session may end ([`crate::session`]): tells every surface, as
+/// whether the app is the active one depends on all of its windows.
+pub(crate) fn lifecycle_changed() {
+    crate::session::focus_changed(app_focused());
     for surface in surfaces() {
         let mut env: Environment = surface.environment.get();
         env.lifecycle = lifecycle(&surface);
@@ -371,14 +374,23 @@ fn lifecycle(surface: &Surface) -> Lifecycle {
             .native()
             .and_then(|n| toplevel_state(&n))
             .is_none_or(|s| !s.intersects(hidden));
-    let focused = || {
-        gtk::Window::list_toplevels().iter().any(|w| {
-            w.downcast_ref::<gtk::Native>()
-                .and_then(toplevel_state)
-                .is_some_and(|s| s.contains(gdk::ToplevelState::FOCUSED))
-        })
-    };
-    if !shown {
+    lifecycle_of(shown, crate::session::ending(), app_focused)
+}
+
+/// Whether one of the app's windows has the focus.
+pub(crate) fn app_focused() -> bool {
+    gtk::Window::list_toplevels().iter().any(|w| {
+        w.downcast_ref::<gtk::Native>()
+            .and_then(toplevel_state)
+            .is_some_and(|s| s.contains(gdk::ToplevelState::FOCUSED))
+    })
+}
+
+/// The app's state with the surface's window `shown` (mapped, not
+/// minimized or suspended), the session `ending` ([`crate::session`]) and
+/// whether one of the app's windows is `focused`.
+fn lifecycle_of(shown: bool, ending: bool, focused: impl FnOnce() -> bool) -> Lifecycle {
+    if !shown || ending {
         Lifecycle::Background
     } else if focused() {
         Lifecycle::Active
@@ -1682,6 +1694,15 @@ pub(crate) fn simulate_system_scheme(dark: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_ending_session_puts_the_app_in_the_background() {
+        assert_eq!(lifecycle_of(true, false, || true), Lifecycle::Active);
+        assert_eq!(lifecycle_of(true, false, || false), Lifecycle::Inactive);
+        assert_eq!(lifecycle_of(false, false, || true), Lifecycle::Background);
+        assert_eq!(lifecycle_of(true, true, || true), Lifecycle::Background);
+        assert_eq!(lifecycle_of(true, true, || false), Lifecycle::Background);
+    }
 
     #[test]
     fn activation_query_fails_closed_during_overlay_mutation() {

@@ -413,8 +413,8 @@ pub struct CanvasFont {
     pub weight: u16,
     /// Italic.
     pub italic: bool,
-    /// The first family; `None` is the system font (also for
-    /// `system-ui` / `sans-serif`).
+    /// Font family or CSS fallback list (`"SF Mono, Menlo, PingFang SC"`);
+    /// `None` is the system font (`system-ui` / `sans-serif`).
     pub family: Option<Arc<str>>,
     /// OpenType features: `small-caps` and (beyond CSS, which only has
     /// them in `font-variant-numeric`) `tabular-nums`, `oldstyle-nums`,
@@ -472,14 +472,17 @@ impl CanvasFont {
             }
             rest = tail;
         }
-        let family = rest
-            .split(',')
-            .next()
-            .map(|f| f.trim().trim_matches(['"', '\'']))
-            .filter(|f| !f.is_empty())?;
-        font.family = match family {
-            "system-ui" | "sans-serif" | "-apple-system" | "ui-sans-serif" => None,
-            f => Some(f.into()),
+        let mut families = crate::style::font_families(rest);
+        let first = families.next()?;
+        font.family = match (first, families.next()) {
+            (crate::style::FamilyName::System, None) => None,
+            (crate::style::FamilyName::Named(name), None)
+                if !name.contains([',', '"', '\'', '\\'])
+                    && !crate::style::is_css_generic_keyword(name) =>
+            {
+                Some(name.into())
+            }
+            _ => Some(rest.into()),
         };
         Some(font)
     }
@@ -1798,7 +1801,22 @@ mod tests {
     fn fonts_parse_the_css_shorthand() {
         let f = CanvasFont::parse("italic bold 14px \"Inter\", sans-serif").unwrap();
         assert_eq!((f.size, f.weight, f.italic), (px(14.0), 700, true));
-        assert_eq!(f.family.as_deref(), Some("Inter"));
+        assert_eq!(f.family.as_deref(), Some("\"Inter\", sans-serif"));
+        assert_eq!(
+            crate::style::font_families(f.family.as_deref().unwrap()).collect::<Vec<_>>(),
+            vec![
+                crate::style::FamilyName::Named("Inter"),
+                crate::style::FamilyName::System,
+            ]
+        );
+        let single = CanvasFont::parse("14px \"Inter\"").unwrap();
+        assert_eq!(single.family.as_deref(), Some("Inter"));
+        let quoted_generic = CanvasFont::parse("14px \"serif\"").unwrap();
+        assert_eq!(
+            crate::style::font_families(quoted_generic.family.as_deref().unwrap())
+                .collect::<Vec<_>>(),
+            vec![crate::style::FamilyName::Named("serif")]
+        );
         let f = CanvasFont::parse("600 12px/1.5 system-ui").unwrap();
         assert_eq!((f.size, f.weight, f.family), (px(12.0), 600, None));
         let f = CanvasFont::parse("small-caps tabular-nums 13px system-ui").unwrap();
@@ -1815,5 +1833,6 @@ mod tests {
         assert!(CanvasFont::parse("wide 13px system-ui").is_none());
         assert!(CanvasFont::parse("bold").is_none());
         assert!(CanvasFont::parse("14px").is_none());
+        assert!(CanvasFont::parse("14px , ").is_none());
     }
 }

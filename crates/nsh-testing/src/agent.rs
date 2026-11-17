@@ -438,6 +438,10 @@ pub trait Scene: Send + Sync {
     }
     /// The app's errors since the last time, taken.
     fn take_errors(&self) -> Result<Vec<String>, String>;
+    /// The semantic text of a composite input, when its native field is a sink.
+    fn input_value_text(&self, _selector: &str) -> Result<Option<String>, String> {
+        Ok(None)
+    }
     /// The one view `selector` names for a step on `target`.
     fn pick(&self, selector: &str, target: PickTarget) -> Result<Pick, String>;
     /// The scroll views around `id`, innermost first, and whether each
@@ -529,6 +533,13 @@ pub trait Scene: Send + Sync {
 }
 
 impl Scene for Model {
+    fn input_value_text(&self, selector: &str) -> Result<Option<String>, String> {
+        let state = self.lock();
+        let Some(id) = state.screen.input_id(selector)? else {
+            return Ok(None);
+        };
+        Ok(state.screen.semantic_input_text(id).map(str::to_owned))
+    }
     fn window_root(&self, id: &str) -> Result<Option<NodeId>, String> {
         Ok(self.lock().screen.window_root(id))
     }
@@ -564,13 +575,23 @@ impl Scene for Model {
         let parsed = Selector::parse(selector)?;
         let state = self.lock();
         let screen = &state.screen;
-        Ok(match target {
+        let picked = match target {
             PickTarget::Pressable => screen.pressable(&parsed),
             PickTarget::LongPressable => screen.long_pressable(&parsed),
             PickTarget::Input => screen.input_view(&parsed),
             PickTarget::ScrollView => screen.scroll_view(&parsed),
             PickTarget::View => screen.view(&parsed),
-        })
+        };
+        if matches!(target, PickTarget::Input)
+            && let Pick::One(id) = picked
+            && let Some(cover) = screen.input_cover(id)
+        {
+            return Err(crate::failure::covered(
+                selector,
+                &screen.selector_of(cover),
+            ));
+        }
+        Ok(picked)
     }
     fn scroll_ancestors(&self, id: NodeId) -> Result<Vec<(NodeId, bool)>, String> {
         Ok(self.lock().screen.scroll_ancestors(id))
@@ -809,6 +830,9 @@ pub fn answer(model: &Model, step: &TestStep) -> Option<Result<serde_json::Value
                 })
             }),
             SceneQuery::TakeErrors => model.take_errors().map(Value::from),
+            SceneQuery::InputValueText { selector } => {
+                model.input_value_text(selector).map(Value::from)
+            }
             SceneQuery::Pick { selector, target } => model.pick(selector, *target).map(pick_value),
             SceneQuery::ScrollAncestors { id } => {
                 model.scroll_ancestors(*id).and_then(|a| json(to_value(a)))
@@ -886,6 +910,11 @@ impl RemoteScene {
 }
 
 impl Scene for RemoteScene {
+    fn input_value_text(&self, selector: &str) -> Result<Option<String>, String> {
+        self.query(SceneQuery::InputValueText {
+            selector: selector.into(),
+        })
+    }
     fn canvas_node(&self, selector: &str) -> Result<Option<(NodeId, Point<Points>)>, String> {
         self.query(SceneQuery::CanvasNode {
             selector: selector.into(),
@@ -1144,7 +1173,7 @@ pub trait Native: Send + Sync {
         Err("this platform has no mouse".into())
     }
     /// The input that has the keyboard focus, where the platform can tell:
-    /// a paste into it needs no press (one would move its caret).
+    /// typing or a paste into it needs no press (one would move its caret).
     fn focused(&self) -> Option<NodeId> {
         None
     }
@@ -1593,6 +1622,9 @@ impl Agent {
                 serde_json::to_value(self.scene.view_style(&selector)?).map_err(|e| e.to_string())
             }
             TestStep::Value { selector } => {
+                if let Some(text) = self.scene.input_value_text(&selector)? {
+                    return Ok(Value::from(text));
+                }
                 let id = self.scene.input_id(&selector)?;
                 Ok(id
                     .and_then(|id| self.native.input_text(id))
@@ -1685,6 +1717,9 @@ impl Agent {
                 })
             }),
             SceneQuery::TakeErrors => scene.take_errors().map(Value::from),
+            SceneQuery::InputValueText { selector } => {
+                scene.input_value_text(&selector).map(Value::from)
+            }
             SceneQuery::Pick { selector, target } => scene.pick(&selector, target).map(pick_value),
             SceneQuery::ScrollAncestors { id } => {
                 scene.scroll_ancestors(id).and_then(|a| json(to_value(a)))
@@ -1806,6 +1841,10 @@ impl Agent {
                 }
                 _ => self.scroll_into_view(id, selector)?,
             };
+            if matches!(target, PickTarget::Input) {
+                // Scrolling can bring the field underneath another view.
+                self.scene.pick(selector, target)?;
+            }
             return Ok((id, at));
         };
         // A span of a text: its text view comes into view, then the finger
@@ -2062,13 +2101,27 @@ impl Agent {
 
     /// Focuses the input `selector` names by pressing it.
     fn focus(&self, selector: &str) -> Result<(), String> {
-        let (_, at) = self.find(selector, "input", PickTarget::Input)?;
+        let (id, at) = self.find(selector, "input", PickTarget::Input)?;
         self.native.press(at);
-        self.settled()
+        self.settled()?;
+        if let Some(focused) = self.native.focused()
+            && focused != id
+        {
+            return Err(crate::failure::covered(
+                selector,
+                &format!("`view:{focused}`"),
+            ));
+        }
+        Ok(())
     }
 
     fn type_text(&self, selector: &str, text: &str) -> Result<(), String> {
-        self.focus(selector)?;
+        // As the user types in the field they are in: a press first would
+        // move its caret, collapsing a selection the typing replaces.
+        let (id, _) = self.find(selector, "input", PickTarget::Input)?;
+        if self.native.focused() != Some(id) {
+            self.focus(selector)?;
+        }
         // A line break is the return key, as the headless driver types it.
         for (i, line) in text.split('\n').enumerate() {
             if i > 0 {
@@ -2791,5 +2844,214 @@ mod tests {
         ));
         assert!(typed.lock().unwrap().is_empty());
         drop(engine);
+    }
+
+    #[test]
+    fn covered_inputs_fail_before_native_input_even_when_focused() {
+        use nsh_core::{MountItem, ViewKind};
+        let model = Arc::new(Model::default());
+        let mut items = Vec::new();
+        for id in [2, 3] {
+            items.extend([
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::Input,
+                },
+                MountItem::Insert {
+                    parent: 1,
+                    child: id,
+                    before: None,
+                },
+                MountItem::Frame {
+                    id,
+                    frame: Bounds::new(point(px(0.0), px(0.0)), size(px(200.0), px(40.0))),
+                },
+            ]);
+        }
+        model.apply(&MountBatch { items });
+        let did = Arc::new(Mutex::new(Vec::new()));
+        let agent = Agent::new(
+            model,
+            Box::new(Field {
+                did: did.clone(),
+                focused: Mutex::new(true),
+            }),
+        );
+        for step in [
+            TestStep::Clear {
+                selector: "view:2".into(),
+            },
+            TestStep::Type {
+                selector: "view:2".into(),
+                text: "X".into(),
+            },
+        ] {
+            assert!(
+                matches!(agent.take(step), StepOutcome::Failed { message } if message.contains("is covered") && message.contains("view:3"))
+            );
+        }
+        assert!(did.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn local_and_remote_values_read_composite_input_text() {
+        use nsh_core::{AccessibilityValue, MountItem, ViewKind, ViewProps};
+        let model = Arc::new(Model::default());
+        model.apply(&MountBatch {
+            items: vec![
+                MountItem::Create {
+                    id: 2,
+                    kind: ViewKind::Input,
+                },
+                MountItem::Frame {
+                    id: 2,
+                    frame: Bounds::new(point(px(0.0), px(0.0)), size(px(200.0), px(40.0))),
+                },
+                MountItem::Insert {
+                    parent: 1,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        });
+        let remote_model = model.clone();
+        let remote = Arc::new(RemoteScene::new(move |step| {
+            answer(&remote_model, &step).unwrap()
+        }));
+        for text in ["Hallo\nworld", "AHallo\nworld", "external", ""] {
+            let mut props = ViewProps::default();
+            props.accessibility.value = Some(AccessibilityValue {
+                text: Some(text.into()),
+                ..Default::default()
+            });
+            model.apply(&MountBatch {
+                items: vec![MountItem::ViewProps {
+                    id: 2,
+                    props: Box::new(props),
+                }],
+            });
+            for scene in [model.clone() as Arc<dyn Scene>, remote.clone()] {
+                let agent = Agent::new(
+                    scene,
+                    Box::new(Field {
+                        did: Arc::default(),
+                        focused: Mutex::new(false),
+                    }),
+                );
+                assert_eq!(
+                    agent.take(TestStep::Value {
+                        selector: "view:2".into()
+                    }),
+                    StepOutcome::Done {
+                        value: serde_json::json!(text)
+                    }
+                );
+            }
+        }
+    }
+
+    /// A field (view 2): what the agent does to it, and whether it has the
+    /// keyboard focus.
+    struct Field {
+        did: Arc<Mutex<Vec<String>>>,
+        focused: Mutex<bool>,
+    }
+
+    impl Native for Field {
+        fn bounds(&self, id: NodeId) -> Option<Bounds<Points>> {
+            (id == 2).then(|| {
+                Bounds::new(
+                    point(Points(0.0), Points(0.0)),
+                    Size::new(Points(200.0), Points(40.0)),
+                )
+            })
+        }
+        fn viewport(&self) -> Size<Points> {
+            Size::new(Points(400.0), Points(400.0))
+        }
+        fn press(&self, _: Point<Points>) {
+            *self.focused.lock().unwrap() = true;
+            self.did.lock().unwrap().push("press".into());
+        }
+        fn long_press(&self, _: Point<Points>, _: Duration) {}
+        fn scroll(&self, _: Point<Points>, _: Point<Points>) {}
+        fn drag(&self, _: Point<Points>, _: Point<Points>) {}
+        fn type_text(&self, text: &str) {
+            self.did.lock().unwrap().push(format!("type {text}"));
+        }
+        fn key(&self, key: Key) {
+            self.did.lock().unwrap().push(format!("{key:?}"));
+        }
+        fn focused(&self) -> Option<NodeId> {
+            self.focused.lock().unwrap().then_some(2)
+        }
+        fn input_text(&self, _: NodeId) -> Option<String> {
+            None
+        }
+        fn back(&self) -> Result<(), String> {
+            Err("no back here".into())
+        }
+        fn answer_dialog(&self, _: Option<&str>) -> Result<(), String> {
+            Ok(())
+        }
+        fn animating(&self) -> bool {
+            false
+        }
+        fn screenshot(&self) -> Result<Vec<u8>, String> {
+            Ok(Vec::new())
+        }
+        fn resize(&self, _: Points, _: Points) -> Result<(), String> {
+            Ok(())
+        }
+        fn set_dark(&self, _: bool) -> Result<(), String> {
+            Ok(())
+        }
+        fn quit(&self) {}
+    }
+
+    #[test]
+    fn typing_into_the_focused_field_keeps_its_caret_and_selection() {
+        use nsh_core::{MountItem, ViewKind};
+        // #2180: a press before typing would collapse a selection (Cmd+A)
+        // the typing replaces, as it does when the user types.
+        let model = Arc::new(Model::default());
+        model.apply(&MountBatch {
+            items: vec![
+                MountItem::Create {
+                    id: 2,
+                    kind: ViewKind::Input,
+                },
+                MountItem::Frame {
+                    id: 2,
+                    frame: Bounds::new(
+                        point(Points(0.0), Points(0.0)),
+                        Size::new(Points(200.0), Points(40.0)),
+                    ),
+                },
+                MountItem::Insert {
+                    parent: 1,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        });
+        let did = Arc::new(Mutex::new(Vec::new()));
+        let field = Field {
+            did: did.clone(),
+            focused: Mutex::new(false),
+        };
+        let agent = Agent::new(model, Box::new(field));
+        let ok = StepOutcome::Done {
+            value: serde_json::Value::Null,
+        };
+        let step = |text: &str| TestStep::Type {
+            selector: "view:2".into(),
+            text: text.into(),
+        };
+        // Not focused: pressed to take the focus.
+        assert_eq!(agent.take(step("A")), ok);
+        // Focused: typed where its caret is.
+        assert_eq!(agent.take(step("Y")), ok);
+        assert_eq!(*did.lock().unwrap(), ["press", "type A", "type Y"]);
     }
 }

@@ -370,6 +370,14 @@ expect Account trigger
 expect Chosen: none
 frame id:menu-button 0 20 390 44
 covers [nsh/base] MenuButton
+# A context menu given items: the system answers a held finger, so the
+# drawn menu (its children) never shows.
+expect NoteRow
+touch start text:NoteRow 5 5
+wait 600
+touch end
+absent DrawnPin
+covers [props] ContextMenu.items
 # base-nav-page
 tap id:case-base-nav-page
 # pop and header are events and props here: the headless runtime has no
@@ -967,6 +975,49 @@ listens parent:text:SwipeSheetBody onPanEnd
 tap below:parent:text:SwipeSheetBody
 absent SwipeSheetBody
 covers [props] closeOnSwipe
+# A bottom sheet with detents: as tall as the largest (the screen), resting
+# at the smallest (half of it, 422 points below its top), with a grabber
+# the app styles that screen readers adjust and a footer at the bottom of
+# what shows (as far up from the panel's bottom; its content is in the
+# slot's own view).
+tap text:OpenDetentSheet
+expect DetentBody
+wait 400
+frame parent:text:DetentBody 0 0 390 844
+animated parent:text:DetentBody transform.1 422
+animated parent:parent:text:DetentFooter transform.0 -422
+frame parent:parent:text:DetentFooter 0 804 390 40
+style parent:parent:text:DetentFooter backgroundColor #234567ff
+listens parent:text:DetentBody onPanEnd
+prop label:Resize role adjustable
+frame label:Resize 175 0 40 6
+style label:Resize backgroundColor #123456ff
+event label:Resize onAccessibilityAction actionName=increment
+expect Detent: large
+wait 1000
+animated parent:text:DetentBody transform.1 0
+tap below:parent:text:DetentBody
+absent DetentBody
+covers [props] Sheet.detents
+covers [props] Sheet.detent
+covers [props] Sheet.grabber
+covers [props] Sheet.grabberClass
+covers [props] Sheet.grabberStyle
+covers [props] Sheet.grabberAccessibilityLabel
+covers [props] Sheet.footer
+covers [props] Sheet.footerClass
+covers [props] Sheet.footerStyle
+covers [events] Sheet.onDetentChange
+# Detents of points and of a share of the screen: the largest (half the
+# screen) is the panel's height, and `defaultDetent` the first rest.
+tap text:OpenCustomSheet
+expect CustomBody
+wait 400
+frame parent:text:CustomBody 0 422 390 422
+animated parent:text:CustomBody transform.1 0
+tap below:parent:text:CustomBody
+absent CustomBody
+covers [props] Sheet.defaultDetent
 # `closeOnBackdropPress={false}`: its backdrop keeps it.
 tap below:parent:text:StuckSheet
 expect StuckSheet
@@ -1062,6 +1113,12 @@ frame text:Wi-Fi 52 4 39 17
 tap id:wifi
 expect Changes: 2
 prop id:wifi accessibilityState checked=false
+frame text:Wi-Fi 32 4 39 17
+# Held down, wherever on it: `active:` of the parts follows the switch
+# (the thumb 24 wide at once puts the label at 36), until it is released.
+state id:wifi pressed
+frame text:Wi-Fi 36 4 39 17
+state id:wifi none
 frame text:Wi-Fi 32 4 39 17
 # The app owns the value: a switch it keeps on asks for off and stays on.
 prop id:lights accessibilityLabel Lights
@@ -1709,13 +1766,19 @@ expect Details
 frame id:region 0 20 390 54
 frame id:details 0 0 390 30
 frame id:after 0 74 390 20
-# Closed: the frames at once, the details out once the region has closed.
+# Closed: the frames at once, the details out once the region has closed:
+# the app's spring (stiffness 620, damping 36) settles in about 384 ms,
+# so they are still there after 300 (the default's would have gone at
+# about 265).
 tap id:trigger
 frame id:region 0 20 390 24
 frame id:after 0 44 390 20
-wait 400
+wait 300
+frame id:details 0 0 390 30
+wait 100
 absent Details
 covers [props] Collapsible.reveal
+covers [props] Collapsible.revealSpring
 
 # base-accordion
 tap id:case-base-accordion
@@ -1770,13 +1833,16 @@ frame id:faq 0 20 390 90
 listens id:details-a onPress
 tap id:details-b
 expect Taps b: 1
-# The open item's trigger closes it; the revealed panel springs shut and
-# its content leaves once it has.
+# The open item's trigger closes it; the revealed panel springs shut on
+# the app's spring (settling in about 384 ms, the default in about 265)
+# and its content leaves once it has.
 tap text:Returns
 expect Open: none
 frame id:item-b 0 20 390 20
 frame id:faq 0 20 390 60
-wait 400
+wait 300
+frame id:details-b 0 0 390 30
+wait 100
 absent Returns details
 # With `multiple`, opening one leaves the others open.
 tap id:multiple
@@ -1808,6 +1874,7 @@ covers [props] Accordion.multiple
 covers [props] AccordionHeader.level
 covers [props] expandedStyle
 covers [props] AccordionPanel.reveal
+covers [props] AccordionPanel.revealSpring
 covers [props] AccordionPanel.keepMounted
 covers [props] accessibilityLabel
 
@@ -3941,6 +4008,9 @@ covers [events] ToastStack.onExpandedChange
 
 # base-editor
 tap id:case-base-editor
+# The editor keeps its native multiline input with its own drawn caret.
+prop label:Code multiline true
+prop label:Code caret false
 # The text is the editor's own, drawn a row per line; nothing is
 # reported before an edit.
 expect let x = 1;

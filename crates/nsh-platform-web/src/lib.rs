@@ -491,8 +491,8 @@ fn page() -> Environment {
 /// bottom, left]`), `keyboard` (the height the on-screen keyboard
 /// covers), `appleKeyboard` (the browser runs on an Apple platform: its
 /// shortcuts are Apple's), `host` (the page answers `nsh/host` calls:
-/// `createPlayer`'s `host`) and `screenColor` (the browser has an
-/// `EyeDropper`) and `shaders` (`false` once a shader view found no
+/// `createPlayer`'s `host`), `screenColor` (the browser has an
+/// `EyeDropper`), `share` (the browser has `navigator.share`) and `shaders` (`false` once a shader view found no
 /// WebGL 2); missing keys keep their value. Called before the app starts
 /// and on every change; the idiom and `host` are the ones at start, as on every
 /// platform. Returns the pump delay.
@@ -599,6 +599,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         None => env.lifecycle,
     };
     env.screen_color = flag("screenColor").unwrap_or(env.screen_color);
+    env.share = flag("share").unwrap_or(env.share);
     env.notifications = flag("notifications").unwrap_or(env.notifications);
     env.audio = flag("audio").unwrap_or(env.audio);
     env.shaders = flag("shaders").unwrap_or(env.shaders);
@@ -617,6 +618,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.keyboard_height = env.keyboard_height;
         e.lifecycle = env.lifecycle;
         e.screen_color = env.screen_color;
+        e.share = env.share;
         e.notifications = env.notifications;
         e.audio = env.audio;
         e.shaders = env.shaders;
@@ -752,10 +754,10 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         serde_json::json!({ "url": url, "page": true, "quiet": true, "base": base })
     });
     let Some(mut engine) = LocalEngine::start_with(config, text.clone(), Sink, |control| {
-        if let Some(payload) = page {
-            if let Some(payload) = event::payload(EventKind::UrlScheme, payload) {
-                control.dispatch_event(ROOT_ID, EventKind::UrlScheme, payload);
-            }
+        if let Some(payload) = page
+            && let Some(payload) = event::payload(EventKind::UrlScheme, payload)
+        {
+            control.dispatch_event(ROOT_ID, EventKind::UrlScheme, payload);
         }
     }) else {
         return -1.0;
@@ -1714,6 +1716,25 @@ pub extern "C" fn nsh_scroll(id: u32, x: f32, y: f32, applied: u32) -> f64 {
         }
         app.control.scroll(id, point(px(x), px(y)), applied);
     })
+}
+
+/// The user moved scroll view `id` with a scroll key, which the page
+/// animates (`EngineControl::key_scrolled`; a list follows its end from
+/// End on). `kind` is the key's move, as `scrollKey` of `web/nsh.js`
+/// numbers it: 0 by `amount` points along the view's axis, 1 by `amount`
+/// viewports, 2 to the start, 3 to the end.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_key_scroll(id: u32, kind: u32, amount: f32) -> f64 {
+    use nsh_core::scroll::KeyMove;
+    let key_move = match kind {
+        0 => KeyMove::Points(px(amount)),
+        1 => KeyMove::Pages(amount),
+        2 => KeyMove::Start,
+        3 => KeyMove::End,
+        // A move this runtime does not know: nothing to tell the core.
+        _ => return pump(),
+    };
+    send(|app| app.control.key_scrolled(id, key_move))
 }
 
 /// The text of multiline input `id` scrolled to `y`, or its height

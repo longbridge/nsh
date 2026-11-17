@@ -125,6 +125,15 @@ pub(crate) enum Action {
     /// Lets the user pick a color on the screen; the color (none when
     /// cancelled or not supported) resolves the slot.
     PickScreenColor(AnswerSlot<Option<crate::Hsla>>),
+    /// Shows the system's share sheet ([`crate::share`]); how it ended, or
+    /// why it could not share, resolves the slot.
+    Share(
+        crate::share::ShareRequest,
+        AnswerSlot<Result<crate::share::ShareOutcome, crate::share::ShareError>>,
+    ),
+    /// Whether the platform shows a share sheet and the app's capabilities
+    /// grant `share`.
+    ShareAvailable(AnswerSlot<bool>),
     /// Renders a drawing offscreen into an image
     /// ([`crate::canvas::render`]); the image's bytes, or why not, resolve
     /// the slot.

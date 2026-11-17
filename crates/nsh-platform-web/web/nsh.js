@@ -350,7 +350,7 @@ img.nsh-fill { pointer-events: none; }
 .nsh-dialog h3 { font-size: 17px; font-weight: 600; margin: 18px 16px 4px; }
 .nsh-dialog p { margin: 0 16px 18px; }
 .nsh-dialog button { display: block; width: 100%; border: 0; border-top: 0.5px solid rgba(0,0,0,.2); background: none;
-  font: 17px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #007aff; padding: 11px; cursor: pointer; }
+  font: 17px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #007aff; padding: 11px; cursor: default; }
 /* Dialogs on desktop browsers: the in-surface cards of the Linux and macOS backends. */
 .nsh-desktop .nsh-dialog-backdrop { background: rgba(0,0,0,.4); }
 .nsh-desktop .nsh-dialog { width: min(340px, calc(100% - 64px)); border-radius: 12px; padding: 20px; text-align: left;
@@ -393,7 +393,7 @@ img.nsh-fill { pointer-events: none; }
 .nsh-sheet > div { border-radius: 14px; background: rgba(245,245,245,.97); color: #000; overflow: hidden; text-align: center; }
 .nsh-sheet .nsh-sheet-head { padding: 12px 16px; color: #8a8a8e; border-bottom: 0.5px solid rgba(0,0,0,.2); }
 .nsh-sheet .nsh-sheet-head b { display: block; font-weight: 600; }
-.nsh-sheet button { display: block; width: 100%; border: 0; background: none; padding: 16px; cursor: pointer;
+.nsh-sheet button { display: block; width: 100%; border: 0; background: none; padding: 16px; cursor: default;
   font: 19px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #007aff; }
 .nsh-sheet button + button { border-top: 0.5px solid rgba(0,0,0,.2); }
 .nsh-sheet button.cancel { font-weight: 600; }
@@ -443,7 +443,7 @@ img.nsh-fill { pointer-events: none; }
   border-left: 3px solid #ff6b6b; border-radius: 10px; white-space: pre-wrap; -webkit-user-select: text; user-select: text; }
 .nsh-error-copy { float: right; position: sticky; top: 0; margin: 0 0 6px 10px; border: 0; border-radius: 6px;
   background: rgba(255,255,255,.12); color: #fff; font: 600 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  padding: 4px 12px; cursor: pointer; }
+  padding: 4px 12px; cursor: default; }
 .nsh-error-copy:hover { background: rgba(255,255,255,.2); }
 `;
 
@@ -483,6 +483,18 @@ function navigationIndex() {
 /** The offset of local time at `ms` (since the epoch) in seconds east of UTC. */
 function localOffset(ms) {
   return 0 - new Date(ms).getTimezoneOffset() * 60;
+}
+
+/**
+ * Whether the page can show the browser's share sheet: it has
+ * `navigator.share` and the page's permissions policy allows `web-share`
+ * (a frame of another origin needs `allow="web-share"`).
+ */
+function webShareAllowed() {
+  if (typeof navigator === "undefined" || typeof navigator.share !== "function") return false;
+  const doc = typeof document === "undefined" ? undefined : document;
+  const policy = doc?.permissionsPolicy ?? doc?.featurePolicy;
+  return typeof policy?.allowsFeature === "function" ? policy.allowsFeature("web-share") : true;
 }
 
 /** The browser's time zone (`Asia/Shanghai`), Intl's default; "" when unknown. */
@@ -1569,10 +1581,45 @@ class Player {
       this.measure.font = font;
       const t = this.measure.measureText("Hg");
       const x = this.measure.measureText("x");
-      m = [t.fontBoundingBoxAscent ?? 0, t.fontBoundingBoxDescent ?? 0, x.actualBoundingBoxAscent ?? 0];
+      // Ascent and descent as the DOM draws a run (`.nsh-run`: absolutely
+      // placed, `font` shorthand, so `line-height: normal`): where its
+      // baseline falls in its box. Canvas rounds its font box to whole
+      // pixels (Chrome), each font its own way, which put runs of two fonts
+      // on one line up to a pixel and a half apart on a phone.
+      const dom = this.domMetrics(font);
+      m = dom
+        ? [dom[0], dom[1], x.actualBoundingBoxAscent ?? 0]
+        : [t.fontBoundingBoxAscent ?? 0, t.fontBoundingBoxDescent ?? 0, x.actualBoundingBoxAscent ?? 0];
       this.metricsCache.set(font, m);
     }
     return m;
+  }
+
+  /** `[ascent, descent]` of a run in `font` as the DOM lays it out, or
+   * null without a document to measure in. */
+  domMetrics(font) {
+    if (typeof document === "undefined" || !document.body) return null;
+    let probe = this.metricsProbe;
+    if (!probe || !probe.box.isConnected) {
+      const box = document.createElement("div");
+      box.setAttribute("aria-hidden", "true");
+      box.style.cssText = "position:absolute;left:-10000px;top:0;visibility:hidden;pointer-events:none";
+      const run = document.createElement("span");
+      run.className = "nsh-run";
+      run.style.cssText = "left:0;top:0";
+      run.textContent = "Hg";
+      const mark = document.createElement("i");
+      mark.style.cssText = "display:inline-block;width:0;height:0;vertical-align:baseline";
+      run.append(mark);
+      box.append(run);
+      document.body.append(box);
+      probe = this.metricsProbe = { box, run, mark };
+    }
+    probe.run.style.font = font;
+    const top = probe.run.getBoundingClientRect();
+    const ascent = probe.mark.getBoundingClientRect().top - top.top;
+    if (!(top.height > 0)) return null;
+    return [ascent, top.height - ascent];
   }
 
   /**
@@ -2022,6 +2069,7 @@ class Player {
         : document.hasFocus() ? "active" : "inactive",
       timeZone: timeZoneName(),
       screenColor: typeof window.EyeDropper === "function",
+      share: webShareAllowed(),
       notifications: typeof window.Notification === "function",
       audio: typeof (window.AudioContext ?? window.webkitAudioContext) === "function",
       // Shader views draw until the first one finds no WebGL 2 (`shaderGl`).
@@ -6709,6 +6757,8 @@ class Player {
         break;
       }
       case "zoomTo": if (el) this.zoomCommand(el, ...args); break;
+      case "setResponder": this.responderBlocks = !!args[0]; break;
+      case "clearResponder": this.responderBlocks = false; break;
       case "dialog": this.dialog(args[0], args[1], args[2], args[3], args[4] ?? [], args[5] ?? true, args[6] ?? false); break;
       case "reload": {
         const frame = el?._frameEl;
@@ -6759,6 +6809,7 @@ class Player {
       // Pages see no local paths: never any files.
       case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
       case "pickScreenColor": this.pickScreenColor(args[0]); break;
+      case "share": this.share(args[0], args[1], args[2], args[3], args[4]); break;
       case "renderCanvas": this.renderCanvas(...args); break;
       case "pickImages": this.pickImages(args[0], args[1], args[2], args[3], args[4]); break;
       case "pickFiles": this.pickFiles(args[0], args[1], args[2], args[3]); break;
@@ -6984,6 +7035,43 @@ class Player {
       color = parseInt(sRGBHex.slice(1, 7), 16) * 256 + 255;
     } catch {}
     this.event(ROOT_ID, "onScreenColor", color === undefined ? { id: request } : { id: request, color });
+  }
+
+  // `share`: the browser's share sheet (`navigator.share`, which the
+  // environment's `share` reports). A page has no local files to share, and
+  // a browser that cannot share this content says so: both are reported as
+  // unavailable, never as shared. The user closing the sheet rejects with
+  // an `AbortError`: dismissed.
+  async share(request, title, text, url, files) {
+    const unavailable = (error) => this.event(ROOT_ID, "onShare",
+      { id: request, error, code: "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM" });
+    const data = {};
+    if (title != null) data.title = title;
+    if (text != null) data.text = text;
+    if (url != null) data.url = url;
+    if (files) return unavailable("share: a page shares no local files");
+    if (!webShareAllowed()) return unavailable("share: this browser has no share sheet for this page");
+    if (typeof navigator.canShare === "function" && !navigator.canShare(data)) {
+      return unavailable("share: this browser cannot share this content");
+    }
+    try {
+      await navigator.share(data);
+      this.event(ROOT_ID, "onShare", { id: request, action: "shared" });
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        this.event(ROOT_ID, "onShare", { id: request, action: "dismissed" });
+      } else if (err?.name === "NotAllowedError") {
+        // The browser refuses the sheet here: the page's permissions policy
+        // (a frame without `web-share`) or a share without a user gesture.
+        unavailable(`share: the browser does not allow sharing here (${err?.message ?? err})`);
+      } else if (err?.name === "InvalidStateError") {
+        // An earlier share's sheet is still open: a browser shows one at a
+        // time and keeps it until the user closes it.
+        unavailable(`share: the browser still shows an earlier share (${err?.message ?? err})`);
+      } else {
+        this.event(ROOT_ID, "onShare", { id: request, error: `share: ${err?.message ?? err}` });
+      }
+    }
   }
 
   // Audio (`Sound`, `AudioPlayer`) -----------------------------------------
@@ -8194,6 +8282,14 @@ class Player {
     root.addEventListener("pointerdown", () => this.inputWith(1), true);
     window.addEventListener("keydown", (e) => MODALITY_KEYS_SKIPPED.has(e.key) || this.inputWith(0), true);
     root.addEventListener("pointerdown", (e) => this.pointerDown(e));
+    // A responder that blocks native scrolling (`setResponder`, a
+    // `TouchClaim`'s `block_native`) keeps its touches: the browser would
+    // scroll the scroll view around it and cancel them. One the browser
+    // already scrolls (`cancelable` false) stays the browser's, as a
+    // native scroll view that started dragging first takes them over.
+    root.addEventListener("touchmove", (e) => {
+      if (this.responderBlocks && e.cancelable) e.preventDefault();
+    }, { passive: false });
     // A link (`Link` with an `href`) is the app's to press: a plain click
     // stays in the app (its `onPress`), a click with a modifier or the
     // middle button opens its `href` as the browser would.
@@ -8694,10 +8790,16 @@ class Player {
     const pos = h ? el.scrollLeft : el.scrollTop;
     const max = h ? el.scrollWidth - el.clientWidth : el.scrollHeight - el.clientHeight;
     const page = (h ? el.clientWidth : el.clientHeight) * 0.875;
-    const d = { ArrowUp: -40, ArrowLeft: -40, ArrowDown: 40, ArrowRight: 40, PageUp: -page, PageDown: page,
-      " ": e.shiftKey ? -page : page, Home: -pos, End: max - pos }[k];
+    // The key's move, as `nsh_key_scroll` takes it: by points (0), by
+    // pages (1), to the start (2), to the end (3).
+    const [kind, amount] = { ArrowUp: [0, -40], ArrowLeft: [0, -40], ArrowDown: [0, 40], ArrowRight: [0, 40],
+      PageUp: [1, -1], PageDown: [1, 1], " ": [1, e.shiftKey ? -1 : 1], Home: [2, 0], End: [3, 0] }[k];
+    const d = [amount, amount * page, -pos, max - pos][kind];
     if (el._snapPoints) this.snapStep(el, Math.sign(d));
     else this.scrollSmoothly(el, h ? d : 0, h ? 0 : d, true);
+    // A list follows its real end from here on (rows never rendered are
+    // only estimated), and the other keys leave it.
+    this.call((w) => w.nsh_key_scroll(el._id, kind, amount));
     return true;
   }
 

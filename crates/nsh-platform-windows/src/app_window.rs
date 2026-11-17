@@ -82,8 +82,9 @@ pub(crate) struct AppWindow {
     /// What shows it, see-through where the app draws nothing (transparent
     /// windows, system backdrops, click-through windows).
     composition: Option<Rc<Composition>>,
-    /// The composition of its web views while it has some (each holds
-    /// it): the see-through one, else one over its swap chain.
+    /// The composition of its web views and composed components while it
+    /// has some (each holds it): the see-through one, else one over its
+    /// swap chain.
     web: RefCell<Weak<Composition>>,
     /// The hosted items and the composed items (web views) its last frame
     /// drew.
@@ -164,8 +165,9 @@ pub(crate) fn hwnd_showing(surface: &Surface, view: &NshView) -> HWND {
     }
 }
 
-/// The composition the web views of the window showing dialog root `id`
-/// are in, and its native window: made with the first of them.
+/// The composition the web views and composed components of the window
+/// showing dialog root `id` are in, and its native window: made with the
+/// first of them.
 #[cfg_attr(not(feature = "webview"), allow(dead_code))]
 pub(crate) fn compose(
     surface: &Surface,

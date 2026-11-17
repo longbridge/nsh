@@ -47,8 +47,10 @@ use crate::{
     web::WebHost,
 };
 
+/// The mounter of a surface, reached on the main thread.
+pub(crate) type MounterCell = MainThreadBound<RefCell<Option<Mounter>>>;
 /// The mounter of one surface, shared with native callbacks.
-pub(crate) type SharedMounter = Arc<MainThreadBound<RefCell<Option<Mounter>>>>;
+pub(crate) type SharedMounter = Arc<MounterCell>;
 
 enum Native {
     /// The surface root (owned by the platform).
@@ -774,6 +776,9 @@ pub(crate) struct Mounter {
     /// The tint of this surface's alerts and action sheets, from its
     /// tokens ([`crate::system::alert_tint`]).
     alert_tint: Option<nsh_core::element::AdaptiveColor>,
+    /// The surface's share sheet, which a new share replaces
+    /// ([`crate::share`]).
+    share: crate::share::Current,
     /// `SplitView`s' splits, by their native component's node
     /// ([`crate::split`]).
     splits: rustc_hash::FxHashMap<NodeId, crate::split::SplitHost>,
@@ -796,6 +801,7 @@ impl Mounter {
         let scrolls = crate::scroll_watch::SurfaceScrolls::default();
         let target = EventTarget::new(mtm, control.clone(), shared.clone(), scrolls.clone());
         let target_for_link = target.clone();
+        let shaders = crate::shader::Shaders::new(&target_for_link, &shared);
         let mut views = Vec::with_capacity(256);
         views.resize_with(2, || None);
         root.setTag(nsh_core::ROOT_ID as isize);
@@ -840,11 +846,12 @@ impl Mounter {
             created: Vec::new(),
             disappearing: Default::default(),
             frame_link: crate::animation::frame_link(&target_for_link),
-            shaders: crate::shader::Shaders::new(&target_for_link),
+            shaders,
             text_colors: crate::interaction::TextColors::new(&target_for_link),
             nav_shaders: rustc_hash::FxHashMap::default(),
             leaving_screens: rustc_hash::FxHashMap::default(),
             alert_tint: None,
+            share: Default::default(),
             hosts: Default::default(),
             dirty_stacks: Vec::new(),
             bottom_bar_dirty: false,
@@ -2001,6 +2008,17 @@ impl Mounter {
                 native,
             ) if id == nsh_core::ROOT_ID => {
                 crate::picker::pick_files(request, asked, native.view(), &self.control);
+            }
+            (Command::Share { id: request, sheet }, native) if id == nsh_core::ROOT_ID => {
+                let anchor = sheet.anchor.and_then(|anchor| self.ui_view(anchor));
+                crate::share::show(
+                    request,
+                    &sheet,
+                    native.view(),
+                    anchor.as_deref(),
+                    &self.share,
+                    &self.control,
+                );
             }
             (
                 Command::RenderCanvas {
@@ -5103,7 +5121,7 @@ impl Mounter {
                 ) || pan.state() == UIGestureRecognizerState::Ended && scroll.isDragging())
             {
                 let t = pan.translationInView(view.superview().as_deref());
-                if s.gesture_start[1] + t.y as f32 > touched.offset {
+                if t.y as f32 > touched.offset {
                     return CGPoint::new(offset.x, -scroll.adjustedContentInset().top);
                 }
             }
@@ -5164,12 +5182,15 @@ impl Mounter {
                 self.animator.set(n, start[0] + t.x as f32);
             }
             if let Some(n) = values.pan_y {
-                let y = self
-                    .slot(id)
-                    .and_then(|s| s.pan_scroll.as_ref())
-                    .map_or(start[1] + t.y as f32, |scroll| {
-                        (start[1] + t.y as f32 - scroll.offset).max(0.0)
-                    });
+                let y = self.slot(id).and_then(|s| s.pan_scroll.as_ref()).map_or(
+                    start[1] + t.y as f32,
+                    |scroll| {
+                        // From where the value was (a sheet resting at a
+                        // detent stands below 0): only the downward
+                        // distance the scroll left over moves it.
+                        start[1] + (t.y as f32 - scroll.offset).max(0.0)
+                    },
+                );
                 let begins = y != start[1]
                     && self
                         .slot_mut(id)
@@ -5282,6 +5303,14 @@ impl Mounter {
     /// The shaders' display link fired.
     pub(crate) fn shader_frame(&mut self) {
         self.shaders.frame();
+    }
+
+    /// The GPU device the shaders asked for opened (`None`: there is none,
+    /// which the app hears: `shadersAvailable()`).
+    pub(crate) fn shaders_opened(&mut self, renderer: Option<nsh_engine::shader::Renderer>) {
+        if self.shaders.opened(renderer) {
+            self.control.shaders_unavailable();
+        }
     }
 
     /// The display link of texts whose color transitions fired.

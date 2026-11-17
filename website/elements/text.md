@@ -88,8 +88,8 @@ text("Run ")
 ```
 
 The Tailwind classes work the same way: `<Text class="bg-gray-100 rounded px-1">`. Horizontal padding takes room in the
-line at the span's two ends and its background covers it, as a CSS inline box's does; vertical padding and borders
-leave spans as they are.
+line at the span's two ends and its background covers it, as a CSS inline box's does; vertical padding grows the
+background above and below the text without changing the line's height, and borders leave spans as they are.
 
 ### Hidden spans
 

@@ -41,13 +41,15 @@ interface AppUpdate {
   notes?: string | null;
   url: string;
   canInstall: boolean;
+  shell: boolean;
 }
 ```
 
 Fetches the manifest from the source in `nsh.json` and resolves the newer version it describes, or `null` when the app
-is up to date, has no `"updater"`, or runs where apps do not update (the web, `nsh run`). A run on a
-[package](#checkforpackage) of that version or a later one is up to date too: the app's own version stays the one it
-shipped as, but its code is already the release's.
+is up to date, has no `"updater"`, or runs where apps do not update (the web, `nsh run`). It compares the installed
+app's own version, the one it shipped as. A run on a [package](#checkforpackage) of that version or a later one still
+gets the update, with `shell` true: its code is already the release's, and only the installed app (the runtime and
+native shell) is behind.
 
 | Field | Meaning |
 | --- | --- |
@@ -55,6 +57,7 @@ shipped as, but its code is already the release's.
 | `notes` | What changed, as the manifest's `--notes` file says it |
 | `url` | Where the user can get it by hand: the archive, or the store page on iOS and Android. Pass it to [`openUrl`](./nsh.md#openurl) when `canInstall` is false |
 | `canInstall` | Whether `downloadUpdate` and `installAndRestart` work in this run: a packaged desktop app installed where the user can write. False on iOS and Android, and under a directory only the system writes (a system package) |
+| `shell` | Whether only the installed app is behind: this run's [package](#checkforpackage) is already this version or later, so the update brings a newer runtime and native shell, not newer code. Apps that update by package can offer it as a quieter, optional step |
 
 It rejects when the source cannot be reached or its manifest is not acceptable: a bad or missing signature when
 `publicKey` is set, another app's id, a URL that is not HTTPS. A manifest of the same or an older version is not an

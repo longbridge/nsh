@@ -2,6 +2,10 @@
 //! click or a held finger), their `MenuItem`s, `MenuSeparator`s and
 //! `Submenu`s.
 //!
+//! A `ContextMenu` given `items` (`MenuButton`'s item data) is the system's
+//! context menu on iOS instead (`system_menu`): a native component the
+//! iOS backend answers without JS, its children the menu elsewhere.
+//!
 //! One structure for every device, presented as it suits (`popup.rs`): on
 //! the desktops, and on an iPad whose window is regular in width, a popup
 //! at the trigger (or the pointer) whose submenus cascade beside the item
@@ -37,18 +41,19 @@ use std::{
 };
 
 use nsh_core::{
-    AccessibilityState, Checked, ContextMenuEvent, PointerType, TouchEvent, TouchPhase,
+    AccessibilityState, Checked, ContextMenuEvent, JsonValue, PointerType, TouchEvent, TouchPhase,
     element::{OrderWatch, Style, watch_order},
     geometry::Axis,
     keymap::When,
     overlay::OverlayAnchor,
-    platform::{Idiom, Os},
+    platform::{CONTEXT_MENU_COMPONENT, Idiom, Os},
     prelude::*,
     time::now,
 };
 
 use crate::{
     listbox::{self, Typeahead},
+    menu_button::{MenuButtonItem, menu_json},
     popup::{
         OpenChangeReason, OpenState, PopupPresence, SheetMotion, StateLooks,
         bottom_panel_max_height, keyboard_lift, lifecycle,
@@ -1924,6 +1929,50 @@ pub enum MenuEvent {
     Position(Placement, Bounds<Points>, Size<Points>),
 }
 
+/// The events of a [`ContextMenu`]: a menu's ([`MenuEvent`]'s), and the
+/// choice in the system's menu its `items` make. (`ContextMenuEvent` is
+/// the core's `onContextMenu` payload.)
+#[derive(Debug, Clone, PartialEq, Event)]
+pub enum ContextMenuEvents {
+    /// It opened or closed (a secondary click or a held finger, a press
+    /// outside or on the backdrop, Escape or back, an item chosen), with
+    /// why: set `open` to follow it.
+    #[args(open, reason)]
+    OpenChange(bool, OpenChangeReason),
+    /// It is shown (a sheet once it came in).
+    Open,
+    /// It is gone (a sheet once it went, a popup after its exit; also when
+    /// the app closed it).
+    Close,
+    /// The user tried to close it without choosing (Escape or back, a press
+    /// outside or on the backdrop).
+    Cancel,
+    /// As a popup: the popup was placed: the side it went on (the other
+    /// side of `placement` when only that one had room), its frame in the
+    /// root view and the room on that side.
+    #[args(placement, bounds, available)]
+    Position(Placement, Bounds<Points>, Size<Points>),
+    /// iOS only: the user chose the item of this `id` in the system's
+    /// menu (`items`); the menu has closed. Not sent on the other
+    /// platforms, whose drawn menu reports through its items' `onSelect`.
+    #[args(id)]
+    Select(SharedString),
+}
+
+impl From<MenuEvent> for ContextMenuEvents {
+    fn from(event: MenuEvent) -> Self {
+        match event {
+            MenuEvent::OpenChange(open, reason) => Self::OpenChange(open, reason),
+            MenuEvent::Open => Self::Open,
+            MenuEvent::Close => Self::Close,
+            MenuEvent::Cancel => Self::Cancel,
+            MenuEvent::Position(placement, bounds, available) => {
+                Self::Position(placement, bounds, available)
+            }
+        }
+    }
+}
+
 /// A menu its trigger opens: a popup at the trigger on the desktops and on
 /// an iPad whose window is regular in width (UIKit's horizontal size
 /// class), a sheet at the bottom of the screen (over a backdrop) on phones
@@ -2120,6 +2169,20 @@ pub struct ContextMenuProps {
     /// the focus (the web, Linux) or a screen reader's "show menu" action (macOS,
     /// Windows) opens the menu.
     pub trigger: Prop<Option<Slot>>,
+    /// iOS only: the menu as data, for the system's own context menu. On
+    /// iOS (and Mac Catalyst) any items make the menu the system's
+    /// (`UIContextMenuInteraction`: the trigger lifts as its preview over
+    /// the blurred screen, with the system's haptics, placement and
+    /// motion), in place of the children; a chosen item comes back as
+    /// `onSelect({ id })`. `MenuButton`'s items: ids, labels, SF Symbols,
+    /// checks, disabled and destructive items, submenus and sections. On
+    /// every other platform `items`, `title` and `onSelect` are not used:
+    /// the children are the menu, drawn as without `items`.
+    #[prop(default)]
+    pub items: Prop<Vec<MenuButtonItem>>,
+    /// iOS only: the system's menu's title, above its items (`items`);
+    /// none when unset. Not used on the other platforms.
+    pub title: Prop<Option<SharedString>>,
     /// The items, made on each opening.
     #[prop(lazy)]
     pub children: Prop<Children>,
@@ -2143,9 +2206,25 @@ pub struct ContextMenuProps {
 /// first enabled item and Up or End the last, as `Menu`'s keys do.
 /// Its items are those of `Menu`, and so is how it
 /// closes and how it is styled.
+///
+/// Given `items`, iOS shows the system's context menu instead
+/// (`UIContextMenuInteraction`, on the native component
+/// [`CONTEXT_MENU_COMPONENT`]): a held finger lifts the trigger over the
+/// blurred screen and shows the items below it, a secondary click (an
+/// iPad's pointer, Mac Catalyst) shows them at the pointer, all answered
+/// natively without waiting for JS. It reports `onOpenChange`, `onOpen`,
+/// `onSelect({ id })`, `onCancel` and `onClose` as the drawn menu does;
+/// the app cannot open it (`open` set true shows nothing), and `open` set
+/// false closes it.
 #[component]
-pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
+pub fn ContextMenu(props: ContextMenuProps, cx: Scope<ContextMenuEvents>) -> impl IntoElement {
     let open = OpenState::new(props.open, Prop::from(false));
+    let items = props.items;
+    // The system's menu: iOS with items. The drawn menu's openers stand
+    // aside while it is, so a held finger opens one menu. Elsewhere there
+    // is nothing to follow: the menu is made as without `items`.
+    let system = (os() == Os::Ios).then(|| computed(move || items.with(|i| !i.is_empty())));
+    let is_system = move || system.is_some_and(|s| s.get_untracked());
     // An opening from the keyboard or an assistive technology focuses the
     // first enabled item once they are there.
     let keyed = stored(None::<Keyed>);
@@ -2158,7 +2237,9 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
             return;
         }
         why.stamp(reason);
-        open.request(next, || cx.emit(MenuEvent::OpenChange(next, reason)));
+        open.request(next, || {
+            cx.emit(ContextMenuEvents::OpenChange(next, reason))
+        });
     });
     // Where the pointer asked for it; none when the app opened it.
     let point = signal(None::<Point<Points>>);
@@ -2198,6 +2279,9 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
             trigger
                 .element_ref(&anchor)
                 .on_context_menu(move |e: &ContextMenuEvent| {
+                    if is_system() {
+                        return;
+                    }
                     point.set(Some(e.page_position));
                     // No pointer: the keyboard (Shift+F10, the Menu key) or
                     // an assistive technology, placed at the trigger by the
@@ -2219,7 +2303,8 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
                     match e.phase {
                         TouchPhase::Start
                             if e.points.len() == 1
-                                && e.points[0].pointer_type != PointerType::Mouse =>
+                                && e.points[0].pointer_type != PointerType::Mouse
+                                && !is_system() =>
                         {
                             let on_hold = on_hold.clone();
                             let page = at.unwrap_or_default();
@@ -2257,17 +2342,105 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
                     }
                 })
         }))
-        .child(presented(
-            open,
-            change,
-            Rc::new(move |e| cx.emit(e)),
-            At::Pointer(point, anchor),
-            parts,
-            // The secondary button and a held finger open it with no item
-            // focused, the keyboard with the first.
-            Asked { keyed, why },
-            props.children,
-        ))
+        .child({
+            let drawn = {
+                let change = change.clone();
+                move || {
+                    presented(
+                        open,
+                        change.clone(),
+                        Rc::new(move |e: MenuEvent| cx.emit(e.into())),
+                        At::Pointer(point, anchor),
+                        parts,
+                        // The secondary button and a held finger open it with
+                        // no item focused, the keyboard with the first.
+                        Asked { keyed, why },
+                        props.children,
+                    )
+                }
+            };
+            match system {
+                None => drawn(),
+                Some(system) => {
+                    let (title, disabled) = (props.title, props.disabled);
+                    when(system, move || {
+                        system_menu(items, title, disabled, open, change.clone(), cx)
+                    })
+                    .otherwise(drawn)
+                    .into_element()
+                }
+            }
+        })
+}
+
+/// A `ContextMenu`'s system menu (iOS, given `items`): the native
+/// component beside the trigger, taking no room and no touches.
+fn system_menu(
+    items: Prop<Vec<MenuButtonItem>>,
+    title: Prop<Option<SharedString>>,
+    disabled: Prop<bool>,
+    open: OpenState,
+    change: Rc<dyn Fn(bool, OpenChangeReason)>,
+    cx: Scope<ContextMenuEvents>,
+) -> impl IntoElement {
+    // Shown, as the platform last told. The platform tells a choice before
+    // the dismissal it causes, so a dismissal finding the menu still shown
+    // closed it without one.
+    let shown = stored(false);
+    native(CONTEXT_MENU_COMPONENT)
+        .absolute()
+        .size_0()
+        .pointer_events(PointerEvents::None)
+        .prop("items", move || items.with(|items| menu_json(items)))
+        .prop("title", move || {
+            title
+                .get()
+                .map_or(JsonValue::Null, |t| JsonValue::from(t.as_ref()))
+        })
+        .prop("disabled", move || JsonValue::Bool(disabled.get()))
+        // Only `false` acts: it closes the menu shown.
+        .prop("open", move || JsonValue::Bool(open.get()))
+        .on_native_event(move |event: &NativeEvent| {
+            match &*event.name {
+                "open" if !shown.replace(true) => {
+                    // A finger held (the lifted preview), or the secondary
+                    // button (the compact menu at the pointer).
+                    let reason = match event.data.as_str() {
+                        Some("pointer") => OpenChangeReason::ContextMenu,
+                        _ => OpenChangeReason::LongPress,
+                    };
+                    change(true, reason);
+                    cx.emit(ContextMenuEvents::Open);
+                }
+                "select" => {
+                    if let Some(id) = event.data.as_str() {
+                        // As a drawn menu's item: closing with the choice,
+                        // the choice, then gone. A choice told after its
+                        // dismissal still reaches the app, alone.
+                        let was = shown.replace(false);
+                        if was {
+                            change(false, OpenChangeReason::Select);
+                        }
+                        cx.emit(ContextMenuEvents::Select(SharedString::from(id.to_owned())));
+                        if was {
+                            cx.emit(ContextMenuEvents::Close);
+                        }
+                    }
+                }
+                // Gone without a choice. As the drawn menu's dismissal: the
+                // user's attempt (a tap outside, the preview's drag away) is
+                // reported, then it closes; when the app closed it, only the
+                // closing is.
+                "close" if shown.replace(false) => {
+                    if open.get_untracked() {
+                        cx.emit(ContextMenuEvents::Cancel);
+                        change(false, OpenChangeReason::PressOutside);
+                    }
+                    cx.emit(ContextMenuEvents::Close);
+                }
+                _ => {}
+            }
+        })
 }
 
 /// The props of [`MenuItem`].

@@ -253,7 +253,7 @@ pub(crate) fn ui_family() -> Arc<str> {
 fn family_names(name: &str, ui: &str) -> Vec<String> {
     let mut out = Vec::new();
     use nsh_core::FamilyName;
-    for family in nsh_core::font_families(name) {
+    nsh_core::for_each_font_family(name, |family| {
         let family = match family {
             FamilyName::Monospace => "Consolas",
             FamilyName::Serif => "Times New Roman",
@@ -263,7 +263,7 @@ fn family_names(name: &str, ui: &str) -> Vec<String> {
             _ => ui,
         };
         out.push(family.to_owned());
-    }
+    });
     if out.is_empty() {
         out.push(ui.to_owned());
     }
@@ -3402,6 +3402,7 @@ mod tests {
 
     #[test]
     fn families() {
+        assert_eq!(family_names(r#"'A\\B', 'A\"B'"#, "X"), [r"A\B", "A\"B"]);
         assert_eq!(family_names("Inter", "Segoe UI"), ["Inter"]);
         assert_eq!(family_names("system-ui", "Segoe UI"), ["Segoe UI"]);
         assert_eq!(family_names("ui-monospace", "X"), ["Consolas"]);
@@ -3976,6 +3977,8 @@ mod tests {
                 color: Color(0xeeee_eeff),
                 radius: px(4.0),
                 node: 4,
+                top: Default::default(),
+                bottom: Default::default(),
             }),
             ..style
         };

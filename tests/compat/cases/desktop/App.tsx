@@ -15,9 +15,11 @@ import WindowRef from "./window-ref";
 import LinkHover from "./link-hover";
 import HomeDirAccess from "./home-dir-access";
 import LaunchAtLogin from "./launch-at-login";
+import ScrollbarHover from "./scrollbar-hover";
 
 const cases: Record<string, () => JSX.Element> = {
   "link-hover": LinkHover,
+  "scrollbar-hover": ScrollbarHover,
   "window-open": WindowOpen,
   "window-element": WindowElement,
   "window-ref": WindowRef,

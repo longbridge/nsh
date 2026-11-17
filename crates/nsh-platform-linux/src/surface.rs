@@ -310,6 +310,7 @@ impl Surface {
                     crate::canvas::reveal();
                     crate::shader::reveal();
                 });
+                crate::fps::log_first_frame(&clock);
             }
         });
         crate::input::install(&surface);

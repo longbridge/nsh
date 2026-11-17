@@ -77,7 +77,7 @@ export function PageHeader(props: {
           accessibilityLabel="Back"
           hitSlop={6}
           class="hover:bg-hover active:bg-accent"
-          style={{ height: 28, flexDirection: "row", alignItems: "center", gap: 2, paddingLeft: 4, paddingRight: 8, borderRadius: radius.control, cursor: "pointer" }}
+          style={{ height: 28, flexDirection: "row", alignItems: "center", gap: 2, paddingLeft: 4, paddingRight: 8, borderRadius: radius.control }}
         >
           <Icon name="back" size={18} tint={tint()} />
           <Text style={{ fontSize: 13, fontWeight: "500", color: tint() }}>Back</Text>

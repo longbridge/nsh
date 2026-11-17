@@ -496,6 +496,7 @@ impl AppView {
             .native
             .set_asset_base(options.asset_base.clone());
         self.surface.native.set_app(&config.app);
+        crate::native::warm_web_later(&self.surface);
         self.surface.start(config);
     }
 
@@ -609,6 +610,8 @@ fn initial_environment() -> Environment {
         idiom: Idiom::Desktop,
         screen_color: true,
         canvas_render: true,
+        // `NSSharingServicePicker` (`crate::share`).
+        share: true,
         file_requests: true,
         speech: true,
         notifications: true,

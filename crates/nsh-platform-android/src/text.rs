@@ -32,8 +32,8 @@ use crate::java::{java, with_env};
 const SPAN_INTS: usize = 11;
 /// Floats per span: size, line height, letter spacing, decoration
 /// thickness (0: the font's), underline offset (NaN: the font's),
-/// background radius.
-const SPAN_FLOATS: usize = 6;
+/// background radius, background room above and below the font.
+const SPAN_FLOATS: usize = 8;
 const ITALIC: i32 = 1;
 const UNDERLINE: i32 = 2;
 const STRIKE: i32 = 4;
@@ -154,6 +154,8 @@ impl TextEngine for AndroidTextEngine {
                 s.decoration_thickness.map_or(0.0, |t| t.0),
                 s.underline_offset.map_or(f32::NAN, |o| o.0),
                 s.background.map_or(0.0, |b| b.radius.0),
+                s.background.map_or(0.0, |b| b.top.0),
+                s.background.map_or(0.0, |b| b.bottom.0),
             ]);
         }
         // Alignment, writing direction (0 from the content, 1 left to

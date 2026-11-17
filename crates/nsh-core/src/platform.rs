@@ -21,6 +21,11 @@ pub const SEGMENTED_CONTROL_COMPONENT: &str = "nsh/segmented-control";
 /// action).
 pub const MENU_BUTTON_COMPONENT: &str = "nsh/menu-button";
 
+/// The native component of `nsh/base`'s `ContextMenu` given `items`, which
+/// the iOS backend registers itself (a `UIContextMenuInteraction` on the
+/// view around the trigger, the trigger lifted as its preview).
+pub const CONTEXT_MENU_COMPONENT: &str = "nsh/context-menu";
+
 /// The native component of `nsh/base`'s `SplitView`, which the iOS backend
 /// makes itself (a `UISplitViewController` whose columns are the
 /// navigation controllers of the stacks the view places before it).
@@ -343,6 +348,10 @@ pub struct Environment {
     /// ([`crate::Command::RenderCanvas`], `OffscreenCanvas`); without it,
     /// a render fails at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
     pub canvas_render: bool,
+    /// The platform shows the system's share sheet
+    /// ([`crate::Command::Share`], `Share.show`); without it, a share fails
+    /// at once with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
+    pub share: bool,
     /// The platform handles file requests ([`crate::Command::FileRequest`]).
     /// Desktops implement the full set; mobile platforms answer the open
     /// dialog and reject operations they do not support. Without it, all
@@ -478,6 +487,7 @@ impl Default for Environment {
             wake_count: 0,
             screen_color: false,
             canvas_render: false,
+            share: false,
             file_requests: false,
             speech: false,
             notifications: false,

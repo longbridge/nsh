@@ -121,7 +121,8 @@ itself lives in an `Rc<RefCell<State>>` outside the reactive graph.
 ### Typed text and input methods
 
 A native `Input` (the sink), invisible, 1 point wide and a row tall, is kept at the primary caret, so input methods
-open their candidate windows there and soft keyboards show. It takes no pointer (`pointer_events(None)`, which the
+open their candidate windows there and soft keyboards show. Its scroll bar is disabled: the app's built-in bars
+belong to the visible text area. It takes no pointer (`pointer_events(None)`, which the
 mobile platforms honor on inputs too): over the caret it would take the touches of the selection's end handle. It lies over the scroll views, not in them, placed in the
 editor's box (`Ed::in_editor`) and held inside it: the platforms scroll the scroll views around a focused field to
 show it, which the editor does itself for its caret, and doing it again moved the text under the caret by a margin,

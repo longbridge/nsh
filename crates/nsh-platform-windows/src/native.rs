@@ -22,14 +22,18 @@
 //!   names a factory; the core creates a [`nsh_core::ViewKind::Native`] container,
 //!   names the component ([`MountItem::Component`]) and sends its props as
 //!   JSON as they change. A component draws with Direct2D in the view
-//!   ([`NativeComponent::draw`]) or brings a child window of its own
-//!   ([`NativeComponent::window`]), moved where the view was drawn after
-//!   every frame ([`Hosted::placed`]), clipped to its clipping ancestors
-//!   and its rounded corners with a window region and hidden while its view
-//!   is not drawn. Being a window, it sits above everything nsh draws (the
-//!   "airspace" limit of child windows): nsh content drawn over it is
-//!   covered by it. Components emit events and report their own size
-//!   through their [`ComponentContext`].
+//!   ([`NativeComponent::draw`]), brings a composition visual of its own
+//!   ([`NativeComponent::visual`]: content another device draws, a swap
+//!   chain of its own), which the window's composition stacks in order with
+//!   nsh's drawing as it stacks a web view's page, placed, clipped and faded
+//!   like its view ([`NativeComponent::placed`]), or brings a child
+//!   window of its own ([`NativeComponent::window`]), moved where the view
+//!   was drawn after every frame ([`Hosted::placed`]), clipped to its
+//!   clipping ancestors and its rounded corners with a window region and
+//!   hidden while its view is not drawn. Being a window, it sits above
+//!   everything nsh draws (the "airspace" limit of child windows): nsh
+//!   content drawn over it is covered by it. Components emit events and
+//!   report their own size through their [`ComponentContext`].
 //!   Registries belong to one `AppView` (and the views made from the same
 //!   [`crate::AppOptions`]): no globals.
 //!
@@ -58,8 +62,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use serde_json::Value as JsonValue;
 use windows::Win32::{
     Foundation::{HWND, RECT},
-    Graphics::Gdi::{
-        CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, RGN_AND, SetWindowRgn,
+    Graphics::{
+        DirectComposition::{IDCompositionDesktopDevice, IDCompositionVisual2},
+        Gdi::{CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, RGN_AND, SetWindowRgn},
     },
     UI::WindowsAndMessaging::{
         GWL_STYLE, GetWindowLongPtrW, HWND_TOP, SW_HIDE, SWP_NOACTIVATE, SWP_NOZORDER,
@@ -69,6 +74,7 @@ use windows::Win32::{
 };
 
 use crate::{
+    compose::Composition,
     image::AssetBase,
     render::DrawCx,
     surface::Surface,
@@ -130,6 +136,43 @@ pub trait NativeComponent {
     /// draws, web views included.
     fn window(&self) -> Option<HWND> {
         None
+    }
+
+    /// True for a component that brings a composition visual of its own
+    /// ([`Self::visual`]). Asked once, when it is made: a frame decides
+    /// whether to draw the view or stack a visual before any visual exists,
+    /// so a component that only draws is never asked for one and its first
+    /// frame is drawn. True with no visual from [`Self::visual`]: its first
+    /// frame shows nothing, and it is drawn from the next frame on.
+    fn composed(&self) -> bool {
+        false
+    }
+
+    /// The visual of a [`Self::composed`] component, made on `device`, the
+    /// composition device of the window its view is first drawn in (asked
+    /// then, once). The window stacks it in order with what nsh draws, as it
+    /// stacks a web view's page: what is drawn before the view is below it,
+    /// what is drawn after it above. `None`: it is drawn with
+    /// [`Self::draw`] instead.
+    ///
+    /// Not asked again when the view moves to another window: the visual
+    /// stays on the first window's device and is not shown in the new one.
+    /// Like a web view's page, it is left out of the window's offscreen
+    /// drawings (the surface drawn to a picture, shader effects and
+    /// transitions).
+    fn visual(&mut self, device: &IDCompositionDesktopDevice) -> Option<IDCompositionVisual2> {
+        let _ = device;
+        None
+    }
+
+    /// Where the frame just shown put the view of a composed component
+    /// (`None`: it was not drawn, and its visual is out of the window's
+    /// tree): the component sets its visual to it (its transform, clip,
+    /// corners and opacity), and the window commits its composition after.
+    /// A window that closes while the component lives does not call it with
+    /// `None`; the component drops with its view.
+    fn placed(&mut self, at: Option<crate::Placement>) {
+        let _ = at;
     }
 
     /// Prop `name` changed (`None`: removed). Every prop the app set comes
@@ -414,6 +457,8 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
             window: Cell::new(None),
             parent: Cell::new(None),
             placement: Placement::default(),
+            composes: Cell::new(false),
+            composed: RefCell::new(None),
         })),
     };
     fill(view, &host.item());
@@ -482,6 +527,7 @@ pub(crate) fn component(surface: &Rc<Surface>, view: &NshView, name: &Arc<str>) 
         item.window.set(Some(hwnd));
         item.parent.set(Some(parent));
     }
+    item.composes.set(made.composed());
     *item.component.borrow_mut() = Some(made);
     view.changed();
 }
@@ -655,6 +701,11 @@ struct ComponentItem {
     /// The window it is a child of: the one its view shows in.
     parent: Cell<Option<HWND>>,
     placement: Placement,
+    /// The component brings a visual ([`NativeComponent::composed`]).
+    composes: Cell<bool>,
+    /// Its visual and the composition it is in, once its view was drawn in
+    /// a window (kept: the window composes while it holds it).
+    composed: RefCell<Option<(Rc<Composition>, IDCompositionVisual2)>>,
 }
 
 impl ComponentItem {
@@ -672,7 +723,52 @@ impl ComponentItem {
         }
     }
 
+    /// Asks the component for its visual on the composition of the window
+    /// its view is in; false while it is in none, or when it has no visual
+    /// (then it is drawn instead).
+    fn bind(&self, surface: &Surface) -> bool {
+        if self.composed.borrow().is_some() {
+            return true;
+        }
+        let Some(view) = view_of(surface, self.id).filter(NshView::attached) else {
+            return false;
+        };
+        let window = crate::app_window::window_of(surface, &view);
+        let made = if window == nsh_core::ROOT_ID {
+            surface.compose()
+        } else {
+            crate::app_window::compose(surface, window).map(|(_, c)| c)
+        };
+        let composition = match made {
+            Ok(c) => c,
+            Err(err) => {
+                log::warn!("native: a component cannot compose: {err}");
+                self.composes.set(false);
+                // The next frame draws it instead.
+                view.changed();
+                return false;
+            }
+        };
+        let Ok(mut component) = self.component.try_borrow_mut() else {
+            return false;
+        };
+        // Taken out while its own code runs: a later frame asks again.
+        let Some(component) = component.as_mut() else {
+            return false;
+        };
+        let Some(visual) = component.visual(composition.device()) else {
+            self.composes.set(false);
+            view.changed();
+            return false;
+        };
+        *self.composed.borrow_mut() = Some((composition, visual));
+        // The window draws again with it in its composition.
+        view.changed();
+        true
+    }
+
     fn close(&self) {
+        self.composed.borrow_mut().take();
         if let Some(hwnd) = self.window.take() {
             // SAFETY: plain calls on a window the component made; it
             // destroys it when it drops.
@@ -701,6 +797,29 @@ impl Hosted for ComponentItem {
         // Touches go to the view (presses, gestures, the responder system);
         // a component's own window gets its input from Windows.
         false
+    }
+
+    fn composed(&self) -> bool {
+        self.composes.get()
+    }
+
+    fn visual(&self) -> Option<IDCompositionVisual2> {
+        self.composed.borrow().as_ref().map(|(_, v)| v.clone())
+    }
+
+    fn compose_at(&self, at: Option<&crate::compose::Placement>) {
+        if at.is_some()
+            && let Some(surface) = self.surface.upgrade()
+            && !self.bind(&surface)
+        {
+            return;
+        }
+        // Not while its own code runs: the next frame places it.
+        if let Ok(mut component) = self.component.try_borrow_mut()
+            && let Some(component) = component.as_mut()
+        {
+            component.placed(at.copied());
+        }
     }
 
     fn placed(&self, rect: Option<RECT>) {

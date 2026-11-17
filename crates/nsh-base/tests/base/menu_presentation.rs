@@ -9,7 +9,7 @@
 
 use std::time::Duration;
 
-use nsh_base::{MenuEvent, context_menu, menu, menu_item};
+use nsh_base::{ContextMenuEvents, MenuEvent, context_menu, menu, menu_item};
 use nsh_core::{
     NodeId, ROOT_ID, Size, TouchEvent, TouchPhase, TouchPoint,
     element::Root,
@@ -66,8 +66,8 @@ fn Menus() -> impl IntoElement {
         )
         .child(
             context_menu()
-                .on_position(move |e: &MenuEvent| {
-                    if let MenuEvent::Position(_, bounds, _) = e {
+                .on_position(move |e: &ContextMenuEvents| {
+                    if let ContextMenuEvents::Position(_, bounds, _) = e {
                         at.set(Some(bounds.origin));
                     }
                 })

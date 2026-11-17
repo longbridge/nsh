@@ -215,9 +215,10 @@ pub fn MenuButton(props: MenuButtonProps, cx: Scope<MenuButtonEvent>) -> impl In
         .into_element()
 }
 
-/// The items as the iOS component reads them: `[{ id, label, icon?,
-/// checked?, disabled?, destructive?, items?, inline? }]`.
-fn menu_json(items: &[MenuButtonItem]) -> JsonValue {
+/// The items as the iOS components read them (`MenuButton`'s, and
+/// `ContextMenu`'s with `items`): `[{ id, label, icon?, checked?,
+/// disabled?, destructive?, items?, inline? }]`.
+pub(crate) fn menu_json(items: &[MenuButtonItem]) -> JsonValue {
     items
         .iter()
         .map(|item| {

@@ -590,3 +590,17 @@ fn forward_goes_forward_on_the_web_only() {
     assert!(failed.is_empty(), "{failed:#?}");
     assert_eq!(results.len(), 1);
 }
+
+#[test]
+fn input_targets_report_document_values_and_do_not_edit_covering_fields() {
+    let run = TestRun {
+        ui_sets: vec![nsh_base::registry()],
+        compile: compiler(vec![nsh_base::registry()]),
+        ..test_run(None)
+    };
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/input-target");
+    let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    assert_eq!(results.len(), 2);
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+}

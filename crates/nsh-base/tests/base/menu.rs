@@ -18,11 +18,13 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use nsh_base::{MenuEvent, context_menu, dialog, input, menu, menu_item};
+use nsh_base::{
+    ContextMenuEvents, MenuButtonItem, MenuEvent, context_menu, dialog, input, menu, menu_item,
+};
 use nsh_core::{
     Checked, MountItem, NodeId, Size,
     element::Root,
-    platform::{Idiom, Os},
+    platform::{CONTEXT_MENU_COMPONENT, Idiom, Os},
     prelude::*,
 };
 use nsh_engine::EngineConfig;
@@ -40,6 +42,12 @@ struct Seen {
     parents: HashMap<NodeId, NodeId>,
     backgrounds: HashMap<NodeId, Vec<u32>>,
     batches: Vec<Vec<NodeId>>,
+    /// The native components mounted, by name, and the props they were
+    /// last sent.
+    components: HashMap<String, NodeId>,
+    component_props: HashMap<(NodeId, String), Option<serde_json::Value>>,
+    /// Every item sent, written out, in order.
+    items: Vec<String>,
 }
 
 struct App {
@@ -100,6 +108,7 @@ fn start_on(root: Root, os: Os) -> App {
         let mut seen = into.lock().unwrap();
         let mut touched = Vec::new();
         for item in &batch.items {
+            seen.items.push(format!("{item:?}"));
             match item {
                 MountItem::ViewProps { id, props } => {
                     if let Some(test_id) = &props.test_id {
@@ -109,6 +118,15 @@ fn start_on(root: Root, os: Os) -> App {
                 }
                 MountItem::Insert { parent, child, .. } => {
                     seen.parents.insert(*child, *parent);
+                }
+                MountItem::Component { id, name } => {
+                    seen.components.insert(name.to_string(), *id);
+                }
+                MountItem::ComponentProps { id, props } => {
+                    for (name, value) in props {
+                        seen.component_props
+                            .insert((*id, name.to_string()), value.clone());
+                    }
                 }
                 MountItem::ViewStyle { id, style } => {
                     seen.backgrounds
@@ -1071,14 +1089,14 @@ fn RowMenu(props: RowMenuProps) -> impl IntoElement {
         .pt(px(100.0))
         .pl(px(40.0))
         .child(
-            menu.on_open_change(move |e: &MenuEvent| {
-                if let MenuEvent::OpenChange(next, _) = e {
+            menu.on_open_change(move |e: &ContextMenuEvents| {
+                if let ContextMenuEvents::OpenChange(next, _) = e {
                     open.set(*next);
                     changes.update(|c| c.push(if *next { 'o' } else { 'c' }));
                 }
             })
-            .on_position(move |e: &MenuEvent| {
-                if let MenuEvent::Position(_, bounds, _) = e {
+            .on_position(move |e: &ContextMenuEvents| {
+                if let ContextMenuEvents::Position(_, bounds, _) = e {
                     at.set(format!("{} {}", bounds.origin.x.0, bounds.origin.y.0));
                 }
             })
@@ -1214,13 +1232,13 @@ fn ShownMenu() -> impl IntoElement {
         .child(
             context_menu()
                 .open(move || Some(open.get()))
-                .on_open_change(move |e: &MenuEvent| {
-                    if let MenuEvent::OpenChange(next, _) = e {
+                .on_open_change(move |e: &ContextMenuEvents| {
+                    if let ContextMenuEvents::OpenChange(next, _) = e {
                         open.set(*next);
                     }
                 })
-                .on_position(move |e: &MenuEvent| {
-                    if let MenuEvent::Position(_, bounds, _) = e {
+                .on_position(move |e: &ContextMenuEvents| {
+                    if let ContextMenuEvents::Position(_, bounds, _) = e {
                         at.set(format!("{} {}", bounds.origin.x.0, bounds.origin.y.0));
                     }
                 })
@@ -1320,4 +1338,243 @@ fn a_flex_1_trigger_fills_its_parent_as_without_the_menu() {
         .expect("the trigger is laid out");
     assert_eq!(fill.bounds.size.height, px(844.0));
     assert_eq!(fill.bounds.size.width, px(390.0));
+}
+
+/// A row whose menu is also given as data (`items`): the system's on iOS,
+/// the drawn one (Rename) elsewhere. The text says what the app heard, in
+/// order.
+#[component]
+fn SystemMenuRow() -> impl IntoElement {
+    let heard = signal(String::from("heard:"));
+    let hear = move |what: String| {
+        heard.update(|h| {
+            h.push(' ');
+            h.push_str(&what);
+        })
+    };
+    view()
+        .pt(px(100.0))
+        .child(
+            context_menu()
+                .items(vec![
+                    MenuButtonItem::new("rename", "Rename").icon("pencil"),
+                    MenuButtonItem::section(
+                        "",
+                        [MenuButtonItem::new("delete", "Delete").destructive(true)],
+                    ),
+                ])
+                .title("Notes.txt")
+                .on_open_change(move |e: &ContextMenuEvents| {
+                    if let ContextMenuEvents::OpenChange(open, reason) = e {
+                        hear(format!("{open}:{reason:?}"));
+                    }
+                })
+                .on_open(move || hear("open".into()))
+                .on_select(move |id: &SharedString| hear(format!("select:{id}")))
+                .on_cancel(move || hear("cancel".into()))
+                .on_close(move || hear("close".into()))
+                .trigger(
+                    view()
+                        .test_id("row")
+                        .w(px(200.0))
+                        .h(px(40.0))
+                        .child(text("Row")),
+                )
+                .child(menu_item().child(text("Drawn rename"))),
+        )
+        .child(text(move || heard.get()))
+}
+
+/// What the system's menu reports, as the iOS backend sends it, settled.
+fn system_menu_event(app: &mut App, name: &str, data: serde_json::Value) {
+    let id = app.seen.lock().unwrap().components[CONTEXT_MENU_COMPONENT];
+    app.app.engine().control().dispatch_event(
+        id,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: name.into(),
+            data,
+        },
+    );
+    app.app.settle();
+}
+
+#[test]
+fn with_items_ios_shows_the_systems_context_menu_and_draws_none() {
+    let mut app = start_on(Root::of::<SystemMenuRow>(), Os::Ios);
+    {
+        let seen = app.seen.lock().unwrap();
+        let id = seen.components[CONTEXT_MENU_COMPONENT];
+        let prop = |name: &str| seen.component_props[&(id, name.to_owned())].clone();
+        assert_eq!(
+            prop("items"),
+            Some(serde_json::json!([
+                { "id": "rename", "label": "Rename", "icon": "pencil" },
+                { "id": "", "label": "", "inline": true, "items": [
+                    { "id": "delete", "label": "Delete", "destructive": true },
+                ] },
+            ]))
+        );
+        assert_eq!(prop("title"), Some(serde_json::json!("Notes.txt")));
+        assert_eq!(prop("disabled"), Some(serde_json::json!(false)));
+    }
+    // The system answers the held finger: NSH draws no menu of its own.
+    hold_row(&mut app, PointerType::Touch);
+    assert!(!app.app.shows("Drawn rename"), "no drawn menu");
+    system_menu_event(&mut app, "open", serde_json::json!("touch"));
+    app.app.wait_for("text:heard: true:LongPress open").unwrap();
+    // A choice closes it with the choice; the system's later dismissal
+    // reports nothing more.
+    system_menu_event(&mut app, "select", serde_json::json!("delete"));
+    system_menu_event(&mut app, "close", serde_json::Value::Null);
+    app.app
+        .wait_for("text:heard: true:LongPress open false:Select select:delete close")
+        .unwrap();
+    // The secondary button's menu, dismissed without a choice.
+    system_menu_event(&mut app, "open", serde_json::json!("pointer"));
+    system_menu_event(&mut app, "close", serde_json::Value::Null);
+    app.app
+        .wait_for(
+            "text:heard: true:LongPress open false:Select select:delete close \
+             true:ContextMenu open cancel false:PressOutside close",
+        )
+        .unwrap();
+    assert!(!app.app.shows("Drawn rename"), "still no drawn menu");
+}
+
+#[test]
+fn a_system_menus_choice_told_after_its_dismissal_still_reaches_the_app() {
+    let mut app = start_on(Root::of::<SystemMenuRow>(), Os::Ios);
+    system_menu_event(&mut app, "open", serde_json::json!("touch"));
+    app.app.wait_for("text:heard: true:LongPress open").unwrap();
+    // The platform tells a choice before its dismissal; one it could only
+    // tell after (a handler run late) is the app's still, alone: the menu
+    // had closed without one.
+    system_menu_event(&mut app, "close", serde_json::Value::Null);
+    system_menu_event(&mut app, "select", serde_json::json!("rename"));
+    app.app
+        .wait_for("text:heard: true:LongPress open cancel false:PressOutside close select:rename")
+        .unwrap();
+    // The next opening starts afresh.
+    system_menu_event(&mut app, "open", serde_json::json!("pointer"));
+    system_menu_event(&mut app, "select", serde_json::json!("delete"));
+    system_menu_event(&mut app, "close", serde_json::Value::Null);
+    app.app
+        .wait_for(
+            "text:heard: true:LongPress open cancel false:PressOutside close select:rename \
+             true:ContextMenu open false:Select select:delete close",
+        )
+        .unwrap();
+}
+
+/// A system menu the app owns the `open` of, and closes itself ("Close
+/// it").
+#[component]
+fn AppClosedSystemMenu() -> impl IntoElement {
+    let open = signal(false);
+    let heard = signal(String::from("heard:"));
+    let hear = move |what: String| {
+        heard.update(|h| {
+            h.push(' ');
+            h.push_str(&what);
+        })
+    };
+    view()
+        .pt(px(100.0))
+        .child(
+            context_menu()
+                .items(vec![MenuButtonItem::new("rename", "Rename")])
+                .open(move || Some(open.get()))
+                .on_open_change(move |e: &ContextMenuEvents| {
+                    if let ContextMenuEvents::OpenChange(next, reason) = e {
+                        open.set(*next);
+                        hear(format!("{next}:{reason:?}"));
+                    }
+                })
+                .on_cancel(move || hear("cancel".into()))
+                .on_close(move || hear("close".into()))
+                .trigger(
+                    view()
+                        .test_id("row")
+                        .w(px(200.0))
+                        .h(px(40.0))
+                        .child(text("Row")),
+                ),
+        )
+        .child(
+            view()
+                .on_press(move || open.set(false))
+                .child(text("Close it")),
+        )
+        .child(text(move || heard.get()))
+}
+
+#[test]
+fn a_system_menu_the_app_closes_reports_only_its_closing() {
+    let mut app = start_on(Root::of::<AppClosedSystemMenu>(), Os::Ios);
+    system_menu_event(&mut app, "open", serde_json::json!("touch"));
+    app.app.wait_for("text:heard: true:LongPress").unwrap();
+    // The app closes it: the platform dismisses the menu and tells.
+    app.app.press("text:Close it").unwrap();
+    app.app.settle();
+    system_menu_event(&mut app, "close", serde_json::Value::Null);
+    // As the drawn menu: the closing (`onClose`), no user's attempt
+    // (`onCancel`) and no change asked for.
+    app.app
+        .wait_for("text:heard: true:LongPress close")
+        .unwrap();
+}
+
+#[test]
+fn off_ios_a_context_menus_items_are_not_used() {
+    for os in [Os::Web, Os::Android] {
+        let mut app = start_on(Root::of::<SystemMenuRow>(), os);
+        assert!(
+            !app.seen
+                .lock()
+                .unwrap()
+                .components
+                .contains_key(CONTEXT_MENU_COMPONENT),
+            "{os:?}: no system menu"
+        );
+        hold_row(&mut app, PointerType::Touch);
+        app.app
+            .wait_for("Drawn rename")
+            .unwrap_or_else(|e| panic!("{os:?}: {e}"));
+    }
+}
+
+/// A row with a context menu and no `items`, as before they existed.
+#[component]
+fn DrawnOnlyRow() -> impl IntoElement {
+    view().pt(px(100.0)).child(
+        context_menu()
+            .trigger(
+                view()
+                    .test_id("row")
+                    .w(px(200.0))
+                    .h(px(40.0))
+                    .child(text("Row")),
+            )
+            .child(menu_item().child(text("Drawn rename"))),
+    )
+}
+
+#[test]
+fn without_items_ios_mounts_what_the_other_platforms_do() {
+    // Off iOS a context menu without `items` is made as it was before they
+    // existed; on iOS it must send the platform the same items too (views,
+    // listeners, the drawn menu), with no system menu, as it renders and
+    // as a held finger opens it.
+    let mounted = |os| {
+        let mut app = start_on(Root::of::<DrawnOnlyRow>(), os);
+        hold_row(&mut app, PointerType::Touch);
+        app.app.wait_for("Drawn rename").unwrap();
+        let seen = app.seen.lock().unwrap();
+        assert!(seen.components.is_empty(), "{os:?}: no native component");
+        seen.items.clone()
+    };
+    let ios = mounted(Os::Ios);
+    assert!(!ios.is_empty());
+    assert_eq!(ios, mounted(Os::Android));
 }
