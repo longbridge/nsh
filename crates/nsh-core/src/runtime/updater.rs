@@ -104,6 +104,11 @@ pub(crate) struct AppUpdate {
     /// on the desktop, installed where the user can write. False on iOS and
     /// Android, and under a directory only the system writes.
     pub(crate) can_install: bool,
+    /// Whether only the installed app is behind: the package this run's code
+    /// came from is already this version or a later one, so the update
+    /// brings a newer runtime and native shell, not newer app code. Apps that
+    /// update by package can offer it as the quieter "update the app" step.
+    pub(crate) shell: bool,
 }
 
 /// A newer build of the app's code, as a signed package.
@@ -385,14 +390,15 @@ mod native {
             };
             let available = config
                 .check(&manifest, signature.as_deref(), &nsh_updater::platform())
-                .map_err(|e| e.to_string())?
-                .filter(|available| {
-                    !package_covers(worker.running_package().as_ref(), &available.version)
-                });
-            Ok(available.map(|available| (bytes, config, available)))
+                .map_err(|e| e.to_string())?;
+            let running = worker.running_package();
+            Ok(available.map(|available| {
+                let shell = package_covers(running.as_ref(), &available.version);
+                (bytes, config, available, shell)
+            }))
         })
         .await?;
-        let Some((bytes, config, available)) = checked else {
+        let Some((bytes, config, available, shell)) = checked else {
             *found.0.borrow_mut() = None;
             return Ok(None);
         };
@@ -410,6 +416,7 @@ mod native {
             notes: available.notes.clone(),
             url: available.url.clone(),
             can_install: false,
+            shell,
         };
         #[cfg(any(
             all(target_os = "linux", not(target_env = "ohos")),
@@ -752,9 +759,9 @@ mod native {
     }
     /// Whether the package this run's code came from is already the
     /// release `offered` or a later one. The app's own version is the one it
-    /// shipped as, so after restarting into a package of the latest release
-    /// the manifest would still look newer, and the whole app would be
-    /// downloaded and offered again for what already runs.
+    /// shipped as, so a run on a package of the latest release still sees the
+    /// release as newer: its code is current and only the shell is behind
+    /// (`AppUpdate::shell`).
     fn package_covers(running: Option<&PackageVersion>, offered: &str) -> bool {
         running.is_some_and(|running| nsh_updater::version_at_least(&running.version, offered))
     }
