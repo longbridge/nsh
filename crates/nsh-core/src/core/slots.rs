@@ -93,6 +93,7 @@ pub(super) fn split(attrs: &Attrs) -> (Attrs, Attrs) {
         bound: attrs.bound.clone(),
         projected_states: attrs.projected_states,
         projected_data: attrs.projected_data.clone(),
+        projected_active: attrs.projected_active,
         ..Attrs::default()
     };
     let holder = Attrs {
@@ -163,6 +164,7 @@ pub(super) fn merged(js: &Attrs, own: &Attrs) -> Attrs {
             data.dedup();
             data
         },
+        projected_active: own.projected_active.or(js.projected_active),
         ..Attrs::default()
     }
 }
@@ -185,6 +187,7 @@ fn absorb(js: &mut Attrs, prop: &Prop) -> bool {
         Prop::PointerEvents(v) => js.pointer_events = *v,
         Prop::ProjectedStates(v) => js.projected_states = *v,
         Prop::ProjectedData(v) => js.projected_data = v.to_vec(),
+        Prop::ProjectedActive(v) => js.projected_active = *v,
         p if crate::element::host::reset(p).is_some() => {
             crate::element::host::set_in(&mut js.props, p.clone())
         }
@@ -335,6 +338,7 @@ impl<M: TextEngine> Core<M> {
             disabled: node.states & state::DISABLED != 0,
             projected_states: node.projected,
             projected_data: node.data.to_vec(),
+            projected_active: node.parts.as_ref().and_then(|p| p.active_group()),
             ..Attrs::default()
         };
         if let Some(props) = &node.props {

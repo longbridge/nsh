@@ -1114,6 +1114,12 @@ tap id:wifi
 expect Changes: 2
 prop id:wifi accessibilityState checked=false
 frame text:Wi-Fi 32 4 39 17
+# Held down, wherever on it: `active:` of the parts follows the switch
+# (the thumb 24 wide at once puts the label at 36), until it is released.
+state id:wifi pressed
+frame text:Wi-Fi 36 4 39 17
+state id:wifi none
+frame text:Wi-Fi 32 4 39 17
 # The app owns the value: a switch it keeps on asks for off and stays on.
 prop id:lights accessibilityLabel Lights
 prop id:lights accessibilityState checked=true
@@ -1760,13 +1766,19 @@ expect Details
 frame id:region 0 20 390 54
 frame id:details 0 0 390 30
 frame id:after 0 74 390 20
-# Closed: the frames at once, the details out once the region has closed.
+# Closed: the frames at once, the details out once the region has closed:
+# The app's spring (stiffness 100, damping 20) settles in about 923 ms.
+# At 500 ms the content is still attached; the default removes it at
+# about 265 ms. Check text, since a hidden view can retain its frame.
 tap id:trigger
 frame id:region 0 20 390 24
 frame id:after 0 44 390 20
-wait 400
+wait 500
+expect Details
+wait 500
 absent Details
 covers [props] Collapsible.reveal
+covers [props] Collapsible.revealSpring
 
 # base-accordion
 tap id:case-base-accordion
@@ -1821,13 +1833,16 @@ frame id:faq 0 20 390 90
 listens id:details-a onPress
 tap id:details-b
 expect Taps b: 1
-# The open item's trigger closes it; the revealed panel springs shut and
-# its content leaves once it has.
+# The open item's trigger closes it; the revealed panel springs shut on
+# the app's spring (settling in about 923 ms, the default in about 265).
+# Check attached content, not a hidden view's retained frame.
 tap text:Returns
 expect Open: none
 frame id:item-b 0 20 390 20
 frame id:faq 0 20 390 60
-wait 400
+wait 500
+expect Returns details
+wait 500
 absent Returns details
 # With `multiple`, opening one leaves the others open.
 tap id:multiple
@@ -1859,6 +1874,7 @@ covers [props] Accordion.multiple
 covers [props] AccordionHeader.level
 covers [props] expandedStyle
 covers [props] AccordionPanel.reveal
+covers [props] AccordionPanel.revealSpring
 covers [props] AccordionPanel.keepMounted
 covers [props] accessibilityLabel
 

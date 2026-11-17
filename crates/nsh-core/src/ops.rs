@@ -3292,6 +3292,12 @@ pub enum Prop {
     /// components (`Interactive::project_checked`, `project_indeterminate`,
     /// `project_disabled`), never by JS.
     ProjectedStates(u16),
+    /// The group whose press a part of a control shows as its own (`None`:
+    /// none): its `active:` classes and active style apply while that
+    /// group around it is pressed, as the platform reports the group's
+    /// press (a switch's thumb while the switch is held). Set by components
+    /// (`Interactive::project_group_active`), never by JS.
+    ProjectedActive(Option<&'static str>),
     /// The boolean `data-*` attributes a part of a component shows, by
     /// name without `data-` and sorted: its `data-<name>:` classes apply,
     /// and with `group` the `group-data-<name>:` classes inside it (a

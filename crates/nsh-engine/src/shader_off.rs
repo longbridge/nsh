@@ -38,6 +38,26 @@ impl Renderer {
         None
     }
 
+    /// Calls `done(None)` at once: this build has no renderer.
+    pub fn open(_format: PixelFormat, done: impl FnOnce(Option<Renderer>) + Send + 'static) {
+        done(None);
+    }
+
+    /// Does nothing: no pipeline is ever compiled (`f` is dropped).
+    pub fn on_pipeline_ready(&self, f: impl Fn() + Send + Sync + 'static) {
+        drop(f);
+    }
+
+    /// `false`: no pipeline is ever compiled.
+    pub fn compiling(&self) -> bool {
+        false
+    }
+
+    /// `true` at once: no pipeline is ever compiled.
+    pub fn wait_for_pipelines(&self, _timeout: Duration) -> bool {
+        true
+    }
+
     /// The format of the frames.
     pub fn format(&self) -> PixelFormat {
         self.format
@@ -116,6 +136,11 @@ impl ShaderView {
 
     /// `false`: there are no frames.
     pub fn wants_frame(&self) -> bool {
+        false
+    }
+
+    /// `false`: nothing compiles.
+    pub fn compiling(&self) -> bool {
         false
     }
 

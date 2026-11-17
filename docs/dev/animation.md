@@ -83,7 +83,11 @@
   StaggerFrom)` counts each item's intervals from the first, the last, the center (both middles of an even count at
   once) or an index; `Animated.stagger`'s `{ from }` and `Animation::stagger_from` use it. A `MotionSpec` is several
   `MotionChannel`s (opacity, then translations, rotations and scales, the order they bind in) through keyframes with
-  one timing, its `composite` a `Parallel` (stop together) over the channels' nodes; `start_values` is where an
+  one timing, its `composite` a `Parallel` (stop together) over the channels' nodes. With a `spring` (`MotionSpec::spring`,
+  JS `spring: { stiffness, damping, mass }`), each channel is one `Driver::Spring` to where its keyframes end (one
+  iteration, so `direction` still picks the end) with `velocity: None`, after a plain `Delay`: it starts from the
+  value and velocity the interrupted motion left (`Graph::start` replaces that run from its last frame), where
+  keyframes replay from their first; keyframes between, `duration`, easings and iterations are not used. `start_values` is where an
   entrance sets the values before its first frame (`createMotion`'s `initial` sets the others; `enter` wins on the
   channels it moves). `Motion::animation` / `motion.animation(..)` return the same tree as a composite, not started,
   so motions compose (`Animated.stagger(.., cards.map((m) => m.animation(..)))`); reduced motion is decided when it
@@ -196,7 +200,7 @@ maps to what:
 | `Sequence` | `Animated.sequence` / `Animation::sequence` (each step starts at the exact end of the one before) |
 | `Stagger` / `StaggerOrigin` (first, last, center, index) | `Animated.stagger(ms, list, { from })` / `Animation::stagger_from`, `StaggerFrom` |
 | `Presence` / `PresencePhase` (keeps content mounted while it exits) | `createMotion({ enter })` / `motion().entering(..)` for entrances, `await play(exit)` then removing the view for exits. Gap: no presence component that keeps a removed view mounted through its exit |
-| `MotionReveal` (measured vertical reveal, clipped) | `nsh/base`'s `Collapsible` `reveal`: a clip view between zero and the content's height whose change is a layout animation of the frames it moves (`ElementRef::animate_layout`; a critically damped spring of `spring_control`'s time), the content kept until it has closed (`docs/dev/components.md` "Children, slots and rows"). Heights are not bindable to animated values, so a reveal is a layout animation, not a progress the app drives; no reveal element of its own yet |
+| `MotionReveal` (measured vertical reveal, clipped) | `nsh/base`'s `Collapsible` `reveal`: a clip view between zero and the content's height whose change is a layout animation of the frames it moves (`ElementRef::animate_layout`; a critically damped spring of `spring_control`'s time, or the app's `revealSpring`), the content kept until it has closed (`docs/dev/components.md` "Children, slots and rows"). Heights are not bindable to animated values, so a reveal is a layout animation, not a progress the app drives; no reveal element of its own yet |
 | Reduced motion (transitions and springs snap) | Motions land at their end; the low-level `Animated` / `timing` / `keyframes` play as written and apps choose with `reduce_motion()` |
 | `MotionTransform` (translation, scale, rotation, opacity bundle) | A `Motion`'s channels (opacity, translate X / Y, rotate, rotate X / Y, scale, scale X / Y), bound with `style={m.style}` / `bind_motion` |
 

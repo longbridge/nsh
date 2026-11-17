@@ -85,7 +85,13 @@
   the node's press listeners from what is mounted, so it shows no press feedback either. A part of a Rust component
   shows its control's `checked`, `indeterminate` and `disabled` to its own classes and state styles
   (`Interactive::project_checked`, `project_indeterminate`, `project_disabled`, and `project_focused` for the part the keys act on; `Prop::ProjectedStates`; `project_data` its `data-*` attributes, `Prop::ProjectedData`): a switch's thumb styled `checked:translate-x-4`, with no accessibility
-  state or press change on the part, so screen readers hear the control alone. `focus-within:` (and
+  state or press change on the part, so screen readers hear the control alone. A part shows its control's press
+  the same way (`Interactive::project_group_active(group)`, `Prop::ProjectedActive`): the control is a group of an
+  NSH name (`Switch`'s `nsh-switch`), so the platform reports its press, and the part's `active:` classes and active
+  style apply while that group is pressed, besides the part's own press (`classes::styled_states`); a press change of
+  the group restyles those parts in its `restyle_subtree` walk (`group_press_changed`). They change as for any other
+  state: a transform animates with `transition-*`, a width at once, so a thumb that stretches smoothly scales
+  (`origin-left active:scale-x-125` with `transition-transform`). `focus-within:` (and
   `focusWithinStyle`, `.focus_within(..)`) is the core's: the platforms report `FOCUSED` for whatever view the
   keyboard focus reaches, whether or not it tracks it (`input::reported_states`; one report per focus change), and the
   core keeps one focus per surface and puts `state::FOCUS_WITHIN` on it and the views around it in the core's tree

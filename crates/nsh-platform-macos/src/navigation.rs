@@ -994,8 +994,8 @@ impl Nav {
 
     /// The `transitionShader` page or dialog `id` comes and goes through
     /// (none when motion is reduced, or where there is no GPU device to
-    /// draw it: the page or dialog then comes and goes with its own
-    /// `animation`).
+    /// draw it, or it is still opening: the page or dialog then comes and
+    /// goes with its own `animation`).
     fn shader(&self, surface: &Surface, id: NodeId) -> Option<nsh_core::NavShader> {
         let reduce = surface.environment.get().reduce_motion;
         self.shaders
@@ -1597,6 +1597,10 @@ pub(crate) fn set_shader(
     view: &NshView,
     shader: Option<nsh_core::NavShader>,
 ) {
+    if shader.is_some() {
+        // Open by the time the page or dialog comes or goes.
+        surface.shaders.open(surface);
+    }
     let mut nav = surface.nav.borrow_mut();
     match shader {
         Some(shader) => nav.shaders.insert(view.id(), shader),
