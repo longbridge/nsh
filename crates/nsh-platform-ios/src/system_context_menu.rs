@@ -1,7 +1,8 @@
 //! `nsh/base`'s `ContextMenu` given `items`, on iOS: the system's context
 //! menu (`UIContextMenuInteraction`), made from the mounted items and
 //! answered natively; the trigger is what the system lifts. JS hears about
-//! it afterwards: `open`, `select` with the app's id, and `close`.
+//! it afterwards: `open`, then a chosen action's `select` with the app's id,
+//! then `close`.
 
 use std::{
     cell::{Cell, RefCell},
@@ -10,7 +11,7 @@ use std::{
 };
 
 use block2::RcBlock;
-use dispatch2::DispatchQueue;
+use dispatch2::{DispatchQueue, MainThreadBound};
 use nsh_core::JsonValue;
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
@@ -27,8 +28,19 @@ use objc2_ui_kit::{
 
 use crate::{
     component::{ComponentContext, ComponentFactory, NativeComponent},
-    system_menu_button::{Entry, elements, parse_items},
+    system_menu_button::{Choose, Entry, elements, parse_items},
 };
+
+/// One opening of the menu. UIKit runs a chosen action's handler around
+/// the dismissal, in no order it promises, so the choice waits here for the
+/// dismissal and both are told together, the choice first.
+#[derive(Default)]
+struct Opening {
+    /// The chosen action's id, not told yet.
+    chosen: RefCell<Option<String>>,
+    /// The dismissal was told: a choice now is told at once.
+    ended: Cell<bool>,
+}
 
 pub(crate) struct Ivars {
     entries: RefCell<Vec<Entry>>,
@@ -41,6 +53,8 @@ pub(crate) struct Ivars {
     interaction: RefCell<Option<(Retained<UIContextMenuInteraction>, Weak<UIView>)>>,
     /// The trigger the current menu is about: its preview.
     trigger: RefCell<Option<Weak<UIView>>>,
+    /// The opening the last configuration made, until its menu ends.
+    opening: RefCell<Option<Rc<Opening>>>,
 }
 
 define_class!(
@@ -154,15 +168,24 @@ define_class!(
         ) {
             let ivars = self.ivars();
             ivars.shown.set(false);
-            // Told once the menu went, a turn later: a chosen action's
-            // handler runs as the dismissal finishes, so its `select` comes
-            // first and this closes nothing more (the component reports a
-            // closing once, and takes a `select` that still follows as what
-            // closed it).
-            let context = ivars.context.clone();
+            // Told once the menu went, a turn later, by when a chosen
+            // action's handler has run: its `select` goes first, in the same
+            // turn, so JS always hears the choice before the dismissal. A
+            // handler running later still is told at once, after it.
+            let (context, opening, mtm) = (ivars.context.clone(), ivars.opening.take(), self.mtm());
             let close = move || {
                 let context = context.clone();
-                DispatchQueue::main().exec_async(move || context.emit("close", JsonValue::Null));
+                let opening = MainThreadBound::new(opening.clone(), mtm);
+                DispatchQueue::main().exec_async(move || {
+                    let opening = opening.into_inner(MainThreadMarker::new().expect("main queue"));
+                    if let Some(opening) = opening {
+                        opening.ended.set(true);
+                        if let Some(id) = opening.chosen.take() {
+                            context.emit("select", JsonValue::from(id));
+                        }
+                    }
+                    context.emit("close", JsonValue::Null);
+                });
             };
             match animator {
                 Some(animator) => animator.addCompletion(&RcBlock::new(close)),
@@ -182,6 +205,7 @@ impl NshContextMenu {
             context,
             interaction: RefCell::default(),
             trigger: RefCell::default(),
+            opening: RefCell::default(),
         });
         // SAFETY: UIView's designated initializer.
         let this: Retained<Self> = unsafe { msg_send![super(this), init] };
@@ -250,7 +274,17 @@ impl NshContextMenu {
         let trigger = trigger_at(&host, &container, location)?;
         ivars.trigger.replace(Some(Weak::from_retained(&trigger)));
         let mtm = self.mtm();
-        let children = elements(&ivars.entries.borrow(), false, &ivars.context, mtm);
+        let opening = Rc::new(Opening::default());
+        ivars.opening.replace(Some(opening.clone()));
+        let context = ivars.context.clone();
+        let choose: Choose = Rc::new(move |id| {
+            if opening.ended.get() {
+                context.emit("select", JsonValue::from(id));
+            } else {
+                opening.chosen.replace(Some(id));
+            }
+        });
+        let children = elements(&ivars.entries.borrow(), false, &choose, mtm);
         let menu = UIMenu::menuWithTitle_children(
             &NSString::from_str(&ivars.title.borrow()),
             &children,

@@ -2383,30 +2383,10 @@ fn system_menu(
     change: Rc<dyn Fn(bool, OpenChangeReason)>,
     cx: Scope<ContextMenuEvents>,
 ) -> impl IntoElement {
-    // Shown, as the platform last told: it reports the closing once,
-    // whether a choice or a dismissal tells first.
+    // Shown, as the platform last told. The platform tells a choice before
+    // the dismissal it causes, so a dismissal finding the menu still shown
+    // closed it without one.
     let shown = stored(false);
-    // A dismissal told and not yet reported: the platform may tell it
-    // before the choice that caused it, so it waits a turn, and a choice
-    // coming meanwhile replaces it.
-    let ending = stored(None::<Spawned<()>>);
-    // Gone without a choice. As the drawn menu's dismissal: the user's
-    // attempt (a tap outside, the preview's drag away) is reported, then
-    // it closes; when the app closed it, only the closing is.
-    let finish = {
-        let change = change.clone();
-        Rc::new(move || {
-            ending.replace(None);
-            if !shown.replace(false) {
-                return;
-            }
-            if open.get_untracked() {
-                cx.emit(ContextMenuEvents::Cancel);
-                change(false, OpenChangeReason::PressOutside);
-            }
-            cx.emit(ContextMenuEvents::Close);
-        })
-    };
     native(CONTEXT_MENU_COMPONENT)
         .absolute()
         .size_0()
@@ -2422,31 +2402,21 @@ fn system_menu(
         .prop("open", move || JsonValue::Bool(open.get()))
         .on_native_event(move |event: &NativeEvent| {
             match &*event.name {
-                "open" => {
-                    // A dismissal still waiting belongs to the menu before.
-                    if let Some(task) = ending.replace(None) {
-                        task.cancel();
-                        finish();
-                    }
-                    if !shown.replace(true) {
-                        // A finger held (the lifted preview), or the
-                        // secondary button (the compact menu at the pointer).
-                        let reason = match event.data.as_str() {
-                            Some("pointer") => OpenChangeReason::ContextMenu,
-                            _ => OpenChangeReason::LongPress,
-                        };
-                        change(true, reason);
-                        cx.emit(ContextMenuEvents::Open);
-                    }
+                "open" if !shown.replace(true) => {
+                    // A finger held (the lifted preview), or the secondary
+                    // button (the compact menu at the pointer).
+                    let reason = match event.data.as_str() {
+                        Some("pointer") => OpenChangeReason::ContextMenu,
+                        _ => OpenChangeReason::LongPress,
+                    };
+                    change(true, reason);
+                    cx.emit(ContextMenuEvents::Open);
                 }
                 "select" => {
                     if let Some(id) = event.data.as_str() {
-                        // The dismissal told before it was this choice.
-                        if let Some(task) = ending.replace(None) {
-                            task.cancel();
-                        }
                         // As a drawn menu's item: closing with the choice,
-                        // the choice, then gone.
+                        // the choice, then gone. A choice told after its
+                        // dismissal still reaches the app, alone.
                         let was = shown.replace(false);
                         if was {
                             change(false, OpenChangeReason::Select);
@@ -2457,11 +2427,16 @@ fn system_menu(
                         }
                     }
                 }
-                "close" => {
-                    if shown.get() && ending.with(|e| e.is_none()) {
-                        let finish = finish.clone();
-                        ending.replace(Some(set_timeout(Duration::ZERO, move || finish())));
+                // Gone without a choice. As the drawn menu's dismissal: the
+                // user's attempt (a tap outside, the preview's drag away) is
+                // reported, then it closes; when the app closed it, only the
+                // closing is.
+                "close" if shown.replace(false) => {
+                    if open.get_untracked() {
+                        cx.emit(ContextMenuEvents::Cancel);
+                        change(false, OpenChangeReason::PressOutside);
                     }
+                    cx.emit(ContextMenuEvents::Close);
                 }
                 _ => {}
             }

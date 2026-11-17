@@ -1385,28 +1385,17 @@ fn SystemMenuRow() -> impl IntoElement {
         .child(text(move || heard.get()))
 }
 
-/// What the system's menu reports, as the iOS backend sends it.
+/// What the system's menu reports, as the iOS backend sends it, settled.
 fn system_menu_event(app: &mut App, name: &str, data: serde_json::Value) {
-    system_menu_events(app, [(name, data)]);
-}
-
-/// Several reports of the system's menu, sent together (one main-thread
-/// turn), then settled.
-fn system_menu_events<'a>(
-    app: &mut App,
-    events: impl IntoIterator<Item = (&'a str, serde_json::Value)>,
-) {
     let id = app.seen.lock().unwrap().components[CONTEXT_MENU_COMPONENT];
-    for (name, data) in events {
-        app.app.engine().control().dispatch_event(
-            id,
-            EventKind::NativeEvent,
-            EventPayload::Native {
-                name: name.into(),
-                data,
-            },
-        );
-    }
+    app.app.engine().control().dispatch_event(
+        id,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: name.into(),
+            data,
+        },
+    );
     app.app.settle();
 }
 
@@ -1454,21 +1443,27 @@ fn with_items_ios_shows_the_systems_context_menu_and_draws_none() {
 }
 
 #[test]
-fn a_system_menus_dismissal_told_before_its_choice_is_no_cancel() {
+fn a_system_menus_choice_told_after_its_dismissal_still_reaches_the_app() {
     let mut app = start_on(Root::of::<SystemMenuRow>(), Os::Ios);
     system_menu_event(&mut app, "open", serde_json::json!("touch"));
     app.app.wait_for("text:heard: true:LongPress open").unwrap();
-    // The platform may tell the dismissal first: the choice that follows
-    // it is what closed the menu, so nothing is cancelled.
-    system_menu_events(
-        &mut app,
-        [
-            ("close", serde_json::Value::Null),
-            ("select", serde_json::json!("rename")),
-        ],
-    );
+    // The platform tells a choice before its dismissal; one it could only
+    // tell after (a handler run late) is the app's still, alone: the menu
+    // had closed without one.
+    system_menu_event(&mut app, "close", serde_json::Value::Null);
+    system_menu_event(&mut app, "select", serde_json::json!("rename"));
     app.app
-        .wait_for("text:heard: true:LongPress open false:Select select:rename close")
+        .wait_for("text:heard: true:LongPress open cancel false:PressOutside close select:rename")
+        .unwrap();
+    // The next opening starts afresh.
+    system_menu_event(&mut app, "open", serde_json::json!("pointer"));
+    system_menu_event(&mut app, "select", serde_json::json!("delete"));
+    system_menu_event(&mut app, "close", serde_json::Value::Null);
+    app.app
+        .wait_for(
+            "text:heard: true:LongPress open cancel false:PressOutside close select:rename \
+             true:ContextMenu open false:Select select:delete close",
+        )
         .unwrap();
 }
 
