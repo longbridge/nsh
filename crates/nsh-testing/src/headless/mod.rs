@@ -453,18 +453,11 @@ impl Headless {
         if let Some(audio) = &audio {
             config.audio = Some(Arc::new(audio.clone()));
         }
-        // A desktop's windows: the main one, focused, on one display, and
-        // those the app opens. The main one starts hidden when the app's
-        // nsh.json `window` says so, as a runner opens it.
-        let main_hidden = config
-            .app
-            .main_window()
-            .is_some_and(|options| !options.visible_at_launch());
+        // A desktop's windows: the invisible app host on one display, and
+        // the windows the app opens. The host is never a user window.
         let windows = (config.environment.os.is_desktop() && config.windows.is_none()).then(|| {
             let mut windows = windows::Windows::new(config.viewport);
-            if main_hidden {
-                windows.start_hidden();
-            }
+            windows.start_hidden();
             windows
         });
         if let Some(windows) = &windows
@@ -493,7 +486,8 @@ impl Headless {
         if let Some(bar) = system_bar {
             screen.set_system_bar(bar);
         }
-        if main_hidden && windows.is_some() {
+        if windows.is_some() {
+            // The app host's root is not a user window.
             screen.set_window_hidden(ROOT_ID, true);
         }
         Ok(Headless {

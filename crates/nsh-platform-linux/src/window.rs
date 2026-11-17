@@ -196,6 +196,16 @@ pub(crate) fn activate_main(surface: &Rc<Surface>) {
     }
 }
 
+/// The OS asked the app to show itself (a second launch): the app root's
+/// `reopen` listeners decide which window to open or focus.
+pub(crate) fn reopen(surface: &Rc<Surface>) {
+    surface.event(
+        nsh_core::ROOT_ID,
+        nsh_core::EventKind::Window,
+        nsh_core::EventPayload::Window(Box::new(nsh_core::desktop::WindowEvent::Reopen)),
+    );
+}
+
 /// Window `id` activated as a press in it does, unless it acts as the
 /// active one already.
 #[cfg(feature = "dev")]

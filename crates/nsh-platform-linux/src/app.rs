@@ -687,7 +687,7 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
             for url in urls {
                 view.open_url(&url);
             }
-            crate::window::activate_main(&view.surface);
+            crate::window::reopen(&view.surface);
         }
         gtk::glib::ExitCode::SUCCESS
     });
@@ -695,7 +695,7 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> glib::ExitCode {
     app.connect_activate(move |app| {
         let Some(source) = source.borrow_mut().take() else {
             if let Some((_, view)) = &*shown.borrow() {
-                crate::window::activate_main(&view.surface);
+                crate::window::reopen(&view.surface);
             }
             return;
         };

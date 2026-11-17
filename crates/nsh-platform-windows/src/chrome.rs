@@ -425,6 +425,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         // A window of the app's own's ([`crate::app_window`]).
         DesktopCommand::OpenWindow(_) => {}
         DesktopCommand::Quit => quit(surface),
+        // The core applies it; the platform sees it for completeness.
+        DesktopCommand::SetQuitOnLastWindowClosed(_) => {}
         DesktopCommand::SetQuitOnRequest(quit) => c.asks_quit.set(!quit),
         // Additional quit request sources are currently macOS-only.
         DesktopCommand::SetQuitRequestOptions(_) | DesktopCommand::CancelQuitRequest => {}

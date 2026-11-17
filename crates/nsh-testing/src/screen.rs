@@ -1722,9 +1722,6 @@ impl Screen {
     /// The root of the window the app calls `id` (`"main"`: the main
     /// window's), while it is open.
     pub(crate) fn window_root(&self, id: &str) -> Option<NodeId> {
-        if id == "main" {
-            return Some(ROOT);
-        }
         self.windows
             .iter()
             .find(|(_, own)| own == id)

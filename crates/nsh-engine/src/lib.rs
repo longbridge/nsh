@@ -2186,6 +2186,12 @@ impl<M: TextEngine + 'static> Driver<M> {
         let text_engine = Rc::new(text_engine);
         let access = Arc::new(app_access(&config.app));
         let mut core = Core::new(text_engine.clone(), config.viewport);
+        // The desktops' `"platform"` quit policy: Windows and Linux quit
+        // when the last window closes; macOS stays in the Dock.
+        core.set_quit_on_last_window_closed(matches!(
+            config.environment.os,
+            nsh_core::platform::Os::Windows | nsh_core::platform::Os::Linux
+        ));
         core.set_content_culling(config.content_culling);
         core.set_tree_order_tracking(sink.needs_tree_order());
         core.set_projected_state_mounting(sink.needs_projected_states());
@@ -3962,6 +3968,13 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
     match message {
         Message::Event(id, event, mut payload) => {
             state.events_handled += 1;
+            // The OS asked the app to show itself: the app root's listeners
+            // hear it (the app decides which window to open or focus).
+            if let EventPayload::Window(window) = &payload
+                && matches!(**window, nsh_core::desktop::WindowEvent::Reopen)
+            {
+                state.core.reopened();
+            }
             if state.trace {
                 log::info!(target: "nsh::perf", "event {event:?} on view {id}");
             }

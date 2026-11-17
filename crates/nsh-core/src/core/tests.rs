@@ -28349,8 +28349,9 @@ mod rust_windows {
         report(&mut c, resized);
         assert_eq!(kept(&c), Some(resized.placement));
 
-        // One that opens shown is where the user left it from the start,
-        // hidden reports included, as before `defaultVisible`.
+        // The app host never shows, `defaultVisible` or not: it keeps no
+        // placement of its own. The first app window's placement is kept
+        // under its own id.
         let mut c = core();
         c.set_main_window(&MainWindowOptions {
             restore_bounds: true,
@@ -28358,7 +28359,7 @@ mod rust_windows {
         });
         let hidden = state(80.0, WindowMode::Normal, false);
         report(&mut c, hidden);
-        assert_eq!(kept(&c), Some(hidden.placement));
+        assert_eq!(kept(&c), None);
     }
 
     /// `nsh.json`'s `"window"` and the app's own `set` reach the main

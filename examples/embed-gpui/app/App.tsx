@@ -9,6 +9,7 @@
 // or an order placed here shows in the host and in the other tickets.
 
 import { effect, mount, Scroll, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 import { nativeComponent, nativeModule } from "nsh";
 import { Button, Card, Stepper, TextField } from "./ui";
 
@@ -144,4 +145,4 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => <Window id="main">{App}</Window>);

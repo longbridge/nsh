@@ -1073,6 +1073,11 @@ pub enum DesktopCommand {
     /// ([`crate::restart`]). A view embedded in another app leaves the
     /// app's lifecycle to that app: nothing happens there.
     Restart,
+    /// Whether the app quits when its last window closes (the policy
+    /// `Application.setQuitPolicy` sets; the desktops default to it on
+    /// Windows and Linux, not macOS). The core sends
+    /// [`DesktopCommand::Quit`] on the root when the last window goes.
+    SetQuitOnLastWindowClosed(bool),
     /// Whether the user's quit requests quit the app: its Quit item and
     /// the platform's quit key (Command-Q, Ctrl+Q). `false` while the app
     /// listens to them ([`crate::element::desktop::on_quit_request`]): the

@@ -50,9 +50,8 @@ use windows::{
             Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
             WindowsAndMessaging::{
                 AllowSetForegroundWindow, EnumWindows, GA_ROOT, GetAncestor, GetPropW,
-                GetWindowThreadProcessId, IsIconic, IsWindowVisible, SMTO_ABORTIFHUNG, SW_RESTORE,
-                SendMessageTimeoutW, SetForegroundWindow, SetPropW, ShowWindow, WM_COPYDATA,
-                WM_NCDESTROY,
+                GetWindowThreadProcessId, SMTO_ABORTIFHUNG, SendMessageTimeoutW, SetPropW,
+                WM_COPYDATA, WM_NCDESTROY,
             },
         },
     },
@@ -305,31 +304,23 @@ fn relaunched(surface: &Surface, launch: nsh_core::single_instance::SecondInstan
 /// `focus()` shows it (one hidden since launch, nsh.json
 /// `window.defaultVisible: false`, drawn before DWM composites it), as a
 /// link shows it on macOS and Linux.
-fn received(window: HWND, deliver: impl FnOnce(&Surface)) {
+fn received(_window: HWND, deliver: impl FnOnce(&Surface)) {
     let surface = SURFACE.with(|s| s.borrow().as_ref().and_then(Weak::upgrade));
-    // SAFETY: plain queries on the app's window.
-    let (iconic, visible) = unsafe {
-        (
-            IsIconic(window).as_bool(),
-            IsWindowVisible(window).as_bool(),
-        )
-    };
-    if iconic {
-        // SAFETY: a plain call on the app's window.
-        let _ = unsafe { ShowWindow(window, SW_RESTORE) };
-    } else if !visible {
-        match &surface {
-            Some(surface) if surface.main_unshown.get() => {
-                crate::app::show_main(surface, window);
-            }
-            _ => crate::window::show(window),
-        }
-    }
-    // SAFETY: a plain call on the app's window; the sender allowed this
-    // process to take the foreground.
-    let _ = unsafe { SetForegroundWindow(window) };
+    // The host is not a user window: the app root's `reopen` listeners
+    // decide which window to open or focus.
     match surface {
-        Some(surface) => deliver(&surface),
+        Some(surface) => {
+            surface.control(|control| {
+                control.dispatch_event(
+                    ROOT_ID,
+                    EventKind::Window,
+                    nsh_core::EventPayload::Window(Box::new(
+                        nsh_core::desktop::WindowEvent::Reopen,
+                    )),
+                );
+            });
+            deliver(&surface)
+        }
         None => log::warn!("links: a launch arrived without a window to take it"),
     }
 }

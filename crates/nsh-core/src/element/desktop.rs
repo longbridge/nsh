@@ -702,8 +702,10 @@ impl IntoElement for Window {
                                 }
                             }
                             WindowEvent::Closed { cause } => close(*cause),
-                            // The root's ([`Core`](crate::Core) hears it).
-                            WindowEvent::QuitRequest => {}
+                            // The root's ([`Core`](crate::Core) hears them).
+                            WindowEvent::QuitRequest
+                            | WindowEvent::Reopen
+                            | WindowEvent::LastWindowClosed => {}
                         }
                     }),
                 ));
@@ -1048,6 +1050,26 @@ pub(crate) fn add_quit_request_listener(
     let requests = &super::ambient::executor().quit_requests;
     let id = requests.borrow_mut().add(listener);
     super::quit::Subscription::new(requests, id)
+}
+
+/// Adds `listener` to what hears the OS ask the app to show itself
+/// (`Application.on("reopen")` keeps one per JS listener).
+pub(crate) fn add_reopen_listener(
+    listener: super::quit::ReopenListener,
+) -> super::quit::Subscription<super::quit::ReopenListener> {
+    let reopens = &super::ambient::executor().reopens;
+    let id = reopens.borrow_mut().add(listener);
+    super::quit::Subscription::new(reopens, id)
+}
+
+/// Adds `listener` to what hears the app's last window close
+/// (`Application.on("lastWindowClosed")` keeps one per JS listener).
+pub(crate) fn add_last_window_closed_listener(
+    listener: super::quit::LastWindowClosedListener,
+) -> super::quit::Subscription<super::quit::LastWindowClosedListener> {
+    let closed = &super::ambient::executor().last_window_closed;
+    let id = closed.borrow_mut().add(listener);
+    super::quit::Subscription::new(closed, id)
 }
 
 /// Adds `listener` to what runs as the app quits, until the subscription

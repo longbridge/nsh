@@ -62,6 +62,26 @@ impl Application {
         desktop(cx, DesktopCommand::Quit);
     }
 
+    /// Sets whether closing the app's last window quits it:
+    /// `"platform"` (the default) follows the platform (macOS stays in the
+    /// Dock; Windows and Linux quit), `true` always quits, `false` leaves
+    /// the app running so it can open another window, show a tray menu or
+    /// call `quit()`. The app root stays alive while no window is open.
+    pub(crate) fn set_quit_policy(options: QuitPolicyOptions, sys: System, cx: &mut ModuleCx) {
+        let policy = options
+            .quit_on_last_window_closed
+            .unwrap_or(QuitOnLastWindowClosed::Platform);
+        let quit = match policy {
+            QuitOnLastWindowClosed::Platform => matches!(
+                sys.os,
+                crate::platform::Os::Windows | crate::platform::Os::Linux
+            ),
+            QuitOnLastWindowClosed::Always => true,
+            QuitOnLastWindowClosed::Never => false,
+        };
+        desktop(cx, DesktopCommand::SetQuitOnLastWindowClosed(quit));
+    }
+
     /// Sets the additional sources of `quitRequest` on standalone macOS
     /// apps. `system` includes logout, restart and shutdown;
     /// `mainWindowClose` includes a user closing the main window when that
@@ -163,6 +183,8 @@ impl Application {
     #[overload(fn(event: ApplicationOpenFilesEvent, #[args(files)] listener: Callback<ApplicationOpenFiles>) -> Stop)]
     #[overload(fn(event: ApplicationQuitEvent, listener: Callback<()>) -> Stop)]
     #[overload(fn(event: ApplicationQuitRequestEvent, listener: Callback<()>) -> Stop)]
+    #[overload(fn(event: ApplicationReopenEvent, listener: Callback<()>) -> Stop)]
+    #[overload(fn(event: ApplicationLastWindowClosedEvent, listener: Callback<()>) -> Stop)]
     pub(crate) fn on(
         event: ApplicationEvent,
         #[args(payload)] listener: Callback<Payload>,
@@ -174,6 +196,8 @@ impl Application {
             ApplicationEvent::OpenFiles => open_files(listener, &sys, cx),
             ApplicationEvent::Quit => quit(listener, &sys, cx),
             ApplicationEvent::QuitRequest => quit_request(listener, &sys, cx),
+            ApplicationEvent::Reopen => reopen(listener, &sys, cx),
+            ApplicationEvent::LastWindowClosed => last_window_closed(listener, &sys, cx),
         }
     }
 }
@@ -262,6 +286,125 @@ fn quit_request(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) -> St
     })
 }
 
+fn reopen(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) -> Stop {
+    let reopens = sys.locals.get::<Reopens>();
+    let id = reopens.next.get();
+    reopens.next.set(id.wrapping_add(1));
+    reopens.listeners.borrow_mut().push((id, listener));
+    if reopens.subscription.borrow().is_none() && !reopens.adding.replace(true) {
+        cx.start(subscribe_reopens(Rc::downgrade(&reopens)));
+    }
+    let reopens = Rc::downgrade(&reopens);
+    Stop::new(move || {
+        if let Some(reopens) = reopens.upgrade() {
+            let removed = {
+                let mut listeners = reopens.listeners.borrow_mut();
+                listeners.retain(|(i, _)| *i != id);
+                listeners
+                    .is_empty()
+                    .then(|| reopens.subscription.borrow_mut().take())
+            };
+            drop(removed);
+        }
+    })
+}
+
+fn last_window_closed(listener: Callback<Payload>, sys: &System, cx: CallCx<'_>) -> Stop {
+    let closed = sys.locals.get::<Closed>();
+    let id = closed.next.get();
+    closed.next.set(id.wrapping_add(1));
+    closed.listeners.borrow_mut().push((id, listener));
+    if closed.subscription.borrow().is_none() && !closed.adding.replace(true) {
+        cx.start(subscribe_closed(Rc::downgrade(&closed)));
+    }
+    let closed = Rc::downgrade(&closed);
+    Stop::new(move || {
+        if let Some(closed) = closed.upgrade() {
+            let removed = {
+                let mut listeners = closed.listeners.borrow_mut();
+                listeners.retain(|(i, _)| *i != id);
+                listeners
+                    .is_empty()
+                    .then(|| closed.subscription.borrow_mut().take())
+            };
+            drop(removed);
+        }
+    })
+}
+
+/// The VM's `reopen` listeners.
+#[derive(Default)]
+struct Reopens {
+    listeners: RefCell<Vec<(u32, Callback<Payload>)>>,
+    next: Cell<u32>,
+    subscription: RefCell<Option<Subscription<crate::element::quit::ReopenListener>>>,
+    adding: Cell<bool>,
+}
+
+impl Local for Reopens {
+    fn close(&self) {
+        self.listeners.borrow_mut().clear();
+        let subscription = self.subscription.borrow_mut().take();
+        drop(subscription);
+    }
+}
+
+/// The VM's `lastWindowClosed` listeners.
+#[derive(Default)]
+struct Closed {
+    listeners: RefCell<Vec<(u32, Callback<Payload>)>>,
+    next: Cell<u32>,
+    subscription: RefCell<Option<Subscription<crate::element::quit::LastWindowClosedListener>>>,
+    adding: Cell<bool>,
+}
+
+impl Local for Closed {
+    fn close(&self) {
+        self.listeners.borrow_mut().clear();
+        let subscription = self.subscription.borrow_mut().take();
+        drop(subscription);
+    }
+}
+
+async fn subscribe_reopens(reopens: Weak<Reopens>) {
+    let Some(this) = reopens.upgrade() else {
+        return;
+    };
+    this.adding.set(false);
+    if this.listeners.borrow().is_empty() || this.subscription.borrow().is_some() {
+        return;
+    }
+    let subscription = crate::element::desktop::add_reopen_listener(Rc::new(move || {
+        let Some(reopens) = reopens.upgrade() else {
+            return;
+        };
+        for (_, listener) in &*reopens.listeners.borrow() {
+            listener.post(Payload::Reopen);
+        }
+    }));
+    *this.subscription.borrow_mut() = Some(subscription);
+}
+
+async fn subscribe_closed(closed: Weak<Closed>) {
+    let Some(this) = closed.upgrade() else {
+        return;
+    };
+    this.adding.set(false);
+    if this.listeners.borrow().is_empty() || this.subscription.borrow().is_some() {
+        return;
+    }
+    let subscription =
+        crate::element::desktop::add_last_window_closed_listener(Rc::new(move || {
+            let Some(closed) = closed.upgrade() else {
+                return;
+            };
+            for (_, listener) in &*closed.listeners.borrow() {
+                listener.post(Payload::LastWindowClosed);
+            }
+        }));
+    *this.subscription.borrow_mut() = Some(subscription);
+}
+
 /// The VM's `quitRequest` listeners.
 #[derive(Default)]
 struct QuitRequests {
@@ -303,6 +446,49 @@ async fn subscribe(requests: Weak<QuitRequests>) {
     *this.subscription.borrow_mut() = Some(subscription);
 }
 
+/// `Application.setQuitPolicy`'s options.
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+#[prop(exact)]
+pub(crate) struct QuitPolicyOptions {
+    /// `"platform"` (the default), `true` or `false`.
+    quit_on_last_window_closed: Option<QuitOnLastWindowClosed>,
+}
+
+/// When closing the last window quits the app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QuitOnLastWindowClosed {
+    /// As the platform does: macOS stays, Windows and Linux quit.
+    Platform,
+    /// Every platform quits.
+    Always,
+    /// Never: the app decides.
+    Never,
+}
+
+impl JsValue for QuitOnLastWindowClosed {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        "\"platform\" | boolean".into()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        if let Some(quit) = value.as_bool() {
+            return Ok(if quit { Self::Always } else { Self::Never });
+        }
+        match value.as_string().as_deref() {
+            Some("platform") => Ok(Self::Platform),
+            _ => Err(value.expected("\"platform\", true or false")),
+        }
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        match self {
+            Self::Platform => Ok(JsOwned::new(host, host.new_string("platform")?)),
+            Self::Always => Ok(JsOwned::new(host, host.new_bool(true))),
+            Self::Never => Ok(JsOwned::new(host, host.new_bool(false))),
+        }
+    }
+}
+
 /// `Application.on`'s events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 pub(crate) enum ApplicationEvent {
@@ -315,6 +501,10 @@ pub(crate) enum ApplicationEvent {
     Quit,
     /// The user asked to quit the app.
     QuitRequest,
+    /// The OS asked the app to show itself.
+    Reopen,
+    /// The app's last window closed.
+    LastWindowClosed,
 }
 
 /// The event of a later launch (`on`'s first overload).
@@ -335,6 +525,18 @@ pub(crate) enum ApplicationQuitRequestEvent {
     QuitRequest,
 }
 
+/// The event of the OS asking the app to show itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub(crate) enum ApplicationReopenEvent {
+    Reopen,
+}
+
+/// The event of the app's last window closing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub(crate) enum ApplicationLastWindowClosedEvent {
+    LastWindowClosed,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 pub(crate) enum ApplicationOpenFilesEvent {
     #[default]
@@ -348,6 +550,8 @@ pub(crate) enum Payload {
     OpenFiles(ApplicationOpenFiles),
     Quit,
     QuitRequest,
+    Reopen,
+    LastWindowClosed,
 }
 
 impl JsValue for Payload {
@@ -363,7 +567,9 @@ impl JsValue for Payload {
         match self {
             Payload::SecondInstance(launch) => launch.to_js(host),
             Payload::OpenFiles(files) => files.to_js(host),
-            Payload::Quit | Payload::QuitRequest => Ret::into_js((), host),
+            Payload::Quit | Payload::QuitRequest | Payload::Reopen | Payload::LastWindowClosed => {
+                Ret::into_js((), host)
+            }
         }
     }
 }

@@ -74,7 +74,7 @@ impl Event {
 /// A listener of a window (`WindowRef.on`, `<Window>`'s event props).
 struct Listener {
     id: u32,
-    /// The window's root node (the main window: [`ROOT_ID`]).
+    /// The window's root node.
     window: NodeId,
     event: Event,
     /// Called with the event's object (owned).
@@ -88,8 +88,9 @@ enum How {
     Opened { node: JsValue, owner: u32 },
     /// `<Window>`: the function that closes it as the user did (owned;
     /// called with the reason's name): the element hides its content and
-    /// tells the app (`onOpenChange`).
-    Element { close: JsValue },
+    /// tells the app (`onOpenChange`), and the reactive root its content
+    /// rendered in (disposed when the window goes).
+    Element { close: JsValue, owner: u32 },
 }
 
 /// A window of the app's own while it is open.
@@ -114,8 +115,6 @@ struct Own {
 pub(crate) struct Windows {
     /// The context key of the current window (owned; made on first use).
     key: Cell<JsValue>,
-    /// The main window's `WindowRef` (owned; made on first use).
-    main: Cell<JsValue>,
     /// A signal of a number counting changes to the list (owned; made on
     /// first use): `windows()` reads it.
     version: Cell<JsValue>,
@@ -123,20 +122,16 @@ pub(crate) struct Windows {
     list: RefCell<Vec<Own>>,
     listeners: RefCell<Vec<Listener>>,
     next: Cell<u32>,
-    /// What the platform reported last of the main window.
-    main_state: Cell<Option<WindowState>>,
 }
 
 impl Default for Windows {
     fn default() -> Self {
         Windows {
             key: Cell::new(UNDEFINED),
-            main: Cell::new(UNDEFINED),
             version: Cell::new(UNDEFINED),
             list: RefCell::default(),
             listeners: RefCell::default(),
             next: Cell::new(0),
-            main_state: Cell::new(None),
         }
     }
 }
@@ -146,7 +141,7 @@ impl Windows {
     pub(crate) fn free_all(&mut self, raw: *mut JsContext) {
         // SAFETY: owned values; no JS runs from here on.
         unsafe {
-            for c in [&self.key, &self.main, &self.version] {
+            for c in [&self.key, &self.version] {
                 qjs::JS_FreeValue(raw, c.replace(UNDEFINED));
             }
             for w in self.list.get_mut().drain(..) {
@@ -155,7 +150,7 @@ impl Windows {
                 qjs::JS_FreeValue(raw, w.title_bar);
                 match w.how {
                     How::Opened { node, .. } => qjs::JS_FreeValue(raw, node),
-                    How::Element { close } => qjs::JS_FreeValue(raw, close),
+                    How::Element { close, .. } => qjs::JS_FreeValue(raw, close),
                 }
             }
             for l in self.listeners.get_mut().drain(..) {
@@ -344,11 +339,8 @@ fn bump(cx: *mut JsContext) {
     reactive::set_signal(cx, v, number(n + 1.0));
 }
 
-/// The node of the window with `key` (`"main"`: [`ROOT_ID`]), if it is open.
+/// The node of the window with `key`, if it is open.
 fn node_of_key(cx: *mut JsContext, key: &str) -> Option<NodeId> {
-    if key == "main" {
-        return Some(ROOT_ID);
-    }
     windows(cx)
         .list
         .borrow()
@@ -359,9 +351,6 @@ fn node_of_key(cx: *mut JsContext, key: &str) -> Option<NodeId> {
 
 /// The handle of the window at node `id` (owned), if it is open.
 fn handle_of(cx: *mut JsContext, id: NodeId) -> Option<JsValue> {
-    if id == ROOT_ID {
-        return Some(main_ref(cx));
-    }
     windows(cx)
         .list
         .borrow()
@@ -418,7 +407,8 @@ const METHODS: &[(&CStr, c_int)] = &[
 fn make_handle(cx: *mut JsContext, key: &str, id: NodeId, parent: JsValue) -> JsValue {
     let handle = new_object(cx);
     set(cx, handle, c"id", string(cx, key));
-    set(cx, handle, c"main", boolean(id == ROOT_ID));
+    // `"main"` is the first window's conventional id, with no privilege.
+    set(cx, handle, c"main", boolean(key == "main"));
     set(cx, handle, c"parent", dup(cx, parent));
     let mut data = [number(id as f64)];
     for (magic, (name, length)) in METHODS.iter().enumerate() {
@@ -428,18 +418,9 @@ fn make_handle(cx: *mut JsContext, key: &str, id: NodeId, parent: JsValue) -> Js
     handle
 }
 
-/// The main window's `WindowRef` (owned).
-fn main_ref(cx: *mut JsContext) -> JsValue {
-    let w = windows(cx);
-    if nullish(w.main.get()) {
-        w.main.set(make_handle(cx, "main", ROOT_ID, qjs::JS_NULL));
-    }
-    dup(cx, w.main.get())
-}
-
-/// Whether node `id` is a window that is open (the main window always is).
+/// Whether node `id` is a window that is open.
 fn is_open(cx: *mut JsContext, id: NodeId) -> bool {
-    id == ROOT_ID || windows(cx).list.borrow().iter().any(|w| w.id == id)
+    windows(cx).list.borrow().iter().any(|w| w.id == id)
 }
 
 /// A `WindowRef`'s methods: `METHODS[magic]` of the window at the node
@@ -484,13 +465,7 @@ unsafe extern "C" fn ref_call(
         "show" => request(WindowRequest::Show),
         "hide" => request(WindowRequest::Hide),
         "focus" => request(WindowRequest::Focus),
-        "close" => {
-            if id == ROOT_ID {
-                request(WindowRequest::Close)
-            } else {
-                close_own(cx, id, None)
-            }
-        }
+        "close" => close_own(cx, id, None),
         "minimize" => request(WindowRequest::Minimize),
         "restore" => request(WindowRequest::Restore),
         "setMode" => match decode::<WindowMode>(cx, a0) {
@@ -561,12 +536,6 @@ fn bounds_arg(cx: *mut JsContext, v: JsValue) -> Result<WindowFrame, String> {
 
 /// `WindowRef.state()` (owned; tracked).
 fn state_of(cx: *mut JsContext, id: NodeId) -> JsValue {
-    if id == ROOT_ID {
-        let accessor = crate::env::window_state(cx);
-        let v = read(cx, accessor);
-        free(cx, accessor);
-        return v;
-    }
     let signal = windows(cx)
         .list
         .borrow()
@@ -589,12 +558,6 @@ fn state_of(cx: *mut JsContext, id: NodeId) -> JsValue {
 
 /// `WindowRef.titleBar()` (owned; tracked).
 fn title_bar_of(cx: *mut JsContext, id: NodeId) -> JsValue {
-    if id == ROOT_ID {
-        let accessor = crate::env::title_bar(cx);
-        let v = read(cx, accessor);
-        free(cx, accessor);
-        return v;
-    }
     let signal = windows(cx)
         .list
         .borrow()
@@ -755,14 +718,6 @@ pub(crate) fn displays_changed(cx: *mut JsContext) {
     }
 }
 
-/// The main window's state changed (the environment's).
-pub(crate) fn main_changed(cx: *mut JsContext, next: Option<WindowState>) {
-    let previous = windows(cx).main_state.replace(next);
-    if previous != next {
-        state_changed(cx, ROOT_ID, previous.as_ref(), next.as_ref());
-    }
-}
-
 /// What the platform reports of a window of the app's own, or of the main
 /// window (its close presses: its state is the environment's).
 pub(crate) fn platform_event(cx: *mut JsContext, id: NodeId, event: &WindowEvent) {
@@ -806,9 +761,8 @@ pub(crate) fn platform_event(cx: *mut JsContext, id: NodeId, event: &WindowEvent
                 }
             }
         }
-        // The root's: `Application.on("quitRequest")` hears it from the
-        // core.
-        WindowEvent::QuitRequest => {}
+        // The root's: `Application`'s listeners hear them from the core.
+        WindowEvent::QuitRequest | WindowEvent::Reopen | WindowEvent::LastWindowClosed => {}
     }
     let r = reactive::finish_value(cx, UNDEFINED);
     if is_exception(r) {
@@ -830,7 +784,7 @@ fn close_own(cx: *mut JsContext, id: NodeId, cause: Option<WindowCloseCause>) ->
         };
         match &w.how {
             How::Opened { node, owner } => Then::Opened(dup(cx, *node), *owner),
-            How::Element { close } => Then::Element(dup(cx, *close)),
+            How::Element { close, .. } => Then::Element(dup(cx, *close)),
         }
     };
     match then {
@@ -887,7 +841,11 @@ fn unregister(cx: *mut JsContext, id: NodeId) {
     match w.how {
         // The caller removes the node.
         How::Opened { node, .. } => free(cx, node),
-        How::Element { close } => free(cx, close),
+        How::Element { close, owner } => {
+            free(cx, close);
+            // Its content's signals, effects and bindings go with it.
+            reactive::dispose_owner(cx, owner);
+        }
     }
 }
 
@@ -1011,6 +969,11 @@ unsafe extern "C" fn open_window(
     if let Some(open) = key.as_deref().and_then(|k| node_of_key(cx, k))
         && let Some(handle) = handle_of(cx, open)
     {
+        // Opening an open window brings it forward, as apps expect.
+        if let Err(e) = send(cx, open, DesktopCommand::Request(WindowRequest::Focus)) {
+            free(cx, handle);
+            return e;
+        }
         return handle;
     }
     let options = match checked_options(cx, "Window.open", o) {
@@ -1080,18 +1043,27 @@ unsafe extern "C" fn get_window(
 // --- <Window> ----------------------------------------------------------------------------
 
 /// `<Window id kind open onOpenChange …>`: a window of the app's own while
-/// it is open: `open` is not false and the user did not close it. Off the
-/// desktops it renders nothing.
+/// it is open: `open` is not false and the user did not close it. It is a
+/// top-level scene of the app root on the desktops. Elsewhere (iOS, Android,
+/// the web) it degrades to its content in the app's one window.
 unsafe extern "C" fn window_component(
     cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    if !crate::env::current(cx).os.is_desktop() {
-        return qjs::JS_NULL;
-    }
     let props = arg(argc, argv, 0);
+    let desktop = crate::env::current(cx).os.is_desktop();
+    if !desktop {
+        if !window_is_open(cx, props) {
+            return qjs::JS_NULL;
+        }
+        return get(cx, props, c"children");
+    }
+    // A `<Window>` is a scene wherever it is declared: a top-level one
+    // belongs to the app root, a nested one to the window around it (it
+    // closes with it). It is never inserted as a view in its parent.
+    dom::note_app_window(cx);
     // Closed by the user while `open` stayed true: `closed` (a plain
     // object's flag) and `tick`, which runs the memo again.
     let state = new_object(cx);
@@ -1101,6 +1073,22 @@ unsafe extern "C" fn window_component(
     free(cx, tick);
     let shown = reactive::memo(cx, run, false);
     reactive::finish_value(cx, shown)
+}
+
+/// Whether a `<Window>`'s `open` (or `defaultOpen`) lets it open.
+fn window_is_open(cx: *mut JsContext, props: JsValue) -> bool {
+    let open = get(cx, props, c"open");
+    if nullish(open) {
+        let default = get(cx, props, c"defaultOpen");
+        // SAFETY: an inline check of a live value.
+        let closed = unsafe { qjs::JS_IsBool(default) } && !truthy(cx, default);
+        free(cx, default);
+        !closed
+    } else {
+        let on = truthy(cx, open);
+        free(cx, open);
+        on
+    }
 }
 
 fn flag(cx: *mut JsContext, state: JsValue, key: &CStr) -> bool {
@@ -1122,18 +1110,7 @@ unsafe extern "C" fn window_run(
     // SAFETY: three data values (props, state, tick).
     let (props, state, tick) = unsafe { (*data, *data.add(1), *data.add(2)) };
     free(cx, read(cx, tick));
-    let open = get(cx, props, c"open");
-    let open = if nullish(open) {
-        let default = get(cx, props, c"defaultOpen");
-        // SAFETY: an inline check of a live value.
-        let closed = unsafe { qjs::JS_IsBool(default) } && !truthy(cx, default);
-        free(cx, default);
-        !closed
-    } else {
-        let on = truthy(cx, open);
-        free(cx, open);
-        on
-    };
+    let open = window_is_open(cx, props);
     if !open {
         // The app followed (or closed it itself): the next `open` opens it.
         set(cx, state, c"closed", qjs::JS_FALSE);
@@ -1156,13 +1133,22 @@ unsafe extern "C" fn window_run(
             return qjs::JS_NULL;
         }
         let close = native(cx, element_close, 1, 0, &mut [props, state, tick]);
-        let opened = open_node(cx, options, |_| How::Element { close });
+        // The window's content lives in a root of its own: closing the
+        // window disposes its signals, effects and bindings, and the app
+        // root's state stays.
+        let (owner, ()) = reactive::with_root(cx, || ());
+        let opened = open_node(cx, options, |_| How::Element { close, owner });
         let (node, id, handle) = match opened {
             Ok(opened) => opened,
-            Err(e) => return e,
+            Err(e) => {
+                reactive::dispose_owner(cx, owner);
+                return e;
+            }
         };
-        let result = (|| -> Result<(), JsValue> {
-            reactive::add_cleanup(cx, native(cx, element_gone, 0, 0, &mut [number(id as f64)]));
+        // The memo's cleanup runs when the element closes: `element_gone`
+        // unregisters the window and disposes its root.
+        reactive::add_cleanup(cx, native(cx, element_gone, 0, 0, &mut [number(id as f64)]));
+        let (_, result) = reactive::with_root_under(cx, owner, || -> Result<(), JsValue> {
             reactive::provide(cx, context_key(cx), handle);
             // `ref`: the window's `WindowRef` (a variable's assignment, a
             // signal or a function, as the compiler gives it).
@@ -1189,11 +1175,12 @@ unsafe extern "C" fn window_run(
             let r = dom::insert_value_at(cx, node, children, None);
             free(cx, children);
             r
-        })();
+        });
         free(cx, handle);
         match result {
             Ok(()) => node,
             Err(e) => {
+                unregister(cx, id);
                 free(cx, node);
                 e
             }
@@ -1325,7 +1312,7 @@ fn current(cx: *mut JsContext) -> Option<JsValue> {
     if !reactive::has_owner(cx) {
         return None;
     }
-    Some(reactive::lookup(cx, context_key(cx)).unwrap_or_else(|| main_ref(cx)))
+    reactive::lookup(cx, context_key(cx))
 }
 
 /// `currentWindow()`.
@@ -1343,8 +1330,7 @@ pub(crate) unsafe extern "C" fn current_window(
     })
 }
 
-/// `windows()`: the main window, then the app's own in opening order
-/// (tracked).
+/// `windows()`: the app's windows in opening order (tracked).
 pub(crate) unsafe extern "C" fn all_windows(
     cx: *mut JsContext,
     _this: JsValue,
@@ -1352,8 +1338,12 @@ pub(crate) unsafe extern "C" fn all_windows(
     _argv: *mut JsValue,
 ) -> JsValue {
     free(cx, read(cx, version(cx)));
-    let mut handles = vec![main_ref(cx)];
-    handles.extend(windows(cx).list.borrow().iter().map(|w| dup(cx, w.handle)));
+    let mut handles: Vec<JsValue> = windows(cx)
+        .list
+        .borrow()
+        .iter()
+        .map(|w| dup(cx, w.handle))
+        .collect();
     // SAFETY: a new array taking the handles.
     unsafe { qjs::JS_NewArrayFrom(cx, handles.len() as c_int, handles.as_mut_ptr()) }
 }
@@ -1367,8 +1357,7 @@ pub(crate) unsafe extern "C" fn focused_window(
     _argv: *mut JsValue,
 ) -> JsValue {
     free(cx, read(cx, version(cx)));
-    let mut ids = vec![ROOT_ID];
-    ids.extend(windows(cx).list.borrow().iter().map(|w| w.id));
+    let ids: Vec<NodeId> = windows(cx).list.borrow().iter().map(|w| w.id).collect();
     let mut focused = None;
     // Every state is read, so a change of any of them runs the reader again.
     for id in ids {
@@ -1392,7 +1381,12 @@ pub(crate) unsafe extern "C" fn window_state(
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
-    let id = current_id(cx);
+    let Some(id) = current_id(cx) else {
+        return type_error(
+            cx,
+            "windowState() reads the window a component renders in: call it inside <Window>",
+        );
+    };
     state_of(cx, id)
 }
 
@@ -1403,18 +1397,27 @@ pub(crate) unsafe extern "C" fn title_bar(
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
-    let id = current_id(cx);
+    let Some(id) = current_id(cx) else {
+        return type_error(
+            cx,
+            "titleBar() reads the window a component renders in: call it inside <Window>",
+        );
+    };
     title_bar_of(cx, id)
 }
 
-/// The node of the current window (the main window's outside any).
-fn current_id(cx: *mut JsContext) -> NodeId {
-    let Some(handle) = current(cx) else {
-        return ROOT_ID;
-    };
+/// The node of the window code renders in, if any (`keymap.bind`'s
+/// default scope).
+pub(crate) fn current_node(cx: *mut JsContext) -> Option<NodeId> {
+    current_id(cx)
+}
+
+/// The node of the current window, if code renders in one.
+fn current_id(cx: *mut JsContext) -> Option<NodeId> {
+    let handle = current(cx)?;
     let id = get(cx, handle, c"id");
     let key = dom::string_arg(cx, id);
     free(cx, id);
     free(cx, handle);
-    key.and_then(|k| node_of_key(cx, &k)).unwrap_or(ROOT_ID)
+    key.and_then(|k| node_of_key(cx, &k))
 }

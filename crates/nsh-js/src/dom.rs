@@ -100,6 +100,9 @@ pub(crate) struct Dom {
     /// whose they are (not owned: a row taken out of its `each`, or the
     /// object's finalizer, takes its entry out).
     pending_rows: RefCell<FxHashMap<NodeId, JsValue>>,
+    /// How many top-level `<Window>` scenes the app root declared while it
+    /// mounted (desktop apps must declare one; reset by `mount`).
+    app_windows: Cell<u32>,
 }
 
 #[derive(Clone, Copy)]
@@ -154,6 +157,22 @@ fn dom<'a>(cx: *mut JsContext) -> &'a Dom {
     // SAFETY: a projection of the state's field; the renderer is only ever
     // reached by shared reference.
     unsafe { &(*crate::state::state(cx)).dom }
+}
+
+/// Starts counting the top-level `<Window>` scenes of a mount.
+pub(crate) fn reset_app_windows(cx: *mut JsContext) {
+    dom(cx).app_windows.set(0);
+}
+
+/// A top-level `<Window>` scene of the app root declared itself.
+pub(crate) fn note_app_window(cx: *mut JsContext) {
+    let d = dom(cx);
+    d.app_windows.set(d.app_windows.get() + 1);
+}
+
+/// How many top-level `<Window>` scenes the app root declared.
+pub(crate) fn app_windows(cx: *mut JsContext) -> u32 {
+    dom(cx).app_windows.get()
 }
 
 /// The node data an object holds, or null for other values.
@@ -311,6 +330,7 @@ impl Dom {
             dialogs: Cell::new(0),
             lazy_rows: Cell::new(false),
             pending_rows: RefCell::new(FxHashMap::default()),
+            app_windows: Cell::new(0),
         }
     }
 
@@ -3575,6 +3595,7 @@ pub(crate) unsafe extern "C" fn mount(
     if let Some(dispose) = crate::hot::reuse(cx, app, props) {
         return dispose;
     }
+    reset_app_windows(cx);
     let root = d.root.get();
     // SAFETY: reads of the root's children; dups for the dispose function.
     let before: Vec<JsValue> = unsafe { &(*node_ptr(cx, root)).children }
@@ -3603,6 +3624,50 @@ pub(crate) unsafe extern "C" fn mount(
         free_values(cx, before);
         reactive::dispose_owner(cx, owner);
         return e;
+    }
+    // A desktop app root is a host: its content is top-level `<Window>`
+    // scenes, each with a root of its own. It never renders a view or text
+    // itself, and it declares at least one scene (else there is no window
+    // to show, and no implicit first window to fall back to).
+    if crate::env::current(cx).os.is_desktop() {
+        let current: Vec<JsValue> = unsafe { &(*node_ptr(cx, root)).children }
+            .iter()
+            .map(|&v| unsafe { qjs::JS_DupValue(cx, v) })
+            .collect();
+        let mut invalid = false;
+        for &c in &current {
+            if node_tag(cx, c) != Some(Tag::Modal) {
+                invalid = true;
+            }
+        }
+        let declared = app_windows(cx);
+        free_values(cx, current);
+        let message = if invalid {
+            Some(
+                "mount: a desktop app renders its UI in top-level <Window> scenes; the app root returned a view or text of its own",
+            )
+        } else if declared == 0 {
+            Some(
+                "mount: a desktop app declares at least one top-level <Window>; no implicit first window is made",
+            )
+        } else {
+            None
+        };
+        if let Some(message) = message {
+            let current: Vec<JsValue> = unsafe { &(*node_ptr(cx, root)).children }
+                .iter()
+                .map(|&v| unsafe { qjs::JS_DupValue(cx, v) })
+                .collect();
+            for &c in &current {
+                if !before.iter().any(|&b| same(b, c)) {
+                    let _ = remove_child(cx, root, c);
+                }
+            }
+            free_values(cx, current);
+            free_values(cx, before);
+            reactive::dispose_owner(cx, owner);
+            return throw_type(cx, message);
+        }
     }
     let mut data = [qjs::JS_NewFloat64(owner as f64), new_array(cx, before)];
     // SAFETY: the function keeps dups of `data`.

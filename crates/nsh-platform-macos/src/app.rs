@@ -903,13 +903,16 @@ define_class!(
                     .as_ref()
                     .map(|running| (running.window.clone(), running.view.surface().clone()))
             });
-            if let Some((window, surface)) = running {
-                if window.isMiniaturized() {
-                    window.deminiaturize(None);
-                }
-                window.makeKeyAndOrderFront(None);
-                // One hidden at launch shows in the mode it opens in.
-                crate::window::main_shown(&surface);
+            if let Some((_window, surface)) = running {
+                // The app opens or focuses the window it wants: there is no
+                // privileged main window to show.
+                surface.event(
+                    nsh_core::ROOT_ID,
+                    nsh_core::EventKind::Window,
+                    nsh_core::EventPayload::Window(Box::new(
+                        nsh_core::desktop::WindowEvent::Reopen,
+                    )),
+                );
             }
             false
         }

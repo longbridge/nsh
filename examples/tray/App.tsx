@@ -10,7 +10,7 @@
 // the app `nsh package` builds.
 import { cleanup, computed, effect, mount, platform, signal, Text, View } from "nsh";
 import { Button, Progress } from "nsh/base";
-import { Application, currentWindow, Tray } from "nsh/desktop";
+import { Window, Application, currentWindow, Tray } from "nsh/desktop";
 import icon from "./tray.svg";
 
 /** The sessions' lengths, in minutes. */
@@ -150,4 +150,4 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => <Window id="main">{App}</Window>);

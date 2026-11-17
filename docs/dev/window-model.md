@@ -134,10 +134,11 @@ signals, effects, menus and window declarations survive while windows open
 and close.
 
 `<Window>` elements in that tree are **scenes**: they are not mounted into a
-parent view. Each one creates a window root. A `<Window>` nested inside a
-normal view is an error. A normal view returned by `mount` outside a
-`<Window>` is an error too: every app declares at least one top-level
-`<Window>`, and NSH does not create an implicit first window.
+parent view. Each one creates a window root. A `<Window>` declared inside
+another window's content is a scene of that window (it closes with it), not
+a view. A normal view returned by `mount` outside a `<Window>` is an error:
+every app declares at least one top-level `<Window>`, and NSH does not
+create an implicit first window.
 
 `currentWindow()` is valid while rendering inside a `<Window>`; outside a
 window (in the app root) it throws with a message pointing at

@@ -3,7 +3,8 @@
 // it, a popup closes when the focus leaves it, Escape closes a dialog,
 // and the close button reports its press and closes unless the window
 // keeps itself open. Each window's button sits where the main window's
-// does: a press goes to the window the view is in.
+// does: a press goes to the window the view is in. The app root declares
+// every window; there is no implicit main window.
 import { mount, signal, Text, View } from "nsh";
 import { currentWindow, focusedWindow, Window } from "nsh/desktop";
 
@@ -28,11 +29,7 @@ function Inside(props: { name: string }) {
   return <Button label={`In ${props.name}`} onPress={() => presses.set(`${props.name} in ${win.id}`)} />;
 }
 
-function App() {
-  const changed = (name: string, flag: { set(open: boolean): void }) => ({ open, reason }: { open: boolean; reason: string }) => {
-    flag.set(open);
-    log.set(`${name} ${reason}`);
-  };
+function Main() {
   return (
     <View style={{ flex: 1 }}>
       <Button label="Main button" onPress={() => presses.set("main")} />
@@ -44,6 +41,20 @@ function App() {
       <Text>{`Presses: ${presses()}`}</Text>
       <Text>{`Focused: ${focusedWindow()?.id ?? "none"}`}</Text>
       <Text>{`Log: ${log()}`}</Text>
+    </View>
+  );
+}
+
+function App() {
+  const changed = (name: string, flag: { set(open: boolean): void }) => ({ open, reason }: { open: boolean; reason: string }) => {
+    flag.set(open);
+    log.set(`${name} ${reason}`);
+  };
+  return (
+    <>
+      <Window id="main">
+        <Main />
+      </Window>
       <Window id="notes" title="Notes" open={notesOpen()} onOpenChange={changed("notes", notesOpen)} defaultSize={{ width: 300, height: 200 }} defaultPosition={{ x: 40, y: 60 }}>
         <Inside name="notes" />
       </Window>
@@ -62,7 +73,7 @@ function App() {
       >
         <Inside name="guard" />
       </Window>
-    </View>
+    </>
   );
 }
 

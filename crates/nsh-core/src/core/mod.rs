@@ -1574,6 +1574,13 @@ pub struct Core<M: TextEngine> {
     /// The windows of the app's own, by the app's id: their root nodes,
     /// and whether their placement is kept.
     window_ids: rustc_hash::FxHashMap<String, (NodeId, bool)>,
+    /// Whether the app quits when its last window closes
+    /// ([`DesktopCommand::SetQuitOnLastWindowClosed`]).
+    quit_on_last_window_closed: bool,
+    /// nsh.json's `"window"` launch defaults ([`Core::set_main_window`]):
+    /// the first app window inherits them, since the host has no visible
+    /// window of its own.
+    main_window_options: Option<crate::desktop::MainWindowOptions>,
     /// The main window's placement is kept (nsh.json `window.restoreBounds`,
     /// [`Core::set_main_window`]).
     keep_main_placement: bool,
@@ -1663,6 +1670,8 @@ impl<M: TextEngine> Core<M> {
             window_ids: Default::default(),
             runs: Default::default(),
             folded: Default::default(),
+            quit_on_last_window_closed: false,
+            main_window_options: None,
             keep_main_placement: false,
             main_shown: false,
             clipboard: None,
@@ -1977,6 +1986,13 @@ impl<M: TextEngine> Core<M> {
         self.picker = backend;
     }
 
+    /// Sets whether the app quits when its last window closes (the
+    /// desktops' `"platform"` policy: true on Windows and Linux, false on
+    /// macOS). `Application.setQuitPolicy` sets it at run time.
+    pub fn set_quit_on_last_window_closed(&mut self, quit: bool) {
+        self.quit_on_last_window_closed = quit;
+    }
+
     /// The main window's launch-time options (nsh.json `"window"`): its
     /// attributes go to the main window with the next commit, as
     /// `currentWindow().set()` sends them (capabilities apply); with
@@ -1986,6 +2002,7 @@ impl<M: TextEngine> Core<M> {
     /// Set it after the environment ([`Core::set_environment`]): a surface
     /// without a window, a phone's, takes no attributes.
     pub fn set_main_window(&mut self, options: &crate::desktop::MainWindowOptions) {
+        self.main_window_options = Some(options.clone());
         self.keep_main_placement = options.restore_bounds;
         self.main_shown |= options.visible_at_launch();
         if let Some(state) = self.components.environment.window_state {
@@ -2986,6 +3003,9 @@ impl<M: TextEngine> Core<M> {
                     .pending
                     .merge(&attributes);
             }
+            DesktopCommand::SetQuitOnLastWindowClosed(quit) => {
+                self.quit_on_last_window_closed = quit;
+            }
             DesktopCommand::OpenWindow(mut open) => {
                 let options = &mut open.options;
                 // `Window.open` checked it already and threw; this guards
@@ -2995,6 +3015,37 @@ impl<M: TextEngine> Core<M> {
                     .values()
                     .filter(|(node, _)| *node != id && self.key(*node).is_ok())
                     .count();
+                // The first app window inherits nsh.json's `"window"` launch
+                // defaults and the host's size: the host is invisible, so
+                // those defaults describe the window the app shows first.
+                if open_now == 0 {
+                    if let Some(defaults) = self.main_window_options.clone() {
+                        if options.default_size.is_none() {
+                            options.default_size = defaults.default_size;
+                        }
+                        if options.default_position.is_none() {
+                            options.default_position = defaults.default_position;
+                        }
+                        if options.display.is_none() {
+                            options.display = defaults.display;
+                        }
+                        if options.default_mode.is_none() {
+                            options.default_mode = defaults.default_mode;
+                        }
+                        let mut attributes = defaults.attributes;
+                        attributes.merge(&options.attributes);
+                        options.attributes = attributes;
+                    }
+                    if let Some(state) = self.components.environment.window_state {
+                        if options.default_size.is_none() {
+                            options.default_size = Some(state.content_bounds.size);
+                        }
+                        if options.default_position.is_none() {
+                            options.default_position =
+                                Some(crate::desktop::WindowPosition::At(state.bounds.origin));
+                        }
+                    }
+                }
                 if let Err(message) =
                     self.access
                         .check_window(options.kind, &options.attributes, open_now)
@@ -3050,6 +3101,7 @@ impl<M: TextEngine> Core<M> {
         if self.windows.is_empty() {
             return;
         }
+        let had_windows = !self.window_ids.is_empty();
         let gone: Vec<NodeId> = self
             .windows
             .keys()
@@ -3059,6 +3111,17 @@ impl<M: TextEngine> Core<M> {
         for id in gone {
             self.windows.remove(&id);
             self.window_ids.retain(|_, (node, _)| *node != id);
+        }
+        // The last window went: the policy decides whether that ends the
+        // app. The app's own close path has run by now (its root is gone).
+        if had_windows && self.window_ids.is_empty() {
+            self.last_window_closed();
+            if self.quit_on_last_window_closed {
+                self.commands.push((
+                    ROOT_ID,
+                    Command::Desktop(Box::new(crate::desktop::DesktopCommand::Quit)),
+                ));
+            }
         }
         let mut ids: Vec<NodeId> = self.windows.keys().copied().collect();
         ids.sort_unstable();

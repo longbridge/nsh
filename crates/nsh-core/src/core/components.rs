@@ -1431,6 +1431,32 @@ impl<M: TextEngine> Core<M> {
         self.apply_actions();
     }
 
+    /// The OS asked the app to show itself: each reopen listener hears it,
+    /// oldest first. The app opens or focuses the window it wants.
+    #[doc(hidden)]
+    pub fn reopened(&mut self) {
+        let _entered = self.components.runtime.enter();
+        let listeners = self.components.executor.reopens.borrow().all();
+        for listener in listeners {
+            if let Err(message) = caught(|| listener()) {
+                log::error!(target: "js", "a reopen listener failed: {message}");
+            }
+        }
+        self.apply_actions();
+    }
+
+    /// The app's last window went: each listener hears it, oldest first.
+    pub(crate) fn last_window_closed(&mut self) {
+        let _entered = self.components.runtime.enter();
+        let listeners = self.components.executor.last_window_closed.borrow().all();
+        for listener in listeners {
+            if let Err(message) = caught(|| listener()) {
+                log::error!(target: "js", "a last window closed listener failed: {message}");
+            }
+        }
+        self.apply_actions();
+    }
+
     /// Tells the platform whether its quit requests go to the app, when
     /// that changed since the last call (a listener came or went): whether
     /// it did.

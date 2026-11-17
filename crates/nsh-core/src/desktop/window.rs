@@ -700,12 +700,10 @@ pub struct MainWindowOptions {
     pub display: Option<DisplayId>,
     /// The mode it opens in.
     pub default_mode: Option<WindowMode>,
-    /// Whether it shows when the app starts (`None`: it does). With `false`
-    /// the window is made and the app runs in it, unseen and unfocused,
-    /// until the app shows it (`show()`, `focus()`), a link of one of its
-    /// URL schemes opens it, or the user opens it again on macOS (its Dock
-    /// icon, the Finder): a tray app starts with only its tray icon. Read
-    /// at launch only.
+    /// The first app window's `defaultVisible` (kept for the window the app
+    /// declares; the host itself never shows). The window model v2 opens
+    /// windows from JS: the app hides the one it wants unseen with
+    /// `hide()`. Read at launch only.
     pub default_visible: Option<bool>,
     /// Opens where the user left it (the runner keeps its placement).
     pub restore_bounds: bool,
@@ -739,11 +737,13 @@ impl MainWindowOptions {
         Some(placement.fit_on_displays(displays))
     }
 
-    /// Whether the main window shows when the app starts: unless
-    /// `defaultVisible` is `false`. For the runners, as they launch the app.
+    /// Whether the main window shows when the app starts: never in the
+    /// window model v2, where it is the invisible app host. `defaultVisible`
+    /// describes the first app window (the app declares it with `<Window>`),
+    /// not the host.
     #[doc(hidden)]
     pub fn visible_at_launch(&self) -> bool {
-        self.default_visible != Some(false)
+        false
     }
 
     /// The keys `"window"` takes besides the attributes.
@@ -1063,6 +1063,16 @@ pub enum WindowEvent {
         /// Which policy.
         cause: WindowCloseCause,
     },
+    /// The OS asked the app to show itself: macOS's Dock or Finder reopen,
+    /// or a second launch on Windows or Linux. Reported on the root only.
+    /// The app opens or focuses the window it wants; NSH shows none by
+    /// itself ([`crate::element::desktop::on_reopen`]).
+    Reopen,
+    /// The app's last window went: the app root is still alive. Reported on
+    /// the root, after the window's own close path, whether or not the
+    /// quit policy then quits the app
+    /// ([`DesktopCommand::SetQuitOnLastWindowClosed`]).
+    LastWindowClosed,
     /// The user asked to quit the app (its Quit item, the platform's quit
     /// key) while the app listens to quit requests
     /// ([`super::DesktopCommand::SetQuitOnRequest`]): the platform did not
@@ -1217,13 +1227,14 @@ mod tests {
         let read = |json: &str| {
             MainWindowOptions::from_json(&serde_json::from_str::<crate::JsonValue>(json).unwrap())
         };
-        // Shown unless the app says otherwise.
-        assert!(MainWindowOptions::default().visible_at_launch());
+        // The host never shows: `defaultVisible` is kept for the first app
+        // window (the app declares it), not applied to the host.
+        assert!(!MainWindowOptions::default().visible_at_launch());
         let shown = read(r#"{"title":"Mail"}"#).unwrap();
         assert_eq!(shown.default_visible, None);
-        assert!(shown.visible_at_launch());
+        assert!(!shown.visible_at_launch());
         assert!(
-            read(r#"{"defaultVisible":true}"#)
+            !read(r#"{"defaultVisible":true}"#)
                 .unwrap()
                 .visible_at_launch()
         );

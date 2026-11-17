@@ -2,7 +2,7 @@ import { type Bounds, type JSX, computed, effect, type InputRef, mount, Scroll, 
 import { Animated, createAnimatedValue, Easing } from "nsh";
 import { fpsEnabled, platform, setFpsEnabled, windowSize } from "nsh";
 import process from "process";
-import { Application, isAvailable as desktopWindows, Menu as AppMenu, titleBar } from "nsh/desktop";
+import { Window, Application, isAvailable as desktopWindows, Menu as AppMenu, titleBar } from "nsh/desktop";
 import { AlertDialog, Input, Menu, MenuItem, NavPage, NavStack, Scrollbar } from "nsh/base";
 import { keymap } from "nsh";
 import { Storage } from "nsh";
@@ -925,4 +925,4 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => <Window id="main">{App}</Window>);
