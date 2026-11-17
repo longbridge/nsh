@@ -371,6 +371,12 @@ Things that were found the hard way. Read the section of the area you change bef
   of its position, so a view moved by a fractional offset each frame blurs its shadows again every frame (on the GPU,
   each into a new render target, slow on PowerVR). `StackBox`'s push / pop slides move by whole pixels; going back to
   the gallery's index ran at about half the frame rate before (#519).
+- **Android, hidden views lose their display lists**: HWUI drops the display list of a RenderNode no longer drawn,
+  and `setVisibility` tells every view under the one that changes, whose background `Drawable.setVisible` calls
+  `invalidateSelf`. A whole screen hidden and shown again therefore records all of its views again (22–36 ms for the
+  gallery's index on a Pixel 10 Pro). `StackBox` keeps drawing the screen a pop reveals at alpha 0 while it is
+  `INVISIBLE` (which still keeps it out of touches, accessibility and focus), and `Decor.setVisible` does not
+  invalidate (#519).
 - **Android, opacity animations and outer box shadows**: at alpha < 1 with overlapping rendering (the default) HWUI composites the view into an offscreen buffer clipped to its bounds, cutting the outer box shadows the `Decor` draws outside them: the shadow vanishes for the whole animation and pops back when it ends. Decor-bearing views therefore report `hasOverlappingRendering() == false` while they carry outer shadows (the alpha then applies per draw op and the shadow fades with the content), at the cost of overlapping content inside such a view blending imprecisely while it fades.
 - **Android, JNI event maps intern their keys from a fixed list** (`Java_com_longbridge_nsh_Native_eventMap`): a new payload key must be
   added there or it is dropped silently.

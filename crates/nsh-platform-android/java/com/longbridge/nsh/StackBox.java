@@ -71,6 +71,24 @@ final class StackBox extends FrameLayout implements Node {
         return shown.size();
     }
 
+    /**
+     * The screen a pop reveals stays drawn, at alpha 0, while it is
+     * invisible under the top one. HWUI drops the display list of a
+     * RenderNode that is no longer drawn, and recording a whole page again
+     * takes the first frame of the pop tens of milliseconds. Alpha 0 draws
+     * nothing; `INVISIBLE` keeps the screen out of touches, accessibility
+     * and focus.
+     */
+    @Override
+    protected void dispatchDraw(Canvas canvas) {
+        super.dispatchDraw(canvas);
+        if (shown.size() < 2 || !canvas.isHardwareAccelerated()) return;
+        ScreenBox below = shown.get(shown.size() - 2);
+        if (below.getVisibility() == INVISIBLE && below.getAlpha() == 0 && below.getParent() == this) {
+            drawChild(canvas, below, getDrawingTime());
+        }
+    }
+
     ScreenBox top() {
         return shown.isEmpty() ? null : shown.get(shown.size() - 1);
     }
@@ -189,14 +207,22 @@ final class StackBox extends FrameLayout implements Node {
         if (t != null) t.finish();
     }
 
-    /** Only the top screen is visible; removed screens leave. */
+    /**
+     * Only the top screen is visible; removed screens leave. The screens
+     * below are at alpha 0 for {@link #dispatchDraw}.
+     */
     private void settle(List<ScreenBox> leaving) {
-        for (ScreenBox s : leaving) removeView(s);
+        for (ScreenBox s : leaving) {
+            s.setLayerType(LAYER_TYPE_NONE, null);
+            removeView(s);
+        }
         for (int i = 0; i < shown.size(); i++) {
             ScreenBox s = shown.get(i);
+            boolean top = i == shown.size() - 1;
             s.setTranslationX(0);
-            s.setAlpha(1);
-            s.setVisibility(i == shown.size() - 1 ? VISIBLE : INVISIBLE);
+            s.setAlpha(top ? 1 : 0);
+            s.setLayerType(LAYER_TYPE_NONE, null);
+            s.setVisibility(top ? VISIBLE : INVISIBLE);
         }
         transition = null;
         mounter.updateBack();
@@ -211,6 +237,13 @@ final class StackBox extends FrameLayout implements Node {
         float w = getWidth();
         lower.setVisibility(VISIBLE);
         upper.setVisibility(VISIBLE);
+        lower.setAlpha(1);
+        upper.setAlpha(1);
+        // Each screen is drawn into a layer once, then the slide only moves
+        // the layers: drawing both pages every frame (their paths, shadows
+        // and text) takes the RenderThread longer than a frame.
+        lower.setLayerType(LAYER_TYPE_HARDWARE, null);
+        upper.setLayerType(LAYER_TYPE_HARDWARE, null);
         android.animation.ValueAnimator a = android.animation.ValueAnimator.ofFloat(push ? 1 : progress, push ? 0 : 1);
         a.setDuration(push ? 300 : Math.round(300 * (1 - progress)));
         a.setInterpolator(new DecelerateInterpolator(1.5f));
@@ -310,6 +343,10 @@ final class StackBox extends FrameLayout implements Node {
         backProgress = 0;
         ScreenBox lower = shown.get(shown.size() - 2);
         lower.setVisibility(VISIBLE);
+        lower.setAlpha(1);
+        // As in `animate`: the screens follow the finger as layers.
+        lower.setLayerType(LAYER_TYPE_HARDWARE, null);
+        top().setLayerType(LAYER_TYPE_HARDWARE, null);
         place(lower, top(), 0, getWidth(), false);
     }
 
