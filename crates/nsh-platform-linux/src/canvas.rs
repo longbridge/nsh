@@ -64,6 +64,27 @@ use crate::{
 
 mod offscreen;
 
+/// An image a canvas draws: its pixels, and how many of them make one unit
+/// of the image's own size (what `drawImage`'s source rectangle and its
+/// default size are in).
+#[derive(Clone)]
+pub(crate) struct CanvasBitmap {
+    pub(crate) surface: cairo::ImageSurface,
+    /// 1 for a bitmap decoded whole, whose units are its pixels; an SVG's
+    /// pixels per point, as it was rasterized.
+    pub(crate) scale: f64,
+}
+
+impl CanvasBitmap {
+    /// `texture` as a canvas draws it, `scale` pixels to each of its units.
+    fn new((texture, scale): (gtk::gdk::Texture, f64)) -> Result<CanvasBitmap, String> {
+        Ok(CanvasBitmap {
+            surface: image_surface(&texture)?,
+            scale,
+        })
+    }
+}
+
 pub(crate) use offscreen::render as render_offscreen;
 
 /// Layouts kept per canvas before the cache is emptied.
@@ -79,7 +100,7 @@ pub(crate) struct CanvasState {
     pub(crate) args: Vec<Option<AnimationValue>>,
     /// The images the drawing names, by URI: `None` while loading (or
     /// when they failed to load).
-    images: FxHashMap<Arc<str>, Option<cairo::ImageSurface>>,
+    images: FxHashMap<Arc<str>, Option<CanvasBitmap>>,
     /// Pango layouts of `fillText` / `strokeText`.
     text: RefCell<TextCache>,
     /// The drawing rasterized, and what of it must be drawn again.
@@ -227,12 +248,18 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, drawing: Arc<Drawing>) 
         c.dirty.set(Damage::All);
     }
     let hidden = view.state().canvas.as_ref().is_some_and(|c| c.hidden.get());
+    // An SVG is rasterized for the screen it shows on (fractional scales
+    // included).
+    let scale = view
+        .native()
+        .and_then(|n| n.surface())
+        .map_or(view.scale_factor() as f64, |s| s.scale());
     for uri in load {
         let weak = view.downgrade();
         let key = uri.clone();
-        crate::image::load_bitmap(surface, &uri, move |result| {
+        crate::image::load_bitmap(surface, &uri, scale, move |result| {
             let Some(view) = weak.upgrade() else { return };
-            let image = match result.and_then(|t| image_surface(&t)) {
+            let image = match result.and_then(CanvasBitmap::new) {
                 Ok(image) => image,
                 Err(e) => {
                     log::warn!("canvas: {e}");
@@ -699,7 +726,7 @@ impl Default for State {
 struct Replay<'a> {
     cr: &'a cairo::Context,
     args: &'a [Option<AnimationValue>],
-    images: &'a FxHashMap<Arc<str>, Option<cairo::ImageSurface>>,
+    images: &'a FxHashMap<Arc<str>, Option<CanvasBitmap>>,
     text: &'a mut TextCache,
     /// The display's scale.
     scale: f64,
@@ -1379,10 +1406,17 @@ impl Replay<'_> {
         if self.state.singular {
             return;
         }
-        let Some(Some(image)) = self.images.get(uri) else {
+        let Some(Some(CanvasBitmap {
+            surface: image,
+            scale,
+        })) = self.images.get(uri)
+        else {
             return;
         };
-        let (iw, ih) = (image.width() as f64, image.height() as f64);
+        // The source rectangle and the default size are in the image's own
+        // units: an SVG drawn sharp has `scale` pixels to each.
+        let scale = *scale;
+        let (iw, ih) = (image.width() as f64 / scale, image.height() as f64 / scale);
         let [sx, sy, sw, sh] = source.map_or([0.0, 0.0, iw, ih], |s| s.map(f64::from));
         if sw <= 0.0 || sh <= 0.0 {
             return;
@@ -1402,8 +1436,10 @@ impl Replay<'_> {
             c.rectangle(dx, dy, dw, dh);
             c.clip();
             c.translate(dx, dy);
-            c.scale(dw / sw, dh / sh);
-            if c.set_source_surface(&image, -sx, -sy).is_err() {
+            c.scale(dw / (sw * scale), dh / (sh * scale));
+            if c.set_source_surface(&image, -sx * scale, -sy * scale)
+                .is_err()
+            {
                 return false;
             }
             // Scaled, the pixels at the image's edges are filtered with what
@@ -1870,7 +1906,13 @@ mod tests {
                 ..Drawing::default()
             };
             let mut canvas = CanvasState::default();
-            canvas.images.insert(uri.into(), Some(image.clone()));
+            canvas.images.insert(
+                uri.into(),
+                Some(CanvasBitmap {
+                    surface: image.clone(),
+                    scale: 1.0,
+                }),
+            );
             for scale in [1, 2] {
                 let size = (100 * scale, 40 * scale);
                 let raster =

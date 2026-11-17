@@ -513,7 +513,7 @@ fn a_paste_goes_in_clipped_to_max_length() {
     .unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 4);
+    assert_eq!(results.len(), 7);
 }
 
 #[test]

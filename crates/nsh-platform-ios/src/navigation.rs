@@ -2227,11 +2227,18 @@ impl ModalHost {
         // Presented outside the surface: the app's appearance is set on
         // it too.
         controller.setOverrideUserInterfaceStyle(crate::system::appearance());
+        // Its container (a sheet's glass) is styled again once shown: UIKit
+        // makes the views of the presentation as it runs.
+        let shown = controller.clone();
+        let done = RcBlock::new(move || {
+            crate::system::style_presented(&shown, crate::system::appearance());
+        });
         presenter.presentViewController_animated_completion(
             controller,
             c.animation != ModalAnimation::None && !at_once,
-            None,
+            Some(&done),
         );
+        crate::system::style_presented(controller, crate::system::appearance());
         self.presented = true;
     }
 

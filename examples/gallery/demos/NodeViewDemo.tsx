@@ -1,6 +1,6 @@
 import { signal, Text, View } from "nsh";
 import { RichEditor, StarterKit, createRichEditor, defineExtension, redo, type RichNodeJSON, type RichNodeViewProps, undo } from "nsh/base";
-import { alpha, colors, mono, richEditorClasses } from "../ui";
+import { alpha, colors, mono, plural, richEditorClasses } from "../ui";
 import { IconButton, TOOL_GAP, ToolbarSeparator } from "./RichEditorUi";
 
 // An extension's node view (`addNodeView`): the app's own component renders
@@ -132,7 +132,7 @@ export function NodeViewDemo() {
         <RichEditor editor={editor} testID="node-view-editor" classes={classes} style={{ flex: 1 }} />
         <View style={{ paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderColor: colors.border }}>
           <Text style={{ fontSize: 12, color: colors.muted, fontFamily: mono, fontVariant: ["tabular-nums"] }}>
-            {`${counts().tags} tags · ${counts().cards} cards`}
+            {`${plural(counts().tags, "tag")} · ${plural(counts().cards, "card")}`}
           </Text>
         </View>
       </View>

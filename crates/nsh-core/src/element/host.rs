@@ -772,7 +772,10 @@ impl Input {
         self.bind_prop(shows, |shows: bool| Prop::Scrollbar(shows.into()))
     }
 
-    /// At most `length` characters.
+    /// At most `length` characters, counted as Unicode scalar values
+    /// (Rust's `char`; an emoji such as 😀 is one) on every platform. A
+    /// longer paste goes in cut to what fits, between user-perceived
+    /// characters.
     pub fn max_length(self, length: impl IntoReactive<u32>) -> Self {
         self.bind_prop(length, |length: u32| Prop::MaxLength(Some(length)))
     }

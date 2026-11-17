@@ -47,6 +47,7 @@ use nsh_core::{
     Points, ResolvedTextStyle, SubmitBehavior, TextAlign,
     geometry::{Point, Size, point, px, size},
     tailwind::state,
+    text_edit::clip_chars,
 };
 
 use crate::{surface::Surface, view::NshView};
@@ -571,15 +572,15 @@ impl Ctx {
         }
     }
 
-    /// The part of `text` an insertion into `current` may add
-    /// (`maxLength`).
-    fn allowed<'a>(&self, current: impl FnOnce() -> String, text: &'a str) -> &'a str {
+    /// The part of `text` an insertion into a text of `current` characters
+    /// may add (`maxLength`, [`clip_chars`]).
+    fn allowed<'a>(&self, current: impl FnOnce() -> usize, text: &'a str) -> &'a str {
         let max = self
             .input
             .upgrade()
             .and_then(|input| input.config.borrow().max_length);
         match max {
-            Some(max) => clip_utf16(text, (max as usize).saturating_sub(utf16_len(&current()))),
+            Some(max) => clip_chars(text, (max as usize).saturating_sub(current())),
             None => text,
         }
     }
@@ -748,7 +749,7 @@ fn attach(cx: &Ctx, editor: &Editor, input: &InputState) {
             let c = cx.clone();
             t.connect_insert_text(move |t, text, pos| {
                 let Some(input) = c.user_edit() else { return };
-                let fit = c.allowed(|| t.text().into(), text);
+                let fit = c.allowed(|| usize::from(t.text_length()), text);
                 if !fit.is_empty() {
                     c.inserted(&input, fit);
                 }
@@ -801,10 +802,7 @@ fn attach(cx: &Ctx, editor: &Editor, input: &InputState) {
                     input.lines.borrow_mut().edit(start, end);
                 }
                 let Some(input) = c.user_edit() else { return };
-                let fit = c.allowed(
-                    || b.text(&b.start_iter(), &b.end_iter(), false).into(),
-                    text,
-                );
+                let fit = c.allowed(|| b.char_count().max(0) as usize, text);
                 if !fit.is_empty() {
                     c.inserted(&input, fit);
                 }
@@ -1699,11 +1697,6 @@ fn key_of(text: &str) -> &str {
     if text == "\n" { "Enter" } else { text }
 }
 
-/// Length of `s` in UTF-16 units.
-fn utf16_len(s: &str) -> usize {
-    s.chars().map(char::len_utf16).sum()
-}
-
 /// The UTF-16 offset of character `chars` of `s` (clamped to its end).
 fn char_to_utf16(s: &str, chars: usize) -> u32 {
     s.chars().take(chars).map(char::len_utf16).sum::<usize>() as u32
@@ -1720,19 +1713,6 @@ fn utf16_to_char(s: &str, units: u32) -> usize {
         at += c.len_utf16();
     }
     s.chars().count()
-}
-
-/// The longest prefix of `s` that fits in `max` UTF-16 units, cut between
-/// characters.
-fn clip_utf16(s: &str, max: usize) -> &str {
-    let mut units = 0;
-    for (i, c) in s.char_indices() {
-        units += c.len_utf16();
-        if units > max {
-            return &s[..i];
-        }
-    }
-    s
 }
 
 #[cfg(test)]
@@ -1942,7 +1922,6 @@ mod tests {
     #[test]
     fn utf16_offsets() {
         let s = "a😀b";
-        assert_eq!(utf16_len(s), 4);
         assert_eq!(char_to_utf16(s, 0), 0);
         assert_eq!(char_to_utf16(s, 1), 1);
         assert_eq!(char_to_utf16(s, 2), 3);
@@ -1954,17 +1933,6 @@ mod tests {
         assert_eq!(utf16_to_char(s, 3), 2);
         assert_eq!(utf16_to_char(s, 4), 3);
         assert_eq!(utf16_to_char(s, 99), 3);
-    }
-
-    #[test]
-    fn max_length_clipping() {
-        assert_eq!(clip_utf16("hello", 3), "hel");
-        assert_eq!(clip_utf16("hello", 9), "hello");
-        assert_eq!(clip_utf16("hello", 0), "");
-        // A pair is never split.
-        assert_eq!(clip_utf16("a😀", 2), "a");
-        assert_eq!(clip_utf16("a😀", 3), "a😀");
-        assert_eq!(clip_utf16("中文", 1), "中");
     }
 
     #[test]

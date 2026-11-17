@@ -590,7 +590,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   paste's own handler, on the user's paste only, and only when the app listens. Whether the input inserts the text is
   answered at once from `pasteBehavior` (`InputConfig::paste_behavior`: `"insert"`, the default, or `"report"`);
   images and files are never inserted. Inserted text is clipped to what `maxLength` leaves room for, as a browser's
-  `maxlength` clips it (iOS cuts between composed character sequences, the other platforms between code points). The event comes before the `onChangeText` of the text it inserts (Linux:
+  `maxlength` clips it. `maxLength` counts characters (Unicode scalar values, Rust's `char`) on every platform, and a
+  cut falls between user-perceived characters (`text_edit::clip_chars`): an emoji counts once and is never split. The event comes before the `onChangeText` of the text it inserts (Linux:
   maybe after, as GTK's own paste and NSH's read of the clipboard are both asynchronous; with `"report"` nothing is
   inserted, so it comes first). An app that decides per paste uses `"report"` and inserts what it allows with the
   ref's `insertText` (`Command::InsertText`): the text in place of the selection as the user's edit, `maxLength`

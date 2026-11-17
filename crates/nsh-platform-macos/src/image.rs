@@ -926,16 +926,29 @@ fn rgba_image(raster: &nsh_core::svg::Raster) -> Option<CFRetained<CGImage>> {
     }
 }
 
+/// An image a canvas draws: its pixels, and how many of them make one unit
+/// of the image's own size (what `drawImage`'s source rectangle and its
+/// default size are in).
+#[derive(Clone)]
+pub(crate) struct CanvasBitmap {
+    pub(crate) image: CFRetained<CGImage>,
+    /// 1 for a bitmap decoded whole, whose units are its pixels; an SVG's
+    /// pixels per point, as it was rasterized.
+    pub(crate) scale: f64,
+}
+
 /// Loads the bitmap `uri` (`https://…`, `asset:/…`, a file path, `data:`)
 /// for a canvas, at its natural size, and hands over its (first) frame;
 /// `done` runs on the main thread (before this returns when it is in
 /// memory: callers must not hold a borrow `done` takes). An SVG is
-/// rasterized by the shared SVG renderer and its frame handed over as a
-/// bitmap.
+/// rasterized by the shared SVG renderer at `scale` pixels per point (the
+/// canvas's), so that it stays sharp on the screen, and its frame handed
+/// over as a bitmap.
 pub(crate) fn load(
     surface: &Rc<Surface>,
     uri: &str,
-    done: impl FnOnce(Result<CFRetained<CGImage>, String>) + 'static,
+    scale: f32,
+    done: impl FnOnce(Result<CanvasBitmap, String>) + 'static,
 ) {
     let name = uri.to_owned();
     let done =
@@ -950,7 +963,7 @@ pub(crate) fn load(
     if let Some(load) = fetch(
         surface,
         &source,
-        Want::natural(1.0),
+        Want::natural(scale.max(1.0)),
         Frames::First,
         Look::default(),
         Priority::Normal,
@@ -1008,8 +1021,19 @@ pub(crate) fn load_icon(
 
 /// The first frame of `picture`, loaded from `uri`; an SVG is rasterized
 /// by the shared SVG renderer, so its frame is a bitmap here too.
-fn bitmap(_uri: &str, picture: Picture) -> Result<CFRetained<CGImage>, String> {
-    Ok(picture.frames[0].clone())
+fn bitmap(_uri: &str, picture: Picture) -> Result<CanvasBitmap, String> {
+    let image = picture.frames[0].clone();
+    // What it was decoded at over its own size.
+    let own = match picture.natural {
+        Natural::Vector(points) => f64::from(points.width.0),
+        Natural::Pixels(width, _) => f64::from(width),
+    };
+    let scale = if own > 0.0 {
+        CGImage::width(Some(&image)) as f64 / own
+    } else {
+        1.0
+    };
+    Ok(CanvasBitmap { image, scale })
 }
 
 /// `Command::ImageInfo` (`Image.getSize`, `Image.prefetch`): reads the
@@ -1821,8 +1845,8 @@ mod tests {
     fn svg_is_a_canvas_image() {
         let logo = decoded(SVG_LOGO, 48).unwrap();
         let image = bitmap("asset:/logo.svg", logo).unwrap();
-        assert_eq!(CGImage::width(Some(&*image)), 48);
-        assert_eq!(CGImage::height(Some(&*image)), 24);
+        assert_eq!(CGImage::width(Some(&*image.image)), 48);
+        assert_eq!(CGImage::height(Some(&*image.image)), 24);
         let png = decoded(&png_pixel(), 0).unwrap();
         assert_eq!(png.natural, Natural::Pixels(1, 1));
         assert!(bitmap("asset:/a.png", png).is_ok());

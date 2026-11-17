@@ -113,7 +113,7 @@ use windows_numerics::{Matrix3x2, Vector2};
 
 use crate::{
     gfx::{self, Gfx},
-    image::Frame,
+    image::CanvasBitmap,
     render::{DrawCx, color_f, rect_f},
     surface::Surface,
     view::{NshView, ViewState},
@@ -143,7 +143,7 @@ pub(crate) struct CanvasState {
     args: Vec<Option<AnimationValue>>,
     /// The images the drawing names, by URI: `None` while loading (or
     /// when they failed to load).
-    images: FxHashMap<Arc<str>, Option<Arc<Frame>>>,
+    images: FxHashMap<Arc<str>, Option<CanvasBitmap>>,
     /// What was recorded (made while drawing, which only sees the state).
     cache: RefCell<Cache>,
     /// Where the operations reading changed slots paint ([`DamageScan`]):
@@ -257,10 +257,12 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, drawing: Arc<Drawing>) 
         c.stale();
     }
     let id = view.id();
+    // An SVG is rasterized for the screen it shows on.
+    let scale = surface.scale();
     for uri in load {
         let weak = Rc::downgrade(surface);
         let key = uri.clone();
-        crate::image::load_bitmap(surface, &uri, move |result| {
+        crate::image::load_bitmap(surface, &uri, scale, move |result| {
             let frame = match result {
                 Ok(frame) => frame,
                 Err(e) => {
@@ -967,7 +969,7 @@ fn record(
     ops: &[CanvasOp],
     from: usize,
     args: &[Option<AnimationValue>],
-    images: &FxHashMap<Arc<str>, Option<Arc<Frame>>>,
+    images: &FxHashMap<Arc<str>, Option<CanvasBitmap>>,
     text: &mut TextCache,
 ) -> windows::core::Result<ID2D1CommandList> {
     // The pool leaves the thread-local while recording, which never
@@ -1198,7 +1200,7 @@ struct Replay<'a> {
     /// The main list being recorded.
     main: Option<ID2D1CommandList>,
     args: &'a [Option<AnimationValue>],
-    images: &'a FxHashMap<Arc<str>, Option<Arc<Frame>>>,
+    images: &'a FxHashMap<Arc<str>, Option<CanvasBitmap>>,
     text: &'a mut TextCache,
     state: State,
     /// Saved states and how many clips each had.
@@ -2322,9 +2324,12 @@ impl<'a> Replay<'a> {
     // --- Images ---
 
     /// The bitmap of the image `uri`, once loaded.
-    fn bitmap(&self, uri: &str) -> Option<ID2D1Bitmap1> {
-        let frame = self.images.get(uri)?.as_ref()?;
-        frame.bitmap(&self.pool.dcs[0])
+    /// The bitmap of image `uri`, and its pixels per unit of the image's
+    /// own size ([`CanvasBitmap::scale`]).
+    fn bitmap(&self, uri: &str) -> Option<(ID2D1Bitmap1, f64)> {
+        let image = self.images.get(uri)?.as_ref()?;
+        let bitmap = image.frame.bitmap(&self.pool.dcs[0])?;
+        Some((bitmap, f64::from(image.scale)))
     }
 
     fn image(
@@ -2342,12 +2347,14 @@ impl<'a> Replay<'a> {
         if self.paints_nothing(None) {
             return Ok(());
         }
-        let Some(bitmap) = self.bitmap(uri) else {
+        let Some((bitmap, scale)) = self.bitmap(uri) else {
             return Ok(());
         };
         // SAFETY: a COM call on a live bitmap.
         let size = unsafe { bitmap.GetPixelSize() };
-        let (iw, ih) = (size.width as f64, size.height as f64);
+        // The source rectangle and the default size are in the image's own
+        // units: an SVG drawn sharp has `scale` pixels to each.
+        let (iw, ih) = (size.width as f64 / scale, size.height as f64 / scale);
         let [sx, sy, sw, sh] = source.map_or([0.0, 0.0, iw, ih], |s| s.map(f64::from));
         if sw == 0.0 || sh == 0.0 {
             return Ok(());
@@ -2357,7 +2364,7 @@ impl<'a> Replay<'a> {
         if dw == 0.0 || dh == 0.0 {
             return Ok(());
         }
-        let src = normalized(sx, sy, sw, sh);
+        let src = normalized(sx * scale, sy * scale, sw * scale, sh * scale);
         let dst = normalized(dx, dy, dw, dh);
         let (alpha, composite) = (self.state.alpha as f32, self.state.composite);
         self.emit(true, composite, alpha, &|r, alpha| {
