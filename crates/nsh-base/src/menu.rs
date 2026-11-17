@@ -67,6 +67,10 @@ use crate::{
 /// still down), and how far it may move meanwhile.
 const HOLD: Duration = Duration::from_millis(400);
 const SLOP: f32 = 10.0;
+/// iOS's system menu: how long a `ContextMenu`'s preview stays made after
+/// the finger lifted or was taken over without the menu coming up (a tap,
+/// a scroll); the system asks for it a moment after a takeover.
+const PREVIEW_LINGER: Duration = Duration::from_secs(1);
 
 /// What a menu's items reach through context.
 #[derive(Clone)]
@@ -1957,6 +1961,9 @@ pub enum ContextMenuEvents {
     /// platforms, whose drawn menu reports through its items' `onSelect`.
     #[args(id)]
     Select(SharedString),
+    /// iOS only: the user pressed the system's preview (`preview`); the
+    /// menu has closed. Not sent on the other platforms.
+    PreviewPress,
 }
 
 impl From<MenuEvent> for ContextMenuEvents {
@@ -2183,6 +2190,16 @@ pub struct ContextMenuProps {
     /// iOS only: the system's menu's title, above its items (`items`);
     /// none when unset. Not used on the other platforms.
     pub title: Prop<Option<SharedString>>,
+    /// iOS only, with `items`: what the system lifts beside the menu in
+    /// place of the trigger (a message's or a document's content, a
+    /// conversation's last lines). Made when a finger goes down on the
+    /// trigger and laid out at its own size out of sight, then shown as a
+    /// picture of how it looked when the menu opened; gone once the menu
+    /// closed. A press on it closes the menu and reports `onPreviewPress`.
+    /// Without it, or when it is not laid out yet, the trigger lifts. Not
+    /// used on the other platforms, nor for the secondary click's compact
+    /// menu, which has no preview.
+    pub preview: Prop<Option<Slot>>,
     /// The items, made on each opening.
     #[prop(lazy)]
     pub children: Prop<Children>,
@@ -2225,6 +2242,9 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<ContextMenuEvents>) -> imp
     // is nothing to follow: the menu is made as without `items`.
     let system = (os() == Os::Ios).then(|| computed(move || items.with(|i| !i.is_empty())));
     let is_system = move || system.is_some_and(|s| s.get_untracked());
+    // The system menu's preview (`preview`): made while a finger is down on
+    // the trigger, kept while the menu is up.
+    let preview = Previewing::new(props.preview);
     // An opening from the keyboard or an assistive technology focuses the
     // first enabled item once they are there.
     let keyed = stored(None::<Keyed>);
@@ -2300,6 +2320,9 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<ContextMenuEvents>) -> imp
                 // secondary button does).
                 .on_touch(move |e: &TouchEvent| {
                     let at = e.points.first().map(|p| p.page);
+                    if is_system() {
+                        preview.touched(e.phase);
+                    }
                     match e.phase {
                         TouchPhase::Start
                             if e.points.len() == 1
@@ -2364,7 +2387,7 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<ContextMenuEvents>) -> imp
                 Some(system) => {
                     let (title, disabled) = (props.title, props.disabled);
                     when(system, move || {
-                        system_menu(items, title, disabled, open, change.clone(), cx)
+                        system_menu(items, title, disabled, preview, open, change.clone(), cx)
                     })
                     .otherwise(drawn)
                     .into_element()
@@ -2373,12 +2396,96 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<ContextMenuEvents>) -> imp
         })
 }
 
+/// A `ContextMenu`'s preview in the system's menu (`preview`): made while
+/// a finger is down on the trigger (the system asks for the preview as the
+/// hold completes, without waiting on the app, so it has to be laid out by
+/// then) and while the menu is up.
+#[derive(Clone, Copy)]
+struct Previewing {
+    slot: Prop<Option<Slot>>,
+    /// Made now.
+    made: Signal<bool>,
+    /// The menu is up, as the platform last told.
+    up: Stored<bool>,
+    /// Lets it go after a finger that opened no menu.
+    linger: Stored<Option<Spawned<()>>>,
+}
+
+impl Previewing {
+    fn new(slot: Prop<Option<Slot>>) -> Self {
+        Self {
+            slot,
+            made: signal(false),
+            up: stored(false),
+            linger: stored(None),
+        }
+    }
+
+    /// A touch on the trigger, while the menu is the system's.
+    fn touched(self, phase: TouchPhase) {
+        match phase {
+            TouchPhase::Start => {
+                if let Some(old) = self.linger.replace(None) {
+                    old.cancel();
+                }
+                if self.slot.with_untracked(Option::is_some) {
+                    self.made.set(true);
+                }
+            }
+            TouchPhase::End | TouchPhase::Cancel if self.made.get_untracked() => {
+                let task = set_timeout(PREVIEW_LINGER, move || {
+                    self.linger.replace(None);
+                    if !self.up.get() {
+                        self.made.set(false);
+                    }
+                });
+                if let Some(old) = self.linger.replace(Some(task)) {
+                    old.cancel();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The menu came up (true) or went (false).
+    fn menu_up(self, up: bool) {
+        self.up.replace(up);
+        if !up {
+            self.made.set(false);
+        }
+    }
+
+    /// The preview, out of sight beside the native component: the platform
+    /// takes a picture of it when the menu opens. Hidden from assistive
+    /// technologies, which have the trigger.
+    fn holder(self) -> impl IntoElement {
+        let slot = self.slot;
+        when(
+            move || self.made.get() && slot.with(Option::is_some),
+            move || {
+                view()
+                    .absolute()
+                    .top_0()
+                    .left(px(-PREVIEW_ASIDE))
+                    .accessibility_elements_hidden(true)
+                    .child(slot.place(|preview| preview))
+            },
+        )
+    }
+}
+
+/// How far left of the trigger a `ContextMenu`'s preview is laid out: off
+/// any screen.
+const PREVIEW_ASIDE: f32 = 100_000.0;
+
 /// A `ContextMenu`'s system menu (iOS, given `items`): the native
-/// component beside the trigger, taking no room and no touches.
+/// component beside the trigger, and the preview out of sight, taking no
+/// room and no touches.
 fn system_menu(
     items: Prop<Vec<MenuButtonItem>>,
     title: Prop<Option<SharedString>>,
     disabled: Prop<bool>,
+    preview: Previewing,
     open: OpenState,
     change: Rc<dyn Fn(bool, OpenChangeReason)>,
     cx: Scope<ContextMenuEvents>,
@@ -2387,10 +2494,13 @@ fn system_menu(
     // the dismissal it causes, so a dismissal finding the menu still shown
     // closed it without one.
     let shown = stored(false);
-    native(CONTEXT_MENU_COMPONENT)
+    let component = native(CONTEXT_MENU_COMPONENT)
         .absolute()
         .size_0()
         .pointer_events(PointerEvents::None)
+        .prop("preview", move || {
+            JsonValue::Bool(preview.slot.with(Option::is_some))
+        })
         .prop("items", move || items.with(|items| menu_json(items)))
         .prop("title", move || {
             title
@@ -2403,6 +2513,7 @@ fn system_menu(
         .on_native_event(move |event: &NativeEvent| {
             match &*event.name {
                 "open" if !shown.replace(true) => {
+                    preview.menu_up(true);
                     // A finger held (the lifted preview), or the secondary
                     // button (the compact menu at the pointer).
                     let reason = match event.data.as_str() {
@@ -2419,6 +2530,7 @@ fn system_menu(
                         // dismissal still reaches the app, alone.
                         let was = shown.replace(false);
                         if was {
+                            preview.menu_up(false);
                             change(false, OpenChangeReason::Select);
                         }
                         cx.emit(ContextMenuEvents::Select(SharedString::from(id.to_owned())));
@@ -2427,11 +2539,24 @@ fn system_menu(
                         }
                     }
                 }
+                // The preview pressed: as a choice, before the closing.
+                "previewPress" => {
+                    let was = shown.replace(false);
+                    if was {
+                        preview.menu_up(false);
+                        change(false, OpenChangeReason::Select);
+                    }
+                    cx.emit(ContextMenuEvents::PreviewPress);
+                    if was {
+                        cx.emit(ContextMenuEvents::Close);
+                    }
+                }
                 // Gone without a choice. As the drawn menu's dismissal: the
                 // user's attempt (a tap outside, the preview's drag away) is
                 // reported, then it closes; when the app closed it, only the
                 // closing is.
                 "close" if shown.replace(false) => {
+                    preview.menu_up(false);
                     if open.get_untracked() {
                         cx.emit(ContextMenuEvents::Cancel);
                         change(false, OpenChangeReason::PressOutside);
@@ -2440,7 +2565,16 @@ fn system_menu(
                 }
                 _ => {}
             }
-        })
+        });
+    // The component's view is the first child, the preview's the second:
+    // the platform finds the trigger around them and the preview beside
+    // its view.
+    view()
+        .absolute()
+        .size_0()
+        .pointer_events(PointerEvents::None)
+        .child(component)
+        .child(preview.holder())
 }
 
 /// The props of [`MenuItem`].
