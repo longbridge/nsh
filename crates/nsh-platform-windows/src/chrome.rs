@@ -727,6 +727,18 @@ pub(crate) fn nc_max_size(hwnd: HWND, info: &mut MINMAXINFO) {
     };
 }
 
+/// What the system's frame of `hwnd` leaves invisible around a window in
+/// the normal mode, in pixels (left, top, right, bottom): its resize
+/// borders past the visible one, on every side but the top. A window
+/// without the system's frame has none.
+pub(crate) fn invisible_frame(hwnd: HWND) -> crate::window_state::Margins {
+    if frameless(hwnd) {
+        return (0, 0, 0, 0);
+    }
+    let side = (frame_thickness(hwnd) - top_border(hwnd)).max(0);
+    (side, 0, side, side)
+}
+
 /// The visible border the system draws along a window's top edge, in
 /// pixels (Windows 11; 0 where there is none).
 fn top_border(hwnd: HWND) -> i32 {

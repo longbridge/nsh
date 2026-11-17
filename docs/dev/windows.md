@@ -476,10 +476,21 @@ measured and are not used: they bring back that latency (48 ms) for the same fra
 
 ### Programmatic window frame and level
 
-`WindowRef.setBounds` merges supplied fields with `GetWindowRect` and uses
+A window's bounds are what shows of it (`window_state::visible_rect`): its
+window rectangle without the resize borders Windows 10 and 11 keep invisible
+outside its left, right and bottom edges, and for a maximized window without
+what hangs over the monitor's work area. The compositor's frame bounds
+(`DWMWA_EXTENDED_FRAME_BOUNDS`) give them for a window in the normal mode; as a
+window maximizes they still are its normal frame's, so a maximized window's are
+its rectangle within the work area. A normal rectangle (`rcNormalPosition`, the
+placement's bounds) takes the margins measured the last time the window was in
+the normal mode (`window::normal_margins`), else the system frame's.
+`WindowRef.setBounds`, `center`, `setPlacement` and an opening `defaultPosition`
+place that visible frame: the window's rectangle is it grown by the margins.
+`WindowRef.setBounds` merges supplied fields with those bounds and uses
 `SetWindowPos` without changing activation or z-order. Dimensions include the
-non-client area; points are scaled by the surface's current DPI. Changes are
-immediate. The `level` attribute uses `HWND_TOPMOST`, `HWND_NOTOPMOST` or `HWND_BOTTOM`;
+non-client area that shows; points are scaled by the surface's current DPI.
+Changes are immediate. The `level` attribute uses `HWND_TOPMOST`, `HWND_NOTOPMOST` or `HWND_BOTTOM`;
 the last moves to the bottom of the current z-order, and later activation can
 raise the window. The top-level guard keeps these commands out of embedded child
 windows. The `taskbar` attribute (and `AppOptions::skip_taskbar`) calls
