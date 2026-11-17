@@ -202,6 +202,7 @@ pub(crate) struct ManifestOptions<'a> {
     pub(crate) entry: &'a Path,
     pub(crate) key: Option<&'a Path>,
     pub(crate) notes: Option<&'a Path>,
+    pub(crate) localized_notes: &'a [String],
     pub(crate) links: &'a [String],
     pub(crate) base_url: Option<&'a str>,
     pub(crate) out: &'a Path,
@@ -216,6 +217,37 @@ fn archive_platform(file: &str, version: &str) -> Option<String> {
         .strip_suffix(".tar.gz")
         .or_else(|| rest.strip_suffix(".zip"))?;
     (!platform.is_empty()).then(|| platform.to_owned())
+}
+
+/// `--localized-notes <tag>=<file>`, read, by tag. They need `--notes`: the
+/// text apps that read only it show.
+fn localized_notes(
+    args: &[String],
+    has_notes: bool,
+) -> anyhow::Result<std::collections::BTreeMap<String, String>> {
+    if !args.is_empty() && !has_notes {
+        bail!("--localized-notes needs --notes, the text apps that read only it show");
+    }
+    let mut notes = std::collections::BTreeMap::new();
+    for arg in args {
+        let tag_is_good = |tag: &str| {
+            !tag.is_empty()
+                && tag
+                    .split('-')
+                    .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_alphanumeric()))
+        };
+        let Some((tag, file)) = arg
+            .split_once('=')
+            .filter(|(tag, file)| tag_is_good(tag) && !file.is_empty())
+        else {
+            bail!("--localized-notes {arg}: expected <tag>=<file>, such as zh-TW=CHANGES.zh-TW.md");
+        };
+        let text = fs::read_to_string(file).with_context(|| format!("read {file}"))?;
+        if notes.insert(tag.to_owned(), text).is_some() {
+            bail!("--localized-notes: {tag} given twice");
+        }
+    }
+    Ok(notes)
 }
 
 /// `nsh update-manifest`.
@@ -274,10 +306,12 @@ pub(crate) fn manifest(options: ManifestOptions<'_>) -> anyhow::Result<()> {
         .map(fs::read_to_string)
         .transpose()
         .context("read the notes")?;
+    let localized_notes = localized_notes(options.localized_notes, notes.is_some())?;
     let mut manifest = Manifest::default();
     manifest.id = id;
     manifest.version = version.to_owned();
     manifest.notes = notes;
+    manifest.localized_notes = localized_notes;
     manifest.platforms = platforms;
     manifest.package = package;
     let bytes = serde_json::to_vec_pretty(&manifest)?;
@@ -471,6 +505,37 @@ mod tests {
         bytes[at] ^= 1;
         fs::write(&path, bytes).unwrap();
         assert!(package_asset(&path, &runtime, None).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn localized_notes_are_tagged_files_beside_the_notes() {
+        let dir = std::env::temp_dir().join(format!("nsh-updater-notes-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("CHANGES.zh-TW.md");
+        fs::write(&file, "修復").unwrap();
+        let arg = |tag: &str| format!("{tag}={}", file.display());
+
+        let notes = localized_notes(&[arg("zh-TW"), arg("en")], true).unwrap();
+        assert_eq!(notes.get("zh-TW").map(String::as_str), Some("修復"));
+        assert_eq!(notes.len(), 2);
+        assert!(localized_notes(&[], false).unwrap().is_empty());
+        // Without --notes, a bad tag or file, a tag twice.
+        assert!(localized_notes(&[arg("en")], false).is_err());
+        for bad in [
+            arg(""),
+            arg("zh_TW"),
+            arg("en-"),
+            "en=".to_owned(),
+            "en".to_owned(),
+        ] {
+            assert!(
+                localized_notes(std::slice::from_ref(&bad), true).is_err(),
+                "{bad}"
+            );
+        }
+        assert!(localized_notes(&[format!("en={}", dir.join("missing").display())], true).is_err());
+        assert!(localized_notes(&[arg("en"), arg("en")], true).is_err());
         let _ = fs::remove_dir_all(&dir);
     }
 

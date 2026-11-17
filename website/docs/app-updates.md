@@ -69,7 +69,7 @@ if (update?.canInstall) {
 }
 ```
 
-`update` has `version`, `notes`, `url` and `canInstall`. `canInstall` is false on iOS and Android, and on the desktop when
+`update` has `version`, `notes`, `localizedNotes`, `url` and `canInstall`. `canInstall` is false on iOS and Android, and on the desktop when
 the app is installed where the user cannot write, such as by a system package. In a development run `checkForUpdate`
 resolves `null`.
 
@@ -97,6 +97,10 @@ nsh update-manifest *.tar.gz *.zip \
 
 Upload the archives, `latest.json` and `latest.json.sig` (with `--key`) as assets of the GitHub Release, or to your host
 next to each other. A release marked as a draft or prerelease on GitHub is not offered.
+
+For notes in more than one language, add `--localized-notes <tag>=<file>` for each, a BCP 47 tag such as
+`--localized-notes zh-TW=CHANGES.zh-TW.md`. `update.localizedNotes` has them by tag; pick the one your user reads and
+fall back to `notes`, which apps that read only it (older runtimes included) keep showing.
 
 ## OTA updates
 

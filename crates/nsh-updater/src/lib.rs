@@ -253,6 +253,7 @@ impl Config {
         Ok(Some(Available {
             version: parsed.version,
             notes: parsed.notes,
+            localized_notes: parsed.localized_notes,
             url,
             sha256: asset.sha256.clone(),
             size: asset.size,
@@ -291,6 +292,7 @@ impl Config {
             version: package.version,
             build: package.build,
             notes: parsed.notes,
+            localized_notes: parsed.localized_notes,
             url,
             sha256: package.sha256,
             size: package.size,
@@ -343,6 +345,11 @@ pub struct Manifest {
     /// What changed, for the app to show.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// `notes` in other languages, by BCP 47 tag (`en`, `zh-TW`, `ja`):
+    /// the app picks the one its user reads. `notes` stays the text for
+    /// apps that read only it, older runtimes included, which ignore this.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub localized_notes: BTreeMap<String, String>,
     /// By [`platform`]: `linux-x86_64`, `macos-aarch64`, `android`, `ios`.
     /// Empty in a release that only has a package (still written: older
     /// runtimes require it).
@@ -386,6 +393,8 @@ pub struct AvailablePackage {
     pub build: u64,
     /// What changed (the manifest's notes).
     pub notes: Option<String>,
+    /// The manifest's notes in other languages, by BCP 47 tag.
+    pub localized_notes: BTreeMap<String, String>,
     /// Where it is, absolute.
     pub url: String,
     /// Its SHA-256, in hex.
@@ -418,6 +427,8 @@ pub struct Available {
     pub version: String,
     /// What changed.
     pub notes: Option<String>,
+    /// What changed in other languages, by BCP 47 tag.
+    pub localized_notes: BTreeMap<String, String>,
     /// Where it is, absolute.
     pub url: String,
     /// The archive's SHA-256; `None`: `url` is a page, not an archive.
@@ -595,6 +606,38 @@ mod tests {
             "platforms": { "linux-x86_64": { "url": url, "sha256": "ab", "size": 2 } },
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn localized_notes_come_with_the_notes() {
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "id": "com.example.app",
+            "version": "2.0.0",
+            "notes": "修复",
+            "localizedNotes": { "en": "Fixes", "zh-TW": "修復" },
+            "platforms": { "linux-x86_64": { "url": "a.tar.gz", "sha256": "ab", "size": 2 } },
+        }))
+        .unwrap();
+        let available = config()
+            .check(&bytes, None, "linux-x86_64")
+            .unwrap()
+            .unwrap();
+        assert_eq!(available.notes.as_deref(), Some("修复"));
+        assert_eq!(
+            available.localized_notes,
+            BTreeMap::from([
+                ("en".to_owned(), "Fixes".to_owned()),
+                ("zh-TW".to_owned(), "修復".to_owned()),
+            ])
+        );
+        // A manifest without them reads as before, and writes as before.
+        let plain = config()
+            .check(&manifest("2.0.0", "a.tar.gz"), None, "linux-x86_64")
+            .unwrap()
+            .unwrap();
+        assert!(plain.localized_notes.is_empty());
+        let written = serde_json::to_value(Manifest::default()).unwrap();
+        assert!(written.get("localizedNotes").is_none());
     }
 
     #[test]

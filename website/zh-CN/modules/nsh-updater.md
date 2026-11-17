@@ -37,6 +37,7 @@ interface UpdateCheckOptions {
 interface AppUpdate {
   version: string;
   notes?: string | null;
+  localizedNotes: Record<string, string>;
   url: string;
   canInstall: boolean;
   shell: boolean;
@@ -49,6 +50,7 @@ interface AppUpdate {
 | --- | --- |
 | `version` | 新版本号，semver |
 | `notes` | 更新说明，即清单的 `--notes` 文件内容 |
+| `localizedNotes` | 其他语言的 `notes`，按 BCP 47 标签（`en`、`zh-TW`、`ja`）索引，来自清单的 `--localized-notes` 文件；没有时为空对象。显示用户所用语言的那一份，没有则显示 `notes` |
 | `url` | 用户手动获取的地址：压缩包，或 iOS、Android 上的商店页面。`canInstall` 为 false 时交给 [`openUrl`](./nsh.md#openurl) |
 | `canInstall` | 本次运行中 `downloadUpdate`、`installAndRestart` 和 `installOnQuit` 是否可用：装在用户可写位置的桌面打包应用为 true。iOS、Android 上为 false，装在只有系统可写的目录（系统包）时也为 false |
 | `shell` | 是否只有已安装的应用落后：本次运行的[包](#checkforpackage)已是该版本或更高，更新带来的是更新的运行时和原生外壳，而不是新代码。用包更新的应用可以把它作为更安静的可选步骤提供 |
@@ -123,6 +125,7 @@ interface PackageUpdate {
   version: string;
   build: number;
   notes?: string | null;
+  localizedNotes: Record<string, string>;
   size?: number | null;
 }
 ```

@@ -363,6 +363,10 @@ enum Command {
         /// A text file with what changed.
         #[arg(long)]
         notes: Option<PathBuf>,
+        /// What changed in another language: `<tag>=<file>`, a BCP 47 tag
+        /// such as `en`, `zh-TW` or `ja` (repeatable; needs `--notes`).
+        #[arg(long = "localized-notes")]
+        localized_notes: Vec<String>,
         /// Where iOS or Android users get it: `ios=<url>`, `android=<url>` (repeatable).
         #[arg(long = "link")]
         links: Vec<String>,
@@ -1053,6 +1057,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             entry,
             key,
             notes,
+            localized_notes,
             links,
             base_url,
             out,
@@ -1062,6 +1067,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             entry: &entry,
             key: key.as_deref(),
             notes: notes.as_deref(),
+            localized_notes: &localized_notes,
             links: &links,
             base_url: base_url.as_deref(),
             out: &out,

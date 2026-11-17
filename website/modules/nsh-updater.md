@@ -43,6 +43,7 @@ interface UpdateCheckOptions {
 interface AppUpdate {
   version: string;
   notes?: string | null;
+  localizedNotes: Record<string, string>;
   url: string;
   canInstall: boolean;
   shell: boolean;
@@ -59,6 +60,7 @@ native shell) is behind.
 | --- | --- |
 | `version` | The new version, semver |
 | `notes` | What changed, as the manifest's `--notes` file says it |
+| `localizedNotes` | `notes` in other languages, by BCP 47 tag (`en`, `zh-TW`, `ja`), from the manifest's `--localized-notes` files; empty when it has none. Show the one in your user's language, else `notes` |
 | `url` | Where the user can get it by hand: the archive, or the store page on iOS and Android. Pass it to [`openUrl`](./nsh.md#openurl) when `canInstall` is false |
 | `canInstall` | Whether `downloadUpdate`, `installAndRestart` and `installOnQuit` work in this run: a packaged desktop app installed where the user can write. False on iOS and Android, and under a directory only the system writes (a system package) |
 | `shell` | Whether only the installed app is behind: this run's [package](#checkforpackage) is already this version or later, so the update brings a newer runtime and native shell, not newer code. Apps that update by package can offer it as a quieter, optional step |
@@ -160,6 +162,7 @@ interface PackageUpdate {
   version: string;
   build: number;
   notes?: string | null;
+  localizedNotes: Record<string, string>;
   size?: number | null;
 }
 ```

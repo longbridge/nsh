@@ -20,6 +20,8 @@ use std::{
     sync::Arc,
 };
 
+use std::collections::BTreeMap;
+
 use crate::element::{Callback, JsError, JsObject, Later, System, codes, module};
 
 /// Takes a piece of a body and the total size if known; an error stops it.
@@ -108,6 +110,10 @@ pub(crate) struct AppUpdate {
     pub(crate) version: String,
     /// What changed, as the manifest says it.
     pub(crate) notes: Option<String>,
+    /// `notes` in other languages, by BCP 47 tag (`en`, `zh-TW`, `ja`), as
+    /// the manifest's `localizedNotes` has them: the app picks the one its
+    /// user reads, else shows `notes`. Empty when the manifest has none.
+    pub(crate) localized_notes: BTreeMap<String, String>,
     /// Where the user can get it by hand: the archive, or a store's page on
     /// iOS and Android. For `openUrl` when `canInstall` is false.
     pub(crate) url: String,
@@ -133,6 +139,8 @@ pub(crate) struct PackageUpdate {
     pub(crate) build: f64,
     /// What changed, as the manifest says it.
     pub(crate) notes: Option<String>,
+    /// `notes` in other languages, by BCP 47 tag, as `AppUpdate`'s.
+    pub(crate) localized_notes: BTreeMap<String, String>,
     /// Its size in bytes, when the manifest says it.
     pub(crate) size: Option<f64>,
 }
@@ -459,6 +467,7 @@ mod native {
         let mut update = AppUpdate {
             version: available.version.clone(),
             notes: available.notes.clone(),
+            localized_notes: available.localized_notes.clone(),
             url: available.url.clone(),
             can_install: false,
             shell,
@@ -647,6 +656,7 @@ mod native {
             version: available.version.clone(),
             build: available.build as f64,
             notes: available.notes.clone(),
+            localized_notes: available.localized_notes.clone(),
             size: available.size.map(|size| size as f64),
         };
         *found.2.borrow_mut() = Some(Arc::new(PendingPackage {
