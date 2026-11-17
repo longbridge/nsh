@@ -17,6 +17,8 @@ test("state() reports a window, and its requests change it", async () => {
   await app.waitFor("text:/^Notes: .* size=360x240 /");
   await app.press("Maximize notes");
   await app.waitFor("text:/^Notes: mode=maximized /");
+  // What shows of it: the work area, without a frame hanging over its edges.
+  await app.waitFor("Notes on display: fills");
   // An intent, not a toggle: normal again.
   await app.press("Normal notes");
   await app.waitFor("text:/^Notes: mode=normal /");

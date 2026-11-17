@@ -390,7 +390,7 @@ impl<M: TextEngine> Core<M> {
         views.sort_unstable();
         views.dedup();
         for view in views {
-            let Some(node) = self.nodes.get(view as usize) else {
+            let Some(node) = self.nodes.get(view as usize).filter(|node| node.created) else {
                 continue;
             };
             let Some(scroll) = node.scroll.as_ref() else {

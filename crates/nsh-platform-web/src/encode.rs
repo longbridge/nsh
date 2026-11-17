@@ -839,6 +839,11 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(t) = &p.test_id {
         let _ = write!(s, ",\"testID\":{}", json_str(t));
     }
+    // An overlay placed against its anchor: `overlays: "viewport"` draws
+    // it over the window (`syncFloats`).
+    if p.overlay_anchor.is_some() {
+        s.push_str(",\"anchored\":true");
+    }
     // The HTML element the view is drawn as (`web={{ element }}`), and a
     // link's target (`Link`'s `href`).
     if let Some(tag) = p.web_element {

@@ -23,7 +23,7 @@ use rustc_hash::FxHashMap;
 use super::CanvasState;
 use crate::surface::Surface;
 
-type Images = FxHashMap<Arc<str>, Option<CFRetained<CGImage>>>;
+type Images = FxHashMap<Arc<str>, Option<crate::image::CanvasBitmap>>;
 
 /// Renders `drawing` into a `width` × `height` pixel image at `scale`
 /// pixels per point and answers request `id`.
@@ -74,7 +74,7 @@ pub(crate) fn render(
     for uri in uris {
         let waiting = waiting.clone();
         let key = uri.clone();
-        crate::image::load(surface, &uri, move |result| {
+        crate::image::load(surface, &uri, scale, move |result| {
             let mut w = waiting.borrow_mut();
             let image = result
                 .inspect_err(|e| log::warn!("offscreen canvas: {e}"))

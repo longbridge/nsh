@@ -26,6 +26,10 @@ pub(crate) struct UpdaterConfig {
     pub(crate) github: Option<String>,
     /// The manifest's URL on a host of the app's own.
     pub(crate) url: Option<String>,
+    /// Other manifests the app's code may check instead, by name
+    /// (`checkForUpdate({ channel })`).
+    #[serde(default)]
+    pub(crate) channels: std::collections::BTreeMap<String, String>,
     /// The manifests' Ed25519 key (`nsh keygen`'s `.pub`).
     pub(crate) public_key: Option<String>,
     /// Signed packages of the app's code the app runs over the air.
@@ -56,6 +60,7 @@ fn runtime_config(config: &AppConfig, id: &str) -> anyhow::Result<Option<Config>
     runtime.version = version(config).to_owned();
     runtime.github = updater.github.clone();
     runtime.url = updater.url.clone();
+    runtime.channels = updater.channels.clone();
     runtime.public_key = updater.public_key.clone();
     runtime.build = Some(config.build.unwrap_or(1).into());
     runtime.packages = updater.packages.as_ref().map(|packages| {
@@ -355,6 +360,36 @@ fn package_asset(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_package_keeps_the_channels_nsh_json_names() {
+        let key = "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=";
+        let config = |channels: &str| -> AppConfig {
+            serde_json::from_str(&format!(
+                r#"{{ "version": "1.2.0", "updater": {{ "url": "https://x.dev/latest.json",
+                    "channels": {channels}, "publicKey": "{key}" }} }}"#
+            ))
+            .unwrap()
+        };
+        let runtime = runtime_config(
+            &config(r#"{ "beta": "https://x.dev/beta/latest.json" }"#),
+            "dev.app",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            runtime.channel("beta").unwrap().manifest_url(),
+            "https://x.dev/beta/latest.json"
+        );
+        // Checked as `url` is, when the app is packaged.
+        assert!(
+            runtime_config(
+                &config(r#"{ "beta": "http://x.dev/beta/latest.json" }"#),
+                "dev.app"
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn archives_name_their_platform() {

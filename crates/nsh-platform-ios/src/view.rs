@@ -197,7 +197,7 @@ impl AppView {
 
     /// The directory the storage (`nsh/storage`) of the apps this view loads
     /// is kept in (`storage.json` in it), overriding each app's own in
-    /// [`SurfaceOptions::data_dir`] (`None`: theirs). A change applies from
+    /// [`SurfaceOptions::support_dir`] (`None`: theirs). A change applies from
     /// the next [`AppView::load`].
     pub fn set_storage_directory(&self, dir: Option<std::path::PathBuf>) {
         if self.inner.state.borrow().options.storage != dir {

@@ -32,6 +32,71 @@ items both ways):
 
 The `*Ts.tsx` runs, which build their views without Rust component nodes, stayed within their run-to-run
 spread (`GridTs` first frame 764.5 / 750.7 µs, `RowsTs` 120.1 / 119.0 µs).
+Rows an `each` keeps (2026-11-17, Linux x86_64, Ryzen 9 7950X, release, against `e2479085c`): every update of an
+`each` (the rows of Rust components, `element/flow.rs`; TSX's `<Each>` is `nsh-js`'s own) built a map of all its
+rows, wrote each row's item and index, and sent the core an element per kept row, which the core copied, matched
+and placed again. A row added also searched the old elements once per kept row and the parent's children once per
+node, so an append grew with the square of the rows. Rows are now passed in order and kept while the key in its
+place is each row's own, the core matches only what follows the elements a run keeps in place, and kept rows and
+nodes in order are found where the last one was (`components.md`, "What comes and goes is a region").
+
+`cargo test --release -p nsh-core --lib bench_each_update -- --ignored --nocapture`: N rows of a view and a text,
+one press an update, from `Core::component_event` to the finished `MountBatch` (`FakeEngine`, 320 × 480). µs an
+update, the rows' pass + the commit, means of 200 updates; medians of three rounds of the two test binaries run
+in turn on one CPU:
+
+| Rows | Update | Before | After | Mount items |
+|---:|---|---:|---:|---:|
+| 640 | The last row's item changes | 102.7 + 42.2 = 144.9 | 9.0 + 7.7 = 16.7 | 1 |
+| 640 | A row is added at the end | 113.9 + 841.9 = 955.8 | 13.6 + 429.9 = 443.6 | 9 |
+| 1,280 | The last row's item changes | 200.7 + 83.1 = 283.9 | 19.0 + 15.0 = 33.9 | 1 |
+| 1,280 | A row is added at the end | 230.3 + 2172.2 = 2402.5 | 23.1 + 815.0 = 837.9 | 9 |
+| 5,000 | The last row's item changes | 820.4 + 338.0 = 1158.4 | 73.9 + 66.3 = 140.2 | 1 |
+| 5,000 | A row is added at the end | 1200.6 + 22137.8 = 23338.3 | 137.9 + 3614.4 = 3752.3 | 9 |
+| 1,280 | Control: a text beside the rows changes | 0.2 + 4.6 = 4.9 | 0.2 + 4.6 = 4.9 | 1 |
+| 1,280 | Control: a view after the rows changes its height | 0.4 + 723.9 = 724.3 | 0.4 + 729.7 = 730.1 | 2 |
+
+A row that stays costs 222 → 26 ns an update (1,280 rows, one item changed). With keys that allocate, as
+`TextView`'s `(usize, String)`, the same updates take 331.8 → 42.2 µs and 2405.8 → 858.0 µs at 1,280 rows. What
+is left of a row added is not the `each`: the second control lays the rows' parent out again with no row set, and
+costs 0.57 µs a row (724 µs of the 838), which this change leaves as it is.
+
+The mount items are the same: a list changed at random (rows changed, added, removed, moved, a key twice; four
+row shapes, 7,680 commits) writes the same items in both versions (`NSH_EACH_ITEMS` with the two `random_lists_`
+tests of `each_updates`), and so does every step of the traces below.
+
+A streamed reply in a `TextView`, whose blocks are rows of an `each`
+(`cargo test --release -p nsh-base --test base bench_text_view_streaming -- --ignored --nocapture`; total over the
+stream / average of the last 10 updates, ms, medians of three rounds of the two test binaries run in turn on one
+CPU; the item counts of all 4,822 updates are equal):
+
+| Reply | Before | After | Mount items |
+|---|---|---|---|
+| Typical, 20 KB | 391.4 / 0.855 | 294.3 / 0.586 | 16,421 |
+| Typical, 40 KB | 1557.6 / 2.058 | 1025.7 / 1.245 | 32,809 |
+| Ends in a 400-row table | 5171.9 / 16.646 | 5087.2 / 16.513 | 18,698 |
+| Ends in a 400-item tight list | 2131.3 / 6.533 | 2099.1 / 6.358 | 9,742 |
+| Ends in a 400-line code block | 354.6 / 0.771 | 359.0 / 0.782 | 3,666 |
+
+The last three replies are one block made again on each update, the same work in both versions: they stay within
+the 2% two builds of the same work differ by. Of what a typical update still costs per block, the layout of the
+view's column is the likely larger part: by the second control above it is about 0.7 ms of the 1.25 ms at 1,280
+blocks (an estimate from that control, not measured inside the `TextView`).
+
+Headless `nsh test <entry> --trace`, three runs of each version in turn on one CPU, every mount item of every
+step equal. `Bench.tsx` and the counter are plain debug builds; the two entries with a long `each` are built with
+`nsh-core` and `nsh-base` at `opt-level=3` (`--config 'profile.dev.package.nsh-core.opt-level=3'`, the same for
+`nsh-base`), as the plain build takes longer to mount them than a step waits. Median of the runs' mean commit:
+
+| Entry | Commits | Before (µs/commit) | After (µs/commit) | Ops | Mount items | Nodes |
+|---|---|---:|---:|---:|---:|---:|
+| `examples/bench/TextViewStream.tsx`, 40 presses of 24 bytes after 600 blocks | 40 | 4,503 | 3,394 | 1 | 1 to 12 | 5,409 to 5,550 |
+| `examples/bench/RichEditor.tsx`, 8 edits of the first of 1,000 paragraphs | 8 | 3,858 | 3,412 | 0 | 4 or 5 | 5,013 |
+| `examples/gallery/Bench.tsx`, `app.scroll("id:photos", 3000)` | 66 | 693 | 696 | 0 to 162 | 1 to 132 | 306 to 684 |
+| Counter, press `+1` | 1 | 261 | 269 | 10 | 7 | 24 |
+
+The first commits keep their counts (19 ops / 4,220 items / 5,406 nodes, 20 / 13,058 / 5,013, 756 / 622 / 252 and
+57 / 51 / 21). The last two rows are controls of unchanged work.
 
 Batched region cleanup (2026-11-15, macOS arm64, Apple M4 Pro, against `9efc3a2c`): three interleaved before / after
 pairs, a fresh headless CLI process per sample. Both builds use the workspace's development profile with

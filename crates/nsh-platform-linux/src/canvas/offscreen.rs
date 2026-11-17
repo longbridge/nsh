@@ -23,11 +23,11 @@ use nsh_core::{
 };
 use rustc_hash::FxHashMap;
 
-use super::{Replay, State, TextCache, image_surface};
+use super::{CanvasBitmap, Replay, State, TextCache};
 use crate::surface::Surface;
 
 /// The images a drawing names, by URI: `None` when one failed to load.
-type Images = FxHashMap<Arc<str>, Option<cairo::ImageSurface>>;
+type Images = FxHashMap<Arc<str>, Option<CanvasBitmap>>;
 
 /// Renders `drawing` into a `width` × `height` pixel image at `scale`
 /// pixels per point and answers request `id`.
@@ -100,9 +100,9 @@ pub(crate) fn render(
         let key = uri.clone();
         // A cached texture is handed over before `load_bitmap` returns: no
         // borrow of `waiting` is held across the call.
-        crate::image::load_bitmap(surface, &uri, move |result| {
+        crate::image::load_bitmap(surface, &uri, f64::from(scale), move |result| {
             let image = result
-                .and_then(|t| image_surface(&t))
+                .and_then(CanvasBitmap::new)
                 .inspect_err(|e| log::warn!("offscreen canvas: {e}"))
                 .ok();
             let mut w = waiting.borrow_mut();

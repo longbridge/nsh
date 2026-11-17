@@ -18,7 +18,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use super::{
     Core,
-    components::{Classes, Expanded, Instance, Part, Placement},
+    components::{Classes, Expanded, Instance, NewChild, Part, Placement},
 };
 use crate::{
     NodeId, Op, Tag, TextEngine,
@@ -663,15 +663,43 @@ impl<M: TextEngine> Core<M> {
         if state.children.iter().any(|e| e.part == Part::Children) {
             inst.children_at = Placement::None;
         }
-        // What a run made goes with it unapplied once a later run replaced
-        // it or its row went.
-        let new = elements
-            .into_iter()
-            .filter(RegionElement::applies)
-            .map(|e| (e.owner, e.element.0))
-            .collect();
+        // Rows kept where they were update through their item bindings:
+        // matching would only move these elements into the output
+        // unchanged, as it does first of all for the elements a run starts
+        // with. A list mostly changes at its end, so only what follows
+        // them is matched.
+        let stay = elements
+            .iter()
+            .zip(&state.children)
+            .take_while(|(element, previous)| {
+                matches!(element, RegionElement::Kept(key) if previous.key.as_ref() == Some(key))
+            })
+            .count();
+        let mut children = state.children;
         let before = self.components.release_generation;
-        let (out, placeholder) = self.match_children(parent, state.children, new, host, &mut inst);
+        let (out, placeholder) = if stay == children.len() && stay == elements.len() {
+            (children, None)
+        } else {
+            // What a run made goes with it unapplied once a later run
+            // replaced it or its row went.
+            let new = elements
+                .into_iter()
+                .skip(stay)
+                .filter(RegionElement::applies)
+                .map(|element| match element {
+                    RegionElement::Made { owner, element } => NewChild::Made(Some(owner), *element),
+                    RegionElement::Kept(key) => NewChild::Kept(key),
+                })
+                .collect();
+            if stay == 0 {
+                self.match_children(parent, children, new, host, &mut inst)
+            } else {
+                let old = children.split_off(stay);
+                let (rest, placeholder) = self.match_children(parent, old, new, host, &mut inst);
+                children.extend(rest);
+                (children, placeholder.map(|at| at + stay))
+            }
+        };
         #[cfg(test)]
         {
             self.components.cleanup_work.regions += 1;
@@ -708,17 +736,20 @@ impl<M: TextEngine> Core<M> {
         }
         self.place_filled(&out, &mut inst, state.anchor, place);
         // In place: from the last, each before the next, from the anchor.
-        let nodes: Vec<NodeId> = out
-            .iter()
-            .flat_map(|e| match e.part {
-                Part::Children => inst.js_children.clone(),
-                Part::Filled(name) => self
-                    .fill_of(&inst, name)
-                    .map(|f| self.fill_nodes(f))
-                    .unwrap_or_default(),
-                _ => self.placed(e),
-            })
-            .collect();
+        let mut nodes: Vec<NodeId> = Vec::with_capacity(out.len());
+        for e in &out {
+            match e.part {
+                Part::Children => nodes.extend_from_slice(&inst.js_children),
+                Part::Filled(name) => {
+                    if let Some(fill) = self.fill_of(&inst, name) {
+                        nodes.extend(self.fill_nodes(fill));
+                    }
+                }
+                Part::Region(_) | Part::Fill(_) => nodes.extend(self.placed(e)),
+                // (As `placed` has it, without a list of its own for each.)
+                _ => nodes.push(e.id),
+            }
+        }
         self.children_placed(host, &mut inst, old_place);
         self.components.instances.insert(host, inst);
         self.components.regions.insert(
@@ -768,17 +799,23 @@ impl<M: TextEngine> Core<M> {
         {
             return;
         }
+        // Where the node before the last one found in its place would be.
+        let mut expected = None;
         for &child in nodes.iter().rev() {
             if nested {
                 if !self.nested_precedes(parent, child, before) {
                     self.join_nested_at(parent, child, before);
                 }
-            } else if !self.precedes(parent, child, before) {
-                let _ = self.apply_op(Op::Insert {
-                    parent,
-                    child,
-                    before,
-                });
+            } else {
+                let at = self.preceding(parent, child, before, expected);
+                if at.is_none() {
+                    let _ = self.apply_op(Op::Insert {
+                        parent,
+                        child,
+                        before,
+                    });
+                }
+                expected = at.and_then(|at| at.checked_sub(1));
             }
             before = Some(child);
         }

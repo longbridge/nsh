@@ -2339,10 +2339,14 @@ impl Rv {
     }
 
     /// The box around the selection in the content box: its cells' (a
-    /// cell selection), its text's lines, else the caret's box.
+    /// cell selection), its node's (a node selection), its text's lines,
+    /// else the caret's box.
     pub(crate) fn selection_box(&self) -> Option<Bounds<Points>> {
         if let Some(cells) = self.cells_box() {
             return Some(cells);
+        }
+        if let Some(node) = self.node_selection_box() {
+            return Some(node);
         }
         let state = self.st.borrow();
         let sel = state.selection();
@@ -2353,7 +2357,26 @@ impl Rv {
             .or_else(|| geo.caret_rect(sel.head(), sel.affinity()))
     }
 
-    /// Scrolls the head into view, once it is laid out.
+    /// The box of the node at `pos` in the content box: a block's, else an
+    /// inline view's or image's on its line.
+    pub(crate) fn node_box(&self, pos: usize) -> Option<Bounds<Points>> {
+        node_box(&self.tree.borrow(), &self.geo.borrow(), pos)
+    }
+
+    /// The selected node's box in the content box, for a node selection:
+    /// a block atom has no text and no caret to place things by.
+    pub(crate) fn node_selection_box(&self) -> Option<Bounds<Points>> {
+        let pos = {
+            let state = self.st.borrow();
+            let sel = state.selection();
+            sel.as_node()?;
+            sel.from()
+        };
+        self.node_box(pos)
+    }
+
+    /// Scrolls the head into view, once it is laid out: a selected node
+    /// whole, as ProseMirror scrolls its DOM node, else the caret.
     fn scroll_into_view(&self) {
         let state = self.session.state();
         if state
@@ -2364,7 +2387,7 @@ impl Rv {
             self.scroll_pending.set(false);
             return;
         }
-        let Some(caret) = self.caret_rect() else {
+        let Some(caret) = self.node_selection_box().or_else(|| self.caret_rect()) else {
             return;
         };
         self.scroll_pending.set(false);
@@ -2996,10 +3019,15 @@ impl ViewGeometry for GeometryHandle {
         if !self.here() {
             return None;
         }
-        let (from, to) = {
+        let (from, to, node) = {
             let state = self.state.borrow();
-            (state.selection().from(), state.selection().to())
+            let sel = state.selection();
+            (sel.from(), sel.to(), sel.as_node().is_some())
         };
+        // A node selection's box is its node's: a block atom has no text.
+        if node {
+            return self.node_rect(from);
+        }
         let geo = self.geo.borrow();
         if from == to {
             return geo.caret_rect(from, Affinity::Downstream);
@@ -3020,16 +3048,20 @@ impl ViewGeometry for GeometryHandle {
         if !self.here() {
             return None;
         }
-        let tree = self.tree.borrow();
-        let geo = self.geo.borrow();
-        let Some(b) = tree.children.values().flatten().find(|b| b.pos == pos) else {
-            // Not a block: an inline view or image, on its line.
-            return geo.inline_rect(pos);
-        };
-        let origin = geo.origin(b.id)?;
-        let (_, frame) = geo.frames.get(&b.id)?;
-        Some(Bounds::new(origin, frame.size))
+        node_box(&self.tree.borrow(), &self.geo.borrow(), pos)
     }
+}
+
+/// The box of the node at `pos` in the content box: a block's, else an
+/// inline view's or image's on its line.
+fn node_box(tree: &Tree, geo: &Geometry, pos: usize) -> Option<Bounds<Points>> {
+    let Some(b) = tree.children.values().flatten().find(|b| b.pos == pos) else {
+        // Not a block: an inline view or image, on its line.
+        return geo.inline_rect(pos);
+    };
+    let origin = geo.origin(b.id)?;
+    let (_, frame) = geo.frames.get(&b.id)?;
+    Some(Bounds::new(origin, frame.size))
 }
 
 /// What a paste hook of the app's answered, or `None` (logged) when it

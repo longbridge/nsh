@@ -409,6 +409,20 @@ impl Expanded {
     }
 }
 
+/// A child to match with a parent's old elements
+/// ([`Core::match_children`]).
+#[allow(
+    clippy::large_enum_variant,
+    reason = "elements are matched as they come: a box for each would allocate for every child"
+)]
+pub(super) enum NewChild {
+    /// An element, applied under its owner when it has one.
+    Made(Option<crate::element::Owner>, ElNode),
+    /// The old element of this key stays as it is: of an `Each` row that
+    /// was there before.
+    Kept(SharedString),
+}
+
 /// Whether a slot's place only places it: no styles, props, listeners or
 /// children of its own (what fills it then needs no node around it).
 fn is_plain(el: &ElNode) -> bool {
@@ -3360,7 +3374,7 @@ impl<M: TextEngine> Core<M> {
         if new.is_empty() && old.is_empty() {
             return Vec::new();
         }
-        let new = new.into_iter().map(|el| (None, el)).collect();
+        let new = new.into_iter().map(|el| NewChild::Made(None, el)).collect();
         let (out, placeholder) = self.match_children(parent, old, new, host, inst);
         // A region's nodes go before what follows it.
         self.set_region_anchors(&out, inst, Anchor::End);
@@ -3463,40 +3477,30 @@ impl<M: TextEngine> Core<M> {
         out
     }
 
-    /// Matches `new` (each made under its owner, when it has one) with the
-    /// `old` elements of `parent` and applies them; releases the old ones
-    /// left. The elements as applied, and where the JS children go among
-    /// them.
+    /// Matches `new` with the `old` elements of `parent` and applies them;
+    /// releases the old ones left. The elements as applied, and where the
+    /// JS children go among them.
     pub(super) fn match_children(
         &mut self,
         parent: NodeId,
         old: Vec<Expanded>,
-        new: Vec<(Option<crate::element::Owner>, ElNode)>,
+        new: Vec<NewChild>,
         host: NodeId,
         inst: &mut Instance,
     ) -> (Vec<Expanded>, Option<usize>) {
-        // Kept rows update through their item bindings. In the same order,
-        // matching would only move these elements into the output unchanged.
-        if old.len() == new.len()
-            && old.iter().zip(&new).all(|(previous, (owner, el))| {
-                owner.is_none()
-                    && matches!(&el.kind, ElKind::Keep)
-                    && el.key.is_some()
-                    && el.key == previous.key
-            })
-        {
-            return (old, None);
-        }
         // `children_each`: one wrapper per JS child, keyed by it; in a view,
         // a region following them.
-        let new = if new
-            .iter()
-            .any(|(_, e)| matches!(e.kind, ElKind::EachChild(_)))
-        {
+        let new = if new.iter().any(
+            |child| matches!(child, NewChild::Made(_, e) if matches!(e.kind, ElKind::EachChild(_))),
+        ) {
             let mut each = Vec::with_capacity(new.len() + inst.js_children.len());
-            for (owner, el) in new {
+            for child in new {
+                let NewChild::Made(owner, el) = child else {
+                    each.push(child);
+                    continue;
+                };
                 let ElKind::EachChild(place) = &el.kind else {
-                    each.push((owner, el));
+                    each.push(NewChild::Made(owner, el));
                     continue;
                 };
                 if inst.children_at != Placement::None {
@@ -3523,7 +3527,7 @@ impl<M: TextEngine> Core<M> {
                             place(Child::js(child.get_untracked()), at)
                         },
                     );
-                    each.push((owner, region.0));
+                    each.push(NewChild::Made(owner, region.0));
                 }
             }
             each
@@ -3537,7 +3541,34 @@ impl<M: TextEngine> Core<M> {
         // in order: an element that comes or goes (`.children(option)`)
         // does not shift its siblings onto new nodes.
         let mut cursor = 0;
-        for (owner, el) in new {
+        // Where the element after the last one kept was: kept rows mostly
+        // follow each other as they did, and are then found without a
+        // search of all the old ones for each.
+        let mut after_kept = 0;
+        for child in new {
+            let (owner, el) = match child {
+                NewChild::Made(owner, el) => (owner, el),
+                // An `Each` row that stays: as it was. (One old element
+                // at most has its key, which is its row's own.)
+                NewChild::Kept(key) => {
+                    let is = |o: &Option<Expanded>| {
+                        o.as_ref().is_some_and(|o| o.key.as_ref() == Some(&key))
+                    };
+                    let at = if old.get(after_kept).is_some_and(is) {
+                        Some(after_kept)
+                    } else {
+                        old.iter().position(is)
+                    };
+                    match at.and_then(|at| {
+                        after_kept = at + 1;
+                        old[at].take()
+                    }) {
+                        Some(e) => out.push(e),
+                        None => log::error!("a kept row is gone"),
+                    }
+                    continue;
+                }
+            };
             let child = |core: &mut Self| {
                 core.match_child(
                     parent,
@@ -3631,7 +3662,7 @@ impl<M: TextEngine> Core<M> {
                 let old_children = prev.map(|p| p.children).unwrap_or_default();
                 let new = std::mem::take(&mut el.children)
                     .into_iter()
-                    .map(|c| (None, c))
+                    .map(|c| NewChild::Made(None, c))
                     .collect();
                 let filling = self.components.filling.replace((parent, name));
                 let (children, _) = self.match_children(parent, old_children, new, host, inst);
@@ -3686,20 +3717,9 @@ impl<M: TextEngine> Core<M> {
                 let id = self.bind_region(host, parent, region);
                 let mut e = super::views::region_placeholder(id);
                 // An `Each` row's region keeps its row's key: a run that
-                // keeps the row finds it by that key (`ElKind::Keep`).
+                // keeps the row finds it by that key (`NewChild::Kept`).
                 e.key = el.key;
                 out.push(e);
-            }
-            // An `Each` row that stays: as it was.
-            ElKind::Keep => {
-                let kept = old.iter().position(|o| {
-                    o.as_ref()
-                        .is_some_and(|o| o.key.is_some() && o.key == el.key)
-                });
-                match kept.and_then(|at| old[at].take()) {
-                    Some(e) => out.push(e),
-                    None => log::error!("a kept row is gone"),
-                }
             }
             ElKind::List(list) => {
                 // The glue's list: placed and laid out like a slot,
@@ -4264,17 +4284,30 @@ impl<M: TextEngine> Core<M> {
     /// Whether `child` is a child of `parent` right before `next` (the last
     /// one when `next` is `None`).
     pub(super) fn precedes(&self, parent: NodeId, child: NodeId, next: Option<NodeId>) -> bool {
-        let Ok(k) = self.key(parent) else {
-            return false;
-        };
+        self.preceding(parent, child, next, None).is_some()
+    }
+
+    /// Where `child` is among `parent`'s children when it is right before
+    /// `next` ([`Self::precedes`]). `hint` is where it is expected, looked
+    /// at first: nodes checked from the last to the first, each before the
+    /// one after it, are found without a search of the children for each.
+    pub(super) fn preceding(
+        &self,
+        parent: NodeId,
+        child: NodeId,
+        next: Option<NodeId>,
+        hint: Option<usize>,
+    ) -> Option<usize> {
+        let k = self.key(parent).ok()?;
         let children = &self.nodes[k as usize].children;
-        let Some(at) = children
-            .iter()
-            .position(|&c| self.nodes[c as usize].id == child)
-        else {
-            return false;
+        let id = |at: usize| children.get(at).map(|&c| self.nodes[c as usize].id);
+        let at = match hint {
+            Some(at) if id(at) == Some(child) => at,
+            _ => children
+                .iter()
+                .position(|&c| self.nodes[c as usize].id == child)?,
         };
-        children.get(at + 1).map(|&c| self.nodes[c as usize].id) == next
+        (id(at + 1) == next).then_some(at)
     }
 
     /// Slot node `node` as element `el` of `host`'s view: its styles, props

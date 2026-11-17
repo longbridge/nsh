@@ -863,7 +863,8 @@ impl RootView {
             limits: self.ivars().options.limits,
             ui_sets: crate::ui_sets(),
             runtime: self.ivars().options.runtime.clone(),
-            data_dir: self.ivars().options.data_dir.clone(),
+            support_dir: self.ivars().options.support_dir.clone(),
+            data_dir: None,
             cache: system_cache(self.ivars().options.cache.clone()),
             storage: self.ivars().options.storage.as_ref().map(|dir| {
                 nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>
@@ -1002,13 +1003,13 @@ pub struct SurfaceOptions {
     /// What the embedding app grants the apps it runs at most (`None`: what
     /// each app declares).
     pub granted: Option<nsh_engine::Capabilities>,
-    /// Where the apps keep their data: each app in `<data_dir>/<app id>`
-    /// ([`nsh_engine::EngineConfig::data_dir`]). Default: `nsh` in the
+    /// Where the apps keep their data: each app in `<support_dir>/<app id>`
+    /// ([`nsh_engine::EngineConfig::support_dir`]). Default: `nsh` in the
     /// app's Application Support; `None`: nothing is kept.
-    pub data_dir: Option<std::path::PathBuf>,
+    pub support_dir: Option<std::path::PathBuf>,
     /// The directory the apps' storage (`nsh/storage`) is kept in
     /// (`storage.json` in it), overriding their own in
-    /// [`SurfaceOptions::data_dir`]; `None`: theirs.
+    /// [`SurfaceOptions::support_dir`]; `None`: theirs.
     pub storage: Option<std::path::PathBuf>,
     /// Where the apps keep their caches (the images they downloaded) and
     /// how much each keeps: by default `nsh` in the app's Caches
@@ -1044,7 +1045,7 @@ impl Default for SurfaceOptions {
             limits: nsh_engine::Limits::default(),
             runtime: None,
             granted: None,
-            data_dir: data_dir(),
+            support_dir: support_dir(),
             storage: None,
             cache: nsh_engine::CacheOptions::default(),
             components: crate::component::Components::default(),
@@ -1059,8 +1060,8 @@ impl Default for SurfaceOptions {
 /// Where apps NSH runs on iOS keep their data: `nsh` in the (embedding or
 /// standalone) app's Application Support, each app in a directory named by
 /// its id.
-fn data_dir() -> Option<std::path::PathBuf> {
-    nsh_engine::data_dir().map(|dir| dir.join("nsh"))
+fn support_dir() -> Option<std::path::PathBuf> {
+    nsh_engine::support_dir().map(|dir| dir.join("nsh"))
 }
 
 /// `cache` with [`nsh_engine::CacheLocation::System`] made iOS's: `nsh` in

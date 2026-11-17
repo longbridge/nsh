@@ -122,7 +122,7 @@ pub(crate) struct CanvasState {
     args: Vec<Option<AnimationValue>>,
     /// The images the drawing names, by URI (premultiplied pixels): `None`
     /// while loading (or when they failed to load).
-    images: FxHashMap<Arc<str>, Option<Arc<sk::Pixmap>>>,
+    images: FxHashMap<Arc<str>, Option<CanvasBitmap>>,
     /// What was rasterized (made while drawing, which only sees the
     /// state).
     cache: RefCell<Option<Recorded>>,
@@ -331,12 +331,14 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, drawing: Arc<Drawing>) 
         wait_for_fonts(surface, view);
     }
     let id = view.id();
+    // An SVG is rasterized for the screen it shows on.
+    let scale = surface.scale();
     for uri in load {
         let weak = Rc::downgrade(surface);
         let key = uri.clone();
-        load_image(surface, &uri, move |result| {
-            let pixmap = match result {
-                Ok(pixmap) => pixmap,
+        load_image(surface, &uri, scale, move |result| {
+            let image = match result {
+                Ok(image) => image,
                 Err(e) => {
                     log::warn!("canvas: {e}");
                     return;
@@ -353,7 +355,7 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, drawing: Arc<Drawing>) 
                 let Some(slot) = c.images.get_mut(&key) else {
                     return;
                 };
-                *slot = Some(Arc::new(pixmap));
+                *slot = Some(image);
                 c.stale();
             }
             view.changed();
@@ -376,22 +378,39 @@ pub(crate) fn set_args(view: &NshView, values: &[(u16, AnimationValue)]) {
     view.changed();
 }
 
-/// Loads the image `uri` for a canvas, as premultiplied pixels.
+/// An image a canvas draws: its premultiplied pixels, and how many of
+/// them make one unit of the image's own size (what `drawImage`'s source
+/// rectangle and its default size are in).
+#[derive(Clone)]
+pub(crate) struct CanvasBitmap {
+    pub(crate) pixmap: Arc<sk::Pixmap>,
+    /// 1 for a bitmap decoded whole, whose units are its pixels; an SVG's
+    /// pixels per point, as it was rasterized.
+    pub(crate) scale: f64,
+}
+
+/// Loads the image `uri` for a canvas, as premultiplied pixels; an SVG is
+/// rasterized at `scale` pixels per point.
 fn load_image(
     surface: &Rc<Surface>,
     uri: &str,
-    done: impl FnOnce(Result<sk::Pixmap, String>) + 'static,
+    scale: f32,
+    done: impl FnOnce(Result<CanvasBitmap, String>) + 'static,
 ) {
-    crate::image::load_bitmap(surface, uri, move |result| {
-        done(result.and_then(|texture| {
+    crate::image::load_bitmap(surface, uri, scale, move |result| {
+        done(result.and_then(|(texture, scale)| {
             let image = texture.image();
             let size = image.size(0);
             let bytes = image.as_bytes(0).ok_or("an image without pixels")?;
-            premultiplied(
+            let pixmap = premultiplied(
                 size.width.0.max(0) as u32,
                 size.height.0.max(0) as u32,
                 bytes,
-            )
+            )?;
+            Ok(CanvasBitmap {
+                pixmap: Arc::new(pixmap),
+                scale,
+            })
         }))
     });
 }
@@ -602,7 +621,7 @@ struct Job {
     id: nsh_core::NodeId,
     drawing: Arc<Drawing>,
     args: Vec<Option<AnimationValue>>,
-    images: FxHashMap<Arc<str>, Option<Arc<sk::Pixmap>>>,
+    images: FxHashMap<Arc<str>, Option<CanvasBitmap>>,
     /// The app's text system (each worker shapes with a line layout cache
     /// of its own over it: the window's is the frame's).
     system: Arc<gpui::TextSystem>,
@@ -926,7 +945,7 @@ impl IRect {
 fn record(
     drawing: &Drawing,
     args: &[Option<AnimationValue>],
-    images: &FxHashMap<Arc<str>, Option<Arc<sk::Pixmap>>>,
+    images: &FxHashMap<Arc<str>, Option<CanvasBitmap>>,
     (text, system): (&WindowTextSystem, &Arc<gpui::TextSystem>),
     key: Key,
     region: IRect,
@@ -956,7 +975,7 @@ fn patch(
     recorded: &mut Recorded,
     drawing: &Drawing,
     args: &[Option<AnimationValue>],
-    images: &FxHashMap<Arc<str>, Option<Arc<sk::Pixmap>>>,
+    images: &FxHashMap<Arc<str>, Option<CanvasBitmap>>,
     text: (&WindowTextSystem, &Arc<gpui::TextSystem>),
     damage: nsh_core::Bounds<nsh_core::Points>,
 ) -> bool {
@@ -1180,7 +1199,7 @@ struct Glyph {
 
 struct Replay<'a> {
     args: &'a [Option<AnimationValue>],
-    images: &'a FxHashMap<Arc<str>, Option<Arc<sk::Pixmap>>>,
+    images: &'a FxHashMap<Arc<str>, Option<CanvasBitmap>>,
     text: &'a WindowTextSystem,
     /// The app's text system (fonts are resolved in it).
     system: &'a Arc<gpui::TextSystem>,
@@ -1218,7 +1237,7 @@ impl<'a> Replay<'a> {
     /// that size.
     fn new(
         args: &'a [Option<AnimationValue>],
-        images: &'a FxHashMap<Arc<str>, Option<Arc<sk::Pixmap>>>,
+        images: &'a FxHashMap<Arc<str>, Option<CanvasBitmap>>,
         (text, system): (&'a WindowTextSystem, &'a Arc<gpui::TextSystem>),
         key: Key,
         region: IRect,
@@ -2060,10 +2079,16 @@ impl<'a> Replay<'a> {
         if self.state.singular {
             return;
         }
-        let Some(Some(image)) = self.images.get(uri).cloned() else {
+        let Some(Some(CanvasBitmap {
+            pixmap: image,
+            scale,
+        })) = self.images.get(uri).cloned()
+        else {
             return;
         };
-        let (iw, ih) = (image.width() as f64, image.height() as f64);
+        // The source rectangle and the default size are in the image's own
+        // units: an SVG drawn sharp has `scale` pixels to each.
+        let (iw, ih) = (image.width() as f64 / scale, image.height() as f64 / scale);
         let [sx, sy, sw, sh] = source.map_or([0.0, 0.0, iw, ih], |s| s.map(f64::from));
         if sw == 0.0 || sh == 0.0 {
             return;
@@ -2080,10 +2105,12 @@ impl<'a> Replay<'a> {
         let Some(path) = self.rect_path([dx, dy, dw, dh]) else {
             return;
         };
-        // The image's pixels to user space, then to the pixmap.
+        // The image's pixels to its units, to user space, then to the
+        // pixmap.
         let to_dest = Affine::translate(dx, dy)
             .then(&Affine::scale(dw / sw, dh / sh))
-            .then(&Affine::translate(-sx, -sy));
+            .then(&Affine::translate(-sx, -sy))
+            .then(&Affine::scale(1.0 / scale, 1.0 / scale));
         let transform = self.state.transform.then(&to_dest).skia();
         let source = Source::Image(image, transform, self.state.alpha as f32);
         self.emit(path.bounds(), &|pixmap, to, mask, blend| {
@@ -3586,15 +3613,17 @@ mod tests {
     #[test]
     fn an_image_draws_its_pixels_over_its_file_density() {
         // 60 × 30 pixels at (0, 0) without a destination size: 60 × 30
-        // points as `dot.png`, 20 × 10 as `dot@3x.png`, at scale 1 and 2.
+        // points as `dot.png`, 20 × 10 as `dot@3x.png`, 30 × 15 as an SVG
+        // rasterized at 2 pixels per point, at scale 1 and 2.
         let mut image = sk::Pixmap::new(60, 30).unwrap();
         image.fill(sk::Color::from_rgba8(255, 0, 0, 255));
         let image = Arc::new(image);
         let system = Arc::new(gpui::TextSystem::new(Arc::new(gpui::NoopTextSystem::new())));
         let text = WindowTextSystem::new(system.clone());
-        for (uri, (w, h)) in [
-            ("asset:/dot.png", (60, 30)),
-            ("asset:/dot@3x.png", (20, 10)),
+        for (uri, (w, h), raster) in [
+            ("asset:/dot.png", (60, 30), 1.0),
+            ("asset:/dot@3x.png", (20, 10), 1.0),
+            ("asset:/dot.svg", (30, 15), 2.0),
         ] {
             let nan = c(f32::NAN);
             let drawing = Drawing {
@@ -3605,9 +3634,11 @@ mod tests {
                 }],
                 ..Drawing::default()
             };
-            let images = [(Arc::from(uri), Some(image.clone()))]
-                .into_iter()
-                .collect();
+            let bitmap = CanvasBitmap {
+                pixmap: image.clone(),
+                scale: raster,
+            };
+            let images = [(Arc::from(uri), Some(bitmap))].into_iter().collect();
             for scale in [1u32, 2] {
                 let key = Key {
                     linear: [scale as f32, 0.0, 0.0, scale as f32],

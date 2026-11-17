@@ -711,7 +711,8 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         limits,
         ui_sets: ui_sets(),
         runtime: None,
-        data_dir: Some("/app-data".into()),
+        support_dir: Some("/app-data".into()),
+        data_dir: None,
         // The browser keeps what it downloads in its HTTP cache.
         cache: nsh_engine::CacheOptions::off(),
         filesystem: Some(std::sync::Arc::new(filesystem::BrowserFileSystem {
@@ -1859,6 +1860,34 @@ pub extern "C" fn nsh_transform_gesture(id: u32, rotation: u32, phase: u32, amou
         if let Some(kind) = kind {
             app.control.dispatch_event(id, kind, payload);
         }
+    })
+}
+
+/// `overlays: "viewport"`: the root view's anchored overlays are drawn
+/// over the window, which is at `x`, `y` (the root's top left at 0, 0) and
+/// `width` × `height` less its safe area; they are placed within it. A
+/// negative `width` keeps them to the root view.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_overlay_area(x: f32, y: f32, width: f32, height: f32) -> f64 {
+    send(|app| {
+        let area = (width >= 0.0).then(|| {
+            nsh_core::geometry::bounds(
+                nsh_core::geometry::point(Points(x), Points(y)),
+                Size::new(Points(width), Points(height.max(0.0))),
+            )
+        });
+        app.control.set_overlay_area(area);
+    })
+}
+
+/// `overlays: "viewport"`: a press on the page around the player, at
+/// `x`, `y` in the root view's coordinates, while anchored overlays are
+/// drawn over it: the ones watching presses hear `onPressOutside`.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_press_outside(x: f32, y: f32) -> f64 {
+    send(|app| {
+        app.control
+            .press_beyond_root(nsh_core::geometry::point(Points(x), Points(y)))
     })
 }
 

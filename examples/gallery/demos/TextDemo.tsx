@@ -5,7 +5,7 @@ import logo from "../logo@2x.png";
 import { alpha, Caption, Card, colors, DemoPage, finish, isDark, mono, photoUrl, type PhotoName, Press, radius, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, tints } from "../ui";
 
 const LOREM =
-  "Native text, typeset once on the engine thread with CoreText and drawn on the main thread without any layout work.";
+  "Native text, typeset once on the engine thread with the platform's text engine and drawn on the main thread without any layout work.";
 
 const body = () => ({ fontSize: 15, lineHeight: 22, color: colors.text }) as const;
 const link = () => ({ color: colors.accent, textDecorationLine: "underline", textDecorationColor: alpha(colors.accent, 0.5) }) as const;

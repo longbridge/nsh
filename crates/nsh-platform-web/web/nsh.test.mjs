@@ -8,8 +8,8 @@ import test from "node:test";
 
 const source = await readFile(new URL("nsh.js", import.meta.url), "utf8");
 // `Player` is not exported; the page only gets it from `createPlayer`.
-const { Player, keyCode, elementTag, runtimeSheet } = await import(
-  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode, runtimeSheet };`)}`
+const { Player, keyCode, elementTag, runtimeSheet, charLength, clipChars } = await import(
+  `data:text/javascript,${encodeURIComponent(`${source}\nexport { Player, keyCode, runtimeSheet, charLength, clipChars };`)}`
 );
 
 /** A player on a fake engine; `sent` holds `[name, payload]` of the events it got. */
@@ -130,6 +130,62 @@ test("links the app shows no menu for keep the browser's context menu", () => {
   // A link without an href is a view like any other: no menu of the browser's.
   link.hasAttribute = () => false;
   assert.equal(player.contextMenu(e), false);
+});
+
+test("maxLength counts characters and cuts between user-perceived characters", () => {
+  assert.equal(charLength("a😀𠀀"), 3);
+  assert.equal(clipChars("hello", 3), "hel");
+  assert.equal(clipChars("hello", 0), "");
+  assert.equal(clipChars("a😀b", 2), "a😀");
+  assert.equal(clipChars("😀".repeat(3), 2), "😀😀");
+  // A letter with its combining accent, an emoji with its skin tone, a
+  // family joined by zero-width joiners: whole or not at all.
+  assert.equal(clipChars("café", 4), "caf");
+  assert.equal(clipChars("ok👍🏽", 3), "ok");
+  assert.equal(clipChars("ok👍🏽", 4), "ok👍🏽");
+  assert.equal(clipChars("a👨‍👩‍👧b", 5), "a");
+});
+
+test("a field's maxlength lets in what fits by characters, an emoji counting once", () => {
+  const { player } = fakePlayer();
+  const field = {
+    tagName: "INPUT",
+    value: "",
+    classList: { toggle() {} },
+    setAttribute() {},
+    removeAttribute(name) {
+      if (name === "maxlength") delete this.maxLength;
+    },
+  };
+  const el = { _field: field, removeAttribute() {} };
+  player.view = () => el;
+  player.op_in(["in", 1, { multiline: false, maxLength: 10 }, null]);
+  assert.equal(field.maxLength, 10);
+  // 800 emoji in a 1500 limit: room for 700 more characters, 1600 + 700 units.
+  player.op_in(["in", 1, { multiline: false, maxLength: 1500 }, null]);
+  field.value = "😀".repeat(800);
+  player.fieldLimit(field);
+  assert.equal(field.maxLength, 2300);
+  // Before a paste at the end: exactly what fits by characters.
+  field.selectionStart = field.selectionEnd = field.value.length;
+  const paste = (text) => ({ inputType: "insertFromPaste", data: null, dataTransfer: { getData: () => text } });
+  player.beforeInput(field, paste("😀".repeat(800)));
+  assert.equal(field.maxLength, 3000, "700 emoji more");
+  player.beforeInput(field, paste("ab👍🏽"));
+  assert.equal(field.maxLength, 1600 + "ab👍🏽".length);
+  // Typing over a selected emoji frees one character's room.
+  field.value = "😀".repeat(1500);
+  field.selectionStart = 0;
+  field.selectionEnd = 2;
+  player.beforeInput(field, { inputType: "insertText", data: "ab" });
+  assert.equal(field.maxLength, 2998 + 1, "only the a");
+  // A composition is held to the room left, one unit per character.
+  field.selectionStart = field.selectionEnd = 3000;
+  player.beforeInput(field, { inputType: "insertCompositionText", data: "中" });
+  assert.equal(field.maxLength, 3000);
+  // No maxLength, no limit.
+  player.op_in(["in", 1, { multiline: false }, null]);
+  assert.equal(field.maxLength, undefined);
 });
 
 test("input autofill hints are set, changed and cleared on both field kinds", () => {

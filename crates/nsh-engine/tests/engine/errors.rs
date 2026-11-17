@@ -47,7 +47,7 @@ fn config(bundle: Bundle, limits: nsh_engine::Limits) -> EngineConfig {
         limits,
         ui_sets: Vec::new(),
         runtime: None,
-        data_dir: None,
+        support_dir: None,
         cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
@@ -60,6 +60,7 @@ fn config(bundle: Bundle, limits: nsh_engine::Limits) -> EngineConfig {
         audio: None,
         windows: None,
         login_item: None,
+        data_dir: None,
     }
 }
 
@@ -137,7 +138,7 @@ fn first_error(bundle: Bundle) -> String {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
-        data_dir: None,
+        support_dir: None,
         cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
@@ -150,6 +151,7 @@ fn first_error(bundle: Bundle) -> String {
         audio: None,
         windows: None,
         login_item: None,
+        data_dir: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, sink).unwrap();
     rx.recv_timeout(Duration::from_secs(5))

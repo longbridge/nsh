@@ -89,6 +89,17 @@ pub(crate) struct UpdateProgress {
     pub(crate) total: Option<f64>,
 }
 
+/// Options of `checkForUpdate`.
+#[derive(Debug, Clone, Default, JsObject)]
+#[non_exhaustive]
+pub(crate) struct UpdateCheckOptions {
+    /// The name of a channel in `nsh.json`'s `"updater": { "channels" }`
+    /// to check instead of the default source. Only names the package
+    /// declares are accepted: the app's code chooses, the package says
+    /// where.
+    pub(crate) channel: Option<String>,
+}
+
 /// A newer version of the app.
 #[derive(Debug, Clone, Default, PartialEq, JsObject)]
 #[non_exhaustive]
@@ -100,9 +111,10 @@ pub(crate) struct AppUpdate {
     /// Where the user can get it by hand: the archive, or a store's page on
     /// iOS and Android. For `openUrl` when `canInstall` is false.
     pub(crate) url: String,
-    /// Whether `downloadUpdate` and `installAndRestart` work here: a package
-    /// on the desktop, installed where the user can write. False on iOS and
-    /// Android, and under a directory only the system writes.
+    /// Whether `downloadUpdate`, `installAndRestart` and `installOnQuit` work
+    /// here: a package on the desktop, installed where the user can write.
+    /// False on iOS and Android, and under a directory only the system
+    /// writes.
     pub(crate) can_install: bool,
     /// Whether only the installed app is behind: the package this run's code
     /// came from is already this version or a later one, so the update
@@ -182,14 +194,22 @@ pub(crate) struct Updater;
 
 #[module(flat)]
 impl Updater {
-    /// Asks the source in `nsh.json`'s `"updater"` for a newer version.
-    /// Resolves with the update, or `null` when the app is up to date, has
-    /// no `"updater"`, or runs where apps do not update (the web, a
-    /// development run). Rejects when the source cannot be reached or its
-    /// manifest is not acceptable: a bad signature, another app's id, a
-    /// URL that is not HTTPS.
-    pub(crate) fn check_for_update(sys: System) -> Later<Option<AppUpdate>> {
-        Later::new(native::check(sys))
+    /// Asks the source in `nsh.json`'s `"updater"` for a newer version:
+    /// its `url` or `github`, or with `channel`, the manifest of that name
+    /// in its `"channels"`. Resolves with the update, or `null` when the
+    /// app is up to date, has no `"updater"`, or runs where apps do not
+    /// update (the web, a development run). Rejects when the package
+    /// declares no channel of that name, and when the source cannot be
+    /// reached or its manifest is not acceptable: a bad signature, another
+    /// app's id, a URL that is not HTTPS. `downloadUpdate`,
+    /// `installAndRestart` and `installOnQuit` use what the last check
+    /// found, whichever source.
+    pub(crate) fn check_for_update(
+        options: Option<UpdateCheckOptions>,
+        sys: System,
+    ) -> Later<Option<AppUpdate>> {
+        let channel = options.and_then(|options| options.channel);
+        Later::new(native::check(sys, channel))
     }
 
     /// Downloads the update the last `checkForUpdate` found and checks it
@@ -210,6 +230,22 @@ impl Updater {
     /// be replaced, which leaves it as it was.
     pub(crate) fn install_and_restart(sys: System) -> Later<()> {
         Later::new(native::install(sys))
+    }
+
+    /// Replaces the installed app with the downloaded update when the app
+    /// quits, without starting it again: the user's next start opens the
+    /// new version. The update is unpacked and checked now, as
+    /// `installAndRestart` checks it, and the promise resolves once it
+    /// waits; quitting then only moves it into place. Rejects when nothing
+    /// was downloaded or the update is refused, which leaves the app as it
+    /// was. Calling it again replaces what waits, and `installAndRestart`
+    /// installs at once instead. Only a quit of the app installs it: if the
+    /// app ends otherwise (a crash, being killed), it is gone, and the next
+    /// `checkForUpdate` offers the update again. When moving it into place
+    /// fails as the app quits (the app was moved meanwhile, say), the app
+    /// stays as it was and quits all the same, the failure logged.
+    pub(crate) fn install_on_quit(sys: System) -> Later<()> {
+        Later::new(native::install_on_quit(sys))
     }
 
     /// Asks the source in `nsh.json`'s `"updater"` for a newer build of the
@@ -357,7 +393,10 @@ mod native {
         super::super::fs::blocking(move || work().map_err(JsError::Error)).await
     }
 
-    pub(super) async fn check(sys: System) -> Result<Option<AppUpdate>, JsError> {
+    pub(super) async fn check(
+        sys: System,
+        channel: Option<String>,
+    ) -> Result<Option<AppUpdate>, JsError> {
         let found = sys.locals.get::<Found>();
         let _operation = begin(&found)?;
         // A failed check keeps what the last one found, and its download: a
@@ -372,6 +411,12 @@ mod native {
                 return Ok(None);
             };
             let config = Config::parse(&bytes).map_err(|e| e.to_string())?;
+            // Only the source changes: the id, version and key are the
+            // package's, and the installation is found by its own file.
+            let config = match &channel {
+                Some(name) => config.channel(name).map_err(|e| e.to_string())?,
+                None => config,
+            };
             #[cfg(any(
                 all(target_os = "linux", not(target_env = "ohos")),
                 target_os = "macos",
@@ -732,6 +777,8 @@ mod native {
             JsError::Error("nothing is downloaded: call downloadUpdate first".into())
         })?;
         let installation = pending.installation.clone();
+        // Installed now instead of as the app quits (`installOnQuit`).
+        crate::restart::set_at_exit(None);
         // The restart starts the app at the path the user knows: once the
         // directory or `.app` is swapped, this process' executable is the
         // old one, moved aside and deleted.
@@ -755,6 +802,49 @@ mod native {
         windows
     )))]
     pub(super) async fn install(_: System) -> Result<(), JsError> {
+        Err(unavailable())
+    }
+
+    #[cfg(any(
+        all(target_os = "linux", not(target_env = "ohos")),
+        target_os = "macos",
+        windows
+    ))]
+    pub(super) async fn install_on_quit(sys: System) -> Result<(), JsError> {
+        let found = sys.locals.get::<Found>();
+        let _operation = begin(&found)?;
+        let pending = pending(&sys)?;
+        let archive = pending.archive.borrow().clone().ok_or_else(|| {
+            JsError::Error("nothing is downloaded: call downloadUpdate first".into())
+        })?;
+        let installation = pending.installation.clone();
+        // What waited before goes first: it is staged in the same place.
+        crate::restart::set_at_exit(None);
+        let staged = blocking({
+            let archive = archive.clone();
+            move || installation.stage(&archive).map_err(|e| e.to_string())
+        })
+        .await?;
+        let version = pending.available.version.clone();
+        crate::restart::set_at_exit(Some(Box::new(move || {
+            // A restart after the swap starts the app at the path the
+            // user knows, as `install` has it.
+            crate::restart::remember_program();
+            match staged.finish() {
+                Ok(()) => log::info!("installed version {version} as the app quit"),
+                Err(e) => log::error!("cannot install version {version} as the app quits: {e}"),
+            }
+            let _ = std::fs::remove_file(&archive);
+        })));
+        Ok(())
+    }
+
+    #[cfg(not(any(
+        all(target_os = "linux", not(target_env = "ohos")),
+        target_os = "macos",
+        windows
+    )))]
+    pub(super) async fn install_on_quit(_: System) -> Result<(), JsError> {
         Err(unavailable())
     }
     /// Whether the package this run's code came from is already the
@@ -806,6 +896,94 @@ mod native {
             );
         }
 
+        /// A package of version 1.0.0 whose `"updater"` has a default
+        /// source and a `beta` channel, each serving a signed manifest; it
+        /// records the URLs asked for.
+        struct Channels(std::sync::Mutex<Vec<String>>);
+
+        const SECRET: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
+        const PUBLIC: &str = "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=";
+        const STABLE: &str = "https://x.dev/latest.json";
+        const BETA: &str = "https://x.dev/beta/latest.json";
+
+        fn served(version: &str) -> Vec<u8> {
+            format!(
+                r#"{{"id":"dev.noop.app","version":"{version}","platforms":{{"{}":{{"url":"a.tar.gz","sha256":"ab","size":2}}}}}}"#,
+                nsh_updater::platform()
+            )
+            .into_bytes()
+        }
+
+        impl UpdaterHost for Channels {
+            fn config(&self) -> Option<Vec<u8>> {
+                Some(
+                    format!(
+                        r#"{{"id":"dev.noop.app","version":"1.0.0","url":"{STABLE}","channels":{{"beta":"{BETA}"}},"publicKey":"{PUBLIC}"}}"#
+                    )
+                    .into_bytes(),
+                )
+            }
+
+            fn get(&self, url: &str, sink: UpdaterSink<'_>) -> Result<(), String> {
+                self.0.lock().unwrap().push(url.to_owned());
+                let manifest = match url.strip_suffix(".sig").unwrap_or(url) {
+                    STABLE => served("1.0.0"),
+                    BETA => served("1.1.0-beta.1"),
+                    _ => return Err("not found".into()),
+                };
+                let body = if url.ends_with(".sig") {
+                    nsh_updater::sign(SECRET, &manifest).unwrap().into_bytes()
+                } else {
+                    manifest
+                };
+                sink(&body, Some(body.len() as u64))
+            }
+        }
+
+        #[test]
+        fn a_check_reads_the_channel_the_package_declares() {
+            let host = Arc::new(Channels(Default::default()));
+            let sys = System::default().with_updater(Some(host.clone()));
+            let checked = |channel: Option<&str>| {
+                tokio::runtime::Builder::new_current_thread()
+                    .build()
+                    .unwrap()
+                    .block_on(check(sys.clone(), channel.map(str::to_owned)))
+            };
+            // The default source has nothing newer; the beta channel has.
+            assert!(checked(None).unwrap().is_none());
+            let update = checked(Some("beta")).unwrap().unwrap();
+            assert_eq!(update.version, "1.1.0-beta.1");
+            assert_eq!(update.url, "https://x.dev/beta/a.tar.gz");
+            assert_eq!(
+                *host.0.lock().unwrap(),
+                [
+                    STABLE.to_owned(),
+                    format!("{STABLE}.sig"),
+                    BETA.to_owned(),
+                    format!("{BETA}.sig"),
+                ]
+            );
+            // A name the package does not declare reaches no host.
+            host.0.lock().unwrap().clear();
+            assert!(checked(Some("nightly")).is_err());
+            assert!(checked(Some("https://evil.dev/latest.json")).is_err());
+            assert!(host.0.lock().unwrap().is_empty());
+        }
+
+        /// Nothing waits to install when no check found an update the app
+        /// can install, and the rejection says so.
+        #[test]
+        fn install_on_quit_needs_a_downloaded_update() {
+            let sys = System::default().with_updater(Some(Arc::new(Channels(Default::default()))));
+            let error = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap()
+                .block_on(install_on_quit(sys))
+                .unwrap_err();
+            assert_eq!(error.code(), Some(codes::UNAVAILABLE));
+        }
+
         #[test]
         fn operations_are_serial_and_release_on_error_or_cancellation() {
             let found = Found::default();
@@ -826,7 +1004,7 @@ mod native {
 mod native {
     use super::*;
 
-    pub(super) async fn check(_: System) -> Result<Option<AppUpdate>, JsError> {
+    pub(super) async fn check(_: System, _: Option<String>) -> Result<Option<AppUpdate>, JsError> {
         Ok(None)
     }
 
@@ -838,6 +1016,10 @@ mod native {
     }
 
     pub(super) async fn install(_: System) -> Result<(), JsError> {
+        Err(unavailable())
+    }
+
+    pub(super) async fn install_on_quit(_: System) -> Result<(), JsError> {
         Err(unavailable())
     }
 
