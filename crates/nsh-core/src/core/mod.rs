@@ -5540,11 +5540,6 @@ impl<M: TextEngine> Core<M> {
                     list.set_selected(selected);
                 }
             }
-            Prop::ListSelectionSpring(spring) => {
-                if let Some(list) = node.list.as_mut() {
-                    list.indicator_spring = spring;
-                }
-            }
             Prop::Inverted(inverted) => {
                 if let Some(list) = node.list.as_mut() {
                     list.set_inverted(inverted);
@@ -9728,7 +9723,7 @@ impl<M: TextEngine> Core<M> {
         let (extent, row) = (list.item_extent(index), list.row_extent(index));
         let main = list.to_content(list.item_at(index), row.max(extent));
         let (x, width) = list.column(cross, list.column_of(index), unit);
-        let (before, spring) = (list.indicator_at, list.indicator_spring);
+        let before = list.indicator_at;
         let Some(layout) = self.nodes.get(cell as usize).and_then(|n| n.layout) else {
             return;
         };
@@ -9763,9 +9758,7 @@ impl<M: TextEngine> Core<M> {
             && node.frame != frame
             && !self.class_env.reduce_motion
         {
-            let spring =
-                spring.unwrap_or_else(|| crate::element::Spring::new(280.0).damping_ratio(0.85));
-            self.scope_frame_animation(node.id, crate::LayoutTransition::spring(spring));
+            self.scope_frame_animation(node.id, list_indicator_motion());
         }
         self.set_frame(cell, frame);
         self.set_spare(cell, false);
@@ -11353,4 +11346,10 @@ struct TextAttachments<'a> {
     /// The first of `baselines` not met yet: they are in the attachments'
     /// order ([`Core::attachments_of`]).
     next_baseline: usize,
+}
+
+/// The selection indicator's travel to another row: `Tabs`' indicator's
+/// spring (a 280 ms response, a damping ratio of 0.85).
+pub(crate) fn list_indicator_motion() -> crate::LayoutTransition {
+    crate::LayoutTransition::spring(crate::element::Spring::new(280.0).damping_ratio(0.85))
 }

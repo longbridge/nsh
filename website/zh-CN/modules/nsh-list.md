@@ -74,7 +74,6 @@ mount(App);
 | `selectedIndex` | `number \| null` | | 选中指示器所在的行；`null` 隐藏它。 |
 | `selectionIndicatorClass` | `string` | | 选中指示器的类名：画在选中行下方的视图，在自身外边距内铺满该行及其所在列，并原生地滑到另一行（见[选中指示器](../docs/lists.md#selection-indicator)）。创建列表时这个和 `selectionIndicatorStyle` 都没有，就没有指示器。 |
 | `selectionIndicatorStyle` | `StyleProp<ViewStyle>` | | 指示器的样式，覆盖 `selectionIndicatorClass`。 |
-| `selectionIndicatorSpring` | `{ stiffness?: number; damping?: number; mass?: number }` | `Tabs` 的弹簧 | 指示器移到另一行时用的弹簧；开启减弱动态效果时直接到位。 |
 | `style` | `StyleProp<ViewStyle>` | | 列表自身的样式（需要给它尺寸：`flex: 1` 或高度）。 |
 | `testID` | `string` | | UI 测试查找列表滚动视图所用的 id（`nsh test` 的 `id:`、XCUITest、UI Automator）。 |
 | `ref` | `ListRef \| ((node: ListRef) => void)` | | 见 [ref 方法](#ref-方法)。 |

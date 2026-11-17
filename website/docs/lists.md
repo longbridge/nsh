@@ -168,10 +168,9 @@ A list takes every scrolling prop of the scroll view that makes sense for a list
 | `stickyHeaderOffset` | `.sticky_header_offset(px(..))`, `.bind_sticky_header_offset(&node)` | `number \| AnimatedNode` | `0` | How far below the top the sticky items stick, as CSS `position: sticky`'s `top`; the content scrolls on under the space above them. An animated value moves them every frame. |
 | `contentStyle` | `.content_padding(..)`, `.content_padding_x(..)`, ..., `.row_gap(..)`, `.column_gap(..)` | `{ padding*, gap, rowGap, columnGap }` | | Padding and gaps of the content, numbers only. |
 | `contentClass` | | `string` | | The same as classes (`p-*`, `gap-*`); `contentStyle` wins over them. |
-| `selectedIndex` | | `number \| null` | | The row the selection indicator lies under; `null` hides it. |
-| `selectionIndicatorClass` | | `string` | | Classes of the selection indicator, a view under the selected row that slides from row to row (see [selection indicator](#selection-indicator)). With neither this nor `selectionIndicatorStyle` when the list is made, there is none. |
-| `selectionIndicatorStyle` | | `StyleProp<ViewStyle>` | | The indicator's style, over `selectionIndicatorClass`. |
-| `selectionIndicatorSpring` | | `{ stiffness?, damping?, mass? }` | `Tabs`' spring | The spring the indicator moves to another row with; with reduced motion it moves at once. |
+| `selectedIndex` | `.selected_index(..)` | `number \| null` | | The row the selection indicator lies under; `null` hides it. |
+| `selectionIndicatorClass` | `.selection_indicator(view())` | `string` | | Classes of the selection indicator, a view under the selected row that slides from row to row (see [selection indicator](#selection-indicator)). With neither this nor `selectionIndicatorStyle` when the list is made, there is none. |
+| `selectionIndicatorStyle` | `.selection_indicator(view())` | `StyleProp<ViewStyle>` | | The indicator's style, over `selectionIndicatorClass`. |
 | `header` | `.header(..)` | component or element | | Before the items. |
 | `footer` | `.footer(..)` | component or element | | After the items. |
 | `empty` | `.empty(..)` | component or element | | Shown instead of the items while there are none. |
@@ -226,14 +225,30 @@ virtual_list(count, move |at| {
 
 A list draws a highlight under its selected row as one view of its own, which slides from row to row the way a tab list's indicator does, across recycled rows and rows not rendered yet. `selectedIndex` says which row; `selectionIndicatorClass` and `selectionIndicatorStyle` style the indicator, a view the list draws under its rows. It spans the selected row along the list and the row's column across, inside its own margins (`mx-2 my-0.5` for an inset pill), and the app's classes give it its look.
 
-```tsx
+```rust tabs
+let selected = signal(None::<usize>);
+virtual_list(mailboxes.len(), move |at| {
+    let mailboxes = mailboxes.clone();
+    view()
+        .on_press(move |_: &()| selected.set(Some(at.index())))
+        .h(px(40.0))
+        .px(px(16.0))
+        .justify_center()
+        .child(text(move || mailboxes[at.index()].name.clone()))
+})
+.selected_index(move || selected.get())
+.selection_indicator(view().mx(px(8.0)).rounded_lg().bg(theme.accent))
+.estimated_item_size(px(40.0))
+.flex_1()
+```
+
+```tsx tabs
 const selected = signal<number | null>(null);
 
 <List
   each={mailboxes}
   selectedIndex={selected()}
   selectionIndicatorClass="mx-2 rounded-lg bg-accent"
-  selectionIndicatorSpring={{ stiffness: 620, damping: 36, mass: 1 }}
   estimatedItemSize={40}
   style={{ flex: 1 }}
 >
@@ -245,7 +260,7 @@ const selected = signal<number | null>(null);
 </List>
 ```
 
-The list places the indicator natively, whether the row is rendered or not (a row never rendered is placed by its estimated size), and it stays with the row as rows above it are measured or the list scrolls. A change of `selectedIndex` to another row slides it there with `selectionIndicatorSpring` (by default `Tabs`' spring), at once while the user asks for reduced motion. When rows arrive above the selected one and the app's index follows its row, the indicator stays with that row. `null`, or an index past the end, hides it. It takes no presses and screen readers skip it: the rows keep their own `selected` state for that.
+The list places the indicator natively, whether the row is rendered or not (a row never rendered is placed by its estimated size), and it stays with the row as rows above it are measured or the list scrolls. A change of `selectedIndex` to another row slides it there with `Tabs`' indicator spring, at once while the user asks for reduced motion. When rows arrive above the selected one and the app's index follows its row, the indicator stays with that row. `null`, or an index past the end, hides it. It takes no presses and screen readers skip it: the rows keep their own `selected` state for that.
 
 ## Sticky headers
 

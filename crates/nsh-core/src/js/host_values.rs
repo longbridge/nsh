@@ -653,21 +653,6 @@ pub(crate) fn selected_index<I: HostInput>(input: &I, _: &mut HostCx) -> Option<
     Some(Prop::ListSelected(index))
 }
 
-/// `selectionIndicatorSpring`: `{ stiffness, damping, mass }`, each
-/// defaulting to `Animated.spring`'s; not an object: the default spring.
-pub(crate) fn list_spring<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
-    if !input.is_object() {
-        return Some(Prop::ListSelectionSpring(None));
-    }
-    let default = crate::element::Spring::default();
-    Some(Prop::ListSelectionSpring(Some(crate::element::Spring {
-        stiffness: number(input, "stiffness").unwrap_or(default.stiffness),
-        damping: number(input, "damping").unwrap_or(default.damping),
-        mass: number(input, "mass").unwrap_or(default.mass),
-        ..default
-    })))
-}
-
 /// `splice`: `[at, removed, inserted]`.
 pub(crate) fn splice<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
     let items = input.items();

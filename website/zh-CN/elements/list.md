@@ -98,7 +98,6 @@ virtual_list(move || messages.with(|m| m.len()), move |at| {
 | `selectedIndex` | | `number \| null` | | 选中指示器所在的行；`null` 隐藏它。 |
 | `selectionIndicatorClass` | | `string` | | 选中指示器的类名：画在选中行下方、在行与行之间滑动的视图（见[选中指示器](../docs/lists.md#selection-indicator)）。创建列表时这个和 `selectionIndicatorStyle` 都没有，就没有指示器。 |
 | `selectionIndicatorStyle` | | `StyleProp<ViewStyle>` | | 指示器的样式，覆盖 `selectionIndicatorClass`。 |
-| `selectionIndicatorSpring` | | `{ stiffness?, damping?, mass? }` | `Tabs` 的弹簧 | 指示器移到另一行时用的弹簧；开启减弱动态效果时直接到位。 |
 | `header` | `.header(el)` | `ListSlot` | | 条目之前的内容：一个组件（`Header`）或一个元素（`<Header />`）。 |
 | `footer` | `.footer(el)` | `ListSlot` | | 条目之后的内容。 |
 | `empty` | `.empty(el)` | `ListSlot` | | `each` 为空时代替条目显示。 |

@@ -3615,33 +3615,22 @@ fn a_lists_selection_indicator_lies_under_the_selected_row() {
     if let Some(batch) = c.commit() {
         assert_eq!(frame_of(&batch, 50), None);
     }
-    // Another row, out of the render window: it springs there, with the
-    // app's spring, by the rows' sizes it knows (17 measured, the rest
+    // Another row, out of the render window: it springs there, with
+    // `Tabs`' spring, by the rows' sizes it knows (17 measured, the rest
     // estimated).
-    let spring = crate::element::Spring {
-        stiffness: 620.0,
-        damping: 36.0,
-        ..Default::default()
-    };
     apply(
         &mut c,
-        vec![
-            Op::SetProp {
-                id: 2,
-                prop: Prop::ListSelectionSpring(Some(spring)),
-            },
-            Op::SetProp {
-                id: 2,
-                prop: Prop::ListSelected(Some(500)),
-            },
-        ],
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::ListSelected(Some(500)),
+        }],
     );
     let batch = c.commit().unwrap();
     let at = 17.0 * 100.0 + 483.0 * 50.0;
     assert_eq!(frame_of(&batch, 50), Some(rect(8.0, at + 2.0, 304.0, 46.0)));
     assert_eq!(
         indicator_moves(&batch, 50),
-        [Some(crate::LayoutTransition::spring(spring))]
+        [Some(crate::core::list_indicator_motion())]
     );
     // No row: hidden. Shown again, it is placed at once.
     apply(
@@ -16214,6 +16203,60 @@ mod components {
                 assert!(!bound(&c, i), "row {i} goes");
             }
         }
+    }
+
+    thread_local! {
+        static SELECTED: std::cell::RefCell<Option<crate::element::Signal<Option<usize>>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    /// A Rust list with a selection indicator under its selected row.
+    #[component]
+    fn IndicatedRows() -> impl IntoElement {
+        let selected = signal(Some(3usize));
+        SELECTED.with(|s| *s.borrow_mut() = Some(selected));
+        virtual_list(500, move |at| {
+            view()
+                .h(px(40.0))
+                .child(text(move || format!("item {}", at.index())))
+        })
+        .estimated_item_size(px(40.0))
+        .selected_index(move || selected.get())
+        .selection_indicator(view().mx(px(8.0)))
+        .flex_1()
+    }
+
+    /// `VirtualList::selected_index` and `selection_indicator` give a Rust
+    /// list the indicator `selectedIndex` gives a TS one: a cell of its
+    /// own, first, hidden from screen readers, under the selected row,
+    /// springing to another.
+    #[test]
+    fn a_rust_lists_selection_indicator_lies_under_the_selected_row() {
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<IndicatedRows>(|| ()));
+        let _ = c.commit();
+        let key = (0..c.nodes.len())
+            .find(|&k| c.nodes[k].slot == Some(CellSlot::Indicator))
+            .expect("an indicator cell");
+        let list = c.nodes[key].parent as usize;
+        assert_eq!(c.nodes[list].list.as_ref().unwrap().indicator, key as u32);
+        assert_eq!(c.nodes[list].list.as_ref().unwrap().indicator_at, Some(3));
+        let frame = c.nodes[key].frame;
+        assert_eq!((frame.origin.y.0, frame.size.height.0), (120.0, 40.0));
+        assert_eq!(frame.origin.x.0, 8.0);
+        {
+            let _entered = c.components.runtime.enter();
+            SELECTED.with(|s| s.borrow().unwrap().set(Some(10)));
+        }
+        let _ = c.commit();
+        assert_eq!(c.nodes[key].frame.origin.y.0, 400.0);
+        assert_eq!(c.nodes[list].list.as_ref().unwrap().indicator_at, Some(10));
+        {
+            let _entered = c.components.runtime.enter();
+            SELECTED.with(|s| s.borrow().unwrap().set(None));
+        }
+        let _ = c.commit();
+        assert_eq!(c.nodes[list].list.as_ref().unwrap().indicator_at, None);
     }
 
     /// What a branch of `ScopedRows` provides to what it makes.

@@ -55,7 +55,6 @@ const FORWARDED: &[&str] = &[
     "stickyHeaderIndices",
     "stickyHeaderOffset",
     "selectedIndex",
-    "selectionIndicatorSpring",
     "contentStyle",
     "contentClass",
     "viewabilityConfig",
@@ -1501,7 +1500,7 @@ export interface ListProps<T> extends Omit<ViewProps, "children" | "ref">, Scrol
    * margins (`mx-2` for an inset pill). The list places it natively, rendered
    * row or not, and moves it with the row as rows above it change size; a
    * change of `selectedIndex` slides it to the new row with
-   * `selectionIndicatorSpring`, at once with reduced motion. It takes no
+   * `Tabs`' indicator spring, at once with reduced motion. It takes no
    * presses and is hidden from screen readers. With neither this nor
    * `selectionIndicatorStyle` when the list is made, it has none. */
   selectionIndicatorClass?: string;

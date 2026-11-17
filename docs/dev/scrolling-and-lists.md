@@ -81,15 +81,15 @@
   while the content stands still;
   the web, whose scroll events trail the browser's scrolling by a frame, puts each in a track spanning that travel
   instead and lets the browser's `position: sticky` keep it pinned (`nsh.js` `op_sticky`).
-- **Selection indicator** (`selectedIndex`, `selectionIndicatorClass` / `selectionIndicatorStyle`,
-  `selectionIndicatorSpring`): a cell of its own (`slot="indicator"`, `CellSlot::Indicator`) the runtime makes first,
+- **Selection indicator** (`selectedIndex`, `selectionIndicatorClass` / `selectionIndicatorStyle`; Rust
+  `VirtualList::selected_index` / `selection_indicator`): a cell of its own (`slot="indicator"`, `CellSlot::Indicator`) the runtime makes first,
   so it draws under the rows, only while the app styles it when the list is made. Its frame is the core's
   (`Core::place_selection_indicator`, each `update_list`): the selected row's span along the main axis
   (`ListState::item_at`, its measured size or the estimate, so a row never rendered has a place too) and its column
   across, inside the indicator's own margins. It lies in the list's content, so scrolling moves it with the rows and
   sends nothing; a row above it measured or spliced moves it at once. `ListState::indicator_at` (the row it was placed
   under) follows the items through splices and moves: a selection that follows its row stays put, another row
-  springs there natively (`scope_frame_animation`, `Tabs`' spring unless the app gives one), at once with reduced
+  springs there natively (`scope_frame_animation`, `Tabs`' fixed spring, `list_indicator_motion`), at once with reduced
   motion. No row selected (or past the end) hides it (`Core::set_spare`), and it comes back in place. It takes no
   presses and is hidden from screen readers (`Node::mounted_props`). Lists without one pay a branch per update.
 - **Loading at either end** (`ListState::update_window`, which returns the `Edges` to raise; both raised by the core):

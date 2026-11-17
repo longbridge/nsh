@@ -75,7 +75,6 @@ element takes, which go to the list's scroll view.
 | `selectedIndex` | `number \| null` | | The row the selection indicator lies under; `null` hides it. |
 | `selectionIndicatorClass` | `string` | | Classes of the selection indicator: a view under the selected row, which spans that row and its column inside its own margins and slides to another row natively (see [selection indicator](../docs/lists.md#selection-indicator)). With neither this nor `selectionIndicatorStyle` when the list is made, there is none. |
 | `selectionIndicatorStyle` | `StyleProp<ViewStyle>` | | The indicator's style, over `selectionIndicatorClass`. |
-| `selectionIndicatorSpring` | `{ stiffness?: number; damping?: number; mass?: number }` | `Tabs`' spring | The spring the indicator moves to another row with; with reduced motion it moves at once. |
 | `style` | `StyleProp<ViewStyle>` | | The list's own style (give it a size: `flex: 1` or a height). |
 | `testID` | `string` | | The id UI tests find the list's scroll view by (`nsh test`'s `id:`, XCUITest, UI Automator). |
 | `ref` | `ListRef \| ((node: ListRef) => void)` | | See [ref methods](#ref-methods). |

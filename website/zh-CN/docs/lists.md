@@ -168,10 +168,9 @@ const toggle = (id: number) =>
 | `stickyHeaderOffset` | `.sticky_header_offset(px(..))`、`.bind_sticky_header_offset(&node)` | `number \| AnimatedNode` | `0` | 吸顶条目吸附在距顶部多远的位置，同 CSS `position: sticky` 的 `top`；内容继续在其上方的空间下滚动。动画值让它们逐帧移动。 |
 | `contentStyle` | `.content_padding(..)`、`.content_padding_x(..)` 等、`.row_gap(..)`、`.column_gap(..)` | `{ padding*, gap, rowGap, columnGap }` | | 内容的内边距和间距，只接受数字。 |
 | `contentClass` | | `string` | | 同上，写成类名（`p-*`、`gap-*`）；`contentStyle` 优先。 |
-| `selectedIndex` | | `number \| null` | | 选中指示器所在的行；`null` 隐藏它。 |
-| `selectionIndicatorClass` | | `string` | | 选中指示器的类名：画在选中行下方、在行与行之间滑动的视图（见[选中指示器](#selection-indicator)）。创建列表时这个和 `selectionIndicatorStyle` 都没有，就没有指示器。 |
-| `selectionIndicatorStyle` | | `StyleProp<ViewStyle>` | | 指示器的样式，覆盖 `selectionIndicatorClass`。 |
-| `selectionIndicatorSpring` | | `{ stiffness?, damping?, mass? }` | `Tabs` 的弹簧 | 指示器移到另一行时用的弹簧；开启减弱动态效果时直接到位。 |
+| `selectedIndex` | `.selected_index(..)` | `number \| null` | | 选中指示器所在的行；`null` 隐藏它。 |
+| `selectionIndicatorClass` | `.selection_indicator(view())` | `string` | | 选中指示器的类名：画在选中行下方、在行与行之间滑动的视图（见[选中指示器](#selection-indicator)）。创建列表时这个和 `selectionIndicatorStyle` 都没有，就没有指示器。 |
+| `selectionIndicatorStyle` | `.selection_indicator(view())` | `StyleProp<ViewStyle>` | | 指示器的样式，覆盖 `selectionIndicatorClass`。 |
 | `header` | `.header(..)` | 组件或元素 | | 在条目之前。 |
 | `footer` | `.footer(..)` | 组件或元素 | | 在条目之后。 |
 | `empty` | `.empty(..)` | 组件或元素 | | 没有条目时代替条目显示。 |
@@ -226,14 +225,30 @@ virtual_list(count, move |at| {
 
 列表用一个自己的视图在选中行下方画出高亮，它像标签列表的指示器一样在行与行之间滑动，跨越被复用的行和尚未渲染的行。`selectedIndex` 指定哪一行；`selectionIndicatorClass` 和 `selectionIndicatorStyle` 设置指示器的样式，它是列表画在各行下方的一个视图。它沿列表方向铺满选中行、横向铺满该行所在的列，留出自身的外边距（内缩的胶囊形可用 `mx-2 my-0.5`），外观由应用的类名决定。
 
-```tsx
+```rust tabs
+let selected = signal(None::<usize>);
+virtual_list(mailboxes.len(), move |at| {
+    let mailboxes = mailboxes.clone();
+    view()
+        .on_press(move |_: &()| selected.set(Some(at.index())))
+        .h(px(40.0))
+        .px(px(16.0))
+        .justify_center()
+        .child(text(move || mailboxes[at.index()].name.clone()))
+})
+.selected_index(move || selected.get())
+.selection_indicator(view().mx(px(8.0)).rounded_lg().bg(theme.accent))
+.estimated_item_size(px(40.0))
+.flex_1()
+```
+
+```tsx tabs
 const selected = signal<number | null>(null);
 
 <List
   each={mailboxes}
   selectedIndex={selected()}
   selectionIndicatorClass="mx-2 rounded-lg bg-accent"
-  selectionIndicatorSpring={{ stiffness: 620, damping: 36, mass: 1 }}
   estimatedItemSize={40}
   style={{ flex: 1 }}
 >
@@ -245,7 +260,7 @@ const selected = signal<number | null>(null);
 </List>
 ```
 
-指示器由列表原生放置，无论该行是否已渲染（从未渲染过的行按估计尺寸放置），并在上方的行完成测量或列表滚动时始终跟着这一行。`selectedIndex` 换到另一行时，它用 `selectionIndicatorSpring`（默认是 `Tabs` 的弹簧）滑过去；用户开启减弱动态效果时直接到位。上方插入新行、应用的索引随原来的行一起变化时，指示器仍停在这一行。`null` 或超出末尾的索引会隐藏它。它不接收按压，屏幕阅读器也会跳过它：行自身的 `selected` 状态负责朗读。
+指示器由列表原生放置，无论该行是否已渲染（从未渲染过的行按估计尺寸放置），并在上方的行完成测量或列表滚动时始终跟着这一行。`selectedIndex` 换到另一行时，它用 `Tabs` 指示器的弹簧滑过去；用户开启减弱动态效果时直接到位。上方插入新行、应用的索引随原来的行一起变化时，指示器仍停在这一行。`null` 或超出末尾的索引会隐藏它。它不接收按压，屏幕阅读器也会跳过它：行自身的 `selected` 状态负责朗读。
 
 ## 吸顶标题
 

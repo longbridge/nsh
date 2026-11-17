@@ -110,7 +110,6 @@ touches and UI tests meet each row once.
 | `selectedIndex` | | `number \| null` | | The row the selection indicator lies under; `null` hides it. |
 | `selectionIndicatorClass` | | `string` | | Classes of the selection indicator, a view under the selected row that slides from row to row (see [selection indicator](../docs/lists.md#selection-indicator)). With neither this nor `selectionIndicatorStyle` when the list is made, there is none. |
 | `selectionIndicatorStyle` | | `StyleProp<ViewStyle>` | | The indicator's style, over `selectionIndicatorClass`. |
-| `selectionIndicatorSpring` | | `{ stiffness?, damping?, mass? }` | `Tabs`' spring | The spring the indicator moves to another row with; with reduced motion it moves at once. |
 | `header` | `.header(el)` | `ListSlot` | | Before the items: a component (`Header`) or an element (`<Header />`). |
 | `footer` | `.footer(el)` | `ListSlot` | | After the items. |
 | `empty` | `.empty(el)` | `ListSlot` | | Shown instead of the items while `each` is empty. |

@@ -19,7 +19,6 @@ function App() {
         selectedIndex={selected()}
         selectionIndicatorClass="mx-[8px] my-[2px]"
         selectionIndicatorStyle={{ backgroundColor: "#ff0000" }}
-        selectionIndicatorSpring={{ stiffness: 620, damping: 36, mass: 1 }}
       >
         {(row) => (
           <View testID={`pick-${row()}`} style={{ height: 40 }}>

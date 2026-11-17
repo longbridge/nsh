@@ -448,8 +448,6 @@ pub(super) struct ListState {
     /// the items change: placed under another one, it springs there.
     /// `None` while hidden or never placed: it is placed at once.
     pub(super) indicator_at: Option<u32>,
-    /// `selectionIndicatorSpring`.
-    pub(super) indicator_spring: Option<crate::element::Spring>,
 }
 
 impl ListState {
@@ -512,7 +510,6 @@ impl ListState {
             selected: None,
             indicator: u32::MAX,
             indicator_at: None,
-            indicator_spring: None,
         }
     }
 

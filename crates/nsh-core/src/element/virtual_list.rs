@@ -314,6 +314,38 @@ impl VirtualList {
         self
     }
 
+    /// The row the selection indicator lies under (TS: `selectedIndex`);
+    /// `None`, or an index past the end, hides it. Bound, a change to
+    /// another row slides the indicator there natively, with `Tabs`'
+    /// indicator spring (at once with reduced motion).
+    pub fn selected_index(mut self, index: impl IntoReactive<Option<usize>>) -> Self {
+        super::host::bind_prop(&mut self.0, index, |i| {
+            Prop::ListSelected(i.map(|i| u32::try_from(i).unwrap_or(u32::MAX)))
+        });
+        self
+    }
+
+    /// The selection indicator (TS: `selectionIndicatorClass` /
+    /// `selectionIndicatorStyle`): `indicator`, a styled view (a highlight,
+    /// a pill: `view().mx(px(8.0)).rounded_lg().bg(..)`), drawn under the
+    /// row at [`VirtualList::selected_index`]. The list sizes and places
+    /// it: it spans that row and its column, inside its own margins,
+    /// rendered row or not. It takes no presses and is hidden from screen
+    /// readers; its children are kept.
+    pub fn selection_indicator(mut self, indicator: super::View) -> Self {
+        const KEY: &str = "\0indicator";
+        let mut cell = indicator.into_element().0;
+        cell.tag = Tag::Cell;
+        cell.key = Some(KEY.into());
+        super::host::set(&mut cell, Prop::Slot(CellSlot::Indicator));
+        self.0
+            .children
+            .retain(|c| c.key.as_ref().is_none_or(|k| k.as_str() != KEY));
+        // First: drawn under the rows.
+        self.0.children.insert(0, cell);
+        self
+    }
+
     /// These rows stick to the start while scrolled past, until the next one
     /// pushes them out (section headers; one column, not inverted; TS:
     /// `stickyHeaderIndices`).

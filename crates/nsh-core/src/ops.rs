@@ -3102,15 +3102,10 @@ pub enum Prop {
     /// (`selectionIndicatorClass`); `null` (or none) hides it. The core
     /// places it under that row, rendered or not, and moves it with the
     /// row as rows above it change size; a change to another row moves it
-    /// there natively with `selectionIndicatorSpring`.
+    /// there natively with `Tabs`' indicator spring (a 280 ms response, a
+    /// damping ratio of 0.85), at once with reduced motion.
     #[prop(js = "selectedIndex", with = crate::js::host_values::selected_index, reset = Prop::ListSelected(None), ts = "number | null", on = LIST)]
     ListSelected(Option<u32>),
-    /// `selectionIndicatorSpring`: the spring the selection indicator
-    /// moves to another row with (by default a 280 ms response, a damping
-    /// ratio of 0.85: `Tabs`' indicator's); with reduced motion it moves
-    /// at once.
-    #[prop(js = "selectionIndicatorSpring", with = crate::js::host_values::list_spring, reset = Prop::ListSelectionSpring(None), ts = "{ stiffness?: number; damping?: number; mass?: number }", on = LIST)]
-    ListSelectionSpring(Option<crate::element::Spring>),
     /// `viewport`: `"parent"` lays the list out at its full length in its
     /// parent and renders the rows near the viewport of the scroll view
     /// around it, which scrolls it (a page of headers and lists); `"own"`
