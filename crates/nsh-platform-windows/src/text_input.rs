@@ -130,7 +130,7 @@ use windows::{
                 DefWindowProcW, GetCaretBlinkTime, KillTimer, SetTimer, WM_CHAR, WM_CLEAR, WM_COPY,
                 WM_CUT, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_SETCONTEXT,
                 WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
-                WM_LBUTTONUP, WM_MOUSEMOVE,
+                WM_LBUTTONUP, WM_MOUSEMOVE, WS_VSCROLL,
             },
         },
     },
@@ -533,8 +533,7 @@ impl InputState {
 
     /// A multiline field's vertical scroll in pixels: where it is and the
     /// farthest it goes (the last line at the content box's bottom).
-    /// RichEdit keeps no scroll range without a scroll bar and scrolls on
-    /// past its text, so the end comes from the text's height.
+    /// Clamp the wheel to the text's height rather than scrolling past its end.
     fn text_scroll(&self) -> Option<(i32, i32)> {
         let e = self.editor.as_ref()?;
         let mut at = windows::Win32::Foundation::POINT::default();
@@ -660,11 +659,7 @@ impl InputState {
                 }
                 p.bits = bits;
                 p.max_length = limit;
-                p.scroll = if config.multiline {
-                    ES_AUTOVSCROLL
-                } else {
-                    ES_AUTOHSCROLL
-                };
+                p.scroll = scroll_flags(&config);
                 p.highlight = config
                     .selection_color
                     .map(|c| (colorref(c), colorref(color)));
@@ -955,6 +950,13 @@ fn family(name: Option<&str>) -> String {
         Some("ui-serif" | "serif") => "Times New Roman".to_owned(),
         Some(f) => f.to_owned(),
     }
+}
+
+fn scroll_flags(config: &InputConfig) -> u32 {
+    if !config.multiline {
+        return ES_AUTOHSCROLL;
+    }
+    ES_AUTOVSCROLL | WS_VSCROLL.0
 }
 
 /// The horizontal alignment of the text (0: left, 1: right).
@@ -2252,6 +2254,39 @@ mod blink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn multiline_scrollbars_have_native_overflow_ranges() {
+        for editable in [false, true] {
+            let config = InputConfig {
+                multiline: true,
+                editable,
+                ..Default::default()
+            };
+            let editor = Editor::new(
+                HWND::default(),
+                Props {
+                    client: RECT {
+                        right: 160,
+                        bottom: 80,
+                        ..Default::default()
+                    },
+                    bits: base_bits(&config),
+                    scroll: scroll_flags(&config),
+                    ..Default::default()
+                },
+                Box::new(|| {}),
+                Box::new(|| {}),
+            )
+            .expect("RichEdit");
+            let line =
+                "<entry name=\"a-long-xml-attribute-that-overflows-the-report-viewport\" />\r\n";
+            editor.set_text(&line.repeat(40));
+            editor.send(0x00BA, 0, 0); // EM_GETLINECOUNT forces text layout.
+            let (min, max, _, _) = editor.vscroll();
+            assert!(max - min > 80, "vertical overflow missing: {min}..{max}");
+        }
+    }
 
     #[test]
     fn stop_and_destroy_forget_the_focus() {
