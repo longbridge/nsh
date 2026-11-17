@@ -2055,7 +2055,7 @@ impl Screen {
     /// Whether a pointer can reach `id`: neither it nor a view around it
     /// has `pointerEvents: none` or is hidden, and no view around it takes
     /// touches only for itself (`box-only`).
-    fn receives_pointer(&self, id: NodeId) -> bool {
+    pub(crate) fn receives_pointer(&self, id: NodeId) -> bool {
         let mut at = Some(id);
         while let Some(current) = at {
             let Some(view) = self.nodes.get(&current) else {
@@ -2076,7 +2076,7 @@ impl Screen {
     /// root) reaches in that window: the topmost, innermost one there that
     /// receives touches. Canvas nodes are not views, and the windows of the
     /// app's own are windows of their own.
-    fn hit_pointer(&self, at: Point<Points>, window: NodeId) -> NodeId {
+    pub(crate) fn hit_pointer(&self, at: Point<Points>, window: NodeId) -> NodeId {
         let order = self.attached();
         let attached: HashSet<NodeId> = order.iter().copied().collect();
         // The dialogs presented over this window first, the last one on

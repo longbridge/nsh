@@ -388,14 +388,16 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// The states `key` is styled by: its own and those it shows as a
-    /// part of a control, with `FOCUS_VISIBLE` on a part projected focused
-    /// while the focus shows. Virtual focus is projected while its control
-    /// has the focus, so on its rows `focus:` is the cursor and
-    /// `focus-visible:` the cursor the keyboard is on.
+    /// The states `key` is styled by: its own, those it shows as a part
+    /// of a control and a hover a component passes on to it, with
+    /// `FOCUS_VISIBLE` on a part projected focused while the focus shows.
+    /// Virtual focus is projected while its control has the focus, so on
+    /// its rows `focus:` is the cursor and `focus-visible:` the cursor the
+    /// keyboard is on.
     pub(super) fn styled_states(&self, key: Key) -> u16 {
         let node = &self.nodes[key as usize];
-        let states = node.states | node.projected;
+        let passed = if node.passed_hover { state::HOVERED } else { 0 };
+        let states = node.states | node.projected | passed;
         if node.projected & state::FOCUSED != 0 && self.focus_visible_on.is_some() {
             states | state::FOCUS_VISIBLE
         } else {
@@ -1145,7 +1147,7 @@ impl<M: TextEngine> Core<M> {
                 return;
             }
             let n = &self.nodes[k as usize];
-            if (n.states | n.projected != 0 || !n.data.is_empty())
+            if (n.states | n.projected != 0 || n.passed_hover || !n.data.is_empty())
                 && n.classes.as_ref().is_some_and(|c| !c.groups().is_empty())
             {
                 break;

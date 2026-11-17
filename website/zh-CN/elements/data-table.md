@@ -229,7 +229,7 @@ const columns: DataTableColumn[] = [
 
 ## 绘制单元格和标题
 
-当某一列不只是文字时（徽标、按钮），用 `renderCell` 绘制应用自己的单元格。它只为视野中的单元格调用，参数是 `DataTableCell`：`row`、`column`、`key`、`text`（表格原本会显示的文字）和 `selected`。应用按 `row` 查找自己的数据。`renderHeaderCell` 绘制铺满单元格的标题，参数是 `DataTableHeaderCell`：`column`、`key`、`title`、`sort`（方向，或无）和 `selected`。
+当某一列不只是文字时（徽标、按钮），用 `renderCell` 绘制应用自己的单元格。它只为视野中的单元格调用，参数是 `DataTableCell`：`row`、`column`、`key`、`text`（表格原本会显示的文字）和 `selected`。应用按 `row` 查找自己的数据。它绘制的视图和表格外的视图一样响应按下和指针：`onPress`、`hover:` 类、`onMouseEnter` / `onMouseMove` / `onMouseLeave`；`classes.row` 设为 `"group"` 时，指针所在行的 `group-hover:` 类也会生效。`renderHeaderCell` 绘制铺满单元格的标题，参数是 `DataTableHeaderCell`：`column`、`key`、`title`、`sort`（方向，或无）和 `selected`。
 
 ```tsx
 <DataTable

@@ -466,7 +466,10 @@ impl Headless {
     /// (from the inside out), each with where the mouse is now in it and
     /// no button down (the mouse never presses here). A browser has one
     /// whatever its width (the web in the phone idiom included); an iOS or
-    /// Android phone or tablet has none: there it fails.
+    /// Android phone or tablet has none: there it fails. A view that takes
+    /// no pointer (in a `pointerEvents: none` subtree, as a data table's
+    /// cells under its hit layer) is hovered where it is, by the view a
+    /// pointer there reaches.
     pub fn hover(&mut self, selector: &str) -> Result<(), String> {
         let parsed = Selector::parse(selector)?;
         self.step(format!("hover({selector})"));
@@ -483,6 +486,10 @@ impl Headless {
             .bounds_in_root(target)
             .ok_or_else(|| format!("`{selector}` is not on screen"))?;
         let at = bounds.center();
+        let target = match self.screen.receives_pointer(target) {
+            true => target,
+            false => self.screen.hit_pointer(at, self.screen.window_of(target)),
+        };
         let views = self.screen.hoverable(&self.screen.chain(target));
         let old = self.screen.set_hovered(views.clone());
         let (left, entered) = input::hover_changes(&old, &views);

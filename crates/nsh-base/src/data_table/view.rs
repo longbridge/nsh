@@ -350,14 +350,10 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
                                 // selects or moves.
                                 .on_mouse_move(move |e: &MouseEvent| {
                                     if e.pressed_button.is_none() {
-                                        hover.hover_at(e.position);
+                                        hover.hover_at(e);
                                     }
                                 })
-                                .on_mouse_leave(move |_: &MouseEvent| {
-                                    if leave.hover.get_untracked().is_some() {
-                                        leave.hover.set(None);
-                                    }
-                                })
+                                .on_mouse_leave(move |_: &MouseEvent| leave.hover_left())
                                 .on_context_menu(move |e: &ContextMenuEvent| {
                                     menu.context_menu(e.position, e.page_position)
                                 }),
@@ -921,6 +917,12 @@ fn body_row(
     let props = dt.props;
     let (top_dt, height_dt, width_dt) = (dt.clone(), dt.clone(), dt.clone());
     let list = row_parts(&dt, row);
+    // Its `hover:` classes and the `group-hover:` classes of the cells in
+    // it, in every region, follow the hit layer's hovered row.
+    let row_hovered = {
+        let hover = dt.hover;
+        computed(move || row.get().is_some() && hover.get() == row.get())
+    };
     let row_selected = {
         let dt = dt.clone();
         computed(move || matches!(dt.selection(), Selection::Row(r) if Some(r) == row.get()))
@@ -933,6 +935,7 @@ fn body_row(
             .style_when(move || row.get().is_none(), |s| s.hidden())
             // The table is one stop of Tab, its hit layer.
             .focusable(false)
+            .project_hovered(row_hovered)
             .on(EventKind::Press, move |p: &EventPayload| {
                 let Some(row) = row.get_untracked() else {
                     return;

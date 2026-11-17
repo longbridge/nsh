@@ -620,6 +620,10 @@ struct Node {
     /// States it shows as a part of a control (`Prop::ProjectedStates`):
     /// its classes read them with its own, nothing else does.
     projected: u16,
+    /// `HOVERED` while a component's hit layer passes a pointer on to it
+    /// (`ElementRef::hover_at`): its classes and the `group-hover:`
+    /// classes inside it read it with its own states.
+    passed_hover: bool,
     /// The `data-*` attributes it shows as a part of a component
     /// (`Prop::ProjectedData`), sorted: its `data-*:` classes read them,
     /// and the `group-data-*:` classes inside it.
@@ -962,6 +966,7 @@ impl Node {
                 0
             },
             projected: 0,
+            passed_hover: false,
             data: Box::default(),
             parts: None,
             positional_children: false,
@@ -1442,6 +1447,9 @@ pub struct Core<M: TextEngine> {
     /// focus does, restyled when it starts or stops showing
     /// (`classes::styled_states`).
     projected_focus: Vec<(Key, NodeId)>,
+    /// The views a pointer passed on into an element is over
+    /// (`ElementRef::hover_at`), by element, innermost first.
+    passed_hovers: rustc_hash::FxHashMap<NodeId, Vec<NodeId>>,
     /// Nodes whose `position: fixed` changed: made overlays (or views again)
     /// as the commit starts ([`Core::sync_fixed`]).
     fixed_changed: Vec<(Key, NodeId)>,
@@ -1674,6 +1682,7 @@ impl<M: TextEngine> Core<M> {
             focus_visible_on: None,
             focus_visible_moved: false,
             projected_focus: Vec::new(),
+            passed_hovers: Default::default(),
             fixed_changed: Vec::new(),
             zero_advances: Default::default(),
             ch_styled: Vec::new(),
@@ -3165,6 +3174,10 @@ impl<M: TextEngine> Core<M> {
     /// One round of a commit: views, layout, lists, commands, into the
     /// mount items.
     fn commit_round(&mut self) {
+        // Pointers components pass on, onto the layout they were over.
+        if !self.components.hovers.is_empty() {
+            self.pass_hovers();
+        }
         // The built-in scroll bars that come, rendered with the rest.
         if !self.scrollbars_pending.is_empty() {
             self.sync_scrollbars();

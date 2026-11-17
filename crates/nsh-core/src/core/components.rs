@@ -714,6 +714,9 @@ pub(super) struct Components {
     /// Presses to pass on inside elements once this commit is laid out
     /// ([`crate::element::ElementRef::press_at`]).
     pub(super) presses: Vec<(NodeId, crate::PressEvent, AnswerSlot<bool>)>,
+    /// Pointers to pass on inside elements as the next commit starts
+    /// ([`crate::element::ElementRef::hover_at`]); `None`: it left.
+    pub(super) hovers: Vec<(NodeId, Option<crate::MouseEvent>)>,
     /// The web views' downloads ([`crate::webview::downloads`]): the
     /// sessions, their files and the platform's replies.
     pub(super) downloads: crate::webview::downloads::Downloads,
@@ -834,6 +837,7 @@ impl Default for Components {
             transition_times: Vec::new(),
             text_contents: Vec::new(),
             presses: Vec::new(),
+            hovers: Vec::new(),
             downloads: crate::webview::downloads::Downloads::default(),
             next_webview_request: 1,
             virtual_lists: FxHashMap::default(),
@@ -6076,6 +6080,7 @@ impl<M: TextEngine> Core<M> {
             }
             Action::TextContent(id, answer) => self.components.text_contents.push((id, answer)),
             Action::PressAt(id, press, answer) => self.components.presses.push((id, press, answer)),
+            Action::HoverAt(id, mouse) => self.components.hovers.push((id, mouse)),
             // A terminal decodes no images: the answer is at once, and no
             // request goes to the platform.
             Action::ImageInfo(_, answer)
