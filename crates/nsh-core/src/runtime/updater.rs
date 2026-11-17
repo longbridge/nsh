@@ -111,9 +111,10 @@ pub(crate) struct AppUpdate {
     /// Where the user can get it by hand: the archive, or a store's page on
     /// iOS and Android. For `openUrl` when `canInstall` is false.
     pub(crate) url: String,
-    /// Whether `downloadUpdate` and `installAndRestart` work here: a package
-    /// on the desktop, installed where the user can write. False on iOS and
-    /// Android, and under a directory only the system writes.
+    /// Whether `downloadUpdate`, `installAndRestart` and `installOnQuit` work
+    /// here: a package on the desktop, installed where the user can write.
+    /// False on iOS and Android, and under a directory only the system
+    /// writes.
     pub(crate) can_install: bool,
     /// Whether only the installed app is behind: the package this run's code
     /// came from is already this version or a later one, so the update
@@ -200,8 +201,9 @@ impl Updater {
     /// update (the web, a development run). Rejects when the package
     /// declares no channel of that name, and when the source cannot be
     /// reached or its manifest is not acceptable: a bad signature, another
-    /// app's id, a URL that is not HTTPS. `downloadUpdate` and
-    /// `installAndRestart` use what the last check found, whichever source.
+    /// app's id, a URL that is not HTTPS. `downloadUpdate`,
+    /// `installAndRestart` and `installOnQuit` use what the last check
+    /// found, whichever source.
     pub(crate) fn check_for_update(
         options: Option<UpdateCheckOptions>,
         sys: System,
@@ -228,6 +230,22 @@ impl Updater {
     /// be replaced, which leaves it as it was.
     pub(crate) fn install_and_restart(sys: System) -> Later<()> {
         Later::new(native::install(sys))
+    }
+
+    /// Replaces the installed app with the downloaded update when the app
+    /// quits, without starting it again: the user's next start opens the
+    /// new version. The update is unpacked and checked now, as
+    /// `installAndRestart` checks it, and the promise resolves once it
+    /// waits; quitting then only moves it into place. Rejects when nothing
+    /// was downloaded or the update is refused, which leaves the app as it
+    /// was. Calling it again replaces what waits, and `installAndRestart`
+    /// installs at once instead. Only a quit of the app installs it: if the
+    /// app ends otherwise (a crash, being killed), it is gone, and the next
+    /// `checkForUpdate` offers the update again. When moving it into place
+    /// fails as the app quits (the app was moved meanwhile, say), the app
+    /// stays as it was and quits all the same, the failure logged.
+    pub(crate) fn install_on_quit(sys: System) -> Later<()> {
+        Later::new(native::install_on_quit(sys))
     }
 
     /// Asks the source in `nsh.json`'s `"updater"` for a newer build of the
@@ -759,6 +777,8 @@ mod native {
             JsError::Error("nothing is downloaded: call downloadUpdate first".into())
         })?;
         let installation = pending.installation.clone();
+        // Installed now instead of as the app quits (`installOnQuit`).
+        crate::restart::set_at_exit(None);
         // The restart starts the app at the path the user knows: once the
         // directory or `.app` is swapped, this process' executable is the
         // old one, moved aside and deleted.
@@ -782,6 +802,49 @@ mod native {
         windows
     )))]
     pub(super) async fn install(_: System) -> Result<(), JsError> {
+        Err(unavailable())
+    }
+
+    #[cfg(any(
+        all(target_os = "linux", not(target_env = "ohos")),
+        target_os = "macos",
+        windows
+    ))]
+    pub(super) async fn install_on_quit(sys: System) -> Result<(), JsError> {
+        let found = sys.locals.get::<Found>();
+        let _operation = begin(&found)?;
+        let pending = pending(&sys)?;
+        let archive = pending.archive.borrow().clone().ok_or_else(|| {
+            JsError::Error("nothing is downloaded: call downloadUpdate first".into())
+        })?;
+        let installation = pending.installation.clone();
+        // What waited before goes first: it is staged in the same place.
+        crate::restart::set_at_exit(None);
+        let staged = blocking({
+            let archive = archive.clone();
+            move || installation.stage(&archive).map_err(|e| e.to_string())
+        })
+        .await?;
+        let version = pending.available.version.clone();
+        crate::restart::set_at_exit(Some(Box::new(move || {
+            // A restart after the swap starts the app at the path the
+            // user knows, as `install` has it.
+            crate::restart::remember_program();
+            match staged.finish() {
+                Ok(()) => log::info!("installed version {version} as the app quit"),
+                Err(e) => log::error!("cannot install version {version} as the app quits: {e}"),
+            }
+            let _ = std::fs::remove_file(&archive);
+        })));
+        Ok(())
+    }
+
+    #[cfg(not(any(
+        all(target_os = "linux", not(target_env = "ohos")),
+        target_os = "macos",
+        windows
+    )))]
+    pub(super) async fn install_on_quit(_: System) -> Result<(), JsError> {
         Err(unavailable())
     }
     /// Whether the package this run's code came from is already the
@@ -908,6 +971,19 @@ mod native {
             assert!(host.0.lock().unwrap().is_empty());
         }
 
+        /// Nothing waits to install when no check found an update the app
+        /// can install, and the rejection says so.
+        #[test]
+        fn install_on_quit_needs_a_downloaded_update() {
+            let sys = System::default().with_updater(Some(Arc::new(Channels(Default::default()))));
+            let error = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap()
+                .block_on(install_on_quit(sys))
+                .unwrap_err();
+            assert_eq!(error.code(), Some(codes::UNAVAILABLE));
+        }
+
         #[test]
         fn operations_are_serial_and_release_on_error_or_cancellation() {
             let found = Found::default();
@@ -940,6 +1016,10 @@ mod native {
     }
 
     pub(super) async fn install(_: System) -> Result<(), JsError> {
+        Err(unavailable())
+    }
+
+    pub(super) async fn install_on_quit(_: System) -> Result<(), JsError> {
         Err(unavailable())
     }
 

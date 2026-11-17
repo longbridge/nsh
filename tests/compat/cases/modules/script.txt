@@ -176,7 +176,7 @@ covers [nsh] UrlScheme
 # mod-updater
 tap id:case-mod-updater
 # no packaged app: no package runs, no update (a channel's) or package is offered, there is nothing to
-# download or restart into, and the shell has no packaged version.
+# download, restart into or install on quit, and the shell has no packaged version.
 expect Running package: none
 expect Shell: none build none, packages false
 expect NSH version: semver
@@ -184,9 +184,11 @@ expect Update: null
 expect Check: null
 expect Download: rejected
 expect Restart: rejected
+expect Install on quit: rejected
 covers [nsh/updater] checkForPackage
 covers [nsh/updater] checkForUpdate
 covers [nsh/updater] downloadPackage
+covers [nsh/updater] installOnQuit
 covers [nsh/updater] restartToPackage
 covers [nsh/updater] runningPackage
 covers [nsh/updater] shellInfo
