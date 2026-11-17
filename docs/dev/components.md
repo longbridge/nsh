@@ -970,10 +970,11 @@ what changed.
   sets when the nested component starts or stops placing its children (slots and rows stay), instead of telling JS.
 - Content that comes and goes with a reveal (`Collapsible`'s `reveal`, `gpui-base`'s `MotionReveal`): the view puts
   it in a clip view (`overflow_hidden`) whose height is zero while closed and the content's own while open, and calls
-  `ElementRef::animate_layout` on the clip with a critically damped spring in the effect that follows `open`, so the
+  `ElementRef::animate_layout` on the clip with a critically damped spring (or the app's `revealSpring`, read as
+  `open` changes) in the effect that follows `open`, so the
   commit that changes the height animates every frame it moves on the platform's animator (the clip's, the views
-  after it) and no other (a list updating in the same commit elsewhere changes at once), with no JS per frame. The content's region follows a signal that turns on with `open` and off after the motion's duration
-  (`set_timeout`, voided by a newer change: layout animations report no end), so it stays in the tree, clipped, while
+  after it) and no other (a list updating in the same commit elsewhere changes at once), with no JS per frame. The content's region follows a signal that turns on with `open` and off after the motion's duration (the
+  spring's `settle_ms`; `set_timeout`, voided by a newer change: layout animations report no end), so it stays in the tree, clipped, while
   the clip closes. Reduced motion skips both. Heights are not animated values, so this is how a component sizes
   something with motion. `collapsible::follow_open` is that signal and effect; `AccordionPanel` shares it, its own
   view the clip (zero high while closed, `invisible()` once the reveal has closed it, so content it keeps mounted takes
