@@ -17,7 +17,7 @@ function App() {
         testID="region"
         open={open()}
         reveal
-        revealSpring={{ stiffness: 620, damping: 36 }}
+        revealSpring={{ stiffness: 64, damping: 16 }}
         class="gap-[4px]"
         content={
           <View testID="details" style={{ height: 30 }}>
