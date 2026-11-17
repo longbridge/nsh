@@ -254,6 +254,13 @@ for (const viewport of [false, true]) {
               box = popover.getBoundingClientRect();
               check(near(moved.top, root.top - 60) && near(box.top, moved.top + 114), 'the overlay did not follow the scroll');
               check(areas.at(-1)[1] === -moved.top, 'the core did not hear the scroll');
+              // The app's own scroll views do not move the container: not measured.
+              let measured = 0;
+              const rect = p.root.getBoundingClientRect.bind(p.root);
+              p.root.getBoundingClientRect = () => { measured++; return rect(); };
+              p.views.get(12).dispatchEvent(new Event('scroll')); p.views.get(2).dispatchEvent(new Event('scroll'));
+              check(measured === 0, 'scrolling in the app measured the container');
+              p.root.getBoundingClientRect = rect;
               // A press on the page around the container is outside the overlay;
               // one on the overlay or in the container is the app's as before.
               const down = (el, x, y) => el.dispatchEvent(new PointerEvent('pointerdown', { bubbles:true, clientX:x, clientY:y }));

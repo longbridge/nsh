@@ -6549,9 +6549,14 @@ class Player {
   installFloats() {
     const moved = () => this.placeFloats();
     // Any scroll view of the page around the container moves it: a
-    // capturing listener hears them all.
-    addEventListener("scroll", moved, { capture: true, passive: true });
+    // capturing listener hears them all. The app's own scroll views move
+    // nothing of it, and their scrolling is a hot path: left alone.
+    addEventListener("scroll", (e) => {
+      if (!(e.target instanceof Node && this.root.contains(e.target))) moved();
+    }, { capture: true, passive: true });
     addEventListener("resize", moved);
+    // The on-screen keyboard shrinks the visual viewport only.
+    visualViewport?.addEventListener("resize", moved);
     // What is above the container on the page changing size moves it
     // without a scroll.
     new ResizeObserver(moved).observe(document.documentElement);
@@ -6643,7 +6648,11 @@ class Player {
     const [top, right, bottom, left] = this.safeProbe
       ? this.safeArea({ left: 0, top: 0, right: w, bottom: h })
       : [0, 0, 0, 0];
-    const area = [left - r.left, top - r.top, Math.max(0, w - left - right), Math.max(0, h - top - bottom)];
+    // Not under the on-screen keyboard, which covers the layout viewport's
+    // bottom (as `keyboardHeight`; not while zoomed).
+    const vv = visualViewport;
+    const visible = vv && vv.scale <= 1.01 ? Math.min(h, vv.offsetTop + vv.height) : h;
+    const area = [left - r.left, top - r.top, Math.max(0, w - left - right), Math.max(0, visible - top - bottom)];
     const key = area.join();
     if (this.floatArea === key) return;
     this.floatArea = key;

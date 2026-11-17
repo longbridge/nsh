@@ -847,12 +847,14 @@ browsers' touches into what phones report:
   untouched. `placeFloats` also reports the window less its safe area in the root's coordinates (`nsh_overlay_area`,
   `Core::set_overlay_area`), where the core places and flips the root's anchored overlays instead of the root's safe
   area (`overlay_area`; it lays them out again only while one is shown), on start, on every scroll of the page
-  (a capturing `scroll` listener: any scroll view around the container moves it), on `resize` and when the root or
-  the document's box changes size. A press on the page outside the root while overlays are lifted
+  (a capturing `scroll` listener: any scroll view around the container moves it; the app's own scroll views, inside
+  the root, are left alone), on `resize` and the visual viewport's (the area ends above the on-screen keyboard, as
+  `keyboardHeight`), and when the root or the document's box changes size. A press on the page outside the root while overlays are lifted
   (`pressAround`, a capturing `pointerdown` on the document) reaches the core as `nsh_press_outside` /
   `Core::presses_beyond_root`: the overlays watching presses hear `onPressOutside` as for a press in the root outside
   them, and the press goes on to the page. A lifted view has a blocking `wheel` listener of its own, as a dialog's
-  layer. Without popovers they stay in the container, with a warning. In an iframe the window is the iframe's (the
+  layer. Dialogs in the container (`dialogs` left out) are not raised above them: a page that lifts overlays lifts
+  dialogs too. Without popovers they stay in the container, with a warning. In an iframe the window is the iframe's (the
   iframe is not lifted as for dialogs); a container the page scales with a CSS transform is not accounted for.
 - **History**: when the app is the page (`window.top === window`, or `createPlayer`'s `history` option) every page
   above a stack's first and every dialog is a history entry (`pushState`, state `{ nsh: depth }`), so the browser's
