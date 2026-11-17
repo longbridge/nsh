@@ -6,10 +6,12 @@ in `crates/nsh-core/src/runtime/updater.rs`, the toolchain's side in `crates/nsh
 
 ## Flow
 
-1. `nsh.json`'s `"updater"` (`github` or `url`, `publicKey`) is checked by `nsh package`, which adds it with the app's
+1. `nsh.json`'s `"updater"` (`github` or `url`, `channels`, `publicKey`) is checked by `nsh package`, which adds it with the app's
    id and version to the package's assets as `nsh-updater.json`, and leaves `<name>-<version>-<os>-<arch>.<ext>`.
 2. `nsh update-manifest` writes `latest.json` and `latest.json.sig` for one version's archives.
 3. `checkForUpdate` reads the asset, gets the manifest, checks the signature, the id and that the version is newer.
+   With `{ channel }` it reads that channel's manifest instead (`Config::channel`); a name the asset does not declare
+   rejects before any request.
 4. `downloadUpdate` streams the asset into `<data dir>/updates`, checking its size and SHA-256.
 5. `installAndRestart` unpacks next to the app, checks the new app, swaps it in, then restarts the app as
    `Application.restart()` does (`DesktopCommand::Restart`): this run quits, and the new version starts once it has
@@ -62,6 +64,11 @@ packages' are removed at launch). `runningPackage()` is `Bundle::package`. `shel
 
 - **The source comes from the package, not the caller.** Otherwise app code, or a plugin, could point the update at
   anything.
+- **Channels are names, not URLs.** An app with a beta (or any opt-in) release needs its code to pick a second
+  manifest at run time, which the user chooses in its settings. `"channels"` keeps the choice of *where* in the
+  package: the code passes a name, `Config::channel` looks it up, and every channel needs HTTPS and `publicKey` as
+  `url` does. Only the source changes, so the id, the signature and the newer-version check hold on every channel,
+  and leaving one never downgrades. `checkForPackage` reads only the default source.
 - **A plugin cannot replace its host.** `Installation::current` needs the executable beside an `app.json` of the id and
   a `nsh-updater.json` with the same bytes the module read. A plugin has other assets, and if it had the same bytes it
   would only update from the host's own source.

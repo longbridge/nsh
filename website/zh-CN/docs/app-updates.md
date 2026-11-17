@@ -38,6 +38,16 @@ group: delivery
 
 `github` 也可以配 `publicKey`，配了之后会拒绝未签名的清单。
 
+想让自愿参加的用户收到 beta，再加一个频道：按名字声明的另一份清单。应用代码把用户的选择作为名字传入（`checkForUpdate({ channel: "beta" })`），不能传地址，所以更新从哪来仍由包决定（[频道](../modules/nsh-updater.md#频道)）。
+
+```json
+"updater": {
+  "url": "https://dl.example.com/app/latest.json",
+  "channels": { "beta": "https://dl.example.com/app/beta/latest.json" },
+  "publicKey": "<keys/update.pub 的内容>"
+}
+```
+
 ## 使用
 
 ```tsx

@@ -75,7 +75,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
-        data_dir: None,
+        support_dir: None,
         cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
@@ -88,6 +88,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         audio: None,
         windows: None,
         login_item: None,
+        data_dir: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -255,7 +256,7 @@ fn start_app_culling(
         limits: nsh_engine::Limits::default(),
         ui_sets: vec![nsh_base::registry(), crate::test_ui::registry()],
         runtime: None,
-        data_dir: None,
+        support_dir: None,
         cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
@@ -268,6 +269,7 @@ fn start_app_culling(
         audio: None,
         windows: None,
         login_item: None,
+        data_dir: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),

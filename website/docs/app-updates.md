@@ -42,6 +42,18 @@ runs (`nsh keygen keys/update`, keep the `.secret` out of your repository):
 
 `publicKey` also works with `github`: unsigned manifests are then refused.
 
+To offer a beta to the users who opt in, add a channel: another manifest, by name. The app's code passes the user's
+choice as a name (`checkForUpdate({ channel: "beta" })`), never an address, so the package still decides where updates
+come from ([channels](../modules/nsh-updater.md#channels)).
+
+```json
+"updater": {
+  "url": "https://dl.example.com/app/latest.json",
+  "channels": { "beta": "https://dl.example.com/app/beta/latest.json" },
+  "publicKey": "<contents of keys/update.pub>"
+}
+```
+
 ## Use it
 
 ```tsx

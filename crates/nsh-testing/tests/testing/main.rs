@@ -99,7 +99,7 @@ fn headless_preserves_environment_and_data_and_stops_on_process_exit() {
         .unwrap();
     let mut config = EngineConfig::new(bundle);
     config.environment.os = Os::MacOs;
-    config.data_dir = Some(root.clone());
+    config.support_dir = Some(root.clone());
     let started = Instant::now();
     let mut app = Headless::start(config).unwrap();
     let result = app.wait(Duration::from_secs(10));

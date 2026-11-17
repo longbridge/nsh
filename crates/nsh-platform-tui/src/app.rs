@@ -109,7 +109,9 @@ pub struct AppOptions {
     pub limits: Limits,
     /// Image and response cache policy.
     pub cache: nsh_engine::CacheOptions,
-    /// Persistent app data directory.
+    /// The app's data directory, used as it is
+    /// ([`nsh_engine::EngineConfig::data_dir`]); `None`: the one under its
+    /// id in the system's directory for apps' data.
     pub data_dir: Option<PathBuf>,
     /// Registries available to app code.
     pub ui_sets: Vec<nsh_core::element::Registry>,
@@ -139,9 +141,9 @@ impl Default for AppOptions {
             wake: None,
             limits: Limits::default(),
             cache: nsh_engine::CacheOptions::default(),
-            data_dir: None,
             ui_sets: vec![nsh_base::registry()],
             host: HostChannel::default(),
+            data_dir: None,
             storage: None,
             assets: None,
             clipboard: None,
@@ -317,6 +319,7 @@ impl AppView {
         }
         config.limits = self.options.limits;
         config.cache = self.options.cache.clone();
+        config.support_dir = nsh_engine::support_dir();
         config.data_dir = self.options.data_dir.clone();
         config.assets = self.options.assets.clone();
         #[cfg(feature = "dev")]
