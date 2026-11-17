@@ -67,6 +67,7 @@ use nsh_core::{
     TextEngine,
     geometry::{point, px},
     platform::{InputModality, Os},
+    text_edit::{char_len, clip_chars},
 };
 use nsh_engine::{
     AppError, AppErrorKind, Clock, Engine, EngineConfig, EngineControl, Environment, MountSink,
@@ -2080,15 +2081,8 @@ impl Headless {
         }
         let mut text = nsh_core::text_edit::pasted(text, input.config.multiline);
         if let Some(max) = input.config.max_length {
-            let room = (max as usize).saturating_sub(input.text.encode_utf16().count());
-            let mut used = 0;
-            text = text
-                .chars()
-                .take_while(|c| {
-                    used += c.len_utf16();
-                    used <= room
-                })
-                .collect();
+            let room = (max as usize).saturating_sub(char_len(&input.text));
+            text.truncate(clip_chars(&text, room).len());
         }
         if text.is_empty() {
             return;
@@ -2242,7 +2236,7 @@ impl Headless {
         let Some(input) = self.screen.input_mut(id) else {
             return;
         };
-        let length = input.text.encode_utf16().count() + c.len_utf16();
+        let length = char_len(&input.text) + 1;
         if input
             .config
             .max_length

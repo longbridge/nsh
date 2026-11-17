@@ -1146,7 +1146,7 @@ standalone host draws as a steady bar; elsewhere it is `Default`, the user's own
 through the ordinary key/paste path.
 
 Bracketed paste is one model insertion and one ChangeText event; it is clipped by the core's
-UTF-16 `maxLength`. The core's `pasted` helper normalizes CRLF and single-line line breaks. `Paste` is reported
+`maxLength`, which counts characters. The core's `pasted` helper normalizes CRLF and single-line line breaks. `Paste` is reported
 before insertion, and `pasteBehavior="report"` reports without insertion.
 
 Fields share the exact `ClipboardBackend` passed to their engine, including the test agent's isolated clipboard.

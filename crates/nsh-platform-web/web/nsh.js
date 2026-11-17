@@ -522,6 +522,39 @@ function regional(locale) {
   return known;
 }
 
+/** The characters of `text` as `maxLength` counts them: Unicode code
+ * points (an emoji is one, though a JS string holds two units for it). */
+function charLength(text) {
+  let n = 0;
+  for (const _ of text) n++;
+  return n;
+}
+
+let graphemes;
+
+/** The longest prefix of `text` of at most `max` characters
+ * ({@link charLength}) that ends between user-perceived characters, as the
+ * core's `clip_chars` cuts: a letter with its accent or an emoji with its
+ * skin tone goes in whole or not at all. */
+function clipChars(text, max) {
+  if (max <= 0) return "";
+  if (text.length <= max || charLength(text) <= max) return text;
+  graphemes ??= typeof Intl !== "undefined" && typeof Intl.Segmenter === "function"
+    ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+    : null;
+  // Without `Intl.Segmenter`, between code points.
+  const parts = graphemes ? graphemes.segment(text) : text;
+  let used = 0;
+  let end = 0;
+  for (const part of parts) {
+    const segment = typeof part === "string" ? part : part.segment;
+    used += charLength(segment);
+    if (used > max) break;
+    end += segment.length;
+  }
+  return text.slice(0, end);
+}
+
 /**
  * The key of a key event as `nsh_key` takes it (-1: none): the character
  * it types without modifiers, or, when Shift or Option change it or the
@@ -5388,8 +5421,8 @@ class Player {
     field.setAttribute("autocorrect", correct ? "on" : "off");
     if (config.autoComplete != null) field.setAttribute("autocomplete", config.autoComplete);
     else field.removeAttribute("autocomplete");
-    if (config.maxLength != null) field.maxLength = config.maxLength;
-    else field.removeAttribute("maxlength");
+    field._maxLength = config.maxLength ?? null;
+    this.fieldLimit(field);
     el._config = config;
     field.classList.toggle("nsh-ph", !!config.placeholderColor);
     // A built-in bar of the app's takes the textarea's indicator's place.
@@ -5402,6 +5435,7 @@ class Player {
   }
 
   wireInput(el, field) {
+    field.addEventListener("beforeinput", (e) => this.beforeInput(field, e));
     field.addEventListener("input", () => this.textChanged(el, field));
     field.addEventListener("scroll", () => this.inputScrolled(el, field), { passive: true });
     if (typeof ResizeObserver === "function") {
@@ -5413,6 +5447,7 @@ class Player {
     // characters chosen).
     field.addEventListener("compositionstart", (e) => {
       field._composing = true;
+      this.fieldLimit(field);
       this.compositionChanged(el, field, e.data ?? "");
     });
     field.addEventListener("compositionupdate", (e) => this.compositionChanged(el, field, e.data ?? ""));
@@ -5473,7 +5508,44 @@ class Player {
     this.call((w) => w.nsh_input_scroll(el._id, ...now));
   }
 
+  /** `field`'s `maxlength` for its `maxLength`: the browser counts UTF-16
+   * units, `maxLength` characters ({@link charLength}), so the limit is the
+   * units the text has plus one per character of room left, set again
+   * after each edit. An input method's composition, whose text the page
+   * cannot cut, stays within `maxLength` characters that way: a character
+   * of one unit leaves the limit as it was, one of two (an emoji) raises it
+   * by one. */
+  fieldLimit(field) {
+    const max = field._maxLength;
+    if (max == null) {
+      field.removeAttribute("maxlength");
+      return;
+    }
+    const value = field.value;
+    field.maxLength = value.length + Math.max(0, max - charLength(value));
+  }
+
+  /** Before the user's insertion of known text (typing, a paste, a drop, the
+   * app's `insertText`) into `field`: its `maxlength` takes exactly what of
+   * that text fits by characters ({@link clipChars}), so the browser cuts
+   * it there itself, keeping its own undo. */
+  beforeInput(field, e) {
+    const max = field._maxLength;
+    if (max == null || !e.inputType?.startsWith("insert")) return;
+    const text = e.inputType === "insertCompositionText" ? null : e.data ?? e.dataTransfer?.getData("text/plain") ?? null;
+    if (text == null) {
+      this.fieldLimit(field);
+      return;
+    }
+    const value = field.value;
+    const start = field.selectionStart ?? value.length;
+    const end = field.selectionEnd ?? start;
+    const kept = value.slice(0, start) + value.slice(end);
+    field.maxLength = kept.length + clipChars(text, max - charLength(kept)).length;
+  }
+
   textChanged(el, field) {
+    this.fieldLimit(field);
     this.inputScrolled(el, field);
     if (field.value === field._known) return;
     field._known = field.value;
@@ -5588,7 +5660,12 @@ class Player {
       return;
     }
     field._known = text;
-    if (field.value !== text) field.value = text;
+    if (field.value !== text) {
+      // The app's value is never cut to `maxLength`, as on every platform
+      // (the browser's `maxlength` limits only the user's edits).
+      field.value = text;
+      this.fieldLimit(field);
+    }
   }
 
   op_ic([, id, x, y, w, h]) {

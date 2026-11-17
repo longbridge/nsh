@@ -13,6 +13,7 @@ use nsh_core::{
     TextAlign,
     element::PropEnum,
     geometry::{point, px, size},
+    text_edit::clip_chars,
 };
 use nsh_engine::EngineControl;
 use objc2::{
@@ -555,9 +556,9 @@ pub(crate) fn test_paste(
 }
 
 /// Pastes `board`'s text into input `view`, cut to what `maxLength` leaves
-/// room for between composed character sequences, as a browser's
-/// `maxlength`. Not UIKit's `paste:`: a paste of it the delegate refuses
-/// leaves an undo step that crashes the app.
+/// room for between user-perceived characters ([`clip_chars`]), as a
+/// browser's `maxlength`. Not UIKit's `paste:`: a paste of it the delegate
+/// refuses leaves an undo step that crashes the app.
 fn paste_text(view: &UIView, board: &objc2_ui_kit::UIPasteboard) {
     // SAFETY: a plain getter, read on the user's paste.
     let (Some(text), Some((start, end))) = (unsafe { board.string() }, selection(view)) else {
@@ -570,11 +571,13 @@ fn paste_text(view: &UIView, board: &objc2_ui_kit::UIPasteboard) {
         .or_else(|| view.downcast_ref::<Area>().map(|a| a.text()))
         .unwrap_or_default();
     let room = max_length(view).map_or(usize::MAX, |max| {
-        (max as usize).saturating_sub(current.length() - range.length.min(current.length()))
+        (max as usize).saturating_sub(kept_chars(&current, range))
     });
+    // A text of no more UTF-16 units than there is room for characters
+    // fits as it is.
     let text = if room < text.length() {
-        let cut = text.rangeOfComposedCharacterSequenceAtIndex(room).location;
-        text.substringToIndex(cut)
+        let units = utf16(&text, NSRange::new(0, text.length()));
+        NSString::from_str(clip_chars(&String::from_utf16_lossy(&units), room))
     } else {
         text
     };
@@ -916,7 +919,9 @@ fn inset(r: CGRect, i: UIEdgeInsets) -> CGRect {
 }
 
 /// True if replacing `range` of `current` with `replacement` keeps the
-/// text within `max` UTF-16 units.
+/// text within `max` characters (`maxLength`'s unit, Unicode scalar
+/// values: an emoji is one, though UIKit's lengths count two UTF-16 units
+/// for it).
 pub(crate) fn fits(
     current: &NSString,
     range: NSRange,
@@ -924,8 +929,40 @@ pub(crate) fn fits(
     max: Option<u32>,
 ) -> bool {
     let Some(max) = max else { return true };
-    let len = current.length() - range.length.min(current.length()) + replacement.length();
-    len <= max as usize || replacement.length() == 0
+    if replacement.length() == 0 {
+        return true;
+    }
+    let len =
+        kept_chars(current, range) + char_count(replacement, NSRange::new(0, replacement.length()));
+    len <= max as usize
+}
+
+/// The characters of `string` outside `range`, which an edit of `range`
+/// keeps.
+fn kept_chars(string: &NSString, range: NSRange) -> usize {
+    let all = string.length();
+    let start = range.location.min(all);
+    let end = range.location.saturating_add(range.length).min(all);
+    char_count(string, NSRange::new(0, start)) + char_count(string, NSRange::new(end, all - end))
+}
+
+/// The characters (Unicode scalar values) in UTF-16 `range` of `string`;
+/// an unpaired surrogate an input method left counts as one.
+fn char_count(string: &NSString, range: NSRange) -> usize {
+    char::decode_utf16(utf16(string, range)).count()
+}
+
+/// The UTF-16 units in `range` of `string`, which must be within it. Not
+/// through UTF-8: NSString's conversion is null for a string with an
+/// unpaired surrogate, which input methods can leave.
+fn utf16(string: &NSString, range: NSRange) -> Vec<u16> {
+    let mut units = vec![0_u16; range.length];
+    // SAFETY: `range` is within the string, and the buffer has room for
+    // each of its units; its pointer is non-null when empty too.
+    unsafe {
+        string.getCharacters_range(std::ptr::NonNull::new(units.as_mut_ptr()).unwrap(), range);
+    }
+    units
 }
 
 /// Reads the limits of the input behind a delegate callback.
