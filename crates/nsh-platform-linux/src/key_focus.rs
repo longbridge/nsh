@@ -69,6 +69,7 @@ pub(crate) fn is_stop(view: &NshView) -> bool {
     {
         let state = view.state();
         if state.kind == ViewKind::Input
+            || state.style.hidden
             || !state
                 .props
                 .focus_stop(state.events.contains(EventKind::Press))
@@ -77,6 +78,19 @@ pub(crate) fn is_stop(view: &NshView) -> bool {
         }
     }
     view.can_target() && view.is_visible()
+}
+
+/// A mounted change can make the keyboard stop ineligible without moving
+/// GTK's focus. Let the normal focus watcher clear its state and report Blur.
+/// Selection-only areas and native inputs do not own this keyboard-stop state.
+pub(crate) fn changed(view: &NshView) {
+    let was_stop = {
+        let current = view.state();
+        current.kind != ViewKind::Input && current.states & state::FOCUSED != 0
+    };
+    if was_stop && !is_stop(view) {
+        blur(view);
+    }
 }
 
 /// `focus()` on a view that is not an input: the focus moves to it as Tab
@@ -555,8 +569,8 @@ fn show_context_menu(surface: &Surface, view: &NshView) -> bool {
 #[cfg(test)]
 mod tests {
     use nsh_core::{
-        EventMask, KeyCapture, MountItem, NodeId, ROOT_ID, ViewProps, keymap::Keystroke,
-        platform::Os,
+        Command, EventMask, KeyCapture, MountItem, NodeId, ROOT_ID, ViewProps, ViewStyle,
+        keymap::Keystroke, platform::Os,
     };
 
     use super::*;
@@ -599,6 +613,119 @@ mod tests {
         let mut props = view(surface, id).state().props.clone();
         edit(&mut props);
         apply(surface, &[MountItem::ViewProps { id, props }]);
+    }
+
+    fn loses_focus(change: MountItem) {
+        let surface = surface();
+        let mut items = Vec::new();
+        for (id, y) in [(2, 0.0), (3, 40.0)] {
+            let mut events = EventMask::default();
+            events.set(EventKind::Press, true);
+            items.extend([
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::View,
+                },
+                MountItem::Insert {
+                    parent: ROOT_ID,
+                    child: id,
+                    before: None,
+                },
+                MountItem::Frame {
+                    id,
+                    frame: frame(0.0, y, 100.0, 30.0),
+                },
+                MountItem::Events { id, events },
+            ]);
+        }
+        apply(&surface, &items);
+        let window = show(&surface);
+        let first = view(&surface, 2);
+        let neighbor = view(&surface, 3);
+        assert!(wait_until(|| first.is_mapped() && neighbor.is_mapped()));
+        let command = |id| {
+            [MountItem::Command {
+                id,
+                command: Command::Focus,
+            }]
+        };
+        // Prove the neighbor accepts explicit focus before testing invalidation.
+        apply(&surface, &command(3));
+        assert!(wait_until(|| neighbor.is_focus()));
+        apply(&surface, &command(2));
+        assert!(wait_until(|| first.is_focus()));
+        assert_ne!(first.state().states & state::FOCUSED, 0);
+
+        apply(&surface, &[change]);
+        let cleared =
+            wait_until(|| !first.is_focus() && first.state().states & state::FOCUSED == 0);
+        // Capture both observations before any failure, and close even on red.
+        let native_focus = GtkWindowExt::focus(&window).map(|widget| {
+            (
+                widget.type_().name().to_string(),
+                widget == *first.upcast_ref::<gtk::Widget>(),
+                widget == *neighbor.upcast_ref::<gtk::Widget>(),
+            )
+        });
+        let diagnostic = format!(
+            "native={native_focus:?}, focus_state={}",
+            first.state().states & state::FOCUSED != 0,
+        );
+        window.destroy();
+        assert!(
+            cleared,
+            "ineligible stop kept native focus or NSH focus state: {diagnostic}"
+        );
+    }
+
+    #[test]
+    fn focusable_false_releases_native_focus_with_press_listener_retained() {
+        run(|| {
+            loses_focus(MountItem::ViewProps {
+                id: 2,
+                props: Box::new(ViewProps {
+                    focusable: Some(false),
+                    ..Default::default()
+                }),
+            });
+        });
+    }
+
+    #[test]
+    fn removing_the_only_press_listener_releases_native_focus() {
+        run(|| {
+            loses_focus(MountItem::Events {
+                id: 2,
+                events: EventMask::default(),
+            });
+        });
+    }
+
+    #[test]
+    fn disabling_a_focused_stop_releases_native_focus() {
+        run(|| {
+            let mut props = ViewProps::default();
+            props.accessibility.state.disabled = true;
+            loses_focus(MountItem::ViewProps {
+                id: 2,
+                props: Box::new(props),
+            });
+        });
+    }
+
+    #[test]
+    fn hiding_a_focused_stop_releases_native_focus() {
+        run(|| {
+            // This tests the mounted hidden style, NOT GtkWidget::set_visible.
+            // Report both visibility channels: their equivalence is not assumed.
+            loses_focus(MountItem::ViewStyle {
+                id: 2,
+                style: Box::new(ViewStyle {
+                    hidden: true,
+                    ..Default::default()
+                }),
+            });
+        });
     }
 
     /// The display's keycode for `key`.
