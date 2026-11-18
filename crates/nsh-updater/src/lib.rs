@@ -68,7 +68,9 @@ pub enum Error {
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct Config {
-    /// The app's id: a manifest for another app is refused.
+    /// The app's id: what finds the installed app ([`install`]). A manifest
+    /// and the package it names may carry another id (an app moved to a new
+    /// one): the manifest's signature is what binds an update to the app.
     pub id: String,
     /// The running version.
     pub version: String,
@@ -313,7 +315,9 @@ impl Config {
         Ok(notes)
     }
 
-    /// The manifest, its signature checked and its id this app's.
+    /// The manifest, its signature checked. Its id is not checked against
+    /// the app's: an update may move the app to a new id or name, and the
+    /// signature, with the manifest's URL, decides what installs.
     fn open(&self, manifest: &[u8], signature: Option<&[u8]>) -> Result<Manifest, Error> {
         if let Some(key) = &self.public_key {
             let signature =
@@ -322,12 +326,6 @@ impl Config {
         }
         let parsed: Manifest =
             serde_json::from_slice(manifest).map_err(|e| Error::Manifest(e.to_string()))?;
-        if parsed.id != self.id {
-            return Err(Error::Manifest(format!(
-                "it is for {:?}, this app is {:?}",
-                parsed.id, self.id
-            )));
-        }
         Ok(parsed)
     }
 }
@@ -909,9 +907,17 @@ mod tests {
     }
 
     #[test]
-    fn a_manifest_of_another_app_or_plain_http_is_refused() {
-        let other = br#"{"id":"com.other","version":"9.0.0","platforms":{}}"#;
-        assert!(config().check(other, None, "linux-x86_64").is_err());
+    fn a_manifest_of_another_id_is_taken_plain_http_is_refused() {
+        // An app moving to a new id: the signature binds, not the id.
+        let other = manifest("2.0.0", "https://x.dev/a.tar.gz");
+        let other = String::from_utf8(other)
+            .unwrap()
+            .replace("com.example.app", "com.other");
+        let found = config()
+            .check(other.as_bytes(), None, "linux-x86_64")
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.version, "2.0.0");
         let plain = manifest("2.0.0", "http://x.dev/a.tar.gz");
         assert!(config().check(&plain, None, "linux-x86_64").is_err());
     }
@@ -1009,12 +1015,6 @@ mod tests {
                 .check_package(&bytes, Some(signature.as_bytes()), 3, "0.5.0")
                 .unwrap()
                 .is_some()
-        );
-        let other = br#"{"id":"com.other","version":"1.0.0","package":{"version":"1","build":9,"url":"p","sha256":"ab","minRuntime":"0.1.0"}}"#;
-        assert!(
-            takes_packages()
-                .check_package(other, None, 3, "0.5.0")
-                .is_err()
         );
         let plain = serde_json::to_vec(&serde_json::json!({
             "id": "com.example.app", "version": "1.0.0",
