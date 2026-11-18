@@ -367,6 +367,11 @@ pub(crate) fn press(
         .as_ref()
         .and_then(|root| root.clone().downcast::<gtk::Window>().ok());
     let focus = root.and_then(|root| root.focus());
+    // Track every press before focus and listener routing: a held key must
+    // not become a new press when its handler moves the focus.
+    let repeat = window
+        .as_ref()
+        .is_some_and(|window| crate::keyboard::held(surface, window, keycode));
     // The application menu's shortcut, where a view leaves the key to it.
     let menu_shortcut = || match (event, widget) {
         (Some(event), Some(widget)) => crate::chrome::menu_shortcut(surface, widget, event),
@@ -398,15 +403,12 @@ pub(crate) fn press(
         if menu_shortcut() {
             return true;
         }
-        return defaults(surface, &view, keyval, modifiers);
+        return defaults(surface, &view, keyval, modifiers, repeat);
     }
     // A raw view runs the app's bindings itself, once, before it is
     // notified: a pass-through binding reports and the key goes on, a
     // consuming one reports and takes it, and the shortcut controller does
     // not report either again.
-    let repeat = window
-        .as_ref()
-        .is_some_and(|window| crate::keyboard::held(surface, window, keycode));
     if let Some(event) = event {
         match crate::keymap::raw(surface, event, repeat) {
             crate::keymap::RawFire::Consumed => return true,
@@ -438,7 +440,7 @@ pub(crate) fn press(
     }
     // Tab's traversal is a default too: it is armed here, then GTK moves the
     // focus right after this, in the same dispatch.
-    defaults(surface, &view, keyval, modifiers)
+    defaults(surface, &view, keyval, modifiers, repeat)
 }
 
 /// Whether `keyval` is a Tab (the app's traversal).
@@ -462,6 +464,7 @@ fn defaults(
     view: &NshView,
     keyval: gdk::Key,
     modifiers: gdk::ModifierType,
+    repeat: bool,
 ) -> bool {
     if is_tab(keyval) {
         // Only a Tab left to GTK may offer the stops for traversal.
@@ -478,7 +481,7 @@ fn defaults(
         gdk::Key::space => Key::Char(' '),
         _ => return false,
     };
-    presses(surface, view, pressing, held)
+    presses(surface, view, pressing, held, repeat)
 }
 
 /// Whether `focus` (a window's focus widget) is a stop that Return and
@@ -493,15 +496,23 @@ pub(crate) fn is_control(surface: &Surface, focus: &gtk::Widget) -> bool {
 /// Return and Space press the focused stop `view` when it takes presses
 /// ([`core_input::presses_focused_control`]), once the app's bindings of
 /// the focus passed on them. A stop that takes no presses (a `focusable`
-/// chart) hears them through the shortcuts only. True when it was
-/// pressed.
-fn presses(surface: &Surface, view: &NshView, key: Key, held: nsh_core::keymap::Modifiers) -> bool {
+/// chart) hears them through the shortcuts only. True when the key was
+/// consumed, including a repeat that must not press the control again.
+fn presses(
+    surface: &Surface,
+    view: &NshView,
+    key: Key,
+    held: nsh_core::keymap::Modifiers,
+    repeat: bool,
+) -> bool {
     if !core_input::presses_focused_control(key, held)
         || !view.state().events.contains(EventKind::Press)
     {
         return false;
     }
-    crate::input::activate(surface, view);
+    if !repeat {
+        crate::input::activate(surface, view);
+    }
     true
 }
 
@@ -512,7 +523,7 @@ fn presses(surface: &Surface, view: &NshView, key: Key, held: nsh_core::keymap::
 pub(crate) fn press_key(surface: &Surface, stroke: nsh_core::keymap::Keystroke) -> bool {
     let focus = crate::window::key_window(surface).and_then(|w| GtkWindowExt::focus(&w));
     focused_stop(surface, focus)
-        .is_some_and(|view| presses(surface, &view, stroke.key, stroke.modifiers))
+        .is_some_and(|view| presses(surface, &view, stroke.key, stroke.modifiers, false))
 }
 
 /// A context menu asked for on `view` without a pointer: the nearest view
