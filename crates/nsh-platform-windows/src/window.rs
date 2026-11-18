@@ -1697,6 +1697,10 @@ fn window_api(
         }
         WM_ACTIVATE => {
             let active = (wparam.0 & 0xFFFF) != 0;
+            if !active {
+                // The press on a drag region it held will see no release.
+                crate::chrome::press_lost(surface, hwnd);
+            }
             match data.window {
                 Some(id) => {
                     crate::app_window::state_changed(surface, id);
@@ -1920,17 +1924,39 @@ pub(crate) fn click(surface: &Rc<Surface>, from: (f32, f32), to: (f32, f32)) {
     crate::input::pointer(surface, up);
 }
 
-/// The pointer moved over a view of the app's title bar that answers as
-/// the frame (`windowDrag`, `windowControl`) at `at` (client points), or
-/// left the app's content (`None`): the views hear it as the client area's
-/// moves, for their hover styles. A leave message's look at where the
-/// pointer is ([`crate::chrome::track`]) reports the same way.
+/// The pointer moved over a view of the app's that answers as the frame
+/// (`windowDrag`, `windowControl`, `windowResize`) at `at` (client
+/// points), or left the app's content (`None`): the views hear it as the
+/// client area's moves, for their hover styles. A leave message's look at
+/// where the pointer is ([`crate::chrome::track`]) reports the same way.
 pub(crate) fn nc_pointer(surface: &Rc<Surface>, at: Option<(f32, f32)>) {
     let (kind, x, y, buttons, clicks) = region_pointer(at, buttons_down());
     crate::input::pointer(
         surface,
         mouse_event(kind, x, y, 0, buttons, clicks, surface),
     );
+}
+
+/// As [`nc_pointer`], for the first look after the system held window
+/// `hwnd`'s pointer ([`crate::chrome::hold_ended`]). The press that began
+/// the hold was never the views': its button, should it still be down
+/// (the move loop ended by Escape, a press let go as stale), would tell
+/// them of a drag they never saw start. Only the buttons the window heard
+/// go down count ([`WindowData::buttons`], a client drag the app follows);
+/// a drag begun in another window loses its button for this one move,
+/// and its next move carries it again.
+pub(crate) fn hold_pointer(surface: &Rc<Surface>, hwnd: HWND, at: Option<(f32, f32)>) {
+    let heard = data(hwnd).map_or(0, |d| d.buttons.get());
+    let (kind, x, y, buttons, clicks) = region_pointer(at, buttons_down() & heard);
+    crate::input::pointer(
+        surface,
+        mouse_event(kind, x, y, 0, buttons, clicks, surface),
+    );
+}
+
+/// The logical primary button is down now ([`buttons_down`]).
+pub(crate) fn primary_down() -> bool {
+    buttons_down() & 1 != 0
 }
 
 /// What [`nc_pointer`] reports: a move at `at` with the buttons held
@@ -1952,11 +1978,25 @@ pub(crate) fn tracking(hwnd: HWND) -> Option<&'static Cell<crate::chrome::Tracki
 /// The buttons held now, numbered as [`held_buttons`] numbers a client
 /// mouse message's. A non-client message and a leave carry none, and the
 /// window's own presses ([`WindowData::buttons`]) miss a drag that began
-/// outside it, so they come from the buttons' state: the physical buttons
-/// (`GetAsyncKeyState`'s, which a press in another window updates too),
-/// turned into the logical ones a client message's `MK_*` keys carry
-/// ([`logical_keys`]).
+/// outside it, so they come from `GetAsyncKeyState`, which is documented
+/// to report the physical buttons (swapped into the logical ones with
+/// `SM_SWAPBUTTON`, [`mouse_keys`]). The trade-off: it reads the buttons
+/// now, not as of the message being handled, so under a backlog a queued
+/// non-client move can disagree with a client move's `MK_*` keys. It is
+/// used because the thread's own key state (`GetKeyState`) never sees a
+/// drag begun in another thread's window.
 fn buttons_down() -> u8 {
+    // SAFETY: a plain query.
+    let swapped = unsafe { GetSystemMetrics(SM_SWAPBUTTON) } != 0;
+    // SAFETY: plain state queries.
+    let keys = mouse_keys(|vk| unsafe { GetAsyncKeyState(vk.0 as i32) } < 0, swapped);
+    held_buttons(WPARAM(keys))
+}
+
+/// The `MK_*` keys of the logical buttons held, from `is_down`, the state
+/// of each physical button's virtual key, and `swapped`, the system's
+/// `SM_SWAPBUTTON` ([`logical_keys`]).
+fn mouse_keys(is_down: impl Fn(VIRTUAL_KEY) -> bool, swapped: bool) -> usize {
     const KEYS: [(VIRTUAL_KEY, usize); 5] = [
         (VK_LBUTTON, 0x1),
         (VK_RBUTTON, 0x2),
@@ -1964,14 +2004,11 @@ fn buttons_down() -> u8 {
         (VK_XBUTTON1, 0x20),
         (VK_XBUTTON2, 0x40),
     ];
-    let keys = KEYS
+    let physical = KEYS
         .iter()
-        // SAFETY: plain state queries.
-        .filter(|(vk, _)| unsafe { GetAsyncKeyState(vk.0 as i32) } < 0)
+        .filter(|(vk, _)| is_down(*vk))
         .fold(0, |keys, (_, mk)| keys | mk);
-    // SAFETY: a plain query.
-    let swapped = unsafe { GetSystemMetrics(SM_SWAPBUTTON) } != 0;
-    held_buttons(WPARAM(logical_keys(keys, swapped)))
+    logical_keys(physical, swapped)
 }
 
 /// The `MK_*` keys of the logical buttons, from those of the physical
@@ -2772,6 +2809,28 @@ mod tests {
             );
         }
         assert_eq!(logical_keys(0, true), 0);
+    }
+
+    #[test]
+    fn the_virtual_keys_down_are_the_logical_buttons_held() {
+        let only = |key: VIRTUAL_KEY| move |vk: VIRTUAL_KEY| vk == key;
+        let left = 1 << button_of(WM_LBUTTONDOWN, WPARAM(0));
+        let right = 1 << button_of(WM_RBUTTONDOWN, WPARAM(0));
+        let middle = 1 << button_of(WM_MBUTTONDOWN, WPARAM(0));
+        let held = |keys| held_buttons(WPARAM(keys));
+        assert_eq!(held(mouse_keys(only(VK_LBUTTON), false)), left);
+        assert_eq!(held(mouse_keys(only(VK_RBUTTON), false)), right);
+        // A left-handed mouse: the physical left button is the logical
+        // right one, as its messages say.
+        assert_eq!(held(mouse_keys(only(VK_LBUTTON), true)), right);
+        assert_eq!(held(mouse_keys(only(VK_RBUTTON), true)), left);
+        assert_eq!(held(mouse_keys(only(VK_MBUTTON), true)), middle);
+        assert_eq!(mouse_keys(only(VK_XBUTTON1), true), 0x20);
+        assert_eq!(mouse_keys(only(VK_XBUTTON2), false), 0x40);
+        assert_eq!(mouse_keys(|_| false, true), 0);
+        assert_eq!(mouse_keys(|_| true, true), 0x73);
+        // Keys that are no mouse buttons are never asked about.
+        assert_eq!(mouse_keys(only(VK_SHIFT), false), 0);
     }
 
     #[test]

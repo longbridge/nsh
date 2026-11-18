@@ -888,9 +888,13 @@ pub(crate) struct Tracking {
     /// The views heard the non-client area's moves last (a view answering
     /// as the frame): its leave ends their hover.
     view_hover: bool,
-    /// A leave or a recheck came while the system held the pointer (its
-    /// move or size loop, or a press on a drag region the app has not
-    /// heard): the hold's end looks once.
+    /// The system held the pointer (its move or size loop, or a press on a
+    /// drag region the views have not heard) and let it go: the next
+    /// recheck tells the views where it is, whatever they heard before,
+    /// unless a move does first. The hover may have moved to another view
+    /// of the same area meanwhile (a snap put a `windowControl` view under
+    /// the pointer, a held press slid onto another view in the drag
+    /// region), with no move dispatched.
     deferred: bool,
 }
 
@@ -908,7 +912,7 @@ pub(crate) enum Mouse {
     /// `WM_NCMOUSELEAVE`.
     NcLeave,
     /// [`RECHECK_TIMER`]: a leave kept the views hovered with neither area
-    /// tracked, or a hold ended.
+    /// tracked, or a hold ended ([`Tracking::deferred`]).
     Recheck,
     /// The system's move or size loop ended, or a held press on a drag
     /// region did ([`hold_ended`]).
@@ -941,6 +945,8 @@ struct Step {
     heard: Heard,
     /// Start [`RECHECK_TIMER`].
     recheck_later: bool,
+    /// The look is the first after a hold ([`Tracking::deferred`]).
+    after_hold: bool,
 }
 
 impl Tracking {
@@ -957,15 +963,21 @@ impl Tracking {
     /// hover with neither area tracked asks for [`Mouse::Recheck`], which
     /// runs after the queued input and arms the area the pointer is in or
     /// ends the hover: the hover never outlasts the pointer. While the
-    /// system holds the pointer, its tracking posts a leave again at once
-    /// whatever is armed, and the views heard no press: leaves and
-    /// rechecks then do nothing but wait for [`Mouse::HoldEnded`].
+    /// system holds the pointer (`held`, asked of leaves and rechecks
+    /// only), the views heard no press, and its move or size loop ends
+    /// whatever tracking is armed at once: leaves and rechecks then do
+    /// nothing, and [`Mouse::HoldEnded`] looks once afterwards.
     fn step(&mut self, mouse: Mouse, held: bool, content: impl FnOnce() -> Option<u32>) -> Step {
         let mut step = Step {
             track: None,
             heard: Heard::Nothing,
             recheck_later: false,
+            after_hold: false,
         };
+        if matches!(mouse, Mouse::ClientMove { .. } | Mouse::NcMove { .. }) {
+            // The move tells the views where the pointer is.
+            self.deferred = false;
+        }
         match mouse {
             Mouse::ClientMove { content } => {
                 if !self.client {
@@ -1003,7 +1015,6 @@ impl Tracking {
             Mouse::ClientLeave => {
                 self.client = false;
                 if held {
-                    self.deferred = true;
                     return step;
                 }
                 step.heard = self.look(true, content());
@@ -1011,7 +1022,6 @@ impl Tracking {
             Mouse::NcLeave => {
                 self.nc = None;
                 if held {
-                    self.deferred = true;
                     return step;
                 }
                 // Kept for the look: one finding the pointer on a view
@@ -1027,7 +1037,19 @@ impl Tracking {
             }
             Mouse::Recheck => {
                 if held {
-                    self.deferred = true;
+                    return step;
+                }
+                if std::mem::take(&mut self.deferred) {
+                    step.after_hold = true;
+                    match content() {
+                        Some(code) => {
+                            step.track = self.arm(code);
+                            self.hovered = true;
+                            self.view_hover = code != HTCLIENT;
+                            step.heard = Heard::Here;
+                        }
+                        None => step.heard = self.leave(),
+                    }
                     return step;
                 }
                 // A move came meanwhile: its area's leave ends the hover.
@@ -1050,14 +1072,34 @@ impl Tracking {
                 return step;
             }
             Mouse::HoldEnded => {
-                // Looked at once the queued input is handled: the moves the
-                // system makes as it lets the pointer go come first.
-                step.recheck_later = std::mem::take(&mut self.deferred);
+                // Looked at once the queued input is handled: a move the
+                // system makes as it lets the pointer go comes first and
+                // tells the views itself. Ended twice (the loop's end, then
+                // the press's), it still reports once.
+                self.deferred = true;
+                step.recheck_later = true;
                 return step;
             }
         }
         step.recheck_later = self.hovered && !self.client && self.nc.is_none();
         step
+    }
+
+    /// Arms the area of hit test code `code` unless it is armed there.
+    fn arm(&mut self, code: u32) -> Option<Area> {
+        if code == HTCLIENT {
+            (!std::mem::replace(&mut self.client, true)).then_some(Area::Client)
+        } else {
+            (self.nc.replace(code) != Some(code)).then_some(Area::NonClient)
+        }
+    }
+
+    /// Forgets what the views heard (the app restarted with new views): the
+    /// next look tells them.
+    fn forget(&mut self) {
+        self.hovered = false;
+        self.view_hover = false;
+        self.deferred = false;
     }
 
     /// The views hear a leave if they were hovered.
@@ -1099,35 +1141,124 @@ pub(crate) fn track(surface: &Rc<Surface>, hwnd: HWND, mouse: Mouse) -> Heard {
     let Some(cell) = crate::window::tracking(hwnd) else {
         return Heard::Nothing;
     };
+    let looks = matches!(mouse, Mouse::ClientLeave | Mouse::NcLeave | Mouse::Recheck);
+    // Asked before the tracking is read: finding a held press stale ends
+    // the hold, which the tracking records.
+    let held = looks && held(surface, hwnd);
     let mut tracking = cell.get();
     let mut at = None;
-    let step = tracking.step(mouse, held(surface, hwnd), || {
+    let step = tracking.step(mouse, held, || {
         at = content_under_pointer(surface, hwnd);
         at.map(|(_, code)| code)
     });
     cell.set(tracking);
     apply(hwnd, step);
-    if matches!(mouse, Mouse::ClientLeave | Mouse::NcLeave | Mouse::Recheck) {
-        match step.heard {
-            Heard::Here => crate::window::nc_pointer(surface, at.map(|(position, _)| position)),
-            Heard::Left => crate::window::nc_pointer(surface, None),
-            Heard::Nothing => {}
+    if looks {
+        let at = match step.heard {
+            Heard::Here => at.map(|(position, _)| position),
+            Heard::Left => None,
+            Heard::Nothing => return step.heard,
+        };
+        if step.after_hold {
+            crate::window::hold_pointer(surface, hwnd, at);
+        } else {
+            crate::window::nc_pointer(surface, at);
         }
     }
     step.heard
 }
 
-/// The system holds window `hwnd`'s pointer: its move or size loop runs,
-/// or a press on a drag region holds the capture ([`hold_press`]), a
-/// press the views never heard.
+/// Whether the system holds a window's pointer ([`hold`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Hold {
+    Held,
+    Free,
+    /// A press on a drag region is held, but its button went up with no
+    /// release or capture change reaching the window (it lost the
+    /// foreground while pressed: Alt+Tab, the Windows key, a UAC prompt).
+    Stale,
+}
+
+/// Whether the system holds a window's pointer, from its state: `sizing`,
+/// its move or size loop runs; `press`, a press on a drag region holds
+/// the capture ([`hold_press`]); `primary_down`, the primary button is
+/// down now; `input_queued`, mouse button or key input waits in the
+/// thread's queue (perhaps the press's release).
+fn hold(sizing: bool, press: bool, primary_down: bool, input_queued: bool) -> Hold {
+    if sizing {
+        Hold::Held
+    } else if !press {
+        Hold::Free
+    } else if primary_down || input_queued {
+        // A release still queued ends the press itself, with its click: the
+        // button's state now is ahead of the queue.
+        Hold::Held
+    } else {
+        Hold::Stale
+    }
+}
+
+/// Window `hwnd` holds a press on a drag region ([`hold_press`]).
+fn press_held(surface: &Surface, hwnd: HWND) -> bool {
+    surface
+        .input
+        .window_press
+        .borrow()
+        .as_ref()
+        .is_some_and(|p| p.hwnd == hwnd)
+}
+
+/// The system holds window `hwnd`'s pointer ([`Hold`]): a press the views
+/// never heard, so leaves and rechecks wait for its end. A stale press is
+/// let go here, or hover would wait for it forever.
 fn held(surface: &Surface, hwnd: HWND) -> bool {
-    crate::window::shell(hwnd).is_some_and(|s| s.sizing.get())
-        || surface
-            .input
-            .window_press
-            .borrow()
-            .as_ref()
-            .is_some_and(|p| p.hwnd == hwnd)
+    let sizing = crate::window::shell(hwnd).is_some_and(|s| s.sizing.get());
+    let press = press_held(surface, hwnd);
+    let (down, queued) = if press && !sizing {
+        // `GetInputState` rather than `GetQueueStatus`, which would clear
+        // the queue's "new input" state a host's `MsgWaitForMultipleObjects`
+        // waits on.
+        // SAFETY: a plain query of this thread's queue.
+        let queued = unsafe { GetInputState() }.as_bool();
+        (crate::window::primary_down(), queued)
+    } else {
+        (false, false)
+    };
+    match hold(sizing, press, down, queued) {
+        Hold::Held => true,
+        Hold::Free => false,
+        Hold::Stale => {
+            press_lost(surface, hwnd);
+            false
+        }
+    }
+}
+
+/// Window `hwnd`'s held press is over without its release (the window
+/// lost the foreground, or the press went stale): forgotten, the capture
+/// let go, and the hold ended.
+pub(crate) fn press_lost(surface: &Surface, hwnd: HWND) {
+    if take_press(surface, hwnd).is_none() {
+        return;
+    }
+    // SAFETY: plain calls; only this window's own capture is released.
+    if unsafe { GetCapture() } == hwnd {
+        let _ = unsafe { ReleaseCapture() };
+    }
+    hold_ended(hwnd);
+}
+
+/// The app stopped (its views are gone): its held press is forgotten, and
+/// what the views heard of the pointer with it.
+pub(crate) fn reset_hover(surface: &Surface) {
+    let press = surface.input.window_press.borrow_mut().take();
+    for hwnd in press.map(|p| p.hwnd).into_iter().chain([surface.hwnd()]) {
+        if let Some(cell) = crate::window::tracking(hwnd) {
+            let mut tracking = cell.get();
+            tracking.forget();
+            cell.set(tracking);
+        }
+    }
 }
 
 /// The system let window `hwnd`'s pointer go ([`held`] ended): what it
@@ -1216,12 +1347,24 @@ fn content_under_pointer(surface: &Surface, hwnd: HWND) -> Option<((f32, f32), u
     let scale = scale_of(surface, hwnd);
     let at = (p.x as f32 / scale, p.y as f32 / scale);
     let drawn = caption_at(surface, hwnd, at.0, at.1).is_some();
-    let view = if code == HTCLIENT {
-        HTCLIENT
-    } else {
-        frame_view_code(surface, hwnd, at)
-    };
+    let view = frame_view(surface, hwnd, code, at);
     content_hit(code, view, drawn, in_client(p, client)).then_some((at, code))
+}
+
+/// What the app's views answer at `at` (client points) in window `hwnd`,
+/// for a point the window answers with hit test code `code` inside its
+/// client area: a caption or a button is a view's own code (the window's
+/// frame answers those only above the client area, and the drawn caption
+/// buttons are told apart by the caller); a border's code needs a look at
+/// the views, since the window's own border answers it as well as a
+/// `windowResize` view; any other code is no view's.
+fn frame_view(surface: &Surface, hwnd: HWND, code: u32, at: (f32, f32)) -> u32 {
+    match code {
+        HTCAPTION | HTMINBUTTON | HTMAXBUTTON | HTCLOSE => code,
+        HTLEFT | HTRIGHT | HTTOP | HTTOPLEFT | HTTOPRIGHT | HTBOTTOM | HTBOTTOMLEFT
+        | HTBOTTOMRIGHT => frame_view_code(surface, hwnd, at),
+        _ => HTCLIENT,
+    }
 }
 
 /// [`view_code`] at `at` (client points) in window `hwnd`.
@@ -1309,7 +1452,7 @@ pub(crate) fn nc_mouse(
             // same codes, above the client area: no view is there.
             let inside = in_client(p, client_rect(hwnd));
             let view = if inside && !drawn {
-                frame_view_code(surface, hwnd, (x, y))
+                frame_view(surface, hwnd, code, (x, y))
             } else {
                 HTCLIENT
             };
@@ -1529,7 +1672,8 @@ pub(crate) fn press_released(surface: &Rc<Surface>, hwnd: HWND, at: (f32, f32)) 
     true
 }
 
-/// Window `hwnd` lost the mouse capture: its held press is forgotten.
+/// Window `hwnd` lost the mouse capture: its held press is forgotten, and
+/// the hold ended.
 pub(crate) fn press_cancelled(surface: &Surface, hwnd: HWND) {
     if take_press(surface, hwnd).is_some() {
         hold_ended(hwnd);
@@ -2619,13 +2763,18 @@ mod tests {
         assert!(!delivers_click(&label, None));
 
         let hwnd = HWND::default();
-        // Pressing on a child inside the drag region holds the innermost view.
+        // Pressing on a child inside the drag region holds the innermost view
+        // (and the pointer, for leaves and rechecks: [`held`]).
+        assert!(!press_held(&surface, hwnd));
         assert!(hold_press(&surface, hwnd, (20, 15), (20.0, 15.0), LPARAM(0)).is_some());
+        assert!(press_held(&surface, hwnd));
         // A move within the drag rectangle stays held.
         assert!(press_moved(&surface, hwnd, pack(22, 16)));
         assert!(surface.input.window_press.borrow().is_some());
+        assert!(press_held(&surface, hwnd));
         assert!(press_released(&surface, hwnd, (22.0, 16.0)));
         assert!(surface.input.window_press.borrow().is_none());
+        assert!(!press_held(&surface, hwnd));
 
         // A view appearing over the press point before release suppresses the click.
         assert!(hold_press(&surface, hwnd, (20, 15), (20.0, 15.0), LPARAM(0)).is_some());
@@ -2652,12 +2801,22 @@ mod tests {
         assert!(hold_press(&surface, hwnd, (20, 15), (20.0, 15.0), LPARAM(0)).is_some());
         assert!(press_moved(&surface, hwnd, pack(30, 20)));
         assert!(surface.input.window_press.borrow().is_none());
+        assert!(!press_held(&surface, hwnd));
         assert!(!press_released(&surface, hwnd, (30.0, 20.0)));
 
         // Losing capture drops the held press.
         assert!(hold_press(&surface, hwnd, (20, 15), (20.0, 15.0), LPARAM(0)).is_some());
         press_cancelled(&surface, hwnd);
+        assert!(!press_held(&surface, hwnd));
         assert!(!press_released(&surface, hwnd, (20.0, 15.0)));
+
+        // So does losing the foreground, and an app restart.
+        assert!(hold_press(&surface, hwnd, (20, 15), (20.0, 15.0), LPARAM(0)).is_some());
+        press_lost(&surface, hwnd);
+        assert!(!press_held(&surface, hwnd));
+        assert!(hold_press(&surface, hwnd, (20, 15), (20.0, 15.0), LPARAM(0)).is_some());
+        reset_hover(&surface);
+        assert!(!press_held(&surface, hwnd));
     }
 
     /// A role-only item reads the translated label, else the English
@@ -3201,16 +3360,18 @@ mod tests {
             assert!(!window.tracked() && !window.timer);
         }
         // Let go where it was: one recheck after the queued input, which
-        // tracks the drag region again and tells the views nothing new.
-        // The system may end that tracking at once a few times until it
-        // has caught up: each such leave is quiet too.
+        // tracks the drag region again and tells the views once where the
+        // pointer is. The system may end that tracking at once a few times
+        // until it has caught up: each such leave is quiet.
         window.held = false;
         let step = window.send(Mouse::HoldEnded, None);
         assert!(step.recheck_later && step.track.is_none());
-        assert!(window.settle(Mouse::Recheck, Some(HTCAPTION), 5).is_empty());
+        assert_eq!(
+            window.settle(Mouse::Recheck, Some(HTCAPTION), 5),
+            [Heard::Here]
+        );
         assert!(window.tracked() && !window.timer && window.hovered);
-        // A second end of the same hold looks at nothing.
-        assert!(!window.send(Mouse::HoldEnded, None).recheck_later);
+        assert!(!window.tracking.deferred);
 
         // Let go off the window (a snap moved it away): one leave.
         let mut window = Window::default();
@@ -3235,8 +3396,8 @@ mod tests {
         );
         assert!(window.tracking.client && !window.tracking.view_hover);
 
-        // The system's move after the hold came first and tracks: the
-        // recheck has nothing to do.
+        // The system's move after the hold came first and tracks: it told
+        // the views, and the recheck has nothing to do.
         let mut window = Window::default();
         window.send(ON_VIEW, None);
         window.held = true;
@@ -3246,5 +3407,88 @@ mod tests {
         window.send(ON_VIEW, None);
         let step = window.recheck(Some(HTCAPTION));
         assert_eq!((step.track, step.heard), (None, Heard::Nothing));
+    }
+
+    #[test]
+    fn a_hold_ends_with_one_report_where_the_pointer_is() {
+        // A press held on a drag region slid onto another view of it (both
+        // `HTCAPTION`), with no leave and no move dispatched: the views
+        // still hover the first. The hold's end tells them, once, though
+        // the pointer is in the same area.
+        let mut window = Window::default();
+        window.send(ON_VIEW, None);
+        window.send(Mouse::HoldEnded, None);
+        let step = window.recheck(Some(HTCAPTION));
+        assert_eq!((step.heard, step.after_hold), (Heard::Here, true));
+        assert_eq!(step.track, None, "the drag region is tracked already");
+
+        // A snap put a `windowControl` view under the pointer: tracked at
+        // its code, and told once.
+        let mut window = Window::default();
+        window.send(ON_VIEW, None);
+        window.held = true;
+        window.settle(Mouse::NcLeave, Some(HTCAPTION), usize::MAX);
+        window.held = false;
+        window.send(Mouse::HoldEnded, None);
+        assert_eq!(
+            window.settle(Mouse::Recheck, Some(HTMAXBUTTON), 2),
+            [Heard::Here]
+        );
+        assert_eq!(window.tracking.nc, Some(HTMAXBUTTON));
+
+        // Ended twice (the move loop's end, then the press's): one report,
+        // and the flag is consumed by it.
+        let mut window = Window::default();
+        window.send(ON_VIEW, None);
+        window.send(Mouse::HoldEnded, None);
+        window.send(Mouse::HoldEnded, None);
+        assert_eq!(
+            window.settle(Mouse::Recheck, Some(HTCAPTION), 0),
+            [Heard::Here]
+        );
+        assert!(!window.tracking.deferred);
+        // A later leave keeping the hover untracked is quiet again.
+        assert!(window.settle(Mouse::NcLeave, Some(HTCAPTION), 3).is_empty());
+
+        // A recheck while the system holds the pointer again keeps the
+        // report for that hold's end.
+        let mut window = Window::default();
+        window.send(ON_VIEW, None);
+        window.send(Mouse::HoldEnded, None);
+        window.held = true;
+        assert_eq!(window.recheck(Some(HTCAPTION)).heard, Heard::Nothing);
+        assert!(window.tracking.deferred);
+    }
+
+    #[test]
+    fn a_held_press_is_let_go_when_its_button_is_up() {
+        // The move or size loop holds the pointer whatever the buttons say.
+        assert_eq!(hold(true, false, false, false), Hold::Held);
+        assert_eq!(hold(true, true, false, false), Hold::Held);
+        // No press held: nothing holds it.
+        assert_eq!(hold(false, false, true, true), Hold::Free);
+        // A press held with its button down, or with its release still in
+        // the queue (the release ends it, with its click).
+        assert_eq!(hold(false, true, true, false), Hold::Held);
+        assert_eq!(hold(false, true, false, true), Hold::Held);
+        // Its button went up and no release is coming: the window lost the
+        // foreground while pressed.
+        assert_eq!(hold(false, true, false, false), Hold::Stale);
+    }
+
+    #[test]
+    fn a_restarted_app_hears_the_hover_again() {
+        // The app restarts with new views while the pointer rests on the
+        // drag region: the next look tells them, and nothing is left to
+        // report for an old hold.
+        let mut window = Window::default();
+        window.send(ON_VIEW, None);
+        window.send(Mouse::HoldEnded, None);
+        window.tracking.forget();
+        window.hovered = false;
+        assert!(!window.tracking.deferred);
+        let step = window.send(Mouse::ClientLeave, Some(HTCAPTION));
+        assert_eq!(step.heard, Heard::Here);
+        assert!(!step.after_hold);
     }
 }
