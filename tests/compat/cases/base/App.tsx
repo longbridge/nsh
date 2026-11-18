@@ -63,6 +63,7 @@ import BaseToast from "./base-toast";
 import BaseToggle from "./base-toggle";
 import BaseToolbar from "./base-toolbar";
 import BaseTree from "./base-tree";
+import BaseTreeSlots from "./base-tree-slots";
 import BaseToken from "./base-token";
 import BaseSetTheme from "./base-set-theme";
 import BaseTransitionShader from "./base-transition-shader";
@@ -113,6 +114,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-toggle": BaseToggle,
   "base-toolbar": BaseToolbar,
   "base-tree": BaseTree,
+  "base-tree-slots": BaseTreeSlots,
   "base-collapsible": BaseCollapsible,
   "base-color-picker": BaseColorPicker,
   "base-collapsible-reveal": BaseCollapsibleReveal,

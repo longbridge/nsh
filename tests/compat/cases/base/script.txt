@@ -4762,3 +4762,15 @@ tap id:content-size-narrow
 expect Width: true
 covers [events] onContentSizeChange
 covers [nsh/base] createRichEditor
+
+# base-tree-slots
+# The header shows above the rows; `empty` shows while no item does.
+tap id:case-base-tree-slots
+expect Pinned files
+expect No files
+tap id:tree-slots-fill
+expect README.md
+absent No files
+expect Pinned files
+covers [props] Tree.header
+covers [props] Tree.empty
