@@ -2031,10 +2031,14 @@ impl ScreenHost {
         } else {
             UINavigationItemLargeTitleDisplayMode::Never
         });
-        let appearance = header_appearance(mtm, c);
-        nav_item.setStandardAppearance(appearance.as_deref());
-        nav_item.setScrollEdgeAppearance(appearance.as_deref());
-        nav_item.setCompactAppearance(appearance.as_deref());
+        let appearances = header_appearances(mtm, c);
+        let (standard, scroll_edge) = match &appearances {
+            Some((standard, scroll_edge)) => (Some(&**standard), Some(&**scroll_edge)),
+            None => (None, None),
+        };
+        nav_item.setStandardAppearance(standard);
+        nav_item.setScrollEdgeAppearance(scroll_edge);
+        nav_item.setCompactAppearance(standard);
         // The bar of the screen on top, too (Catalyst does not always take
         // the item's appearance).
         if let Some(nav) = self.controller.navigationController()
@@ -2081,11 +2085,17 @@ pub(crate) fn keep_in_window(bar: &UINavigationBar) {
     }
 }
 
-/// The header's appearance from the screen's options (`None`: UIKit's).
-fn header_appearance(
+/// The header's appearances from the screen's options (`None`: UIKit's):
+/// the standard one (also the compact one), and the one while the content
+/// rests at its top (the scroll edge), clear for a transparent header that
+/// shows its background only on scroll.
+fn header_appearances(
     mtm: MainThreadMarker,
     c: &ScreenConfig,
-) -> Option<Retained<UINavigationBarAppearance>> {
+) -> Option<(
+    Retained<UINavigationBarAppearance>,
+    Retained<UINavigationBarAppearance>,
+)> {
     if c.background_color.is_none()
         && c.title_color.is_none()
         && !c.header_transparent
@@ -2093,8 +2103,25 @@ fn header_appearance(
     {
         return None;
     }
+    let on_scroll = c.header_transparent && c.header_background_on_scroll;
+    let standard = header_appearance(mtm, c, c.header_transparent && !on_scroll);
+    let scroll_edge = if on_scroll {
+        header_appearance(mtm, c, true)
+    } else {
+        standard.clone()
+    };
+    Some((standard, scroll_edge))
+}
+
+/// One appearance of the header: `transparent`, or its background color,
+/// else UIKit's default background.
+fn header_appearance(
+    mtm: MainThreadMarker,
+    c: &ScreenConfig,
+    transparent: bool,
+) -> Retained<UINavigationBarAppearance> {
     let appearance = UINavigationBarAppearance::new(mtm);
-    if c.header_transparent {
+    if transparent {
         appearance.configureWithTransparentBackground();
     } else if let Some(bg) = c.background_color {
         appearance.configureWithOpaqueBackground();
@@ -2119,7 +2146,7 @@ fn header_appearance(
             appearance.setLargeTitleTextAttributes(&attributes);
         }
     }
-    Some(appearance)
+    appearance
 }
 
 /// Styles a stack's navigation bar for the screen it shows: the screen's
@@ -2131,11 +2158,11 @@ pub(crate) fn style_bar(bar: &UINavigationBar, c: &ScreenConfig) {
     let tint = c.tint_color.map(ui_color);
     // SAFETY: a plain setter; `None` restores the default tint.
     unsafe { bar.setTintColor(tint.as_deref()) };
-    match header_appearance(mtm, c) {
-        Some(appearance) => {
-            bar.setStandardAppearance(&appearance);
-            bar.setScrollEdgeAppearance(Some(&appearance));
-            bar.setCompactAppearance(Some(&appearance));
+    match header_appearances(mtm, c) {
+        Some((standard, scroll_edge)) => {
+            bar.setStandardAppearance(&standard);
+            bar.setScrollEdgeAppearance(Some(&scroll_edge));
+            bar.setCompactAppearance(Some(&standard));
         }
         None => {
             let appearance = UINavigationBarAppearance::new(mtm);
