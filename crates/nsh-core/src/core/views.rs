@@ -776,46 +776,63 @@ impl<M: TextEngine> Core<M> {
         // (Resolved with the host's instance back: a region after this one
         // may hold its JS children.)
         let mut before = self.anchor_node(state.anchor);
+        let parent_key = self.key(parent).ok().filter(|_| !nested);
+        // Where `before` is among the parent's children (their end for
+        // `None`), when known.
+        let mut next = parent_key.and_then(|key| {
+            let children = &self.nodes[key as usize].children;
+            match before {
+                Some(id) => children
+                    .iter()
+                    .position(|&child| self.nodes[child as usize].id == id),
+                None => Some(children.len()),
+            }
+        });
         // Already contiguous before the anchor: every precedes check below
         // would succeed, so no child needs to move.
-        if !nested
-            && self.key(parent).is_ok_and(|key| {
-                let children = &self.nodes[key as usize].children;
-                let end = match before {
-                    Some(id) => children
-                        .iter()
-                        .position(|&child| self.nodes[child as usize].id == id),
-                    None => Some(children.len()),
-                };
-                end.is_some_and(|end| {
-                    end.checked_sub(nodes.len()).is_some_and(|start| {
-                        children[start..end]
-                            .iter()
-                            .zip(&nodes)
-                            .all(|(&child, &id)| self.nodes[child as usize].id == id)
-                    })
-                })
+        if let (Some(key), Some(end)) = (parent_key, next)
+            && end.checked_sub(nodes.len()).is_some_and(|start| {
+                self.nodes[key as usize].children[start..end]
+                    .iter()
+                    .zip(&nodes)
+                    .all(|(&child, &id)| self.nodes[child as usize].id == id)
             })
         {
             return;
         }
-        // Where the node before the last one found in its place would be.
-        let mut expected = None;
         for &child in nodes.iter().rev() {
             if nested {
                 if !self.nested_precedes(parent, child, before) {
                     self.join_nested_at(parent, child, before);
                 }
             } else {
-                let at = self.preceding(parent, child, before, expected);
-                if at.is_none() {
+                // Looked for right before the node after it.
+                let after = next;
+                next = self.preceding(
+                    parent,
+                    child,
+                    before,
+                    after.and_then(|at| at.checked_sub(1)),
+                );
+                if next.is_none() {
                     let _ = self.apply_op(Op::Insert {
                         parent,
                         child,
                         before,
                     });
+                    // In the place `before` had, or right before it when
+                    // the child moved from before it: the node before it
+                    // is looked for next to it, so a node kept after new
+                    // ones is found without a search of the children.
+                    next = after.and_then(|at| {
+                        let children = &self.nodes[parent_key? as usize].children;
+                        std::iter::once(at).chain(at.checked_sub(1)).find(|&at| {
+                            children
+                                .get(at)
+                                .is_some_and(|&c| self.nodes[c as usize].id == child)
+                        })
+                    });
                 }
-                expected = at.and_then(|at| at.checked_sub(1));
             }
             before = Some(child);
         }

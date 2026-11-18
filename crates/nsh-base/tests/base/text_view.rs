@@ -1027,3 +1027,96 @@ fn a_pressed_task_box_reports_its_place_in_the_document_and_the_state_asked_for(
     app.wait_for("Pressed: 1:false 2:true 4:true 3:false 3:false 0:true")
         .unwrap();
 }
+
+mod large_document {
+    //! A long Markdown document opened at once in a scroll view: reading
+    //! it, and mounting its blocks, each a row of the same parent.
+
+    use std::{
+        cell::RefCell,
+        time::{Duration, Instant},
+    };
+
+    use nsh_base::{
+        text_view,
+        text_view::{Document, Parser},
+    };
+    use nsh_core::{ApproxTextEngine, Core, Size, element::Root, prelude::*};
+
+    thread_local! {
+        static SOURCE: RefCell<Option<String>> = const { RefCell::new(None) };
+        static DOCUMENT: RefCell<Option<Document>> = const { RefCell::new(None) };
+    }
+
+    /// [`SOURCE`] read by the view, or [`DOCUMENT`] read before.
+    #[component]
+    fn Opened() -> impl IntoElement {
+        let view = match SOURCE.take() {
+            Some(source) => text_view().markdown(SharedString::from(source)),
+            None => text_view().document(DOCUMENT.take().expect("a document")),
+        };
+        scroll().size_full().child(view)
+    }
+
+    /// Sections of a heading, a paragraph with bold words and a link, and
+    /// a list of two items, about 50 bytes a block.
+    fn document(bytes: usize) -> String {
+        let mut text = String::with_capacity(bytes + 200);
+        let mut n = 0;
+        while text.len() < bytes {
+            n += 1;
+            text.push_str(&format!(
+                "## Section {n}\n\nSome **bold** text and a [link](https://example.com/{n}), with a few more words in each paragraph.\n\n- the first item of the list\n- the second item\n\n"
+            ));
+        }
+        text
+    }
+
+    fn mount(culling: bool) -> (Duration, usize) {
+        let mut core = Core::new(ApproxTextEngine, Size::new(px(390.0), px(844.0)));
+        core.set_content_culling(culling);
+        let start = Instant::now();
+        core.mount_root(&Root::new::<Opened>(|| ()));
+        let mut items = 0;
+        // What waits for later turns is made too, as a test driver has it.
+        for _ in 0..if culling { 1 } else { 8 } {
+            match core.commit() {
+                Some(batch) => items += batch.items.len(),
+                None => break,
+            }
+        }
+        (start.elapsed(), items)
+    }
+
+    /// `cargo test --release -p nsh-base --test base bench_large_document
+    /// -- --ignored --nocapture`; the numbers are in `docs/dev/performance.md`.
+    #[test]
+    #[ignore]
+    fn bench_large_document() {
+        let ms = |d: Duration| d.as_secs_f64() * 1e3;
+        println!("ms to read | ms to mount the read document, culling on / off | both, culling on");
+        for kb in [190, 475, 950, 1_900] {
+            let source = document(kb * 1_000);
+            let start = Instant::now();
+            let document = Parser::new().markdown(&source);
+            let read = start.elapsed();
+            let blocks = document.blocks.len();
+            let mut shown = Vec::new();
+            for culling in [true, false] {
+                DOCUMENT.set(Some(document.clone()));
+                shown.push(mount(culling));
+            }
+            SOURCE.set(Some(source));
+            let both = mount(true);
+            println!(
+                "{kb:>5} KB {blocks:>6} blocks | {:>8.1} | {:>8.1} ({} items) / {:>8.1} ({} items) | {:>8.1}",
+                ms(read),
+                ms(shown[0].0),
+                shown[0].1,
+                ms(shown[1].0),
+                shown[1].1,
+                ms(both.0),
+            );
+        }
+    }
+}

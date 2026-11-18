@@ -631,6 +631,10 @@ pub(super) struct Components {
     pub(super) released_hosts: FxHashSet<NodeId>,
     #[cfg(test)]
     pub(super) cleanup_work: super::views::CleanupWork,
+    /// Siblings and overlays looked at to place views among them
+    /// ([`Core::preceding`], `native_before_at`, `first_overlay_in`).
+    #[cfg(test)]
+    pub(super) placing_work: std::cell::Cell<usize>,
     /// Slot nodes (`componentSlot`) -> their slot's name.
     slot_names: FxHashMap<NodeId, Arc<str>>,
     /// Slot nodes in a host -> the host.
@@ -824,6 +828,8 @@ impl Default for Components {
             released_hosts: FxHashSet::default(),
             #[cfg(test)]
             cleanup_work: Default::default(),
+            #[cfg(test)]
+            placing_work: Default::default(),
             slot_names: FxHashMap::default(),
             slot_hosts: FxHashMap::default(),
             slot_targets: FxHashMap::default(),
@@ -4315,6 +4321,8 @@ impl<M: TextEngine> Core<M> {
     /// `next` ([`Self::precedes`]). `hint` is where it is expected, looked
     /// at first: nodes checked from the last to the first, each before the
     /// one after it, are found without a search of the children for each.
+    /// A node not among them, as each node of a region mounted for the
+    /// first time, is known from its own parent without a search either.
     pub(super) fn preceding(
         &self,
         parent: NodeId,
@@ -4323,16 +4331,35 @@ impl<M: TextEngine> Core<M> {
         hint: Option<usize>,
     ) -> Option<usize> {
         let k = self.key(parent).ok()?;
+        if self.nodes[self.key(child).ok()? as usize].parent != k {
+            return None;
+        }
         let children = &self.nodes[k as usize].children;
         let id = |at: usize| children.get(at).map(|&c| self.nodes[c as usize].id);
         let at = match hint {
             Some(at) if id(at) == Some(child) => at,
-            _ => children
-                .iter()
-                .position(|&c| self.nodes[c as usize].id == child)?,
+            _ => {
+                let at = children
+                    .iter()
+                    .position(|&c| self.nodes[c as usize].id == child);
+                self.placing(at.map_or(children.len(), |at| at + 1));
+                at?
+            }
         };
         (id(at + 1) == next).then_some(at)
     }
+
+    /// `n` more siblings or overlays looked at to place a view
+    /// ([`Components::placing_work`]).
+    #[cfg(test)]
+    pub(super) fn placing(&self, n: usize) {
+        let work = &self.components.placing_work;
+        work.set(work.get() + n);
+    }
+
+    #[cfg(not(test))]
+    #[inline(always)]
+    pub(super) fn placing(&self, _n: usize) {}
 
     /// Slot node `node` as element `el` of `host`'s view: its styles, props
     /// and handlers (its children are the app's JSX). Its bound parts are

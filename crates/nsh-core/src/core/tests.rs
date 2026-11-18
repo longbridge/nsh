@@ -45027,6 +45027,199 @@ mod each_updates {
             }
         }
     }
+
+    thread_local! {
+        /// [`MountRows`] in a scroll view, which culls the rows it does
+        /// not show.
+        static SCROLLED: Cell<bool> = const { Cell::new(false) };
+        /// Each row of [`MountRows`] with a hint, as a document's links
+        /// have their addresses: an overlay each.
+        static HINTED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// `ROWS` rows of an `each` as `TextView` has a document's blocks: a
+    /// view each, keyed by position and kind, with a region in it; a text
+    /// before them and a view after them.
+    #[component]
+    fn MountRows() -> impl IntoElement {
+        let items = signal(
+            (0..ROWS.with(Cell::get))
+                .map(|i| (i, 0u32))
+                .collect::<Vec<_>>(),
+        );
+        let hinted = HINTED.with(Cell::get);
+        let rows = view()
+            .flex_col()
+            .child(text("before"))
+            .child(each(
+                items,
+                |item| (item.0, "paragraph".to_owned()),
+                move |item, _| {
+                    view()
+                        .child(dynamic(move || {
+                            let (at, n) = item.get();
+                            text(format!("row {at} {n}"))
+                        }))
+                        .child(hinted.then(|| {
+                            overlay()
+                                .hint(Duration::from_millis(500))
+                                .child(text("https://example.com"))
+                        }))
+                },
+            ))
+            .child(view().h(px(4.0)));
+        if SCROLLED.with(Cell::get) {
+            scroll().size_full().child(rows).into_element()
+        } else {
+            rows.into_element()
+        }
+    }
+
+    /// [`MountRows`] mounted with `rows` rows and, in a scroll view,
+    /// scrolled down 20 points a frame for `frames` frames: the core and
+    /// its scroll view.
+    fn rows_mounted(rows: usize, frames: u32) -> (Core<FakeEngine>, Option<NodeId>) {
+        ROWS.with(|r| r.set(rows));
+        let mut c = core();
+        c.mount_root(&Root::new::<MountRows>(|| ()));
+        let batch = c.commit();
+        let scroll = batch
+            .iter()
+            .flat_map(|b| &b.items)
+            .find_map(|item| match item {
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::Scroll,
+                } => Some(*id),
+                _ => None,
+            });
+        if let Some(id) = scroll {
+            for n in 1..=frames {
+                c.set_scroll_offset(id, point(px(0.0), px(20.0 * n as f32)), u32::MAX);
+                c.commit();
+            }
+        }
+        (c, scroll)
+    }
+
+    /// Rows of an `each` mounted at once, and made as they scroll into
+    /// sight, are placed among their siblings without a search of all of
+    /// them, or of all the overlays (a hint a row), for each: the siblings
+    /// and overlays looked at grow with the rows, not with their square.
+    #[test]
+    fn rows_mounted_at_once_are_placed_without_a_search_for_each() {
+        let mut grew = Vec::new();
+        for scrolled in [false, true] {
+            for hinted in [false, true] {
+                SCROLLED.with(|s| s.set(scrolled));
+                HINTED.with(|h| h.set(hinted));
+                let work = |rows| {
+                    let (c, _) = rows_mounted(rows, 20);
+                    c.components.placing_work.get()
+                };
+                let (few, many) = (work(400), work(1_600));
+                // Four times the rows: about four times the work (it was
+                // about sixteen times, with a search for each row).
+                if many > 5 * few {
+                    grew.push(format!(
+                        "scrolled {scrolled}, hinted {hinted}: {few} for 400 rows, {many} for 1,600"
+                    ));
+                }
+            }
+        }
+        SCROLLED.with(|s| s.set(false));
+        HINTED.with(|h| h.set(false));
+        assert!(grew.is_empty(), "{grew:#?}");
+    }
+
+    /// The rows end up in order, after the text before them and before the
+    /// view after them, mounted at once and made as they scroll into
+    /// sight.
+    #[test]
+    fn rows_mounted_at_once_keep_their_order() {
+        for scrolled in [false, true] {
+            SCROLLED.with(|s| s.set(scrolled));
+            let (c, _) = rows_mounted(300, 40);
+            // The column: the view of the text, the rows and the view.
+            let mut stack = vec![c.root];
+            let column = std::iter::from_fn(|| {
+                let key = stack.pop()?;
+                stack.extend(&c.nodes[key as usize].children);
+                Some(key)
+            })
+            .find(|&key| c.nodes[key as usize].children.len() == 302)
+            .expect("the column");
+            let children = &c.nodes[column as usize].children;
+            let mut expected = vec!["before".to_owned()];
+            expected.extend((0..300).map(|i| format!("row {i} 0")));
+            assert_eq!(
+                shown(&c, c.nodes[column as usize].id),
+                expected,
+                "scrolled {scrolled}"
+            );
+            assert!(c.nodes[children[301] as usize].text.is_empty());
+        }
+        SCROLLED.with(|s| s.set(false));
+    }
+
+    /// `cargo test --release -p nsh-core --lib bench_each_mount -- --ignored --nocapture`:
+    /// an `each` of N rows mounted at once, as `TextView` mounts a long
+    /// document's blocks, then, in a scroll view, scrolled down 20 points
+    /// a frame for 200 frames; the numbers are in `docs/dev/performance.md`.
+    #[test]
+    #[ignore]
+    fn bench_each_mount() {
+        println!(
+            "ms a first mount: the root's pass + the commit | mount items | µs a scrolled frame"
+        );
+        for (scrolled, hinted) in [(false, false), (true, false), (true, true)] {
+            SCROLLED.with(|s| s.set(scrolled));
+            HINTED.with(|h| h.set(hinted));
+            for rows in [1_000, 10_000, 50_000] {
+                ROWS.with(|r| r.set(rows));
+                let mut c = core();
+                let start = Instant::now();
+                c.mount_root(&Root::new::<MountRows>(|| ()));
+                let mid = Instant::now();
+                let batch = c.commit();
+                let (first, items) = (mid.elapsed(), batch.as_ref().map_or(0, |b| b.items.len()));
+                let scroll = batch
+                    .iter()
+                    .flat_map(|b| &b.items)
+                    .find_map(|item| match item {
+                        MountItem::Create {
+                            id,
+                            kind: ViewKind::Scroll,
+                        } => Some(*id),
+                        _ => None,
+                    });
+                let frame = scroll.map(|id| {
+                    let frames = 200;
+                    let start = Instant::now();
+                    for n in 1..=frames {
+                        c.set_scroll_offset(id, point(px(0.0), px(20.0 * n as f32)), u32::MAX);
+                        c.commit();
+                    }
+                    start.elapsed().as_secs_f64() * 1e6 / f64::from(frames)
+                });
+                let ms = |d: Duration| d.as_secs_f64() * 1e3;
+                println!(
+                    "{:<15} {rows:>6} rows | {:>8.1} + {:>8.1} = {:>8.1} | {items:>6} | {}",
+                    match (scrolled, hinted) {
+                        (false, _) => "plain",
+                        (true, false) => "scrolled",
+                        (true, true) => "scrolled, hints",
+                    },
+                    ms(mid - start),
+                    ms(first),
+                    ms(mid - start + first),
+                    frame.map_or("-".to_owned(), |us| format!("{us:.1}"))
+                );
+            }
+        }
+        SCROLLED.with(|s| s.set(false));
+        HINTED.with(|h| h.set(false));
+    }
 }
 
 /// The default `evaluate` timeout.
