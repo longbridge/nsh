@@ -16,7 +16,7 @@ use nsh_base::{
     text_view, tree,
 };
 use nsh_core::{
-    MountItem, NodeId, Size,
+    ApproxTextEngine, AttributedText, MountItem, NodeId, Size, TextEngine, TextLayout,
     element::Root,
     geometry::point,
     platform::{Environment, Idiom, Os},
@@ -24,6 +24,30 @@ use nsh_core::{
 };
 use nsh_engine::EngineConfig;
 use nsh_testing::{Headless, Screen};
+
+/// Fixed Cells for component layout tests, independent of the document's
+/// font size and line height, as the TUI's `CellTextEngine` measures them.
+/// Glyph shaping and word wrapping remain the approximate engine's.
+struct GridTextEngine;
+
+impl TextEngine for GridTextEngine {
+    type Prepared = <ApproxTextEngine as TextEngine>::Prepared;
+
+    fn prepare(&self, text: &AttributedText) -> Self::Prepared {
+        let mut prepared = ApproxTextEngine.prepare(text);
+        prepared.1 = px(COLUMN / 0.55);
+        prepared.6 = px(CELL);
+        prepared
+    }
+
+    fn measure(&self, prepared: &Self::Prepared, width: Option<Points>) -> Size<Points> {
+        ApproxTextEngine.measure(prepared, width)
+    }
+
+    fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout {
+        ApproxTextEngine.layout(prepared, size)
+    }
+}
 
 fn start<C: Component<Props = ()>>(idiom: Idiom) -> Headless {
     let viewport = Size::new(px(390.0), px(844.0));
@@ -37,7 +61,11 @@ fn start<C: Component<Props = ()>>(idiom: Idiom) -> Headless {
         },
         ..EngineConfig::new(Root::of::<C>())
     };
-    let mut app = Headless::start(config).unwrap();
+    let mut app = match idiom {
+        Idiom::Terminal => Headless::start_with_text_engine(config, || GridTextEngine),
+        _ => Headless::start(config),
+    }
+    .unwrap();
     app.first_render().unwrap();
     app
 }
@@ -406,18 +434,12 @@ fn text_bounds<C: Component<Props = ()>>() -> std::collections::HashMap<String, 
             window: viewport,
             os: Os::Linux,
             idiom: Idiom::Terminal,
-            // A terminal's Cells, so the core lays out on its grid as the
-            // TUI's does. The headless text engine's lines are 1.2 × the
-            // font size: the body's 18pt, a code block's 15.6, a level-3
-            // heading's 20.4 and the canvas font's 12, which components
-            // measure as a Cell, are each one row of 21pt (nearest), as a
-            // terminal's line is.
-            cell: Some(Size::new(px(8.0), px(21.0))),
+            cell: Some(Size::new(px(COLUMN), px(CELL))),
             ..Environment::default()
         },
         ..EngineConfig::new(Root::of::<C>())
     };
-    let mut app = Headless::start(config).unwrap();
+    let mut app = Headless::start_with_text_engine(config, || GridTextEngine).unwrap();
     type Seen = (
         std::collections::HashMap<NodeId, String>,
         std::collections::HashMap<NodeId, Bounds<Points>>,
