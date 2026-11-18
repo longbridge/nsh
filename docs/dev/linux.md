@@ -164,8 +164,8 @@ bubble back up. What NSH adds:
   are not child visible, and the views under the newest dialog cannot take the focus. A removed view takes the focus
   inside it away at once (`input::removed`), as a removed DOM element does, instead of GTK handing it to the next
   field. Alerts (`system.rs`) move it between their own buttons. Return and Space press the focused stop on
-  key-down, once per press: their auto-repeats are consumed until the release, even when the press moved the focus,
-  as on macOS.
+  key-down, once per press: their auto-repeats in the same window are consumed until the release, even when the
+  press moved the focus.
 
 `onKeyPress` reports what UIKit's does: the typed text (`"Enter"` for a line break), `"Backspace"` for a deletion (in
 an empty input too), and `"Escape"`, as on macOS. Pasted and undone text, and the deletion of a selection typed over,
