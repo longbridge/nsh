@@ -968,8 +968,15 @@ public class NshView extends FrameLayout {
         @Override public void onActivityDestroyed(Activity a) { states.remove(a); }
     }
 
-    private android.view.accessibility.AccessibilityManager accessibility() {
-        return (android.view.accessibility.AccessibilityManager) getContext().getSystemService(Context.ACCESSIBILITY_SERVICE);
+    private android.view.accessibility.AccessibilityManager accessibilityManager;
+
+    /** The accessibility manager, looked up once (`A11y.changed` asks it on every update). */
+    android.view.accessibility.AccessibilityManager accessibility() {
+        if (accessibilityManager == null) {
+            accessibilityManager = (android.view.accessibility.AccessibilityManager)
+                    getContext().getSystemService(Context.ACCESSIBILITY_SERVICE);
+        }
+        return accessibilityManager;
     }
 
     /** TalkBack turning on or off: `screenReaderEnabled()`. */

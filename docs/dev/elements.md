@@ -434,7 +434,18 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   element's own `accessibilityDescription`, so every platform reads it where it reads a description; the web also
   sets `aria-describedby` on the focused element. Views without a label read their texts. The props go as one `MountItem::ViewProps`, except
   a label changing alone on mounted props (one that follows app state: a count, a price), which goes as
-  `MountItem::AccessibilityLabel`. The `increment` / `decrement` actions make an element adjustable whatever its
+  `MountItem::AccessibilityLabel`. Android tells TalkBack when new props change what a mounted view's node says,
+  as its own widgets do (`A11y.changed`, the choice in `A11yChanges`): a new state description (mixed, expanded,
+  current, a value's text, invalid, with them the checked word) is a content change of that type, sent on every API
+  level (before 30 the description is the node's extras entry androidx reads); a checked or pressed change or a
+  gained selection of the view TalkBack just clicked (double tap), with the focus on it or an ancestor, is a click,
+  from which TalkBack reads the node's new state; a change of the focused view's numeric range is a state
+  description change on API 30+ and a selection before (at most one every 200 ms); anything else is a content
+  change that only refreshes the node (a change the app makes by itself to a plain checked or selected state, and a
+  tab selected without the focus, are silent, as there is nothing TalkBack reads for them). A first mount, an
+  unchanged update, a hidden element and a view not shown send nothing; a list cell recycled for another row may
+  send one, as its props change.
+  The `increment` / `decrement` actions make an element adjustable whatever its
   role: iOS adds the adjustable trait to the traits of its role (`native_view.rs` `traits`), so VoiceOver's swipe up /
   down performs them (an `image`, `Plot`'s role, stays an image), Android offers scroll forward / backward, Windows
   makes its range value writable.

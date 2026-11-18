@@ -1482,7 +1482,7 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         Some(Checked::Mixed) => flags |= 256 | 1024,
         None => {}
     }
-    // The current item's kind, in bits 11 to 13 (`A11y.java`
+    // The current item's kind, in bits 11 to 13 (`A11yChanges.java`
     // `CURRENT_DESCRIPTIONS`).
     flags |= match s.current {
         None => 0,
