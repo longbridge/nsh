@@ -24022,7 +24022,10 @@ mod views {
         let first = config(&c.commit().unwrap()).expect("a screen");
         assert!(first.header_shadow_visible);
         let shadow = SHADOW.with(Cell::get).expect("mounted");
-        shadow.set(false);
+        {
+            let _entered = c.components.runtime.enter();
+            shadow.set(false);
+        }
         let hidden = config(&c.commit().unwrap()).expect("updated");
         assert!(!hidden.header_shadow_visible);
     }
