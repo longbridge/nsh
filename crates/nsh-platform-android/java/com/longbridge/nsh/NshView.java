@@ -1417,4 +1417,3 @@ public class NshView extends FrameLayout {
         });
     }
 }
-

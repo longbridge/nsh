@@ -451,10 +451,10 @@ Things that were found the hard way. Read the section of the area you change bef
   unfocused view only hears it through `View.addOnUnhandledKeyEventListener` (API 28+, called by the decor view between
   the two, whatever has focus). A listener that takes the down captures the key: the window hands its up to that
   listener alone, before the views, so `NshView.onBackKey` passes it on to `KeyDispatch`. With the callback in effect,
-  Android 13 to 15 turn both into the callback before any view; Android 16 calls the callback for each, then still
-  sends the down, and the up cancelled, down the views, so `NshView` taking the key never doubles its callback. Going
-  back can remove the focused view before that up arrives: `KeyDispatch.backInvoked` reports the release when the
-  callback runs. A Pixel on Android 17 again sends neither.
+  Android 13 to 15 turn both into the callback before any view; Android 16 calls `onBackStarted` on the down and
+  `onBackInvoked` on the up, and still sends both on down the views, the up cancelled, so `NshView` taking the key
+  never doubles its callback. Going back can remove the focused view before that up arrives:
+  `KeyDispatch.backInvoked` reports the release when the callback runs. A Pixel on Android 17 again sends neither.
 - **Android 8 (API 26 and 27) lacks three things the runtime uses from API 28**, and gets each another way, checked with
   `Build.VERSION.SDK_INT` so Android 9 and later draw as before:
   - Weights: `Typeface.create(family, weight, italic)` is API 28. The default family takes the nearest of Roboto's
