@@ -230,7 +230,8 @@ impl<H: Host> Held<H> {
     }
 }
 
-/// The owner that was current before a run ([`Graph::enter_owner`]).
+/// The owner or listener that was current before a run
+/// ([`Graph::enter_owner`]), with its generation.
 #[derive(Clone, Copy, Debug)]
 pub struct SavedOwner {
     id: u32,
@@ -540,29 +541,40 @@ impl<H: Host> Graph<H> {
     /// back with [`Self::leave_owner`].
     pub fn enter_owner(&mut self, owner: u32) -> SavedOwner {
         let previous = std::mem::replace(&mut self.owner, owner);
+        self.save(previous)
+    }
+
+    /// Puts back the owner [`Self::enter_owner`] saved: [`DISPOSED`] if it
+    /// was disposed meanwhile (its slot may name another node now).
+    pub fn leave_owner(&mut self, saved: SavedOwner) {
+        self.owner = self.kept(saved, DISPOSED);
+    }
+
+    /// `id` with its generation, to tell after a run whether its slot still
+    /// holds that node ([`Self::kept`]).
+    fn save(&self, id: u32) -> SavedOwner {
         SavedOwner {
-            id: previous,
-            generation: if is_node(previous) {
-                self.nodes[previous as usize].generation
+            id,
+            generation: if is_node(id) {
+                self.nodes[id as usize].generation
             } else {
                 0
             },
         }
     }
 
-    /// Puts back the owner [`Self::enter_owner`] saved: [`DISPOSED`] if it
-    /// was disposed meanwhile (its slot may name another node now).
-    pub fn leave_owner(&mut self, saved: SavedOwner) {
-        self.owner = if is_node(saved.id) {
-            let n = &self.nodes[saved.id as usize];
-            if n.generation == saved.generation && !n.disposed {
-                saved.id
-            } else {
-                DISPOSED
-            }
-        } else {
+    /// The node `saved` names, or `gone` if it was disposed since it was
+    /// saved (its slot may hold another node now).
+    fn kept(&self, saved: SavedOwner, gone: u32) -> u32 {
+        if !is_node(saved.id) {
+            return saved.id;
+        }
+        let n = &self.nodes[saved.id as usize];
+        if n.generation == saved.generation && !n.disposed {
             saved.id
-        };
+        } else {
+            gone
+        }
     }
 
     /// The current listener (what reads track into).
@@ -573,6 +585,20 @@ impl<H: Host> Graph<H> {
     /// Sets the current listener; returns the previous one.
     pub fn set_listener(&mut self, listener: u32) -> u32 {
         std::mem::replace(&mut self.listener, listener)
+    }
+
+    /// Makes `listener` current for a run; returns the previous listener,
+    /// to put back with [`Self::leave_listener`].
+    fn enter_listener(&mut self, listener: u32) -> SavedOwner {
+        let previous = std::mem::replace(&mut self.listener, listener);
+        self.save(previous)
+    }
+
+    /// Puts back the listener [`Self::enter_listener`] saved: [`NONE`] if
+    /// it was disposed meanwhile. Its slot may hold another computation by
+    /// then, which the rest of the disposed one's run would track into.
+    fn leave_listener(&mut self, saved: SavedOwner) {
+        self.listener = self.kept(saved, NONE);
     }
 
     /// Whether a live owner owns what runs now.
@@ -653,9 +679,10 @@ impl<H: Host> Graph<H> {
             return;
         }
         // Only a live computation takes sources: it unlinks them before its
-        // slot is freed (when it runs again or is disposed). A computation
-        // disposed in a nested run is the listener again once that run
-        // returns, and its slot may hold a signal by then.
+        // slot is freed (when it runs again or is disposed). One disposed
+        // during its own run stays the listener until the run returns; one
+        // disposed in a nested run is not put back (`leave_listener`), as
+        // its slot may hold another node by then.
         let n = &self.nodes[l as usize];
         if n.disposed || !n.is_computation() {
             return;
@@ -978,12 +1005,12 @@ fn run_computation<H: Host>(h: H, id: u32, time: u64) {
     };
     let prev = h.dup(&n.value);
     let generation = n.generation;
-    let listener = std::mem::replace(&mut graph.listener, id);
+    let listener = graph.enter_listener(id);
     let owner = graph.enter_owner(id);
     let result = h.call(&func, prev);
     h.free_func(func);
     let graph = g(h);
-    graph.listener = listener;
+    graph.leave_listener(listener);
     graph.leave_owner(owner);
     // The run let the node go (its owner was disposed: a list letting a
     // cell's content go) and its slot was freed, maybe made another node
@@ -1115,14 +1142,26 @@ pub fn read<H: Host>(h: H, id: u32) -> H::Value {
 /// Solid's `cleanNode`: unlinks the node's sources, disposes what it owns
 /// and runs its cleanups.
 fn clean_node<H: Host>(h: H, id: u32) {
+    let generation = g(h).nodes[id as usize].generation;
     g(h).unlink_sources(id);
-    while let Some(c) = g(h).nodes[id as usize].owned.pop() {
+    // What runs here may let the node go (a cleanup disposing its owner),
+    // and its slot may hold another node by the next step: that node's
+    // children and cleanups are not this one's.
+    while !g(h).left(id, generation) {
+        let Some(c) = g(h).nodes[id as usize].owned.pop() else {
+            break;
+        };
         dispose(h, c);
     }
-    while let Some(f) = g(h).nodes[id as usize].cleanups.pop() {
+    while !g(h).left(id, generation) {
+        let Some(f) = g(h).nodes[id as usize].cleanups.pop() else {
+            break;
+        };
         h.run_cleanup(f);
     }
-    g(h).nodes[id as usize].state = CLEAN;
+    if !g(h).left(id, generation) {
+        g(h).nodes[id as usize].state = CLEAN;
+    }
 }
 
 /// Disposes node `id`: cleans it, unlinks it and frees it (a node named by
@@ -1206,17 +1245,23 @@ pub fn effect<H: Host>(h: H, kind: Kind, func: H::Func, value: H::Value) -> u32 
 
 /// Runs `f` with no listener (untracked).
 pub fn untracked<H: Host, R>(h: H, f: impl FnOnce() -> R) -> R {
-    let listener = swap_listener(h, NONE);
+    let listener = enter_listener(h, NONE);
     let r = f();
-    swap_listener(h, listener);
+    leave_listener(h, listener);
     r
 }
 
 /// Makes `listener` the graph's, returning the previous one (out of line
 /// for the generic functions around closures).
 #[cfg_attr(target_arch = "wasm32", inline(never))]
-fn swap_listener<H: Host>(h: H, listener: u32) -> u32 {
-    g(h).set_listener(listener)
+fn enter_listener<H: Host>(h: H, listener: u32) -> SavedOwner {
+    g(h).enter_listener(listener)
+}
+
+/// Puts back the listener [`enter_listener`] saved (out of line as it is).
+#[cfg_attr(target_arch = "wasm32", inline(never))]
+fn leave_listener<H: Host>(h: H, saved: SavedOwner) {
+    g(h).leave_listener(saved)
 }
 
 /// Runs `f` as one batch: its writes apply together at the end.
@@ -1236,19 +1281,22 @@ pub fn with_owner<H: Host, R>(h: H, owner: u32, f: impl FnOnce() -> R) -> R {
 /// The start of [`with_owner`]: `owner` current, no listener; what was
 /// before, for [`leave_owner_untracked`].
 #[cfg_attr(target_arch = "wasm32", inline(never))]
-fn enter_owner_untracked<H: Host>(h: H, owner: u32) -> (SavedOwner, u32) {
+fn enter_owner_untracked<H: Host>(h: H, owner: u32) -> (SavedOwner, SavedOwner) {
     let graph = g(h);
     let previous_owner = graph.enter_owner(owner);
-    let previous_listener = graph.set_listener(NONE);
+    let previous_listener = graph.enter_listener(NONE);
     (previous_owner, previous_listener)
 }
 
 /// The end of [`with_owner`]: the owner and listener before it back.
 #[cfg_attr(target_arch = "wasm32", inline(never))]
-fn leave_owner_untracked<H: Host>(h: H, (previous_owner, previous_listener): (SavedOwner, u32)) {
+fn leave_owner_untracked<H: Host>(
+    h: H,
+    (previous_owner, previous_listener): (SavedOwner, SavedOwner),
+) {
     let graph = g(h);
     graph.leave_owner(previous_owner);
-    graph.listener = previous_listener;
+    graph.leave_listener(previous_listener);
 }
 
 /// Runs `f` in a new root owner under the current one (context passes
