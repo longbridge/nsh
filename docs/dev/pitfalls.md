@@ -381,6 +381,14 @@ Things that were found the hard way. Read the section of the area you change bef
   gallery's index on a Pixel 10 Pro). `StackBox` keeps drawing the screen a pop reveals at alpha 0 while it is
   `INVISIBLE` (which still keeps it out of touches, accessibility and focus), and `Decor.setVisible` does not
   invalidate (#519).
+- **Android, focusing a view that is not shown**: `requestFocus` fails on a view that is not shown, and a page's
+  `focus()` (from a timer of the render, say) can arrive in the batch that pushes it, the engine merging a wake-up's
+  commits into one batch, whose commands run before `finishNavigation` places the page (a transition shader also
+  keeps it `INVISIBLE` while it runs). `Mounter` keeps such a request (`PendingFocus`) and tries it again at the
+  batch's end and on each frame until the view is shown, or gives it up after 3 s (#2323). The frames come from a
+  `Choreographer` callback, posted only while a request waits, not from the host's `ViewTreeObserver`: a dialog's
+  content shows in the dialog's own window, whose tree the host's observer never hears from, while `Choreographer`
+  frames reach every window of the thread.
 - **Android, opacity animations and outer box shadows**: at alpha < 1 with overlapping rendering (the default) HWUI composites the view into an offscreen buffer clipped to its bounds, cutting the outer box shadows the `Decor` draws outside them: the shadow vanishes for the whole animation and pops back when it ends. Decor-bearing views therefore report `hasOverlappingRendering() == false` while they carry outer shadows (the alpha then applies per draw op and the shadow fades with the content), at the cost of overlapping content inside such a view blending imprecisely while it fades.
 - **Android, JNI event maps intern their keys from a fixed list** (`Java_com_longbridge_nsh_Native_eventMap`): a new payload key must be
   added there or it is dropped silently.

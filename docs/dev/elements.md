@@ -308,8 +308,13 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `focusVisible` and treats it as keyboard focus whatever its heuristics say after a click (`focusPressable`), the
   headless driver moves its focus (`focus_calls`); on a view that is not a stop it does nothing. Linux grabs the
   stop's widget (`key_focus::focus`), Android requests the native focus on a managed stop
-  (`Mounter.focusManaged`, focusable in touch mode for that session). Windows and GPUI leave `focus()` on views to
-  them; iOS focuses inputs only.
+  (`Mounter.focusManaged`, focusable in touch mode for that session), and keeps a request for a view not shown yet (a
+  page in the batch that pushes it or under its transition shader, a dialog's content before its window shows) until
+  it is, giving it up if the view is still not shown 3 s later: the latest request wins; a `blur()` of it, of a view
+  holding it, or `Keyboard.dismiss()`, any focus taken meanwhile (in hosted native content or the embedding app's
+  views too) or the view's removal end it; a request dropped without effect logs a warning (`PendingFocus`; an input
+  waits for its field on its own, `InputBox.focus`, and reports the wait, so the same rules end it). Windows and GPUI
+  leave `focus()` on views to them; iOS focuses inputs only.
 - **`onPanEnd` / `onPanStart`** carry `value` (`{ x?, y? }`, the axes `pan` binds): the bound pan values at that moment (a drag may grab a value mid
   animation), for snapping.
 - **Imperative calls**: nodes have `focus()`, `blur()` (inputs, and views that take presses where they are stops of

@@ -825,6 +825,9 @@ final class InputBox extends FrameLayout implements Node {
         };
         getViewTreeObserver().addOnGlobalLayoutListener(pendingFocus);
         getViewTreeObserver().addOnWindowFocusChangeListener(pendingWindowFocus);
+        // Whoever asked (`ref.focus()` or `autoFocus`), this is now
+        // the latest request: a newer one or a blur ends the wait.
+        if (mounter != null) mounter.inputFocusWaits(this);
     }
 
     /** {@link #focus()} waiting for the field to be shown in a focused window. */
@@ -833,11 +836,22 @@ final class InputBox extends FrameLayout implements Node {
         if (focused && pendingFocus != null) pendingFocus.onGlobalLayout();
     };
 
-    private void cancelPendingFocus() {
+    /** Whether {@link #focus()} still waits for the field to be shown in a focused window. */
+    boolean focusPending() {
+        return pendingFocus != null;
+    }
+
+    /**
+     * Ends a waiting {@link #focus()}: the field is shown (it is focused
+     * next), a newer focus request or a blur took over, or it left its
+     * window. The mounter forgets the request with it.
+     */
+    void cancelPendingFocus() {
         if (pendingFocus == null) return;
         getViewTreeObserver().removeOnGlobalLayoutListener(pendingFocus);
         getViewTreeObserver().removeOnWindowFocusChangeListener(pendingWindowFocus);
         pendingFocus = null;
+        if (mounter != null) mounter.inputFocusWaitEnded(this);
     }
 
     @Override
