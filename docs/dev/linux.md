@@ -179,8 +179,9 @@ An app-rendered view can observe the source's logical key, its physical code, re
 `KeyCapture` rule so GTK can consume a key without waiting for the engine. Omitting the rule on a retained view
 restores `KeyCapture::None`.
 
-The logical key is GDK's actual keyval, so Shift's case (`"K"`) and a non-US layout's character are reported as the
-source gives them, and common named keys use the DOM's spelling (`"Enter"`, `"ArrowLeft"`). `KeyEvent::code` is the
+The logical key comes from GDK's keyval, so Shift's case (`"K"`) and a non-US layout's character are reported as the
+source gives them. Enter, arrows and common media, volume and browser keys use UI Events spellings
+(`"Enter"`, `"ArrowLeft"`, `"MediaPlayPause"`, `"AudioVolumeUp"`, `"BrowserBack"`). `KeyEvent::code` is the
 DOM `KeyboardEvent.code` of GDK's hardware keycode: the key's physical place by the XKB keycode (the X11 keycode,
 the evdev code plus 8 on Wayland), so the A key is `"KeyA"` on an AZERTY or Cyrillic layout even though it types `q`
 or `ф` there, keypad keys keep `"Numpad1"` / `"NumpadEnter"`, and the sides are `"ShiftLeft"` / `"ShiftRight"` and
