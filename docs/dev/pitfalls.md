@@ -381,6 +381,14 @@ Things that were found the hard way. Read the section of the area you change bef
   gallery's index on a Pixel 10 Pro). `StackBox` keeps drawing the screen a pop reveals at alpha 0 while it is
   `INVISIBLE` (which still keeps it out of touches, accessibility and focus), and `Decor.setVisible` does not
   invalidate (#519).
+- **Android, focusing a view that is not shown**: `requestFocus` fails on a view that is not shown, and a page's
+  `focus()` (from a timer of the render, say) can arrive in the batch that pushes it, the engine merging a wake-up's
+  commits into one batch, whose commands run before `finishNavigation` places the page (a transition shader also
+  keeps it `INVISIBLE` while it runs). `Mounter` keeps such a request (`PendingFocus`) and tries it again at the
+  batch's end and on each frame until the view is shown, or gives it up after 3 s (#2323). The frames come from a
+  `Choreographer` callback, posted only while a request waits, not from the host's `ViewTreeObserver`: a dialog's
+  content shows in the dialog's own window, whose tree the host's observer never hears from, while `Choreographer`
+  frames reach every window of the thread.
 - **Android, opacity animations and outer box shadows**: at alpha < 1 with overlapping rendering (the default) HWUI composites the view into an offscreen buffer clipped to its bounds, cutting the outer box shadows the `Decor` draws outside them: the shadow vanishes for the whole animation and pops back when it ends. Decor-bearing views therefore report `hasOverlappingRendering() == false` while they carry outer shadows (the alpha then applies per draw op and the shadow fades with the content), at the cost of overlapping content inside such a view blending imprecisely while it fades.
 - **Android, JNI event maps intern their keys from a fixed list** (`Java_com_longbridge_nsh_Native_eventMap`): a new payload key must be
   added there or it is dropped silently.
@@ -449,8 +457,16 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Android, the back key without `OnBackInvokedCallback`** (below 13, or `enableOnBackInvokedCallback` off): the window
   sends `KEYCODE_BACK` down the focus path, then the activity's `onKeyDown` / `onKeyUp` take it (`onBackPressed`), so an
   unfocused view only hears it through `View.addOnUnhandledKeyEventListener` (API 28+, called by the decor view between
-  the two, whatever has focus). With the callback in effect the window turns the key into the callback before any view,
-  so `NshView` taking the key never doubles its callback (seen on Android 16, both settings).
+  the two, whatever has focus). A listener that takes the down gets the press's repeats and its release directly, before
+  any view (`ViewRootImpl`'s `UnhandledKeyManager`), so the focus path never sees them: `NshView` hands them to
+  `KeyDispatch` for the raw `onKeyUp`.
+- **Android, the back key with `OnBackInvokedCallback`** (13 and later, the packaged manifest's default): the window turns
+  the release into `onBackInvoked` / `onBackCancelled` before any view (`ViewRootImpl`'s `doOnBackKeyEvent`). Android 13
+  to 15 send the views neither the down nor the up; from Android 15 QPR1 the window sends the down on and, after the
+  callback, the up marked cancelled; Android 16 QPR2's `predictiveBackStopKeycodeBackForwarding` flag keeps both from the
+  views again. `KeyDispatch` reports the release at the callback, from the down it saw, and not again for that key-up
+  (`BackRelease`); `NshView` taking the key never doubles its callback, as the cancelled up does not go back (seen on an
+  Android 16 emulator, both settings; the version boundaries are AOSP's source).
 - **Android 8 (API 26 and 27) lacks three things the runtime uses from API 28**, and gets each another way, checked with
   `Build.VERSION.SDK_INT` so Android 9 and later draw as before:
   - Weights: `Typeface.create(family, weight, italic)` is API 28. The default family takes the nearest of Roboto's
@@ -889,4 +905,5 @@ Things that were found the hard way. Read the section of the area you change bef
   emulators) intercepts taps on inputs — turn it off with `adb shell settings put secure stylus_handwriting_enabled 0`.
 
 - **Windows RichEdit**: never set `TXTBIT_ADVANCEDINPUT` on a windowless RichEdit host; msftedit aborts (0x40000015) on focus. Enable TSF with `EM_SETEDITSTYLE SES_USECTF` instead.
+- **Windows RichEdit draws by GDI's DPI**: `TxDrawD2D` turns its client pixels into the target's units with the window DC's DPI (`richedit::dpi`, the system's DPI in a per-monitor aware process), not with the target's own DPI. On a monitor of another scale than the system's the two differ, and the text was drawn scaled from the target's origin, out of the field (typed text invisible, caret and placeholder in place). `InputState::record` scales the recording by `richedit::target_scale`.
 - **Windows RichEdit invalidates while it draws**: `TxDrawD2D` and the client-rectangle updates around it call `TxInvalidateRect` inside the window's `WM_PAINT`; a paint asked for there never comes back as another `WM_PAINT`, which left the surface waiting forever (typed text not shown until something else repainted). The field ignores what RichEdit invalidates while it is drawn (`Editor::drawing`), and `Surface::paint` asks again, once the frame is done, for what was requested during it.

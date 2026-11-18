@@ -1,5 +1,6 @@
 package com.longbridge.nsh;
 
+import android.os.SystemClock;
 import android.util.SparseArray;
 import android.view.KeyEvent;
 import android.view.View;
@@ -23,6 +24,13 @@ import android.view.View;
  * {@code defaultPrevented} decision; observation and consumption are
  * separate.
  *
+ * <p>Back's release may reach the window another way than a key-up down the
+ * focus path ({@link BackRelease}): {@code NshView} hands it here
+ * ({@link #backKey}, {@link #releaseBack}, {@link #cancelBack}) and it is
+ * reported once, before the press goes back: as the listener's real key-up,
+ * or, from the back callbacks, which bring none, as a key-up made from the
+ * press's down.
+ *
  * <p>Tab and Shift+Tab move between the managed stops and inputs in tree
  * order. At the first or last stop they yield to Android's own focus and
  * default handling instead of wrapping, so an app never traps Tab.
@@ -44,6 +52,10 @@ final class KeyDispatch {
     private final SparseArray<View> nativeDown = new SparseArray<>();
     /** A native press already cancelled while its key stayed held: its real up is cancelled too. */
     private final SparseArray<View> nativeCancelled = new SparseArray<>();
+    /** Back's press, whose release may come another way than a key-up here. */
+    private final BackRelease back = new BackRelease();
+    /** A copy of Back's down (Android reuses the events it dispatches), for its release. */
+    private KeyEvent backDown;
 
     KeyDispatch(Mounter mounter, View root, int fallback) {
         this.mounter = mounter;
@@ -59,6 +71,10 @@ final class KeyDispatch {
                 // A fresh press: any lost release state of this code is stale.
                 nativeDown.remove(e.getKeyCode());
                 nativeCancelled.remove(e.getKeyCode());
+                if (e.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+                    back.press(e.getDownTime());
+                    backDown = new KeyEvent(e);
+                }
             }
             if (keyEvent(e)) {
                 // A repeat or a re-down consumed the key after native
@@ -84,27 +100,89 @@ final class KeyDispatch {
             return false;
         }
         if (action == KeyEvent.ACTION_UP) {
-            boolean consumed = keyEvent(e);
-            View cancelled = nativeCancelled.get(e.getKeyCode());
-            if (cancelled != null) {
-                nativeCancelled.remove(e.getKeyCode());
-                cancelNative(cancelled, e);
-                return true;
+            // Back's release may have been reported another way already:
+            // with the back callback in effect, Android 15 QPR1 to 16 may
+            // still send its key-up, marked cancelled, after `onBackInvoked`
+            // or `onBackCancelled`, here or to the unhandled-key listener
+            // when that took the down (`backKey`). It is not a second
+            // release.
+            if (e.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+                boolean report = back.up(e.getDownTime());
+                if (!back.held()) backDown = null;
+                if (!report) return false;
             }
-            boolean moved = false;
-            if (tabMoved && e.getKeyCode() == KeyEvent.KEYCODE_TAB) {
-                tabMoved = false;
-                moved = true;
-            }
-            boolean result = consumed || moved;
-            View nativeView = nativeDown.get(e.getKeyCode());
-            if (nativeView != null) {
-                nativeDown.remove(e.getKeyCode());
-                if (result || nativeView != focus()) cancelNative(nativeView, e);
-            }
-            return result;
+            return release(e);
         }
         return false;
+    }
+
+    /** A key-up, real or Back's made from its down: reported and its native press settled. */
+    private boolean release(KeyEvent e) {
+        boolean consumed = keyEvent(e);
+        View cancelled = nativeCancelled.get(e.getKeyCode());
+        if (cancelled != null) {
+            nativeCancelled.remove(e.getKeyCode());
+            cancelNative(cancelled, e);
+            return true;
+        }
+        boolean moved = false;
+        if (tabMoved && e.getKeyCode() == KeyEvent.KEYCODE_TAB) {
+            tabMoved = false;
+            moved = true;
+        }
+        boolean result = consumed || moved;
+        View nativeView = nativeDown.get(e.getKeyCode());
+        if (nativeView != null) {
+            nativeDown.remove(e.getKeyCode());
+            if (result || nativeView != focus()) cancelNative(nativeView, e);
+        }
+        return result;
+    }
+
+    /**
+     * A Back event the unhandled-key listener got instead of the views: once
+     * it took the press's down, the window hands it the repeats and the
+     * release directly. A repeat is reported as any key's, the release (or
+     * its cancel) once, as the real key-up, with the modifiers held then.
+     */
+    void backKey(KeyEvent e) {
+        if (e.getKeyCode() != KeyEvent.KEYCODE_BACK) return;
+        if (e.getAction() == KeyEvent.ACTION_DOWN) {
+            if (e.getRepeatCount() > 0 && back.held()) dispatchKeyEvent(e);
+        } else if (e.getAction() == KeyEvent.ACTION_UP) {
+            if (!back.take()) return;
+            backDown = null;
+            if (mounter.handle() != 0) release(e);
+        }
+    }
+
+    /**
+     * Back went up at {@code at} (uptime ms) and the press goes back
+     * ({@code onBackInvoked}, which takes the place of the key-up): its
+     * release is reported, once, before the app hears the press.
+     */
+    void releaseBack(long at) {
+        endBack(at, false);
+    }
+
+    /** Back's press was cancelled ({@code onBackCancelled}): forgotten as a cancelled key-up, once. */
+    void cancelBack() {
+        endBack(SystemClock.uptimeMillis(), true);
+    }
+
+    /**
+     * The callbacks bring no key-up: Back's release is made from its down
+     * (its modifiers the down's), at {@code at}.
+     */
+    private void endBack(long at, boolean cancelled) {
+        if (!back.take()) return;
+        KeyEvent down = backDown;
+        backDown = null;
+        if (down == null || mounter.handle() == 0) return;
+        int flags = down.getFlags() | (cancelled ? KeyEvent.FLAG_CANCELED : 0);
+        release(new KeyEvent(down.getDownTime(), Math.max(at, down.getDownTime()), KeyEvent.ACTION_UP,
+                KeyEvent.KEYCODE_BACK, 0, down.getMetaState(), down.getDeviceId(),
+                down.getScanCode(), flags, down.getSource()));
     }
 
     boolean dispatchKeyShortcutEvent(KeyEvent e) {
@@ -121,6 +199,8 @@ final class KeyDispatch {
         tabMoved = false;
         nativeDown.clear();
         nativeCancelled.clear();
+        back.reset();
+        backDown = null;
     }
 
     private View focus() {

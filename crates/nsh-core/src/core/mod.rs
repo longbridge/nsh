@@ -6526,6 +6526,7 @@ impl<M: TextEngine> Core<M> {
             Some(b) => p
                 .children
                 .iter()
+                .inspect(|_| self.placing(1))
                 .position(|&c| c == b)
                 .expect("anchor is a child"),
             None => p.children.len(),
@@ -6971,6 +6972,7 @@ impl<M: TextEngine> Core<M> {
         let pos = self.nodes[parent as usize]
             .children
             .iter()
+            .inspect(|_| self.placing(1))
             .position(|&c| c == child)?;
         self.native_before_at(parent, child, pos)
     }
@@ -6982,6 +6984,7 @@ impl<M: TextEngine> Core<M> {
         let z = self.nodes[child as usize].stack_rank();
         if !self.nodes[parent as usize].ranked_children && z == (0, false) {
             let next = children[pos + 1..].iter().find_map(|&c| {
+                self.placing(1);
                 let n = &self.nodes[c as usize];
                 (n.created && n.layout.is_some() && !n.is_overlay()).then_some(n.id)
             });
@@ -6991,6 +6994,7 @@ impl<M: TextEngine> Core<M> {
                 None => None,
             };
         }
+        self.placing(children.len());
         let mut best: Option<((i32, bool), usize, NodeId)> = None;
         for (i, &c) in children.iter().enumerate() {
             let n = &self.nodes[c as usize];

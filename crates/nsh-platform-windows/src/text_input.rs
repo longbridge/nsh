@@ -760,10 +760,20 @@ impl InputState {
                 dc.SetTarget(&list);
                 dc.SetDpi(96.0 * s, 96.0 * s);
                 dc.BeginDraw();
-                // RichEdit maps its client rectangle through the target's
-                // DPI and draws in DIPs: only the origin comes back to the
-                // view's points (the scale is the DPI's already).
-                dc.SetTransform(&Matrix3x2::translation(-ox as f32 / s, -oy as f32 / s));
+                // RichEdit draws its client pixels in units of GDI's DPI,
+                // not the target's: scaled to the target's (nothing on a
+                // monitor at the system's scale), then the origin comes
+                // back to the view's points.
+                let k = Surface::by_key(self.surface)
+                    .map_or(1.0, |surface| richedit::target_scale(surface.hwnd(), s));
+                dc.SetTransform(&Matrix3x2 {
+                    M11: k,
+                    M12: 0.0,
+                    M21: 0.0,
+                    M22: k,
+                    M31: -ox as f32 / s,
+                    M32: -oy as f32 / s,
+                });
                 let drawn = e.draw(dc.as_raw(), bounds);
                 let ended = dc.EndDraw(None, None);
                 dc.SetTarget(None);

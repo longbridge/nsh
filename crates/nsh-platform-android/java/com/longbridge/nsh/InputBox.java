@@ -66,6 +66,8 @@ final class InputBox extends FrameLayout implements Node {
     boolean pasteInserts = true;
     /** Whether the EditText shows a vertical scroll bar of its own by default. */
     private final boolean defaultVerticalBar;
+    /** Platform hint colors before any explicit `placeholderTextColor` override. */
+    private final android.content.res.ColorStateList defaultHintColors;
     /**
      * A built-in bar replaces the scroll indicator (`InputConfig::replaced`):
      * how far the text scrolled is reported to the engine.
@@ -192,6 +194,7 @@ final class InputBox extends FrameLayout implements Node {
         if (Build.VERSION.SDK_INT >= 28) edit.setFallbackLineSpacing(false);
         if (Build.VERSION.SDK_INT >= 35) edit.setLocalePreferredLineHeightForMinimumUsed(false);
         defaultVerticalBar = edit.isVerticalScrollBarEnabled();
+        defaultHintColors = edit.getHintTextColors();
         edit.addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
@@ -306,17 +309,19 @@ final class InputBox extends FrameLayout implements Node {
                    boolean secure, int keyboard, int returnKey, int capitalize, boolean autoCorrect,
                    boolean multiline, int maxLength, boolean editable, boolean autoFocus,
                    boolean hasSelectionColor, int selectionColor, boolean hasCaretColor, int caretColor,
-                   int submit) {
+                   int submit, boolean rtl, int fontVariant) {
         boolean restart = this.submit != submit && multiline && configured;
         this.multiline = multiline;
         this.submit = submit;
         edit.setTextSize(TypedValue.COMPLEX_UNIT_PX, fontSizeDp * mounter.density);
         edit.setTextColor(color);
-        if (letterSpacingDp != 0) edit.setLetterSpacing(letterSpacingDp / fontSizeDp);
-        int horizontal = align == 1 ? Gravity.CENTER_HORIZONTAL : align == 2 ? Gravity.END : Gravity.START;
+        edit.setLetterSpacing(TextLayouts.letterSpacing(letterSpacingDp, fontSizeDp));
+        edit.setFontFeatureSettings(TextLayouts.features(fontVariant));
+        int horizontal = TextLayouts.horizontalGravity(align, rtl);
         edit.setGravity(horizontal | (multiline ? Gravity.TOP : Gravity.CENTER_VERTICAL));
         edit.setHint(placeholder);
         if (hasPlaceholderColor) edit.setHintTextColor(placeholderColor);
+        else if (defaultHintColors != null) edit.setHintTextColor(defaultHintColors);
         int type;
         switch (keyboard) {
             case 1: type = InputType.TYPE_CLASS_NUMBER; break;
@@ -825,6 +830,9 @@ final class InputBox extends FrameLayout implements Node {
         };
         getViewTreeObserver().addOnGlobalLayoutListener(pendingFocus);
         getViewTreeObserver().addOnWindowFocusChangeListener(pendingWindowFocus);
+        // Whoever asked (`ref.focus()` or `autoFocus`), this is now
+        // the latest request: a newer one or a blur ends the wait.
+        if (mounter != null) mounter.inputFocusWaits(this);
     }
 
     /** {@link #focus()} waiting for the field to be shown in a focused window. */
@@ -833,11 +841,22 @@ final class InputBox extends FrameLayout implements Node {
         if (focused && pendingFocus != null) pendingFocus.onGlobalLayout();
     };
 
-    private void cancelPendingFocus() {
+    /** Whether {@link #focus()} still waits for the field to be shown in a focused window. */
+    boolean focusPending() {
+        return pendingFocus != null;
+    }
+
+    /**
+     * Ends a waiting {@link #focus()}: the field is shown (it is focused
+     * next), a newer focus request or a blur took over, or it left its
+     * window. The mounter forgets the request with it.
+     */
+    void cancelPendingFocus() {
         if (pendingFocus == null) return;
         getViewTreeObserver().removeOnGlobalLayoutListener(pendingFocus);
         getViewTreeObserver().removeOnWindowFocusChangeListener(pendingWindowFocus);
         pendingFocus = null;
+        if (mounter != null) mounter.inputFocusWaitEnded(this);
     }
 
     @Override

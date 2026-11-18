@@ -389,10 +389,17 @@ impl<M: TextEngine> Core<M> {
     /// The first overlay shown in root view `parent`: the native sibling
     /// its own children go below.
     pub(super) fn first_overlay_in(&self, parent: Key) -> Option<NodeId> {
+        // Only the root view and a modal show overlays (`overlay_host`):
+        // the views made in any other are not looked up among all the
+        // overlays, which are as many as a document's links (their hints).
+        if parent != self.root && self.nodes[parent as usize].kind != Kind::Modal {
+            return None;
+        }
         let id = self.nodes[parent as usize].id;
-        self.overlays
-            .iter()
-            .find_map(|&k| (self.overlay(k)?.host == Some(id)).then(|| self.nodes[k as usize].id))
+        self.overlays.iter().find_map(|&k| {
+            self.placing(1);
+            (self.overlay(k)?.host == Some(id)).then(|| self.nodes[k as usize].id)
+        })
     }
 
     /// The root view overlay `key` is shown in, or `None` while it is not

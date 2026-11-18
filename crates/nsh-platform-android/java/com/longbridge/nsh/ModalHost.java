@@ -95,6 +95,11 @@ final class ModalHost {
         container.requestFocus();
     }
 
+    /** Whether `v` is a dialog's root, which holds its window's focus while no node does ({@link #focusRoot}). */
+    static boolean isRoot(View v) {
+        return v instanceof Container;
+    }
+
     void show() {
         if (dialog != null && !closing) return;
         // A dismissal through the shader still running ends first: its
