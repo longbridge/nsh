@@ -148,13 +148,14 @@ describe.skipIf(!!missing)('Storage in the browser', () => {
     expect(result.reset.text).toContain('Keys: none');
   }, 60_000);
 
-  test('without localStorage the app keeps its entries in memory', async () => {
+  test('when the browser denies localStorage, the app reports the refused write', async () => {
     // An opaque origin: localStorage throws. The player's own requests
     // then come from origin "null", hence the CORS header.
     using server = serve({ 'content-security-policy': 'sandbox allow-scripts', 'access-control-allow-origin': '*' });
     const url = `http://127.0.0.1:${server.port}/play/index.html#mod-storage`;
-    expect(counter(await dumpDom(url, profile('blocked')))).toBe('Opened 1 time');
-    expect(counter(await dumpDom(url, profile('blocked')))).toBe('Opened 1 time');
+    const dom = await dumpDom(url, profile('blocked'));
+    expect(dom).toContain('Could not save the counter');
+    expect(dom).toContain('Keys: none');
   }, 60_000);
 });
 

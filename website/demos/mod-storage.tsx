@@ -7,6 +7,7 @@ import { button, buttonText, sectionSurface, ui, wide } from "./palette";
 function App() {
   const opened = signal<number | null>(null);
   const keys = signal<string[]>([]);
+  const saveFailed = signal(false);
 
   const start = async () => {
     const count = Number((await Storage.getItem("opened")) ?? "0") + 1;
@@ -20,19 +21,26 @@ function App() {
     opened.set(0);
     keys.set(await Storage.keys());
   };
-  start();
+  start().catch(async () => {
+    keys.set(await Storage.keys());
+    saveFailed.set(true);
+  });
 
   return (
     <View style={{ flex: 1, backgroundColor: ui().page, padding: wide() ? 20 : 16, paddingTop: 24, gap: 12, alignItems: wide() ? "flex-start" : "stretch" }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>Storage</Text>
       <View style={{ ...sectionSurface(), padding: 16, gap: 6, width: wide() ? 440 : undefined }}>
         <Text style={{ fontSize: 28, fontWeight: "700", color: ui().text }}>
-          {opened() === null ? "Reading…" : `Opened ${opened()} ${opened() === 1 ? "time" : "times"}`}
+          {saveFailed()
+            ? "Could not save the counter"
+            : opened() === null ? "Reading…" : `Opened ${opened()} ${opened() === 1 ? "time" : "times"}`}
         </Text>
-        <Text style={{ color: ui().muted }}>Reload the page: the count is still there.</Text>
+        <Text style={{ color: ui().muted }}>
+          {saveFailed() ? "Check your browser’s storage settings." : "Reload the page: the count is still there."}
+        </Text>
       </View>
       <Text style={{ color: ui().muted }}>{`Keys: ${keys().length ? keys().join(", ") : "none"}`}</Text>
-      <Button onPress={reset} {...button()}>
+      <Button onPress={reset} disabled={saveFailed()} {...button()}>
         <Text style={buttonText()}>Reset</Text>
       </Button>
     </View>
