@@ -4,7 +4,7 @@
 // the tests open go to its bottom left corner (or where the platform puts
 // them: GTK centers a dialog or a panel on its parent), so they never cover
 // what a test presses on a real platform.
-import { mount, signal, Text, View } from "nsh";
+import { mount, platform, signal, Text, View } from "nsh";
 import { currentWindow, focusedWindow, Window, type WindowOptions, type WindowRef, type WindowState, windows } from "nsh/desktop";
 
 const round = (n: number) => Math.round(n);
@@ -27,6 +27,20 @@ const onDisplay = (s: WindowState | null | undefined) => {
   if (near(b.origin.x, area.origin.x) && near(b.origin.y, area.origin.y) && near(b.size.width, area.size.width) && near(b.size.height, area.size.height)) return "fills";
   return `at=${round(b.origin.x - area.origin.x)},${round(b.origin.y - area.origin.y)}`;
 };
+
+/** Whether a window opened at the point the app asked for: `as asked`, `by the system` where the platform places
+ * windows itself (GTK), else where it is and what was asked. */
+const placed = (s: WindowState | null | undefined, asked: WindowOptions["defaultPosition"]) => {
+  if (platform.os === "linux") return "by the system";
+  if (!s) return "none";
+  if (typeof asked !== "object") return `asked ${asked ?? "nothing"}`;
+  const o = s.bounds.origin;
+  if (Math.abs(o.x - asked.x) < 1 && Math.abs(o.y - asked.y) < 1) return "as asked";
+  return `at=${round(o.x)},${round(o.y)} asked=${round(asked.x)},${round(asked.y)}`;
+};
+
+/** Where the notes window was asked to open. */
+let notesAsked: WindowOptions["defaultPosition"];
 
 const opened = signal("none");
 const notesSeen = signal("none");
@@ -93,7 +107,8 @@ function openPalette() {
 }
 
 function openNotes() {
-  const first = Window.open(Notes, { id: "notes", title: "Notes", defaultSize: { width: 220, height: 140 }, defaultPosition: corner() });
+  notesAsked = corner();
+  const first = Window.open(Notes, { id: "notes", title: "Notes", defaultSize: { width: 220, height: 140 }, defaultPosition: notesAsked });
   // Open already: the same window, whatever the options say.
   const second = Window.open(Notes, { id: "notes", title: "Other" });
   opened.set(first === second && Window.get("notes") === first ? "same ref" : "different refs");
@@ -128,6 +143,7 @@ function App() {
         <Text>{`Overlay: ${overlay()}`}</Text>
         <Text>{`Notes: ${describe(notes()?.state())}`}</Text>
         <Text>{`Notes on display: ${onDisplay(notes()?.state())}`}</Text>
+        <Text>{`Notes placed: ${placed(notes()?.state(), notesAsked)}`}</Text>
         <Text>{`Panel: ${describe(Window.get("panel")?.state())}`}</Text>
         <Text>{`Palette: ${describe(Window.get("palette")?.state())}`}</Text>
         <Text>{`Popup: ${describe(Window.get("popup")?.state())}`}</Text>
