@@ -146,6 +146,12 @@ use crate::{
     view::{Hosted, ItemPointer, NshView},
 };
 
+/// Typography options `msftedit.dll` takes that the SDK's `richedit.h` does
+/// not name: with both bits set it draws emoji in color, as `Text` does.
+/// Without them most emoji draw as monochrome glyphs in the text color;
+/// `0x2000` alone colors only emoji with a presentation selector (❤️).
+const TO_COLOR_EMOJI: u32 = 0x1000 | 0x2000;
+
 /// `EM_SETSEL`.
 const EM_SETSEL: u32 = 0x00B1;
 /// `EM_CANUNDO`.
@@ -268,7 +274,7 @@ impl InputState {
             );
             if let Some(e) = &editor {
                 // Plain text with many undo levels (only while empty), the
-                // notifications the field follows, DirectWrite's shaping.
+                // notifications the field follows.
                 let mode = TM_PLAINTEXT.0 | TM_MULTILEVELUNDO.0 | TM_MULTICODEPAGE.0;
                 e.send(EM_SETTEXTMODE, mode as usize, 0);
                 let mask = ENM_CHANGE | ENM_SELCHANGE | ENM_STARTCOMPOSITION | ENM_ENDCOMPOSITION;
@@ -276,10 +282,14 @@ impl InputState {
                 // Text Services Framework input: dictation, the emoji
                 // panel, the touch keyboard, reconversion, spelling.
                 e.send(EM_SETEDITSTYLE, SES_USECTF as usize, SES_USECTF as isize);
+                // DirectWrite's shaping, and emoji in color as `Text` draws
+                // them (otherwise RichEdit binds most emoji to a monochrome
+                // symbol font and draws them in the text color).
+                let typography = TO_ADVANCEDTYPOGRAPHY | TO_COLOR_EMOJI;
                 e.send(
                     EM_SETTYPOGRAPHYOPTIONS,
-                    TO_ADVANCEDTYPOGRAPHY as usize,
-                    TO_ADVANCEDTYPOGRAPHY as isize,
+                    typography as usize,
+                    typography as isize,
                 );
                 e.take_notes();
             } else {
