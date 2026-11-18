@@ -260,11 +260,12 @@ nsh update [stable|nightly]
 
 ```sh
 nsh add acme-gauge@1.0                                 # 来自 crates.io：取匹配 1.0 的最新版本
-nsh add https://github.com/acme/gauge --tag v1.0.0   # 来自 Git；或 --rev <提交或分支>；都不给则取默认分支
+nsh add github:acme/gauge@v1.0.0                    # 来自 GitHub 的标签；或 --rev <提交或分支>；都不给则取默认分支
+nsh add https://git.example.com/gauge.git --tag v1.0.0  # 来自任意 Git 地址
 nsh add --path ../gauge                              # 来自本地目录，按当前内容使用
 ```
 
-它把扩展记录到 `nsh.json` 的 `"extensions"`（`{ "crate": "acme-gauge", "version": "1.0" }`、`{ "git": "…", "tag": "v1.0.0" }` 或 `{ "path": "../gauge" }`），交给 Cargo 解析，并把解析到的版本或提交锁定在 `nsh.lock`（随应用一起提交），应用有自己的 crate（`"rust"`）时还会加入其 `[dependencies]`。构建始终使用锁定的版本或提交（本地目录按当前内容），再次运行 `nsh add` 即更新。纯 TSX 应用会像带 crate 的应用一样用扩展重新构建宿主（[使用 Rust](./rust.md)），因此开发机和 CI 需要 Rust 工具链。扩展与应用的 crate 或其他扩展冲突（同名包或同名模块），或与当前 NSH 不兼容时，`nsh.json` 和 `nsh.lock` 保持不变。
+它把扩展记录到 `nsh.json` 的 `"extensions"`（`"acme-gauge@1.0"`、`"github:acme/gauge@v1.0.0"`、`{ "github": "acme/gauge", "rev": "…" }`、`{ "git": "…", "tag": "v1.0.0" }` 或 `{ "path": "../gauge" }`），交给 Cargo 解析，并把解析到的版本或提交锁定在 `nsh.lock`（随应用一起提交），应用有自己的 crate（`"rust"`）时还会加入其 `[dependencies]`。构建始终使用锁定的版本或提交（本地目录按当前内容），再次运行 `nsh add` 即更新。纯 TSX 应用会像带 crate 的应用一样用扩展重新构建宿主（[使用 Rust](./rust.md)），因此开发机和 CI 需要 Rust 工具链。扩展与应用的 crate 或其他扩展冲突（同名包或同名模块），或与当前 NSH 不兼容时，`nsh.json` 和 `nsh.lock` 保持不变。
 
 扩展是普通的 Cargo 库：根部有 `#[native_module("<module>")]` 入口（与应用自己的 crate 相同），并在 `Cargo.toml` 中声明：
 

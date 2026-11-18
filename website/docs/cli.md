@@ -265,11 +265,12 @@ Adds a third-party extension to the app in the current directory: a Rust crate f
 
 ```sh
 nsh add acme-gauge@1.0                                 # from crates.io: the newest version matching 1.0
-nsh add https://github.com/acme/gauge --tag v1.0.0   # from Git; or --rev <commit or branch>; neither: the default branch
+nsh add github:acme/gauge@v1.0.0                    # from GitHub at a tag; or --rev <commit or branch>; neither: the default branch
+nsh add https://git.example.com/gauge.git --tag v1.0.0  # from any Git URL
 nsh add --path ../gauge                              # from a local directory, as it is
 ```
 
-It lists the extension in `nsh.json` `"extensions"` (`{ "crate": "acme-gauge", "version": "1.0" }`, `{ "git": "…", "tag": "v1.0.0" }` or `{ "path": "../gauge" }`), lets Cargo resolve it and pins the version or commit it resolved to in `nsh.lock` (commit it with the app), and adds it to the `[dependencies]` of the app's crate when it has one (`"rust"`). Builds take the locked version or commit (a directory is read as it is); running `nsh add` again updates it. A pure TSX app gets hosts built with the extension, as an app with a crate of its own does ([Building with Rust](./rust.md)), so its development machine and CI need the Rust toolchain. If the extension clashes with the app's crates or another extension (the same package or module), or does not build with this NSH, `nsh.json` and `nsh.lock` are left unchanged.
+It lists the extension in `nsh.json` `"extensions"` (`"acme-gauge@1.0"`, `"github:acme/gauge@v1.0.0"`, `{ "github": "acme/gauge", "rev": "…" }`, `{ "git": "…", "tag": "v1.0.0" }` or `{ "path": "../gauge" }`), lets Cargo resolve it and pins the version or commit it resolved to in `nsh.lock` (commit it with the app), and adds it to the `[dependencies]` of the app's crate when it has one (`"rust"`). Builds take the locked version or commit (a directory is read as it is); running `nsh add` again updates it. A pure TSX app gets hosts built with the extension, as an app with a crate of its own does ([Building with Rust](./rust.md)), so its development machine and CI need the Rust toolchain. If the extension clashes with the app's crates or another extension (the same package or module), or does not build with this NSH, `nsh.json` and `nsh.lock` are left unchanged.
 
 An extension is an ordinary Cargo library with a `#[native_module("<module>")]` entry at its root, the same as an app's crate, and this table in its `Cargo.toml`:
 

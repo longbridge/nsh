@@ -1,10 +1,15 @@
-//! Third-party extensions: Rust crates from Git that export components,
-//! modules and classes to the app, as the app's own crates do (`nsh.json`
-//! `"rust"`, [`crate::rust_app`]). `nsh add <url> [--tag <tag> | --rev
-//! <rev>]` lists one in `nsh.json`:
+//! Third-party extensions: Rust crates that export components, modules
+//! and classes to the app, as the app's own crates do (`nsh.json`
+//! `"rust"`, [`crate::rust_app`]). `nsh add <source>` lists one in
+//! `nsh.json`; a crate from crates.io is the default:
 //!
 //! ```json
-//! { "extensions": [{ "git": "https://github.com/acme/ui", "tag": "v1.2.0" }] }
+//! { "extensions": [
+//!   "acme-ui@1.2",
+//!   "github:acme/chart@v0.3.0",
+//!   { "git": "https://git.example.com/ui.git", "rev": "4f2a1c0" },
+//!   { "path": "../my-ui" }
+//! ] }
 //! ```
 //!
 //! and pins the commit it resolved to in `nsh.lock`, next to `nsh.json`,
@@ -124,16 +129,66 @@ impl Source {
         Ok(())
     }
 
-    /// The source `nsh add` was given: a Git URL, else a crate name with an
-    /// optional `@<version requirement>`; or `path`.
+    /// A source written as a string, in `nsh.json` or to `nsh add`: a
+    /// crate by default (`acme-ui`, `acme-ui@1.2`), `github:<owner>/<repo>`
+    /// (`@<tag>`), or a Git URL. `tag`/`rev` (from `--tag`/`--rev`) apply to
+    /// Git only.
+    pub(crate) fn short(s: &str, tag: Option<String>, rev: Option<String>) -> anyhow::Result<Self> {
+        let source = if let Some(repo) = s.strip_prefix("github:") {
+            let (repo, at) = match repo.split_once('@') {
+                Some((repo, t)) => (repo, Some(t.to_owned())),
+                None => (repo, None),
+            };
+            if repo.split('/').count() != 2 || repo.split('/').any(str::is_empty) {
+                bail!("{s}: write github:<owner>/<repo>");
+            }
+            if at.is_some() && (tag.is_some() || rev.is_some()) {
+                bail!("{s}: give the tag once");
+            }
+            Source {
+                git: Some(github_url(repo)),
+                tag: at.or(tag),
+                rev,
+                ..Default::default()
+            }
+        } else if s.contains("://") || s.starts_with("git@") || s.ends_with(".git") {
+            Source {
+                git: Some(s.to_owned()),
+                tag,
+                rev,
+                ..Default::default()
+            }
+        } else {
+            let (name, version) = match s.split_once('@') {
+                Some((name, v)) => (name.to_owned(), Some(v.to_owned())),
+                None => (s.to_owned(), None),
+            };
+            if let Some(v) = &version {
+                semver::VersionReq::parse(v)
+                    .with_context(|| format!("{name}@{v}: not a version requirement"))?;
+            }
+            if tag.is_some() || rev.is_some() {
+                bail!("--tag and --rev are for Git; take a crate's version with {name}@<version>");
+            }
+            Source {
+                krate: Some(name),
+                version,
+                ..Default::default()
+            }
+        };
+        source.validate()?;
+        Ok(source)
+    }
+
+    /// The source `nsh add` was given: [`Source::short`], or `path`.
     pub(crate) fn parse(
         source: Option<String>,
         path: Option<String>,
         tag: Option<String>,
         rev: Option<String>,
     ) -> anyhow::Result<Self> {
-        let source = match (source, path) {
-            (None, Some(path)) => Source {
+        match (source, path) {
+            (None, Some(path)) => Ok(Source {
                 // Written with a separator, never read as a crate's name.
                 path: Some(if path.contains(['/', '\\']) || path.starts_with('.') {
                     path
@@ -141,42 +196,86 @@ impl Source {
                     format!("./{path}")
                 }),
                 ..Default::default()
-            },
-            (Some(s), None)
-                if s.contains("://") || s.starts_with("git@") || s.ends_with(".git") =>
-            {
-                Source {
-                    git: Some(s),
-                    tag,
-                    rev,
-                    ..Default::default()
+            }),
+            (Some(s), None) => Source::short(&s, tag, rev),
+            _ => bail!(
+                "nsh add takes a crate name, github:<owner>/<repo>, a Git URL or --path <dir>"
+            ),
+        }
+    }
+
+    /// How `nsh.json` lists it: a string when it can be one.
+    fn entry(&self) -> serde_json::Value {
+        use serde_json::{Value, json};
+        if let Some(name) = &self.krate {
+            return Value::String(match &self.version {
+                Some(v) => format!("{name}@{v}"),
+                None => name.clone(),
+            });
+        }
+        if let Some(path) = &self.path {
+            return json!({ "path": path });
+        }
+        let url = self.git.clone().unwrap_or_default();
+        let github = github_repo(&url);
+        match (github, &self.tag, &self.rev) {
+            (Some(repo), None, None) => Value::String(format!("github:{repo}")),
+            (Some(repo), Some(tag), None) => Value::String(format!("github:{repo}@{tag}")),
+            (Some(repo), _, Some(rev)) => json!({ "github": repo, "rev": rev }),
+            (None, tag, rev) => {
+                let mut o = json!({ "git": url });
+                if let Some(t) = tag {
+                    o["tag"] = json!(t);
                 }
+                if let Some(r) = rev {
+                    o["rev"] = json!(r);
+                }
+                o
             }
-            (Some(s), None) => {
-                let (name, version) = match s.split_once('@') {
-                    Some((name, v)) => (name.to_owned(), Some(v.to_owned())),
-                    None => (s, None),
-                };
-                if let Some(v) = &version {
-                    semver::VersionReq::parse(v)
-                        .with_context(|| format!("{name}@{v}: not a version requirement"))?;
-                }
-                if tag.is_some() || rev.is_some() {
-                    bail!(
-                        "--tag and --rev are for a Git URL; take a crate's version with {name}@<version>"
-                    );
-                }
-                Source {
-                    krate: Some(name),
-                    version,
-                    ..Default::default()
-                }
-            }
-            _ => bail!("nsh add takes a Git URL, a crate name or --path <dir>"),
+        }
+    }
+
+    /// Reads an entry of `nsh.json` `"extensions"`.
+    fn from_entry(value: &serde_json::Value) -> anyhow::Result<Self> {
+        if let Some(s) = value.as_str() {
+            return Source::short(s, None, None);
+        }
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Full {
+            git: Option<String>,
+            github: Option<String>,
+            tag: Option<String>,
+            rev: Option<String>,
+            path: Option<String>,
+        }
+        let full: Full = serde_json::from_value(value.clone()).context(
+            "nsh.json: \"extensions\": each is \"<crate>[@<version>]\", \"github:<owner>/<repo>[@<tag>]\", { \"git\" | \"github\": ..., \"tag\" | \"rev\" } or { \"path\": \"<dir>\" }",
+        )?;
+        if full.git.is_some() && full.github.is_some() {
+            bail!("nsh.json: \"extensions\": an entry has both \"git\" and \"github\"");
+        }
+        let source = Source {
+            git: full.git.or(full.github.as_deref().map(github_url)),
+            tag: full.tag,
+            rev: full.rev,
+            path: full.path,
+            ..Default::default()
         };
         source.validate()?;
         Ok(source)
     }
+}
+
+/// `https://github.com/<repo>`.
+fn github_url(repo: &str) -> String {
+    format!("https://github.com/{repo}")
+}
+
+/// `<owner>/<repo>` of a `https://github.com/<owner>/<repo>` URL.
+fn github_repo(url: &str) -> Option<&str> {
+    let repo = url.strip_prefix("https://github.com/")?;
+    (repo.split('/').count() == 2 && !repo.ends_with(".git")).then_some(repo)
 }
 
 /// `nsh.lock`: the commit each extension resolved to.
@@ -327,7 +426,8 @@ pub(crate) fn add(dir: &Path, source: Source) -> anyhow::Result<()> {
         let mut sources = sources(&config)?;
         sources.retain(|s| s.id() != id);
         sources.push(source.clone());
-        config["extensions"] = serde_json::to_value(&sources)?;
+        config["extensions"] =
+            serde_json::Value::Array(sources.iter().map(Source::entry).collect());
         fs::write(&config_path, serde_json::to_string_pretty(&config)? + "\n")?;
         // The app's crates and the extensions together: a clash of
         // packages or modules is reported here, before a build.
@@ -514,9 +614,13 @@ fn sources(config: &serde_json::Value) -> anyhow::Result<Vec<Source>> {
     match config.get("extensions") {
         None => Ok(Vec::new()),
         Some(value) => {
-            let sources: Vec<Source> = serde_json::from_value(value.clone()).context(
-                "nsh.json: \"extensions\" is a list of { \"git\": \"<url>\" (\"tag\" or \"rev\") }, { \"crate\": \"<name>\" (\"version\") } or { \"path\": \"<dir>\" }",
+            let list = value.as_array().context(
+                "nsh.json: \"extensions\" is a list, e.g. [\"acme-ui@1.2\", \"github:acme/ui\"]",
             )?;
+            let sources = list
+                .iter()
+                .map(Source::from_entry)
+                .collect::<anyhow::Result<Vec<_>>>()?;
             for s in &sources {
                 s.validate()?;
             }
@@ -872,26 +976,32 @@ mod tests {
 
     #[test]
     fn sources_are_checked() {
-        let config = serde_json::json!({ "extensions": [{ "git": "https://x/a", "tag": "v1" }] });
-        assert_eq!(
-            sources(&config).unwrap(),
-            [Source {
-                git: Some("https://x/a".into()),
-                tag: Some("v1".into()),
-                ..Default::default()
-            }]
-        );
+        let config = serde_json::json!({ "extensions": [
+            "acme-ui", "acme-ui@1.2", "github:acme/ui@v1",
+            { "github": "acme/ui", "rev": "abc" },
+            { "git": "https://x/a", "tag": "v1" },
+            { "path": "../ui" }
+        ] });
+        let list = sources(&config).unwrap();
+        assert_eq!(list[1].krate.as_deref(), Some("acme-ui"));
+        assert_eq!(list[1].version.as_deref(), Some("1.2"));
+        assert_eq!(list[2].git.as_deref(), Some("https://github.com/acme/ui"));
+        assert_eq!(list[2].tag.as_deref(), Some("v1"));
+        assert_eq!(list[3].rev.as_deref(), Some("abc"));
+        // Written back as it was.
+        let back: Vec<_> = list.iter().map(Source::entry).collect();
+        assert_eq!(serde_json::Value::Array(back), config["extensions"]);
         let both = serde_json::json!({ "extensions": [{ "git": "g", "tag": "v1", "rev": "abc" }] });
         assert!(sources(&both).unwrap_err().to_string().contains("both"));
         let unknown = serde_json::json!({ "extensions": [{ "git": "g", "branch": "main" }] });
         assert!(sources(&unknown).is_err());
         assert!(sources(&serde_json::json!({})).unwrap().is_empty());
-        let krate = serde_json::json!({ "extensions": [{ "crate": "acme-ui", "version": "1" }, { "path": "../ui" }] });
-        assert_eq!(sources(&krate).unwrap().len(), 2);
-        let two = serde_json::json!({ "extensions": [{ "crate": "a", "path": "../a" }] });
+        let old = serde_json::json!({ "extensions": [{ "crate": "a" }] });
+        assert!(sources(&old).is_err());
+        let two = serde_json::json!({ "extensions": [{ "github": "a/b", "path": "../a" }] });
         assert!(sources(&two).is_err());
-        let tag = serde_json::json!({ "extensions": [{ "crate": "a", "tag": "v1" }] });
-        assert!(sources(&tag).is_err());
+        let bad = serde_json::json!({ "extensions": ["github:acme"] });
+        assert!(sources(&bad).is_err());
     }
 
     #[test]
@@ -904,6 +1014,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(git.git.as_deref(), Some("https://github.com/acme/ui"));
+        let gh =
+            Source::parse(Some("github:acme/ui".into()), None, Some("v1".into()), None).unwrap();
+        assert_eq!(gh, git);
+        assert_eq!(gh.entry(), serde_json::json!("github:acme/ui@v1"));
+        assert!(
+            Source::parse(
+                Some("github:acme/ui@v1".into()),
+                None,
+                Some("v2".into()),
+                None
+            )
+            .is_err()
+        );
         let krate = Source::parse(Some("acme-ui@1.2".into()), None, None, None).unwrap();
         assert_eq!(
             (krate.krate.as_deref(), krate.version.as_deref()),

@@ -343,7 +343,8 @@ enum Command {
     /// ../ui`). Listed in `nsh.json` `"extensions"`, the version or commit
     /// it resolved to pinned in `nsh.lock`.
     Add {
-        /// A crate name (with `@<version>`) or a Git repository URL.
+        /// A crate name (with `@<version>`), `github:<owner>/<repo>` (with
+        /// `@<tag>`) or a Git repository URL.
         #[arg(required_unless_present = "path", conflicts_with = "path")]
         source: Option<String>,
         /// A local directory with the extension.
