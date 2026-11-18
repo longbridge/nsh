@@ -158,6 +158,19 @@ tab: a press selects it, a drag moves its panel, screen readers hear it as a tab
 | `closable` | `boolean` | The area would close it: it is closable, the area is not locked, and its group may give it away. |
 | `zoomed` | `boolean` | Its group is zoomed. |
 
+`renderTabBarSuffix` renders what follows a group's tabs in its tab bar: the group's own actions, such as a button
+that adds a tab, a list of its tabs or a zoom button. It is a child of the tab bar after the tabs, so the bar's own
+layout places it (`ml-auto` on what it returns pushes it to the end of a `flex-row` bar). In the compact presentation
+the one tab bar ends with the shown group's. A group's value says what the app needs to draw it:
+
+| Field | Type | Description |
+|---|---|---|
+| `group` | `number` | The id of the tab group. |
+| `placement` | `"center" \| "left" \| "bottom" \| "right"` | The region it is in: the center, or a dock. |
+| `panels` | `string[]` | The keys of its visible panels, in tab order. |
+| `active` | `string \| null` | Its displayed panel, if it has one. |
+| `zoomed` | `boolean` | It is zoomed. |
+
 ```tsx
 let area!: DockAreaRef;
 
@@ -330,6 +343,7 @@ rest of the area.
 | `panels` | `.panels(..)` | `DockPanelOptions[]` | `[]` | What each panel allows, by key: `closable`, `zoomable`, `visible`. |
 | `renderPanel` | `.render_panel(\|panel\| ..)` | `(panel: DockPanel) => JSX.Element` | none | A panel's content, by its key (`panel.id`). |
 | `renderTab` | `.render_tab(\|tab\| ..)` | `(tab: DockTab) => JSX.Element` | the key | What a tab shows. |
+| `renderTabBarSuffix` | `.render_tab_bar_suffix(\|group\| ..)` | `(group: DockGroup) => JSX.Element` | none | What follows a group's tabs in its tab bar: the group's own actions (a new tab, a list of its tabs, a zoom button). |
 | `renderDropIndicator` | `.render_drop_indicator(\|drop\| ..)` | `(drop: DockDropIndicator) => JSX.Element` | none | What is inside the drop indicator: `group`, `side`, `index`. |
 | `renderDock` | `.render_dock(\|dock\| ..)` | `(dock: DockInfo) => JSX.Element` | none | A dock's own chrome, before its layout: `placement`, `open` (shown in the current presentation), `size`, `collapsible`. |
 | `renderEmpty` | `.render_empty(\|placement\| ..)` | `(placement: DockPlacement) => JSX.Element` | none | What an empty center shows. |
@@ -367,6 +381,7 @@ rest of the area.
 | A tab group | a region | `groupClass`, `groupStyle` | |
 | A tab bar | a group | `tabBarClass`, `tabBarStyle` | |
 | A tab | a tab bar | `tabClass`, `tabStyle`; `renderTab` | `selected:`, `active:`, `hover:` |
+| What follows the tabs | a tab bar | `renderTabBarSuffix` | |
 | A group's content | a group | `contentClass`, `contentStyle`; `renderPanel` | |
 | A handle's indicator | between a split's groups, at a dock's edge | `handleClass`, `handleStyle` | `group-hover:`, `group-active:` |
 | A handle's thumb | centered on a handle's line | `handleThumbClass`, `handleThumbStyle` | `group-hover:`, `group-active:` (pressed until the drag ends) |

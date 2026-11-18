@@ -1,13 +1,14 @@
 //! `DockArea`: a layout renders as splits of tab groups and docks; a press
 //! on a tab selects it, a drag of a tab moves it (into a group, beside
 //! it, into a tab bar), a split's handle resizes it, and the ref's methods
-//! close panels, toggle docks and zoom; a locked area moves nothing, and
+//! close panels, toggle docks and zoom; `render_tab_bar_suffix` draws what
+//! follows a group's tabs; a locked area moves nothing, and
 //! at compact width the center shows one group with every panel's tab.
 //! The app controls the layout: what it shows is what the area reported.
 
 use nsh_base::dock::{
-    DockArea, DockAreaApi, DockAreaEvent, DockAreaLayout, DockLayout, DockNode, DockPanel,
-    DockPlacement, DockRegion, DockTab, PanelId, dock_area,
+    DockArea, DockAreaApi, DockAreaEvent, DockAreaLayout, DockGroup, DockLayout, DockNode,
+    DockPanel, DockPlacement, DockRegion, DockTab, PanelId, dock_area,
 };
 use nsh_core::{
     Size,
@@ -775,4 +776,87 @@ fn a_compact_bottom_dock_lifted_by_the_keyboard_stays_below_the_status_bar() {
         label.bottom() <= px(844.0 - 336.0),
         "the drawer's content above the keyboard: {label:?}"
     );
+}
+
+/// An area of `layout` whose tab bars end with their group's panels, the
+/// displayed one starred, and its region.
+#[derive(Clone, PartialEq, Props)]
+struct SuffixProps {
+    layout: DockAreaLayout,
+    compact: bool,
+}
+
+#[component]
+fn Suffix(props: SuffixProps) -> impl IntoElement {
+    view().w(px(800.0)).h(px(600.0)).child(
+        dock_area()
+            .default_layout(props.layout.clone())
+            .compact(props.compact)
+            .tab_bar_class("flex-row h-6")
+            .render_tab(|tab: &DockTab| {
+                view()
+                    .test_id(&format!("tab-{}", tab.panel))
+                    .w(px(60.0))
+                    .h(px(24.0))
+                    .child(text(format!("Tab {}", tab.panel)))
+            })
+            .render_tab_bar_suffix(|group: &DockGroup| {
+                let panels: Vec<String> = group
+                    .panels
+                    .iter()
+                    .map(|panel| {
+                        let star = if group.active.as_ref() == Some(panel) {
+                            "*"
+                        } else {
+                            ""
+                        };
+                        format!("{star}{panel}")
+                    })
+                    .collect();
+                text(format!(
+                    "Suffix {:?} [{}]",
+                    group.placement,
+                    panels.join(" ")
+                ))
+            })
+            .size_full(),
+    )
+}
+
+fn start_suffix(layout: DockAreaLayout, compact: bool) -> Headless {
+    let mut config = EngineConfig {
+        viewport: Size::new(px(1000.0), px(900.0)),
+        ..EngineConfig::new(Root::new::<Suffix>(move || SuffixProps {
+            layout: layout.clone(),
+            compact,
+        }))
+    };
+    config.environment.os = Os::MacOs;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    app.wait_for("Tab a").unwrap();
+    app
+}
+
+#[test]
+fn a_tab_bar_ends_with_what_render_tab_bar_suffix_draws_for_its_group() {
+    // Each group's bar ends with its own: its panels, the displayed one,
+    // its region.
+    let mut app = start_suffix(with_files(), false);
+    app.wait_for("Suffix Center [*a b]").unwrap();
+    app.wait_for("Suffix Center [*c]").unwrap();
+    app.wait_for("Suffix Left [*files]").unwrap();
+    // It follows the group: another tab displayed.
+    app.press("id:tab-b").unwrap();
+    app.wait_for("Suffix Center [a *b]").unwrap();
+    app.wait_for("Suffix Center [*c]").unwrap();
+
+    // Compact: one bar with every center panel's tab, ending with the
+    // shown group's.
+    let mut app = start_suffix(two_groups(), true);
+    app.wait_for("Suffix Center [*a b]").unwrap();
+    assert_eq!(app.screen().count("text:Suffix Center [*c]"), Ok(0));
+    app.press("id:tab-c").unwrap();
+    app.wait_for("Suffix Center [*c]").unwrap();
+    assert_eq!(app.screen().count("text:Suffix Center [*a b]"), Ok(0));
 }

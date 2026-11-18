@@ -137,6 +137,16 @@ mount(App);
 | `closable` | `boolean` | 区域会关闭它：它可以关闭，区域没有锁定，它的组也可以交出它。 |
 | `zoomed` | `boolean` | 它的组已放大。 |
 
+`renderTabBarSuffix` 绘制标签栏里跟在组的标签页之后的内容：这个组自己的操作，例如新建标签页的按钮、标签页列表或放大按钮。它是标签栏在标签页之后的子元素，由标签栏自己的布局摆放（在 `flex-row` 的标签栏里，给返回的元素加 `ml-auto` 可以把它推到末尾）。在紧凑方式中，唯一的标签栏以当前显示的组的内容结尾。组的值提供应用绘制所需的信息：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `group` | `number` | 标签组的 id。 |
+| `placement` | `"center" \| "left" \| "bottom" \| "right"` | 它所在的区域：中央，或一个停靠区。 |
+| `panels` | `string[]` | 它的可见面板的键，按标签页顺序。 |
+| `active` | `string \| null` | 它显示的面板（如果有）。 |
+| `zoomed` | `boolean` | 它已放大。 |
+
 ```tsx
 let area!: DockAreaRef;
 
@@ -281,6 +291,7 @@ const terminalOpen = signal(true);
 | `panels` | `.panels(..)` | `DockPanelOptions[]` | `[]` | 按键设置每个面板允许什么：`closable`、`zoomable`、`visible`。 |
 | `renderPanel` | `.render_panel(\|panel\| ..)` | `(panel: DockPanel) => JSX.Element` | 无 | 面板的内容，按它的键（`panel.id`）。 |
 | `renderTab` | `.render_tab(\|tab\| ..)` | `(tab: DockTab) => JSX.Element` | 面板的键 | 标签页显示的内容。 |
+| `renderTabBarSuffix` | `.render_tab_bar_suffix(\|group\| ..)` | `(group: DockGroup) => JSX.Element` | 无 | 标签栏里跟在组的标签页之后的内容：这个组自己的操作（新建标签页、标签页列表、放大按钮）。 |
 | `renderDropIndicator` | `.render_drop_indicator(\|drop\| ..)` | `(drop: DockDropIndicator) => JSX.Element` | 无 | 放置指示里的内容：`group`、`side`、`index`。 |
 | `renderDock` | `.render_dock(\|dock\| ..)` | `(dock: DockInfo) => JSX.Element` | 无 | 停靠区自己的装饰，位于它的布局之前：`placement`、`open`（在当前呈现方式中是否显示）、`size`、`collapsible`。 |
 | `renderEmpty` | `.render_empty(\|placement\| ..)` | `(placement: DockPlacement) => JSX.Element` | 无 | 中心区域为空时显示的内容。 |
@@ -322,6 +333,7 @@ const terminalOpen = signal(true);
 | 标签组 | 区域里 | `groupClass`、`groupStyle` | |
 | 标签栏 | 组里 | `tabBarClass`、`tabBarStyle` | |
 | 标签页 | 标签栏里 | `tabClass`、`tabStyle`；`renderTab` | `selected:`、`active:`、`hover:` |
+| 标签页之后的内容 | 标签栏里 | `renderTabBarSuffix` | |
 | 组的内容 | 组里 | `contentClass`、`contentStyle`；`renderPanel` | |
 | 手柄的指示器 | 分栏的组之间、停靠区的边缘 | `handleClass`、`handleStyle` | `group-hover:`、`group-active:` |
 | 手柄的握把 | 居中在手柄的线上 | `handleThumbClass`、`handleThumbStyle` | `group-hover:`、`group-active:`（直到拖动结束都保持按下） |

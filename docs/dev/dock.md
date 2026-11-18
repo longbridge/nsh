@@ -83,6 +83,7 @@ tab groups are rendered by the area for each `NodeId` and the panels by the app 
 every edit that keeps them.
 
 The other parts the app draws are render props as well (`renderTab` and `renderDragPreview` with a `DockTab`,
+`renderTabBarSuffix` with a `DockGroup` for what follows a group's tabs in its tab bar,
 `renderDropIndicator` with a `DockDropIndicator`, `renderDock` with a `DockInfo`, `renderEmpty`), and every part
 takes `<part>Class` / `<part>Style` (group, tab bar, tab, content, drop indicator, handle, handle thumb, dock, and
 compact's drawer, sheet and backdrop). The drop indicator moves natively: when its target changes the area asks for a

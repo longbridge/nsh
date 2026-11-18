@@ -42,7 +42,9 @@ use nsh_core::{
 
 use super::{
     area::Group,
-    dock_area::{AreaCx, DockDropIndicator, DockPanel, DockTab, DropAt, GroupRefs, TabDrag, Zone},
+    dock_area::{
+        AreaCx, DockDropIndicator, DockGroup, DockPanel, DockTab, DropAt, GroupRefs, TabDrag, Zone,
+    },
     drag::{DropPlaceholderBounds, split_placement_at},
     layout::{InsertTarget, NodeId, PanelId},
 };
@@ -78,6 +80,33 @@ pub(crate) fn tab_value(a: AreaCx, panel: &PanelId) -> Option<DockTab> {
         active: shown_of(a, &group).as_ref() == Some(panel),
         closable: a.closable(panel),
         zoomed: a.zoomed.get() == Some(group.node),
+    })
+}
+
+/// What `renderTabBarSuffix` gets for `group` (tracked).
+pub(crate) fn group_value(a: AreaCx, group: &Group) -> DockGroup {
+    DockGroup {
+        group: group.node.as_u64(),
+        placement: group.placement,
+        panels: group
+            .panels
+            .iter()
+            .filter(|p| a.visible(p))
+            .cloned()
+            .collect(),
+        active: shown_of(a, group),
+        zoomed: a.zoomed.get() == Some(group.node),
+    }
+}
+
+/// What follows the tabs in the tab bar of `group`: what
+/// `renderTabBarSuffix` draws for it, nothing without the prop.
+pub(crate) fn tab_bar_suffix(a: AreaCx, group: Memo<Option<Group>>) -> AnyElement {
+    let value = computed(move || group.with(|g| g.as_ref().map(|g| group_value(a, g))));
+    dynamic(move || {
+        let render = a.props.render_tab_bar_suffix.get()?;
+        let value = value.get()?;
+        Some(render.render(value.group.to_string(), value))
     })
 }
 
@@ -127,7 +156,8 @@ pub(crate) fn tab_group(a: AreaCx, node: NodeId) -> AnyElement {
                         };
                         tab(a, id, Some(node), value, tab_refs.clone())
                     },
-                )),
+                ))
+                .child(tab_bar_suffix(a, group)),
         )
         .child(
             view()
