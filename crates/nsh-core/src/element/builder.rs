@@ -2386,6 +2386,18 @@ pub trait Interactive: Element {
         self
     }
 
+    /// Styles it as hovered while `hovered` holds (its `hover:` classes,
+    /// and the `group-hover:` classes inside it when it is a group), as a
+    /// part whose hovers a component's hit layer over it takes: a table's
+    /// row while the pointer is over it anywhere. Its mouse events stay the
+    /// hit layer's.
+    fn project_hovered(mut self, hovered: impl IntoReactive<bool>) -> Self {
+        self.node().bind_attr(hovered, |a, hovered| {
+            project(a, crate::tailwind::state::HOVERED, hovered)
+        });
+        self
+    }
+
     /// Styles it as focused while `focused` holds (its `focus:` classes
     /// and focus styles), as the part the keyboard is on inside a control
     /// that keeps the focus itself: the cell of a one-time-code input that

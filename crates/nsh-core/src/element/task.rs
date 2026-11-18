@@ -274,6 +274,10 @@ pub(crate) enum Action {
     /// the node, with the layout of the commit the action goes out with;
     /// whether a view took it resolves the slot.
     PressAt(NodeId, crate::PressEvent, AnswerSlot<bool>),
+    /// Hovers what a pointer at the event's page position would inside
+    /// the node, with the layout of the last commit; `None`: the pointer
+    /// left.
+    HoverAt(NodeId, Option<crate::MouseEvent>),
 }
 
 /// What a speech recognition session asks of the core
