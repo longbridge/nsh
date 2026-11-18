@@ -24073,7 +24073,10 @@ mod views {
         let first = config(&c.commit().unwrap()).expect("a screen");
         assert!(first.header_shadow_visible);
         let shadow = SHADOW.with(Cell::get).expect("mounted");
-        shadow.set(false);
+        {
+            let _entered = c.components.runtime.enter();
+            shadow.set(false);
+        }
         let hidden = config(&c.commit().unwrap()).expect("updated");
         assert!(!hidden.header_shadow_visible);
     }
@@ -38276,6 +38279,27 @@ mod built_in_scrollbars {
         assert_eq!(
             frame_of(&batch, bar),
             Some(rect(0.0, 10.0, 294.0, 130.0)),
+            "{:?}",
+            batch.items
+        );
+        // Moved down at the same size: nothing in the bar is laid out
+        // again, the bar still follows.
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: 2,
+                prop: Prop::Scroll(ScrollProp::ScrollbarInset(EdgeInsets {
+                    top: px(30.0),
+                    right: px(6.0),
+                    bottom: px(40.0),
+                    left: px(0.0),
+                })),
+            }],
+        );
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            frame_of(&batch, bar),
+            Some(rect(0.0, 30.0, 294.0, 130.0)),
             "{:?}",
             batch.items
         );
