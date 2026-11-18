@@ -133,12 +133,21 @@ fn clamped_truncation_keeps_whole_clusters_and_counts_ellipsis_letter_spacing() 
     let a_w = measure_spaced("A");
     let thumb_w = measure_spaced("👍🏻");
     let ellipsis_w = measure_spaced("…");
+    let url_prefix = "https://example.com/👍🏻";
+    let url_prefix_w = measure_spaced(url_prefix);
 
     // `box_width` fits "A" + "…" (both with letter-spacing), not "A" + "👨‍👩‍👧‍👦" + "…".
-    // Truncating must drop the whole ZWJ cluster instead of slicing code points out of it.
+    // Truncating must drop the whole ZWJ cluster instead of slicing code points out of it,
+    // including on long unbroken tokens (> 16 clusters) and non-breaking spaces before `…`.
     for (input, box_width, expected) in [
         ("A👨‍👩‍👧‍👦", a_w + ellipsis_w + 0.5, "A…"),
         ("👍🏻👨‍👩‍👧‍👦", thumb_w + ellipsis_w + 0.5, "👍🏻…"),
+        (
+            "https://example.com/👍🏻👨‍👩‍👧‍👦/very/long/path/segment",
+            url_prefix_w + ellipsis_w + 0.5,
+            "https://example.com/👍🏻…",
+        ),
+        ("A\u{00A0}👨‍👩‍👧‍👦", a_w + ellipsis_w + 0.5, "A…"),
     ] {
         let mut t = AttributedText::default();
         t.push(input, style);

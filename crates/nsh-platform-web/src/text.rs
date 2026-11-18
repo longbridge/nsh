@@ -19,8 +19,7 @@ use std::{
 
 use nsh_core::{
     AttributedText, Bounds, EllipsizeMode, Point, Points, ResolvedTextStyle, Size, TextAlign,
-    TextEngine, TextLayout, TextLine, TextPosition,
-    text_edit::{next_cluster, prev_cluster},
+    TextEngine, TextLayout, TextLine, TextPosition, text_edit::next_cluster,
 };
 use rustc_hash::FxHashMap;
 
@@ -520,9 +519,10 @@ struct Part {
     ellipsis: bool,
 }
 
-/// Number of extended grapheme clusters in `text`. CSS `letter-spacing`
-/// applies once per typographic character unit (grapheme cluster), not once
-/// per Unicode scalar value.
+/// Number of extended grapheme clusters in `text`, segmented with
+/// [`nsh_core::text_edit::next_cluster`] (the same boundaries [`WebTextEngine::stops`]
+/// and `emoji_excess` use). CSS `letter-spacing` applies once per typographic
+/// character unit (grapheme cluster), not once per Unicode scalar value.
 fn cluster_count(text: &str) -> usize {
     if text.is_empty() {
         return 0;
@@ -537,6 +537,33 @@ fn cluster_count(text: &str) -> usize {
         count += 1;
     }
     count
+}
+
+/// Advances one cluster from `pos` in `s`, returning `(next_byte, first_char, utf16_len)`.
+///
+/// Every code point that [`next_cluster`] joins onto a preceding base
+/// (`extends`, regional indicators, ZWJ) is `>= U+0300` (UTF-8 lead byte
+/// `>= 0xCC`). When the current character is not ZWJ and the following byte is
+/// `< 0xCC` (or end of string), the cluster is that single scalar, avoiding
+/// `next_cluster` and `encode_utf16` on plain ASCII and standalone BMP/CJK runs.
+#[inline]
+fn step_cluster(s: &str, pos: usize) -> Option<(usize, char, u32)> {
+    let bytes = s.as_bytes();
+    let &b = bytes.get(pos)?;
+    if b < 0x80 && bytes.get(pos + 1).is_none_or(|&n| n < 0xCC) {
+        return Some((pos + 1, b as char, 1));
+    }
+    let c = s[pos..].chars().next()?;
+    let first_end = pos + c.len_utf8();
+    if c != '\u{200D}' && bytes.get(first_end).is_none_or(|&n| n < 0xCC) {
+        return Some((first_end, c, c.len_utf16() as u32));
+    }
+    let next = next_cluster(s, pos);
+    if next <= first_end {
+        return Some((first_end, c, c.len_utf16() as u32));
+    }
+    let len = u32::try_from(s[pos..next].encode_utf16().count()).unwrap_or(0);
+    Some((next, c, len))
 }
 
 /// The end of the paragraph atom `from` is in: its break, or the end.
@@ -630,17 +657,18 @@ impl WebTextEngine {
             }
             let s = String::from_utf16_lossy(&units[start..end]);
             let mut at = start as u32;
-            let mut word = String::new();
+            let mut word_byte: Option<usize> = None;
             let mut word_start = at;
-            let push = |atoms: &mut Vec<Atom>, text: String, kind, start, end| {
-                let width = match kind {
-                    AtomKind::Text | AtomKind::Space => self.run_width(run, &text),
+            let empty: Rc<str> = Rc::from("");
+            let push = |atoms: &mut Vec<Atom>, text: &str, kind, start, end| {
+                let (width, text) = match kind {
+                    AtomKind::Text | AtomKind::Space => (self.run_width(run, text), Rc::from(text)),
                     // Its placeholder's room on the line.
-                    AtomKind::Attachment(w, ..) => w,
-                    AtomKind::Newline => 0.0,
+                    AtomKind::Attachment(w, ..) => (w, Rc::clone(&empty)),
+                    AtomKind::Newline => (0.0, Rc::clone(&empty)),
                 };
                 atoms.push(Atom {
-                    text: text.into(),
+                    text,
                     style: index,
                     width,
                     kind,
@@ -648,98 +676,79 @@ impl WebTextEngine {
                     end,
                 });
             };
-            // Walk by extended grapheme clusters so CJK base characters stay
-            // joined with trailing combining marks or variation selectors.
+            // Walk by extended grapheme clusters (with a byte fast path on
+            // ASCII and standalone scalars) so CJK base characters stay joined
+            // with trailing combining marks or variation selectors.
             let mut pos = 0;
-            while pos < s.len() {
-                let next = next_cluster(&s, pos);
-                let Some(cluster) = s.get(pos..next).filter(|_| next > pos) else {
-                    break;
-                };
-                let Some(c) = cluster.chars().next() else {
-                    break;
-                };
-                let len = u32::try_from(cluster.encode_utf16().count()).unwrap_or(0);
-                let attachment = (c == OBJECT && len == 1)
+            while let Some((next, c, len)) = step_cluster(&s, pos) {
+                let single = next - pos == c.len_utf8();
+                let attachment = (single && c == OBJECT)
                     .then(|| attachments.get(&at))
                     .flatten();
-                let newline = c == '\n' || cluster == "\r\n";
-                let space = cluster == " " || cluster == "\t";
+                let newline = c == '\n';
+                let space = single && (c == ' ' || c == '\t');
                 let cjk = wrap::is_cjk(c);
                 if newline || space || cjk || attachment.is_some() {
-                    if !word.is_empty() {
-                        push(
-                            out,
-                            std::mem::take(&mut word),
-                            AtomKind::Text,
-                            word_start,
-                            at,
-                        );
+                    if let Some(wb) = word_byte.take() {
+                        push(out, &s[wb..pos], AtomKind::Text, word_start, at);
                     }
                     if newline {
-                        push(out, String::new(), AtomKind::Newline, at, at + len);
+                        push(out, "", AtomKind::Newline, at, at + len);
                         pos = next;
                     } else if let Some(&(w, top, up, down)) = attachment {
                         push(
                             out,
-                            String::new(),
+                            "",
                             AtomKind::Attachment(w, top, up, down),
                             at,
                             at + len,
                         );
                         pos = next;
                     } else if cjk {
-                        push(out, cluster.to_owned(), AtomKind::Text, at, at + len);
+                        push(out, &s[pos..next], AtomKind::Text, at, at + len);
                         pos = next;
                     } else {
                         // A run of spaces is one atom.
-                        let mut spaces = cluster.to_owned();
+                        let space_byte = pos;
                         let mut end = at + len;
                         pos = next;
-                        while pos < s.len() {
-                            let peek_next = next_cluster(&s, pos);
-                            let Some(peek) = s.get(pos..peek_next).filter(|_| peek_next > pos)
-                            else {
-                                break;
-                            };
-                            if peek != " " && peek != "\t" {
+                        while let Some((peek_next, pc, _)) = step_cluster(&s, pos) {
+                            if peek_next - pos != 1 || (pc != ' ' && pc != '\t') {
                                 break;
                             }
-                            spaces.push_str(peek);
                             end += 1;
                             pos = peek_next;
                         }
-                        push(out, spaces, AtomKind::Space, at, end);
+                        push(out, &s[space_byte..pos], AtomKind::Space, at, end);
                         at = end;
-                        word_start = at;
                         continue;
                     }
                     at += len;
-                    word_start = at;
                 } else {
-                    if word.is_empty() {
+                    if word_byte.is_none() {
+                        word_byte = Some(pos);
                         word_start = at;
                     }
-                    word.push_str(cluster);
                     at += len;
                     pos = next;
                     // A hyphen ends a word (the line may break after it).
-                    if cluster == "-"
-                        && s[pos..].chars().next().is_some_and(|n| n.is_alphanumeric())
+                    if single
+                        && c == '-'
+                        && s.as_bytes().get(pos).is_some_and(|&b| {
+                            if b < 0x80 {
+                                b.is_ascii_alphanumeric()
+                            } else {
+                                s[pos..].chars().next().is_some_and(char::is_alphanumeric)
+                            }
+                        })
+                        && let Some(wb) = word_byte.take()
                     {
-                        push(
-                            out,
-                            std::mem::take(&mut word),
-                            AtomKind::Text,
-                            word_start,
-                            at,
-                        );
-                        word_start = at;
+                        push(out, &s[wb..pos], AtomKind::Text, word_start, at);
                     }
                 }
             }
-            if !word.is_empty() {
-                push(out, word, AtomKind::Text, word_start, at);
+            if let Some(wb) = word_byte {
+                push(out, &s[wb..], AtomKind::Text, word_start, at);
             }
         }
     }
@@ -1300,22 +1309,46 @@ impl TextEngine for WebTextEngine {
                 {
                     width -= piece.width;
                     if fits(width) && piece.kind == AtomKind::Text {
-                        let mut shorter = piece.text.to_string();
-                        while !shorter.is_empty() {
-                            let prev = prev_cluster(&shorter, shorter.len());
-                            shorter.truncate(prev);
-                            let trimmed = shorter.trim_end();
-                            if trimmed.is_empty() {
+                        let run = &styles[piece.style as usize];
+                        let s: &str = &piece.text;
+                        let mut ends = Vec::new();
+                        let mut pos = 0;
+                        while let Some((next, _, _)) = step_cluster(s, pos) {
+                            if next >= s.len() {
                                 break;
                             }
-                            let w = self.run_width(&styles[piece.style as usize], trimmed);
-                            if fits(width + w) {
-                                piece.text = trimmed.into();
-                                piece.width = w;
-                                width += w;
-                                pieces.push(piece);
-                                break;
-                            }
+                            ends.push(next);
+                            pos = next;
+                        }
+                        let found = if ends.len() > 16 && run.style.letter_spacing.0 >= 0.0 {
+                            // Long unbroken tokens (URLs, hashes): binary-search
+                            // cluster boundaries so WASM crosses FFI O(log K) times.
+                            let keep = ends.partition_point(|&end| {
+                                let trimmed = s[..end].trim_end();
+                                trimmed.is_empty() || fits(width + self.run_width(run, trimmed))
+                            });
+                            keep.checked_sub(1).and_then(|i| {
+                                let trimmed = s[..ends[i]].trim_end();
+                                (!trimmed.is_empty()).then(|| {
+                                    let w = self.run_width(run, trimmed);
+                                    (trimmed, w)
+                                })
+                            })
+                        } else {
+                            ends.iter().rev().find_map(|&end| {
+                                let trimmed = s[..end].trim_end();
+                                (!trimmed.is_empty()).then(|| {
+                                    let w = self.run_width(run, trimmed);
+                                    fits(width + w).then_some((trimmed, w))
+                                })?
+                            })
+                        };
+                        if let Some((trimmed, w)) = found {
+                            piece.text = trimmed.into();
+                            piece.width = w;
+                            width += w;
+                            pieces.push(piece);
+                            break;
                         }
                     }
                 }
