@@ -99,8 +99,6 @@ const FADE_IN: f64 = 150.0;
 const FADE_OUT: f64 = 120.0;
 
 const CSS: &str = "
-.nsh-light { background-color: #ffffff; }
-.nsh-dark { background-color: #0a0a0a; }
 window.nsh-transparent, window.nsh-transparent .nsh-light, window.nsh-transparent .nsh-dark { background: none; }
 window.nsh-no-shadow, window.nsh-no-shadow.csd { box-shadow: none; }
 .nsh-dialog-backdrop { background-color: rgba(0, 0, 0, 0.4); }
