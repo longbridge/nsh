@@ -286,6 +286,7 @@ const terminalOpen = signal(true);
 | `renderEmpty` | `.render_empty(\|placement\| ..)` | `(placement: DockPlacement) => JSX.Element` | 无 | 中心区域为空时显示的内容。 |
 | `renderDragPreview` | `.render_drag_preview(\|tab\| ..)` | `(tab: DockTab) => JSX.Element` | 无 | 拖动标签页时跟随指针或手指的内容。 |
 | `groupClass`、`groupStyle` | `.group_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每个标签组的框架。 |
+| `scrollableTabs` | `.scrollable_tabs(..)` | `boolean` | `false` | 每个标签栏的标签页放不下时可以横向滚动：它们位于一个占据标签栏剩余空间的横向滚动视图里，显示的标签页变化时会滚动到可见位置。关闭时，标签页是标签栏自己的子元素。 |
 | `tabBarClass`、`tabBarStyle` | `.tab_bar_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每个标签栏（`flex-row` 排成一行）。 |
 | `tabClass`、`tabStyle` | `.tab_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每个标签页；`selected:` 用于当前显示的那个。 |
 | `contentClass`、`contentStyle` | `.content_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每个组的内容框架，面板显示在其中。 |
@@ -346,7 +347,7 @@ const terminalOpen = signal(true);
 ## 平台说明
 
 - 指针（鼠标、触控板、悬停在屏幕上方的笔）按住按键移动 4 点后即开始拖动标签页，各平台都一样：连着触控板的 iPad、用鼠标操作的窄浏览器窗口都和桌面一样拖动。在 macOS、Windows、Linux 和 GPUI 上，每次按下都算作指针的按下，包括触摸屏笔记本上的手指。
-- iOS、iPadOS 和 Android 上的手指：长按后才开始拖动标签页，和 iPadOS 的拖放一样，所以在标签栏上滑动是滚动。
+- iOS、iPadOS 和 Android 上的手指：长按后才开始拖动标签页，和 iPadOS 的拖放一样，所以在开启 `scrollableTabs` 的标签栏上滑动是滚动。
 - 桌面平台和 Web：手柄显示对应方向的调整大小光标。
 - 手机和窄区域：紧凑方式，使用抽屉和底部面板。
 - 各平台绘制的都是应用设置的样式：标签页、标签栏、手柄、放置指示、停靠区、抽屉和底部面板。

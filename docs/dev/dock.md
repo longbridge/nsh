@@ -97,7 +97,7 @@ A tab claims the touches of a gesture with the core's responder (`tab_group.rs`)
 platform: a press from a pointer (a mouse, a trackpad, a pen hovering: anything that hovered the tab before pressing
 it), and every press on the desktop OSes (a touchscreen laptop's finger too), drags once it moves `DRAG_SLOP` (4
 points) from where it went down; a finger's press on iOS and Android only after a long press armed it, so a swipe
-over the tabs scrolls them. An iPad with a trackpad, or a phone-width browser window driven by a mouse, drags as a
+over the tabs scrolls them where `scrollableTabs` puts them in a scroll view (`tab_group.rs` `tab_strip`). An iPad with a trackpad, or a phone-width browser window driven by a mouse, drags as a
 desktop does. The grant starts the drag: every group's tab bar, tabs and content frame are measured in the root
 view's coordinates in one task, answered with the next commit. Each move resolves the target from those bounds: over
 a tab bar, the slot between the tabs the pointer is past (counted without the dragged tab); over a content frame, its

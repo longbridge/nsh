@@ -34,7 +34,7 @@ use std::{
 };
 
 use nsh_core::{
-    AccessibilityState,
+    AccessibilityState, RevealOptions, ScrollAlignment,
     element::{LayoutAnimation, LayoutCurve, LayoutTransition},
     geometry::{Bounds, Point, Points},
     prelude::*,
@@ -81,6 +81,26 @@ pub(crate) fn tab_value(a: AreaCx, panel: &PanelId) -> Option<DockTab> {
     })
 }
 
+/// The tabs of a tab bar, as `tabs` makes them: the bar's own children, or
+/// with `scrollableTabs` a row in a horizontal scroll view that takes the
+/// bar's free room, so what follows the tabs keeps its place.
+pub(crate) fn tab_strip(a: AreaCx, tabs: impl Fn() -> AnyElement + 'static) -> AnyElement {
+    dynamic(move || {
+        let tabs = tabs();
+        if a.props.scrollable_tabs.get() {
+            scroll()
+                .horizontal()
+                .scrollbar(false)
+                .flex_1()
+                .min_w(px(0.0))
+                .child(view().flex_row().child(tabs))
+                .into_element()
+        } else {
+            tabs
+        }
+    })
+}
+
 /// Tab group `node`: its frame, tab bar and content frame.
 pub(crate) fn tab_group(a: AreaCx, node: NodeId) -> AnyElement {
     let group = computed(move || a.area.with(|area| area.group(node)));
@@ -116,18 +136,22 @@ pub(crate) fn tab_group(a: AreaCx, node: NodeId) -> AnyElement {
                 .element_ref(&refs.bar)
                 .app_class(a.props.tab_bar_class)
                 .inline_style(a.props.tab_bar_style)
-                .child(each(
-                    move || tabs.get(),
-                    |panel: &PanelId| panel.clone(),
-                    move |panel, _| {
-                        let id = panel.get_untracked();
-                        let value = {
-                            let id = id.clone();
-                            computed(move || tab_value(a, &id))
-                        };
-                        tab(a, id, Some(node), value, tab_refs.clone())
-                    },
-                )),
+                .child(tab_strip(a, move || {
+                    let tab_refs = tab_refs.clone();
+                    each(
+                        move || tabs.get(),
+                        |panel: &PanelId| panel.clone(),
+                        move |panel, _| {
+                            let id = panel.get_untracked();
+                            let value = {
+                                let id = id.clone();
+                                computed(move || tab_value(a, &id))
+                            };
+                            tab(a, id, Some(node), value, tab_refs.clone())
+                        },
+                    )
+                    .into_element()
+                })),
         )
         .child(
             view()
@@ -325,6 +349,14 @@ pub(crate) fn tab(
         })
     };
     let selected = move || value.with(|v| v.as_ref().is_some_and(|v| v.active));
+    // In a tab bar that scrolls, the tab that becomes the displayed one
+    // (a press in another group, the ref's `selectPanel`, a panel added)
+    // comes into view, by as little as shows it.
+    effect(move || {
+        if selected() && a.props.scrollable_tabs.get() {
+            me.reveal(RevealOptions::default().vertical(ScrollAlignment::Nearest));
+        }
+    });
     let pressed = panel.clone();
     let dragged = panel.clone();
     view()

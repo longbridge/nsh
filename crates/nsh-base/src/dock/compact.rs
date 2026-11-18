@@ -106,24 +106,28 @@ pub(crate) fn compact_view(a: AreaCx) -> AnyElement {
                         .element_ref(&refs.bar)
                         .app_class(a.props.tab_bar_class)
                         .inline_style(a.props.tab_bar_style)
-                        .child(each(
-                            move || tabs.get(),
-                            |panel: &PanelId| panel.clone(),
-                            move |panel, index| {
-                                let id = panel.get_untracked();
-                                let value = {
-                                    let id = id.clone();
-                                    computed(move || {
-                                        tab_value(a, &id).map(|tab| DockTab {
-                                            index: index.get(),
-                                            active: shown.with(|s| s.as_ref() == Some(&id)),
-                                            ..tab
+                        .child(super::tab_group::tab_strip(a, move || {
+                            let tab_refs = tab_refs.clone();
+                            each(
+                                move || tabs.get(),
+                                |panel: &PanelId| panel.clone(),
+                                move |panel, index| {
+                                    let id = panel.get_untracked();
+                                    let value = {
+                                        let id = id.clone();
+                                        computed(move || {
+                                            tab_value(a, &id).map(|tab| DockTab {
+                                                index: index.get(),
+                                                active: shown.with(|s| s.as_ref() == Some(&id)),
+                                                ..tab
+                                            })
                                         })
-                                    })
-                                };
-                                tab(a, id, None, value, tab_refs.clone())
-                            },
-                        )),
+                                    };
+                                    tab(a, id, None, value, tab_refs.clone())
+                                },
+                            )
+                            .into_element()
+                        })),
                 )
                 .child(
                     view()
