@@ -1,7 +1,9 @@
 //! A transparent, borderless window that stays out of the taskbar
 //! (`AppOptions::transparent`, `AppOptions::skip_taskbar`): a translucent
-//! rounded card on the desktop, dragged by its body, with buttons that put
-//! it back in the taskbar and close it.
+//! rounded card on the desktop over the system's blur of what is behind it
+//! (`windows_backdrop`, Windows 11 and later), dragged by its body, with
+//! buttons that turn the blur off and on, put it back in the taskbar and
+//! close it.
 //!
 //! `cargo run -p nsh-platform-windows --example transparent`
 
@@ -10,7 +12,7 @@
 #[cfg(target_os = "windows")]
 mod app {
     use nsh_base::button;
-    use nsh_core::{Color, element::desktop as window, prelude::*};
+    use nsh_core::{Color, WindowsBackdrop, element::desktop as window, prelude::*};
 
     fn action(label: &'static str, press: impl Fn() + 'static) -> impl IntoElement {
         button()
@@ -26,6 +28,7 @@ mod app {
     #[component]
     pub fn Card() -> impl IntoElement {
         let skip = signal(true);
+        let blur = signal(true);
         let win = window::current_window();
         let close = win.clone();
         // The root draws nothing: only the card shows.
@@ -35,7 +38,8 @@ mod app {
                 .gap_3()
                 .p_4()
                 .rounded(px(16.0))
-                .bg(Color(0x1e1e_2ecc))
+                .bg(Color(0x1e1e_2e80))
+                .windows_backdrop(move || blur.get().then_some(WindowsBackdrop::Blur))
                 .window_drag(true)
                 .child(
                     text("Transparent window")
@@ -56,6 +60,9 @@ mod app {
                     view()
                         .flex_row()
                         .gap_2()
+                        .child(action("Toggle blur", move || {
+                            blur.set(!blur.get_untracked())
+                        }))
                         .child(action("Toggle taskbar", move || {
                             let next = !skip.get_untracked();
                             skip.set(next);

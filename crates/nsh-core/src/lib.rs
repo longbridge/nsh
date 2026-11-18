@@ -99,7 +99,7 @@ pub use crate::{
         BackdropMaterial, BlendMode, BoxShadow, ColorStop, Cursor, Effects, Filter, GlassEffect,
         Gradient, GradientKind, GradientSize, KeyframeAnimation, Keyframes, MacOsBackdrop,
         MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState, Outline, Transition,
-        TransitionProps, blur_radius, compose_color_matrices,
+        TransitionProps, WindowsBackdrop, blur_radius, compose_color_matrices,
     },
     geometry::{Bounds, Corners, Edges, Point, Points, Size},
     image::ImageData,
