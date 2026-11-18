@@ -273,7 +273,9 @@ events have none either. Android reports `key` from the character the hardware k
 DOM name) and `code` only from a real scan code, so a synthetic `adb shell input keyevent` has `""`. A system key
 (Back, Home, volume, media, camera, call) is never captured, even by `captureKeys="all"`, and still reaches listeners.
 A `focusable` view takes the hardware keyboard's focus; Tab and Shift+Tab move between the stops and go to the
-embedding Android host at the first and last one. See `docs/dev/tooling.md` and each platform's development page
+embedding Android host at the first and last one, and while no view has the focus the first arrow key moves it to the
+first stop on screen. A `keymap` binding on that arrow keeps the key for the app, as does a `captureKeys` rule of a
+view that hears it. See `docs/dev/tooling.md` and each platform's development page
 for what its source reports.
 
 On iOS, a hardware keyboard reports `UIKey.characters` as `key` (its case and layout kept) and maps

@@ -515,6 +515,20 @@ Things that were found the hard way. Read the section of the area you change bef
   (`dispatchKeyEvent`, the parents before the focused view): `NshView`, which holds the focus when no input does,
   sees every key meant for the views inside it. Keys with Control come as `dispatchKeyShortcutEvent` first, where a
   text field selects all, copies and pastes, so the app's shortcuts are matched there too.
+- **Android, arrow keys while no view of the app has the focus**: Android's directional search (`FocusFinder`) starts
+  from the focused view and takes only views past its edge in the key's direction. While no view of the app has the
+  focus, `NshView` or a dialog's container holds it, and a standalone app's `NshView` and a dialog's container fill
+  their window, so from them nothing qualifies and an arrow does nothing. A tap clears a focus that is not focusable
+  in touch mode (`enterTouchMode`: the root comes before its descendants, so it is not the ancestor that takes the
+  focus) and leaves the window without one. The first navigation key after it leaves touch mode in `ViewRootImpl`
+  (`checkForLeavingTouchModeAndConsume`), which consumes the key when it has to pick a focus itself
+  (`restoreDefaultFocus`, which gives it to the root). The root's touch-mode listener runs before that check and
+  takes the focus when nothing holds it (`NshView.keyboardFocus`, the `keyboardFocus` of `ModalHost`'s container;
+  without it a dialog's first arrow after a tap only focused the container), and a focused view group that comes
+  before its descendants keeps the focus there. The arrow therefore reaches `KeyDispatch`, which moves the focus to
+  the first stop on screen (`ArrowEntry`, #2361). An embedded `NshView` can have host views beside it and host scroll
+  views around it, which Android's handling of an unconsumed arrow reaches (`focusSearch` from `NshView`, a host
+  `ScrollView`'s `arrowScroll`): `KeyDispatch.elsewhere` asks the same and leaves such an arrow to the host.
 
 ## Linux, GTK
 

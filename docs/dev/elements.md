@@ -283,7 +283,22 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   between inputs and the views `focusable` or presses make stops (`Mounter.updateFocusable`, `TabOrder` in
   `nsh-platform-android`), and at its first and last stop Tab and Shift+Tab go to the embedding Android host
   instead of wrapping. Android's Tab walks the native view tree (a portaled overlay is reached where it is
-  inserted, not by `ViewProps::tab_after`).
+  inserted, not by `ViewProps::tab_after`). While no view of the app has the focus, the window's own root holds it
+  (`NshView`, or a dialog's container): at launch, and from the first key after a tap. A tap clears a focus that is
+  not focusable in touch mode and leaves the window without one; the root's touch-mode listener takes the focus
+  again as the next key leaves touch mode (`pitfalls.md`). Android's directional search from the root takes only
+  views past its edge, and a standalone app's `NshView` and a dialog's container fill their window, so it finds
+  nothing. An arrow key with no modifier that nothing in the app took (no shortcut; a `captureKeys` rule takes a key
+  only where a view hears it, and while nothing has the focus none does, #2362) and that Android has nowhere else to
+  take then moves the focus into the app (`ArrowEntry`, `KeyDispatch.elsewhere`): an embedded `NshView`'s host
+  keeps an arrow when Android's search from `NshView` (`focusSearch`) finds a host view in its direction or a host
+  scroll view around it scrolls that way. The focus goes to the first stop on screen, whatever the arrow's
+  direction, or the first stop when none is on screen (`Mounter.enterFocus`), leaving touch mode as Tab does; the
+  app hears that stop's `onFocus`. The press is consumed, and its release too, unless the arrow is held until it
+  repeats: the repeats then move the focus Android's way and the release is Android's. Starting on screen keeps a
+  scrolled page where it is, near what Android's own default focus picks (`ViewRootImpl`'s `restoreDefaultFocus`:
+  the first focusable in tree order, in a scroll view the first one below its scrolled top that is on screen); from
+  there Android's directional navigation moves the focus. Enter and the D-pad centre keep Android's default.
   A shown overlay's content is in the Tab order where the app put the overlay, not where its native view is (at the
   end of its root view), as WAI-ARIA's non-modal popups have it: a popover's content right after its trigger, so
   Shift+Tab from it goes back to the trigger and Tab past its last stop goes on to what follows the popover. A list
