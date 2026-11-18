@@ -190,6 +190,14 @@ at `https://example.com/apps/counter/sports/football` as at `https://example.com
 the site under that path. The path's segments are ASCII letters, digits, `-`, `.`, `_` and `~`, with other characters
 percent-encoded as browsers send them (`/%E5%BA%94%E7%94%A8/` for `/应用/`).
 
+### Supported browsers
+
+Published apps need Safari 16.4 (iOS and iPadOS 16.4), Chrome and Edge 97, or Firefox 108 and later. The page loads
+its modules through an import map and uses JavaScript built-ins of those releases (`Object.hasOwn`,
+`Array.prototype.findLastIndex`, `OffscreenCanvas`); earlier browsers, such as iOS 15 Safari or the WebViews of
+older Android releases, show a blank page. NSH does not ship polyfills for them, so modern browsers download nothing
+extra.
+
 ### Runtime size
 
 Packaging links each app its own `nsh.<digest>.wasm`, holding the engine and the `nsh/base` components, standard
