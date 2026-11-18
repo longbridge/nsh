@@ -2595,8 +2595,23 @@ opt-level = \"s\"
                 "\n[profile.dev.package.{package}]\nopt-level = 3\n"
             ));
         }
+        // The app's crates take its extensions from Git or crates.io (`nsh
+        // add`): the locked checkouts, the ones the sets link. One from a
+        // directory is that directory already.
+        let mut crates_io = String::new();
+        let mut git_patches = String::new();
+        for (id, package, dir) in &self.extensions {
+            let line = format!("{package} = {{ path = {:?} }}\n", dir.to_string_lossy());
+            match crate::extensions::patch_table(id) {
+                Some(None) => crates_io.push_str(&line),
+                Some(Some(url)) => git_patches.push_str(&format!("\n[patch.{url:?}]\n{line}")),
+                None => {}
+            }
+        }
         if let Some(source) = self.nsh.source() {
             manifest.push_str("\n[patch.crates-io]\n");
+            manifest.push_str(&crates_io);
+            crates_io.clear();
             let mut patches = String::new();
             for name in NSH_CRATES
                 .iter()
@@ -2615,14 +2630,10 @@ opt-level = \"s\"
                 manifest.push_str(&format!("\n[patch.{url:?}]\n{patches}"));
             }
         }
-        // The app's crates take its extensions from Git (`nsh add`): the
-        // locked checkouts, the ones the sets link.
-        for (url, package, dir) in &self.extensions {
-            manifest.push_str(&format!(
-                "\n[patch.{url:?}]\n{package} = {{ path = {:?} }}\n",
-                dir.to_string_lossy()
-            ));
+        if !crates_io.is_empty() {
+            manifest.push_str(&format!("\n[patch.crates-io]\n{crates_io}"));
         }
+        manifest.push_str(&git_patches);
         write(&path, &manifest)
     }
 

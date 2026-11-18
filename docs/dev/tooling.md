@@ -1035,15 +1035,17 @@ for the release runner in both. The test runner links QuickJS, so the first `nsh
 
 ### Third-party extensions (`nsh.json` `"extensions"`, `nsh add`)
 
-`crates/nsh-cli/src/extensions.rs`. An extension is a crate like the ones `"rust"` lists, from Git: `nsh add <url>
-[--tag|--rev]` writes `{ "git", "tag"|"rev" }` into `"extensions"`, resolves it to a commit and pins it in `nsh.lock`
-(`{ git, tag|rev, commit, package, module }`). Each locked commit is a `git worktree` of one clone per repository in
+`crates/nsh-cli/src/extensions.rs`. An extension is a crate like the ones `"rust"` lists, from Git (`nsh add <url>
+[--tag|--rev]`, `{ "git", "tag"|"rev" }`, locked to a `commit`), crates.io (`nsh add <crate>[@<req>]`, `{ "crate",
+"version" }`, resolved by `cargo metadata` on a probe crate in the cache and locked to the exact version as `resolved`)
+or a directory (`nsh add --path <dir>`, `{ "path" }`, not locked, read as it is). `nsh.lock` holds `{ <source>,
+commit|resolved, package, module }`. A locked crate is Cargo's own download of that version. Each locked commit is a `git worktree` of one clone per repository in
 nsh's cache (`<cache>/extensions/<name>-<hash of url>/<commit>`), made again when missing, so a build after clearing
 the cache takes the same commit. `rust_app::of` appends the extensions to the app's crates (an app with extensions
 only is a `RustApp` too, its nsh crates this CLI's, as `runner_only`), checks them together (`check_crates`: the same
 directory, package or `#[native_module]` specifier), and the workspace links each like an app crate. The app's crate
-depends on the extension by Git at the locked `rev` (`nsh add` writes it), which the workspace's
-`[patch."<url>"]` sends to the same checkout. Before linking, `[package.metadata.nsh]` is checked: `format = 1`,
+depends on the extension as `nsh add` writes it (Git at the locked `rev`, the resolved crate version, or a relative
+`path`), which the workspace's `[patch."<url>"]` / `[patch.crates-io]` sends to the same checkout. Before linking, `[package.metadata.nsh]` is checked: `format = 1`,
 `module` equal to the crate's `#[native_module]`, `nsh` (a version requirement) matching this CLI, `targets` known
 names. `nsh check` does not `cargo check` extensions (only crates outside the cache). Not yet: refusing a command for
 a target not in `targets`, web and mobile packaging checks, and an OTA check of the shell's linked modules.

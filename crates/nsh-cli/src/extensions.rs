@@ -49,18 +49,30 @@ const TARGETS: &[&str] = &[
     "macos", "ios", "android", "windows", "linux", "web", "gpui", "tui",
 ];
 
-/// An extension as `nsh.json` lists it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// An extension as `nsh.json` lists it: from Git (`git`, with `tag` or
+/// `rev`), from crates.io (`crate`, with a `version` requirement) or from
+/// a local directory (`path`, relative to `nsh.json`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Source {
     /// The repository's URL.
-    pub git: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git: Option<String>,
     /// A tag to take.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
     /// A commit (or branch) to take.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rev: Option<String>,
+    /// The crate's name on crates.io.
+    #[serde(rename = "crate", default, skip_serializing_if = "Option::is_none")]
+    pub krate: Option<String>,
+    /// The versions of the crate to take (a Cargo version requirement).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// A local directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 impl Source {
@@ -70,6 +82,100 @@ impl Source {
             .as_deref()
             .or(self.rev.as_deref())
             .unwrap_or("HEAD")
+    }
+
+    /// What names it: its URL, crate or path. Two sources with the same
+    /// one are the same extension.
+    pub(crate) fn id(&self) -> &str {
+        self.git
+            .as_deref()
+            .or(self.krate.as_deref())
+            .or(self.path.as_deref())
+            .unwrap_or_default()
+    }
+
+    /// Checks it names exactly one place.
+    fn validate(&self) -> anyhow::Result<()> {
+        let kinds = [&self.git, &self.krate, &self.path]
+            .iter()
+            .filter(|k| k.is_some())
+            .count();
+        if kinds != 1 {
+            bail!("nsh.json: \"extensions\": each has one of \"git\", \"crate\" or \"path\"");
+        }
+        if self.tag.is_some() && self.rev.is_some() {
+            bail!(
+                "nsh.json: \"extensions\": {} has both \"tag\" and \"rev\"",
+                self.id()
+            );
+        }
+        if self.git.is_none() && (self.tag.is_some() || self.rev.is_some()) {
+            bail!(
+                "nsh.json: \"extensions\": {}: \"tag\" and \"rev\" are for \"git\"",
+                self.id()
+            );
+        }
+        if self.krate.is_none() && self.version.is_some() {
+            bail!(
+                "nsh.json: \"extensions\": {}: \"version\" is for \"crate\"",
+                self.id()
+            );
+        }
+        Ok(())
+    }
+
+    /// The source `nsh add` was given: a Git URL, else a crate name with an
+    /// optional `@<version requirement>`; or `path`.
+    pub(crate) fn parse(
+        source: Option<String>,
+        path: Option<String>,
+        tag: Option<String>,
+        rev: Option<String>,
+    ) -> anyhow::Result<Self> {
+        let source = match (source, path) {
+            (None, Some(path)) => Source {
+                // Written with a separator, never read as a crate's name.
+                path: Some(if path.contains(['/', '\\']) || path.starts_with('.') {
+                    path
+                } else {
+                    format!("./{path}")
+                }),
+                ..Default::default()
+            },
+            (Some(s), None)
+                if s.contains("://") || s.starts_with("git@") || s.ends_with(".git") =>
+            {
+                Source {
+                    git: Some(s),
+                    tag,
+                    rev,
+                    ..Default::default()
+                }
+            }
+            (Some(s), None) => {
+                let (name, version) = match s.split_once('@') {
+                    Some((name, v)) => (name.to_owned(), Some(v.to_owned())),
+                    None => (s, None),
+                };
+                if let Some(v) = &version {
+                    semver::VersionReq::parse(v)
+                        .with_context(|| format!("{name}@{v}: not a version requirement"))?;
+                }
+                if tag.is_some() || rev.is_some() {
+                    bail!(
+                        "--tag and --rev are for a Git URL; take a crate's version with {name}@<version>"
+                    );
+                }
+                Source {
+                    krate: Some(name),
+                    version,
+                    ..Default::default()
+                }
+            }
+            _ => bail!("nsh add takes a Git URL, a crate name or --path <dir>"),
+        };
+        source.validate()?;
+        Ok(source)
     }
 }
 
@@ -86,9 +192,25 @@ struct Lock {
 struct Locked {
     #[serde(flatten)]
     source: Source,
-    commit: String,
+    /// The commit a Git source resolved to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    commit: Option<String>,
+    /// The version a crate resolved to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resolved: Option<String>,
     package: String,
     module: String,
+}
+
+impl Locked {
+    /// Where it was resolved to, briefly.
+    fn at(&self) -> String {
+        match (&self.commit, &self.resolved) {
+            (Some(c), _) => c[..c.len().min(12)].to_owned(),
+            (_, Some(v)) => v.clone(),
+            _ => "the local directory".to_owned(),
+        }
+    }
 }
 
 /// What `[package.metadata.nsh]` of an extension says.
@@ -113,19 +235,26 @@ pub(crate) fn crates(
     }
     let lock = read_lock(dir)?;
     let mut locked = Vec::new();
+    let mut crates = Vec::new();
     for source in &sources {
+        if let Some(path) = &source.path {
+            // A local directory: read as it is now, nothing to lock.
+            let checkout = dunce::canonicalize(dir.join(path))
+                .with_context(|| format!("nsh.json: \"extensions\": no directory {path}"))?;
+            let package = rust_app::package_name(&checkout.join("Cargo.toml"))?;
+            check(&checkout, path)?;
+            crates.push((path.clone(), AppCrate::new(package, checkout)));
+            continue;
+        }
         let entry = match lock.extensions.iter().find(|l| l.source == *source) {
             Some(entry) => entry.clone(),
             None => resolve(source)?,
         };
-        locked.push(entry);
-    }
-    let mut crates = Vec::new();
-    for entry in &locked {
-        let checkout = checkout(&entry.source.git, &entry.commit)?;
+        let checkout = place(&entry)?;
         let package = rust_app::package_name(&checkout.join("Cargo.toml"))?;
-        check(&checkout, &entry.source.git)?;
-        crates.push((entry.source.git.clone(), AppCrate::new(package, checkout)));
+        check(&checkout, source.id())?;
+        crates.push((source.id().to_owned(), AppCrate::new(package, checkout)));
+        locked.push(entry);
     }
     let new = Lock {
         version: 1,
@@ -137,16 +266,43 @@ pub(crate) fn crates(
     Ok(crates)
 }
 
+/// The `[patch]` table that sends the app's dependency on the extension
+/// named `id` (as [`crates`] names it) to its checkout: `Some(Some(url))`
+/// for Git, `Some(None)` for crates.io, `None` for a directory, which the
+/// app's crate takes as it is.
+pub(crate) fn patch_table(id: &str) -> Option<Option<&str>> {
+    if id.contains("://") || id.starts_with("git@") || id.ends_with(".git") {
+        Some(Some(id))
+    } else if id.contains(['/', '\\', '.']) {
+        None
+    } else {
+        Some(None)
+    }
+}
+
+/// The directory of the locked `entry`: a Git checkout or the crate as
+/// Cargo downloaded it.
+fn place(entry: &Locked) -> anyhow::Result<PathBuf> {
+    match (
+        &entry.source.git,
+        &entry.commit,
+        &entry.source.krate,
+        &entry.resolved,
+    ) {
+        (Some(git), Some(commit), _, _) => checkout(git, commit),
+        (_, _, Some(name), Some(version)) => Ok(registry(name, &format!("={version}"))?.1),
+        _ => bail!(
+            "{LOCK}: {} is not resolved: run nsh add again",
+            entry.source.id()
+        ),
+    }
+}
+
 /// `nsh add`: lists the extension at `git` (`tag` or `rev`, else the
 /// default branch) in the `nsh.json` in `dir`, replacing one of the same
 /// repository, locks it, and checks it with the app's crates. On an error
 /// `nsh.json` and `nsh.lock` are left as they were.
-pub(crate) fn add(
-    dir: &Path,
-    git: &str,
-    tag: Option<String>,
-    rev: Option<String>,
-) -> anyhow::Result<()> {
+pub(crate) fn add(dir: &Path, source: Source) -> anyhow::Result<()> {
     let config_path = dir.join("nsh.json");
     let lock_path = dir.join(LOCK);
     let config_text = fs::read_to_string(&config_path).with_context(|| {
@@ -158,24 +314,20 @@ pub(crate) fn add(
     let lock_text = fs::read_to_string(&lock_path).ok();
     let mut config: serde_json::Value =
         serde_json::from_str(&config_text).context("nsh.json is not JSON")?;
-    let source = Source {
-        git: git.to_owned(),
-        tag,
-        rev,
-    };
-    // `nsh add` again: resolved anew, what the reference points to now.
-    if let Ok(mut lock) = read_lock(dir)
-        && lock.extensions.iter().any(|l| l.source.git == git)
-    {
-        lock.extensions.retain(|l| l.source.git != git);
-        write_lock(dir, &lock)?;
-    }
-    let mut sources = sources(&config)?;
-    sources.retain(|s| s.git != source.git);
-    sources.push(source.clone());
-    config["extensions"] = serde_json::to_value(&sources)?;
+    let id = source.id().to_owned();
     let mut manifest_backup: Option<(PathBuf, String)> = None;
     let result = (|| {
+        // `nsh add` again: resolved anew, what the reference points to now.
+        if let Ok(mut lock) = read_lock(dir)
+            && lock.extensions.iter().any(|l| l.source.id() == id)
+        {
+            lock.extensions.retain(|l| l.source.id() != id);
+            write_lock(dir, &lock)?;
+        }
+        let mut sources = sources(&config)?;
+        sources.retain(|s| s.id() != id);
+        sources.push(source.clone());
+        config["extensions"] = serde_json::to_value(&sources)?;
         fs::write(&config_path, serde_json::to_string_pretty(&config)? + "\n")?;
         // The app's crates and the extensions together: a clash of
         // packages or modules is reported here, before a build.
@@ -184,38 +336,53 @@ pub(crate) fn add(
             Some(rust) => rust_crates(dir, rust)?,
             None => Vec::new(),
         };
-        let app_crate = all.first().map(|(_, c)| c.dir().join("Cargo.toml"));
+        let app_crate = all.first().map(|(_, c)| c.dir().to_owned());
+        let added = extensions
+            .iter()
+            .find(|(name, _)| *name == id)
+            .map(|(_, c)| c.clone())
+            .context("the extension is not listed")?;
         all.extend(extensions);
         rust_app::check_crates(&all)?;
         let lock = read_lock(dir)?;
+        let entry = lock.extensions.iter().find(|l| l.source == source).cloned();
         // The app's crate uses it from Rust too (`use acme_ui::Gauge`).
-        if let Some(manifest) = &app_crate
-            && let Some(entry) = lock.extensions.iter().find(|l| l.source == source)
-        {
-            let text = fs::read_to_string(manifest)?;
+        if let Some(crate_dir) = &app_crate {
+            let manifest = crate_dir.join("Cargo.toml");
+            let package = rust_app::package_name(&added.dir().join("Cargo.toml"))?;
+            let dependency = match &entry {
+                Some(Locked {
+                    commit: Some(commit),
+                    ..
+                }) => Dependency::Git {
+                    url: id.clone(),
+                    commit: commit.clone(),
+                },
+                Some(Locked {
+                    resolved: Some(version),
+                    ..
+                }) => Dependency::Crate {
+                    version: version.clone(),
+                },
+                _ => Dependency::Path {
+                    path: relative(crate_dir, added.dir()),
+                },
+            };
+            let text = fs::read_to_string(&manifest)?;
             manifest_backup = Some((manifest.clone(), text.clone()));
-            if let Some(new) =
-                with_dependency(&text, &entry.package, &entry.source.git, &entry.commit)?
-            {
-                fs::write(manifest, new)?;
+            if let Some(new) = with_dependency(&text, &package, &dependency)? {
+                fs::write(&manifest, new)?;
             }
         }
-        anyhow::Ok(lock)
+        let module = check(added.dir(), &id)?;
+        let at = entry
+            .map(|e| e.at())
+            .unwrap_or_else(|| "the local directory".into());
+        anyhow::Ok((module, at))
     })();
     match result {
-        Ok(lock) => {
-            let entry = lock
-                .extensions
-                .iter()
-                .find(|l| l.source == source)
-                .context("the extension is not in nsh.lock")?;
-            println!(
-                "added {} ({}) at {}: import from \"{}\"",
-                entry.package,
-                source.git,
-                &entry.commit[..entry.commit.len().min(12)],
-                entry.module
-            );
+        Ok((module, at)) => {
+            println!("added {id} at {at}: import from \"{module}\"");
             Ok(())
         }
         Err(e) => {
@@ -229,21 +396,68 @@ pub(crate) fn add(
                     let _ = fs::remove_file(&lock_path);
                 }
             }
-            Err(e.context(format!("nsh add {git}: nsh.json and {LOCK} are unchanged")))
+            Err(e.context(format!("nsh add {id}: nsh.json and {LOCK} are unchanged")))
         }
     }
 }
 
-/// The manifest `text` depending on `package` from `git` at `commit`, or
+/// How the app's crate depends on an extension.
+#[derive(Debug)]
+enum Dependency {
+    Git { url: String, commit: String },
+    Crate { version: String },
+    Path { path: String },
+}
+
+impl Dependency {
+    /// Its value in `[dependencies]`.
+    fn value(&self) -> String {
+        match self {
+            Dependency::Git { url, commit } => format!("{{ git = {url:?}, rev = {commit:?} }}"),
+            Dependency::Crate { version } => format!("{version:?}"),
+            Dependency::Path { path } => format!("{{ path = {path:?} }}"),
+        }
+    }
+
+    /// Whether the dependency `line` takes the crate from the same place.
+    fn same_place(&self, line: &str) -> bool {
+        let git = rust_app::toml_string(line, "git");
+        let path = rust_app::toml_string(line, "path");
+        match self {
+            Dependency::Git { url, .. } => git.as_deref() == Some(url.as_str()),
+            Dependency::Crate { .. } => git.is_none() && path.is_none(),
+            Dependency::Path { .. } => path.is_some(),
+        }
+    }
+}
+
+/// `to` relative to `from`, with `/`.
+fn relative(from: &Path, to: &Path) -> String {
+    let from: Vec<_> = from.components().collect();
+    let to: Vec<_> = to.components().collect();
+    let common = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let mut parts: Vec<String> = vec!["..".into(); from.len() - common];
+    parts.extend(
+        to[common..]
+            .iter()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned()),
+    );
+    if parts.is_empty() {
+        ".".into()
+    } else {
+        parts.join("/")
+    }
+}
+
+/// The manifest `text` depending on `package` as `dependency` says, or
 /// `None` when it does already; an error when it takes `package` from
 /// elsewhere.
 fn with_dependency(
     text: &str,
     package: &str,
-    git: &str,
-    commit: &str,
+    dependency: &Dependency,
 ) -> anyhow::Result<Option<String>> {
-    let line = format!("{package} = {{ git = {git:?}, rev = {commit:?} }}");
+    let line = format!("{package} = {}", dependency.value());
     let mut out = Vec::new();
     let mut found = false;
     let mut table = String::new();
@@ -253,9 +467,8 @@ fn with_dependency(
             table = t.to_owned();
         }
         if table == "[dependencies]" && t.split(['=', ' ']).next() == Some(package) {
-            if toml_has(t, "git", git) {
-                // The same repository: at the locked commit, written under
-                // the table's header already.
+            if dependency.same_place(t) {
+                // The same place: as now, written under the table's header.
                 continue;
             }
             bail!("Cargo.toml: [dependencies] already has {package} from elsewhere: `{t}`");
@@ -273,11 +486,6 @@ fn with_dependency(
     }
     let new = out.join("\n") + "\n";
     Ok((new != text).then_some(new))
-}
-
-/// Whether the TOML `line` sets `key` to `value`.
-fn toml_has(line: &str, key: &str, value: &str) -> bool {
-    rust_app::toml_string(line, key).as_deref() == Some(value)
 }
 
 /// The app's own crates (`"rust"`), named by their paths.
@@ -307,15 +515,10 @@ fn sources(config: &serde_json::Value) -> anyhow::Result<Vec<Source>> {
         None => Ok(Vec::new()),
         Some(value) => {
             let sources: Vec<Source> = serde_json::from_value(value.clone()).context(
-                "nsh.json: \"extensions\" is a list of { \"git\": \"<url>\", \"tag\" or \"rev\": \"…\" }",
+                "nsh.json: \"extensions\" is a list of { \"git\": \"<url>\" (\"tag\" or \"rev\") }, { \"crate\": \"<name>\" (\"version\") } or { \"path\": \"<dir>\" }",
             )?;
             for s in &sources {
-                if s.tag.is_some() && s.rev.is_some() {
-                    bail!(
-                        "nsh.json: \"extensions\": {} has both \"tag\" and \"rev\"",
-                        s.git
-                    );
-                }
+                s.validate()?;
             }
             Ok(sources)
         }
@@ -334,9 +537,22 @@ fn write_lock(dir: &Path, lock: &Lock) -> anyhow::Result<()> {
     fs::write(dir.join(LOCK), text).with_context(|| format!("writing {LOCK}"))
 }
 
-/// Resolves `source` to a commit, checks it out and reads its metadata.
+/// Resolves `source` (from Git or crates.io) and reads its metadata.
 fn resolve(source: &Source) -> anyhow::Result<Locked> {
-    let repo = repository(&source.git, true)?;
+    if let Some(name) = &source.krate {
+        let (version, dir) = registry(name, source.version.as_deref().unwrap_or("*"))?;
+        let package = rust_app::package_name(&dir.join("Cargo.toml"))?;
+        let module = check(&dir, name)?;
+        return Ok(Locked {
+            source: source.clone(),
+            commit: None,
+            resolved: Some(version),
+            package,
+            module,
+        });
+    }
+    let url = source.git.as_deref().context("nothing to resolve")?;
+    let repo = repository(url, true)?;
     let reference = source.reference();
     let spec = match (&source.tag, &source.rev) {
         (Some(tag), _) => format!("refs/tags/{tag}^{{commit}}"),
@@ -355,16 +571,61 @@ fn resolve(source: &Source) -> anyhow::Result<Locked> {
                 ],
             )
         })
-        .with_context(|| format!("{}: no {reference}", source.git))?;
-    let checkout = checkout(&source.git, &commit)?;
+        .with_context(|| format!("{url}: no {reference}"))?;
+    let checkout = checkout(url, &commit)?;
     let package = rust_app::package_name(&checkout.join("Cargo.toml"))?;
-    let module = check(&checkout, &source.git)?;
+    let module = check(&checkout, url)?;
     Ok(Locked {
         source: source.clone(),
-        commit,
+        commit: Some(commit),
+        resolved: None,
         package,
         module,
     })
+}
+
+/// The crate `name` from crates.io, its newest version matching `req` as
+/// Cargo resolves it: that version and the directory Cargo downloaded it
+/// to.
+fn registry(name: &str, req: &str) -> anyhow::Result<(String, PathBuf)> {
+    let probe = crate::check::cache()?.join("extensions").join("registry");
+    fs::create_dir_all(&probe)?;
+    fs::write(
+        probe.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"nsh-extension-probe\"\nversion = \"0.0.0\"\nedition = \"2021\"\npublish = false\n\n[lib]\npath = \"lib.rs\"\n\n[workspace]\n\n[dependencies]\n{name} = {req:?}\n"
+        ),
+    )?;
+    fs::write(probe.join("lib.rs"), "")?;
+    // Resolved anew each time: the requirement decides, not a past lock.
+    let _ = fs::remove_file(probe.join("Cargo.lock"));
+    let out = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+        .args(["metadata", "--format-version", "1", "--manifest-path"])
+        .arg(probe.join("Cargo.toml"))
+        .output()
+        .context("running cargo")?;
+    if !out.status.success() {
+        bail!(
+            "{name} {req} from crates.io: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    let meta: serde_json::Value = serde_json::from_slice(&out.stdout)?;
+    let package = meta["packages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|p| {
+            p["name"] == name
+                && p["source"]
+                    .as_str()
+                    .is_some_and(|s| s.starts_with("registry+"))
+        })
+        .with_context(|| format!("{name}: not on crates.io"))?;
+    let version = package["version"].as_str().unwrap_or_default().to_owned();
+    let manifest = PathBuf::from(package["manifest_path"].as_str().unwrap_or_default());
+    let dir = manifest.parent().context("no crate directory")?.to_owned();
+    Ok((version, dunce::canonicalize(dir)?))
 }
 
 /// The directory of the extensions from `url` in nsh's cache.
@@ -561,7 +822,11 @@ mod tests {
     #[test]
     fn the_app_crate_depends_on_the_extension() {
         let manifest = "[package]\nname = \"app\"\n\n[dependencies]\nnsh-core = \"0.6\"\n";
-        let new = with_dependency(manifest, "acme-ui", "https://x/ui", "abc")
+        let at = |commit: &str| Dependency::Git {
+            url: "https://x/ui".into(),
+            commit: commit.into(),
+        };
+        let new = with_dependency(manifest, "acme-ui", &at("abc"))
             .unwrap()
             .unwrap();
         assert!(
@@ -571,7 +836,7 @@ mod tests {
             "{new}"
         );
         // Again at another commit: the line is replaced.
-        let newer = with_dependency(&new, "acme-ui", "https://x/ui", "def")
+        let newer = with_dependency(&new, "acme-ui", &at("def"))
             .unwrap()
             .unwrap();
         assert!(
@@ -580,13 +845,29 @@ mod tests {
         );
         assert_eq!(newer.matches("acme-ui").count(), 1, "{newer}");
         assert!(
-            with_dependency(&newer, "acme-ui", "https://x/ui", "def")
+            with_dependency(&newer, "acme-ui", &at("def"))
                 .unwrap()
                 .is_none()
         );
         // Taken from elsewhere: an error, not a second source.
         let other = "[dependencies]\nacme-ui = \"1\"\n";
-        assert!(with_dependency(other, "acme-ui", "https://x/ui", "abc").is_err());
+        assert!(with_dependency(other, "acme-ui", &at("abc")).is_err());
+        // From crates.io and a directory.
+        let krate = Dependency::Crate {
+            version: "1.2.0".into(),
+        };
+        let new = with_dependency(manifest, "acme-ui", &krate)
+            .unwrap()
+            .unwrap();
+        assert!(new.contains("acme-ui = \"1.2.0\""), "{new}");
+        let path = Dependency::Path {
+            path: "../ui".into(),
+        };
+        assert!(with_dependency(&new, "acme-ui", &path).is_err());
+        let new = with_dependency(manifest, "acme-ui", &path)
+            .unwrap()
+            .unwrap();
+        assert!(new.contains("acme-ui = { path = \"../ui\" }"), "{new}");
     }
 
     #[test]
@@ -595,9 +876,9 @@ mod tests {
         assert_eq!(
             sources(&config).unwrap(),
             [Source {
-                git: "https://x/a".into(),
+                git: Some("https://x/a".into()),
                 tag: Some("v1".into()),
-                rev: None
+                ..Default::default()
             }]
         );
         let both = serde_json::json!({ "extensions": [{ "git": "g", "tag": "v1", "rev": "abc" }] });
@@ -605,5 +886,41 @@ mod tests {
         let unknown = serde_json::json!({ "extensions": [{ "git": "g", "branch": "main" }] });
         assert!(sources(&unknown).is_err());
         assert!(sources(&serde_json::json!({})).unwrap().is_empty());
+        let krate = serde_json::json!({ "extensions": [{ "crate": "acme-ui", "version": "1" }, { "path": "../ui" }] });
+        assert_eq!(sources(&krate).unwrap().len(), 2);
+        let two = serde_json::json!({ "extensions": [{ "crate": "a", "path": "../a" }] });
+        assert!(sources(&two).is_err());
+        let tag = serde_json::json!({ "extensions": [{ "crate": "a", "tag": "v1" }] });
+        assert!(sources(&tag).is_err());
+    }
+
+    #[test]
+    fn add_arguments_are_parsed() {
+        let git = Source::parse(
+            Some("https://github.com/acme/ui".into()),
+            None,
+            Some("v1".into()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(git.git.as_deref(), Some("https://github.com/acme/ui"));
+        let krate = Source::parse(Some("acme-ui@1.2".into()), None, None, None).unwrap();
+        assert_eq!(
+            (krate.krate.as_deref(), krate.version.as_deref()),
+            (Some("acme-ui"), Some("1.2"))
+        );
+        assert!(Source::parse(Some("acme-ui".into()), None, Some("v1".into()), None).is_err());
+        assert!(Source::parse(Some("acme-ui@nope".into()), None, None, None).is_err());
+        let path = Source::parse(None, Some("../ui".into()), None, None).unwrap();
+        assert_eq!(path.path.as_deref(), Some("../ui"));
+    }
+
+    #[test]
+    fn relative_paths() {
+        assert_eq!(
+            relative(Path::new("/a/app/rust"), Path::new("/a/ext/ui")),
+            "../../ext/ui"
+        );
+        assert_eq!(relative(Path::new("/a"), Path::new("/a/b")), "b");
     }
 }
