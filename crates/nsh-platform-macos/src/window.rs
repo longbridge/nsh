@@ -2154,6 +2154,7 @@ pub(crate) fn removed(surface: &Surface, view: &NshView) -> bool {
         dismiss(surface, child, WindowCloseCause::ParentClose);
     }
     dock::set(surface.key(), id, None);
+    crate::input::window_closed(surface, &w.view);
     let window = w.window.clone();
     close(w);
     lost_key(surface, &window);
