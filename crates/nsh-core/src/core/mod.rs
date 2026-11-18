@@ -1228,6 +1228,19 @@ impl ApplyError {
     }
 }
 
+/// What [`Core::retag`] knows of the mount items of a round of renders,
+/// which only grows at its end until the round is over.
+#[derive(Default)]
+struct Retags {
+    /// The views whose `Create` is among the items looked at.
+    made: rustc_hash::FxHashSet<NodeId>,
+    /// The items looked at.
+    seen: usize,
+    /// The views that took another kind, with the number of items then:
+    /// their `Create` and `Insert` before that go.
+    retagged: rustc_hash::FxHashMap<NodeId, usize>,
+}
+
 /// The shadow tree of one surface.
 ///
 /// Feed it [`Op`]s with [`Core::apply`], then call [`Core::commit`] once per
@@ -1397,6 +1410,9 @@ pub struct Core<M: TextEngine> {
     /// Batches handed out so far: tells this batch's mount indexes from
     /// earlier ones'.
     batches: u64,
+    /// Component roots taking their kind in this round of renders
+    /// ([`Core::retag`]).
+    retags: Option<Box<Retags>>,
     /// Imperative calls, run after everything else in the batch.
     commands: Vec<(NodeId, Command)>,
     /// Where the keyboard focus goes back to in this commit, and the popup
@@ -1705,6 +1721,7 @@ impl<M: TextEngine> Core<M> {
             key_ancestry_dirty: false,
             mount_projected: false,
             batches: 0,
+            retags: None,
             commands: Vec::new(),
             focus_back: None,
             layout_animation: None,
@@ -4077,13 +4094,13 @@ impl<M: TextEngine> Core<M> {
             return true;
         }
         let id = node.id;
-        let unsent = self
-            .mount
-            .iter()
-            .any(|m| matches!(m, MountItem::Create { id: c, .. } if *c == id));
-        if node.kind != Kind::View || !node.children.is_empty() || (node.created && !unsent) {
+        if node.kind != Kind::View || !node.children.is_empty() {
             return false;
         }
+        if node.created && !self.made_in_this_batch(id) {
+            return false;
+        }
+        let node = &self.nodes[key as usize];
         // Out of its parent, its native view never made.
         let parent = node.parent;
         let at = (parent != NO_KEY).then(|| {
@@ -4095,9 +4112,11 @@ impl<M: TextEngine> Core<M> {
         if parent != NO_KEY {
             self.unlink(key, false);
         }
-        self.mount.retain(|m| {
-            !matches!(m, MountItem::Create { id: c, .. } | MountItem::Insert { child: c, .. } if *c == id)
-        });
+        // Its `Create` and `Insert` so far go, with the other retagged
+        // views' in one pass ([`Self::drop_retagged`]).
+        let retags = self.retags.get_or_insert_default();
+        retags.made.remove(&id);
+        retags.retagged.insert(id, self.mount.len());
         // The kind's own state and layout.
         let fresh = Node::new(id, kind);
         let node = &mut self.nodes[key as usize];
@@ -4121,6 +4140,67 @@ impl<M: TextEngine> Core<M> {
             let _ = self.insert(parent, id, before);
         }
         true
+    }
+
+    /// Whether made view `id`'s `Create` is still in the mount items (it was
+    /// made in this batch). Each item is looked at once a round of renders,
+    /// not once a view.
+    fn made_in_this_batch(&mut self, id: NodeId) -> bool {
+        let retags = self.retags.get_or_insert_default();
+        let from = retags.seen;
+        retags
+            .made
+            .extend(self.mount[from..].iter().filter_map(|m| match m {
+                MountItem::Create { id, .. } => Some(*id),
+                _ => None,
+            }));
+        retags.seen = self.mount.len();
+        let made = retags.made.contains(&id);
+        self.retagging(self.mount.len() - from);
+        made
+    }
+
+    /// Drops the `Create` and `Insert` items the retagged views had before
+    /// they took their kind ([`Self::retag`]), in one pass.
+    pub(super) fn drop_retagged(&mut self) {
+        let Some(retags) = self.retags.as_deref_mut() else {
+            return;
+        };
+        if retags.retagged.is_empty() {
+            return;
+        }
+        let retagged = std::mem::take(&mut retags.retagged);
+        let (seen, made) = (retags.seen, &mut retags.made);
+        let mut at = 0;
+        self.mount.retain(|m| {
+            let i = at;
+            at += 1;
+            let (MountItem::Create { id, .. } | MountItem::Insert { child: id, .. }) = m else {
+                return true;
+            };
+            if retagged.get(id).is_some_and(|&then| i < then) {
+                return false;
+            }
+            if i >= seen && matches!(m, MountItem::Create { .. }) {
+                made.insert(*id);
+            }
+            true
+        });
+        retags.seen = self.mount.len();
+        self.retagging(at);
+    }
+
+    /// The round of renders is over: what [`Self::retag`] did goes into
+    /// the mount items, and its record of them goes (other steps insert
+    /// items among them).
+    pub(super) fn end_retags(&mut self) {
+        self.drop_retagged();
+        #[cfg(test)]
+        if self.retags.is_some() {
+            let rounds = &self.components.retag_rounds;
+            rounds.set(rounds.get() + 1);
+        }
+        self.retags = None;
     }
 
     /// Rebuilds the text an input is measured with: what it shows while an
