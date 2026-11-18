@@ -45,9 +45,9 @@ use windows::{
             HiDpi::{AdjustWindowRectExForDpi, GetDpiForWindow},
             Input::{
                 KeyboardAndMouse::{
-                    GetKeyState, ReleaseCapture, SetCapture, SetFocus, VIRTUAL_KEY, VK_CONTROL,
-                    VK_LBUTTON, VK_LWIN, VK_MBUTTON, VK_MENU, VK_RBUTTON, VK_RWIN, VK_SHIFT,
-                    VK_XBUTTON1, VK_XBUTTON2,
+                    GetAsyncKeyState, GetKeyState, ReleaseCapture, SetCapture, SetFocus,
+                    VIRTUAL_KEY, VK_CONTROL, VK_LBUTTON, VK_LWIN, VK_MBUTTON, VK_MENU, VK_RBUTTON,
+                    VK_RWIN, VK_SHIFT, VK_XBUTTON1, VK_XBUTTON2,
                 },
                 Pointer::{GetPointerInfo, POINTER_INFO},
             },
@@ -1375,7 +1375,8 @@ fn handle(
                     let (x, y) = point(lparam);
                     mouse_event(PointerKind::Move, x, y, 0, held_buttons(wparam), 1, surface)
                 }
-                _ => mouse_event(PointerKind::Leave, -1.0, -1.0, 0, 0, 0, surface),
+                Heard::Left => mouse_event(PointerKind::Leave, -1.0, -1.0, 0, 0, 0, surface),
+                Heard::Nothing => return None,
             };
             crate::input::pointer(surface, event);
         }
@@ -1687,6 +1688,7 @@ fn window_api(
         }
         WM_EXITSIZEMOVE => {
             shell.sizing.set(false);
+            crate::chrome::hold_ended(hwnd);
             match data.window {
                 Some(id) => crate::app_window::state_changed(surface, id),
                 None => crate::window_state::report_main(surface),
@@ -1948,10 +1950,12 @@ pub(crate) fn tracking(hwnd: HWND) -> Option<&'static Cell<crate::chrome::Tracki
 }
 
 /// The buttons held now, numbered as [`held_buttons`] numbers a client
-/// mouse message's: the thread's key state, which is what those messages'
-/// `MK_*` keys carry (the logical buttons). A non-client message and a
-/// leave carry none, and the window's own presses
-/// ([`WindowData::buttons`]) miss a drag that began outside it.
+/// mouse message's. A non-client message and a leave carry none, and the
+/// window's own presses ([`WindowData::buttons`]) miss a drag that began
+/// outside it, so they come from the buttons' state: the physical buttons
+/// (`GetAsyncKeyState`'s, which a press in another window updates too),
+/// turned into the logical ones a client message's `MK_*` keys carry
+/// ([`logical_keys`]).
 fn buttons_down() -> u8 {
     const KEYS: [(VIRTUAL_KEY, usize); 5] = [
         (VK_LBUTTON, 0x1),
@@ -1963,9 +1967,28 @@ fn buttons_down() -> u8 {
     let keys = KEYS
         .iter()
         // SAFETY: plain state queries.
-        .filter(|(vk, _)| unsafe { GetKeyState(vk.0 as i32) } < 0)
+        .filter(|(vk, _)| unsafe { GetAsyncKeyState(vk.0 as i32) } < 0)
         .fold(0, |keys, (_, mk)| keys | mk);
-    held_buttons(WPARAM(keys))
+    // SAFETY: a plain query.
+    let swapped = unsafe { GetSystemMetrics(SM_SWAPBUTTON) } != 0;
+    held_buttons(WPARAM(logical_keys(keys, swapped)))
+}
+
+/// The `MK_*` keys of the logical buttons, from those of the physical
+/// buttons held (`physical`, `VK_LBUTTON` being the physical left one):
+/// with the buttons swapped (`SM_SWAPBUTTON`, a left-handed mouse) the
+/// physical left button is the logical right one, as the mouse messages
+/// say, and the other way round. The middle and X buttons are never
+/// swapped.
+fn logical_keys(physical: usize, swapped: bool) -> usize {
+    const LEFT: usize = 0x1;
+    const RIGHT: usize = 0x2;
+    if !swapped {
+        return physical;
+    }
+    let left = if physical & LEFT != 0 { RIGHT } else { 0 };
+    let right = if physical & RIGHT != 0 { LEFT } else { 0 };
+    (physical & !(LEFT | RIGHT)) | left | right
 }
 
 /// Lines one wheel notch scrolls (the user's setting, 3 by default).
@@ -2725,6 +2748,30 @@ mod tests {
             region_pointer(None, 0b1),
             (PointerKind::Leave, -1.0, -1.0, 0, 0)
         );
+    }
+
+    #[test]
+    fn swapped_buttons_are_held_as_the_messages_name_them() {
+        // The physical left button of a left-handed mouse is the logical
+        // right one: a drag with it holds the right button, as its
+        // `WM_RBUTTONDOWN` and `MK_RBUTTON` say.
+        let left = 1 << button_of(WM_LBUTTONDOWN, WPARAM(0));
+        let right = 1 << button_of(WM_RBUTTONDOWN, WPARAM(0));
+        assert_eq!(held_buttons(WPARAM(logical_keys(0x1, true))), right);
+        assert_eq!(held_buttons(WPARAM(logical_keys(0x2, true))), left);
+        assert_eq!(held_buttons(WPARAM(logical_keys(0x3, true))), left | right);
+        // Unswapped, the physical buttons are the logical ones.
+        assert_eq!(held_buttons(WPARAM(logical_keys(0x1, false))), left);
+        assert_eq!(held_buttons(WPARAM(logical_keys(0x2, false))), right);
+        // The middle and X buttons stay, swapped or not.
+        for swapped in [false, true] {
+            assert_eq!(logical_keys(0x70, swapped), 0x70);
+            assert_eq!(
+                logical_keys(0x11, swapped),
+                if swapped { 0x12 } else { 0x11 }
+            );
+        }
+        assert_eq!(logical_keys(0, true), 0);
     }
 
     #[test]

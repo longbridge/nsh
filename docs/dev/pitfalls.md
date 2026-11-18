@@ -821,7 +821,14 @@ Things that were found the hard way. Read the section of the area you change bef
   messages are retrieved before input, so leaves would follow one another ahead of every input message. A leave that
   keeps the hover with neither area tracked (the pointer came back before the moves were dispatched) starts a
   one-shot timer instead: `WM_TIMER` comes only once no input is queued, and it arms the area the pointer is in or
-  ends the hover. A non-client move arms its tracking again at another hit test code, which may end it.
+  ends the hover. A non-client move arms its tracking again at another hit test code, which may end it. A look that
+  finds the pointer in the area the views are hovered in already tells them nothing (the move there did), so a
+  recheck whose tracking the system ends at once stays quiet. While the system holds the pointer (its move or size
+  loop, `WM_ENTERSIZEMOVE` to `WM_EXITSIZEMOVE`, or a press on a `windowDrag` view holding the capture), it posts a
+  leave again at once for whatever is armed, every few milliseconds: leaves and rechecks then neither report a move
+  (the views would hear a button held for a press they never heard) nor arm tracking, and the hold's end asks for
+  one recheck. A border's hit test code counts as the app's content only where a view answers it (`windowResize`),
+  not where the window's frame does.
 
 ## Web, browsers
 
