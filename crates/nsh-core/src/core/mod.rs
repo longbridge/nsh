@@ -8064,11 +8064,6 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// Texts and spans around `key` (it is inside an attachment) pass on
-    /// their color only, as `currentColor` reaches the attachment's view:
-    /// the attachment takes the color of the text it sits in, while its
-    /// font and line height stay its own, which size the box its line
-    /// makes room for.
     /// A native component's `accentColor` style, passed to it as its
     /// `accentColor` prop (`#RRGGBBAA`; removed when unset): the system
     /// control shows its state in it, over the color its props give.
@@ -8101,6 +8096,11 @@ impl<M: TextEngine> Core<M> {
         self.mark(key, dirty::COMPONENT);
     }
 
+    /// Texts and spans around `key` (it is inside an attachment) pass on
+    /// their color only, as `currentColor` reaches the attachment's view:
+    /// the attachment takes the color of the text it sits in, while its
+    /// font and line height stay its own, which size the box its line
+    /// makes room for.
     fn inherited_text_style(&self, key: Key) -> ResolvedTextStyle {
         let mut chain: Vec<Key> = Vec::new();
         let mut k = self.nodes[key as usize].parent;
