@@ -133,10 +133,13 @@ jobs:
           lockfiles: "**/Cargo.lock"
 
       # A workspace of its own: huacnlee/cargo builds the dependencies it
-      # shares with the main workspace once (`shared-deps`).
+      # shares with the main workspace once (`shared-deps`). `--locked`: a
+      # change to those crates that left crates/gpui/Cargo.lock behind fails
+      # here, on main's scheduled runs too, rather than in the release
+      # (`cargo xtask dist` builds the GPUI host `--locked`).
       - name: Clippy
         working-directory: crates/gpui
-        run: cargo clippy --all-targets --features nsh-platform-gpui/dev -- -D warnings
+        run: cargo clippy --locked --all-targets --features nsh-platform-gpui/dev -- -D warnings
 
       # Without the optional features: no shader renderer (naga, NSH's
       # wgpu), syntect, RaTeX, ropey, imara-diff; no `zlib` or `crypto`
