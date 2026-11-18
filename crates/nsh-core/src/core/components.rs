@@ -3149,6 +3149,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     pub(super) fn detach_id(&mut self, id: NodeId) {
+        self.unfold_run(id);
         if let Ok(key) = self.key(id)
             && self.nodes[key as usize].parent != NO_KEY
         {
