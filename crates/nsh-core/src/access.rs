@@ -403,14 +403,13 @@ pub(crate) fn in_root(path: &Path, (expanded, canonical): &(PathBuf, PathBuf)) -
 }
 
 /// Whether apps have the native file system here that `capabilities.fs`
-/// grants (`fs/promises`, local media files): on the desktops (macOS,
-/// Windows, Linux), never on iOS, Android or the web.
+/// grants (`fs/promises`, local media files, shared files): on every
+/// native OS (the desktops, iOS, Android — the capability confines each
+/// call to the roots the app declares, whatever the sandbox around
+/// them), never on the web, whose `fs/promises` works on the host's
+/// private virtual file system and whose pages name no local file.
 pub fn native_files(os: crate::platform::Os) -> bool {
-    cfg!(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "windows"
-    )) && os.is_desktop()
+    cfg!(not(target_arch = "wasm32")) && os != crate::platform::Os::Web
 }
 
 /// The `capabilities.fs.read` roots local media files are read under, as
@@ -432,7 +431,7 @@ pub struct MediaFiles {
 impl MediaFiles {
     /// `access`'s read roots, expanded against `data_dir` and `paths`.
     /// Where the platform has no file system for apps (`available`
-    /// false: iOS, Android, as for `fs/promises`), none.
+    /// false: the web, as for `fs/promises`), none.
     pub fn new(
         access: &Access,
         data_dir: Option<&Path>,
@@ -810,7 +809,8 @@ const RELATIVE_ADVICE: &str = "a relative path names no file in a native app: na
 const ASSET_ADVICE: &str = "bundled files are named by a path inside the app's files";
 
 /// [`media_grant_advice`] for a local file.
-const LOCAL_FILE_ADVICE: &str = "a local file is read under capabilities.fs.read in nsh.json: add a root that holds it (desktop apps)";
+const LOCAL_FILE_ADVICE: &str =
+    "a local file is read under capabilities.fs.read in nsh.json: add a root that holds it";
 
 /// [`media_grant_advice`] for a protocol-relative source without a base.
 const NO_SCHEME_ADVICE: &str =
@@ -937,8 +937,12 @@ fn local_file(uri: &str) -> Option<Option<PathBuf>> {
     (drive || rooted).then(|| Some(PathBuf::from(uri)))
 }
 
-/// The path `file:` URL `uri` names. The web has no local files to name.
-fn file_url_path(uri: &str) -> Option<PathBuf> {
+/// The path `file:` URL `uri` names, decoded as a URL is (percent
+/// encoding included). What [`media_url`] checks is what the platforms'
+/// loaders read: they resolve `file:` sources with this, never by
+/// stripping the prefix. The web has no local files to name.
+#[doc(hidden)]
+pub fn file_url_path(uri: &str) -> Option<PathBuf> {
     #[cfg(target_arch = "wasm32")]
     {
         let _ = uri;
@@ -4262,6 +4266,36 @@ mod tests {
             assert_eq!(again(&path(&data.join("link/b.png"))), None);
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `capabilities.fs` roots gate the file system every native OS has —
+    /// the desktops', iOS's, Android's; the web has none to gate.
+    #[test]
+    fn every_native_os_has_the_files_the_capability_gates() {
+        use crate::platform::Os;
+        for os in [Os::MacOs, Os::Windows, Os::Linux, Os::Ios, Os::Android] {
+            assert!(native_files(os), "{os:?}");
+        }
+        assert!(!native_files(Os::Web));
+    }
+
+    /// A `file:` URL's path is the URL's decoded path: `%20` is a space,
+    /// `file://localhost/` names no host that refuses.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn file_urls_name_their_decoded_path() {
+        assert_eq!(
+            file_url_path("file:///tmp/a%20b.png"),
+            Some(PathBuf::from("/tmp/a b.png"))
+        );
+        assert_eq!(
+            file_url_path("file://localhost/tmp/a.png"),
+            Some(PathBuf::from("/tmp/a.png"))
+        );
+        #[cfg(unix)]
+        assert_eq!(file_url_path("file://host/tmp/a.png"), None);
+        assert_eq!(file_url_path("not a url"), None);
+        assert_eq!(file_url_path("https://a/b"), None);
     }
 
     /// A refused source's advice names the host it resolves to, as the

@@ -4309,7 +4309,7 @@ fn app_access(app: &App) -> Access {
 }
 
 /// The roots local media files are read under, as `fs/promises` reads
-/// files (where it has a file system: the desktops).
+/// files (where the platform has a file system for apps: the native OSes).
 fn media_files(config: &EngineConfig, access: &Access) -> nsh_core::access::MediaFiles {
     match &config.app {
         App::Js(bundle) => nsh_core::access::MediaFiles::new(

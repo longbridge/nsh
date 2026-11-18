@@ -16916,6 +16916,63 @@ mod components {
         );
     }
 
+    /// An offscreen render checks its images as a canvas drawing does: a
+    /// source the app may not load is dropped before the platform sees it,
+    /// one it may is rewritten to what the check granted.
+    #[test]
+    fn offscreen_renders_check_their_images() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            canvas_render: true,
+            ..Default::default()
+        });
+        c.set_access(Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(
+                &serde_json::json!({ "network": { "hosts": ["docs.example.com"] } }),
+            )
+            .unwrap(),
+            granted: None,
+        }));
+        let image = |uri: &str| crate::canvas::CanvasOp::DrawImage {
+            image: crate::canvas::CanvasImage { uri: uri.into() },
+            source: None,
+            dest: [crate::canvas::Num::Const(0.0); 4],
+        };
+        let (_answer, slot) = crate::element::task::Answer::new();
+        c.start_canvas_render(
+            crate::canvas::render::RenderRequest {
+                drawing: crate::canvas::Drawing {
+                    ops: vec![
+                        image("https://docs.example.com/a/../x.png"),
+                        image("https://refused.example.com/x.png"),
+                    ],
+                    ..Default::default()
+                },
+                size: crate::Size::new(px(30.0), px(20.0)),
+                ..Default::default()
+            },
+            slot,
+        );
+        let batch = c.commit().unwrap();
+        let uris: Vec<String> = batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    command: Command::RenderCanvas { drawing, .. },
+                    ..
+                } => Some(drawing),
+                _ => None,
+            })
+            .flat_map(|d| d.ops.iter())
+            .filter_map(|op| match op {
+                crate::canvas::CanvasOp::DrawImage { image, .. } => Some(image.uri.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(uris, ["https://docs.example.com/x.png"]);
+    }
+
     #[test]
     fn components_read_images_over_the_limit_as_none() {
         let mut c = core();
