@@ -714,10 +714,74 @@ mod tests {
     }
 
     #[test]
+    fn a_visible_restyle_keeps_keyboard_focus() {
+        run(|| {
+            let surface = surface();
+            views(&surface);
+            let window = show(&surface);
+            let first = view(&surface, 2);
+            assert!(wait_until(|| first.is_mapped()));
+            apply(
+                &surface,
+                &[MountItem::Command {
+                    id: 2,
+                    command: Command::Focus,
+                }],
+            );
+            let owns_focus = || first.is_focus() && first.state().states & state::FOCUSED != 0;
+            assert!(wait_until(owns_focus));
+
+            apply(
+                &surface,
+                &[MountItem::ViewStyle {
+                    id: 2,
+                    style: Box::new(ViewStyle {
+                        opacity: 0.5,
+                        ..Default::default()
+                    }),
+                }],
+            );
+            let (native, focused) = (first.is_focus(), first.state().states & state::FOCUSED != 0);
+            window.destroy();
+            assert!(
+                native && focused,
+                "visible restyle cleared focus: native={native}, focused={focused}"
+            );
+        });
+    }
+
+    #[test]
+    fn tab_skips_a_mounted_hidden_stop() {
+        run(|| {
+            let surface = surface();
+            views(&surface);
+            apply(
+                &surface,
+                &[MountItem::ViewStyle {
+                    id: 2,
+                    style: Box::new(ViewStyle {
+                        hidden: true,
+                        ..Default::default()
+                    }),
+                }],
+            );
+            let window = show(&surface);
+            let (hidden, last) = (view(&surface, 2), view(&surface, 4));
+            assert!(wait_until(|| last.is_mapped()));
+            tab(&window);
+            let (hidden_has_focus, last_has_focus) = (hidden.is_focus(), last.is_focus());
+            window.destroy();
+            assert!(
+                !hidden_has_focus && last_has_focus,
+                "Tab did not skip hidden stop: hidden={hidden_has_focus}, last={last_has_focus}"
+            );
+        });
+    }
+
+    #[test]
     fn hiding_a_focused_stop_releases_native_focus() {
         run(|| {
             // This tests the mounted hidden style, NOT GtkWidget::set_visible.
-            // Report both visibility channels: their equivalence is not assumed.
             loses_focus(MountItem::ViewStyle {
                 id: 2,
                 style: Box::new(ViewStyle {
