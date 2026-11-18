@@ -252,6 +252,7 @@ impl Decoder {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn start(
     source: Arc<Source>,
     key: Option<Key>,
