@@ -100,6 +100,10 @@ fn action(label: &'static str, primary: bool, on_press: impl Fn() + 'static) -> 
 
 fn prompt_view(prompt: UpdatePrompt) -> impl IntoElement {
     let window = current_window();
+    // The footer's branches go as the stage changes, and a task spawned
+    // under one would end with it: downloads and installs run under the
+    // whole prompt's owner instead.
+    let owner = Owner::current();
     let stage = signal(Stage::Ask);
     let automatic = signal(prompt.automatic);
     let close = {
@@ -129,11 +133,13 @@ fn prompt_view(prompt: UpdatePrompt) -> impl IntoElement {
             stage.set(Stage::Downloading(0, None));
             let downloaded = prompt
                 .download(move |received, total| stage.set(Stage::Downloading(received, total)));
-            spawn(async move {
-                match downloaded.await {
-                    Ok(()) => stage.set(Stage::Ready),
-                    Err(e) => stage.set(Stage::Failed(e)),
-                }
+            owner.run(|| {
+                spawn(async move {
+                    match downloaded.await {
+                        Ok(()) => stage.set(Stage::Ready),
+                        Err(e) => stage.set(Stage::Failed(e)),
+                    }
+                });
             });
         }
     };
@@ -201,10 +207,12 @@ fn prompt_view(prompt: UpdatePrompt) -> impl IntoElement {
                     move || {
                         stage.set(Stage::Installing);
                         let installed = prompt.install_and_restart();
-                        spawn(async move {
-                            if let Err(e) = installed.await {
-                                stage.set(Stage::Failed(e));
-                            }
+                        owner.run(|| {
+                            spawn(async move {
+                                if let Err(e) = installed.await {
+                                    stage.set(Stage::Failed(e));
+                                }
+                            });
                         });
                     }
                 };
@@ -215,11 +223,13 @@ fn prompt_view(prompt: UpdatePrompt) -> impl IntoElement {
                         stage.set(Stage::Installing);
                         let installed = prompt.install_on_quit();
                         let close = close.clone();
-                        spawn(async move {
-                            match installed.await {
-                                Ok(()) => close(),
-                                Err(e) => stage.set(Stage::Failed(e)),
-                            }
+                        owner.run(|| {
+                            spawn(async move {
+                                match installed.await {
+                                    Ok(()) => close(),
+                                    Err(e) => stage.set(Stage::Failed(e)),
+                                }
+                            });
                         });
                     }
                 };
