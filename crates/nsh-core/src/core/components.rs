@@ -670,7 +670,7 @@ pub(super) struct Components {
     /// The status bar's settings, shared by components, modules and tasks.
     pub(super) status_bars: crate::element::status_bar::StatusBars,
     /// Dialogs components show, by id: their answers.
-    dialogs: FxHashMap<u32, AnswerSlot<i32>>,
+    dialogs: FxHashMap<u32, AnswerSlot<crate::element::DialogReply>>,
     next_dialog: u32,
     /// Image sizes asked for (`Image.getSize`), by request id: their answers.
     image_infos: FxHashMap<u32, AnswerSlot<Result<ImageSize, String>>>,
@@ -6183,7 +6183,9 @@ impl<M: TextEngine> Core<M> {
                     return;
                 };
                 self.components.dialogs.remove(&id);
-                answer.borrow_mut().deliver(-1);
+                answer
+                    .borrow_mut()
+                    .deliver(crate::element::DialogReply::dismissed());
                 let _ = self.apply_op(Op::Command {
                     id: crate::ROOT_ID,
                     command: Command::CloseDialog(id),
@@ -7131,9 +7133,17 @@ impl<M: TextEngine> Core<M> {
                 let Some(answer) = self.components.dialogs.remove(&(dialog as u32)) else {
                     return false;
                 };
-                answer
-                    .borrow_mut()
-                    .deliver(number("index").unwrap_or(-1.0) as i32);
+                let value = match payload {
+                    EventPayload::Map(entries) => entries.iter().find_map(|(k, v)| match v {
+                        crate::PayloadValue::Str(text) if *k == "value" => Some(text.clone()),
+                        _ => None,
+                    }),
+                    _ => None,
+                };
+                answer.borrow_mut().deliver(crate::element::DialogReply {
+                    index: number("index").unwrap_or(-1.0) as i32,
+                    value,
+                });
                 true
             }
             // A view's shortcut runs here; JS's go to JS.

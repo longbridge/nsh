@@ -1015,7 +1015,7 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
 - **Alerts** (`AlertDialog`, both presentations) are drawn in the root (over the whole window with `dialogs:
   "viewport"`, as dialogs are: under Input): with the `desktop` idiom as the Linux and
   macOS backends' alerts (up to three buttons in a row, the last regular one the default), otherwise as iOS's alert
-  and action sheet; their keys and focus are under Input. Only clicks pressed inside the dialog count: a tap's
+  and action sheet, an alert's `input` an `<input>` above its buttons; their keys and focus are under Input. Only clicks pressed inside the dialog count: a tap's
   compatibility click, which lands after the press that opened it, must not dismiss it.
 - **Offscreen canvases** (`renderCanvas`, `docs/dev/canvas.md`): a size over the browser's canvas limit (iOS WebKit's
   is 16777216 pixels in all; the probe of `offscreenCanvas` finds any browser's) answers `CANVAS_IMAGE.TOO_LARGE`,

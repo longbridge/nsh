@@ -628,6 +628,17 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                                 DialogButtonStyle::Destructive => 2,
                             });
                         }
+                        // The text field (`SystemUi.dialog`): an alert's only.
+                        match d.input {
+                            Some(input) if !d.sheet => {
+                                e.bool(true);
+                                e.string(input.text);
+                                e.opt_string(input.placeholder.as_deref());
+                                e.bool(input.select_all);
+                                e.bool(input.required);
+                            }
+                            _ => e.bool(false),
+                        }
                     }
                     Command::CloseDialog(dialog) => {
                         e.int(60);
