@@ -519,11 +519,14 @@ style id:target backgroundColor #00ff00ff
 tap id:target
 expect Presses: 2
 expect Outer: 1
-# Disabled once more: the state style comes back.
+# Disable it while its hover border is visible.
+state id:target hovered
+style id:target borderWidth 2
 tap id:toggle
 expect Disabled: true
 style id:target backgroundColor #888888ff
 style id:target opacity 0.4
+style id:target borderWidth 0
 covers [props] activeStyle
 covers [props] hoverStyle
 covers [props] focusStyle
