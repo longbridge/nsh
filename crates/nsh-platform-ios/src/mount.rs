@@ -1633,7 +1633,28 @@ impl Mounter {
                     inset.left += new.left - old.left;
                     inset.bottom += new.bottom - old.bottom;
                     inset.right += new.right - old.right;
+                    // UIKit keeps the offset when the inset changes: content
+                    // resting at its start would end up under the new inset
+                    // (a page's first rows under a header it scrolls under),
+                    // or short of it. It rests at the new start instead.
+                    let horizontal = s.horizontal;
+                    let start = |scroll: &UIScrollView| {
+                        let inset = scroll.adjustedContentInset();
+                        if horizontal { -inset.left } else { -inset.top }
+                    };
+                    let along = |offset: CGPoint| if horizontal { offset.x } else { offset.y };
+                    let at_start =
+                        !scroll.isDragging() && along(scroll.contentOffset()) <= start(scroll);
                     scroll.setContentInset(inset);
+                    if at_start && along(scroll.contentOffset()) != start(scroll) {
+                        let mut offset = scroll.contentOffset();
+                        if horizontal {
+                            offset.x = start(scroll);
+                        } else {
+                            offset.y = start(scroll);
+                        }
+                        scroll.setContentOffset(offset);
+                    }
                     // The indicators' insets by the same change, keeping the
                     // keyboard's room (`set_bottom_inset`) in the bottom one.
                     let old = ui_insets(
