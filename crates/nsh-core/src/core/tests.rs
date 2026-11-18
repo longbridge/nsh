@@ -24081,6 +24081,62 @@ mod views {
         assert!(!hidden.header_shadow_visible);
     }
 
+    /// A transparent screen whose header background on scroll follows
+    /// `ON_SCROLL`.
+    #[derive(Default)]
+    struct OnScrollPage;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct OnScrollPageProps {}
+
+    thread_local! {
+        static ON_SCROLL: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+    }
+
+    impl Component for OnScrollPage {
+        type Props = OnScrollPageProps;
+        type Event = NoEvent;
+
+        // The core's own stack and screen: `nsh_base`'s wrap them.
+        #[allow(deprecated)]
+        fn view(_: OnScrollPageProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let on = signal(false);
+            ON_SCROLL.with(|s| s.set(Some(on)));
+            stack().flex_1().child(
+                screen()
+                    .title("Page")
+                    .header_transparent(true)
+                    .header_background_on_scroll(move || on.get())
+                    .child(view().flex_1()),
+            )
+        }
+    }
+
+    /// The header background on scroll is off by default and follows its
+    /// signal.
+    #[test]
+    fn the_header_background_on_scroll_reaches_the_screens_config() {
+        assert!(!crate::ScreenConfig::default().header_background_on_scroll);
+        let mut c = core();
+        c.mount_root(&Root::new::<OnScrollPage>(|| OnScrollPageProps {}));
+        let config = |batch: &MountBatch| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+                _ => None,
+            })
+        };
+        let first = config(&c.commit().unwrap()).expect("a screen");
+        assert!(first.header_transparent);
+        assert!(!first.header_background_on_scroll);
+        let on = ON_SCROLL.with(Cell::get).expect("mounted");
+        {
+            let _entered = c.components.runtime.enter();
+            on.set(true);
+        }
+        let updated = config(&c.commit().unwrap()).expect("updated");
+        assert!(updated.header_background_on_scroll);
+    }
+
     /// A screen whose trailing header button is UIKit's own.
     #[derive(Default)]
     struct SystemItemPage;
