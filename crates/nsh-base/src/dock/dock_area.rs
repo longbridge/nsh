@@ -288,17 +288,13 @@ pub struct DockAreaProps {
     /// The style of each tab group's frame.
     #[prop(default)]
     pub group_style: Prop<Style>,
-    /// The classes of each tab bar (`flex-row` for a row).
+    /// The classes of each tab bar: its height, surface and border. Its
+    /// tabs are a row in a horizontal scroll view inside it, so tabs that
+    /// do not fit scroll; space them with `tab_class`.
     pub tab_bar_class: Prop<Option<SharedString>>,
     /// The style of each tab bar.
     #[prop(default)]
     pub tab_bar_style: Prop<Style>,
-    /// Each tab bar's tabs scroll sideways when they do not fit, in a
-    /// horizontal scroll view that takes the bar's free room, and the
-    /// displayed tab is brought into view when it changes. Off, the tabs
-    /// are the bar's own children, laid out by its classes alone.
-    #[prop(default)]
-    pub scrollable_tabs: Prop<bool>,
     /// The classes of each tab (`selected:` for the displayed one).
     pub tab_class: Prop<Option<SharedString>>,
     /// The style of each tab.

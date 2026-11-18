@@ -158,6 +158,10 @@ tab: a press selects it, a drag moves its panel, screen readers hear it as a tab
 | `closable` | `boolean` | The area would close it: it is closable, the area is not locked, and its group may give it away. |
 | `zoomed` | `boolean` | Its group is zoomed. |
 
+The tabs are a row in a horizontal scroll view inside the bar: tabs that do not fit scroll instead of running past the
+bar's end, and the tab that becomes the displayed one is brought into view. The bar's classes style the bar itself,
+so space the tabs with `tabClass` (a margin), not with a `gap` on `tabBarClass`.
+
 ```tsx
 let area!: DockAreaRef;
 
@@ -281,7 +285,7 @@ In Rust, `DockAreaLayout::to_state` and `from_state` read and write `DockAreaSta
 The dock adapts to its own width. An area 600 points wide and wider (in a window on a desktop, the web, a tablet, an
 iPad full screen, a foldable open) is the whole workspace: splits, groups and docks side by side, as a tablet's
 multi-pane apps are. With a finger on a phone or tablet, a tab drag starts on a long press, as iPadOS drag and drop does, so a tab bar
-with `scrollableTabs` still scrolls under a swipe, and handles take a wider touch area with the same look.
+still scrolls under a swipe, and handles take a wider touch area with the same look.
 
 An area narrower than 600 points (on a phone, an iPad in Slide Over, in a narrow desktop or browser window, or in a
 narrow column of a wide one) presents the same layout for one screen, as iPad's split views collapse their columns and Material Design's supporting
@@ -335,8 +339,7 @@ rest of the area.
 | `renderEmpty` | `.render_empty(\|placement\| ..)` | `(placement: DockPlacement) => JSX.Element` | none | What an empty center shows. |
 | `renderDragPreview` | `.render_drag_preview(\|tab\| ..)` | `(tab: DockTab) => JSX.Element` | none | What follows the pointer or finger while a tab is dragged. |
 | `groupClass`, `groupStyle` | `.group_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | Each tab group's frame. |
-| `scrollableTabs` | `.scrollable_tabs(..)` | `boolean` | `false` | Each tab bar's tabs scroll sideways when they do not fit: they are in a horizontal scroll view that takes the bar's free room, and the displayed tab is brought into view when it changes. Off, the tabs are the bar's own children. |
-| `tabBarClass`, `tabBarStyle` | `.tab_bar_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | Each tab bar (`flex-row` for a row). |
+| `tabBarClass`, `tabBarStyle` | `.tab_bar_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | Each tab bar: its height, surface and border. Its tabs are a row in a scroll view inside it; space them with `tabClass`. |
 | `tabClass`, `tabStyle` | `.tab_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | Each tab; `selected:` for the displayed one. |
 | `contentClass`, `contentStyle` | `.content_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | Each group's content frame, where its panels show. |
 | `dropIndicatorClass`, `dropIndicatorStyle` | `.drop_indicator_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | The drop indicator. |
@@ -395,7 +398,7 @@ See [Accessibility](../docs/accessibility.md) for labels, roles and announcement
   does. On macOS, Windows, Linux and GPUI every press counts as a pointer's, a finger on a touchscreen laptop's
   included.
 - A finger on iOS, iPadOS and Android drags a tab after a long press, as iPadOS drag and drop does, so a swipe over
-  a tab bar with `scrollableTabs` scrolls it.
+  the tab bar scrolls it.
 - Desktops and the web: handles show the resize cursor of their axis.
 - Phones and narrow areas: the compact presentation, with drawers and a bottom sheet.
 - Every platform draws what the app styles: tabs, tab bars, handles, the drop indicator, docks, drawers and the sheet.
