@@ -22,12 +22,18 @@ test('storage round-trips arbitrary string keys and clears only its namespace', 
     setItem: (key: string, value: string) => { kept.set(key, value); },
     removeItem: (key: string) => { kept.delete(key); },
   };
-  const player = { str: (text: string) => text, storage: (f: () => unknown) => f() };
+  const followed = new Set<string>();
+  const player = {
+    str: (text: string) => text,
+    storage: (f: () => unknown) => f(),
+    followStorage: (prefix: string) => { followed.add(prefix); },
+  };
   const storage = makeImports.call(player, localStorage);
   const prefix = 'nsh:/app/:';
   const entries = new Map(['__proto__', 'constructor', 'toString', '', '键😀'].map((key) => [key, `value:${key}`]));
   for (const [key, value] of entries) storage.storage_set(prefix, 0, key, 0, value, 0);
   const loaded = JSON.parse(storage.storage_load(prefix, 0));
+  expect([...followed]).toEqual([prefix]);
   expect(Object.keys(loaded).sort()).toEqual([...entries.keys()].sort());
   for (const [key, value] of entries) expect(loaded[key]).toBe(value);
   storage.storage_remove(prefix, 0, '__proto__', 0);
