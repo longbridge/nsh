@@ -2192,6 +2192,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             <RowLabel label="Starts" detail="The first reminder" />
             <DateTimePicker
               testID="reminder-starts"
+              accessibilityLabel="Starts"
               mode="dateTime"
               value={starts()}
               min={`${iso(today)}T00:00`}
@@ -2206,6 +2207,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             <RowLabel label="Every day at" detail="Five-minute steps" />
             <DateTimePicker
               testID="reminder-at"
+              accessibilityLabel="Every day at"
               mode="time"
               value={at()}
               minuteInterval={5}
@@ -2219,6 +2221,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             <RowLabel label="Until" detail="No later than a year" />
             <DateTimePicker
               testID="reminder-until"
+              accessibilityLabel="Until"
               value={until()}
               min={starts().slice(0, 10)}
               max={iso(addDays(today, 365))}

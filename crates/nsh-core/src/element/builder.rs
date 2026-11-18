@@ -523,13 +523,32 @@ pub(crate) type PlaceFn = Rc<dyn Fn(Child, Position) -> AnyElement>;
 pub struct Position {
     index: super::reactive::Node,
     count: super::reactive::Node,
+    /// The memo that writes the index and the count as the rows change (a
+    /// keyed or bound list's): run before they are read, so a computation
+    /// reading the rows' data and the position in the same change reads
+    /// the new data at the new index, whichever of the two runs first.
+    rows: Option<super::reactive::Node>,
 }
 
 impl Position {
     /// The position read from signals (or memos) of the index and the
     /// count.
     pub(crate) fn of(index: super::reactive::Node, count: super::reactive::Node) -> Self {
-        Self { index, count }
+        Self {
+            index,
+            count,
+            rows: None,
+        }
+    }
+
+    /// The position of a list row: its index and the count are signals
+    /// memo `rows` writes as the rows change.
+    pub(crate) fn of_row(
+        index: super::reactive::Node,
+        count: super::reactive::Node,
+        rows: Option<super::reactive::Node>,
+    ) -> Self {
+        Self { index, count, rows }
     }
 
     /// A position that does not change (signals of the current owner).
@@ -540,12 +559,27 @@ impl Position {
     /// Its index, subscribing the running computation.
     #[track_caller]
     pub fn index(&self) -> usize {
+        if let Some(rows) = self.rows
+            && rows.is_outdated()
+        {
+            let before = self.index.with_untracked("a position", |i: &usize| *i);
+            rows.bring_up_to_date();
+            // The row went, and its cell's content with it (the running
+            // computation too, if it is the cell's): what it reads now is
+            // dropped.
+            if !self.index.is_live() {
+                return before;
+            }
+        }
         self.index.with("a position", |i: &usize| *i)
     }
 
     /// How many there are, subscribing the running computation.
     #[track_caller]
     pub fn count(&self) -> usize {
+        if let Some(rows) = self.rows {
+            rows.bring_up_to_date();
+        }
         self.count.with("a position", |n: &usize| *n)
     }
 
@@ -2382,6 +2416,18 @@ pub trait Interactive: Element {
     fn project_disabled(mut self, disabled: impl IntoReactive<bool>) -> Self {
         self.node().bind_attr(disabled, |a, disabled| {
             project(a, crate::tailwind::state::DISABLED, disabled)
+        });
+        self
+    }
+
+    /// Styles it as hovered while `hovered` holds (its `hover:` classes,
+    /// and the `group-hover:` classes inside it when it is a group), as a
+    /// part whose hovers a component's hit layer over it takes: a table's
+    /// row while the pointer is over it anywhere. Its mouse events stay the
+    /// hit layer's.
+    fn project_hovered(mut self, hovered: impl IntoReactive<bool>) -> Self {
+        self.node().bind_attr(hovered, |a, hovered| {
+            project(a, crate::tailwind::state::HOVERED, hovered)
         });
         self
     }

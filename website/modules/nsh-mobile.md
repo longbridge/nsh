@@ -295,6 +295,7 @@ const at = signal("2026-11-17T09:30");
   value={at()}
   min="2026-11-17T00:00"
   minuteInterval={5}
+  accessibilityLabel="Reminder"
   onChange={({ value }) => at.set(value)}
 />;
 ```
@@ -318,6 +319,7 @@ from `chrono`'s `NaiveDate`, `NaiveTime` and `NaiveDateTime`.
 | `max` | `.max(..)` | `string \| null` | `null` | The latest value the user can pick. |
 | `minuteInterval` | `.minute_interval(..)` | `number` | `1` | The minutes offered are this many apart: 1 to 30, a divisor of 60. Other numbers log a warning and step by 1. |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | It cannot be changed: the system dims it. |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say with its value: what it sets. The picker shows only the value, so give the name of the row it sits in. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | Where the picker is: its position and size. Its look is the system's. |
 | `testID` | `.test_id(..)` | `string` | none | Finds the picker in tests and `nsh test --trace`. |
 

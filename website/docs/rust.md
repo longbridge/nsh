@@ -244,6 +244,12 @@ the app without signing in); a session with nothing to bring its callback back f
 with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. The page's URL needs the `openUrl`
 capability, as `open_url` does.
 
+When the app learns the user signed in some other way while the page still shows (a
+device code approved on a page that never redirects back), `close_auth_session()`
+closes it: the session answers `Cancelled`, and iOS and Android take the page away and
+bring the app back. A page in a desktop browser stays open. With no session waiting,
+it does nothing.
+
 ```rust
 use nsh_core::{
     auth_session::{AuthSessionOutcome, AuthSessionRequest},
@@ -263,8 +269,9 @@ fn sign_in(authorize_url: String) {
 ```
 
 In tests, `Headless::on_auth_session` gives the platform an in-app session and ends
-each one with the outcome given; without it the page is in `opened_urls()` and
-`open_with_url` delivers the callback.
+each one with the outcome given, and `keep_auth_sessions_open` leaves each one open
+until the app closes it (`screen().auth_session_showing()`); without either the page
+is in `opened_urls()` and `open_with_url` delivers the callback.
 
 ## Extending a Rust app with TSX
 

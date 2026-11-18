@@ -1,7 +1,8 @@
 //! System UI driven from JS: the status bar and alerts / action sheets.
 
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
+    collections::HashMap,
     ptr::NonNull,
     rc::Rc,
     time::{Duration, Instant},
@@ -17,12 +18,13 @@ use nsh_engine::EngineControl;
 use objc2::{
     AllocAnyThread, ClassType, MainThreadMarker, MainThreadOnly,
     rc::Retained,
-    runtime::{AnyObject, Bool},
+    runtime::{AnyObject, Bool, ProtocolObject},
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
-    NSAttributedString, NSData, NSDictionary, NSError, NSObjectProtocol, NSPropertyListReadOptions,
-    NSPropertyListSerialization, NSRange, NSString, NSURL,
+    NSAttributedString, NSData, NSDictionary, NSError, NSNotification, NSNotificationCenter,
+    NSObjectProtocol, NSOperationQueue, NSPropertyListReadOptions, NSPropertyListSerialization,
+    NSRange, NSString, NSURL,
 };
 use objc2_ui_kit::{
     NSAttributedStringDocumentFormats, NSDocumentTypeDocumentAttribute,
@@ -30,8 +32,8 @@ use objc2_ui_kit::{
     NSRTFTextDocumentType, UIAlertAction, UIAlertActionStyle, UIAlertController,
     UIAlertControllerStyle, UIApplication, UIDevice, UIDeviceOrientation, UIInterfaceOrientation,
     UIInterfaceOrientationMask, UIPopoverArrowDirection, UIStatusBarAnimation, UIStatusBarStyle,
-    UIUserInterfaceIdiom, UIUserInterfaceStyle, UIView, UIViewController,
-    UIWindowSceneGeometryPreferencesIOS,
+    UITextField, UITextFieldTextDidChangeNotification, UITextInput, UIUserInterfaceIdiom,
+    UIUserInterfaceStyle, UIView, UIViewController, UIWindowSceneGeometryPreferencesIOS,
 };
 
 thread_local! {
@@ -319,6 +321,27 @@ struct DialogAnswer {
     id: u32,
     control: EngineControl,
     answered: Cell<bool>,
+    /// Its presentation finished: it can be dismissed.
+    presented: Cell<bool>,
+    /// The app closed it ([`close_dialog`]); dismissed as soon as it can be.
+    closed: Cell<bool>,
+    /// Its surface's alerts, which it leaves once answered.
+    dialogs: std::rc::Weak<RefCell<HashMap<u32, ShownDialog>>>,
+    /// The alert's text field (`Dialog::input`), whose text goes with the
+    /// answer.
+    field: RefCell<Option<objc2::rc::Weak<UITextField>>>,
+    /// Follows the field's text to enable the actions while it is required.
+    observer: RefCell<Option<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
+}
+
+/// A surface's alerts shown and not answered yet, by dialog id: what
+/// [`close_dialog`] takes back.
+pub(crate) type Dialogs = Rc<RefCell<HashMap<u32, ShownDialog>>>;
+
+/// An alert on the screen, for [`close_dialog`].
+pub(crate) struct ShownDialog {
+    alert: objc2::rc::Weak<UIAlertController>,
+    answer: Rc<DialogAnswer>,
 }
 
 impl DialogAnswer {
@@ -326,15 +349,95 @@ impl DialogAnswer {
         if self.answered.replace(true) {
             return;
         }
+        self.stop_following();
+        if let Some(dialogs) = self.dialogs.upgrade()
+            && let Ok(mut dialogs) = dialogs.try_borrow_mut()
+        {
+            dialogs.remove(&self.id);
+        }
+        let mut payload = vec![
+            ("id", PayloadValue::Number(self.id as f64)),
+            ("index", PayloadValue::Number(index as f64)),
+        ];
+        if let Some(field) = self.field.borrow().as_ref() {
+            let text = field.load().and_then(|f| f.text());
+            let text = text.map(|t| t.to_string()).unwrap_or_default();
+            payload.push(("value", PayloadValue::Str(text)));
+        }
         self.control.dispatch_event(
             nsh_core::ROOT_ID,
             EventKind::Dialog,
-            EventPayload::Map(vec![
-                ("id", PayloadValue::Number(self.id as f64)),
-                ("index", PayloadValue::Number(index as f64)),
-            ]),
+            EventPayload::Map(payload),
         );
     }
+
+    /// Stops following the field's text, once the alert is answered.
+    fn stop_following(&self) {
+        if let Some(observer) = self.observer.take() {
+            // SAFETY: the observer `addObserverForName…` returned.
+            unsafe { NSNotificationCenter::defaultCenter().removeObserver(observer.as_ref()) };
+        }
+    }
+}
+
+/// Adds the text field of `dialog`'s input to `alert`, which has its
+/// actions already: return chooses its default action (UIKit's preferred
+/// one, drawn bold), and while a required field is empty only its cancel
+/// actions are enabled.
+fn add_text_field(alert: &UIAlertController, dialog: &Dialog, answer: &Rc<DialogAnswer>) {
+    let Some(input) = dialog.input.as_ref().filter(|_| !dialog.sheet) else {
+        return;
+    };
+    alert.addTextFieldWithConfigurationHandler(None);
+    let Some(field) = alert.textFields().and_then(|f| f.firstObject()) else {
+        return;
+    };
+    field.setText(Some(&NSString::from_str(&input.text)));
+    field.setPlaceholder(
+        input
+            .placeholder
+            .as_deref()
+            .map(NSString::from_str)
+            .as_deref(),
+    );
+    *answer.field.borrow_mut() = Some(objc2::rc::Weak::from_retained(&field));
+    let actions = alert.actions();
+    if let Some(default) = nsh_core::dialog_default_button(&dialog.buttons)
+        && default < actions.count()
+    {
+        alert.setPreferredAction(Some(&actions.objectAtIndex(default)));
+    }
+    if !input.required {
+        return;
+    }
+    let enable = {
+        let alert = objc2::rc::Weak::new(alert);
+        let buttons = dialog.buttons.clone();
+        let input = input.clone();
+        move |text: &str| {
+            let Some(alert) = alert.load() else { return };
+            for (action, button) in alert.actions().iter().zip(&buttons) {
+                action.setEnabled(input.enables(button, text));
+            }
+        }
+    };
+    enable(&input.text);
+    let watched = objc2::rc::Weak::from_retained(&field);
+    let block = RcBlock::new(move |_: NonNull<NSNotification>| {
+        let text = watched.load().and_then(|f| f.text());
+        enable(&text.map(|t| t.to_string()).unwrap_or_default());
+    });
+    // SAFETY: the block touches the alert on the main queue it is
+    // delivered on, and `stop_following` removes the observer.
+    let observer = unsafe {
+        NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+            Some(UITextFieldTextDidChangeNotification),
+            Some(&field),
+            Some(&NSOperationQueue::mainQueue()),
+            &block,
+        )
+    };
+    *answer.observer.borrow_mut() = Some(observer);
 }
 
 /// Shows `dialog` over `view`'s window (a `UIAlertController`), tinted
@@ -344,12 +447,18 @@ pub(crate) fn show_dialog(
     tint: Option<nsh_core::element::AdaptiveColor>,
     view: &UIView,
     control: &EngineControl,
+    dialogs: &Dialogs,
 ) {
     let mtm = view.mtm();
     let answer = Rc::new(DialogAnswer {
         id: dialog.id,
         control: control.clone(),
         answered: Cell::new(false),
+        presented: Cell::new(false),
+        closed: Cell::new(false),
+        dialogs: Rc::downgrade(dialogs),
+        field: RefCell::new(None),
+        observer: RefCell::new(None),
     });
     let Some(top) = top_controller(view) else {
         log::warn!("no window to show a dialog in");
@@ -401,6 +510,11 @@ pub(crate) fn show_dialog(
         );
         alert.addAction(&action);
     }
+    add_text_field(&alert, dialog, &answer);
+    let select_all = dialog
+        .input
+        .as_ref()
+        .is_some_and(|i| i.select_all && !dialog.sheet);
     let phone = UIDevice::currentDevice(mtm).userInterfaceIdiom() == UIUserInterfaceIdiom::Phone;
     if dialog.sheet
         && !phone
@@ -433,7 +547,51 @@ pub(crate) fn show_dialog(
         ));
         popover.setPermittedArrowDirections(UIPopoverArrowDirection::empty());
     }
-    top.presentViewController_animated_completion(&alert, true, None);
+    let weak = objc2::rc::Weak::from_retained(&alert);
+    dialogs.borrow_mut().insert(
+        dialog.id,
+        ShownDialog {
+            alert: weak.clone(),
+            answer: answer.clone(),
+        },
+    );
+    // Closed while it was still coming up: UIKit cannot dismiss it before
+    // its presentation ends, so it goes then.
+    let presented = RcBlock::new(move || {
+        answer.presented.set(true);
+        // The field has the keyboard now: select its text without the
+        // edit menu `selectAll:` brings up.
+        if select_all && let Some(field) = answer.field.borrow().as_ref().and_then(|f| f.load()) {
+            let range = field.textRangeFromPosition_toPosition(
+                &field.beginningOfDocument(),
+                &field.endOfDocument(),
+            );
+            field.setSelectedTextRange(range.as_deref());
+        }
+        if answer.closed.get()
+            && let Some(alert) = weak.load()
+        {
+            alert.dismissViewControllerAnimated_completion(true, None);
+        }
+    });
+    top.presentViewController_animated_completion(&alert, true, Some(&presented));
+}
+
+/// Takes back the alert [`show_dialog`] showed as `id` (`Command::CloseDialog`):
+/// the core answered it already, so it reports nothing.
+pub(crate) fn close_dialog(dialogs: &Dialogs, id: u32) {
+    let Some(shown) = dialogs.borrow_mut().remove(&id) else {
+        return;
+    };
+    shown.answer.answered.set(true);
+    shown.answer.stop_following();
+    shown.answer.closed.set(true);
+    if shown.answer.presented.get()
+        && let Some(alert) = shown.alert.load()
+        && !alert.isBeingDismissed()
+    {
+        alert.dismissViewControllerAnimated_completion(true, None);
+    }
 }
 
 /// Where a user taps to answer the alert shown over `window`: the middle

@@ -12,10 +12,12 @@
 //!   in it itself and reports that height. It attaches no toolbar for it:
 //!   from macOS 26 a window with a toolbar gets larger corners than one
 //!   with only a title bar.
-//! - **Drag regions**: a left press on a view marked `windowDrag`
-//!   ([`crate::input::window_drag`]) moves the window with
-//!   `performWindowDragWithEvent:` (AppKit's own drag, with snapping and
-//!   Mission Control), and a double click does what the user chose in
+//! - **Drag regions**: a left press on a view marked `windowDrag`, or on
+//!   the strip of a hidden title bar that no view claims
+//!   ([`crate::input::window_drag`]), moves the window: once the pointer
+//!   leaves the press's slop, the window follows it (AppKit's
+//!   `performWindowDragWithEvent:` no longer moves it with a press whose
+//!   drags were already taken off the queue), and a double click does what the user chose in
 //!   System Settings (`AppleActionOnDoubleClick`: zoom, minimize or
 //!   nothing). A single click without dragging reaches the app on release,
 //!   so overlays can close. This works with the system's title bar too.

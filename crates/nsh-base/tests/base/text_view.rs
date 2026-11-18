@@ -1,13 +1,15 @@
 //! Typed root parts reach the document's text before classes and styles;
-//! inline links are stops of Tab, pressed with Return; a link's press
-//! reports the modifier keys held.
+//! a table's grid takes the app's frame; inline links are stops of Tab,
+//! pressed with Return; a link's press reports the modifier keys held.
+
+use std::sync::{Arc, Mutex};
 
 use nsh_base::{
     TextViewClasses, TextViewLinkPressEvent, TextViewPart, TextViewParts, TextViewStyles,
     TextViewTaskPressEvent, text_view,
 };
 use nsh_core::{
-    StyleKey,
+    Color, MountItem, StyleKey,
     element::{Root, Style},
     platform::{Idiom, Os},
     prelude::*,
@@ -150,6 +152,52 @@ fn root_without_typed_parts_keeps_the_default_typography() {
     assert_eq!(
         app.screen().span_style("Default text").unwrap().font_size,
         px(15.0)
+    );
+}
+
+/// A table whose grid the app frames by `classes`: a border on every
+/// side and a background.
+#[component]
+fn FramedTable() -> impl IntoElement {
+    text_view()
+        .markdown("| Name | Size |\n|------|-----:|\n| Alpha | 12 |")
+        .classes(TextViewClasses {
+            table_grid: Some("border-2 border-[#ff0000] bg-[#00ff00]".into()),
+            ..Default::default()
+        })
+}
+
+#[test]
+fn a_tables_grid_takes_the_apps_frame() {
+    let mut app = Headless::start(EngineConfig::new(Root::of::<FramedTable>())).unwrap();
+    let styles = Arc::new(Mutex::new(Vec::new()));
+    let into = styles.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let MountItem::ViewStyle { id, style } = item {
+                into.lock().unwrap().push((*id, style.clone()));
+            }
+        }
+    });
+    app.first_render().unwrap();
+    app.wait_for("Alpha").unwrap();
+    let styles = styles.lock().unwrap();
+    let grid: Vec<_> = styles
+        .iter()
+        .filter(|(_, style)| style.background_color == Color(0x00ff_00ff))
+        .collect();
+    // One view, the grid: not its cells or rows.
+    assert!(!grid.is_empty(), "no view has the grid's background");
+    assert!(grid.iter().all(|(id, _)| *id == grid[0].0), "{grid:?}");
+    // The app's border on every side: over the top and left lines the
+    // grid draws itself, and on the right and bottom, which it leaves to
+    // the cells.
+    let borders = &grid.last().unwrap().1.borders;
+    assert_eq!(borders.colors, [Color(0xff00_00ff); 4]);
+    let widths = borders.widths;
+    assert_eq!(
+        [widths.top, widths.right, widths.bottom, widths.left],
+        [px(2.0); 4]
     );
 }
 
@@ -622,6 +670,370 @@ mod streaming {
     }
 }
 
+mod word_fade {
+    //! A paragraph whose words fade in as they arrive, as a chat app's
+    //! streamed reply does: a plugin splits the newest text into word
+    //! spans, hidden until their turn and then fading from transparent by
+    //! their text color; a word done fading joins the plain text again.
+    //! Measured on the engine thread, from the press that adds the words or
+    //! advances a frame to the finished batch of mount items, with a text
+    //! engine that draws colors from the text, as the desktop platforms'.
+
+    use std::{
+        cell::{Cell, RefCell},
+        collections::BTreeMap,
+        rc::Rc,
+        time::{Duration, Instant},
+    };
+
+    use nsh_base::{
+        MarkdownOptions, MarkdownPlugin, MarkdownPlugins, text_view,
+        text_view::{CustomNode, Inline, ParseContext, mdast::Node},
+    };
+    use nsh_core::{
+        ApproxTextEngine, AttributedText, Core, EventKind, EventPayload, MountItem, Points,
+        ROOT_ID, Size, TextEngine, TextLayout, TextLine, element::Root, prelude::*,
+    };
+
+    /// [`ApproxTextEngine`] drawing the colors and hidden runs from the
+    /// mounted text, as the macOS, Windows, Linux and GPUI engines do; it
+    /// counts the characters it typesets ([`TYPESET`]), what a platform's
+    /// engine spends its time on.
+    struct ColorsAtDraw;
+
+    thread_local! {
+        /// Characters prepared and laid out by [`ColorsAtDraw`].
+        static TYPESET: Cell<usize> = const { Cell::new(0) };
+    }
+
+    impl TextEngine for ColorsAtDraw {
+        type Prepared = <ApproxTextEngine as TextEngine>::Prepared;
+
+        fn prepare(&self, text: &AttributedText) -> Self::Prepared {
+            TYPESET.set(TYPESET.get() + text.text.len());
+            ApproxTextEngine.prepare(text)
+        }
+
+        fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points> {
+            TYPESET.set(TYPESET.get() + prepared.0);
+            ApproxTextEngine.measure(prepared, max_width)
+        }
+
+        fn draws_colors_from_text(&self) -> bool {
+            true
+        }
+
+        fn breaks_lines_greedily(&self) -> bool {
+            ApproxTextEngine.breaks_lines_greedily()
+        }
+
+        fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout {
+            TYPESET.set(TYPESET.get() + prepared.0);
+            ApproxTextEngine.layout(prepared, size)
+        }
+
+        fn lines(&self, layout: &TextLayout) -> Vec<TextLine> {
+            ApproxTextEngine.lines(layout)
+        }
+
+        fn attachments(&self, layout: &TextLayout) -> Vec<Option<Point<Points>>> {
+            ApproxTextEngine.attachments(layout)
+        }
+    }
+
+    /// Milliseconds a frame (about 30 a second).
+    const FRAME: f32 = 33.0;
+    /// Milliseconds between two words' starts (60 words a second).
+    const GAP: f32 = 1000.0 / 60.0;
+    /// Milliseconds a word takes to fade in.
+    const FADE: f32 = 280.0;
+    const WORD: &str = "fade-word";
+    const VOCABULARY: [&str; 8] = [
+        "streamed ",
+        "words ",
+        "fade ",
+        "in ",
+        "one ",
+        "after ",
+        "another ",
+        "here ",
+    ];
+
+    /// When each word (by its byte offset) starts, and up to where the
+    /// text has been seen.
+    #[derive(Default)]
+    struct Pacer {
+        starts: RefCell<BTreeMap<usize, f32>>,
+        seen: Cell<usize>,
+        last_start: Cell<f32>,
+        now: Cell<f32>,
+        fading: Cell<bool>,
+    }
+
+    impl Pacer {
+        fn alpha(&self, start: usize) -> f32 {
+            self.starts
+                .borrow()
+                .get(&start)
+                .map_or(1.0, |&at| ((self.now.get() - at) / FADE).clamp(0.0, 1.0))
+        }
+    }
+
+    struct Fade {
+        pacer: Rc<Pacer>,
+        frame: Signal<u64>,
+    }
+
+    impl MarkdownPlugin for Fade {
+        fn name(&self) -> &str {
+            "word-fade"
+        }
+
+        fn inline(&self, node: &Node, _: &mut ParseContext<'_>) -> Option<Inline> {
+            let Node::Text(text) = node else {
+                return None;
+            };
+            let base = text.position.as_ref().map_or(0, |p| p.start.offset);
+            let pacer = &*self.pacer;
+            let now = pacer.now.get();
+            let mut starts = pacer.starts.borrow_mut();
+            starts.retain(|_, at| now < *at + FADE);
+            let mut out: Vec<Inline> = Vec::new();
+            let mut at = 0;
+            for piece in text.value.split_inclusive(' ') {
+                let start = base + at;
+                at += piece.len();
+                if start >= pacer.seen.get() && pacer.fading.get() {
+                    let begin = (pacer.last_start.get() + GAP).max(now);
+                    pacer.last_start.set(begin);
+                    starts.insert(start, begin);
+                }
+                if starts.contains_key(&start) {
+                    out.push(Inline::Custom(
+                        CustomNode::new(WORD)
+                            .with_text(piece)
+                            .with_attribute("start", start.to_string()),
+                    ));
+                } else if let Some(Inline::Text { text }) = out.last_mut() {
+                    text.push_str(piece);
+                } else {
+                    out.push(Inline::text(piece));
+                }
+            }
+            pacer
+                .seen
+                .set(pacer.seen.get().max(base + text.value.len()));
+            match out.len() {
+                1 => out.pop(),
+                _ => Some(Inline::Custom(CustomNode::new("group").with_content(out))),
+            }
+        }
+
+        fn render(&self, node: &CustomNode) -> Option<AnyElement> {
+            if node.name != WORD {
+                return None;
+            }
+            let start: usize = node.attributes.get("start")?.parse().ok()?;
+            let (color, queued) = (self.pacer.clone(), self.pacer.clone());
+            let frame = self.frame;
+            Some(
+                text(node.text.clone())
+                    .test_id(&format!("word-{start}"))
+                    .text_color(move || {
+                        frame.get();
+                        hsla(0.0, 0.0, 0.1, color.alpha(start))
+                    })
+                    .style_when(
+                        move || {
+                            frame.get();
+                            queued.alpha(start) <= 0.0
+                        },
+                        |s| s.invisible(),
+                    )
+                    .into_element(),
+            )
+        }
+    }
+
+    thread_local! {
+        static PACER: RefCell<Rc<Pacer>> = RefCell::new(Rc::default());
+        static WORDS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// A paragraph of [`WORDS`] words. Presses take turns: one adds two
+    /// words, the next advances a frame.
+    #[component]
+    fn Paragraph() -> impl IntoElement {
+        let pacer = PACER.with_borrow(Rc::clone);
+        let frame = signal(0u64);
+        let source = signal(
+            (0..WORDS.get())
+                .map(|i| VOCABULARY[i % VOCABULARY.len()])
+                .collect::<String>(),
+        );
+        // What was there at first shows at once.
+        pacer.seen.set(source.get_untracked().len());
+        provide_context(MarkdownPlugins::new().with(Fade {
+            pacer: pacer.clone(),
+            frame,
+        }));
+        let added = Cell::new(WORDS.get());
+        let words_next = Cell::new(true);
+        view()
+            .flex_1()
+            .on_press(move || {
+                if words_next.replace(!words_next.get()) {
+                    source.update(|s| {
+                        for _ in 0..2 {
+                            s.push_str(VOCABULARY[added.get() % VOCABULARY.len()]);
+                            added.set(added.get() + 1);
+                        }
+                    });
+                } else {
+                    pacer.now.set(pacer.now.get() + FRAME);
+                    frame.update(|f| *f += 1);
+                }
+            })
+            .child(
+                text_view()
+                    .markdown(move || Some(SharedString::from(source.get())))
+                    .options(MarkdownOptions {
+                        streaming: true,
+                        ..MarkdownOptions::default()
+                    }),
+            )
+    }
+
+    /// What a frame costs on average: two words added, then a frame
+    /// advanced.
+    #[derive(Default, Clone, Copy)]
+    struct Cost {
+        /// Engine time of the words: reading the Markdown and building the
+        /// elements, then the commit.
+        event: Duration,
+        commit: Duration,
+        /// Engine time of the frame.
+        tick: Duration,
+        /// Characters typeset ([`TYPESET`]) for the words, for the frame.
+        typeset_add: usize,
+        typeset_tick: usize,
+        /// Mount items of both.
+        items: usize,
+    }
+
+    impl Cost {
+        fn total(&self) -> Duration {
+            self.event + self.commit + self.tick
+        }
+    }
+
+    /// The average [`Cost`] of `frames` frames of a paragraph of `words`
+    /// words at first, after a second of warming up (the words in flight
+    /// reach their steady count).
+    fn run(words: usize, fading: bool, frames: usize) -> Cost {
+        WORDS.set(words);
+        let pacer = Rc::new(Pacer {
+            fading: Cell::new(fading),
+            last_start: Cell::new(f32::NEG_INFINITY),
+            ..Pacer::default()
+        });
+        PACER.with_borrow_mut(|p| *p = pacer);
+        let mut core = Core::new(ColorsAtDraw, Size::new(px(720.0), px(900.0)));
+        core.mount_root(&Root::new::<Paragraph>(|| ()));
+        let batch = core.commit().expect("the first frame");
+        let host = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent: ROOT_ID,
+                    child,
+                    ..
+                } => Some(*child),
+                _ => None,
+            })
+            .expect("the root's host");
+        let mut sum = Cost::default();
+        let warm = 30;
+        for f in 0..warm + frames {
+            let (start, typeset) = (Instant::now(), TYPESET.get());
+            core.component_event(host, EventKind::Press, &EventPayload::None);
+            let event = start.elapsed();
+            let added = core.commit();
+            let commit = start.elapsed() - event;
+            let typeset_add = TYPESET.get() - typeset;
+            let (start, typeset) = (Instant::now(), TYPESET.get());
+            core.component_event(host, EventKind::Press, &EventPayload::None);
+            let ticked = core.commit();
+            let (tick, typeset_tick) = (start.elapsed(), TYPESET.get() - typeset);
+            if f >= warm {
+                sum.event += event;
+                sum.commit += commit;
+                sum.tick += tick;
+                sum.typeset_add += typeset_add;
+                sum.typeset_tick += typeset_tick;
+                sum.items +=
+                    added.map_or(0, |b| b.items.len()) + ticked.map_or(0, |b| b.items.len());
+            }
+        }
+        let n = frames as u32;
+        Cost {
+            event: sum.event / n,
+            commit: sum.commit / n,
+            tick: sum.tick / n,
+            typeset_add: sum.typeset_add / frames,
+            typeset_tick: sum.typeset_tick / frames,
+            items: sum.items / frames,
+        }
+    }
+
+    #[test]
+    fn fading_words_typeset_the_paragraph_only_for_new_words() {
+        let (off, on) = (run(400, false, 20), run(400, true, 20));
+        // A frame only changes colors and hidden runs: the layout stands.
+        assert_eq!(on.typeset_tick, 0);
+        // New words typeset the paragraph once, as without fading.
+        assert_eq!(on.typeset_add, off.typeset_add);
+        // The frame mounts the text again, with the layout drawn.
+        assert_eq!(on.items, off.items + 1);
+    }
+
+    /// `cargo test --release -p nsh-base --test base bench_word_fade -- --ignored --nocapture`;
+    /// the numbers are in `docs/dev/performance.md`. Medians of three
+    /// rounds, fading off and on in turn.
+    #[test]
+    #[ignore]
+    fn bench_word_fade() {
+        let frames = 90;
+        let us = |d: Duration| d.as_secs_f64() * 1e6;
+        println!(
+            "words | fade | words: event + commit µs (chars typeset) | frame µs (chars typeset) | items | extra µs"
+        );
+        for words in [200, 800, 1600, 3200] {
+            let mut rounds: Vec<(Cost, Cost)> = (0..3)
+                .map(|_| (run(words, false, frames), run(words, true, frames)))
+                .collect();
+            rounds.sort_by_key(|(off, on)| on.total().saturating_sub(off.total()));
+            let (off, on) = rounds[1];
+            for (name, c) in [("off", off), ("on", on)] {
+                print!(
+                    "{words:>5} | {name:>4} | {:>7.1} + {:>6.1} ({:>6}) | {:>6.1} ({:>5}) | {:>5}",
+                    us(c.event),
+                    us(c.commit),
+                    c.typeset_add,
+                    us(c.tick),
+                    c.typeset_tick,
+                    c.items
+                );
+                match name {
+                    "on" => println!(" | {:>+6.1}", us(on.total()) - us(off.total())),
+                    _ => println!(" |"),
+                }
+            }
+        }
+    }
+}
+
 const TASKS: &str = "- [ ] first\n- [x] second\n  - [ ] nested\n\n<details>\n<summary>More</summary>\n\n\
                      - [x] hidden\n\n</details>\n\n> - [ ] last";
 
@@ -662,4 +1074,97 @@ fn a_pressed_task_box_reports_its_place_in_the_document_and_the_state_asked_for(
     app.press("label:first").unwrap();
     app.wait_for("Pressed: 1:false 2:true 4:true 3:false 3:false 0:true")
         .unwrap();
+}
+
+mod large_document {
+    //! A long Markdown document opened at once in a scroll view: reading
+    //! it, and mounting its blocks, each a row of the same parent.
+
+    use std::{
+        cell::RefCell,
+        time::{Duration, Instant},
+    };
+
+    use nsh_base::{
+        text_view,
+        text_view::{Document, Parser},
+    };
+    use nsh_core::{ApproxTextEngine, Core, Size, element::Root, prelude::*};
+
+    thread_local! {
+        static SOURCE: RefCell<Option<String>> = const { RefCell::new(None) };
+        static DOCUMENT: RefCell<Option<Document>> = const { RefCell::new(None) };
+    }
+
+    /// [`SOURCE`] read by the view, or [`DOCUMENT`] read before.
+    #[component]
+    fn Opened() -> impl IntoElement {
+        let view = match SOURCE.take() {
+            Some(source) => text_view().markdown(SharedString::from(source)),
+            None => text_view().document(DOCUMENT.take().expect("a document")),
+        };
+        scroll().size_full().child(view)
+    }
+
+    /// Sections of a heading, a paragraph with bold words and a link, and
+    /// a list of two items, about 50 bytes a block.
+    fn document(bytes: usize) -> String {
+        let mut text = String::with_capacity(bytes + 200);
+        let mut n = 0;
+        while text.len() < bytes {
+            n += 1;
+            text.push_str(&format!(
+                "## Section {n}\n\nSome **bold** text and a [link](https://example.com/{n}), with a few more words in each paragraph.\n\n- the first item of the list\n- the second item\n\n"
+            ));
+        }
+        text
+    }
+
+    fn mount(culling: bool) -> (Duration, usize) {
+        let mut core = Core::new(ApproxTextEngine, Size::new(px(390.0), px(844.0)));
+        core.set_content_culling(culling);
+        let start = Instant::now();
+        core.mount_root(&Root::new::<Opened>(|| ()));
+        let mut items = 0;
+        // What waits for later turns is made too, as a test driver has it.
+        for _ in 0..if culling { 1 } else { 8 } {
+            match core.commit() {
+                Some(batch) => items += batch.items.len(),
+                None => break,
+            }
+        }
+        (start.elapsed(), items)
+    }
+
+    /// `cargo test --release -p nsh-base --test base bench_large_document
+    /// -- --ignored --nocapture`; the numbers are in `docs/dev/performance.md`.
+    #[test]
+    #[ignore]
+    fn bench_large_document() {
+        let ms = |d: Duration| d.as_secs_f64() * 1e3;
+        println!("ms to read | ms to mount the read document, culling on / off | both, culling on");
+        for kb in [190, 475, 950, 1_900] {
+            let source = document(kb * 1_000);
+            let start = Instant::now();
+            let document = Parser::new().markdown(&source);
+            let read = start.elapsed();
+            let blocks = document.blocks.len();
+            let mut shown = Vec::new();
+            for culling in [true, false] {
+                DOCUMENT.set(Some(document.clone()));
+                shown.push(mount(culling));
+            }
+            SOURCE.set(Some(source));
+            let both = mount(true);
+            println!(
+                "{kb:>5} KB {blocks:>6} blocks | {:>8.1} | {:>8.1} ({} items) / {:>8.1} ({} items) | {:>8.1}",
+                ms(read),
+                ms(shown[0].0),
+                shown[0].1,
+                ms(shown[1].0),
+                shown[1].1,
+                ms(both.0),
+            );
+        }
+    }
 }

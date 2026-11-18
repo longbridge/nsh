@@ -198,6 +198,9 @@ struct System {
 
 thread_local! {
     static SYSTEM: RefCell<System> = RefCell::default();
+    /// The dialogs shown and not answered yet: what [`close_dialog`] takes
+    /// back.
+    static DIALOGS: RefCell<Vec<Rc<DialogAnswer>>> = const { RefCell::new(Vec::new()) };
     static OS_VERSION: (u16, u16) = std::fs::read_to_string("/proc/sys/kernel/osrelease")
         .map_or((0, 0), |s| parse_version(&s));
     static LOCALE: Locale = user_locale(|name| std::env::var(name).ok(), || {
@@ -785,6 +788,7 @@ fn screen_reader(proxy: &gio::DBusProxy) {
 pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
     match command {
         Command::Dialog(dialog) => show_dialog(surface, dialog),
+        Command::CloseDialog(dialog) => close_dialog(surface, *dialog),
         // In the window the user is in: a screen reader reads that one.
         Command::Announce(text) => crate::access::announce(&crate::window::key_root(surface), text),
         Command::PerfMonitor(true) => surface.enable_fps(),
@@ -1027,6 +1031,27 @@ impl DialogAnswer {
         if self.answered.replace(true) {
             return;
         }
+        self.take_down();
+        let Some(surface) = self.surface.upgrade() else {
+            return;
+        };
+        surface.event(
+            ROOT_ID,
+            EventKind::Dialog,
+            EventPayload::Map(vec![
+                ("id", PayloadValue::Number(self.id as f64)),
+                ("index", PayloadValue::Number(index as f64)),
+            ]),
+        );
+    }
+
+    /// Takes the dialog off the window.
+    fn take_down(&self) {
+        DIALOGS.with(|dialogs| {
+            if let Ok(mut dialogs) = dialogs.try_borrow_mut() {
+                dialogs.retain(|d| !std::ptr::eq(&**d, self));
+            }
+        });
         // The focus goes back where it was (as desktop dialogs do), not to
         // whatever GTK picks once the focused button goes.
         match self.previous_focus.upgrade() {
@@ -1044,17 +1069,23 @@ impl DialogAnswer {
             }
         }
         remove_overlay(&self.backdrop);
-        let Some(surface) = self.surface.upgrade() else {
-            return;
-        };
-        surface.event(
-            ROOT_ID,
-            EventKind::Dialog,
-            EventPayload::Map(vec![
-                ("id", PayloadValue::Number(self.id as f64)),
-                ("index", PayloadValue::Number(index as f64)),
-            ]),
-        );
+    }
+}
+
+/// Takes back the dialog [`show_dialog`] showed as `id`
+/// (`Command::CloseDialog`), reporting nothing: the core answered it.
+fn close_dialog(surface: &Rc<Surface>, id: u32) {
+    let shown = DIALOGS.with(|dialogs| {
+        let mut dialogs = dialogs.borrow_mut();
+        let at = dialogs
+            .iter()
+            .position(|d| d.id == id && std::ptr::eq(d.surface.as_ptr(), Rc::as_ptr(surface)))?;
+        Some(dialogs.remove(at))
+    });
+    if let Some(shown) = shown
+        && !shown.answered.replace(true)
+    {
+        shown.take_down();
     }
 }
 
@@ -1129,6 +1160,7 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
         answered: Cell::new(false),
         previous_focus,
     });
+    DIALOGS.with(|dialogs| dialogs.borrow_mut().push(answer.clone()));
     // `AlertDialog` always brings the app's actions (it rejects none): no
     // label of NSH's own.
     let buttons = &dialog.buttons[..];

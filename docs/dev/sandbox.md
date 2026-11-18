@@ -111,8 +111,8 @@ trusted: every limit and check is enforced in Rust, never in JS.
   web views', ends the host at and Foundation's `NSURL` keeps in the user info; an ASCII control character; a host
   with percent-encoding or a WHATWG forbidden host code point) names no one host, port or path: only a grant of every
   host with no port or path covers it (`*`, or no `capabilities`), and `parse_url` gives `None` for it.
-- **Desktop system APIs**: `process` and `fs/promises` (the only process and file APIs) check the intersection of the
-  declaration and the optional host grant in Rust. Process commands match exactly: a grant for `codex` grants that
+- **System APIs**: `process` (desktops only) and `fs/promises` (every native OS and the browser's OPFS: the only
+  process and file APIs) check the intersection of the declaration and the optional host grant in Rust. Process commands match exactly: a grant for `codex` grants that
   command, while `/usr/bin/codex` requires its own entry. The runtime launches the executable directly with an
   argument array, in the app data directory or a `cwd` within an `fs.write` root, with a cleared environment
   refilled from the host's `PATH`, `HOME`, `USERPROFILE`, `SystemRoot`, `TEMP`, `TMP`, `TMPDIR`, `LANG`, `LC_*`

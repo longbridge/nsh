@@ -128,8 +128,8 @@ pub use crate::{
         accordion_header, accordion_item, accordion_panel, accordion_trigger,
     },
     alert_dialog::{
-        AlertDialog, AlertDialogAction, AlertDialogOptions, AlertDialogPresentation,
-        AlertDialogResult, AlertDialogRole, alert_dialog,
+        AlertDialog, AlertDialogAction, AlertDialogAnswer, AlertDialogInput, AlertDialogOptions,
+        AlertDialogPresentation, AlertDialogResult, AlertDialogRole, alert_dialog,
     },
     avatar::{
         Avatar, AvatarElement, AvatarEvent, AvatarGroup, AvatarGroupElement, AvatarGroupProps,

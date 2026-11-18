@@ -28,6 +28,15 @@ test("state() reports a window, and its requests change it", async () => {
   await app.waitFor("text:/^Notes: mode=normal minimized=false visible=true /");
 });
 
+test("a window opens at the defaultPosition the app gives it", async () => {
+  const app = await open(FIXTURE, OPTIONS);
+  await app.press("Open notes");
+  await app.waitFor("text:/^Notes: mode=normal /");
+  // A normal window, without a parent or a display: the kind whose default once won over the app's position on
+  // macOS. GTK places windows itself.
+  await app.waitFor("text:/^Notes placed: (as asked|by the system)$/");
+});
+
 test("set() changes what the platform reports: sizeToContent fits the window to its content", async () => {
   const app = await open(FIXTURE, OPTIONS);
   await app.press("Open notes");

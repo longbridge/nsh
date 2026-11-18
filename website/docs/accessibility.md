@@ -310,6 +310,8 @@ view()
 </View>
 ```
 
+A labelled container stays a container: the label of a `"list"`, `"listbox"`, `"group"`, `"toolbar"`, `"radiogroup"`, `"tablist"`, `"navigation"`, `"region"` or `"dialog"` names what the screen reader moves into, and the elements inside are still reached one by one. VoiceOver also says where a list starts and ends. Make the container accessible only when it should be read as a whole.
+
 Hide what adds nothing: decorative images, dividers, an icon next to a text that already says the same.
 
 ```tsx

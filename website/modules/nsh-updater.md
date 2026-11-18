@@ -8,7 +8,7 @@ order: 12.7
 
 `nsh/updater` checks for a newer version of a packaged app, downloads it and replaces the app. Where updates come
 from is set in [`nsh.json`'s `"updater"`](#nshjson), never by the code that calls the module, and every step is checked
-in Rust: the manifest's signature, the app id, a newer version, the archive's size and SHA-256. The UI is yours: the
+in Rust: the manifest's signature, a newer version, the archive's size and SHA-256. The UI is yours: the
 module returns state and does the work.
 [App Updates](../docs/app-updates.md) walks through the whole flow, from setting the source to publishing a release.
 
@@ -38,6 +38,7 @@ function checkForUpdate(options?: UpdateCheckOptions | null): Promise<AppUpdate 
 
 interface UpdateCheckOptions {
   channel?: string | null;
+  locale?: string | null;
 }
 
 interface AppUpdate {
@@ -58,18 +59,23 @@ native shell) is behind.
 | Field | Meaning |
 | --- | --- |
 | `version` | The new version, semver |
-| `notes` | What changed, as the manifest's `--notes` file says it |
+| `notes` | What changed, as the manifest's `--notes` file says it; with `locale`, its notes in that language (or its base language, `zh` for `zh-TW`) when it has them, downloading only that file |
 | `url` | Where the user can get it by hand: the archive, or the store page on iOS and Android. Pass it to [`openUrl`](./nsh.md#openurl) when `canInstall` is false |
 | `canInstall` | Whether `downloadUpdate`, `installAndRestart` and `installOnQuit` work in this run: a packaged desktop app installed where the user can write. False on iOS and Android, and under a directory only the system writes (a system package) |
 | `shell` | Whether only the installed app is behind: this run's [package](#checkforpackage) is already this version or later, so the update brings a newer runtime and native shell, not newer code. Apps that update by package can offer it as a quieter, optional step |
 
 It rejects when the source cannot be reached or its manifest is not acceptable: a bad or missing signature when
-`publicKey` is set, another app's id, a URL that is not HTTPS. A manifest of the same or an older version is not an
+`publicKey` is set, a URL that is not HTTPS. A manifest of the same or an older version is not an
 update, so a stale manifest cannot downgrade the app.
 
 `channel` checks one of the [channels](#channels) `nsh.json` names instead of the default source. It is a name, never
 an address: a name the package does not declare rejects before any request. `downloadUpdate` and `installAndRestart`
 use what the last check found, whichever source it read.
+
+`locale` is the language the app shows, a BCP 47 tag such as `zh-TW`, which may differ from the system's. When the
+manifest has notes in it (`nsh update-manifest --notes zh-TW=<file>`), or in its base language (`zh`), `notes` is
+those: only that file is downloaded and checked against the SHA-256 in the signed manifest. Otherwise, and when that
+file cannot be had, `notes` is the manifest's default notes. `checkForPackage` takes `locale` too.
 
 ### Channels
 
@@ -80,7 +86,7 @@ An app that offers early releases to the users who opt in declares a second mani
 const update = await checkForUpdate(wantsBeta() ? { channel: "beta" } : undefined);
 ```
 
-Every channel is checked as the default source is: the same `publicKey`, the same id, and only a newer version is
+Every channel is checked as the default source is: the same `publicKey`, and only a newer version is
 offered. Leaving a channel therefore never goes back: an app on `1.3.0-beta.2` that checks the default source again is
 offered `1.3.0`, not `1.2.0`. Publish each channel's manifest with `nsh update-manifest` as usual; a channel's
 archives' relative URLs resolve next to its own manifest.
@@ -112,8 +118,8 @@ await downloadUpdate(({ received, total }) => progress.set(total ? received / to
 function installAndRestart(): Promise<void>;
 ```
 
-Unpacks the downloaded archive next to the app, checks the new app (its id and executable, and on macOS its code
-signature), swaps it in and restarts the app as `Application.restart()` does: this run quits as when the user quits
+Unpacks the downloaded archive next to the app, checks the new app (one runnable app, and on macOS its code
+signature; its id and name may change), swaps it in and restarts the app as `Application.restart()` does: this run quits as when the user quits
 it, and the new version starts once it has exited. The promise settles only on failure, which leaves the installed app
 as it was: it rejects when nothing was downloaded or the app cannot be replaced.
 
@@ -154,7 +160,7 @@ build: each package names the lowest runtime it runs on, and older apps are not 
 ### checkForPackage
 
 ```ts
-function checkForPackage(): Promise<PackageUpdate | null>;
+function checkForPackage(options?: { locale?: string | null }): Promise<PackageUpdate | null>;
 
 interface PackageUpdate {
   version: string;

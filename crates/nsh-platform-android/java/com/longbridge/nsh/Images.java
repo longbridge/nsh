@@ -614,7 +614,22 @@ final class Images {
                 if (c != null) c.disconnect();
             }
         }
-        String path = uri.startsWith("file://") ? uri.substring(7) : uri;
+        String path = uri;
+        if (path.startsWith("file:")) {
+            // A `file:` source reads the URL's decoded path, as the core
+            // checked it — never the raw string minus its scheme.
+            try {
+                java.net.URI parsed = new java.net.URI(path);
+                String host = parsed.getHost();
+                if (host != null && !host.isEmpty() && !host.equals("localhost")) {
+                    throw new java.io.FileNotFoundException(uri);
+                }
+                path = parsed.getPath();
+            } catch (java.net.URISyntaxException e) {
+                throw new java.io.IOException("malformed file URI: " + uri, e);
+            }
+            if (path == null) throw new java.io.FileNotFoundException(uri);
+        }
         try (InputStream in = new FileInputStream(path)) {
             return Net.readAll(in);
         }

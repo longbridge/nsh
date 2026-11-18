@@ -2,6 +2,7 @@
 //! what a user does with them and what the app hears and shows.
 
 mod accordion;
+mod alert_dialog;
 mod avatar;
 mod button;
 mod calendar;

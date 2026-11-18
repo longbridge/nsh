@@ -1501,7 +1501,25 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 push_str(&mut out.s, &kebab(&format!("{:?}", b.style)));
             }
             out.s.push(']');
-            out.bool(d.cancelable).bool(d.sheet).end();
+            out.bool(d.cancelable).bool(d.sheet);
+            // The text field: its text (null: none), placeholder, select
+            // all and required.
+            match d.input.as_ref().filter(|_| !d.sheet) {
+                Some(input) => out
+                    .str(&input.text)
+                    .opt_str(input.placeholder.as_deref())
+                    .bool(input.select_all)
+                    .bool(input.required),
+                None => out.raw("null"),
+            };
+            out.end();
+        }
+        Command::CloseDialog(dialog) => {
+            out.item("cmd")
+                .num(id)
+                .str("closeDialog")
+                .num(*dialog)
+                .end();
         }
         Command::SetJsResponder { block } => {
             out.item("cmd")

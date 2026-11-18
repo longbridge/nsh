@@ -283,7 +283,22 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   between inputs and the views `focusable` or presses make stops (`Mounter.updateFocusable`, `TabOrder` in
   `nsh-platform-android`), and at its first and last stop Tab and Shift+Tab go to the embedding Android host
   instead of wrapping. Android's Tab walks the native view tree (a portaled overlay is reached where it is
-  inserted, not by `ViewProps::tab_after`).
+  inserted, not by `ViewProps::tab_after`). While no view of the app has the focus, the window's own root holds it
+  (`NshView`, or a dialog's container): at launch, and from the first key after a tap. A tap clears a focus that is
+  not focusable in touch mode and leaves the window without one; the root's touch-mode listener takes the focus
+  again as the next key leaves touch mode (`pitfalls.md`). Android's directional search from the root takes only
+  views past its edge, and a standalone app's `NshView` and a dialog's container fill their window, so it finds
+  nothing. An arrow key with no modifier that nothing in the app took (no shortcut; a `captureKeys` rule takes a key
+  only where a view hears it, and while nothing has the focus none does, #2362) and that Android has nowhere else to
+  take then moves the focus into the app (`ArrowEntry`, `KeyDispatch.elsewhere`): an embedded `NshView`'s host
+  keeps an arrow when Android's search from `NshView` (`focusSearch`) finds a host view in its direction or a host
+  scroll view around it scrolls that way. The focus goes to the first stop on screen, whatever the arrow's
+  direction, or the first stop when none is on screen (`Mounter.enterFocus`), leaving touch mode as Tab does; the
+  app hears that stop's `onFocus`. The press is consumed, and its release too, unless the arrow is held until it
+  repeats: the repeats then move the focus Android's way and the release is Android's. Starting on screen keeps a
+  scrolled page where it is, near what Android's own default focus picks (`ViewRootImpl`'s `restoreDefaultFocus`:
+  the first focusable in tree order, in a scroll view the first one below its scrolled top that is on screen); from
+  there Android's directional navigation moves the focus. Enter and the D-pad centre keep Android's default.
   A shown overlay's content is in the Tab order where the app put the overlay, not where its native view is (at the
   end of its root view), as WAI-ARIA's non-modal popups have it: a popover's content right after its trigger, so
   Shift+Tab from it goes back to the trigger and Tab past its last stop goes on to what follows the popover. A list
@@ -308,8 +323,13 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `focusVisible` and treats it as keyboard focus whatever its heuristics say after a click (`focusPressable`), the
   headless driver moves its focus (`focus_calls`); on a view that is not a stop it does nothing. Linux grabs the
   stop's widget (`key_focus::focus`), Android requests the native focus on a managed stop
-  (`Mounter.focusManaged`, focusable in touch mode for that session). Windows and GPUI leave `focus()` on views to
-  them; iOS focuses inputs only.
+  (`Mounter.focusManaged`, focusable in touch mode for that session), and keeps a request for a view not shown yet (a
+  page in the batch that pushes it or under its transition shader, a dialog's content before its window shows) until
+  it is, giving it up if the view is still not shown 3 s later: the latest request wins; a `blur()` of it, of a view
+  holding it, or `Keyboard.dismiss()`, any focus taken meanwhile (in hosted native content or the embedding app's
+  views too) or the view's removal end it; a request dropped without effect logs a warning (`PendingFocus`; an input
+  waits for its field on its own, `InputBox.focus`, and reports the wait, so the same rules end it). Windows and GPUI
+  leave `focus()` on views to them; iOS focuses inputs only.
 - **`onPanEnd` / `onPanStart`** carry `value` (`{ x?, y? }`, the axes `pan` binds): the bound pan values at that moment (a drag may grab a value mid
   animation), for snapping.
 - **Imperative calls**: nodes have `focus()`, `blur()` (inputs, and views that take presses where they are stops of
@@ -429,7 +449,18 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   element's own `accessibilityDescription`, so every platform reads it where it reads a description; the web also
   sets `aria-describedby` on the focused element. Views without a label read their texts. The props go as one `MountItem::ViewProps`, except
   a label changing alone on mounted props (one that follows app state: a count, a price), which goes as
-  `MountItem::AccessibilityLabel`. The `increment` / `decrement` actions make an element adjustable whatever its
+  `MountItem::AccessibilityLabel`. Android tells TalkBack when new props change what a mounted view's node says,
+  as its own widgets do (`A11y.changed`, the choice in `A11yChanges`): a new state description (mixed, expanded,
+  current, a value's text, invalid, with them the checked word) is a content change of that type, sent on every API
+  level (before 30 the description is the node's extras entry androidx reads); a checked or pressed change or a
+  gained selection of the view TalkBack just clicked (double tap), with the focus on it or an ancestor, is a click,
+  from which TalkBack reads the node's new state; a change of the focused view's numeric range is a state
+  description change on API 30+ and a selection before (at most one every 200 ms); anything else is a content
+  change that only refreshes the node (a change the app makes by itself to a plain checked or selected state, and a
+  tab selected without the focus, are silent, as there is nothing TalkBack reads for them). A first mount, an
+  unchanged update, a hidden element and a view not shown send nothing; a list cell recycled for another row may
+  send one, as its props change.
+  The `increment` / `decrement` actions make an element adjustable whatever its
   role: iOS adds the adjustable trait to the traits of its role (`native_view.rs` `traits`), so VoiceOver's swipe up /
   down performs them (an `image`, `Plot`'s role, stays an image), Android offers scroll forward / backward, Windows
   makes its range value writable.

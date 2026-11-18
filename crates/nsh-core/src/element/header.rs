@@ -67,7 +67,9 @@ impl HeaderItem {
         Self::of(HeaderItemContent::Label(label.into()))
     }
 
-    /// Optional key for keeping a `UIBarButtonItem` across updates.
+    /// Optional key for keeping a `UIBarButtonItem` across updates; also
+    /// the button's accessibility identifier, which tests name it by
+    /// (`id:<key>`).
     pub fn key(mut self, key: impl Into<Arc<str>>) -> Self {
         self.key = Some(key.into());
         self

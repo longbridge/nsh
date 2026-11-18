@@ -100,7 +100,7 @@ use objc2_app_kit::{
     NSDocumentTypeDocumentAttribute, NSEvent, NSEventModifierFlags, NSEventType,
     NSExcludedElementsDocumentAttribute, NSHTMLTextDocumentType, NSModalPanelRunLoopMode,
     NSModalResponse, NSModalResponseAbort, NSPasteboard, NSPasteboardTypeHTML, NSPasteboardTypeRTF,
-    NSPasteboardTypeRTFD, NSPasteboardTypeString, NSScreen, NSWorkspace,
+    NSPasteboardTypeRTFD, NSPasteboardTypeString, NSScreen, NSTextField, NSWorkspace,
     NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification, NSWorkspaceDidWakeNotification,
 };
 use objc2_foundation::{
@@ -634,6 +634,7 @@ fn os_version() -> (u16, u16) {
 pub(crate) fn command(surface: &Rc<Surface>, id: NodeId, command: &Command) {
     match command {
         Command::Dialog(dialog) => show_dialog(surface, dialog),
+        Command::CloseDialog(dialog) => close_dialog(surface, *dialog),
         Command::Desktop(command) => crate::chrome::command(surface, command),
         Command::PerfMonitor(show) => {
             if let Some(toggle) = &*surface.perf_toggle.borrow() {
@@ -756,6 +757,19 @@ pub(crate) fn end_batch(surface: &Surface) {
 /// loop is over ([`run_alone`]), so the next one does not show inside it;
 /// one waiting to show never shows.
 pub(crate) fn clear(surface: &Surface) {
+    end_dialogs(surface, None);
+}
+
+/// Takes back the dialog [`show_dialog`] showed on `surface` as `id`
+/// (`Command::CloseDialog`), as [`clear`] does, reporting nothing: the core
+/// answered it.
+fn close_dialog(surface: &Surface, id: u32) {
+    end_dialogs(surface, Some(id));
+}
+
+/// Ends `surface`'s dialogs unanswered (and those of surfaces gone), or
+/// only its dialog `only`: see [`clear`].
+fn end_dialogs(surface: &Surface, only: Option<u32>) {
     // `try_with`: also as the surface drops, which may be as the thread
     // ends.
     let ended = SYSTEM.try_with(|s| {
@@ -764,14 +778,18 @@ pub(crate) fn clear(surface: &Surface) {
         };
         let mut ended = Vec::new();
         s.dialogs.retain(|d| {
-            let ours = d
-                .surface
-                .upgrade()
-                .is_none_or(|s| std::ptr::eq(&*s, surface));
+            let shown_on = d.surface.upgrade();
+            let ours = match only {
+                None => shown_on.is_none_or(|s| std::ptr::eq(&*s, surface)),
+                Some(id) => {
+                    d.answer.id == id && shown_on.is_some_and(|s| std::ptr::eq(&*s, surface))
+                }
+            };
             // Answered: an alert on its own already told to stop.
             if !ours || d.answer.answered.replace(true) {
                 return true;
             }
+            d.answer.stop_following();
             ended.push((d.alert.clone(), d.shows));
             d.shows == Shows::Alone
         });
@@ -839,6 +857,11 @@ struct DialogAnswer {
     id: u32,
     surface: Weak<Surface>,
     answered: Cell<bool>,
+    /// The alert's text field (`Dialog::input`, its accessory view), whose
+    /// text goes with the answer.
+    field: Option<Retained<NSTextField>>,
+    /// Follow the field ([`add_text_field`]) until the alert closes.
+    observers: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
 }
 
 impl DialogAnswer {
@@ -846,18 +869,111 @@ impl DialogAnswer {
         if self.answered.replace(true) {
             return;
         }
+        self.stop_following();
         let Some(surface) = self.surface.upgrade() else {
             return;
         };
-        surface.event(
-            ROOT_ID,
-            EventKind::Dialog,
-            EventPayload::Map(vec![
-                ("id", PayloadValue::Number(self.id as f64)),
-                ("index", PayloadValue::Number(index as f64)),
-            ]),
-        );
+        let mut payload = vec![
+            ("id", PayloadValue::Number(self.id as f64)),
+            ("index", PayloadValue::Number(index as f64)),
+        ];
+        if let Some(field) = &self.field {
+            payload.push(("value", PayloadValue::Str(field.stringValue().to_string())));
+        }
+        surface.event(ROOT_ID, EventKind::Dialog, EventPayload::Map(payload));
     }
+
+    /// Stops following the field, once the alert closed.
+    fn stop_following(&self) {
+        let center = NSNotificationCenter::defaultCenter();
+        for observer in self.observers.take() {
+            // SAFETY: an observer `addObserverForName…` returned.
+            unsafe { center.removeObserver(observer.as_ref()) };
+        }
+    }
+}
+
+/// The text field of `dialog`'s input, made to be `alert`'s accessory view
+/// (an alert's only), focused as it shows.
+fn text_field(alert: &NSAlert, dialog: &Dialog) -> Option<Retained<NSTextField>> {
+    let input = dialog.input.as_ref().filter(|_| !dialog.sheet)?;
+    let mtm = MainThreadMarker::from(alert);
+    let field = NSTextField::textFieldWithString(&NSString::from_str(&input.text), mtm);
+    if let Some(placeholder) = &input.placeholder {
+        field.setPlaceholderString(Some(&NSString::from_str(placeholder)));
+    }
+    // NSAlert's text column is this wide.
+    field.setFrame(objc2_foundation::NSRect::new(
+        NSPoint::new(0.0, 0.0),
+        objc2_foundation::NSSize::new(230.0, 24.0),
+    ));
+    alert.setAccessoryView(Some(&field));
+    alert.window().setInitialFirstResponder(Some(&field));
+    Some(field)
+}
+
+/// Follows `answer`'s text field in `alert`: AppKit selects a field's
+/// text as it takes the focus, so without `select_all` the caret goes
+/// after it once the alert shows; while a required field is empty only
+/// the cancel buttons are enabled (`order` as in [`Shown::order`]).
+fn follow_text_field(alert: &NSAlert, dialog: &Dialog, order: &[usize], answer: &DialogAnswer) {
+    let (Some(field), Some(input)) = (&answer.field, &dialog.input) else {
+        return;
+    };
+    let center = NSNotificationCenter::defaultCenter();
+    let mut observers = answer.observers.borrow_mut();
+    if !input.select_all {
+        let weak = objc2::rc::Weak::from_retained(field);
+        let block = RcBlock::new(move |_: NonNull<NSNotification>| {
+            if let Some(field) = weak.load()
+                && let Some(editor) = field.currentEditor()
+            {
+                let end = field.stringValue().length();
+                editor.setSelectedRange(NSRange::new(end, 0));
+            }
+        });
+        // SAFETY: the block runs on the main queue it is delivered on, and
+        // `stop_following` removes the observer.
+        observers.push(unsafe {
+            center.addObserverForName_object_queue_usingBlock(
+                Some(objc2_app_kit::NSWindowDidBecomeKeyNotification),
+                Some(&alert.window()),
+                Some(&NSOperationQueue::mainQueue()),
+                &block,
+            )
+        });
+    }
+    if !input.required {
+        return;
+    }
+    let enable = {
+        let alert = objc2::rc::Weak::new(alert);
+        let buttons = dialog.buttons.clone();
+        let order = order.to_vec();
+        let input = input.clone();
+        move |text: &str| {
+            let Some(alert) = alert.load() else { return };
+            for (button, &index) in alert.buttons().iter().zip(&order) {
+                button.setEnabled(input.enables(&buttons[index], text));
+            }
+        }
+    };
+    enable(&input.text);
+    let weak = objc2::rc::Weak::from_retained(field);
+    let block = RcBlock::new(move |_: NonNull<NSNotification>| {
+        if let Some(field) = weak.load() {
+            enable(&field.stringValue().to_string());
+        }
+    });
+    // SAFETY: as above.
+    observers.push(unsafe {
+        center.addObserverForName_object_queue_usingBlock(
+            Some(objc2_app_kit::NSControlTextDidChangeNotification),
+            Some(field),
+            Some(&NSOperationQueue::mainQueue()),
+            &block,
+        )
+    });
 }
 
 /// Shows `dialog` as an `NSAlert`, its buttons in the dialog's order (see
@@ -871,12 +987,14 @@ impl DialogAnswer {
 /// -1 when it closes without one.
 fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
     let mtm = surface.mtm;
+    let alert = NSAlert::new(mtm);
     let answer = Rc::new(DialogAnswer {
         id: dialog.id,
         surface: Rc::downgrade(surface),
         answered: Cell::new(false),
+        field: text_field(&alert, dialog),
+        observers: RefCell::new(Vec::new()),
     });
-    let alert = NSAlert::new(mtm);
     alert.setAlertStyle(NSAlertStyle::Informational);
     match (&dialog.title, &dialog.message) {
         (Some(title), message) => {
@@ -927,6 +1045,7 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
             button.setHasDestructiveAction(true);
         }
     }
+    follow_text_field(&alert, dialog, &order, &answer);
     // The alert takes the surface's appearance, which the app may force.
     alert
         .window()

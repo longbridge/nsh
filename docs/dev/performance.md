@@ -4,6 +4,56 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Many children of one parent mounted at once (2026-11-18, Linux x86_64, Intel Core Ultra 7 270K Plus, release, one
+CPU, against `6442c86be`): an `each` placed its new rows by searching the parent's children for each one, and a view
+made last among its siblings looked through every overlay of the surface (a document's links each have a hint
+overlay) for the one it goes below, so mounting a long document grew with the square of its blocks. A new row is now
+known from its own parent, the rows are placed next to the one placed before them, and only a root view or a modal
+is looked up among the overlays. `cargo test --release -p nsh-core --lib bench_each_mount -- --ignored --nocapture`,
+ms from `mount_root` to the finished first `MountBatch` (`FakeEngine`, 320 × 480), the least of three rounds of the
+two test binaries run in turn:
+
+| Rows of an `each` | 1,000 | 10,000 | 50,000 |
+|---|---:|---:|---:|
+| In a view | 10.2 → 9.4 | 195.6 → 145.3 | 3,636.7 → 955.4 |
+| In a scroll view (the rows out of sight culled) | 7.3 → 6.7 | 143.3 → 140.2 | 3,683.7 → 845.3 |
+| In a scroll view, a hint overlay in each row | 16.8 → 13.1 | 437.1 → 214.6 | 12,531.1 → 1,361.5 |
+
+A scrolled frame of the same rows (20 points a frame) is unchanged: it lays the whole column out again when rows
+come into sight. A long Markdown document in a `TextView` in a scroll view (`cargo test --release -p nsh-base --test
+base bench_large_document -- --ignored --nocapture`, ms to mount a document read before; with content culling off,
+as test drivers have it, every block's view is made):
+
+| Document | Blocks | Culling on | Culling off |
+|---|---:|---:|---:|
+| 190 KB | 3,474 | 167.9 → 125.8 | 144.4 → 103.8 |
+| 950 KB | 17,211 | 907.3 → 647.0 | 1,247.4 → 586.0 |
+| 1.9 MB | 34,326 | 2,707.6 → 1,296.7 | 4,473.4 → 1,210.6 |
+
+`rows_mounted_at_once_are_placed_without_a_search_for_each` keeps the siblings and overlays looked at in step with
+the rows (four times the rows: about four times the work, sixteen before).
+
+Words fading into a long paragraph (`text_view` with a Markdown plugin, 2026-11-18, Linux x86_64, Ryzen 9 7950X,
+release, one CPU): a streamed paragraph whose newest words are spans, hidden until their turn and then fading in
+by their text color, about 30 frames a second, two words arriving a frame; a word done fading joins the plain text
+again. The text engine is `ApproxTextEngine` drawing colors from the text, as the desktop engines do; it counts
+the characters it typesets. `cargo test --release -p nsh-base --test base bench_word_fade -- --ignored
+--nocapture`, µs a frame, medians of three rounds of fading off and on in turn (the paragraph grows by 240 words
+over a round):
+
+| Words at first | Arrival: reading + commit, off / on | Frame (colors only), on | Extra a frame | Characters typeset a frame |
+|---:|---:|---:|---:|---:|
+| 200 | 85.8 + 3.5 / 101.1 + 21.3 | 13.7 | +46.5 | 6,053 both |
+| 800 | 222.6 + 6.2 / 235.6 + 24.0 | 14.5 | +45.1 | 16,403 both |
+| 1,600 | 397.8 + 9.7 / 413.6 + 27.8 | 15.6 | +49.3 | 30,203 both |
+| 3,200 | 753.1 + 16.0 / 769.4 + 35.5 | 18.1 | +53.7 | 57,803 both |
+
+Fading costs the engine about 50 µs a frame whatever the paragraph's length: the frames of colors and hidden runs
+typeset nothing and mount the text once with the layout drawn, and arriving words typeset the paragraph once
+either way (`fading_words_typeset_the_paragraph_only_for_new_words` keeps both). What grows with the paragraph is
+each arrival, fading or not: reading the Markdown again and one typesetting of the whole paragraph. Where a
+platform's cost of a fading frame grows with the paragraph, it is its drawing, not the engine.
+
 Out-of-line rare attributes (`core/element/builder.rs`, 2026-11-18, macOS arm64, release `bench_components`
 and `size_of` on the same machine, `main` against the change): `Attrs` keeps its common
 fields inline and boxes eighteen rare ones (`src`, `drawing`, `element_ref`, `animated`, `bound`, `inset_*`,
@@ -380,6 +430,30 @@ make the same commits (19 ops, 9,277 mount items, 16,657 nodes, then 1 op and 1 
 replacement) and every mount item of every step is the same. The first commit takes
 522 → 427 ms, a replacement's 204.5 → 106.9 ms (parsing, expansion and layout; no native
 mounting or drawing).
+
+`TextView` long text (`text_view/markdown/incremental.rs`, 2026-11-18, Linux x86_64, Intel Core
+Ultra 7 270K Plus, release, one CPU with `taskset`, least of three runs): one parse of a whole text
+grows faster than the text, so a long text given at once is read in parts the way a streamed one
+is (`text-view.md` "Reading only what can change"). `cargo test --release -p nsh-base --lib
+bench_long_texts -- --ignored --nocapture` reads each text both ways and checks that the documents
+are equal. Sections are a heading, a paragraph with a link and bold words, and a two-item list; the
+typical reply is the streaming benchmarks' text repeated. ms:
+
+| Text | Size | One parse | In parts |
+|---|---|---|---|
+| Sections | 190 KB | 50.8 | 27.4 |
+| Sections | 475 KB | 210.9 | 75.1 |
+| Sections | 950 KB | 625.8 | 140.4 |
+| Sections | 1.9 MB | 2282.0 | 309.3 |
+| Typical reply | 950 KB | 3689.0 | 352.4 |
+| One table, 20,000 rows | 928 KB | 19357.1 | 19333.5 |
+| One list, 20,000 items | 848 KB | 422.9 | 436.8 |
+| One code block, 20,000 lines | 1.1 MB | 78.4 | 74.2 |
+
+A text up to twice the part's size, and one read whole (definitions, plugins, containers, MDX), is
+parsed once as before. A text the boundary cannot cross costs what one parse does: the table, list
+and code block are within noise. The table's own parse still grows with the square of its rows,
+inside `markdown-rs`.
 
 Terminal `TextView` tables (2026-11-08, Linux x86_64, debug hosts,
 `nsh test <entry> --target tui --trace`, against `71aeb06a`, seven alternating runs per version, medians):

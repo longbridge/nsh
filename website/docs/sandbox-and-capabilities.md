@@ -202,7 +202,7 @@ nothing).
 
 A local file in a media source (a `file:` URL, or in a native app an absolute path such as `/Users/a/x.png` or
 `C:\pictures\x.png`) is read under the [`fs`](../modules/standard-modules.md) capability's `read` roots, as
-`fs/promises` reads files, and so only on the desktops. Its symlinks are resolved when the source is set, and the
+`fs/promises` reads files, on every native platform. Its symlinks are resolved when the source is set, and the
 platform loads the resolved path, so a link inside a granted root then does not lead out of it; a link made there
 later is followed while the source stays set. On the web, `/x.png` is the page's
 own path. An app without `capabilities` loads local files as before.

@@ -1,11 +1,15 @@
 //! CoreText text engine: typesets on the engine thread, draws on the main
 //! thread from finished `CTLine`s, so every text is laid out once.
 
-use std::{cell::RefCell, ffi::c_void, ptr::NonNull};
+use std::{cell::RefCell, ffi::c_void, ptr::NonNull, sync::Arc};
 
 use nsh_core::{
     Affinity, AttributedText, Color, EllipsizeMode, FamilyName, FontFamily, Point, Points,
     ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextPosition,
+};
+use nsh_platform_apple::core_text::{
+    background_key, decoration_key, ellipsis_key, paragraph_is_rtl, strikethrough_key,
+    truncated_line_x, underline_key,
 };
 use objc2::rc::Retained;
 use objc2_core_foundation::{
@@ -30,53 +34,6 @@ use objc2_ui_kit::{
     UIFontWeightThin, UIFontWeightUltraLight,
 };
 use rustc_hash::FxHashMap;
-
-/// Attribute carrying the strikethrough color: CoreText draws underlines
-/// but not strikethroughs, so [`crate::text_view::TextView`] draws those.
-pub(crate) fn strikethrough_key() -> &'static CFString {
-    static KEY: std::sync::OnceLock<CFStringKey> = std::sync::OnceLock::new();
-    &KEY.get_or_init(|| CFStringKey(CFString::from_static_str("NshStrikethroughColor")))
-        .0
-}
-
-/// Attribute carrying the color of an underline CoreText cannot draw
-/// (styled, thick or offset): [`crate::text_view::TextView`] draws it.
-pub(crate) fn underline_key() -> &'static CFString {
-    static KEY: std::sync::OnceLock<CFStringKey> = std::sync::OnceLock::new();
-    &KEY.get_or_init(|| CFStringKey(CFString::from_static_str("NshUnderlineColor")))
-        .0
-}
-
-/// Attribute carrying how drawn decoration lines look: a `CFArray` of
-/// [style, thickness (0: the font's), offset (NaN: the font's)].
-pub(crate) fn decoration_key() -> &'static CFString {
-    static KEY: std::sync::OnceLock<CFStringKey> = std::sync::OnceLock::new();
-    &KEY.get_or_init(|| CFStringKey(CFString::from_static_str("NshDecorationStyle")))
-        .0
-}
-
-/// Attribute marking the characters of a span background (the node that
-/// set it, a `CFNumber`): CoreText splits runs where it changes, so
-/// the text view fills each background behind its own runs.
-fn background_key() -> &'static CFString {
-    static KEY: std::sync::OnceLock<CFStringKey> = std::sync::OnceLock::new();
-    &KEY.get_or_init(|| CFStringKey(CFString::from_static_str("NshBackground")))
-        .0
-}
-
-/// Attribute marking the ellipsis token of a truncated line (a `CFNumber`):
-/// its run claims the characters it cut, which are not on screen to select.
-fn ellipsis_key() -> &'static CFString {
-    static KEY: std::sync::OnceLock<CFStringKey> = std::sync::OnceLock::new();
-    &KEY.get_or_init(|| CFStringKey(CFString::from_static_str("NshEllipsis")))
-        .0
-}
-
-struct CFStringKey(CFRetained<CFString>);
-// SAFETY: CFStrings are immutable and thread-safe.
-unsafe impl Send for CFStringKey {}
-// SAFETY: as above.
-unsafe impl Sync for CFStringKey {}
 
 /// Identifies a font: size bits, weight, family, italic, OpenType features.
 type FontKey = (u32, u16, Option<FontFamily>, bool, u8);
@@ -347,6 +304,9 @@ pub struct Prepared {
     max_lines: u32,
     ellipsize: EllipsizeMode,
     align: TextAlign,
+    rtl: bool,
+    writing_direction: Option<bool>,
+    text: Arc<str>,
     /// Attachments: placeholder offset (UTF-16) and how far its top is
     /// above the baseline (`TextAttachment::ascent`).
     attachments: Vec<(CFIndex, CGFloat)>,
@@ -1175,14 +1135,6 @@ impl Prepared {
             rest.truncated_line(width, kind, Some(&token))
         }
     }
-
-    fn flush_factor(&self) -> CGFloat {
-        match self.align {
-            TextAlign::Center => 0.5,
-            TextAlign::Right => 1.0,
-            TextAlign::Auto | TextAlign::Left | TextAlign::Justify => 0.0,
-        }
-    }
 }
 
 impl TextEngine for CoreTextEngine {
@@ -1208,6 +1160,9 @@ impl TextEngine for CoreTextEngine {
             max_lines: text.max_lines,
             ellipsize: text.ellipsize,
             align: text.align,
+            rtl: text.rtl,
+            writing_direction: text.writing_direction,
+            text: Arc::from(text.text.as_str()),
             attachments: text
                 .attachments
                 .iter()
@@ -1333,11 +1288,21 @@ impl TextEngine for CoreTextEngine {
             if range.location + range.length < prepared.length
                 && let Some(truncated) = prepared.truncate(range.location, width)
             {
+                let paragraph_rtl = paragraph_is_rtl(
+                    prepared.writing_direction,
+                    &prepared.text,
+                    range.location.max(0) as usize,
+                );
                 // SAFETY: a valid line.
-                let x = unsafe { truncated.pen_offset_for_flush(prepared.flush_factor(), width) };
-                // A clipped line wider than the box starts at its start edge
-                // and overflows the end (CSS), centered or not.
-                last.origin.x = x.max(0.0);
+                last.origin.x = unsafe {
+                    truncated_line_x(
+                        &truncated,
+                        prepared.align,
+                        prepared.rtl,
+                        paragraph_rtl,
+                        width,
+                    )
+                };
                 last.line = truncated;
                 last.caret_end = prepared.length;
                 last.truncated = true;

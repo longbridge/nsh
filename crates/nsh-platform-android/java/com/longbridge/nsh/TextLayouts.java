@@ -1,7 +1,9 @@
 package com.longbridge.nsh;
 
+import android.annotation.TargetApi;
 import android.graphics.Paint;
 import android.graphics.Typeface;
+import android.graphics.text.LineBreaker;
 import android.text.Layout;
 import android.text.PrecomputedText;
 import android.text.SpannableString;
@@ -18,6 +20,7 @@ import android.text.TextDirectionHeuristics;
 import android.text.style.AlignmentSpan;
 import android.text.style.StrikethroughSpan;
 import android.text.style.UnderlineSpan;
+import android.view.Gravity;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.util.ArrayList;
@@ -29,6 +32,9 @@ import java.util.List;
  * Sizes cross the boundary in dp; layouts are made in px for drawing.
  */
 final class TextLayouts {
+    /** Encoded alignment values shared with `text.rs` (`encode_align`). */
+    static final int ALIGN_AUTO = 0, ALIGN_LEFT = 1, ALIGN_CENTER = 2, ALIGN_RIGHT = 3, ALIGN_JUSTIFY = 4;
+
     private TextLayouts() {}
 
     /** Where registered font files are written (set by NshView). */
@@ -138,9 +144,10 @@ final class TextLayouts {
                 if (typeface != null && !typeface.equals(Typeface.DEFAULT)) return typeface;
             }
         }
-        int style = (weight >= 600 && baseWeight < 600 ? Typeface.BOLD : 0)
-                | (italic && !baseItalic ? Typeface.ITALIC : 0);
-        return style == 0 ? base : Typeface.create(base, style);
+        boolean bold = weight >= 600 && baseWeight < 600;
+        boolean slanted = italic && !baseItalic;
+        if (!bold && !slanted) return base;
+        return Typeface.create(base, bold ? (slanted ? Typeface.BOLD_ITALIC : Typeface.BOLD) : Typeface.ITALIC);
     }
 
     /**
@@ -300,6 +307,7 @@ final class TextLayouts {
     }
 
     /** A registered face as a font family of one font (Android 10+). */
+    @TargetApi(29)
     private static android.graphics.fonts.FontFamily fontFamily(Face face) throws java.io.IOException {
         android.graphics.fonts.Font font = new android.graphics.fonts.Font.Builder(face.file)
                 .setWeight(clamp(face.weight))
@@ -395,13 +403,15 @@ final class TextLayouts {
             widthPx = Math.max(0, widthPx);
             for (StaticLayout l : layouts) if (l != null && l.getWidth() == widthPx) return l;
             // Break strategy and hyphenation match the PrecomputedText params,
-            // so the builder reuses its glyph measurements.
+            // so the builder reuses its glyph measurements. LineBreaker's
+            // constants are the setters' type (Android Lint) and equal
+            // Layout's; javac inlines them, so API 26-28 never load the class.
             StaticLayout.Builder b = StaticLayout.Builder.obtain(text, 0, text.length(), paint, widthPx)
                     .setAlignment(alignment)
                     .setTextDirection(direction)
                     .setIncludePad(false)
                     .setLineSpacing(0f, 1f)
-                    .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
+                    .setBreakStrategy(LineBreaker.BREAK_STRATEGY_SIMPLE)
                     .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE);
             if (android.os.Build.VERSION.SDK_INT >= 35) {
                 // `obtain` hands out pooled builders and does not reset these
@@ -411,7 +421,7 @@ final class TextLayouts {
                 b.setUseBoundsForWidth(false);
                 b.setShiftDrawingOffsetForStartOverhang(false);
             }
-            if (justify) b.setJustificationMode(Layout.JUSTIFICATION_MODE_INTER_WORD);
+            if (justify) b.setJustificationMode(LineBreaker.JUSTIFICATION_MODE_INTER_WORD);
             if (maxLines > 0) {
                 b.setMaxLines(maxLines);
                 if (ellipsize != null) b.setEllipsize(ellipsize);
@@ -506,10 +516,10 @@ final class TextLayouts {
                 : writing == 2 ? TextDirectionHeuristics.RTL
                 : rtlLayout ? TextDirectionHeuristics.FIRSTSTRONG_RTL : TextDirectionHeuristics.FIRSTSTRONG_LTR;
         // `auto` is the right side right to left (as on iOS).
-        if (align == 0 && rtlLayout) align = 3;
-        Layout.Alignment alignment = align == 2 ? Layout.Alignment.ALIGN_CENTER : Layout.Alignment.ALIGN_NORMAL;
+        if (align == ALIGN_AUTO && rtlLayout) align = ALIGN_RIGHT;
+        Layout.Alignment alignment = align == ALIGN_CENTER ? Layout.Alignment.ALIGN_CENTER : Layout.Alignment.ALIGN_NORMAL;
         boolean endAligned = false;
-        if (align == 1 || align == 3) {
+        if (align == ALIGN_LEFT || align == ALIGN_RIGHT) {
             // Left and right are absolute, while Android's alignments follow
             // each paragraph's direction: align each paragraph by its own.
             int start = 0;
@@ -517,7 +527,7 @@ final class TextLayouts {
                 int end = text.indexOf('\n', start);
                 if (end < 0) end = text.length();
                 boolean rtl = direction.isRtl(text, start, end - start);
-                boolean normal = (align == 1) != rtl;
+                boolean normal = (align == ALIGN_LEFT) != rtl;
                 endAligned |= !normal;
                 int spanEnd = Math.min(end + 1, text.length());
                 if (spanEnd > start) {
@@ -540,13 +550,13 @@ final class TextLayouts {
         CharSequence measured = s;
         if (android.os.Build.VERSION.SDK_INT >= 28) {
             PrecomputedText.Params params = new PrecomputedText.Params.Builder(paint)
-                    .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
+                    .setBreakStrategy(LineBreaker.BREAK_STRATEGY_SIMPLE)
                     .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
                     .setTextDirection(direction)
                     .build();
             measured = PrecomputedText.create(s, params);
         }
-        return new Prepared(measured, paint, alignment, align == 4, endAligned, maxLines, truncate, density,
+        return new Prepared(measured, paint, alignment, align == ALIGN_JUSTIFY, endAligned, maxLines, truncate, density,
                 direction);
     }
 
@@ -1083,6 +1093,25 @@ final class TextLayouts {
         }
     }
 
+    /** Android `letterSpacing` (em) for `spacing` and `fontSize` in matching units. */
+    static float letterSpacing(float spacing, float fontSize) {
+        return fontSize > 0f && spacing != 0f ? spacing / fontSize : 0f;
+    }
+
+    /** Horizontal {@link Gravity} for encoded `align` (`ALIGN_*`) and layout RTL flag. */
+    static int horizontalGravity(int align, boolean rtl) {
+        switch (align) {
+            case ALIGN_LEFT:
+                return Gravity.LEFT;
+            case ALIGN_CENTER:
+                return Gravity.CENTER_HORIZONTAL;
+            case ALIGN_RIGHT:
+                return Gravity.RIGHT;
+            default:
+                return rtl ? Gravity.RIGHT : Gravity.START;
+        }
+    }
+
     /** OpenType feature settings for `fontVariant` bits (`nsh_core::FontVariant`), or null. */
     static String features(int bits) {
         if (bits == 0) return null;
@@ -1109,8 +1138,8 @@ final class TextLayouts {
 
         private void apply(TextPaint paint) {
             paint.setTypeface(typeface);
-            if (spacingPx != 0 && paint.getTextSize() > 0) paint.setLetterSpacing(spacingPx / paint.getTextSize());
-            if (features != null) paint.setFontFeatureSettings(features);
+            paint.setLetterSpacing(letterSpacing(spacingPx, paint.getTextSize()));
+            paint.setFontFeatureSettings(features);
         }
 
         @Override

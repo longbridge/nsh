@@ -484,6 +484,10 @@ impl Mounter {
                     ..
                 } => self.dialogs.show(*dialog),
                 MountItem::Command {
+                    command: Command::CloseDialog(dialog),
+                    ..
+                } => self.dialogs.close(dialog),
+                MountItem::Command {
                     command: Command::Desktop(ref desktop),
                     ..
                 } if matches!(

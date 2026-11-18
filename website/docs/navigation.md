@@ -247,7 +247,7 @@ In Rust, each prop below is a method of `nav_page()` in snake case: `.title(..)`
 | `ios={{ headerLeftSystemItem }}` | same as `headerRightSystemItem` | | iOS: the same, at the start of the header, pressing `headerLeft`. |
 | `ios={{ headerRightSymbol }}` | `string` | | iOS: UIKit's own bar button showing the SF Symbol of that name (`"slider.horizontal.3"`) in place of `headerRight`'s views; a press on it is a press on the first pressable view of `headerRight`, and VoiceOver reads that view's label. `headerRightSystemItem` wins over it; a name SF Symbols does not have shows `headerRight` as it is. Android shows `headerRight` as it is. |
 | `ios={{ headerLeftSymbol }}` | `string` | | iOS: the same, at the start of the header, pressing `headerLeft`. |
-| `ios={{ headerRightItems }}` | `HeaderItem[]` | | iOS: several UIKit bar buttons at the end of the header (first at the trailing edge). Each item shows exactly one of `systemItem`, `symbol` or `label` (the button's title when it has neither system item nor symbol; otherwise VoiceOver's label), with optional `key` (to keep the `UIBarButtonItem` across updates), `disabled`, `onPress` (when it has no menu), and `menu` (`nsh/desktop`'s [`MenuItem`](../modules/nsh-desktop.md#menu-items) items: `onSelect`, `destructive`, `inline`, `symbol`). A non-empty list wins over `headerRightSystemItem` / `headerRightSymbol` and leaves `headerRight`'s views out of the iOS bar (they stay the fallback on Android, the desktops and the web). An empty list is unset. |
+| `ios={{ headerRightItems }}` | `HeaderItem[]` | | iOS: several UIKit bar buttons at the end of the header (first at the trailing edge). Each item shows exactly one of `systemItem`, `symbol` or `label` (the button's title when it has neither system item nor symbol; otherwise VoiceOver's label), with optional `key` (to keep the `UIBarButtonItem` across updates; also its accessibility identifier, which tests press it by: `id:<key>`), `disabled`, `onPress` (when it has no menu), and `menu` (`nsh/desktop`'s [`MenuItem`](../modules/nsh-desktop.md#menu-items) items: `onSelect`, `destructive`, `inline`, `symbol`). A non-empty list wins over `headerRightSystemItem` / `headerRightSymbol` and leaves `headerRight`'s views out of the iOS bar (they stay the fallback on Android, the desktops and the web). An empty list is unset. |
 | `headerTitle` | `JSX.Element` | | iOS and Android: views replacing the title. |
 | `headerLargeTitle` | `boolean` | `false` | iOS: a large title that shrinks into the bar as the content scrolls. |
 | `headerBackTitle` | `string` | | The label of the back button that leads back to this page (iOS; Android's up arrow says it to screen readers). |
@@ -503,6 +503,8 @@ With `pop_on_back(false)` (`popOnBack={false}`), the page stays on every way bac
 > [!IMPORTANT]
 > `pop_on_back` / `popOnBack` is a prop, not a callback that returns true or false, because the main thread never waits for app code. When the user starts a swipe or presses back, the system asks right away whether the page may go, and NSH answers natively from the props it already has. Set it as soon as there is something to lose (as above, from the text), before the user tries to leave.
 
+In Rust, an alert can also be taken back without the user, when what it asks about goes away (the user went elsewhere): keep the `closer()` of what `show()` returns before a task takes it, and `close()` it. The answer then comes at once as closed without an action.
+
 `pop_on_swipe(false)` (`popOnSwipe={false}`) is the lighter option: it turns off only the interactive gesture (iOS swipe back, Android's predictive back animation), and the back buttons still pop.
 
 ## Dialogs
@@ -585,6 +587,20 @@ function Files() {
 Escape, Android's back button, a press on the backdrop (TSX's backdrop, a native sheet's in Rust) and a swipe down on a sheet close it natively (`close_on_escape`, `close_on_backdrop_press` and `close_on_swipe`, TSX `closeOnEscape`, `closeOnBackdropPress` and `closeOnSwipe`, each true by default). In Rust, `on_cancel` reports every attempt and `on_close` the close, so leave the dialog out of the view there; a backdrop your app draws closes it with its own press handler, as above. In TSX, `onOpenChange({ open: false, reason })` tells you, so set `open` to `false` there. To confirm first, set a flag to false and handle the cancel event (`on_cancel`, `onCancel`), which reports every attempt, then close the dialog yourself. On iOS, `.presentation(ModalPresentation::PageSheet)` or `FormSheet` (`presentation="pageSheet"` or `"formSheet"`) presents a sheet that keeps what is behind visible.
 
 See [Dialog](../elements/dialog.md) for every prop. Inside a dialog, the `env(safe-area-inset-*)` variables and the insets are the dialog's own. For system dialogs (an alert with actions, an action sheet) use [`AlertDialog`](../modules/nsh-base.md#alertdialog) from `nsh_base` (TSX: `nsh/base`).
+
+To ask for a short text, such as a new name, give the alert an `input`: iOS, Android, macOS and the web show the system's own text field in it, focused, and the result's `value` is its text. Return chooses the last `"default"` action, and `required` keeps every action but the cancel ones disabled while the field is empty. On Windows, Linux and in the terminal the alert shows without a field and `value` is `null`, so draw your own `Dialog` there.
+
+```tsx
+const { action, value } = await AlertDialog.show({
+  title: "Rename",
+  input: { defaultValue: name(), placeholder: "Name", selectTextOnFocus: true, required: true },
+  actions: [
+    { label: "Cancel", role: "cancel", id: "cancel" },
+    { label: "Rename", id: "rename" },
+  ],
+});
+if (action === "rename" && value !== null) name.set(value);
+```
 
 ## The Android back button
 

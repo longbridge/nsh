@@ -776,6 +776,8 @@ pub(crate) struct Mounter {
     /// The tint of this surface's alerts and action sheets, from its
     /// tokens ([`crate::system::alert_tint`]).
     alert_tint: Option<nsh_core::element::AdaptiveColor>,
+    /// The alerts shown and not answered yet (`Command::CloseDialog`).
+    dialogs: crate::system::Dialogs,
     /// The surface's share sheet, which a new share replaces
     /// ([`crate::share`]).
     share: crate::share::Current,
@@ -853,6 +855,7 @@ impl Mounter {
             nav_shaders: rustc_hash::FxHashMap::default(),
             leaving_screens: rustc_hash::FxHashMap::default(),
             alert_tint: None,
+            dialogs: Default::default(),
             share: Default::default(),
             auth_session: Default::default(),
             hosts: Default::default(),
@@ -1973,7 +1976,16 @@ impl Mounter {
                 crate::system::set_status_bar(config, native.view());
             }
             (Command::Dialog(dialog), native) if id == nsh_core::ROOT_ID => {
-                crate::system::show_dialog(&dialog, self.alert_tint, native.view(), &self.control);
+                crate::system::show_dialog(
+                    &dialog,
+                    self.alert_tint,
+                    native.view(),
+                    &self.control,
+                    &self.dialogs,
+                );
+            }
+            (Command::CloseDialog(dialog), _) if id == nsh_core::ROOT_ID => {
+                crate::system::close_dialog(&self.dialogs, dialog);
             }
             (
                 Command::PickImages {
@@ -2020,6 +2032,9 @@ impl Mounter {
                     &self.auth_session,
                     &self.control,
                 );
+            }
+            (Command::CloseAuthSession(request), _) if id == nsh_core::ROOT_ID => {
+                crate::auth_session::close(request, &self.auth_session);
             }
             (Command::Share { id: request, sheet }, native) if id == nsh_core::ROOT_ID => {
                 let anchor = sheet.anchor.and_then(|anchor| self.ui_view(anchor));
