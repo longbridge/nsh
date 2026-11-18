@@ -32,8 +32,8 @@
 //! as on iOS.
 //!
 //! Animated GIF and WebP images decode every frame (composited, at most
-//! [`MAX_FRAMES`]; past [`MAX_ANIMATION_BYTES`] they decode smaller until
-//! they fit) with its delay, as browsers and iOS time them (under 20ms: 100ms),
+//! [`MAX_FRAMES`]); those exceeding [`MAX_ANIMATION_BYTES`] stream frames on
+//! a bounded worker instead. Their delays match browsers (under 20ms: 100ms),
 //! and play their loop count. A view advances its frames with a thread
 //! timer at each frame's delay, not on the frame ticker (a 10 fps GIF need
 //! not keep the ticker running at the display's rate), measured on the
@@ -110,6 +110,8 @@ use crate::{
     window::UiThread,
 };
 
+mod stream;
+
 /// The longest side of a decoded image, in pixels: larger images are
 /// scaled down as they decode (every Direct3D 10+ device draws bitmaps
 /// this big, and one this size already takes 256 MB).
@@ -173,8 +175,7 @@ fn context(surface: &Surface, uri: &str) -> Context {
 /// at the last of them).
 const MAX_FRAMES: usize = 600;
 
-/// The most bytes one animation's frames take: larger animations decode
-/// smaller (half the side at a time) until their frames fit.
+/// The most bytes an animation keeps as decoded frames before streaming.
 const MAX_ANIMATION_BYTES: usize = 48 << 20;
 
 /// Decoded pixels: premultiplied BGRA, rows packed.
@@ -388,7 +389,15 @@ impl Picture {
     /// Bytes its pixels take (4 per pixel, every frame); each bitmap adds
     /// as much once made.
     fn cost(&self) -> usize {
-        self.frames().iter().map(|f| f.pixels.data.len()).sum()
+        self.frames()
+            .iter()
+            .map(|f| f.pixels.data.len())
+            .sum::<usize>()
+            + self
+                .animation
+                .as_ref()
+                .and_then(|a| a.stream.as_ref())
+                .map_or(0, |s| s.bytes.len())
     }
 
     /// It is kept as `key`: its bitmaps count there.
@@ -413,6 +422,8 @@ struct Animation {
     delays: Vec<u32>,
     /// Plays before it stops on its last frame; 0: forever.
     plays: u32,
+    /// The encoded image when its decoded frames do not fit the cache.
+    stream: Option<Arc<stream::Source>>,
 }
 
 /// A frame's delay in ms: as browsers and iOS, delays under 20ms (often
@@ -466,8 +477,7 @@ fn shrunk(rgba: image::RgbaImage, longest: u32) -> image::RgbaImage {
 }
 
 /// Decodes the frames of a GIF or WebP, its longest side at most `longest`
-/// pixels (0: its own); `None` when it is a still image (or too large to
-/// animate: then it decodes as one).
+/// pixels (0: its own); `None` when it is a still image.
 fn animation(
     bytes: &[u8],
     format: image::ImageFormat,
@@ -500,6 +510,7 @@ fn animation(
     };
     let (mut buffers, mut delays, mut total) = (Vec::<image::RgbaImage>::new(), Vec::new(), 0);
     let mut natural = None;
+    let mut streaming = None;
     let mut longest = longest;
     for frame in frames.take(MAX_FRAMES) {
         let frame = match frame {
@@ -522,6 +533,21 @@ fn animation(
         // Over budget: the frames take half the side (a quarter of the
         // bytes) until they fit, so a large animation plays as sharp as
         // the budget allows rather than stopping on its first frame.
+        if total > MAX_ANIMATION_BYTES
+            && buffers.len() > 1
+            && bytes.len() <= nsh_core::image::loader::MAX_BYTES as usize
+            && stream::working_bytes((w, h), longest).is_some()
+        {
+            streaming = Some(Arc::new(stream::Source {
+                bytes: Arc::from(bytes),
+                format,
+                longest,
+                natural: (w, h),
+            }));
+            buffers.truncate(1);
+            delays.truncate(1);
+            break;
+        }
         while total > MAX_ANIMATION_BYTES {
             let (w, h) = buffers[0].dimensions();
             let side = w.max(h);
@@ -543,11 +569,12 @@ fn animation(
     };
     let frames: Vec<Arc<Frame>> = pixels.into_iter().map(Frame::new).collect();
     let first = frames[0].clone();
-    let animation = (frames.len() > 1).then(|| {
+    let animation = (frames.len() > 1 || streaming.is_some()).then(|| {
         Arc::new(Animation {
             frames,
             delays,
             plays,
+            stream: streaming,
         })
     });
     Ok(Some(Picture {
@@ -1152,9 +1179,13 @@ unsafe extern "system" fn timer_proc(_: HWND, _: u32, id: usize, _: u32) {
 /// An animation playing in a view.
 struct Playback {
     animation: Arc<Animation>,
+    lease: Lease,
+    stream: Option<StreamPlayback>,
     timeline: Timeline,
     /// The timer of the next frame, while it plays.
     timer: Option<usize>,
+    /// A pending decode's timer checks whether its view is still drawn.
+    watchdog: bool,
     /// Bumped per timer: a timer that is not the latest is stale.
     serial: u64,
     /// The view was drawn since the frame last changed: it plays on.
@@ -1163,12 +1194,65 @@ struct Playback {
     resuming: Cell<bool>,
 }
 
+struct StreamPlayback {
+    source: Arc<stream::Source>,
+    current: Arc<Frame>,
+    delay: u32,
+    key: Option<Key>,
+    sender: Option<stream::Worker>,
+    retained: Option<stream::Retained>,
+    id: u64,
+    pending: bool,
+    needs_seek: bool,
+    failed: bool,
+}
+
+impl StreamPlayback {
+    fn new(animation: &Animation, current: Arc<Frame>) -> Option<Self> {
+        Some(Self {
+            source: animation.stream.clone()?,
+            current,
+            delay: animation.delays[0],
+            key: animation.frames[0].key.get().cloned(),
+            sender: None,
+            retained: None,
+            id: 0,
+            pending: false,
+            needs_seek: false,
+            failed: false,
+        })
+    }
+
+    fn stop(&mut self, first: Arc<Frame>) {
+        self.sender = None;
+        self.retained = None;
+        self.id = 0;
+        self.pending = false;
+        self.needs_seek = false;
+        self.current = first;
+    }
+
+    fn finish(&mut self, lease: Lease) {
+        self.retained = Some(stream::Retained::new(
+            self.key.clone(),
+            lease,
+            self.current.data().len().saturating_mul(2),
+        ));
+        self.sender = None;
+        self.id = 0;
+    }
+}
+
 impl Playback {
-    fn new(animation: Arc<Animation>) -> Playback {
+    fn new(animation: Arc<Animation>, lease: Lease) -> Playback {
+        let stream = StreamPlayback::new(&animation, animation.frames[0].clone());
         Playback {
             animation,
+            lease,
+            stream,
             timeline: Timeline::default(),
             timer: None,
+            watchdog: false,
             serial: 0,
             drawn: Cell::new(false),
             resuming: Cell::new(false),
@@ -1177,31 +1261,217 @@ impl Playback {
 
     /// The frame to draw.
     fn frame(&self) -> &Arc<Frame> {
-        &self.animation.frames[self.timeline.frame]
+        match &self.stream {
+            Some(stream) => &stream.current,
+            None => &self.animation.frames[self.timeline.frame],
+        }
     }
 
-    /// True when it waits for nothing: no timer, not finished.
+    /// True when drawing should resume playback or a pending seek.
     fn paused(&self) -> bool {
         let a = &self.animation;
-        self.timer.is_none() && !self.timeline.finished(a.plays)
+        self.timer.is_none()
+            && (!self.timeline.finished(a.plays)
+                || self.stream.as_ref().is_some_and(|s| s.needs_seek))
+            && self.stream.as_ref().is_none_or(|s| !s.pending && !s.failed)
+    }
+
+    fn schedule(&mut self, owner: (u64, NodeId), due: i64, now: i64) {
+        let wait = Duration::from_millis(((due - now).max(0) as u64).div_ceil(1000));
+        self.serial += 1;
+        let serial = self.serial;
+        self.timer = after(wait, move || step(owner, serial));
+    }
+
+    fn request_stream(&mut self, owner: (u64, NodeId), seek: bool) {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let Some(stream) = self.stream.as_mut() else {
+            return;
+        };
+        if stream.pending || stream.failed {
+            return;
+        }
+        stream.needs_seek |= seek;
+        if stream.sender.is_none() {
+            stream.id = NEXT.fetch_add(1, Ordering::Relaxed) + 1;
+            match stream::start(
+                stream.source.clone(),
+                stream.key.clone(),
+                self.lease.clone(),
+                owner,
+                stream.id,
+                self.timeline.frame,
+                self.timeline.played,
+                self.animation.plays,
+            ) {
+                Ok(sender) => stream.sender = Some(sender),
+                Err(stream::StartError::Busy) => {
+                    let now = monotonic();
+                    self.timeline.due = Some(now);
+                    if self.timer.is_none() {
+                        self.schedule(owner, now + 200_000, now);
+                    }
+                    return;
+                }
+                Err(error) => {
+                    let message = match error {
+                        stream::StartError::TooLarge => {
+                            "animation exceeds streaming memory limit".to_owned()
+                        }
+                        stream::StartError::Failed(message) => message,
+                        stream::StartError::Busy => unreachable!(),
+                    };
+                    log::warn!("image: cannot stream animation: {message}");
+                    stream.failed = true;
+                    stream.current = self.animation.frames[0].clone();
+                    self.timeline.due = None;
+                    return;
+                }
+            }
+        }
+        let command = if stream.needs_seek {
+            stream::Command::Seek
+        } else {
+            stream::Command::Next
+        };
+        if stream
+            .sender
+            .as_ref()
+            .is_some_and(|sender| sender.send(command).is_ok())
+        {
+            stream.pending = true;
+            stream.needs_seek = false;
+        } else {
+            stream.sender = None;
+            stream.failed = true;
+            stream.current = self.animation.frames[0].clone();
+            self.timeline.due = None;
+        }
     }
 
     /// Advances to now; schedules the next frame (for the view `owner`)
     /// while it plays. Returns whether the frame changed.
     fn advance(&mut self, owner: (u64, NodeId)) -> bool {
         let now = monotonic();
+        if let Some(stream) = &self.stream {
+            if stream.pending {
+                self.watchdog = true;
+                self.schedule(owner, now + 500_000, now);
+                return true;
+            }
+            if stream.failed || (self.timeline.finished(self.animation.plays) && !stream.needs_seek)
+            {
+                return false;
+            }
+            if stream.needs_seek {
+                self.request_stream(owner, true);
+                if self.stream.as_ref().is_some_and(|stream| stream.pending) && self.timer.is_none()
+                {
+                    self.watchdog = true;
+                    self.schedule(owner, now + 500_000, now);
+                }
+                return true;
+            }
+            let due = *self
+                .timeline
+                .due
+                .get_or_insert(now + i64::from(stream.delay) * 1000);
+            if now >= due {
+                self.request_stream(owner, false);
+                if self.stream.as_ref().is_some_and(|stream| stream.pending) && self.timer.is_none()
+                {
+                    self.watchdog = true;
+                    self.schedule(owner, now + 500_000, now);
+                }
+                return true;
+            } else {
+                self.schedule(owner, due, now);
+            }
+            return false;
+        }
         let a = &self.animation;
         let (changed, running) = self.timeline.advance(&a.delays, a.plays, now);
         if let Some(due) = self.timeline.due.filter(|_| running) {
             // Timers count whole milliseconds: one that fires early would
             // spin until the frame is due.
-            let wait = Duration::from_millis(((due - now).max(0) as u64).div_ceil(1000));
-            self.serial += 1;
-            let serial = self.serial;
-            self.timer = after(wait, move || step(owner, serial));
+            self.schedule(owner, due, now);
         }
         changed
     }
+}
+
+fn stream_arrived(owner: (u64, NodeId), id: u64, reply: stream::Reply) {
+    let Some(view) = owner_view(owner) else {
+        return;
+    };
+    {
+        let mut state = view.state_mut();
+        let Some(p) = state
+            .image
+            .as_mut()
+            .and_then(|image| image.playback.as_mut())
+        else {
+            return;
+        };
+        let Some(stream) = p
+            .stream
+            .as_mut()
+            .filter(|stream| stream.id == id && stream.pending)
+        else {
+            return;
+        };
+        stream.pending = false;
+        if p.watchdog {
+            if let Some(timer) = p.timer.take() {
+                cancel(timer);
+            }
+            p.watchdog = false;
+        }
+        match reply {
+            stream::Reply::Frame(frame, seek) => {
+                stream.current = frame.frame;
+                stream.delay = frame.delay;
+                p.timeline.frame = frame.index;
+                p.timeline.played = frame.played;
+                let now = monotonic();
+                if p.timeline.finished(p.animation.plays) {
+                    stream.finish(p.lease.clone());
+                    p.timeline.due = None;
+                } else if !seek {
+                    let previous = p.timeline.due.unwrap_or(now);
+                    let base = if now - previous > 1_000_000 {
+                        now
+                    } else {
+                        previous
+                    };
+                    p.timeline.due = Some(base + i64::from(frame.delay) * 1000);
+                } else if p.timeline.due.is_none_or(|due| due <= now) {
+                    p.timeline.due = Some(now + i64::from(frame.delay) * 1000);
+                }
+                if p.timer.is_none()
+                    && let Some(due) = p.timeline.due
+                {
+                    p.schedule(owner, due, now);
+                }
+                p.drawn.set(false);
+            }
+            stream::Reply::Finished => {
+                stream.finish(p.lease.clone());
+                p.timeline.played = p.animation.plays;
+                p.timeline.due = None;
+            }
+            stream::Reply::Error(error) => {
+                log::warn!("image: animation stream failed: {error}");
+                stream.failed = true;
+                stream.stop(p.animation.frames[0].clone());
+                p.timeline.due = None;
+                if let Some(timer) = p.timer.take() {
+                    cancel(timer);
+                }
+            }
+        }
+    }
+    view.changed();
 }
 
 impl Drop for Playback {
@@ -1223,11 +1493,23 @@ fn resume(owner: (u64, NodeId)) {
         return;
     };
     let mut s = view.state_mut();
-    if let Some(p) = s.image.as_mut().and_then(|i| i.playback.as_mut()) {
+    let changed = if let Some(p) = s.image.as_mut().and_then(|i| i.playback.as_mut()) {
         p.resuming.set(false);
         if p.paused() {
-            p.advance(owner);
+            let changed = p.advance(owner);
+            if changed {
+                p.drawn.set(false);
+            }
+            changed
+        } else {
+            false
         }
+    } else {
+        false
+    };
+    drop(s);
+    if changed {
+        view.changed();
     }
 }
 
@@ -1248,10 +1530,16 @@ fn step(owner: (u64, NodeId), serial: u64) {
         };
         // It ran: Win32 forgot it.
         p.timer = None;
+        p.watchdog = false;
         if !p.drawn.get() {
             // Not drawn since the last frame: nobody sees it. It pauses
             // here, and drawing resumes it.
             p.timeline.due = None;
+            if let Some(stream) = p.stream.as_mut() {
+                let seek = p.timeline.finished(p.animation.plays) && stream.pending;
+                stream.stop(p.animation.frames[0].clone());
+                stream.needs_seek = seek;
+            }
             return;
         }
         let changed = p.advance(owner);
@@ -1512,12 +1800,30 @@ pub(crate) fn resized(surface: &Rc<Surface>, view: &NshView) {
         image.load = None;
         let Ok((picture, lease)) = result else { return };
         // The same image, larger: no new load events; an animation plays
-        // on from the frame it was. A decode that cannot play the same
-        // frames keeps the one playing (its frames are what draws).
+        // on from the frame it was.
         if let Some(p) = image.playback.as_mut() {
-            match picture.animation.clone() {
-                Some(a) if a.frames.len() == p.animation.frames.len() => p.animation = a,
-                _ => return,
+            let Some(animation) = picture.animation.clone() else {
+                return;
+            };
+            if p.stream.is_some() || animation.stream.is_some() {
+                let current = animation.frames[0].clone();
+                p.lease = lease.clone();
+                p.stream = StreamPlayback::new(&animation, current);
+                p.animation = animation;
+                if p.stream.is_some() {
+                    p.request_stream(owner, true);
+                    if p.stream.as_ref().is_some_and(|stream| stream.pending) && p.timer.is_none() {
+                        let now = monotonic();
+                        p.watchdog = true;
+                        p.schedule(owner, now + 500_000, now);
+                    }
+                    p.drawn.set(false);
+                }
+            } else if animation.frames.len() == p.animation.frames.len() {
+                p.lease = lease.clone();
+                p.animation = animation;
+            } else {
+                return;
             }
         }
         image.image = Some(picture);
@@ -1562,7 +1868,10 @@ fn loaded(
             Ok((picture, lease)) => {
                 image.image = Some(picture.clone());
                 image.lease = lease.clone();
-                image.playback = picture.animation.clone().map(Playback::new);
+                image.playback = picture
+                    .animation
+                    .clone()
+                    .map(|animation| Playback::new(animation, lease.clone()));
                 let owner = image.owner;
                 if let Some(p) = image.playback.as_mut() {
                     p.advance(owner);
@@ -2217,34 +2526,93 @@ mod tests {
     }
 
     #[test]
-    fn large_animations_shrink_to_fit_and_keep_playing() {
-        // #2248: 20 frames of 800x800 take ~48.8 MiB, over the budget.
-        use image::{Delay, Frame, codecs::gif::GifEncoder};
+    fn plays_large_gif_without_downsampling() {
         let mut bytes = Vec::new();
         {
-            let mut encoder = GifEncoder::new(&mut bytes);
-            for i in 0..20u32 {
-                let rgba = image::RgbaImage::from_fn(800, 800, |x, _| {
-                    image::Rgba(if (x / 16 + i) % 2 == 0 {
-                        [0, 0, 0, 255]
-                    } else {
-                        [255; 4]
-                    })
-                });
-                let frame = Frame::from_parts(rgba, 0, 0, Delay::from_numer_denom_ms(100, 1));
-                encoder.encode_frame(frame).unwrap();
+            let mut encoder = image::codecs::gif::GifEncoder::new(&mut bytes);
+            for index in 0..14 {
+                let pixels =
+                    image::RgbaImage::from_pixel(1024, 1024, image::Rgba([index, 0, 0, 255]));
+                encoder
+                    .encode_frame(image::Frame::from_parts(
+                        pixels,
+                        0,
+                        0,
+                        image::Delay::from_numer_denom_ms(100, 1),
+                    ))
+                    .unwrap();
             }
         }
-        let picture = animation(&bytes, image::ImageFormat::Gif, 800)
+        let picture = animation(&bytes, image::ImageFormat::Gif, 1024)
             .unwrap()
             .unwrap();
-        let a = picture.animation.as_ref().expect("still animates");
-        assert_eq!(a.frames.len(), 20);
+        assert_eq!(picture.frame.size(), (1024, 1024));
+        assert!(
+            picture.animation.is_some(),
+            "large GIF must continue playing"
+        );
         assert!(picture.cost() <= MAX_ANIMATION_BYTES);
-        let (w, h) = picture.frame.size();
-        assert_eq!((w, h), (400, 400), "the largest size that fits");
-        assert!(a.frames.iter().all(|f| f.size() == (w, h)));
-        assert_eq!(picture.natural, Natural::Pixels(800, 800));
+        let source = picture.animation.as_ref().unwrap().stream.clone().unwrap();
+        let mut decoder = stream::Decoder::new(source, 0, 1).unwrap();
+        for index in 0..14 {
+            let frame = if index == 0 {
+                decoder.seek(0).unwrap()
+            } else {
+                decoder.next().unwrap().unwrap()
+            };
+            assert_eq!(frame.frame.size(), (1024, 1024));
+            assert_eq!(frame.frame.data()[2], index as u8);
+            assert_eq!(frame.delay, 100);
+        }
+        assert!(decoder.next().unwrap().is_none());
+    }
+
+    #[test]
+    fn streamed_frames_preserve_compositing_and_loop() {
+        use image::AnimationDecoder;
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/gallery/bounce.gif");
+        let bytes = std::fs::read(path).unwrap();
+        let reference: Vec<_> = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(&bytes))
+            .unwrap()
+            .into_frames()
+            .take(3)
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(reference.len() > 1);
+        let natural = match Natural::of(&bytes).unwrap() {
+            Natural::Pixels(w, h) => (w, h),
+            _ => unreachable!(),
+        };
+        let source = Arc::new(stream::Source {
+            bytes: Arc::from(bytes),
+            format: image::ImageFormat::Gif,
+            longest: 32,
+            natural,
+        });
+        let mut decoder = stream::Decoder::new(source, 0, 0).unwrap();
+        for (index, expected) in reference.into_iter().enumerate() {
+            let frame = if index == 0 {
+                decoder.seek(0).unwrap()
+            } else {
+                decoder.next().unwrap().unwrap()
+            };
+            assert_eq!(frame.delay, frame_delay(expected.delay()));
+            assert_eq!(
+                frame.frame.data(),
+                Pixels::from_rgba(shrunk(expected.into_buffer(), 32)).data
+            );
+        }
+        let mut looped = false;
+        for _ in 0..MAX_FRAMES {
+            let frame = decoder.next().unwrap().unwrap();
+            if frame.index == 0 {
+                assert_eq!(frame.played, 1);
+                looped = true;
+                break;
+            }
+        }
+        assert!(looped);
     }
 
     #[test]
