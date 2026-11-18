@@ -219,6 +219,20 @@ pub unsafe extern "C" fn nsh_app_set_limits(
     app.view.set_limits(limits.limits());
 }
 
+/// Whether scroll views make the views of their content only near their
+/// viewport (true, the default), or all of it (false), in the running app
+/// and the apps `app` loads next ([`AppView::set_content_culling`]).
+///
+/// # Safety
+///
+/// `app` must come from [`nsh_app_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_app_set_content_culling(app: *mut NshApp, enabled: bool) {
+    // SAFETY: guaranteed by the caller.
+    let app = unsafe { &*app };
+    app.view.set_content_culling(enabled);
+}
+
 /// Gives the address of the apps `app` loads (`UrlScheme.setUrl`) to the
 /// system as the current `NSUserActivity`, for Handoff. An address
 /// that is no web page needs `<bundle id>.url` in the embedding app's

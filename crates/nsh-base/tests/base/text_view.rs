@@ -715,7 +715,7 @@ mod word_fade {
         }
 
         fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points> {
-            TYPESET.set(TYPESET.get() + prepared.0);
+            TYPESET.set(TYPESET.get() + prepared.chars());
             ApproxTextEngine.measure(prepared, max_width)
         }
 
@@ -728,7 +728,7 @@ mod word_fade {
         }
 
         fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout {
-            TYPESET.set(TYPESET.get() + prepared.0);
+            TYPESET.set(TYPESET.get() + prepared.chars());
             ApproxTextEngine.layout(prepared, size)
         }
 
@@ -1074,6 +1074,25 @@ fn a_pressed_task_box_reports_its_place_in_the_document_and_the_state_asked_for(
     app.press("label:first").unwrap();
     app.wait_for("Pressed: 1:false 2:true 4:true 3:false 3:false 0:true")
         .unwrap();
+}
+
+/// A numbered list with a bulleted one nested in its second item.
+#[component]
+fn NestedLists() -> impl IntoElement {
+    view().child(text_view().markdown("1. one\n2. two\n   - nested\n3. three"))
+}
+
+#[test]
+fn a_lists_markers_come_before_their_items_in_tree_order() {
+    let mut app = Headless::start(EngineConfig::new(Root::of::<NestedLists>())).unwrap();
+    app.wait_for("three").unwrap();
+    // A selection across the view takes the texts in this order: a drag
+    // from a number selects on into its item, and a copy reads each
+    // marker before its item's text and its nested list.
+    assert_eq!(
+        app.screen().texts(),
+        ["1.", "one", "2.", "two", "◦", "nested", "3.", "three"]
+    );
 }
 
 mod large_document {

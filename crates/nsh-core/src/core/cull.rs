@@ -258,7 +258,9 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         self.culls_content = enabled;
-        if !enabled && !self.culling.is_empty() {
+        // Off: what is culled is made. On again: what went far away while
+        // it was off is given up (the scroll views stay in `culling`).
+        if !self.culling.is_empty() {
             self.cull_dirty = true;
         }
     }
@@ -325,7 +327,6 @@ impl<M: TextEngine> Core<M> {
         );
         let holders = self.view_holders();
         let mut made = false;
-        let mut left = false;
         let mut stack = std::mem::take(&mut self.cull_scratch);
         stack.clear();
         stack.push((scope, 0.0f32, 0.0f32, 0.0f32, 0.0f32));
@@ -359,7 +360,6 @@ impl<M: TextEngine> Core<M> {
                     let away = cw > 0.0 && ch > 0.0 && !meets(far);
                     if away && self.culls_content && self.reclaimable(child, &holders) {
                         self.reclaim(child);
-                        left = true;
                         continue;
                     }
                     let c = &self.nodes[child as usize];
@@ -381,12 +381,10 @@ impl<M: TextEngine> Core<M> {
                     || near
                     || self.never_culled(child);
                 if !shows {
-                    left = true;
                     continue;
                 }
                 if self.nodes[child as usize].placeholder {
                     self.ask_row(child);
-                    left = true;
                     continue;
                 }
                 // In the overscan, not in sight: within the turn's budget
@@ -400,7 +398,6 @@ impl<M: TextEngine> Core<M> {
                     && !self.never_culled(child)
                     && !self.pace_overscan()
                 {
-                    left = true;
                     continue;
                 }
                 self.make_culled(parent, child);
@@ -411,7 +408,10 @@ impl<M: TextEngine> Core<M> {
             }
         }
         self.cull_scratch = stack;
-        (made, left || self.culls_content)
+        // Still to be looked at as it scrolls, though all its content is
+        // made: what is far away is given up (with culling off too, so that
+        // turned on again it gives up what went far away meanwhile).
+        (made, true)
     }
 
     /// Makes culled `child`'s native view in made `parent`'s, at its place
