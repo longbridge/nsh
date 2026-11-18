@@ -48274,3 +48274,165 @@ fn style_constants_match_default() {
         crate::style::TextStyle::default()
     );
 }
+
+/// #1345 option 2 baseline: the issue's 300 × 50 table (15,000 cells,
+/// each a view holding a text block and its raw text run).
+/// `cargo test --release -p nsh-core --lib raw_text_table_bench --
+/// --ignored --nocapture`
+#[test]
+#[ignore]
+fn raw_text_table_bench() {
+    use std::time::Instant;
+    fn rss_kib() -> u64 {
+        std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find(|l| l.starts_with("VmRSS:"))
+                    .and_then(|l| l.split_whitespace().nth(1)?.parse().ok())
+            })
+            .unwrap_or(0)
+    }
+    fn build(rows: u32, cols: u32, inline_run: bool) -> (Core<crate::ApproxTextEngine>, f64) {
+        let mut c = Core::new(crate::ApproxTextEngine, size_pt(1600.0, 900.0));
+        let mut ops = Vec::new();
+        let mut id: NodeId = 2;
+        let table = id;
+        ops.push(Op::Create {
+            id: table,
+            tag: Tag::View,
+        });
+        for r in 0..rows {
+            id += 1;
+            let row = id;
+            ops.push(Op::Create {
+                id: row,
+                tag: Tag::View,
+            });
+            ops.push(style_op(row, &[("flexDirection", StyleValue::Str("row"))]));
+            for col in 0..cols {
+                let (cell, text, run) = (id + 1, id + 2, id + 3);
+                id += 3;
+                ops.push(Op::Create {
+                    id: cell,
+                    tag: Tag::View,
+                });
+                ops.push(style_op(
+                    cell,
+                    &[
+                        ("width", StyleValue::Number(32.0)),
+                        ("padding", StyleValue::Number(2.0)),
+                    ],
+                ));
+                ops.push(Op::Create {
+                    id: text,
+                    tag: Tag::Text,
+                });
+                if inline_run {
+                    ops.push(Op::SetText {
+                        id: text,
+                        text: format!("{r}:{col}"),
+                    });
+                } else {
+                    ops.push(Op::CreateText {
+                        id: run,
+                        text: format!("{r}:{col}"),
+                    });
+                    ops.push(Op::Insert {
+                        parent: text,
+                        child: run,
+                        before: None,
+                    });
+                }
+                ops.push(Op::Insert {
+                    parent: cell,
+                    child: text,
+                    before: None,
+                });
+                ops.push(Op::Insert {
+                    parent: row,
+                    child: cell,
+                    before: None,
+                });
+            }
+            ops.push(Op::Insert {
+                parent: table,
+                child: row,
+                before: None,
+            });
+        }
+        ops.push(Op::Insert {
+            parent: ROOT_ID,
+            child: table,
+            before: None,
+        });
+        let t = Instant::now();
+        apply(&mut c, ops);
+        let batch = c.commit().unwrap();
+        let ms = t.elapsed().as_secs_f64() * 1e3;
+        let texts = batch
+            .items
+            .iter()
+            .filter(|i| matches!(i, MountItem::Text { .. }))
+            .count();
+        let first = text_item(&batch).map(|t| t.text.to_string());
+        println!("mounted texts {texts}, first {first:?}");
+        (c, ms)
+    }
+    let variant = std::env::var("NSH_RUNS").unwrap_or_default();
+    let inline_run = variant == "inline";
+    println!(
+        "variant: {}",
+        if inline_run {
+            "run text in its block (prototype)"
+        } else {
+            "raw text nodes (main)"
+        }
+    );
+    let before = rss_kib();
+    let (mut c, mount_ms) = build(300, 50, inline_run);
+    let after = rss_kib();
+    let raw = c
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.kind == Kind::RawText)
+        .count();
+    let node = std::mem::size_of::<super::Node>();
+    println!(
+        "nodes {} (raw text runs {raw}), slab capacity {}, Node {node} B",
+        c.nodes.len(),
+        c.nodes.capacity()
+    );
+    println!(
+        "node slab live {:.1} MiB, raw runs live {:.1} MiB, reserved {:.1} MiB",
+        (c.nodes.len() * node) as f64 / 1048576.0,
+        (raw * node) as f64 / 1048576.0,
+        (c.nodes.capacity() * node) as f64 / 1048576.0
+    );
+    println!(
+        "RSS growth {:.1} MiB, first mount + commit {mount_ms:.1} ms",
+        (after - before) as f64 / 1024.0
+    );
+    // Steady state: change one run's text, commit (relayout + text).
+    let mut runs = Vec::new();
+    for i in 0..21 {
+        let t = Instant::now();
+        let _ = c.apply(Op::SetText {
+            id: if inline_run { 5 } else { 6 },
+            text: format!("x{i}"),
+        });
+        let _ = c.commit();
+        runs.push(t.elapsed().as_secs_f64() * 1e6);
+    }
+    runs.sort_by(f64::total_cmp);
+    println!("set one run's text + commit: median {:.0} µs", runs[10]);
+    let mut runs = Vec::new();
+    for i in 0..5 {
+        let t = Instant::now();
+        c.set_viewport(size_pt(1500.0 + i as f32 * 10.0, 900.0));
+        let _ = c.commit();
+        runs.push(t.elapsed().as_secs_f64() * 1e3);
+    }
+    runs.sort_by(f64::total_cmp);
+    println!("resize + full relayout + commit: median {:.1} ms", runs[2]);
+}

@@ -8039,6 +8039,12 @@ impl<M: TextEngine> Core<M> {
         parts: &mut TextAttachments<'_>,
         in_press: bool,
     ) {
+        // #1345 prototype: a text block holding its run's text itself,
+        // with no raw text node.
+        let own = &self.nodes[key as usize];
+        if own.kind == Kind::Text && !own.text.is_empty() {
+            out.push(&own.text, style);
+        }
         for &c in &self.nodes[key as usize].children {
             let child = &self.nodes[c as usize];
             if child.is_overlay() {
