@@ -10576,18 +10576,20 @@ fn estimate_line(text: &AttributedText, run: &str) -> Points {
 /// `text`'s largest font size and the line height it gives (the style's,
 /// or 1.2 of the font size).
 fn text_metrics(text: &AttributedText) -> (f32, f32) {
+    if text.spans.is_empty() {
+        return (14.0, 14.0 * 1.2);
+    }
     text.spans
         .iter()
         .fold((14.0f32, 0.0f32), |(size, line), span| {
             let s = &span.style;
             let font = s.font_size.0.max(1.0);
-            let height = if s.line_height.0 > 0.0 {
-                s.line_height.0
-            } else if s.line_height_multiple > 0.0 {
-                font * s.line_height_multiple
-            } else {
-                font * 1.2
-            };
+            let height = ResolvedTextStyle {
+                font_size: Points(font),
+                ..*s
+            }
+            .approx_line_height()
+            .0;
             (
                 if line == 0.0 { font } else { size.max(font) },
                 line.max(height),
