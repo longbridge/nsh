@@ -3011,7 +3011,7 @@ impl Screen {
         let content = input
             .content
             .unwrap_or_else(|| Bounds::new(Point::default(), view.frame.size));
-        let font = input.config.style.font_size.0;
+        let font = input.config.style.font_size.0.max(1.0);
         let (advance, line) = (font * 0.55, input.config.style.approx_line_height().0);
         let (column, row) = if input.config.multiline {
             let per_line = ((content.size.width.0 / advance).floor() as usize).max(1);

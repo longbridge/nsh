@@ -268,16 +268,17 @@ impl ResolvedTextStyle {
 
     /// The line height [`ApproxTextEngine`] and offscreen estimates give
     /// this style: its explicit `line_height`, `line_height_multiple` of
-    /// `font_size`, or `1.2 × font_size`.
+    /// `font_size` (clamped to at least 1 pt), or `1.2 × font_size`.
     #[doc(hidden)]
     #[inline]
     pub fn approx_line_height(&self) -> Points {
+        let font = self.font_size.max(px(1.0));
         if self.line_height > Points::ZERO {
             self.line_height
         } else if self.line_height_multiple > 0.0 {
-            self.font_size * self.line_height_multiple
+            font * self.line_height_multiple
         } else {
-            self.font_size * 1.2
+            font * 1.2
         }
     }
 
@@ -669,6 +670,25 @@ impl AttributedText {
     /// Whether a span has a background ([`TextBackground`]).
     pub fn has_backgrounds(&self) -> bool {
         self.spans.iter().any(|s| s.style.background.is_some())
+    }
+
+    /// The largest clamped font size across spans (`14 pt` when empty) and
+    /// the tallest [`ResolvedTextStyle::approx_line_height`] across spans,
+    /// shared by [`ApproxTextEngine`] and offscreen text estimates.
+    pub(crate) fn approx_metrics(&self) -> (Points, Points) {
+        if self.spans.is_empty() {
+            let font = px(14.0);
+            return (font, font * 1.2);
+        }
+        self.spans
+            .iter()
+            .fold((Points::ZERO, Points::ZERO), |(font, line), span| {
+                let s = &span.style;
+                (
+                    font.max(s.font_size.max(px(1.0))),
+                    line.max(s.approx_line_height()),
+                )
+            })
     }
 
     /// The color every character is drawn in, decoration lines included,
@@ -1399,6 +1419,7 @@ mod estimate {
 /// Prepared typesetting state for [`ApproxTextEngine`].
 #[doc(hidden)]
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ApproxPrepared {
     chars: usize,
     font: Points,
@@ -1409,13 +1430,28 @@ pub struct ApproxPrepared {
     breaks: Vec<usize>,
 }
 
+impl Default for ApproxPrepared {
+    fn default() -> Self {
+        let font = px(14.0);
+        Self {
+            chars: 0,
+            font,
+            line: font * 1.2,
+            max_lines: 0,
+            attachments: Vec::new(),
+            astral: Vec::new(),
+            breaks: Vec::new(),
+        }
+    }
+}
+
 /// A deterministic, platform-free [`TextEngine`] for headless runs and
-/// tests: every character is `0.55 × font size` wide and lines are as tall as
-/// the spans' `lineHeight` (or `1.2 × font size` by default); a text with line
-/// breaks measures as wide as its widest line and as tall as its lines (each
-/// wrapped on its own), their baseline placed with half-leading around the
-/// natural `1.2 × font size` ascent (its descent 0 when unspaced, its x height
-/// `0.5 × font size`), where attachments are placed by
+/// tests: every character is `0.55 × font size` wide (in the largest span's
+/// font) and lines are as tall as the spans' `lineHeight` (or `1.2 × font size`
+/// by default); a text with line breaks measures as wide as its widest line and
+/// as tall as its lines (each wrapped on its own), their baseline placed with
+/// half-leading around the natural `1.2 × font size` ascent (its descent 0 when
+/// unspaced, its x height `0.5 × font size`), where attachments are placed by
 /// [`TextAttachment::ascent`] on the line their character wraps to (its lines,
 /// carets and hits are those of one line).
 #[derive(Debug, Default, Clone, Copy)]
@@ -1433,17 +1469,7 @@ impl TextEngine for ApproxTextEngine {
         text: &AttributedText,
         alignments: &AttachmentAlignments,
     ) -> Self::Prepared {
-        let font = text.spans.first().map_or(px(14.0), |s| s.style.font_size);
-        let line = text
-            .spans
-            .iter()
-            .map(|s| s.style.approx_line_height())
-            .fold(Points::ZERO, Points::max);
-        let line = if line > Points::ZERO {
-            line
-        } else {
-            font * 1.2
-        };
+        let (font, line) = text.approx_metrics();
         // Empty (no allocation) for text in the Basic Multilingual Plane.
         let astral = text
             .text
@@ -2179,6 +2205,42 @@ mod tests {
         );
         let mp_mixed = engine.prepare(&mixed);
         assert_eq!(engine.measure(&mp_mixed, None).height, px(30.0));
+
+        // Unspaced mixed font sizes resolve both advance and natural ascent
+        // from the largest span, matching offscreen estimates.
+        let mut mixed_fonts = AttributedText::default();
+        mixed_fonts.push(
+            "a",
+            ResolvedTextStyle {
+                font_size: px(10.0),
+                ..ResolvedTextStyle::default()
+            },
+        );
+        mixed_fonts.push(
+            "b",
+            ResolvedTextStyle {
+                font_size: px(20.0),
+                ..ResolvedTextStyle::default()
+            },
+        );
+        let mp_fonts = engine.prepare(&mixed_fonts);
+        assert_eq!(engine.measure(&mp_fonts, None), size(px(22.0), px(24.0)));
+        assert_eq!(engine.first_baseline(&mp_fonts, px(50.0)), Some(px(24.0)));
+
+        // Default prepared state matches an empty `AttributedText`, and zero
+        // font sizes clamp to at least 1 pt.
+        assert_eq!(
+            engine.measure(&ApproxPrepared::default(), None),
+            engine.measure(&engine.prepare(&AttributedText::default()), None)
+        );
+        assert_eq!(
+            ResolvedTextStyle {
+                font_size: Points::ZERO,
+                ..ResolvedTextStyle::default()
+            }
+            .approx_line_height(),
+            px(1.2)
+        );
     }
 
     #[test]
