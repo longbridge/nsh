@@ -14,8 +14,8 @@
 //!
 //! A view whose text grows at its end (a reply still arriving) reads it
 //! from where it can still change and keeps the blocks before
-//! (`incremental.rs`); [`parse`] reads a whole text and is what that is
-//! held to.
+//! (`incremental.rs`); a long text is read in parts the same way. Both are
+//! held to [`parse_whole`], which reads a whole text in one parse.
 
 mod autolink;
 mod cjk;
@@ -54,8 +54,15 @@ use crate::mdast_tree::{Mdast, plain_text};
 /// How deep blocks and inline content are read: deeper content is text.
 const MAX_DEPTH: usize = 32;
 
-/// Markdown `source` read with `parser`'s options, extensions and plugins.
+/// Markdown `source` read with `parser`'s options, extensions and plugins:
+/// the document [`parse_whole`] makes of it, a long text read a part at a
+/// time where nothing after a part changes it (`incremental.rs`).
 pub(crate) fn parse(parser: &Parser, source: &str) -> Document {
+    incremental::parse_long(parser, source).unwrap_or_else(|| parse_whole(parser, source))
+}
+
+/// Markdown `source` read in one parse.
+pub(crate) fn parse_whole(parser: &Parser, source: &str) -> Document {
     let mut source = if source.contains('\r') {
         Cow::Owned(source.replace("\r\n", "\n").replace('\r', "\n"))
     } else {
@@ -227,7 +234,16 @@ fn definitions(trees: &[Tree<'_>]) -> String {
     out
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The longest text one `markdown-rs` parse read on this thread: a long
+    /// text read in parts is never parsed whole.
+    static LONGEST_PARSE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn parse_tree(parser: &Parser, text: &str, first: bool) -> Node {
+    #[cfg(test)]
+    LONGEST_PARSE.with(|longest| longest.set(longest.get().max(text.len())));
     let mdx = parser.options.mdx;
     match markdown::to_mdast(text, &options(parser, first, mdx)) {
         Ok(root) => root,
