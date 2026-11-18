@@ -466,6 +466,13 @@ impl<H: Host> Graph<H> {
         self.nodes[id as usize].state != CLEAN
     }
 
+    /// Whether slot `id` no longer holds the node of generation
+    /// `generation`: freed, or made another node since.
+    fn left(&self, id: u32, generation: u32) -> bool {
+        let n = &self.nodes[id as usize];
+        n.kind == Kind::Free || n.generation != generation
+    }
+
     /// Node `id`'s value (untracked; a disposed memo keeps its last one).
     pub fn value(&self, id: u32) -> &H::Value {
         &self.nodes[id as usize].value
@@ -920,9 +927,14 @@ fn run_top<H: Host>(h: H, id: u32) {
 /// Solid's `lookUpstream`: brings the stale memos `id` reads up to date.
 fn look_upstream<H: Host>(h: H, id: u32, ignore: u32) {
     g(h).nodes[id as usize].state = CLEAN;
+    let generation = g(h).nodes[id as usize].generation;
     let mut i = 0;
     loop {
         let graph = g(h);
+        // A source's run let the node go (its slot may hold another).
+        if graph.left(id, generation) {
+            break;
+        }
         let Some(&(source, _)) = graph.nodes[id as usize].sources.get(i) else {
             break;
         };
@@ -947,7 +959,12 @@ pub fn update_computation<H: Host>(h: H, id: u32) {
     if graph.nodes[id as usize].disposed || graph.nodes[id as usize].kind == Kind::Free {
         return;
     }
+    let generation = g(h).nodes[id as usize].generation;
     clean_node(h, id);
+    // A cleanup let the node go: nothing runs in its slot.
+    if g(h).left(id, generation) {
+        return;
+    }
     let exec = g(h).exec;
     run_computation(h, id, exec);
 }
@@ -960,6 +977,7 @@ fn run_computation<H: Host>(h: H, id: u32, time: u64) {
         return;
     };
     let prev = h.dup(&n.value);
+    let generation = n.generation;
     let listener = std::mem::replace(&mut graph.listener, id);
     let owner = graph.enter_owner(id);
     let result = h.call(&func, prev);
@@ -967,6 +985,15 @@ fn run_computation<H: Host>(h: H, id: u32, time: u64) {
     let graph = g(h);
     graph.listener = listener;
     graph.leave_owner(owner);
+    // The run let the node go (its owner was disposed: a list letting a
+    // cell's content go) and its slot was freed, maybe made another node
+    // since: the result is no one's.
+    if graph.left(id, generation) {
+        if let Some(next) = result {
+            h.free(next);
+        }
+        return;
+    }
     let Some(next) = result else {
         // A failed run keeps the last value and stays clean, as an effect's
         // does: a write to what it read before failing queues it again and
@@ -1061,6 +1088,7 @@ pub fn write<H: Host>(h: H, id: u32, next: H::Value) {
 pub fn read<H: Host>(h: H, id: u32) -> H::Value {
     let n = &g(h).nodes[id as usize];
     if n.kind == Kind::Memo && !n.disposed && n.state != CLEAN {
+        let (generation, last) = (n.generation, h.dup(&n.value));
         if n.state == STALE {
             update_computation(h, id);
         } else {
@@ -1068,6 +1096,14 @@ pub fn read<H: Host>(h: H, id: u32) -> H::Value {
             run_updates(h, false, || look_upstream(h, id, NONE));
             g(h).updates = updates;
         }
+        // Bringing it up to date let the memo go (what it read disposed its
+        // owner, as a list lets a cell's content go) and freed its slot,
+        // which another node may hold by now: the reader gets the memo's
+        // last value, as a disposed memo keeps it, and nothing to track.
+        if g(h).left(id, generation) {
+            return last;
+        }
+        h.free(last);
     }
     let graph = g(h);
     if !graph.nodes[id as usize].disposed {
