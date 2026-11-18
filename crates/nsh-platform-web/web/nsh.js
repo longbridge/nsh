@@ -86,6 +86,14 @@ const ARIA_ROLES = {
   search: "searchbox", text: null, summary: "status", togglebutton: "button", dropdownlist: "combobox",
 };
 
+/** Reconcile accessibility props with the element's current attributes. */
+function setAriaAttribute(el, name, value) {
+  const next = value == null || value === false ? null : String(value);
+  if (el.getAttribute(name) === next) return;
+  if (next === null) el.removeAttribute(name);
+  else el.setAttribute(name, next);
+}
+
 /**
  * The HTML element a view or text is drawn as, from what its props say it
  * is: a heading (`role="header"`, `h1` to `h6` by `accessibilityLevel`,
@@ -3081,13 +3089,15 @@ class Player {
   /** ARIA attributes from the accessibility props (`op_vp`). */
   updateAria(el) {
     const p = el._props ?? {};
-    const set = (name, value) => (value == null || value === false ? el.removeAttribute(name) : el.setAttribute(name, String(value)));
+    const set = (name, value) => setAriaAttribute(el, name, value);
     const role = ARIA_ROLES[p.role] ?? (p.role && p.role !== "none" ? p.role : el._pressable ? "button" : null);
     // A combo box that is an input is its field, which keeps the focus
     // (`fieldAria`).
     set("role", el._field && p.role === "combobox" ? null : role);
-    set("aria-label", el._field ? null : p.label ?? el._textLabel);
-    set("aria-description", el._field ? null : p.hint);
+    if (!el._field) {
+      set("aria-label", p.label ?? el._textLabel);
+      set("aria-description", p.hint);
+    }
     set("aria-disabled", p.disabled && "true");
     set("aria-selected", p.selected && "true");
     set("aria-checked", p.checked);
@@ -3151,12 +3161,12 @@ class Player {
    * the field is the element screen readers read as the input. */
   fieldAria(el, field) {
     const p = el._props ?? {};
-    const set = (name, value) => (value == null || value === false ? field.removeAttribute(name) : field.setAttribute(name, String(value)));
+    const set = (name, value) => setAriaAttribute(field, name, value);
     set("aria-label", (p.label ?? el._textLabel) || null);
     set("aria-description", p.hint || null);
     // Props may arrive before the field exists; its wrapper then held the name.
-    el.removeAttribute("aria-label");
-    el.removeAttribute("aria-description");
+    setAriaAttribute(el, "aria-label", null);
+    setAriaAttribute(el, "aria-description", null);
     set("aria-invalid", p.invalid && "true");
     // A combo box's field is the combo box: the focus stays in it while
     // its list is open, and its active descendant is the highlighted row.
