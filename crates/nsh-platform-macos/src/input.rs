@@ -810,8 +810,20 @@ fn repick(key: u64) {
 /// An event reaches `surface` through `window`'s root view: a window of
 /// the app's own (`Window.open`), or `None` for the surface's root. What it
 /// picks, converts and focuses is in that window until the next event.
-pub(crate) fn enter(surface: &Surface, window: Option<NshView>) {
-    *surface.input.window_root.borrow_mut() = window;
+/// Returns the window the input was in before, so an event that does not
+/// move the pointer (the test agent's file drop) can hand it back.
+pub(crate) fn enter(surface: &Surface, window: Option<NshView>) -> Option<NshView> {
+    surface.input.window_root.replace(window)
+}
+
+/// A window of the app's own closed (its root `root`): when it was the
+/// input's, the input goes back to the surface's root, so a repick never
+/// picks in a detached root.
+pub(crate) fn window_closed(surface: &Surface, root: &NshView) {
+    let mut window_root = surface.input.window_root.borrow_mut();
+    if window_root.as_ref() == Some(root) {
+        *window_root = None;
+    }
 }
 
 /// The root view `window` shows: the surface's, or that of a window of the
