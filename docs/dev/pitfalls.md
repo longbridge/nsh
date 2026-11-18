@@ -809,6 +809,19 @@ Things that were found the hard way. Read the section of the area you change bef
   are written early: registered components' animated props (`set_animated_number`, `set_animated_color`) still reach
   them after the batches (`native::component_animated`), so a component that draws in its view
   (`NativeComponent::draw`) draws such a frame without the values its batch set.
+- **The client and the non-client area are tracked for leaves apart** (`TrackMouseEvent`'s `TME_LEAVE` without and
+  with `TME_NONCLIENT`), and a view marked `windowDrag` or `windowControl` is non-client area inside the app's content
+  (`HTCAPTION`, `HTCLOSE`, ...): moving between one and an ordinary view posts the leave of the area left, which
+  arrives after the other area's move. Taken as leaving the window, it cleared the hover that move had just set. A
+  leave message therefore only looks where the pointer is now (`GetCursorPos`, `WindowFromPoint`, the window's own
+  answer to `WM_NCHITTEST`, and the client rectangle, since the system's title bar answers `HTCAPTION` as a drag
+  region does), and the views hear a move there or a leave; the decisions are `chrome::Tracking::step`'s, over plain
+  data. A leave message never arms tracking: `TrackMouseEvent` posts a leave at once when the system does not have
+  the pointer in the area yet (it has not taken the moves still queued, although `GetCursorPos` has), and posted
+  messages are retrieved before input, so leaves would follow one another ahead of every input message. A leave that
+  keeps the hover with neither area tracked (the pointer came back before the moves were dispatched) starts a
+  one-shot timer instead: `WM_TIMER` comes only once no input is queued, and it arms the area the pointer is in or
+  ends the hover. A non-client move arms its tracking again at another hit test code, which may end it.
 
 ## Web, browsers
 

@@ -45,8 +45,9 @@ use windows::{
             HiDpi::{AdjustWindowRectExForDpi, GetDpiForWindow},
             Input::{
                 KeyboardAndMouse::{
-                    GetKeyState, ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT,
-                    TrackMouseEvent, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+                    GetKeyState, ReleaseCapture, SetCapture, SetFocus, VIRTUAL_KEY, VK_CONTROL,
+                    VK_LBUTTON, VK_LWIN, VK_MBUTTON, VK_MENU, VK_RBUTTON, VK_RWIN, VK_SHIFT,
+                    VK_XBUTTON1, VK_XBUTTON2,
                 },
                 Pointer::{GetPointerInfo, POINTER_INFO},
             },
@@ -58,6 +59,7 @@ use windows::{
 };
 
 use crate::{
+    chrome::{Heard, Mouse},
     input::{KeyEvent, Modifiers, PointerEvent, PointerKind, WheelEvent},
     surface::Surface,
 };
@@ -110,8 +112,8 @@ struct WindowData {
     surface: Weak<Surface>,
     /// Closing it ends the message loop when it is the last one.
     top_level: bool,
-    /// The mouse is tracked for `WM_MOUSELEAVE`.
-    tracking: Cell<bool>,
+    /// Its mouse leave tracking.
+    tracking: Cell<crate::chrome::Tracking>,
     /// Buttons held (capture is released when none is).
     buttons: Cell<u8>,
     /// The last press, for double-click counting: time (ms), point, count.
@@ -240,7 +242,7 @@ pub(crate) fn create(
     let data = Box::new(WindowData {
         surface: Rc::downgrade(surface),
         top_level: parent.is_none(),
-        tracking: Cell::new(false),
+        tracking: Cell::new(crate::chrome::Tracking::default()),
         buttons: Cell::new(0),
         last_press: Cell::new((0, (0, 0), 0)),
         surrogate: Cell::new(0),
@@ -348,7 +350,7 @@ pub(crate) fn create_app_window(
     let data = Box::new(WindowData {
         surface: Rc::downgrade(surface),
         top_level: false,
-        tracking: Cell::new(false),
+        tracking: Cell::new(crate::chrome::Tracking::default()),
         buttons: Cell::new(0),
         last_press: Cell::new((0, (0, 0), 0)),
         surrogate: Cell::new(0),
@@ -1366,30 +1368,22 @@ fn handle(
             if crate::chrome::press_moved(surface, hwnd, lparam) {
                 return Some(LRESULT(0));
             }
-            if !data.tracking.replace(true) {
-                let mut track = TRACKMOUSEEVENT {
-                    cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
-                    dwFlags: TME_LEAVE,
-                    hwndTrack: hwnd,
-                    dwHoverTime: 0,
-                };
-                // SAFETY: a valid structure for this window.
-                let _ = unsafe { TrackMouseEvent(&mut track) };
-            }
             crate::chrome::client_mouse_moved(surface, hwnd);
-            let (x, y) = point(lparam);
-            let held = held_buttons(wparam);
-            crate::input::pointer(
-                surface,
-                mouse_event(PointerKind::Move, x, y, 0, held, 1, surface),
-            );
+            let content = crate::chrome::client_point_is_content(hwnd, lparam);
+            let event = match crate::chrome::track(surface, hwnd, Mouse::ClientMove { content }) {
+                Heard::Here => {
+                    let (x, y) = point(lparam);
+                    mouse_event(PointerKind::Move, x, y, 0, held_buttons(wparam), 1, surface)
+                }
+                _ => mouse_event(PointerKind::Leave, -1.0, -1.0, 0, 0, 0, surface),
+            };
+            crate::input::pointer(surface, event);
         }
         WM_MOUSELEAVE => {
-            data.tracking.set(false);
-            crate::input::pointer(
-                surface,
-                mouse_event(PointerKind::Leave, -1.0, -1.0, 0, 0, 0, surface),
-            );
+            crate::chrome::track(surface, hwnd, Mouse::ClientLeave);
+        }
+        WM_TIMER if crate::chrome::recheck_timer(surface, hwnd, wparam.0) => {
+            return Some(LRESULT(0));
         }
         WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN | WM_LBUTTONDBLCLK
         | WM_RBUTTONDBLCLK | WM_MBUTTONDBLCLK | WM_XBUTTONDBLCLK => {
@@ -1926,14 +1920,52 @@ pub(crate) fn click(surface: &Rc<Surface>, from: (f32, f32), to: (f32, f32)) {
 
 /// The pointer moved over a view of the app's title bar that answers as
 /// the frame (`windowDrag`, `windowControl`) at `at` (client points), or
-/// left it (`None`): the views hear it as the client area's moves, for
-/// their hover styles.
+/// left the app's content (`None`): the views hear it as the client area's
+/// moves, for their hover styles. A leave message's look at where the
+/// pointer is ([`crate::chrome::track`]) reports the same way.
 pub(crate) fn nc_pointer(surface: &Rc<Surface>, at: Option<(f32, f32)>) {
-    let event = match at {
-        Some((x, y)) => mouse_event(PointerKind::Move, x, y, 0, 0, 1, surface),
-        None => mouse_event(PointerKind::Leave, -1.0, -1.0, 0, 0, 0, surface),
-    };
-    crate::input::pointer(surface, event);
+    let (kind, x, y, buttons, clicks) = region_pointer(at, buttons_down());
+    crate::input::pointer(
+        surface,
+        mouse_event(kind, x, y, 0, buttons, clicks, surface),
+    );
+}
+
+/// What [`nc_pointer`] reports: a move at `at` with the buttons held
+/// (`held`, as [`PointerEvent::buttons`] numbers them: a move without them
+/// would tell the views the drag's button went up), or a leave, which has
+/// neither a place nor buttons. Kind, x, y, buttons, clicks.
+fn region_pointer(at: Option<(f32, f32)>, held: u8) -> (PointerKind, f32, f32, u8, u32) {
+    match at {
+        Some((x, y)) => (PointerKind::Move, x, y, held, 1),
+        None => (PointerKind::Leave, -1.0, -1.0, 0, 0),
+    }
+}
+
+/// Window `hwnd`'s mouse leave tracking.
+pub(crate) fn tracking(hwnd: HWND) -> Option<&'static Cell<crate::chrome::Tracking>> {
+    data(hwnd).map(|d| &d.tracking)
+}
+
+/// The buttons held now, numbered as [`held_buttons`] numbers a client
+/// mouse message's: the thread's key state, which is what those messages'
+/// `MK_*` keys carry (the logical buttons). A non-client message and a
+/// leave carry none, and the window's own presses
+/// ([`WindowData::buttons`]) miss a drag that began outside it.
+fn buttons_down() -> u8 {
+    const KEYS: [(VIRTUAL_KEY, usize); 5] = [
+        (VK_LBUTTON, 0x1),
+        (VK_RBUTTON, 0x2),
+        (VK_MBUTTON, 0x10),
+        (VK_XBUTTON1, 0x20),
+        (VK_XBUTTON2, 0x40),
+    ];
+    let keys = KEYS
+        .iter()
+        // SAFETY: plain state queries.
+        .filter(|(vk, _)| unsafe { GetKeyState(vk.0 as i32) } < 0)
+        .fold(0, |keys, (_, mk)| keys | mk);
+    held_buttons(WPARAM(keys))
 }
 
 /// Lines one wheel notch scrolls (the user's setting, 3 by default).
@@ -2669,6 +2701,30 @@ mod tests {
         // SAFETY: as above.
         unsafe { DestroyWindow(hwnd).unwrap() };
         assert!(after >= 2, "the frame asked for while drawing never came");
+    }
+
+    #[test]
+    fn a_rechecked_move_keeps_the_buttons_held() {
+        // Dragging with the left button across a drag region: the views
+        // hear the move with the button still down.
+        assert_eq!(
+            region_pointer(Some((12.0, 8.0)), 0b1),
+            (PointerKind::Move, 12.0, 8.0, 0b1, 1)
+        );
+        // The mask is the one presses build (`1 << button_of`), which is
+        // what a mouse message's own keys decode to.
+        let right = 1 << button_of(WM_RBUTTONDOWN, WPARAM(0));
+        assert_eq!(right, held_buttons(WPARAM(0x2)));
+        assert_eq!(region_pointer(Some((0.0, 0.0)), right).3, right);
+        // No button held, and a leave, as before.
+        assert_eq!(
+            region_pointer(Some((1.0, 2.0)), 0),
+            (PointerKind::Move, 1.0, 2.0, 0, 1)
+        );
+        assert_eq!(
+            region_pointer(None, 0b1),
+            (PointerKind::Leave, -1.0, -1.0, 0, 0)
+        );
     }
 
     #[test]
