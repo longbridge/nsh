@@ -1571,7 +1571,9 @@ pub struct HeaderItem {
     /// Optional key for keeping a `UIBarButtonItem` across updates: a kept
     /// button takes the new title, symbol, label, menu and state in place.
     /// Without a key, a button is kept only while its position and its
-    /// content are unchanged; any other change makes a new one.
+    /// content are unchanged; any other change makes a new one. It is also
+    /// the button's accessibility identifier, as a view's `testID` is:
+    /// tests name it by `id:<key>`.
     pub key: Option<Arc<str>>,
     /// What the button shows.
     pub content: HeaderItemContent,

@@ -1427,6 +1427,16 @@ fn update_right_item(
         let label = kept.label.map(NSString::from_str);
         button.setAccessibilityLabel(label.as_deref(), mtm);
     }
+    set_item_id(button, item);
+}
+
+/// The button's accessibility identifier from the item's `key`, as a view's
+/// `testID` is: what UI tests (a test's selector `id:<key>`) find it by.
+fn set_item_id(button: &UIBarButtonItem, item: &HeaderItem) {
+    let id = item.key.as_deref().map(NSString::from_str);
+    // SAFETY: UIBarButtonItem's `UIAccessibilityIdentification` setter, an
+    // optional string.
+    let _: () = unsafe { msg_send![button, setAccessibilityIdentifier: id.as_deref()] };
 }
 
 /// One trailing `ios.headerRightItems` button.
@@ -1461,6 +1471,7 @@ fn make_right_item(
         use objc2_ui_kit::NSObjectUIAccessibility;
         button.setAccessibilityLabel(Some(&NSString::from_str(label)), mtm);
     }
+    set_item_id(&button, item);
     button
 }
 
@@ -2285,40 +2296,151 @@ impl ModalHost {
     }
 }
 
-/// The back button a user taps in the header shown over `window`: the
-/// navigation bar's (UIKit draws it, so it is found by what it is).
+/// The navigation bars showing in `view`'s subtree, in drawing order (the
+/// front one last).
 #[cfg(feature = "dev")]
-pub(crate) fn back_button(window: &objc2_ui_kit::UIWindow) -> Option<Retained<UIView>> {
-    fn bars(view: &UIView, out: &mut Vec<Retained<UIView>>) {
-        if view.isHidden() || view.alpha() < 0.01 {
-            return;
-        }
-        if view.isKindOfClass(<UINavigationBar as objc2::ClassType>::class()) {
-            out.push(objc2::Message::retain(view));
-        }
-        for sub in view.subviews().iter() {
-            bars(&sub, out);
-        }
+fn bars(view: &UIView, out: &mut Vec<Retained<UIView>>) {
+    if view.isHidden() || view.alpha() < 0.01 {
+        return;
     }
-    fn named(view: &UIView, part: &str) -> bool {
-        view.class().name().to_string_lossy().contains(part)
+    if view.isKindOfClass(<UINavigationBar as objc2::ClassType>::class()) {
+        out.push(objc2::Message::retain(view));
     }
-    // A bar button that carries the back chevron's mask.
+    for sub in view.subviews().iter() {
+        bars(&sub, out);
+    }
+}
+
+/// Whether `view`'s class name has `part` in it (UIKit's private views are
+/// found by what they are).
+#[cfg(feature = "dev")]
+pub(crate) fn class_named(view: &UIView, part: &str) -> bool {
+    view.class().name().to_string_lossy().contains(part)
+}
+
+/// The back button a user taps in the front header shown in `root` (a
+/// window, a sheet's view): the navigation bar's (UIKit draws it, so it is
+/// found by what it is).
+#[cfg(feature = "dev")]
+pub(crate) fn back_button(root: &UIView) -> Option<Retained<UIView>> {
+    // A showing bar button that carries the back chevron's mask (the bar
+    // keeps a page's it left, hidden, for a while).
     fn back(view: &UIView) -> Option<Retained<UIView>> {
+        if view.isHidden() || view.alpha() < 0.01 {
+            return None;
+        }
         let subviews = view.subviews();
-        if named(view, "ButtonBarButton")
-            && !view.isHidden()
-            && view.alpha() > 0.01
-            && subviews.iter().any(|v| named(&v, "BackButton"))
+        if class_named(view, "ButtonBarButton")
+            && subviews.iter().any(|v| class_named(&v, "BackButton"))
         {
             return Some(objc2::Message::retain(view));
         }
         subviews.iter().find_map(|v| back(&v))
     }
     let mut found = Vec::new();
-    bars(window, &mut found);
+    bars(root, &mut found);
     // The front one: the last drawn.
     found.iter().rev().find_map(|bar| back(bar))
+}
+
+/// What names a bar button to a test: its identifier (the item's `key`) or
+/// its accessibility label.
+#[cfg(feature = "dev")]
+pub(crate) enum BarName<'a> {
+    Id(&'a str),
+    Label(&'a str),
+}
+
+/// The button a user taps for the bar button `name` names in the front
+/// header that has one over `window` (UIKit draws it for the item, which
+/// carries the name).
+#[cfg(feature = "dev")]
+pub(crate) fn bar_button(
+    window: &objc2_ui_kit::UIWindow,
+    name: &BarName<'_>,
+) -> Option<Retained<UIView>> {
+    fn text(object: &AnyObject, getter: objc2::runtime::Sel) -> Option<String> {
+        // SAFETY: an optional-string getter (`accessibilityIdentifier`,
+        // `accessibilityLabel`) the object answers, checked first.
+        unsafe {
+            let answers: bool = msg_send![object, respondsToSelector: getter];
+            if !answers {
+                return None;
+            }
+            let text: Option<Retained<NSString>> =
+                objc2::msg_send![object, performSelector: getter];
+            text.map(|t| t.to_string())
+        }
+    }
+    fn named(object: &AnyObject, name: &BarName<'_>) -> bool {
+        match name {
+            BarName::Id(id) => {
+                text(object, objc2::sel!(accessibilityIdentifier)).as_deref() == Some(*id)
+            }
+            BarName::Label(label) => {
+                text(object, objc2::sel!(accessibilityLabel)).is_some_and(|l| l.trim() == *label)
+                    || text(object, objc2::sel!(title)).is_some_and(|l| l.trim() == *label)
+            }
+        }
+    }
+    // A showing view in the bar that carries the name itself.
+    fn view_named(view: &UIView, name: &BarName<'_>) -> Option<Retained<UIView>> {
+        if view.isHidden() || view.alpha() < 0.01 {
+            return None;
+        }
+        if class_named(view, "ButtonBarButton") && named(view, name) {
+            return Some(objc2::Message::retain(view));
+        }
+        view.subviews().iter().find_map(|v| view_named(&v, name))
+    }
+    let mut found = Vec::new();
+    bars(window, &mut found);
+    found.iter().rev().find_map(|bar| {
+        let bar = bar.downcast_ref::<UINavigationBar>()?;
+        let item = bar.topItem()?;
+        let items = [item.rightBarButtonItems(), item.leftBarButtonItems()];
+        let item = items
+            .iter()
+            .flatten()
+            .flat_map(|items| items.to_vec())
+            .find(|item| named(item, name));
+        match item {
+            // The view UIKit made for the item (`view`, private), else
+            // the bar's button that took the item's name.
+            Some(item) => {
+                // SAFETY: the item's `view` getter (private), returning an
+                // optional view; an item without one is asked first.
+                let view: Option<Retained<UIView>> = unsafe {
+                    let answers: bool = msg_send![&*item, respondsToSelector: objc2::sel!(view)];
+                    if answers {
+                        msg_send![&*item, view]
+                    } else {
+                        None
+                    }
+                };
+                view.filter(|v| v.window().is_some() && !v.isHidden())
+                    .or_else(|| view_named(bar, name))
+            }
+            None => view_named(bar, name),
+        }
+    })
+}
+
+/// Whether a navigation controller in `window`'s app (its presented
+/// controllers' included) is in a transition: a push or pop UIKit is still
+/// animating, which takes no gesture for a sheet until it ends.
+#[cfg(feature = "dev")]
+pub(crate) fn navigation_transitioning(window: &objc2_ui_kit::UIWindow) -> bool {
+    fn walk(c: &UIViewController) -> bool {
+        if c.isKindOfClass(<UINavigationController as objc2::ClassType>::class())
+            && c.transitionCoordinator().is_some()
+        {
+            return true;
+        }
+        c.childViewControllers().iter().any(|c| walk(&c))
+            || c.presentedViewController().is_some_and(|p| walk(&p))
+    }
+    window.rootViewController().is_some_and(|root| walk(&root))
 }
 
 /// The sheet presented over `window`'s app (a modal), whose swipe down

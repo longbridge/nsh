@@ -16203,6 +16203,182 @@ mod components {
         }
     }
 
+    /// A change to `ChangingRows`'s rows.
+    type RowsChange = fn(&mut Vec<String>);
+
+    thread_local! {
+        /// How many rows `ChangingRows` starts with.
+        static CHANGING_ROWS: Cell<usize> = const { Cell::new(100) };
+        /// What a press does to `ChangingRows`'s rows.
+        static ROWS_CHANGE: Cell<Option<RowsChange>> = const { Cell::new(None) };
+    }
+
+    /// Keyed rows, `r0`, `r1`, ...; a press changes them as
+    /// [`ROWS_CHANGE`] says.
+    #[component]
+    fn ChangingRows() -> impl IntoElement {
+        let count = CHANGING_ROWS.get();
+        let rows = signal((0..count).map(|i| format!("r{i}")).collect::<Vec<_>>());
+        view()
+            .flex_1()
+            .child(view().h(px(20.0)).on_press(move |_: &()| {
+                let change = ROWS_CHANGE.get().expect("a change");
+                rows.update(change);
+            }))
+            .child(
+                virtual_list(
+                    move || rows.with(Vec::len),
+                    move |at| {
+                        view()
+                            .h(px(40.0))
+                            .child(text(move || rows.with(|r| r[at.index()].clone())))
+                    },
+                )
+                .keys(move || rows.get())
+                .estimated_item_size(px(40.0))
+                .flex_1(),
+            )
+    }
+
+    /// The rows two or more cells show at once: each row is in one cell,
+    /// spare cells included (which keep showing their last row).
+    fn rows_shown_twice(c: &Core<FakeEngine>) -> Vec<String> {
+        let mut shown = std::collections::HashMap::<&str, u32>::new();
+        for (_, node) in c.nodes.iter() {
+            if node.kind == Kind::RawText && !node.text.is_empty() {
+                *shown.entry(node.text.as_str()).or_default() += 1;
+            }
+        }
+        let mut twice: Vec<String> = shown
+            .into_iter()
+            .filter(|&(_, n)| n > 1)
+            .map(|(t, _)| t.to_owned())
+            .collect();
+        twice.sort();
+        twice
+    }
+
+    /// A row that goes leaves its cell spare, and the rows after it move up
+    /// into theirs; data replaced or cut short leaves spare cells too.
+    /// No row shows in two cells at any point: the spare ones show rows no
+    /// other cell does, or nothing, so a row's elements are found once.
+    #[test]
+    fn spare_list_cells_never_show_a_row_another_cell_shows() {
+        // The window holds 34 rows in the middle of the list, 23 at either
+        // end: scrolled from the middle to an end, 11 cells are spare.
+        let cases: [(&str, usize, &[f32], RowsChange); 8] = [
+            // At the end: the gone row's cell stays spare, the rows after
+            // it move up into theirs.
+            ("drop at the end", 100, &[2000.0, 3560.0], |r| {
+                r.remove(90);
+            }),
+            ("drop the last", 100, &[2000.0, 3560.0], |r| {
+                r.pop();
+            }),
+            ("drop at the start", 100, &[2000.0, 0.0], |r| {
+                r.remove(3);
+            }),
+            ("drop two", 100, &[2000.0, 0.0], |r| {
+                r.drain(3..5);
+            }),
+            ("replace", 100, &[2000.0, 0.0], |r| {
+                *r = (0..100).map(|i| format!("s{i}")).collect();
+            }),
+            ("move", 100, &[2000.0, 0.0], |r| {
+                let row = r.remove(30);
+                r.insert(2, row);
+            }),
+            ("cut short", 100, &[2000.0, 0.0], |r| r.truncate(5)),
+            // Every row in the window: no row comes for the gone one.
+            ("short list", 10, &[], |r| {
+                r.remove(3);
+            }),
+        ];
+        let mut failures = Vec::new();
+        for (name, count, scrolls, change) in cases {
+            CHANGING_ROWS.set(count);
+            let mut c = core();
+            c.mount_root(&crate::element::Root::new::<ChangingRows>(|| ()));
+            let batch = c.commit().unwrap();
+            let list = batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Create { id, kind } if *kind == ViewKind::Scroll => Some(*id),
+                    _ => None,
+                })
+                .expect("a list");
+            let button = batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Events { id, events } if events.contains(EventKind::Press) => {
+                        Some(*id)
+                    }
+                    _ => None,
+                })
+                .expect("a button");
+            let mut check = |c: &Core<FakeEngine>, when: String| {
+                let twice = rows_shown_twice(c);
+                if !twice.is_empty() {
+                    failures.push(format!("{name}, {when}: {twice:?}"));
+                }
+            };
+            let settle = |c: &mut Core<FakeEngine>| {
+                for _ in 0..4 {
+                    let _ = c.commit();
+                }
+            };
+            settle(&mut c);
+            let mut applied = 0;
+            for &y in scrolls {
+                applied += 1;
+                c.set_scroll_offset(list, point(px(0.0), px(y)), applied);
+                settle(&mut c);
+                check(&c, format!("scrolled to {y}"));
+            }
+            let mut rows: Vec<String> = (0..count).map(|i| format!("r{i}")).collect();
+            change(&mut rows);
+            ROWS_CHANGE.set(Some(change));
+            assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+            // At every commit, not only once the list settled; the cells
+            // that take the new rows are bound again, not made.
+            let mut made = 0;
+            for round in 0..4 {
+                let batch = c.commit();
+                let items = batch.iter().flat_map(|b| &b.items);
+                made += items
+                    .filter(|i| matches!(i, MountItem::Create { .. }))
+                    .count();
+                check(&c, format!("round {round}"));
+            }
+            // And as the list scrolls on.
+            for y in [400.0, 1600.0, 0.0] {
+                applied += 1;
+                c.set_scroll_offset(list, point(px(0.0), px(y)), applied);
+                settle(&mut c);
+                check(&c, format!("then at {y}"));
+            }
+            if made != 0 {
+                failures.push(format!("{name}: {made} views made"));
+            }
+            // Back at the start, the rows in the viewport show, once each.
+            let shown: Vec<String> = c
+                .nodes
+                .iter()
+                .filter(|(_, n)| n.kind == Kind::RawText)
+                .map(|(_, n)| n.text.clone())
+                .collect();
+            for row in rows.iter().take(11) {
+                if !shown.contains(row) {
+                    failures.push(format!("{name}: {row} does not show"));
+                }
+            }
+        }
+        CHANGING_ROWS.set(100);
+        assert_eq!(failures, Vec::<String>::new());
+    }
+
     /// A long list of its own rows, each a stop of Tab.
     #[component]
     fn FocusableRows() -> impl IntoElement {
@@ -20318,6 +20494,122 @@ fn presses_passed_on_reach_the_innermost_pressable_view() {
         &pressed[..],
         [(6, _, EventPayload::Press(p))] if p.position == point(px(5.0), px(5.0)) && p.clicks == 2
     ));
+}
+
+/// A pointer passed on into an element (`ElementRef::hover_at`) hovers
+/// the views under it in a subtree that takes no pointer itself: their
+/// `hover:` and `group-hover:` classes apply, the views that listen hear
+/// the mouse enter, move and leave, and its leaving undoes it.
+#[test]
+fn hovers_passed_on_reach_the_views_under_the_pointer() {
+    use crate::props::PointerEvents;
+    let mut c = core();
+    let listen = |id, event| Op::Listen {
+        id,
+        event,
+        enabled: true,
+    };
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let create = |id| Op::Create { id, tag: Tag::View };
+    let size = |id, w: f32, h: f32, more: &[(&'static str, StyleValue)]| {
+        let mut style = vec![
+            ("width", StyleValue::Number(w)),
+            ("height", StyleValue::Number(h)),
+        ];
+        style.extend_from_slice(more);
+        style_op(id, &style)
+    };
+    apply(
+        &mut c,
+        vec![
+            create(2),
+            create(4),
+            create(6),
+            create(8),
+            style_op(
+                2,
+                &[
+                    ("marginTop", StyleValue::Number(40.0)),
+                    ("height", StyleValue::Number(100.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::PointerEvents(PointerEvents::None),
+            },
+            size(4, 200.0, 50.0, &[("flexDirection", StyleValue::Str("row"))]),
+            class_op(4, "group"),
+            size(6, 20.0, 20.0, &[("marginLeft", StyleValue::Number(50.0))]),
+            class_op(6, "hover:opacity-50"),
+            listen(6, EventKind::MouseEnter),
+            listen(6, EventKind::MouseLeave),
+            listen(6, EventKind::MouseMove),
+            size(8, 20.0, 20.0, &[]),
+            class_op(8, "group-hover:opacity-25"),
+            insert(4, 6),
+            insert(4, 8),
+            insert(2, 4),
+            insert(ROOT_ID, 2),
+        ],
+    );
+    c.commit().unwrap();
+    js_events(&mut c);
+    let mouse = |x: f32, y: f32| crate::MouseEvent {
+        page_position: point(px(x), px(y)),
+        ..Default::default()
+    };
+    let mouse_events = |c: &mut Core<FakeEngine>| -> Vec<(NodeId, EventKind, Point<Points>)> {
+        js_events(c)
+            .into_iter()
+            .filter_map(|(id, kind, payload)| match payload {
+                EventPayload::Mouse(m) => Some((id, kind, m.position)),
+                _ => None,
+            })
+            .collect()
+    };
+    let opacity = |batch: &MountBatch, id| view_style_of(batch, id).map(|s| s.opacity);
+
+    // Over 6 (at 50..70 in 4, which is at 40 in the root).
+    c.components.hovers.push((2, Some(mouse(55.0, 45.0))));
+    let batch = c.commit().unwrap();
+    assert_eq!(opacity(&batch, 6), Some(0.5), "hover:");
+    assert_eq!(opacity(&batch, 8), Some(0.25), "group-hover:");
+    assert_eq!(
+        mouse_events(&mut c),
+        vec![
+            (6, EventKind::MouseEnter, point(px(5.0), px(5.0))),
+            (6, EventKind::MouseMove, point(px(5.0), px(5.0))),
+        ]
+    );
+
+    // A move inside 6 only moves.
+    c.components.hovers.push((2, Some(mouse(56.0, 46.0))));
+    c.commit();
+    assert_eq!(
+        mouse_events(&mut c),
+        vec![(6, EventKind::MouseMove, point(px(6.0), px(6.0)))]
+    );
+
+    // Off 6, still in the group: 6 is left, the group stays hovered.
+    c.components.hovers.push((2, Some(mouse(150.0, 45.0))));
+    let batch = c.commit().unwrap();
+    assert_eq!(opacity(&batch, 6), Some(1.0));
+    assert_eq!(opacity(&batch, 8), None, "unchanged");
+    assert_eq!(
+        mouse_events(&mut c),
+        vec![(6, EventKind::MouseLeave, point(px(100.0), px(5.0)))]
+    );
+
+    // The pointer leaves.
+    c.components.hovers.push((2, None));
+    let batch = c.commit().unwrap();
+    assert_eq!(opacity(&batch, 8), Some(1.0));
+    assert!(mouse_events(&mut c).is_empty());
+    assert!(c.passed_hovers.is_empty());
 }
 
 /// `reveal` becomes a `ScrollTo` of the scroll view around, placed

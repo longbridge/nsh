@@ -751,6 +751,9 @@ pub(super) struct Components {
     /// Presses to pass on inside elements once this commit is laid out
     /// ([`crate::element::ElementRef::press_at`]).
     pub(super) presses: Vec<(NodeId, crate::PressEvent, AnswerSlot<bool>)>,
+    /// Pointers to pass on inside elements as the next commit starts
+    /// ([`crate::element::ElementRef::hover_at`]); `None`: it left.
+    pub(super) hovers: Vec<(NodeId, Option<crate::MouseEvent>)>,
     /// The web views' downloads ([`crate::webview::downloads`]): the
     /// sessions, their files and the platform's replies.
     pub(super) downloads: crate::webview::downloads::Downloads,
@@ -873,6 +876,7 @@ impl Default for Components {
             transition_times: Vec::new(),
             text_contents: Vec::new(),
             presses: Vec::new(),
+            hovers: Vec::new(),
             downloads: crate::webview::downloads::Downloads::default(),
             next_webview_request: 1,
             virtual_lists: FxHashMap::default(),
@@ -6203,6 +6207,7 @@ impl<M: TextEngine> Core<M> {
             }
             Action::TextContent(id, answer) => self.components.text_contents.push((id, answer)),
             Action::PressAt(id, press, answer) => self.components.presses.push((id, press, answer)),
+            Action::HoverAt(id, mouse) => self.components.hovers.push((id, mouse)),
             // A terminal decodes no images: the answer is at once, and no
             // request goes to the platform.
             Action::ImageInfo(_, answer)
@@ -7781,9 +7786,11 @@ fn dispose_rows(rows: &std::rc::Weak<RefCell<CellRowMap>>) {
 
 /// Moves the live cells of a view's list as its rows moved (`diff`, now
 /// `count` rows): each keeps its row, at the row's new index. A cell whose
-/// row went keeps its index (the list frees it, and binds it to another row
-/// before showing it again) while that is a row; past the rows, its content
-/// is disposed, before its bindings could read there.
+/// row went keeps its index, and shows the row now there, unless that row
+/// came there with its own cell: then, as past the rows, its content is
+/// disposed before its bindings could read there, so a row never shows in
+/// two cells (`ListState::adopt_orphans` in `core/list.rs`, by the same
+/// rule).
 fn move_rows(cells: &CellRows, diff: Option<&ListDiff>, count: u32) {
     let parts: Vec<_> = cells
         .borrow()
@@ -7791,20 +7798,41 @@ fn move_rows(cells: &CellRows, diff: Option<&ListDiff>, count: u32) {
         .map(|(&id, &(index, owner))| (id, index, owner))
         .collect();
     let mut gone = Vec::new();
-    for (id, index, owner) in parts {
+    // The new index of each cell's row, `None` for a row that went.
+    let moves: Vec<_> = parts
+        .iter()
+        .map(|&(id, index, owner)| {
+            let i = index.get_untracked();
+            let to = match diff {
+                Some(d) => d.new_index(i as u32).map(|(to, _)| to as usize),
+                None => Some(i),
+            };
+            (id, index, owner, i, to)
+        })
+        .collect();
+    let mut taken: Vec<usize> = moves
+        .iter()
+        .filter(|m| m.2.is_live())
+        .filter_map(|m| m.4)
+        .collect();
+    taken.sort_unstable();
+    for (id, index, owner, i, to) in moves {
         if !owner.is_live() {
             gone.push(id);
             continue;
         }
-        let i = index.get_untracked();
-        let to = diff
-            .and_then(|d| d.new_index(i as u32))
-            .map_or(i, |(to, _)| to as usize);
-        if to < count as usize {
-            index.set(to);
-        } else {
-            owner.dispose();
-            gone.push(id);
+        let to = match to {
+            Some(to) => Some(to),
+            // The row went: the cell reads the row now at its index, if
+            // that one's cell is not there too.
+            None => Some(i).filter(|i| taken.binary_search(i).is_err()),
+        };
+        match to {
+            Some(to) if to < count as usize => index.set(to),
+            _ => {
+                owner.dispose();
+                gone.push(id);
+            }
         }
     }
     let mut cells = cells.borrow_mut();
