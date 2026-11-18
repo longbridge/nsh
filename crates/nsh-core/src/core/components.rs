@@ -1192,20 +1192,27 @@ impl<M: TextEngine> Core<M> {
             child: id,
             before: None,
         });
-        // The windows `open_window` opens render beside the root (desktops).
-        let desktop = crate::element::os().is_desktop();
-        if desktop {
-            use crate::element::Component as _;
-            let host = crate::element::desktop::OpenedWindowsHost::element(()).into_element();
-            if let Some(host) = self.make_component(host, |_, _| {}) {
-                let _ = self.apply_op(Op::Insert {
-                    parent: ROOT_ID,
-                    child: host,
-                    before: None,
-                });
-            }
-        }
+        self.mount_opened_windows();
         self.own_direction();
+    }
+
+    /// Mounts what renders the windows `open_window` opens, beside the
+    /// app's root (desktops): a Rust app's ([`Self::mount_root`]) or a TSX
+    /// app's, whose built-in windows (the update prompt) open the same way.
+    pub fn mount_opened_windows(&mut self) {
+        let _entered = self.components.runtime.enter();
+        if !crate::element::os().is_desktop() {
+            return;
+        }
+        use crate::element::Component as _;
+        let host = crate::element::desktop::OpenedWindowsHost::element(()).into_element();
+        if let Some(host) = self.make_component(host, |_, _| {}) {
+            let _ = self.apply_op(Op::Insert {
+                parent: ROOT_ID,
+                child: host,
+                before: None,
+            });
+        }
     }
 
     /// Makes the host of component element `el` (`None`: `el` is not a

@@ -2483,6 +2483,11 @@ impl<M: TextEngine + 'static> Driver<M> {
             script.run_system();
         }
         state.load_fonts(script, assets.as_deref(), &**sink);
+        // A TSX app's windows of its own (the update prompt) render beside
+        // its root, after it, as a Rust app's do (`Core::mount_root`).
+        if script.is_some() {
+            state.core.mount_opened_windows();
+        }
         if let Some(batch) = state.commit(script) {
             if state.trace {
                 log::info!(
