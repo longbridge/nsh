@@ -355,8 +355,11 @@ impl Native for GpuiNative {
     }
 
     fn type_text(&self, text: &str) {
-        let text = text.to_owned();
-        self.in_focused(move |surface, _, _| crate::text_input::char_input(surface, &text));
+        for ch in text.chars() {
+            self.in_focused(move |surface, _, _| {
+                crate::text_input::char_input(surface, ch.encode_utf8(&mut [0; 4]));
+            });
+        }
     }
 
     fn key(&self, key: Key) {
