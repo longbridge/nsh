@@ -254,6 +254,28 @@ nsh package my-app --target miniprogram --out dist
 nsh update [stable|nightly]
 ```
 
+## nsh add
+
+为当前目录的应用添加第三方扩展：一个来自 Git 的 Rust crate，应用可在 TSX（`import { Gauge } from "acme/gauge"`）和 Rust（`acme_gauge::gauge()`）中使用它导出的组件、模块和类。实验性功能。
+
+```sh
+nsh add https://github.com/acme/gauge --tag v1.0.0   # 或 --rev <提交或分支>；都不给则取默认分支
+```
+
+它把扩展记录到 `nsh.json` 的 `"extensions"`（`[{ "git": "…", "tag": "v1.0.0" }]`），把解析到的提交锁定在 `nsh.lock`（随应用一起提交），应用有自己的 crate（`"rust"`）时还会加入其 `[dependencies]`。构建始终使用锁定的提交，再次运行 `nsh add` 即更新。纯 TSX 应用会像带 crate 的应用一样用扩展重新构建宿主（[使用 Rust](./rust.md)），因此开发机和 CI 需要 Rust 工具链。扩展与应用的 crate 或其他扩展冲突（同名包或同名模块），或与当前 NSH 不兼容时，`nsh.json` 和 `nsh.lock` 保持不变。
+
+扩展是普通的 Cargo 库：根部有 `#[native_module("<module>")]` 入口（与应用自己的 crate 相同），并在 `Cargo.toml` 中声明：
+
+```toml
+[package.metadata.nsh]
+format = 1                    # 此表的版本
+module = "acme/gauge"         # TSX 导入用的标识，即它的 #[native_module]
+nsh = "0.6"                   # 可选：兼容的 NSH 版本
+targets = ["macos", "linux"]  # 可选：支持的目标（默认全部）
+```
+
+扩展的构建脚本和过程宏会在应用构建时执行，其代码以应用的权限运行：请像审查应用代码一样审查扩展来源和 `nsh.lock` 的变更。
+
 ## nsh component
 
 添加、删除或列出已安装 `nsh` 旁边的运行时：它所在平台之外的那些（`android`、`android-symbols`、`ios`、`web`、`gpui`、`tui`）。需要某个运行时的命令第一次运行时会自己添加它（[安装](./installation.md#组件)）。

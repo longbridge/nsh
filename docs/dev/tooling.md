@@ -1032,6 +1032,22 @@ A Rust app's runners were and are what they were: `nsh package --target macos` a
 for the release runner in both. The test runner links QuickJS, so the first `nsh test` of such an app builds what its
 `nsh build` no longer does.
 
+
+### Third-party extensions (`nsh.json` `"extensions"`, `nsh add`)
+
+`crates/nsh-cli/src/extensions.rs`. An extension is a crate like the ones `"rust"` lists, from Git: `nsh add <url>
+[--tag|--rev]` writes `{ "git", "tag"|"rev" }` into `"extensions"`, resolves it to a commit and pins it in `nsh.lock`
+(`{ git, tag|rev, commit, package, module }`). Each locked commit is a `git worktree` of one clone per repository in
+nsh's cache (`<cache>/extensions/<name>-<hash of url>/<commit>`), made again when missing, so a build after clearing
+the cache takes the same commit. `rust_app::of` appends the extensions to the app's crates (an app with extensions
+only is a `RustApp` too, its nsh crates this CLI's, as `runner_only`), checks them together (`check_crates`: the same
+directory, package or `#[native_module]` specifier), and the workspace links each like an app crate. The app's crate
+depends on the extension by Git at the locked `rev` (`nsh add` writes it), which the workspace's
+`[patch."<url>"]` sends to the same checkout. Before linking, `[package.metadata.nsh]` is checked: `format = 1`,
+`module` equal to the crate's `#[native_module]`, `nsh` (a version requirement) matching this CLI, `targets` known
+names. `nsh check` does not `cargo check` extensions (only crates outside the cache). Not yet: refusing a command for
+a target not in `targets`, web and mobile packaging checks, and an OTA check of the shell's linked modules.
+
 ## Finding the runtimes
 
 The CLI finds prebuilt runtimes next to itself (`bin/../runtime`, the distribution layout) or, in a checkout, in

@@ -13,6 +13,7 @@ mod component;
 mod dev;
 mod dev_port;
 mod entry;
+mod extensions;
 mod init;
 mod logger;
 mod native_features;
@@ -335,6 +336,20 @@ enum Command {
         #[arg(value_enum)]
         channel: Option<self_update::Channel>,
     },
+    /// Add a third-party extension to the app in this directory: a Rust
+    /// crate from Git with components, modules and classes for its Rust
+    /// and TSX code. Listed in `nsh.json` `"extensions"`, its commit pinned
+    /// in `nsh.lock`.
+    Add {
+        /// The extension's Git repository URL.
+        git: String,
+        /// The tag to take (default: the default branch).
+        #[arg(long, conflicts_with = "rev")]
+        tag: Option<String>,
+        /// The commit or branch to take.
+        #[arg(long)]
+        rev: Option<String>,
+    },
     /// Add, remove or list the runtimes installed beside this nsh: those
     /// of other platforms than this machine's (`android`, `ios`, `web`,
     /// `gpui`, `tui`), which a command that needs one also adds itself.
@@ -627,6 +642,7 @@ impl Command {
             | Command::Keygen { .. }
             | Command::Update { .. }
             | Command::Component { .. }
+            | Command::Add { .. }
             | Command::UpdateManifest { .. }
             | Command::Certify { .. }
             | Command::Verify { .. }
@@ -1044,6 +1060,9 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
         }
         Command::Keygen { name } => sign::keygen(&name),
         Command::Update { channel } => self_update::update(channel),
+        Command::Add { git, tag, rev } => {
+            extensions::add(&std::env::current_dir()?, &git, tag, rev)
+        }
         Command::Component { action } => match action {
             ComponentAction::List => component::list(),
             ComponentAction::Add { names } => component::add_named(&names),

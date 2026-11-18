@@ -259,6 +259,28 @@ does, switches channels ([Installation](./installation.md#updating)).
 nsh update [stable|nightly]
 ```
 
+## nsh add
+
+Adds a third-party extension to the app in the current directory: a Rust crate from Git whose components, modules and classes the app uses from TSX (`import { Gauge } from "acme/gauge"`) and from Rust (`acme_gauge::gauge()`). Experimental.
+
+```sh
+nsh add https://github.com/acme/gauge --tag v1.0.0   # or --rev <commit or branch>; neither: the default branch
+```
+
+It lists the extension in `nsh.json` `"extensions"` (`[{ "git": "…", "tag": "v1.0.0" }]`), pins the commit it resolved to in `nsh.lock` (commit it with the app), and adds it to the `[dependencies]` of the app's crate when it has one (`"rust"`). Builds take the locked commit; running `nsh add` again updates it. A pure TSX app gets hosts built with the extension, as an app with a crate of its own does ([Building with Rust](./rust.md)), so its development machine and CI need the Rust toolchain. If the extension clashes with the app's crates or another extension (the same package or module), or does not build with this NSH, `nsh.json` and `nsh.lock` are left unchanged.
+
+An extension is an ordinary Cargo library with a `#[native_module("<module>")]` entry at its root, the same as an app's crate, and this table in its `Cargo.toml`:
+
+```toml
+[package.metadata.nsh]
+format = 1                    # the version of this table
+module = "acme/gauge"         # the specifier TSX imports it by: its #[native_module]
+nsh = "0.6"                   # optional: the NSH versions it builds with
+targets = ["macos", "linux"]  # optional: the targets it supports (default: all)
+```
+
+Build scripts and procedural macros of an extension run when the app builds, and its code runs with the app's permissions: review its source and `nsh.lock` changes like the app's own code.
+
 ## nsh component
 
 Adds, removes or lists the runtimes installed next to an installed `nsh`: those of the platforms other than the one it runs on (`android`, `android-symbols`, `ios`, `web`, `gpui`, `tui`). A command that needs one adds it itself the first time ([Installation](./installation.md#components)).
