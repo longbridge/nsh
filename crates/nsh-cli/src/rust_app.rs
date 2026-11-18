@@ -2696,8 +2696,18 @@ opt-level = \"s\"
                 format!("\n[features]\ndefault = [{default}]\n{forward}"),
             )
         } else {
+            // Linux's host makes web views when this machine can build
+            // them ([`crate::runtime::linux_web_views`]).
+            let lib_dep = if dir == "linux-host"
+                && cfg!(target_os = "linux")
+                && !crate::runtime::linux_web_views()
+            {
+                self.nsh.dep(lib, ", default-features = false")
+            } else {
+                src(lib)
+            };
             (
-                src(lib),
+                lib_dep,
                 self.nsh.dep("nsh-base", HIGHLIGHT),
                 src(platform),
                 String::new(),
