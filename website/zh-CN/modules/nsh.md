@@ -1053,7 +1053,7 @@ interface LocaleSettings {
 const lifecycle: Accessor<"active" | "inactive" | "background">;
 ```
 
-应用是否正在使用，与 React Native 的 `AppState` 含义相同：`"active"` 表示在前台并接收输入；`"inactive"` 表示仍可见但没有焦点（焦点在另一个应用或窗口上，或系统在它上面显示了内容，例如应用切换器或来电）；`"background"` 表示不可见（在后台、已最小化、浏览器中隐藏的标签页）。显示在原生应用中的应用跟随该应用的状态。响应式。Rust：`lifecycle() -> Lifecycle`（`Lifecycle::Active`、`Inactive`、`Background`）。
+应用是否正在使用，与 React Native 的 `AppState` 含义相同：`"active"` 表示在前台并接收输入；`"inactive"` 表示仍可见但没有焦点（焦点在另一个应用或窗口上，或系统在它上面显示了内容，例如应用切换器或来电）；`"background"` 表示不可见（在后台、已最小化、浏览器中隐藏的标签页、浏览器保存在往返缓存中的页面，直到用户回到它）。显示在原生应用中的应用跟随该应用的状态。响应式。Rust：`lifecycle() -> Lifecycle`（`Lifecycle::Active`、`Inactive`、`Background`）。
 
 在 effect 中读取它，即可暂停无人可见的工作，并在应用回来时恢复：
 
