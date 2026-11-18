@@ -2269,6 +2269,7 @@ final class Mounter {
         boolean caretHidden = b.getInt() != 0;
         boolean pasteInserts = b.getInt() != 0;
         boolean scrollbarVisible = b.getInt() != 0, replaced = b.getInt() != 0;
+        int fontVariant = b.getInt();
         if (!(v instanceof InputBox)) return;
         ((InputBox) v).pasteInserts = pasteInserts;
         ((InputBox) v).setScrollbar(scrollbarVisible, replaced);
@@ -2278,7 +2279,8 @@ final class Mounter {
         String family = familyIndex >= 0 ? (String) objects[familyIndex] : null;
         ((InputBox) v).configure(size, weight, italic, color, family, spacing, align, placeholder,
                 hasPlaceholderColor, placeholderColor, secure, keyboard, returnKey, capitalize, autoCorrect,
-                multiline, maxLength, editable, autoFocus, hasSelection, selection, hasCaret, caret, submit);
+                multiline, maxLength, editable, autoFocus, hasSelection, selection, hasCaret, caret, submit,
+                inputRtl, fontVariant);
     }
 
     /**

@@ -47,6 +47,18 @@ pub(crate) fn argb(c: nsh_core::Color) -> i32 {
     (c.0.rotate_right(8)) as i32
 }
 
+/// Alignment code shared with `TextLayouts.java` (`ALIGN_*`).
+#[inline]
+pub(crate) fn encode_align(align: TextAlign) -> i32 {
+    match align {
+        TextAlign::Auto => 0,
+        TextAlign::Left => 1,
+        TextAlign::Center => 2,
+        TextAlign::Right => 3,
+        TextAlign::Justify => 4,
+    }
+}
+
 /// A `TextLayouts.Prepared` object.
 #[derive(Default)]
 pub(crate) struct Prepared(Option<GlobalRef>);
@@ -160,17 +172,12 @@ impl TextEngine for AndroidTextEngine {
         }
         // Alignment, writing direction (0 from the content, 1 left to
         // right, 2 right to left) << 4, layout right to left << 8.
-        let align = match text.align {
-            TextAlign::Auto => 0,
-            TextAlign::Left => 1,
-            TextAlign::Center => 2,
-            TextAlign::Right => 3,
-            TextAlign::Justify => 4,
-        } | match text.writing_direction {
-            None => 0,
-            Some(false) => 1,
-            Some(true) => 2,
-        } << 4
+        let align = encode_align(text.align)
+            | match text.writing_direction {
+                None => 0,
+                Some(false) => 1,
+                Some(true) => 2,
+            } << 4
             | (text.rtl as i32) << 8;
         let ellipsize = match text.ellipsize {
             EllipsizeMode::Tail => 0,
