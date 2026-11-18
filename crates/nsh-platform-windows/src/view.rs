@@ -240,20 +240,8 @@ impl ViewState {
     pub(crate) fn radii(&self) -> [f32; 4] {
         let s = &self.style;
         let corners = s.corner_radius.to_array();
-        let mut r: [f32; 4] = std::array::from_fn(|i| corners[i].unwrap_or(s.border_radius).0);
-        let (w, h) = (self.frame.size.width.0, self.frame.size.height.0);
-        let sums = [r[0] + r[1], r[1] + r[2], r[2] + r[3], r[3] + r[0]];
-        let lens = [w, h, w, h];
-        let f = sums
-            .iter()
-            .zip(lens)
-            .filter(|(s, _)| **s > 0.0)
-            .map(|(s, l)| l / s)
-            .fold(1.0f32, f32::min);
-        if f < 1.0 {
-            r.iter_mut().for_each(|v| *v *= f);
-        }
-        r
+        let r: [f32; 4] = std::array::from_fn(|i| corners[i].unwrap_or(s.border_radius).0);
+        crate::geom::fit_radii(self.frame.size.width.0, self.frame.size.height.0, r)
     }
 
     /// True if its children are clipped to its rounded bounds.
