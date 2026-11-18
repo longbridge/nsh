@@ -321,6 +321,7 @@ async fn alert(title: String, message: String) {
         }],
         cancelable: true,
         sheet: false,
+        input: None,
     })
     .await;
 }
@@ -373,9 +374,10 @@ async fn ask_in_alert(prompt: UpdatePrompt) {
         ],
         cancelable: true,
         sheet: false,
+        input: None,
     })
     .await;
-    match answer {
+    match answer.index {
         0 if prompt.can_install => {
             let installed = async {
                 prompt.download(|_, _| {}).await?;
