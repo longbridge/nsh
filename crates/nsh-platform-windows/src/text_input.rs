@@ -752,6 +752,12 @@ impl InputState {
         let (ox, oy) = self.origin.get();
         let s = cx.scale.max(0.01);
         let bounds = self.client();
+        // RichEdit converts its client pixels to DIPs with the window DC's
+        // DPI (`richedit::dpi`, the system DPI), not the target's: on a
+        // monitor at another scale its drawing is off by this ratio.
+        let k = Surface::by_key(self.surface)
+            .map_or(s, |surface| richedit::dpi(surface.hwnd()) / 96.0)
+            / s;
         let list = crate::decor::layer::with_context(cx.gfx, |dc| {
             // SAFETY: COM calls on a context nobody else draws with;
             // `EndDraw` follows `BeginDraw`, the list is closed before use.
@@ -760,10 +766,17 @@ impl InputState {
                 dc.SetTarget(&list);
                 dc.SetDpi(96.0 * s, 96.0 * s);
                 dc.BeginDraw();
-                // RichEdit maps its client rectangle through the target's
-                // DPI and draws in DIPs: only the origin comes back to the
-                // view's points (the scale is the DPI's already).
-                dc.SetTransform(&Matrix3x2::translation(-ox as f32 / s, -oy as f32 / s));
+                // RichEdit draws in DIPs of the system DPI: `k` brings them
+                // to the monitor's scale (1 on the system-DPI monitor), and
+                // the origin comes back to the view's points.
+                dc.SetTransform(&Matrix3x2 {
+                    M11: k,
+                    M12: 0.0,
+                    M21: 0.0,
+                    M22: k,
+                    M31: -ox as f32 / s,
+                    M32: -oy as f32 / s,
+                });
                 let drawn = e.draw(dc.as_raw(), bounds);
                 let ended = dc.EndDraw(None, None);
                 dc.SetTarget(None);
