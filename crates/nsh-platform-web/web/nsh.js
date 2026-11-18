@@ -1273,6 +1273,7 @@ class Player {
         // (the error handed over with `nsh_storage_reply`).
         storage_load: (pp, pl) => this.storage(() => {
           const prefix = this.str(pp, pl);
+          this.followStorage(prefix);
           const entries = Object.create(null);
           for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
@@ -1621,6 +1622,49 @@ class Player {
     return done;
   }
 
+  /**
+   * Follows what other tabs of the origin change in the app's storage,
+   * kept under `prefix` (`storage_load`): a tab gets a `storage` event for
+   * each `localStorage` change the others make, never for its own.
+   */
+  followStorage(prefix) {
+    (this.storagePrefixes ??= new Set()).add(prefix);
+    if (this.storageListener) return;
+    this.storageListener = (e) => this.storageChanged(e);
+    window.addEventListener("storage", this.storageListener);
+  }
+
+  /**
+   * Hands the engine a change another tab made to the app's storage: the
+   * value this tab reads now rather than the event's `newValue`, which a
+   * write this tab made since the other tab's may have replaced. A `key`
+   * of null is `localStorage.clear()`: the engine reads the entries again.
+   */
+  storageChanged(e) {
+    let area;
+    try {
+      area = localStorage;
+    } catch {
+      return;
+    }
+    if (e.storageArea !== area) return;
+    for (const prefix of this.storagePrefixes) {
+      let kind = 2, key = "", value = "";
+      if (e.key !== null) {
+        if (!e.key.startsWith(prefix)) continue;
+        key = e.key.slice(prefix.length);
+        try {
+          value = area.getItem(e.key);
+        } catch {
+          continue;
+        }
+        kind = value === null ? 0 : 1;
+      }
+      this.call((w) => this.withStrings([prefix, key, value ?? ""], (pp, pl, kp, kl, vp, vl) =>
+        w.nsh_storage_changed(pp, pl, kp, kl, vp, vl, kind)));
+    }
+  }
+
   /** Calls `f(ptr, len, ...)` for each string, freeing them afterwards. */
   withStrings(strings, f) {
     const passed = strings.map((s) => {
@@ -1916,6 +1960,9 @@ class Player {
     clearTimeout(this.keeper?.timer);
     this.keeper = null;
     this.browserHost?.stop();
+    this.storagePrefixes?.clear();
+    if (this.storageListener) window.removeEventListener("storage", this.storageListener);
+    this.storageListener = null;
     this.wasm?.nsh_stop();
     } finally { this.stopping = false; }
   }
