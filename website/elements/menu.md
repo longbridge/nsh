@@ -117,7 +117,8 @@ const popup = () =>
 
 The popup is never taller than the room on the side it opens on, and a submenu's popup never taller than its own: a
 long menu in a short window opens on the side where it fits whole, or where there is more room, and its items scroll
-inside it. The keys bring the item they move to into view, and a submenu closes once its item scrolls out of view.
+inside it, without overscroll bounce or scroll bars. The keys bring the item they move to into view, and a submenu
+closes once its item scrolls out of view.
 The sheet stays below the status bar the same way. Draw the surface (background, border, shadow) with
 `popupClass`, around the items, so it stays in place while they scroll.
 

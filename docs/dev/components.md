@@ -1154,6 +1154,9 @@ natural size and the items scroll past the room (`gpui-component`'s `PopupMenu` 
 items are: the item they move to is scrolled into view, and Page Up / Page Down go a viewport at a time
 (`crates/nsh-base/tests/base/menu.rs`).
 
+The internal scroll views and `MenuList` disable edge bounce and scroll bars; content that fits stays still,
+while overflowing items remain scrollable by pointer and keyboard.
+
 **Menu lists.** `MenuList` (Rust, `menu.rs`) puts a level's items in a virtualized list of the menu's own. The menu
 counts it as one place per row among the level's items, made or not, so its keys walk the rows by index: a row not
 made yet is scrolled to and focused once the list has made it, and a disabled row is passed over as an item is. A
