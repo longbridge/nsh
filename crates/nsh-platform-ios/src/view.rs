@@ -176,6 +176,19 @@ impl AppView {
         self.inner.set_limits(limits);
     }
 
+    /// Whether scroll views make the views of their content only near
+    /// their viewport (true, the default), or all of it (false). Turned
+    /// off, what is not made yet is made in the next frames, e.g. to draw a
+    /// whole scroll view into an image; turned on again, what is far away
+    /// is given up. Applies to the running app and the apps loaded next.
+    pub fn set_content_culling(&self, enabled: bool) {
+        let mut state = self.inner.state.borrow_mut();
+        state.options.content_culling = enabled;
+        if let Some(surface) = &state.surface {
+            surface.set_content_culling(enabled);
+        }
+    }
+
     /// Gives the address of the apps this view loads (`UrlScheme.setUrl`)
     /// to the system as the current `NSUserActivity` (Handoff;
     /// [`SurfaceOptions::handoff`]). Applies from the next [`AppView::load`]:

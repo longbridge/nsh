@@ -2077,6 +2077,7 @@ class Player {
     document.addEventListener("visibilitychange", changed);
     addEventListener("focus", changed);
     addEventListener("blur", changed);
+    this.watchPageCache(changed);
     visualViewport?.addEventListener("resize", changed);
     visualViewport?.addEventListener("scroll", changed);
     new MutationObserver(changed).observe(document.documentElement, { attributes: true, attributeFilter: ["dir", "lang"] });
@@ -2085,6 +2086,30 @@ class Player {
     this.safeProbe.className = "nsh-probe";
     document.body.append(this.safeProbe);
     if (this.viewportOverlays) this.installFloats();
+  }
+
+  /** A page the browser keeps in its back / forward cache (a `pagehide`
+   * that is `persisted`) is in the background until a `pageshow` brings it
+   * back: the app sees the pair of edges whether or not the browser tells
+   * `visibilitychange` around them. A page that is discarded (`pagehide`
+   * not `persisted`) ends its app instead (`watchPageEnd`). Neither
+   * listener keeps a page out of that cache. */
+  watchPageCache(changed) {
+    const cached = (value) => (event) => {
+      if (!event.persisted) return;
+      this.pageCached = value;
+      changed();
+    };
+    window.addEventListener("pagehide", cached(true));
+    window.addEventListener("pageshow", cached(false));
+  }
+
+  /** The app's state (`lifecycle()`): `background` while the page is
+   * hidden (another tab, a minimized window) or in the back / forward
+   * cache, else whether it has the focus. */
+  lifecycle() {
+    if (this.pageCached || document.visibilityState === "hidden") return "background";
+    return document.hasFocus() ? "active" : "inactive";
   }
 
   /** The page's insets covered by system UI, where they overlap the root
@@ -2134,9 +2159,7 @@ class Player {
       keyboard: this.keyboardHeight(),
       appleKeyboard: APPLE,
       host: Boolean(this.options.host),
-      lifecycle: document.visibilityState === "hidden"
-        ? "background"
-        : document.hasFocus() ? "active" : "inactive",
+      lifecycle: this.lifecycle(),
       timeZone: timeZoneName(),
       screenColor: typeof window.EyeDropper === "function",
       share: webShareAllowed(),

@@ -89,6 +89,9 @@ struct VirtualListState {
     /// In a view: the live parts of its cells (cells and contents) with the
     /// index their content reads and its owner, for its rows' binding.
     rows: CellRows,
+    /// The memo of a bound count or keys, which moves the cells' indices
+    /// as the rows change: their positions run it before they are read.
+    moves: Option<crate::element::reactive::Node>,
     /// The rows of another component's `Items` prop
     /// ([`crate::element::ComponentElement::items`]): each cell is that
     /// component's wrapper (`place`, its row function: an [`Inner::Row`])
@@ -2554,9 +2557,12 @@ impl<M: TextEngine> Core<M> {
                 let list = self.list_of(host);
                 // The wrapper reads its position from signals.
                 let count_signal = list.map(|list| self.list_count(list, count));
+                let moves = list
+                    .and_then(|list| self.components.virtual_lists.get(&list))
+                    .and_then(|state| state.moves);
                 let made = std::cell::Cell::new(None);
                 let build = || {
-                    let at = row_position(index, count, count_signal, &made);
+                    let at = row_position(index, count, count_signal, moves, &made);
                     view().child(place(Child::row(), at)).into_element().0
                 };
                 // The wrapper is the placing component's.
@@ -2595,6 +2601,7 @@ impl<M: TextEngine> Core<M> {
                         state.separator.clone(),
                         state.rows.clone(),
                         scope,
+                        state.moves,
                     )
                 });
                 match state {
@@ -2609,11 +2616,11 @@ impl<M: TextEngine> Core<M> {
                         inst.row_index = None;
                         ElNode::empty_view()
                     }
-                    Some((count, row, separator, rows, scope)) => {
+                    Some((count, row, separator, rows, scope, moves)) => {
                         let count_signal = Some(self.list_count(list, count));
                         let made = std::cell::Cell::new(None);
                         let build = || {
-                            let at = row_position(index, count, count_signal, &made);
+                            let at = row_position(index, count, count_signal, moves, &made);
                             let row = row(at);
                             // Between rows: after each but the last (before
                             // it, inverted), while it is not.
@@ -3149,6 +3156,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     pub(super) fn detach_id(&mut self, id: NodeId) {
+        self.unfold_run(id);
         if let Ok(key) = self.key(id)
             && self.nodes[key as usize].parent != NO_KEY
         {
@@ -4731,10 +4739,12 @@ impl<M: TextEngine> Core<M> {
     /// A view's list of its own rows: its layout, its rows (a splice when
     /// the keys say rows came or went, then the count), and its live cells
     /// built again with the new row function (when the list is made
-    /// again). A bound count or keys are a binding: a memo that, before the
-    /// rows' own bindings run, moves the live cells' indices as the rows
-    /// moved (dropping the content of cells whose row went) and queues the
-    /// change for the list ([`Self::set_list_rows`]).
+    /// again). A bound count or keys are a binding: a memo that moves the
+    /// live cells' indices as the rows moved (dropping the content of cells
+    /// whose row went) and queues the change for the list
+    /// ([`Self::set_list_rows`]). The cells' positions run it before they
+    /// are read, so the rows' own bindings never read the new rows at the
+    /// old indices, whichever runs first.
     fn update_virtual_list(
         &mut self,
         id: NodeId,
@@ -4769,6 +4779,7 @@ impl<M: TextEngine> Core<M> {
                 separator: None,
                 cells: Vec::new(),
                 rows: CellRows::default(),
+                moves: None,
                 items,
                 place: None,
                 contents: Vec::new(),
@@ -4799,6 +4810,7 @@ impl<M: TextEngine> Core<M> {
         let bound = matches!(list.count, Reactive::Bound(_)) || list.keys.is_some();
         let (count, keys) = (list.count, list.keys);
         let rows = move || (count.get(), keys.as_ref().map(|k| k()));
+        let mut moves = None;
         let (count, keys) = if bound {
             let count_signal = self.list_count(id, 0);
             let patches = self.components.patches.clone();
@@ -4806,7 +4818,7 @@ impl<M: TextEngine> Core<M> {
             let slot = first.clone();
             let last: RefCell<Option<Rc<[u64]>>> = RefCell::new(None);
             let made = std::cell::Cell::new(false);
-            crate::element::computed(move || {
+            let memo = crate::element::computed(move || {
                 let (count, keys) = rows();
                 let diff = match (&*last.borrow(), &keys) {
                     (Some(old), Some(new)) => ListDiff::new(old, new),
@@ -4826,6 +4838,7 @@ impl<M: TextEngine> Core<M> {
                     *slot.borrow_mut() = Some((count, keys));
                 }
             });
+            moves = Some(memo.node());
             first.take().expect("a memo runs when it is made")
         } else {
             let (count, keys) = crate::element::untracked(rows);
@@ -4845,6 +4858,7 @@ impl<M: TextEngine> Core<M> {
         state.row = list.row;
         state.count = count;
         state.keys = keys;
+        state.moves = moves;
         state.separator = list.separator;
         state.min_view = list.min_view_time;
         let marked: Vec<NodeId> = state
@@ -7880,18 +7894,20 @@ fn move_rows(cells: &CellRows, diff: Option<&ListDiff>, count: u32) {
 
 /// The position of row `index` of `count` that a cell's content reads: in a
 /// view (`count_signal`), its index a signal of the cell's (handed back in
-/// `made`) and the list's count; else fixed.
+/// `made`) and the list's count, both written by the list's memo `moves`
+/// when its rows are bound; else fixed.
 fn row_position(
     index: usize,
     count: usize,
     count_signal: Option<crate::element::Signal<usize>>,
+    moves: Option<crate::element::reactive::Node>,
     made: &std::cell::Cell<Option<crate::element::Signal<usize>>>,
 ) -> Position {
     match count_signal {
         Some(count) => {
             let index = crate::element::signal(index);
             made.set(Some(index));
-            Position::of(index.node(), count.node())
+            Position::of_row(index.node(), count.node(), moves)
         }
         None => Position::fixed(index, count),
     }

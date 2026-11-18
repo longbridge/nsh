@@ -3356,9 +3356,10 @@ function leavingPage() {
       preventDefault() { this.defaultPrevented = true; },
     });
   const hide = (persisted = false) => dispatch("pagehide", { persisted });
+  const show = (persisted = false) => dispatch("pageshow", { persisted });
   const guards = () => (listeners.get("beforeunload") ?? []).length;
   const watchers = () => (listeners.get("pagehide") ?? []).length;
-  return { leave, hide, guards, watchers, restore: () => Object.assign(globalThis, saved) };
+  return { leave, hide, show, guards, watchers, restore: () => Object.assign(globalThis, saved) };
 }
 
 /** A running app (it watches the page's end, as `begin` has it) that
@@ -3460,6 +3461,45 @@ test("a page kept in the back / forward cache keeps its app running", () => {
     page.hide();
     assert.equal(calls.quits, 1);
   } finally {
+    page.restore();
+  }
+});
+
+test("a page in the back / forward cache is in the background until it comes back", () => {
+  const page = leavingPage();
+  const document = globalThis.document;
+  // A browser that tells no `visibilitychange` around the cache: the page
+  // stays visible and focused throughout.
+  globalThis.document = { visibilityState: "visible", hasFocus: () => true };
+  try {
+    const { player, calls } = quittingPlayer(() => true);
+    const reported = [];
+    Object.assign(player, { reported: "{}", environment: () => ({ lifecycle: player.lifecycle() }) });
+    player.wasm.nsh_environment = (ptr, len) => {
+      reported.push(JSON.parse(new TextDecoder().decode(new Uint8Array(player.wasm.memory.buffer, ptr, len))).lifecycle);
+      return -1;
+    };
+    player.watchPageCache(() => player.environmentChanged());
+    page.show();
+    page.hide(true);
+    assert.deepEqual(reported, ["background"], "kept in the cache: the app goes to the background");
+    assert.equal(calls.quits, 0, "and runs on");
+    page.show(true);
+    assert.deepEqual(reported, ["background", "active"], "restored: back in the foreground");
+    // Hidden again: the cache and visibility are one background.
+    page.hide(true);
+    globalThis.document.visibilityState = "hidden";
+    page.show(true);
+    assert.deepEqual(reported, ["background", "active", "background"]);
+    globalThis.document.visibilityState = "visible";
+    player.environmentChanged();
+    // The page's real end ends the app, once, with no lifecycle edge.
+    page.hide();
+    page.hide();
+    assert.equal(calls.quits, 1);
+    assert.deepEqual(reported, ["background", "active", "background", "active"]);
+  } finally {
+    globalThis.document = document;
     page.restore();
   }
 });

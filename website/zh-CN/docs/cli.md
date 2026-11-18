@@ -254,6 +254,25 @@ nsh package my-app --target miniprogram --out dist
 nsh update [stable|nightly]
 ```
 
+## nsh add
+
+为当前目录的应用添加第三方扩展：一个来自 crates.io、Git 或本地目录的 Rust crate，应用可在 TSX（`import { Gauge } from "acme/gauge"`）和 Rust（`acme_gauge::gauge()`）中使用它导出的组件、模块和类。实验性功能。
+
+```sh
+nsh add acme-gauge@1.0                                 # 来自 crates.io：取匹配 1.0 的最新版本
+nsh add github:acme/gauge@v1.0.0                    # 来自 GitHub 的标签；或 --rev <提交或分支>；都不给则取默认分支
+nsh add https://git.example.com/gauge.git --tag v1.0.0  # 来自任意 Git 地址
+nsh add --path ../gauge                              # 来自本地目录，按当前内容使用
+```
+
+它把扩展记录到 `nsh.json` 的 `"extensions"`（`"acme-gauge@1.0"`、`"github:acme/gauge@v1.0.0"`、`{ "github": "acme/gauge", "rev": "…" }`、`{ "git": "…", "tag": "v1.0.0" }` 或 `{ "path": "../gauge" }`），交给 Cargo 解析，并把解析到的版本或提交锁定在 `nsh.lock`（随应用一起提交），应用有自己的 crate（`"rust"`）时还会加入其 `[dependencies]`。构建始终使用锁定的版本或提交（本地目录按当前内容），再次运行 `nsh add` 即更新。纯 TSX 应用会像带 crate 的应用一样用扩展重新构建宿主（[使用 Rust](./rust.md)），因此开发机和 CI 需要 Rust 工具链。扩展与应用的 crate 或其他扩展冲突（同名包或同名模块），或与当前 NSH 不兼容时，`nsh.json` 和 `nsh.lock` 保持不变。
+
+扩展是普通的 Cargo 库：根部有 `#[native_module("<module>")]` 入口（与应用自己的 crate 相同），TSX 按这个标识导入它，不需要任何 NSH 专用的元数据。
+
+版本要求沿用 Cargo 的写法和语义：`"acme-gauge@1.2"` 即 `^1.2`（1.2.0 起的任意 1.x），`~1.2`、`=1.2.3`、`>=1.2, <2`、`*` 与 `Cargo.toml` 相同（在 shell 中加引号：`nsh add "acme-gauge@>=1.2, <2"`）。`nsh.json` 写可接受的范围，`nsh.lock` 记录实际解析结果：锁定的版本仍满足要求时构建一直用它，修改要求后重新解析。Git 或本地目录可以在对象写法里加 `"version"`（`{ "github": "acme/gauge", "tag": "v1.2.0", "version": "1.2" }`），与 Cargo 对这类依赖的处理一样，包的版本必须满足它。扩展兼容的 NSH 版本就是它自己对 `nsh-core` 依赖的版本要求（`nsh-core = "0.6"`），编译前会与当前 `nsh` 比对。
+
+扩展的构建脚本和过程宏会在应用构建时执行，其代码以应用的权限运行：请像审查应用代码一样审查扩展来源和 `nsh.lock` 的变更。
+
 ## nsh component
 
 添加、删除或列出已安装 `nsh` 旁边的运行时：它所在平台之外的那些（`android`、`android-symbols`、`ios`、`web`、`gpui`、`tui`）。需要某个运行时的命令第一次运行时会自己添加它（[安装](./installation.md#组件)）。
