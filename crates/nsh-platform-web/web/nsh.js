@@ -94,6 +94,10 @@ function setAriaAttribute(el, name, value) {
   else el.setAttribute(name, next);
 }
 
+/** Elements a browser's Tab stops at without a `tabindex` (`elementTag`'s
+ * links and `web={{ element }}` values). */
+const NATIVE_STOPS = "a[href], button, input, select, textarea, summary, [contenteditable]";
+
 /**
  * The HTML element a view or text is drawn as, from what its props say it
  * is: a heading (`role="header"`, `h1` to `h6` by `accessibilityLevel`,
@@ -101,10 +105,6 @@ function setAriaAttribute(el, name, value) {
  * `href`, as `Link` sets), else the element `web={{ element }}` names, else
  * a `div`.
  */
-/** Elements a browser's Tab stops at without a `tabindex` (`elementTag`'s
- * links and `web={{ element }}` values). */
-const NATIVE_STOPS = "a[href], button, input, select, textarea, summary, [contenteditable]";
-
 export function elementTag(props) {
   if (props.element) return props.element;
   if (props.role === "header") return `h${Math.min(6, Math.max(1, props.level ?? 2))}`;
