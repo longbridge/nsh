@@ -411,6 +411,7 @@ impl Surface {
         *self.rx.borrow_mut() = Some(rx);
         *self.pending.borrow_mut() = pending;
         let family = crate::text::ui_family();
+        crate::text::read_font_rendering();
         // The embedding app's theme overrides are in the first frame, and
         // the links that came before are the app's address when its code
         // first runs (`UrlScheme.url()`).
