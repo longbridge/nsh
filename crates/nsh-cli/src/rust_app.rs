@@ -166,7 +166,7 @@ fn runner_features(platform: &str) -> &'static [&'static str] {
 /// The cargo arguments of a release runner of `platform`: its features
 /// when [`set_runner_features`] chose some, each the runner's crate has
 /// (`net` is not macOS's), plus those no import tells about (Linux's
-/// `sound` and `webview`, Windows' `webview` and `media`).
+/// `sound`, Windows' `media`).
 fn runner_feature_args(platform: &str) -> Vec<String> {
     let Some(chosen) = RUNNER_FEATURES
         .lock()
@@ -179,7 +179,7 @@ fn runner_feature_args(platform: &str) -> Vec<String> {
     let kept: Vec<&str> = has
         .iter()
         .copied()
-        .filter(|f| matches!(*f, "sound" | "webview" | "media") || chosen.iter().any(|c| c == f))
+        .filter(|f| matches!(*f, "sound" | "media") || chosen.iter().any(|c| c == f))
         .collect();
     vec![
         "--no-default-features".into(),
@@ -200,6 +200,29 @@ pub(crate) fn clear_current() {
 }
 
 /// The app of this command, if it has Rust crates of its own.
+/// The app's own Rust code may make a web view: a source file under one
+/// of its crates' directories spells `WebView` or `web_view`. Its runner
+/// keeps `webview` then, as no bundle import tells about it (#2377).
+pub(crate) fn may_make_web_view(app: &RustApp) -> bool {
+    fn spells(dir: &Path) -> bool {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return false;
+        };
+        entries.flatten().any(|e| {
+            let path = e.path();
+            let name = e.file_name();
+            if path.is_dir() {
+                name != "target" && !name.to_string_lossy().starts_with('.') && spells(&path)
+            } else {
+                path.extension().is_some_and(|x| x == "rs")
+                    && std::fs::read_to_string(&path)
+                        .is_ok_and(|s| s.contains("WebView") || s.contains("web_view"))
+            }
+        })
+    }
+    app.watched.iter().any(|dir| spells(dir))
+}
+
 pub(crate) fn current() -> Option<RustApp> {
     CURRENT.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
@@ -3555,7 +3578,7 @@ mod tests {
             [
                 "--no-default-features",
                 "--features",
-                "js,plot,webview,svg,net,media"
+                "js,plot,svg,net,media"
             ]
         );
         // macOS has no `net`; Linux keeps `sound` and Windows `media`, which no
@@ -3566,8 +3589,15 @@ mod tests {
         );
         assert_eq!(
             super::runner_feature_args("nsh-platform-linux")[2],
-            "js,plot,webview,svg,net,sound"
+            "js,plot,svg,net,sound"
         );
+        // `webview` only when chosen (#2377).
+        super::set_runner_features(vec!["js".into(), "webview".into()]);
+        assert_eq!(
+            super::runner_feature_args("nsh-platform-linux")[2],
+            "js,webview,sound"
+        );
+        super::set_runner_features(vec!["js".into(), "net".into(), "svg".into(), "plot".into()]);
         // Android: a TSX app's own library, trimmed the same way.
         assert_eq!(
             super::runner_feature_args("nsh-platform-android")[2],
