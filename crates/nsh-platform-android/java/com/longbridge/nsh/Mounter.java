@@ -241,6 +241,13 @@ final class Mounter {
     /** `hitSlop` of views that have one (px: top, right, bottom, left). */
     private final SparseArray<float[]> slops = new SparseArray<>();
     private final SparseArray<A11y> a11y = new SparseArray<>();
+    /**
+     * The view whose node an accessibility service last clicked through its delegate
+     * (TalkBack's double tap), and when (uptime ms): a checked or selected state it changes in a
+     * later batch is told as that click's (`A11y.changed`).
+     */
+    View accessibilityClicked;
+    long accessibilityClickedAt;
     /** Layout animation of the batch being applied: create, update, delete. */
     private Transition[] layoutAnimation;
     /** Views created by the batch being applied. */
@@ -1082,6 +1089,7 @@ final class Mounter {
         keyParents.delete(id);
         slops.remove(id);
         a11y.remove(id);
+        if (accessibilityClicked == v) accessibilityClicked = null;
     }
 
     private void frame(int id, float x, float y, float w, float h) {
@@ -1793,9 +1801,12 @@ final class Mounter {
         }
         if (v instanceof InputBox) ((InputBox) v).pointerEvents = pointerEvents;
         if (v instanceof TextBox) ((TextBox) v).a11y = a;
+        A11y before = a11y.get(id);
         a11y.put(id, a);
         a.apply(v);
         updateFocusable(id, v);
+        // After the new delegate is in place: services answer by querying the node.
+        a.changed(v, before);
         if (v instanceof ScrollBox) keyScroll((ScrollBox) v, nativeId);
     }
 
