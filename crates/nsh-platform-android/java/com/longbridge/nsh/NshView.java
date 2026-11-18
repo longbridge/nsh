@@ -272,6 +272,19 @@ public class NshView extends FrameLayout {
         Native.setLimits(handle, memoryMb, stackKb, loadMs, callMs, maxNodes);
     }
 
+    /**
+     * Whether scroll views make the views of their content only near their
+     * viewport (true, the default), or all of it (false). Turned off, what is
+     * not made yet is made in the next frames, e.g. to draw a whole scroll
+     * view into a bitmap (a long screenshot); turned on again, what is far
+     * away is given up. Applies to the running app and the apps loaded next.
+     *
+     * @param enabled true to make content near the viewport only
+     */
+    public void setContentCulling(boolean enabled) {
+        Native.setContentCulling(handle, enabled);
+    }
+
     /** Runs the apps loaded from now on as apps on their own, without limits (nsh's own activities). */
     void useStandaloneLimits() {
         Native.setStandaloneLimits(handle);
