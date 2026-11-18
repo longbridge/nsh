@@ -557,6 +557,7 @@ mod tests {
             ],
             cancelable: false,
             sheet,
+            input: None,
         }
     }
 

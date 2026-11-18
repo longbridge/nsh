@@ -588,6 +588,20 @@ Escape, Android's back button, a press on the backdrop (TSX's backdrop, a native
 
 See [Dialog](../elements/dialog.md) for every prop. Inside a dialog, the `env(safe-area-inset-*)` variables and the insets are the dialog's own. For system dialogs (an alert with actions, an action sheet) use [`AlertDialog`](../modules/nsh-base.md#alertdialog) from `nsh_base` (TSX: `nsh/base`).
 
+To ask for a short text, such as a new name, give the alert an `input`: iOS, Android, macOS and the web show the system's own text field in it, focused, and the result's `value` is its text. Return chooses the last `"default"` action, and `required` keeps every action but the cancel ones disabled while the field is empty. On Windows, Linux and in the terminal the alert shows without a field and `value` is `null`, so draw your own `Dialog` there.
+
+```tsx
+const { action, value } = await AlertDialog.show({
+  title: "Rename",
+  input: { defaultValue: name(), placeholder: "Name", selectTextOnFocus: true, required: true },
+  actions: [
+    { label: "Cancel", role: "cancel", id: "cancel" },
+    { label: "Rename", id: "rename" },
+  ],
+});
+if (action === "rename" && value !== null) name.set(value);
+```
+
 ## The Android back button
 
 On Android, the back button (or gesture) is handled in this order:

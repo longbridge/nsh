@@ -460,7 +460,7 @@ export function Confirm() {
 - `Dialog` keeps closing if the user closes it, whatever `open` says: keep `open` in sync in `onOpenChange`.
 - `closeOnEscape`, `closeOnBackdropPress`, `closeOnSwipe`, `closeOnPressOutside` decide dismissal up front.
 - `Sheet` takes `open`, `onOpenChange`, `side` and `popupClass`. `Popover` and `Menu` take `trigger` and `popupClass`.
-- `const { action } = await AlertDialog.show({ title, actions: [{ id: "delete", label: "Delete", role: "destructive" }] })` resolves the chosen `id`, or `null` when closed without one.
+- `const { action } = await AlertDialog.show({ title, actions: [{ id: "delete", label: "Delete", role: "destructive" }] })` resolves the chosen `id`, or `null` when closed without one. An alert with `input: { defaultValue, placeholder, selectTextOnFocus, required }` shows the system's text field (iOS, Android, macOS, web) and resolves its text as `value`.
 - `Menu` holds `MenuItem`s, each with `onSelect`.
 - `ToastStack`, `Tooltip`, `HoverCard`, `ContextMenu` and `Command` are also in `nsh/base`.
 

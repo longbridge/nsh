@@ -2483,7 +2483,17 @@ final class Mounter {
                     texts[i] = (String) objects[b.getInt()];
                     styles[i] = b.getInt();
                 }
-                SystemUi.dialog(this, dialog, title, message, cancelable, sheet, texts, styles);
+                // Its text field: the text, the placeholder, select all, required.
+                String input = null, placeholder = null;
+                boolean selectAll = false, required = false;
+                if (b.getInt() != 0) {
+                    input = (String) objects[b.getInt()];
+                    placeholder = optString(b, objects);
+                    selectAll = b.getInt() != 0;
+                    required = b.getInt() != 0;
+                }
+                SystemUi.dialog(this, dialog, title, message, cancelable, sheet, texts, styles, input, placeholder,
+                        selectAll, required);
                 break;
             }
             case 60:
