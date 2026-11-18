@@ -24126,7 +24126,10 @@ mod views {
         assert!(first.header_transparent);
         assert!(!first.header_background_on_scroll);
         let on = ON_SCROLL.with(Cell::get).expect("mounted");
-        on.set(true);
+        {
+            let _entered = c.components.runtime.enter();
+            on.set(true);
+        }
         let updated = config(&c.commit().unwrap()).expect("updated");
         assert!(updated.header_background_on_scroll);
     }
