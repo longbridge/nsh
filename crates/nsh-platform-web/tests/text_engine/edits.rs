@@ -264,3 +264,84 @@ fn per_keystroke_timings() {
         }
     }
 }
+
+#[test]
+fn letter_spacing_is_counted_per_grapheme_cluster_across_spans() {
+    let engine = WebTextEngine::default();
+    let spacing = 5.0f32;
+    for (sample, clusters) in [
+        ("👨‍👩‍👧‍👦", 1usize),
+        ("👍🏻", 1),
+        ("🇨🇳", 1),
+        ("e\u{0301}", 1),
+        ("か\u{3099}", 1),
+        ("葛\u{E0100}", 1),
+    ] {
+        let after_style = bold();
+        let layout_for = |letter_spacing: f32| {
+            let style = ResolvedTextStyle {
+                letter_spacing: Points(letter_spacing),
+                ..ResolvedTextStyle::default()
+            };
+            let mut t = AttributedText::default();
+            t.push(sample, style);
+            t.push("after", after_style);
+            let p = engine.prepare(&t);
+            let size = engine.measure(&p, None);
+            engine.layout(&p, size)
+        };
+        let unspaced = layout_for(0.0);
+        let spaced = layout_for(spacing);
+        let unspaced_runs = &unspaced.downcast::<WebLayout>().unwrap().runs;
+        let spaced_runs = &spaced.downcast::<WebLayout>().unwrap().runs;
+        assert_eq!(unspaced_runs.len(), 2, "{sample}: {unspaced_runs:?}");
+        assert_eq!(spaced_runs.len(), 2, "{sample}: {spaced_runs:?}");
+        assert_eq!(spaced_runs[0].text, sample);
+        assert_eq!(spaced_runs[1].text, "after");
+        let shift = spaced_runs[1].x - unspaced_runs[1].x;
+        let expected = spacing * clusters as f32;
+        assert!(
+            (shift - expected).abs() < 0.01,
+            "{sample}: expected shift {expected}, got {shift}"
+        );
+    }
+
+    // `break_split` also counts letter-spacing once per cluster when breaking
+    // an oversized word across lines.
+    let single = {
+        let mut t = AttributedText::default();
+        t.push(
+            "👨‍👩‍👧‍👦",
+            ResolvedTextStyle {
+                letter_spacing: Points(spacing),
+                ..ResolvedTextStyle::default()
+            },
+        );
+        let p = engine.prepare(&t);
+        engine.measure(&p, None).width.0
+    };
+    let mut doubled = AttributedText::default();
+    doubled.push(
+        "👨‍👩‍👧‍👦👨‍👩‍👧‍👦",
+        ResolvedTextStyle {
+            letter_spacing: Points(spacing),
+            ..ResolvedTextStyle::default()
+        },
+    );
+    let p = engine.prepare(&doubled);
+    let size = engine.measure(&p, Some(Points(single + 1.0)));
+    let layout = engine.layout(&p, size);
+    let lines = engine.lines(&layout);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    for line in &lines {
+        assert!(
+            (line.width.0 - single).abs() < 0.01,
+            "expected wrapped cluster width {single}, got {:?}",
+            line.width
+        );
+    }
+    let runs = &layout.downcast::<WebLayout>().unwrap().runs;
+    assert_eq!(runs.len(), 2, "{runs:?}");
+    assert_eq!(runs[0].text, "👨‍👩‍👧‍👦");
+    assert_eq!(runs[1].text, "👨‍👩‍👧‍👦");
+}
