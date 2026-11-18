@@ -1,13 +1,15 @@
 //! Typed root parts reach the document's text before classes and styles;
-//! inline links are stops of Tab, pressed with Return; a link's press
-//! reports the modifier keys held.
+//! a table's grid takes the app's frame; inline links are stops of Tab,
+//! pressed with Return; a link's press reports the modifier keys held.
+
+use std::sync::{Arc, Mutex};
 
 use nsh_base::{
     TextViewClasses, TextViewLinkPressEvent, TextViewPart, TextViewParts, TextViewStyles,
     TextViewTaskPressEvent, text_view,
 };
 use nsh_core::{
-    StyleKey,
+    Color, MountItem, StyleKey,
     element::{Root, Style},
     platform::{Idiom, Os},
     prelude::*,
@@ -150,6 +152,52 @@ fn root_without_typed_parts_keeps_the_default_typography() {
     assert_eq!(
         app.screen().span_style("Default text").unwrap().font_size,
         px(15.0)
+    );
+}
+
+/// A table whose grid the app frames by `classes`: a border on every
+/// side and a background.
+#[component]
+fn FramedTable() -> impl IntoElement {
+    text_view()
+        .markdown("| Name | Size |\n|------|-----:|\n| Alpha | 12 |")
+        .classes(TextViewClasses {
+            table_grid: Some("border-2 border-[#ff0000] bg-[#00ff00]".into()),
+            ..Default::default()
+        })
+}
+
+#[test]
+fn a_tables_grid_takes_the_apps_frame() {
+    let mut app = Headless::start(EngineConfig::new(Root::of::<FramedTable>())).unwrap();
+    let styles = Arc::new(Mutex::new(Vec::new()));
+    let into = styles.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let MountItem::ViewStyle { id, style } = item {
+                into.lock().unwrap().push((*id, style.clone()));
+            }
+        }
+    });
+    app.first_render().unwrap();
+    app.wait_for("Alpha").unwrap();
+    let styles = styles.lock().unwrap();
+    let grid: Vec<_> = styles
+        .iter()
+        .filter(|(_, style)| style.background_color == Color(0x00ff_00ff))
+        .collect();
+    // One view, the grid: not its cells or rows.
+    assert!(!grid.is_empty(), "no view has the grid's background");
+    assert!(grid.iter().all(|(id, _)| *id == grid[0].0), "{grid:?}");
+    // The app's border on every side: over the top and left lines the
+    // grid draws itself, and on the right and bottom, which it leaves to
+    // the cells.
+    let borders = &grid.last().unwrap().1.borders;
+    assert_eq!(borders.colors, [Color(0xff00_00ff); 4]);
+    let widths = borders.widths;
+    assert_eq!(
+        [widths.top, widths.right, widths.bottom, widths.left],
+        [px(2.0); 4]
     );
 }
 
