@@ -4195,6 +4195,11 @@ impl<M: TextEngine> Core<M> {
     /// items among them).
     pub(super) fn end_retags(&mut self) {
         self.drop_retagged();
+        #[cfg(test)]
+        if self.retags.is_some() {
+            let rounds = &self.components.retag_rounds;
+            rounds.set(rounds.get() + 1);
+        }
         self.retags = None;
     }
 

@@ -45556,6 +45556,183 @@ mod each_updates {
         assert_eq!(tips, 50);
     }
 
+    /// `batch`, a first batch: every view in it is made once, before it is
+    /// inserted, and is still in the tree (none removed in the batch left
+    /// its `Create` or `Insert`).
+    fn made_once_before_inserted(c: &Core<FakeEngine>, batch: &MountBatch) {
+        let mut made = std::collections::HashSet::new();
+        for item in &batch.items {
+            let id = match item {
+                MountItem::Create { id, .. } => {
+                    assert!(made.insert(*id), "{id:?} made twice: {:?}", batch.items);
+                    *id
+                }
+                MountItem::Insert { child, .. } => {
+                    assert!(
+                        made.contains(child),
+                        "{child:?} inserted before it is made: {:?}",
+                        batch.items
+                    );
+                    *child
+                }
+                _ => continue,
+            };
+            assert!(c.key(id).is_ok(), "{id:?} is gone: {:?}", batch.items);
+        }
+    }
+
+    /// The views of `kind` made in `batch`.
+    fn made_as(batch: &MountBatch, kind: ViewKind) -> Vec<NodeId> {
+        batch
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::Create { id, kind: k } if *k == kind => Some(*id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A component whose root is a list in its parent's viewport: its host
+    /// is made a view, takes the list's kind, then the list's `viewport`
+    /// changes the kind of its `Create`.
+    #[component]
+    fn ParentList() -> impl IntoElement {
+        virtual_list(|| 3usize, |_| view().h(px(20.0)).child(text("row")))
+            .viewport(ListViewport::Parent)
+    }
+
+    /// Tips and lists in their parent's viewport, all components' roots
+    /// taking their kind in one round of renders.
+    #[component]
+    fn ParentLists() -> impl IntoElement {
+        scroll().size_full().child(
+            view()
+                .flex_col()
+                .child(Tip::element(TipProps {}))
+                .child(ParentList::element(()))
+                .child(Tip::element(TipProps {}))
+                .child(ParentList::element(()))
+                .child(Tip::element(TipProps {})),
+        )
+    }
+
+    /// A list that is a component's root and set in its parent's viewport
+    /// in the round its host takes the list's kind is made once, as a
+    /// plain view: the viewport changes its one `Create`, not the one its
+    /// host had as a view.
+    #[test]
+    fn a_component_root_list_in_its_parents_viewport_is_made_once() {
+        let mut c = core();
+        c.mount_root(&Root::new::<ParentLists>(|| ()));
+        let batch = c.commit().expect("a batch");
+        made_once_before_inserted(&c, &batch);
+        let lists: Vec<_> = c
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.kind == Kind::List)
+            .map(|(_, n)| n.id)
+            .collect();
+        assert_eq!(lists.len(), 2);
+        let views = made_as(&batch, ViewKind::View);
+        for id in &lists {
+            assert!(
+                views.contains(id),
+                "{id:?} not made a view: {:?}",
+                batch.items
+            );
+        }
+        assert!(
+            made_as(&batch, ViewKind::Scroll).len() == 1,
+            "{:?}",
+            batch.items
+        );
+        let tips = (c.overlays.iter())
+            .filter(|&&key| c.nodes[key as usize].kind == Kind::Overlay)
+            .count();
+        assert_eq!(tips, 3);
+    }
+
+    thread_local! {
+        /// Whether [`Vanishing`] shows its [`GoneTip`].
+        static SHOWN: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+    }
+
+    /// A tip that, as it renders, has the view holding it drop it: its
+    /// host takes the overlay's kind and goes in the same round.
+    #[component]
+    fn GoneTip() -> impl IntoElement {
+        if let Some(shown) = SHOWN.with(Cell::get) {
+            shown.set(false);
+        }
+        overlay()
+            .hint(Duration::from_millis(500))
+            .child(text("gone"))
+    }
+
+    /// Tips around a [`GoneTip`].
+    #[component]
+    fn Vanishing() -> impl IntoElement {
+        let shown = signal(true);
+        SHOWN.with(|s| s.set(Some(shown)));
+        view()
+            .flex_col()
+            .child(Tip::element(TipProps {}))
+            .child(dynamic(move || shown.get().then(|| GoneTip::element(()))))
+            .child(Tip::element(TipProps {}))
+    }
+
+    /// A host that takes its component root's kind and is removed in the
+    /// same round leaves neither its `Create` nor its `Insert`; the tips
+    /// around it are made once.
+    #[test]
+    fn a_component_root_that_takes_its_kind_and_goes_in_one_round_leaves_nothing() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Vanishing>(|| ()));
+        let batch = c.commit().expect("a batch");
+        SHOWN.with(|s| s.set(None));
+        made_once_before_inserted(&c, &batch);
+        let tips = (c.overlays.iter())
+            .filter(|&&key| c.nodes[key as usize].kind == Kind::Overlay)
+            .count();
+        assert_eq!(tips, 2);
+    }
+
+    /// A tip, then a list whose rows (made in a later round, once the
+    /// layout gives the list its viewport) hold a tip each.
+    #[component]
+    fn TippedList() -> impl IntoElement {
+        view()
+            .size_full()
+            .flex_col()
+            .child(Tip::element(TipProps {}))
+            .child(
+                virtual_list(
+                    || 40usize,
+                    |_| view().h(px(30.0)).child(Tip::element(TipProps {})),
+                )
+                .flex_1(),
+            )
+    }
+
+    /// Hosts taking their component root's kind in several rounds of one
+    /// batch are each made once, before they are inserted.
+    #[test]
+    fn component_roots_taking_their_kind_in_later_rounds_are_made_once() {
+        let mut c = core();
+        c.mount_root(&Root::new::<TippedList>(|| ()));
+        let batch = c.commit().expect("a batch");
+        assert!(
+            c.components.retag_rounds.get() >= 2,
+            "the rows' tips took their kind in the first round"
+        );
+        made_once_before_inserted(&c, &batch);
+        let tips = (c.overlays.iter())
+            .filter(|&&key| c.nodes[key as usize].kind == Kind::Overlay)
+            .count();
+        assert!(tips > 1, "no row's tip: {:?}", batch.items);
+    }
+
     /// `cargo test --release -p nsh-core --lib bench_component_roots_mount -- --ignored --nocapture`:
     /// [`MountRows`] with a [`Tip`] in each row, mounted at once; the
     /// numbers are in `docs/dev/performance.md`.

@@ -642,6 +642,10 @@ pub(super) struct Components {
     /// component's root ([`Core::retag`]).
     #[cfg(test)]
     pub(super) retag_work: std::cell::Cell<usize>,
+    /// Rounds of renders in which views took the kind of their
+    /// component's root ([`Core::end_retags`]).
+    #[cfg(test)]
+    pub(super) retag_rounds: std::cell::Cell<usize>,
     /// Slot nodes (`componentSlot`) -> their slot's name.
     slot_names: FxHashMap<NodeId, Arc<str>>,
     /// Slot nodes in a host -> the host.
@@ -839,6 +843,8 @@ impl Default for Components {
             placing_work: Default::default(),
             #[cfg(test)]
             retag_work: Default::default(),
+            #[cfg(test)]
+            retag_rounds: Default::default(),
             slot_names: FxHashMap::default(),
             slot_hosts: FxHashMap::default(),
             slot_targets: FxHashMap::default(),

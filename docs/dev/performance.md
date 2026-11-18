@@ -36,7 +36,9 @@ the rows (four times the rows: about four times the work, sixteen before).
 Many components whose root is not a plain view mounted at once (2026-11-18, Linux x86_64, Intel Core Ultra 7 270K
 Plus, release, against `0713ce96d`): a tooltip's hint overlay or a text as a component's root takes its kind when
 the component renders, and each such root went through all the mount items of the batch, so a document with a
-tooltip in every code block grew with the square of its blocks. It now grows with them. `cargo test --release -p
+tooltip in every code block grew with the square of its blocks. It now grows with them within a round of renders (a
+batch that makes such roots over several rounds, as rows scroll into sight, still goes over its items once a round).
+`cargo test --release -p
 nsh-core --lib bench_component_roots_mount -- --ignored --nocapture`, ms from `mount_root` to the first
 `MountBatch` (`FakeEngine`), the least of three rounds; the mount items are the same before and after:
 
