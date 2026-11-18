@@ -12,7 +12,14 @@
 //! ] }
 //! ```
 //!
-//! and pins the commit it resolved to in `nsh.lock`, next to `nsh.json`,
+//! Versions are Cargo version requirements with Cargo's meaning: `"1.2"`
+//! is `^1.2`, and `"~1.2"`, `"=1.2.3"`, `">=1.2, <2"` and `"*"` work as in
+//! `Cargo.toml`. A Git or path entry may add `"version"` (the object form)
+//! and, as Cargo does, the package must be such a version. An extension
+//! says which NSH it builds with in `nsh = "<requirement>"` below.
+//!
+//! `nsh.json` says what is acceptable; `nsh add` pins what it resolved to
+//! (a crate's exact version, a Git commit) in `nsh.lock`, next to `nsh.json`,
 //! which the app commits: a build takes the locked commit, never what a tag
 //! or branch points to now. An extension is an ordinary Cargo library with
 //! a `#[native_module("<module>")]` entry at its root and, in its
@@ -120,11 +127,13 @@ impl Source {
                 self.id()
             );
         }
-        if self.krate.is_none() && self.version.is_some() {
-            bail!(
-                "nsh.json: \"extensions\": {}: \"version\" is for \"crate\"",
-                self.id()
-            );
+        if let Some(v) = &self.version {
+            semver::VersionReq::parse(v).with_context(|| {
+                format!(
+                    "nsh.json: \"extensions\": {}: {v:?} is not a version requirement",
+                    self.id()
+                )
+            })?;
         }
         Ok(())
     }
@@ -214,10 +223,29 @@ impl Source {
             });
         }
         if let Some(path) = &self.path {
-            return json!({ "path": path });
+            let mut o = json!({ "path": path });
+            if let Some(v) = &self.version {
+                o["version"] = json!(v);
+            }
+            return o;
         }
         let url = self.git.clone().unwrap_or_default();
         let github = github_repo(&url);
+        if let Some(v) = &self.version {
+            // A version requirement on Git: only the object form carries it.
+            let mut o = match github {
+                Some(repo) => json!({ "github": repo }),
+                None => json!({ "git": url }),
+            };
+            if let Some(t) = &self.tag {
+                o["tag"] = json!(t);
+            }
+            if let Some(r) = &self.rev {
+                o["rev"] = json!(r);
+            }
+            o["version"] = json!(v);
+            return o;
+        }
         match (github, &self.tag, &self.rev) {
             (Some(repo), None, None) => Value::String(format!("github:{repo}")),
             (Some(repo), Some(tag), None) => Value::String(format!("github:{repo}@{tag}")),
@@ -248,6 +276,7 @@ impl Source {
             tag: Option<String>,
             rev: Option<String>,
             path: Option<String>,
+            version: Option<String>,
         }
         let full: Full = serde_json::from_value(value.clone()).context(
             "nsh.json: \"extensions\": each is \"<crate>[@<version>]\", \"github:<owner>/<repo>[@<tag>]\", { \"git\" | \"github\": ..., \"tag\" | \"rev\" } or { \"path\": \"<dir>\" }",
@@ -260,6 +289,7 @@ impl Source {
             tag: full.tag,
             rev: full.rev,
             path: full.path,
+            version: full.version,
             ..Default::default()
         };
         source.validate()?;
@@ -342,6 +372,7 @@ pub(crate) fn crates(
                 .with_context(|| format!("nsh.json: \"extensions\": no directory {path}"))?;
             let package = rust_app::package_name(&checkout.join("Cargo.toml"))?;
             check(&checkout, path)?;
+            check_version(&checkout, source)?;
             crates.push((path.clone(), AppCrate::new(package, checkout)));
             continue;
         }
@@ -352,6 +383,7 @@ pub(crate) fn crates(
         let checkout = place(&entry)?;
         let package = rust_app::package_name(&checkout.join("Cargo.toml"))?;
         check(&checkout, source.id())?;
+        check_version(&checkout, source)?;
         crates.push((source.id().to_owned(), AppCrate::new(package, checkout)));
         locked.push(entry);
     }
@@ -855,6 +887,42 @@ fn check(dir: &Path, url: &str) -> anyhow::Result<String> {
     Ok(module)
 }
 
+/// Checks the package in `dir` is a version `source` requires (its
+/// `"version"`, a Cargo version requirement), as Cargo checks a Git or
+/// path dependency's `version`. A crate from crates.io is resolved to one.
+fn check_version(dir: &Path, source: &Source) -> anyhow::Result<()> {
+    let Some(req) = &source.version else {
+        return Ok(());
+    };
+    let req = semver::VersionReq::parse(req)?;
+    let manifest = fs::read_to_string(dir.join("Cargo.toml"))?;
+    let version = package_version(&manifest)
+        .with_context(|| format!("{}: Cargo.toml has no [package] version", source.id()))?;
+    let version = semver::Version::parse(&version)
+        .with_context(|| format!("{}: version {version:?}", source.id()))?;
+    if !req.matches(&version) {
+        bail!(
+            "nsh.json: \"extensions\": {} requires version {req}, but it is {version}",
+            source.id()
+        );
+    }
+    Ok(())
+}
+
+/// The `[package]` version of the manifest `text`.
+fn package_version(text: &str) -> Option<String> {
+    let mut in_package = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_package = line == "[package]";
+        } else if in_package && line.starts_with("version") {
+            return rust_app::toml_string(line, "version");
+        }
+    }
+    None
+}
+
 /// `[package.metadata.nsh]` of the manifest `text`.
 fn metadata(text: &str) -> Metadata {
     let mut meta = Metadata::default();
@@ -980,9 +1048,14 @@ mod tests {
             "acme-ui", "acme-ui@1.2", "github:acme/ui@v1",
             { "github": "acme/ui", "rev": "abc" },
             { "git": "https://x/a", "tag": "v1" },
-            { "path": "../ui" }
+            { "path": "../ui" },
+            { "github": "acme/ui", "tag": "v1", "version": ">=1.2, <2" },
+            { "path": "../ui", "version": "~1.2" },
+            "acme-ui@=1.2.3"
         ] });
         let list = sources(&config).unwrap();
+        assert_eq!(list[6].version.as_deref(), Some(">=1.2, <2"));
+        assert_eq!(list[7].version.as_deref(), Some("~1.2"));
         assert_eq!(list[1].krate.as_deref(), Some("acme-ui"));
         assert_eq!(list[1].version.as_deref(), Some("1.2"));
         assert_eq!(list[2].git.as_deref(), Some("https://github.com/acme/ui"));
@@ -1002,6 +1075,32 @@ mod tests {
         assert!(sources(&two).is_err());
         let bad = serde_json::json!({ "extensions": ["github:acme"] });
         assert!(sources(&bad).is_err());
+        let req = serde_json::json!({ "extensions": [{ "path": "../a", "version": "one" }] });
+        assert!(sources(&req).is_err());
+    }
+
+    #[test]
+    fn versions_follow_cargo() {
+        let dir = std::env::temp_dir().join(format!("nsh-ext-version-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"acme-ui\"\nversion = \"1.2.5\"\n",
+        )
+        .unwrap();
+        let with = |v: &str| Source {
+            path: Some("../ui".into()),
+            version: Some(v.into()),
+            ..Default::default()
+        };
+        // "1.2" is ^1.2, as in Cargo.
+        for ok in ["1.2", "^1", "~1.2", ">=1.2, <2", "=1.2.5", "*"] {
+            check_version(&dir, &with(ok)).unwrap();
+        }
+        for no in ["1.3", "=1.2.4", "~1.1", "2"] {
+            assert!(check_version(&dir, &with(no)).is_err(), "{no}");
+        }
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

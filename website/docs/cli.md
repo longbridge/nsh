@@ -282,6 +282,15 @@ nsh = "0.6"                   # optional: the NSH versions it builds with
 targets = ["macos", "linux"]  # optional: the targets it supports (default: all)
 ```
 
+Versions are Cargo version requirements with Cargo's meaning: `"acme-gauge@1.2"` takes `^1.2` (any 1.x from 1.2.0), and `~1.2`, `=1.2.3`, `>=1.2, <2` and `*` work as in `Cargo.toml` (quote them in the shell: `nsh add "acme-gauge@>=1.2, <2"`). `nsh.json` says what is acceptable, `nsh.lock` what was resolved: a build takes the locked version while it still meets the requirement, and changing the requirement resolves anew. A Git or path entry may add `"version"` in its object form (`{ "github": "acme/gauge", "tag": "v1.2.0", "version": "1.2" }`); as Cargo does for such dependencies, the package must then be such a version. An extension declares the NSH versions it builds with in its `Cargo.toml`, also a Cargo requirement:
+
+```toml
+[package.metadata.nsh]
+format = 1          # the version of this table
+module = "acme/gauge"
+nsh = "0.6"         # builds with NSH ^0.6
+```
+
 Build scripts and procedural macros of an extension run when the app builds, and its code runs with the app's permissions: review its source and `nsh.lock` changes like the app's own code.
 
 ## nsh component

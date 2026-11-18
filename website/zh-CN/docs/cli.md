@@ -277,6 +277,15 @@ nsh = "0.6"                   # 可选：兼容的 NSH 版本
 targets = ["macos", "linux"]  # 可选：支持的目标（默认全部）
 ```
 
+版本要求沿用 Cargo 的写法和语义：`"acme-gauge@1.2"` 即 `^1.2`（1.2.0 起的任意 1.x），`~1.2`、`=1.2.3`、`>=1.2, <2`、`*` 与 `Cargo.toml` 相同（在 shell 中加引号：`nsh add "acme-gauge@>=1.2, <2"`）。`nsh.json` 写可接受的范围，`nsh.lock` 记录实际解析结果：锁定的版本仍满足要求时构建一直用它，修改要求后重新解析。Git 或本地目录可以在对象写法里加 `"version"`（`{ "github": "acme/gauge", "tag": "v1.2.0", "version": "1.2" }`），与 Cargo 对这类依赖的处理一样，包的版本必须满足它。扩展在自己的 `Cargo.toml` 中声明兼容的 NSH 版本，同样是 Cargo 版本要求：
+
+```toml
+[package.metadata.nsh]
+format = 1          # 这张表的格式版本
+module = "acme/gauge"
+nsh = "0.6"         # 兼容 NSH ^0.6
+```
+
 扩展的构建脚本和过程宏会在应用构建时执行，其代码以应用的权限运行：请像审查应用代码一样审查扩展来源和 `nsh.lock` 的变更。
 
 ## nsh component
