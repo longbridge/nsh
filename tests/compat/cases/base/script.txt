@@ -194,6 +194,15 @@ expect Mouse: move 6.5,1 page 288 left down out -2,0
 listens id:hover onContextMenu
 event id:hover onContextMenu position.x=5 position.y=7 pointerType=mouse
 expect Mouse: menu at 5,294
+# `busy`: screen readers say its action is running, following a signal;
+# presses still count.
+prop id:save accessibilityState {}
+tap text:Save
+expect Saves: 1
+prop id:save accessibilityState busy=true
+tap text:Saving…
+expect Saves: 2
+prop id:save accessibilityState {}
 covers [nsh/base] Button
 covers [props] hitSlop
 covers [props] role
@@ -204,6 +213,7 @@ covers [events] onPressDown
 covers [events] onPressUp
 covers [events] onPress
 covers [props] Button.selected
+covers [props] Button.busy
 covers [props] selectedStyle
 # base-link
 tap id:case-base-link
@@ -4765,3 +4775,13 @@ tap id:content-size-narrow
 expect Width: true
 covers [events] onContentSizeChange
 covers [nsh/base] createRichEditor
+
+# base-dock-tab-scroll
+# The tabs do not fit the bar: they are in a scroll view as wide as the
+# bar, and the tab the ref displays stays the displayed one.
+tap id:case-base-dock-tab-scroll
+expect Strip a*
+expect Strip h
+frame scroll:id:strip-tab-a 0 0 390 24
+tap id:strip-show-h
+expect Strip h*

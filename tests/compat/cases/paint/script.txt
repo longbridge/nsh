@@ -428,8 +428,10 @@ style span:outer color #007affff
 style span:inner color #007affff
 # A hidden span keeps its characters and their place: as wide as shown.
 expect Seen unseen words
-frame id:hidden-span 0 976 131 17
-frame id:shown-span 0 993 131 17
+# The mixed spans above use the largest font (20) and line height (24): three lines.
+frame id:spans 0 947 390 72
+frame id:hidden-span 0 1019 131 17
+frame id:shown-span 0 1036 131 17
 style span:inner fontSize 16
 covers [styles] fontFamily
 covers [styles] fontSize

@@ -1,10 +1,5 @@
 # Text
 
-Headless runs use `ApproxTextEngine`: characters are 0.55 em wide, and the first span's resolved
-`lineHeight` sets the line height, falling back to 1.2 em when unset. Measurement, the first baseline,
-reported line and caret heights, and attachment placement use that height. Font metrics and hit testing
-remain approximations; use a real platform to verify typography.
-
 - **Text**: `<Text>`; styles `numberOfLines`, `textOverflow` (`ellipsis|clip|ellipsis-start|ellipsis-middle`: `EllipsizeMode`'s
   `Tail|Clip|Head|Middle`; on macOS the cut last line goes where its paragraph's alignment puts the other lines, and a
   `clip` line wider than its box starts at its paragraph's start edge whatever the alignment, as CSS does for a
@@ -195,8 +190,7 @@ remain approximations; use a real platform to verify typography.
   spread around it, CSS's strut) and grows only where the attachment reaches past that box, on every engine: the
   line height is never a cap that cuts an attachment to the line. CSS's
   `top` / `bottom` (the line box's) and `sub` / `super` / lengths are not offered: the engines size placeholders
-  before lines exist. The headless engine uses its resolved line height as ascent (1.2 em when unset),
-  zero descent and an x height of 0.5 em. After the final layout the core places its native view, a child of the text view (Android's
+  before lines exist. The headless engine's natural font is 1.2 em (ascent 1.2 em, descent 0, x height 0.5 em), with explicit `lineHeight` spread around that ascent by half-leading. After the final layout the core places its native view, a child of the text view (Android's
   `TextBox` is a ViewGroup for this), on the placeholder (`TextEngine::attachments`); attachments cut off by the line limit or
   an ellipsis move out of sight. Their own children are normal layout children, made with the attachment: a scroll
   view around the text never culls them (`Core::cull_scope`), as its walk does not reach inside texts, though past

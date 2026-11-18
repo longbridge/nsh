@@ -34,10 +34,12 @@ impl TextEngine for GridTextEngine {
     type Prepared = <ApproxTextEngine as TextEngine>::Prepared;
 
     fn prepare(&self, text: &AttributedText) -> Self::Prepared {
-        let mut prepared = ApproxTextEngine.prepare(text);
-        prepared.1 = px(COLUMN / 0.55);
-        prepared.6 = px(CELL);
-        prepared
+        let mut text = text.clone();
+        for span in &mut text.spans {
+            span.style.font_size = px(COLUMN / 0.55);
+            span.style.line_height = px(CELL);
+        }
+        ApproxTextEngine.prepare(&text)
     }
 
     fn measure(&self, prepared: &Self::Prepared, width: Option<Points>) -> Size<Points> {
