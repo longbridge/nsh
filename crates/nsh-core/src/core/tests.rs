@@ -16308,9 +16308,9 @@ mod components {
     /// spare cells included (which keep showing their last row).
     fn rows_shown_twice(c: &Core<FakeEngine>) -> Vec<String> {
         let mut shown = std::collections::HashMap::<&str, u32>::new();
-        for (_, node) in c.nodes.iter() {
-            if node.kind == Kind::RawText && !node.text.is_empty() {
-                *shown.entry(node.text.as_str()).or_default() += 1;
+        for text in texts_shown(c) {
+            if !text.is_empty() {
+                *shown.entry(text).or_default() += 1;
             }
         }
         let mut twice: Vec<String> = shown
@@ -16320,6 +16320,22 @@ mod components {
             .collect();
         twice.sort();
         twice
+    }
+
+    /// The raw texts in the tree: those with a node, and those a text block
+    /// shows without one (its only run).
+    fn texts_shown(c: &Core<FakeEngine>) -> Vec<&str> {
+        c.nodes
+            .iter()
+            .filter(|(_, n)| n.kind == Kind::RawText)
+            .map(|(_, n)| n.text.as_str())
+            .chain(
+                c.runs
+                    .values()
+                    .filter(|r| r.block != NO_KEY)
+                    .map(|r| r.text.as_str()),
+            )
+            .collect()
     }
 
     /// A row that goes leaves its cell spare, and the rows after it move up
@@ -16427,20 +16443,9 @@ mod components {
                 failures.push(format!("{name}: {made} views made"));
             }
             // Back at the start, the rows in the viewport show, once each.
-            let shown: Vec<String> = c
-                .nodes
-                .iter()
-                .filter(|(_, n)| n.kind == Kind::RawText)
-                .map(|(_, n)| n.text.clone())
-                .chain(
-                    c.runs
-                        .values()
-                        .filter(|r| r.block != NO_KEY)
-                        .map(|r| r.text.clone()),
-                )
-                .collect();
+            let shown = texts_shown(&c);
             for row in rows.iter().take(11) {
-                if !shown.contains(row) {
+                if !shown.contains(&row.as_str()) {
                     failures.push(format!("{name}: {row} does not show"));
                 }
             }
@@ -16634,11 +16639,9 @@ mod components {
                 let _ = c.commit();
             }
         }
-        let mut shown: Vec<String> = c
-            .nodes
-            .iter()
-            .filter(|(_, n)| n.kind == Kind::RawText && !n.text.is_empty())
-            .map(|(_, n)| n.text.clone())
+        let mut shown: Vec<&str> = texts_shown(&c)
+            .into_iter()
+            .filter(|t| !t.is_empty())
             .collect();
         shown.sort();
         CHANGING_ROWS.set(100);
