@@ -307,6 +307,9 @@ cargo build -p nsh-cli
 
 ### Reviewing UI and platform changes
 
+Every pull request that changes the UI must include screenshots or a screen recording in its description.
+Show the affected states or interaction so reviewers can verify the change.
+
 When reviewing a UI or platform change, check whether the tests and the description cover the behavior the pull
 request claims, including its states and edge cases, on both iOS and Android. If coverage is missing, describe the
 specific gap. Ask for a manual check only for what automated tests cannot exercise, and name the scenario and the
