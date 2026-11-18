@@ -8351,6 +8351,96 @@ fn a_press_is_cancelled_after_other_nodes_were_freed() {
 }
 
 #[test]
+fn release_states_after_holds_pressed_across_touch_end_hover_and_cancellation() {
+    use std::time::Duration;
+
+    use crate::tailwind::{ClassEnvironment, state};
+    let mut c = core();
+    view_with_classes(&mut c, 2, "bg-white hover:opacity-90 active:bg-zinc-200");
+    c.commit().unwrap();
+
+    // 1. Same-turn tap on a component touch responder: `TouchPhase::Start` sets
+    //    `hold_pressed(Some(2))` and `TouchPhase::End` clears `hold_pressed(None)`
+    //    right before `release_states_after` schedules the 64 ms impulse.
+    c.set_states(2, state::PRESSED);
+    c.hold_pressed(Some(2));
+    c.hold_pressed(None);
+    c.release_states_after(2, 0, Duration::from_millis(64));
+
+    let due = c.next_state_timer().expect("impulse deadline scheduled");
+    let style = view_style_of(&c.commit().unwrap(), 2).unwrap();
+    assert_eq!(style.background_color, Color(0xe4e4_e7ff));
+
+    // Concurrent hover update (`Surface::revisit`) and a late `hold_pressed(None)`
+    // keep the `PRESSED` impulse alive while updating `HOVERED`.
+    c.set_states(2, state::HOVERED);
+    c.hold_pressed(Some(2));
+    c.hold_pressed(None);
+    assert_eq!(c.next_state_timer(), Some(due));
+    let style = view_style_of(&c.commit().unwrap(), 2).unwrap();
+    assert_eq!(style.opacity, 0.9);
+    assert_eq!(style.background_color, Color(0xe4e4_e7ff));
+
+    // Not expired before `due`; expires at `due`, keeping `HOVERED`.
+    assert!(!c.expire_state_timers(due - Duration::from_millis(1)));
+    assert_eq!(c.next_state_timer(), Some(due));
+    assert!(c.expire_state_timers(due));
+    assert_eq!(c.next_state_timer(), None);
+    let style = view_style_of(&c.commit().unwrap(), 2).unwrap();
+    assert_eq!(style.opacity, 0.9);
+    assert_eq!(style.background_color, Color(0xffff_ffff));
+
+    // 2. `Command::CancelPress` clears an active impulse immediately and rejects
+    //    any post-cancel `release_states_after` until the next press begins.
+    c.set_states(2, state::HOVERED | state::PRESSED);
+    c.release_states_after(2, state::HOVERED, Duration::from_millis(64));
+    assert!(c.next_state_timer().is_some());
+    assert_eq!(
+        view_style_of(&c.commit().unwrap(), 2)
+            .unwrap()
+            .background_color,
+        Color(0xe4e4_e7ff)
+    );
+    apply(
+        &mut c,
+        vec![Op::Command {
+            id: 2,
+            command: Command::CancelPress,
+        }],
+    );
+    assert_eq!(c.next_state_timer(), None);
+    assert_eq!(
+        view_style_of(&c.commit().unwrap(), 2)
+            .unwrap()
+            .background_color,
+        Color(0xffff_ffff)
+    );
+    c.release_states_after(2, state::HOVERED, Duration::from_millis(64));
+    assert_eq!(c.next_state_timer(), None);
+    assert!(c.commit().is_none_or(|b| view_style_of(&b, 2).is_none()));
+
+    // Clear cancellation with a new press, then verify `reduce_motion` flushes impulses.
+    let _ = c.component_event(2, EventKind::PressUp, &EventPayload::None);
+    let _ = c.component_event(2, EventKind::Press, &EventPayload::None);
+    assert!(!c.component_event(2, EventKind::PressDown, &EventPayload::None));
+    c.set_states(2, state::PRESSED);
+    c.release_states_after(2, 0, Duration::from_millis(64));
+    assert!(c.next_state_timer().is_some());
+    c.commit().unwrap();
+    c.set_class_environment(ClassEnvironment {
+        reduce_motion: true,
+        ..Default::default()
+    });
+    assert_eq!(c.next_state_timer(), None);
+    assert_eq!(
+        view_style_of(&c.commit().unwrap(), 2)
+            .unwrap()
+            .background_color,
+        Color(0xffff_ffff)
+    );
+}
+
+#[test]
 fn a_node_joining_a_group_in_a_state_reads_it() {
     let mut c = core();
     view_with_classes(&mut c, 2, "group");

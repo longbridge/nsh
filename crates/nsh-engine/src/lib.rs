@@ -1307,6 +1307,7 @@ enum Message {
     ScreenHeader(NodeId, Option<Points>),
     Frame,
     States(NodeId, u16),
+    ReleaseStates(NodeId, u16, std::time::Duration),
     Modality(nsh_core::platform::InputModality),
     FontsChanged,
     Remount,
@@ -1384,6 +1385,9 @@ pub struct EngineControl {
     /// The input modality last sent ([`Self::set_input_modality`]), shared
     /// by every clone: 0 none, else 1 + the modality.
     modality: Arc<std::sync::atomic::AtomicU8>,
+    /// Events sent so far ([`Self::dispatch_event`]), shared by every clone
+    /// and matching [`MountSink::handled`].
+    events_sent: Arc<std::sync::atomic::AtomicU64>,
     /// What cleans a download's staging directory when the engine is gone
     /// and an event cannot be delivered: the platform's last stop
     /// acknowledgement goes here.
@@ -1399,7 +1403,16 @@ impl EngineControl {
         // While the core lives the sink only records (the core publishes);
         // once the core is gone the sink cleans.
         self.downloads.dispatch(id, event, &payload);
-        let _ = self.tx.send(Message::Event(id, event, payload));
+        if self.tx.send(Message::Event(id, event, payload)).is_ok() {
+            self.events_sent
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// Number of events queued via [`Self::dispatch_event`] so far, matching
+    /// [`MountSink::handled`].
+    pub fn events_sent(&self) -> u64 {
+        self.events_sent.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Reports the content offset of a scroll view or list, and how many
@@ -1601,6 +1614,14 @@ impl EngineControl {
         let _ = self.tx.send(Message::States(id, states));
     }
 
+    /// Reports the interaction states of view `id` after a short completed
+    /// press, holding `PRESSED` for `hold` in the core so same-turn
+    /// tap-to-click gestures still render `:active` feedback
+    /// ([`nsh_core::Core::release_states_after`]).
+    pub fn release_states_after(&self, id: NodeId, states: u16, hold: std::time::Duration) {
+        let _ = self.tx.send(Message::ReleaseStates(id, states, hold));
+    }
+
     /// Fonts the platform loads asynchronously became usable (on the web,
     /// a `FontFace` finished loading): text measured with a fallback font
     /// is measured again.
@@ -1686,10 +1707,12 @@ impl Engine {
         let media_files = Arc::new(media_files(&config, &app_access(&config.app)));
         let (tx, rx) = crossbeam_channel::unbounded();
         let modality = Arc::default();
+        let events_sent = Arc::default();
         let downloads = nsh_core::webview::downloads::DownloadCleanup::new();
         setup(&EngineControl {
             tx: tx.clone(),
             modality: Arc::clone(&modality),
+            events_sent: Arc::clone(&events_sent),
             downloads: downloads.clone(),
         });
         let engine_tx = tx.clone();
@@ -1717,6 +1740,7 @@ impl Engine {
             control: EngineControl {
                 tx,
                 modality,
+                events_sent,
                 downloads,
             },
             thread: Some(thread),
@@ -1925,6 +1949,7 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
         let control = EngineControl {
             tx: tx.clone(),
             modality: Arc::default(),
+            events_sent: Arc::default(),
             downloads: downloads.clone(),
         };
         setup(&control);
@@ -2019,6 +2044,9 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
             }
             _ => false,
         };
+        self.control
+            .events_sent
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.driver
             .handle(Message::Event(id, kind, payload), &self.rx);
         prevented
@@ -2297,6 +2325,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         // and the link that launched the app, which its first `url()` reads
         // (the core keeps it for the first `open` listener too).
         let mut early = Vec::new();
+        let mut early_events = 0u64;
         let mut displays: Arc<[nsh_core::desktop::Display]> = Arc::from(Vec::new());
         while let Ok(message) = rx.try_recv() {
             match message {
@@ -2311,6 +2340,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                     displays = list;
                 }
                 Message::Event(nsh_core::ROOT_ID, EventKind::UrlScheme, payload) => {
+                    early_events += 1;
                     core.component_event(nsh_core::ROOT_ID, EventKind::UrlScheme, &payload);
                 }
                 message => early.push(message),
@@ -2342,7 +2372,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                 shown: config.environment.window_state,
                 ..WindowStateReport::default()
             },
-            events_handled: 0,
+            events_handled: early_events,
             events_reported: 0,
             pinned: config.pinned,
             environment: config.environment,
@@ -2546,6 +2576,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             self.state.next_scroll_event(),
             self.state.next_mouse_move(),
             self.state.core.next_task_timer(),
+            self.state.core.next_state_timer(),
             self.state.core.download_deadline(),
             self.state.resize_burst_ends,
             self.state.window_state.settles,
@@ -2707,6 +2738,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         {
             self.last_active = Instant::now();
         }
+        state.core.expire_state_timers(nsh_core::time::now());
         if state
             .resize_burst_ends
             .is_some_and(|ends| ends <= nsh_core::time::now())
@@ -4104,6 +4136,9 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::States(id, states) => state.core.set_states(id, states),
+        Message::ReleaseStates(id, states, hold) => {
+            state.core.release_states_after(id, states, hold);
+        }
         Message::Modality(modality) => state.core.set_input_modality(modality),
         Message::FontsChanged => state.core.fonts_changed(),
         Message::Remount => state.core.remount(),
@@ -4597,6 +4632,7 @@ mod download_cleanup_tests {
         let control = EngineControl {
             tx,
             modality: Arc::default(),
+            events_sent: Arc::default(),
             downloads: cleanup.clone(),
         };
         drop(rx);

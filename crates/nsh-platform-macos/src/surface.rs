@@ -70,6 +70,9 @@ enum Message {
     HotUpdateFailed,
     /// The engine laid the app out at this size ([`MountSink::resized`]).
     Resized(Size<Points>),
+    /// The engine handled this many [`EngineControl::dispatch_event`] events
+    /// ([`MountSink::handled`]).
+    Handled(u64),
     /// The app imports chunk `id` (`import()` of a split bundle), which its
     /// bundle does not hold ([`MountSink::load_chunk`]).
     LoadChunk(String),
@@ -168,6 +171,10 @@ impl MountSink for Sink {
         self.send(Message::Resized(size));
     }
 
+    fn handled(&self, events: u64) {
+        self.send(Message::Handled(events));
+    }
+
     fn load_chunk(&self, id: &str) -> bool {
         if self.chunks.is_none() {
             return false;
@@ -239,6 +246,8 @@ pub(crate) struct Surface {
     control: RefCell<Option<EngineControl>>,
     rx: RefCell<Option<Receiver<Message>>>,
     pending: RefCell<Arc<AtomicBool>>,
+    /// Events the engine has handled and committed ([`MountSink::handled`]).
+    events_handled: Cell<u64>,
     /// The environment the engine was last told about.
     pub(crate) environment: Cell<Environment>,
     /// The app's appearance (`nsh.json`, `setColorScheme`): the color
@@ -410,6 +419,7 @@ impl Surface {
             control: RefCell::new(None),
             rx: RefCell::new(None),
             pending: RefCell::new(Arc::new(AtomicBool::new(false))),
+            events_handled: Cell::new(0),
             environment: Cell::new(environment),
             appearance: Cell::default(),
             chunks: RefCell::new(None),
@@ -467,6 +477,7 @@ impl Surface {
         });
         root.set_surface(Rc::downgrade(&surface));
         crate::keyboard::install(&surface);
+        crate::input::install(&surface);
         surface
     }
 
@@ -556,6 +567,7 @@ impl Surface {
         self.control.borrow_mut().take();
         self.engine.borrow_mut().take();
         self.rx.borrow_mut().take();
+        self.events_handled.set(0);
         self.mounter.borrow_mut().clear();
         self.native.clear();
         crate::system::clear(self);
@@ -594,6 +606,19 @@ impl Surface {
     /// Sends an event to JS.
     pub(crate) fn event(&self, id: NodeId, kind: EventKind, payload: EventPayload) {
         self.control(|c| c.dispatch_event(id, kind, payload));
+    }
+
+    /// Events queued via [`EngineControl::dispatch_event`] so far.
+    pub(crate) fn events_sent(&self) -> u64 {
+        self.control
+            .borrow()
+            .as_ref()
+            .map_or(0, EngineControl::events_sent)
+    }
+
+    /// Events the engine has handled, with their batches already applied.
+    pub(crate) fn events_handled(&self) -> u64 {
+        self.events_handled.get()
     }
 
     /// Shows fatal app errors with `f` (development hosts).
@@ -686,6 +711,50 @@ impl Surface {
                     if done {
                         break;
                     }
+                }
+                if applied {
+                    self.write_animations();
+                    self.revisit();
+                    crate::text_input::sync(self);
+                }
+            })
+        });
+        if applied {
+            self.ensure_ticking();
+        }
+    }
+
+    /// Flushes queued and pending engine messages up to `target_event` (within
+    /// [`RESIZE_WAIT`]) so AppKit's modal `mouseDown:` tracking on an input
+    /// that raised `onFocus` applies `setSelection` before returning to the
+    /// event queue.
+    pub(crate) fn flush_until_handled(self: &Rc<Self>, target_event: u64) {
+        if target_event == 0
+            || self.events_handled.get() >= target_event
+            || self.mounter.try_borrow_mut().is_err()
+        {
+            return;
+        }
+        let Some(rx) = self.rx.borrow().clone() else {
+            return;
+        };
+        if self.control.borrow().is_none() {
+            return;
+        }
+        let deadline = Instant::now() + RESIZE_WAIT;
+        let monitor = self.perf.borrow().clone();
+        let mut applied = false;
+        self.measure(false, || {
+            quiet(|| {
+                let queued = std::mem::take(&mut *self.queued.borrow_mut());
+                for message in queued {
+                    applied |= self.handle(message, monitor.as_deref());
+                }
+                while self.events_handled.get() < target_event {
+                    let Ok(message) = rx.recv_deadline(deadline) else {
+                        break;
+                    };
+                    applied |= self.handle(message, monitor.as_deref());
                 }
                 if applied {
                     self.write_animations();
@@ -797,6 +866,7 @@ impl Surface {
                 }
             }
             Message::Resized(_) => self.resize_late.set(false),
+            Message::Handled(events) => self.events_handled.set(events),
             Message::Run(task) => task.run(),
             Message::LoadChunk(id) => {
                 // The chunk's file name is its id: `is_chunk_name`

@@ -226,6 +226,9 @@ impl<M: TextEngine> Core<M> {
             // platform must reach classes resolved before it was known.
             | (if env.platform != self.class_env.platform { u16::MAX } else { 0 });
         self.class_env = env;
+        if env.reduce_motion {
+            self.clear_pressed_impulses();
+        }
         self.restyle_where(changed);
         self.parts_restyled();
     }
@@ -240,9 +243,94 @@ impl<M: TextEngine> Core<M> {
         self.set_node_states(key, states);
     }
 
+    /// Reports the interaction states of view `id` after a short completed
+    /// press, holding `state::PRESSED` for `hold` so same-turn tap-to-click
+    /// releases still render `:active` feedback before settling to `states`.
+    /// Any subsequent state report for `id` (including a new press or
+    /// cancellation) supersedes the pending release.
+    pub fn release_states_after(&mut self, id: NodeId, states: u16, hold: std::time::Duration) {
+        let Ok(key) = self.key(id) else { return };
+        if self.class_env.reduce_motion
+            || hold.is_zero()
+            || crate::time::manual()
+            || states & state::PRESSED != 0
+            || self.press_cancelled(key)
+        {
+            self.set_node_states(key, states);
+            return;
+        }
+        self.set_node_states(key, states | state::PRESSED);
+        if self.nodes[key as usize].states & state::PRESSED != 0 {
+            self.pressed_impulses
+                .push((key, id, crate::time::now() + hold));
+        }
+    }
+
+    /// Earliest deadline at which a short press's held `PRESSED` state ends.
+    pub fn next_state_timer(&self) -> Option<crate::time::Instant> {
+        self.pressed_impulses.iter().map(|&(_, _, due)| due).min()
+    }
+
+    /// Releases any short-press `PRESSED` impulses due by `now`; returns
+    /// whether any state changed.
+    pub fn expire_state_timers(&mut self, now: crate::time::Instant) -> bool {
+        if self.pressed_impulses.iter().all(|&(_, _, due)| due > now) {
+            return false;
+        }
+        let mut due = Vec::new();
+        self.pressed_impulses.retain(|&(k, id, at)| {
+            if at <= now {
+                due.push((k, id));
+                false
+            } else {
+                true
+            }
+        });
+        let mut changed = false;
+        for (key, id) in due {
+            let Some(current) = self
+                .nodes
+                .get(key as usize)
+                .filter(|n| n.id == id)
+                .map(|n| n.states & REPORTED)
+            else {
+                continue;
+            };
+            if current & state::PRESSED != 0 {
+                let before = self.nodes[key as usize].states;
+                self.set_node_states(key, current & !state::PRESSED);
+                changed |= self.nodes[key as usize].states != before;
+            }
+        }
+        changed
+    }
+
+    fn clear_pressed_impulses(&mut self) {
+        let pending = std::mem::take(&mut self.pressed_impulses);
+        for (key, id, _) in pending {
+            if let Some(current) = self
+                .nodes
+                .get(key as usize)
+                .filter(|n| n.id == id)
+                .map(|n| n.states & REPORTED)
+                && current & state::PRESSED != 0
+            {
+                self.set_node_states(key, current & !state::PRESSED);
+            }
+        }
+    }
+
     /// [`Self::set_states`] by key.
     fn set_node_states(&mut self, key: Key, states: u16) {
-        let held = self.held_pressed() == Some(key);
+        if states & state::PRESSED != 0 || self.press_cancelled(key) {
+            self.pressed_impulses.retain(|&(k, _, _)| k != key);
+        }
+        let id = self.nodes[key as usize].id;
+        let impulse_held = self
+            .pressed_impulses
+            .iter()
+            .any(|&(k, imp_id, _)| k == key && imp_id == id);
+        let held = self.held_pressed() == Some(key) || impulse_held;
         let node = &mut self.nodes[key as usize];
         let mut new = node.states & !REPORTED | states & REPORTED;
         if held {
@@ -514,10 +602,17 @@ impl<M: TextEngine> Core<M> {
         let before = self.held_pressed();
         self.components.touch.pressed = id;
         if let Some(key) = before {
-            let node = &mut self.nodes[key as usize];
-            if node.states & state::PRESSED != 0 {
-                node.states &= !state::PRESSED;
-                self.states_changed(key);
+            let prev_id = self.nodes[key as usize].id;
+            let impulse_held = self
+                .pressed_impulses
+                .iter()
+                .any(|&(k, imp_id, _)| k == key && imp_id == prev_id);
+            if !impulse_held {
+                let node = &mut self.nodes[key as usize];
+                if node.states & state::PRESSED != 0 {
+                    node.states &= !state::PRESSED;
+                    self.states_changed(key);
+                }
             }
         }
         if let Some(key) = self.held_pressed() {
@@ -1142,6 +1237,9 @@ impl<M: TextEngine> Core<M> {
                 });
             }
             if stale != 0 {
+                if stale & state::PRESSED != 0 {
+                    self.pressed_impulses.retain(|&(k, _, _)| k != key);
+                }
                 self.set_node_states(key, states);
             }
         }

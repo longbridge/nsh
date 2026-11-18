@@ -732,7 +732,7 @@ impl Mounter {
             },
             Command::SetSelection { start, end } => {
                 if let Some(view) = view {
-                    crate::text_input::set_selection(view, *start, *end);
+                    crate::text_input::set_selection(surface, view, *start, *end);
                 }
             }
             // Not carried out on this platform yet: the app's paste is lost,

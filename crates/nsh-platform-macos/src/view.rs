@@ -1447,6 +1447,9 @@ impl ViewObj {
             }
         }
         if let Some(surface) = self.input_surface() {
+            if crate::input::saw_hosted(&surface, event) {
+                return;
+            }
             // Drags may scroll or pan (a frame for the performance
             // monitor); the rest changes the screen through the engine.
             let drag = matches!(
@@ -1691,7 +1694,7 @@ thread_local! {
 }
 
 /// The type of the event the test agent hands its window now.
-fn scripted_type() -> Option<NSEventType> {
+pub(crate) fn scripted_type() -> Option<NSEventType> {
     SCRIPTED.with_borrow(|e| e.as_ref().map(|e| e.r#type()))
 }
 
