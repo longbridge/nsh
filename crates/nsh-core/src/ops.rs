@@ -1976,6 +1976,11 @@ pub enum ScreenProp {
     /// (iOS and Android).
     #[prop(js = "headerTransparent", on = SCREEN)]
     HeaderTransparent(bool),
+    /// `headerShadowVisible` (iOS: the system header; Android's has none):
+    /// the hairline under the header. Off, the bar has no shadow line, as
+    /// iOS 26's own bars.
+    #[prop(js = "headerShadowVisible", default = true, on = SCREEN)]
+    HeaderShadowVisible(bool),
     /// `headerBackTitle` (iOS: the system header; ignored elsewhere): the
     /// label of the back button leading back to this page.
     #[prop(js = "headerBackTitle", on = SCREEN)]

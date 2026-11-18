@@ -23972,6 +23972,55 @@ mod views {
         assert_eq!(dark.background_color, Some(crate::Color(0x000000ff)));
     }
 
+    /// A screen whose header hairline follows `SHADOW`.
+    #[derive(Default)]
+    struct ShadowPage;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct ShadowPageProps {}
+
+    thread_local! {
+        static SHADOW: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+    }
+
+    impl Component for ShadowPage {
+        type Props = ShadowPageProps;
+        type Event = NoEvent;
+
+        // The core's own stack and screen: `nsh_base`'s wrap them.
+        #[allow(deprecated)]
+        fn view(_: ShadowPageProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let shadow = signal(true);
+            SHADOW.with(|s| s.set(Some(shadow)));
+            stack().flex_1().child(
+                screen()
+                    .title("Page")
+                    .header_shadow_visible(move || shadow.get())
+                    .child(view().flex_1()),
+            )
+        }
+    }
+
+    /// The header hairline is on by default and follows its signal.
+    #[test]
+    fn the_header_shadow_reaches_the_screens_config() {
+        assert!(crate::ScreenConfig::default().header_shadow_visible);
+        let mut c = core();
+        c.mount_root(&Root::new::<ShadowPage>(|| ShadowPageProps {}));
+        let config = |batch: &MountBatch| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+                _ => None,
+            })
+        };
+        let first = config(&c.commit().unwrap()).expect("a screen");
+        assert!(first.header_shadow_visible);
+        let shadow = SHADOW.with(Cell::get).expect("mounted");
+        shadow.set(false);
+        let hidden = config(&c.commit().unwrap()).expect("updated");
+        assert!(!hidden.header_shadow_visible);
+    }
+
     /// A screen whose trailing header button is UIKit's own.
     #[derive(Default)]
     struct SystemItemPage;

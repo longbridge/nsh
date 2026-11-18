@@ -6180,6 +6180,7 @@ impl<M: TextEngine> Core<M> {
                         ScreenProp::HeaderVisible(v) => c.header_visible = v,
                         ScreenProp::HeaderLargeTitle(v) => c.large_title = v,
                         ScreenProp::HeaderTransparent(v) => c.header_transparent = v,
+                        ScreenProp::HeaderShadowVisible(v) => c.header_shadow_visible = v,
                         ScreenProp::HidesBottomBarWhenPushed(v) => {
                             c.hides_bottom_bar_when_pushed = v
                         }
