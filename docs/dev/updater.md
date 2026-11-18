@@ -6,7 +6,7 @@ in `crates/nsh-core/src/runtime/updater.rs`, the toolchain's side in `crates/nsh
 
 ## Flow
 
-1. `nsh.json`'s `"updater"` (`github` or `url`, `channels`, `publicKey`) is checked by `nsh package`, which adds it with the app's
+1. `nsh.json`'s `"updater"` (`github` or `url`, `channels`, `publicKey`, `successor`) is checked by `nsh package`, which adds it with the app's
    id and version to the package's assets as `nsh-updater.json`, and leaves `<name>-<version>-<os>-<arch>.<ext>`.
 2. `nsh update-manifest` writes `latest.json` and `latest.json.sig` for one version's archives.
 3. `checkForUpdate` reads the asset, gets the manifest, checks the signature, the id and that the version is newer.
@@ -71,6 +71,14 @@ packages' are removed at launch). `runningPackage()` is `Bundle::package`. `shel
   package: the code passes a name, `Config::channel` looks it up, and every channel needs HTTPS and `publicKey` as
   `url` does. Only the source changes, so the id, the signature and the newer-version check hold on every channel,
   and leaving one never downgrades. `checkForPackage` reads only the default source.
+- **A rename is one bridge release.** The id is how an app knows its own updates (the manifest's, the new app's
+  `app.json`), and the installed app's checks are compiled in, so an app cannot move to a new id by itself. A release
+  under the old id that names the new one `"successor"` takes the successor's manifest and archive: the archive's id
+  must be that one, and its executable is where `nsh package` puts it for the name in its `app.json`
+  (`nsh_updater::runner_name`, the rule `nsh package` itself names runners by), not where the old one was. It is
+  swapped in where the old app is installed, and the restart starts the new executable
+  (`Staged::program`, `nsh_core::restart::set_program`). The successor's packages (`checkForPackage`) are not taken:
+  that code is the new app's. The new app's own config names no successor.
 - **A plugin cannot replace its host.** `Installation::current` needs the executable beside an `app.json` of the id and
   a `nsh-updater.json` with the same bytes the module read. A plugin has other assets, and if it had the same bytes it
   would only update from the host's own source.

@@ -37,6 +37,13 @@ pub fn remember_program() {
     }
 }
 
+/// Sets the program a restart starts to `exe`: where an update put the
+/// app's executable when it is not where the running one was (a renamed
+/// app, `nsh_updater::Config::successor`).
+pub fn set_program(exe: PathBuf) {
+    *PROGRAM.lock().unwrap_or_else(|e| e.into_inner()) = Some(exe);
+}
+
 /// The program the app runs from: the one [`remember_program`] took before
 /// something replaced the app on disk, else this process' executable. What
 /// a restart starts, and what the desktops' login items start at login.

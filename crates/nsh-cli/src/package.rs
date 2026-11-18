@@ -1112,12 +1112,8 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
             "nsh.json schemes: a web page opens from its address, so the schemes are left out",
         );
     }
-    let executable: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
-    let executable = if executable.is_empty() {
-        "App".to_owned()
-    } else {
-        executable
-    };
+    // The rule `nsh-updater` finds a renamed app's executable by.
+    let executable = nsh_updater::runner_name(&name, false);
 
     // Web apps load what `import()` brings in when it is used; native
     // packages are one bundle. A Rust app has none: its runner mounts its

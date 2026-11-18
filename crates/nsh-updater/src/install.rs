@@ -1,8 +1,10 @@
 //! Replacing the installed app with a downloaded one, on the desktop.
 //!
 //! The new app is unpacked next to the installed one (a rename needs the
-//! same volume) and checked: its id and executable must be this app's, and
-//! on macOS `codesign` must accept it. Then, on Linux and macOS, the whole
+//! same volume) and checked: its id and executable must be this app's, or
+//! its id the successor's this app's configuration names and its executable
+//! the one `nsh package` gives that app's name (a renamed app,
+//! [`crate::Config::successor`]), and on macOS `codesign` must accept it. Then, on Linux and macOS, the whole
 //! directory or `.app` is swapped by two renames, under the path the user
 //! knows. Windows refuses to rename a directory holding the running
 //! executable but renames the executable itself, so there each entry of the
@@ -47,6 +49,9 @@ pub struct Installation {
     executable: PathBuf,
     /// The app's id; `None` for a plain directory.
     id: Option<String>,
+    /// The id the app is renamed to, whose archive may replace it
+    /// ([`crate::Config::successor`]).
+    successor: Option<String>,
 }
 
 impl Installation {
@@ -76,6 +81,9 @@ impl Installation {
             root: root.to_owned(),
             executable: executable.strip_prefix(root).ok()?.to_owned(),
             id: Some(id.to_owned()),
+            successor: crate::Config::parse(config)
+                .ok()
+                .and_then(|config| config.successor),
         };
         let holds_config = fs::read(resources(root).join("assets").join(crate::CONFIG_ASSET))
             .is_ok_and(|held| held == config);
@@ -90,6 +98,7 @@ impl Installation {
             root: root.to_owned(),
             executable: executable.strip_prefix(root).ok()?.to_owned(),
             id: None,
+            successor: None,
         })
     }
 
@@ -173,10 +182,11 @@ impl Installation {
             installation: self.clone(),
             scratch,
             new: PathBuf::new(),
+            executable: PathBuf::new(),
         };
         unpack(archive, &staged.scratch)?;
         staged.new = single_entry(&staged.scratch)?;
-        self.check_new(&staged.new)?;
+        staged.executable = self.check_new(&staged.new)?;
         Ok(staged)
     }
 
@@ -193,11 +203,19 @@ impl Installation {
         Ok(self.scratch_parent().join(staged))
     }
 
-    /// Whether `new` is this app, runnable.
-    fn check_new(&self, new: &Path) -> Result<(), Error> {
+    /// Whether `new` is this app or its successor, runnable: its
+    /// executable, under `new`.
+    fn check_new(&self, new: &Path) -> Result<PathBuf, Error> {
+        let mut executable = self.executable.clone();
         if let Some(id) = &self.id {
             match package_id(new) {
                 Some(new_id) if new_id == *id => {}
+                // The renamed app: its executable is named for its own name.
+                Some(new_id) if self.successor.as_deref() == Some(new_id.as_str()) => {
+                    executable = package_executable(new).ok_or_else(|| {
+                        Error::Install(format!("the archive of {new_id:?} names no app"))
+                    })?;
+                }
                 new_id => {
                     return Err(Error::Install(format!(
                         "the archive holds {new_id:?}, this app is {id:?}"
@@ -205,21 +223,16 @@ impl Installation {
                 }
             }
         }
-        if !new.join(&self.executable).is_file() {
+        if !new.join(&executable).is_file() {
             return Err(Error::Install(format!(
                 "the archive has no {}",
-                self.executable.display()
+                executable.display()
             )));
         }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
-            if fs::metadata(new.join(&self.executable))?
-                .permissions()
-                .mode()
-                & 0o111
-                == 0
-            {
+            if fs::metadata(new.join(&executable))?.permissions().mode() & 0o111 == 0 {
                 return Err(Error::Install("the new app is not executable".into()));
             }
         }
@@ -232,7 +245,7 @@ impl Installation {
                 return Err(Error::Install("its code signature is not valid".into()));
             }
         }
-        Ok(())
+        Ok(executable)
     }
 }
 
@@ -245,9 +258,19 @@ pub struct Staged {
     scratch: PathBuf,
     /// The new app, in `scratch`.
     new: PathBuf,
+    /// Its executable, under it: the installed app's, or the successor's.
+    executable: PathBuf,
 }
 
 impl Staged {
+    /// Where the app's executable is once [`Staged::finish`] swapped the
+    /// new app in: the installed one's path, or, for a successor named
+    /// otherwise, its executable under the same directory or `.app`. What a
+    /// restart starts.
+    pub fn program(&self) -> PathBuf {
+        self.installation.root.join(&self.executable)
+    }
+
     /// Swaps the staged app in for the installed one, as
     /// [`Installation::install`] does: on Linux and macOS two renames, on
     /// Windows the entries of the directory. Fails, leaving the installed
@@ -273,9 +296,25 @@ impl Drop for Staged {
 
 /// The id in a package's `nsh/app.json`.
 fn package_id(root: &Path) -> Option<String> {
+    package_info(root, "id")
+}
+
+/// A string of a package's `nsh/app.json`.
+fn package_info(root: &Path, key: &str) -> Option<String> {
     let text = fs::read_to_string(resources(root).join("app.json")).ok()?;
     let info: serde_json::Value = serde_json::from_str(&text).ok()?;
-    info.get("id")?.as_str().map(str::to_owned)
+    info.get(key)?.as_str().map(str::to_owned)
+}
+
+/// A package's executable under it, as `nsh package` names it for the
+/// `name` in its `nsh/app.json` ([`crate::runner_name`]).
+fn package_executable(root: &Path) -> Option<PathBuf> {
+    let runner = crate::runner_name(&package_info(root, "name")?, cfg!(windows));
+    Some(if cfg!(target_os = "macos") {
+        Path::new("Contents/MacOS").join(runner)
+    } else {
+        PathBuf::from(runner)
+    })
 }
 
 /// A package's `nsh` directory.
@@ -570,6 +609,172 @@ mod tests {
         } else {
             "App"
         }
+    }
+
+    /// A package of `id` called `app` (its `app.json` `name`), its runner
+    /// named for it as `nsh package` names it, holding `config`, under
+    /// `dir/dir_name`.
+    fn named_package(
+        dir: &Path,
+        dir_name: &str,
+        id: &str,
+        version: &str,
+        app: &str,
+        config: &[u8],
+    ) -> (PathBuf, PathBuf) {
+        let root = dir.join(dir_name);
+        let runner = crate::runner_name(app, cfg!(windows));
+        let (exe, resources) = if cfg!(target_os = "macos") {
+            (
+                root.join("Contents/MacOS").join(&runner),
+                root.join("Contents/Resources/nsh"),
+            )
+        } else {
+            (root.join(&runner), root.join("nsh"))
+        };
+        fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        fs::create_dir_all(resources.join("assets")).unwrap();
+        fs::write(resources.join("assets").join(crate::CONFIG_ASSET), config).unwrap();
+        fs::write(
+            resources.join("app.json"),
+            serde_json::json!({ "id": id, "name": app, "version": version }).to_string(),
+        )
+        .unwrap();
+        if cfg!(target_os = "macos") {
+            fs::copy("/usr/bin/true", &exe).unwrap();
+            fs::write(
+                root.join("Contents/Info.plist"),
+                format!(
+                    r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>{runner}</string>
+<key>CFBundleIdentifier</key><string>{id}</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+</dict></plist>"#
+                ),
+            )
+            .unwrap();
+            let output = Command::new("/usr/bin/codesign")
+                .args(["--force", "--sign", "-", "--timestamp=none"])
+                .arg(&root)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+        } else {
+            fs::write(&exe, version).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+        (root, exe)
+    }
+
+    /// The configuration of an app that names `com.example.renamed` its successor.
+    const RENAMED: &[u8] = br#"{"id":"com.example.app","version":"1.0.0","github":"owner/repo","successor":"com.example.renamed"}"#;
+
+    #[test]
+    fn the_successor_s_archive_replaces_the_app_under_its_own_executable() {
+        let dir = TempDir::new();
+        let (root, exe) = named_package(
+            dir.path(),
+            name(),
+            "com.example.app",
+            "1.0.0",
+            "App",
+            RENAMED,
+        );
+        let build = dir.path().join("build");
+        let new_name = if cfg!(target_os = "macos") {
+            "Renamed.app"
+        } else {
+            "Renamed"
+        };
+        let (new, _) = named_package(
+            &build,
+            new_name,
+            "com.example.renamed",
+            "2.0.0",
+            "Renamed App",
+            b"{}",
+        );
+        let archive = tar_gz(&build, &new, "new.tar.gz");
+
+        let installation = Installation::of(&exe, "com.example.app", RENAMED).unwrap();
+        let staged = installation.stage(&archive).unwrap();
+        let program = staged.program();
+        staged.finish().unwrap();
+
+        // Where the user installed it, under the successor's executable.
+        let runner = crate::runner_name("Renamed App", cfg!(windows));
+        let expected = if cfg!(target_os = "macos") {
+            root.join("Contents/MacOS").join(&runner)
+        } else {
+            root.join(&runner)
+        };
+        assert_eq!(program, expected);
+        assert!(program.is_file());
+        assert_eq!(version(&root), "2.0.0");
+        assert_eq!(package_id(&root).as_deref(), Some("com.example.renamed"));
+    }
+
+    #[test]
+    fn only_the_named_successor_replaces_the_app() {
+        let dir = TempDir::new();
+        let (_, exe) = named_package(
+            dir.path(),
+            name(),
+            "com.example.app",
+            "1.0.0",
+            "App",
+            CONFIG,
+        );
+        let build = dir.path().join("build");
+        let (renamed, _) = named_package(
+            &build,
+            "renamed",
+            "com.example.renamed",
+            "2.0.0",
+            "Renamed",
+            b"{}",
+        );
+        let archive = tar_gz(&build, &renamed, "renamed.tar.gz");
+        // An app that names no successor refuses it.
+        let plain = Installation::of(&exe, "com.example.app", CONFIG).unwrap();
+        assert!(plain.stage(&archive).is_err());
+        // One that names another refuses it too.
+        let dir = TempDir::new();
+        let other = br#"{"id":"com.example.app","version":"1.0.0","github":"owner/repo","successor":"com.example.other"}"#;
+        let (_, exe) = named_package(dir.path(), name(), "com.example.app", "1.0.0", "App", other);
+        let installation = Installation::of(&exe, "com.example.app", other).unwrap();
+        assert!(installation.stage(&archive).is_err());
+        // The successor's archive without an app of its name.
+        let dir = TempDir::new();
+        let (_, exe) = named_package(
+            dir.path(),
+            name(),
+            "com.example.app",
+            "1.0.0",
+            "App",
+            RENAMED,
+        );
+        let (broken, _) = named_package(
+            &build,
+            "broken",
+            "com.example.renamed",
+            "2.0.0",
+            "Renamed",
+            b"{}",
+        );
+        fs::write(
+            resources(&broken).join("app.json"),
+            serde_json::json!({ "id": "com.example.renamed", "name": "Elsewhere" }).to_string(),
+        )
+        .unwrap();
+        let archive = tar_gz(&build, &broken, "broken.tar.gz");
+        let installation = Installation::of(&exe, "com.example.app", RENAMED).unwrap();
+        assert!(installation.stage(&archive).is_err());
     }
 
     #[test]

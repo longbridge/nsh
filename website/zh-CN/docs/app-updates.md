@@ -48,6 +48,16 @@ group: delivery
 }
 ```
 
+应用改名会换 id。已装的应用只接受自己 id 的更新，所以要先发一个过渡版：仍用旧 id，用 `"successor"` 写上新 id，并读新应用的清单。它接受新 id 的清单和归档，把新应用放到旧应用的安装位置（可执行文件按新名字），然后重启进新应用。先发过渡版；新应用自己的 `nsh.json` 不写 successor。
+
+```json
+"updater": {
+  "url": "https://dl.example.com/new-app/latest.json",
+  "publicKey": "<keys/update.pub 的内容>",
+  "successor": "com.example.newapp"
+}
+```
+
 ## 使用
 
 ```tsx

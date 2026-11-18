@@ -361,21 +361,10 @@ fn inno_script(app: &InnoApp<'_>) -> String {
     s
 }
 
-/// `name` without what Windows does not allow in file names.
+/// `name` without what Windows does not allow in file names: the rule
+/// `nsh-updater` finds a renamed app's executable by.
 fn file_stem(name: &str) -> String {
-    let stem: String = name
-        .chars()
-        .filter(|c| {
-            !c.is_control() && !matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
-        })
-        .collect();
-    // Nor may a name end in a dot or a space.
-    let stem = stem.trim_end_matches(['.', ' ']).trim_start();
-    if stem.is_empty() {
-        "App".to_owned()
-    } else {
-        stem.to_owned()
-    }
+    nsh_updater::windows_file_stem(name)
 }
 
 /// The development host's arguments for the app `entry`: its name

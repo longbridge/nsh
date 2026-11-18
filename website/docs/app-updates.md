@@ -54,6 +54,20 @@ come from ([channels](../modules/nsh-updater.md#channels)).
 }
 ```
 
+To rename an app, which gives it a new id, ship one bridge release under the old id that names the new id as its
+`"successor"` and reads the new app's manifest. An installed app only takes updates of its own id, so this release is
+how the installs reach the new app: it takes a manifest and an archive of the successor, puts the new app where the
+old one is installed (its executable named for the new name), and restarts into it. Release the bridge first; the new
+app's own `nsh.json` names no successor.
+
+```json
+"updater": {
+  "url": "https://dl.example.com/new-app/latest.json",
+  "publicKey": "<contents of keys/update.pub>",
+  "successor": "com.example.newapp"
+}
+```
+
 ## Use it
 
 ```tsx

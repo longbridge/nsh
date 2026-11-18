@@ -32,6 +32,8 @@ pub(crate) struct UpdaterConfig {
     pub(crate) channels: std::collections::BTreeMap<String, String>,
     /// The manifests' Ed25519 key (`nsh keygen`'s `.pub`).
     pub(crate) public_key: Option<String>,
+    /// The id the app is renamed to, whose updates this release takes.
+    pub(crate) successor: Option<String>,
     /// Signed packages of the app's code the app runs over the air.
     pub(crate) packages: Option<PackagesConfig>,
 }
@@ -62,6 +64,7 @@ fn runtime_config(config: &AppConfig, id: &str) -> anyhow::Result<Option<Config>
     runtime.url = updater.url.clone();
     runtime.channels = updater.channels.clone();
     runtime.public_key = updater.public_key.clone();
+    runtime.successor = updater.successor.clone();
     runtime.build = Some(config.build.unwrap_or(1).into());
     runtime.packages = updater.packages.as_ref().map(|packages| {
         let mut runtime = Packages::default();
@@ -449,6 +452,24 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn the_package_keeps_the_successor_nsh_json_names() {
+        let key = "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=";
+        let config = |successor: &str| -> AppConfig {
+            serde_json::from_str(&format!(
+                r#"{{ "version": "1.2.0", "updater": {{ "url": "https://x.dev/latest.json",
+                    "publicKey": "{key}", "successor": "{successor}" }} }}"#
+            ))
+            .unwrap()
+        };
+        let runtime = runtime_config(&config("dev.renamed"), "dev.app")
+            .unwrap()
+            .unwrap();
+        assert_eq!(runtime.successor.as_deref(), Some("dev.renamed"));
+        // Checked when the app is packaged: not the app's own id.
+        assert!(runtime_config(&config("dev.app"), "dev.app").is_err());
     }
 
     #[test]

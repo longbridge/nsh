@@ -836,12 +836,16 @@ mod native {
         // directory or `.app` is swapped, this process' executable is the
         // old one, moved aside and deleted.
         crate::restart::remember_program();
-        blocking(move || {
-            installation.install(&archive).map_err(|e| e.to_string())?;
+        let program = blocking(move || {
+            let staged = installation.stage(&archive).map_err(|e| e.to_string())?;
+            let program = staged.program();
+            staged.finish().map_err(|e| e.to_string())?;
             let _ = std::fs::remove_file(&archive);
-            Ok(())
+            Ok(program)
         })
         .await?;
+        // A renamed app's executable has another name there.
+        crate::restart::set_program(program);
         // As `Application.restart()`: the app quits as the user's quit does
         // (storage written, windows closed), and the new version starts
         // once this process has exited (`crate::restart`).
@@ -883,8 +887,13 @@ mod native {
             // A restart after the swap starts the app at the path the
             // user knows, as `install` has it.
             crate::restart::remember_program();
+            let program = staged.program();
             match staged.finish() {
-                Ok(()) => log::info!("installed version {version} as the app quit"),
+                Ok(()) => {
+                    // A renamed app's executable has another name there.
+                    crate::restart::set_program(program);
+                    log::info!("installed version {version} as the app quit");
+                }
                 Err(e) => log::error!("cannot install version {version} as the app quits: {e}"),
             }
             let _ = std::fs::remove_file(&archive);

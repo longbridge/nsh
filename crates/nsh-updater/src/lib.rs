@@ -88,6 +88,13 @@ pub struct Config {
     /// are refused once it is set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_key: Option<String>,
+    /// The id the app is renamed to: a manifest for it is taken as this
+    /// app's, and its archive replaces this app where it is installed
+    /// although its id and executable differ (`install`). For the release
+    /// that bridges a rename, whose source then names the new app's
+    /// manifest; the new app's own configuration names no successor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub successor: Option<String>,
     /// The build number of the bundle shipped in the app (`nsh.json`
     /// `"build"`): a package runs only when its build is newer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -172,6 +179,13 @@ impl Config {
         }
         if let Some(key) = &self.public_key {
             public_key(key)?;
+        }
+        if let Some(successor) = &self.successor
+            && (successor.trim().is_empty() || *successor == self.id)
+        {
+            return Err(Error::Config(format!(
+                "successor: {successor:?} is not another app's id"
+            )));
         }
         if let Some(packages) = &self.packages {
             if packages.roots.is_empty() {
@@ -278,6 +292,10 @@ impl Config {
             return Ok(None);
         }
         let parsed = self.open(manifest, signature)?;
+        // The successor's code is for the successor's app, not this one.
+        if parsed.id != self.id {
+            return Ok(None);
+        }
         let Some(package) = parsed.package else {
             return Ok(None);
         };
@@ -313,7 +331,8 @@ impl Config {
         Ok(notes)
     }
 
-    /// The manifest, its signature checked and its id this app's.
+    /// The manifest, its signature checked and its id this app's or its
+    /// successor's.
     fn open(&self, manifest: &[u8], signature: Option<&[u8]>) -> Result<Manifest, Error> {
         if let Some(key) = &self.public_key {
             let signature =
@@ -322,7 +341,7 @@ impl Config {
         }
         let parsed: Manifest =
             serde_json::from_slice(manifest).map_err(|e| Error::Manifest(e.to_string()))?;
-        if parsed.id != self.id {
+        if parsed.id != self.id && self.successor.as_deref() != Some(parsed.id.as_str()) {
             return Err(Error::Manifest(format!(
                 "it is for {:?}, this app is {:?}",
                 parsed.id, self.id
@@ -492,6 +511,39 @@ pub struct Available {
     pub sha256: Option<String>,
     /// The archive's size.
     pub size: Option<u64>,
+}
+
+/// The runner's file name `nsh package` gives an app called `name` (its
+/// `app.json` `name`): its ASCII letters and digits on macOS (in
+/// `Contents/MacOS`) and Linux, `App` when it has none; on Windows the name
+/// without what a file name may not hold ([`windows_file_stem`]), `.exe`.
+pub fn runner_name(name: &str, windows: bool) -> String {
+    if windows {
+        return format!("{}.exe", windows_file_stem(name));
+    }
+    let runner: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    if runner.is_empty() {
+        "App".to_owned()
+    } else {
+        runner
+    }
+}
+
+/// `name` without the characters a Windows file name may not hold and the
+/// dots and spaces it may not end in; `App` when nothing is left.
+pub fn windows_file_stem(name: &str) -> String {
+    let stem: String = name
+        .chars()
+        .filter(|c| {
+            !c.is_control() && !matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+        })
+        .collect();
+    let stem = stem.trim_end_matches(['.', ' ']).trim_start();
+    if stem.is_empty() {
+        "App".to_owned()
+    } else {
+        stem.to_owned()
+    }
 }
 
 /// This machine's key in [`Manifest::platforms`]: `<os>-<arch>` on the
@@ -914,6 +966,83 @@ mod tests {
         assert!(config().check(other, None, "linux-x86_64").is_err());
         let plain = manifest("2.0.0", "http://x.dev/a.tar.gz");
         assert!(config().check(&plain, None, "linux-x86_64").is_err());
+    }
+
+    #[test]
+    fn a_successor_is_another_app_s_id() {
+        let renamed = Config {
+            successor: Some("com.example.renamed".into()),
+            ..config()
+        };
+        assert!(renamed.validate().is_ok());
+        for successor in ["", " ", "com.example.app"] {
+            let config = Config {
+                successor: Some(successor.into()),
+                ..config()
+            };
+            assert!(config.validate().is_err(), "{successor:?}");
+        }
+        // Without one it writes as before, and a newer key is read.
+        assert!(
+            serde_json::to_value(config())
+                .unwrap()
+                .get("successor")
+                .is_none()
+        );
+        let read: Config =
+            serde_json::from_str(r#"{"id":"a","version":"1.0.0","successor":"b"}"#).unwrap();
+        assert_eq!(read.successor.as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn the_successor_s_manifest_is_taken_but_not_its_packages() {
+        let renamed = Config {
+            successor: Some("com.example.renamed".into()),
+            ..takes_packages()
+        };
+        let successor = serde_json::to_vec(&serde_json::json!({
+            "id": "com.example.renamed",
+            "version": "2.0.0",
+            "platforms": { "linux-x86_64": { "url": "a.tar.gz", "sha256": "ab", "size": 2 } },
+            "package": {
+                "version": "2.0.1", "build": 9, "url": "p.nshpkg",
+                "sha256": "ab", "size": 2, "minRuntime": "0.1.0",
+            },
+        }))
+        .unwrap();
+        let available = renamed
+            .check(&successor, None, "linux-x86_64")
+            .unwrap()
+            .unwrap();
+        assert_eq!(available.version, "2.0.0");
+        // Its code is the successor app's.
+        assert!(
+            renamed
+                .check_package(&successor, None, 3, "9.0.0")
+                .unwrap()
+                .is_none()
+        );
+        // Its own manifest still reads, and a third app's is still refused.
+        assert!(
+            renamed
+                .check(&manifest("2.0.0", "a.tar.gz"), None, "linux-x86_64")
+                .unwrap()
+                .is_some()
+        );
+        let other = br#"{"id":"com.other","version":"9.0.0","platforms":{}}"#;
+        assert!(renamed.check(other, None, "linux-x86_64").is_err());
+        // An app that names no successor refuses it.
+        assert!(config().check(&successor, None, "linux-x86_64").is_err());
+    }
+
+    #[test]
+    fn runners_are_named_as_nsh_package_names_them() {
+        assert_eq!(runner_name("Endless", false), "Endless");
+        assert_eq!(runner_name("Pal Debug", false), "PalDebug");
+        assert_eq!(runner_name("日本", false), "App");
+        assert_eq!(runner_name("Pal Debug", true), "Pal Debug.exe");
+        assert_eq!(runner_name("a<b>:\"c/d\\e|f?g*. ", true), "abcdefg.exe");
+        assert_eq!(windows_file_stem("..."), "App");
     }
 
     fn takes_packages() -> Config {
