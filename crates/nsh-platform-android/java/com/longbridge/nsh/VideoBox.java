@@ -29,6 +29,8 @@ final class VideoBox extends WidgetBox implements TextureView.SurfaceTextureList
     private String source;
     private boolean prepared;
     private boolean paused, muted, repeat;
+    /** The `paused` prop last configured; {@link #paused} also follows the controls. */
+    private Boolean propPaused;
     private float volume = 1, rate = 1;
     /** 0 cover, 1 contain, 2 stretch. */
     private int resizeMode = 1;
@@ -51,7 +53,12 @@ final class VideoBox extends WidgetBox implements TextureView.SurfaceTextureList
 
     void configure(String source, boolean paused, boolean muted, float volume, float rate, boolean repeat,
             int resizeMode, boolean controls, float progressInterval, int audioSession) {
-        this.paused = paused;
+        // `paused` is acted on when it changes: a video that ended, or that
+        // the controls paused, stays so when another prop (the volume, say)
+        // changes.
+        boolean toggled = propPaused == null || propPaused != paused;
+        propPaused = paused;
+        if (toggled) this.paused = paused;
         this.muted = muted;
         this.volume = volume;
         this.rate = rate;
@@ -81,9 +88,10 @@ final class VideoBox extends WidgetBox implements TextureView.SurfaceTextureList
         }
         if (!Objects.equals(source, this.source) || reopen) {
             this.source = source;
+            this.paused = paused;
             open();
         } else {
-            apply();
+            apply(toggled);
         }
     }
 
@@ -99,7 +107,7 @@ final class VideoBox extends WidgetBox implements TextureView.SurfaceTextureList
             if (paused) mp.seekTo(0);
             mounter.eventMap(id, Native.LOAD, new String[] {"duration", "width", "height"},
                     new Object[] {mp.getDuration() / 1000.0, (double) mp.getVideoWidth(), (double) mp.getVideoHeight()});
-            apply();
+            apply(true);
         });
         p.setOnVideoSizeChangedListener((mp, w, h) -> {
             videoWidth = w;
@@ -145,18 +153,21 @@ final class VideoBox extends WidgetBox implements TextureView.SurfaceTextureList
         }
     }
 
-    /** Applies the playback properties to a prepared player. */
-    private void apply() {
+    /**
+     * Applies the playback properties to a prepared player; {@code toggled}
+     * when {@link #paused} is to be acted on, not only kept.
+     */
+    private void apply(boolean toggled) {
         MediaPlayer p = player;
         if (p == null || !prepared) return;
         float v = muted ? 0 : Math.max(0, Math.min(1, volume));
         p.setVolume(v, v);
         if (paused) {
-            if (p.isPlaying()) p.pause();
+            if (toggled && p.isPlaying()) p.pause();
         } else {
+            if (toggled && !p.isPlaying()) p.start();
             // Setting a speed starts playback, so only while playing.
-            if (!p.isPlaying()) p.start();
-            if (rate > 0 && p.getPlaybackParams().getSpeed() != rate) {
+            if (p.isPlaying() && rate > 0 && p.getPlaybackParams().getSpeed() != rate) {
                 p.setPlaybackParams(p.getPlaybackParams().setSpeed(rate));
             }
         }

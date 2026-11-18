@@ -284,9 +284,14 @@ impl VideoHost {
         if !av_foundation() {
             return log::error!("cannot load AVFoundation");
         }
-        if p.source != self.props.source || self.player.is_none() {
+        let reopened = p.source != self.props.source || self.player.is_none();
+        if reopened {
             self.open(p.source.as_deref());
         }
+        // `paused` is acted on when it changes (or for a new source): one
+        // the system controls paused stays paused when another prop (the
+        // volume, say) changes.
+        let toggled = reopened || p.paused != self.props.paused;
         if p.controls != self.props.controls || self.layer.is_none() && self.controller.is_none() {
             self.attach(p.controls);
         }
@@ -317,9 +322,12 @@ impl VideoHost {
                     msg_send![player, setAudiovisualBackgroundPlaybackPolicy: background_policy];
                 let _: () = msg_send![player, setMuted: Bool::new(p.muted)];
                 let _: () = msg_send![player, setVolume: p.volume];
-                if p.paused {
+                let rate: f32 = msg_send![player, rate];
+                if toggled && p.paused {
                     let _: () = msg_send![player, pause];
-                } else {
+                } else if toggled || !p.paused && rate != 0.0 && p.rate != self.props.rate {
+                    // A new `rate` applies while playing; setting it would
+                    // also play a paused player.
                     let _: () = msg_send![player, setRate: p.rate];
                 }
             }

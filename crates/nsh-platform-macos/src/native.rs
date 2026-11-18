@@ -1478,9 +1478,16 @@ impl VideoHost {
             unsafe {
                 let _: () = msg_send![player, setMuted: Bool::new(p.muted)];
                 let _: () = msg_send![player, setVolume: p.volume.clamp(0.0, 1.0)];
-                if p.paused {
+                // `paused` is acted on when it changes (or for a new
+                // source): one the system controls paused stays paused
+                // when another prop (the volume, say) changes. A new
+                // `rate` applies while playing; setting it would also
+                // play a paused player.
+                let toggled = first || reopened || p.paused != old.paused;
+                let rate: f32 = msg_send![player, rate];
+                if toggled && p.paused {
                     let _: () = msg_send![player, pause];
-                } else {
+                } else if toggled || !p.paused && rate != 0.0 && p.rate != old.rate {
                     let _: () = msg_send![player, setRate: p.rate];
                 }
             }
