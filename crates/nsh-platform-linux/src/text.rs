@@ -1257,9 +1257,13 @@ pub(crate) fn set(
     let mut selection = None;
     match old.and_then(|o| o.selection.map(|s| (s, o.text))) {
         Some((s, old)) if text.is_selectable() => {
-            // Offsets into other text mean nothing.
-            if old.text != text.text {
-                s.range.set(None);
+            // Offsets into other text mean nothing: the selection ends
+            // as `select(.., None)` ends one, or the view would keep the
+            // focus, Ctrl+A / Ctrl+C and the watcher for a selection that
+            // is no more (`select` cannot clear a range already `None`).
+            if old.text != text.text && s.range.take().is_some() {
+                s.watch_outside(view, false);
+                view.set_focusable(false);
             }
             selection = Some(s);
         }
@@ -2682,6 +2686,52 @@ mod tests {
 
     /// Nothing of a hidden run is drawn: not its color emoji, its
     /// decorations or its shadow.
+    /// A selectable text whose content changes ends its selection as a
+    /// cleared one: not focusable, no watcher on the root (#2436).
+    #[test]
+    fn new_content_ends_the_selection_and_its_focus() {
+        crate::gtk_test::run(|| {
+            let engine = PangoTextEngine::new("sans-serif".into());
+            let window = gtk::Window::new();
+            let view = NshView::new(1, nsh_core::ViewKind::Text);
+            window.set_child(Some(&view));
+            window.present();
+            let set_text = |s: &str| {
+                let mut t = text(&[(s, ResolvedTextStyle::default())]);
+                t.selectable = Some(true);
+                let prepared = engine.prepare(&t);
+                let size = engine.measure(&prepared, None);
+                let layout = engine.layout(&prepared, size);
+                let content =
+                    Bounds::new(nsh_core::geometry::point(Points(0.0), Points(0.0)), size);
+                set(&view, &Arc::new(t), &layout, content);
+            };
+            let selected = |view: &NshView| {
+                let s = view_selection(view).unwrap();
+                (
+                    s.range.get(),
+                    s.outside.borrow().is_some(),
+                    view.is_focusable(),
+                )
+            };
+            set_text("hello world");
+            select(&view, Some((0, 5)));
+            assert_eq!(selected(&view), (Some((0, 5)), true, true));
+            // The same content keeps it.
+            set_text("hello world");
+            assert_eq!(selected(&view), (Some((0, 5)), true, true));
+            // Other content ends it, focus and watcher included.
+            set_text("goodbye");
+            assert_eq!(selected(&view), (None, false, false));
+            // A later selection clears as any other.
+            select(&view, Some((0, 4)));
+            assert_eq!(selected(&view), (Some((0, 4)), true, true));
+            select(&view, None);
+            assert_eq!(selected(&view), (None, false, false));
+            window.destroy();
+        });
+    }
+
     #[test]
     fn hidden_runs_draw_nothing() {
         crate::gtk_test::run(|| {
