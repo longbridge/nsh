@@ -41,9 +41,14 @@ tap text:Sheet
 expect Sheet: pending
 tap text:Empty
 expect Empty: rejected TypeError
+tap text:Prompt
+expect Prompt: pending
+tap text:Input in sheet
+expect Input in sheet: rejected TypeError
 wait 300
 expect Alert: pending
 expect Sheet: pending
+expect Prompt: pending
 covers [nsh/base] AlertDialog
 # base-avatar
 tap id:case-base-avatar

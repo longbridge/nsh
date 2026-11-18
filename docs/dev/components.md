@@ -96,7 +96,9 @@ Visual rules are changed in the shared layer; `nsh-base` supplies the components
   AlertDialogOptions) -> Result<AlertDialogResult, String> }` is `await AlertDialog.show({ … })` in JS (`nsh-base`
   `alert_dialog.rs`). A module named like a component adds static functions to it.
 - **System UI**: `nsh_base::alert_dialog().title(..).cancel(..).destructive(..).show()` (TSX's `AlertDialog.show({ … })`:
-  await an `AlertDialogResult`, whose `action` is the chosen action's id, `None` when closed without one), `dismiss_keyboard()`, a screen's
+  await an `AlertDialogResult`, whose `action` is the chosen action's id, `None` when closed without one, and `value`
+  the text of an alert's `.input(..)`: the system's own text field where the platform's alert has one, iOS, Android,
+  macOS and the web; elsewhere the alert shows without it), `dismiss_keyboard()`, a screen's
   or modal's `.status_bar(..)` (as a view controller's `preferredStatusBarStyle`; a `StatusBarStyle` alone, a
   `StatusBarSetting` or a closure of one), `ModuleCx::set_status_bar(patch)`
   for the default under them; `.inset_padding(..)` / `.inset_margin(..)` on an element; the safe area and the keyboard as styles: `.pt_safe_area()`, `.pb_keyboard()` (`styles.md` "Environment variables").
@@ -960,8 +962,9 @@ what changed.
   lays out again; JS is not involved). Each cell's content (`Inner::VirtualRow`) is made once, under an owner of its
   own made under the owner `virtual_list` was called in (the view's, or a `when` / `dynamic` / `each` run's), so the
   rows see that run's context and are disposed with it (also when the list is passed as another component's `Items`; a list a later run keeps moves to that run, and the earlier run's end leaves it alone); it shows the row its `Position` says: a memo of the list's count and keys moves the cells' index signals
-  (`move_rows`) before the bindings that read them run, so a change runs only the bindings of the rows that changed
-  and never shows a row with another row's data. With keys, a row that stays keeps its cell and size wherever it
+  (`move_rows`), and a cell's `Position` brings that memo up to date before its index or count is read, so whichever
+  of them runs first, a binding never reads the new rows at a cell's old index: a change runs only the bindings of the
+  rows that changed and never shows a row with another row's data, not even for a moment in a memo. With keys, a row that stays keeps its cell and size wherever it
   moves, and rows removed or inserted before others leave the others alone. A cell past the end (the list shrank) disposes its content until the list binds it again.
   The header, footer and empty view are part of the view (their `CellSlot`s), outside the recycling; a separator
   goes into each row's cell, after the row (before it, inverted), while the row is not the last.

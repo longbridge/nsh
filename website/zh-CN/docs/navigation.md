@@ -594,6 +594,20 @@ Escape、Android 返回键、点击背景（TSX 的背景，Rust 中是原生表
 
 全部属性见 [Dialog](../elements/dialog.md)。在对话框内部，`env(safe-area-inset-*)` 变量和 inset 都是对话框自己的。系统对话框（带操作的提示框、操作表）请用 `nsh_base`（TSX：`nsh/base`）的 [`AlertDialog`](../modules/nsh-base.md#alertdialog)。
 
+要让用户输入一小段文字（例如新名字），给提示框加上 `input`：iOS、Android、macOS 和 Web 会在提示框里显示系统自己的文本框并让它获得焦点，结果的 `value` 就是框里的文字。回车会选中最后一个 `"default"` 操作；设了 `required` 时，文本框为空期间除取消操作外的操作都不可用。在 Windows、Linux 和终端里，提示框不带文本框显示，`value` 为 `null`，那里请自己画一个 `Dialog`。
+
+```tsx
+const { action, value } = await AlertDialog.show({
+  title: "重命名",
+  input: { defaultValue: name(), placeholder: "名称", selectTextOnFocus: true, required: true },
+  actions: [
+    { label: "取消", role: "cancel", id: "cancel" },
+    { label: "重命名", id: "rename" },
+  ],
+});
+if (action === "rename" && value !== null) name.set(value);
+```
+
 ## Android 返回键
 
 在 Android 上，返回键（或返回手势）按以下顺序处理：

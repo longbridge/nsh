@@ -394,6 +394,16 @@ img.nsh-fill { pointer-events: none; }
 .nsh-dialog button.cancel { font-weight: 600; }
 .nsh-desktop .nsh-dialog button.cancel { font-weight: 500; }
 .nsh-dialog button.destructive { color: #ff3b30; }
+.nsh-dialog button:disabled { opacity: .4; }
+.nsh-dialog-input { display: block; box-sizing: border-box; width: calc(100% - 32px); margin: 0 16px 16px; padding: 6px 8px;
+  border: 0.5px solid rgba(0,0,0,.25); border-radius: 7px; background: #fff; color: inherit; outline: none;
+  font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.nsh-dialog h3 + .nsh-dialog-input { margin-top: 14px; }
+.nsh-desktop .nsh-dialog-input { width: 100%; margin: 12px 0 0; padding: 7px 10px; border: 1px solid #e5e5e5;
+  border-radius: 8px; font-size: 14px; }
+.nsh-desktop .nsh-dialog-input:focus { border-color: #a3a3a3; }
+.nsh-dark .nsh-dialog-input { background: rgba(28,28,30,.9); border-color: rgba(255,255,255,.2); }
+.nsh-desktop.nsh-dark .nsh-dialog-input { background: #0a0a0a; border-color: #262626; }
 .nsh-dark .nsh-dialog { background: rgba(44,44,46,.97); color: #fff; }
 .nsh-dark .nsh-dialog button { border-top-color: rgba(255,255,255,.15); color: #0a84ff; }
 .nsh-dark .nsh-dialog button.destructive { color: #ff453a; }
@@ -2067,6 +2077,7 @@ class Player {
     document.addEventListener("visibilitychange", changed);
     addEventListener("focus", changed);
     addEventListener("blur", changed);
+    this.watchPageCache(changed);
     visualViewport?.addEventListener("resize", changed);
     visualViewport?.addEventListener("scroll", changed);
     new MutationObserver(changed).observe(document.documentElement, { attributes: true, attributeFilter: ["dir", "lang"] });
@@ -2075,6 +2086,30 @@ class Player {
     this.safeProbe.className = "nsh-probe";
     document.body.append(this.safeProbe);
     if (this.viewportOverlays) this.installFloats();
+  }
+
+  /** A page the browser keeps in its back / forward cache (a `pagehide`
+   * that is `persisted`) is in the background until a `pageshow` brings it
+   * back: the app sees the pair of edges whether or not the browser tells
+   * `visibilitychange` around them. A page that is discarded (`pagehide`
+   * not `persisted`) ends its app instead (`watchPageEnd`). Neither
+   * listener keeps a page out of that cache. */
+  watchPageCache(changed) {
+    const cached = (value) => (event) => {
+      if (!event.persisted) return;
+      this.pageCached = value;
+      changed();
+    };
+    window.addEventListener("pagehide", cached(true));
+    window.addEventListener("pageshow", cached(false));
+  }
+
+  /** The app's state (`lifecycle()`): `background` while the page is
+   * hidden (another tab, a minimized window) or in the back / forward
+   * cache, else whether it has the focus. */
+  lifecycle() {
+    if (this.pageCached || document.visibilityState === "hidden") return "background";
+    return document.hasFocus() ? "active" : "inactive";
   }
 
   /** The page's insets covered by system UI, where they overlap the root
@@ -2124,9 +2159,7 @@ class Player {
       keyboard: this.keyboardHeight(),
       appleKeyboard: APPLE,
       host: Boolean(this.options.host),
-      lifecycle: document.visibilityState === "hidden"
-        ? "background"
-        : document.hasFocus() ? "active" : "inactive",
+      lifecycle: this.lifecycle(),
       timeZone: timeZoneName(),
       screenColor: typeof window.EyeDropper === "function",
       share: webShareAllowed(),
@@ -6992,7 +7025,10 @@ class Player {
       case "zoomTo": if (el) this.zoomCommand(el, ...args); break;
       case "setResponder": this.responderBlocks = !!args[0]; break;
       case "clearResponder": this.responderBlocks = false; break;
-      case "dialog": this.dialog(args[0], args[1], args[2], args[3], args[4] ?? [], args[5] ?? true, args[6] ?? false); break;
+      case "dialog":
+        this.dialog(args[0], args[1], args[2], args[3], args[4] ?? [], args[5] ?? true, args[6] ?? false,
+          args[7] ?? null, args[8] ?? null, args[9] ?? false, args[10] ?? false);
+        break;
       case "closeDialog": this.closeDialog(args[0]); break;
       case "reload": {
         const frame = el?._frameEl;
@@ -8288,9 +8324,13 @@ class Player {
    * buttons in a row, the last regular one the default), otherwise as
    * iOS's alert and action sheet. Answers the button's index, -1 when
    * dismissed (a click beside it, or Escape, when cancelable); Escape
-   * presses the cancel button if any (`keyDown`, `_cancel`).
+   * presses the cancel button if any (`keyDown`, `_cancel`). An alert with
+   * `input` (not null) has a text field starting with it, focused, its
+   * text answered as `value`: Enter in it presses the default button, and
+   * while a `required` field is empty only the cancel buttons are enabled.
    */
-  dialog(dialogId, title, message, buttons, styles, cancelable, sheet) {
+  dialog(dialogId, title, message, buttons, styles, cancelable, sheet, input = null, placeholder = null,
+    selectAll = false, required = false) {
     // `AlertDialog` always brings the app's actions: no label of NSH's own.
     const list = buttons;
     const style = (i) => styles[i] ?? "default";
@@ -8316,8 +8356,10 @@ class Player {
       if (restore?.isConnected) restore.focus({ preventScroll: true });
       return true;
     };
+    let field = null;
     const close = (index) => {
-      if (takeDown()) this.event(ROOT_ID, "onDialog", { id: dialogId, index });
+      if (!takeDown()) return;
+      this.event(ROOT_ID, "onDialog", field ? { id: dialogId, index, value: field.value } : { id: dialogId, index });
     };
     backdrop._dialogId = dialogId;
     backdrop._takeDown = takeDown;
@@ -8375,6 +8417,15 @@ class Player {
         p.textContent = message;
         box.append(p);
       }
+      if (input !== null) {
+        field = document.createElement("input");
+        field.type = "text";
+        field.className = "nsh-dialog-input";
+        field.value = input;
+        if (placeholder !== null) field.placeholder = placeholder;
+        field.setAttribute("aria-label", title ?? message ?? placeholder ?? "");
+        box.append(field);
+      }
       const actions = document.createElement("div");
       // Desktop: up to three in a row; iOS: two side by side.
       const row = desktop ? list.length <= 3 : list.length === 2;
@@ -8392,6 +8443,23 @@ class Player {
       });
       focus ??= actions.firstChild;
       box.append(actions);
+      if (field) {
+        const all = [...actions.children];
+        const enable = () => {
+          if (!required) return;
+          const empty = field.value === "";
+          all.forEach((b, i) => { b.disabled = empty && style(i) !== "cancel"; });
+        };
+        enable();
+        field.addEventListener("input", enable);
+        field.addEventListener("keydown", (e) => {
+          if (e.key !== "Enter" || e.isComposing) return;
+          e.preventDefault();
+          const b = all[preferred];
+          if (b && !b.disabled) close(preferred);
+        });
+        focus = field;
+      }
     }
     backdrop.addEventListener("click", (e) => e.target === backdrop && down === backdrop && cancelable && close(-1));
     backdrop.append(box);
@@ -8400,6 +8468,10 @@ class Player {
     (this.dialogs ??= []).push(backdrop);
     this.scopeFocus();
     focus?.focus({ preventScroll: true });
+    if (field) {
+      if (selectAll) field.select();
+      else field.setSelectionRange(field.value.length, field.value.length);
+    }
   }
 
   /** Takes back the dialog `dialog` showed as `dialogId` (`closeDialog`), reporting nothing: the core answered it. */

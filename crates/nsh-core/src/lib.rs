@@ -109,8 +109,8 @@ pub use crate::{
     },
     ops::{
         AutoCapitalize, AutoFill, CellSlot, Command, ContextMenuEvent, Dialog, DialogButton,
-        DialogButtonStyle, EditAction, EventKind, EventMask, EventPayload, FpsMode, Haptic,
-        HapticImpact, HapticNotification, HeaderItem, HeaderItemContent, HeaderSlot,
+        DialogButtonStyle, DialogInput, EditAction, EventKind, EventMask, EventPayload, FpsMode,
+        Haptic, HapticImpact, HapticNotification, HeaderItem, HeaderItemContent, HeaderSlot,
         HeaderSystemItem, IMAGE_SCALES, ImageProp, ImageScales, ImageSource, KeyboardAppearance,
         KeyboardDismissMode, KeyboardTaps, KeyboardType, ListAlignment, ListContentStyle,
         ListViewport, ModalAnimation, ModalPresentation, ModalProp, MouseButton, MouseEvent,
@@ -120,6 +120,7 @@ pub use crate::{
         SheetDetent, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
         SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint, TransitionFallback, Viewability,
         WebElement, WebInput, WebKey, WebLoad, WebSource, WheelDelta, WheelEvent,
+        dialog_default_button,
     },
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityCurrent, AccessibilityProp,

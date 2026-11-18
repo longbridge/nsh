@@ -431,6 +431,30 @@ replacement) and every mount item of every step is the same. The first commit ta
 522 → 427 ms, a replacement's 204.5 → 106.9 ms (parsing, expansion and layout; no native
 mounting or drawing).
 
+`TextView` long text (`text_view/markdown/incremental.rs`, 2026-11-18, Linux x86_64, Intel Core
+Ultra 7 270K Plus, release, one CPU with `taskset`, least of three runs): one parse of a whole text
+grows faster than the text, so a long text given at once is read in parts the way a streamed one
+is (`text-view.md` "Reading only what can change"). `cargo test --release -p nsh-base --lib
+bench_long_texts -- --ignored --nocapture` reads each text both ways and checks that the documents
+are equal. Sections are a heading, a paragraph with a link and bold words, and a two-item list; the
+typical reply is the streaming benchmarks' text repeated. ms:
+
+| Text | Size | One parse | In parts |
+|---|---|---|---|
+| Sections | 190 KB | 50.8 | 27.4 |
+| Sections | 475 KB | 210.9 | 75.1 |
+| Sections | 950 KB | 625.8 | 140.4 |
+| Sections | 1.9 MB | 2282.0 | 309.3 |
+| Typical reply | 950 KB | 3689.0 | 352.4 |
+| One table, 20,000 rows | 928 KB | 19357.1 | 19333.5 |
+| One list, 20,000 items | 848 KB | 422.9 | 436.8 |
+| One code block, 20,000 lines | 1.1 MB | 78.4 | 74.2 |
+
+A text up to twice the part's size, and one read whole (definitions, plugins, containers, MDX), is
+parsed once as before. A text the boundary cannot cross costs what one parse does: the table, list
+and code block are within noise. The table's own parse still grows with the square of its rows,
+inside `markdown-rs`.
+
 Terminal `TextView` tables (2026-11-08, Linux x86_64, debug hosts,
 `nsh test <entry> --target tui --trace`, against `71aeb06a`, seven alternating runs per version, medians):
 100 body rows × 10 columns, each cell 100 `x` characters, in a 200 × 60 Cell terminal. Narrowing the table's

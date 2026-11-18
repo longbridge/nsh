@@ -16368,6 +16368,12 @@ mod components {
                 .iter()
                 .filter(|(_, n)| n.kind == Kind::RawText)
                 .map(|(_, n)| n.text.clone())
+                .chain(
+                    c.runs
+                        .values()
+                        .filter(|r| r.block != NO_KEY)
+                        .map(|r| r.text.clone()),
+                )
                 .collect();
             for row in rows.iter().take(11) {
                 if !shown.contains(row) {
@@ -16377,6 +16383,202 @@ mod components {
         }
         CHANGING_ROWS.set(100);
         assert_eq!(failures, Vec::<String>::new());
+    }
+
+    thread_local! {
+        /// Every value the id memo of a `KeyedIdRows` cell took: the cell's
+        /// number and the id.
+        static IDS_READ: std::cell::RefCell<Vec<(u32, Option<String>)>> = const { std::cell::RefCell::new(Vec::new()) };
+        /// How many times a `KeyedIdRows` row's content was made again for
+        /// the id it already showed.
+        static ROWS_REMADE: Cell<u32> = const { Cell::new(0) };
+        /// The `KeyedIdRows` cells made so far (their numbers).
+        static ID_CELLS: Cell<u32> = const { Cell::new(0) };
+        /// The rows inserted so far (their keys).
+        static INSERTED: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// Keyed rows, `r0`, `r1`, ..., whose cells read their row's id in a
+    /// memo and make the row's content from it, as an app does to keep a
+    /// row's state with its item; a press changes the rows as
+    /// [`ROWS_CHANGE`] says.
+    #[component]
+    fn KeyedIdRows() -> impl IntoElement {
+        let count = CHANGING_ROWS.get();
+        let rows = signal((0..count).map(|i| format!("r{i}")).collect::<Vec<_>>());
+        view()
+            .flex_1()
+            .child(view().h(px(20.0)).on_press(move |_: &()| {
+                let change = ROWS_CHANGE.get().expect("a change");
+                rows.update(change);
+            }))
+            .child(
+                virtual_list(
+                    move || rows.with(Vec::len),
+                    move |at| {
+                        let cell = ID_CELLS.get();
+                        ID_CELLS.set(cell + 1);
+                        let id = computed(move || {
+                            let id = rows.with(|r| r.get(at.index()).cloned());
+                            IDS_READ.with_borrow_mut(|read| read.push((cell, id.clone())));
+                            id
+                        });
+                        let shown: std::rc::Rc<std::cell::RefCell<Option<Option<String>>>> =
+                            std::rc::Rc::default();
+                        view().h(px(40.0)).child(dynamic(move || {
+                            let id = id.get();
+                            if shown.replace(Some(id.clone())).as_ref() == Some(&id) {
+                                ROWS_REMADE.set(ROWS_REMADE.get() + 1);
+                            }
+                            text(id.unwrap_or_default())
+                        }))
+                    },
+                )
+                .keys(move || rows.get())
+                .estimated_item_size(px(40.0))
+                .flex_1(),
+            )
+    }
+
+    /// A keyed list's cells read their rows at their new indices as soon as
+    /// the rows change: a memo of a cell's row never sees another row on
+    /// the way (the row now at the cell's old index), so content made from
+    /// it is not made again. However long the list is, and however often
+    /// its rows changed before.
+    #[test]
+    fn keyed_list_cells_never_read_another_row_on_the_way() {
+        let changes: [(&str, RowsChange); 4] = [
+            ("move to the top", |r| {
+                let row = r.remove(5);
+                r.insert(0, row);
+            }),
+            ("remove", |r| {
+                r.remove(3);
+            }),
+            ("insert", |r| {
+                let n = INSERTED.get();
+                INSERTED.set(n + 1);
+                r.insert(4, format!("n{n}"));
+            }),
+            ("reorder", |r| r[..12].reverse()),
+        ];
+        let mut failures = Vec::new();
+        for count in [40, 2000] {
+            CHANGING_ROWS.set(count);
+            let mut c = core();
+            c.mount_root(&crate::element::Root::new::<KeyedIdRows>(|| ()));
+            let batch = c.commit().unwrap();
+            let button = batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Events { id, events } if events.contains(EventKind::Press) => {
+                        Some(*id)
+                    }
+                    _ => None,
+                })
+                .expect("a button");
+            for _ in 0..4 {
+                let _ = c.commit();
+            }
+            // The id each cell showed last.
+            let mut shown = std::collections::HashMap::new();
+            for (cell, id) in IDS_READ.take() {
+                shown.insert(cell, id);
+            }
+            // The order the graph runs the memos in follows the history of
+            // the rows' changes: go through the changes a few times.
+            for round in 0..4 {
+                for (name, change) in changes {
+                    IDS_READ.with_borrow_mut(Vec::clear);
+                    ROWS_REMADE.set(0);
+                    ROWS_CHANGE.set(Some(change));
+                    assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+                    let mut made = 0;
+                    for _ in 0..4 {
+                        let batch = c.commit();
+                        made += batch
+                            .iter()
+                            .flat_map(|b| &b.items)
+                            .filter(|i| matches!(i, MountItem::Create { .. }))
+                            .count();
+                    }
+                    let case = format!("{count} rows, round {round}, {name}");
+                    // Each cell's memo went from the id it showed (if it
+                    // showed one) straight to the id it settled on: no
+                    // other row on the way.
+                    let mut taken = std::collections::HashMap::<u32, Vec<Option<String>>>::new();
+                    for (cell, id) in IDS_READ.take() {
+                        let ids = taken.entry(cell).or_default();
+                        if ids.last() != Some(&id) {
+                            ids.push(id);
+                        }
+                    }
+                    for (cell, ids) in taken {
+                        let settled = ids.last().cloned().expect("an id");
+                        let before = shown.insert(cell, settled.clone());
+                        let straight = match &ids[..] {
+                            [_] => true,
+                            [from, _] => before.as_ref() == Some(from),
+                            _ => false,
+                        };
+                        if !straight {
+                            failures.push(format!("{case}: cell {cell} took {ids:?}"));
+                        }
+                    }
+                    let remade = ROWS_REMADE.get();
+                    if remade != 0 {
+                        failures.push(format!("{case}: {remade} rows made again"));
+                    }
+                    if matches!(name, "move to the top" | "reorder") && made != 0 {
+                        failures.push(format!("{case}: {made} views made"));
+                    }
+                }
+            }
+        }
+        CHANGING_ROWS.set(100);
+        assert_eq!(failures, Vec::<String>::new());
+    }
+
+    /// The cell of a keyed row that goes can be the first to read the new
+    /// rows (the graph runs what reads them in an order their earlier
+    /// changes left): reading its position lets the cell's content go, the
+    /// running memo with it, and nothing fails.
+    #[test]
+    fn keyed_list_cell_whose_row_goes_can_read_first() {
+        let changes: [RowsChange; 2] = [|r| r.swap(0, 1), |r| drop(r.remove(0))];
+        CHANGING_ROWS.set(3);
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<KeyedIdRows>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("a button");
+        for _ in 0..4 {
+            let _ = c.commit();
+        }
+        for change in changes {
+            ROWS_CHANGE.set(Some(change));
+            assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+            assert!(c.components.runtime.take_failures().is_empty());
+            for _ in 0..4 {
+                let _ = c.commit();
+            }
+        }
+        let mut shown: Vec<String> = c
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.kind == Kind::RawText && !n.text.is_empty())
+            .map(|(_, n)| n.text.clone())
+            .collect();
+        shown.sort();
+        CHANGING_ROWS.set(100);
+        assert_eq!(shown, ["r0", "r2"]);
     }
 
     /// A long list of its own rows, each a stop of Tab.
@@ -17208,6 +17410,63 @@ mod components {
             shown.last().unwrap(),
             "render failed ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"
         );
+    }
+
+    /// An offscreen render checks its images as a canvas drawing does: a
+    /// source the app may not load is dropped before the platform sees it,
+    /// one it may is rewritten to what the check granted.
+    #[test]
+    fn offscreen_renders_check_their_images() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            canvas_render: true,
+            ..Default::default()
+        });
+        c.set_access(Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(
+                &serde_json::json!({ "network": { "hosts": ["docs.example.com"] } }),
+            )
+            .unwrap(),
+            granted: None,
+        }));
+        let image = |uri: &str| crate::canvas::CanvasOp::DrawImage {
+            image: crate::canvas::CanvasImage { uri: uri.into() },
+            source: None,
+            dest: [crate::canvas::Num::Const(0.0); 4],
+        };
+        let (_answer, slot) = crate::element::task::Answer::new();
+        c.start_canvas_render(
+            crate::canvas::render::RenderRequest {
+                drawing: crate::canvas::Drawing {
+                    ops: vec![
+                        image("https://docs.example.com/a/../x.png"),
+                        image("https://refused.example.com/x.png"),
+                    ],
+                    ..Default::default()
+                },
+                size: crate::Size::new(px(30.0), px(20.0)),
+                ..Default::default()
+            },
+            slot,
+        );
+        let batch = c.commit().unwrap();
+        let uris: Vec<String> = batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    command: Command::RenderCanvas { drawing, .. },
+                    ..
+                } => Some(drawing),
+                _ => None,
+            })
+            .flat_map(|d| d.ops.iter())
+            .filter_map(|op| match op {
+                crate::canvas::CanvasOp::DrawImage { image, .. } => Some(image.uri.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(uris, ["https://docs.example.com/x.png"]);
     }
 
     #[test]
@@ -21577,6 +21836,7 @@ mod views {
                 node.children
                     .first()
                     .map(|&raw| c.nodes[raw as usize].text.clone())
+                    .or_else(|| c.folded_text(c.key(node.id).unwrap()).map(str::to_owned))
             })
             .collect()
     }
@@ -44096,6 +44356,7 @@ mod each_order {
                 node.children
                     .first()
                     .map(|&raw| c.nodes[raw as usize].text.clone())
+                    .or_else(|| c.folded_text(c.key(node.id).unwrap()).map(str::to_owned))
             })
             .collect()
     }
@@ -44480,6 +44741,9 @@ mod each_updates {
             let node = &c.nodes[key as usize];
             if !node.text.is_empty() {
                 out.push(node.text.clone());
+            }
+            if let Some(run) = c.folded_text(key) {
+                out.push(run.to_owned());
             }
             for &child in &node.children {
                 collect(c, child, out);
@@ -48273,4 +48537,320 @@ fn style_constants_match_default() {
         crate::style::TextStyle::DEFAULT,
         crate::style::TextStyle::default()
     );
+}
+
+/// #1345: a text block's only raw text run has no node of its own.
+mod folded_runs {
+    use super::*;
+
+    fn last_text(c: &mut Core<FakeEngine>) -> Option<String> {
+        let batch = c.commit()?;
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Text { text, .. } => Some(text.text.clone()),
+            _ => None,
+        })
+    }
+
+    fn insert(parent: NodeId, child: NodeId, before: Option<NodeId>) -> Op {
+        Op::Insert {
+            parent,
+            child,
+            before,
+        }
+    }
+
+    fn block(c: &mut Core<FakeEngine>, id: NodeId) {
+        apply(
+            c,
+            vec![Op::Create { id, tag: Tag::Text }, insert(ROOT_ID, id, None)],
+        );
+    }
+
+    fn raw_nodes(c: &Core<FakeEngine>) -> usize {
+        c.nodes
+            .iter()
+            .filter(|(_, n)| n.kind == Kind::RawText)
+            .count()
+    }
+
+    fn run(id: NodeId, text: &str) -> Op {
+        Op::CreateText {
+            id,
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn a_blocks_only_run_shows_without_a_node() {
+        let mut c = core();
+        block(&mut c, 2);
+        apply(&mut c, vec![run(3, "hello"), insert(2, 3, None)]);
+        assert_eq!(last_text(&mut c).as_deref(), Some("hello"));
+        assert_eq!(raw_nodes(&c), 0);
+        assert_eq!(c.text_content(2), "hello");
+        apply(
+            &mut c,
+            vec![Op::SetText {
+                id: 3,
+                text: "world".into(),
+            }],
+        );
+        assert_eq!(last_text(&mut c).as_deref(), Some("world"));
+        assert_eq!(raw_nodes(&c), 0);
+    }
+
+    #[test]
+    fn a_second_child_gives_the_run_its_node_in_order() {
+        let mut c = core();
+        block(&mut c, 2);
+        apply(
+            &mut c,
+            vec![
+                run(3, "a"),
+                insert(2, 3, None),
+                run(4, "b"),
+                insert(2, 4, None),
+            ],
+        );
+        assert_eq!(last_text(&mut c).as_deref(), Some("ab"));
+        assert_eq!(raw_nodes(&c), 2);
+        // Before the folded run: it gets its node first.
+        let mut c = core();
+        block(&mut c, 2);
+        apply(&mut c, vec![run(3, "b"), insert(2, 3, None)]);
+        c.commit();
+        apply(&mut c, vec![run(4, "a"), insert(2, 4, Some(3))]);
+        assert_eq!(last_text(&mut c).as_deref(), Some("ab"));
+        apply(
+            &mut c,
+            vec![Op::SetText {
+                id: 3,
+                text: "c".into(),
+            }],
+        );
+        assert_eq!(last_text(&mut c).as_deref(), Some("ac"));
+    }
+
+    #[test]
+    fn a_folded_run_moves_and_goes() {
+        let mut c = core();
+        block(&mut c, 2);
+        block(&mut c, 5);
+        apply(&mut c, vec![run(3, "x"), insert(2, 3, None)]);
+        c.commit();
+        assert_eq!(c.text_content(2), "x");
+        assert!(matches!(
+            c.apply(Op::Remove {
+                parent: 5,
+                child: 3
+            }),
+            Err(ApplyError::NotAChild(3))
+        ));
+        apply(
+            &mut c,
+            vec![Op::Remove {
+                parent: 2,
+                child: 3,
+            }],
+        );
+        assert_eq!(c.text_content(2), "");
+        // Moved to another block without a Remove too.
+        apply(&mut c, vec![insert(5, 3, None)]);
+        assert_eq!(c.text_content(5), "x");
+        apply(&mut c, vec![insert(2, 3, None)]);
+        assert_eq!(c.text_content(5), "");
+        assert_eq!(c.text_content(2), "x");
+        assert_eq!(raw_nodes(&c), 0);
+        // Its block goes: it is loose until released.
+        apply(
+            &mut c,
+            vec![
+                Op::Remove {
+                    parent: ROOT_ID,
+                    child: 2,
+                },
+                Op::Release { id: 2 },
+            ],
+        );
+        apply(&mut c, vec![insert(5, 3, None)]);
+        assert_eq!(c.text_content(5), "x");
+        apply(&mut c, vec![Op::Release { id: 3 }]);
+        assert_eq!(c.text_content(5), "");
+        assert!(c.runs.is_empty() && c.folded.is_empty());
+        assert!(matches!(
+            c.apply(run(5, "dup")),
+            Err(ApplyError::DuplicateNode(5))
+        ));
+    }
+
+    #[test]
+    fn a_run_in_a_span_folds_and_keeps_its_place() {
+        // <Text>a<Text bold>b</Text>c</Text>
+        let mut c = core();
+        block(&mut c, 2);
+        apply(
+            &mut c,
+            vec![
+                run(3, "a"),
+                insert(2, 3, None),
+                Op::Create {
+                    id: 4,
+                    tag: Tag::Text,
+                },
+                run(5, "b"),
+                insert(4, 5, None),
+                insert(2, 4, None),
+                run(6, "c"),
+                insert(2, 6, None),
+            ],
+        );
+        assert_eq!(last_text(&mut c).as_deref(), Some("abc"));
+        // The span's run stays without a node; the block's got theirs.
+        assert_eq!(raw_nodes(&c), 2);
+        assert_eq!(c.folded.len(), 1);
+    }
+
+    #[test]
+    fn a_run_under_a_view_has_its_node() {
+        let mut c = core();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                insert(ROOT_ID, 2, None),
+                run(3, "v"),
+                insert(2, 3, None),
+            ],
+        );
+        assert_eq!(raw_nodes(&c), 1);
+        assert!(c.runs.is_empty());
+    }
+}
+
+/// #1345: the issue's 300 × 50 table (15,000 cells, each a view holding
+/// a text block and its raw text run), with and without runs folded into
+/// their blocks.
+/// `cargo test --release -p nsh-core --lib raw_text_table_bench --
+/// --ignored --nocapture` (`NSH_RUNS=nodes` for every run as a node)
+#[test]
+#[ignore]
+fn raw_text_table_bench() {
+    use std::time::Instant;
+    fn rss_kib() -> u64 {
+        std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find(|l| l.starts_with("VmRSS:"))
+                    .and_then(|l| l.split_whitespace().nth(1)?.parse().ok())
+            })
+            .unwrap_or(0)
+    }
+    let fold = std::env::var("NSH_RUNS").map_or(true, |v| v != "nodes");
+    let mut c = Core::new(crate::ApproxTextEngine, size_pt(1600.0, 900.0));
+    c.fold_runs = fold;
+    let before = rss_kib();
+    let mut ops = Vec::new();
+    let mut id: NodeId = 2;
+    let table = id;
+    ops.push(Op::Create {
+        id: table,
+        tag: Tag::View,
+    });
+    for r in 0..300 {
+        id += 1;
+        let row = id;
+        ops.push(Op::Create {
+            id: row,
+            tag: Tag::View,
+        });
+        ops.push(style_op(row, &[("flexDirection", StyleValue::Str("row"))]));
+        for col in 0..50 {
+            let (cell, text, run) = (id + 1, id + 2, id + 3);
+            id += 3;
+            ops.push(Op::Create {
+                id: cell,
+                tag: Tag::View,
+            });
+            ops.push(style_op(
+                cell,
+                &[
+                    ("width", StyleValue::Number(32.0)),
+                    ("padding", StyleValue::Number(2.0)),
+                ],
+            ));
+            ops.push(Op::Create {
+                id: text,
+                tag: Tag::Text,
+            });
+            ops.push(Op::CreateText {
+                id: run,
+                text: format!("{r}:{col}"),
+            });
+            for (parent, child) in [(text, run), (cell, text), (row, cell)] {
+                ops.push(Op::Insert {
+                    parent,
+                    child,
+                    before: None,
+                });
+            }
+        }
+        ops.push(Op::Insert {
+            parent: table,
+            child: row,
+            before: None,
+        });
+    }
+    ops.push(Op::Insert {
+        parent: ROOT_ID,
+        child: table,
+        before: None,
+    });
+    let t = Instant::now();
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let mount_ms = t.elapsed().as_secs_f64() * 1e3;
+    let after = rss_kib();
+    let texts = batch
+        .items
+        .iter()
+        .filter(|i| matches!(i, MountItem::Text { .. }))
+        .count();
+    let node = std::mem::size_of::<super::Node>();
+    println!(
+        "{}: nodes {}, runs without nodes {}, slab capacity {}, Node {node} B, Run {} B, texts {texts}",
+        if fold { "folded" } else { "nodes" },
+        c.nodes.len(),
+        c.runs.len(),
+        c.nodes.capacity(),
+        std::mem::size_of::<super::Run>(),
+    );
+    println!(
+        "RSS growth {:.1} MiB, first mount + commit {mount_ms:.1} ms",
+        (after - before) as f64 / 1024.0
+    );
+    let mut times = Vec::new();
+    for i in 0..21 {
+        let t = Instant::now();
+        let _ = c.apply(Op::SetText {
+            id: 6,
+            text: format!("x{i}"),
+        });
+        let _ = c.commit();
+        times.push(t.elapsed().as_secs_f64() * 1e6);
+    }
+    times.sort_by(f64::total_cmp);
+    println!("set one run's text + commit: median {:.0} µs", times[10]);
+    let mut times = Vec::new();
+    for i in 0..5 {
+        let t = Instant::now();
+        c.set_viewport(size_pt(1500.0 + i as f32 * 10.0, 900.0));
+        let _ = c.commit();
+        times.push(t.elapsed().as_secs_f64() * 1e3);
+    }
+    times.sort_by(f64::total_cmp);
+    println!("resize + full relayout + commit: median {:.1} ms", times[2]);
 }

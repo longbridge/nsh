@@ -350,9 +350,10 @@ later system, through its own [Rust crate](./rust.md) for example, raises its mi
 ```
 
 The value is a string of one to three numbers joined by dots (`"15"`, `"15.2"`, `"15.2.1"`) from NSH's minimum up:
-`"15.0"` on iOS, `"14.0"` on macOS. The package declares it as written, and the iOS app icon is compiled for it. A
-lower version, or a value of another form, is an error that names NSH's minimum, reported as soon as `nsh.json` is
-read.
+`"15.0"` on iOS, `"14.0"` on macOS. The package declares it as written, the app's Rust code (Rust and C alike) is
+built for it, and the iOS app icon is compiled for it. A deployment target set in the environment
+(`IPHONEOS_DEPLOYMENT_TARGET`, `MACOSX_DEPLOYMENT_TARGET`) is used as it is. A lower version, or a value of another
+form, is an error that names NSH's minimum, reported as soon as `nsh.json` is read.
 
 ## Icons
 

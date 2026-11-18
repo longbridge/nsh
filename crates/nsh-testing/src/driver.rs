@@ -755,6 +755,11 @@ impl Driver for Remote {
     fn answer_dialog(&mut self, answer: DialogAnswer) -> Result<(), String> {
         let button = match answer {
             DialogAnswer::Press(text) => Some(text),
+            DialogAnswer::TypeAndPress { .. } => {
+                return Err("a native host answers a dialog with a button only: \
+                     type into its text field in a headless run"
+                    .into());
+            }
             DialogAnswer::Dismiss => None,
         };
         self.action(TestStep::AnswerDialog { button })

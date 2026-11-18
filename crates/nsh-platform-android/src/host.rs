@@ -1960,6 +1960,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 "buffering" => "buffering",
                 "action" => "action",
                 "target" => "target",
+                "value" => "value",
                 _ => continue,
             };
             if let Some(v) = read(&mut env, i) {

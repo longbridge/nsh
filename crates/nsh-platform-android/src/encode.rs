@@ -628,6 +628,17 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                                 DialogButtonStyle::Destructive => 2,
                             });
                         }
+                        // The text field (`SystemUi.dialog`): an alert's only.
+                        match d.input {
+                            Some(input) if !d.sheet => {
+                                e.bool(true);
+                                e.string(input.text);
+                                e.opt_string(input.placeholder.as_deref());
+                                e.bool(input.select_all);
+                                e.bool(input.required);
+                            }
+                            _ => e.bool(false),
+                        }
                     }
                     Command::CloseDialog(dialog) => {
                         e.int(60);
@@ -1482,7 +1493,7 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         Some(Checked::Mixed) => flags |= 256 | 1024,
         None => {}
     }
-    // The current item's kind, in bits 11 to 13 (`A11y.java`
+    // The current item's kind, in bits 11 to 13 (`A11yChanges.java`
     // `CURRENT_DESCRIPTIONS`).
     flags |= match s.current {
         None => 0,

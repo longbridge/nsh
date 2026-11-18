@@ -234,6 +234,9 @@ impl<M: TextEngine> Core<M> {
         if text && !inline {
             apart(out);
         }
+        if let Some(run) = self.folded_text(key) {
+            out.push_str(run);
+        }
         for &child in &node.children {
             self.push_describing_text(child, inline || text, hidden, out);
         }
