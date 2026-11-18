@@ -61,10 +61,13 @@ cargo build -p nsh-gpui-host                      # ../../target/debug/nsh-gpui-
 
 The GPUI host is built for the machine itself, so the CLI finds it in `target/<profile>` and builds it first
 in a checkout; `cargo xtask dist` puts it in `dist/nsh/runtime/gpui/` on each of the three OSes (`tooling.md`,
-`embedding.md`). CI: `.github/workflows/gpui.yml` (Ubuntu 24.04, macOS 15 and Windows: clippy with `-D warnings` and
-tests of the GPUI workspace; on Linux clippy of `examples/embed-gpui` too), run when `crates/gpui` or the example
-changes and daily, which catches what changes to the crates it shares with the main workspace (`nsh-core`,
-`nsh-engine`, ...) break.
+`embedding.md`), built `--locked` as all of xtask's task builds are, so it fails while `crates/gpui/Cargo.lock`
+misses a change to the crates the GPUI workspace shares with the main one (a build there without `--locked` updates
+it): a change to those crates' dependencies commits the GPUI workspace's refreshed lock too. CI:
+`.github/workflows/gpui.yml` (Ubuntu 24.04, macOS 15 and Windows: clippy with `-D warnings`, `--locked`, and tests
+of the GPUI workspace; on Linux clippy of `examples/embed-gpui` too), run when `crates/gpui` or the example changes
+and daily, which catches what changes to the crates it shares with the main workspace (`nsh-core`, `nsh-engine`,
+...) break, a lock left behind included.
 
 Features:
 

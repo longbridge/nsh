@@ -26,18 +26,19 @@ pub(crate) fn compat(record: Option<&str>) -> anyhow::Result<()> {
     let root = root();
     let repo = checkout(&root)?;
     term::cargo(
-        Command::new("cargo")
+        crate::cargo::command("build")
             .current_dir(&root)
-            .args(["build", "-p", "nsh-cli"]),
+            .args(["-p", "nsh-cli"]),
         "nsh",
     )?;
     // The versions this checkout builds with, so the Cargo cache serves
     // both.
     std::fs::copy(root.join("Cargo.lock"), repo.join("Cargo.lock"))
         .context("copy Cargo.lock to nsh-compat")?;
-    let mut cargo = Command::new("cargo");
+    // Not `--locked`: this workspace's lock lacks nsh-compat's own
+    // packages, which cargo adds to the copy.
+    let mut cargo = crate::cargo::unlocked(if record.is_some() { "run" } else { "test" });
     cargo.current_dir(&repo);
-    cargo.arg(if record.is_some() { "run" } else { "test" });
     // Cargo's own option, so before `run`'s `--`.
     cargo.arg("--target-dir").arg(root.join("target"));
     // The cases use shaders, EmojiPicker and WebSockets, all opt-in runtime features.
