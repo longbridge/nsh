@@ -39,6 +39,18 @@ pub(crate) struct UiAnimation {
     /// Scroll view id -> its sticky cells that stick an animated value
     /// further in, with that value's node.
     sticky: FxHashMap<u32, Vec<(u32, NodeId)>>,
+    /// View id -> the bits of each bound value (in `bindings` order) last
+    /// sent: frames and gestures send only the ones that moved.
+    sent: FxHashMap<u32, Vec<u32>>,
+    /// Sticky cell id -> the bits of its offset last sent.
+    sent_sticky: FxHashMap<u32, u32>,
+}
+
+fn bits(v: AnimationValue) -> u32 {
+    match v {
+        AnimationValue::Color(c) => c,
+        AnimationValue::Number(n) => n.to_bits(),
+    }
 }
 
 /// The CSS property `nsh.js` writes a bound property into (`op_a`), for
@@ -81,6 +93,7 @@ impl UiAnimation {
                         self.unbound.push((*id, css));
                     }
                 }
+                self.sent.remove(id);
                 if bindings.is_empty() {
                     self.bindings.remove(id);
                 } else {
@@ -133,6 +146,8 @@ impl UiAnimation {
                 }
             }
             MountItem::Delete { id } => {
+                self.sent.remove(id);
+                self.sent_sticky.remove(id);
                 self.bindings.remove(id);
                 self.statics.remove(id);
                 self.gestures.remove(id);
@@ -257,50 +272,69 @@ impl UiAnimation {
     }
 
     /// Every bound property's current value, after clearing the ones bound
-    /// no more (`nsh.js` removes an inline property set to "").
+    /// no more (`nsh.js` removes an inline property set to ""). After a
+    /// batch: views inserted again and inline styles written since get
+    /// theirs there.
     pub(crate) fn outputs(&mut self, out: &mut Out) {
+        self.write(out, true);
+    }
+
+    /// The bound values that changed since they were last sent (frames,
+    /// scrolls and gestures): one holding still costs nothing while
+    /// another moves.
+    pub(crate) fn changed_outputs(&mut self, out: &mut Out) {
+        self.write(out, false);
+    }
+
+    fn write(&mut self, out: &mut Out, all: bool) {
         for (view, css) in self.unbound.drain(..) {
             out.animation(view, css, "");
         }
         for (&view, bindings) in &self.bindings {
+            let sent = self.sent.entry(view).or_default();
+            sent.resize(bindings.len(), u32::MAX);
             let mut overrides = [None; MAX_TRANSFORMS];
             let mut transformed = false;
-            for &(prop, node) in bindings {
+            let mut transform_moved = false;
+            for (k, &(prop, node)) in bindings.iter().enumerate() {
+                let value = self.graph.eval(node);
+                let moved = sent[k] != bits(value) || all;
+                sent[k] = bits(value);
+                if let AnimationProp::Transform(i) = prop {
+                    if let Some(o) = overrides.get_mut(i as usize) {
+                        *o = Some(value.number());
+                        transformed = true;
+                        transform_moved |= moved;
+                    }
+                    continue;
+                }
+                if !moved {
+                    continue;
+                }
                 match prop {
                     // `nsh.js` puts these on the border overlay and the
                     // text's runs.
                     AnimationProp::BorderColor => {
-                        out.animation(view, "border-color", &value_css(self.graph.eval(node)));
+                        out.animation(view, "border-color", &value_css(value));
                     }
-                    AnimationProp::Color => {
-                        out.animation(view, "color", &value_css(self.graph.eval(node)));
-                    }
+                    AnimationProp::Color => out.animation(view, "color", &value_css(value)),
                     AnimationProp::Opacity => {
-                        out.animation(view, "opacity", &self.graph.eval(node).number().to_string());
+                        out.animation(view, "opacity", &value.number().to_string());
                     }
                     AnimationProp::BackgroundColor => {
-                        out.animation(view, "background-color", &value_css(self.graph.eval(node)));
+                        out.animation(view, "background-color", &value_css(value));
                     }
                     AnimationProp::CanvasArg(k) => {
-                        out.animation(
-                            view,
-                            &format!("canvas:{k}"),
-                            &value_css(self.graph.eval(node)),
-                        );
+                        out.animation(view, &format!("canvas:{k}"), &value_css(value));
                     }
-                    AnimationProp::Transform(i) => {
-                        if let Some(o) = overrides.get_mut(i as usize) {
-                            *o = Some(self.graph.eval(node).number());
-                            transformed = true;
-                        }
-                    }
+                    AnimationProp::Transform(_) => {}
                     // The scroll view's (`sticky` below), never bound.
                     AnimationProp::StickyTop | AnimationProp::StickyLeft => {}
                     // No registered native components on the web.
                     AnimationProp::ComponentSlot(_) => {}
                 }
             }
-            if transformed {
+            if transformed && transform_moved {
                 let statics = self
                     .statics
                     .get(&view)
@@ -314,8 +348,11 @@ impl UiAnimation {
         // moves their sticky inset).
         for cells in self.sticky.values() {
             for &(cell, node) in cells {
-                let value = self.graph.eval(node).number().to_string();
-                out.animation(cell, "sticky-offset", &value);
+                let value = self.graph.eval(node).number();
+                if self.sent_sticky.insert(cell, value.to_bits()) == Some(value.to_bits()) && !all {
+                    continue;
+                }
+                out.animation(cell, "sticky-offset", &value.to_string());
             }
         }
     }
