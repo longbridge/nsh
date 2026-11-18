@@ -85,6 +85,8 @@ objc2-io-surface.workspace = true
 objc2-quartz-core.workspace = true
 rustc-hash.workspace = true
 serde_json.workspace = true
+# The direction of a paragraph from its content (`text::natural_rtl`).
+unicode-bidi.workspace = true
 libc.workspace = true
 nsh-dev = { workspace = true, features = ["client"], optional = true }
 nsh-testing = { workspace = true, features = ["agent"], optional = true }
