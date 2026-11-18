@@ -1019,6 +1019,7 @@ final class Mounter {
 
     private void delete(int id) {
         View v = views.get(id);
+        if (id == pendingFocusId) cancelPendingFocus();
         if (v != null && managed(v) && v.isFocused()) {
             // The view goes away: report its blur before it leaves the tree.
             v.setOnFocusChangeListener(focusChange);
@@ -2366,10 +2367,15 @@ final class Mounter {
         View v = views.get(id);
         switch (kind) {
             case 0:
-                if (v instanceof InputBox) ((InputBox) v).focus();
-                else focusManaged(id);
+                if (v instanceof InputBox) {
+                    // The latest focus wins over one still waiting.
+                    cancelPendingFocus();
+                    ((InputBox) v).focus();
+                } else focusManaged(id);
                 break;
             case 1:
+                // A blur of the view, or Keyboard.dismiss(), drops its pending focus.
+                if (id == pendingFocusId || id == 1) cancelPendingFocus();
                 if (v instanceof InputBox) {
                     ((InputBox) v).blur();
                 } else if (v != null && managed(v) && v.isFocused()) {
@@ -2983,11 +2989,52 @@ final class Mounter {
      * view holds the focus.
      */
     void focusManaged(int id) {
+        cancelPendingFocus();
         View v = views.get(id);
-        if (v == null || !v.isShown() || !focusStop(id)) return;
+        if (v == null || !focusStop(id)) return;
+        if (v.isShown()) {
+            takeFocus(v);
+            return;
+        }
+        // A view on a page being pushed is not shown yet: a focus asked in
+        // the batch that mounts the page runs before `finishNavigation`
+        // adds its screen to the stack, and a page coming through a
+        // `transitionShader` stays invisible until the shader ends. Focus
+        // it in the first frame it is shown in.
+        pendingFocusId = id;
+        pendingFocusView = v;
+        v.getViewTreeObserver().addOnPreDrawListener(pendingFocus);
+    }
+
+    private static void takeFocus(View v) {
         if (!v.isFocusable()) v.setFocusable(true);
         if (!v.isFocusableInTouchMode()) v.setFocusableInTouchMode(true);
         v.requestFocus();
+    }
+
+    /** {@link #focusManaged} waiting for its view to be shown. */
+    private int pendingFocusId;
+    private View pendingFocusView;
+    private final android.view.ViewTreeObserver.OnPreDrawListener pendingFocus = () -> {
+        View v = pendingFocusView;
+        if (v == null) return true;
+        // The view was deleted, or the app made it no longer a focus stop.
+        if (views.get(pendingFocusId) != v || !focusStop(pendingFocusId)) {
+            cancelPendingFocus();
+        } else if (v.isShown()) {
+            cancelPendingFocus();
+            takeFocus(v);
+        }
+        return true;
+    };
+
+    private void cancelPendingFocus() {
+        View v = pendingFocusView;
+        if (v == null) return;
+        pendingFocusView = null;
+        pendingFocusId = 0;
+        android.view.ViewTreeObserver o = v.getViewTreeObserver();
+        if (o.isAlive()) o.removeOnPreDrawListener(pendingFocus);
     }
 
     /**
