@@ -449,8 +449,16 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Android, the back key without `OnBackInvokedCallback`** (below 13, or `enableOnBackInvokedCallback` off): the window
   sends `KEYCODE_BACK` down the focus path, then the activity's `onKeyDown` / `onKeyUp` take it (`onBackPressed`), so an
   unfocused view only hears it through `View.addOnUnhandledKeyEventListener` (API 28+, called by the decor view between
-  the two, whatever has focus). With the callback in effect the window turns the key into the callback before any view,
-  so `NshView` taking the key never doubles its callback (seen on Android 16, both settings).
+  the two, whatever has focus). A listener that takes the down gets the press's repeats and its release directly, before
+  any view (`ViewRootImpl`'s `UnhandledKeyManager`), so the focus path never sees them: `NshView` hands them to
+  `KeyDispatch` for the raw `onKeyUp`.
+- **Android, the back key with `OnBackInvokedCallback`** (13 and later, the packaged manifest's default): the window turns
+  the release into `onBackInvoked` / `onBackCancelled` before any view (`ViewRootImpl`'s `doOnBackKeyEvent`). Android 13
+  to 15 send the views neither the down nor the up; from Android 15 QPR1 the window sends the down on and, after the
+  callback, the up marked cancelled; Android 16 QPR2's `predictiveBackStopKeycodeBackForwarding` flag keeps both from the
+  views again. `KeyDispatch` reports the release at the callback, from the down it saw, and not again for that key-up
+  (`BackRelease`); `NshView` taking the key never doubles its callback, as the cancelled up does not go back (seen on an
+  Android 16 emulator, both settings; the version boundaries are AOSP's source).
 - **Android 8 (API 26 and 27) lacks three things the runtime uses from API 28**, and gets each another way, checked with
   `Build.VERSION.SDK_INT` so Android 9 and later draw as before:
   - Weights: `Typeface.create(family, weight, italic)` is API 28. The default family takes the nearest of Roboto's

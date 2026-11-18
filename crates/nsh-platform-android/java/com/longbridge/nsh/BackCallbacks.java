@@ -50,6 +50,9 @@ final class BackCallbacks {
         public void onBackCancelled() {
             if (stack != null) stack.backCancelled();
             stack = null;
+            // A cancelled back key: its press is forgotten here, before a
+            // cancelled key-up may follow (Android 15 QPR1 to 16).
+            view.backCancelled();
         }
 
         @Override
