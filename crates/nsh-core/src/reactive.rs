@@ -460,6 +460,12 @@ impl<H: Host> Graph<H> {
         self.nodes[id as usize].disposed
     }
 
+    /// Whether computation `id` is to run again before its value is
+    /// current (what it reads changed, here or upstream).
+    pub(crate) fn outdated(&self, id: u32) -> bool {
+        self.nodes[id as usize].state != CLEAN
+    }
+
     /// Node `id`'s value (untracked; a disposed memo keeps its last one).
     pub fn value(&self, id: u32) -> &H::Value {
         &self.nodes[id as usize].value
