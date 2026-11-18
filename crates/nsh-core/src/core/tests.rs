@@ -38290,6 +38290,21 @@ mod built_in_scrollbars {
             "{:?}",
             batch.items
         );
+        // Moving the inset without resizing the bar still moves its frame.
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: 2,
+                prop: Prop::Scroll(ScrollProp::ScrollbarInset(EdgeInsets {
+                    top: px(20.0),
+                    right: px(0.0),
+                    bottom: px(50.0),
+                    left: px(6.0),
+                })),
+            }],
+        );
+        let batch = c.commit().unwrap();
+        assert_eq!(frame_of(&batch, bar), Some(rect(6.0, 20.0, 294.0, 130.0)));
         // Back to the whole viewport.
         apply(
             &mut c,
