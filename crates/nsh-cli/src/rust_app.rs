@@ -58,7 +58,7 @@ use anyhow::{Context as _, bail};
 use nsh_core::element::description::{Description, SetDescription};
 use sha2::{Digest as _, Sha256};
 
-use crate::{runtime::Platform, ui};
+use crate::{apple::AppleMinimums, runtime::Platform, ui};
 
 /// The function `#[native_module]` makes at the root of the app's crate
 /// (`nsh-macros` `native_module.rs`): the crate's UI set.
@@ -248,6 +248,9 @@ pub(crate) struct RustApp {
     /// share one build of what they have in common
     /// ([`RustApp::unify_features`]).
     unify: bool,
+    /// The oldest Apple systems its packages declare, which its builds for
+    /// them compile for ([`set_deployment_target`]).
+    minimums: AppleMinimums,
 }
 
 /// A crate of the app (`nsh.json` `"rust"`).
@@ -812,6 +815,13 @@ pub(crate) fn runner_only(entry: &Path) -> anyhow::Result<RustApp> {
     let dir = entry.parent().context("entry has no directory")?;
     let nsh = crate::runtime::cli_checkout().map_or(Nsh::Registry, Nsh::Source);
     let watched = watched(&[], nsh.source());
+    // A TSX app packaged from flags alone has no `nsh.json`: the runtime's.
+    let minimums = match fs::read_to_string(dir.join("nsh.json")) {
+        Ok(text) => {
+            AppleMinimums::of(&serde_json::from_str(&text).context("nsh.json is not JSON")?)?
+        }
+        Err(_) => AppleMinimums::default(),
+    };
     let app = RustApp {
         workspace: dir.join(".nsh/rust"),
         nsh,
@@ -820,6 +830,7 @@ pub(crate) fn runner_only(entry: &Path) -> anyhow::Result<RustApp> {
         root: None,
         retargeted: false,
         unify: true,
+        minimums,
     };
     app.write_workspace()?;
     Ok(app)
@@ -849,6 +860,7 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
     } else {
         None
     };
+    let minimums = AppleMinimums::of(&config)?;
     let app = RustApp {
         workspace,
         nsh,
@@ -857,6 +869,7 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
         root,
         retargeted,
         unify,
+        minimums,
     };
     app.write_workspace()?;
     Ok(Some(app))
@@ -2762,6 +2775,9 @@ opt-level = \"s\"
             what,
         } = *build;
         crate::runtime::cross_build(&mut cmd, triple)?;
+        set_deployment_target(&mut cmd, triple, &self.minimums, |name| {
+            env::var_os(name).is_some()
+        });
         cmd.arg("build")
             .arg("--manifest-path")
             .arg(workspace.join("Cargo.toml"))
@@ -3466,6 +3482,23 @@ fn cargo() -> std::ffi::OsString {
     env::var_os("CARGO").unwrap_or_else(|| "cargo".into())
 }
 
+/// Has `cmd`, a build for `triple` (`None`: this machine), compile for the
+/// oldest Apple system the app's packages declare
+/// ([`AppleMinimums::deployment_target`]), unless `set` says the user set
+/// the variable, whose value is kept.
+fn set_deployment_target(
+    cmd: &mut Command,
+    triple: Option<&str>,
+    minimums: &AppleMinimums,
+    set: impl Fn(&str) -> bool,
+) {
+    if let Some((name, version)) = minimums.deployment_target(triple)
+        && !set(name)
+    {
+        cmd.env(name, version);
+    }
+}
+
 /// The target directory of the generated `workspace` ([`RustApp::target_dir`]):
 /// `cargo_target_dir` (a relative one against the current directory, as Cargo
 /// takes it), else the app's `target`.
@@ -3650,7 +3683,47 @@ mod tests {
             root,
             retargeted: false,
             unify: true,
+            minimums: crate::apple::AppleMinimums::default(),
         }
+    }
+
+    /// Builds for an Apple system get the deployment target of the app's
+    /// packages (the raised one when the app raises it); one the user set
+    /// is theirs.
+    #[test]
+    fn apple_builds_set_the_deployment_target_the_user_has_not() {
+        use std::process::Command;
+
+        use crate::apple::AppleMinimums;
+        let env = |cmd: &Command, name: &str| {
+            cmd.get_envs()
+                .find(|(key, _)| *key == name)
+                .and_then(|(_, value)| value)
+                .map(|value| value.to_string_lossy().into_owned())
+        };
+        let ios = "IPHONEOS_DEPLOYMENT_TARGET";
+        let default = AppleMinimums::default();
+        let mut cmd = Command::new("cargo");
+        super::set_deployment_target(&mut cmd, Some("aarch64-apple-ios"), &default, |_| false);
+        assert_eq!(env(&cmd, ios).as_deref(), Some(crate::apple::IOS_MINIMUM));
+
+        let raised = AppleMinimums::of(&serde_json::json!({
+            "ios": { "infoPlist": { "MinimumOSVersion": "16.4" } }
+        }))
+        .unwrap();
+        let mut cmd = Command::new("cargo");
+        super::set_deployment_target(&mut cmd, Some("aarch64-apple-ios-sim"), &raised, |_| false);
+        assert_eq!(env(&cmd, ios).as_deref(), Some("16.4"));
+
+        let mut cmd = Command::new("cargo");
+        super::set_deployment_target(&mut cmd, Some("aarch64-apple-ios"), &raised, |name| {
+            name == ios
+        });
+        assert!(cmd.get_envs().next().is_none());
+
+        let mut cmd = Command::new("cargo");
+        super::set_deployment_target(&mut cmd, Some("wasm32-unknown-unknown"), &raised, |_| false);
+        assert!(cmd.get_envs().next().is_none());
     }
 
     #[test]
