@@ -113,7 +113,16 @@ impl Headless {
     fn send_key(&mut self, keys: &str) -> Result<bool, String> {
         self.input_with(nsh_core::platform::InputModality::Keyboard);
         let stroke = Keystroke::parse(keys, self.environment.os).map_err(|e| e.to_string())?;
-        let editing = self.screen.focused().is_some();
+        // A text input the newest modal over its window covers (the app
+        // left the focus under a dialog where the platform does not move it
+        // into the modal) edits nothing: the modal's window has the keys,
+        // as on Android, whose dialog is a window of its own, so Escape
+        // reaches the dialog instead of the input under it.
+        let input = self
+            .screen
+            .focused()
+            .filter(|&view| self.screen.in_focus_scope(view));
+        let editing = input.is_some();
         // The control with the keyboard focus, which Return and Space press
         // (a stop that takes no presses, a `focusable` chart, hears its keys
         // through the keymap only). Only one in the newest modal over its
@@ -144,7 +153,8 @@ impl Headless {
         focus.control = control.is_some();
         focus.covered = self
             .screen
-            .key_focus()
+            .focused()
+            .or(self.screen.key_focus())
             .is_some_and(|view| !self.screen.in_focus_scope(view));
         let found = match self.screen.keymap() {
             Some(keymap) => keymap.find_with(window, stroke, focus, false),
@@ -169,7 +179,7 @@ impl Headless {
         // focused when the source reports them; the simulator moves the
         // focus between them as a Tab or a dialog can.
         let mut raw = false;
-        let captured = if !editing
+        let captured = if self.screen.focused().is_none()
             && self.delivers_raw_input()
             && let Some(view) = self.screen.key_focus()
             && self.screen.accepts_key_focus(view)
@@ -266,7 +276,7 @@ impl Headless {
                     self.tab(m.shift);
                     break 'defaults;
                 }
-                if let Some(input) = self.screen.focused() {
+                if let Some(input) = input {
                     let multiline = self.screen.input(input).is_some_and(|i| i.config.multiline);
                     match stroke.key {
                         keymap::Key::Enter

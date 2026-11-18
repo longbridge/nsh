@@ -10772,6 +10772,63 @@ fn text_shrinks_to_fit_its_lines() {
 }
 
 #[test]
+fn approx_engine_and_offscreen_text_estimate_agree_on_line_height() {
+    let mut text = crate::AttributedText::default();
+    text.push(
+        "hello",
+        crate::ResolvedTextStyle {
+            font_size: px(14.0),
+            line_height: px(28.0),
+            ..Default::default()
+        },
+    );
+    let estimated = super::estimate_text(&text, None);
+    assert_eq!(estimated.height, px(28.0));
+
+    let mut c = Core::new(crate::text::ApproxTextEngine, size_pt(320.0, 480.0));
+    for op in [
+        Op::Create {
+            id: 2,
+            tag: Tag::Text,
+        },
+        Op::SetStyle {
+            id: 2,
+            style: style(&[
+                ("fontSize", StyleValue::Number(14.0)),
+                ("lineHeight", StyleValue::Number(28.0)),
+            ]),
+            patch: Default::default(),
+        },
+        Op::CreateText {
+            id: 3,
+            text: "hello\nworld".into(),
+        },
+        Op::Insert {
+            parent: 2,
+            child: 3,
+            before: None,
+        },
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ] {
+        c.apply(op).unwrap();
+    }
+    let batch = c.commit().unwrap();
+    let frame = batch
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::Frame { id: 2, frame } => Some(*frame),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(frame.size.height, px(56.0));
+}
+
+#[test]
 fn styles_clamp_cut_and_select_texts_and_say_which_views_take_touches() {
     let mut c = Core::new(crate::text::ApproxTextEngine, size_pt(320.0, 480.0));
     let insert = |parent, child| Op::Insert {

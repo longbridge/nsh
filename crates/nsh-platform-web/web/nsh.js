@@ -322,6 +322,10 @@ img.nsh-fill { pointer-events: none; }
 .nsh-scroll.nsh-oy.nsh-oy { overflow-x: hidden; overflow-y: auto; overscroll-behavior-x: auto; }
 .nsh-scroll.nsh-oxy.nsh-oxy { overflow: auto; }
 .nsh-scroll.nsh-onone.nsh-onone { overflow: hidden; }
+/* A scroll view whose content fits along its axis has nothing to scroll
+   (\`nsh-fits\`): a swipe along it scrolls the scroll view around it, as on
+   Android, instead of stopping at its \`contain\` and moving nothing. */
+.nsh-scroll.nsh-fits.nsh-fits { overscroll-behavior: auto; }
 .nsh-scroll.nsh-zoom.nsh-zoom { touch-action: none; }
 .nsh-snap-x { scroll-snap-type: x mandatory; }
 .nsh-snap-y { scroll-snap-type: y mandatory; }
@@ -2682,6 +2686,7 @@ class Player {
     // at one again changes whether it shows (`stackShown`).
     const emptied = el._kind === "stack" && el._frame && !(el._frame[2] > 0 && el._frame[3] > 0) !== !(w > 0 && h > 0);
     el._frame = [x, y, w, h];
+    if (resized && el._kind === "scroll") this.scrollFits(el);
     // No size: nothing of its own shows (`.nsh-empty`).
     el.classList.toggle("nsh-empty", !(w > 0 && h > 0));
     if (emptied) this.syncHistorySoon();
@@ -4555,6 +4560,7 @@ class Player {
     const el = this.view(id);
     if (!el?._spacer) return;
     el._content = [w, h];
+    this.scrollFits(el);
     this.placeLayer(el);
     this.snapMarkers(el);
     // The last sticky cell travels to the end of the content.
@@ -4622,6 +4628,17 @@ class Player {
     const axes = scroll === "hidden" ? "nsh-onone" : zooms ? "nsh-oxy" : el._horizontal ? "nsh-ox" : "nsh-oy";
     swapClass(el, "_overflow", axes);
     el.classList.toggle("nsh-zoom", zooms);
+    this.scrollFits(el);
+  }
+
+  /** Whether the content of scroll view `el` fits along its axis, which
+   * leaves it nothing to scroll (`nsh-fits`): its overscroll is the scroll
+   * view's around it then, as a native Android scroll view hands its parent
+   * what it cannot take. A zoomable view keeps its own. */
+  scrollFits(el) {
+    const axis = el._horizontal ? 0 : 1;
+    const fits = !!el._content && !!el._frame && !this.zooms(el) && el._content[axis] <= el._frame[2 + axis] + 0.5;
+    el.classList.toggle("nsh-fits", fits);
   }
 
   snapMarkers(el) {

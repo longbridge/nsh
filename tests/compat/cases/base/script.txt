@@ -4765,3 +4765,13 @@ tap id:content-size-narrow
 expect Width: true
 covers [events] onContentSizeChange
 covers [nsh/base] createRichEditor
+
+# base-dock-tab-scroll
+# The tabs do not fit the bar: they are in a scroll view as wide as the
+# bar, and the tab the ref displays stays the displayed one.
+tap id:case-base-dock-tab-scroll
+expect Strip a*
+expect Strip h
+frame scroll:id:strip-tab-a 0 0 390 24
+tap id:strip-show-h
+expect Strip h*

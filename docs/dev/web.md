@@ -99,6 +99,8 @@ of garbage-collection timing or whether a detached realm resumes its JavaScript 
 Chromium's `--suite interaction` checks every state style (`hoverStyle` / `activeStyle` under real mouse input,
 `focusStyle` / `focusWithinStyle` under Tab), a list's `contentClass`, a scroll view's `contentStyle` /
 `contentClass` (children inserted before and after its content container is made), platform props and tooltips.
+It also sends mouse, pen and touch input through Wasm and the realm bootstrap to check the pointer fields
+on `onTouchMove`, `touches` and `changedTouches`.
 `--suite all` combines the two suites. Firefox and WebKit select `lifecycle` explicitly. The website CI builds
 Wasm once and runs Chromium `all`, Firefox `lifecycle` and WebKit `lifecycle` serially, reporting all engines
 before failing the step.
@@ -557,6 +559,9 @@ measured against it frame by frame (`requestAnimationFrame` samplers of computed
   before. Stepped at the frame's time, an animation the task started began before it was asked for, and its first
   drawn step was as far along as the task took. Bound values are inline styles: a property bound no more (its view taken over by an element without
   the binding) is cleared from them with the next output (`["a", view, prop, ""]`), so the view shows its own style.
+  After a batch every bound value goes out, so what it inserted (again) gets its values; on a frame, a gesture or a
+  scroll only the values that changed since they last went (`UiAnimation::outputs`), so values that hold still cost a
+  frame nothing however many views hold them.
 - **Without frames** (a hidden tab, and often an iframe out of view: browsers run no `requestAnimationFrame` there),
   what an animation ends still happens on time, as on macOS (`Surface::keep_deadline`). After each call into the
   engine that asked for a frame, `Player.keepDeadline` asks `nsh_deadline` when the graph next has an animation that
@@ -720,6 +725,9 @@ browsers' touches into what phones report:
   scrolling is the browser's: a `pointercancel` in a scroll view starts its drag, `touchend` ends it, a scroll within
   150 ms after it begins the glide, `scrollend` ends it (`touchScroll`, `scrolled`, `scrollEnded`). A scroll view
   along one axis contains only that axis's overscroll, so a swipe across it chains to the scroll view around it.
+  One whose content fits along its axis (`nsh-fits`, kept by `scrollFits` as its content and frame change) contains
+  none, so a swipe along it chains too, as Android's scroll view hands its parent what it cannot take; a zoomable
+  one keeps its own.
   A touch responder that blocks native scrolling (`setResponder`: a `TouchClaim` with `block_native`, JS's
   `onResponderGrant` returning true) keeps its touches: a non-passive `touchmove` on the root prevents the browser's
   scroll while it holds them (`responderBlocks`), unless the browser already scrolls (`cancelable` false).
