@@ -337,6 +337,9 @@ impl<M: TextEngine> Core<M> {
             if node.kind == Kind::RawText {
                 text.push_str(&node.text);
             }
+            if let Some(run) = self.folded_text(k) {
+                text.push_str(run);
+            }
             stack.extend(node.children.iter().rev().copied());
         }
         text
