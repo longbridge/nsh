@@ -1045,10 +1045,8 @@ the cache takes the same commit. `rust_app::of` appends the extensions to the ap
 only is a `RustApp` too, its nsh crates this CLI's, as `runner_only`), checks them together (`check_crates`: the same
 directory, package or `#[native_module]` specifier), and the workspace links each like an app crate. The app's crate
 depends on the extension as `nsh add` writes it (Git at the locked `rev`, the resolved crate version, or a relative
-`path`), which the workspace's `[patch."<url>"]` / `[patch.crates-io]` sends to the same checkout. Before linking, `[package.metadata.nsh]` is checked: `format = 1`,
-`module` equal to the crate's `#[native_module]`, `nsh` (a version requirement) matching this CLI, `targets` known
-names. `nsh check` does not `cargo check` extensions (only crates outside the cache). Not yet: refusing a command for
-a target not in `targets`, web and mobile packaging checks, and an OTA check of the shell's linked modules.
+`path`), which the workspace's `[patch."<url>"]` / `[patch.crates-io]` sends to the same checkout. Before linking, the extension must have a `#[native_module]` at its root
+(its module) and its `nsh-core` dependency requirement, if any, must match this CLI; there is no NSH-specific metadata. `nsh check` does not `cargo check` extensions (only crates outside the cache). Not yet: per-target support checks, web and mobile packaging checks, and an OTA check of the shell's linked modules.
 
 ## Finding the runtimes
 

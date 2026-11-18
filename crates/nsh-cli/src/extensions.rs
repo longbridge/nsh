@@ -15,8 +15,7 @@
 //! Versions are Cargo version requirements with Cargo's meaning: `"1.2"`
 //! is `^1.2`, and `"~1.2"`, `"=1.2.3"`, `">=1.2, <2"` and `"*"` work as in
 //! `Cargo.toml`. A Git or path entry may add `"version"` (the object form)
-//! and, as Cargo does, the package must be such a version. An extension
-//! says which NSH it builds with in `nsh = "<requirement>"` below.
+//! and, as Cargo does, the package must be such a version.
 //!
 //! `nsh.json` says what is acceptable; `nsh add` pins what it resolved to
 //! (a crate's exact version, a Git commit) in `nsh.lock`, next to `nsh.json`,
@@ -52,14 +51,6 @@ use crate::rust_app::{self, AppCrate};
 
 /// The lock file beside `nsh.json`.
 pub(crate) const LOCK: &str = "nsh.lock";
-
-/// The version of `[package.metadata.nsh]` this NSH reads.
-const FORMAT: u64 = 1;
-
-/// The targets an extension may list in `targets`.
-const TARGETS: &[&str] = &[
-    "macos", "ios", "android", "windows", "linux", "web", "gpui", "tui",
-];
 
 /// An extension as `nsh.json` lists it: from Git (`git`, with `tag` or
 /// `rev`), from crates.io (`crate`, with a `version` requirement) or from
@@ -340,15 +331,6 @@ impl Locked {
             _ => "the local directory".to_owned(),
         }
     }
-}
-
-/// What `[package.metadata.nsh]` of an extension says.
-#[derive(Debug, Default)]
-struct Metadata {
-    format: Option<u64>,
-    module: Option<String>,
-    nsh: Option<String>,
-    targets: Option<Vec<String>>,
 }
 
 /// The extensions `config` (the `nsh.json` in `dir`) lists, each checked
@@ -847,44 +829,55 @@ fn checkout(url: &str, commit: &str) -> anyhow::Result<PathBuf> {
     Ok(dunce::canonicalize(&dir)?)
 }
 
-/// Checks the extension in `dir` (from `url`) can link into this NSH: its
-/// `[package.metadata.nsh]` against its `#[native_module]`; its module.
+/// Checks the extension in `dir` (from `url`) can link into this NSH:
+/// a `#[native_module]` at its root, and its `nsh-core` requirement (if
+/// any) matching this NSH. Its module.
 fn check(dir: &Path, url: &str) -> anyhow::Result<String> {
     let manifest = fs::read_to_string(dir.join("Cargo.toml"))?;
-    let meta = metadata(&manifest);
-    let what = format!("{url}: Cargo.toml [package.metadata.nsh]");
-    match meta.format {
-        Some(FORMAT) => {}
-        Some(other) => bail!("{what}: format {other} needs a newer nsh (this one reads {FORMAT})"),
-        None => bail!("{what}: no `format = {FORMAT}`: is this an NSH extension?"),
-    }
-    let module = meta
-        .module
-        .with_context(|| format!("{what}: no `module`"))?;
-    match rust_app::specifier_of(dir) {
-        Some(specifier) if specifier == module => {}
-        Some(specifier) => {
-            bail!("{what}: `module = {module:?}`, but its #[native_module] is {specifier:?}")
-        }
-        None => bail!("{what}: no #[native_module({module:?})] at the crate's root"),
-    }
-    if let Some(req) = &meta.nsh {
-        let req =
-            semver::VersionReq::parse(req).with_context(|| format!("{what}: `nsh = {req:?}`"))?;
+    let module = rust_app::specifier_of(dir).with_context(|| {
+        format!(
+            "{url}: no #[native_module(\"...\")] at the crate's root: is this an NSH extension?"
+        )
+    })?;
+    if let Some(req) = nsh_requirement(&manifest) {
+        let req = semver::VersionReq::parse(&req)
+            .with_context(|| format!("{url}: Cargo.toml: nsh-core = {req:?}"))?;
         let version = semver::Version::parse(env!("CARGO_PKG_VERSION"))?;
         if !req.matches(&version) {
-            bail!("{what}: builds with nsh {req}, this is {version}");
-        }
-    }
-    for target in meta.targets.iter().flatten() {
-        if !TARGETS.contains(&target.as_str()) {
-            bail!(
-                "{what}: unknown target {target:?} (one of {})",
-                TARGETS.join(", ")
-            );
+            bail!("{url}: depends on nsh-core {req}, this is nsh {version}");
         }
     }
     Ok(module)
+}
+
+/// The version requirement of `nsh-core` in the `[dependencies]` of the
+/// manifest `text` (`nsh-core = "0.6"` or `nsh-core = { version = "0.6", .. }`).
+fn nsh_requirement(text: &str) -> Option<String> {
+    for (table, line) in rust_app::toml_tables(text) {
+        if table != "dependencies" {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() != "nsh-core" {
+            continue;
+        }
+        let value = value.trim();
+        return if value.starts_with('{') {
+            rust_app::toml_string(value, "version")
+        } else {
+            Some(
+                value
+                    .split(" #")
+                    .next()?
+                    .trim()
+                    .trim_matches('"')
+                    .to_owned(),
+            )
+        };
+    }
+    None
 }
 
 /// Checks the package in `dir` is a version `source` requires (its
@@ -923,38 +916,6 @@ fn package_version(text: &str) -> Option<String> {
     None
 }
 
-/// `[package.metadata.nsh]` of the manifest `text`.
-fn metadata(text: &str) -> Metadata {
-    let mut meta = Metadata::default();
-    for (table, line) in rust_app::toml_tables(text) {
-        if table != "package.metadata.nsh" {
-            continue;
-        }
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        let value = value.split(" #").next().unwrap_or_default().trim();
-        match key.trim() {
-            "format" => meta.format = value.parse().ok(),
-            "module" => meta.module = rust_app::toml_string(line, "module"),
-            "nsh" => meta.nsh = rust_app::toml_string(line, "nsh"),
-            "targets" => {
-                meta.targets = Some(
-                    value
-                        .trim_start_matches('[')
-                        .trim_end_matches(']')
-                        .split(',')
-                        .map(|t| t.trim().trim_matches('"').to_owned())
-                        .filter(|t| !t.is_empty())
-                        .collect(),
-                )
-            }
-            _ => {}
-        }
-    }
-    meta
-}
-
 /// `git` with `args`, in `dir`; its trimmed output.
 fn git(dir: Option<&Path>, args: &[&str]) -> anyhow::Result<String> {
     let mut cmd = Command::new("git");
@@ -981,14 +942,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn metadata_is_read() {
-        let meta = metadata(
-            "[package]\nname = \"acme-ui\"\n\n[package.metadata.nsh]\nformat = 1\nmodule = \"acme/ui\" # its specifier\nnsh = \">=0.6\"\ntargets = [\"macos\", \"linux\"]\n\n[dependencies]\nmodule = \"x\"\n",
+    fn nsh_requirement_is_read() {
+        let req = |t: &str| nsh_requirement(t);
+        assert_eq!(
+            req("[dependencies]\nnsh-core = \"0.6\"\n").as_deref(),
+            Some("0.6")
         );
-        assert_eq!(meta.format, Some(1));
-        assert_eq!(meta.module.as_deref(), Some("acme/ui"));
-        assert_eq!(meta.nsh.as_deref(), Some(">=0.6"));
-        assert_eq!(meta.targets, Some(vec!["macos".into(), "linux".into()]));
+        assert_eq!(
+            req("[dependencies]\nnsh-core = { version = \">=0.6, <0.8\", features = [\"x\"] }\n")
+                .as_deref(),
+            Some(">=0.6, <0.8")
+        );
+        assert_eq!(req("[dev-dependencies]\nnsh-core = \"0.6\"\n"), None);
+        assert_eq!(
+            req("[dependencies]\nnsh-core = { path = \"../core\" }\n"),
+            None
+        );
     }
 
     #[test]
