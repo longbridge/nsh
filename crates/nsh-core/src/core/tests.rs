@@ -16634,11 +16634,14 @@ mod components {
                 let _ = c.commit();
             }
         }
+        // A text block's only run has no node of its own (#1345).
         let mut shown: Vec<String> = c
             .nodes
             .iter()
-            .filter(|(_, n)| n.kind == Kind::RawText && !n.text.is_empty())
-            .map(|(_, n)| n.text.clone())
+            .filter_map(|(key, n)| match n.kind {
+                Kind::RawText if !n.text.is_empty() => Some(n.text.clone()),
+                _ => c.folded_text(key as Key).map(str::to_owned),
+            })
             .collect();
         shown.sort();
         CHANGING_ROWS.set(100);
