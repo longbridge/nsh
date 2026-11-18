@@ -6,6 +6,11 @@
 
 pub mod audio;
 pub mod canvas_image;
+// CoreText attribute keys, RTL decoration spans and truncated-line alignment
+// shared by `nsh-platform-macos` and `nsh-platform-ios`, no API of apps':
+// hidden from the docs, so it stays out of what NSH keeps compatible.
+#[doc(hidden)]
+pub mod core_text;
 pub mod handoff;
 // Which images of a decoded file the macOS and iOS backends show, no API of
 // apps': hidden from the docs, so it stays out of what NSH keeps compatible.
