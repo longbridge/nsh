@@ -2719,6 +2719,8 @@ Rust 函数是同步的，因为数据就在内存中：在组件运行的地方
 
 损坏的 `storage.json` 会被保留为同目录下的 `storage.json.corrupt`，应用从空存储开始；读不了的文件则让应用的改动只留在内存中，文件本身永远不会被覆盖。
 
+在 Web 上，应用的多个标签页共用同一份存储：其中一个标签页设置、删除或清空的内容，其他标签页随后都能读到。浏览器拒绝保存的值（浏览器自身的配额用尽，或用户禁止了网站保存数据）会像超过 5 MB 的值一样被拒绝。
+
 app id 是 `nsh.json` 中的 `id`，它随应用一起传递：`nsh build` 和 `nsh package` 把它写在 bundle 旁边，开发服务器会发送它，签名包则带有经发布密钥证书担保的 id。因此无论应用在哪里运行，都无需任何设置就各自保存自己的数据；没有 id 的应用保存在 `default` 下。宿主应用可以另选位置（见[在 iOS 中嵌入](../docs/ios.md)和[在 Android 中嵌入](../docs/android.md)）。
 
 ### Storage.getItem
@@ -2743,7 +2745,7 @@ const theme = (await Storage.getItem("theme")) ?? "system";
 setItem(key: string, value: string): Promise<void>;
 ```
 
-把 `key` 设为 `value`，替换原有的值。如果存储会超过 5 MB，则 Promise 以一个 `code` 为 `"ERR_NSH_QUOTA_EXCEEDED"` 的 `Error` 拒绝，值不会被保存。Rust：`Storage::set_item(key, value)`，此时返回 `Err(StorageFull)`。值都是字符串：结构化数据保存为 JSON（Rust 用 `serde_json::to_string`，TSX 用 `JSON.stringify`），再读回（`serde_json::from_str`、`JSON.parse`）。
+把 `key` 设为 `value`，替换原有的值。如果存储会超过 5 MB，或在 Web 上浏览器拒绝保存这个值，则 Promise 以一个 `code` 为 `"ERR_NSH_QUOTA_EXCEEDED"` 的 `Error` 拒绝，值不会被保存。Rust：`Storage::set_item(key, value)`，此时返回 `Err(StorageFull)`。值都是字符串：结构化数据保存为 JSON（Rust 用 `serde_json::to_string`，TSX 用 `JSON.stringify`），再读回（`serde_json::from_str`、`JSON.parse`）。
 
 ```rust tabs
 let draft = serde_json::json!({ "title": title.get(), "body": body.get() });

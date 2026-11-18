@@ -1016,7 +1016,9 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   carry), so an app keeps its data wherever its page is and apps of one origin keep theirs apart. An app without an id
   (the demo player's, the playground's) keeps its entries under `nsh:<page directory>:<key>` (the directory of
   `document.baseURI`): apps run one after another on one such page share theirs. `nsh.js` wraps every call in try / catch (blocked
-  storage, private mode, quota) and hands failures back as messages.
+  storage, private mode, quota) and hands failures back as messages: a value the browser refuses is not kept and
+  `setItem` fails, as past NSH's own quota. What other tabs of the origin change under the app's prefix arrives as
+  `storage` events, which `nsh.js` hands to the engine (`nsh_storage_changed`), so the app reads their changes.
 - **Alerts** (`AlertDialog`, both presentations) are drawn in the root (over the whole window with `dialogs:
   "viewport"`, as dialogs are: under Input): with the `desktop` idiom as the Linux and
   macOS backends' alerts (up to three buttons in a row, the last regular one the default), otherwise as iOS's alert
