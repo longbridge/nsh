@@ -779,7 +779,7 @@ fn a_compact_bottom_dock_lifted_by_the_keyboard_stays_below_the_status_bar() {
 }
 
 /// An area of `layout` whose tab bars end with their group's panels, the
-/// displayed one starred, and its region.
+/// displayed one starred.
 #[derive(Clone, PartialEq, Props)]
 struct SuffixProps {
     layout: DockAreaLayout,
@@ -813,11 +813,7 @@ fn Suffix(props: SuffixProps) -> impl IntoElement {
                         format!("{star}{panel}")
                     })
                     .collect();
-                text(format!(
-                    "Suffix {:?} [{}]",
-                    group.placement,
-                    panels.join(" ")
-                ))
+                text(format!("Suffix [{}]", panels.join(" ")))
             })
             .size_full(),
     )
@@ -840,23 +836,23 @@ fn start_suffix(layout: DockAreaLayout, compact: bool) -> Headless {
 
 #[test]
 fn a_tab_bar_ends_with_what_render_tab_bar_suffix_draws_for_its_group() {
-    // Each group's bar ends with its own: its panels, the displayed one,
-    // its region.
+    // Each group's bar ends with its own: its panels and the displayed
+    // one, in the center and in a dock.
     let mut app = start_suffix(with_files(), false);
-    app.wait_for("Suffix Center [*a b]").unwrap();
-    app.wait_for("Suffix Center [*c]").unwrap();
-    app.wait_for("Suffix Left [*files]").unwrap();
+    app.wait_for("Suffix [*a b]").unwrap();
+    app.wait_for("Suffix [*c]").unwrap();
+    app.wait_for("Suffix [*files]").unwrap();
     // It follows the group: another tab displayed.
     app.press("id:tab-b").unwrap();
-    app.wait_for("Suffix Center [a *b]").unwrap();
-    app.wait_for("Suffix Center [*c]").unwrap();
+    app.wait_for("Suffix [a *b]").unwrap();
+    app.wait_for("Suffix [*c]").unwrap();
 
     // Compact: one bar with every center panel's tab, ending with the
     // shown group's.
     let mut app = start_suffix(two_groups(), true);
-    app.wait_for("Suffix Center [*a b]").unwrap();
-    assert_eq!(app.screen().count("text:Suffix Center [*c]"), Ok(0));
+    app.wait_for("Suffix [*a b]").unwrap();
+    assert_eq!(app.screen().count("text:Suffix [*c]"), Ok(0));
     app.press("id:tab-c").unwrap();
-    app.wait_for("Suffix Center [*c]").unwrap();
-    assert_eq!(app.screen().count("text:Suffix Center [*a b]"), Ok(0));
+    app.wait_for("Suffix [*c]").unwrap();
+    assert_eq!(app.screen().count("text:Suffix [*a b]"), Ok(0));
 }

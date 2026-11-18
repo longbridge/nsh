@@ -1,5 +1,5 @@
 // `DockArea`'s `renderTabBarSuffix`: what follows a tab group's tabs in
-// its tab bar, given the group (its panels, its displayed one, its region).
+// its tab bar, given the group (its panels and its displayed one).
 import { Text, View } from "nsh";
 import { DockArea } from "nsh/base";
 
@@ -24,7 +24,7 @@ export default function BaseDockTabBarSuffix() {
           renderTab={tab => <Text testID={`suffix-tab-${tab.panel}`}>{`Tab ${tab.panel}`}</Text>}
           renderPanel={panel => <Text>{`Panel ${panel.id}`}</Text>}
           renderTabBarSuffix={group => (
-            <Text>{`Suffix ${group.placement} ${group.panels.join(",")} shows ${group.active}`}</Text>
+            <Text>{`Suffix ${group.panels.join(",")} shows ${group.active}`}</Text>
           )}
         />
       </View>

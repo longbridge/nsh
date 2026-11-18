@@ -141,11 +141,21 @@ mount(App);
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `group` | `number` | 标签组的 id。 |
-| `placement` | `"center" \| "left" \| "bottom" \| "right"` | 它所在的区域：中央，或一个停靠区。 |
+| `group` | `number` | 标签组的 id：ref 的 `selectTab`、`splitAt` 和 `toggleZoom` 接受的就是它。 |
 | `panels` | `string[]` | 它的可见面板的键，按标签页顺序。 |
 | `active` | `string \| null` | 它显示的面板（如果有）。 |
 | `zoomed` | `boolean` | 它已放大。 |
+
+```tsx
+renderTabBarSuffix={(group) => (
+  <View class="ml-auto flex-row items-center gap-2 px-2">
+    <Text>{`${group.panels.length} 个标签页`}</Text>
+    <Button onPress={() => area.toggleZoom(group.group)}>
+      <Text>{group.zoomed ? "还原" : "放大"}</Text>
+    </Button>
+  </View>
+)}
+```
 
 ```tsx
 let area!: DockAreaRef;

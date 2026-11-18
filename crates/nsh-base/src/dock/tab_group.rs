@@ -87,7 +87,6 @@ pub(crate) fn tab_value(a: AreaCx, panel: &PanelId) -> Option<DockTab> {
 pub(crate) fn group_value(a: AreaCx, group: &Group) -> DockGroup {
     DockGroup {
         group: group.node.as_u64(),
-        placement: group.placement,
         panels: group
             .panels
             .iter()

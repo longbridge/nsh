@@ -165,11 +165,21 @@ the one tab bar ends with the shown group's. A group's value says what the app n
 
 | Field | Type | Description |
 |---|---|---|
-| `group` | `number` | The id of the tab group. |
-| `placement` | `"center" \| "left" \| "bottom" \| "right"` | The region it is in: the center, or a dock. |
+| `group` | `number` | The id of the tab group: what the ref's `selectTab`, `splitAt` and `toggleZoom` take. |
 | `panels` | `string[]` | The keys of its visible panels, in tab order. |
 | `active` | `string \| null` | Its displayed panel, if it has one. |
 | `zoomed` | `boolean` | It is zoomed. |
+
+```tsx
+renderTabBarSuffix={(group) => (
+  <View class="ml-auto flex-row items-center gap-2 px-2">
+    <Text>{`${group.panels.length} tabs`}</Text>
+    <Button onPress={() => area.toggleZoom(group.group)}>
+      <Text>{group.zoomed ? "Restore" : "Zoom"}</Text>
+    </Button>
+  </View>
+)}
+```
 
 ```tsx
 let area!: DockAreaRef;

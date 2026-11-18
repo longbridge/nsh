@@ -134,32 +134,20 @@ pub struct DockTab {
     pub zoomed: bool,
 }
 
-/// A tab group, as `renderTabBarSuffix` renders what follows its tabs.
-#[derive(Clone, Debug, PartialEq, JsObject)]
+/// A tab group, as `renderTabBarSuffix` renders what follows its tabs:
+/// what the group's own actions act on.
+#[derive(Clone, Debug, Default, PartialEq, JsObject)]
 #[non_exhaustive]
 pub struct DockGroup {
-    /// The id of the tab group.
+    /// The id of the tab group, as [`DockTab::group`]: what the ref's
+    /// `select_tab`, `split_at` and `toggle_zoom` take.
     pub group: u64,
-    /// The region it is in: the center, or a dock.
-    pub placement: DockPlacement,
-    /// The keys of its visible panels, in tab order.
+    /// The keys of its visible panels, in tab order (a list of its tabs).
     pub panels: Vec<PanelId>,
     /// Its displayed panel, if it has one.
     pub active: Option<PanelId>,
-    /// It is zoomed.
+    /// It is zoomed (a zoom button's state).
     pub zoomed: bool,
-}
-
-impl Default for DockGroup {
-    fn default() -> Self {
-        Self {
-            group: 0,
-            placement: DockPlacement::Center,
-            panels: Vec::new(),
-            active: None,
-            zoomed: false,
-        }
-    }
 }
 
 /// Where a drag would land, as `renderDropIndicator` renders it.
