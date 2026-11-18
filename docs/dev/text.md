@@ -190,7 +190,7 @@
   spread around it, CSS's strut) and grows only where the attachment reaches past that box, on every engine: the
   line height is never a cap that cuts an attachment to the line. CSS's
   `top` / `bottom` (the line box's) and `sub` / `super` / lengths are not offered: the engines size placeholders
-  before lines exist. The headless engine's font is its line (ascent 1.2 em, descent 0, x height 0.5 em). After the final layout the core places its native view, a child of the text view (Android's
+  before lines exist. The headless engine's natural font is 1.2 em (ascent 1.2 em, descent 0, x height 0.5 em), with explicit `lineHeight` spread around that ascent by half-leading. After the final layout the core places its native view, a child of the text view (Android's
   `TextBox` is a ViewGroup for this), on the placeholder (`TextEngine::attachments`); attachments cut off by the line limit or
   an ellipsis move out of sight. Their own children are normal layout children, made with the attachment: a scroll
   view around the text never culls them (`Core::cull_scope`), as its walk does not reach inside texts, though past
