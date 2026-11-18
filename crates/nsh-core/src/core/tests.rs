@@ -16379,6 +16379,202 @@ mod components {
         assert_eq!(failures, Vec::<String>::new());
     }
 
+    thread_local! {
+        /// Every value the id memo of a `KeyedIdRows` cell took: the cell's
+        /// number and the id.
+        static IDS_READ: std::cell::RefCell<Vec<(u32, Option<String>)>> = const { std::cell::RefCell::new(Vec::new()) };
+        /// How many times a `KeyedIdRows` row's content was made again for
+        /// the id it already showed.
+        static ROWS_REMADE: Cell<u32> = const { Cell::new(0) };
+        /// The `KeyedIdRows` cells made so far (their numbers).
+        static ID_CELLS: Cell<u32> = const { Cell::new(0) };
+        /// The rows inserted so far (their keys).
+        static INSERTED: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// Keyed rows, `r0`, `r1`, ..., whose cells read their row's id in a
+    /// memo and make the row's content from it, as an app does to keep a
+    /// row's state with its item; a press changes the rows as
+    /// [`ROWS_CHANGE`] says.
+    #[component]
+    fn KeyedIdRows() -> impl IntoElement {
+        let count = CHANGING_ROWS.get();
+        let rows = signal((0..count).map(|i| format!("r{i}")).collect::<Vec<_>>());
+        view()
+            .flex_1()
+            .child(view().h(px(20.0)).on_press(move |_: &()| {
+                let change = ROWS_CHANGE.get().expect("a change");
+                rows.update(change);
+            }))
+            .child(
+                virtual_list(
+                    move || rows.with(Vec::len),
+                    move |at| {
+                        let cell = ID_CELLS.get();
+                        ID_CELLS.set(cell + 1);
+                        let id = computed(move || {
+                            let id = rows.with(|r| r.get(at.index()).cloned());
+                            IDS_READ.with_borrow_mut(|read| read.push((cell, id.clone())));
+                            id
+                        });
+                        let shown: std::rc::Rc<std::cell::RefCell<Option<Option<String>>>> =
+                            std::rc::Rc::default();
+                        view().h(px(40.0)).child(dynamic(move || {
+                            let id = id.get();
+                            if shown.replace(Some(id.clone())).as_ref() == Some(&id) {
+                                ROWS_REMADE.set(ROWS_REMADE.get() + 1);
+                            }
+                            text(id.unwrap_or_default())
+                        }))
+                    },
+                )
+                .keys(move || rows.get())
+                .estimated_item_size(px(40.0))
+                .flex_1(),
+            )
+    }
+
+    /// A keyed list's cells read their rows at their new indices as soon as
+    /// the rows change: a memo of a cell's row never sees another row on
+    /// the way (the row now at the cell's old index), so content made from
+    /// it is not made again. However long the list is, and however often
+    /// its rows changed before.
+    #[test]
+    fn keyed_list_cells_never_read_another_row_on_the_way() {
+        let changes: [(&str, RowsChange); 4] = [
+            ("move to the top", |r| {
+                let row = r.remove(5);
+                r.insert(0, row);
+            }),
+            ("remove", |r| {
+                r.remove(3);
+            }),
+            ("insert", |r| {
+                let n = INSERTED.get();
+                INSERTED.set(n + 1);
+                r.insert(4, format!("n{n}"));
+            }),
+            ("reorder", |r| r[..12].reverse()),
+        ];
+        let mut failures = Vec::new();
+        for count in [40, 2000] {
+            CHANGING_ROWS.set(count);
+            let mut c = core();
+            c.mount_root(&crate::element::Root::new::<KeyedIdRows>(|| ()));
+            let batch = c.commit().unwrap();
+            let button = batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Events { id, events } if events.contains(EventKind::Press) => {
+                        Some(*id)
+                    }
+                    _ => None,
+                })
+                .expect("a button");
+            for _ in 0..4 {
+                let _ = c.commit();
+            }
+            // The id each cell showed last.
+            let mut shown = std::collections::HashMap::new();
+            for (cell, id) in IDS_READ.take() {
+                shown.insert(cell, id);
+            }
+            // The order the graph runs the memos in follows the history of
+            // the rows' changes: go through the changes a few times.
+            for round in 0..4 {
+                for (name, change) in changes {
+                    IDS_READ.with_borrow_mut(Vec::clear);
+                    ROWS_REMADE.set(0);
+                    ROWS_CHANGE.set(Some(change));
+                    assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+                    let mut made = 0;
+                    for _ in 0..4 {
+                        let batch = c.commit();
+                        made += batch
+                            .iter()
+                            .flat_map(|b| &b.items)
+                            .filter(|i| matches!(i, MountItem::Create { .. }))
+                            .count();
+                    }
+                    let case = format!("{count} rows, round {round}, {name}");
+                    // Each cell's memo went from the id it showed (if it
+                    // showed one) straight to the id it settled on: no
+                    // other row on the way.
+                    let mut taken = std::collections::HashMap::<u32, Vec<Option<String>>>::new();
+                    for (cell, id) in IDS_READ.take() {
+                        let ids = taken.entry(cell).or_default();
+                        if ids.last() != Some(&id) {
+                            ids.push(id);
+                        }
+                    }
+                    for (cell, ids) in taken {
+                        let settled = ids.last().cloned().expect("an id");
+                        let before = shown.insert(cell, settled.clone());
+                        let straight = match &ids[..] {
+                            [_] => true,
+                            [from, _] => before.as_ref() == Some(from),
+                            _ => false,
+                        };
+                        if !straight {
+                            failures.push(format!("{case}: cell {cell} took {ids:?}"));
+                        }
+                    }
+                    let remade = ROWS_REMADE.get();
+                    if remade != 0 {
+                        failures.push(format!("{case}: {remade} rows made again"));
+                    }
+                    if matches!(name, "move to the top" | "reorder") && made != 0 {
+                        failures.push(format!("{case}: {made} views made"));
+                    }
+                }
+            }
+        }
+        CHANGING_ROWS.set(100);
+        assert_eq!(failures, Vec::<String>::new());
+    }
+
+    /// The cell of a keyed row that goes can be the first to read the new
+    /// rows (the graph runs what reads them in an order their earlier
+    /// changes left): reading its position lets the cell's content go, the
+    /// running memo with it, and nothing fails.
+    #[test]
+    fn keyed_list_cell_whose_row_goes_can_read_first() {
+        let changes: [RowsChange; 2] = [|r| r.swap(0, 1), |r| drop(r.remove(0))];
+        CHANGING_ROWS.set(3);
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<KeyedIdRows>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("a button");
+        for _ in 0..4 {
+            let _ = c.commit();
+        }
+        for change in changes {
+            ROWS_CHANGE.set(Some(change));
+            assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+            assert!(c.components.runtime.take_failures().is_empty());
+            for _ in 0..4 {
+                let _ = c.commit();
+            }
+        }
+        let mut shown: Vec<String> = c
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.kind == Kind::RawText && !n.text.is_empty())
+            .map(|(_, n)| n.text.clone())
+            .collect();
+        shown.sort();
+        CHANGING_ROWS.set(100);
+        assert_eq!(shown, ["r0", "r2"]);
+    }
+
     /// A long list of its own rows, each a stop of Tab.
     #[component]
     fn FocusableRows() -> impl IntoElement {
@@ -17208,6 +17404,63 @@ mod components {
             shown.last().unwrap(),
             "render failed ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"
         );
+    }
+
+    /// An offscreen render checks its images as a canvas drawing does: a
+    /// source the app may not load is dropped before the platform sees it,
+    /// one it may is rewritten to what the check granted.
+    #[test]
+    fn offscreen_renders_check_their_images() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            canvas_render: true,
+            ..Default::default()
+        });
+        c.set_access(Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(
+                &serde_json::json!({ "network": { "hosts": ["docs.example.com"] } }),
+            )
+            .unwrap(),
+            granted: None,
+        }));
+        let image = |uri: &str| crate::canvas::CanvasOp::DrawImage {
+            image: crate::canvas::CanvasImage { uri: uri.into() },
+            source: None,
+            dest: [crate::canvas::Num::Const(0.0); 4],
+        };
+        let (_answer, slot) = crate::element::task::Answer::new();
+        c.start_canvas_render(
+            crate::canvas::render::RenderRequest {
+                drawing: crate::canvas::Drawing {
+                    ops: vec![
+                        image("https://docs.example.com/a/../x.png"),
+                        image("https://refused.example.com/x.png"),
+                    ],
+                    ..Default::default()
+                },
+                size: crate::Size::new(px(30.0), px(20.0)),
+                ..Default::default()
+            },
+            slot,
+        );
+        let batch = c.commit().unwrap();
+        let uris: Vec<String> = batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    command: Command::RenderCanvas { drawing, .. },
+                    ..
+                } => Some(drawing),
+                _ => None,
+            })
+            .flat_map(|d| d.ops.iter())
+            .filter_map(|op| match op {
+                crate::canvas::CanvasOp::DrawImage { image, .. } => Some(image.uri.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(uris, ["https://docs.example.com/x.png"]);
     }
 
     #[test]
@@ -45026,6 +45279,199 @@ mod each_updates {
                 }
             }
         }
+    }
+
+    thread_local! {
+        /// [`MountRows`] in a scroll view, which culls the rows it does
+        /// not show.
+        static SCROLLED: Cell<bool> = const { Cell::new(false) };
+        /// Each row of [`MountRows`] with a hint, as a document's links
+        /// have their addresses: an overlay each.
+        static HINTED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// `ROWS` rows of an `each` as `TextView` has a document's blocks: a
+    /// view each, keyed by position and kind, with a region in it; a text
+    /// before them and a view after them.
+    #[component]
+    fn MountRows() -> impl IntoElement {
+        let items = signal(
+            (0..ROWS.with(Cell::get))
+                .map(|i| (i, 0u32))
+                .collect::<Vec<_>>(),
+        );
+        let hinted = HINTED.with(Cell::get);
+        let rows = view()
+            .flex_col()
+            .child(text("before"))
+            .child(each(
+                items,
+                |item| (item.0, "paragraph".to_owned()),
+                move |item, _| {
+                    view()
+                        .child(dynamic(move || {
+                            let (at, n) = item.get();
+                            text(format!("row {at} {n}"))
+                        }))
+                        .child(hinted.then(|| {
+                            overlay()
+                                .hint(Duration::from_millis(500))
+                                .child(text("https://example.com"))
+                        }))
+                },
+            ))
+            .child(view().h(px(4.0)));
+        if SCROLLED.with(Cell::get) {
+            scroll().size_full().child(rows).into_element()
+        } else {
+            rows.into_element()
+        }
+    }
+
+    /// [`MountRows`] mounted with `rows` rows and, in a scroll view,
+    /// scrolled down 20 points a frame for `frames` frames: the core and
+    /// its scroll view.
+    fn rows_mounted(rows: usize, frames: u32) -> (Core<FakeEngine>, Option<NodeId>) {
+        ROWS.with(|r| r.set(rows));
+        let mut c = core();
+        c.mount_root(&Root::new::<MountRows>(|| ()));
+        let batch = c.commit();
+        let scroll = batch
+            .iter()
+            .flat_map(|b| &b.items)
+            .find_map(|item| match item {
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::Scroll,
+                } => Some(*id),
+                _ => None,
+            });
+        if let Some(id) = scroll {
+            for n in 1..=frames {
+                c.set_scroll_offset(id, point(px(0.0), px(20.0 * n as f32)), u32::MAX);
+                c.commit();
+            }
+        }
+        (c, scroll)
+    }
+
+    /// Rows of an `each` mounted at once, and made as they scroll into
+    /// sight, are placed among their siblings without a search of all of
+    /// them, or of all the overlays (a hint a row), for each: the siblings
+    /// and overlays looked at grow with the rows, not with their square.
+    #[test]
+    fn rows_mounted_at_once_are_placed_without_a_search_for_each() {
+        let mut grew = Vec::new();
+        for scrolled in [false, true] {
+            for hinted in [false, true] {
+                SCROLLED.with(|s| s.set(scrolled));
+                HINTED.with(|h| h.set(hinted));
+                let work = |rows| {
+                    let (c, _) = rows_mounted(rows, 20);
+                    c.components.placing_work.get()
+                };
+                let (few, many) = (work(400), work(1_600));
+                // Four times the rows: about four times the work (it was
+                // about sixteen times, with a search for each row).
+                if many > 5 * few {
+                    grew.push(format!(
+                        "scrolled {scrolled}, hinted {hinted}: {few} for 400 rows, {many} for 1,600"
+                    ));
+                }
+            }
+        }
+        SCROLLED.with(|s| s.set(false));
+        HINTED.with(|h| h.set(false));
+        assert!(grew.is_empty(), "{grew:#?}");
+    }
+
+    /// The rows end up in order, after the text before them and before the
+    /// view after them, mounted at once and made as they scroll into
+    /// sight.
+    #[test]
+    fn rows_mounted_at_once_keep_their_order() {
+        for scrolled in [false, true] {
+            SCROLLED.with(|s| s.set(scrolled));
+            let (c, _) = rows_mounted(300, 40);
+            // The column: the view of the text, the rows and the view.
+            let mut stack = vec![c.root];
+            let column = std::iter::from_fn(|| {
+                let key = stack.pop()?;
+                stack.extend(&c.nodes[key as usize].children);
+                Some(key)
+            })
+            .find(|&key| c.nodes[key as usize].children.len() == 302)
+            .expect("the column");
+            let children = &c.nodes[column as usize].children;
+            let mut expected = vec!["before".to_owned()];
+            expected.extend((0..300).map(|i| format!("row {i} 0")));
+            assert_eq!(
+                shown(&c, c.nodes[column as usize].id),
+                expected,
+                "scrolled {scrolled}"
+            );
+            assert!(c.nodes[children[301] as usize].text.is_empty());
+        }
+        SCROLLED.with(|s| s.set(false));
+    }
+
+    /// `cargo test --release -p nsh-core --lib bench_each_mount -- --ignored --nocapture`:
+    /// an `each` of N rows mounted at once, as `TextView` mounts a long
+    /// document's blocks, then, in a scroll view, scrolled down 20 points
+    /// a frame for 200 frames; the numbers are in `docs/dev/performance.md`.
+    #[test]
+    #[ignore]
+    fn bench_each_mount() {
+        println!(
+            "ms a first mount: the root's pass + the commit | mount items | µs a scrolled frame"
+        );
+        for (scrolled, hinted) in [(false, false), (true, false), (true, true)] {
+            SCROLLED.with(|s| s.set(scrolled));
+            HINTED.with(|h| h.set(hinted));
+            for rows in [1_000, 10_000, 50_000] {
+                ROWS.with(|r| r.set(rows));
+                let mut c = core();
+                let start = Instant::now();
+                c.mount_root(&Root::new::<MountRows>(|| ()));
+                let mid = Instant::now();
+                let batch = c.commit();
+                let (first, items) = (mid.elapsed(), batch.as_ref().map_or(0, |b| b.items.len()));
+                let scroll = batch
+                    .iter()
+                    .flat_map(|b| &b.items)
+                    .find_map(|item| match item {
+                        MountItem::Create {
+                            id,
+                            kind: ViewKind::Scroll,
+                        } => Some(*id),
+                        _ => None,
+                    });
+                let frame = scroll.map(|id| {
+                    let frames = 200;
+                    let start = Instant::now();
+                    for n in 1..=frames {
+                        c.set_scroll_offset(id, point(px(0.0), px(20.0 * n as f32)), u32::MAX);
+                        c.commit();
+                    }
+                    start.elapsed().as_secs_f64() * 1e6 / f64::from(frames)
+                });
+                let ms = |d: Duration| d.as_secs_f64() * 1e3;
+                println!(
+                    "{:<15} {rows:>6} rows | {:>8.1} + {:>8.1} = {:>8.1} | {items:>6} | {}",
+                    match (scrolled, hinted) {
+                        (false, _) => "plain",
+                        (true, false) => "scrolled",
+                        (true, true) => "scrolled, hints",
+                    },
+                    ms(mid - start),
+                    ms(first),
+                    ms(mid - start + first),
+                    frame.map_or("-".to_owned(), |us| format!("{us:.1}"))
+                );
+            }
+        }
+        SCROLLED.with(|s| s.set(false));
+        HINTED.with(|h| h.set(false));
     }
 }
 

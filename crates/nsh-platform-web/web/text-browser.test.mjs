@@ -356,3 +356,44 @@ test('a text streamed in keeps the spans and breaks of the lines it already had'
     assert.equal(html.match(/data-result="([^"]*)"/)?.[1], 'passed');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('letter-spacing advances DOM runs once per grapheme cluster', { skip: !chromium }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'nsh-text-cluster-spacing-'));
+  try {
+    const source = await readFile(new URL('./nsh.js', import.meta.url), 'utf8');
+    const module = 'data:text/javascript;base64,' + Buffer.from(source + '\nexport { measureNumericText, textClusterBoxes };').toString('base64');
+    await writeFile(join(dir, 'index.html'), `<!doctype html><meta charset="utf-8"><body><script type="module">
+      import { measureNumericText, textClusterBoxes } from '${module}';
+      try {
+        const font = '400 20px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+        const near = (a, b, what) => { if (Math.abs(a - b) > 0.25) throw Error(what + ': ' + a + ' != ' + b); };
+        const domWidth = (text, spacing) => {
+          const span = document.createElement('span');
+          span.style.cssText = 'position:absolute;left:0;top:0;white-space:pre;font:' + font + ';letter-spacing:' + spacing + 'px';
+          span.textContent = text;
+          document.body.append(span);
+          const w = span.getBoundingClientRect().width;
+          span.remove();
+          return w;
+        };
+        const seg = new Intl.Segmenter();
+        for (const text of ['👨‍👩‍👧‍👦', '👍🏻', '🇨🇳', 'cafe\\u0301', 'か\\u3099', '…', '👨‍👩‍👧‍👦after']) {
+          const clusters = [...seg.segment(text)].length;
+          const base = measureNumericText(font, 'normal', text);
+          const spaced = domWidth(text, 10);
+          near(spaced - base, clusters * 10, text);
+        }
+        // A following span shifts by 1 * spacing after a 7-scalar ZWJ emoji, not 7 * spacing.
+        const familyBase = measureNumericText(font, 'normal', '👨‍👩‍👧‍👦');
+        const box = textClusterBoxes(font, 'normal', 10, '👨‍👩‍👧‍👦after', [[0, 11], [11, 16]]);
+        near(box[1][0], familyBase + 10, 'second span start');
+        document.body.dataset.result = 'passed';
+      } catch (e) { document.body.dataset.result = 'failed: ' + e.message; }
+    </script>`);
+    const html = execFileSync(chromium, ['--headless', '--no-sandbox', '--disable-dev-shm-usage',
+      '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--virtual-time-budget=1000',
+      '--user-data-dir=' + join(dir, 'profile'), '--dump-dom', pathToFileURL(join(dir, 'index.html')).href],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20000, maxBuffer: 1024 * 1024 });
+    assert.equal(html.match(/data-result="([^"]*)"/)?.[1], 'passed');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

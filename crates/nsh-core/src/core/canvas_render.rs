@@ -100,8 +100,10 @@ impl<M: crate::TextEngine> Core<M> {
     }
 
     /// Checks `request` and sends it to the platform; `answer` gets the
-    /// image or why there is none.
-    pub(super) fn start_canvas_render(&mut self, request: RenderRequest, answer: Slot) {
+    /// image or why there is none. Its images pass the same check an
+    /// on-screen canvas drawing's do (`Core::check_canvas_images`): a
+    /// source the app may not load is dropped before the platform sees it.
+    pub(super) fn start_canvas_render(&mut self, mut request: RenderRequest, answer: Slot) {
         let env = &self.components.environment;
         if !env.canvas_render {
             answer.borrow_mut().deliver(Err(render::error(
@@ -125,6 +127,7 @@ impl<M: crate::TextEngine> Core<M> {
             )));
             return;
         }
+        self.check_canvas_images(&mut request.drawing);
         let id = next_id();
         let deadline = task::act_after(
             &self.components.executor,

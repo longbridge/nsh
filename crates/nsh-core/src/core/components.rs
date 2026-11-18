@@ -89,6 +89,9 @@ struct VirtualListState {
     /// In a view: the live parts of its cells (cells and contents) with the
     /// index their content reads and its owner, for its rows' binding.
     rows: CellRows,
+    /// The memo of a bound count or keys, which moves the cells' indices
+    /// as the rows change: their positions run it before they are read.
+    moves: Option<crate::element::reactive::Node>,
     /// The rows of another component's `Items` prop
     /// ([`crate::element::ComponentElement::items`]): each cell is that
     /// component's wrapper (`place`, its row function: an [`Inner::Row`])
@@ -631,6 +634,10 @@ pub(super) struct Components {
     pub(super) released_hosts: FxHashSet<NodeId>,
     #[cfg(test)]
     pub(super) cleanup_work: super::views::CleanupWork,
+    /// Siblings and overlays looked at to place views among them
+    /// ([`Core::preceding`], `native_before_at`, `first_overlay_in`).
+    #[cfg(test)]
+    pub(super) placing_work: std::cell::Cell<usize>,
     /// Slot nodes (`componentSlot`) -> their slot's name.
     slot_names: FxHashMap<NodeId, Arc<str>>,
     /// Slot nodes in a host -> the host.
@@ -666,7 +673,7 @@ pub(super) struct Components {
     /// The status bar's settings, shared by components, modules and tasks.
     pub(super) status_bars: crate::element::status_bar::StatusBars,
     /// Dialogs components show, by id: their answers.
-    dialogs: FxHashMap<u32, AnswerSlot<i32>>,
+    dialogs: FxHashMap<u32, AnswerSlot<crate::element::DialogReply>>,
     next_dialog: u32,
     /// Image sizes asked for (`Image.getSize`), by request id: their answers.
     image_infos: FxHashMap<u32, AnswerSlot<Result<ImageSize, String>>>,
@@ -824,6 +831,8 @@ impl Default for Components {
             released_hosts: FxHashSet::default(),
             #[cfg(test)]
             cleanup_work: Default::default(),
+            #[cfg(test)]
+            placing_work: Default::default(),
             slot_names: FxHashMap::default(),
             slot_hosts: FxHashMap::default(),
             slot_targets: FxHashMap::default(),
@@ -2548,9 +2557,12 @@ impl<M: TextEngine> Core<M> {
                 let list = self.list_of(host);
                 // The wrapper reads its position from signals.
                 let count_signal = list.map(|list| self.list_count(list, count));
+                let moves = list
+                    .and_then(|list| self.components.virtual_lists.get(&list))
+                    .and_then(|state| state.moves);
                 let made = std::cell::Cell::new(None);
                 let build = || {
-                    let at = row_position(index, count, count_signal, &made);
+                    let at = row_position(index, count, count_signal, moves, &made);
                     view().child(place(Child::row(), at)).into_element().0
                 };
                 // The wrapper is the placing component's.
@@ -2589,6 +2601,7 @@ impl<M: TextEngine> Core<M> {
                         state.separator.clone(),
                         state.rows.clone(),
                         scope,
+                        state.moves,
                     )
                 });
                 match state {
@@ -2603,11 +2616,11 @@ impl<M: TextEngine> Core<M> {
                         inst.row_index = None;
                         ElNode::empty_view()
                     }
-                    Some((count, row, separator, rows, scope)) => {
+                    Some((count, row, separator, rows, scope, moves)) => {
                         let count_signal = Some(self.list_count(list, count));
                         let made = std::cell::Cell::new(None);
                         let build = || {
-                            let at = row_position(index, count, count_signal, &made);
+                            let at = row_position(index, count, count_signal, moves, &made);
                             let row = row(at);
                             // Between rows: after each but the last (before
                             // it, inverted), while it is not.
@@ -4315,6 +4328,8 @@ impl<M: TextEngine> Core<M> {
     /// `next` ([`Self::precedes`]). `hint` is where it is expected, looked
     /// at first: nodes checked from the last to the first, each before the
     /// one after it, are found without a search of the children for each.
+    /// A node not among them, as each node of a region mounted for the
+    /// first time, is known from its own parent without a search either.
     pub(super) fn preceding(
         &self,
         parent: NodeId,
@@ -4323,16 +4338,35 @@ impl<M: TextEngine> Core<M> {
         hint: Option<usize>,
     ) -> Option<usize> {
         let k = self.key(parent).ok()?;
+        if self.nodes[self.key(child).ok()? as usize].parent != k {
+            return None;
+        }
         let children = &self.nodes[k as usize].children;
         let id = |at: usize| children.get(at).map(|&c| self.nodes[c as usize].id);
         let at = match hint {
             Some(at) if id(at) == Some(child) => at,
-            _ => children
-                .iter()
-                .position(|&c| self.nodes[c as usize].id == child)?,
+            _ => {
+                let at = children
+                    .iter()
+                    .position(|&c| self.nodes[c as usize].id == child);
+                self.placing(at.map_or(children.len(), |at| at + 1));
+                at?
+            }
         };
         (id(at + 1) == next).then_some(at)
     }
+
+    /// `n` more siblings or overlays looked at to place a view
+    /// ([`Components::placing_work`]).
+    #[cfg(test)]
+    pub(super) fn placing(&self, n: usize) {
+        let work = &self.components.placing_work;
+        work.set(work.get() + n);
+    }
+
+    #[cfg(not(test))]
+    #[inline(always)]
+    pub(super) fn placing(&self, _n: usize) {}
 
     /// Slot node `node` as element `el` of `host`'s view: its styles, props
     /// and handlers (its children are the app's JSX). Its bound parts are
@@ -4704,10 +4738,12 @@ impl<M: TextEngine> Core<M> {
     /// A view's list of its own rows: its layout, its rows (a splice when
     /// the keys say rows came or went, then the count), and its live cells
     /// built again with the new row function (when the list is made
-    /// again). A bound count or keys are a binding: a memo that, before the
-    /// rows' own bindings run, moves the live cells' indices as the rows
-    /// moved (dropping the content of cells whose row went) and queues the
-    /// change for the list ([`Self::set_list_rows`]).
+    /// again). A bound count or keys are a binding: a memo that moves the
+    /// live cells' indices as the rows moved (dropping the content of cells
+    /// whose row went) and queues the change for the list
+    /// ([`Self::set_list_rows`]). The cells' positions run it before they
+    /// are read, so the rows' own bindings never read the new rows at the
+    /// old indices, whichever runs first.
     fn update_virtual_list(
         &mut self,
         id: NodeId,
@@ -4742,6 +4778,7 @@ impl<M: TextEngine> Core<M> {
                 separator: None,
                 cells: Vec::new(),
                 rows: CellRows::default(),
+                moves: None,
                 items,
                 place: None,
                 contents: Vec::new(),
@@ -4772,6 +4809,7 @@ impl<M: TextEngine> Core<M> {
         let bound = matches!(list.count, Reactive::Bound(_)) || list.keys.is_some();
         let (count, keys) = (list.count, list.keys);
         let rows = move || (count.get(), keys.as_ref().map(|k| k()));
+        let mut moves = None;
         let (count, keys) = if bound {
             let count_signal = self.list_count(id, 0);
             let patches = self.components.patches.clone();
@@ -4779,7 +4817,7 @@ impl<M: TextEngine> Core<M> {
             let slot = first.clone();
             let last: RefCell<Option<Rc<[u64]>>> = RefCell::new(None);
             let made = std::cell::Cell::new(false);
-            crate::element::computed(move || {
+            let memo = crate::element::computed(move || {
                 let (count, keys) = rows();
                 let diff = match (&*last.borrow(), &keys) {
                     (Some(old), Some(new)) => ListDiff::new(old, new),
@@ -4799,6 +4837,7 @@ impl<M: TextEngine> Core<M> {
                     *slot.borrow_mut() = Some((count, keys));
                 }
             });
+            moves = Some(memo.node());
             first.take().expect("a memo runs when it is made")
         } else {
             let (count, keys) = crate::element::untracked(rows);
@@ -4818,6 +4857,7 @@ impl<M: TextEngine> Core<M> {
         state.row = list.row;
         state.count = count;
         state.keys = keys;
+        state.moves = moves;
         state.separator = list.separator;
         state.min_view = list.min_view_time;
         let marked: Vec<NodeId> = state
@@ -6156,7 +6196,9 @@ impl<M: TextEngine> Core<M> {
                     return;
                 };
                 self.components.dialogs.remove(&id);
-                answer.borrow_mut().deliver(-1);
+                answer
+                    .borrow_mut()
+                    .deliver(crate::element::DialogReply::dismissed());
                 let _ = self.apply_op(Op::Command {
                     id: crate::ROOT_ID,
                     command: Command::CloseDialog(id),
@@ -7104,9 +7146,17 @@ impl<M: TextEngine> Core<M> {
                 let Some(answer) = self.components.dialogs.remove(&(dialog as u32)) else {
                     return false;
                 };
-                answer
-                    .borrow_mut()
-                    .deliver(number("index").unwrap_or(-1.0) as i32);
+                let value = match payload {
+                    EventPayload::Map(entries) => entries.iter().find_map(|(k, v)| match v {
+                        crate::PayloadValue::Str(text) if *k == "value" => Some(text.clone()),
+                        _ => None,
+                    }),
+                    _ => None,
+                };
+                answer.borrow_mut().deliver(crate::element::DialogReply {
+                    index: number("index").unwrap_or(-1.0) as i32,
+                    value,
+                });
                 true
             }
             // A view's shortcut runs here; JS's go to JS.
@@ -7843,18 +7893,20 @@ fn move_rows(cells: &CellRows, diff: Option<&ListDiff>, count: u32) {
 
 /// The position of row `index` of `count` that a cell's content reads: in a
 /// view (`count_signal`), its index a signal of the cell's (handed back in
-/// `made`) and the list's count; else fixed.
+/// `made`) and the list's count, both written by the list's memo `moves`
+/// when its rows are bound; else fixed.
 fn row_position(
     index: usize,
     count: usize,
     count_signal: Option<crate::element::Signal<usize>>,
+    moves: Option<crate::element::reactive::Node>,
     made: &std::cell::Cell<Option<crate::element::Signal<usize>>>,
 ) -> Position {
     match count_signal {
         Some(count) => {
             let index = crate::element::signal(index);
             made.set(Some(index));
-            Position::of(index.node(), count.node())
+            Position::of_row(index.node(), count.node(), moves)
         }
         None => Position::fixed(index, count),
     }

@@ -4112,10 +4112,12 @@ dependencies = [
  "objc2-app-kit",
  "objc2-core-foundation",
  "objc2-core-graphics",
+ "objc2-core-text",
  "objc2-foundation",
  "objc2-image-io",
  "objc2-ui-kit",
  "serde_json",
+ "unicode-bidi",
 ]
 
 [[package]]
@@ -4198,6 +4200,7 @@ dependencies = [
  "objc2-quartz-core",
  "rustc-hash 2.1.3",
  "serde_json",
+ "unicode-bidi",
 ]
 
 [[package]]

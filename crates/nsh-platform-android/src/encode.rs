@@ -23,7 +23,7 @@ use nsh_core::{
     KeyboardDismissMode, KeyboardTaps, KeyboardType, LayoutCurve, LayoutProperty, LayoutTransition,
     LiveRegion, ModalAnimation, ModalPresentation, MountBatch, MountItem, NativeProps,
     PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenConfig, SnapAlignment,
-    StatusBarStyle, SubmitBehavior, TextAlign, ViewKind, ViewProps, ViewStyle, WebSource,
+    StatusBarStyle, SubmitBehavior, ViewKind, ViewProps, ViewStyle, WebSource,
     audio::AudioCommand,
     geometry::{DefiniteLength, REM_SIZE},
 };
@@ -627,6 +627,17 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                                 DialogButtonStyle::Cancel => 1,
                                 DialogButtonStyle::Destructive => 2,
                             });
+                        }
+                        // The text field (`SystemUi.dialog`): an alert's only.
+                        match d.input {
+                            Some(input) if !d.sheet => {
+                                e.bool(true);
+                                e.string(input.text);
+                                e.opt_string(input.placeholder.as_deref());
+                                e.bool(input.select_all);
+                                e.bool(input.required);
+                            }
+                            _ => e.bool(false),
                         }
                     }
                     Command::CloseDialog(dialog) => {
@@ -1482,7 +1493,7 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         Some(Checked::Mixed) => flags |= 256 | 1024,
         None => {}
     }
-    // The current item's kind, in bits 11 to 13 (`A11y.java`
+    // The current item's kind, in bits 11 to 13 (`A11yChanges.java`
     // `CURRENT_DESCRIPTIONS`).
     flags |= match s.current {
         None => 0,
@@ -1688,11 +1699,7 @@ fn input(e: &mut Encoded, c: &InputConfig) {
         None => e.int(-1),
     }
     e.float(s.letter_spacing.0);
-    e.int(match c.align {
-        TextAlign::Auto | TextAlign::Left | TextAlign::Justify => 0,
-        TextAlign::Center => 1,
-        TextAlign::Right => 2,
-    });
+    e.int(crate::text::encode_align(c.align));
     e.string(c.placeholder.clone());
     e.bool(c.placeholder_color.is_some());
     e.int(c.placeholder_color.map_or(0, argb));
@@ -1776,6 +1783,7 @@ fn input(e: &mut Encoded, c: &InputConfig) {
     // (the input then reports how far its text scrolled).
     e.bool(c.scrollbar_visible);
     e.bool(c.replaced);
+    e.int(s.font_variant.0 as i32);
 }
 
 // --- Canvas drawings (`CanvasPainter.java`) ---------------------------------
@@ -2348,5 +2356,61 @@ mod tests {
             .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
             .collect();
         assert_eq!(ints[ints.len() - 1], 7);
+    }
+
+    #[test]
+    fn inputs_carry_text_layout_align_letter_spacing_and_font_variant() {
+        use nsh_core::{FontVariant, InputConfig, Points, ResolvedTextStyle, TextAlign};
+
+        let mut config = InputConfig::default();
+        config.style = ResolvedTextStyle {
+            letter_spacing: Points(2.5),
+            font_variant: FontVariant(FontVariant::TABULAR_NUMS | FontVariant::SMALL_CAPS),
+            ..ResolvedTextStyle::default()
+        };
+        let ints_for = |cfg: InputConfig| {
+            let encoded = encode(
+                MountBatch {
+                    items: vec![MountItem::Input { id: 5, config: cfg }],
+                },
+                0,
+            );
+            encoded
+                .bytes
+                .chunks_exact(4)
+                .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+                .collect::<Vec<_>>()
+        };
+
+        // Distinct alignment codes match `TextLayouts.ALIGN_*` (`0..=4`).
+        let encoded_aligns: Vec<i32> = [
+            TextAlign::Auto,
+            TextAlign::Left,
+            TextAlign::Center,
+            TextAlign::Right,
+            TextAlign::Justify,
+        ]
+        .into_iter()
+        .map(|align| {
+            let mut cfg = config.clone();
+            cfg.align = align;
+            ints_for(cfg)[8]
+        })
+        .collect();
+        assert_eq!(encoded_aligns, [0, 1, 2, 3, 4]);
+
+        let with_variant = ints_for(config.clone());
+        assert_eq!(with_variant[7], 2.5f32.to_bits() as i32);
+        assert_eq!(
+            *with_variant.last().unwrap(),
+            (FontVariant::TABULAR_NUMS | FontVariant::SMALL_CAPS) as i32
+        );
+
+        let mut reset = config;
+        reset.style.letter_spacing = Points(0.0);
+        reset.style.font_variant = FontVariant(0);
+        let reset_ints = ints_for(reset);
+        assert_eq!(reset_ints[7], 0.0f32.to_bits() as i32);
+        assert_eq!(*reset_ints.last().unwrap(), 0);
     }
 }

@@ -53,7 +53,9 @@ colored with the theme's tokens; the app restyles each part over it.
   wrapping) down to a floor per column when the view is narrower, and below the floors the table scrolls horizontally
   (`tableScroll`; `tableScrollbar` hides its indicator, as `codeBlockScrollbar` a code block's). The cells are one CSS grid, so columns line up across rows: each column is a `minmax(<floor>,
   auto)` track (the spare width is shared out as CSS shares it among `auto` tracks), and the grid is `w-full` with
-  the floors' sum as its `min-width`, so past the floors it is wider than the scroll view. Taffy has no
+  the floors' sum as its `min-width`, so past the floors it is wider than the scroll view. The grid is the part
+  `tableGrid`: it draws the table's top and left lines, each cell its right and bottom ones, so no line is drawn
+  twice and an app's frame goes on the grid. Taffy has no
   `display: contents` and text has no min-content (longest word) measure, so the floor is computed in the component
   (`column_floor`): about half the column's widest line, estimated from the cells' text (wide characters an em, the
   rest about half), clamped to 10–30 rem, or the whole line plus 2 rem for padding when that is narrower. A row is a
@@ -297,6 +299,11 @@ A reply that ends in one large block (a long table, list or code block) has that
 is the part parsed again on each update: the blocks before it are still kept. So is a reply with no paragraph for a
 long stretch (lists, quotes or code one after another): the boundary stays after its last paragraph.
 
+A long text given at once (a file opened, a reply shown whole) is read the same way, a part at a time
+(`parse_long`), because one parse of a whole text grows faster than the text does. The document is the one a single
+parse makes, and the module's tests hold the two to each other. A text the boundary cannot cross (one long table,
+list or code block) is read about as fast as by one parse; a text with definitions is read whole.
+
 ## HTML
 
 `html/` reads fragments and whole pages (their body) through html5ever, so unclosed and misplaced tags build the tree a
@@ -347,6 +354,8 @@ module, which has everything.
   block itself: a reply ending in a 400-row table parses and shows that table again on each update. Replaced text,
   definitions, plugins, containers and MDX are parsed whole on each change. Baselines: `performance.md` "`TextView`
   streaming".
+- A long text given at once is read in parts ("Reading only what can change"): 1.9 MB of short sections in about
+  0.3 s instead of 2.1 s. Baselines: `performance.md` "`TextView` long text".
 - Rows are made again only when their value changes (`Each` with the position and kind as the key, the row's item as
   the value), and render functions only when their value changes.
 - A disclosure makes its content only while open.

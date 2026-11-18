@@ -2726,59 +2726,7 @@ impl<M: TextEngine> Core<M> {
                 if self.nodes[key as usize].kind != Kind::Canvas {
                     return Ok(());
                 }
-                if !self.access.is_unrestricted() {
-                    let access = self.access.clone();
-                    let base = self.base_url.clone();
-                    let files = self.media_files.clone();
-                    let mut refused = Vec::new();
-                    let checked = &mut self.canvas_images;
-                    // An image draws what the check granted
-                    // (`Access::media_url`).
-                    drawing.ops.retain_mut(|op| match op {
-                        crate::canvas::CanvasOp::DrawImage { image, .. } => {
-                            let granted = match checked.get(&image.uri) {
-                                Some(granted) => granted.clone(),
-                                None => {
-                                    let granted = access
-                                        .media_url(&image.uri, base.as_deref(), Some(&files))
-                                        .map(|url| match url {
-                                            std::borrow::Cow::Owned(url) => Arc::from(url),
-                                            std::borrow::Cow::Borrowed(_) => image.uri.clone(),
-                                        });
-                                    // A file's answer changes with the disk:
-                                    // never remembered.
-                                    if crate::access::media_capability(&image.uri, base.as_deref())
-                                        == "network"
-                                    {
-                                        if checked.len() >= CANVAS_IMAGES {
-                                            checked.clear();
-                                        }
-                                        checked.insert(image.uri.clone(), granted.clone());
-                                    }
-                                    granted
-                                }
-                            };
-                            match granted {
-                                Some(url) => {
-                                    image.uri = url;
-                                    true
-                                }
-                                None => {
-                                    refused.push(image.uri.clone());
-                                    false
-                                }
-                            }
-                        }
-                        _ => true,
-                    });
-                    for uri in refused {
-                        self.deny(media_not_granted(
-                            "a canvas image",
-                            &uri,
-                            self.base_url.as_deref(),
-                        ));
-                    }
-                }
+                self.check_canvas_images(&mut drawing);
                 let node = &mut self.nodes[key as usize];
                 let slots_changed = node
                     .drawing
@@ -4770,6 +4718,67 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// The images `drawing` draws as the app may load them
+    /// ([`crate::access::Access::media_url`] against [`Core::set_base_url`]'s
+    /// URL and the `capabilities.fs.read` roots): one the check grants is
+    /// rewritten to what it granted (a file's canonical path, a URL's
+    /// serialization); one it refuses is dropped and reported. A network
+    /// answer is remembered for the session; a file's changes with the
+    /// disk and is never remembered. On-screen canvases check every
+    /// drawing (`Op::Draw`); offscreen renders check the same way before
+    /// the platform draws (`canvas_render.rs`).
+    fn check_canvas_images(&mut self, drawing: &mut crate::canvas::Drawing) {
+        if self.access.is_unrestricted() {
+            return;
+        }
+        let access = self.access.clone();
+        let base = self.base_url.clone();
+        let files = self.media_files.clone();
+        let mut refused = Vec::new();
+        let checked = &mut self.canvas_images;
+        drawing.ops.retain_mut(|op| match op {
+            crate::canvas::CanvasOp::DrawImage { image, .. } => {
+                let granted = match checked.get(&image.uri) {
+                    Some(granted) => granted.clone(),
+                    None => {
+                        let granted = access
+                            .media_url(&image.uri, base.as_deref(), Some(&files))
+                            .map(|url| match url {
+                                std::borrow::Cow::Owned(url) => Arc::from(url),
+                                std::borrow::Cow::Borrowed(_) => image.uri.clone(),
+                            });
+                        if crate::access::media_capability(&image.uri, base.as_deref()) == "network"
+                        {
+                            if checked.len() >= CANVAS_IMAGES {
+                                checked.clear();
+                            }
+                            checked.insert(image.uri.clone(), granted.clone());
+                        }
+                        granted
+                    }
+                };
+                match granted {
+                    Some(url) => {
+                        image.uri = url;
+                        true
+                    }
+                    None => {
+                        refused.push(image.uri.clone());
+                        false
+                    }
+                }
+            }
+            _ => true,
+        });
+        for uri in refused {
+            self.deny(media_not_granted(
+                "a canvas image",
+                &uri,
+                self.base_url.as_deref(),
+            ));
+        }
+    }
+
     /// `desktop`'s menu and tray icons as the app may load them
     /// ([`Self::media_source`]): a refused icon is dropped (the item shows
     /// none) and reported.
@@ -6516,6 +6525,7 @@ impl<M: TextEngine> Core<M> {
             Some(b) => p
                 .children
                 .iter()
+                .inspect(|_| self.placing(1))
                 .position(|&c| c == b)
                 .expect("anchor is a child"),
             None => p.children.len(),
@@ -6961,6 +6971,7 @@ impl<M: TextEngine> Core<M> {
         let pos = self.nodes[parent as usize]
             .children
             .iter()
+            .inspect(|_| self.placing(1))
             .position(|&c| c == child)?;
         self.native_before_at(parent, child, pos)
     }
@@ -6972,6 +6983,7 @@ impl<M: TextEngine> Core<M> {
         let z = self.nodes[child as usize].stack_rank();
         if !self.nodes[parent as usize].ranked_children && z == (0, false) {
             let next = children[pos + 1..].iter().find_map(|&c| {
+                self.placing(1);
                 let n = &self.nodes[c as usize];
                 (n.created && n.layout.is_some() && !n.is_overlay()).then_some(n.id)
             });
@@ -6981,6 +6993,7 @@ impl<M: TextEngine> Core<M> {
                 None => None,
             };
         }
+        self.placing(children.len());
         let mut best: Option<((i32, bool), usize, NodeId)> = None;
         for (i, &c) in children.iter().enumerate() {
             let n = &self.nodes[c as usize];

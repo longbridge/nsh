@@ -1091,7 +1091,7 @@ Headless tests have the locale's (it alone as the languages, its region's prefer
 const lifecycle: Accessor<"active" | "inactive" | "background">;
 ```
 
-Whether the app is in use, in React Native's `AppState` terms: `"active"` in the foreground and taking input, `"inactive"` while visible without the focus (another app or window has it, or the system shows something over it, such as the app switcher or an incoming call), `"background"` while not visible (in the background, minimized, a hidden browser tab). An app shown inside a native app follows that app's. Reactive. Rust: `lifecycle() -> Lifecycle` (`Lifecycle::Active`, `Inactive`, `Background`).
+Whether the app is in use, in React Native's `AppState` terms: `"active"` in the foreground and taking input, `"inactive"` while visible without the focus (another app or window has it, or the system shows something over it, such as the app switcher or an incoming call), `"background"` while not visible (in the background, minimized, a hidden browser tab, a page the browser keeps in its back / forward cache until the user comes back to it). An app shown inside a native app follows that app's. Reactive. Rust: `lifecycle() -> Lifecycle` (`Lifecycle::Active`, `Inactive`, `Background`).
 
 Read it in an effect to pause work nobody sees and resume it when the app comes back:
 

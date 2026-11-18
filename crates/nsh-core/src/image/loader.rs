@@ -351,11 +351,7 @@ pub fn resolve(uri: &str, base: Option<&AssetBase>) -> Option<Location> {
         return Some(Location::Data(uri.to_owned()));
     }
     if uri.starts_with("file:") {
-        return url::Url::parse(uri)
-            .ok()?
-            .to_file_path()
-            .ok()
-            .map(Location::File);
+        return crate::access::file_url_path(uri).map(Location::File);
     }
     let path = std::path::Path::new(uri);
     path.is_absolute().then(|| Location::File(path.into()))

@@ -117,3 +117,54 @@ fn a_clamped_line_links_only_the_characters_it_shows() {
         assert_eq!(in_links, "W".repeat(shown), "{before} + {linked}");
     }
 }
+
+#[test]
+fn clamped_truncation_keeps_whole_clusters_and_counts_ellipsis_letter_spacing() {
+    let engine = WebTextEngine::default();
+    let style = ResolvedTextStyle {
+        letter_spacing: Points(4.0),
+        ..Default::default()
+    };
+    let measure_spaced = |s: &str| {
+        let mut t = AttributedText::default();
+        t.push(s, style);
+        engine.measure(&engine.prepare(&t), None).width.0
+    };
+    let a_w = measure_spaced("A");
+    let thumb_w = measure_spaced("👍🏻");
+    let ellipsis_w = measure_spaced("…");
+    let url_prefix = "https://example.com/👍🏻";
+    let url_prefix_w = measure_spaced(url_prefix);
+
+    // `box_width` fits "A" + "…" (both with letter-spacing), not "A" + "👨‍👩‍👧‍👦" + "…".
+    // Truncating must drop the whole ZWJ cluster instead of slicing code points out of it,
+    // including on long unbroken tokens (> 16 clusters) and non-breaking spaces before `…`.
+    for (input, box_width, expected) in [
+        ("A👨‍👩‍👧‍👦", a_w + ellipsis_w + 0.5, "A…"),
+        ("👍🏻👨‍👩‍👧‍👦", thumb_w + ellipsis_w + 0.5, "👍🏻…"),
+        (
+            "https://example.com/👍🏻👨‍👩‍👧‍👦/very/long/path/segment",
+            url_prefix_w + ellipsis_w + 0.5,
+            "https://example.com/👍🏻…",
+        ),
+        ("A\u{00A0}👨‍👩‍👧‍👦", a_w + ellipsis_w + 0.5, "A…"),
+    ] {
+        let mut t = AttributedText::default();
+        t.push(input, style);
+        t.max_lines = 1;
+        t.ellipsize = EllipsizeMode::Tail;
+        let p = engine.prepare(&t);
+        let size = engine.measure(&p, Some(Points(box_width)));
+        let layout = engine.layout(&p, size);
+        let lines = engine.lines(&layout);
+        assert_eq!(lines.len(), 1, "{input}");
+        let runs = &layout.downcast::<WebLayout>().unwrap().runs;
+        let shown: String = runs.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(shown, expected, "{input}");
+        assert!(
+            lines[0].width.0 <= box_width + 0.01,
+            "{input}: line overflowed {box_width}: {:?}",
+            lines[0]
+        );
+    }
+}

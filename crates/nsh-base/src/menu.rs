@@ -1473,6 +1473,9 @@ fn items_scroll(items: &Items, level: u32, children: Prop<Children>) -> AnyEleme
     let (offset, reported) = (signal(Points::ZERO), signal(Points::ZERO));
     items.add_scroll(level, me, offset, reported);
     scroll()
+        // Menus stop at their content edges and never show a scroll bar.
+        .bounces(false)
+        .scrollbar(false)
         .element_ref(&me)
         .flex_shrink(1.0)
         .min_h(px(0.0))
@@ -2914,6 +2917,8 @@ pub fn MenuList(props: MenuListProps, cx: Scope<NoEvent>) -> impl IntoElement {
             })
         },
     )
+    .bounces(false)
+    .scrollbar(false)
     .element_ref(&list)
     .viewability(Viewability {
         item_visible_threshold: Some(Percentage(0.995)),

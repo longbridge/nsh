@@ -1,13 +1,15 @@
 //! Typed root parts reach the document's text before classes and styles;
-//! inline links are stops of Tab, pressed with Return; a link's press
-//! reports the modifier keys held.
+//! a table's grid takes the app's frame; inline links are stops of Tab,
+//! pressed with Return; a link's press reports the modifier keys held.
+
+use std::sync::{Arc, Mutex};
 
 use nsh_base::{
     TextViewClasses, TextViewLinkPressEvent, TextViewPart, TextViewParts, TextViewStyles,
     TextViewTaskPressEvent, text_view,
 };
 use nsh_core::{
-    StyleKey,
+    Color, MountItem, StyleKey,
     element::{Root, Style},
     platform::{Idiom, Os},
     prelude::*,
@@ -150,6 +152,52 @@ fn root_without_typed_parts_keeps_the_default_typography() {
     assert_eq!(
         app.screen().span_style("Default text").unwrap().font_size,
         px(15.0)
+    );
+}
+
+/// A table whose grid the app frames by `classes`: a border on every
+/// side and a background.
+#[component]
+fn FramedTable() -> impl IntoElement {
+    text_view()
+        .markdown("| Name | Size |\n|------|-----:|\n| Alpha | 12 |")
+        .classes(TextViewClasses {
+            table_grid: Some("border-2 border-[#ff0000] bg-[#00ff00]".into()),
+            ..Default::default()
+        })
+}
+
+#[test]
+fn a_tables_grid_takes_the_apps_frame() {
+    let mut app = Headless::start(EngineConfig::new(Root::of::<FramedTable>())).unwrap();
+    let styles = Arc::new(Mutex::new(Vec::new()));
+    let into = styles.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let MountItem::ViewStyle { id, style } = item {
+                into.lock().unwrap().push((*id, style.clone()));
+            }
+        }
+    });
+    app.first_render().unwrap();
+    app.wait_for("Alpha").unwrap();
+    let styles = styles.lock().unwrap();
+    let grid: Vec<_> = styles
+        .iter()
+        .filter(|(_, style)| style.background_color == Color(0x00ff_00ff))
+        .collect();
+    // One view, the grid: not its cells or rows.
+    assert!(!grid.is_empty(), "no view has the grid's background");
+    assert!(grid.iter().all(|(id, _)| *id == grid[0].0), "{grid:?}");
+    // The app's border on every side: over the top and left lines the
+    // grid draws itself, and on the right and bottom, which it leaves to
+    // the cells.
+    let borders = &grid.last().unwrap().1.borders;
+    assert_eq!(borders.colors, [Color(0xff00_00ff); 4]);
+    let widths = borders.widths;
+    assert_eq!(
+        [widths.top, widths.right, widths.bottom, widths.left],
+        [px(2.0); 4]
     );
 }
 
@@ -1026,4 +1074,97 @@ fn a_pressed_task_box_reports_its_place_in_the_document_and_the_state_asked_for(
     app.press("label:first").unwrap();
     app.wait_for("Pressed: 1:false 2:true 4:true 3:false 3:false 0:true")
         .unwrap();
+}
+
+mod large_document {
+    //! A long Markdown document opened at once in a scroll view: reading
+    //! it, and mounting its blocks, each a row of the same parent.
+
+    use std::{
+        cell::RefCell,
+        time::{Duration, Instant},
+    };
+
+    use nsh_base::{
+        text_view,
+        text_view::{Document, Parser},
+    };
+    use nsh_core::{ApproxTextEngine, Core, Size, element::Root, prelude::*};
+
+    thread_local! {
+        static SOURCE: RefCell<Option<String>> = const { RefCell::new(None) };
+        static DOCUMENT: RefCell<Option<Document>> = const { RefCell::new(None) };
+    }
+
+    /// [`SOURCE`] read by the view, or [`DOCUMENT`] read before.
+    #[component]
+    fn Opened() -> impl IntoElement {
+        let view = match SOURCE.take() {
+            Some(source) => text_view().markdown(SharedString::from(source)),
+            None => text_view().document(DOCUMENT.take().expect("a document")),
+        };
+        scroll().size_full().child(view)
+    }
+
+    /// Sections of a heading, a paragraph with bold words and a link, and
+    /// a list of two items, about 50 bytes a block.
+    fn document(bytes: usize) -> String {
+        let mut text = String::with_capacity(bytes + 200);
+        let mut n = 0;
+        while text.len() < bytes {
+            n += 1;
+            text.push_str(&format!(
+                "## Section {n}\n\nSome **bold** text and a [link](https://example.com/{n}), with a few more words in each paragraph.\n\n- the first item of the list\n- the second item\n\n"
+            ));
+        }
+        text
+    }
+
+    fn mount(culling: bool) -> (Duration, usize) {
+        let mut core = Core::new(ApproxTextEngine, Size::new(px(390.0), px(844.0)));
+        core.set_content_culling(culling);
+        let start = Instant::now();
+        core.mount_root(&Root::new::<Opened>(|| ()));
+        let mut items = 0;
+        // What waits for later turns is made too, as a test driver has it.
+        for _ in 0..if culling { 1 } else { 8 } {
+            match core.commit() {
+                Some(batch) => items += batch.items.len(),
+                None => break,
+            }
+        }
+        (start.elapsed(), items)
+    }
+
+    /// `cargo test --release -p nsh-base --test base bench_large_document
+    /// -- --ignored --nocapture`; the numbers are in `docs/dev/performance.md`.
+    #[test]
+    #[ignore]
+    fn bench_large_document() {
+        let ms = |d: Duration| d.as_secs_f64() * 1e3;
+        println!("ms to read | ms to mount the read document, culling on / off | both, culling on");
+        for kb in [190, 475, 950, 1_900] {
+            let source = document(kb * 1_000);
+            let start = Instant::now();
+            let document = Parser::new().markdown(&source);
+            let read = start.elapsed();
+            let blocks = document.blocks.len();
+            let mut shown = Vec::new();
+            for culling in [true, false] {
+                DOCUMENT.set(Some(document.clone()));
+                shown.push(mount(culling));
+            }
+            SOURCE.set(Some(source));
+            let both = mount(true);
+            println!(
+                "{kb:>5} KB {blocks:>6} blocks | {:>8.1} | {:>8.1} ({} items) / {:>8.1} ({} items) | {:>8.1}",
+                ms(read),
+                ms(shown[0].0),
+                shown[0].1,
+                ms(shown[1].0),
+                shown[1].1,
+                ms(both.0),
+            );
+        }
+    }
 }

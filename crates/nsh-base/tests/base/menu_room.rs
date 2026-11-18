@@ -303,3 +303,71 @@ fn space_typed_ahead_selects_the_item_paged_to() {
     app.press_keys(&["pagedown", "space"]).unwrap();
     app.wait_for("text:chose:Item 9").unwrap();
 }
+
+#[component]
+fn ListMenu() -> impl IntoElement {
+    menu()
+        .trigger(view().test_id("open").child(text("Open")))
+        .child(
+            nsh_base::menu_list()
+                .count(30)
+                .render_item(|e: &nsh_base::MenuListEntry| {
+                    menu_item().child(text(format!("Row {}", e.index)).h(px(30.0)))
+                })
+                .w(px(200.0))
+                .h(px(150.0)),
+        )
+}
+
+#[test]
+fn menu_scrollers_stop_at_their_edges_without_bars() {
+    use std::sync::{Arc, Mutex};
+
+    use nsh_core::MountItem;
+
+    // Cover a fitting menu, a constrained menu and its nested popup.
+    for (root, height, nested, expected) in [
+        (Root::of::<LowMenu>(), 400.0, false, 1),
+        (Root::of::<LongMenu>(), 300.0, false, 1),
+        (Root::of::<LongMenuWithSubmenu>(), 300.0, true, 2),
+        (Root::of::<ListMenu>(), 300.0, false, 2),
+    ] {
+        let mut app = start(root, height);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let into = seen.clone();
+        app.observe(move |_, batch| into.lock().unwrap().extend(batch.items.iter().cloned()));
+        app.press("id:open").unwrap();
+        if nested {
+            app.press_key("down").unwrap();
+            app.press_key("right").unwrap();
+            app.wait_for("Sub A").unwrap();
+        }
+        let seen = seen.lock().unwrap();
+        let mut scrollers = std::collections::HashSet::new();
+        let mut behaviors = std::collections::HashSet::new();
+        for item in seen.iter() {
+            match item {
+                MountItem::ScrollConfig {
+                    id,
+                    scrollbar_visible,
+                    replaced,
+                    ..
+                } => {
+                    assert!(!scrollbar_visible && !replaced, "no native or themed bar");
+                    scrollers.insert(*id);
+                }
+                MountItem::ScrollBehavior { id, behavior } => {
+                    assert!(
+                        !behavior.bounces,
+                        "no rubber banding even when content fits"
+                    );
+                    assert!(behavior.enabled, "overflow remains scrollable");
+                    behaviors.insert(*id);
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(scrollers.len(), expected);
+        assert_eq!(scrollers, behaviors);
+    }
+}
