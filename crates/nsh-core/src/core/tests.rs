@@ -45346,6 +45346,28 @@ mod each_updates {
         /// Each row of [`MountRows`] with a hint, as a document's links
         /// have their addresses: an overlay each.
         static HINTED: Cell<bool> = const { Cell::new(false) };
+        /// Each row of [`MountRows`] with a [`Tip`], as a toolbar has its
+        /// tooltips: a component whose root is an overlay each.
+        static TIPPED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// A component whose root is a hint overlay, as a tooltip is: its
+    /// host is made a view, then takes the overlay's kind.
+    #[derive(Default)]
+    struct Tip;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct TipProps {}
+
+    impl Component for Tip {
+        type Props = TipProps;
+        type Event = NoEvent;
+
+        fn view(_: TipProps, _: Scope<NoEvent>) -> impl IntoElement {
+            overlay()
+                .hint(Duration::from_millis(500))
+                .child(text("tip"))
+        }
     }
 
     /// `ROWS` rows of an `each` as `TextView` has a document's blocks: a
@@ -45359,6 +45381,7 @@ mod each_updates {
                 .collect::<Vec<_>>(),
         );
         let hinted = HINTED.with(Cell::get);
+        let tipped = TIPPED.with(Cell::get);
         let rows = view()
             .flex_col()
             .child(text("before"))
@@ -45376,6 +45399,7 @@ mod each_updates {
                                 .hint(Duration::from_millis(500))
                                 .child(text("https://example.com"))
                         }))
+                        .child(tipped.then(|| Tip::element(TipProps {})))
                 },
             ))
             .child(view().h(px(4.0)));
@@ -45471,6 +45495,104 @@ mod each_updates {
             assert!(c.nodes[children[301] as usize].text.is_empty());
         }
         SCROLLED.with(|s| s.set(false));
+    }
+
+    /// Rows mounted at once, each with a component whose root is an
+    /// overlay (a tooltip), give the components' hosts their roots' kind
+    /// without a pass over the batch's mount items for each: the items
+    /// looked at grow with the rows, not with their square.
+    #[test]
+    fn component_roots_mounted_at_once_take_their_kind_without_a_pass_for_each() {
+        TIPPED.with(|t| t.set(true));
+        let mut grew = Vec::new();
+        for scrolled in [false, true] {
+            SCROLLED.with(|s| s.set(scrolled));
+            let work = |rows| {
+                let (c, _) = rows_mounted(rows, 0);
+                c.components.retag_work.get()
+            };
+            let (few, many) = (work(400), work(1_600));
+            eprintln!("scrolled {scrolled}: {few} items for 400 rows, {many} for 1,600");
+            // Four times the rows: about four times the work (it was
+            // about sixteen times, with a pass for each component).
+            if many > 5 * few {
+                grew.push(format!(
+                    "scrolled {scrolled}: {few} for 400 rows, {many} for 1,600"
+                ));
+            }
+        }
+        SCROLLED.with(|s| s.set(false));
+        TIPPED.with(|t| t.set(false));
+        assert!(grew.is_empty(), "{grew:#?}");
+    }
+
+    /// Hosts that take their component root's kind in the batch they are
+    /// made in are made once, with that kind, before they are inserted.
+    #[test]
+    fn component_roots_mounted_at_once_are_made_once() {
+        TIPPED.with(|t| t.set(true));
+        ROWS.with(|r| r.set(50));
+        let mut c = core();
+        c.mount_root(&Root::new::<MountRows>(|| ()));
+        let batch = c.commit().expect("a batch");
+        TIPPED.with(|t| t.set(false));
+        let mut made = std::collections::HashSet::new();
+        for item in &batch.items {
+            match item {
+                MountItem::Create { id, .. } => {
+                    assert!(made.insert(*id), "{id:?} made twice: {:?}", batch.items);
+                }
+                MountItem::Insert { child, .. } => {
+                    assert!(made.contains(child), "{child:?} inserted before it is made");
+                }
+                _ => {}
+            }
+        }
+        let tips = c
+            .overlays
+            .iter()
+            .filter(|&&key| c.nodes[key as usize].kind == Kind::Overlay)
+            .count();
+        assert_eq!(tips, 50);
+    }
+
+    /// `cargo test --release -p nsh-core --lib bench_component_roots_mount -- --ignored --nocapture`:
+    /// [`MountRows`] with a [`Tip`] in each row, mounted at once; the
+    /// numbers are in `docs/dev/performance.md`.
+    #[test]
+    #[ignore]
+    fn bench_component_roots_mount() {
+        println!("ms a first mount: the root's pass + the commit | mount items");
+        TIPPED.with(|t| t.set(true));
+        for scrolled in [false, true] {
+            SCROLLED.with(|s| s.set(scrolled));
+            for rows in [1_000, 10_000, 20_000] {
+                ROWS.with(|r| r.set(rows));
+                let mut best = (Duration::from_secs(3600), Duration::ZERO, 0);
+                for _ in 0..3 {
+                    let mut c = core();
+                    let start = Instant::now();
+                    c.mount_root(&Root::new::<MountRows>(|| ()));
+                    let mid = Instant::now();
+                    let batch = c.commit();
+                    let first = mid.elapsed();
+                    if mid - start + first < best.0 + best.1 {
+                        best = (mid - start, first, batch.map_or(0, |b| b.items.len()));
+                    }
+                }
+                let ms = |d: Duration| d.as_secs_f64() * 1e3;
+                println!(
+                    "{:<9} {rows:>6} rows | {:>8.1} + {:>8.1} = {:>8.1} | {:>6}",
+                    if scrolled { "scrolled" } else { "plain" },
+                    ms(best.0),
+                    ms(best.1),
+                    ms(best.0 + best.1),
+                    best.2
+                );
+            }
+        }
+        SCROLLED.with(|s| s.set(false));
+        TIPPED.with(|t| t.set(false));
     }
 
     /// `cargo test --release -p nsh-core --lib bench_each_mount -- --ignored --nocapture`:
