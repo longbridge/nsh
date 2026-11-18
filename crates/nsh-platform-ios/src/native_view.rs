@@ -124,11 +124,7 @@ define_class!(
 
         #[unsafe(method(accessibilityContainerType))]
         fn accessibility_container_type(&self) -> UIAccessibilityContainerType {
-            if is_container(&self.ivars().props.borrow().accessibility) {
-                UIAccessibilityContainerType::SemanticGroup
-            } else {
-                UIAccessibilityContainerType::None
-            }
+            container_type(&self.ivars().props.borrow().accessibility)
         }
 
         #[unsafe(method(accessibilityElementsHidden))]
@@ -424,14 +420,10 @@ impl NshView {
     }
 
     fn a11y_element(&self) -> bool {
-        let props = self.ivars().props.borrow();
-        let a = &props.accessibility;
-        // A container's label names the group VoiceOver enters, not one
-        // element that would hide what is inside it.
-        !a.hidden
-            && a.accessible.unwrap_or_else(|| {
-                self.ivars().pressable.get() || (a.label.is_some() && !is_container(a))
-            })
+        is_element(
+            &self.ivars().props.borrow().accessibility,
+            self.ivars().pressable.get(),
+        )
     }
 
     fn a11y_label(&self) -> Option<Retained<NSString>> {
@@ -439,8 +431,9 @@ impl NshView {
         if let Some(label) = &props.accessibility.label {
             return Some(NSString::from_str(label));
         }
-        // A group's elements read their own text.
-        if is_container(&props.accessibility) {
+        // A group's elements read their own text, unless the group was
+        // made one element.
+        if is_container(&props.accessibility) && props.accessibility.accessible != Some(true) {
             return None;
         }
         drop(props);
@@ -751,14 +744,26 @@ fn steps(a: &Accessibility) -> bool {
         .any(|x| matches!(&*x.name, "increment" | "decrement"))
 }
 
+/// Whether a view is one element for VoiceOver, which then does not move
+/// into it. A container's label names the group VoiceOver enters, not one
+/// element that would hide what is inside it.
+fn is_element(a: &Accessibility, pressable: bool) -> bool {
+    !a.hidden
+        && a.accessible
+            .unwrap_or_else(|| pressable || (a.label.is_some() && !is_container(a)))
+}
+
 /// Roles of groups whose elements stay VoiceOver's own: a semantic
 /// group, which VoiceOver names by its label as it moves into it. A
 /// dialog is one (UIKit has no dialog trait): its title is said as the
-/// focus enters it, and its controls stay reachable.
+/// focus enters it, and its controls stay reachable. So is a list: a
+/// labelled list names its items, which are reached one by one.
 fn is_container(a: &Accessibility) -> bool {
     matches!(
         a.role,
-        AccessibilityRole::Group
+        AccessibilityRole::List
+            | AccessibilityRole::Listbox
+            | AccessibilityRole::Group
             | AccessibilityRole::Region
             | AccessibilityRole::Navigation
             | AccessibilityRole::Tree
@@ -768,6 +773,16 @@ fn is_container(a: &Accessibility) -> bool {
             | AccessibilityRole::Dialog
             | AccessibilityRole::AlertDialog
     )
+}
+
+/// How VoiceOver presents a container: a list as a list (it says where
+/// the list starts and ends), the other containers as semantic groups.
+fn container_type(a: &Accessibility) -> UIAccessibilityContainerType {
+    match a.role {
+        AccessibilityRole::List | AccessibilityRole::Listbox => UIAccessibilityContainerType::List,
+        _ if is_container(a) => UIAccessibilityContainerType::SemanticGroup,
+        _ => UIAccessibilityContainerType::None,
+    }
 }
 
 /// The traits of `props`' role, state and actions.
@@ -1007,5 +1022,39 @@ mod tests {
         assert!(!is_container(
             &props(AccessibilityRole::Button, &[]).accessibility
         ));
+    }
+
+    /// A labelled list is a list VoiceOver moves into, not one element
+    /// that hides its items; other containers stay semantic groups.
+    #[test]
+    fn labelled_lists_are_list_containers() {
+        let labelled = |role| {
+            let mut props = props(role, &[]);
+            props.accessibility.label = Some(Arc::from("Ideas"));
+            props.accessibility
+        };
+        for role in [AccessibilityRole::List, AccessibilityRole::Listbox] {
+            assert!(!is_element(&labelled(role), false), "{role:?}");
+            // Made one element, or pressed as a whole, it stays one.
+            let mut one = labelled(role);
+            one.accessible = Some(true);
+            assert!(is_element(&one, false), "{role:?}");
+            assert!(is_element(&labelled(role), true), "{role:?}");
+            assert_eq!(
+                container_type(&labelled(role)),
+                UIAccessibilityContainerType::List,
+                "{role:?}"
+            );
+        }
+        // A labelled view that is not a container is still one element.
+        assert!(is_element(&labelled(AccessibilityRole::Image), false));
+        assert_eq!(
+            container_type(&labelled(AccessibilityRole::Group)),
+            UIAccessibilityContainerType::SemanticGroup
+        );
+        assert_eq!(
+            container_type(&labelled(AccessibilityRole::Button)),
+            UIAccessibilityContainerType::None
+        );
     }
 }

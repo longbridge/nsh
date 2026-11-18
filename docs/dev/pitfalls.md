@@ -347,6 +347,30 @@ Things that were found the hard way. Read the section of the area you change bef
   content rect within the view that started it: started from an editor's sink (a sliver at the caret) it sat on the
   caret whatever the rect said, over the selection's start handle, and took that handle's touches; it starts from the
   root view (`InputBox.openEditMenu`).
+- **Android, API levels and lint**: hosts that compile the Java runtime run Android Lint over it (NewApi,
+  WrongConstant), while NSH's own build runs only javac. A class or helper reached only behind `SDK_INT >= N` carries
+  `@TargetApi(N)`, as `Backdrop` does; a guard lint cannot see through (a helper that returns the check) is written at
+  the call site; an `int` setter typed with another class's constants takes those constants.
+- **Android, accessibility state changes**: a service reads an `AccessibilityDelegate`'s node only when it queries
+  it, and nothing tells it that a new delegate says something else. A screen reader's double tap is the app's press:
+  `A11y.performAccessibilityAction` takes `ACTION_CLICK`, so the framework sends no `TYPE_VIEW_CLICKED`, and the new
+  state arrives batches later. What TalkBack does with each event (its compositor rules): on a `TYPE_VIEW_CLICKED`
+  it queries the source node again and says its checked state, else its selected state, else expanded / collapsed
+  (from the node, not the event's flags), with a tick and a vibration, and the click stops reading from the top; it
+  says no checked state for a node with a state description, so a checked change must change the description, as a
+  `CompoundButton`'s does since API 30. On a content change of type `STATE_DESCRIPTION` (64) it says the node's
+  state description when the node or an ancestor has the accessibility focus; it reads the description through
+  androidx's node compat, which before API 30 is the extras entry
+  `androidx.view.accessibility.AccessibilityNodeInfoCompat.STATE_DESCRIPTION_KEY`, so the type and the entry work
+  from API 26. A seek bar's or progress bar's state description change says its range when it has no description
+  (a `RANGE_TYPE_FLOAT` range is said as the number, a percentage only for `RANGE_TYPE_PERCENT`). A content change
+  of an undefined type only refreshes its copy of the node. `A11y.changed` sends one of them after the new delegate
+  is installed (`A11yChanges`): a click only within a second of TalkBack's click on the view or an ancestor (a
+  change the app makes alone is not a click; a keyboard Enter goes through `performClick`, which sends the
+  framework's own click), state descriptions at once (as `View.setStateDescription`: the framework's merged
+  content changes come from the views' common ancestor, which has no focus), refreshes through
+  `notifySubtreeAccessibilityStateChanged` (merged by the framework). Sending while
+  `AccessibilityManager.isEnabled()` is false throws on the main thread.
 - **Android, JNI**: cache classes and method ids in `JNI_OnLoad`; wrap every call from the (permanently attached) engine thread in
   a local frame (`java::with_env`), or local references pile up.
 - **Android, text**: `StaticLayout` ignores `maxLines` without an ellipsis (clip mode counts lines itself and the view clips);
@@ -377,6 +401,14 @@ Things that were found the hard way. Read the section of the area you change bef
   gallery's index on a Pixel 10 Pro). `StackBox` keeps drawing the screen a pop reveals at alpha 0 while it is
   `INVISIBLE` (which still keeps it out of touches, accessibility and focus), and `Decor.setVisible` does not
   invalidate (#519).
+- **Android, focusing a view that is not shown**: `requestFocus` fails on a view that is not shown, and a page's
+  `focus()` (from a timer of the render, say) can arrive in the batch that pushes it, the engine merging a wake-up's
+  commits into one batch, whose commands run before `finishNavigation` places the page (a transition shader also
+  keeps it `INVISIBLE` while it runs). `Mounter` keeps such a request (`PendingFocus`) and tries it again at the
+  batch's end and on each frame until the view is shown, or gives it up after 3 s (#2323). The frames come from a
+  `Choreographer` callback, posted only while a request waits, not from the host's `ViewTreeObserver`: a dialog's
+  content shows in the dialog's own window, whose tree the host's observer never hears from, while `Choreographer`
+  frames reach every window of the thread.
 - **Android, opacity animations and outer box shadows**: at alpha < 1 with overlapping rendering (the default) HWUI composites the view into an offscreen buffer clipped to its bounds, cutting the outer box shadows the `Decor` draws outside them: the shadow vanishes for the whole animation and pops back when it ends. Decor-bearing views therefore report `hasOverlappingRendering() == false` while they carry outer shadows (the alpha then applies per draw op and the shadow fades with the content), at the cost of overlapping content inside such a view blending imprecisely while it fades.
 - **Android, JNI event maps intern their keys from a fixed list** (`Java_com_longbridge_nsh_Native_eventMap`): a new payload key must be
   added there or it is dropped silently.
@@ -445,8 +477,16 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Android, the back key without `OnBackInvokedCallback`** (below 13, or `enableOnBackInvokedCallback` off): the window
   sends `KEYCODE_BACK` down the focus path, then the activity's `onKeyDown` / `onKeyUp` take it (`onBackPressed`), so an
   unfocused view only hears it through `View.addOnUnhandledKeyEventListener` (API 28+, called by the decor view between
-  the two, whatever has focus). With the callback in effect the window turns the key into the callback before any view,
-  so `NshView` taking the key never doubles its callback (seen on Android 16, both settings).
+  the two, whatever has focus). A listener that takes the down gets the press's repeats and its release directly, before
+  any view (`ViewRootImpl`'s `UnhandledKeyManager`), so the focus path never sees them: `NshView` hands them to
+  `KeyDispatch` for the raw `onKeyUp`.
+- **Android, the back key with `OnBackInvokedCallback`** (13 and later, the packaged manifest's default): the window turns
+  the release into `onBackInvoked` / `onBackCancelled` before any view (`ViewRootImpl`'s `doOnBackKeyEvent`). Android 13
+  to 15 send the views neither the down nor the up; from Android 15 QPR1 the window sends the down on and, after the
+  callback, the up marked cancelled; Android 16 QPR2's `predictiveBackStopKeycodeBackForwarding` flag keeps both from the
+  views again. `KeyDispatch` reports the release at the callback, from the down it saw, and not again for that key-up
+  (`BackRelease`); `NshView` taking the key never doubles its callback, as the cancelled up does not go back (seen on an
+  Android 16 emulator, both settings; the version boundaries are AOSP's source).
 - **Android 8 (API 26 and 27) lacks three things the runtime uses from API 28**, and gets each another way, checked with
   `Build.VERSION.SDK_INT` so Android 9 and later draw as before:
   - Weights: `Typeface.create(family, weight, italic)` is API 28. The default family takes the nearest of Roboto's
@@ -475,6 +515,20 @@ Things that were found the hard way. Read the section of the area you change bef
   (`dispatchKeyEvent`, the parents before the focused view): `NshView`, which holds the focus when no input does,
   sees every key meant for the views inside it. Keys with Control come as `dispatchKeyShortcutEvent` first, where a
   text field selects all, copies and pastes, so the app's shortcuts are matched there too.
+- **Android, arrow keys while no view of the app has the focus**: Android's directional search (`FocusFinder`) starts
+  from the focused view and takes only views past its edge in the key's direction. While no view of the app has the
+  focus, `NshView` or a dialog's container holds it, and a standalone app's `NshView` and a dialog's container fill
+  their window, so from them nothing qualifies and an arrow does nothing. A tap clears a focus that is not focusable
+  in touch mode (`enterTouchMode`: the root comes before its descendants, so it is not the ancestor that takes the
+  focus) and leaves the window without one. The first navigation key after it leaves touch mode in `ViewRootImpl`
+  (`checkForLeavingTouchModeAndConsume`), which consumes the key when it has to pick a focus itself
+  (`restoreDefaultFocus`, which gives it to the root). The root's touch-mode listener runs before that check and
+  takes the focus when nothing holds it (`NshView.keyboardFocus`, the `keyboardFocus` of `ModalHost`'s container;
+  without it a dialog's first arrow after a tap only focused the container), and a focused view group that comes
+  before its descendants keeps the focus there. The arrow therefore reaches `KeyDispatch`, which moves the focus to
+  the first stop on screen (`ArrowEntry`, #2361). An embedded `NshView` can have host views beside it and host scroll
+  views around it, which Android's handling of an unconsumed arrow reaches (`focusSearch` from `NshView`, a host
+  `ScrollView`'s `arrowScroll`): `KeyDispatch.elsewhere` asks the same and leaves such an arrow to the host.
 
 ## Linux, GTK
 
@@ -885,4 +939,5 @@ Things that were found the hard way. Read the section of the area you change bef
   emulators) intercepts taps on inputs — turn it off with `adb shell settings put secure stylus_handwriting_enabled 0`.
 
 - **Windows RichEdit**: never set `TXTBIT_ADVANCEDINPUT` on a windowless RichEdit host; msftedit aborts (0x40000015) on focus. Enable TSF with `EM_SETEDITSTYLE SES_USECTF` instead.
+- **Windows RichEdit draws by GDI's DPI**: `TxDrawD2D` turns its client pixels into the target's units with the window DC's DPI (`richedit::dpi`, the system's DPI in a per-monitor aware process), not with the target's own DPI. On a monitor of another scale than the system's the two differ, and the text was drawn scaled from the target's origin, out of the field (typed text invisible, caret and placeholder in place). `InputState::record` scales the recording by `richedit::target_scale`.
 - **Windows RichEdit invalidates while it draws**: `TxDrawD2D` and the client-rectangle updates around it call `TxInvalidateRect` inside the window's `WM_PAINT`; a paint asked for there never comes back as another `WM_PAINT`, which left the surface waiting forever (typed text not shown until something else repainted). The field ignores what RichEdit invalidates while it is drawn (`Editor::drawing`), and `Surface::paint` asks again, once the frame is done, for what was requested during it.

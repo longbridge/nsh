@@ -322,7 +322,9 @@ jobs:
           NSH_CHANNEL: ${{ env.NIGHTLY == 'true' && 'nightly' || 'stable' }}
           NSH_DIST_NO_ANDROID: ${{ !matrix.shared && '1' || '' }}
           NSH_DIST_NO_WEB: ${{ !matrix.shared && '1' || '' }}
-        run: cargo xtask dist -v
+        # `--locked` for xtask's own run, which resolves the main workspace;
+        # xtask's builds pass it on themselves (crates/xtask/src/cargo.rs).
+        run: cargo --locked xtask dist -v
 
       - name: Check the iOS runtime build versions
         if: matrix.embed == 'ios'

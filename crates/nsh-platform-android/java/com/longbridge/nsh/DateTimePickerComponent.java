@@ -49,6 +49,8 @@ final class DateTimePickerComponent implements NshComponent {
     private Map<?, ?> min, max;
     private int minuteInterval = 1;
     private boolean disabled;
+    /** What screen readers say with each field's value (null: the value alone). */
+    private String label;
 
     DateTimePickerComponent(Context context, NshComponentContext events, BooleanSupplier night) {
         this.context = context;
@@ -98,6 +100,9 @@ final class DateTimePickerComponent implements NshComponent {
             case "disabled":
                 disabled = Boolean.TRUE.equals(value);
                 break;
+            case "accessibilityLabel":
+                label = value instanceof String ? (String) value : null;
+                break;
             default:
                 return;
         }
@@ -146,6 +151,10 @@ final class DateTimePickerComponent implements NshComponent {
         at.set(year, month - 1, day, hour, minute);
         dateField.setText(DateFormat.getMediumDateFormat(context).format(at.getTime()));
         timeField.setText(DateFormat.getTimeFormat(context).format(at.getTime()));
+        // TalkBack reads a field's description in place of its text: the name, then the value.
+        for (Field field : new Field[] {dateField, timeField}) {
+            field.setContentDescription(label == null ? null : label + ", " + field.getText());
+        }
         dateField.setVisibility(hasDate() ? View.VISIBLE : View.GONE);
         timeField.setVisibility(hasTime() ? View.VISIBLE : View.GONE);
         // A time of day alone takes no gap before it.

@@ -1,5 +1,6 @@
 package com.longbridge.nsh;
 
+import android.annotation.TargetApi;
 import android.graphics.Bitmap;
 import android.graphics.BlendMode;
 import android.graphics.Canvas;
@@ -738,6 +739,7 @@ final class CanvasPainter {
         canvas.restore();
     }
 
+    @TargetApi(29)
     private static BlendMode blend(int c) {
         switch (c) {
             case 1: return BlendMode.SRC_IN;

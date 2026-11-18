@@ -152,12 +152,13 @@ test("a field's maxlength lets in what fits by characters, an emoji counting onc
     tagName: "INPUT",
     value: "",
     classList: { toggle() {} },
+    getAttribute: () => null,
     setAttribute() {},
     removeAttribute(name) {
       if (name === "maxlength") delete this.maxLength;
     },
   };
-  const el = { _field: field, removeAttribute() {} };
+  const el = { _field: field, getAttribute: () => null };
   player.view = () => el;
   player.op_in(["in", 1, { multiline: false, maxLength: 10 }, null]);
   assert.equal(field.maxLength, 10);
@@ -193,10 +194,11 @@ test("input autofill hints are set, changed and cleared on both field kinds", ()
   const attrs = new Map();
   const field = {
     classList: { toggle() {} },
+    getAttribute: (name) => attrs.get(name) ?? null,
     setAttribute: (name, value) => attrs.set(name, value),
     removeAttribute: (name) => attrs.delete(name),
   };
-  const el = { _field: field, removeAttribute() {} };
+  const el = { _field: field, getAttribute: () => null };
   player.view = () => el;
   for (const multiline of [false, true]) {
     field.tagName = multiline ? "TEXTAREA" : "INPUT";
@@ -220,10 +222,11 @@ test("input autoCorrect sets spellcheck and the autocorrect attribute on both fi
   const attrs = new Map();
   const field = {
     classList: { toggle() {} },
+    getAttribute: (name) => attrs.get(name) ?? null,
     setAttribute: (name, value) => attrs.set(name, value),
     removeAttribute: (name) => attrs.delete(name),
   };
-  const el = { _field: field, removeAttribute() {} };
+  const el = { _field: field, getAttribute: () => null };
   player.view = () => el;
   for (const multiline of [false, true]) {
     field.tagName = multiline ? "TEXTAREA" : "INPUT";
@@ -239,12 +242,58 @@ test("input autoCorrect sets spellcheck and the autocorrect attribute on both fi
   }
 });
 
+test("view and field ARIA write only changed attributes", () => {
+  const { player } = fakePlayer();
+  const element = () => {
+    const attrs = new Map();
+    const writes = [];
+    return {
+      attrs,
+      writes,
+      getAttribute: (name) => attrs.get(name) ?? null,
+      setAttribute(name, value) {
+        writes.push(["set", name, value]);
+        attrs.set(name, value);
+      },
+      removeAttribute(name) {
+        writes.push(["remove", name]);
+        attrs.delete(name);
+      },
+    };
+  };
+  const el = element();
+  player.updateAria(el);
+  assert.deepEqual(el.writes, []);
+
+  // A label can arrive before the field, which then takes it from the view.
+  el._props = { label: "Price" };
+  player.updateAria(el);
+  assert.deepEqual(el.writes.splice(0), [["set", "aria-label", "Price"]]);
+  const field = element();
+  el._field = field;
+  player.fieldAria(el, field);
+  assert.deepEqual(el.writes.splice(0), [["remove", "aria-label"]]);
+  assert.deepEqual(field.writes.splice(0), [["set", "aria-label", "Price"]]);
+
+  player.updateAria(el);
+  assert.deepEqual(el.writes, []);
+  assert.deepEqual(field.writes, []);
+  el._props = {};
+  player.updateAria(el);
+  assert.deepEqual(field.writes.splice(0), [["remove", "aria-label"]]);
+  assert.equal(field.attrs.has("aria-label"), false);
+  player.updateAria(el);
+  assert.deepEqual(el.writes, []);
+  assert.deepEqual(field.writes, []);
+});
+
 test("an invalid view is aria-invalid, and so is the field of an input", () => {
   const { player } = fakePlayer();
   const element = () => {
     const attrs = new Map();
     return {
       attrs,
+      getAttribute: (name) => attrs.get(name) ?? null,
       setAttribute: (name, value) => attrs.set(name, value),
       removeAttribute: (name) => attrs.delete(name),
     };
@@ -277,6 +326,7 @@ for (const multiline of [false, true]) {
         const attrs = new Map();
         return {
           attrs, style: {}, classList: { toggle() {} },
+          getAttribute: (name) => attrs.get(name) ?? null,
           setAttribute: (name, value) => attrs.set(name, value),
           removeAttribute: (name) => attrs.delete(name),
         };
@@ -351,6 +401,7 @@ test("a combo box's field names its highlighted row and its list by DOM id", () 
     return {
       attrs,
       id: "",
+      getAttribute: (name) => attrs.get(name) ?? null,
       setAttribute: (name, value) => attrs.set(name, value),
       removeAttribute: (name) => attrs.delete(name),
       ...extra,
@@ -404,6 +455,7 @@ test("a field names the line describing it by DOM id, followed as it comes and g
     return {
       attrs,
       id: "",
+      getAttribute: (name) => attrs.get(name) ?? null,
       setAttribute: (name, value) => attrs.set(name, value),
       removeAttribute: (name) => attrs.delete(name),
       ...extra,
@@ -1506,6 +1558,54 @@ test("a paused WebSocket holds its events, in order, until the engine resumes it
   }
 });
 
+test("another tab's changes to the app's storage reach the engine as this tab now reads them", () => {
+  const { player } = fakePlayer();
+  const text = (p, l) => new TextDecoder().decode(new Uint8Array(player.wasm.memory.buffer, p, l));
+  const got = [];
+  player.wasm.nsh_storage_changed = (pp, pl, kp, kl, vp, vl, kind) => {
+    got.push([text(pp, pl), text(kp, kl), text(vp, vl), kind]);
+    return -1;
+  };
+  const listeners = new Set();
+  const kept = new Map();
+  const area = { getItem: (key) => kept.get(key) ?? null };
+  const saved = { window: globalThis.window, localStorage: globalThis.localStorage };
+  globalThis.window = {
+    addEventListener: (type, f) => type === "storage" && listeners.add(f),
+    removeEventListener: (type, f) => type === "storage" && listeners.delete(f),
+  };
+  globalThis.localStorage = area;
+  const dispatch = (event) => listeners.forEach((f) => f({ storageArea: area, ...event }));
+  try {
+    player.followStorage("nsh:app:");
+    player.followStorage("nsh:app:");
+    assert.equal(listeners.size, 1, "one listener however many loads");
+    // This tab wrote "mine" after the other tab's "theirs": it keeps its own.
+    kept.set("nsh:app:draft", "mine");
+    dispatch({ key: "nsh:app:draft", newValue: "theirs" });
+    kept.delete("nsh:app:gone");
+    dispatch({ key: "nsh:app:gone", newValue: null });
+    // Other apps' keys, the page's own and `sessionStorage` are not the app's.
+    dispatch({ key: "nsh:other:draft", newValue: "x" });
+    dispatch({ key: "draft", newValue: "x" });
+    dispatch({ key: "nsh:app:draft", newValue: "x", storageArea: {} });
+    dispatch({ key: null, newValue: null });
+    assert.deepEqual(got, [
+      ["nsh:app:", "draft", "mine", 1],
+      ["nsh:app:", "gone", "", 0],
+      ["nsh:app:", "", "", 2],
+    ]);
+    // A stopped app follows nothing until the next one loads its storage.
+    globalThis.cancelAnimationFrame ??= () => {};
+    player.stop();
+    assert.equal(listeners.size, 0);
+    assert.equal(player.storagePrefixes.size, 0);
+  } finally {
+    clearTimeout(player.timer);
+    Object.assign(globalThis, saved);
+  }
+});
+
 test("a plain Shader uploads the whole built-ins block, progress and overflow at 0", () => {
   const { player } = fakePlayer();
   const uploads = [];
@@ -2235,10 +2335,11 @@ function animating(t) {
     else player.requestFrame();
     return -1;
   };
-  const frame = () => {
+  // The page's animation frame, which began at `at` (now by default).
+  const frame = (at = clock.now) => {
     const due = frames;
     frames = [];
-    for (const f of due) f(clock.now);
+    for (const f of due) f(at);
   };
   // Time passes by `ms`: the timers due run, and what the calls into the
   // engine left for after them (`deadlineSoon`).
@@ -2248,7 +2349,7 @@ function animating(t) {
     t.mock.timers.tick(ms);
     await null;
   };
-  return { player, ticks, frame, pass, ended: () => ended };
+  return { player, ticks, frame, pass, clock, ended: () => ended };
 }
 
 test("a native animation ends on time while no animation frames come", async (t) => {
@@ -2279,6 +2380,33 @@ test("while animation frames come the page runs no frames of its own", async (t)
   assert.equal(ticks.length, frames, "every frame the browser's");
   await pass(1000);
   assert.equal(ticks.length, frames);
+});
+
+test("a frame a task held steps the animations when its callbacks run", (t) => {
+  const { player, ticks, frame, clock } = animating(t);
+  player.requestFrame();
+  // The frame began at 0; a press handled before its callbacks took
+  // 170 ms (it opened a sheet, whose entrance asks for this frame).
+  clock.now = 170;
+  frame(0);
+  assert.deepEqual(ticks, [170], "the entrance starts when it was asked for, not 170 ms in");
+  // The next frames are on time: their own times keep the display's pace.
+  clock.now = 189;
+  frame(186.7);
+  clock.now = 205;
+  frame(203.3);
+  assert.deepEqual(ticks, [170, 186.7, 203.3]);
+});
+
+test("an animation frame never steps earlier than the one before", (t) => {
+  const { player, ticks, frame, clock } = animating(t);
+  player.requestFrame();
+  clock.now = 170;
+  frame(0);
+  // On time by its own measure, but begun before the held one ran.
+  clock.now = 172;
+  frame(160);
+  assert.deepEqual(ticks, [170, 170]);
 });
 
 test("a dialog comes in and reports it shown without animation frames", () => {
@@ -3356,9 +3484,10 @@ function leavingPage() {
       preventDefault() { this.defaultPrevented = true; },
     });
   const hide = (persisted = false) => dispatch("pagehide", { persisted });
+  const show = (persisted = false) => dispatch("pageshow", { persisted });
   const guards = () => (listeners.get("beforeunload") ?? []).length;
   const watchers = () => (listeners.get("pagehide") ?? []).length;
-  return { leave, hide, guards, watchers, restore: () => Object.assign(globalThis, saved) };
+  return { leave, hide, show, guards, watchers, restore: () => Object.assign(globalThis, saved) };
 }
 
 /** A running app (it watches the page's end, as `begin` has it) that
@@ -3460,6 +3589,45 @@ test("a page kept in the back / forward cache keeps its app running", () => {
     page.hide();
     assert.equal(calls.quits, 1);
   } finally {
+    page.restore();
+  }
+});
+
+test("a page in the back / forward cache is in the background until it comes back", () => {
+  const page = leavingPage();
+  const document = globalThis.document;
+  // A browser that tells no `visibilitychange` around the cache: the page
+  // stays visible and focused throughout.
+  globalThis.document = { visibilityState: "visible", hasFocus: () => true };
+  try {
+    const { player, calls } = quittingPlayer(() => true);
+    const reported = [];
+    Object.assign(player, { reported: "{}", environment: () => ({ lifecycle: player.lifecycle() }) });
+    player.wasm.nsh_environment = (ptr, len) => {
+      reported.push(JSON.parse(new TextDecoder().decode(new Uint8Array(player.wasm.memory.buffer, ptr, len))).lifecycle);
+      return -1;
+    };
+    player.watchPageCache(() => player.environmentChanged());
+    page.show();
+    page.hide(true);
+    assert.deepEqual(reported, ["background"], "kept in the cache: the app goes to the background");
+    assert.equal(calls.quits, 0, "and runs on");
+    page.show(true);
+    assert.deepEqual(reported, ["background", "active"], "restored: back in the foreground");
+    // Hidden again: the cache and visibility are one background.
+    page.hide(true);
+    globalThis.document.visibilityState = "hidden";
+    page.show(true);
+    assert.deepEqual(reported, ["background", "active", "background"]);
+    globalThis.document.visibilityState = "visible";
+    player.environmentChanged();
+    // The page's real end ends the app, once, with no lifecycle edge.
+    page.hide();
+    page.hide();
+    assert.equal(calls.quits, 1);
+    assert.deepEqual(reported, ["background", "active", "background", "active"]);
+  } finally {
+    globalThis.document = document;
     page.restore();
   }
 });

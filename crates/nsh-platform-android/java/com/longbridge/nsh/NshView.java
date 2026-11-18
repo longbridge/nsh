@@ -126,7 +126,10 @@ public class NshView extends FrameLayout {
      * unaffected. A
      * view with no raw listener and no capture leaves the key to Android; Tab and Shift+Tab then
      * move the focus between managed stops and inputs, yielding to Android at the first and last
-     * stop.
+     * stop, and while this view itself holds the focus (at launch, on the first key after a tap)
+     * an unmodified arrow key that Android has nowhere outside the app to take (an embedding host's
+     * view in its direction, a host scroll view) moves it to the first stop on screen
+     * ({@link ArrowEntry}).
      */
     @Override
     public boolean dispatchKeyEvent(android.view.KeyEvent e) {
@@ -148,6 +151,7 @@ public class NshView extends FrameLayout {
         if (!hasWindowFocus) {
             // The releases of the keys held may never come.
             keys.focusLost();
+            backKeyDown = false;
             if (handle != 0) Native.keyReset(handle);
         } else {
             focusForKeyboard();
@@ -266,6 +270,19 @@ public class NshView extends FrameLayout {
      */
     public void setLimits(int memoryMb, int stackKb, int loadMs, int callMs, int maxNodes) {
         Native.setLimits(handle, memoryMb, stackKb, loadMs, callMs, maxNodes);
+    }
+
+    /**
+     * Whether scroll views make the views of their content only near their
+     * viewport (true, the default), or all of it (false). Turned off, what is
+     * not made yet is made in the next frames, e.g. to draw a whole scroll
+     * view into a bitmap (a long screenshot); turned on again, what is far
+     * away is given up. Applies to the running app and the apps loaded next.
+     *
+     * @param enabled true to make content near the viewport only
+     */
+    public void setContentCulling(boolean enabled) {
+        Native.setContentCulling(handle, enabled);
     }
 
     /** Runs the apps loaded from now on as apps on their own, without limits (nsh's own activities). */
@@ -967,8 +984,15 @@ public class NshView extends FrameLayout {
         @Override public void onActivityDestroyed(Activity a) { states.remove(a); }
     }
 
-    private android.view.accessibility.AccessibilityManager accessibility() {
-        return (android.view.accessibility.AccessibilityManager) getContext().getSystemService(Context.ACCESSIBILITY_SERVICE);
+    private android.view.accessibility.AccessibilityManager accessibilityManager;
+
+    /** The accessibility manager, looked up once (`A11y.changed` asks it on every update). */
+    android.view.accessibility.AccessibilityManager accessibility() {
+        if (accessibilityManager == null) {
+            accessibilityManager = (android.view.accessibility.AccessibilityManager)
+                    getContext().getSystemService(Context.ACCESSIBILITY_SERVICE);
+        }
+        return accessibilityManager;
     }
 
     /** TalkBack turning on or off: `screenReaderEnabled()`. */
@@ -1016,14 +1040,27 @@ public class NshView extends FrameLayout {
      * {@code android:enableOnBackInvokedCallback="true"}), else as the back
      * key, which it takes before the activity's {@code onBackPressed} (and
      * so before AndroidX's {@code OnBackPressedDispatcher}). Hosts that see
-     * the press first in another way may forward it here, falling back to
-     * their own handling when it returns false.
+     * the press first in another way may forward it here when it goes back
+     * (on its release: {@code onBackPressed}, {@code onBackInvoked}), never
+     * from a key-down handler, as this reports Back's release to the app's
+     * raw keys first; they fall back to their own handling when it returns
+     * false.
      *
      * @return whether the app handled the press
      */
     public boolean handleBack() {
+        // With the callback in effect the window turns Back's key-up into
+        // this call: the focused view hears the release here, before the
+        // press goes back (`KeyDispatch` reports it once, whichever way it
+        // comes; a press that did not come as a key reports nothing).
+        keys.releaseBack(android.os.SystemClock.uptimeMillis());
         if (exiting || handle == 0) return false;
         return mounter.handleBack();
+    }
+
+    /** {@code onBackCancelled}: a held Back's release is cancelled, without going back. */
+    void backCancelled() {
+        keys.cancelBack();
     }
 
     /** The back key's press went to the app (its release does too). */
@@ -1034,18 +1071,28 @@ public class NshView extends FrameLayout {
      * {@code OnBackInvokedCallback} in effect: no view on the focus path took
      * it, and the activity is next ({@code onBackPressed}). The app takes it
      * while it wants back presses; with the callback in effect the window
-     * never sends the key, so a press is never handled twice.
+     * sends the release as the callback, and at most a cancelled key-up
+     * after it (Android 15 QPR1 to 16), so a press is never handled twice.
+     *
+     * <p>Once this listener took the down, the window hands it the press's
+     * repeats and release before any view ({@code ViewRootImpl}'s
+     * {@code UnhandledKeyManager}): the focus path, and so the raw
+     * {@code onKeyUp}, never sees them, and they go to {@code KeyDispatch}
+     * from here, the release before the press goes back.
      */
     private boolean onBackKey(android.view.KeyEvent e) {
         if (e.getKeyCode() != android.view.KeyEvent.KEYCODE_BACK) return false;
         if (e.getAction() == android.view.KeyEvent.ACTION_DOWN) {
             if (e.getRepeatCount() == 0) {
                 backKeyDown = !exiting && handle != 0 && isShown() && mounter.wantsBack();
+            } else if (backKeyDown) {
+                keys.backKey(e);
             }
             return backKeyDown;
         }
         if (e.getAction() != android.view.KeyEvent.ACTION_UP || !backKeyDown) return false;
         backKeyDown = false;
+        keys.backKey(e);
         if (!e.isCanceled()) handleBack();
         return true;
     }
@@ -1097,6 +1144,7 @@ public class NshView extends FrameLayout {
         getViewTreeObserver().removeOnTouchModeChangeListener(keyboardFocus);
         super.onDetachedFromWindow();
         keys.focusLost();
+        backKeyDown = false;
         if (handle != 0) Native.keyReset(handle);
         accessibility().removeTouchExplorationStateChangeListener(screenReader);
         if (Lifecycles.registered != null) Lifecycles.registered.views.remove(this);

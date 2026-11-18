@@ -6,7 +6,12 @@ reported line and caret heights, and attachment placement use that height. Font 
 remain approximations; use a real platform to verify typography.
 
 - **Text**: `<Text>`; styles `numberOfLines`, `textOverflow` (`ellipsis|clip|ellipsis-start|ellipsis-middle`: `EllipsizeMode`'s
-  `Tail|Clip|Head|Middle`), `fontFamily` (system or imported fonts:
+  `Tail|Clip|Head|Middle`; on macOS the cut last line goes where its paragraph's alignment puts the other lines, and a
+  `clip` line wider than its box starts at its paragraph's start edge whatever the alignment, as CSS does for a
+  paragraph of that direction (`dir="auto"`): the right one for a right-to-left paragraph (its `writingDirection`, else
+  its first strong character's, as CoreText resolves a natural direction), so the beginning of the text stays in view;
+  such a right-to-left line's box starts left of the content box, and `onTextLayout` reports its negative `x`),
+  `fontFamily` (system or imported fonts:
   `import Inter from "./Inter.ttf"` evaluates to the family name and registers the font before the first frame; a host can register the same files itself, `NshView.registerFont` / `NshAppView.registerFont`, and the app names the family), `fontWeight`,
   `fontStyle` (italic runs leave color emoji upright, in runs of their own: `AttributedText::push`, as WebKit does;
   Chrome and Android would slant them), `letterSpacing`, `textDecorationLine` + `textDecorationColor`, `textTransform`, `lineHeight`, `textAlign`,

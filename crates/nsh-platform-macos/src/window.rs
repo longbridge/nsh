@@ -1553,23 +1553,19 @@ fn place(
         .or_else(|| parent.and_then(|p| p.screen()))
         .or_else(|| surface.root.ns().window().and_then(|w| w.screen()))
         .or_else(|| NSScreen::mainScreen(mtm));
-    let position = position.unwrap_or(match kind {
-        WindowKind::Dialog if parent.is_some() => WindowPosition::ParentCenter,
-        WindowKind::Popup | WindowKind::Overlay => WindowPosition::Center,
-        _ if display.is_some() => WindowPosition::Center,
-        _ => {
-            // Cascaded from the parent's (or the main window's) top left.
-            let step = CASCADE * (surface.windows.borrow().len() % 8 + 1) as f64;
-            let from = parent
-                .map(|p| p.frame())
-                .or_else(|| surface.root.ns().window().map(|w| w.frame()));
-            let top_left = from.map_or(NSPoint::new(step, step), |f| {
-                NSPoint::new(f.origin.x + step, f.origin.y + f.size.height - step)
-            });
-            window.setFrameTopLeftPoint(top_left);
-            return;
-        }
-    });
+    let Some(position) = opening_position(position, kind, parent.is_some(), display.is_some())
+    else {
+        // Cascaded from the parent's (or the main window's) top left.
+        let step = CASCADE * (surface.windows.borrow().len() % 8 + 1) as f64;
+        let from = parent
+            .map(|p| p.frame())
+            .or_else(|| surface.root.ns().window().map(|w| w.frame()));
+        let top_left = from.map_or(NSPoint::new(step, step), |f| {
+            NSPoint::new(f.origin.x + step, f.origin.y + f.size.height - step)
+        });
+        window.setFrameTopLeftPoint(top_left);
+        return;
+    };
     match position {
         WindowPosition::At(p) => {
             let primary = crate::window_state::primary_height(mtm);
@@ -1585,6 +1581,25 @@ fn place(
             }
         }
     }
+}
+
+/// Where a window opens: the app's `position` (`WindowOptions`'
+/// `default_position`) when it gives one, else its kind's default; `None`
+/// cascades it from its parent's (or the main window's) top left. Kept
+/// apart from placing the window, so a default is never chosen, and
+/// applied, over the app's position.
+fn opening_position(
+    position: Option<WindowPosition>,
+    kind: WindowKind,
+    parent: bool,
+    display: bool,
+) -> Option<WindowPosition> {
+    position.or(match kind {
+        WindowKind::Dialog if parent => Some(WindowPosition::ParentCenter),
+        WindowKind::Popup | WindowKind::Overlay => Some(WindowPosition::Center),
+        _ if display => Some(WindowPosition::Center),
+        _ => None,
+    })
 }
 
 /// A batch was applied: the windows waiting for their first frame show
@@ -2139,6 +2154,7 @@ pub(crate) fn removed(surface: &Surface, view: &NshView) -> bool {
         dismiss(surface, child, WindowCloseCause::ParentClose);
     }
     dock::set(surface.key(), id, None);
+    crate::input::window_closed(surface, &w.view);
     let window = w.window.clone();
     close(w);
     lost_key(surface, &window);
@@ -2512,6 +2528,59 @@ pub(crate) mod dock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_window_opens_where_the_app_asks() {
+        let at = WindowPosition::At(point(Points(1180.0), Points(720.0)));
+        let kinds = [
+            WindowKind::Normal,
+            WindowKind::Dialog,
+            WindowKind::Panel,
+            WindowKind::Popup,
+            WindowKind::Overlay,
+        ];
+        for kind in kinds {
+            for parent in [false, true] {
+                for display in [false, true] {
+                    for asked in [at, WindowPosition::Center, WindowPosition::ParentCenter] {
+                        assert_eq!(
+                            opening_position(Some(asked), kind, parent, display),
+                            Some(asked),
+                            "{kind:?}, parent {parent}, display {display}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_window_without_a_position_opens_where_its_kind_does() {
+        use WindowKind::{Dialog, Normal, Overlay, Panel, Popup};
+        use WindowPosition::{Center, ParentCenter};
+        // (kind, parent, display) -> default; `None` cascades. A parent
+        // comes before a display for a dialog.
+        let cases = [
+            (Normal, false, false, None),
+            (Normal, true, false, None),
+            (Normal, false, true, Some(Center)),
+            (Panel, true, false, None),
+            (Panel, true, true, Some(Center)),
+            (Dialog, false, false, None),
+            (Dialog, false, true, Some(Center)),
+            (Dialog, true, false, Some(ParentCenter)),
+            (Dialog, true, true, Some(ParentCenter)),
+            (Popup, false, false, Some(Center)),
+            (Overlay, true, false, Some(Center)),
+        ];
+        for (kind, parent, display, expected) in cases {
+            assert_eq!(
+                opening_position(None, kind, parent, display),
+                expected,
+                "{kind:?}, parent {parent}, display {display}"
+            );
+        }
+    }
 
     fn inputs(kind: WindowKind) -> StyleInputs {
         StyleInputs {

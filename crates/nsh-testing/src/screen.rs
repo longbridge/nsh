@@ -207,6 +207,9 @@ pub struct Screen {
     auth_sessions: Vec<nsh_core::auth_session::AuthSessionPage>,
     /// The sign-in sessions to answer.
     auth_session_answers: Vec<u32>,
+    /// The sign-in session showing: not answered, closed by the app nor
+    /// replaced yet.
+    auth_session_showing: Option<u32>,
     /// The requests on local paths that reached the platform
     /// (`pick_paths`, `open_path`, ...), in order.
     file_requests: Vec<nsh_core::file_dialog::FileRequest>,
@@ -890,7 +893,9 @@ impl Screen {
             Command::AuthSession { id, page } => {
                 self.auth_sessions.push((**page).clone());
                 self.auth_session_answers.push(*id);
+                self.auth_session_showing = Some(*id);
             }
+            Command::CloseAuthSession(id) => self.auth_session_ended(*id),
             // Recorded, never carried out: a test's machine opens, shows
             // and trashes nothing.
             Command::FileRequest { id, request } => {
@@ -1875,6 +1880,21 @@ impl Screen {
         &self.auth_sessions
     }
 
+    /// Whether a sign-in session the app opened in the app still shows:
+    /// the user has not ended it (as
+    /// [`crate::Headless::keep_auth_sessions_open`] leaves it), and the app
+    /// has not closed it ([`nsh_core::element::close_auth_session`]).
+    pub fn auth_session_showing(&self) -> bool {
+        self.auth_session_showing.is_some()
+    }
+
+    /// Sign-in session `id` is no longer showing.
+    pub(crate) fn auth_session_ended(&mut self, id: u32) {
+        if self.auth_session_showing == Some(id) {
+            self.auth_session_showing = None;
+        }
+    }
+
     /// The sign-in sessions to answer since the last call.
     pub(crate) fn take_auth_session_answers(&mut self) -> Vec<u32> {
         std::mem::take(&mut self.auth_session_answers)
@@ -2405,7 +2425,7 @@ impl Screen {
     /// Whether a pointer can reach `id`: neither it nor a view around it
     /// has `pointerEvents: none` or is hidden, and no view around it takes
     /// touches only for itself (`box-only`).
-    fn receives_pointer(&self, id: NodeId) -> bool {
+    pub(crate) fn receives_pointer(&self, id: NodeId) -> bool {
         let mut at = Some(id);
         while let Some(current) = at {
             let Some(view) = self.nodes.get(&current) else {
@@ -2426,7 +2446,7 @@ impl Screen {
     /// root) reaches in that window: the topmost, innermost one there that
     /// receives touches. Canvas nodes are not views, and the windows of the
     /// app's own are windows of their own.
-    fn hit_pointer(&self, at: Point<Points>, window: NodeId) -> NodeId {
+    pub(crate) fn hit_pointer(&self, at: Point<Points>, window: NodeId) -> NodeId {
         let order = self.attached();
         let attached: HashSet<NodeId> = order.iter().copied().collect();
         // The dialogs presented over this window first, the last one on

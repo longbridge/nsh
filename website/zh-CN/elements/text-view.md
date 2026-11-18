@@ -222,6 +222,7 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
 | `mathBlock` | `MathBlock` | 公式块；没有 `renderMath` 时由 TextView 排版并居中。 |
 | `table` | `Table` | 表格：`renderTableActions` 的内容，然后是单元格的滚动视图。 |
 | `tableScroll` | `TableScroll` | 表格单元格的横向滚动视图：空间足够时各列适应内容宽度，较窄时换行收缩到每列的下限，再窄则横向滚动。 |
+| `tableGrid` | `TableGrid` | 表格单元格所在的网格，位于 `tableScroll` 内。它绘制表格的上边线和左边线，每个单元格绘制自己的右边线和下边线；应用自己的外框（四边、圆角）设在这里。 |
 | `tableRow` | `TableRow` | 表格的每一行：位于单元格后面的视图，用于背景和边框（文本样式设在 `tableCell` 上）。 |
 | `tableHead` | `TableHead` | 表头行，在 `tableRow` 之后。 |
 | `tableCell` | `TableCell` | 每个单元格。 |
@@ -724,6 +725,8 @@ fn chat() -> impl IntoElement {
 ```
 
 插件的 `render` 最先生效，然后是 `renderCustom`，最后是节点的内容。`configure` 打开 markdown-rs 的更多语法，`ParseContext` 按解析器的方式读取节点的子节点。
+
+`ParseContext::source` 是整篇 Markdown 文本，节点位置是它里面的偏移；长文本分段读取时也一样。带插件的长文档同样读得快；`configure` 打开或关闭某个语法结构（construct）的插件会让文本每次按整篇一次解析。
 
 <a id="props"></a>
 

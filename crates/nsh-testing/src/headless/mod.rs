@@ -243,8 +243,17 @@ type HostPosts = Box<dyn FnMut(&str, &nsh_core::JsonValue) + Send>;
 /// The answer to a dialog (`AlertDialog.show`, an action sheet).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DialogAnswer {
-    /// Press the button with this text.
+    /// Press the button with this text (its text field, if any, keeps the
+    /// text it started with).
     Press(String),
+    /// Type `text` into its text field ([`Dialog::input`]), replacing what
+    /// the field holds, then press the button `button`.
+    TypeAndPress {
+        /// What the field holds when the button is pressed.
+        text: String,
+        /// The text of the button to press.
+        button: String,
+    },
     /// Close it without a button (tapping outside, the back button).
     Dismiss,
 }
@@ -860,6 +869,17 @@ impl Headless {
         self.set_environment(&what, |env| env.auth_session = true)
     }
 
+    /// The platform shows web sign-in sessions in the app, as
+    /// [`Headless::on_auth_session`] does, but the user ends none of them:
+    /// each stays open until the app closes it
+    /// ([`nsh_core::element::close_auth_session`]) or opens another
+    /// ([`Screen::auth_session_showing`]). Then waits until the app is
+    /// quiet.
+    pub fn keep_auth_sessions_open(&mut self) -> Result<(), String> {
+        self.auth_session = None;
+        self.set_environment("keepAuthSessionsOpen", |env| env.auth_session = true)
+    }
+
     /// The platform has file dialogs, a file manager and a trash
     /// ([`nsh_core::platform::Environment::file_requests`]), and the user
     /// picks `paths` whenever the app shows the open dialog (`pick_paths`;
@@ -1175,6 +1195,7 @@ impl Headless {
         for id in self.screen.take_auth_session_answers() {
             if let Some(outcome) = &self.auth_session {
                 control.dispatch_event(ROOT_ID, EventKind::AuthSession, outcome.payload(id));
+                self.screen.auth_session_ended(id);
             }
         }
         for (id, request) in self.screen.take_file_answers() {
@@ -1539,19 +1560,45 @@ impl Headless {
     /// Answers the oldest dialog not answered yet.
     fn answer(&mut self, answer: DialogAnswer) -> Result<(), String> {
         let dialog = self.screen.pending_dialog().ok_or("no dialog to answer")?;
+        let typed = match &answer {
+            DialogAnswer::TypeAndPress { text, .. } if dialog.input.is_none() => {
+                return Err(format!(
+                    "the dialog {} has no text field to type {text:?} into",
+                    describe(dialog)
+                ));
+            }
+            DialogAnswer::TypeAndPress { text, .. } => Some(text.as_str()),
+            _ => None,
+        };
+        // The field's text as the user leaves it.
+        let value = dialog
+            .input
+            .as_ref()
+            .map(|input| typed.unwrap_or(&input.text).to_owned());
         let index = match &answer {
-            DialogAnswer::Press(text) => dialog
-                .buttons
-                .iter()
-                .position(|b| b.text == *text)
-                .ok_or_else(|| {
-                    let buttons: Vec<&str> =
-                        dialog.buttons.iter().map(|b| b.text.as_str()).collect();
-                    format!(
-                        "the dialog {} has no button {text:?}: {buttons:?}",
+            DialogAnswer::Press(text) | DialogAnswer::TypeAndPress { button: text, .. } => {
+                let index = dialog
+                    .buttons
+                    .iter()
+                    .position(|b| b.text == *text)
+                    .ok_or_else(|| {
+                        let buttons: Vec<&str> =
+                            dialog.buttons.iter().map(|b| b.text.as_str()).collect();
+                        format!(
+                            "the dialog {} has no button {text:?}: {buttons:?}",
+                            describe(dialog)
+                        )
+                    })?;
+                if let (Some(input), Some(value)) = (&dialog.input, &value)
+                    && !input.enables(&dialog.buttons[index], value)
+                {
+                    return Err(format!(
+                        "the button {text:?} of the dialog {} is disabled while its text field is empty",
                         describe(dialog)
-                    )
-                })? as f64,
+                    ));
+                }
+                index as f64
+            }
             DialogAnswer::Dismiss if dialog.cancelable => -1.0,
             DialogAnswer::Dismiss => {
                 return Err(format!(
@@ -1562,13 +1609,17 @@ impl Headless {
         };
         let id = f64::from(dialog.id);
         self.screen.answered();
+        let mut payload = vec![
+            ("id", PayloadValue::Number(id)),
+            ("index", PayloadValue::Number(index)),
+        ];
+        if let Some(value) = value {
+            payload.push(("value", PayloadValue::Str(value)));
+        }
         self.engine.control().dispatch_event(
             ROOT_ID,
             EventKind::Dialog,
-            EventPayload::Map(vec![
-                ("id", PayloadValue::Number(id)),
-                ("index", PayloadValue::Number(index)),
-            ]),
+            EventPayload::Map(payload),
         );
         Ok(())
     }
@@ -3273,8 +3324,9 @@ mod tests {
         assert_eq!(app.screen().shares().len(), 3);
     }
 
-    /// Opens a sign-in session ending with a `demo:` callback and shows how
-    /// it ended; the links the app hears otherwise show after it.
+    /// Opens a sign-in session ending with a `demo:` callback (closes it)
+    /// and shows how it ended; the links the app hears otherwise show
+    /// after it.
     #[component]
     fn SigningIn() -> impl IntoElement {
         let result = signal(String::from("nothing"));
@@ -3304,6 +3356,7 @@ mod tests {
         view()
             .child(text(move || result.get()))
             .child(text("Sign in").on_press(sign_in))
+            .child(text("Close").on_press(|_: &()| close_auth_session()))
     }
 
     #[test]
@@ -3360,6 +3413,36 @@ mod tests {
         app.wait_for("text:ERR_FEATURE_UNAVAILABLE_ON_PLATFORM")
             .unwrap();
         assert!(app.screen().opened_urls().is_empty());
+    }
+
+    #[test]
+    fn the_app_closes_its_sign_in_session() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<SigningIn>())).unwrap();
+        app.first_render().unwrap();
+        // With no session waiting, closing does nothing.
+        app.press("Close").unwrap();
+        app.wait_for("text:nothing").unwrap();
+        app.keep_auth_sessions_open().unwrap();
+        app.press("Sign in").unwrap();
+        assert_eq!(app.screen().auth_sessions().len(), 1);
+        assert!(app.screen().auth_session_showing());
+        app.wait_for("text:nothing").unwrap();
+        // Closed: answered as cancelled, and off the screen.
+        app.press("Close").unwrap();
+        app.wait_for("text:cancelled").unwrap();
+        assert!(!app.screen().auth_session_showing());
+
+        // In the system browser, the session ends as cancelled too; the
+        // callback link that comes later is an ordinary link.
+        let root = || Root::of::<SigningIn>().url_schemes(["demo"]);
+        let mut app = Headless::start(EngineConfig::new(root())).unwrap();
+        app.first_render().unwrap();
+        app.press("Sign in").unwrap();
+        app.press("Close").unwrap();
+        app.wait_for("text:cancelled").unwrap();
+        app.open_with_url("demo://done?code=9").unwrap();
+        app.wait_for("text:link demo://done?code=9").unwrap();
+        assert!(app.screen().auth_sessions().is_empty());
     }
 
     #[test]

@@ -768,7 +768,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         EventKind::Wheel,
         on::ALL,
         "(e: WheelEvent) => void",
-        "A mouse wheel or touchpad scrolled over the view (or a view inside it); desktops and the web. The nearest listener hears it. A listener nearer than any scroll view under the pointer takes the wheel: nothing scrolls or zooms natively (a canvas zooms on `e.modifiers.ctrl` and pans otherwise); a scroll view listening, or a view around one, only observes it.",
+        "A mouse wheel or touchpad scrolled over the view (or a view inside it); desktops and the web. The nearest listener hears it. A listener nearer than any scroll view under the pointer takes the wheel: nothing scrolls or zooms natively (a canvas zooms on `e.modifiers.control` and pans otherwise); a scroll view listening, or a view around one, only observes it.",
     ),
     (
         EventKind::Pinch,

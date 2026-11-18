@@ -10,6 +10,7 @@ import android.os.Build;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowManager;
@@ -93,6 +94,11 @@ final class ModalHost {
     /** Holds focus after an input blurs, so this window still receives hardware keys. */
     void focusRoot() {
         container.requestFocus();
+    }
+
+    /** Whether `v` is a dialog's root, which holds its window's focus while no node does ({@link #focusRoot}). */
+    static boolean isRoot(View v) {
+        return v instanceof Container;
     }
 
     void show() {
@@ -384,6 +390,29 @@ final class ModalHost {
             } else if (findFocus() == null) {
                 requestFocus();
             }
+        }
+
+        /**
+         * A tap clears a focus not focusable in touch mode and leaves the
+         * dialog's window without one; the first key after it leaves touch
+         * mode, and this takes the focus back before `ViewRootImpl` would
+         * pick a default one and consume the key ({@code NshView}'s
+         * listener, for its window), so an arrow reaches {@link KeyDispatch}.
+         */
+        private final ViewTreeObserver.OnTouchModeChangeListener keyboardFocus = inTouchMode -> {
+            if (!inTouchMode && hasWindowFocus() && getRootView().findFocus() == null) requestFocus();
+        };
+
+        @Override
+        protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            getViewTreeObserver().addOnTouchModeChangeListener(keyboardFocus);
+        }
+
+        @Override
+        protected void onDetachedFromWindow() {
+            getViewTreeObserver().removeOnTouchModeChangeListener(keyboardFocus);
+            super.onDetachedFromWindow();
         }
 
         /** Holds the root where the content starts (below the status bar unless translucent). */

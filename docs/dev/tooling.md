@@ -1032,6 +1032,22 @@ A Rust app's runners were and are what they were: `nsh package --target macos` a
 for the release runner in both. The test runner links QuickJS, so the first `nsh test` of such an app builds what its
 `nsh build` no longer does.
 
+
+### Third-party extensions (`nsh.json` `"extensions"`, `nsh add`)
+
+`crates/nsh-cli/src/extensions.rs`. An extension is a crate like the ones `"rust"` lists, from Git (`nsh add <url>
+[--tag|--rev]`, `{ "git", "tag"|"rev" }`, locked to a `commit`), crates.io (`nsh add <crate>[@<req>]`, `{ "crate",
+"version" }`, resolved by `cargo metadata` on a probe crate in the cache and locked to the exact version as `resolved`)
+or a directory (`nsh add --path <dir>`, `{ "path" }`, not locked, read as it is). `nsh.lock` holds `{ <source>,
+commit|resolved, package, module }`. A locked crate is Cargo's own download of that version. Each locked commit is a `git worktree` of one clone per repository in
+nsh's cache (`<cache>/extensions/<name>-<hash of url>/<commit>`), made again when missing, so a build after clearing
+the cache takes the same commit. `rust_app::of` appends the extensions to the app's crates (an app with extensions
+only is a `RustApp` too, its nsh crates this CLI's, as `runner_only`), checks them together (`check_crates`: the same
+directory, package or `#[native_module]` specifier), and the workspace links each like an app crate. The app's crate
+depends on the extension as `nsh add` writes it (Git at the locked `rev`, the resolved crate version, or a relative
+`path`), which the workspace's `[patch."<url>"]` / `[patch.crates-io]` sends to the same checkout. Before linking, the extension must have a `#[native_module]` at its root
+(its module) and its `nsh-core` dependency requirement, if any, must match this CLI; there is no NSH-specific metadata. `nsh check` does not `cargo check` extensions (only crates outside the cache). Not yet: per-target support checks, web and mobile packaging checks, and an OTA check of the shell's linked modules.
+
 ## Finding the runtimes
 
 The CLI finds prebuilt runtimes next to itself (`bin/../runtime`, the distribution layout) or, in a checkout, in
@@ -1088,10 +1104,11 @@ the profile's fat LTO over one, which linked each executable single-threaded for
 `xtask dist` strips the executables it copies (`copy_executable`: about a sixth of each), after the build rather
 than with the profile's `strip`, so the release builds a checkout keeps for profiling stay as they are. Asset
 names carry no version, so `releases/latest/download/<asset>` always resolves; the installers and package managers
-rely on that. To release, set `version` in the root `Cargo.toml`, push the tag `v<version>` (a tag that does not
-match fails the run) and publish the draft release the run creates once every platform has built. Running the
-workflow by hand without a tag builds the archives only (the run's artifacts): a dry run before tagging, and how to
-check a change to the workflow or to how xtask builds the distribution (`dist.rs`, `android.rs`, `ios.rs`).
+rely on that. To release, set `version` in the root `Cargo.toml` and commit both lock files refreshed (`Cargo.lock`,
+`crates/gpui/Cargo.lock`: the release builds `--locked`), push the tag `v<version>` (a tag that does not match fails
+the run) and publish the draft release the run creates once every platform has built. Running the workflow by hand
+without a tag builds the archives only (the run's artifacts): a dry run before tagging, and how to check a change to
+the workflow or to how xtask builds the distribution (`dist.rs`, `android.rs`, `ios.rs`, `cargo.rs`).
 
 Every night (18:00 UTC) the same workflow builds the latest `main` and publishes it as the release `nightly`, a
 prerelease never marked latest, so `releases/latest` and the package managers keep the stable release. A night

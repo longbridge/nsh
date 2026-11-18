@@ -71,10 +71,10 @@ pub(crate) enum Action {
         from: Option<NodeId>,
     },
     /// A dialog; its answer resolves the slot.
-    Dialog(Dialog, Rc<RefCell<Output<i32>>>),
+    Dialog(Dialog, Rc<RefCell<Output<DialogReply>>>),
     /// Close the dialog whose answer resolves the slot, answering it as
     /// dismissed ([`DialogCloser::close`]).
-    CloseDialog(Rc<RefCell<Output<i32>>>),
+    CloseDialog(Rc<RefCell<Output<DialogReply>>>),
     /// The result of a module function JS waits for.
     Return(u32, super::JsResult),
     /// The pixel size of the image at the URI (its bytes stay loaded); the
@@ -145,6 +145,9 @@ pub(crate) enum Action {
             Result<crate::auth_session::AuthSessionOutcome, crate::auth_session::AuthSessionError>,
         >,
     ),
+    /// Closes the app's waiting web sign-in session, answering it as
+    /// cancelled ([`crate::element::close_auth_session`]).
+    CloseAuthSession,
     /// Renders a drawing offscreen into an image
     /// ([`crate::canvas::render`]); the image's bytes, or why not, resolve
     /// the slot.
@@ -271,6 +274,10 @@ pub(crate) enum Action {
     /// the node, with the layout of the commit the action goes out with;
     /// whether a view took it resolves the slot.
     PressAt(NodeId, crate::PressEvent, AnswerSlot<bool>),
+    /// Hovers what a pointer at the event's page position would inside
+    /// the node, with the layout of the last commit; `None`: the pointer
+    /// left.
+    HoverAt(NodeId, Option<crate::MouseEvent>),
 }
 
 /// What a speech recognition session asks of the core
@@ -845,9 +852,31 @@ pub struct Answer<T> {
     slot: Rc<RefCell<Output<T>>>,
 }
 
-/// The answer to a dialog (`nsh_base::alert_dialog`): the index of the
-/// button pressed, -1 when it was dismissed.
-pub type DialogAnswer = Answer<i32>;
+/// The answer to a dialog (`nsh_base::alert_dialog`): the button pressed
+/// and the text of its text field.
+pub type DialogAnswer = Answer<DialogReply>;
+
+/// What the platform answered a dialog with ([`DialogAnswer`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct DialogReply {
+    /// The index of the button pressed, -1 when it closed without one.
+    pub index: i32,
+    /// The text of its text field ([`crate::Dialog::input`]); `None`
+    /// without one, where the platform's alert has none, or when the app
+    /// closed it ([`DialogCloser`]).
+    pub value: Option<String>,
+}
+
+impl DialogReply {
+    /// Closed without a button or text.
+    pub fn dismissed() -> Self {
+        Self {
+            index: -1,
+            value: None,
+        }
+    }
+}
 
 impl<T> Answer<T> {
     pub(crate) fn new() -> (Self, Rc<RefCell<Output<T>>>) {
@@ -856,7 +885,7 @@ impl<T> Answer<T> {
     }
 }
 
-impl Answer<i32> {
+impl Answer<DialogReply> {
     /// What closes the dialog this answer waits for, kept apart from the
     /// answer (which a task usually takes): see [`DialogCloser`].
     pub fn closer(&self) -> DialogCloser {
@@ -871,7 +900,7 @@ impl Answer<i32> {
 /// made by [`Answer::closer`].
 #[derive(Clone)]
 pub struct DialogCloser {
-    slot: Rc<RefCell<Output<i32>>>,
+    slot: Rc<RefCell<Output<DialogReply>>>,
 }
 
 impl std::fmt::Debug for DialogCloser {
@@ -882,7 +911,7 @@ impl std::fmt::Debug for DialogCloser {
 
 impl DialogCloser {
     /// Closes the dialog, as if the user dismissed it: its answer resolves
-    /// with -1 now, and the platform takes it off the screen. Nothing
+    /// with -1 (and no text) now, and the platform takes it off the screen. Nothing
     /// happens once it was answered, or outside the engine.
     pub fn close(&self) {
         super::ambient::act_if_running(Action::CloseDialog(self.slot.clone()));

@@ -466,7 +466,10 @@ that take presses, and every `focusable` view. Focus styles (`focus:`, `.focus(.
 Return or Space presses it when it takes presses. A click presses a view without focusing it, so focus styles show
 for keyboard focus only. On Android a pressable view is a hardware-keyboard stop, while a touch-mode tap focuses
 only an explicit `focusable` view (or one a ref focused), so tapping a button leaves a field editing; at the first
-and last stop Tab and Shift+Tab go to the embedding Android host instead of wrapping.
+and last stop Tab and Shift+Tab go to the embedding Android host instead of wrapping. On Android, while no view of the
+app has the focus, as at launch and after a tap, the first arrow key moves it to the first stop on screen, and from
+there the arrow keys move it in their direction; an embedding Android host keeps an arrow that moves its own focus or
+scrolls it.
 
 The view the focus reaches scrolls into view in the scroll views and lists around it. Tab walks every row of a list,
 the rows not rendered yet included: the list renders the next row as the focus reaches it, and the focus leaves the

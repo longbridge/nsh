@@ -10,23 +10,89 @@
 //! key the app sets replaces NSH's default, if it has one. The oldest system
 //! the app runs on (`MinimumOSVersion`, `LSMinimumSystemVersion`) is such a
 //! default, which an app raises for the APIs of a later system but never
-//! lowers below the runtime's own ([`IOS_MINIMUM`], [`MACOS_MINIMUM`]).
+//! lowers below the runtime's own ([`IOS_MINIMUM`], [`MACOS_MINIMUM`]);
+//! builds of the app's Rust code compile for it too ([`AppleMinimums`]).
 
 use std::path::{Path, PathBuf};
 
 use anyhow::bail;
 use serde::Deserialize;
 
-/// The oldest iOS the runtime runs on: the deployment target it is built
-/// for (`.cargo/config.toml`'s `IPHONEOS_DEPLOYMENT_TARGET`, `cargo xtask
-/// dist`). Packages declare it (`MinimumOSVersion`, and `actool`'s
-/// deployment target) unless the app raises it.
+/// The oldest iOS the runtime runs on. Packages declare it
+/// (`MinimumOSVersion`, and `actool`'s deployment target) unless the app
+/// raises it, and every build `nsh` makes of an app's Rust code for iOS
+/// compiles its Rust and C for it ([`AppleMinimums::deployment_target`]),
+/// as nsh's own builds do (`.cargo/config.toml`'s
+/// `IPHONEOS_DEPLOYMENT_TARGET`, `cargo xtask dist`).
 pub(crate) const IOS_MINIMUM: &str = "15.0";
 
 /// The oldest macOS the AppKit runtime runs on (its display links are
 /// `NSView`'s, new in macOS 14). Packages declare it
-/// (`LSMinimumSystemVersion`) unless the app raises it.
+/// (`LSMinimumSystemVersion`) unless the app raises it, and builds of an
+/// app's Rust code for macOS compile for it as for iOS.
 pub(crate) const MACOS_MINIMUM: &str = "14.0";
+
+/// The oldest systems an app runs on, as its packages declare them: its
+/// own `<platform>.infoPlist` minimum when it raises the runtime's, else
+/// the runtime's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AppleMinimums {
+    /// iOS's (Mac Catalyst's too: its versions are iOS's).
+    ios: String,
+    /// macOS's.
+    macos: String,
+}
+
+impl Default for AppleMinimums {
+    fn default() -> Self {
+        AppleMinimums {
+            ios: IOS_MINIMUM.into(),
+            macos: MACOS_MINIMUM.into(),
+        }
+    }
+}
+
+impl AppleMinimums {
+    /// The minimums of the app whose `nsh.json` is `config`. A minimum the
+    /// app sets is checked as packages check it; a section of another form
+    /// is left to the reading of the whole `nsh.json` to reject.
+    pub(crate) fn of(config: &serde_json::Value) -> anyhow::Result<Self> {
+        let minimum = |platform: ApplePlatform| -> anyhow::Result<String> {
+            let Some(value) = config
+                .get(platform.key())
+                .and_then(|section| section.get("infoPlist"))
+                .and_then(|info| info.get(platform.minimum_key()))
+            else {
+                return Ok(platform.minimum().into());
+            };
+            check_minimum(value, platform, &format!("{}.infoPlist", platform.key()))?;
+            Ok(value.as_str().unwrap_or_default().into())
+        };
+        Ok(AppleMinimums {
+            ios: minimum(ApplePlatform::Ios)?,
+            macos: minimum(ApplePlatform::Macos)?,
+        })
+    }
+
+    /// The deployment target variable and version of a build for `triple`
+    /// (`None`: this machine) when it is an Apple system's. rustc links for
+    /// it and `cc` compiles C for it; without it they disagree (rustc's
+    /// old default against the SDK's own version), and the C code may need
+    /// a later system than the package declares, or fail to link.
+    pub(crate) fn deployment_target(&self, triple: Option<&str>) -> Option<(&'static str, &str)> {
+        let platform = match triple {
+            Some(triple) if triple.contains("-apple-ios") => ApplePlatform::Ios,
+            Some(triple) if triple.contains("-apple-darwin") => ApplePlatform::Macos,
+            Some(_) => return None,
+            None if cfg!(target_os = "macos") => ApplePlatform::Macos,
+            None => return None,
+        };
+        Some(match platform {
+            ApplePlatform::Ios => ("IPHONEOS_DEPLOYMENT_TARGET", &self.ios),
+            ApplePlatform::Macos => ("MACOSX_DEPLOYMENT_TARGET", &self.macos),
+        })
+    }
+}
 
 /// `nsh.json` `"ios"` (and the keys [`MacosConfig`] shares with it).
 #[derive(Debug, Default, Deserialize)]
@@ -880,6 +946,65 @@ mod tests {
             macos(serde_json::json!({ "infoPlist": { "MinimumOSVersion": "11.0" } }))
                 .check()
                 .is_ok()
+        );
+    }
+
+    /// Builds for an Apple system compile for the oldest one the package
+    /// declares: the app's own minimum when it raises the runtime's.
+    #[test]
+    fn builds_target_the_minimum_their_package_declares() {
+        let minimums = AppleMinimums::of(&serde_json::json!({ "name": "App" })).unwrap();
+        assert_eq!(minimums, AppleMinimums::default());
+        for triple in [
+            "aarch64-apple-ios",
+            "aarch64-apple-ios-sim",
+            "aarch64-apple-ios-macabi",
+        ] {
+            assert_eq!(
+                minimums.deployment_target(Some(triple)),
+                Some(("IPHONEOS_DEPLOYMENT_TARGET", IOS_MINIMUM))
+            );
+        }
+        for triple in ["aarch64-apple-darwin", "x86_64-apple-darwin"] {
+            assert_eq!(
+                minimums.deployment_target(Some(triple)),
+                Some(("MACOSX_DEPLOYMENT_TARGET", MACOS_MINIMUM))
+            );
+        }
+        for triple in [
+            "wasm32-unknown-unknown",
+            "aarch64-linux-android",
+            "x86_64-pc-windows-msvc",
+        ] {
+            assert_eq!(minimums.deployment_target(Some(triple)), None);
+        }
+        assert_eq!(
+            minimums.deployment_target(None).is_some(),
+            cfg!(target_os = "macos")
+        );
+
+        let raised = AppleMinimums::of(&serde_json::json!({
+            "ios": { "infoPlist": { "MinimumOSVersion": "16.4" } },
+            "macos": { "infoPlist": { "LSMinimumSystemVersion": "15.2" } }
+        }))
+        .unwrap();
+        assert_eq!(
+            raised.deployment_target(Some("aarch64-apple-ios")),
+            Some(("IPHONEOS_DEPLOYMENT_TARGET", "16.4"))
+        );
+        assert_eq!(
+            raised.deployment_target(Some("aarch64-apple-darwin")),
+            Some(("MACOSX_DEPLOYMENT_TARGET", "15.2"))
+        );
+
+        let error = AppleMinimums::of(&serde_json::json!({
+            "ios": { "infoPlist": { "MinimumOSVersion": "13.0" } }
+        }))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("ios.infoPlist.MinimumOSVersion: \"13.0\" is below"),
+            "{error}"
         );
     }
 

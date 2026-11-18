@@ -222,6 +222,7 @@ final class EmbedController: UIViewController {
 | `connectDevServer(_ url: URL) throws` | 开发用：从 `nsh dev` 服务器加载，每次修改后重新加载。使用不含开发支持的 `NativeShell.xcframework` 时会抛出错误。 |
 | `register(component:_:)` | 注册一个[原生组件](./native-components.md)。 |
 | `watchScroll(_ nativeID: String, _ watcher: NshScrollWatcher?)` | 在主线程、滚动的同一帧跟随并驱动应用中带该 `nativeID` 的 `<Scroll>`（[跟随滚动视图](#跟随滚动视图)）；传 `nil` 停止。 |
+| `contentCulling: Bool` | 滚动视图是只创建视口附近内容的视图（`true`，默认），还是创建全部内容。关闭后，尚未创建的内容在之后几帧里创建，宿主即可绘制整个滚动视图（如从句柄的 `contentView` 截整页长图）；重新开启后，远处的内容会被释放。立即生效，也作用于之后加载的应用。 |
 | `params: [String: Any]` | 之后加载的应用的启动参数：应用在启动时以 `host.params` 读取（[`host`](../modules/nsh.md#host)）。 |
 | `send(_ name: String, _ data: Any? = nil)` | 向应用发送一个事件（`host.on(name, …)`）；应用开始监听前会一直保留，没有应用运行时留给下一个应用。 |
 | `handle(_ name: String, _ handler:)` | 在主线程处理应用对 `name` 的调用（`host.call`）和投递（`host.post`）：`{ data, reply in … }`，或一个 `async throws` 函数 `{ data in … }`，其结果即调用的回答。 |

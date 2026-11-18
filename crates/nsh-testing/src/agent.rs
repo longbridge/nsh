@@ -1204,6 +1204,24 @@ pub trait Native: Send + Sync {
     fn close_menu(&self) -> Result<(), String> {
         Err("this platform shows no context menus to close".into())
     }
+    /// Whether a menu the system draws for one of the app's views is open
+    /// (on iOS: a `MenuButton`'s, a `ContextMenu`'s or a header button's
+    /// `UIMenu`), one the app's model does not hold: then
+    /// [`Native::choose_menu_item`] chooses from it and
+    /// [`Native::close_menu`] closes it.
+    fn system_menu_open(&self) -> bool {
+        false
+    }
+    /// Where a control the system draws for the app is on screen, one the
+    /// app's views do not press (on iOS: a header button of
+    /// `ios.headerRightItems`, by its `key` or its label; a `MenuButton`'s
+    /// `UIButton`, by the `testID` of the view it covers or its label), in
+    /// the window's content as [`Native::bounds`]: a press there reaches it
+    /// as the user's does. `None` when the platform shows none so named.
+    fn system_control(&self, name: SystemName<'_>) -> Option<Bounds<Points>> {
+        let _ = name;
+        None
+    }
     /// Presses `keys`, a keystroke as `nsh/keymap` names it (`"mod+k"`;
     /// `mod` the platform's command key), on a hardware keyboard, in the
     /// window that has the keyboard focus (one of the app's own too): the
@@ -1267,6 +1285,18 @@ pub trait Native: Send + Sync {
     fn set_dark(&self, dark: bool) -> Result<(), String>;
     /// Closes the app: the host exits.
     fn quit(&self);
+}
+
+/// What names a control the system draws for the app
+/// ([`Native::system_control`]), as a step's selector does: `id:<key>` or
+/// `label:<label>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SystemName<'a> {
+    /// The id the app gave it (a header button's `key`).
+    TestId(&'a str),
+    /// Its accessibility label.
+    Label(&'a str),
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -2068,9 +2098,40 @@ impl Agent {
     }
 
     fn press(&self, selector: &str) -> Result<(), String> {
-        let (_, at) = self.find(selector, "pressable view", PickTarget::Pressable)?;
+        let at = match self.find(selector, "pressable view", PickTarget::Pressable) {
+            Ok((_, at)) => at,
+            // Not one of the app's views on screen: a control the system
+            // draws for it (a header button) may carry the name.
+            Err(error) => self.system_control(selector).ok_or(error)?,
+        };
         self.native.press(at);
         self.settled()
+    }
+
+    /// The middle of the control the system draws for the app that
+    /// `selector` names alone (`id:<key>`, `label:<label>` or a bare name,
+    /// as a test id, else a label), when the platform shows one.
+    fn system_control(&self, selector: &str) -> Option<Point<Points>> {
+        use crate::selector::{Matcher, TextMatch};
+        let parsed = Selector::parse(selector).ok()?;
+        let [part] = parsed.parts.as_slice() else {
+            return None;
+        };
+        if part.nth.is_some() {
+            return None;
+        }
+        let bounds = match &part.matcher {
+            Matcher::TestId(id) => self.native.system_control(SystemName::TestId(id)),
+            Matcher::Label(TextMatch::Exact(label)) => {
+                self.native.system_control(SystemName::Label(label))
+            }
+            Matcher::Any(name) => self
+                .native
+                .system_control(SystemName::TestId(name))
+                .or_else(|| self.native.system_control(SystemName::Label(name))),
+            _ => None,
+        }?;
+        Some(bounds.center())
     }
 
     fn long_press(&self, selector: &str) -> Result<(), String> {
@@ -2194,7 +2255,15 @@ impl Agent {
     }
 
     fn choose_menu_item(&self, label: &str) -> Result<(), String> {
-        let items = self.scene.menu()?.ok_or("no context menu is open")?;
+        let Some(items) = self.scene.menu()? else {
+            // A menu the system draws for one of the app's views: the
+            // platform finds the action by its label.
+            if self.native.system_menu_open() {
+                self.native.choose_menu_item(&crate::menu::path(label))?;
+                return self.settled();
+            }
+            return Err("no context menu is open".into());
+        };
         crate::menu::find(&items, label)?;
         self.native.choose_menu_item(&crate::menu::path(label))?;
         self.scene.menu_closed()?;
@@ -2203,6 +2272,10 @@ impl Agent {
 
     fn close_menu(&self) -> Result<(), String> {
         if self.scene.menu()?.is_none() {
+            if self.native.system_menu_open() {
+                self.native.close_menu()?;
+                return self.settled();
+            }
             return Err("no context menu is open".into());
         }
         self.native.close_menu()?;
@@ -2762,6 +2835,132 @@ mod tests {
                 Ok((4, point(px(151.5), px(20.0))))
             );
         }
+    }
+
+    /// A platform that draws a control of its own for the app (a header
+    /// button named `more`, labelled "More", at x 500) and shows its menus
+    /// itself: what reaches it is logged.
+    struct SystemDrawn(Arc<Mutex<Vec<String>>>);
+
+    impl Native for SystemDrawn {
+        fn bounds(&self, _: NodeId) -> Option<Bounds<Points>> {
+            None
+        }
+        fn viewport(&self) -> Size<Points> {
+            Size::new(Points(1000.0), Points(1000.0))
+        }
+        fn press(&self, at: Point<Points>) {
+            self.0.lock().unwrap().push(format!("press {}", at.x.0));
+        }
+        fn long_press(&self, _: Point<Points>, _: Duration) {}
+        fn scroll(&self, _: Point<Points>, _: Point<Points>) {}
+        fn drag(&self, _: Point<Points>, _: Point<Points>) {}
+        fn type_text(&self, _: &str) {}
+        fn key(&self, _: Key) {}
+        fn input_text(&self, _: NodeId) -> Option<String> {
+            None
+        }
+        fn back(&self) -> Result<(), String> {
+            Ok(())
+        }
+        fn answer_dialog(&self, _: Option<&str>) -> Result<(), String> {
+            Ok(())
+        }
+        fn animating(&self) -> bool {
+            false
+        }
+        fn screenshot(&self) -> Result<Vec<u8>, String> {
+            Ok(Vec::new())
+        }
+        fn resize(&self, _: Points, _: Points) -> Result<(), String> {
+            Ok(())
+        }
+        fn set_dark(&self, _: bool) -> Result<(), String> {
+            Ok(())
+        }
+        fn quit(&self) {}
+        fn choose_menu_item(&self, path: &[String]) -> Result<(), String> {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("choose {}", path.join("/")));
+            Ok(())
+        }
+        fn close_menu(&self) -> Result<(), String> {
+            self.0.lock().unwrap().push("close".into());
+            Ok(())
+        }
+        fn system_menu_open(&self) -> bool {
+            true
+        }
+        fn system_control(&self, name: SystemName<'_>) -> Option<Bounds<Points>> {
+            matches!(name, SystemName::TestId("more") | SystemName::Label("More")).then(|| {
+                Bounds::new(
+                    point(Points(490.0), Points(0.0)),
+                    Size::new(Points(20.0), Points(20.0)),
+                )
+            })
+        }
+    }
+
+    #[test]
+    fn the_agent_presses_and_chooses_from_what_the_platform_draws() {
+        let (engine, batches) = crate::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
+        let model = Arc::new(Model::default());
+        let feeding = model.clone();
+        std::thread::spawn(move || {
+            while let Ok(batch) = batches.recv() {
+                feeding.apply(&batch);
+            }
+        });
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let agent = Agent::new(model.clone(), Box::new(SystemDrawn(log.clone())));
+        let ok = StepOutcome::Done {
+            value: serde_json::Value::Null,
+        };
+        assert_eq!(agent.take(TestStep::Ready { timeout_ms: 5000 }), ok);
+        // Not one of the app's views: the platform's control of that name,
+        // by its id, its label, or either for a bare name.
+        for selector in ["id:more", "label:More", "more", "More"] {
+            assert_eq!(
+                agent.take(TestStep::Press {
+                    selector: selector.into()
+                }),
+                ok,
+                "{selector}"
+            );
+        }
+        // Named by nothing the platform draws (or by more than a name): the
+        // app's views' failure.
+        for selector in ["id:less", "text:More", "id:more >> nth=0"] {
+            assert!(
+                matches!(
+                    agent.take(TestStep::Press { selector: selector.into() }),
+                    StepOutcome::Failed { message } if message.starts_with("no pressable view matches")
+                ),
+                "{selector}"
+            );
+        }
+        // No menu of the app's is open: the platform's own is chosen from.
+        assert_eq!(
+            agent.take(TestStep::ChooseMenuItem {
+                label: "Sort > By name".into()
+            }),
+            ok
+        );
+        assert_eq!(agent.take(TestStep::CloseMenu), ok);
+        assert_eq!(
+            *log.lock().unwrap(),
+            [
+                "press 500",
+                "press 500",
+                "press 500",
+                "press 500",
+                "choose Sort/By name",
+                "close"
+            ]
+        );
+        drop(engine);
     }
 
     #[test]

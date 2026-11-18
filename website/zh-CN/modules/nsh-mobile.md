@@ -242,6 +242,7 @@ const at = signal("2026-11-17T09:30");
   value={at()}
   min="2026-11-17T00:00"
   minuteInterval={5}
+  accessibilityLabel="提醒时间"
   onChange={({ value }) => at.set(value)}
 />;
 ```
@@ -258,6 +259,7 @@ const at = signal("2026-11-17T09:30");
 | `max` | `.max(..)` | `string \| null` | `null` | 用户能选的最晚的值。 |
 | `minuteInterval` | `.minute_interval(..)` | `number` | `1` | 可选的分钟之间相隔的分钟数：1 到 30 之间 60 的约数。其他数字记录警告，按 1 分钟。 |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 不能修改：系统将它调暗。 |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 读屏随值朗读的名字：它设置的是什么。选择器只显示值，所以传入它所在那一行的名称。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 选择器的位置和尺寸。外观由系统决定。 |
 | `testID` | `.test_id(..)` | `string` | 无 | 在测试和 `nsh test --trace` 中找到这个选择器。 |
 

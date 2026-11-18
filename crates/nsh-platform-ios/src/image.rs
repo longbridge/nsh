@@ -604,8 +604,12 @@ impl ImageLoader {
         if uri.starts_with("data:") {
             return Some(Source::Data);
         }
-        let path = uri.strip_prefix("file://").unwrap_or(uri);
-        path.starts_with('/').then(|| Source::File(path.into()))
+        // `file:` sources resolve as the core checked them: the URL's
+        // decoded path, never the raw string minus its scheme.
+        if uri.starts_with("file:") {
+            return nsh_core::access::file_url_path(uri).map(Source::File);
+        }
+        uri.starts_with('/').then(|| Source::File(uri.into()))
     }
 }
 

@@ -117,7 +117,8 @@ const popup = () =>
 
 The popup is never taller than the room on the side it opens on, and a submenu's popup never taller than its own: a
 long menu in a short window opens on the side where it fits whole, or where there is more room, and its items scroll
-inside it. The keys bring the item they move to into view, and a submenu closes once its item scrolls out of view.
+inside it, without overscroll bounce or scroll bars. The keys bring the item they move to into view, and a submenu
+closes once its item scrolls out of view.
 The sheet stays below the status bar the same way. Draw the surface (background, border, shadow) with
 `popupClass`, around the items, so it stays in place while they scroll.
 
@@ -441,6 +442,27 @@ import { ContextMenu, MenuItem } from "nsh/base";
 The trigger's own presses keep working beside the held finger. Without `items`, iOS shows the drawn menu, as the other
 platforms do.
 
+### A preview in place of the trigger
+
+The system lifts the trigger as it is. To lift something else, a card with a conversation's last messages or the start of
+a document, give `preview` a view; pressing it closes the menu and reports `onPreviewPress`, where the app usually opens
+what the row stands for:
+
+```tsx
+<ContextMenu
+  items={actions}
+  onSelect={({ id }) => act(chat, id)}
+  preview={<ChatCard chat={chat} />}
+  onPreviewPress={() => openChat(chat)}
+  trigger={<ChatRow chat={chat} />}
+/>
+```
+
+The preview is made when a finger goes down on the trigger, laid out at its own size out of sight, and shown as a
+picture of how it looks when the menu comes up; it goes once the menu closed. Data it starts loading as it is made can
+arrive while the finger is held. Until it is laid out the system lifts the trigger. Like `items`, `preview` is used on
+iOS only.
+
 ## Props
 
 ### Menu
@@ -472,6 +494,7 @@ platforms do.
 | `margin` | `.margin(..)` | `number` | `0` | As a popup: the distance it keeps from the edges of the safe area. |
 | `items` | `.items(..)` | `MenuButtonItem[]` | `[]` | iOS only: the system's context menu, in place of the children. Not used on the other platforms, which draw the children. |
 | `title` | `.title(..)` | `string` | none | iOS only: the system's menu's title, above its items. Not used on the other platforms. |
+| `preview` | `.preview(..)` | `JSX.Element` | none | iOS only, with `items`: what the system lifts beside its menu in place of the trigger. Made when a finger goes down, gone once the menu closed. |
 
 ### MenuItem
 
@@ -519,6 +542,7 @@ platforms do.
 | `onPosition` (`Menu`, `ContextMenu`) | `.on_position(\|e\| ..)` | As a popup: the popup was placed: `placement` (the side it went on), `bounds`, `available`. |
 | `onCancel` (`Menu`, `ContextMenu`) | `.on_cancel(\|\| ..)` | The user tried to close it without choosing (Escape or back, a press outside or on the backdrop). |
 | `onSelect` (`ContextMenu`) | `.on_select(\|id: &SharedString\| ..)` | iOS only, with `items`: the item of this `id` was chosen in the system's menu. Not sent on the other platforms, where the `MenuItem`s report the choice. |
+| `onPreviewPress` (`ContextMenu`) | `.on_preview_press(\|\| ..)` | iOS only, with `preview`: the preview was pressed; the menu closed as for a chosen item. |
 | `onSelect` (`MenuItem`) | `.on_select(\|\| ..)` | The item was chosen; a checkable item asks for its other value. |
 | `onOpenChange` (`Submenu`) | `.on_open_change(\|e\| ..)` | It opened or closed as the user asked, with why. |
 

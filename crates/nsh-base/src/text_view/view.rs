@@ -1072,7 +1072,6 @@ impl Cx {
                     v.ps(px(LIST_INDENT))
                 }
             });
-            let content = self.blocks(content, &item.children, &key, tail && i + 1 == n);
             // Before the content when a box, inside it (placed over the
             // indent) when a bullet or a number.
             // In a terminal the marker is text before the content, always.
@@ -1081,9 +1080,14 @@ impl Cx {
             } else {
                 (None, Some(marker))
             };
+            // Inside, it is the content's first child: a selection takes
+            // the texts in tree order, and a marker comes before the
+            // item's text and its nested lists, as it reads.
+            let content = content.child(inside);
+            let content = self.blocks(content, &item.children, &key, tail && i + 1 == n);
             self.part(row, Part::ListItem)
                 .child(before)
-                .child(self.part(content.child(inside), Part::ListItemContent))
+                .child(self.part(content, Part::ListItemContent))
         });
         self.list_depth.set(depth.saturating_add(1));
         let rows: Vec<_> = rows.collect();
@@ -1408,7 +1412,10 @@ impl Cx {
                     scroll().horizontal().scrollbar(self.table_scrollbar),
                     Part::TableScroll,
                 )
-                .child(view().flex_col().items_start().children(lines)),
+                .child(
+                    self.part(view().flex_col().items_start(), Part::TableGrid)
+                        .children(lines),
+                ),
             )
             .into_element()
     }
@@ -1585,15 +1592,15 @@ impl Cx {
             .map(|r| r.render(format!("table:{key}"), table.clone()));
         // As wide as the view, never narrower than the floors: past them,
         // the scroll view moves it.
-        let grid = view()
+        let frame = view()
             .grid()
             .grid_template_columns(SharedString::from(tracks))
             .w_full()
             .min_w(rems(floors.iter().sum()))
             .border_t_1()
             .border_l_1()
-            .border_color(move || theme().border)
-            .children(grid);
+            .border_color(move || theme().border);
+        let grid = self.part(frame, Part::TableGrid).children(grid);
         let table = view()
             .flex_col()
             .text_size(px(TABLE_SIZE))

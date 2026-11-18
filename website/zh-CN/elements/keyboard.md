@@ -247,7 +247,7 @@ Linux 桌面模式的无界面驱动也会执行这一 Rust API；Rust UI 集可
 Android 根据硬件键盘实际输入的字符（没有字符时用键码的 DOM 名称）报告 `key`，只有拿到真实扫描码时才报告 `code`，所以
 合成事件（`adb shell input keyevent`）的 `code` 为 `""`。系统键（Back、Home、音量、媒体、相机、通话）即使设置
 `captureKeys="all"` 也不会被捕获，但仍会到达监听函数。`focusable` 视图可获得硬件键盘焦点；Tab 和 Shift+Tab 在停靠点之间
-移动，在第一个和最后一个停靠点交给嵌入它的 Android 宿主。
+移动，在第一个和最后一个停靠点交给嵌入它的 Android 宿主；没有视图获得焦点时，第一次按方向键会把焦点移到屏幕上的第一个停靠点。绑定了该方向键的 `keymap` 快捷键会把按键留给应用，听到该按键的视图上的 `captureKeys` 规则也一样。
 各平台输入源报告的字段见 `docs/dev/tooling.md` 及各平台的开发文档。
 
 iOS 上，硬件键盘以 `UIKey.characters` 作为 `key`（保留大小写与布局），并把 `UIKey.keyCode` 的 USB HID 用途码映射为 DOM 的 `code`。

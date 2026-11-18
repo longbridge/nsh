@@ -2769,6 +2769,70 @@ fn scrolls_to_top_reaches_the_scroll_behavior() {
     assert_eq!(behavior(&batch).map(|b| b.scrolls_to_top), Some(true));
 }
 
+/// `scrollbarInset` reaches the scroll view's mounted behavior (the platforms
+/// keep their indicators within it), negative edges as none, and leaves the
+/// content inset alone.
+#[test]
+fn scrollbar_inset_reaches_the_scroll_behavior() {
+    fn behavior(batch: &MountBatch) -> Option<ScrollBehavior> {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ScrollBehavior { id: 2, behavior } => Some((**behavior).clone()),
+            _ => None,
+        })
+    }
+    assert_eq!(
+        ScrollBehavior::default().scrollbar_inset,
+        EdgeInsets::default()
+    );
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Scroll(ScrollProp::ScrollbarInset(EdgeInsets {
+                    top: px(8.0),
+                    bottom: px(72.0),
+                    left: px(-4.0),
+                    ..EdgeInsets::default()
+                })),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let sent = behavior(&batch).expect("the behavior is mounted");
+    assert_eq!(
+        sent.scrollbar_inset,
+        EdgeInsets {
+            top: px(8.0),
+            bottom: px(72.0),
+            ..EdgeInsets::default()
+        }
+    );
+    assert_eq!(sent.content_inset, EdgeInsets::default());
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Scroll(ScrollProp::ScrollbarInset(EdgeInsets::default())),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        behavior(&batch).map(|b| b.scrollbar_inset),
+        Some(EdgeInsets::default())
+    );
+}
+
 /// `overflow: "hidden"` clips in layout as well as in paint: what a box
 /// clips away must not grow an ancestor scroll view's content size. A
 /// preview laid out at its design width and scaled down by a transform
@@ -3102,6 +3166,124 @@ fn list_renders_window_and_recycles_cells() {
     assert_eq!(cells.len(), 25);
     c.commit();
     assert_eq!(c.node_count(), 2 + cells.len());
+}
+
+/// A list whose columns or content padding change with nothing else in
+/// the turn (columns worked out from a width an `onLayout` measured) lays
+/// its cells out again at the new column width, not only at the new
+/// column positions.
+#[test]
+fn a_lists_cells_take_a_new_column_width_with_nothing_else_changed() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::List,
+            },
+            style_op(2, &[("height", StyleValue::Number(400.0))]),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::EstimatedItemSize(px(50.0)),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Columns(2),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Count(4),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 4);
+    // A card filling each cell.
+    for (i, &cell) in cells.iter().enumerate() {
+        let card = 200 + i as u32;
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: card,
+                    tag: Tag::View,
+                },
+                style_op(card, &[("height", StyleValue::Number(50.0))]),
+                Op::Insert {
+                    parent: cell,
+                    child: card,
+                    before: None,
+                },
+            ],
+        );
+    }
+    let batch = c.commit().unwrap();
+    for (i, &cell) in cells.iter().enumerate() {
+        let (x, y) = ((i % 2) as f32 * 160.0, (i / 2) as f32 * 50.0);
+        assert_eq!(frame_of(&batch, cell), Some(rect(x, y, 160.0, 50.0)));
+        assert_eq!(
+            frame_of(&batch, 200 + i as u32),
+            Some(rect(0.0, 0.0, 160.0, 50.0))
+        );
+    }
+
+    // Four columns, and nothing else.
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::Columns(4),
+    })
+    .unwrap();
+    let batch = c.commit().unwrap();
+    for (i, &cell) in cells.iter().enumerate() {
+        assert_eq!(
+            frame_of(&batch, cell),
+            Some(rect(i as f32 * 80.0, 0.0, 80.0, 50.0)),
+            "cell {i}"
+        );
+        // The card laid out at the new column width, not the old one.
+        assert_eq!(
+            frame_of(&batch, 200 + i as u32),
+            Some(rect(0.0, 0.0, 80.0, 50.0)),
+            "card {i}"
+        );
+    }
+
+    // The same columns again change nothing.
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::Columns(4),
+    })
+    .unwrap();
+    assert!(c.commit().is_none());
+
+    // Padding across the content, and nothing else: the columns narrow.
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::ListContent(crate::ListContentStyle {
+            padding: crate::props::EdgeInsets {
+                left: px(20.0),
+                right: px(20.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    })
+    .unwrap();
+    let batch = c.commit().unwrap();
+    for i in 0..cells.len() {
+        assert_eq!(
+            frame_of(&batch, 200 + i as u32),
+            Some(rect(0.0, 0.0, 70.0, 50.0)),
+            "card {i}"
+        );
+    }
 }
 
 /// With tree order tracked (a platform's focus traversal), a list's
@@ -16085,6 +16267,384 @@ mod components {
         }
     }
 
+    /// A change to `ChangingRows`'s rows.
+    type RowsChange = fn(&mut Vec<String>);
+
+    thread_local! {
+        /// How many rows `ChangingRows` starts with.
+        static CHANGING_ROWS: Cell<usize> = const { Cell::new(100) };
+        /// What a press does to `ChangingRows`'s rows.
+        static ROWS_CHANGE: Cell<Option<RowsChange>> = const { Cell::new(None) };
+    }
+
+    /// Keyed rows, `r0`, `r1`, ...; a press changes them as
+    /// [`ROWS_CHANGE`] says.
+    #[component]
+    fn ChangingRows() -> impl IntoElement {
+        let count = CHANGING_ROWS.get();
+        let rows = signal((0..count).map(|i| format!("r{i}")).collect::<Vec<_>>());
+        view()
+            .flex_1()
+            .child(view().h(px(20.0)).on_press(move |_: &()| {
+                let change = ROWS_CHANGE.get().expect("a change");
+                rows.update(change);
+            }))
+            .child(
+                virtual_list(
+                    move || rows.with(Vec::len),
+                    move |at| {
+                        view()
+                            .h(px(40.0))
+                            .child(text(move || rows.with(|r| r[at.index()].clone())))
+                    },
+                )
+                .keys(move || rows.get())
+                .estimated_item_size(px(40.0))
+                .flex_1(),
+            )
+    }
+
+    /// The rows two or more cells show at once: each row is in one cell,
+    /// spare cells included (which keep showing their last row).
+    fn rows_shown_twice(c: &Core<FakeEngine>) -> Vec<String> {
+        let mut shown = std::collections::HashMap::<&str, u32>::new();
+        for (_, node) in c.nodes.iter() {
+            if node.kind == Kind::RawText && !node.text.is_empty() {
+                *shown.entry(node.text.as_str()).or_default() += 1;
+            }
+        }
+        let mut twice: Vec<String> = shown
+            .into_iter()
+            .filter(|&(_, n)| n > 1)
+            .map(|(t, _)| t.to_owned())
+            .collect();
+        twice.sort();
+        twice
+    }
+
+    /// A row that goes leaves its cell spare, and the rows after it move up
+    /// into theirs; data replaced or cut short leaves spare cells too.
+    /// No row shows in two cells at any point: the spare ones show rows no
+    /// other cell does, or nothing, so a row's elements are found once.
+    #[test]
+    fn spare_list_cells_never_show_a_row_another_cell_shows() {
+        // The window holds 34 rows in the middle of the list, 23 at either
+        // end: scrolled from the middle to an end, 11 cells are spare.
+        let cases: [(&str, usize, &[f32], RowsChange); 8] = [
+            // At the end: the gone row's cell stays spare, the rows after
+            // it move up into theirs.
+            ("drop at the end", 100, &[2000.0, 3560.0], |r| {
+                r.remove(90);
+            }),
+            ("drop the last", 100, &[2000.0, 3560.0], |r| {
+                r.pop();
+            }),
+            ("drop at the start", 100, &[2000.0, 0.0], |r| {
+                r.remove(3);
+            }),
+            ("drop two", 100, &[2000.0, 0.0], |r| {
+                r.drain(3..5);
+            }),
+            ("replace", 100, &[2000.0, 0.0], |r| {
+                *r = (0..100).map(|i| format!("s{i}")).collect();
+            }),
+            ("move", 100, &[2000.0, 0.0], |r| {
+                let row = r.remove(30);
+                r.insert(2, row);
+            }),
+            ("cut short", 100, &[2000.0, 0.0], |r| r.truncate(5)),
+            // Every row in the window: no row comes for the gone one.
+            ("short list", 10, &[], |r| {
+                r.remove(3);
+            }),
+        ];
+        let mut failures = Vec::new();
+        for (name, count, scrolls, change) in cases {
+            CHANGING_ROWS.set(count);
+            let mut c = core();
+            c.mount_root(&crate::element::Root::new::<ChangingRows>(|| ()));
+            let batch = c.commit().unwrap();
+            let list = batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Create { id, kind } if *kind == ViewKind::Scroll => Some(*id),
+                    _ => None,
+                })
+                .expect("a list");
+            let button = batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Events { id, events } if events.contains(EventKind::Press) => {
+                        Some(*id)
+                    }
+                    _ => None,
+                })
+                .expect("a button");
+            let mut check = |c: &Core<FakeEngine>, when: String| {
+                let twice = rows_shown_twice(c);
+                if !twice.is_empty() {
+                    failures.push(format!("{name}, {when}: {twice:?}"));
+                }
+            };
+            let settle = |c: &mut Core<FakeEngine>| {
+                for _ in 0..4 {
+                    let _ = c.commit();
+                }
+            };
+            settle(&mut c);
+            let mut applied = 0;
+            for &y in scrolls {
+                applied += 1;
+                c.set_scroll_offset(list, point(px(0.0), px(y)), applied);
+                settle(&mut c);
+                check(&c, format!("scrolled to {y}"));
+            }
+            let mut rows: Vec<String> = (0..count).map(|i| format!("r{i}")).collect();
+            change(&mut rows);
+            ROWS_CHANGE.set(Some(change));
+            assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+            // At every commit, not only once the list settled; the cells
+            // that take the new rows are bound again, not made.
+            let mut made = 0;
+            for round in 0..4 {
+                let batch = c.commit();
+                let items = batch.iter().flat_map(|b| &b.items);
+                made += items
+                    .filter(|i| matches!(i, MountItem::Create { .. }))
+                    .count();
+                check(&c, format!("round {round}"));
+            }
+            // And as the list scrolls on.
+            for y in [400.0, 1600.0, 0.0] {
+                applied += 1;
+                c.set_scroll_offset(list, point(px(0.0), px(y)), applied);
+                settle(&mut c);
+                check(&c, format!("then at {y}"));
+            }
+            if made != 0 {
+                failures.push(format!("{name}: {made} views made"));
+            }
+            // Back at the start, the rows in the viewport show, once each.
+            let shown: Vec<String> = c
+                .nodes
+                .iter()
+                .filter(|(_, n)| n.kind == Kind::RawText)
+                .map(|(_, n)| n.text.clone())
+                .chain(
+                    c.runs
+                        .values()
+                        .filter(|r| r.block != NO_KEY)
+                        .map(|r| r.text.clone()),
+                )
+                .collect();
+            for row in rows.iter().take(11) {
+                if !shown.contains(row) {
+                    failures.push(format!("{name}: {row} does not show"));
+                }
+            }
+        }
+        CHANGING_ROWS.set(100);
+        assert_eq!(failures, Vec::<String>::new());
+    }
+
+    thread_local! {
+        /// Every value the id memo of a `KeyedIdRows` cell took: the cell's
+        /// number and the id.
+        static IDS_READ: std::cell::RefCell<Vec<(u32, Option<String>)>> = const { std::cell::RefCell::new(Vec::new()) };
+        /// How many times a `KeyedIdRows` row's content was made again for
+        /// the id it already showed.
+        static ROWS_REMADE: Cell<u32> = const { Cell::new(0) };
+        /// The `KeyedIdRows` cells made so far (their numbers).
+        static ID_CELLS: Cell<u32> = const { Cell::new(0) };
+        /// The rows inserted so far (their keys).
+        static INSERTED: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// Keyed rows, `r0`, `r1`, ..., whose cells read their row's id in a
+    /// memo and make the row's content from it, as an app does to keep a
+    /// row's state with its item; a press changes the rows as
+    /// [`ROWS_CHANGE`] says.
+    #[component]
+    fn KeyedIdRows() -> impl IntoElement {
+        let count = CHANGING_ROWS.get();
+        let rows = signal((0..count).map(|i| format!("r{i}")).collect::<Vec<_>>());
+        view()
+            .flex_1()
+            .child(view().h(px(20.0)).on_press(move |_: &()| {
+                let change = ROWS_CHANGE.get().expect("a change");
+                rows.update(change);
+            }))
+            .child(
+                virtual_list(
+                    move || rows.with(Vec::len),
+                    move |at| {
+                        let cell = ID_CELLS.get();
+                        ID_CELLS.set(cell + 1);
+                        let id = computed(move || {
+                            let id = rows.with(|r| r.get(at.index()).cloned());
+                            IDS_READ.with_borrow_mut(|read| read.push((cell, id.clone())));
+                            id
+                        });
+                        let shown: std::rc::Rc<std::cell::RefCell<Option<Option<String>>>> =
+                            std::rc::Rc::default();
+                        view().h(px(40.0)).child(dynamic(move || {
+                            let id = id.get();
+                            if shown.replace(Some(id.clone())).as_ref() == Some(&id) {
+                                ROWS_REMADE.set(ROWS_REMADE.get() + 1);
+                            }
+                            text(id.unwrap_or_default())
+                        }))
+                    },
+                )
+                .keys(move || rows.get())
+                .estimated_item_size(px(40.0))
+                .flex_1(),
+            )
+    }
+
+    /// A keyed list's cells read their rows at their new indices as soon as
+    /// the rows change: a memo of a cell's row never sees another row on
+    /// the way (the row now at the cell's old index), so content made from
+    /// it is not made again. However long the list is, and however often
+    /// its rows changed before.
+    #[test]
+    fn keyed_list_cells_never_read_another_row_on_the_way() {
+        let changes: [(&str, RowsChange); 4] = [
+            ("move to the top", |r| {
+                let row = r.remove(5);
+                r.insert(0, row);
+            }),
+            ("remove", |r| {
+                r.remove(3);
+            }),
+            ("insert", |r| {
+                let n = INSERTED.get();
+                INSERTED.set(n + 1);
+                r.insert(4, format!("n{n}"));
+            }),
+            ("reorder", |r| r[..12].reverse()),
+        ];
+        let mut failures = Vec::new();
+        for count in [40, 2000] {
+            CHANGING_ROWS.set(count);
+            let mut c = core();
+            c.mount_root(&crate::element::Root::new::<KeyedIdRows>(|| ()));
+            let batch = c.commit().unwrap();
+            let button = batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Events { id, events } if events.contains(EventKind::Press) => {
+                        Some(*id)
+                    }
+                    _ => None,
+                })
+                .expect("a button");
+            for _ in 0..4 {
+                let _ = c.commit();
+            }
+            // The id each cell showed last.
+            let mut shown = std::collections::HashMap::new();
+            for (cell, id) in IDS_READ.take() {
+                shown.insert(cell, id);
+            }
+            // The order the graph runs the memos in follows the history of
+            // the rows' changes: go through the changes a few times.
+            for round in 0..4 {
+                for (name, change) in changes {
+                    IDS_READ.with_borrow_mut(Vec::clear);
+                    ROWS_REMADE.set(0);
+                    ROWS_CHANGE.set(Some(change));
+                    assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+                    let mut made = 0;
+                    for _ in 0..4 {
+                        let batch = c.commit();
+                        made += batch
+                            .iter()
+                            .flat_map(|b| &b.items)
+                            .filter(|i| matches!(i, MountItem::Create { .. }))
+                            .count();
+                    }
+                    let case = format!("{count} rows, round {round}, {name}");
+                    // Each cell's memo went from the id it showed (if it
+                    // showed one) straight to the id it settled on: no
+                    // other row on the way.
+                    let mut taken = std::collections::HashMap::<u32, Vec<Option<String>>>::new();
+                    for (cell, id) in IDS_READ.take() {
+                        let ids = taken.entry(cell).or_default();
+                        if ids.last() != Some(&id) {
+                            ids.push(id);
+                        }
+                    }
+                    for (cell, ids) in taken {
+                        let settled = ids.last().cloned().expect("an id");
+                        let before = shown.insert(cell, settled.clone());
+                        let straight = match &ids[..] {
+                            [_] => true,
+                            [from, _] => before.as_ref() == Some(from),
+                            _ => false,
+                        };
+                        if !straight {
+                            failures.push(format!("{case}: cell {cell} took {ids:?}"));
+                        }
+                    }
+                    let remade = ROWS_REMADE.get();
+                    if remade != 0 {
+                        failures.push(format!("{case}: {remade} rows made again"));
+                    }
+                    if matches!(name, "move to the top" | "reorder") && made != 0 {
+                        failures.push(format!("{case}: {made} views made"));
+                    }
+                }
+            }
+        }
+        CHANGING_ROWS.set(100);
+        assert_eq!(failures, Vec::<String>::new());
+    }
+
+    /// The cell of a keyed row that goes can be the first to read the new
+    /// rows (the graph runs what reads them in an order their earlier
+    /// changes left): reading its position lets the cell's content go, the
+    /// running memo with it, and nothing fails.
+    #[test]
+    fn keyed_list_cell_whose_row_goes_can_read_first() {
+        let changes: [RowsChange; 2] = [|r| r.swap(0, 1), |r| drop(r.remove(0))];
+        CHANGING_ROWS.set(3);
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<KeyedIdRows>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("a button");
+        for _ in 0..4 {
+            let _ = c.commit();
+        }
+        for change in changes {
+            ROWS_CHANGE.set(Some(change));
+            assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+            assert!(c.components.runtime.take_failures().is_empty());
+            for _ in 0..4 {
+                let _ = c.commit();
+            }
+        }
+        let mut shown: Vec<String> = c
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.kind == Kind::RawText && !n.text.is_empty())
+            .map(|(_, n)| n.text.clone())
+            .collect();
+        shown.sort();
+        CHANGING_ROWS.set(100);
+        assert_eq!(shown, ["r0", "r2"]);
+    }
+
     /// A long list of its own rows, each a stop of Tab.
     #[component]
     fn FocusableRows() -> impl IntoElement {
@@ -16914,6 +17474,63 @@ mod components {
             shown.last().unwrap(),
             "render failed ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"
         );
+    }
+
+    /// An offscreen render checks its images as a canvas drawing does: a
+    /// source the app may not load is dropped before the platform sees it,
+    /// one it may is rewritten to what the check granted.
+    #[test]
+    fn offscreen_renders_check_their_images() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            canvas_render: true,
+            ..Default::default()
+        });
+        c.set_access(Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(
+                &serde_json::json!({ "network": { "hosts": ["docs.example.com"] } }),
+            )
+            .unwrap(),
+            granted: None,
+        }));
+        let image = |uri: &str| crate::canvas::CanvasOp::DrawImage {
+            image: crate::canvas::CanvasImage { uri: uri.into() },
+            source: None,
+            dest: [crate::canvas::Num::Const(0.0); 4],
+        };
+        let (_answer, slot) = crate::element::task::Answer::new();
+        c.start_canvas_render(
+            crate::canvas::render::RenderRequest {
+                drawing: crate::canvas::Drawing {
+                    ops: vec![
+                        image("https://docs.example.com/a/../x.png"),
+                        image("https://refused.example.com/x.png"),
+                    ],
+                    ..Default::default()
+                },
+                size: crate::Size::new(px(30.0), px(20.0)),
+                ..Default::default()
+            },
+            slot,
+        );
+        let batch = c.commit().unwrap();
+        let uris: Vec<String> = batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    command: Command::RenderCanvas { drawing, .. },
+                    ..
+                } => Some(drawing),
+                _ => None,
+            })
+            .flat_map(|d| d.ops.iter())
+            .filter_map(|op| match op {
+                crate::canvas::CanvasOp::DrawImage { image, .. } => Some(image.uri.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(uris, ["https://docs.example.com/x.png"]);
     }
 
     #[test]
@@ -20202,6 +20819,122 @@ fn presses_passed_on_reach_the_innermost_pressable_view() {
     ));
 }
 
+/// A pointer passed on into an element (`ElementRef::hover_at`) hovers
+/// the views under it in a subtree that takes no pointer itself: their
+/// `hover:` and `group-hover:` classes apply, the views that listen hear
+/// the mouse enter, move and leave, and its leaving undoes it.
+#[test]
+fn hovers_passed_on_reach_the_views_under_the_pointer() {
+    use crate::props::PointerEvents;
+    let mut c = core();
+    let listen = |id, event| Op::Listen {
+        id,
+        event,
+        enabled: true,
+    };
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let create = |id| Op::Create { id, tag: Tag::View };
+    let size = |id, w: f32, h: f32, more: &[(&'static str, StyleValue)]| {
+        let mut style = vec![
+            ("width", StyleValue::Number(w)),
+            ("height", StyleValue::Number(h)),
+        ];
+        style.extend_from_slice(more);
+        style_op(id, &style)
+    };
+    apply(
+        &mut c,
+        vec![
+            create(2),
+            create(4),
+            create(6),
+            create(8),
+            style_op(
+                2,
+                &[
+                    ("marginTop", StyleValue::Number(40.0)),
+                    ("height", StyleValue::Number(100.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::PointerEvents(PointerEvents::None),
+            },
+            size(4, 200.0, 50.0, &[("flexDirection", StyleValue::Str("row"))]),
+            class_op(4, "group"),
+            size(6, 20.0, 20.0, &[("marginLeft", StyleValue::Number(50.0))]),
+            class_op(6, "hover:opacity-50"),
+            listen(6, EventKind::MouseEnter),
+            listen(6, EventKind::MouseLeave),
+            listen(6, EventKind::MouseMove),
+            size(8, 20.0, 20.0, &[]),
+            class_op(8, "group-hover:opacity-25"),
+            insert(4, 6),
+            insert(4, 8),
+            insert(2, 4),
+            insert(ROOT_ID, 2),
+        ],
+    );
+    c.commit().unwrap();
+    js_events(&mut c);
+    let mouse = |x: f32, y: f32| crate::MouseEvent {
+        page_position: point(px(x), px(y)),
+        ..Default::default()
+    };
+    let mouse_events = |c: &mut Core<FakeEngine>| -> Vec<(NodeId, EventKind, Point<Points>)> {
+        js_events(c)
+            .into_iter()
+            .filter_map(|(id, kind, payload)| match payload {
+                EventPayload::Mouse(m) => Some((id, kind, m.position)),
+                _ => None,
+            })
+            .collect()
+    };
+    let opacity = |batch: &MountBatch, id| view_style_of(batch, id).map(|s| s.opacity);
+
+    // Over 6 (at 50..70 in 4, which is at 40 in the root).
+    c.components.hovers.push((2, Some(mouse(55.0, 45.0))));
+    let batch = c.commit().unwrap();
+    assert_eq!(opacity(&batch, 6), Some(0.5), "hover:");
+    assert_eq!(opacity(&batch, 8), Some(0.25), "group-hover:");
+    assert_eq!(
+        mouse_events(&mut c),
+        vec![
+            (6, EventKind::MouseEnter, point(px(5.0), px(5.0))),
+            (6, EventKind::MouseMove, point(px(5.0), px(5.0))),
+        ]
+    );
+
+    // A move inside 6 only moves.
+    c.components.hovers.push((2, Some(mouse(56.0, 46.0))));
+    c.commit();
+    assert_eq!(
+        mouse_events(&mut c),
+        vec![(6, EventKind::MouseMove, point(px(6.0), px(6.0)))]
+    );
+
+    // Off 6, still in the group: 6 is left, the group stays hovered.
+    c.components.hovers.push((2, Some(mouse(150.0, 45.0))));
+    let batch = c.commit().unwrap();
+    assert_eq!(opacity(&batch, 6), Some(1.0));
+    assert_eq!(opacity(&batch, 8), None, "unchanged");
+    assert_eq!(
+        mouse_events(&mut c),
+        vec![(6, EventKind::MouseLeave, point(px(100.0), px(5.0)))]
+    );
+
+    // The pointer leaves.
+    c.components.hovers.push((2, None));
+    let batch = c.commit().unwrap();
+    assert_eq!(opacity(&batch, 8), Some(1.0));
+    assert!(mouse_events(&mut c).is_empty());
+    assert!(c.passed_hovers.is_empty());
+}
+
 /// `reveal` becomes a `ScrollTo` of the scroll view around, placed
 /// as its alignment says, and nothing when the view is where it would go.
 #[test]
@@ -21167,6 +21900,7 @@ mod views {
                 node.children
                     .first()
                     .map(|&raw| c.nodes[raw as usize].text.clone())
+                    .or_else(|| c.folded_text(c.key(node.id).unwrap()).map(str::to_owned))
             })
             .collect()
     }
@@ -23236,6 +23970,55 @@ mod views {
         });
         let dark = config(&c.commit().unwrap()).expect("restyled");
         assert_eq!(dark.background_color, Some(crate::Color(0x000000ff)));
+    }
+
+    /// A screen whose header hairline follows `SHADOW`.
+    #[derive(Default)]
+    struct ShadowPage;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct ShadowPageProps {}
+
+    thread_local! {
+        static SHADOW: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+    }
+
+    impl Component for ShadowPage {
+        type Props = ShadowPageProps;
+        type Event = NoEvent;
+
+        // The core's own stack and screen: `nsh_base`'s wrap them.
+        #[allow(deprecated)]
+        fn view(_: ShadowPageProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let shadow = signal(true);
+            SHADOW.with(|s| s.set(Some(shadow)));
+            stack().flex_1().child(
+                screen()
+                    .title("Page")
+                    .header_shadow_visible(move || shadow.get())
+                    .child(view().flex_1()),
+            )
+        }
+    }
+
+    /// The header hairline is on by default and follows its signal.
+    #[test]
+    fn the_header_shadow_reaches_the_screens_config() {
+        assert!(crate::ScreenConfig::default().header_shadow_visible);
+        let mut c = core();
+        c.mount_root(&Root::new::<ShadowPage>(|| ShadowPageProps {}));
+        let config = |batch: &MountBatch| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+                _ => None,
+            })
+        };
+        let first = config(&c.commit().unwrap()).expect("a screen");
+        assert!(first.header_shadow_visible);
+        let shadow = SHADOW.with(Cell::get).expect("mounted");
+        shadow.set(false);
+        let hidden = config(&c.commit().unwrap()).expect("updated");
+        assert!(!hidden.header_shadow_visible);
     }
 
     /// A screen whose trailing header button is UIKit's own.
@@ -35167,6 +35950,53 @@ fn a_waiting_view_whose_parent_is_released_is_not_made() {
 }
 
 #[test]
+fn content_culling_turned_back_on_gives_up_far_rows() {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    // Rows of 50 in a wrapper: 0..2000.
+    ops.extend(child_view(4, 2, 2000.0, &[]));
+    for i in 0..40u32 {
+        ops.extend(child_view(10 + 2 * i, 4, 50.0, &[]));
+    }
+    apply(&mut c, ops);
+    let made = created_in(&c.commit().unwrap());
+    assert!(!made.contains(&(10 + 2 * 39)), "{made:?}");
+    // Off (a long screenshot): every row is made.
+    c.set_content_culling(false);
+    let made = created_in(&c.commit().unwrap());
+    assert!(made.contains(&(10 + 2 * 39)), "{made:?}");
+    // On again, still at the top: the rows more than three viewports
+    // below (from 400) go, those near stay.
+    c.set_content_culling(true);
+    let batch = c.commit().unwrap();
+    let deleted: Vec<NodeId> = batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Delete { id } => Some(*id),
+            _ => None,
+        })
+        .collect();
+    assert!(deleted.contains(&(10 + 2 * 39)), "{deleted:?}");
+    assert!(!deleted.contains(&(10 + 2 * 7)), "{deleted:?}");
+    // And come back as it scrolls to them.
+    c.set_scroll_offset(2, point(Points::ZERO, Points(1900.0)), 0);
+    let made = created_in(&c.commit().unwrap());
+    assert!(made.contains(&(10 + 2 * 39)), "{made:?}");
+}
+
+#[test]
 fn culled_text_is_estimated_and_measured_once_it_comes_near() {
     let mut c = core();
     let mut ops = vec![
@@ -37424,6 +38254,43 @@ mod built_in_scrollbars {
             _ => None,
         });
         assert_eq!(content, Some(size_pt(300.0, 1000.0)));
+    }
+
+    #[test]
+    fn a_built_in_bar_keeps_within_the_scrollbar_inset() {
+        let (mut c, batch) = scroll_view(true, None);
+        let [bar] = bars_in(&batch)[..] else {
+            panic!("one bar: {:?}", batch.items)
+        };
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: 2,
+                prop: Prop::Scroll(ScrollProp::ScrollbarInset(EdgeInsets {
+                    top: px(10.0),
+                    right: px(6.0),
+                    bottom: px(60.0),
+                    left: px(0.0),
+                })),
+            }],
+        );
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            frame_of(&batch, bar),
+            Some(rect(0.0, 10.0, 294.0, 130.0)),
+            "{:?}",
+            batch.items
+        );
+        // Back to the whole viewport.
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: 2,
+                prop: Prop::Scroll(ScrollProp::ScrollbarInset(EdgeInsets::default())),
+            }],
+        );
+        let batch = c.commit().unwrap();
+        assert_eq!(frame_of(&batch, bar), Some(rect(0.0, 0.0, 300.0, 200.0)));
     }
 
     #[test]
@@ -43745,6 +44612,7 @@ mod each_order {
                 node.children
                     .first()
                     .map(|&raw| c.nodes[raw as usize].text.clone())
+                    .or_else(|| c.folded_text(c.key(node.id).unwrap()).map(str::to_owned))
             })
             .collect()
     }
@@ -44129,6 +44997,9 @@ mod each_updates {
             let node = &c.nodes[key as usize];
             if !node.text.is_empty() {
                 out.push(node.text.clone());
+            }
+            if let Some(run) = c.folded_text(key) {
+                out.push(run.to_owned());
             }
             for &child in &node.children {
                 collect(c, child, out);
@@ -44675,6 +45546,199 @@ mod each_updates {
                 }
             }
         }
+    }
+
+    thread_local! {
+        /// [`MountRows`] in a scroll view, which culls the rows it does
+        /// not show.
+        static SCROLLED: Cell<bool> = const { Cell::new(false) };
+        /// Each row of [`MountRows`] with a hint, as a document's links
+        /// have their addresses: an overlay each.
+        static HINTED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// `ROWS` rows of an `each` as `TextView` has a document's blocks: a
+    /// view each, keyed by position and kind, with a region in it; a text
+    /// before them and a view after them.
+    #[component]
+    fn MountRows() -> impl IntoElement {
+        let items = signal(
+            (0..ROWS.with(Cell::get))
+                .map(|i| (i, 0u32))
+                .collect::<Vec<_>>(),
+        );
+        let hinted = HINTED.with(Cell::get);
+        let rows = view()
+            .flex_col()
+            .child(text("before"))
+            .child(each(
+                items,
+                |item| (item.0, "paragraph".to_owned()),
+                move |item, _| {
+                    view()
+                        .child(dynamic(move || {
+                            let (at, n) = item.get();
+                            text(format!("row {at} {n}"))
+                        }))
+                        .child(hinted.then(|| {
+                            overlay()
+                                .hint(Duration::from_millis(500))
+                                .child(text("https://example.com"))
+                        }))
+                },
+            ))
+            .child(view().h(px(4.0)));
+        if SCROLLED.with(Cell::get) {
+            scroll().size_full().child(rows).into_element()
+        } else {
+            rows.into_element()
+        }
+    }
+
+    /// [`MountRows`] mounted with `rows` rows and, in a scroll view,
+    /// scrolled down 20 points a frame for `frames` frames: the core and
+    /// its scroll view.
+    fn rows_mounted(rows: usize, frames: u32) -> (Core<FakeEngine>, Option<NodeId>) {
+        ROWS.with(|r| r.set(rows));
+        let mut c = core();
+        c.mount_root(&Root::new::<MountRows>(|| ()));
+        let batch = c.commit();
+        let scroll = batch
+            .iter()
+            .flat_map(|b| &b.items)
+            .find_map(|item| match item {
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::Scroll,
+                } => Some(*id),
+                _ => None,
+            });
+        if let Some(id) = scroll {
+            for n in 1..=frames {
+                c.set_scroll_offset(id, point(px(0.0), px(20.0 * n as f32)), u32::MAX);
+                c.commit();
+            }
+        }
+        (c, scroll)
+    }
+
+    /// Rows of an `each` mounted at once, and made as they scroll into
+    /// sight, are placed among their siblings without a search of all of
+    /// them, or of all the overlays (a hint a row), for each: the siblings
+    /// and overlays looked at grow with the rows, not with their square.
+    #[test]
+    fn rows_mounted_at_once_are_placed_without_a_search_for_each() {
+        let mut grew = Vec::new();
+        for scrolled in [false, true] {
+            for hinted in [false, true] {
+                SCROLLED.with(|s| s.set(scrolled));
+                HINTED.with(|h| h.set(hinted));
+                let work = |rows| {
+                    let (c, _) = rows_mounted(rows, 20);
+                    c.components.placing_work.get()
+                };
+                let (few, many) = (work(400), work(1_600));
+                // Four times the rows: about four times the work (it was
+                // about sixteen times, with a search for each row).
+                if many > 5 * few {
+                    grew.push(format!(
+                        "scrolled {scrolled}, hinted {hinted}: {few} for 400 rows, {many} for 1,600"
+                    ));
+                }
+            }
+        }
+        SCROLLED.with(|s| s.set(false));
+        HINTED.with(|h| h.set(false));
+        assert!(grew.is_empty(), "{grew:#?}");
+    }
+
+    /// The rows end up in order, after the text before them and before the
+    /// view after them, mounted at once and made as they scroll into
+    /// sight.
+    #[test]
+    fn rows_mounted_at_once_keep_their_order() {
+        for scrolled in [false, true] {
+            SCROLLED.with(|s| s.set(scrolled));
+            let (c, _) = rows_mounted(300, 40);
+            // The column: the view of the text, the rows and the view.
+            let mut stack = vec![c.root];
+            let column = std::iter::from_fn(|| {
+                let key = stack.pop()?;
+                stack.extend(&c.nodes[key as usize].children);
+                Some(key)
+            })
+            .find(|&key| c.nodes[key as usize].children.len() == 302)
+            .expect("the column");
+            let children = &c.nodes[column as usize].children;
+            let mut expected = vec!["before".to_owned()];
+            expected.extend((0..300).map(|i| format!("row {i} 0")));
+            assert_eq!(
+                shown(&c, c.nodes[column as usize].id),
+                expected,
+                "scrolled {scrolled}"
+            );
+            assert!(c.nodes[children[301] as usize].text.is_empty());
+        }
+        SCROLLED.with(|s| s.set(false));
+    }
+
+    /// `cargo test --release -p nsh-core --lib bench_each_mount -- --ignored --nocapture`:
+    /// an `each` of N rows mounted at once, as `TextView` mounts a long
+    /// document's blocks, then, in a scroll view, scrolled down 20 points
+    /// a frame for 200 frames; the numbers are in `docs/dev/performance.md`.
+    #[test]
+    #[ignore]
+    fn bench_each_mount() {
+        println!(
+            "ms a first mount: the root's pass + the commit | mount items | µs a scrolled frame"
+        );
+        for (scrolled, hinted) in [(false, false), (true, false), (true, true)] {
+            SCROLLED.with(|s| s.set(scrolled));
+            HINTED.with(|h| h.set(hinted));
+            for rows in [1_000, 10_000, 50_000] {
+                ROWS.with(|r| r.set(rows));
+                let mut c = core();
+                let start = Instant::now();
+                c.mount_root(&Root::new::<MountRows>(|| ()));
+                let mid = Instant::now();
+                let batch = c.commit();
+                let (first, items) = (mid.elapsed(), batch.as_ref().map_or(0, |b| b.items.len()));
+                let scroll = batch
+                    .iter()
+                    .flat_map(|b| &b.items)
+                    .find_map(|item| match item {
+                        MountItem::Create {
+                            id,
+                            kind: ViewKind::Scroll,
+                        } => Some(*id),
+                        _ => None,
+                    });
+                let frame = scroll.map(|id| {
+                    let frames = 200;
+                    let start = Instant::now();
+                    for n in 1..=frames {
+                        c.set_scroll_offset(id, point(px(0.0), px(20.0 * n as f32)), u32::MAX);
+                        c.commit();
+                    }
+                    start.elapsed().as_secs_f64() * 1e6 / f64::from(frames)
+                });
+                let ms = |d: Duration| d.as_secs_f64() * 1e3;
+                println!(
+                    "{:<15} {rows:>6} rows | {:>8.1} + {:>8.1} = {:>8.1} | {items:>6} | {}",
+                    match (scrolled, hinted) {
+                        (false, _) => "plain",
+                        (true, false) => "scrolled",
+                        (true, true) => "scrolled, hints",
+                    },
+                    ms(mid - start),
+                    ms(first),
+                    ms(mid - start + first),
+                    frame.map_or("-".to_owned(), |us| format!("{us:.1}"))
+                );
+            }
+        }
+        SCROLLED.with(|s| s.set(false));
+        HINTED.with(|h| h.set(false));
     }
 }
 
@@ -47729,4 +48793,320 @@ fn style_constants_match_default() {
         crate::style::TextStyle::DEFAULT,
         crate::style::TextStyle::default()
     );
+}
+
+/// #1345: a text block's only raw text run has no node of its own.
+mod folded_runs {
+    use super::*;
+
+    fn last_text(c: &mut Core<FakeEngine>) -> Option<String> {
+        let batch = c.commit()?;
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Text { text, .. } => Some(text.text.clone()),
+            _ => None,
+        })
+    }
+
+    fn insert(parent: NodeId, child: NodeId, before: Option<NodeId>) -> Op {
+        Op::Insert {
+            parent,
+            child,
+            before,
+        }
+    }
+
+    fn block(c: &mut Core<FakeEngine>, id: NodeId) {
+        apply(
+            c,
+            vec![Op::Create { id, tag: Tag::Text }, insert(ROOT_ID, id, None)],
+        );
+    }
+
+    fn raw_nodes(c: &Core<FakeEngine>) -> usize {
+        c.nodes
+            .iter()
+            .filter(|(_, n)| n.kind == Kind::RawText)
+            .count()
+    }
+
+    fn run(id: NodeId, text: &str) -> Op {
+        Op::CreateText {
+            id,
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn a_blocks_only_run_shows_without_a_node() {
+        let mut c = core();
+        block(&mut c, 2);
+        apply(&mut c, vec![run(3, "hello"), insert(2, 3, None)]);
+        assert_eq!(last_text(&mut c).as_deref(), Some("hello"));
+        assert_eq!(raw_nodes(&c), 0);
+        assert_eq!(c.text_content(2), "hello");
+        apply(
+            &mut c,
+            vec![Op::SetText {
+                id: 3,
+                text: "world".into(),
+            }],
+        );
+        assert_eq!(last_text(&mut c).as_deref(), Some("world"));
+        assert_eq!(raw_nodes(&c), 0);
+    }
+
+    #[test]
+    fn a_second_child_gives_the_run_its_node_in_order() {
+        let mut c = core();
+        block(&mut c, 2);
+        apply(
+            &mut c,
+            vec![
+                run(3, "a"),
+                insert(2, 3, None),
+                run(4, "b"),
+                insert(2, 4, None),
+            ],
+        );
+        assert_eq!(last_text(&mut c).as_deref(), Some("ab"));
+        assert_eq!(raw_nodes(&c), 2);
+        // Before the folded run: it gets its node first.
+        let mut c = core();
+        block(&mut c, 2);
+        apply(&mut c, vec![run(3, "b"), insert(2, 3, None)]);
+        c.commit();
+        apply(&mut c, vec![run(4, "a"), insert(2, 4, Some(3))]);
+        assert_eq!(last_text(&mut c).as_deref(), Some("ab"));
+        apply(
+            &mut c,
+            vec![Op::SetText {
+                id: 3,
+                text: "c".into(),
+            }],
+        );
+        assert_eq!(last_text(&mut c).as_deref(), Some("ac"));
+    }
+
+    #[test]
+    fn a_folded_run_moves_and_goes() {
+        let mut c = core();
+        block(&mut c, 2);
+        block(&mut c, 5);
+        apply(&mut c, vec![run(3, "x"), insert(2, 3, None)]);
+        c.commit();
+        assert_eq!(c.text_content(2), "x");
+        assert!(matches!(
+            c.apply(Op::Remove {
+                parent: 5,
+                child: 3
+            }),
+            Err(ApplyError::NotAChild(3))
+        ));
+        apply(
+            &mut c,
+            vec![Op::Remove {
+                parent: 2,
+                child: 3,
+            }],
+        );
+        assert_eq!(c.text_content(2), "");
+        // Moved to another block without a Remove too.
+        apply(&mut c, vec![insert(5, 3, None)]);
+        assert_eq!(c.text_content(5), "x");
+        apply(&mut c, vec![insert(2, 3, None)]);
+        assert_eq!(c.text_content(5), "");
+        assert_eq!(c.text_content(2), "x");
+        assert_eq!(raw_nodes(&c), 0);
+        // Its block goes: it is loose until released.
+        apply(
+            &mut c,
+            vec![
+                Op::Remove {
+                    parent: ROOT_ID,
+                    child: 2,
+                },
+                Op::Release { id: 2 },
+            ],
+        );
+        apply(&mut c, vec![insert(5, 3, None)]);
+        assert_eq!(c.text_content(5), "x");
+        apply(&mut c, vec![Op::Release { id: 3 }]);
+        assert_eq!(c.text_content(5), "");
+        assert!(c.runs.is_empty() && c.folded.is_empty());
+        assert!(matches!(
+            c.apply(run(5, "dup")),
+            Err(ApplyError::DuplicateNode(5))
+        ));
+    }
+
+    #[test]
+    fn a_run_in_a_span_folds_and_keeps_its_place() {
+        // <Text>a<Text bold>b</Text>c</Text>
+        let mut c = core();
+        block(&mut c, 2);
+        apply(
+            &mut c,
+            vec![
+                run(3, "a"),
+                insert(2, 3, None),
+                Op::Create {
+                    id: 4,
+                    tag: Tag::Text,
+                },
+                run(5, "b"),
+                insert(4, 5, None),
+                insert(2, 4, None),
+                run(6, "c"),
+                insert(2, 6, None),
+            ],
+        );
+        assert_eq!(last_text(&mut c).as_deref(), Some("abc"));
+        // The span's run stays without a node; the block's got theirs.
+        assert_eq!(raw_nodes(&c), 2);
+        assert_eq!(c.folded.len(), 1);
+    }
+
+    #[test]
+    fn a_run_under_a_view_has_its_node() {
+        let mut c = core();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                insert(ROOT_ID, 2, None),
+                run(3, "v"),
+                insert(2, 3, None),
+            ],
+        );
+        assert_eq!(raw_nodes(&c), 1);
+        assert!(c.runs.is_empty());
+    }
+}
+
+/// #1345: the issue's 300 × 50 table (15,000 cells, each a view holding
+/// a text block and its raw text run), with and without runs folded into
+/// their blocks.
+/// `cargo test --release -p nsh-core --lib raw_text_table_bench --
+/// --ignored --nocapture` (`NSH_RUNS=nodes` for every run as a node)
+#[test]
+#[ignore]
+fn raw_text_table_bench() {
+    use std::time::Instant;
+    fn rss_kib() -> u64 {
+        std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find(|l| l.starts_with("VmRSS:"))
+                    .and_then(|l| l.split_whitespace().nth(1)?.parse().ok())
+            })
+            .unwrap_or(0)
+    }
+    let fold = std::env::var("NSH_RUNS").map_or(true, |v| v != "nodes");
+    let mut c = Core::new(crate::ApproxTextEngine, size_pt(1600.0, 900.0));
+    c.fold_runs = fold;
+    let before = rss_kib();
+    let mut ops = Vec::new();
+    let mut id: NodeId = 2;
+    let table = id;
+    ops.push(Op::Create {
+        id: table,
+        tag: Tag::View,
+    });
+    for r in 0..300 {
+        id += 1;
+        let row = id;
+        ops.push(Op::Create {
+            id: row,
+            tag: Tag::View,
+        });
+        ops.push(style_op(row, &[("flexDirection", StyleValue::Str("row"))]));
+        for col in 0..50 {
+            let (cell, text, run) = (id + 1, id + 2, id + 3);
+            id += 3;
+            ops.push(Op::Create {
+                id: cell,
+                tag: Tag::View,
+            });
+            ops.push(style_op(
+                cell,
+                &[
+                    ("width", StyleValue::Number(32.0)),
+                    ("padding", StyleValue::Number(2.0)),
+                ],
+            ));
+            ops.push(Op::Create {
+                id: text,
+                tag: Tag::Text,
+            });
+            ops.push(Op::CreateText {
+                id: run,
+                text: format!("{r}:{col}"),
+            });
+            for (parent, child) in [(text, run), (cell, text), (row, cell)] {
+                ops.push(Op::Insert {
+                    parent,
+                    child,
+                    before: None,
+                });
+            }
+        }
+        ops.push(Op::Insert {
+            parent: table,
+            child: row,
+            before: None,
+        });
+    }
+    ops.push(Op::Insert {
+        parent: ROOT_ID,
+        child: table,
+        before: None,
+    });
+    let t = Instant::now();
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let mount_ms = t.elapsed().as_secs_f64() * 1e3;
+    let after = rss_kib();
+    let texts = batch
+        .items
+        .iter()
+        .filter(|i| matches!(i, MountItem::Text { .. }))
+        .count();
+    let node = std::mem::size_of::<super::Node>();
+    println!(
+        "{}: nodes {}, runs without nodes {}, slab capacity {}, Node {node} B, Run {} B, texts {texts}",
+        if fold { "folded" } else { "nodes" },
+        c.nodes.len(),
+        c.runs.len(),
+        c.nodes.capacity(),
+        std::mem::size_of::<super::Run>(),
+    );
+    println!(
+        "RSS growth {:.1} MiB, first mount + commit {mount_ms:.1} ms",
+        (after - before) as f64 / 1024.0
+    );
+    let mut times = Vec::new();
+    for i in 0..21 {
+        let t = Instant::now();
+        let _ = c.apply(Op::SetText {
+            id: 6,
+            text: format!("x{i}"),
+        });
+        let _ = c.commit();
+        times.push(t.elapsed().as_secs_f64() * 1e6);
+    }
+    times.sort_by(f64::total_cmp);
+    println!("set one run's text + commit: median {:.0} µs", times[10]);
+    let mut times = Vec::new();
+    for i in 0..5 {
+        let t = Instant::now();
+        c.set_viewport(size_pt(1500.0 + i as f32 * 10.0, 900.0));
+        let _ = c.commit();
+        times.push(t.elapsed().as_secs_f64() * 1e3);
+    }
+    times.sort_by(f64::total_cmp);
+    println!("resize + full relayout + commit: median {:.1} ms", times[2]);
 }

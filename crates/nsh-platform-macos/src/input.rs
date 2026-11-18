@@ -614,8 +614,10 @@ fn cursor_at(hit: &Hit) -> Cursor {
                 .or_else(|| s.props.window_resize.map(resize_cursor))
                 .or_else(|| crate::text::selectable(&s).then_some(Cursor::Text))
                 .or_else(|| {
-                    (v == &hit.view && crate::selectable_view::is_area_text(v, &s))
-                        .then_some(Cursor::Text)
+                    (v == &hit.view
+                        && crate::selectable_view::is_area_text(v, &s)
+                        && !crate::selectable_view::cursor_above(v))
+                    .then_some(Cursor::Text)
                 })
         })
         .unwrap_or(Cursor::Default)
@@ -810,8 +812,20 @@ fn repick(key: u64) {
 /// An event reaches `surface` through `window`'s root view: a window of
 /// the app's own (`Window.open`), or `None` for the surface's root. What it
 /// picks, converts and focuses is in that window until the next event.
-pub(crate) fn enter(surface: &Surface, window: Option<NshView>) {
-    *surface.input.window_root.borrow_mut() = window;
+/// Returns the window the input was in before, so an event that does not
+/// move the pointer (the test agent's file drop) can hand it back.
+pub(crate) fn enter(surface: &Surface, window: Option<NshView>) -> Option<NshView> {
+    surface.input.window_root.replace(window)
+}
+
+/// A window of the app's own closed (its root `root`): when it was the
+/// input's, the input goes back to the surface's root, so a repick never
+/// picks in a detached root.
+pub(crate) fn window_closed(surface: &Surface, root: &NshView) {
+    let mut window_root = surface.input.window_root.borrow_mut();
+    if window_root.as_ref() == Some(root) {
+        *window_root = None;
+    }
 }
 
 /// The root view `window` shows: the surface's, or that of a window of the
@@ -2055,6 +2069,7 @@ fn window_press(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f6
     cancel_pointer(surface);
     *surface.input.window_press.borrow_mut() = Some(hit.view);
     let start = event.locationInWindow();
+    let start_screen = (NSEvent::mouseLocation(), window.frame().origin);
     // SAFETY: AppKit's immutable mouse-tracking run-loop mode.
     let mode = unsafe { NSEventTrackingRunLoopMode };
     while let Some(next) = window.nextEventMatchingMask_untilDate_inMode_dequeue(
@@ -2070,8 +2085,10 @@ fn window_press(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f6
         let distance = (point.x - start.x).hypot(point.y - start.y);
         if distance >= WINDOW_DRAG_SLOP && next.r#type() == NSEventType::LeftMouseDragged {
             surface.input.window_press.borrow_mut().take();
-            // AppKit expects the original mouse-down event for native dragging.
-            crate::chrome::mouse_down(surface, event, x, y);
+            // `performWindowDragWithEvent:` with the press, once its drags
+            // have been taken off the queue here, does not move the window
+            // (#2274): the window follows the pointer itself from now on.
+            move_window(&window, start_screen);
             return true;
         }
         if next.r#type() == NSEventType::LeftMouseUp {
@@ -2150,6 +2167,38 @@ fn window_part_press(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32) -> 
             true
         }
         None => false,
+    }
+}
+
+/// Moves `window` with the mouse until its button goes up, from where the
+/// pointer and the window's origin were at the press (`from`, Cocoa screen
+/// coordinates), kept below the menu bar as AppKit keeps its title bar.
+fn move_window(window: &NSWindow, from: (objc2_foundation::NSPoint, objc2_foundation::NSPoint)) {
+    let (pointer, origin) = from;
+    let place = |at: objc2_foundation::NSPoint| {
+        let mut frame = window.frame();
+        frame.origin = objc2_foundation::NSPoint::new(
+            origin.x + at.x - pointer.x,
+            origin.y + at.y - pointer.y,
+        );
+        let frame = window.constrainFrameRect_toScreen(frame, window.screen().as_deref());
+        if frame.origin != window.frame().origin {
+            window.setFrameOrigin(frame.origin);
+        }
+    };
+    place(NSEvent::mouseLocation());
+    // SAFETY: AppKit's immutable mouse-tracking run-loop mode.
+    let mode = unsafe { NSEventTrackingRunLoopMode };
+    while let Some(next) = window.nextEventMatchingMask_untilDate_inMode_dequeue(
+        NSEventMask::LeftMouseDragged | NSEventMask::LeftMouseUp,
+        Some(&NSDate::distantFuture()),
+        mode,
+        true,
+    ) {
+        place(NSEvent::mouseLocation());
+        if next.r#type() == NSEventType::LeftMouseUp {
+            break;
+        }
     }
 }
 
@@ -3604,7 +3653,18 @@ pub(crate) fn window_drag(surface: &Surface, x: f32, y: f32) -> bool {
         }
         view = v.parent_view();
     }
-    false
+    // Nothing decided: the strip of a hidden title bar drags the window,
+    // as the system's bar would (#2274).
+    in_hidden_title_bar(surface, y)
+}
+
+/// Whether `y` (root coordinates) is in the main window's hidden title bar.
+fn in_hidden_title_bar(surface: &Surface, y: f32) -> bool {
+    if surface.input.window_root.borrow().is_some() {
+        return false;
+    }
+    let top = surface.environment.get().title_bar.top.0;
+    top > 0.0 && y >= 0.0 && y < top
 }
 
 /// The hosted AppKit view (a text field, a web view) under `(x, y)` (root

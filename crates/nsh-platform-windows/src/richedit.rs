@@ -124,8 +124,7 @@ pub(crate) struct Props {
     pub(crate) bits: u32,
     /// The maximum length, in UTF-16 units.
     pub(crate) max_length: u32,
-    /// `ES_AUTOHSCROLL` / `ES_AUTOVSCROLL`: how the text scrolls (never a
-    /// scroll bar: there is no window to put one in).
+    /// Scroll-bar support and auto-scrolling flags. The host draws the indicators.
     pub(crate) scroll: u32,
     /// The character a password shows.
     pub(crate) password: u16,
@@ -1128,8 +1127,17 @@ unsafe extern "system" fn tx_get_horz_extent(_: This, out: *mut i32) -> HRESULT 
     S_FALSE
 }
 
+/// How much the services' drawing is scaled into a target of `scale`:
+/// they turn client pixels into the target's units by GDI's DPI
+/// ([`dpi`]), whatever the target's own DPI is. 1 on a monitor at the
+/// system's scale; on any other the text would be drawn `scale` over GDI's
+/// scale times too large, from the target's origin.
+pub(crate) fn target_scale(hwnd: HWND, scale: f32) -> f32 {
+    dpi(hwnd) / (96.0 * scale.max(0.01))
+}
+
 /// The window's vertical DPI as GDI reports it, which the services convert
-/// twips to pixels with.
+/// twips to pixels with, and client pixels to a Direct2D target's units.
 pub(crate) fn dpi(hwnd: HWND) -> f32 {
     // SAFETY: a DC of the window, released after the query.
     unsafe {
@@ -1191,6 +1199,146 @@ mod tests {
     fn type_in(e: &Editor, text: &str) {
         let wide: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
         e.send(EM_REPLACESEL, 1, wide.as_ptr() as isize);
+    }
+
+    /// Where the ink of "MMMM" lands (pixels: left, top, right, bottom),
+    /// drawn in the client rectangle (200, 100)–(600, 200) through a target
+    /// of `scale` with the transform scaled by `k`.
+    fn ink(scale: f32, k: f32) -> Option<(u32, u32, u32, u32)> {
+        let dpi = 96.0 * scale;
+        use windows::Win32::{
+            Graphics::{
+                Direct2D::{
+                    Common::{
+                        D2D_POINT_2U, D2D_RECT_U, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED,
+                        D2D1_PIXEL_FORMAT,
+                    },
+                    D2D1_BITMAP_OPTIONS, D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                    D2D1_BITMAP_OPTIONS_CPU_READ, D2D1_BITMAP_OPTIONS_TARGET,
+                    D2D1_BITMAP_PROPERTIES1, D2D1_MAP_OPTIONS_READ,
+                },
+                Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
+            },
+            UI::Controls::RichEdit::{CFM_COLOR, CFM_FACE, CFM_SIZE, TXTBIT_D2DDWRITE},
+        };
+        use windows_numerics::Matrix3x2;
+        let gfx = crate::gfx::get().unwrap();
+        let mut p = Props {
+            client: RECT {
+                left: 200,
+                top: 100,
+                right: 600,
+                bottom: 200,
+            },
+            bits: TXTBIT_D2DDWRITE,
+            ..Props::default()
+        };
+        p.char_format.Base.dwMask = CFM_FACE | CFM_SIZE | CFM_COLOR;
+        p.char_format.Base.yHeight = (40.0 * 1440.0 / super::dpi(HWND::default())) as i32;
+        for (i, u) in "Segoe UI".encode_utf16().enumerate() {
+            p.char_format.Base.szFaceName[i] = u;
+        }
+        let client = p.client;
+        let e = Editor::new(HWND::default(), p, Box::new(|| {}), Box::new(|| {})).unwrap();
+        e.set_text("MMMM");
+        let (w, h) = (1600u32, 600u32);
+        let props = |options: D2D1_BITMAP_OPTIONS| D2D1_BITMAP_PROPERTIES1 {
+            pixelFormat: D2D1_PIXEL_FORMAT {
+                format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+            },
+            dpiX: 96.0,
+            dpiY: 96.0,
+            bitmapOptions: options,
+            colorContext: std::mem::ManuallyDrop::new(None),
+        };
+        let size = D2D_SIZE_U {
+            width: w,
+            height: h,
+        };
+        // SAFETY: COM calls on live objects; the mapped memory is read
+        // before `Unmap`.
+        unsafe {
+            let dc = &gfx.dc;
+            let target = dc
+                .CreateBitmap(size, None, 0, &props(D2D1_BITMAP_OPTIONS_TARGET))
+                .unwrap();
+            dc.SetTarget(&target);
+            dc.SetDpi(dpi, dpi);
+            dc.BeginDraw();
+            dc.Clear(None);
+            dc.SetTransform(&Matrix3x2 {
+                M11: k,
+                M12: 0.0,
+                M21: 0.0,
+                M22: k,
+                M31: 0.0,
+                M32: 0.0,
+            });
+            assert!(e.draw(dc.as_raw(), client));
+            dc.SetTransform(&Matrix3x2::identity());
+            dc.EndDraw(None, None).unwrap();
+            dc.SetTarget(None);
+            dc.SetDpi(96.0, 96.0);
+            let read = dc
+                .CreateBitmap(
+                    size,
+                    None,
+                    0,
+                    &props(D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW),
+                )
+                .unwrap();
+            read.CopyFromBitmap(
+                Some(&D2D_POINT_2U { x: 0, y: 0 }),
+                &target,
+                Some(&D2D_RECT_U {
+                    left: 0,
+                    top: 0,
+                    right: w,
+                    bottom: h,
+                }),
+            )
+            .unwrap();
+            let mapped = read.Map(D2D1_MAP_OPTIONS_READ).unwrap();
+            let mut b: Option<(u32, u32, u32, u32)> = None;
+            for y in 0..h {
+                let row = std::slice::from_raw_parts(
+                    mapped.bits.add((y * mapped.pitch) as usize),
+                    (w * 4) as usize,
+                );
+                for x in 0..w {
+                    if row[(x * 4 + 3) as usize] > 40 {
+                        b = Some(match b {
+                            None => (x, y, x, y),
+                            Some((l, t, r, bt)) => (l.min(x), t.min(y), r.max(x), bt.max(y)),
+                        });
+                    }
+                }
+            }
+            read.Unmap().unwrap();
+            b
+        }
+    }
+
+    /// A window on a monitor of another scale than the system's (GDI's
+    /// DPI stays the system's there): the text is drawn where the client
+    /// rectangle is, at its size, whatever the target's scale.
+    #[test]
+    fn text_lands_in_the_client_rectangle_at_any_target_scale() {
+        let hwnd = HWND::default();
+        let system = ink(dpi(hwnd) / 96.0, 1.0).expect("text at the system's scale");
+        assert!(system.0 >= 200 && system.1 >= 100 && system.2 < 600 && system.3 < 200);
+        for scale in [1.0, 1.25, 1.5, 2.5] {
+            let at = ink(scale, target_scale(hwnd, scale)).expect("text");
+            for (a, b) in [
+                (at.0, system.0),
+                (at.1, system.1),
+                (at.2, system.2),
+                (at.3, system.3),
+            ] {
+                assert!(a.abs_diff(b) <= 2, "at {scale}: {at:?}, not {system:?}");
+            }
+        }
     }
 
     #[test]
