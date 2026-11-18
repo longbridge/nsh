@@ -63,29 +63,12 @@ pub(crate) fn parse(parser: &Parser, source: &str) -> Document {
 
 /// Markdown `source` read in one parse.
 pub(crate) fn parse_whole(parser: &Parser, source: &str) -> Document {
-    let mut source = if source.contains('\r') {
+    let source = if source.contains('\r') {
         Cow::Owned(source.replace("\r\n", "\n").replace('\r', "\n"))
     } else {
         Cow::Borrowed(source)
     };
-    if parser.options.streaming {
-        let repaired = match repair_streaming(&source) {
-            Cow::Owned(repaired) => Some(repaired),
-            Cow::Borrowed(_) => None,
-        };
-        if let Some(repaired) = repaired {
-            source = Cow::Owned(repaired);
-        }
-    }
-    if parser.options.math {
-        let rewritten = match latex::rewrite(&source) {
-            Cow::Owned(rewritten) => Some(rewritten),
-            Cow::Borrowed(_) => None,
-        };
-        if let Some(rewritten) = rewritten {
-            source = Cow::Owned(rewritten);
-        }
-    }
+    let source = prepare(parser, source);
     let source = source.as_ref();
 
     let segments = if parser.extensions.iter().any(|e| e.container.is_some()) {
@@ -123,6 +106,31 @@ pub(crate) fn parse_whole(parser: &Parser, source: &str) -> Document {
     converter.segments(&segments, &trees, &mut next, &mut blocks);
     let footnotes = converter.footnotes();
     Document { blocks, footnotes }
+}
+
+/// Markdown `source` (its line endings `\n`) as it is parsed: the end of a
+/// streamed reply repaired, TeX's delimiters rewritten. Positions in the
+/// syntax tree, and so what plugins read, are offsets in it.
+fn prepare<'s>(parser: &Parser, mut source: Cow<'s, str>) -> Cow<'s, str> {
+    if parser.options.streaming {
+        let repaired = match repair_streaming(&source) {
+            Cow::Owned(repaired) => Some(repaired),
+            Cow::Borrowed(_) => None,
+        };
+        if let Some(repaired) = repaired {
+            source = Cow::Owned(repaired);
+        }
+    }
+    if parser.options.math {
+        let rewritten = match latex::rewrite(&source) {
+            Cow::Owned(rewritten) => Some(rewritten),
+            Cow::Borrowed(_) => None,
+        };
+        if let Some(rewritten) = rewritten {
+            source = Cow::Owned(rewritten);
+        }
+    }
+    source
 }
 
 /// A Markdown part of the source and its syntax tree, whose positions are
@@ -269,6 +277,26 @@ fn parse_tree(parser: &Parser, text: &str, first: bool) -> Node {
 
 /// `markdown-rs`'s options for `parser`'s.
 fn options(parser: &Parser, frontmatter: bool, mdx: bool) -> ParseOptions {
+    let mut options = own_options(parser, frontmatter, mdx);
+    for plugin in &parser.plugins.0 {
+        plugin.configure(&mut options);
+    }
+    options
+}
+
+/// Whether `parser`'s plugins leave the syntax of a text as its options
+/// make it: they turn no construct on or off (what else they configure,
+/// as `gfm_strikethrough_single_tilde`, is read inside a paragraph).
+fn plugins_keep_constructs(parser: &Parser) -> bool {
+    parser.plugins.is_empty()
+        || [true, false].into_iter().all(|first| {
+            let mdx = parser.options.mdx;
+            options(parser, first, mdx).constructs == own_options(parser, first, mdx).constructs
+        })
+}
+
+/// [`options`] without the plugins'.
+fn own_options(parser: &Parser, frontmatter: bool, mdx: bool) -> ParseOptions {
     let opts = &parser.options;
     let mut options = ParseOptions::gfm();
     let c = &mut options.constructs;
@@ -285,9 +313,6 @@ fn options(parser: &Parser, frontmatter: bool, mdx: bool) -> ParseOptions {
         c.mdx_expression_text = true;
         c.mdx_jsx_flow = true;
         c.mdx_jsx_text = true;
-    }
-    for plugin in &parser.plugins.0 {
-        plugin.configure(&mut options);
     }
     options
 }

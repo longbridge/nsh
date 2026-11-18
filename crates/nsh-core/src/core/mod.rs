@@ -5571,6 +5571,14 @@ impl<M: TextEngine> Core<M> {
                         ScrollProp::Bounces(on) => b.bounces = on,
                         ScrollProp::ScrollsToTop(on) => b.scrolls_to_top = on,
                         ScrollProp::ContentInset(i) => b.content_inset = i,
+                        ScrollProp::ScrollbarInset(i) => {
+                            // Negative insets count as none.
+                            b.scrollbar_inset = i.map(|v| Points(v.0.max(0.0)));
+                            // A built-in bar is laid out within the insets.
+                            if scroll.bar.is_some() {
+                                self.needs_layout = true;
+                            }
+                        }
                         ScrollProp::KeyboardTaps(t) => b.keyboard_taps = t,
                         ScrollProp::DisableIntervalMomentum(on) => b.one_step = on,
                         ScrollProp::MinZoom(v) => b.min_zoom = v.max(0.01),
@@ -6172,6 +6180,7 @@ impl<M: TextEngine> Core<M> {
                         ScreenProp::HeaderVisible(v) => c.header_visible = v,
                         ScreenProp::HeaderLargeTitle(v) => c.large_title = v,
                         ScreenProp::HeaderTransparent(v) => c.header_transparent = v,
+                        ScreenProp::HeaderShadowVisible(v) => c.header_shadow_visible = v,
                         ScreenProp::HidesBottomBarWhenPushed(v) => {
                             c.hides_bottom_bar_when_pushed = v
                         }
@@ -10792,23 +10801,8 @@ fn estimate_line(text: &AttributedText, run: &str) -> Points {
 /// `text`'s largest font size and the line height it gives (the style's,
 /// or 1.2 of the font size).
 fn text_metrics(text: &AttributedText) -> (f32, f32) {
-    text.spans
-        .iter()
-        .fold((14.0f32, 0.0f32), |(size, line), span| {
-            let s = &span.style;
-            let font = s.font_size.0.max(1.0);
-            let height = if s.line_height.0 > 0.0 {
-                s.line_height.0
-            } else if s.line_height_multiple > 0.0 {
-                font * s.line_height_multiple
-            } else {
-                font * 1.2
-            };
-            (
-                if line == 0.0 { font } else { size.max(font) },
-                line.max(height),
-            )
-        })
+    let (font, line) = text.approx_metrics();
+    (font.0, line.0)
 }
 
 fn min_content_width<M: TextEngine>(
