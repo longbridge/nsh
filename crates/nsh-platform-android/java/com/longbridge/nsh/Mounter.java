@@ -522,11 +522,13 @@ final class Mounter {
                     boolean bouncesZoom = b.getInt() != 0, pinch = b.getInt() != 0, center = b.getInt() != 0;
                     boolean ownIndicator = b.getInt() != 0;
                     float indicatorHeight = b.getFloat();
+                    float barTop = b.getFloat(), barRight = b.getFloat(), barBottom = b.getFloat(), barLeft = b.getFloat();
                     if (v instanceof ScrollBox) {
                         ((ScrollBox) v).setBehavior(paging, interval, offsets, alignment, deceleration, enabled, bounces,
                                 top, right, bottom, left, taps, oneStep);
                         ((ScrollBox) v).setZoom(zooms, minZoom, maxZoom, bouncesZoom, pinch, center);
                         ((ScrollBox) v).setRefresh(ownIndicator, indicatorHeight);
+                        ((ScrollBox) v).setBarInset(barTop, barRight, barBottom, barLeft);
                     }
                     break;
                 }
@@ -556,7 +558,11 @@ final class Mounter {
                     Dynamic d = statics.get(id);
                     if (v != null && d != null) applyDynamic(v, d);
                     // Its props bound again are handed over again.
-                    if (v instanceof ComponentBox) ((ComponentBox) v).forgetAnimated();
+                    if (v instanceof ComponentBox) {
+                        NshComponent c = ((ComponentBox) v).component;
+                        if (c instanceof RustComponent) ((RustComponent) c).step(seq);
+                        else ((ComponentBox) v).forgetAnimated();
+                    }
                     break;
                 }
                 case GESTURES: {
@@ -628,7 +634,7 @@ final class Mounter {
                     if (v instanceof InputBox) ((InputBox) v).setContent(px(x), px(y), px(x + w) - px(x), px(y + h) - px(y));
                     break;
                 }
-                case COMMAND: command(b, objects); break;
+                case COMMAND: command(b, objects, seq); break;
                 case COMPONENT: {
                     int id = b.getInt();
                     component(id, string(objects, b.getInt()));
@@ -665,17 +671,25 @@ final class Mounter {
                     View v = views.get(b.getInt());
                     String[] names = new String[b.getInt()];
                     for (int i = 0; i < names.length; i++) names[i] = string(objects, b.getInt());
-                    if (v instanceof ComponentBox) ((ComponentBox) v).slots = names;
+                    if (v instanceof ComponentBox) {
+                        NshComponent c = ((ComponentBox) v).component;
+                        if (c instanceof RustComponent) ((RustComponent) c).step(seq);
+                        else ((ComponentBox) v).slots = names;
+                    }
                     break;
                 }
                 case COMPONENT_PROPS: {
                     View v = views.get(b.getInt());
                     int count = b.getInt();
                     NshComponent c = v instanceof ComponentBox ? ((ComponentBox) v).component : null;
-                    for (int i = 0; i < count; i++) {
-                        String name = string(objects, b.getInt());
-                        String json = string(objects, b.getInt());
-                        if (c != null) c.setProp(name, Json.parse(json));
+                    if (c instanceof RustComponent) {
+                        ((RustComponent) c).step(seq);
+                    } else if (c != null) {
+                        for (int i = 0; i < count; i++) {
+                            String name = string(objects, b.getInt());
+                            String json = string(objects, b.getInt());
+                            c.setProp(name, Json.parse(json));
+                        }
                     }
                     break;
                 }
@@ -2387,7 +2401,7 @@ final class Mounter {
         view.performHapticFeedback(feedback);
     }
 
-    private void command(ByteBuffer b, Object[] objects) {
+    private void command(ByteBuffer b, Object[] objects, long seq) {
         int id = b.getInt(), kind = b.getInt();
         View v = views.get(id);
         switch (kind) {
@@ -2562,8 +2576,10 @@ final class Mounter {
             case 21: {
                 String name = string(objects, b.getInt());
                 String json = string(objects, b.getInt());
-                if (v instanceof ComponentBox && ((ComponentBox) v).component != null) {
-                    ((ComponentBox) v).component.command(name, Json.parse(json));
+                if (v instanceof ComponentBox) {
+                    NshComponent c = ((ComponentBox) v).component;
+                    if (c instanceof RustComponent) ((RustComponent) c).step(seq);
+                    else if (c != null) c.command(name, Json.parse(json));
                 }
                 break;
             }

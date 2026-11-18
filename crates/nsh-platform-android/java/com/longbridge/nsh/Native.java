@@ -129,6 +129,9 @@ final class Native {
     /** No VM limits for the apps loaded next: they run on their own. */
     static native void setStandaloneLimits(long handle);
 
+    /** Whether scroll views make their content's native views only near their viewport (default: true). */
+    static native void setContentCulling(long handle, boolean enabled);
+
     /** The directory the storage of the apps loaded next is kept in (null: each app's own in the data directory). */
     static native void setStorage(long handle, String dir);
 
@@ -224,6 +227,21 @@ final class Native {
 
     /** A native component's own size (dp). */
     static native void componentSize(long handle, int id, float width, float height);
+
+    /** Names of native components registered by the app's Rust crate, or null. */
+    static native String[] componentNames(long handle);
+
+    /** Notes that host code registered a Java component overriding {@code name}. */
+    static native void componentJavaRegistered(long handle, String name);
+
+    /** Creates the native view of a Rust crate component on the UI thread. */
+    static native android.view.View componentCreate(long handle, int id, android.content.Context context, String name);
+
+    /** Runs the next queued typed prop, slot, command, or reset step for a Rust component. */
+    static native void componentStep(long handle, long seq, int id);
+
+    /** Destroys a Rust component instance when its element or app stops. */
+    static native void componentDestroy(long handle, int id);
 
     /** The launch parameters (a JSON object; null: none) of the apps loaded next; false if it is not one. */
     static native boolean setHostParams(long handle, String json);

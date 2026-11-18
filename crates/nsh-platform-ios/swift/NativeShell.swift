@@ -178,6 +178,16 @@ public final class NshAppView: UIView {
         }
     }
 
+    /// Whether scroll views make the views of their content only near their
+    /// viewport (`true`, the default), or all of it (`false`). Turned off,
+    /// what is not made yet is made in the next frames, e.g. to draw a whole
+    /// scroll view into an image (a long screenshot); turned on again, what
+    /// is far away is given up. Applies to the running app and the apps
+    /// loaded from now on.
+    public var contentCulling = true {
+        didSet { nsh_app_set_content_culling(app, contentCulling) }
+    }
+
     /// Gives the address of the apps loaded from now on (`UrlScheme.setUrl`)
     /// to the system as the current `NSUserActivity`, so Handoff continues it
     /// on the user's other devices. An `http(s)` address is a web page, which
