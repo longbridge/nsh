@@ -874,7 +874,7 @@ const BACKDROPS_APP: &str = r##"import { mount, View } from "nsh";
 
 mount(() => (
   <View
-    windows={{ backdrop: "blur" }}
+    windows={{ backdrop: { material: "blur" } }}
     macos={{ backdrop: { blending: "behindWindow" } }}
   />
 ));
@@ -898,7 +898,7 @@ fn windows_props_apply_on_windows_through_the_mount() {
     // Each platform takes its own backdrop and ignores the other's.
     assert_eq!(
         backdrops(Os::Windows),
-        [(Some(WindowsBackdrop::Blur), None)]
+        [(Some(WindowsBackdrop::default()), None)]
     );
     let mut mac = MacOsBackdrop::default();
     mac.blending = MacOsBackdropBlending::BehindWindow;

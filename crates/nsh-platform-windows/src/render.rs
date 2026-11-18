@@ -2509,7 +2509,7 @@ mod tests {
                 let mut s = card.state_mut();
                 s.style.background_color = Color(0xffff_ff40);
                 s.style.border_radius = Points(12.0);
-                s.style.windows_backdrop = Some(nsh_core::WindowsBackdrop::Blur);
+                s.style.windows_backdrop = Some(nsh_core::WindowsBackdrop::default());
             }
             let back = target(&gfx, size);
             let drawn = draw_into(&surface, &gfx, &back, 1.0, false, None, None, None).unwrap();

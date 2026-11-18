@@ -179,7 +179,10 @@ mod tests {
         assert!(elements.contains(
             "export type MacOsBackdropState = \"followsWindowActiveState\" | \"active\" | \"inactive\";"
         ));
-        assert!(elements.contains("export type WindowsBackdrop = \"blur\";"));
+        assert!(elements.contains(
+            "export interface WindowsBackdrop {\n  material: WindowsBackdropMaterial;\n}"
+        ));
+        assert!(elements.contains("export type WindowsBackdropMaterial = \"blur\";"));
         for (interface, prop) in [
             ("HostProps", "  onPress?: (e: PressEvent) => void;"),
             ("HostProps", "  onLongPress?: (e: PressEvent) => void;"),

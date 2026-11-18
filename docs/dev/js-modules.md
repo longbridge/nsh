@@ -72,8 +72,9 @@ the chunks of a split bundle (`Screen.js`: a name that is no native module, with
   backdrop blur), input `inputAccessoryViewID` / `textContentType` / `keyboardAppearance`, Dialog
   `supportedOrientations`, WebView `allowsBackForwardNavigationGestures`. macOS: `backdrop` (an
   `NSVisualEffectView` material, blending and state, `MacOsBackdrop` in the core). Windows: `backdrop` (the
-  system's blur behind a transparent window, `WindowsBackdrop`). Both renderers qualify Windows keys before
-  decoding so `windows.backdrop` and the macOS object's `backdrop` have separate payloads and clear independently.
+  `{ material: "blur" }`, the system's blur behind a transparent window, `WindowsBackdrop`). An object with a recognized
+  `material` is required. Both renderers qualify Windows keys before decoding so `windows.backdrop` and the macOS
+  object's `backdrop` have separate payloads and clear independently.
   Desktop:
   `windowDrag`, WebView `allowsBackForwardNavigationGestures` (macOS' and Linux's trackpad swipes, Windows'
   touchscreen swipes; a system feature of several platforms names each: `#[prop(ios = "x", desktop = "x")]`). What

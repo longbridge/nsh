@@ -77,7 +77,7 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   its composition; the composition stacks it in paint order like a web view's page and hands the component its
   `Placement` (transform, size, clip, corner radii, opacity) with `placed` every frame, which the component applies to
   its visual before the window commits. Unlike a child window, it is covered by what NSH draws after it.
-- **Backdrop views** (`backdrop.rs`). `windows={{ backdrop: "blur" }}` (`WindowsBackdrop::Blur`) puts the system's
+- **Backdrop views** (`backdrop.rs`). `windows={{ backdrop: { material: "blur" } }}` (`WindowsBackdrop::default()`) puts the system's
   blur of what is behind a see-through window under one view: a host backdrop brush (`CreateHostBackdropBrush`, with
   `DWMWA_USE_HOSTBACKDROPBRUSH`), a `Windows.UI.Composition` object that cannot join NSH's DirectComposition tree. A
   window has two composition targets, one below its child windows and one above them, and NSH's tree takes the lower

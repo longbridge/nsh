@@ -718,9 +718,17 @@ pub enum MacOsBackdropState {
 /// and corners on Windows 11 and later, below everything the window draws;
 /// the view's own background draws over it, and tints it when translucent.
 /// Nothing elsewhere, nor in a window that is not transparent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct WindowsBackdrop {
+    /// The system material to draw behind the view.
+    pub material: WindowsBackdropMaterial,
+}
+
+/// The material of a [`WindowsBackdrop`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, crate::element::PropEnum)]
 #[non_exhaustive]
-pub enum WindowsBackdrop {
+pub enum WindowsBackdropMaterial {
     /// The system's blur of what is behind the window, with no tint of its
     /// own (a host backdrop brush).
     #[default]

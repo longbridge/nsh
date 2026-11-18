@@ -56,8 +56,9 @@ test("platform props set the props of the web's and the desktop's objects and ig
 test("platform backdrops set, update and clear with the matching decoder key", () => {
   const mac = { blending: "behindWindow" };
   const macUpdated = { material: "sidebar" };
+  const win = { material: "blur" };
   for (const [os, group, key, first, updated] of [
-    ["windows", "windows", "windows.backdrop", "blur", undefined],
+    ["windows", "windows", "windows.backdrop", win, {}],
     ["macos", "macos", "backdrop", mac, macUpdated],
   ]) {
     const values = new Values();
@@ -67,7 +68,7 @@ test("platform backdrops set, update and clear with the matching decoder key", (
     const view = values.makeNode(2);
     const other = group === "windows" ? "macos" : "windows";
     dom.rt.prop(view, group, { backdrop: first });
-    dom.rt.prop(view, other, { backdrop: group === "windows" ? mac : "blur" });
+    dom.rt.prop(view, other, { backdrop: group === "windows" ? mac : win });
     dom.rt.prop(view, group, { backdrop: updated });
     dom.rt.prop(view, other, {});
     dom.rt.prop(view, group, {});

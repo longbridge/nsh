@@ -39,7 +39,7 @@ mod app {
                 .p_4()
                 .rounded(px(16.0))
                 .bg(Color(0x1e1e_2e80))
-                .windows_backdrop(move || blur.get().then_some(WindowsBackdrop::Blur))
+                .windows_backdrop(move || blur.get().then(WindowsBackdrop::default))
                 .window_drag(true)
                 .child(
                     text("Transparent window")

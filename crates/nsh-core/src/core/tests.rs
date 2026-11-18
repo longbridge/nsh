@@ -7777,7 +7777,7 @@ fn macos_backdrop_decodes_and_survives_restyling() {
 #[test]
 fn windows_backdrop_decodes_and_clears() {
     use crate::{
-        WindowsBackdrop,
+        WindowsBackdrop, WindowsBackdropMaterial,
         js::host::{HostCx, HostProps},
     };
     let decode = |value: HostTestValue<'_>| {
@@ -7786,13 +7786,20 @@ fn windows_backdrop_decodes_and_clears() {
             .expect("a Windows backdrop prop")
             .expect("a value")
     };
-    let prop = decode(HostTestValue::String("blur"));
-    assert_eq!(prop, Prop::WindowsBackdrop(Some(WindowsBackdrop::Blur)));
-    // An unknown name, a value of another type and null set none: a prop
-    // never fails.
+    let backdrop = WindowsBackdrop {
+        material: WindowsBackdropMaterial::Blur,
+    };
+    let prop = decode(HostTestValue::object([(
+        "material",
+        HostTestValue::String("blur"),
+    )]));
+    assert_eq!(prop, Prop::WindowsBackdrop(Some(backdrop)));
     for value in [
-        HostTestValue::String("mica"),
+        HostTestValue::String("blur"),
         HostTestValue::Number(1.0),
+        HostTestValue::object([]),
+        HostTestValue::object([("material", HostTestValue::String("mica"))]),
+        HostTestValue::object([("material", HostTestValue::Number(1.0))]),
         HostTestValue::object([("blending", HostTestValue::String("behindWindow"))]),
         HostTestValue::Null,
     ] {
@@ -7822,7 +7829,7 @@ fn windows_backdrop_decodes_and_clears() {
         view_style_of(&c.commit().unwrap(), 2)
             .unwrap()
             .windows_backdrop,
-        Some(WindowsBackdrop::Blur)
+        Some(backdrop)
     );
     c.apply(Op::SetProp {
         id: 2,
@@ -7843,7 +7850,7 @@ fn rust_windows_backdrop_reaches_the_view_style() {
 
     #[component]
     fn BackdropView() -> impl IntoElement {
-        view().windows_backdrop(WindowsBackdrop::Blur)
+        view().windows_backdrop(WindowsBackdrop::default())
     }
 
     let mut c = core();
@@ -7858,7 +7865,7 @@ fn rust_windows_backdrop_reaches_the_view_style() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(backdrops, [WindowsBackdrop::Blur]);
+    assert_eq!(backdrops, [WindowsBackdrop::default()]);
 }
 
 #[test]
