@@ -367,6 +367,11 @@ pub(crate) fn press(
         .as_ref()
         .and_then(|root| root.clone().downcast::<gtk::Window>().ok());
     let focus = root.and_then(|root| root.focus());
+    // Track every press before focus and listener routing: a held key must
+    // not become a new press when its handler moves the focus.
+    let repeat = window
+        .as_ref()
+        .is_some_and(|window| crate::keyboard::held(surface, window, keycode));
     // The application menu's shortcut, where a view leaves the key to it.
     let menu_shortcut = || match (event, widget) {
         (Some(event), Some(widget)) => crate::chrome::menu_shortcut(surface, widget, event),
@@ -398,15 +403,12 @@ pub(crate) fn press(
         if menu_shortcut() {
             return true;
         }
-        return defaults(surface, &view, keyval, modifiers);
+        return defaults(surface, &view, keyval, modifiers, repeat);
     }
     // A raw view runs the app's bindings itself, once, before it is
     // notified: a pass-through binding reports and the key goes on, a
     // consuming one reports and takes it, and the shortcut controller does
     // not report either again.
-    let repeat = window
-        .as_ref()
-        .is_some_and(|window| crate::keyboard::held(surface, window, keycode));
     if let Some(event) = event {
         match crate::keymap::raw(surface, event, repeat) {
             crate::keymap::RawFire::Consumed => return true,
@@ -438,7 +440,7 @@ pub(crate) fn press(
     }
     // Tab's traversal is a default too: it is armed here, then GTK moves the
     // focus right after this, in the same dispatch.
-    defaults(surface, &view, keyval, modifiers)
+    defaults(surface, &view, keyval, modifiers, repeat)
 }
 
 /// Whether `keyval` is a Tab (the app's traversal).
@@ -462,6 +464,7 @@ fn defaults(
     view: &NshView,
     keyval: gdk::Key,
     modifiers: gdk::ModifierType,
+    repeat: bool,
 ) -> bool {
     if is_tab(keyval) {
         // Only a Tab left to GTK may offer the stops for traversal.
@@ -478,7 +481,7 @@ fn defaults(
         gdk::Key::space => Key::Char(' '),
         _ => return false,
     };
-    presses(surface, view, pressing, held)
+    presses(surface, view, pressing, held, repeat)
 }
 
 /// Whether `focus` (a window's focus widget) is a stop that Return and
@@ -493,15 +496,23 @@ pub(crate) fn is_control(surface: &Surface, focus: &gtk::Widget) -> bool {
 /// Return and Space press the focused stop `view` when it takes presses
 /// ([`core_input::presses_focused_control`]), once the app's bindings of
 /// the focus passed on them. A stop that takes no presses (a `focusable`
-/// chart) hears them through the shortcuts only. True when it was
-/// pressed.
-fn presses(surface: &Surface, view: &NshView, key: Key, held: nsh_core::keymap::Modifiers) -> bool {
+/// chart) hears them through the shortcuts only. True when the key was
+/// consumed, including a repeat that must not press the control again.
+fn presses(
+    surface: &Surface,
+    view: &NshView,
+    key: Key,
+    held: nsh_core::keymap::Modifiers,
+    repeat: bool,
+) -> bool {
     if !core_input::presses_focused_control(key, held)
         || !view.state().events.contains(EventKind::Press)
     {
         return false;
     }
-    crate::input::activate(surface, view);
+    if !repeat {
+        crate::input::activate(surface, view);
+    }
     true
 }
 
@@ -512,7 +523,7 @@ fn presses(surface: &Surface, view: &NshView, key: Key, held: nsh_core::keymap::
 pub(crate) fn press_key(surface: &Surface, stroke: nsh_core::keymap::Keystroke) -> bool {
     let focus = crate::window::key_window(surface).and_then(|w| GtkWindowExt::focus(&w));
     focused_stop(surface, focus)
-        .is_some_and(|view| presses(surface, &view, stroke.key, stroke.modifiers))
+        .is_some_and(|view| presses(surface, &view, stroke.key, stroke.modifiers, false))
 }
 
 /// A context menu asked for on `view` without a pointer: the nearest view
@@ -628,6 +639,145 @@ mod tests {
             gdk::ModifierType::empty(),
             0,
         )
+    }
+
+    #[derive(Clone)]
+    struct StopPresses {
+        nodes: std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>,
+        move_focus: bool,
+    }
+
+    #[nsh_core::element::component]
+    fn RepeatStops() -> impl nsh_core::element::IntoElement {
+        use nsh_core::prelude::*;
+
+        let recorded = engine_context::<StopPresses>().unwrap();
+        let first = recorded.nodes.clone();
+        let second = recorded.nodes.clone();
+        let move_focus = recorded.move_focus;
+        let next = element_ref();
+        view().children([
+            view()
+                .test_id("first-stop")
+                .w(px(100.0))
+                .h(px(40.0))
+                .on_press(move || {
+                    first.lock().unwrap().push("first");
+                    if move_focus {
+                        next.focus();
+                    }
+                }),
+            view()
+                .test_id("second-stop")
+                .element_ref(&next)
+                .w(px(100.0))
+                .h(px(40.0))
+                .on_press(move || second.lock().unwrap().push("second")),
+        ])
+    }
+
+    fn repeated_return(move_focus: bool) {
+        run(move || {
+            let surface = surface();
+            let nodes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let mut config = nsh_engine::EngineConfig::new(nsh_engine::Root::of::<RepeatStops>());
+            config.context = config.context.with(StopPresses {
+                nodes: nodes.clone(),
+                move_focus,
+            });
+            surface.start(config);
+            let window = show(&surface);
+            let find = |name| {
+                surface
+                    .mounter
+                    .borrow()
+                    .views
+                    .values()
+                    .find(|view| view.state().props.test_id.as_deref() == Some(name))
+                    .filter(|view| view.is_mapped())
+                    .cloned()
+            };
+            assert!(wait_until(|| {
+                find("first-stop").is_some() && find("second-stop").is_some()
+            }));
+            let first = find("first-stop").unwrap();
+            let second = find("second-stop").unwrap();
+            // Neither stop listens to raw keys: exercise press -> defaults
+            // -> presses -> input::activate, not just KeyDown notification.
+            assert!(!crate::keyboard::listens(&surface, &first));
+            assert!(!crate::keyboard::listens(&surface, &second));
+            focus(&first);
+            assert!(first.is_focus());
+            let code = keycode(gdk::Key::Return);
+            let down = || {
+                press(
+                    &surface,
+                    Some(window.upcast_ref()),
+                    None,
+                    gdk::Key::Return,
+                    code,
+                    gdk::ModifierType::empty(),
+                    0,
+                )
+            };
+            let flush = || {
+                let (sent, received) = std::sync::mpsc::channel();
+                surface.control(|control| {
+                    control.flush(move |done| {
+                        let _ = sent.send(done);
+                    });
+                });
+                assert!(wait_until(|| received.try_recv() == Ok(true)));
+            };
+            down();
+            flush();
+            assert_eq!(*nodes.lock().unwrap(), ["first"]);
+            assert!(wait_until(|| {
+                if move_focus {
+                    second.is_focus()
+                } else {
+                    first.is_focus()
+                }
+            }));
+            // The same physical key goes down again without an intervening
+            // release, just as GDK delivers an auto-repeat.
+            let consumed = down();
+            flush();
+            assert_eq!(
+                *nodes.lock().unwrap(),
+                ["first"],
+                "a held Return must not press again"
+            );
+            assert!(consumed, "a repeated control key must not propagate");
+            assert!(crate::keyboard::held_key(&surface, code));
+            crate::keyboard::released(
+                &surface,
+                Some(&window),
+                focused_view(&surface, &window).as_ref(),
+                gdk::Key::Return,
+                code,
+                gdk::ModifierType::empty(),
+                0,
+            );
+            assert!(!crate::keyboard::held_key(&surface, code));
+            down();
+            flush();
+            assert_eq!(
+                *nodes.lock().unwrap(),
+                ["first", if move_focus { "second" } else { "first" }]
+            );
+            window.destroy();
+        });
+    }
+
+    #[test]
+    fn a_held_return_presses_a_stop_once() {
+        repeated_return(false);
+    }
+
+    #[test]
+    fn a_return_repeat_does_not_press_the_stop_focused_by_its_handler() {
+        repeated_return(true);
     }
 
     #[test]
