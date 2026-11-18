@@ -158,6 +158,22 @@
   `ViewProps::screen_order` (its axis): the platforms read its cells in the order they are on screen, as they read a
   scroll view's content, since recycled cells are not in their rows' order in the tree. Lists of their
   own pay nothing (`crates/nsh-core/src/core/parent_viewport.rs`).
+- **Drawing on Android**: a scroll view's content (`ScrollBox.Content`) draws only its direct children (a list's
+  cells, a `<Scroll>`'s top-level children) within its viewport and a margin around it (a quarter of the scroll
+  view's larger side, at least 64 dp: `ScrollCull`), so the render thread does not walk and record a list's whole
+  overscan every frame. The rest stay laid out and attached (binding, focus and accessibility see them). A child's
+  reach is its bounds, its descendants' layout overflow and what its own decoration draws outside them (outer box
+  shadows, outline, elevation, a shader's overflow); what a descendant draws outside the child's reach is covered by
+  half the margin (at least 32 dp). Hardware scrolling replays the content's display list without drawing it, so
+  the content draws again when the viewport goes half the margin past what it drew for, before what it left out
+  shows. Never left out: a zooming scroll view's content; children translated, scaled, rotated or mirrored (a
+  right-to-left horizontal list's cells, so such lists draw every bound cell), in transient state or under a view
+  animation; children holding a descendant transformed more than 16 dp past its own bounds outside a clipping
+  ancestor (a pinned header built inside a row, a large static translation), and children holding an app's native
+  component (`ComponentBox`, which may draw through a surface). A child left out that moves without a layout draws
+  again only through `ScrollBox.Content.moved`, which the mounter's transforms, sticky cells and overflow call, and a
+  descendant pins its child through `ScrollBox.Content.inserted` and `moved`: a new path that moves or transforms a
+  view calls `moved` too.
 - **List internals** (the window, binding cells, recycling): `crates/nsh-core/src/core/list.rs`; its rows under a
   layout animation (they slide though the core scrolls the list, a recycled cell appears in place): `core/list_motion.rs`
   (`docs/dev/animation.md` "Layout animation").

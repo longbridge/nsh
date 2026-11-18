@@ -109,12 +109,356 @@ final class ScrollBox extends FrameLayout implements Node {
     /** A smooth scroll of the host's may still be running. */
     private boolean hostAnimating;
 
-    /** The scrolled content, sized by the core (`ScrollContent`). */
+    /**
+     * The scrolled content, sized by the core (`ScrollContent`). In a
+     * scroll view that does not zoom it draws only its children (rows) near
+     * the viewport ({@link ScrollCull}): the rest stay laid out and attached,
+     * so list binding, focus and accessibility see them as before. A row is
+     * drawn wherever it is while it is translated, scaled, rotated or
+     * mirrored, animates, or holds a descendant that pins it (see
+     * {@link #inserted}): one transformed well past its own bounds, or an
+     * app's native component.
+     */
     static final class Content extends Box {
         int contentWidth, contentHeight;
+        /** The viewport in the content's px (left, top, right, bottom). */
+        private final int[] viewport = new int[4];
+        /** While {@link #dispatchDraw} runs: whether it culls, with this
+         * margin, and whether it records the display list. */
+        private boolean culls, recording;
+        private int margin;
+        /** {@link #margin} for a scroll view of this size and density. */
+        private int marginWidth = -1, marginHeight = -1;
+        private float marginDensity;
+        /**
+         * What its display list was last recorded for: the viewport and
+         * margin, and the children left out; {@code culled} is false once
+         * that recording did not cull or is out of date (it draws again).
+         */
+        private final int[] drawn = new int[4];
+        private int drawnMargin;
+        private boolean culled;
+        private final java.util.Set<View> skipped =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        /**
+         * Rows kept drawn wherever they are, with the descendants that pin
+         * them; a descendant pinned for its transform carries its row as tag
+         * {@link #PIN}, so it is unpinned when the transform goes.
+         */
+        private final java.util.IdentityHashMap<View, java.util.ArrayList<View>> pins = new java.util.IdentityHashMap<>();
+        /** Scratch for {@link #skips} and {@link #excess} (main thread). */
+        private final float[] overflowScratch = new float[4], paintScratch = new float[4];
+        private final int[] reachScratch = new int[4];
+        private final android.graphics.RectF mapped = new android.graphics.RectF();
+
+        /** Tag key of the row a descendant's transform pins (an id unlikely to clash, as `Effects.R_LAYER`). */
+        private static final int PIN = 0x7f0e7f02;
 
         Content(Context context, Mounter mounter, int id) {
             super(context, mounter, id);
+        }
+
+        /**
+         * Fills {@link #viewport}; false where it does not cull: a zooming
+         * scroll view scales the content without drawing it again, and a
+         * scroll view not laid out yet shows nothing to cull against. The
+         * platform scroll views place the content at their padding and
+         * never transform it.
+         */
+        private boolean viewport() {
+            ViewParent parent = getParent();
+            if (!(parent instanceof ScrollView || parent instanceof HorizontalScrollView)) return false;
+            View scroller = (View) parent;
+            int w = scroller.getWidth(), h = scroller.getHeight();
+            if (w <= 0 || h <= 0) return false;
+            int x = scroller.getScrollX() - getLeft(), y = scroller.getScrollY() - getTop();
+            viewport[0] = x;
+            viewport[1] = y;
+            viewport[2] = x + w;
+            viewport[3] = y + h;
+            if (w != marginWidth || h != marginHeight || mounter.density != marginDensity) {
+                marginWidth = w;
+                marginHeight = h;
+                marginDensity = mounter.density;
+                margin = ScrollCull.margin(w, h, mounter.density);
+            }
+            return true;
+        }
+
+        @Override
+        protected void dispatchDraw(Canvas canvas) {
+            culls = viewport();
+            // Only a hardware canvas records the display list that later
+            // frames replay; a software drawing is drawn whole each time.
+            recording = canvas.isHardwareAccelerated();
+            if (recording) {
+                skipped.clear();
+                culled = culls;
+                if (culls) {
+                    System.arraycopy(viewport, 0, drawn, 0, 4);
+                    drawnMargin = margin;
+                }
+            }
+            try {
+                super.dispatchDraw(canvas);
+            } finally {
+                culls = recording = false;
+            }
+        }
+
+        @Override
+        protected boolean drawChild(Canvas canvas, View child, long time) {
+            if (culls && skips(child, viewport, margin)) {
+                if (recording) skipped.add(child);
+                return false;
+            }
+            return super.drawChild(canvas, child, time);
+        }
+
+        @Override
+        public void onViewRemoved(View child) {
+            super.onViewRemoved(child);
+            // A row that left keeps nothing here; one inserted again is
+            // scanned again (`inserted`).
+            skipped.remove(child);
+            java.util.ArrayList<View> by = pins.remove(child);
+            if (by != null) {
+                for (View d : by) if (d.getTag(PIN) == child) d.setTag(PIN, null);
+            }
+        }
+
+        /** Whether {@code child} is left out of a drawing for {@code viewport} and {@code margin}. */
+        private boolean skips(View child, int[] viewport, int margin) {
+            if (!far(child, viewport, margin)) return false;
+            // The cheap checks first: fields, then the render node's.
+            if (child.hasTransientState() || child.getAnimation() != null) return false;
+            if (!identity(child)) return false;
+            return !pinned(child);
+        }
+
+        /** Whether what {@code child} may draw in lies wholly outside {@code viewport} and {@code margin}. */
+        private boolean far(View child, int[] viewport, int margin) {
+            int left = child.getLeft(), top = child.getTop(), right = child.getRight(), bottom = child.getBottom();
+            // Descendants placed outside it (a dropdown under its field).
+            android.graphics.RectF o = child instanceof Box ? ((Box) child).overflow : null;
+            float[] overflow = null;
+            if (o != null) {
+                overflow = overflowScratch;
+                overflow[0] = o.left;
+                overflow[1] = o.top;
+                overflow[2] = o.right;
+                overflow[3] = o.bottom;
+            }
+            int[] reach = reachScratch;
+            ScrollCull.reach(left, top, right, bottom, overflow, null, reach);
+            if (!ScrollCull.outside(reach, viewport[0], viewport[1], viewport[2], viewport[3], margin)) return false;
+            // Only a row outside pays for what it draws outside its bounds.
+            Decor decor = Mounter.decor(child);
+            int shader = child instanceof Box ? ((Box) child).shaderOverflow() : 0;
+            boolean paints = decor != null
+                    ? ScrollCull.paint(decor.boxShadows, decor.boxShadowColors, decor.outlineWidth, decor.outlineColor,
+                            decor.outlineOffset, child.getZ(), shader, paintScratch)
+                    : ScrollCull.paint(null, null, 0, 0, 0, child.getZ(), shader, paintScratch);
+            if (!paints) return true;
+            ScrollCull.reach(left, top, right, bottom, overflow, paintScratch, reach);
+            return ScrollCull.outside(reach, viewport[0], viewport[1], viewport[2], viewport[3], margin);
+        }
+
+        private static boolean identity(View v) {
+            return ScrollCull.identity(v.getTranslationX(), v.getTranslationY(), v.getScaleX(), v.getScaleY(),
+                    v.getRotation(), v.getRotationX(), v.getRotationY());
+        }
+
+        /** Whether a descendant keeps {@code row} drawn; drops the ones no longer in it. */
+        private boolean pinned(View row) {
+            if (pins.isEmpty()) return false;
+            java.util.ArrayList<View> by = pins.get(row);
+            if (by == null) return false;
+            for (int i = by.size() - 1; i >= 0; i--) {
+                View d = by.get(i);
+                // Gone from the row, or its component destroyed.
+                boolean still = under(d, row)
+                        && (d.getTag(PIN) == row || d instanceof ComponentBox && ((ComponentBox) d).hosted());
+                if (!still) {
+                    by.remove(i);
+                    if (d.getTag(PIN) == row) d.setTag(PIN, null);
+                }
+            }
+            if (!by.isEmpty()) return true;
+            pins.remove(row);
+            return false;
+        }
+
+        /** Whether {@code v} is {@code row} or in it. */
+        private static boolean under(View v, View row) {
+            for (Object at = v; at instanceof View; at = ((View) at).getParent()) {
+                if (at == row) return true;
+            }
+            return false;
+        }
+
+        /** Whether {@code v} keeps its descendants inside its bounds. */
+        private static boolean clips(View v) {
+            return v instanceof Box && ((Box) v).clip || v instanceof ScrollBox;
+        }
+
+        /** Keeps {@code row} drawn for {@code d}; draws again where the last drawing left it out. */
+        private void pin(View row, View d) {
+            java.util.ArrayList<View> by = pins.get(row);
+            if (by == null) pins.put(row, by = new java.util.ArrayList<>(2));
+            if (!by.contains(d)) by.add(d);
+            if (culled && skipped.contains(row)) {
+                culled = false;
+                invalidate();
+            }
+        }
+
+        /** {@code d} no longer pins {@code row} for its transform (an app's component still does). */
+        private void unpin(View row, View d) {
+            d.setTag(PIN, null);
+            if (d instanceof ComponentBox && ((ComponentBox) d).hosted()) return;
+            java.util.ArrayList<View> by = pins.get(row);
+            if (by == null) return;
+            by.remove(d);
+            if (by.isEmpty()) pins.remove(row);
+        }
+
+        /**
+         * How far {@code v}'s transform takes it beyond its own bounds, px
+         * (NaN where it cannot be told).
+         */
+        private float excess(View v) {
+            int w = v.getWidth(), h = v.getHeight();
+            mapped.set(0, 0, w, h);
+            v.getMatrix().mapRect(mapped);
+            return ScrollCull.excess(mapped.left, mapped.top, mapped.right, mapped.bottom, w, h);
+        }
+
+        /**
+         * Pins or unpins {@code row} for descendant {@code v}'s transform;
+         * {@code clipped}: an ancestor of it within the row (or the row)
+         * clips.
+         */
+        private void transformed(View v, View row, boolean clipped) {
+            // A clipped one never pins: its transform is not even read.
+            boolean pin = !clipped && !identity(v)
+                    && ScrollCull.pins(excess(v), Math.round(ScrollCull.PIN_EXCESS_DP * mounter.density), clipped);
+            Object was = v.getTag(PIN);
+            if (pin) {
+                if (was == row) return;
+                if (was instanceof View) unpinFrom((View) was, v);
+                v.setTag(PIN, row);
+                pin(row, v);
+            } else if (was instanceof View) {
+                unpinFrom((View) was, v);
+            }
+        }
+
+        /** Unpins {@code row}, wherever it went, for {@code d}. */
+        private static void unpinFrom(View row, View d) {
+            ViewParent p = row.getParent();
+            if (p instanceof Content) ((Content) p).unpin(row, d);
+            else d.setTag(PIN, null);
+        }
+
+        /** Whether the app's component {@code v} holds is in a row: pins it in every content above. */
+        private static void hosted(View v) {
+            for (View at = v; ; ) {
+                ViewParent p = at.getParent();
+                if (p instanceof Content) ((Content) p).pin(at, v);
+                if (!(p instanceof View)) return;
+                at = (View) p;
+            }
+        }
+
+        /**
+         * {@code v} was inserted ({@code Mounter.insert}), or an app's
+         * component attached to it: pins the rows above for what it holds
+         * that the content cannot bound. A transform on a descendant of a row
+         * escapes the row's reach (the core's overflow is the layout's), and
+         * {@link #moved} only follows it once it is in the tree; an app's
+         * component may draw through a surface (a SurfaceView's map or
+         * camera) that stays hidden on some Android versions once its render
+         * node leaves the content's display list. A row inserted itself is
+         * scanned whole, once.
+         */
+        static void inserted(View v) {
+            View row = v;
+            boolean clipped = false;
+            ViewParent p = v.getParent();
+            while (!(p instanceof Content)) {
+                if (!(p instanceof View)) return;
+                row = (View) p;
+                clipped |= clips(row);
+                p = row.getParent();
+            }
+            ((Content) p).scan(v, row, clipped);
+        }
+
+        /** Pins {@code row} for {@code v} and its descendants; {@code clipped}: as {@link #transformed}'s. */
+        private void scan(View v, View row, boolean clipped) {
+            if (v instanceof ComponentBox && ((ComponentBox) v).hosted()) hosted(v);
+            if (v != row && (v.getTag(PIN) != null || !clipped && !identity(v))) transformed(v, row, clipped);
+            if (!(v instanceof ViewGroup)) return;
+            ViewGroup g = (ViewGroup) v;
+            boolean inside = clipped || clips(v);
+            for (int i = 0; i < g.getChildCount(); i++) scan(g.getChildAt(i), row, inside);
+        }
+
+        /**
+         * The viewport moved or changed size (a scroll, the scroll view
+         * resized, its padding moved the content): draws the children again
+         * once it went half the margin past what they were drawn for.
+         * Scrolling replays the display list, which keeps what it left out.
+         */
+        void viewportChanged() {
+            if (!culled) return;
+            if (!viewport() || ScrollCull.stale(drawn, drawnMargin, viewport[0], viewport[1], viewport[2], viewport[3])) {
+                culled = false;
+                invalidate();
+            }
+        }
+
+        /**
+         * {@code v} may have moved, changed size, transform, decoration or
+         * reach. A view property (a transform from styles, transitions,
+         * keyframes or animated values, a sticky cell pinned) updates only
+         * its render node, and a new overflow area or decoration of a row
+         * changes only what this content decides: where {@code v} is a row
+         * this content left out and would draw now, it draws again. A frame
+         * change ({@code Box.place}) already has the parent record again
+         * (`View.setFrame` invalidates it) and calls this as a guard. A row it
+         * drew is in its display list wherever it goes; one still left out
+         * (an animation of its opacity, a row moved further away) costs
+         * nothing. Below a row, a transform pins or unpins the row
+         * ({@link #inserted}); a view in no content, or with no transform
+         * and none pinning, returns at once.
+         */
+        static void moved(View v) {
+            ViewParent p = v.getParent();
+            if (p instanceof Content) {
+                Content content = (Content) p;
+                if (content.culled && content.skipped.contains(v) && !content.skips(v, content.drawn, content.drawnMargin)) {
+                    content.culled = false;
+                    content.invalidate();
+                }
+                return;
+            }
+            if (!(p instanceof View) || v.getTag(PIN) == null && identity(v)) return;
+            View row = v;
+            boolean clipped = false;
+            while (!(p instanceof Content)) {
+                if (!(p instanceof View)) {
+                    // Out of the tree: no longer pins where it was.
+                    Object was = v.getTag(PIN);
+                    if (was instanceof View) unpinFrom((View) was, v);
+                    return;
+                }
+                row = (View) p;
+                clipped |= clips(row);
+                p = row.getParent();
+            }
+            ((Content) p).transformed(v, row, clipped);
         }
 
         @Override
@@ -136,7 +480,11 @@ final class ScrollBox extends FrameLayout implements Node {
         spinner.setVisibility(GONE);
         int size = Math.round(28 * mounter.density);
         addView(spinner, new LayoutParams(size, size, android.view.Gravity.CENTER_HORIZONTAL | android.view.Gravity.TOP));
-        content.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> payOwed());
+        content.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            // Padding (`contentInset`, the keyboard's room) moved it.
+            content.viewportChanged();
+            payOwed();
+        });
         build();
     }
 
@@ -167,9 +515,16 @@ final class ScrollBox extends FrameLayout implements Node {
         scroller.setVerticalScrollBarEnabled(!horizontal);
         scroller.setHorizontalScrollBarEnabled(horizontal);
         scroller.addView(content, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        // The view or its content changed size: scroll what was clamped.
-        scroller.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> payOwed());
+        // The view or its content changed size: scroll what was clamped,
+        // and draw what a larger viewport shows.
+        scroller.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            content.viewportChanged();
+            payOwed();
+        });
         scroller.setOnScrollChangeListener((v, x, y, ox, oy) -> {
+            // Every scroll comes here (drags, flings, smooth and
+            // programmatic scrolls): the content draws what comes near.
+            content.viewportChanged();
             // Layout may clamp against a mixture of old and new pixel
             // sizes. Report only after restoring the logical offset.
             if (rescaling) return;
@@ -279,6 +634,7 @@ final class ScrollBox extends FrameLayout implements Node {
             float extra = mounter.stickyOffset(stickyCells[i]);
             float t = Math.max(0, Math.min(offset + extra - stickyStart[i], stickyEnd[i] - stickyStart[i]));
             if (horizontal) v.setTranslationX(t); else v.setTranslationY(t);
+            Content.moved(v);
         }
     }
 

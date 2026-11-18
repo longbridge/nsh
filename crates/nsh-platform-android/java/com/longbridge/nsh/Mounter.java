@@ -454,6 +454,8 @@ final class Mounter {
                         ((Box) v).overflow = some
                                 ? new android.graphics.RectF(x * density, y * density, (x + w) * density, (y + h) * density)
                                 : null;
+                        // What it reaches decides whether a scroll view's content draws it.
+                        ScrollBox.Content.moved(v);
                     }
                     break;
                 }
@@ -905,6 +907,8 @@ final class Mounter {
             return;
         }
         ((ComponentBox) v).attach(factory.create(new NshComponentContext(host, id)));
+        // Attached after its box was inserted: the rows above it stay drawn.
+        ScrollBox.Content.inserted(v);
     }
 
     private static ViewGroup container(View parent) {
@@ -935,6 +939,8 @@ final class Mounter {
         }
         group.addView(child, index);
         Box.place(child);
+        // What it holds may keep a scroll view's row drawn wherever it is.
+        ScrollBox.Content.inserted(child);
         // Cells of a mirrored list flip back.
         int mirror = parent instanceof ScrollBox && mirrors.get(parentId) == 1 ? 2 : 0;
         if (mirrors.get(childId) != mirror) {
@@ -1144,7 +1150,7 @@ final class Mounter {
         if (v instanceof ImageBox) loadImage((ImageBox) v);
     }
 
-    private Decor decor(View v) {
+    static Decor decor(View v) {
         if (v instanceof StackBox.ScreenBox) return ((StackBox.ScreenBox) v).root.decor;
         if (v instanceof StackBox) return ((StackBox) v).decor;
         if (v instanceof Box) return ((Box) v).decor;
@@ -1555,6 +1561,8 @@ final class Mounter {
         v.setRotationX(d.rotateX);
         v.setRotationY(back * d.rotateY);
         setPerspective(v, d.perspective);
+        // A transform moves it without a layout (transitions, keyframes).
+        ScrollBox.Content.moved(v);
         Decor backface = decor(v);
         if (backface != null) backface.applyBackface(v);
         Decor decor = decor(v);
@@ -1909,6 +1917,8 @@ final class Mounter {
                 }
                 default: break;
             }
+            // An animated transform moves it without a layout.
+            if (prop >= 1 && prop <= 9 && prop != 7) ScrollBox.Content.moved(v);
         }
         if (out[0] != 0) host.requestFrames();
     }

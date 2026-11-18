@@ -23,6 +23,17 @@ final class ComponentBox extends Box {
         addView(component.view());
     }
 
+    /**
+     * Whether it holds an app's component, whose view a scroll view's
+     * content never leaves out ({@code ScrollBox.Content#inserted}): it may
+     * draw through a surface. NSH's own components are framework views.
+     */
+    boolean hosted() {
+        NshComponent c = component;
+        return c != null && !(c instanceof SwitchComponent || c instanceof TabBarComponent
+                || c instanceof DateTimePickerComponent);
+    }
+
     /** Hands animated slot {@code slot} to the component when it changed (outputs come on every frame). */
     void setAnimated(int slot, boolean color, float value) {
         NshComponent c = component;

@@ -389,6 +389,20 @@ Things that were found the hard way. Read the section of the area you change bef
   `Choreographer` callback, posted only while a request waits, not from the host's `ViewTreeObserver`: a dialog's
   content shows in the dialog's own window, whose tree the host's observer never hears from, while `Choreographer`
   frames reach every window of the thread.
+- **Android, scroll content left out of its display list**: `ScrollBox.Content` draws only the direct children
+  near its viewport (`docs/dev/scrolling-and-lists.md` "Drawing on Android"). A view property set on a child it left
+  out (`setTranslationY`, `setScaleX`, ...) updates only the child's RenderNode and does not draw the content again,
+  so the child would stay out wherever it moved: what moves a content child without a layout calls
+  `ScrollBox.Content.moved` (`Mounter.applyDynamic` and animated outputs, sticky cells, overflow, shaders). A new
+  frame does have the content record again (`View.setFrame` sets `PFLAG_INVALIDATED` on the parent), and
+  `Box.place` calls `moved` only as a guard. The child's reach comes from the core's overflow, which is the layout's
+  and leaves out transforms: a descendant transformed past its bounds pins its row (`Content.inserted` on insertion,
+  `moved` on later transforms), and only while no ancestor within the row clips it. Hosted components pin their rows
+  too: a SurfaceView's position callbacks hide its surface once its RenderNode leaves the tree, and some versions
+  may not show it again. A child left out loses its display list as a hidden view does (above) and records it
+  again once: when it comes back within the margin, before it shows, or earlier when a change below the content has
+  the platform update its children's display lists without drawing it again (`ViewGroup.dispatchGetDisplayList`
+  walks every visible child, drawn or not).
 - **Android, opacity animations and outer box shadows**: at alpha < 1 with overlapping rendering (the default) HWUI composites the view into an offscreen buffer clipped to its bounds, cutting the outer box shadows the `Decor` draws outside them: the shadow vanishes for the whole animation and pops back when it ends. Decor-bearing views therefore report `hasOverlappingRendering() == false` while they carry outer shadows (the alpha then applies per draw op and the shadow fades with the content), at the cost of overlapping content inside such a view blending imprecisely while it fades.
 - **Android, JNI event maps intern their keys from a fixed list** (`Java_com_longbridge_nsh_Native_eventMap`): a new payload key must be
   added there or it is dropped silently.

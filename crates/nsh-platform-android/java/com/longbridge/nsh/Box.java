@@ -148,7 +148,14 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         f.width = w;
         f.height = h;
         v.measure(MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY));
+        int left = v.getLeft(), top = v.getTop(), right = v.getRight(), bottom = v.getBottom();
         v.layout(f.left, f.top, f.right, f.bottom);
+        // A row a scroll view's content left out may come into view by
+        // moving or by growing from where it stands: `View.setFrame` has
+        // the content record again, and this guards it; below a row, a
+        // transformed view's size decides whether it pins the row
+        // (`ScrollBox.Content`).
+        if (left != f.left || top != f.top || right != f.right || bottom != f.bottom) ScrollBox.Content.moved(v);
     }
 
     @Override
@@ -224,11 +231,18 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
             shown().invalidate();
         }
         watch();
+        // How far it draws decides whether a scroll view's content draws it.
+        ScrollBox.Content.moved(this);
     }
 
     /** Its node is deleted: its shader goes, with its pictures and the surface it drew over. */
     void dropShader() {
         if (shader) setShader(false, FILL, 0, 0);
+    }
+
+    /** How far its shader's frames reach beyond the box, px (0 without a shader). */
+    int shaderOverflow() {
+        return shader ? shaderOverflow : 0;
     }
 
     /** Whether it draws over the whole surface. */
