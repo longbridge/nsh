@@ -76,6 +76,8 @@ mod tabs;
 mod term;
 pub mod terminal;
 pub mod text_view;
+#[cfg(not(target_arch = "wasm32"))]
+mod updater_prompt;
 
 /// `EmojiPicker`'s emoji (`emoji_picker/emoji.tsv`): the native runtimes
 /// embed them; `nsh` publishes them next to a web runtime, which fetches
@@ -513,6 +515,10 @@ pub mod parts {
     /// `TextView`: Markdown and HTML documents.
     pub fn text_view(registry: &mut Registry) {
         registry.register::<TextView>().module::<TextView>();
+        // The window of `promptForUpdate`, which shows the notes in a
+        // `TextView`. Apps on the web do not update.
+        #[cfg(not(target_arch = "wasm32"))]
+        registry.setup(crate::updater_prompt::install);
     }
 
     /// The `Editor`: a code editor.
