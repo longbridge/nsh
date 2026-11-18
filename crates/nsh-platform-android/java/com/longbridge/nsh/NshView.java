@@ -219,10 +219,10 @@ public class NshView extends FrameLayout {
         if (Build.VERSION.SDK_INT >= 30) {
             KeyboardAnimation.install(this, mounter);
         }
-        // The back key where the window has no OnBackInvokedCallback in
-        // effect (below Android 13, or `enableOnBackInvokedCallback` off).
-        // Android 8 has no such listener: there the activity's
-        // `onBackPressed` hands the press to `handleBack`.
+        // The back key the window sends down the views (below Android 13,
+        // `enableOnBackInvokedCallback` off, or Android 16). Android 8 has
+        // no such listener: there the activity's `onBackPressed` hands the
+        // press to `handleBack`.
         if (Build.VERSION.SDK_INT >= 28) addOnUnhandledKeyEventListener((v, e) -> onBackKey(e));
         // Apps keep their data in <dataDir>/<app id>: nsh in the files
         // directory unless the development host's test session says.
@@ -1026,15 +1026,26 @@ public class NshView extends FrameLayout {
         return mounter.handleBack();
     }
 
+    /**
+     * The window's back callback was invoked: a back gesture, or the back
+     * key's release, which the focused view hears first
+     * ({@link KeyDispatch#backInvoked}).
+     */
+    void backInvoked() {
+        keys.backInvoked();
+        handleBack();
+    }
+
     /** The back key's press went to the app (its release does too). */
     private boolean backKeyDown;
 
     /**
-     * The back key, as the window dispatches it without an
-     * {@code OnBackInvokedCallback} in effect: no view on the focus path took
-     * it, and the activity is next ({@code onBackPressed}). The app takes it
-     * while it wants back presses; with the callback in effect the window
-     * never sends the key, so a press is never handled twice.
+     * The back key, as the window dispatches it: no view on the focus path
+     * took it, and the activity is next ({@code onBackPressed}). The app
+     * takes it while it wants back presses. With an
+     * {@code OnBackInvokedCallback} in effect, Android 13 to 15 never send
+     * the key; Android 16 sends it after invoking the callback, with the
+     * release cancelled, so a press is never handled twice.
      */
     private boolean onBackKey(android.view.KeyEvent e) {
         if (e.getKeyCode() != android.view.KeyEvent.KEYCODE_BACK) return false;
@@ -1046,6 +1057,10 @@ public class NshView extends FrameLayout {
         }
         if (e.getAction() != android.view.KeyEvent.ACTION_UP || !backKeyDown) return false;
         backKeyDown = false;
+        // Taking the press captured the key: the window hands its release
+        // to this listener alone, before the views. The focused view still
+        // hears it, as it heard the press.
+        keys.dispatchKeyEvent(e);
         if (!e.isCanceled()) handleBack();
         return true;
     }
@@ -1402,3 +1417,4 @@ public class NshView extends FrameLayout {
         });
     }
 }
+

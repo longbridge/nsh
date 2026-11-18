@@ -1,5 +1,6 @@
 package com.longbridge.nsh;
 
+import android.os.SystemClock;
 import android.util.SparseArray;
 import android.view.KeyEvent;
 import android.view.View;
@@ -44,6 +45,8 @@ final class KeyDispatch {
     private final SparseArray<View> nativeDown = new SparseArray<>();
     /** A native press already cancelled while its key stayed held: its real up is cancelled too. */
     private final SparseArray<View> nativeCancelled = new SparseArray<>();
+    /** Back's press, reported here and not released yet ({@link #backInvoked}). */
+    private KeyEvent backDown;
 
     KeyDispatch(Mounter mounter, View root, int fallback) {
         this.mounter = mounter;
@@ -59,6 +62,8 @@ final class KeyDispatch {
                 // A fresh press: any lost release state of this code is stale.
                 nativeDown.remove(e.getKeyCode());
                 nativeCancelled.remove(e.getKeyCode());
+                // The window recycles its events: keep a copy.
+                if (e.getKeyCode() == KeyEvent.KEYCODE_BACK) backDown = new KeyEvent(e);
             }
             if (keyEvent(e)) {
                 // A repeat or a re-down consumed the key after native
@@ -84,6 +89,7 @@ final class KeyDispatch {
             return false;
         }
         if (action == KeyEvent.ACTION_UP) {
+            if (e.getKeyCode() == KeyEvent.KEYCODE_BACK) backDown = null;
             boolean consumed = keyEvent(e);
             View cancelled = nativeCancelled.get(e.getKeyCode());
             if (cancelled != null) {
@@ -116,9 +122,25 @@ final class KeyDispatch {
                 node == 0);
     }
 
+    /**
+     * The window's back callback was invoked. From Android 16 the window
+     * invokes it on Back's release, then sends that release on, cancelled.
+     * Going back may remove the focused view, so the release of a press
+     * reported here is reported now, before the app goes back; the
+     * cancelled release that follows only forgets the key.
+     */
+    void backInvoked() {
+        KeyEvent down = backDown;
+        if (down == null) return;
+        dispatchKeyEvent(new KeyEvent(down.getDownTime(), SystemClock.uptimeMillis(), KeyEvent.ACTION_UP,
+                down.getKeyCode(), 0, down.getMetaState(), down.getDeviceId(), down.getScanCode(),
+                down.getFlags(), down.getSource()));
+    }
+
     /** The window lost its focus or goes away: no held key has a release here. */
     void focusLost() {
         tabMoved = false;
+        backDown = null;
         nativeDown.clear();
         nativeCancelled.clear();
     }

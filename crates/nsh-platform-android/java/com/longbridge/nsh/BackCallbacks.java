@@ -15,7 +15,7 @@ final class BackCallbacks {
 
     static Object create(NshView view, Mounter mounter) {
         if (Build.VERSION.SDK_INT >= 34) return new Animated(view, mounter);
-        return (OnBackInvokedCallback) view::handleBack;
+        return (OnBackInvokedCallback) view::backInvoked;
     }
 
     @TargetApi(34)
@@ -55,7 +55,7 @@ final class BackCallbacks {
         @Override
         public void onBackInvoked() {
             stack = null;
-            view.handleBack();
+            view.backInvoked();
         }
     }
 }
