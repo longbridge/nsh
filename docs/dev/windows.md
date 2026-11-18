@@ -438,7 +438,9 @@ measured and are not used: they bring back that latency (48 ms) for the same fra
   closed with its views). The layers are presented unsynchronized with the window's swap chain, so for a frame NSH
   content above and below a page may come from consecutive frames while both animate. `baseUrl` answers only the
   document's request: other requests (images, scripts, links) go to the network, and `http(s)` base URLs are the ones
-  WebView2 lets the app answer. Touch and pen input reaches pages as pointer input when it comes from the system
+  WebView2 lets the app answer. A new window (`target="_blank"`, `window.open`) opens nothing, as on the other
+  platforms (`NewWindowRequested` is handled: WebView2's own pop-up would be a browser window outside the `webview`
+  capability); one for a URL that is not granted reports `onError` like a navigation. Touch and pen input reaches pages as pointer input when it comes from the system
   (swipe navigation needs it). An offscreen drawing of the window has no pages (`PrintWindow`'s capture does). Without
   the WebView2 Runtime (it comes with Windows 11; Windows 10 gets it with Edge) a web view shows a neutral
   placeholder.
