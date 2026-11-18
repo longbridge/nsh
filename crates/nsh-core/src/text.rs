@@ -1430,6 +1430,14 @@ pub struct ApproxPrepared {
     breaks: Vec<usize>,
 }
 
+impl ApproxPrepared {
+    /// Characters this preparation covers.
+    #[doc(hidden)]
+    pub fn chars(&self) -> usize {
+        self.chars
+    }
+}
+
 impl Default for ApproxPrepared {
     fn default() -> Self {
         let font = px(14.0);
