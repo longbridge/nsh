@@ -291,6 +291,7 @@ const terminalOpen = signal(true);
 | `contentClass`、`contentStyle` | `.content_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每个组的内容框架，面板显示在其中。 |
 | `dropIndicatorClass`、`dropIndicatorStyle` | `.drop_indicator_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 放置指示。 |
 | `handleClass`、`handleStyle` | `.handle_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每个手柄的指示器，位于分栏的组之间以及每个停靠区的边缘；`group-hover:` 和 `group-active:` 跟随手柄。除非另有指定，它横跨手柄 1 点粗、与手柄等长，所以 `bg-border` 在两个方向上都是一条细线；`w-[3px]` / `h-[3px]` 可以加粗。 |
+| `renderHandle` | `.render_handle(\|handle\| ..)` | `(handle: ResizeHandleContext) => JSX.Element` | 无 | 分栏的组之间每个手柄的指示器里的内容，手柄的 `state` 变化时重新绘制：一个抓手、一个图标（即 [Resizable](./resizable.md) 的 `renderHandle`）。停靠区边缘的手柄仍使用由类名设置样式的指示器。 |
 | `handleThumbClass`、`handleThumbStyle` | `.handle_thumb_class(..)`、`.handle_thumb_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每个手柄的握把：居中在线上，按竖线的方向竖着绘制，在横线上转四分之一圈，所以一个类在两个方向上都适用。手柄悬停、按下和拖动时它始终是同一个视图，所以 `group-hover:` 和 `group-active:` 类会以过渡动画改变它（`h-11 w-[3px] rounded-full bg-muted-foreground opacity-0 scale-y-0 transition group-hover:opacity-40 group-hover:scale-y-[0.45] group-active:opacity-90 group-active:scale-y-100`）。 |
 | `dockClass`、`dockStyle` | `.dock_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每个停靠区的框架。 |
 | `drawerClass`、`drawerStyle` | `.drawer_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 紧凑方式：左右停靠区的抽屉。 |
