@@ -1050,6 +1050,23 @@ pub fn write<H: Host>(h: H, id: u32, next: H::Value) {
     });
 }
 
+/// Brings memo `id` up to date without subscribing the running
+/// computation: what it writes as it runs (a list moving its cells'
+/// indices) lands before the caller reads it.
+pub fn refresh<H: Host>(h: H, id: u32) {
+    let n = &g(h).nodes[id as usize];
+    if n.kind != Kind::Memo || n.disposed || n.state == CLEAN {
+        return;
+    }
+    if n.state == STALE {
+        update_computation(h, id);
+    } else {
+        let updates = g(h).updates.take();
+        run_updates(h, false, || look_upstream(h, id, NONE));
+        g(h).updates = updates;
+    }
+}
+
 /// Solid's `readSignal`: brings a memo up to date, tracks, and returns
 /// another reference to the value.
 pub fn read<H: Host>(h: H, id: u32) -> H::Value {

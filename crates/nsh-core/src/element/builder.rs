@@ -523,13 +523,30 @@ pub(crate) type PlaceFn = Rc<dyn Fn(Child, Position) -> AnyElement>;
 pub struct Position {
     index: super::reactive::Node,
     count: super::reactive::Node,
+    /// The list's memo of its rows, which moves its cells' indices with
+    /// their rows: brought up to date before the index is read, so a cell
+    /// never reads the new rows at its row's old index.
+    rows: Option<super::reactive::Node>,
 }
 
 impl Position {
     /// The position read from signals (or memos) of the index and the
     /// count.
     pub(crate) fn of(index: super::reactive::Node, count: super::reactive::Node) -> Self {
-        Self { index, count }
+        Self {
+            index,
+            count,
+            rows: None,
+        }
+    }
+
+    /// A list cell's position, its index moved by the list's memo `rows`.
+    pub(crate) fn of_row(
+        index: super::reactive::Node,
+        count: super::reactive::Node,
+        rows: Option<super::reactive::Node>,
+    ) -> Self {
+        Self { index, count, rows }
     }
 
     /// A position that does not change (signals of the current owner).
@@ -540,12 +557,18 @@ impl Position {
     /// Its index, subscribing the running computation.
     #[track_caller]
     pub fn index(&self) -> usize {
+        if let Some(rows) = self.rows {
+            rows.refresh();
+        }
         self.index.with("a position", |i: &usize| *i)
     }
 
     /// How many there are, subscribing the running computation.
     #[track_caller]
     pub fn count(&self) -> usize {
+        if let Some(rows) = self.rows {
+            rows.refresh();
+        }
         self.count.with("a position", |n: &usize| *n)
     }
 

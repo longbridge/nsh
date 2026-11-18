@@ -81,6 +81,9 @@ struct VirtualListState {
     /// that run's.
     scope: Rc<std::cell::Cell<Option<crate::element::Owner>>>,
     row: RowFn,
+    /// The memo of its bound rows (count, keys) that moves its cells'
+    /// indices: what their positions bring up to date before reading.
+    rows_memo: Option<crate::element::reactive::Node>,
     count: u32,
     keys: Option<Rc<[u64]>>,
     separator: Option<SeparatorFn>,
@@ -2554,9 +2557,10 @@ impl<M: TextEngine> Core<M> {
                 let list = self.list_of(host);
                 // The wrapper reads its position from signals.
                 let count_signal = list.map(|list| self.list_count(list, count));
+                let rows_memo = list.and_then(|list| self.list_rows_memo(list));
                 let made = std::cell::Cell::new(None);
                 let build = || {
-                    let at = row_position(index, count, count_signal, &made);
+                    let at = row_position(index, count, count_signal, rows_memo, &made);
                     view().child(place(Child::row(), at)).into_element().0
                 };
                 // The wrapper is the placing component's.
@@ -2611,9 +2615,10 @@ impl<M: TextEngine> Core<M> {
                     }
                     Some((count, row, separator, rows, scope)) => {
                         let count_signal = Some(self.list_count(list, count));
+                        let rows_memo = self.list_rows_memo(list);
                         let made = std::cell::Cell::new(None);
                         let build = || {
-                            let at = row_position(index, count, count_signal, &made);
+                            let at = row_position(index, count, count_signal, rows_memo, &made);
                             let row = row(at);
                             // Between rows: after each but the last (before
                             // it, inverted), while it is not.
@@ -4764,6 +4769,7 @@ impl<M: TextEngine> Core<M> {
                 owner,
                 scope: Rc::default(),
                 row: list.row.clone(),
+                rows_memo: None,
                 count: 0,
                 keys: None,
                 separator: None,
@@ -4806,7 +4812,7 @@ impl<M: TextEngine> Core<M> {
             let slot = first.clone();
             let last: RefCell<Option<Rc<[u64]>>> = RefCell::new(None);
             let made = std::cell::Cell::new(false);
-            crate::element::computed(move || {
+            let memo = crate::element::computed(move || {
                 let (count, keys) = rows();
                 let diff = match (&*last.borrow(), &keys) {
                     (Some(old), Some(new)) => ListDiff::new(old, new),
@@ -4826,6 +4832,11 @@ impl<M: TextEngine> Core<M> {
                     *slot.borrow_mut() = Some((count, keys));
                 }
             });
+            self.components
+                .virtual_lists
+                .get_mut(&id)
+                .expect("list")
+                .rows_memo = Some(memo.node());
             first.take().expect("a memo runs when it is made")
         } else {
             let (count, keys) = crate::element::untracked(rows);
@@ -4935,6 +4946,12 @@ impl<M: TextEngine> Core<M> {
             .run(|| crate::element::create_root(|| crate::element::signal(count)));
         self.components.list_counts.insert(list, made);
         made.1
+    }
+
+    /// The memo that moves list `list`'s cells' indices, if its rows are
+    /// bound.
+    fn list_rows_memo(&self, list: NodeId) -> Option<crate::element::reactive::Node> {
+        self.components.virtual_lists.get(&list)?.rows_memo
     }
 
     /// List `list` goes: so do the count its cells read and its layout.
@@ -7875,13 +7892,14 @@ fn row_position(
     index: usize,
     count: usize,
     count_signal: Option<crate::element::Signal<usize>>,
+    rows: Option<crate::element::reactive::Node>,
     made: &std::cell::Cell<Option<crate::element::Signal<usize>>>,
 ) -> Position {
     match count_signal {
         Some(count) => {
             let index = crate::element::signal(index);
             made.set(Some(index));
-            Position::of(index.node(), count.node())
+            Position::of_row(index.node(), count.node(), rows)
         }
         None => Position::fixed(index, count),
     }

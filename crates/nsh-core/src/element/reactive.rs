@@ -391,6 +391,14 @@ impl Node {
         read_value(self.0.expect(what), true, f)
     }
 
+    /// Brings it up to date (a memo) without subscribing the running
+    /// computation; nothing once its owner is gone.
+    pub(crate) fn refresh(self) {
+        if self.0.live() {
+            r::refresh(Rust, self.0.id);
+        }
+    }
+
     /// Writes `value` to it (a signal's node): what read it runs again,
     /// unless the signal finds it equal.
     #[track_caller]

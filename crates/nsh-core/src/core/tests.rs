@@ -16203,6 +16203,84 @@ mod components {
         }
     }
 
+    thread_local! {
+        /// How many times a cell of `ShuffledRows` saw its row's id change.
+        static ID_FLIPS: Cell<usize> = const { Cell::new(0) };
+        /// The order `ShuffledRows` takes on a press (a seed).
+        static SHUFFLE: Cell<u64> = const { Cell::new(1) };
+    }
+
+    /// Keyed rows whose cells read their row's id in a memo of their own;
+    /// a press swaps a few rows among the first ones (all shown), so every
+    /// cell keeps its row.
+    #[component]
+    fn ShuffledRows() -> impl IntoElement {
+        let rows = signal((0..60).map(|i| format!("r{i}")).collect::<Vec<_>>());
+        view()
+            .flex_1()
+            .child(view().h(px(20.0)).on_press(move |_: &()| {
+                let mut s = SHUFFLE.get();
+                rows.update(|r| {
+                    for _ in 0..4 {
+                        s ^= s << 13;
+                        s ^= s >> 7;
+                        s ^= s << 17;
+                        let (a, b) = ((s % 12) as usize, ((s >> 8) % 12) as usize);
+                        r.swap(a, b);
+                    }
+                });
+                SHUFFLE.set(s);
+            }))
+            .child(
+                virtual_list(
+                    move || rows.with(Vec::len),
+                    move |at| {
+                        // The cell's own memo of its row's id: a sibling of
+                        // the list's memo of the keys, both reading `rows`.
+                        let last: Rc<std::cell::RefCell<Option<String>>> = Rc::default();
+                        let id = computed(move || {
+                            let now = rows.with(|r| r.get(at.index()).cloned());
+                            let before = last.replace(now.clone());
+                            if before.is_some() && before != now {
+                                ID_FLIPS.set(ID_FLIPS.get() + 1);
+                            }
+                            now
+                        });
+                        view()
+                            .h(px(40.0))
+                            .child(text(move || id.get().unwrap_or_default()))
+                    },
+                )
+                .keys(move || rows.get())
+                .estimated_item_size(px(40.0))
+                .flex_1(),
+            )
+    }
+
+    /// A keyed row's cell reads its row's index already moved with it: what
+    /// it reads of the new rows is its own row, never the one that was at
+    /// its old index, however its reads are ordered against the list's.
+    #[test]
+    fn virtual_list_cells_read_their_rows_moved_index() {
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ShuffledRows>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        ID_FLIPS.set(0);
+        for _ in 0..40 {
+            assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+            while c.commit().is_some() {}
+        }
+        assert_eq!(ID_FLIPS.get(), 0, "cells saw another row's id");
+    }
+
     /// A change to `ChangingRows`'s rows.
     type RowsChange = fn(&mut Vec<String>);
 
