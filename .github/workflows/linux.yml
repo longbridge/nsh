@@ -129,6 +129,7 @@ jobs:
           done
           run examples/gallery/tests/environment.test.tsx --filter appearance
           run crates/nsh-testing/tests/testing/input-target/App.test.tsx --filter 'shared prefix'
+          run crates/nsh-testing/tests/testing/input-target/gpui/Editor.test.tsx
 
   check:
     needs: changed

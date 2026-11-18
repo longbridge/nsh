@@ -133,13 +133,25 @@ impl GpuiNative {
         })
     }
 
-    /// Presses key `vk` in the focused window; Escape nothing took closes
-    /// a window of the app's own that says so, as a real one does.
-    fn keystroke(&self, vk: u16, modifiers: Modifiers) -> Option<()> {
+    /// Finish a simulated edit before sending the next one. Return may move
+    /// focus, and a controlled Editor writes its value back after each edit.
+    fn edit_in_focus(&self, edit: impl FnOnce(&Rc<Surface>) + Send + 'static) {
+        let (done, handled) = std::sync::mpsc::channel();
         self.press_in_focus(
-            move |surface| synth::press(surface, vk, modifiers),
-            vk == crate::keys::VK_ESCAPE,
-        )
+            move |surface| {
+                edit(surface);
+                surface.control(|engine| {
+                    engine.flush(move |_| {
+                        let _ = done.send(());
+                    })
+                });
+                true
+            },
+            false,
+        );
+        if let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = handled.recv_timeout(MAIN) {
+            log::warn!("test: timed out waiting for a keyboard edit");
+        }
     }
 
     /// `f` with the window's view on the main thread, waited for (what it
@@ -356,7 +368,7 @@ impl Native for GpuiNative {
 
     fn type_text(&self, text: &str) {
         for ch in text.chars() {
-            self.in_focused(move |surface, _, _| {
+            self.edit_in_focus(move |surface| {
                 crate::text_input::char_input(surface, ch.encode_utf8(&mut [0; 4]));
             });
         }
@@ -374,7 +386,9 @@ impl Native for GpuiNative {
             ctrl: command && !cfg!(target_os = "macos"),
             ..Modifiers::default()
         };
-        self.keystroke(vk, modifiers);
+        self.edit_in_focus(move |surface| {
+            synth::press(surface, vk, modifiers);
+        });
     }
 
     fn mouse(&self) -> bool {
