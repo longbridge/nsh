@@ -613,6 +613,9 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                         e.bool(c.animated);
                     }
                     Command::Dialog(d) => {
+                        // Out of its box: the buttons move out below, and
+                        // the text field is read after them.
+                        let d = *d;
                         e.int(12);
                         e.int(d.id as i32);
                         e.opt_string(d.title.as_deref());
