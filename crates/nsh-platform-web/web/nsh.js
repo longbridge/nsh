@@ -142,6 +142,10 @@ const VELOCITY_WINDOW = 100;
  * when no animation frame did (`keepDeadline`, `moveScreens`, ...): more
  * than a frame, so that while the page shows its frames always come first. */
 const LATE_MS = 50;
+/** How long after its time a frame's `requestAnimationFrame` callbacks may
+ * run and still step the native animations at that time (`frameTime`):
+ * later than that, a task held the frame. */
+const FRAME_HELD_MS = 16;
 /** How long a dialog waits for the two frames before it comes in
  * (`present`): far more than two frames, so it only waits that long while
  * frames stop (a hidden tab). */
@@ -1987,8 +1991,24 @@ class Player {
     this.frame = requestAnimationFrame((now) => {
       this.frame = 0;
       this.frameAt = performance.now();
-      this.call((w) => w.nsh_frame(now));
+      this.call((w) => w.nsh_frame(this.frameTime(now)));
     });
+  }
+
+  /**
+   * The time an animation frame steps the native animations at: the
+   * frame's (when it began, so the steps keep the display's pace), unless a
+   * task held the frame, and then when its callbacks run. A press handled
+   * before them runs the app's code, which may mount a sheet and start its
+   * entrance; stepped at the frame's time, that entrance would start before
+   * it was asked for, and its first drawn step would be as far along as the
+   * press took (a slow one showed the sheet nearly in place). Never earlier
+   * than the frame before.
+   */
+  frameTime(now) {
+    const at = this.frameAt - now > FRAME_HELD_MS ? this.frameAt : now;
+    this.steppedAt = Math.max(at, this.steppedAt ?? at);
+    return this.steppedAt;
   }
 
   /** `keepDeadline` once the call into the engine that asked for a frame

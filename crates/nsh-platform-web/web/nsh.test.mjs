@@ -2287,10 +2287,11 @@ function animating(t) {
     else player.requestFrame();
     return -1;
   };
-  const frame = () => {
+  // The page's animation frame, which began at `at` (now by default).
+  const frame = (at = clock.now) => {
     const due = frames;
     frames = [];
-    for (const f of due) f(clock.now);
+    for (const f of due) f(at);
   };
   // Time passes by `ms`: the timers due run, and what the calls into the
   // engine left for after them (`deadlineSoon`).
@@ -2300,7 +2301,7 @@ function animating(t) {
     t.mock.timers.tick(ms);
     await null;
   };
-  return { player, ticks, frame, pass, ended: () => ended };
+  return { player, ticks, frame, pass, clock, ended: () => ended };
 }
 
 test("a native animation ends on time while no animation frames come", async (t) => {
@@ -2331,6 +2332,33 @@ test("while animation frames come the page runs no frames of its own", async (t)
   assert.equal(ticks.length, frames, "every frame the browser's");
   await pass(1000);
   assert.equal(ticks.length, frames);
+});
+
+test("a frame a task held steps the animations when its callbacks run", (t) => {
+  const { player, ticks, frame, clock } = animating(t);
+  player.requestFrame();
+  // The frame began at 0; a press handled before its callbacks took
+  // 170 ms (it opened a sheet, whose entrance asks for this frame).
+  clock.now = 170;
+  frame(0);
+  assert.deepEqual(ticks, [170], "the entrance starts when it was asked for, not 170 ms in");
+  // The next frames are on time: their own times keep the display's pace.
+  clock.now = 189;
+  frame(186.7);
+  clock.now = 205;
+  frame(203.3);
+  assert.deepEqual(ticks, [170, 186.7, 203.3]);
+});
+
+test("an animation frame never steps earlier than the one before", (t) => {
+  const { player, ticks, frame, clock } = animating(t);
+  player.requestFrame();
+  clock.now = 170;
+  frame(0);
+  // On time by its own measure, but begun before the held one ran.
+  clock.now = 172;
+  frame(160);
+  assert.deepEqual(ticks, [170, 170]);
 });
 
 test("a dialog comes in and reports it shown without animation frames", () => {

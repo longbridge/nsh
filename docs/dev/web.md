@@ -551,7 +551,11 @@ measured against it frame by frame (`requestAnimationFrame` samplers of computed
 
 - **Animated values** (`src/animation.rs`): the graph's clock is in seconds (`Graph::tick`), so `nsh_frame` divides the
   `requestAnimationFrame` time (ms) by 1000; passing milliseconds ended every `timing` / `spring` / `decay` on its
-  first frame. Bound values are inline styles: a property bound no more (its view taken over by an element without
+  first frame. That time is the frame's, when it began, unless its callbacks run more than `FRAME_HELD_MS` (16 ms)
+  after it: a task held the frame (a press handled before the callbacks, whose code mounted a sheet and started its
+  entrance), and the frame steps at the time its callbacks run (`Player.frameTime`), never earlier than the frame
+  before. Stepped at the frame's time, an animation the task started began before it was asked for, and its first
+  drawn step was as far along as the task took. Bound values are inline styles: a property bound no more (its view taken over by an element without
   the binding) is cleared from them with the next output (`["a", view, prop, ""]`), so the view shows its own style.
 - **Without frames** (a hidden tab, and often an iframe out of view: browsers run no `requestAnimationFrame` there),
   what an animation ends still happens on time, as on macOS (`Surface::keep_deadline`). After each call into the
