@@ -301,8 +301,11 @@ img.nsh-fill { pointer-events: none; }
 .nsh-fit-none { object-fit: none; }
 .nsh-spacer { position: absolute; left: 0; top: 0; width: 1px; height: 1px; pointer-events: none; visibility: hidden; }
 /* Over the style's \`overflow: clip\`. */
-.nsh-scroll.nsh-ox.nsh-ox { overflow-x: auto; overflow-y: hidden; }
-.nsh-scroll.nsh-oy.nsh-oy { overflow-x: hidden; overflow-y: auto; }
+/* A one-axis scroll view keeps only its own axis's overscroll: a swipe
+   across it (vertical over a horizontal one, as over an editor's text
+   inside its vertical scroll) scrolls the scroll view around it. */
+.nsh-scroll.nsh-ox.nsh-ox { overflow-x: auto; overflow-y: hidden; overscroll-behavior-y: auto; }
+.nsh-scroll.nsh-oy.nsh-oy { overflow-x: hidden; overflow-y: auto; overscroll-behavior-x: auto; }
 .nsh-scroll.nsh-oxy.nsh-oxy { overflow: auto; }
 .nsh-scroll.nsh-onone.nsh-onone { overflow: hidden; }
 .nsh-scroll.nsh-zoom.nsh-zoom { touch-action: none; }
@@ -6990,6 +6993,7 @@ class Player {
       case "setResponder": this.responderBlocks = !!args[0]; break;
       case "clearResponder": this.responderBlocks = false; break;
       case "dialog": this.dialog(args[0], args[1], args[2], args[3], args[4] ?? [], args[5] ?? true, args[6] ?? false); break;
+      case "closeDialog": this.closeDialog(args[0]); break;
       case "reload": {
         const frame = el?._frameEl;
         if (!frame) break;
@@ -8301,16 +8305,22 @@ class Player {
     let down = null;
     backdrop.addEventListener("pointerdown", (e) => { down = e.target; }, true);
     const pressed = (e, el) => e.detail === 0 || (down !== null && el.contains(down));
-    const close = (index) => {
-      if (answered) return;
+    // Off the surface, once: false when it was already.
+    const takeDown = () => {
+      if (answered) return false;
       answered = true;
       backdrop.remove();
       this.releaseFrame(backdrop);
       this.dialogs = this.dialogs.filter((d) => d !== backdrop);
       this.scopeFocus();
       if (restore?.isConnected) restore.focus({ preventScroll: true });
-      this.event(ROOT_ID, "onDialog", { id: dialogId, index });
+      return true;
     };
+    const close = (index) => {
+      if (takeDown()) this.event(ROOT_ID, "onDialog", { id: dialogId, index });
+    };
+    backdrop._dialogId = dialogId;
+    backdrop._takeDown = takeDown;
     const cancel = list.findIndex((_, i) => style(i) === "cancel");
     backdrop._cancel = () => (cancel >= 0 ? close(cancel) : cancelable && close(-1));
     const button = (index) => {
@@ -8390,6 +8400,11 @@ class Player {
     (this.dialogs ??= []).push(backdrop);
     this.scopeFocus();
     focus?.focus({ preventScroll: true });
+  }
+
+  /** Takes back the dialog `dialog` showed as `dialogId` (`closeDialog`), reporting nothing: the core answered it. */
+  closeDialog(dialogId) {
+    this.dialogs?.find((d) => d._dialogId === dialogId)?._takeDown();
   }
 
   /** Dialogs and other system UI look as the desktop backends' with the desktop idiom, else as on phones. */

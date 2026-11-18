@@ -712,6 +712,7 @@ pub(crate) fn open_url(url: &str) -> bool {
 pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
     match command {
         Command::Dialog(dialog) => show_dialog(surface, dialog),
+        Command::CloseDialog(dialog) => close_dialog(surface, *dialog),
         Command::SetClipboard(text) => {
             if !set_clipboard_text(text) {
                 log::debug!("windows: cannot set the clipboard");
@@ -1002,6 +1003,23 @@ fn add_overlay(surface: &Rc<Surface>, serial: u64, kind: OverlayKind) {
     } else {
         kind.opacity().set(0.0);
         fade(surface, serial, 1.0, FADE_IN, false);
+    }
+}
+
+/// Takes back the dialog [`show_dialog`] showed as `id`
+/// (`Command::CloseDialog`): it fades out as an answered one does, and
+/// reports nothing (the core answered it).
+fn close_dialog(surface: &Rc<Surface>, id: u32) {
+    let serial = OVERLAYS.with(|o| {
+        o.borrow().iter().find_map(|o| match &o.kind {
+            OverlayKind::Dialog(d) if o.key == surface.key() && d.id == id && !d.closing.get() => {
+                Some(o.serial)
+            }
+            _ => None,
+        })
+    });
+    if let Some(serial) = serial {
+        remove_overlay(surface, serial);
     }
 }
 

@@ -211,9 +211,8 @@ reasons: `reactive-components.md`.
     the app's function in a root of its own under the component's owner (so context reaches it), inserts what it
     returns into a holder view (`componentRender`: the prop, U+001F, the key) and the holder into the host, replacing
     the key's previous one; the core places the holder as the only child of the key's placeholder (the last one placed
-    when a view places a key twice, skipping those in list cells their lists freed: a cell whose row went still reads
-    the row now at its old index until the list binds it again, so it may place the key of a row that moved to another
-    cell, which keeps showing it; none placed: it waits out of the tree for the `Unrender`). Until its holder
+    when a view places a key twice; a list shows each row in one cell at most, so a row's key is placed once;
+    none placed: it waits out of the tree for the `Unrender`). Until its holder
     arrives a placeholder is empty, so a list cell holding one is not measured (`Core::cells_awaiting_renders`): its
     row keeps its estimate (or its last size) and stays in the window, and is measured in the commit the holder
     comes in; measured empty, a list in a view sized by its content would shrink that view's viewport to nothing
@@ -1154,6 +1153,9 @@ natural size and the items scroll past the room (`gpui-component`'s `PopupMenu` 
 (`popupClass` / `popupStyle`), around the scroll view, so its edges and shadow stay put. The keys measure where the
 items are: the item they move to is scrolled into view, and Page Up / Page Down go a viewport at a time
 (`crates/nsh-base/tests/base/menu.rs`).
+
+The internal scroll views and `MenuList` disable edge bounce and scroll bars; content that fits stays still,
+while overflowing items remain scrollable by pointer and keyboard.
 
 **Menu lists.** `MenuList` (Rust, `menu.rs`) puts a level's items in a virtualized list of the menu's own. The menu
 counts it as one place per row among the level's items, made or not, so its keys walk the rows by index: a row not

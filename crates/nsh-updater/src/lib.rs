@@ -68,7 +68,9 @@ pub enum Error {
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct Config {
-    /// The app's id: a manifest for another app is refused.
+    /// The app's id: what finds the installed app ([`install`]). A manifest
+    /// and the package it names may carry another id (an app moved to a new
+    /// one): the manifest's signature is what binds an update to the app.
     pub id: String,
     /// The running version.
     pub version: String,
@@ -250,9 +252,11 @@ impl Config {
         };
         let url = resolve(&self.manifest_url(), &asset.url);
         check_url(&url).map_err(Error::Manifest)?;
+        let localized_notes = self.localized_notes(parsed.localized_notes)?;
         Ok(Some(Available {
             version: parsed.version,
             notes: parsed.notes,
+            localized_notes,
             url,
             sha256: asset.sha256.clone(),
             size: asset.size,
@@ -287,17 +291,33 @@ impl Config {
         }
         let url = resolve(&self.manifest_url(), &package.url);
         check_url(&url).map_err(Error::Manifest)?;
+        let localized_notes = self.localized_notes(parsed.localized_notes)?;
         Ok(Some(AvailablePackage {
             version: package.version,
             build: package.build,
             notes: parsed.notes,
+            localized_notes,
             url,
             sha256: package.sha256,
             size: package.size,
         }))
     }
 
-    /// The manifest, its signature checked and its id this app's.
+    /// The manifest's notes files, their URLs absolute and HTTPS.
+    fn localized_notes(
+        &self,
+        mut notes: BTreeMap<String, NotesFile>,
+    ) -> Result<BTreeMap<String, NotesFile>, Error> {
+        for file in notes.values_mut() {
+            file.url = resolve(&self.manifest_url(), &file.url);
+            check_url(&file.url).map_err(Error::Manifest)?;
+        }
+        Ok(notes)
+    }
+
+    /// The manifest, its signature checked. Its id is not checked against
+    /// the app's: an update may move the app to a new id or name, and the
+    /// signature, with the manifest's URL, decides what installs.
     fn open(&self, manifest: &[u8], signature: Option<&[u8]>) -> Result<Manifest, Error> {
         if let Some(key) = &self.public_key {
             let signature =
@@ -306,12 +326,6 @@ impl Config {
         }
         let parsed: Manifest =
             serde_json::from_slice(manifest).map_err(|e| Error::Manifest(e.to_string()))?;
-        if parsed.id != self.id {
-            return Err(Error::Manifest(format!(
-                "it is for {:?}, this app is {:?}",
-                parsed.id, self.id
-            )));
-        }
         Ok(parsed)
     }
 }
@@ -343,6 +357,13 @@ pub struct Manifest {
     /// What changed, for the app to show.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// `notes` in other languages, by BCP 47 tag (`en`, `zh-TW`, `ja`):
+    /// each a file of its own, so a client downloads only the one its user
+    /// reads. Their hashes are here, under the manifest's signature. `notes`
+    /// stays the text for every other language and for older runtimes,
+    /// which ignore this.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub localized_notes: BTreeMap<String, NotesFile>,
     /// By [`platform`]: `linux-x86_64`, `macos-aarch64`, `android`, `ios`.
     /// Empty in a release that only has a package (still written: older
     /// runtimes require it).
@@ -386,12 +407,54 @@ pub struct AvailablePackage {
     pub build: u64,
     /// What changed (the manifest's notes).
     pub notes: Option<String>,
+    /// The manifest's notes in other languages, by BCP 47 tag, their URLs
+    /// absolute.
+    pub localized_notes: BTreeMap<String, NotesFile>,
     /// Where it is, absolute.
     pub url: String,
     /// Its SHA-256, in hex.
     pub sha256: String,
     /// Its size in bytes.
     pub size: Option<u64>,
+}
+
+/// One language's notes in a [`Manifest`]: a text file beside it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct NotesFile {
+    /// Where it is, absolute or relative to the manifest.
+    pub url: String,
+    /// Its SHA-256, in hex.
+    pub sha256: String,
+}
+
+/// The notes of `locale` (a BCP 47 tag) among `notes`: its own tag, else
+/// its language's (`zh` for `zh-TW`), compared without case; `None`: show
+/// the manifest's `notes`.
+pub fn notes_for<'a>(
+    notes: &'a BTreeMap<String, NotesFile>,
+    locale: &str,
+) -> Option<&'a NotesFile> {
+    let find = |tag: &str| {
+        notes
+            .iter()
+            .find(|(have, _)| have.eq_ignore_ascii_case(tag))
+            .map(|(_, file)| file)
+    };
+    find(locale).or_else(|| find(locale.split(['-', '_']).next()?))
+}
+
+/// The notes in `bytes`, downloaded for `file`: its text when the hash
+/// matches.
+pub fn open_notes(file: &NotesFile, bytes: Vec<u8>) -> Result<String, Error> {
+    if sha256(&bytes) != file.sha256.to_ascii_lowercase() {
+        return Err(Error::Manifest(format!(
+            "{}: not the notes the manifest names",
+            file.url
+        )));
+    }
+    String::from_utf8(bytes).map_err(|_| Error::Manifest(format!("{}: not UTF-8", file.url)))
 }
 
 /// One platform's entry of a [`Manifest`].
@@ -418,6 +481,9 @@ pub struct Available {
     pub version: String,
     /// What changed.
     pub notes: Option<String>,
+    /// What changed in other languages, by BCP 47 tag, their URLs
+    /// absolute: [`notes_for`] picks one.
+    pub localized_notes: BTreeMap<String, NotesFile>,
     /// Where it is, absolute.
     pub url: String,
     /// The archive's SHA-256; `None`: `url` is a page, not an archive.
@@ -595,6 +661,60 @@ mod tests {
             "platforms": { "linux-x86_64": { "url": url, "sha256": "ab", "size": 2 } },
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn localized_notes_are_files_beside_the_manifest() {
+        let zh_tw = sha256("修復".as_bytes());
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "id": "com.example.app",
+            "version": "2.0.0",
+            "notes": "Fixes",
+            "localizedNotes": {
+                "zh-TW": { "url": "notes.zh-TW.md", "sha256": zh_tw },
+                "ja": { "url": "https://cdn.example.com/notes.ja.md", "sha256": "ab" },
+            },
+            "platforms": { "linux-x86_64": { "url": "a.tar.gz", "sha256": "ab", "size": 2 } },
+        }))
+        .unwrap();
+        let available = config()
+            .check(&bytes, None, "linux-x86_64")
+            .unwrap()
+            .unwrap();
+        assert_eq!(available.notes.as_deref(), Some("Fixes"));
+        let file = notes_for(&available.localized_notes, "zh-tw").unwrap();
+        assert_eq!(
+            file.url,
+            "https://github.com/owner/repo/releases/latest/download/notes.zh-TW.md"
+        );
+        assert_eq!(
+            open_notes(file, "修復".as_bytes().to_vec()).unwrap(),
+            "修復"
+        );
+        assert!(open_notes(file, b"tampered".to_vec()).is_err());
+        assert_eq!(
+            notes_for(&available.localized_notes, "ja-JP").unwrap().url,
+            "https://cdn.example.com/notes.ja.md"
+        );
+        assert!(notes_for(&available.localized_notes, "zh-CN").is_none());
+        assert!(notes_for(&available.localized_notes, "en").is_none());
+        // A manifest without them reads as before, and writes as before.
+        let plain = config()
+            .check(&manifest("2.0.0", "a.tar.gz"), None, "linux-x86_64")
+            .unwrap()
+            .unwrap();
+        assert!(plain.localized_notes.is_empty());
+        let written = serde_json::to_value(Manifest::default()).unwrap();
+        assert!(written.get("localizedNotes").is_none());
+        // Notes over plain HTTP are refused as archives are.
+        let http = serde_json::to_vec(&serde_json::json!({
+            "id": "com.example.app",
+            "version": "2.0.0",
+            "localizedNotes": { "ja": { "url": "http://x.dev/ja.md", "sha256": "ab" } },
+            "platforms": { "linux-x86_64": { "url": "a.tar.gz", "sha256": "ab", "size": 2 } },
+        }))
+        .unwrap();
+        assert!(config().check(&http, None, "linux-x86_64").is_err());
     }
 
     #[test]
@@ -787,9 +907,17 @@ mod tests {
     }
 
     #[test]
-    fn a_manifest_of_another_app_or_plain_http_is_refused() {
-        let other = br#"{"id":"com.other","version":"9.0.0","platforms":{}}"#;
-        assert!(config().check(other, None, "linux-x86_64").is_err());
+    fn a_manifest_of_another_id_is_taken_plain_http_is_refused() {
+        // An app moving to a new id: the signature binds, not the id.
+        let other = manifest("2.0.0", "https://x.dev/a.tar.gz");
+        let other = String::from_utf8(other)
+            .unwrap()
+            .replace("com.example.app", "com.other");
+        let found = config()
+            .check(other.as_bytes(), None, "linux-x86_64")
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.version, "2.0.0");
         let plain = manifest("2.0.0", "http://x.dev/a.tar.gz");
         assert!(config().check(&plain, None, "linux-x86_64").is_err());
     }
@@ -887,12 +1015,6 @@ mod tests {
                 .check_package(&bytes, Some(signature.as_bytes()), 3, "0.5.0")
                 .unwrap()
                 .is_some()
-        );
-        let other = br#"{"id":"com.other","version":"1.0.0","package":{"version":"1","build":9,"url":"p","sha256":"ab","minRuntime":"0.1.0"}}"#;
-        assert!(
-            takes_packages()
-                .check_package(other, None, 3, "0.5.0")
-                .is_err()
         );
         let plain = serde_json::to_vec(&serde_json::json!({
             "id": "com.example.app", "version": "1.0.0",

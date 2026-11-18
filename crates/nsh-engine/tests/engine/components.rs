@@ -12210,7 +12210,8 @@ import { DateTimePicker } from "nsh/mobile";
 const value = signal("2026-11-17T09:30");
 mount(() => <View>
   <DateTimePicker mode="dateTime" value={value()} min="2026-11-01T00:00" max="bogus"
-    minuteInterval={7} onChange={({ value: v }) => value.set(v)} />
+    minuteInterval={7} accessibilityLabel="Reminder" onChange={({ value: v }) => value.set(v)} />
+  <DateTimePicker mode="time" value="09:30" />
   <Text>{`Picked: ${value()}`}</Text>
 </View>);
 "#;
@@ -12218,8 +12219,8 @@ mount(() => <View>
 /// `nsh/mobile`'s `DateTimePicker` is the system's picker on iOS and
 /// Android: its value and bounds reach it as fields, a minute step that
 /// does not divide an hour and a bound that is no date are not passed on,
-/// and the user's pick comes back as `onChange({ value })` in the mode's
-/// form.
+/// its `accessibilityLabel` reaches it (none without one), and the user's
+/// pick comes back as `onChange({ value })` in the mode's form.
 #[test]
 fn the_date_time_picker_is_the_systems_on_mobile_and_reports_the_pick() {
     use nsh_core::platform::{DATE_TIME_PICKER_COMPONENT, Os};
@@ -12233,11 +12234,24 @@ fn the_date_time_picker_is_the_systems_on_mobile_and_reports_the_pick() {
             },
         );
         let initial = until(&rx, |batch| shows(batch, "Picked: 2026-11-17T09:30"));
-        let picker = component_id(&initial, DATE_TIME_PICKER_COMPONENT).expect("the picker");
-        assert_eq!(
-            component_prop(&initial, picker, "mode"),
-            Some(serde_json::json!("dateTime"))
-        );
+        // Each picker by its mode: the mount order is not the tree's.
+        let by_mode = |mode: &str| {
+            initial
+                .iter()
+                .flat_map(|batch| &batch.items)
+                .find_map(|item| match item {
+                    MountItem::Component { id, name }
+                        if &**name == DATE_TIME_PICKER_COMPONENT
+                            && component_prop(&initial, *id, "mode")
+                                == Some(serde_json::json!(mode)) =>
+                    {
+                        Some(*id)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("the {mode} picker on {os:?}"))
+        };
+        let (picker, unnamed) = (by_mode("dateTime"), by_mode("time"));
         assert_eq!(
             component_prop(&initial, picker, "value"),
             Some(
@@ -12257,6 +12271,16 @@ fn the_date_time_picker_is_the_systems_on_mobile_and_reports_the_pick() {
         assert_eq!(
             component_prop(&initial, picker, "minuteInterval"),
             Some(serde_json::json!(1))
+        );
+        assert_eq!(
+            component_prop(&initial, picker, "accessibilityLabel"),
+            Some(serde_json::json!("Reminder")),
+            "{os:?}"
+        );
+        assert_eq!(
+            component_prop(&initial, unnamed, "accessibilityLabel"),
+            Some(serde_json::json!(null)),
+            "{os:?}"
         );
         engine.control().dispatch_event(
             picker,

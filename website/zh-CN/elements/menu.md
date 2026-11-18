@@ -95,7 +95,7 @@ const popup = () =>
   (platform.os === "ios" && platform.idiom === "pad" && !platform.catalyst && horizontalSizeClass() === "regular");
 ```
 
-弹出层不会高过它打开那一侧的可用空间，子菜单的弹出层也不会高过它自己的可用空间：短窗口里的长菜单会在能完整放下的一侧打开（都放不下时在空间更大的一侧），条目在弹出层里滚动。按键会把移到的条目滚进视野；子菜单的条目被滚出视野后，子菜单随之关闭。sheet 同样停在状态栏下方。用 `popupClass` 在条目外面画出面板（背景、边框、阴影），这样条目滚动时面板保持不动。
+弹出层不会高过它打开那一侧的可用空间，子菜单的弹出层也不会高过它自己的可用空间：短窗口里的长菜单会在能完整放下的一侧打开（都放不下时在空间更大的一侧），条目在弹出层里滚动，不会越界回弹或显示滚动条。按键会把移到的条目滚进视野；子菜单的条目被滚出视野后，子菜单随之关闭。sheet 同样停在状态栏下方。用 `popupClass` 在条目外面画出面板（背景、边框、阴影），这样条目滚动时面板保持不动。
 
 <a id="context-menus"></a>
 
@@ -372,6 +372,22 @@ import { ContextMenu, MenuItem } from "nsh/base";
 
 触发器自己的按压在按住手指的同时照常工作。不传 `items` 时，iOS 和其他平台一样显示绘制的菜单。
 
+### 用预览代替触发器
+
+系统按触发器原样抬起它。要抬起别的内容（一张显示会话最近几条消息或文档开头的卡片），给 `preview` 一个视图；按下它会关闭菜单并报告 `onPreviewPress`，应用通常在这里打开这一行代表的内容：
+
+```tsx
+<ContextMenu
+  items={actions}
+  onSelect={({ id }) => act(chat, id)}
+  preview={<ChatCard chat={chat} />}
+  onPreviewPress={() => openChat(chat)}
+  trigger={<ChatRow chat={chat} />}
+/>
+```
+
+预览在手指按到触发器上时创建，按它自己的尺寸在看不见的地方排版，菜单弹出时以那一刻的样子作为图片显示；菜单关闭后移除。它创建时开始加载的数据可以在手指按住期间到达。排版完成之前，系统抬起触发器。与 `items` 一样，`preview` 只在 iOS 上使用。
+
 ## 属性
 
 ### Menu
@@ -402,6 +418,7 @@ import { ContextMenu, MenuItem } from "nsh/base";
 | `margin` | `.margin(..)` | `number` | `0` | 以弹出层呈现时：它与安全区边缘保持的距离。 |
 | `items` | `.items(..)` | `MenuButtonItem[]` | `[]` | 仅 iOS：系统的上下文菜单，代替 children。其他平台不使用它，绘制 children。 |
 | `title` | `.title(..)` | `string` | 无 | 仅 iOS：系统菜单的标题，在条目上方。其他平台不使用它。 |
+| `preview` | `.preview(..)` | `JSX.Element` | 无 | 仅 iOS，传入 `items` 时：系统在菜单旁代替触发器抬起的内容。手指按下时创建，菜单关闭后移除。 |
 
 ### MenuItem
 
@@ -451,6 +468,7 @@ import { ContextMenu, MenuItem } from "nsh/base";
 | `onPosition`（`Menu`、`ContextMenu`） | `.on_position(\|e\| ..)` | 以弹出层呈现时：弹出层已放置：`placement`（它所在的一侧）、`bounds`、`available`。 |
 | `onCancel`（`Menu`、`ContextMenu`） | `.on_cancel(\|\| ..)` | 用户没有选择条目就尝试关闭它（Escape 或返回键、外部按压或按下背景层）。 |
 | `onSelect`（`ContextMenu`） | `.on_select(\|id: &SharedString\| ..)` | 仅 iOS，传入 `items` 时：用户在系统菜单中选择了这个 `id` 的条目。其他平台不触发它，由 `MenuItem` 报告选择。 |
+| `onPreviewPress`（`ContextMenu`） | `.on_preview_press(\|\| ..)` | 仅 iOS，传入 `preview` 时：预览被按下；菜单像选择了条目一样关闭。 |
 | `onSelect`（`MenuItem`） | `.on_select(\|\| ..)` | 条目被选择；可勾选的条目请求它的另一个值。 |
 | `onOpenChange`（`Submenu`） | `.on_open_change(\|e\| ..)` | 它按用户的操作打开或关闭了，附带原因。 |
 

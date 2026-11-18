@@ -186,6 +186,13 @@ nsh package --target web --asset-url https://cdn.example.com/debugger/
 
 页面随之在 `/apps/counter/` 下引用自己的文件，应用的相对 URL 也相对于它解析，在 `https://example.com/apps/counter/sports/football` 和在 `https://example.com/apps/counter/` 一样能加载。`"base": "/"` 表示站点位于主机的根路径。`nsh package --target web --run` 在这个路径下提供站点。路径的各段由 ASCII 字母、数字、`-`、`.`、`_` 和 `~` 组成，其他字符按浏览器发送时的方式做百分号编码（`/应用/` 写作 `/%E5%BA%94%E7%94%A8/`）。
 
+### 支持的浏览器
+
+发布的应用需要 Safari 16.4（iOS 和 iPadOS 16.4）、Chrome 和 Edge 97、Firefox 108 及以上版本。页面通过 import map
+加载模块，并使用这些版本才有的 JavaScript 内置函数（`Object.hasOwn`、`Array.prototype.findLastIndex`、
+`OffscreenCanvas`）；更早的浏览器，例如 iOS 15 的 Safari 或旧版 Android 的 WebView，会显示空白页面。NSH 不为它们附带
+polyfill，现代浏览器因此不必多下载任何内容。
+
 ### 运行时大小
 
 打包时为每个应用链接一个专属的 `nsh.<digest>.wasm`：其中包含引擎，以及应用首屏导入的 `nsh/base` 组件、标准模块和着色器。应用其他页面导入的部分在首屏显示后于后台下载。应用的 crate [在 Rust 中调用浏览器 API](#在-rust-中使用浏览器-api) 时，它的 `nsh.<digest>.wasm` 包含整个运行时以及它自己的 crate。以下数据由 `nsh package --target web` 实测（MB 按 10^6 字节计）：

@@ -264,7 +264,9 @@ scroll, however long, changes texts and places only.
 
 `renderCell` draws the cells of the app's own where a column is not just text (a badge, a button). It is called for the
 cells in view only, with a `DataTableCell`: `row`, `column`, `key`, `text` (what the table would show) and `selected`.
-The app looks up its own data by `row`. `renderHeaderCell` draws a title across its cell, told a `DataTableHeaderCell`:
+The app looks up its own data by `row`. The views it draws take presses and the pointer as views outside the table do:
+`onPress`, `hover:` classes, `onMouseEnter` / `onMouseMove` / `onMouseLeave`, and with `classes.row` set to `"group"`
+the `group-hover:` classes of the row under the pointer. `renderHeaderCell` draws a title across its cell, told a `DataTableHeaderCell`:
 `column`, `key`, `title`, `sort` (the direction, or none) and `selected`.
 
 ```tsx

@@ -16,7 +16,8 @@ import android.os.Looper;
  * root's {@code UrlScheme} event), which ends the session in the core. The user coming back to the app without one
  * (closing the tab, the back button, switching back) answers the root's {@code AuthSession} event as cancelled:
  * Android delivers a link's {@code onNewIntent} before {@code onResume}, and the answer waits for the turn after the
- * resume, so a callback always reaches the core first and the late cancellation is ignored.
+ * resume, so a callback always reaches the core first and the late cancellation is ignored. The app closing the session
+ * ({@link #close}) brings its activity back over the tab.
  */
 final class AuthSession {
     /** The code of a session nothing brings the callback of back. */
@@ -65,6 +66,27 @@ final class AuthSession {
             return;
         }
         current = watch;
+    }
+
+    /**
+     * Closes session {@code id} if it still waits: the app closed it, and the core answered it already. The activity
+     * that opened the tab comes back to the front: started again with {@code CLEAR_TOP | SINGLE_TOP}, it finishes the
+     * tab above it in its task and gets the intent in {@code onNewIntent}, not recreated (an intent with no data nor
+     * extras, which the app ignores). A browser that showed the page in a task of its own stays there, behind the app.
+     */
+    static void close(int id) {
+        Watch watch = current;
+        if (watch == null || watch.id != id) return;
+        watch.stop();
+        Activity activity = watch.activity;
+        if (activity.isFinishing() || activity.isDestroyed()) return;
+        Intent back = new Intent(activity, activity.getClass())
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        try {
+            activity.startActivity(back);
+        } catch (ActivityNotFoundException | SecurityException e) {
+            // Not an activity the system starts by its class: the tab stays until the user closes it.
+        }
     }
 
     private static void fail(Mounter mounter, int id, String message, String code) {

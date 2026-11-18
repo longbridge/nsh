@@ -511,6 +511,10 @@ pub struct DateTimePickerProps {
     /// It cannot be changed (default false): the system dims it.
     #[prop(default)]
     pub disabled: Prop<bool>,
+    /// What screen readers say with its value: what it sets (`"Due
+    /// date"`). The picker shows only the value, so a label beside it
+    /// names it for sighted users alone.
+    pub accessibility_label: Prop<Option<SharedString>>,
 }
 
 /// The events of a [`DateTimePicker`].
@@ -528,11 +532,12 @@ pub enum DateTimePickerEvent {
 /// time are two), on Android the value in a field that opens the system's
 /// date or time dialog. The app says what it picks (`mode`), gives the
 /// value (`value`, a wall-clock time the app ties to its time zone), its
-/// bounds (`min`, `max`) and the minutes' step (`minuteInterval`), hears
-/// the user's pick (`onChange`) and places the picker with its `class` and
-/// `style`; its size is the system's where the style leaves it open. The
-/// desktops and the web have no such control: there it takes no room and
-/// shows nothing, and the app picks with `nsh/base`'s `DatePicker` and
+/// bounds (`min`, `max`) and the minutes' step (`minuteInterval`), names it
+/// for screen readers (`accessibilityLabel`), hears the user's pick
+/// (`onChange`) and places the picker with its `class` and `style`; its
+/// size is the system's where the style leaves it open. The desktops and
+/// the web have no such control: there it takes no room and shows
+/// nothing, and the app picks with `nsh/base`'s `DatePicker` and
 /// `TimeField`.
 #[component]
 pub fn DateTimePicker(
@@ -576,6 +581,12 @@ pub fn DateTimePicker(
             }
         })
         .prop("disabled", move || JsonValue::Bool(props.disabled.get()))
+        .prop("accessibilityLabel", move || {
+            props
+                .accessibility_label
+                .get()
+                .map_or(JsonValue::Null, |label| label.as_ref().into())
+        })
         .on_native_event(move |event: &NativeEvent| {
             if &*event.name == "change"
                 && let Some(value) = DateTimePickerValue::of_fields(mode.get_untracked(), &event.data)

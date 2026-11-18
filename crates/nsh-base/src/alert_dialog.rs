@@ -176,8 +176,10 @@ impl AlertDialogOptions {
 
     /// Shows the dialog now; the answer, to await in a task, is
     /// `{ action }`: the chosen action's `id`, or `None` when it closed
-    /// without an action. An error without actions.
-    pub fn show(self) -> impl Future<Output = Result<AlertDialogResult, String>> + 'static {
+    /// without an action. An error without actions. Its
+    /// [`closer`](AlertDialogAnswer::closer) takes the dialog off the screen
+    /// without the user.
+    pub fn show(self) -> AlertDialogAnswer {
         let shown = (!self.actions.is_empty()).then(|| {
             let sheet = self.presentation == AlertDialogPresentation::ActionSheet;
             let cancelable = self.close_on_escape.unwrap_or(sheet)
@@ -198,15 +200,54 @@ impl AlertDialogOptions {
                 sheet,
             })
         });
-        async move {
-            let index = shown.ok_or("AlertDialog.show: `actions` is empty")?.await;
+        AlertDialogAnswer {
+            shown,
+            actions: self.actions,
+        }
+    }
+}
+
+/// What [`show`](AlertDialogOptions::show) returns: the dialog's answer,
+/// to await in a task (`{ action }`, the chosen action's `id`, or `None`
+/// when it closed without one), and its [`closer`](Self::closer).
+#[must_use = "an answer does nothing unless awaited"]
+#[derive(Debug)]
+pub struct AlertDialogAnswer {
+    /// `None` without actions.
+    shown: Option<DialogAnswer>,
+    actions: Vec<AlertDialogAction>,
+}
+
+impl AlertDialogAnswer {
+    /// What closes the dialog without the user, as when what it asks about
+    /// went away (the user went elsewhere): kept apart from the answer,
+    /// which a task takes. Closing it answers `{ action: None }` at once
+    /// and takes the dialog off the screen; closing an answered one does
+    /// nothing. `None` without actions.
+    pub fn closer(&self) -> Option<DialogCloser> {
+        self.shown.as_ref().map(DialogAnswer::closer)
+    }
+}
+
+impl Future for AlertDialogAnswer {
+    type Output = Result<AlertDialogResult, String>;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let this = self.get_mut();
+        let Some(shown) = this.shown.as_mut() else {
+            return std::task::Poll::Ready(Err("AlertDialog.show: `actions` is empty".to_owned()));
+        };
+        std::pin::Pin::new(shown).poll(cx).map(|index| {
             Ok(AlertDialogResult {
                 action: usize::try_from(index)
                     .ok()
-                    .and_then(|i| self.actions.get(i))
+                    .and_then(|i| this.actions.get(i))
                     .map(|a| a.id.clone()),
             })
-        }
+        })
     }
 }
 

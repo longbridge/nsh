@@ -72,6 +72,9 @@ pub(crate) enum Action {
     },
     /// A dialog; its answer resolves the slot.
     Dialog(Dialog, Rc<RefCell<Output<i32>>>),
+    /// Close the dialog whose answer resolves the slot, answering it as
+    /// dismissed ([`DialogCloser::close`]).
+    CloseDialog(Rc<RefCell<Output<i32>>>),
     /// The result of a module function JS waits for.
     Return(u32, super::JsResult),
     /// The pixel size of the image at the URI (its bytes stay loaded); the
@@ -142,6 +145,9 @@ pub(crate) enum Action {
             Result<crate::auth_session::AuthSessionOutcome, crate::auth_session::AuthSessionError>,
         >,
     ),
+    /// Closes the app's waiting web sign-in session, answering it as
+    /// cancelled ([`crate::element::close_auth_session`]).
+    CloseAuthSession,
     /// Renders a drawing offscreen into an image
     /// ([`crate::canvas::render`]); the image's bytes, or why not, resolve
     /// the slot.
@@ -268,6 +274,10 @@ pub(crate) enum Action {
     /// the node, with the layout of the commit the action goes out with;
     /// whether a view took it resolves the slot.
     PressAt(NodeId, crate::PressEvent, AnswerSlot<bool>),
+    /// Hovers what a pointer at the event's page position would inside
+    /// the node, with the layout of the last commit; `None`: the pointer
+    /// left.
+    HoverAt(NodeId, Option<crate::MouseEvent>),
 }
 
 /// What a speech recognition session asks of the core
@@ -850,6 +860,39 @@ impl<T> Answer<T> {
     pub(crate) fn new() -> (Self, Rc<RefCell<Output<T>>>) {
         let slot = Rc::new(RefCell::new(Output::default()));
         (Self { slot: slot.clone() }, slot)
+    }
+}
+
+impl Answer<i32> {
+    /// What closes the dialog this answer waits for, kept apart from the
+    /// answer (which a task usually takes): see [`DialogCloser`].
+    pub fn closer(&self) -> DialogCloser {
+        DialogCloser {
+            slot: self.slot.clone(),
+        }
+    }
+}
+
+/// Closes a dialog the app showed (`nsh_base::alert_dialog`) without the
+/// user, as when what it asks about went away (the user went elsewhere):
+/// made by [`Answer::closer`].
+#[derive(Clone)]
+pub struct DialogCloser {
+    slot: Rc<RefCell<Output<i32>>>,
+}
+
+impl std::fmt::Debug for DialogCloser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DialogCloser").finish_non_exhaustive()
+    }
+}
+
+impl DialogCloser {
+    /// Closes the dialog, as if the user dismissed it: its answer resolves
+    /// with -1 now, and the platform takes it off the screen. Nothing
+    /// happens once it was answered, or outside the engine.
+    pub fn close(&self) {
+        super::ambient::act_if_running(Action::CloseDialog(self.slot.clone()));
     }
 }
 

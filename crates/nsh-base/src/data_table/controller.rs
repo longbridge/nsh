@@ -2,7 +2,12 @@
 //! the revisions bindings subscribe to, the windows of rows and columns
 //! made, and what presses, keys, drags, props and the ref do to them.
 
-use std::{cell::RefCell, ops::Range, rc::Rc, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    ops::Range,
+    rc::Rc,
+    time::Duration,
+};
 
 use nsh_core::{
     PressEvent,
@@ -152,6 +157,9 @@ pub(crate) struct Dt {
     /// The cells `renderCell` draws, which the hit layer passes presses
     /// on to ([`Dt::press_with`]).
     pub(crate) custom_cells: Rc<RefCell<CustomCells>>,
+    /// The cell `renderCell` draws that the hit layer last passed the
+    /// pointer on to ([`Dt::hover_at`]).
+    hovered_cell: Rc<Cell<Option<(u64, ElementRef)>>>,
 }
 
 /// A cell `renderCell` draws: its view, and the row and column it shows
@@ -181,11 +189,11 @@ impl CustomCells {
         self.cells.retain(|(k, _)| *k != key);
     }
 
-    /// The view of the cell showing `row` of column `def`.
-    fn showing(&self, row: usize, def: usize) -> Option<ElementRef> {
-        self.cells.iter().find_map(|(_, c)| {
+    /// The key and view of the cell showing `row` of column `def`.
+    fn showing(&self, row: usize, def: usize) -> Option<(u64, ElementRef)> {
+        self.cells.iter().find_map(|(k, c)| {
             (c.row.get_untracked() == Some(row) && c.def.get_untracked() == Some(def))
-                .then_some(c.view)
+                .then_some((*k, c.view))
         })
     }
 }
@@ -248,6 +256,7 @@ impl Dt {
             resizing: Rc::default(),
             handle_tap: Rc::default(),
             custom_cells: Rc::default(),
+            hovered_cell: Rc::default(),
         };
         dt.sync_columns();
         dt.sync_selection();
@@ -1106,7 +1115,7 @@ impl Dt {
             (Some(row), Some(def)) if !hit.header => self.custom_cells.borrow().showing(row, def),
             _ => None,
         };
-        let Some(cell) = cell else {
+        let Some((_, cell)) = cell else {
             self.press_hit(hit, clicks, modifiers);
             return;
         };
@@ -1305,11 +1314,37 @@ impl Dt {
             }));
     }
 
-    /// The pointer moved over the body at `position`.
-    pub(crate) fn hover_at(&self, position: Point<Points>) {
-        let row = self.target_at(position).row;
-        if self.hover.get_untracked() != row {
-            self.hover.set(row);
+    /// The pointer moved over the body (`mouse.position` in the hit
+    /// layer's content): it hovers the row, and inside a cell
+    /// `renderCell` draws the app's views under it (the body under the hit
+    /// layer takes no pointer).
+    pub(crate) fn hover_at(&self, mouse: &MouseEvent) {
+        let hit = self.target_at(mouse.position);
+        if self.hover.get_untracked() != hit.row {
+            self.hover.set(hit.row);
+        }
+        let cell = match (hit.row, hit.column) {
+            (Some(row), Some(def)) if !hit.header => self.custom_cells.borrow().showing(row, def),
+            _ => None,
+        };
+        let before = self.hovered_cell.replace(cell);
+        if let Some((key, view)) = before
+            && cell.is_none_or(|(k, _)| k != key)
+        {
+            view.hover_at(None);
+        }
+        if let Some((_, view)) = cell {
+            view.hover_at(Some(*mouse));
+        }
+    }
+
+    /// The pointer left the body.
+    pub(crate) fn hover_left(&self) {
+        if self.hover.get_untracked().is_some() {
+            self.hover.set(None);
+        }
+        if let Some((_, view)) = self.hovered_cell.take() {
+            view.hover_at(None);
         }
     }
 

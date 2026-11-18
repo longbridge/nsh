@@ -525,9 +525,12 @@ impl Native for MacNative {
                 let root = (target != ROOT_ID)
                     .then(|| crate::window::root_view(surface, target))
                     .flatten();
+                // The window stays the input's, as after a real move: what
+                // the hover changes (the controls it shows) is picked again
+                // where the pointer is (`input::content_moved`), not in the
+                // main window, where the hovered views would hear a leave.
                 crate::input::enter(surface, root);
                 crate::input::event(surface, &event);
-                crate::input::enter(surface, None);
             }
         })
         .ok_or_else(|| "the window is gone".to_owned())
@@ -540,9 +543,13 @@ impl Native for MacNative {
             let root = (target != ROOT_ID)
                 .then(|| crate::window::root_view(surface, target))
                 .flatten();
-            crate::input::enter(surface, root);
+            // The agent's drop does not move the pointer (`input.last`): the
+            // window it was in stays the input's, so what the drop changes
+            // is picked again where the pointer is (a hover in this window
+            // included), not in the main window.
+            let pointer = crate::input::enter(surface, root);
             let dropped = crate::file_drop::drop_uris(surface, x, y, uris);
-            crate::input::enter(surface, None);
+            crate::input::enter(surface, pointer);
             dropped
         });
         match dropped {
@@ -605,7 +612,9 @@ impl Native for MacNative {
         // Escape, as a user goes back: in a focused field it only leaves
         // it, so then once more.
         self.on_key(|surface, window| {
-            if crate::text_input::editing(surface) {
+            // The field of the window the keys go to: the input's window is
+            // where the pointer last was (a hover elsewhere included).
+            if crate::text_input::editing_in(&crate::input::root_in(surface, window)) {
                 synth::key(surface, window, "Escape");
             }
             synth::key(surface, window, "Escape");

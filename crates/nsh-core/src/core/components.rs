@@ -631,6 +631,10 @@ pub(super) struct Components {
     pub(super) released_hosts: FxHashSet<NodeId>,
     #[cfg(test)]
     pub(super) cleanup_work: super::views::CleanupWork,
+    /// Siblings and overlays looked at to place views among them
+    /// ([`Core::preceding`], `native_before_at`, `first_overlay_in`).
+    #[cfg(test)]
+    pub(super) placing_work: std::cell::Cell<usize>,
     /// Slot nodes (`componentSlot`) -> their slot's name.
     slot_names: FxHashMap<NodeId, Arc<str>>,
     /// Slot nodes in a host -> the host.
@@ -751,6 +755,9 @@ pub(super) struct Components {
     /// Presses to pass on inside elements once this commit is laid out
     /// ([`crate::element::ElementRef::press_at`]).
     pub(super) presses: Vec<(NodeId, crate::PressEvent, AnswerSlot<bool>)>,
+    /// Pointers to pass on inside elements as the next commit starts
+    /// ([`crate::element::ElementRef::hover_at`]); `None`: it left.
+    pub(super) hovers: Vec<(NodeId, Option<crate::MouseEvent>)>,
     /// The web views' downloads ([`crate::webview::downloads`]): the
     /// sessions, their files and the platform's replies.
     pub(super) downloads: crate::webview::downloads::Downloads,
@@ -821,6 +828,8 @@ impl Default for Components {
             released_hosts: FxHashSet::default(),
             #[cfg(test)]
             cleanup_work: Default::default(),
+            #[cfg(test)]
+            placing_work: Default::default(),
             slot_names: FxHashMap::default(),
             slot_hosts: FxHashMap::default(),
             slot_targets: FxHashMap::default(),
@@ -873,6 +882,7 @@ impl Default for Components {
             transition_times: Vec::new(),
             text_contents: Vec::new(),
             presses: Vec::new(),
+            hovers: Vec::new(),
             downloads: crate::webview::downloads::Downloads::default(),
             next_webview_request: 1,
             virtual_lists: FxHashMap::default(),
@@ -4311,6 +4321,8 @@ impl<M: TextEngine> Core<M> {
     /// `next` ([`Self::precedes`]). `hint` is where it is expected, looked
     /// at first: nodes checked from the last to the first, each before the
     /// one after it, are found without a search of the children for each.
+    /// A node not among them, as each node of a region mounted for the
+    /// first time, is known from its own parent without a search either.
     pub(super) fn preceding(
         &self,
         parent: NodeId,
@@ -4319,16 +4331,35 @@ impl<M: TextEngine> Core<M> {
         hint: Option<usize>,
     ) -> Option<usize> {
         let k = self.key(parent).ok()?;
+        if self.nodes[self.key(child).ok()? as usize].parent != k {
+            return None;
+        }
         let children = &self.nodes[k as usize].children;
         let id = |at: usize| children.get(at).map(|&c| self.nodes[c as usize].id);
         let at = match hint {
             Some(at) if id(at) == Some(child) => at,
-            _ => children
-                .iter()
-                .position(|&c| self.nodes[c as usize].id == child)?,
+            _ => {
+                let at = children
+                    .iter()
+                    .position(|&c| self.nodes[c as usize].id == child);
+                self.placing(at.map_or(children.len(), |at| at + 1));
+                at?
+            }
         };
         (id(at + 1) == next).then_some(at)
     }
+
+    /// `n` more siblings or overlays looked at to place a view
+    /// ([`Components::placing_work`]).
+    #[cfg(test)]
+    pub(super) fn placing(&self, n: usize) {
+        let work = &self.components.placing_work;
+        work.set(work.get() + n);
+    }
+
+    #[cfg(not(test))]
+    #[inline(always)]
+    pub(super) fn placing(&self, _n: usize) {}
 
     /// Slot node `node` as element `el` of `host`'s view: its styles, props
     /// and handlers (its children are the app's JSX). Its bound parts are
@@ -6141,6 +6172,23 @@ impl<M: TextEngine> Core<M> {
                     command: Command::Dialog(Box::new(dialog)),
                 });
             }
+            Action::CloseDialog(answer) => {
+                // Answered already (or never shown): nothing to close.
+                let Some(id) = self
+                    .components
+                    .dialogs
+                    .iter()
+                    .find_map(|(id, slot)| Rc::ptr_eq(slot, &answer).then_some(*id))
+                else {
+                    return;
+                };
+                self.components.dialogs.remove(&id);
+                answer.borrow_mut().deliver(-1);
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::CloseDialog(id),
+                });
+            }
             Action::Return(call, result) => self.settle(call, result),
             Action::Animation(op) => {
                 let _ = self.apply_op(Op::Animation(op));
@@ -6186,6 +6234,7 @@ impl<M: TextEngine> Core<M> {
             }
             Action::TextContent(id, answer) => self.components.text_contents.push((id, answer)),
             Action::PressAt(id, press, answer) => self.components.presses.push((id, press, answer)),
+            Action::HoverAt(id, mouse) => self.components.hovers.push((id, mouse)),
             // A terminal decodes no images: the answer is at once, and no
             // request goes to the platform.
             Action::ImageInfo(_, answer)
@@ -6472,6 +6521,7 @@ impl<M: TextEngine> Core<M> {
                 answer.borrow_mut().deliver(available);
             }
             Action::AuthSession(request, answer) => self.start_auth_session(request, answer),
+            Action::CloseAuthSession => self.close_auth_session(),
             Action::RenderCanvas(request, answer) => self.start_canvas_render(*request, answer),
             Action::FileRequest(request, answer) => {
                 use crate::file_dialog::FileRequest;
@@ -6637,6 +6687,25 @@ impl<M: TextEngine> Core<M> {
             answer,
             opening,
         });
+    }
+
+    /// Closes the app's waiting sign-in session, if any: answers it as
+    /// cancelled and, where the platform shows it, has the platform close
+    /// it. A page in the system browser stays open: nothing closes it.
+    fn close_auth_session(&mut self) {
+        let Some(session) = self.components.auth_session.take() else {
+            return;
+        };
+        session
+            .answer
+            .borrow_mut()
+            .deliver(Ok(crate::auth_session::AuthSessionOutcome::Cancelled));
+        if session.opening.is_none() {
+            let _ = self.apply_op(Op::Command {
+                id: crate::ROOT_ID,
+                command: Command::CloseAuthSession(session.id),
+            });
+        }
     }
 
     /// Ends the waiting sign-in session `id` (any, `None`) with `result`.
@@ -7744,9 +7813,11 @@ fn dispose_rows(rows: &std::rc::Weak<RefCell<CellRowMap>>) {
 
 /// Moves the live cells of a view's list as its rows moved (`diff`, now
 /// `count` rows): each keeps its row, at the row's new index. A cell whose
-/// row went keeps its index (the list frees it, and binds it to another row
-/// before showing it again) while that is a row; past the rows, its content
-/// is disposed, before its bindings could read there.
+/// row went keeps its index, and shows the row now there, unless that row
+/// came there with its own cell: then, as past the rows, its content is
+/// disposed before its bindings could read there, so a row never shows in
+/// two cells (`ListState::adopt_orphans` in `core/list.rs`, by the same
+/// rule).
 fn move_rows(cells: &CellRows, diff: Option<&ListDiff>, count: u32) {
     let parts: Vec<_> = cells
         .borrow()
@@ -7754,20 +7825,41 @@ fn move_rows(cells: &CellRows, diff: Option<&ListDiff>, count: u32) {
         .map(|(&id, &(index, owner))| (id, index, owner))
         .collect();
     let mut gone = Vec::new();
-    for (id, index, owner) in parts {
+    // The new index of each cell's row, `None` for a row that went.
+    let moves: Vec<_> = parts
+        .iter()
+        .map(|&(id, index, owner)| {
+            let i = index.get_untracked();
+            let to = match diff {
+                Some(d) => d.new_index(i as u32).map(|(to, _)| to as usize),
+                None => Some(i),
+            };
+            (id, index, owner, i, to)
+        })
+        .collect();
+    let mut taken: Vec<usize> = moves
+        .iter()
+        .filter(|m| m.2.is_live())
+        .filter_map(|m| m.4)
+        .collect();
+    taken.sort_unstable();
+    for (id, index, owner, i, to) in moves {
         if !owner.is_live() {
             gone.push(id);
             continue;
         }
-        let i = index.get_untracked();
-        let to = diff
-            .and_then(|d| d.new_index(i as u32))
-            .map_or(i, |(to, _)| to as usize);
-        if to < count as usize {
-            index.set(to);
-        } else {
-            owner.dispose();
-            gone.push(id);
+        let to = match to {
+            Some(to) => Some(to),
+            // The row went: the cell reads the row now at its index, if
+            // that one's cell is not there too.
+            None => Some(i).filter(|i| taken.binary_search(i).is_err()),
+        };
+        match to {
+            Some(to) if to < count as usize => index.set(to),
+            _ => {
+                owner.dispose();
+                gone.push(id);
+            }
         }
     }
     let mut cells = cells.borrow_mut();

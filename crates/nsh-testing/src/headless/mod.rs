@@ -860,6 +860,17 @@ impl Headless {
         self.set_environment(&what, |env| env.auth_session = true)
     }
 
+    /// The platform shows web sign-in sessions in the app, as
+    /// [`Headless::on_auth_session`] does, but the user ends none of them:
+    /// each stays open until the app closes it
+    /// ([`nsh_core::element::close_auth_session`]) or opens another
+    /// ([`Screen::auth_session_showing`]). Then waits until the app is
+    /// quiet.
+    pub fn keep_auth_sessions_open(&mut self) -> Result<(), String> {
+        self.auth_session = None;
+        self.set_environment("keepAuthSessionsOpen", |env| env.auth_session = true)
+    }
+
     /// The platform has file dialogs, a file manager and a trash
     /// ([`nsh_core::platform::Environment::file_requests`]), and the user
     /// picks `paths` whenever the app shows the open dialog (`pick_paths`;
@@ -1175,6 +1186,7 @@ impl Headless {
         for id in self.screen.take_auth_session_answers() {
             if let Some(outcome) = &self.auth_session {
                 control.dispatch_event(ROOT_ID, EventKind::AuthSession, outcome.payload(id));
+                self.screen.auth_session_ended(id);
             }
         }
         for (id, request) in self.screen.take_file_answers() {
@@ -3273,8 +3285,9 @@ mod tests {
         assert_eq!(app.screen().shares().len(), 3);
     }
 
-    /// Opens a sign-in session ending with a `demo:` callback and shows how
-    /// it ended; the links the app hears otherwise show after it.
+    /// Opens a sign-in session ending with a `demo:` callback (closes it)
+    /// and shows how it ended; the links the app hears otherwise show
+    /// after it.
     #[component]
     fn SigningIn() -> impl IntoElement {
         let result = signal(String::from("nothing"));
@@ -3304,6 +3317,7 @@ mod tests {
         view()
             .child(text(move || result.get()))
             .child(text("Sign in").on_press(sign_in))
+            .child(text("Close").on_press(|_: &()| close_auth_session()))
     }
 
     #[test]
@@ -3360,6 +3374,36 @@ mod tests {
         app.wait_for("text:ERR_FEATURE_UNAVAILABLE_ON_PLATFORM")
             .unwrap();
         assert!(app.screen().opened_urls().is_empty());
+    }
+
+    #[test]
+    fn the_app_closes_its_sign_in_session() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<SigningIn>())).unwrap();
+        app.first_render().unwrap();
+        // With no session waiting, closing does nothing.
+        app.press("Close").unwrap();
+        app.wait_for("text:nothing").unwrap();
+        app.keep_auth_sessions_open().unwrap();
+        app.press("Sign in").unwrap();
+        assert_eq!(app.screen().auth_sessions().len(), 1);
+        assert!(app.screen().auth_session_showing());
+        app.wait_for("text:nothing").unwrap();
+        // Closed: answered as cancelled, and off the screen.
+        app.press("Close").unwrap();
+        app.wait_for("text:cancelled").unwrap();
+        assert!(!app.screen().auth_session_showing());
+
+        // In the system browser, the session ends as cancelled too; the
+        // callback link that comes later is an ordinary link.
+        let root = || Root::of::<SigningIn>().url_schemes(["demo"]);
+        let mut app = Headless::start(EngineConfig::new(root())).unwrap();
+        app.first_render().unwrap();
+        app.press("Sign in").unwrap();
+        app.press("Close").unwrap();
+        app.wait_for("text:cancelled").unwrap();
+        app.open_with_url("demo://done?code=9").unwrap();
+        app.wait_for("text:link demo://done?code=9").unwrap();
+        assert!(app.screen().auth_sessions().is_empty());
     }
 
     #[test]

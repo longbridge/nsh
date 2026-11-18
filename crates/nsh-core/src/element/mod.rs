@@ -188,7 +188,7 @@ pub use self::{
         CallCx, Cleanup, ErrorClass, ErrorFields, Held, IntoThrown, JsError, Later, Local, Locals,
         Quotas, RefuseConnections, Stop, System, codes, io_code,
     },
-    task::{Answer, ClipboardImage, ClipboardItem, DialogAnswer, ImageSize, Task},
+    task::{Answer, ClipboardImage, ClipboardItem, DialogAnswer, DialogCloser, ImageSize, Task},
     tokens::{FONT_MONO, FONT_SANS, ThemeTokens, Token, TokenSource, Tokens},
     value::{JsValue, NodeRef, PropEnum, PropError, SharedString, TsType, TsTypes, ts_of},
     virtual_list::{ListLayout, ViewableItems, VirtualList, virtual_list},

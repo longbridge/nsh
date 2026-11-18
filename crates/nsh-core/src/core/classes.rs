@@ -400,14 +400,16 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// The states `key` is styled by: its own and those it shows as a
-    /// part of a control, with `FOCUS_VISIBLE` on a part projected focused
-    /// while the focus shows. Virtual focus is projected while its control
-    /// has the focus, so on its rows `focus:` is the cursor and
-    /// `focus-visible:` the cursor the keyboard is on.
+    /// The states `key` is styled by: its own, those it shows as a part
+    /// of a control and a hover a component passes on to it, with
+    /// `FOCUS_VISIBLE` on a part projected focused while the focus shows.
+    /// Virtual focus is projected while its control has the focus, so on
+    /// its rows `focus:` is the cursor and `focus-visible:` the cursor the
+    /// keyboard is on.
     pub(super) fn styled_states(&self, key: Key) -> u16 {
         let node = &self.nodes[key as usize];
-        let mut states = node.states | node.projected;
+        let passed = if node.passed_hover { state::HOVERED } else { 0 };
+        let mut states = node.states | node.projected | passed;
         if let Some(group) = node.parts.as_ref().and_then(|p| p.active_group) {
             states |= self.group_states(key, group) & state::PRESSED;
         }
@@ -854,8 +856,10 @@ impl<M: TextEngine> Core<M> {
             }
             Part::Content => {
                 let content = self.list_content(key);
-                if let Some(list) = self.nodes[key as usize].list.as_mut() {
-                    list.set_class_content(content);
+                if let Some(list) = self.nodes[key as usize].list.as_mut()
+                    && list.set_class_content(content)
+                {
+                    self.needs_layout = true;
                 }
             }
             _ => {}
@@ -1212,7 +1216,7 @@ impl<M: TextEngine> Core<M> {
                 return;
             }
             let n = &self.nodes[k as usize];
-            if (n.states | n.projected != 0 || !n.data.is_empty())
+            if (n.states | n.projected != 0 || n.passed_hover || !n.data.is_empty())
                 && n.classes.as_ref().is_some_and(|c| !c.groups().is_empty())
             {
                 break;

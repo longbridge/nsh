@@ -98,6 +98,11 @@ nsh update-manifest *.tar.gz *.zip \
 Upload the archives, `latest.json` and `latest.json.sig` (with `--key`) as assets of the GitHub Release, or to your host
 next to each other. A release marked as a draft or prerelease on GitHub is not offered.
 
+For notes in more than one language, add `--notes <tag>=<file>` for each, a BCP 47 tag such as
+`--notes zh-TW=CHANGES.zh-TW.md`. Each is written as `notes.<tag>.md` beside `latest.json`, which records its SHA-256;
+upload them with it. Check with `checkForUpdate({ locale })` and `update.notes` is the one in that language, downloaded
+alone, or the untagged notes when there is none. Apps on older runtimes keep showing the untagged notes.
+
 ## OTA updates
 
 A release that changes only the app's TSX needs no new app: [OTA updates](/docs/ota-updates) deliver it as a signed
@@ -122,11 +127,12 @@ device.
 ## What is checked
 
 - The manifest's signature, when there is a `publicKey`.
-- The manifest's app id: it must be this app's.
 - The version: only a newer one is offered, so an old manifest cannot downgrade the app.
 - URLs: HTTPS only (plain HTTP only to this machine, for local tests).
 - The archive's size and SHA-256.
-- The new app: its id and executable, and on macOS its code signature.
+- The new app: one runnable app (its executable, and on macOS its code signature). Its id and executable name may
+  differ from the installed app's, so an update can rename the app or move it to a new id: the manifest's signature is
+  what binds an update to the app. Apps sharing a signing key install whatever their `"updater"` source serves.
 - That this run is the package itself: an NSH module running inside another app cannot replace it.
 - An OTA package: its signature against `packages.roots`, the app id, a build newer than the running one
   and than any the app ran before, the runtime it needs, its size and SHA-256.

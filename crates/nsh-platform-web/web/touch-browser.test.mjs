@@ -102,3 +102,55 @@ test('a zoomable view hands the touch drag it cannot take to the pager around it
     assert.equal(html.match(/data-result="([^"]*)"/)?.[1], 'passed');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('a one-axis scroll view leaves swipes across it to the scroll view around it', { skip: !chromium }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'nsh-touch-browser-'));
+  try {
+    const source = await readFile(new URL('./nsh.js', import.meta.url), 'utf8');
+    const module = 'data:text/javascript;base64,' + Buffer.from(source + '\nexport { Player };').toString('base64');
+    await writeFile(join(dir, 'index.html'), `<!doctype html><style>body { margin:0; } #app { width:300px; height:200px; }</style>
+    <div id="app"></div>
+    <script type="module">
+      import { Player } from '${module}';
+      const check = (ok, message) => { if (!ok) throw Error(message); };
+      try {
+        const p = new Player(document.querySelector('#app'), { history: false });
+        p.size = [300, 200];
+        p.wasm = new Proxy({}, { get: () => () => -1 });
+        p.call = (f) => f(p.wasm);
+        p.event = () => {};
+        p.installInput();
+        const behavior = { paging: false, snapInterval: 0, snapOffsets: [], snapAlignment: 'start', enabled: true,
+          bounces: true, inset: [0, 0, 0, 0], minZoom: 1, maxZoom: 1, bouncesZoom: true, pinch: true, centerContent: false,
+          refreshIndicator: null };
+        // A code editor: long lines scroll sideways inside the vertical scroll of all the lines.
+        p.op_c(['c', 2, 'scroll']);
+        const page = p.view(2);
+        p.root.append(page);
+        p.op_f(['f', 2, 0, 0, 300, 200]);
+        p.op_sc(['sc', 2, false, false, null, false]);
+        p.op_sbh(['sbh', 2, behavior]);
+        p.op_scs(['scs', 2, 300, 2000]);
+        p.op_c(['c', 4, 'scroll']);
+        p.op_i(['i', 2, 4, null]);
+        p.op_f(['f', 4, 0, 0, 300, 2000]);
+        p.op_sc(['sc', 4, true, false, null, false]);
+        p.op_sbh(['sbh', 4, behavior]);
+        p.op_scs(['scs', 4, 900, 2000]);
+        const style = (el) => getComputedStyle(el);
+        // Each contains its own axis (no chaining past it, no pull-to-refresh) and passes the other on: the
+        // vertical swipe that starts over the lines is the page's.
+        check(style(p.view(4)).overscrollBehaviorX === 'contain' && style(p.view(4)).overscrollBehaviorY === 'auto',
+          'horizontal: ' + style(p.view(4)).overscrollBehavior);
+        check(style(page).overscrollBehaviorY === 'contain' && style(page).overscrollBehaviorX === 'auto',
+          'vertical: ' + style(page).overscrollBehavior);
+        document.body.dataset.result = 'passed';
+      } catch (e) { document.body.dataset.result = 'failed: ' + e.message; }
+    </script>`);
+    const html = execFileSync(chromium, ['--headless', '--no-sandbox', '--disable-dev-shm-usage',
+      '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--virtual-time-budget=5000',
+      '--user-data-dir=' + join(dir, 'profile'), '--dump-dom', pathToFileURL(join(dir, 'index.html')).href],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60000, maxBuffer: 1024 * 1024 });
+    assert.equal(html.match(/data-result="([^"]*)"/)?.[1], 'passed');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

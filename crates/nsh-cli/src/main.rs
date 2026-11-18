@@ -360,9 +360,12 @@ enum Command {
         /// The secret key (`nsh keygen`'s `.secret`) of the app's `updater.publicKey`.
         #[arg(long)]
         key: Option<PathBuf>,
-        /// A text file with what changed.
+        /// A text file with what changed; `<tag>=<file>` for another
+        /// language, a BCP 47 tag such as `en`, `zh-TW` or `ja`, written
+        /// beside the manifest as `notes.<tag>.md` (repeatable; the
+        /// untagged one is needed with tagged ones).
         #[arg(long)]
-        notes: Option<PathBuf>,
+        notes: Vec<String>,
         /// Where iOS or Android users get it: `ios=<url>`, `android=<url>` (repeatable).
         #[arg(long = "link")]
         links: Vec<String>,
@@ -1061,7 +1064,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             package: package.as_deref(),
             entry: &entry,
             key: key.as_deref(),
-            notes: notes.as_deref(),
+            notes: &notes,
             links: &links,
             base_url: base_url.as_deref(),
             out: &out,

@@ -1571,7 +1571,9 @@ pub struct HeaderItem {
     /// Optional key for keeping a `UIBarButtonItem` across updates: a kept
     /// button takes the new title, symbol, label, menu and state in place.
     /// Without a key, a button is kept only while its position and its
-    /// content are unchanged; any other change makes a new one.
+    /// content are unchanged; any other change makes a new one. It is also
+    /// the button's accessibility identifier, as a view's `testID` is:
+    /// tests name it by `id:<key>`.
     pub key: Option<Arc<str>>,
     /// What the button shows.
     pub content: HeaderItemContent,
@@ -2582,6 +2584,10 @@ pub enum Command {
     /// Show an alert or action sheet (on the root); the answer comes back
     /// as [`EventKind::Dialog`].
     Dialog(Box<Dialog>),
+    /// Close the dialog [`Command::Dialog`] showed with this id (on the
+    /// root), as if dismissed, without reporting an answer: the app no
+    /// longer wants one, and the core has already answered it.
+    CloseDialog(u32),
     /// A JS responder took the touches on this view: `block` keeps native
     /// scroll views around it from taking them over.
     SetJsResponder {
@@ -2755,6 +2761,11 @@ pub enum Command {
         /// The page and the callback scheme.
         page: Box<crate::auth_session::AuthSessionPage>,
     },
+    /// Close the sign-in session [`Command::AuthSession`] showed with this
+    /// id (on the root), without reporting how it ended: the app closed it
+    /// ([`crate::element::close_auth_session`]), and the core has answered
+    /// it as cancelled already. A session no longer showing is left alone.
+    CloseAuthSession(u32),
     /// Let the user pick a color anywhere on the screen (on the root; a
     /// color picker's eyedropper, [`crate::element::ambient::pick_screen_color`]):
     /// the system's color sampler or the browser's `EyeDropper`. Report it

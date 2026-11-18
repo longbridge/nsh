@@ -176,6 +176,8 @@ pub struct Screen {
     /// The dialogs shown, in order, and how many were answered.
     dialogs: Vec<Dialog>,
     answered: usize,
+    /// The dialogs the app closed itself (`DialogCloser::close`), by id.
+    closed_dialogs: HashSet<u32>,
     /// The item on the clipboard: its text, and the HTML written with it
     /// (`Clipboard.write`).
     clipboard: Option<ClipboardItem>,
@@ -205,6 +207,9 @@ pub struct Screen {
     auth_sessions: Vec<nsh_core::auth_session::AuthSessionPage>,
     /// The sign-in sessions to answer.
     auth_session_answers: Vec<u32>,
+    /// The sign-in session showing: not answered, closed by the app nor
+    /// replaced yet.
+    auth_session_showing: Option<u32>,
     /// The requests on local paths that reached the platform
     /// (`pick_paths`, `open_path`, ...), in order.
     file_requests: Vec<nsh_core::file_dialog::FileRequest>,
@@ -848,6 +853,9 @@ impl Screen {
     fn command(&mut self, id: NodeId, command: &Command) {
         match command {
             Command::Dialog(dialog) => self.dialogs.push((**dialog).clone()),
+            Command::CloseDialog(dialog) => {
+                self.closed_dialogs.insert(*dialog);
+            }
             Command::SetClipboard(text) => self.set_clipboard(Some(text.clone())),
             Command::SetClipboardItem(item) => self.clipboard = Some(item.clone()),
             // An image replaces the text.
@@ -885,7 +893,9 @@ impl Screen {
             Command::AuthSession { id, page } => {
                 self.auth_sessions.push((**page).clone());
                 self.auth_session_answers.push(*id);
+                self.auth_session_showing = Some(*id);
             }
+            Command::CloseAuthSession(id) => self.auth_session_ended(*id),
             // Recorded, never carried out: a test's machine opens, shows
             // and trashes nothing.
             Command::FileRequest { id, request } => {
@@ -1744,14 +1754,28 @@ impl Screen {
         &self.dialogs
     }
 
-    /// The oldest dialog not answered yet.
+    /// Whether the app closed the dialog with this id itself
+    /// (`DialogCloser::close`): it is no longer up, and no step answers it.
+    pub fn dialog_closed(&self, id: u32) -> bool {
+        self.closed_dialogs.contains(&id)
+    }
+
+    /// Where the oldest dialog neither answered nor closed is.
+    fn pending_dialog_at(&self) -> Option<usize> {
+        (self.answered..self.dialogs.len())
+            .find(|&at| !self.closed_dialogs.contains(&self.dialogs[at].id))
+    }
+
+    /// The oldest dialog neither answered nor closed yet.
     pub(crate) fn pending_dialog(&self) -> Option<&Dialog> {
-        self.dialogs.get(self.answered)
+        self.pending_dialog_at().map(|at| &self.dialogs[at])
     }
 
     /// The oldest dialog was answered.
     pub(crate) fn answered(&mut self) {
-        self.answered = (self.answered + 1).min(self.dialogs.len());
+        self.answered = self
+            .pending_dialog_at()
+            .map_or(self.dialogs.len(), |at| at + 1);
     }
 
     /// The picks the app asked for so far, in order (`Picker.pickImages`,
@@ -1854,6 +1878,21 @@ impl Screen {
     /// elsewhere the page is in [`Screen::opened_urls`]).
     pub fn auth_sessions(&self) -> &[nsh_core::auth_session::AuthSessionPage] {
         &self.auth_sessions
+    }
+
+    /// Whether a sign-in session the app opened in the app still shows:
+    /// the user has not ended it (as
+    /// [`crate::Headless::keep_auth_sessions_open`] leaves it), and the app
+    /// has not closed it ([`nsh_core::element::close_auth_session`]).
+    pub fn auth_session_showing(&self) -> bool {
+        self.auth_session_showing.is_some()
+    }
+
+    /// Sign-in session `id` is no longer showing.
+    pub(crate) fn auth_session_ended(&mut self, id: u32) {
+        if self.auth_session_showing == Some(id) {
+            self.auth_session_showing = None;
+        }
     }
 
     /// The sign-in sessions to answer since the last call.
@@ -2386,7 +2425,7 @@ impl Screen {
     /// Whether a pointer can reach `id`: neither it nor a view around it
     /// has `pointerEvents: none` or is hidden, and no view around it takes
     /// touches only for itself (`box-only`).
-    fn receives_pointer(&self, id: NodeId) -> bool {
+    pub(crate) fn receives_pointer(&self, id: NodeId) -> bool {
         let mut at = Some(id);
         while let Some(current) = at {
             let Some(view) = self.nodes.get(&current) else {
@@ -2407,7 +2446,7 @@ impl Screen {
     /// root) reaches in that window: the topmost, innermost one there that
     /// receives touches. Canvas nodes are not views, and the windows of the
     /// app's own are windows of their own.
-    fn hit_pointer(&self, at: Point<Points>, window: NodeId) -> NodeId {
+    pub(crate) fn hit_pointer(&self, at: Point<Points>, window: NodeId) -> NodeId {
         let order = self.attached();
         let attached: HashSet<NodeId> = order.iter().copied().collect();
         // The dialogs presented over this window first, the last one on

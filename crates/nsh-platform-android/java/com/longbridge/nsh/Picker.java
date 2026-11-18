@@ -79,7 +79,9 @@ final class Picker {
         Intent intent;
         if (request.files) {
             intent = documents(request);
-        } else if (photoPicker()) {
+        } else if (Build.VERSION.SDK_INT >= 33 || (Build.VERSION.SDK_INT >= 30
+                && SdkExtensions.getExtensionVersion(Build.VERSION_CODES.R) >= 2)) {
+            // The system's Photo Picker: checked here, where lint sees the guard.
             intent = new Intent(MediaStore.ACTION_PICK_IMAGES);
             intent.setType("image/*");
             if (request.limit > 1) {
@@ -120,12 +122,6 @@ final class Picker {
         }
         if (!types.isEmpty()) intent.putExtra(Intent.EXTRA_MIME_TYPES, types.toArray(new String[0]));
         return intent;
-    }
-
-    /** Whether the system's Photo Picker is there. */
-    private static boolean photoPicker() {
-        if (Build.VERSION.SDK_INT >= 33) return true;
-        return Build.VERSION.SDK_INT >= 30 && SdkExtensions.getExtensionVersion(Build.VERSION_CODES.R) >= 2;
     }
 
     /**

@@ -1,15 +1,15 @@
 //! CoreText text engine: typesets on the engine thread, draws on the main
 //! thread from finished `CTLine`s, so every text is laid out once.
 
-use std::{cell::RefCell, ffi::c_void, ops::Range, ptr::NonNull, sync::Arc};
+use std::{cell::RefCell, ffi::c_void, ops::Range, ptr::NonNull};
 
 use nsh_core::{
     Affinity, AttributedText, Bounds, Color, EllipsizeMode, FamilyName, FontFamily, Point, Points,
     ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextPosition,
 };
 use nsh_platform_apple::core_text::{
-    background_key, decoration_key, ellipsis_key, paragraph_is_rtl, run_visual_span,
-    strikethrough_key, stroke_decoration, truncated_line_x, underline_key,
+    background_key, decoration_key, ellipsis_key, flush_factor, run_visual_span, strikethrough_key,
+    stroke_decoration, underline_key,
 };
 use objc2::rc::Retained;
 use objc2_app_kit::{
@@ -313,9 +313,11 @@ pub struct Prepared {
     max_lines: u32,
     ellipsize: EllipsizeMode,
     align: TextAlign,
+    /// The block is laid out right to left (`AttributedText::rtl`).
     rtl: bool,
+    /// `writingDirection` (`AttributedText::writing_direction`): right to
+    /// left, left to right, or from the content (`None`).
     writing_direction: Option<bool>,
-    text: Arc<str>,
     /// Attachments: placeholder offset (UTF-16) and how far its top is
     /// above the baseline (`TextAttachment::ascent`).
     attachments: Vec<(CFIndex, CGFloat)>,
@@ -351,7 +353,6 @@ pub(crate) struct CoreTextLayout {
     align: TextAlign,
     rtl: bool,
     writing_direction: Option<bool>,
-    text: Arc<str>,
     placeholders: Vec<(CFIndex, CGFloat)>,
     size: Size<Points>,
 }
@@ -371,7 +372,6 @@ impl std::ops::Deref for CoreTextLayout {
                 align: self.align,
                 rtl: self.rtl,
                 writing_direction: self.writing_direction,
-                text: self.text.clone(),
                 attachments: self.placeholders.clone(),
             };
             lay_out(&prepared, self.size)
@@ -899,6 +899,141 @@ impl Prepared {
             rest.truncated_line(width, kind, Some(&token))
         }
     }
+
+    /// The paragraph holding `at` (UTF-16; [`paragraph_around`]) and
+    /// whether it runs right to left as CoreText typesets it: its
+    /// `writingDirection`, else its content's ([`natural_rtl`]). Reads
+    /// only that paragraph's characters.
+    fn paragraph(&self, at: CFIndex) -> (Range<CFIndex>, bool) {
+        let attributed: &CFAttributedString = &self.string;
+        let Some(string) = attributed.string() else {
+            return (at..at, self.writing_direction.unwrap_or(false));
+        };
+        // SAFETY: `paragraph_around` and the paragraph it finds read
+        // indices below `self.length`, the string's length.
+        let unit = |i: CFIndex| unsafe { string.character_at_index(i) };
+        let paragraph = paragraph_around(unit, self.length, at);
+        let rtl = self
+            .writing_direction
+            .unwrap_or_else(|| natural_rtl(paragraph.clone().map(unit)));
+        (paragraph, rtl)
+    }
+}
+
+/// Whether a UTF-16 unit ends a paragraph (bidi class B: `\n`, `\r`,
+/// U+2029, ...; all in the BMP, so one unit each).
+fn ends_paragraph(unit: u16) -> bool {
+    char::from_u32(unit.into())
+        .is_some_and(|c| unicode_bidi::bidi_class(c) == unicode_bidi::BidiClass::B)
+}
+
+/// The paragraph of a text `len` UTF-16 units long, read a unit at a time
+/// by `unit`, that holds `at`: from after the paragraph separator before
+/// it to the next separator (not included) or the text's end.
+fn paragraph_around(unit: impl Fn(CFIndex) -> u16, len: CFIndex, at: CFIndex) -> Range<CFIndex> {
+    let at = at.clamp(0, len);
+    let mut start = at;
+    while start > 0 && !ends_paragraph(unit(start - 1)) {
+        start -= 1;
+    }
+    let mut end = at;
+    while end < len && !ends_paragraph(unit(end)) {
+        end += 1;
+    }
+    start..end
+}
+
+/// Whether a paragraph (its UTF-16 `units`) runs right to left by its
+/// content, as CoreText resolves a natural writing direction: as its first
+/// strong character outside isolates (UAX #9 rules P2 and P3), left to
+/// right when it has none (P3; the Linux backend takes the block's
+/// direction there instead).
+fn natural_rtl(units: impl IntoIterator<Item = u16>) -> bool {
+    use unicode_bidi::BidiClass::{AL, B, FSI, L, LRI, PDI, R, RLI};
+    let mut isolates = 0u32;
+    for c in char::decode_utf16(units) {
+        // An unpaired surrogate is no strong character.
+        let Ok(c) = c else { continue };
+        match unicode_bidi::bidi_class(c) {
+            LRI | RLI | FSI => isolates += 1,
+            PDI => isolates = isolates.saturating_sub(1),
+            L if isolates == 0 => return false,
+            R | AL if isolates == 0 => return true,
+            B => break,
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Where the characters `paragraph` of `line` start, from the line's
+/// origin: the right edge of their runs for a right-to-left paragraph,
+/// the left edge otherwise; `None` when none of them is in the line. A
+/// clipped line holds the rest of the text, the paragraphs after its own
+/// too, and reordering them need not put its own at either end of the
+/// line.
+fn paragraph_start_x(line: &CTLine, paragraph: Range<CFIndex>, rtl: bool) -> Option<CGFloat> {
+    let mut edges: Option<(CGFloat, CGFloat)> = None;
+    // SAFETY: the line's own run array (of CTRuns).
+    let runs = unsafe { line.glyph_runs() };
+    for i in 0..runs.count() {
+        // SAFETY: an index within the array.
+        let run = unsafe { &*runs.value_at_index(i).cast::<CTRun>() };
+        // SAFETY: a valid run.
+        let (range, glyphs) = unsafe { (run.string_range(), run.glyph_count()) };
+        if glyphs <= 0
+            || range.location >= paragraph.end
+            || range.location + range.length <= paragraph.start
+        {
+            continue;
+        }
+        let mut origin = CGPoint::new(0.0, 0.0);
+        // SAFETY: one position (the run has a glyph) into a one-point
+        // buffer, and the whole run's width.
+        let width = unsafe {
+            run.positions(
+                CFRange {
+                    location: 0,
+                    length: 1,
+                },
+                NonNull::from(&mut origin),
+            );
+            run.typographic_bounds(
+                WHOLE,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        let (left, right) = (origin.x, origin.x + width);
+        edges = Some(edges.map_or((left, right), |(l, r)| (l.min(left), r.max(right))));
+    }
+    edges.map(|(left, right)| if rtl { right } else { left })
+}
+
+/// The x of a cut last line (ellipsized or clipped) `line_width` wide in a
+/// box `width` wide, `flushed` where its alignment puts it when it fits
+/// (CoreText's pen offset for its [`flush_factor`]). A line wider than the
+/// box starts at its paragraph's start edge and overflows the end,
+/// whatever the alignment (CSS Text: an overflowing line is start
+/// aligned), so the beginning of the text stays in view: `start`, where
+/// the paragraph starts in the line ([`paragraph_start_x`]; the line's own
+/// start edge when `None`), goes to the box's right edge for a
+/// right-to-left paragraph and to its left edge otherwise.
+fn cut_line_x(
+    flushed: CGFloat,
+    line_width: CGFloat,
+    start: Option<CGFloat>,
+    width: CGFloat,
+    paragraph_rtl: bool,
+) -> CGFloat {
+    if line_width <= width {
+        flushed.max(0.0)
+    } else if paragraph_rtl {
+        width - start.unwrap_or(line_width)
+    } else {
+        -start.unwrap_or(0.0)
+    }
 }
 
 impl TextEngine for CoreTextEngine {
@@ -927,7 +1062,6 @@ impl TextEngine for CoreTextEngine {
             align: text.align,
             rtl: text.rtl,
             writing_direction: text.writing_direction,
-            text: Arc::from(text.text.as_str()),
             attachments: text
                 .attachments
                 .iter()
@@ -999,7 +1133,6 @@ impl TextEngine for CoreTextEngine {
             align: prepared.align,
             rtl: prepared.rtl,
             writing_direction: prepared.writing_direction,
-            text: prepared.text.clone(),
             placeholders: prepared.attachments.clone(),
             size,
         };
@@ -1229,21 +1362,21 @@ fn lay_out(prepared: &Prepared, size: Size<Points>) -> LaidLines {
         if range.location + range.length < prepared.length
             && let Some(truncated) = prepared.truncate(range.location, width)
         {
-            let paragraph_rtl = paragraph_is_rtl(
-                prepared.writing_direction,
-                &prepared.text,
-                range.location.max(0) as usize,
-            );
-            // SAFETY: a valid line.
-            last.origin.x = unsafe {
-                truncated_line_x(
-                    &truncated,
-                    prepared.align,
-                    prepared.rtl,
-                    paragraph_rtl,
-                    width,
+            let (paragraph, rtl) = prepared.paragraph(range.location);
+            let flush = flush_factor(prepared.align, prepared.rtl, rtl);
+            // SAFETY: a valid line and null out-params.
+            let (flushed, line_width) = unsafe {
+                (
+                    truncated.pen_offset_for_flush(flush, width),
+                    truncated.typographic_bounds(
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                    ),
                 )
             };
+            let start = paragraph_start_x(&truncated, paragraph, rtl);
+            last.origin.x = cut_line_x(flushed, line_width, start, width, rtl);
             last.line = truncated;
             last.hit_end = prepared.length;
             last.break_len = 0;
@@ -3512,7 +3645,7 @@ mod tests {
     /// covers its whole content box.
     #[test]
     fn drawing_in_a_shorter_or_narrower_layer_marks_the_text_cut() {
-        use std::{cell::Cell, sync::Arc};
+        use std::cell::Cell;
 
         use nsh_core::{Bounds, Point, ViewKind};
         use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
@@ -4073,5 +4206,345 @@ mod first_baseline {
         );
         let (large, _) = baseline(24.0);
         assert!(large > small * 1.5, "{small} {large}");
+    }
+}
+
+#[cfg(test)]
+mod cut_lines {
+    use super::*;
+
+    fn units(text: &str) -> Vec<u16> {
+        text.encode_utf16().collect()
+    }
+
+    fn paragraph_of(text: &str, at: CFIndex) -> Range<CFIndex> {
+        let units = units(text);
+        paragraph_around(|i| units[i as usize], units.len() as CFIndex, at)
+    }
+
+    #[test]
+    fn a_paragraph_runs_as_its_first_strong_character() {
+        let cases = [
+            ("Programme of the evening", false),
+            ("برنامج المساء", true),
+            ("תוכנית בדיקה", true),
+            // Digits and punctuation are not strong: the letters after
+            // them decide.
+            ("5 برنامج المساء", true),
+            ("(4) תוכנית", true),
+            ("12 Programme", false),
+            // Nothing strong: left to right (UAX #9 P3).
+            ("123 456", false),
+            ("", false),
+            // An isolate's content does not count (P2).
+            ("\u{2067}אבג\u{2069} abc", false),
+            ("\u{2066}abc\u{2069} אבג", true),
+            // Only its own paragraph counts.
+            ("123\nאבג", false),
+        ];
+        for (text, rtl) in cases {
+            assert_eq!(natural_rtl(units(text)), rtl, "{text:?}");
+        }
+        // An unpaired surrogate is skipped.
+        assert!(natural_rtl([0xd800, 0x05d0]));
+    }
+
+    #[test]
+    fn a_paragraph_reaches_from_separator_to_separator() {
+        let cases = [
+            ("abc\nאבג", 0, 0..3),
+            ("abc\nאבג", 2, 0..3),
+            ("abc\nאבג", 4, 4..7),
+            ("אבג\r\nabc", 5, 5..8),
+            ("abc\u{2029}אבג", 4, 4..7),
+            // Offsets are UTF-16: an emoji takes two units.
+            ("😀\nאבג", 3, 3..6),
+            // A line in the middle of a paragraph.
+            ("abc אבג", 4, 0..7),
+            // An empty paragraph between two breaks.
+            ("abc\n\nאבג", 4, 4..4),
+            ("", 0, 0..0),
+            ("abc", 9, 0..3),
+        ];
+        for (text, at, paragraph) in cases {
+            assert_eq!(paragraph_of(text, at), paragraph, "{text:?} at {at}");
+        }
+        // The direction of the paragraph holding a line's start.
+        for (text, at, rtl) in [
+            ("abc\nאבג", 0, false),
+            ("abc\nאבג", 4, true),
+            ("אבג\r\nabc", 5, false),
+            ("abc אבג", 4, false),
+        ] {
+            let units = units(text);
+            let paragraph = paragraph_of(text, at);
+            let units = units[paragraph.start as usize..paragraph.end as usize].iter();
+            assert_eq!(natural_rtl(units.copied()), rtl, "{text:?} at {at}");
+        }
+    }
+
+    #[test]
+    fn a_line_that_fits_goes_where_the_paragraph_aligns_its_lines() {
+        use TextAlign::*;
+        // (align, layout right to left, paragraph right to left, factor)
+        let cases = [
+            (Left, false, false, 0.0),
+            (Left, true, true, 0.0),
+            (Right, false, false, 1.0),
+            (Right, true, true, 1.0),
+            (Center, false, false, 0.5),
+            (Center, true, true, 0.5),
+            // Natural alignment: the paragraph's start side.
+            (Auto, false, false, 0.0),
+            (Auto, false, true, 1.0),
+            // `auto` in a right-to-left block: the right, whatever the
+            // content (`paragraph_key`).
+            (Auto, true, false, 1.0),
+            (Auto, true, true, 1.0),
+            // A justified paragraph's last line: natural.
+            (Justify, false, false, 0.0),
+            (Justify, true, false, 0.0),
+            (Justify, false, true, 1.0),
+        ];
+        for (align, layout_rtl, paragraph_rtl, factor) in cases {
+            assert_eq!(
+                flush_factor(align, layout_rtl, paragraph_rtl),
+                factor,
+                "{align:?} layout_rtl {layout_rtl} paragraph_rtl {paragraph_rtl}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_line_wider_than_its_box_starts_at_its_paragraphs_start() {
+        // A 300-point line in a 120-point box, whatever its alignment put
+        // it at (`flushed`).
+        for flushed in [0.0, -40.0, 100.0] {
+            // The paragraph starts at the line's own start edge.
+            assert_eq!(cut_line_x(flushed, 300.0, Some(0.0), 120.0, false), 0.0);
+            assert_eq!(cut_line_x(flushed, 300.0, None, 120.0, false), 0.0);
+            assert_eq!(cut_line_x(flushed, 300.0, Some(300.0), 120.0, true), -180.0);
+            assert_eq!(cut_line_x(flushed, 300.0, None, 120.0, true), -180.0);
+            // Within the line (reordered after a paragraph of the other
+            // direction): that start goes to the box's start edge.
+            assert_eq!(
+                cut_line_x(flushed, 300.0, Some(250.0), 120.0, false),
+                -250.0
+            );
+            assert_eq!(cut_line_x(flushed, 300.0, Some(60.0), 120.0, true), 60.0);
+        }
+        // A line that fits stays where its alignment put it, never left of
+        // the box.
+        for rtl in [false, true] {
+            for start in [None, Some(0.0), Some(100.0)] {
+                assert_eq!(cut_line_x(20.0, 100.0, start, 120.0, rtl), 20.0);
+                assert_eq!(cut_line_x(-0.25, 120.0, start, 120.0, rtl), 0.0);
+            }
+        }
+    }
+
+    /// `text` with `s` in one style, laid out in a box `width` wide.
+    fn lay(mut text: AttributedText, s: &str, width: f32) -> (CoreTextEngine, TextLayout) {
+        text.push(
+            s,
+            ResolvedTextStyle {
+                font_size: Points(26.0),
+                ..Default::default()
+            },
+        );
+        let engine = CoreTextEngine::default();
+        let prepared = engine.prepare(&text);
+        let laid = engine.layout(&prepared, Size::new(Points(width), Points(80.0)));
+        (engine, laid)
+    }
+
+    /// The x of the caret before character `offset`.
+    fn caret(engine: &CoreTextEngine, layout: &TextLayout, offset: u32) -> f32 {
+        engine
+            .caret_rect(layout, TextPosition::new(offset, Affinity::Downstream))
+            .expect("a caret")
+            .origin
+            .x
+            .0
+    }
+
+    #[test]
+    fn coretext_lines_keep_the_start_of_their_paragraph() {
+        let width = 120.0;
+        // (text, its natural direction is right to left)
+        let texts = [
+            ("Programme of the evening, live", false),
+            ("برنامج المساء التجريبي الطويل", true),
+            ("5 برنامج المساء التجريبي الطويل", true),
+            ("תוכנית בדיקה ארוכה מאוד 4", true),
+        ];
+        let aligns = [
+            TextAlign::Auto,
+            TextAlign::Left,
+            TextAlign::Center,
+            TextAlign::Right,
+            TextAlign::Justify,
+        ];
+        let modes = [
+            EllipsizeMode::Clip,
+            EllipsizeMode::Tail,
+            EllipsizeMode::Head,
+            EllipsizeMode::Middle,
+        ];
+        for (s, natural) in texts {
+            for direction in [None, Some(false), Some(true)] {
+                for layout_rtl in [false, true] {
+                    for mode in modes {
+                        for align in aligns {
+                            let text = AttributedText {
+                                max_lines: 1,
+                                ellipsize: mode,
+                                align,
+                                writing_direction: direction,
+                                rtl: layout_rtl,
+                                ..Default::default()
+                            };
+                            let (engine, laid) = lay(text, s, width);
+                            let lines = engine.lines(&laid);
+                            let what = format!(
+                                "{s} {direction:?} layout_rtl {layout_rtl} {mode:?} {align:?}"
+                            );
+                            assert_eq!(lines.len(), 1, "{what}");
+                            let line = &lines[0];
+                            let (left, right) = (line.x.0, line.x.0 + line.width.0);
+                            let what = format!("{what}: {left}..{right}");
+                            let rtl = direction.unwrap_or(natural);
+                            // 0 flush left, 0.5 centered, 1 flush right.
+                            let side = |rtl: bool| if rtl { 1.0 } else { 0.0 };
+                            let expected = match (mode, align) {
+                                (EllipsizeMode::Clip, _) => {
+                                    assert!(line.width.0 > width, "{what}: wider than its box");
+                                    side(rtl)
+                                }
+                                (_, TextAlign::Left) => 0.0,
+                                (_, TextAlign::Center) => 0.5,
+                                (_, TextAlign::Right) => 1.0,
+                                (_, TextAlign::Auto) if layout_rtl => 1.0,
+                                (_, TextAlign::Auto | TextAlign::Justify) => side(rtl),
+                            };
+                            if mode != EllipsizeMode::Clip {
+                                assert!(line.width.0 <= width + 0.5, "{what}: fits its box");
+                            }
+                            // Negative for a line wider than its box
+                            // flush right: it overflows the left.
+                            let at = (width - line.width.0) * expected;
+                            assert!((left - at).abs() < 0.5, "{what}: expected at {at}");
+                            // CoreText's own caret: the text's start is in
+                            // view when the paragraph runs as its content.
+                            if mode == EllipsizeMode::Clip && direction.is_none_or(|d| d == natural)
+                            {
+                                let start = caret(&engine, &laid, 0);
+                                assert!(
+                                    (-0.5..=width + 0.5).contains(&start),
+                                    "{what}: its start at {start} is out of view"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_ellipsized_line_starts_where_coretext_started_the_line_above() {
+        // CoreText typesets the first line, aligned by `paragraph_key`; the
+        // cut second line starts at the same edge.
+        let width = 120.0;
+        for s in [
+            "برنامج المساء التجريبي الطويل للعائلة كلها مع الأخبار والطقس",
+            "תוכנית בדיקה ארוכה מאוד עם הרבה מילים נוספות לבדיקה",
+        ] {
+            for align in [TextAlign::Auto, TextAlign::Right, TextAlign::Justify] {
+                let text = AttributedText {
+                    max_lines: 2,
+                    ellipsize: EllipsizeMode::Tail,
+                    align,
+                    ..Default::default()
+                };
+                let (engine, laid) = lay(text, s, width);
+                let lines = engine.lines(&laid);
+                assert_eq!(lines.len(), 2, "{s} {align:?}");
+                assert!(
+                    (lines[1].end as usize) < s.encode_utf16().count(),
+                    "{s} {align:?}: the second line is cut"
+                );
+                let first = caret(&engine, &laid, lines[0].start);
+                let second = caret(&engine, &laid, lines[1].start);
+                assert!(
+                    (first - second).abs() < 0.5,
+                    "{s} {align:?}: lines start at {first} and {second}"
+                );
+                assert!((first - width).abs() < 1.0, "{s} {align:?}: at {first}");
+            }
+        }
+    }
+
+    #[test]
+    fn each_paragraph_of_a_clipped_text_starts_at_its_start_edge() {
+        let width = 160.0;
+        // (text, its paragraphs run right to left)
+        for (s, rtl) in [
+            ("Tonight\nبرنامج المساء التجريبي الطويل", [false, true]),
+            ("برنامج\nProgramme of the evening, live", [true, false]),
+        ] {
+            let text = AttributedText {
+                max_lines: 2,
+                ellipsize: EllipsizeMode::Clip,
+                ..Default::default()
+            };
+            let (engine, laid) = lay(text, s, width);
+            let lines = engine.lines(&laid);
+            assert_eq!(lines.len(), 2, "{s}");
+            assert!(lines[1].width.0 > width, "{s}: the second line overflows");
+            for (line, rtl) in lines.iter().zip(rtl) {
+                let start = caret(&engine, &laid, line.start);
+                let edge = if rtl { width } else { 0.0 };
+                assert!(
+                    (start - edge).abs() < 1.0,
+                    "{s}: the line from {} starts at {start}",
+                    line.start
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_clipped_line_of_two_paragraphs_keeps_the_first_in_view() {
+        // The clipped line holds every paragraph left; reordering need not
+        // put the first at the line's start edge.
+        let width = 120.0;
+        for (s, rtl) in [
+            ("אבג\nabc def ghi jkl mno", true),
+            ("abc\nאבג דהו זחט יכל מנס", false),
+        ] {
+            let text = AttributedText {
+                max_lines: 1,
+                ellipsize: EllipsizeMode::Clip,
+                ..Default::default()
+            };
+            let (engine, laid) = lay(text, s, width);
+            let lines = engine.lines(&laid);
+            assert_eq!(lines.len(), 1, "{s}");
+            assert!(lines[0].width.0 > width, "{s}: wider than its box");
+            let start = caret(&engine, &laid, 0);
+            let edge = if rtl { width } else { 0.0 };
+            assert!((start - edge).abs() < 0.5, "{s}: starts at {start}");
+            let mut rects = Vec::new();
+            engine.range_rects(&laid, 0..3, &mut rects);
+            assert!(!rects.is_empty(), "{s}");
+            for r in &rects {
+                let (left, right) = (r.origin.x.0, r.origin.x.0 + r.size.width.0);
+                assert!(
+                    left >= -0.5 && right <= width + 0.5,
+                    "{s}: its first word at {left}..{right}"
+                );
+            }
+        }
     }
 }

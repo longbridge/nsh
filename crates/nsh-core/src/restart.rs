@@ -37,6 +37,20 @@ pub fn remember_program() {
     }
 }
 
+/// Sets the program a restart starts: an update's new executable, when the
+/// update renamed it or its `.app`.
+#[cfg(all(
+    feature = "updater",
+    any(
+        all(target_os = "linux", not(target_env = "ohos")),
+        target_os = "macos",
+        windows
+    )
+))]
+pub(crate) fn set_program(path: PathBuf) {
+    *PROGRAM.lock().unwrap_or_else(|e| e.into_inner()) = Some(path);
+}
+
 /// The program the app runs from: the one [`remember_program`] took before
 /// something replaced the app on disk, else this process' executable. What
 /// a restart starts, and what the desktops' login items start at login.

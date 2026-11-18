@@ -79,6 +79,8 @@ final class Mounter {
      * its message, its buttons and a destructive action, each light then dark ARGB (0: the system's).
      */
     final int[] dialogColors = new int[10];
+    /** The alerts shown and not answered yet, by dialog id: what {@link SystemUi#closeDialog} takes back. */
+    final SparseArray<android.app.AlertDialog> dialogs = new SparseArray<>();
     /** The status bar the app asked for last (style, hidden), applied again when the appearance changes. */
     private int barStyle = -1;
     private boolean barHidden;
@@ -163,6 +165,9 @@ final class Mounter {
     private final View.OnFocusChangeListener focusChange = (view, focused) -> {
         if (!(view instanceof Node)) return;
         int id = ((Node) view).nodeId();
+        // The focus went somewhere (the user's Tab or tap, or the view a
+        // pending `focus()` waits for): that request is over.
+        if (focused) dropPendingFocus();
         // A programmatic focus only opts this focus session into touch
         // mode. Once it ends, default buttons must remain touch-neutral.
         if (!focused && !Focusable.touch(focusProps.get(id, -1))) {
@@ -236,6 +241,13 @@ final class Mounter {
     /** `hitSlop` of views that have one (px: top, right, bottom, left). */
     private final SparseArray<float[]> slops = new SparseArray<>();
     private final SparseArray<A11y> a11y = new SparseArray<>();
+    /**
+     * The view whose node an accessibility service last clicked through its delegate
+     * (TalkBack's double tap), and when (uptime ms): a checked or selected state it changes in a
+     * later batch is told as that click's (`A11y.changed`).
+     */
+    View accessibilityClicked;
+    long accessibilityClickedAt;
     /** Layout animation of the batch being applied: create, update, delete. */
     private Transition[] layoutAnimation;
     /** Views created by the batch being applied. */
@@ -677,6 +689,10 @@ final class Mounter {
         }
         created.clear();
         finishNavigation();
+        // Commands run before the navigation: a page's `focus()` in the
+        // batch that pushes it finds the page placed only now, so it is
+        // focused before the frame draws.
+        if (pendingFocus.id() != 0) retryFocus();
         outputs(Native.afterBatch(handle(), seq));
     }
 
@@ -803,8 +819,10 @@ final class Mounter {
      */
     void destroyComponents() {
         Notifications.forget(this);
-        // A page's orientations go with the app.
+        // A page's orientations go with the app, and so does a focus
+        // request still waiting (no `DELETE` ends it).
         orientations(0);
+        dropPendingFocus();
         if (audio != null) {
             audio.release();
             audio = null;
@@ -1017,6 +1035,10 @@ final class Mounter {
 
     private void delete(int id) {
         View v = views.get(id);
+        if (id == pendingFocus.id()) {
+            dropPendingFocus();
+            android.util.Log.w("nsh", "focus(): view " + id + " was removed before it was shown; the request is dropped");
+        }
         if (v != null && managed(v) && v.isFocused()) {
             // The view goes away: report its blur before it leaves the tree.
             v.setOnFocusChangeListener(focusChange);
@@ -1067,6 +1089,7 @@ final class Mounter {
         keyParents.delete(id);
         slops.remove(id);
         a11y.remove(id);
+        if (accessibilityClicked == v) accessibilityClicked = null;
     }
 
     private void frame(int id, float x, float y, float w, float h) {
@@ -1778,9 +1801,12 @@ final class Mounter {
         }
         if (v instanceof InputBox) ((InputBox) v).pointerEvents = pointerEvents;
         if (v instanceof TextBox) ((TextBox) v).a11y = a;
+        A11y before = a11y.get(id);
         a11y.put(id, a);
         a.apply(v);
         updateFocusable(id, v);
+        // After the new delegate is in place: services answer by querying the node.
+        a.changed(v, before);
         if (v instanceof ScrollBox) keyScroll((ScrollBox) v, nativeId);
     }
 
@@ -2254,6 +2280,7 @@ final class Mounter {
         boolean caretHidden = b.getInt() != 0;
         boolean pasteInserts = b.getInt() != 0;
         boolean scrollbarVisible = b.getInt() != 0, replaced = b.getInt() != 0;
+        int fontVariant = b.getInt();
         if (!(v instanceof InputBox)) return;
         ((InputBox) v).pasteInserts = pasteInserts;
         ((InputBox) v).setScrollbar(scrollbarVisible, replaced);
@@ -2263,7 +2290,8 @@ final class Mounter {
         String family = familyIndex >= 0 ? (String) objects[familyIndex] : null;
         ((InputBox) v).configure(size, weight, italic, color, family, spacing, align, placeholder,
                 hasPlaceholderColor, placeholderColor, secure, keyboard, returnKey, capitalize, autoCorrect,
-                multiline, maxLength, editable, autoFocus, hasSelection, selection, hasCaret, caret, submit);
+                multiline, maxLength, editable, autoFocus, hasSelection, selection, hasCaret, caret, submit,
+                inputRtl, fontVariant);
     }
 
     /**
@@ -2364,10 +2392,10 @@ final class Mounter {
         View v = views.get(id);
         switch (kind) {
             case 0:
-                if (v instanceof InputBox) ((InputBox) v).focus();
-                else focusManaged(id);
+                focus(id, v);
                 break;
             case 1:
+                blurPending(id, v);
                 if (v instanceof InputBox) {
                     ((InputBox) v).blur();
                 } else if (v != null && managed(v) && v.isFocused()) {
@@ -2471,6 +2499,9 @@ final class Mounter {
                 SystemUi.dialog(this, dialog, title, message, cancelable, sheet, texts, styles);
                 break;
             }
+            case 60:
+                SystemUi.closeDialog(this, b.getInt());
+                break;
             case 14: {
                 boolean block = b.getInt() != 0;
                 clearJsResponder();
@@ -2650,6 +2681,10 @@ final class Mounter {
                 AuthSession.open(context, this, request, url, scheme, ephemeral);
                 break;
             }
+            case 61:
+                // `encode.rs` `Command::CloseAuthSession`: the request the app closed.
+                AuthSession.close(b.getInt());
+                break;
             case 26: {
                 int request = b.getInt();
                 String url = (String) objects[b.getInt()];
@@ -2758,6 +2793,9 @@ final class Mounter {
 
     void inputFocused(InputBox input, boolean focused) {
         if (focused) {
+            // As a managed view's focus does (`focusChange`): a request
+            // still waiting for another view would take it from the field.
+            dropPendingFocus();
             this.focused = input;
             host.post(this::revealFocused);
         } else if (this.focused == input) {
@@ -2968,17 +3006,170 @@ final class Mounter {
     }
 
     /**
-     * `ref.focus()` on a managed stop: makes it focusable and focuses it.
-     * The request is explicit, so it opts into touch-mode focus as an
-     * explicit `focusable` does; `updateFocusable` keeps that while the
-     * view holds the focus.
+     * A `ref.focus()` whose view is not shown yet (`PendingFocus`: a page
+     * the batch pushes, a page under its transition shader, a dialog's
+     * content before its window shows).
      */
-    void focusManaged(int id) {
+    private final PendingFocus pendingFocus = new PendingFocus();
+    /**
+     * Tries a pending focus again each frame, posted only while a managed
+     * view waits: Choreographer calls it whichever window the view will
+     * show in (the surface's or a dialog's), and nothing runs per frame
+     * when no request waits.
+     */
+    private final android.view.Choreographer.FrameCallback pendingFocusFrame = frameTime -> {
+        retryFocus();
+        int id = pendingFocus.id();
+        if (id != 0 && !(views.get(id) instanceof InputBox)) {
+            android.view.Choreographer.getInstance().postFrameCallback(this.pendingFocusFrame);
+        }
+    };
+
+    /**
+     * What held the focus of the pending view's window outside NSH's own
+     * views when the request was made (`foreignFocus`), so the request
+     * still takes the focus from it, as it would from a shown view.
+     */
+    private View pendingForeign;
+
+    /** `Command::Focus`: the latest request wins over one still waiting. */
+    private void focus(int id, View v) {
+        dropPendingFocus();
+        // A field not shown yet waits on its own and reports that wait
+        // (`inputFocusWaits`), so a newer request or a blur ends it.
+        if (v instanceof InputBox) ((InputBox) v).focus();
+        else focusManaged(id);
+    }
+
+    /**
+     * `ref.focus()` on a managed stop: makes it focusable and focuses it,
+     * at once when it is shown, else once it is (`PendingFocus`). The
+     * request is explicit, so it opts into touch-mode focus as an
+     * explicit `focusable` does; `updateFocusable` keeps that while the
+     * view holds the focus. On a shown view that is not a stop it does
+     * nothing; a request dropped without effect (no such view, a view
+     * neither shown nor a stop) logs a warning. Called only by `focus`,
+     * which ends the request before it.
+     */
+    private void focusManaged(int id) {
         View v = views.get(id);
-        if (v == null || !v.isShown() || !focusStop(id)) return;
+        if (v == null) {
+            android.util.Log.w("nsh", "focus(): no view " + id);
+            return;
+        }
+        boolean stop = focusStop(id);
+        if (v.isShown()) {
+            if (stop) takeFocus(v);
+            return;
+        }
+        if (!stop) {
+            android.util.Log.w("nsh", "focus(): view " + id + " is neither shown nor a focus stop"
+                    + " (focusable false, disabled, or no press handler); the request is dropped");
+            return;
+        }
+        pendingFocus.start(id, android.os.SystemClock.uptimeMillis());
+        pendingForeign = foreignFocus(v.getRootView());
+        android.view.Choreographer.getInstance().postFrameCallback(pendingFocusFrame);
+    }
+
+    /** Focuses `v`; whether Android gave it the focus. */
+    private boolean takeFocus(View v) {
         if (!v.isFocusable()) v.setFocusable(true);
         if (!v.isFocusableInTouchMode()) v.setFocusableInTouchMode(true);
-        v.requestFocus();
+        return v.requestFocus();
+    }
+
+    /** Focuses the view a pending request waits for once it is shown; gives the request up after its bound. */
+    private void retryFocus() {
+        int id = pendingFocus.id();
+        View v = views.get(id);
+        // A field waits on its own (`InputBox.focus`).
+        if (id == 0 || v instanceof InputBox) return;
+        switch (pendingFocus.retry(v != null && v.isShown(), android.os.SystemClock.uptimeMillis())) {
+            case PendingFocus.FOCUS: {
+                android.view.Choreographer.getInstance().removeFrameCallback(pendingFocusFrame);
+                View before = pendingForeign;
+                pendingForeign = null;
+                View foreign = foreignFocus(v.getRootView());
+                if (foreign != null && foreign != before) {
+                    // Hosted native content, a web view or the embedding
+                    // app's own view took the focus meanwhile (the user's
+                    // tap or Tab), which `focusChange` does not see: the
+                    // latest focus wins, as a node's would.
+                    break;
+                }
+                // Its props may have changed while it waited.
+                if (!focusStop(id)) {
+                    android.util.Log.w("nsh", "focus(): view " + id
+                            + " stopped being a focus stop before it was shown; the request is dropped");
+                } else if (!takeFocus(v)) {
+                    android.util.Log.w("nsh", "focus(): view " + id + " was shown but did not take the focus");
+                }
+                break;
+            }
+            case PendingFocus.EXPIRED:
+                android.view.Choreographer.getInstance().removeFrameCallback(pendingFocusFrame);
+                pendingForeign = null;
+                android.util.Log.w("nsh", "focus(): view " + id + " was not shown within "
+                        + PendingFocus.TIMEOUT_MS + " ms; the request is dropped");
+                break;
+            default:
+                break;
+        }
+    }
+
+    /**
+     * The view holding `window`'s focus when it is not NSH's own: in
+     * hosted native content (a `WidgetBox`, a web view's included, or a
+     * `ComponentBox`) or one of the embedding app's views. Null when
+     * nothing, the surface, a dialog's root or a node (an input's field
+     * included) holds it.
+     */
+    private View foreignFocus(View window) {
+        View f = window == null ? null : window.findFocus();
+        for (View cur = f; cur != null; ) {
+            if (cur == host || ModalHost.isRoot(cur)) return null;
+            if (cur instanceof WidgetBox || cur instanceof ComponentBox) return f;
+            if (cur instanceof Node) return null;
+            ViewParent parent = cur.getParent();
+            cur = parent instanceof View ? (View) parent : null;
+        }
+        return f;
+    }
+
+    /** Ends a pending focus request, a field's own wait included. */
+    private void dropPendingFocus() {
+        int id = pendingFocus.clear();
+        if (id == 0) return;
+        pendingForeign = null;
+        View v = views.get(id);
+        if (v instanceof InputBox) ((InputBox) v).cancelPendingFocus();
+        else android.view.Choreographer.getInstance().removeFrameCallback(pendingFocusFrame);
+    }
+
+    /**
+     * An input's `focus()` started waiting for its field (`InputBox.focus`,
+     * whoever asked: `ref.focus()`, `autoFocus`): the latest request, so
+     * one still waiting for another view ends.
+     */
+    void inputFocusWaits(InputBox input) {
+        int id = input.nodeId();
+        if (pendingFocus.id() == id) return;
+        dropPendingFocus();
+        pendingFocus.start(id, android.os.SystemClock.uptimeMillis());
+    }
+
+    /** An input's wait for its field ended, met or not (`InputBox.cancelPendingFocus`). */
+    void inputFocusWaitEnded(InputBox input) {
+        if (pendingFocus.id() == input.nodeId()) pendingFocus.clear();
+    }
+
+    /** `Command::Blur` of `id` (`v`): ends a pending focus of it, of a view it holds, or of any view (`Keyboard.dismiss()`). */
+    private void blurPending(int id, View v) {
+        int waiting = pendingFocus.id();
+        if (PendingFocus.blurs(id, waiting, v != null && waiting != 0 && holds(v, views.get(waiting)))) {
+            dropPendingFocus();
+        }
     }
 
     /**

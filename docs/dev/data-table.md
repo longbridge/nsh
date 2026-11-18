@@ -39,9 +39,14 @@ The table is a body, a hit layer over it and a header (`view.rs`), from the bott
 A press on a cell `renderCell` draws is passed on into it first (`Dt::press_with`): the cell's view, registered by
 row and column (`CustomCells`), gets `ElementRef::press_at` with the press, and the core presses the innermost view of
 the app's there that hears presses, with the commit's layout (`Core::press_target`). Only when none takes it does the
-press select and report `onRowPress`. That view gets `onPress`, not hover or press states: the pointer stays on the hit
-layer. Headless tests press a view that takes no pointer (the body's) where it is, through the hit layer, as a pointer
-would (`Screen::routed_press`).
+press select and report `onRowPress`. That view gets `onPress`, not press states: the pointer stays on the hit layer.
+The pointer moving over the body is passed on the same way (`Dt::hover_at`): the cell under it gets
+`ElementRef::hover_at`, and the core hovers the app's views there with the last layout (`Core::pass_hovers`), so their
+`hover:` classes apply and they hear `onMouseEnter`, `onMouseMove` and `onMouseLeave`; the cell it left, or the hit
+layer's `onMouseLeave`, gets `hover_at(None)`. The hovered row's views in every region are projected hovered
+(`project_hovered`), so with `classes.row: "group"` the `group-hover:` classes of every cell in it apply. Headless tests
+press and hover a view that takes no pointer (the body's) where it is, through the hit layer, as a pointer would
+(`Screen::routed_press`, `Screen::hit_pointer`).
 
 The fixed-column separator sits above each row background and below its cells, so app-supplied cell borders
 remain visible at the fixed boundary.
