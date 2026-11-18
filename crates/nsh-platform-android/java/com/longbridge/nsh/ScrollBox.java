@@ -334,16 +334,27 @@ final class ScrollBox extends FrameLayout implements Node {
      * keyboard's room) to the one `scrollbarInset` leaves, by mapping the canvas along the bar's axis and
      * shifting it across, so that the bar keeps the platform's look and behavior. Returns the save count to
      * restore after drawing the bars, or -1 when the tracks are the same.
+     *
+     * <p>The mapping scales the thumb along the axis too, its ends included; the inset is small next to the
+     * track, so the difference is too.
      */
     private int insetBars(View v, Canvas canvas, boolean horizontal) {
         if (!barSet) return -1;
         int padStart = horizontal ? v.getPaddingLeft() : v.getPaddingTop();
         int padEnd = horizontal ? v.getPaddingRight() : v.getPaddingBottom();
-        int padAcross = horizontal ? v.getPaddingBottom() : v.getPaddingRight();
         int start = horizontal ? barLeft : barTop;
         int end = horizontal ? barRight : barBottom + keyboardPadding;
-        int across = horizontal ? barBottom + keyboardPadding : barRight;
-        if (padStart == start && padEnd == end && padAcross == across) return -1;
+        // How far to move the bar across, towards the content: the horizontal bar sits at the bottom, the vertical
+        // one on the side the platform puts it (the left in a right-to-left layout).
+        int shift;
+        if (horizontal) {
+            shift = v.getPaddingBottom() - (barBottom + keyboardPadding);
+        } else if (barOnLeft(v)) {
+            shift = barLeft - v.getPaddingLeft();
+        } else {
+            shift = v.getPaddingRight() - barRight;
+        }
+        if (padStart == start && padEnd == end && shift == 0) return -1;
         int length = horizontal ? v.getWidth() : v.getHeight();
         float from = length - padStart - padEnd, to = length - start - end;
         int save = canvas.save();
@@ -355,16 +366,25 @@ final class ScrollBox extends FrameLayout implements Node {
         float k = to / from;
         if (horizontal) {
             int x = v.getScrollX();
-            canvas.translate(x + start, padAcross - across);
+            canvas.translate(x + start, shift);
             canvas.scale(k, 1);
             canvas.translate(-(x + padStart), 0);
         } else {
             int y = v.getScrollY();
-            canvas.translate(padAcross - across, y + start);
+            canvas.translate(shift, y + start);
             canvas.scale(1, k);
             canvas.translate(0, -(y + padStart));
         }
         return save;
+    }
+
+    /** Whether the platform draws the vertical scroll bar of {@code v} on its left, as it does by default when RTL. */
+    private static boolean barOnLeft(View v) {
+        int position = v.getVerticalScrollbarPosition();
+        if (position == View.SCROLLBAR_POSITION_DEFAULT) {
+            return v.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+        }
+        return position == View.SCROLLBAR_POSITION_LEFT;
     }
 
     // --- Paging and snapping ---------------------------------------------

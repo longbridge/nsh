@@ -13,7 +13,8 @@
   that off for it (a chat thread that keeps the reader's place). iOS and Mac Catalyst only. `scrollbarInset` keeps
   the indicator clear of bars floating over the view (`ScrollBehavior::scrollbar_inset`): iOS sets its indicator
   insets, the other platforms and the built-in bars keep their track within it, and the keyboard's room is added at
-  the bottom where the platform avoids the keyboard. Snapping is decided
+  the bottom where the platform avoids the keyboard. On Android an all-zero inset keeps the earlier track (within
+  `contentInset`), since the bridge cannot tell it from an unset one. Snapping is decided
   by `ScrollBehavior::snap_target` (core) on iOS and its Java port on Android, from the release offset, the projected glide and
   the velocity. Lists scrolled past their start keep the visible rows in place when items are inserted above them
   (`splice`), as a browser's scroll anchoring does; at their start the rows that arrive show, unless the list loads

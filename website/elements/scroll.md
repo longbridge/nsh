@@ -202,4 +202,6 @@ changes; their children are mirrored.
 - On Mac Catalyst (Mac idiom), NSH detects the pull and shows its spinner.
 - `scrollbarInset`: iOS adds the keyboard's room to its bottom, as it does to the content's. Touch browsers inset the
   indicator only along the axis it scrolls, and browsers that cannot style their scroll bars (Firefox) ignore it.
+  On Android, while every edge is 0 the indicator stays within `contentInset` as before; once any edge is set, it
+  follows `scrollbarInset` alone, as on the other platforms.
 - iOS redraws texts and canvases at the zoomed resolution when a zoom ends.
