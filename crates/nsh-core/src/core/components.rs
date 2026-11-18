@@ -5335,7 +5335,7 @@ impl<M: TextEngine> Core<M> {
     /// backend mounts it elsewhere. No allocation: a walk per transition.
     #[doc(hidden)]
     pub fn key_interest(&self, id: NodeId) -> bool {
-        let Ok(mut key) = self.key(id) else {
+        let Ok(mut key) = self.key(id).map(|key| self.key_start(key)) else {
             return false;
         };
         let window = self.key_window(key);
@@ -5374,7 +5374,7 @@ impl<M: TextEngine> Core<M> {
     #[doc(hidden)]
     pub fn key_path(&self, id: NodeId, out: &mut Vec<NodeId>) {
         out.clear();
-        let Ok(mut key) = self.key(id) else {
+        let Ok(mut key) = self.key(id).map(|key| self.key_start(key)) else {
             return;
         };
         let window = self.key_window(key);
@@ -5404,7 +5404,7 @@ impl<M: TextEngine> Core<M> {
     /// keys that edit it: nothing captures them.
     #[doc(hidden)]
     pub fn key_captured(&self, id: NodeId, keystroke: Option<&crate::keymap::Keystroke>) -> bool {
-        let Ok(mut key) = self.key(id) else {
+        let Ok(mut key) = self.key(id).map(|key| self.key_start(key)) else {
             return false;
         };
         // A native text input owns the keys that edit it: an ancestor's
@@ -5432,6 +5432,25 @@ impl<M: TextEngine> Core<M> {
             }
             key = node.parent;
         }
+    }
+
+    /// Where a key transition reported at `key` starts. A backend with
+    /// nothing focused in a window reports at the window's root (`ROOT_ID`,
+    /// or a dialog window's root): the app's views are not its ancestors,
+    /// so the transition starts at the view mounted there (the app's mount
+    /// root, or the dialog's content) and bubbles from it, as a browser
+    /// reports it at `document.body` (#2362). Any other node starts at
+    /// itself.
+    fn key_start(&self, key: Key) -> Key {
+        let node = &self.nodes[key as usize];
+        if node.id != crate::ROOT_ID && self.key_window(key) != node.id {
+            return key;
+        }
+        node.children
+            .iter()
+            .copied()
+            .find(|&child| !matches!(self.nodes[child as usize].kind, Kind::Overlay | Kind::Modal))
+            .unwrap_or(key)
     }
 
     /// The root of the window `key` is in, `key` itself when it is one.
