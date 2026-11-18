@@ -16639,6 +16639,12 @@ mod components {
             .iter()
             .filter(|(_, n)| n.kind == Kind::RawText && !n.text.is_empty())
             .map(|(_, n)| n.text.clone())
+            .chain(
+                c.runs
+                    .values()
+                    .filter(|r| r.block != NO_KEY && !r.text.is_empty())
+                    .map(|r| r.text.clone()),
+            )
             .collect();
         shown.sort();
         CHANGING_ROWS.set(100);
