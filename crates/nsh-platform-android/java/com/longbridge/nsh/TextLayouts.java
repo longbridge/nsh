@@ -1,7 +1,9 @@
 package com.longbridge.nsh;
 
+import android.annotation.TargetApi;
 import android.graphics.Paint;
 import android.graphics.Typeface;
+import android.graphics.text.LineBreaker;
 import android.text.Layout;
 import android.text.PrecomputedText;
 import android.text.SpannableString;
@@ -138,9 +140,10 @@ final class TextLayouts {
                 if (typeface != null && !typeface.equals(Typeface.DEFAULT)) return typeface;
             }
         }
-        int style = (weight >= 600 && baseWeight < 600 ? Typeface.BOLD : 0)
-                | (italic && !baseItalic ? Typeface.ITALIC : 0);
-        return style == 0 ? base : Typeface.create(base, style);
+        boolean bold = weight >= 600 && baseWeight < 600;
+        boolean slanted = italic && !baseItalic;
+        if (!bold && !slanted) return base;
+        return Typeface.create(base, bold ? (slanted ? Typeface.BOLD_ITALIC : Typeface.BOLD) : Typeface.ITALIC);
     }
 
     /**
@@ -300,6 +303,7 @@ final class TextLayouts {
     }
 
     /** A registered face as a font family of one font (Android 10+). */
+    @TargetApi(29)
     private static android.graphics.fonts.FontFamily fontFamily(Face face) throws java.io.IOException {
         android.graphics.fonts.Font font = new android.graphics.fonts.Font.Builder(face.file)
                 .setWeight(clamp(face.weight))
@@ -395,13 +399,15 @@ final class TextLayouts {
             widthPx = Math.max(0, widthPx);
             for (StaticLayout l : layouts) if (l != null && l.getWidth() == widthPx) return l;
             // Break strategy and hyphenation match the PrecomputedText params,
-            // so the builder reuses its glyph measurements.
+            // so the builder reuses its glyph measurements. LineBreaker's
+            // constants are the setters' type (Android Lint) and equal
+            // Layout's; javac inlines them, so API 26-28 never load the class.
             StaticLayout.Builder b = StaticLayout.Builder.obtain(text, 0, text.length(), paint, widthPx)
                     .setAlignment(alignment)
                     .setTextDirection(direction)
                     .setIncludePad(false)
                     .setLineSpacing(0f, 1f)
-                    .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
+                    .setBreakStrategy(LineBreaker.BREAK_STRATEGY_SIMPLE)
                     .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE);
             if (android.os.Build.VERSION.SDK_INT >= 35) {
                 // `obtain` hands out pooled builders and does not reset these
@@ -411,7 +417,7 @@ final class TextLayouts {
                 b.setUseBoundsForWidth(false);
                 b.setShiftDrawingOffsetForStartOverhang(false);
             }
-            if (justify) b.setJustificationMode(Layout.JUSTIFICATION_MODE_INTER_WORD);
+            if (justify) b.setJustificationMode(LineBreaker.JUSTIFICATION_MODE_INTER_WORD);
             if (maxLines > 0) {
                 b.setMaxLines(maxLines);
                 if (ellipsize != null) b.setEllipsize(ellipsize);
@@ -540,7 +546,7 @@ final class TextLayouts {
         CharSequence measured = s;
         if (android.os.Build.VERSION.SDK_INT >= 28) {
             PrecomputedText.Params params = new PrecomputedText.Params.Builder(paint)
-                    .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
+                    .setBreakStrategy(LineBreaker.BREAK_STRATEGY_SIMPLE)
                     .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
                     .setTextDirection(direction)
                     .build();

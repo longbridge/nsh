@@ -1,5 +1,6 @@
 package com.longbridge.nsh;
 
+import android.annotation.TargetApi;
 import android.view.WindowInsets;
 import android.view.WindowInsetsAnimation;
 import java.util.List;
@@ -8,6 +9,7 @@ import java.util.List;
  * The keyboard's curve and duration for Android 11+ (only loaded there, so
  * that {@code NshView} verifies without these types on older versions).
  */
+@TargetApi(30)
 final class KeyboardAnimation {
     private KeyboardAnimation() {}
 

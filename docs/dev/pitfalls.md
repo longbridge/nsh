@@ -347,6 +347,10 @@ Things that were found the hard way. Read the section of the area you change bef
   content rect within the view that started it: started from an editor's sink (a sliver at the caret) it sat on the
   caret whatever the rect said, over the selection's start handle, and took that handle's touches; it starts from the
   root view (`InputBox.openEditMenu`).
+- **Android, API levels and lint**: hosts that compile the Java runtime run Android Lint over it (NewApi,
+  WrongConstant), while NSH's own build runs only javac. A class or helper reached only behind `SDK_INT >= N` carries
+  `@TargetApi(N)`, as `Backdrop` does; a guard lint cannot see through (a helper that returns the check) is written at
+  the call site; an `int` setter typed with another class's constants takes those constants.
 - **Android, JNI**: cache classes and method ids in `JNI_OnLoad`; wrap every call from the (permanently attached) engine thread in
   a local frame (`java::with_env`), or local references pile up.
 - **Android, text**: `StaticLayout` ignores `maxLines` without an ellipsis (clip mode counts lines itself and the view clips);
