@@ -614,8 +614,10 @@ fn cursor_at(hit: &Hit) -> Cursor {
                 .or_else(|| s.props.window_resize.map(resize_cursor))
                 .or_else(|| crate::text::selectable(&s).then_some(Cursor::Text))
                 .or_else(|| {
-                    (v == &hit.view && crate::selectable_view::is_area_text(v, &s))
-                        .then_some(Cursor::Text)
+                    (v == &hit.view
+                        && crate::selectable_view::is_area_text(v, &s)
+                        && !crate::selectable_view::cursor_above(v))
+                    .then_some(Cursor::Text)
                 })
         })
         .unwrap_or(Cursor::Default)

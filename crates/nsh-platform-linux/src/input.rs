@@ -532,7 +532,10 @@ fn shows_ibeam(view: &NshView) -> bool {
 }
 
 fn shows_ibeam_state(view: &NshView, s: &crate::view::ViewState) -> bool {
-    s.text.is_some() && (crate::text::selectable(s) || crate::selectable_view::takes_part(view))
+    s.text.is_some()
+        && (crate::text::selectable(s)
+            || (crate::selectable_view::takes_part(view)
+                && !crate::selectable_view::cursor_above(view)))
 }
 
 fn set_cursor(view: &NshView, over_link: bool) {
