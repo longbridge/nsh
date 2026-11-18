@@ -927,7 +927,7 @@ test("a key a field's own handler took is not the page's shortcut as well", () =
   let mounted = true;
   const body = { closest: () => null };
   const field = { ...focusView(false, {}), classList: { contains: () => true }, closest: (selector) => (selector.includes(".nsh-field") ? field : null) };
-  const root = { contains: (el) => mounted && el === field };
+  const root = { children: [], contains: (el) => mounted && el === field };
   player.root = root;
   globalThis.document = { activeElement: field, body };
   Player.active = player;
