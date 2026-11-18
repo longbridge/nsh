@@ -22,13 +22,7 @@ test('storage round-trips arbitrary string keys and clears only its namespace', 
     setItem: (key: string, value: string) => { kept.set(key, value); },
     removeItem: (key: string) => { kept.delete(key); },
   };
-  const player = {
-    str: (text: string) => text,
-    storage: (f: () => unknown) => f(),
-    // This fixture exercises local reads and writes. The player tests cover
-    // subscriptions to storage events from other tabs.
-    followStorage: (_prefix: string) => {},
-  };
+  const player = { str: (text: string) => text, storage: (f: () => unknown) => f() };
   const storage = makeImports.call(player, localStorage);
   const prefix = 'nsh:/app/:';
   const entries = new Map(['__proto__', 'constructor', 'toString', '', '键😀'].map((key) => [key, `value:${key}`]));
