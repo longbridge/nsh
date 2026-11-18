@@ -3319,16 +3319,37 @@ final class Mounter {
         }
         index = TabOrder.next(index, stops.size(), forward);
         if (index < 0) return false;
-        View next = stops.get(index);
+        return keyFocus(stops.get(index));
+    }
+
+    /**
+     * An arrow key while the window's own root holds the focus
+     * ({@link ArrowEntry}): the first stop in `windowRoot` that is on
+     * screen in the window, or its first stop when none is; false when it
+     * has none.
+     */
+    boolean enterFocus(View windowRoot) {
+        java.util.ArrayList<View> stops = new java.util.ArrayList<>();
+        collectFocusStops(windowRoot, stops);
+        android.graphics.Rect window = new android.graphics.Rect();
+        android.graphics.Rect rect = new android.graphics.Rect();
+        boolean shown = windowRoot.getGlobalVisibleRect(window);
+        int index = ArrowEntry.stop(stops.size(), i -> shown
+                && stops.get(i).getGlobalVisibleRect(rect) && android.graphics.Rect.intersects(window, rect));
+        return index >= 0 && keyFocus(stops.get(index));
+    }
+
+    /** Focuses the stop `moveFocus` or `enterFocus` picked, as a key does. */
+    private boolean keyFocus(View next) {
         if (next instanceof InputBox) {
             ((InputBox) next).focus();
             return true;
         }
-        // A Tab is a keyboard transition: leave touch mode as a hardware
-        // key does, so a default pressable (not focusable in touch mode)
-        // takes the focus from a real or a synthetic Tab alike. The
-        // enclosing scroll view still reveals the stop (ScrollView's
-        // requestChildFocus), as for any keyboard focus.
+        // A Tab (or an arrow into the app) is a keyboard transition: leave
+        // touch mode as a hardware key does, so a default pressable (not
+        // focusable in touch mode) takes the focus from a real or a
+        // synthetic key alike. The enclosing scroll view still reveals the
+        // stop (ScrollView's requestChildFocus), as for any keyboard focus.
         return next.requestFocusFromTouch();
     }
 

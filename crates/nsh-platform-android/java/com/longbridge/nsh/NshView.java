@@ -126,7 +126,10 @@ public class NshView extends FrameLayout {
      * unaffected. A
      * view with no raw listener and no capture leaves the key to Android; Tab and Shift+Tab then
      * move the focus between managed stops and inputs, yielding to Android at the first and last
-     * stop.
+     * stop, and while this view itself holds the focus (at launch, on the first key after a tap)
+     * an unmodified arrow key that Android has nowhere outside the app to take (an embedding host's
+     * view in its direction, a host scroll view) moves it to the first stop on screen
+     * ({@link ArrowEntry}).
      */
     @Override
     public boolean dispatchKeyEvent(android.view.KeyEvent e) {

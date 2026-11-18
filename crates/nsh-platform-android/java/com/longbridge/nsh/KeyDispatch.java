@@ -2,8 +2,10 @@ package com.longbridge.nsh;
 
 import android.os.SystemClock;
 import android.util.SparseArray;
+import android.util.SparseBooleanArray;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewParent;
 
 /**
  * The keyboard of one native window: the app's shortcuts, the focused
@@ -35,6 +37,14 @@ import android.view.View;
  * order. At the first or last stop they yield to Android's own focus and
  * default handling instead of wrapping, so an app never traps Tab.
  *
+ * <p>While no view of the app has the focus (the window's own root holds
+ * it: at launch, and on the first key after a tap), an unmodified arrow key
+ * that nothing in the app took and that Android has nowhere else to take
+ * (no view outside the app in its direction, no scroll view around the app
+ * scrolling that way) moves the focus to the first stop on screen
+ * ({@link ArrowEntry}). From then on Android's own directional navigation
+ * moves it. Enter and the D-pad centre keep Android's default.
+ *
  * <p>An uncaptured Return or Space down reaches Android's native pressed
  * state. If a repeat or release becomes captured, the native state is
  * cancelled with a `FLAG_CANCELED` up, so no stale press and no click
@@ -46,8 +56,12 @@ final class KeyDispatch {
     private final View root;
     /** The node a key goes to when nothing in this window has a focus ({@code ROOT_ID} or a modal's id). */
     private final int fallback;
-    /** A Tab press moved the managed focus; its release is consumed too. */
-    private boolean tabMoved;
+    /**
+     * The keys whose press moved the managed focus (Tab, or an arrow into
+     * the app), by code: their releases are consumed too. Another key
+     * pressed meanwhile leaves them be.
+     */
+    private final SparseBooleanArray moved = new SparseBooleanArray();
     /** A down reached native handling: the view whose pressed state a captured repeat/up must cancel. */
     private final SparseArray<View> nativeDown = new SparseArray<>();
     /** A native press already cancelled while its key stayed held: its real up is cancelled too. */
@@ -71,6 +85,7 @@ final class KeyDispatch {
                 // A fresh press: any lost release state of this code is stale.
                 nativeDown.remove(e.getKeyCode());
                 nativeCancelled.remove(e.getKeyCode());
+                moved.delete(e.getKeyCode());
                 if (e.getKeyCode() == KeyEvent.KEYCODE_BACK) {
                     back.press(e.getDownTime());
                     backDown = new KeyEvent(e);
@@ -83,16 +98,27 @@ final class KeyDispatch {
                 cancelNative(e);
                 return true;
             }
-            boolean tab = isTab(e);
-            if (tab && mounter.moveFocus(root, focus(), !e.isShiftPressed())) {
-                tabMoved = true;
+            View focus = focus();
+            int code = e.getKeyCode();
+            if (isTab(e) && mounter.moveFocus(root, focus, !e.isShiftPressed())) {
+                moved.put(code, true);
                 return true;
             }
-            // Not a Tab, or a Tab the stops yielded at an end: its release
+            // An arrow with nothing of the app focused that Android has
+            // nowhere else to take: its search from the window's root finds
+            // nothing, so the focus goes to the first stop on screen,
+            // whatever the direction.
+            if (ArrowEntry.enters(code, e.hasNoModifiers(), focus == null || focus == root,
+                    () -> elsewhere(ArrowEntry.direction(code)))
+                    && mounter.enterFocus(root)) {
+                moved.put(code, true);
+                return true;
+            }
+            // Not a move (a held arrow's repeat moves the focus Android's
+            // way), or a Tab the stops yielded at an end: its release
             // belongs to Android too, not to an earlier move of this press.
-            tabMoved = false;
+            moved.delete(code);
             nativeCancelled.remove(e.getKeyCode());
-            View focus = focus();
             if (focus != null && focus != root && mounter.keyNode(focus, fallback) > 1
                     && nativeDown.get(e.getKeyCode()) == null) {
                 nativeDown.put(e.getKeyCode(), focus);
@@ -125,12 +151,9 @@ final class KeyDispatch {
             cancelNative(cancelled, e);
             return true;
         }
-        boolean moved = false;
-        if (tabMoved && e.getKeyCode() == KeyEvent.KEYCODE_TAB) {
-            tabMoved = false;
-            moved = true;
-        }
-        boolean result = consumed || moved;
+        boolean movedFocus = moved.get(e.getKeyCode());
+        moved.delete(e.getKeyCode());
+        boolean result = consumed || movedFocus;
         View nativeView = nativeDown.get(e.getKeyCode());
         if (nativeView != null) {
             nativeDown.remove(e.getKeyCode());
@@ -196,7 +219,7 @@ final class KeyDispatch {
 
     /** The window lost its focus or goes away: no held key has a release here. */
     void focusLost() {
-        tabMoved = false;
+        moved.clear();
         nativeDown.clear();
         nativeCancelled.clear();
         back.reset();
@@ -205,6 +228,45 @@ final class KeyDispatch {
 
     private View focus() {
         return root.findFocus();
+    }
+
+    /**
+     * Whether Android takes an arrow in `direction` ({@code View.FOCUS_*})
+     * elsewhere while the window's own root holds the focus: its focus
+     * search from there ({@code ViewRootImpl}'s, through the parents'
+     * {@code focusSearch}) finds a view outside the app, or a scroll view
+     * around it scrolls that way (a host {@code ScrollView}'s
+     * {@code arrowScroll}). Only an embedded {@code NshView} has either: a
+     * standalone app's and a dialog's root fill their window.
+     */
+    private boolean elsewhere(int direction) {
+        View holder = root.getRootView().findFocus();
+        if (holder == null) return false;
+        View next = holder.focusSearch(direction);
+        if (next != null && next != holder && !inside(next, holder)) return true;
+        for (ViewParent p = holder.getParent(); p instanceof View; p = p.getParent()) {
+            if (scrolls((View) p, direction)) return true;
+        }
+        return false;
+    }
+
+    /** Whether `view` is inside `ancestor`. */
+    private static boolean inside(View view, View ancestor) {
+        for (ViewParent p = view.getParent(); p != null; p = p.getParent()) {
+            if (p == ancestor) return true;
+        }
+        return false;
+    }
+
+    /** Whether `view` can scroll its content in `direction` ({@code View.FOCUS_*}). */
+    private static boolean scrolls(View view, int direction) {
+        switch (direction) {
+            case View.FOCUS_UP: return view.canScrollVertically(-1);
+            case View.FOCUS_DOWN: return view.canScrollVertically(1);
+            case View.FOCUS_LEFT: return view.canScrollHorizontally(-1);
+            case View.FOCUS_RIGHT: return view.canScrollHorizontally(1);
+            default: return false;
+        }
     }
 
     private boolean keyEvent(KeyEvent e) {
