@@ -464,12 +464,15 @@ fn set_pan(view: &UIView, shift: CGFloat, motion: KeyboardMotion, mtm: MainThrea
     });
 }
 
-/// Sets the bottom inset of `scroll` and scrolls `reveal` (a rectangle in
-/// its content) into view in one animation along `motion`, the keyboard's,
-/// so that the content moves with the keyboard.
+/// Sets the bottom inset of `scroll`'s content to `bottom` and of its
+/// vertical indicator to `indicator` (the app's own insets plus the room
+/// kept for the keyboard), and scrolls `reveal` (a rectangle in its
+/// content) into view in one animation along `motion`, the keyboard's, so
+/// that the content moves with the keyboard.
 fn set_bottom_inset(
     scroll: &UIScrollView,
     bottom: CGFloat,
+    indicator: CGFloat,
     reveal: Option<CGRect>,
     motion: KeyboardMotion,
     mtm: MainThreadMarker,
@@ -481,7 +484,7 @@ fn set_bottom_inset(
         inset.bottom = bottom;
         scroll.setContentInset(inset);
         let mut indicators = scroll.verticalScrollIndicatorInsets();
-        indicators.bottom = bottom;
+        indicators.bottom = indicator;
         scroll.setVerticalScrollIndicatorInsets(indicators);
         if let Some(rect) = reveal {
             let insets = scroll.adjustedContentInset();
@@ -723,6 +726,10 @@ pub(crate) struct Mounter {
     orientations_waiting: bool,
     /// Screens whose header changed in the current batch.
     dirty_headers: Vec<NodeId>,
+    /// Screens whose header follows the scroll view under it
+    /// (`headerBackgroundOnScroll`): checked after every batch, which may
+    /// add, move or remove that scroll view.
+    following_scroll: Vec<NodeId>,
     /// Modals to present or dismiss at the end of the current batch.
     dirty_modals: Vec<NodeId>,
     /// Where `asset:/` URIs of videos resolve.
@@ -735,17 +742,17 @@ pub(crate) struct Mounter {
     /// the pans of the scroll views and the swipe back of the stacks around
     /// it.
     blocked_gestures: Vec<Retained<UIGestureRecognizer>>,
-    /// Vertical scroll views whose content size arrived in this batch, with
-    /// the height that came with it. A batch applies a scroll view's content
+    /// Vertical scroll views whose content size arrived in this batch. Judge
+    /// the final size once per view. A batch applies a scroll view's content
     /// size before the frames of the children it measures (`ScrollContent` is
     /// queued when the scroll view is, its children after it), so a size that
     /// looks too wide is only judged after the whole batch is in place.
-    content_sizes: Vec<(NodeId, CGFloat)>,
-    /// The core's width and height for every vertical scroll view the platform
+    content_sizes: rustc_hash::FxHashSet<NodeId>,
+    /// The core's width for every vertical scroll view the platform
     /// narrowed, by id. The core does not resend a content size it did not
     /// change, so a later batch that widens what such a scroll view holds has
     /// to give that width back from here.
-    narrowed: Vec<(NodeId, CGFloat, CGFloat)>,
+    narrowed: Vec<(NodeId, CGFloat)>,
     /// Whether this batch moved any frame: nothing under a narrowed scroll
     /// view can have grown otherwise, so the judgement is skipped.
     frames_applied: bool,
@@ -865,13 +872,14 @@ impl Mounter {
             orientations: None,
             orientations_waiting: false,
             dirty_headers: Vec::new(),
+            following_scroll: Vec::new(),
             dirty_modals: Vec::new(),
             asset_base: asset_base.clone(),
             sticky: Default::default(),
             touch_trackers: Vec::new(),
             touch_listeners: 0,
             blocked_gestures: Vec::new(),
-            content_sizes: Vec::new(),
+            content_sizes: Default::default(),
             narrowed: Vec::new(),
             frames_applied: false,
             rtl: false,
@@ -956,15 +964,15 @@ impl Mounter {
     /// that really is wider than the viewport.
     fn settle_content_sizes(&mut self) {
         let frames_applied = std::mem::take(&mut self.frames_applied);
-        for (id, height) in std::mem::take(&mut self.content_sizes) {
+        for id in std::mem::take(&mut self.content_sizes) {
             let mut narrowed = None;
-            if let Some(Slot {
-                native: Native::Scroll(scroll),
-                ..
-            }) = self.slot(id)
+            if let Some(slot) = self.slot(id)
+                && let Native::Scroll(scroll) = &slot.native
+                && still_judged(slot.horizontal, slot.zoom_view().is_some())
             {
                 let viewport = scroll.bounds().size.width;
-                let content = scroll.contentSize().width;
+                let size = scroll.contentSize();
+                let content = size.width;
                 // Content that fits cannot be narrowed; walking the subtree
                 // to learn that would cost the page on every batch.
                 if viewport > 0.0 && content > viewport {
@@ -974,14 +982,14 @@ impl Mounter {
                         reaches_beyond(scroll, viewport + 0.5),
                     );
                     if width != content {
-                        scroll.setContentSize(CGSize::new(width, height));
-                        narrowed = Some((content, height));
+                        scroll.setContentSize(CGSize::new(width, size.height));
+                        narrowed = Some(content);
                     }
                 }
             }
             self.narrowed.retain(|&(n, ..)| n != id);
-            if let Some((width, height)) = narrowed {
-                self.narrowed.push((id, width, height));
+            if let Some(width) = narrowed {
+                self.narrowed.push((id, width));
             }
         }
         if frames_applied {
@@ -996,7 +1004,7 @@ impl Mounter {
     fn rejudge_narrowed(&mut self) {
         let mut i = 0;
         while i < self.narrowed.len() {
-            let (id, core, height) = self.narrowed[i];
+            let (id, core) = self.narrowed[i];
             let mut done = true;
             if let Some(slot) = self.slot(id)
                 && let Native::Scroll(scroll) = &slot.native
@@ -1005,8 +1013,9 @@ impl Mounter {
                 let viewport = scroll.bounds().size.width;
                 let reaches = reaches_beyond(scroll, viewport + 0.5);
                 let width = narrowed_width(viewport, core, reaches);
-                if width != scroll.contentSize().width {
-                    scroll.setContentSize(CGSize::new(width, height));
+                let size = scroll.contentSize();
+                if width != size.width {
+                    scroll.setContentSize(CGSize::new(width, size.height));
                 }
                 done = width == core;
             }
@@ -1555,7 +1564,7 @@ impl Mounter {
                         None => scroll.setContentSize(size),
                     }
                     if vertical {
-                        self.content_sizes.push((id, size.height));
+                        self.content_sizes.insert(id);
                     }
                     self.scrolls.resized(id);
                 }
@@ -1630,7 +1639,50 @@ impl Mounter {
                     inset.left += new.left - old.left;
                     inset.bottom += new.bottom - old.bottom;
                     inset.right += new.right - old.right;
+                    // UIKit keeps the offset when the inset changes: content
+                    // resting at its start would end up under the new inset
+                    // (a page's first rows under a header it scrolls under),
+                    // or short of it. It rests at the new start instead.
+                    let horizontal = s.horizontal;
+                    let start = |scroll: &UIScrollView| {
+                        let inset = scroll.adjustedContentInset();
+                        if horizontal { -inset.left } else { -inset.top }
+                    };
+                    let along = |offset: CGPoint| if horizontal { offset.x } else { offset.y };
+                    let at_start =
+                        !scroll.isDragging() && along(scroll.contentOffset()) <= start(scroll);
                     scroll.setContentInset(inset);
+                    if at_start && along(scroll.contentOffset()) != start(scroll) {
+                        let mut offset = scroll.contentOffset();
+                        if horizontal {
+                            offset.x = start(scroll);
+                        } else {
+                            offset.y = start(scroll);
+                        }
+                        scroll.setContentOffset(offset);
+                    }
+                    // The indicators' insets by the same change, keeping the
+                    // keyboard's room (`set_bottom_inset`) in the bottom one.
+                    let old = ui_insets(
+                        s.behavior
+                            .as_ref()
+                            .map(|b| b.scrollbar_inset)
+                            .unwrap_or_default(),
+                    );
+                    let new = ui_insets(b.scrollbar_inset);
+                    let moved = |mut i: objc2_ui_kit::UIEdgeInsets| {
+                        i.top += new.top - old.top;
+                        i.left += new.left - old.left;
+                        i.bottom += new.bottom - old.bottom;
+                        i.right += new.right - old.right;
+                        i
+                    };
+                    scroll.setVerticalScrollIndicatorInsets(moved(
+                        scroll.verticalScrollIndicatorInsets(),
+                    ));
+                    scroll.setHorizontalScrollIndicatorInsets(moved(
+                        scroll.horizontalScrollIndicatorInsets(),
+                    ));
                     // Zooming (UIKit asks the delegate for the zoom view).
                     scroll.setMinimumZoomScale(b.min_zoom as CGFloat);
                     scroll.setMaximumZoomScale(b.max_zoom.max(b.min_zoom) as CGFloat);
@@ -2111,7 +2163,7 @@ impl Mounter {
             }
             (Command::ClearJsResponder, _) => self.clear_js_responder(),
             (Command::Announce(text), _) => crate::system::announce(&text),
-            (Command::Haptic(haptic), _) => crate::system::haptic(haptic),
+            (Command::Haptic(haptic), _) => self.target.haptics().play(haptic, self.mtm),
             (Command::Orientations(bits), _) if id == nsh_core::ROOT_ID => {
                 self.orientations = Some(bits);
             }
@@ -2512,8 +2564,11 @@ impl Mounter {
                 ..
             }) = self.slot(previous)
         {
-            let base = self.base_inset(previous).bottom;
-            set_bottom_inset(view, base, None, motion, self.mtm);
+            let (base, bar) = (
+                self.base_inset(previous).bottom,
+                self.base_bar_inset(previous).bottom,
+            );
+            set_bottom_inset(view, base, bar, None, motion, self.mtm);
         }
         let Some((scroll_id, scroll)) = scroll else {
             return;
@@ -2532,6 +2587,7 @@ impl Mounter {
         };
         let covered = (frame.origin.y + frame.size.height - keyboard_top).max(0.0);
         let base = self.base_inset(scroll_id).bottom;
+        let bar = self.base_bar_inset(scroll_id).bottom;
         let reveal = match self.focused.and_then(|id| self.slot(id)) {
             Some(Slot {
                 native: Native::Input(input),
@@ -2547,7 +2603,14 @@ impl Mounter {
             }
             _ => None,
         };
-        set_bottom_inset(&scroll, base + covered, reveal, motion, self.mtm);
+        set_bottom_inset(
+            &scroll,
+            base + covered,
+            bar + covered,
+            reveal,
+            motion,
+            self.mtm,
+        );
         self.avoiding = Some(scroll_id);
     }
 
@@ -2558,6 +2621,16 @@ impl Mounter {
             self.slot(id)
                 .and_then(|s| s.behavior.as_ref())
                 .map(|b| b.content_inset)
+                .unwrap_or_default(),
+        )
+    }
+
+    /// The `scrollbarInset` the app set on scroll view `id`.
+    fn base_bar_inset(&self, id: NodeId) -> objc2_ui_kit::UIEdgeInsets {
+        ui_insets(
+            self.slot(id)
+                .and_then(|s| s.behavior.as_ref())
+                .map(|b| b.scrollbar_inset)
                 .unwrap_or_default(),
         )
     }
@@ -3984,6 +4057,7 @@ impl Mounter {
         let mut headers = std::mem::take(&mut self.dirty_headers);
         headers.sort_unstable();
         headers.dedup();
+        let mut follows = Vec::new();
         for id in headers {
             let Some(Slot {
                 native: Native::Screen(screen),
@@ -4000,6 +4074,10 @@ impl Mounter {
                 },
                 press,
             );
+            follows.push((
+                id,
+                screen.config.header_transparent && screen.config.header_background_on_scroll,
+            ));
             if screen.config.large_title {
                 // Large titles collapse as the content scrolls under them.
                 if let Some(scroll) = first_scroll_view(&screen.view)
@@ -4021,6 +4099,12 @@ impl Mounter {
                         scroll.setContentOffset(offset);
                     }
                 }
+            }
+        }
+        for (id, follows) in follows {
+            self.following_scroll.retain(|&other| other != id);
+            if follows {
+                self.following_scroll.push(id);
             }
         }
         let modals = std::mem::take(&mut self.dirty_modals);
@@ -4054,6 +4138,19 @@ impl Mounter {
                 });
             }
         }
+        let views = &self.views;
+        self.following_scroll.retain(
+            |&id| match views.get(id as usize).and_then(Option::as_ref) {
+                Some(Slot {
+                    native: Native::Screen(screen),
+                    ..
+                }) => {
+                    screen.controller.follow_content_scroll();
+                    true
+                }
+                _ => false,
+            },
+        );
         // What no change used goes, but for stacks whose change waits for
         // UIKit's transition to end.
         let deferred = &self.deferred_stacks;
@@ -4923,9 +5020,8 @@ impl Mounter {
         }
     }
 
-    /// A tap on a `focusable` view that takes no presses: it takes the
-    /// keyboard focus without claiming the touch. The pressable path
-    /// ([`Mounter::press_changed`]) focuses those with press handlers.
+    /// Give a tapped focus stop keyboard focus. An input using the software
+    /// keyboard keeps focus so the layout stays in place under the finger.
     pub(crate) fn focus_node(&mut self, id: NodeId) {
         if !self.typing()
             && let Some(view) = self.slot(id).and_then(|s| s.native.focus_view())
@@ -4938,18 +5034,6 @@ impl Mounter {
 
     /// A finger went down on (or left) a pressable view.
     pub(crate) fn press_changed(&mut self, id: NodeId, pressed: bool, at: PressAt) {
-        // A press on a focusable view gives it the keyboard focus, as a
-        // click does on the desktops (and a tap on an iPad with a hardware
-        // keyboard should). Not while the software keyboard types into an
-        // input: as with UIKit's controls, the input keeps it.
-        if pressed
-            && !self.typing()
-            && let Some(view) = self.slot(id).and_then(|s| s.native.focus_view())
-            && view.is_focus_stop()
-            && view.becomeFirstResponder()
-        {
-            crate::keyboard::request_focus(view);
-        }
         self.report_state(id, nsh_core::tailwind::state::PRESSED, pressed);
         let Some(s) = self.slot(id) else { return };
         let event = if pressed {
@@ -4960,6 +5044,10 @@ impl Mounter {
         if s.events.contains(event) {
             let payload = self.press_payload(id, at);
             self.control.dispatch_event(id, event, payload);
+        }
+        // Queue press-down before UIKit sends the resulting focus notifications.
+        if pressed {
+            self.focus_node(id);
         }
     }
 

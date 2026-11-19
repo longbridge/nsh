@@ -1003,6 +1003,26 @@ impl Screen {
         })
     }
 
+    /// The hairline under the header (iOS; on by default, as UIKit's opaque
+    /// bars draw it). Off matches iOS 26's bars, which separate the
+    /// content by the scroll edge effect instead (TS: `headerShadowVisible`).
+    pub fn header_shadow_visible(self, visible: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(visible, |v| {
+            Prop::Screen(ScreenProp::HeaderShadowVisible(v))
+        })
+    }
+
+    /// With [`Self::header_transparent`], the header stays clear while the
+    /// content rests at its top and shows its background (UIKit's default,
+    /// or [`Self::header_style_with`]'s color) once the content scrolls
+    /// under it, as UIKit's own bars do (iOS; off by default; TS:
+    /// `headerBackgroundOnScroll`).
+    pub fn header_background_on_scroll(self, on: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(on, |v| {
+            Prop::Screen(ScreenProp::HeaderBackgroundOnScroll(v))
+        })
+    }
+
     /// The header's colors: `backgroundColor`, `color` (the title's) and
     /// `tintColor` (the buttons'), as [`super::Style::from_decls`] makes
     /// them (TS: `headerStyle`); a style of typed styles applies as

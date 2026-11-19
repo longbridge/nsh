@@ -124,7 +124,11 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         let id = node.id;
-        let create = node.created.then(|| {
+        let (created, layout) = (node.created, node.layout);
+        // A list that was a component's view before it took its kind has
+        // its first `Create` among the items until they go.
+        self.drop_retagged();
+        let create = created.then(|| {
             self.mount
                 .iter()
                 .position(|m| matches!(m, MountItem::Create { id: c, .. } if *c == id))
@@ -141,7 +145,7 @@ impl<M: TextEngine> Core<M> {
             }
             return;
         }
-        let layout = node.layout.expect("list layout");
+        let layout = layout.expect("list layout");
         let list = self.nodes[key as usize].list.as_mut().expect("list");
         list.set_parent(parent);
         if parent {
@@ -744,7 +748,7 @@ const IGNORED: [(u16, &str, &str); 8] = [
     ),
     (
         ignored::BEHAVIOR,
-        "paging, snapping, `contentInset`, `contentOffset`, `bounces`, `scrollsToTop`, `scrollable` and `keyboardDismissMode`",
+        "paging, snapping, `contentInset`, `scrollbarInset`, `contentOffset`, `bounces`, `scrollsToTop`, `scrollable` and `keyboardDismissMode`",
         AROUND,
     ),
     (ignored::SCROLLBAR, "`scrollbar`", AROUND),

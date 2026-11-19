@@ -97,7 +97,7 @@ go elsewhere under these rules rather than into them.
   `nsh` with the same fields: `Point { x, y }`, `Size { width, height }`, `Bounds { origin: Point, size: Size }`,
   `Edges { top, right, bottom, left }` (decided by the user, 2026-10-21). A position and an extent together are a
   `Bounds` (`onLayout({ bounds })`), an extent beside other fields is a `size` (`ImageAsset.size`), insets are `Edges`
-  (`safeArea()`, `hitSlop`, `contentInset`; inputs take `Partial<Edges>`); never flat `x` / `y` / `width` / `height`
+  (`safeArea()`, `hitSlop`, `contentInset`, `scrollbarInset`; inputs take `Partial<Edges>`); never flat `x` / `y` / `width` / `height`
   together, `<prefix>Width` / `<prefix>X` fields or another name for one shape (`Insets`).
 - **Points**: a position is a `Point` (`{ x, y }`, GPUI's `Point<Pixels>`, Rust `Point<Points>`), never separate
   `<prefix>X` / `<prefix>Y` fields: `position` in the view, `pagePosition` in the root view (the surface or its dialog),
@@ -297,6 +297,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `scrollEnabled` | `scrollable` (default `true`) | States | The user's scrolling; `scrollTo` still scrolls |
 | `pinchGestureEnabled` | `zoomable` (default `true`) | States | The user's pinch; `zoomTo` still zooms |
 | `showsIndicator` | `scrollbar` (default `true`) | States | The part's name, as `caret` |
+| `scrollIndicatorInsets` | `scrollbarInset` (`Partial<Edges>`) | Geometry | The part's name, as `scrollbar`; `Inset` as `contentInset` |
 | `onScrollBeginDrag`, `onScrollEndDrag` | `onScrollDragStart`, `onScrollDragEnd` | Begin and end | `onDrag*` stays free for drag and drop |
 | `onMomentumScrollBegin`, `onMomentumScrollEnd` | `onMomentumStart`, `onMomentumEnd` | Begin and end | |
 | List `onEndReached`, `onEndReachedThreshold` | `onLoadMore`, `loadMoreThreshold` | Intent over geometry | `ListDelegate::load_more`, `load_more_threshold`; also in `ListItemsProps` |
@@ -471,6 +472,7 @@ and `Input`'s React Native names follow the rules as well.
 | `placeholderTextColor` | style key `placeholderColor`, class `placeholder:text-*` | *guides* `value` vs `presentation`; CSS `::placeholder` | |
 | `selectionColor` (Input, Text) | style key `selectionColor` (the highlight), class `selection:text-*` | CSS `::selection` | |
 | `cursorColor` (Input) | style key `caretColor`, class `caret-*` | CSS `caret-color` | |
+| Switch `trackColor` (on) (`nsh/mobile`'s system switch) | style key `accentColor`, class `accent-*` | CSS `accent-color` | A color of a part is a style key. Set on the control (not inherited); the system's segmented control and tab bar could read it later |
 | `editable` | `readonly` (`editable={false}` = `readonly`) | *guides* "readonly"; `gpui-component` `Input::readonly` | `disabled` (no focus, `disabled:` classes) stays separate |
 | `onChangeText(text)` | `onChange({ value })` (was `onChange(text)` until 2026-10-27) | `InputEvent::Change`; `on_change` observes (*guides*) | |
 | `onSubmitEditing` | `onSubmit` | `InputEvent::PressEnter` (not followed) | The return key, whatever `returnKeyType` shows: on a phone it says Done / Search / Go, not Enter; HTML's `submit` |
