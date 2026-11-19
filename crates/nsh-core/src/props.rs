@@ -506,6 +506,11 @@ pub struct ViewProps {
     /// for ordinary views and for portals with no key listener or capture
     /// rule on their logical ancestry.
     pub key_parent: Option<crate::NodeId>,
+    /// The app's content view where unfocused keys start in this native
+    /// window. Mounted by the core so keyboard routing follows logical
+    /// order even when the backend stacks the children differently.
+    #[doc(hidden)]
+    pub key_content: Option<crate::NodeId>,
     /// The view is a selectable view (`View`'s `selectable`): the
     /// texts in its subtree that are not `selectable={false}` share one
     /// selection, from text to text ([`crate::selection`]); an area inside

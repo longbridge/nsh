@@ -49877,7 +49877,7 @@ fn unfocused_keys_reach_the_windows_root() {
 
     let mut c = core();
     c.mount_root(&crate::element::Root::of::<Listening>());
-    c.commit().unwrap();
+    let batch = c.commit().unwrap();
     assert!(c.key_interest(crate::ROOT_ID));
     let space = Keystroke::parse_with("space", false).unwrap();
     assert!(c.key_captured(crate::ROOT_ID, Some(&space)));
@@ -49887,6 +49887,22 @@ fn unfocused_keys_reach_the_windows_root() {
     c.key_path(crate::ROOT_ID, &mut path);
     assert_eq!(path.last(), Some(&crate::ROOT_ID));
     assert_eq!(path.len(), 2, "the mount root, then the window root");
+    let mounted_content = |batch: &crate::MountBatch| {
+        batch.items.iter().rev().find_map(|item| match item {
+            MountItem::ViewProps { id, props } if *id == crate::ROOT_ID => Some(props.key_content),
+            _ => None,
+        })
+    };
+    let content = path[0];
+    assert_eq!(mounted_content(&batch), Some(Some(content)));
+
+    c.apply(Op::Remove {
+        parent: crate::ROOT_ID,
+        child: content,
+    })
+    .unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(mounted_content(&batch), Some(None));
 }
 
 /// A root without listeners or captures builds no key event: an app that
