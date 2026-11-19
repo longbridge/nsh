@@ -612,7 +612,7 @@ impl PangoTextEngine {
     /// Made on the engine thread; `ui_family` is the family of the system
     /// font ([`ui_family`], read on the main thread).
     pub(crate) fn new(ui_family: Arc<str>) -> Self {
-        let font_map = pangocairo::FontMap::new();
+        let font_map = measure_font_map();
         let files = FONT_FILES.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if !files.is_empty()
             && let Err(err) = set_font_files(&font_map, &files)
@@ -1184,6 +1184,20 @@ impl TextEngine for PangoTextEngine {
     }
 }
 
+/// The engine thread's font map: PangoFT2, not pangocairo. Cairo's FreeType
+/// backend evicts faces across threads unsafely once more than ten font
+/// files are open (cairo#436), and the main thread draws with cairo-ft, so
+/// the engine must measure without cairo. PangoFT2 shapes and measures
+/// through HarfBuzz alone and gives the same logical extents as pangocairo
+/// at 96 dpi (its own default is 72). It is a `PangoFcFontMap`, so
+/// [`set_font_files`] still applies (#2504).
+fn measure_font_map() -> pango::FontMap {
+    use glib::translate::FromGlibPtrFull;
+    let map = unsafe { fontconfig::pango_ft2_font_map_new() };
+    unsafe { fontconfig::pango_ft2_font_map_set_resolution(map, 96.0, 96.0) };
+    unsafe { pango::FontMap::from_glib_full(map.cast::<pango::ffi::PangoFontMap>()) }
+}
+
 mod fontconfig {
     //! Fontconfig and PangoFc functions the bindings lack: an app font for
     //! a Fontconfig font map without `pango_font_map_add_font_file`, which
@@ -1204,6 +1218,8 @@ mod fontconfig {
         #[cfg(test)]
         pub(super) fn pango_fc_font_map_get_config(map: *mut c_void) -> *mut c_void;
         pub(super) fn pango_fc_font_map_set_config(map: *mut c_void, config: *mut c_void);
+        pub(super) fn pango_ft2_font_map_new() -> *mut c_void;
+        pub(super) fn pango_ft2_font_map_set_resolution(map: *mut c_void, dpi_x: f64, dpi_y: f64);
     }
 }
 
@@ -2455,6 +2471,61 @@ impl LinuxLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2504: the engine measures on its own thread while the main thread
+    /// draws with cairo-ft. Over more than ten font files, cairo-ft evicts
+    /// faces across threads unsafely, so the engine must not use it.
+    #[test]
+    fn engine_measuring_does_not_race_main_thread_cairo() {
+        use pangocairo::cairo;
+        let families: Vec<String> = {
+            let map = pangocairo::FontMap::new();
+            let mut f: Vec<String> = map
+                .list_families()
+                .iter()
+                .map(|f| f.name().to_string())
+                .collect();
+            f.sort();
+            f.dedup();
+            f.into_iter().take(30).collect()
+        };
+        if families.len() <= 10 {
+            return; // Too few fonts to reach cairo's face eviction.
+        }
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let engine_families = families.clone();
+        let engine_stop = stop.clone();
+        let engine = std::thread::spawn(move || {
+            let engine = PangoTextEngine::new("sans-serif".into());
+            let mut size = 6.0;
+            while !engine_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                for family in &engine_families {
+                    size = if size > 40.0 { 6.0 } else { size + 0.37 };
+                    let layout = pango::Layout::new(&engine.ltr);
+                    let mut desc = pango::FontDescription::from_string(family);
+                    desc.set_absolute_size(size * pango::SCALE as f64);
+                    layout.set_font_description(Some(&desc));
+                    layout.set_width(80 * pango::SCALE);
+                    layout.set_text("The quick brown fox jumps 0123");
+                    assert!(layout.line_count() > 0);
+                }
+            }
+        });
+        let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, 64, 64).unwrap();
+        let cr = cairo::Context::new(&surface).unwrap();
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let mut size = 6.0;
+        while std::time::Instant::now() < end {
+            for family in &families {
+                size = if size > 40.0 { 6.0 } else { size + 0.41 };
+                cr.select_font_face(family, cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+                cr.set_font_size(size);
+                let _ = cr.text_extents("Pack my box with five dozen");
+            }
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        engine.join().unwrap();
+    }
 
     #[test]
     fn utf16_offsets_of_bytes() {
