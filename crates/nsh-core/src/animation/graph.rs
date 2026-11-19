@@ -206,6 +206,9 @@ struct Program {
     root: Step,
     /// When it started (its first frame).
     at: Option<f64>,
+    /// `at` while no display frame has followed its first one
+    /// ([`Graph::tick_frame`]).
+    first_frame: Option<f64>,
     /// The highest frame rate its steps need ([`Composite::frame_rate`]),
     /// asked for while it runs, delays included.
     frame_rate: Option<f32>,
@@ -489,6 +492,60 @@ impl Step {
         }
     }
 
+    /// Moves the times it has started at (and what it runs) `by` seconds
+    /// later: a composite counting from its first display frame
+    /// ([`Graph::tick_frame`]).
+    fn shift(&mut self, g: &mut Graph, by: f64) {
+        match self {
+            Step::Run {
+                node,
+                leaf: Some(id),
+                ..
+            } => {
+                if let Some(Node::Value {
+                    running: Some(r), ..
+                }) = g.node_mut(*node)
+                    && r.id == *id
+                {
+                    r.shift(by);
+                }
+            }
+            Step::Run { .. } => {}
+            Step::Delay { until, .. } => {
+                if let Some(until) = until {
+                    *until += by;
+                }
+            }
+            Step::Sequence { steps, index, at } => {
+                if let Some(at) = at {
+                    *at += by;
+                }
+                if let Some(step) = steps.get_mut(*index) {
+                    step.shift(g, by);
+                }
+            }
+            Step::Parallel {
+                steps, ends, at, ..
+            } => {
+                if let Some(at) = at {
+                    *at += by;
+                }
+                for (step, end) in steps.iter_mut().zip(ends.iter_mut()) {
+                    match end {
+                        Some((_, t)) => *t += by,
+                        None => step.shift(g, by),
+                    }
+                }
+            }
+            Step::Loop { current, at, .. } => {
+                if let Some(at) = at {
+                    *at += by;
+                }
+                current.shift(g, by);
+            }
+        }
+    }
+
     /// Stops what runs (values stay where they are).
     fn stop(&mut self, g: &mut Graph, finished: &mut Vec<Finished>) {
         match self {
@@ -643,6 +700,7 @@ impl Graph {
                     key,
                     root: Step::new(&spec),
                     at: None,
+                    first_frame: None,
                     frame_rate: spec.frame_rate(),
                 });
             }
@@ -1120,6 +1178,37 @@ impl Graph {
         changed
     }
 
+    /// [`Graph::tick`] for a display frame: an animation whose first step
+    /// came long before this frame (the UI thread held right after it, as
+    /// by mounting and laying out what the animation shows) counts from
+    /// about this frame instead of having its beginning gone by unseen
+    /// ([`first_frame_stall`](super::driver::first_frame_stall)). Ticks at
+    /// a deadline while no frames are drawn use [`Graph::tick`]: they keep
+    /// the real time, so animations end on time.
+    pub fn tick_frame(&mut self, now: f64, finished: &mut Vec<Finished>) -> bool {
+        for i in 0..self.animating.len() {
+            let node = self.animating[i];
+            if let Some(Node::Value {
+                running: Some(r), ..
+            }) = self.node_mut(node)
+            {
+                r.commit_first_frame(now);
+            }
+        }
+        let mut programs = std::mem::take(&mut self.programs);
+        for p in &mut programs {
+            if let Some(first) = p.first_frame.take()
+                && let Some(by) = super::driver::first_frame_stall(first, now, p.frame_rate)
+            {
+                p.at = p.at.map(|at| at + by);
+                p.root.shift(self, by);
+            }
+        }
+        programs.append(&mut self.programs);
+        self.programs = programs;
+        self.tick(now, finished)
+    }
+
     /// Steps the animation of `node` to `now`: `(value changed, ended)`.
     /// Ends of composite steps go to `leaf_ends`, with their exact time.
     fn step_node(&mut self, node: NodeId, now: f64, finished: &mut Vec<Finished>) -> (bool, bool) {
@@ -1165,6 +1254,11 @@ impl Graph {
             self.route_leaf_ends(finished);
             let mut programs = std::mem::take(&mut self.programs);
             programs.retain_mut(|p| {
+                if p.at.is_none() {
+                    p.first_frame = Some(now);
+                } else if p.first_frame.is_some_and(|first| now > first) {
+                    p.first_frame = None;
+                }
                 let at = *p.at.get_or_insert(now);
                 match p.root.advance(self, now, at, finished) {
                     Some((done, _)) => {
@@ -2989,5 +3083,133 @@ mod tests {
             assert!(!g.is_animating());
             f.clear();
         }
+    }
+
+    /// A graph with value 1 running a linear timing to 100 over 300 ms,
+    /// stepped first by a display frame at 1 s.
+    fn started_at_one_second() -> (Graph, Vec<Finished>) {
+        let mut g = Graph::default();
+        let mut f = Vec::new();
+        values(&mut g, &mut f, &[1]);
+        g.apply(
+            AnimationOp::Start {
+                node: 1,
+                animation: 1,
+                driver: timing(100.0, 300.0),
+            },
+            &mut f,
+        );
+        g.tick_frame(1.0, &mut f);
+        assert_eq!(g.value(1), Some(0.0));
+        (g, f)
+    }
+
+    #[test]
+    fn a_frame_held_after_the_first_step_does_not_skip_the_start() {
+        // The UI thread is held 200 ms after the first step (what the
+        // change that started it mounts and lays out).
+        let (mut g, mut f) = started_at_one_second();
+        g.tick_frame(1.2, &mut f);
+        // It counts from about this frame: one frame in, not 200 ms.
+        let one_frame = 100.0 / 300.0 * (1000.0 / 60.0);
+        assert!(
+            (g.value(1).unwrap() - one_frame).abs() < 0.1,
+            "{:?}",
+            g.value(1)
+        );
+        // Only the first frame counts again: a later held frame skips.
+        g.tick_frame(1.4, &mut f);
+        let later = one_frame + 100.0 / 300.0 * 200.0;
+        assert!(
+            (g.value(1).unwrap() - later).abs() < 0.1,
+            "{:?}",
+            g.value(1)
+        );
+        // It ends 300 ms after the frame it counts from.
+        let from = 1.2 - 1.0 / 60.0;
+        g.tick_frame(from + 0.3 - 1e-4, &mut f);
+        assert!(f.iter().all(|e| e.animation != 1));
+        g.tick_frame(from + 0.3 + 1e-6, &mut f);
+        assert!(f.iter().any(|e| e.animation == 1 && e.finished));
+    }
+
+    #[test]
+    fn a_deadline_after_the_first_step_keeps_the_real_time() {
+        // No frame is drawn (a hidden window): the deadline's tick is real
+        // time, and the frames after it are past the first.
+        let (mut g, mut f) = started_at_one_second();
+        g.tick(1.2, &mut f);
+        assert!(
+            (g.value(1).unwrap() - 200.0 / 3.0).abs() < 0.1,
+            "{:?}",
+            g.value(1)
+        );
+        g.tick_frame(1.25, &mut f);
+        assert!(
+            (g.value(1).unwrap() - 250.0 / 3.0).abs() < 0.1,
+            "{:?}",
+            g.value(1)
+        );
+    }
+
+    #[test]
+    fn frames_at_the_display_pace_keep_the_start() {
+        let (mut g, mut f) = started_at_one_second();
+        // A frame or two late (40 ms) is not a held first frame.
+        g.tick_frame(1.04, &mut f);
+        assert!((g.value(1).unwrap() - 100.0 / 300.0 * 40.0).abs() < 0.1);
+        // An animation capped at 10 Hz steps every 100 ms by design.
+        values(&mut g, &mut f, &[2]);
+        g.apply(
+            AnimationOp::Start {
+                node: 2,
+                animation: 2,
+                driver: Driver::Timing {
+                    to: 100.0,
+                    duration_ms: 1000.0,
+                    easing: Easing::Linear,
+                    delay_ms: 0.0,
+                    frame_rate: Some(10.0),
+                },
+            },
+            &mut f,
+        );
+        g.tick_frame(2.0, &mut f);
+        g.tick_frame(2.1, &mut f);
+        assert!((g.value(2).unwrap() - 10.0).abs() < 0.1, "{:?}", g.value(2));
+    }
+
+    #[test]
+    fn a_held_first_frame_moves_a_composite_and_its_steps_together() {
+        let mut g = Graph::default();
+        let mut f = Vec::new();
+        values(&mut g, &mut f, &[1]);
+        g.apply(
+            AnimationOp::StartComposite {
+                animation: 5,
+                key: 1,
+                spec: Composite::Sequence(vec![
+                    Composite::Delay(100.0),
+                    Composite::Run {
+                        node: 1,
+                        driver: timing(100.0, 100.0),
+                    },
+                ]),
+            },
+            &mut f,
+        );
+        g.tick_frame(1.0, &mut f);
+        // Held 300 ms: past the delay and the whole run, counted from the
+        // first step. It counts from about this frame instead.
+        g.tick_frame(1.3, &mut f);
+        assert_eq!(g.value(1), Some(0.0), "still in the delay");
+        assert!(f.iter().all(|e| e.animation != 5));
+        // The delay ends 100 ms after the frame it counts from, then the run
+        // takes 100 ms.
+        let from = 1.3 - 1.0 / 60.0;
+        g.tick_frame(from + 0.15, &mut f);
+        assert!((g.value(1).unwrap() - 50.0).abs() < 0.5, "{:?}", g.value(1));
+        g.tick_frame(from + 0.2 + 1e-6, &mut f);
+        assert!(f.iter().any(|e| e.animation == 5 && e.finished));
     }
 }

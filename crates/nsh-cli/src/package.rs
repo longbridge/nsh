@@ -194,9 +194,9 @@ pub(crate) struct AppConfig {
     /// The app's Rust crate: its builds are the app's own (`rust_app.rs`).
     #[serde(default, rename = "rust")]
     _rust: Option<serde_json::Value>,
-    /// The app's third-party extensions, linked like its crates (`extensions.rs`).
-    #[serde(default, rename = "extensions")]
-    _extensions: Option<serde_json::Value>,
+    /// The app's nshm, linked like its crates (`nshm.rs`).
+    #[serde(default, rename = "modules")]
+    _modules: Option<serde_json::Value>,
     /// A Rust app's root component in its crate (`rust_app::RootConfig`).
     #[serde(default, rename = "root")]
     _root: Option<serde_json::Value>,
@@ -1147,7 +1147,11 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         && (has_crates || trimmed_runner(&entry, options.target))
     {
         own_runner = !has_crates;
-        let choices = crate::native_features::choose(built.native_use.as_ref(), &config.features);
+        let choices = crate::native_features::choose(
+            built.native_use.as_ref(),
+            &config.features,
+            crate::rust_app::current().is_some_and(|app| crate::rust_app::may_make_web_view(&app)),
+        );
         for c in &choices {
             let mark = if c.keep { "keep" } else { "leave out" };
             ui::note(format!("{mark} `{}`: {}", c.feature, c.why));

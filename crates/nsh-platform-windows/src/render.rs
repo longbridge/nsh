@@ -614,7 +614,8 @@ impl<'a> DrawCx<'a> {
 }
 
 /// The rounded rectangle `rect` with corner radii clockwise from the top
-/// left (each clamped to half the box), as a geometry.
+/// left (fitted to the box as CSS fits them, [`crate::geom::fit_radii`]), as
+/// a geometry.
 pub(crate) fn rounded_geometry(
     gfx: &Gfx,
     rect: Bounds<Points>,
@@ -630,8 +631,7 @@ pub(crate) fn rounded_geometry(
             height: Points(h),
         },
     } = rect;
-    let max = (w.min(h) / 2.0).max(0.0);
-    let r = radii.map(|r| r.clamp(0.0, max));
+    let r = crate::geom::fit_radii(w, h, radii);
     if r[0] == r[1] && r[1] == r[2] && r[2] == r[3] {
         let rr = D2D1_ROUNDED_RECT {
             rect: rect_f(x, y, w, h),

@@ -1121,9 +1121,9 @@ final class Mounter {
             return;
         }
         if (headerItems.contains(id)) {
-            // A header item: the toolbar places it at its size.
+            // A header item: the toolbar (or the row of a leading item and its title) places it at its size.
             headerSizes.put(id, new int[] {px(w), px(h)});
-            if (v.getParent() instanceof android.widget.Toolbar) {
+            if (v.getParent() instanceof android.widget.Toolbar || v.getParent() instanceof StackBox.ScreenBox.HeaderRow) {
                 ViewGroup.LayoutParams p = v.getLayoutParams();
                 p.width = Math.max(1, px(w));
                 p.height = Math.max(1, px(h));
@@ -2831,12 +2831,19 @@ final class Mounter {
 
     /** The scroll view padded to clear the keyboard. */
     private int avoided = -1;
+    /**
+     * The scroll view around the focused input of a modal window while the
+     * keyboard is up: it shrinks as the window lays out above the keyboard.
+     */
+    private int shrinking = -1;
 
     /**
      * The software keyboard's top edge moved, in screen coordinates
      * ({@code Integer.MAX_VALUE} when hidden): pads the scroll view around
-     * the focused input so it can clear the keyboard (in the surface or a
-     * modal window).
+     * the focused input of the surface so it can clear the keyboard. A
+     * modal window lays its content out above the keyboard instead
+     * ({@link ModalHost}), after this: its scroll view gets no padding and
+     * reveals the input once it has shrunk ({@link #scrollShrank}).
      */
     void keyboard(int screenTop) {
         ScrollBox scroll = focused == null ? null : scrollAround(focused);
@@ -2848,13 +2855,30 @@ final class Mounter {
             }
             avoided = -1;
         }
+        shrinking = -1;
         if (scroll == null || hidden) return;
+        // Measured now, before the modal window's layout, the padding would
+        // be what the keyboard covers of the content where it was, and it
+        // would stay under the content once that is above the keyboard.
+        if (scroll.getRootView() != host.getRootView()) {
+            shrinking = scroll.id;
+            return;
+        }
         int[] at = new int[2];
         scroll.getLocationOnScreen(at);
         int covered = Math.max(0, at[1] + scroll.getHeight() - screenTop);
         scroll.setContentPaddingBottom(covered);
         avoided = scroll.id;
         host.post(this::revealFocused);
+    }
+
+    /**
+     * Scroll view {@code scroll} got shorter: the one around the focused
+     * input of a modal window that now lays out above the keyboard keeps the
+     * input in sight.
+     */
+    void scrollShrank(ScrollBox scroll) {
+        if (scroll.id == shrinking && focused != null) host.post(this::revealFocused);
     }
 
     private void revealFocused() {
@@ -3563,7 +3587,9 @@ final class Mounter {
     }
 
     void zoom(int id, float scale) {
-        Native.zoom(handle(), id, scale);
+        long handle = handle();
+        if (handle == 0) return;
+        Native.zoom(handle, id, scale);
     }
 
     void scroll(int id, float x, float y, int applied) {
@@ -3573,14 +3599,22 @@ final class Mounter {
     }
 
     void inputScroll(int id, float y, float contentWidth, float contentHeight, float width, float height) {
-        Native.inputScroll(handle(), id, y, contentWidth, contentHeight, width, height);
+        long handle = handle();
+        if (handle == 0) return;
+        Native.inputScroll(handle, id, y, contentWidth, contentHeight, width, height);
     }
 
     void pull(int id, float distance) {
-        outputs(Native.pull(handle(), id, distance));
+        long handle = handle();
+        if (handle == 0) return;
+        outputs(Native.pull(handle, id, distance));
     }
 
-    /** Scroll view {@code id} came to rest: snapping animated values settle. */
+    /**
+     * Scroll view {@code id} came to rest: snapping animated values settle.
+     * Its settle timer can fire after the view is destroyed; the native side
+     * takes a live handle only.
+     */
     void scrollEnded(int id) {
         long handle = handle();
         if (handle == 0) return;
@@ -3589,11 +3623,15 @@ final class Mounter {
 
     void pan(int id, int state, float tx, float ty, float vx, float vy) {
         if (state == 0) for (TouchTracker t : touchTrackers) t.cancelFeedback();
-        outputs(Native.pan(handle(), id, state, tx, ty, vx, vy));
+        long handle = handle();
+        if (handle == 0) return;
+        outputs(Native.pan(handle, id, state, tx, ty, vx, vy));
     }
 
     void transformGesture(int id, boolean rotation, int state, float amount, float velocity) {
         if (state == 0) for (TouchTracker t : touchTrackers) t.cancelFeedback();
-        outputs(Native.transformGesture(handle(), id, rotation, state, amount, velocity));
+        long handle = handle();
+        if (handle == 0) return;
+        outputs(Native.transformGesture(handle, id, rotation, state, amount, velocity));
     }
 }

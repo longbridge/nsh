@@ -417,6 +417,51 @@ impl InputState {
         }
     }
 
+    /// Several lines too narrow for a character: the rich editor's sink, a
+    /// point wide at its caret, which takes the typing and the input
+    /// methods of an editor that draws its own text. Wrapped, RichEdit
+    /// puts every character on a line of its own there, and input methods
+    /// open their candidates by what they compose, which would go down a
+    /// line with every character typed. Such a field keeps its text
+    /// unwrapped and its caret at its left edge
+    /// ([`InputState::keep_left`]).
+    fn narrow(&self) -> bool {
+        let width = self.size.get().0;
+        let config = self.config.borrow();
+        config.multiline && width > 0.0 && width < config.style.font_size.0
+    }
+
+    /// The property bits: the config's, unwrapped while the field is
+    /// narrow.
+    fn bits(&self) -> u32 {
+        let bits = base_bits(&self.config.borrow());
+        if self.narrow() {
+            bits & !TXTBIT_WORDWRAP
+        } else {
+            bits
+        }
+    }
+
+    /// A narrow field scrolls the start of what an input method composes,
+    /// else the caret, to its left edge, which is where the field is: a
+    /// composition starts there and runs on along the line, as in a field
+    /// of any width, whatever the input method places its candidates by
+    /// (the composition's start, its box or the caret). RichEdit scrolls
+    /// several lines sideways only when told to (no `ES_AUTOHSCROLL`), so
+    /// the composition stays put as it grows; it keeps the caret's line in
+    /// view itself.
+    fn keep_left(&self) {
+        if !self.narrow() {
+            return;
+        }
+        let Some(e) = &self.editor else { return };
+        let at = match self.composing.get() {
+            Some((before, _)) => before,
+            None => self.selection().1,
+        };
+        e.scroll_to_left_edge(at);
+    }
+
     /// The text format of the config's font.
     fn format(&self) -> Option<IDWriteTextFormat> {
         if let Some(f) = &*self.format.borrow() {
@@ -584,13 +629,19 @@ impl InputState {
         self.update_client();
     }
 
-    /// Tells RichEdit its client rectangle if it changed.
+    /// Tells RichEdit its client rectangle if it changed, and whether the
+    /// text wraps, which changes as the field becomes narrow or stops
+    /// being narrow.
     fn update_client(&self) {
+        let Some(e) = &self.editor else { return };
         let client = self.client();
-        if let Some(e) = &self.editor
-            && e.props().client != client
-        {
+        if e.props().client != client {
             e.update(|p| p.client = client, TXTBIT_CLIENTRECTCHANGE);
+        }
+        let bits = self.bits();
+        if e.props().bits != bits {
+            e.update(|p| p.bits = bits, 0);
+            self.keep_left();
         }
     }
 
@@ -608,7 +659,7 @@ impl InputState {
         let style = &config.style;
         let color = self.anim_color.get().unwrap_or(style.color);
         let face = family(style.font_family.map(|f| f.name()).as_deref());
-        let bits = base_bits(&config);
+        let bits = self.bits();
         let limit = self.limit();
         e.update(
             |p| {
@@ -1388,6 +1439,7 @@ fn process(surface: &Surface, view: &NshView, input: &InputState) -> bool {
     if notes.changed || notes.composition_end {
         input.follow_limit();
     }
+    input.keep_left();
     if notes.changed || notes.selection {
         input.wake_caret();
         report_selection(surface, view, input);
@@ -2308,6 +2360,75 @@ mod tests {
         destroyed(&surface);
         assert!(FOCUS.with(|f| !f.borrow().contains_key(&surface.key())));
         assert!(window_active(&surface));
+    }
+
+    /// The rich editor's sink: a multiline input a point wide. However
+    /// much it holds, the caret stays at its top left, and what an input
+    /// method composes starts there and runs on along one line, where the
+    /// input method opens its candidates; a field of any other width wraps
+    /// as before.
+    #[test]
+    fn a_point_wide_input_keeps_a_composition_at_its_corner() {
+        let surface = Surface::new(Default::default());
+        let view = NshView::new(5, nsh_core::ViewKind::Input);
+        create(&surface, &view);
+        let input = input_of(&view).expect("input");
+        config(
+            &surface,
+            &view,
+            &InputConfig {
+                multiline: true,
+                ..Default::default()
+            },
+        );
+        let at = |w: f32| {
+            content(
+                &view,
+                Bounds::new(Point::default(), Size::new(Points(w), Points(16.0))),
+            );
+        };
+        at(1.0);
+        let e = input.editor.as_ref().expect("RichEdit");
+        assert_eq!(
+            e.props().bits & TXTBIT_WORDWRAP,
+            0,
+            "a point-wide input wraps"
+        );
+        let client = e.props().client;
+        let at_corner = |p: windows::Win32::Foundation::POINT| {
+            (p.x - client.left).abs() <= 1 && (p.y - client.top).abs() <= 1
+        };
+        let mut text = String::new();
+        for (count, c) in "你好世界，再见".chars().enumerate() {
+            text.push(c);
+            value(&view, &text, count as u32 + 1);
+            let caret = e.position(input.selection().1);
+            assert!(
+                at_corner(caret),
+                "after {text:?} the caret is at {caret:?}, the field at {client:?}"
+            );
+        }
+        // An input method composes at the caret (as Text Services Framework
+        // would, with no message of the field's).
+        let start = input.selection().1;
+        input.composing.set(Some((start, 0)));
+        for letter in ["n", "i", "h", "a", "o"] {
+            replace_selection(&input, letter);
+            process(&surface, &view, &input);
+            let (first, end) = (e.position(start), e.position(input.selection().1));
+            assert!(
+                at_corner(first),
+                "the composition starts at {first:?}, the field at {client:?}"
+            );
+            assert_eq!(end.y, first.y, "the composition goes on to another line");
+        }
+        input.composing.set(None);
+        at(200.0);
+        assert_ne!(
+            e.props().bits & TXTBIT_WORDWRAP,
+            0,
+            "a wide input does not wrap"
+        );
     }
 
     #[test]
