@@ -4,6 +4,27 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Rust components' props read by atom (`nsh-js` `components.rs`, 2026-11-19, macOS arm64, release, against
+`2ede573ac`): a Rust component's props effect read each of its keys (its value and renderer props and the about 20
+host props it does not declare) by name on every run, making the key list again (`ComponentSpec::host_props`, one
+`format!` per host prop and event) and a `CString` and an atom per key. The keys and their atoms are now made once per
+spec (`Components::prop_keys`) and read with `JS_GetProperty`. `cargo test --release -p nsh-engine --test engine
+bench_components -- --ignored --nocapture`, JS time, the least of three rounds of each version run in turn; ops and
+mount items are the same before and after:
+
+| Entry | Before | After | Ops | Mount items |
+|---|---:|---:|---:|---:|
+| `GridRust.tsx` first frame | 988 µs | 598 µs | 1,015 | 386 |
+| `GridRust.tsx` update 200 titles | 485 µs | 112 µs | 200 | 63 |
+| `RowsRust.tsx` first frame | 289 µs | 263 µs | 263 | 323 |
+| `RowsRust.tsx` scrolling, per rebinding frame | 4.04 µs | 1.85 µs | — | — |
+
+The TSX twins (`GridTs.tsx` 1,053 / 127 µs, `RowsTs.tsx` 320 / 2.18 µs) are the controls, unchanged. Apps that set
+no props of Rust components after they mount do not show it: headless `nsh test --trace` (debug, three alternating
+rounds) of `examples/bench/data-table` (open, press row `#1`), `examples/bench/Inputs.tsx` (open the Select, type a
+search) and the counter keep every commit's ops, mount items and nodes, and their commit times stay within the runs'
+spread (data-table's first commit 16.6–17.9 ms before, 16.9–19.0 ms after; the Select's 30.0–34.8 ms, 26.4–32.4 ms).
+
 Many children of one parent mounted at once (2026-11-18, Linux x86_64, Intel Core Ultra 7 270K Plus, release, one
 CPU, against `6442c86be`): an `each` placed its new rows by searching the parent's children for each one, and a view
 made last among its siblings looked through every overlay of the surface (a document's links each have a hint
