@@ -1156,7 +1156,7 @@ fn Slots() -> impl IntoElement {
 
 #[test]
 fn the_header_scrolls_with_the_rows_and_empty_shows_while_no_item_does() {
-    let mut app = launch(Root::of::<Slots>());
+    let mut app = launch(nsh_testing::windowed_root::<Slots>());
     // No item: the header and `empty`, no row.
     see(&mut app, "Pinned");
     see(&mut app, "No files");

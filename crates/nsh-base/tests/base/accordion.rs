@@ -568,8 +568,10 @@ fn closing_reveal_panel_disables_pointer_events_at_once() {
     let config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::new::<PanelHarness>(|| PanelProps {
-            block_parent: false,
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<PanelHarness>(|| {
+            PanelProps {
+                block_parent: false,
+            }
         }))
     };
     let mut app = Headless::start(config).expect("engine starts");
@@ -620,8 +622,8 @@ fn closing_reveal_panel_disables_pointer_events_at_once() {
     // An open panel inside a `PointerEvents::None` ancestor inherits `None`.
     let blocked_config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::new::<PanelHarness>(|| PanelProps {
-            block_parent: true,
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<PanelHarness>(|| {
+            PanelProps { block_parent: true }
         }))
     };
     let mut blocked = Headless::start(blocked_config).expect("engine starts");

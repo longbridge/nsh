@@ -906,8 +906,10 @@ fn Grips(props: GripsProps) -> impl IntoElement {
 fn start_grips(layout: DockAreaLayout) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(1000.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Grips>(move || GripsProps {
-            layout: layout.clone(),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Grips>(move || {
+            GripsProps {
+                layout: layout.clone(),
+            }
         }))
     };
     config.environment.os = Os::MacOs;
