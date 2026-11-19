@@ -361,7 +361,7 @@ system's blur of what is behind the window, below the view's own background, bor
 background tints it. Like `"behindWindow"`, it shows only in a transparent window. In an opaque window, on an earlier
 Windows, or when the system cannot make the blur, nothing is drawn under the view and the rest of it draws as always.
 The system decides how it looks, and it keeps following what is behind the window while the window is inactive. Rust
-uses `.windows_backdrop(WindowsBackdrop::default())`; `None` (the default) draws none. While a window shows such a
+uses `.windows_backdrop(Some(WindowsBackdrop::default()))`; `None` (the default) draws none. While a window shows such a
 view, the windows of native components that bring their own (see [Native components](./native-components.md)) sit below
 NSH's content instead of above it. A window that shows such a view draws every frame whole, the blur is clipped to the
 rectangle around its ancestors' clips (it can show past an ancestor's rounded corners), and a view inside a `filter`, a
