@@ -4039,8 +4039,9 @@ test("links and addresses resolve against the site's base where the page names i
 });
 
 /** An element whose DOM state, as a real one's, is not among its own
- * enumerable keys (`retag` copies those); a `style` attribute set as text
- * applies nothing, as under a strict `style-src`. */
+ * enumerable keys (`retag` copies those), listeners included; a `style`
+ * attribute set as text applies nothing, as under a strict `style-src`;
+ * focused, it is focused from the keyboard. */
 function fakeElement(tag, attributes = {}) {
   const attrs = new Map(Object.entries(attributes));
   const set = [];
@@ -4050,14 +4051,26 @@ function fakeElement(tag, attributes = {}) {
     attributes: { get: () => [...attrs].map(([name, value]) => ({ name, value })) },
     setAttribute: { value(name, value) { set.push(name); if (name !== "style") attrs.set(name, String(value)); } },
     getAttribute: { value: (name) => attrs.get(name) ?? null },
+    hasAttribute: { value: (name) => attrs.has(name) },
     removeAttribute: { value: (name) => attrs.delete(name) },
     attributesSet: { value: set },
+    tabIndex: { get: () => Number(attrs.get("tabindex") ?? -1), set: (v) => attrs.set("tabindex", String(v)) },
+    dataset: { value: {} },
+    classList: { value: { toggle() {} } },
+    matches: { value: (selector) => selector === ":focus-visible" },
     style: { value: { cssText: attributes.style ?? "" } },
     childNodes: { value: [] },
     append: { value(...nodes) { this.childNodes.push(...nodes); } },
     replaceWith: { value() {} },
+    listeners: { value: [] },
+    addEventListener: { value(type, listener) { this.listeners.push([type, listener]); } },
   });
   return el;
+}
+
+/** Dispatches `event` of `type` to the listeners `el` (`fakeElement`) has. */
+function fire(el, type, event = {}) {
+  for (const [t, listener] of el.listeners) if (t === type) listener({ type, ...event });
 }
 
 test("a view drawn as another element keeps its frame under a strict style-src", () => {
@@ -4078,6 +4091,71 @@ test("a view drawn as another element keeps its frame under a strict style-src",
     assert.equal(next.getAttribute("class"), "nsh-v");
     assert.equal(next._id, 6);
     assert.equal(player.views.get(6), next);
+  } finally {
+    globalThis.document = savedDocument;
+  }
+});
+
+test("a link drawn as an a keeps its hover and its keyboard focus", () => {
+  const savedDocument = globalThis.document;
+  globalThis.document = { createElement: (tag) => fakeElement(tag), activeElement: null };
+  try {
+    const { player } = fakePlayer();
+    const reported = [];
+    player.wasm.nsh_states = (id, states) => {
+      reported.push([id, states]);
+      return -1;
+    };
+    const heard = [];
+    player.event = (id, name) => heard.push([id, name]);
+    Object.assign(player, { views: new Map(), mouseTracked: new Set(), wheelTracked: new Set() });
+    player.updateAria = () => {};
+    player.updateTouchAction = () => {};
+    const el = fakeElement("div", { class: "nsh-v" });
+    Object.assign(el, { _id: 6, _kind: "view", _events: new Set(), _frame: null });
+    player.views.set(6, el);
+    // A new `Link` with `hover:` and `focus:` classes, in the core's order:
+    // its tracked states and events come before the props whose `href`
+    // draws it as an `a`.
+    player.op_ts([, 6, 2 | 4]);
+    player.op_e([, 6, ["onPress"]]);
+    player.op_vp([, 6, { role: "link", href: "/notes" }]);
+    const link = player.view(6);
+    assert.equal(link.localName, "a");
+    // Listeners of its own, once each: the div's went with the div.
+    assert.deepEqual(link.listeners.map(([type]) => type), ["pointerenter", "pointerleave", "focus", "blur"]);
+    fire(link, "pointerenter", { pointerType: "mouse" });
+    fire(link, "focus");
+    fire(link, "pointerleave", { pointerType: "mouse" });
+    fire(link, "blur");
+    // Hovered, then focused too, then focused only, then neither.
+    assert.deepEqual(reported, [[6, 2], [6, 6], [6, 4], [6, 0]]);
+    assert.deepEqual(heard, [[6, "onFocus"], [6, "onBlur"]]);
+  } finally {
+    globalThis.document = savedDocument;
+  }
+});
+
+test("a text drawn as a heading after its links keeps their hover", () => {
+  const savedDocument = globalThis.document;
+  globalThis.document = { createElement: (tag) => fakeElement(tag) };
+  try {
+    const { player } = fakePlayer();
+    const heard = [];
+    player.event = (id, name) => heard.push([id, name]);
+    player.mouseEvent = () => null;
+    player.views = new Map();
+    const el = fakeElement("div", { class: "nsh-v" });
+    Object.assign(el, { _id: 8, _kind: "text" });
+    player.views.set(8, el);
+    // Its runs hold a link the mouse is reported for (`runs`); then a
+    // `role="header"` draws it as an `h2`.
+    player.installLinkHover(el);
+    const heading = player.retag(el, "h2");
+    const run = { _link: { node: 10, events: new Set(["onMouseEnter", "onMouseLeave"]) } };
+    fire(heading, "pointerover", { pointerType: "mouse", target: run });
+    fire(heading, "pointerleave", { pointerType: "mouse" });
+    assert.deepEqual(heard, [[10, "onMouseEnter"], [10, "onMouseLeave"]]);
   } finally {
     globalThis.document = savedDocument;
   }
