@@ -3,8 +3,9 @@
   "id": "com.example.macos-host-input",
   "capabilities": {
     "webview": {
-      "hosts": [],
-      "input": true
+      "hosts": ["example.com"],
+      "input": true,
+      "media": ["microphone"]
     }
   }
 }
