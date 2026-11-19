@@ -800,7 +800,8 @@ event mask; unchanged frames are not sent. A frame of scrolling that reveals no 
 
 > [!NOTE]
 > Text is measured with an approximate text engine headless, so text sizes differ a little from a device, which uses
-> CoreText or Android's text layout. Layout logic, view counts and operation counts are the same.
+> CoreText or Android's text layout. Explicit `lineHeight` is respected; without it, lines are 1.2 times the
+> font size. Character widths remain approximate. Layout logic, view counts and operation counts are the same.
 
 Single-run timings depend a lot on the CPU's clock state (a machine that just woke from idle is slow). Compare runs on
 the same machine, look at the minimum of several runs, and trust the op and item counts more than the microseconds.

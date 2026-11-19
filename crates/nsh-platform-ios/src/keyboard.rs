@@ -724,6 +724,57 @@ fn tab_focus(view: &NshView, target: &EventTarget, backward: bool) -> bool {
     tab_from(view, target, backward)
 }
 
+/// Raw keys delivered to the surface root while it has the keyboard focus
+/// (no view or input focused): the root hears them and they bubble from
+/// there, as a browser reports them at `document.body`. The root is no
+/// stop, so nothing is pressed; Tab's traversal still follows
+/// ([`root_tab`]) unless a capture took the key. True when a mounted
+/// capture consumed a press.
+pub(crate) fn root_raw(
+    view: &UIView,
+    target: &EventTarget,
+    presses: &NSSet<UIPress>,
+    down: bool,
+) -> bool {
+    if !view.isFirstResponder() {
+        return false;
+    }
+    let id = view.tag() as nsh_core::NodeId;
+    let listens = target.listens_keys(id);
+    let mtm = MainThreadMarker::from(view);
+    let state = target.keyboard();
+    let mut consumed = false;
+    for press in presses.iter() {
+        let Some(key) = press.key(mtm) else {
+            continue;
+        };
+        let Some(usage) = usage(&key) else {
+            continue;
+        };
+        let was_held = state.is_held(usage);
+        let mut reported = event(&key, usage, state, down);
+        if down {
+            state.down(usage);
+        } else {
+            state.up(usage);
+        }
+        if !listens && !(was_held && !down) {
+            continue;
+        }
+        let stroke = crate::keymap::keystroke(&key);
+        let captured = target.captures_stroke(id, stroke.as_ref());
+        reported.default_prevented = captured;
+        let kind = if down {
+            EventKind::KeyDown
+        } else {
+            EventKind::KeyUp
+        };
+        target.dispatch(id, kind, EventPayload::Key(reported));
+        consumed |= captured;
+    }
+    consumed
+}
+
 /// Tab / Shift+Tab delivered to the surface root while it has the keyboard
 /// focus: UIKit sends a hardware key to the first responder, and before a
 /// view or input takes the focus the root owns that role (its
@@ -891,8 +942,15 @@ pub(crate) fn adopt_focus(context: &UIFocusUpdateContext) {
     let next = context.nextFocusedView();
     let previous = context.previouslyFocusedView();
     let Some(next) = next else {
+        // UIKit reports no next view when a text field's own editor takes the
+        // focus (the field editor is not a focus item), and when the focus
+        // engine merely re-evaluates. Resigning here dismissed the keyboard
+        // after the first keystroke. A field that is still the first
+        // responder keeps it; only a view that is no longer in a window gives
+        // it up.
         if let Some(previous) = previous.as_deref()
             && is_ours(previous)
+            && previous.window().is_none()
         {
             let _ = previous.resignFirstResponder();
         }

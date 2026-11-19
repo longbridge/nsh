@@ -659,7 +659,8 @@ pub struct PressEvent {
     /// The modifier keys held when the press began.
     pub modifiers: crate::keymap::Modifiers,
     /// Consecutive clicks at the same place: 1 for a click, 2 for a
-    /// double click, ...
+    /// double click, ...; 0 when not from a pointer (a keyboard or
+    /// assistive technology activation), as the DOM's `detail`.
     pub clicks: u32,
 }
 
@@ -1953,6 +1954,19 @@ pub enum ScreenAnimation {
     None,
 }
 
+/// Where a page's title sits in the native header (`headerTitleAlign`).
+/// Android's toolbar honors it. iOS's system bar always centers the title
+/// and ignores the value; the desktops and the web draw no native header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub enum HeaderTitleAlign {
+    /// At the start, after the back button or the leading item (Android's
+    /// default).
+    #[default]
+    Left,
+    /// Centered across the header, between the leading and trailing items.
+    Center,
+}
+
 /// A screen option (`<NavPage title headerVisible ...>`).
 #[derive(Debug, Clone, PartialEq, HostProps)]
 pub enum ScreenProp {
@@ -1981,6 +1995,18 @@ pub enum ScreenProp {
     /// iOS 26's own bars.
     #[prop(js = "headerShadowVisible", default = true, on = SCREEN)]
     HeaderShadowVisible(bool),
+    /// `headerTitleAlign` (Android: the system header): where the title
+    /// sits, `"left"` (the default) or `"center"`. iOS's system bar always
+    /// centers the title and ignores the value; the desktops and the web
+    /// draw no native header.
+    #[prop(js = "headerTitleAlign", on = SCREEN)]
+    HeaderTitleAlign(HeaderTitleAlign),
+    /// `headerBackgroundOnScroll` (iOS: the system header; ignored
+    /// elsewhere): with `headerTransparent`, the header stays clear while
+    /// the content rests at its top and shows its background once the
+    /// content scrolls under it, as UIKit's own bars do.
+    #[prop(js = "headerBackgroundOnScroll", on = SCREEN)]
+    HeaderBackgroundOnScroll(bool),
     /// `headerBackTitle` (iOS: the system header; ignored elsewhere): the
     /// label of the back button leading back to this page.
     #[prop(js = "headerBackTitle", on = SCREEN)]
@@ -3624,6 +3650,11 @@ pub enum Prop {
     /// The system material of a backdrop blur (iOS, default `ultraThin`).
     #[prop(ios = "backdropMaterial")]
     BackdropMaterial(crate::BackdropMaterial),
+    /// `ios={{ scrollEdgeElement }}`: the scroll view the view floats over
+    /// and the edge of it the view sits at (iOS 26: that scroll view's edge
+    /// effect takes its shape from the view); `None`: none.
+    #[prop(ios = "scrollEdgeElement")]
+    ScrollEdgeElement(Option<crate::element::ScrollEdgeTarget>),
     /// `macos={{ backdrop }}`: the `NSVisualEffectView` material on macOS
     /// (default `popover` / `withinWindow` / `active`; `None`: none).
     #[prop(macos = "backdrop")]

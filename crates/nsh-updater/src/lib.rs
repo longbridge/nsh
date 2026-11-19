@@ -74,6 +74,10 @@ pub struct Config {
     pub id: String,
     /// The running version.
     pub version: String,
+    /// The app's display name (`nsh.json` `"name"`), which the built-in
+    /// update prompt shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// `owner/repo`: updates from its GitHub Releases.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github: Option<String>,
