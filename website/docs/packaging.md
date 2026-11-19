@@ -63,7 +63,7 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
-[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk` and `usesCleartextTraffic`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
+[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, `usesCleartextTraffic` and `permissions`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
 of their packages, [below](#infoplist-keys-and-entitlements); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
 (see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
 every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
@@ -200,6 +200,24 @@ Packaged apps make requests over HTTPS. For servers without TLS, such as one on 
 ```
 
 Development builds (`nsh run --target android`) always allow plain HTTP: they load the app from the dev server over it.
+
+### Permissions
+
+The manifest declares the permissions NSH's own features need: `INTERNET`, `POST_NOTIFICATIONS` for
+[notifications](./sandbox-and-capabilities.md#notifications), `RECORD_AUDIO` and `CAMERA` for a web view's `media`. `android.permissions` adds
+others, for code of the app or an extension that calls Android itself: a bare name is one of Android's
+(`android.permission.<NAME>`), a dotted one is written as it is.
+
+```json
+{
+  "android": { "permissions": ["ACCESS_NETWORK_STATE", "com.example.permission.READ_ORDERS"] }
+}
+```
+
+A normal permission such as `ACCESS_NETWORK_STATE` is granted when the app is installed. A runtime permission
+(`ACCESS_FINE_LOCATION`, say) is only declared: the app's own code still asks the user for it. The TSX development
+host (`nsh run --target android` of a TSX app) declares none of these; a Rust app's `nsh run` builds its package and
+declares them.
 
 ### Google Play: App Bundles
 
