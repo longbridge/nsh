@@ -54,8 +54,11 @@ works and its runner only needs GTK.
   image, canvas), the children (clipped to the rounded bounds with `overflow: hidden`), the border, then hosted GTK
   widgets (`ViewState::natives`: text editors, videos, web views).
 - **One hop per commit.** The engine runs on its own thread (`nsh_engine::Engine`); its sink queues each commit and wakes
-  the main loop once (`MainContext::invoke`), and the main thread applies every queued batch in order (`surface.rs`,
-  `mount.rs`). `invoke` closures must be `Send`, so they find their surface by key in a thread-local map; no globals
+  the main loop once (`MainContext::invoke_with_priority`), and the main thread applies every queued batch in order
+  (`surface.rs`, `mount.rs`). The wake-up runs at `G_PRIORITY_HIGH_IDLE` (`DRAIN_PRIORITY`): after input, before the
+  frame clock lays out and paints. At the idle priority of a plain `invoke` it waits for a loop with nothing else to
+  do, and while frames cost more than a refresh the next paint is always due first, so the app would get no commit
+  and no frame. `invoke` closures must be `Send`, so they find their surface by key in a thread-local map; no globals
   are shared between surfaces.
 - **Text is typeset on the engine thread** with a Pango font map of the engine's own (Pango objects are not
   thread-safe, and GTK's font map belongs to the main thread). App fonts are loaded into a fresh Fontconfig
