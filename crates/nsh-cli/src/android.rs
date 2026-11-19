@@ -1061,7 +1061,7 @@ mod tests {
         let res = dir.join("res");
         let files = super::write_icon(super::Icon::Image(&icon), &res).unwrap();
         let launcher = res.join("mipmap-xxxhdpi").join("ic_launcher.png");
-        assert_eq!(files, [launcher.clone()]);
+        assert_eq!(files, std::slice::from_ref(&launcher));
         assert_eq!(png_size(&launcher), (192, 192));
         assert!(!res.join("mipmap-anydpi-v26").exists());
         std::fs::remove_dir_all(&dir).unwrap();
