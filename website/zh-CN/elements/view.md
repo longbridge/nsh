@@ -149,6 +149,7 @@ view()
 | `onPress` | `.on_press` | `PressEvent`（Rust 中无） | 在视图内完成一次点击。 |
 | `onLongPress` | `.on_long_press` | `PressEvent`（Rust 中无） | 手指按住达到 `delayLongPress`（500 ms）。 |
 | `onPressDown` / `onPressUp` | `.on_press_down` / `.on_press_up` | `PressEvent`（Rust 中无） | 手指按下 / 抬起或移出。 |
+| `onFocusIn` / `onFocusOut` | `ElementRef::on_focus_in` / `on_focus_out` | 无 | 键盘焦点从外部进入视图（落到它或其内部的视图上）/ 离开到外部的视图或不再有焦点；在内部视图之间移动不算再次进入。面板可借此记下焦点位置，之后用 `ref.focus()` 放回。 |
 | `onMouseEnter` / `onMouseLeave` | `.on_mouse_enter` / `.on_mouse_leave` | `MouseEvent` | 鼠标移到视图（或其内部的视图）上 / 离开视图或窗口（见[悬停](./index.md#悬停)）；`onMouseLeave` 的位置是鼠标最后所在之处。 |
 | `onMouseMove` | `.on_mouse_move` | `MouseEvent` | 鼠标在视图（或其内部的视图）上移动，无论是否按着按键；或鼠标停在那里、没有按键按下时按下或松开了修饰键：`position`、`pagePosition`（`Point`）、`modifiers` 和 `pressedButton`（`"left"`、`"right"`、`"middle"`、`"back"`、`"forward"` 或 `null`）；每帧最多一次。 |
 | `onWheel` | `.on_wheel` | `WheelEvent` | 鼠标滚轮或触控板在视图（或其内部的视图）上滚动：`position`、`pagePosition`、`delta`、`deltaMode`（`"lines"` 或 `"points"`）和 `modifiers`；比指针下方滚动视图更近的监听者接管滚轮（见[滚轮](./index.md#滚轮)）。 |

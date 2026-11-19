@@ -978,6 +978,18 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         "It lost the keyboard focus.",
     ),
     (
+        EventKind::FocusIn,
+        on::ALL,
+        "() => void",
+        "The keyboard focus came into it: onto it or a view inside it, from outside (it entered `focus-within`). Moving between the views inside it is no new coming in; the content of an overlay is inside the view the overlay is in. A panel notes where its focus is with it, to put it back later with `ref.focus()`.",
+    ),
+    (
+        EventKind::FocusOut,
+        on::ALL,
+        "() => void",
+        "The keyboard focus left it: from it or a view inside it to one outside, or to none (it left `focus-within`). A view removed with the focus inside it hears nothing.",
+    ),
+    (
         EventKind::SelectionChange,
         on::INPUT,
         "(e: { start: number; end: number }) => void",
