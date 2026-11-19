@@ -575,6 +575,7 @@ pub struct Root {
     appearance: Option<crate::platform::Appearance>,
     app_id: Option<String>,
     url_schemes: Vec<String>,
+    link_domains: Vec<String>,
     capabilities: Option<crate::access::Capabilities>,
     status_bar: Option<crate::StatusBarSetting>,
     main_window: Option<crate::desktop::MainWindowOptions>,
@@ -591,6 +592,7 @@ impl Root {
             appearance: None,
             app_id: None,
             url_schemes: Vec::new(),
+            link_domains: Vec::new(),
             capabilities: None,
             status_bar: None,
             main_window: None,
@@ -646,6 +648,20 @@ impl Root {
     /// The schemes the app claims ([`Root::url_schemes`]).
     pub fn url_schemes_ref(&self) -> &[String] {
         &self.url_schemes
+    }
+
+    /// The web domains the app claims (`nsh.json` `linkDomains`, which
+    /// nsh's generated code sets): the `https` links of theirs (Universal
+    /// Links, App Links) the core lets through ([`crate::url_scheme`],
+    /// [`crate::element::next_url_scheme_open`]).
+    pub fn link_domains(mut self, domains: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.link_domains = domains.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// The domains the app claims ([`Root::link_domains`]).
+    pub fn link_domains_ref(&self) -> &[String] {
+        &self.link_domains
     }
 
     /// What the app declares it may reach (`nsh.json` `capabilities`, which

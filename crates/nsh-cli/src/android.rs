@@ -215,6 +215,10 @@ pub(crate) struct Apk<'a> {
     /// URL schemes that open the app (nsh.json `schemes`): one
     /// `VIEW` intent filter.
     pub(crate) schemes: &'a [String],
+    /// Web domains whose `https` links open the app (nsh.json
+    /// `linkDomains`): one `VIEW` intent filter Android verifies (App
+    /// Links).
+    pub(crate) link_domains: &'a [String],
     /// A Rust app: its `libnsh.so` has the root, which `AppActivity` runs
     /// instead of a bundle (manifest meta-data `com.longbridge.nsh.RUST`).
     pub(crate) rust: bool,
@@ -409,7 +413,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
         .collect();
     // A link opens the running app (`onNewIntent`), not another activity in
     // the caller's task.
-    let launch_mode = if apk.schemes.is_empty() {
+    let launch_mode = if apk.schemes.is_empty() && apk.link_domains.is_empty() {
         ""
     } else {
         r#" android:launchMode="singleTask""#
@@ -424,6 +428,20 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
             .collect();
         format!(
             "\n            <intent-filter>\n                <action android:name=\"android.intent.action.VIEW\" />\n                <category android:name=\"android.intent.category.DEFAULT\" />\n                <category android:name=\"android.intent.category.BROWSABLE\" />{data}\n            </intent-filter>"
+        )
+    };
+    // App Links: Android checks each host's `/.well-known/assetlinks.json`
+    // as the app installs, and opens their verified links in the app.
+    let link_domains = if apk.link_domains.is_empty() {
+        String::new()
+    } else {
+        let hosts: String = apk
+            .link_domains
+            .iter()
+            .map(|d| format!("\n                <data android:host=\"{d}\" />"))
+            .collect();
+        format!(
+            "\n            <intent-filter android:autoVerify=\"true\">\n                <action android:name=\"android.intent.action.VIEW\" />\n                <category android:name=\"android.intent.category.DEFAULT\" />\n                <category android:name=\"android.intent.category.BROWSABLE\" />\n                <data android:scheme=\"https\" />{hosts}\n            </intent-filter>"
         )
     };
     format!(
@@ -456,7 +474,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>{schemes}
+            </intent-filter>{schemes}{link_domains}
         </activity>
     </application>
 </manifest>
@@ -859,6 +877,7 @@ mod tests {
             microphone: false,
             camera: false,
             schemes: &[],
+            link_domains: &[],
             rust,
             dark: false,
             runtime: std::path::Path::new("."),
@@ -921,6 +940,46 @@ mod tests {
         assert!(manifest.contains("android.permission.RECORD_AUDIO"));
         assert!(!manifest.contains("android.permission.CAMERA"));
         assert!(!super::manifest_xml(&apk(false, false)).contains("RECORD_AUDIO"));
+    }
+
+    #[test]
+    fn an_app_claims_its_link_domains_in_a_filter_android_verifies() {
+        let domains = ["example.com".to_owned(), "*.shop.example".to_owned()];
+        let manifest = super::manifest_xml(&super::Apk {
+            link_domains: &domains,
+            ..apk(false, false)
+        });
+        let filter = manifest
+            .split("<intent-filter android:autoVerify=\"true\">")
+            .nth(1)
+            .and_then(|rest| rest.split("</intent-filter>").next())
+            .expect(&manifest);
+        assert!(filter.contains("android.intent.action.VIEW"), "{manifest}");
+        assert!(
+            filter.contains("android.intent.category.BROWSABLE"),
+            "{manifest}"
+        );
+        assert!(
+            filter.contains(r#"<data android:scheme="https" />"#),
+            "{manifest}"
+        );
+        assert!(!filter.contains(r#"android:scheme="http""#), "{manifest}");
+        assert!(
+            filter.contains(r#"<data android:host="example.com" />"#),
+            "{manifest}"
+        );
+        assert!(
+            filter.contains(r#"<data android:host="*.shop.example" />"#),
+            "{manifest}"
+        );
+        // A link opens the running app, as a scheme's does.
+        assert!(
+            manifest.contains(r#"android:launchMode="singleTask""#),
+            "{manifest}"
+        );
+        let none = super::manifest_xml(&apk(false, false));
+        assert!(!none.contains("autoVerify"), "{none}");
+        assert!(!none.contains("singleTask"), "{none}");
     }
 
     #[test]

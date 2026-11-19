@@ -2307,11 +2307,37 @@ scheme 以字母开头，后面是字母、数字、`+`、`-` 或 `.`，按小�
 | Windows | 应用每次启动时写入 `HKEY_CURRENT_USER\\Software\\Classes`；第二次启动会把 URL 交给正在运行的应用 |
 | Linux | 应用启动时在 `~/.local/share/applications` 写入带 `x-scheme-handler/<scheme>` 的桌面文件（`<应用 id>.desktop`）。安装器为本可执行文件放在那里的条目会保留，只补上它缺少的 scheme；属于应用另一份副本的条目不会改动。只有某个 scheme 还没有任何应用处理时，应用才设为它的默认处理程序。`nsh run` 以同样方式注册开发宿主。第二次启动会把 URL 交给正在运行的应用 |
 
+### Web 链接
+
+应用还可以声明 Web 域名，让这些域名的 `https` 链接打开应用：iOS 和 macOS 上的 Universal Links，Android 上的 App Links。
+这样，邮件、聊天或搜索结果里的 `https://example.com/orders/42` 这类链接在装有应用的设备上打开应用，在其他地方打开网页。
+它和 scheme 的链接交给同一个 `open` 监听器，一个监听器就能处理两者；在 Web 上，同一个地址就是页面自己的地址
+（`UrlScheme.url()`）。Rust 应用生成的代码把这些域名交给它的根组件（`Root::link_domains`）。
+
+```json
+{ "linkDomains": ["example.com", "*.example.com"] }
+```
+
+域名是主机名，按小写比较，`*.` 表示它的子域名（`*.example.com` 不包括 `example.com` 本身：两者都要列出）；带 scheme、
+端口或路径的条目在构建应用时被拒绝。NSH 只放行这些主机的 `https` 链接。和 scheme 一样，任何人都能做出这样的链接，所以要检查它
+请求的内容。
+
+网站要证明应用属于它：通过 HTTPS 且不经重定向提供 `/.well-known/apple-app-site-association`（以 `<team id>.<应用 id>`
+指明应用）和 `/.well-known/assetlinks.json`（指明包名和签名证书的 SHA-256 指纹）。在此之前，系统会在浏览器中打开这些链接。
+
+| 平台 | 应用如何声明域名 |
+| --- | --- |
+| iOS | `nsh package` 签名应用时使用的 `com.apple.developer.associated-domains` entitlement 中的 `applinks:<域名>`，排在 `ios.entitlements` 列出的条目之后；真机构建的描述文件必须授予 Associated Domains。包括启动应用的链接和运行中到达的链接 |
+| macOS | 同一个 entitlement，但 macOS 只在描述文件下承认它：`nsh package` 以 ad hoc 方式签名的应用不包含它，请在 `macos.entitlements` 中列出，并用授予它的描述文件签名应用。之后应用就会接收这些链接 |
+| Android | 带 `android:autoVerify="true"`、以每个域名为 `https` 主机的 `ACTION_VIEW` intent filter，Android 在安装应用时验证；Activity 以 `singleTask` 运行，链接会交给正在运行的应用 |
+| Web | 页面本身就是链接：`nsh package` 略过 `linkDomains` 并给出警告 |
+| Windows、Linux | 没有应用链接：由浏览器打开 |
+
 `nsh test` 可以把链接交给测试中的应用：`App.open(entry, { url })` 用一个链接启动应用，`app.openWithUrl(url)`
 在运行中打开一个链接，两者都在无头模式下运行。
 
 嵌入 NSH 的应用自己拥有 scheme，把 URL 交给视图：`AppView.open_url`（Linux、iOS）、`NshAppView.openURL`（Swift）、
-`NshView.openUrl` 或 `NshView.handleUrlSchemeIntent`（Android）。
+`NshView.openUrl` 或 `NshView.handleUrlSchemeIntent`（Android）。Universal Link 会到达嵌入应用的 `scene(_:continue:)`：把它的 `webpageURL` 也交给 `NshAppView.openURL`。
 
 ### UrlScheme.url
 

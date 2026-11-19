@@ -118,6 +118,9 @@ pub enum Reply {
         /// The URL schemes the app claims (`nsh.json` `schemes`).
         #[serde(default)]
         url_schemes: Vec<String>,
+        /// The web domains the app claims (`nsh.json` `linkDomains`).
+        #[serde(default)]
+        link_domains: Vec<String>,
         /// The main window's launch options (`nsh.json` `window`, JSON).
         #[doc(hidden)]
         #[serde(default)]
@@ -218,6 +221,7 @@ pub fn runner(ui_sets: Vec<Registry>, root: Option<fn() -> Root>) -> ExitCode {
                 source_map,
                 capabilities,
                 url_schemes,
+                link_domains,
                 main_window,
                 asset_root,
             } => {
@@ -235,6 +239,7 @@ pub fn runner(ui_sets: Vec<Registry>, root: Option<fn() -> Root>) -> ExitCode {
                 let bundle = unsafe { Bundle::bytecode(bytes) }
                     .with_capabilities_json(capabilities.as_deref())?
                     .with_url_schemes(url_schemes)
+                    .with_link_domains(link_domains)
                     .with_main_window(main_window.as_deref());
                 // An app's entry may be its directory.
                 let asset_root = asset_root.unwrap_or_else(|| {
@@ -331,6 +336,7 @@ mod tests {
             source_map: None,
             capabilities: Some(r#"{"network":{"hosts":["api.test"]}}"#.into()),
             url_schemes: vec!["myapp".into()],
+            link_domains: vec!["example.com".into()],
             main_window: Some(r#"{"defaultVisible":false}"#.into()),
             asset_root: Some("/app".into()),
         };
@@ -340,7 +346,7 @@ mod tests {
         let older = r#"{"built":"js","bytecode":"/b.nshc","source_map":null}"#;
         assert!(matches!(
             serde_json::from_str::<Reply>(older),
-            Ok(Reply::Js { url_schemes, .. }) if url_schemes.is_empty()
+            Ok(Reply::Js { url_schemes, link_domains, .. }) if url_schemes.is_empty() && link_domains.is_empty()
         ));
     }
 }

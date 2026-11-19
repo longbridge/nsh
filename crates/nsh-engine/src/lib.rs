@@ -166,6 +166,15 @@ impl App {
             App::Js(bundle) => &bundle.url_schemes,
         }
     }
+
+    /// The web domains the app claims (`nsh.json` `linkDomains`): the
+    /// `https` links the core lets through (`nsh_core::url_scheme`).
+    pub fn link_domains(&self) -> &[String] {
+        match self {
+            App::Rust(root) => root.link_domains_ref(),
+            App::Js(bundle) => &bundle.link_domains,
+        }
+    }
 }
 
 impl From<Root> for App {
@@ -199,6 +208,11 @@ pub struct Bundle {
     /// Read from the app's own resources, never from its code; none for a
     /// signed package, whose embedding app owns the schemes.
     pub url_schemes: Vec<String>,
+    /// The web domains the app claims (`nsh.json` `linkDomains`, a
+    /// packaged app's `app.json`): the `https` links its engine lets
+    /// through (Universal Links, App Links). From the app's own resources,
+    /// as [`Bundle::url_schemes`].
+    pub link_domains: Vec<String>,
     /// Trusted filesystem anchors selected by the native host, never decoded
     /// from application code, its manifest or a development server message.
     /// Missing anchors deny relative and corresponding placeholder grants.
@@ -359,6 +373,7 @@ impl Bundle {
             chunks: Arc::default(),
             app_id: None,
             url_schemes: Vec::new(),
+            link_domains: Vec::new(),
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
             updater_config: None,
@@ -377,6 +392,7 @@ impl Bundle {
             chunks: Arc::default(),
             app_id: None,
             url_schemes: Vec::new(),
+            link_domains: Vec::new(),
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
             updater_config: None,
@@ -423,6 +439,16 @@ impl Bundle {
         schemes: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
         self.url_schemes = schemes.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// The web domains the app claims ([`Bundle::link_domains`]), as
+    /// `nsh.json` gives them.
+    pub fn with_link_domains(
+        mut self,
+        domains: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.link_domains = domains.into_iter().map(Into::into).collect();
         self
     }
 
@@ -507,6 +533,14 @@ impl Bundle {
                 log::warn!("app.json: {what}, ignored");
             }
             bundle.url_schemes = schemes;
+        }
+        if let Some(domains) = info.as_ref().and_then(|info| info.get("linkDomains")) {
+            // A newer NSH's: what this runtime cannot claim is left out.
+            let (domains, ignored) = nsh_core::url_scheme::link_domains_from_json_lenient(domains);
+            for what in ignored {
+                log::warn!("app.json: {what}, ignored");
+            }
+            bundle.link_domains = domains;
         }
         // The files it opens come as `file:` URLs (`nsh_core::file_type`).
         if info
@@ -2233,6 +2267,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         core.set_picker(config.picker.clone());
         core.set_speech(config.speech.clone());
         core.set_url_schemes(config.app.url_schemes().iter().cloned());
+        core.set_link_domains(config.app.link_domains().iter().cloned());
         // Every VM reads the core's address where it is (`UrlScheme.url()`).
         #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
         let app_url = core.app_url_cell();

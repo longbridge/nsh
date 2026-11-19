@@ -146,6 +146,9 @@ pub struct Bundle {
     /// The URL schemes the app claims (`nsh.json` `schemes`,
     /// checked, in lower case).
     pub url_schemes: Vec<String>,
+    /// The web domains the app claims (`nsh.json` `linkDomains`, checked,
+    /// in lower case).
+    pub link_domains: Vec<String>,
     /// The main window's launch options (`nsh.json` `window`), as
     /// `app.json` carries them: JSON, `None` without them or when they
     /// are not valid ([`main_window`]).
@@ -224,6 +227,22 @@ pub fn url_schemes(dir: &std::path::Path) -> Result<Vec<String>, BundleError> {
         schemes.push(nsh_core::file_type::FILE_SCHEME.to_owned());
     }
     Ok(schemes)
+}
+
+/// The domains of the `"linkDomains"` of the `nsh.json` in `dir` (the
+/// app's), checked ([`nsh_core::url_scheme::link_domains_from_json`]).
+pub fn link_domains(dir: &std::path::Path) -> Result<Vec<String>, BundleError> {
+    let Ok(text) = std::fs::read_to_string(dir.join("nsh.json")) else {
+        return Ok(Vec::new());
+    };
+    let config: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
+    // What it cannot claim is left out (the CLI's `read_config` warns of
+    // it).
+    Ok(config
+        .get("linkDomains")
+        .map(nsh_core::url_scheme::link_domains_from_json)
+        .unwrap_or_default())
 }
 
 /// The `"window"` of the `nsh.json` in `dir`, the main window's launch
@@ -582,6 +601,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
     let tailwind = tailwind_setup(&app, options.development, &options.app)?;
     let capabilities = capabilities(&app)?;
     let url_schemes = url_schemes(&app)?;
+    let link_domains = link_domains(&app)?;
     // Beside the entry, as `app.json`, `nsh run` and `nsh test`'s
     // real-window hosts read it (the CLI's `read_config`): an app a test
     // opens below its app's root starts alike headless and in a window.
@@ -721,6 +741,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
         chunk_native_use,
         capabilities,
         url_schemes,
+        link_domains,
         main_window,
         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
     })
@@ -840,6 +861,8 @@ pub struct HotBundle {
     pub capabilities: Option<nsh_core::access::Capabilities>,
     /// As in [`Bundle::url_schemes`].
     pub url_schemes: Vec<String>,
+    /// As in [`Bundle::link_domains`].
+    pub link_domains: Vec<String>,
     /// Wall time spent bundling, in milliseconds.
     pub elapsed_ms: f64,
 }
@@ -1006,6 +1029,7 @@ pub async fn bundle_hot_async(
     let tailwind = tailwind_setup(&app, true, &AppInfo::default())?;
     let capabilities = capabilities(&app)?;
     let url_schemes = url_schemes(&app)?;
+    let link_domains = link_domains(&app)?;
     let resolve = ResolveSetup::read(&app)?;
     let mut bundler_options = BundlerOptions {
         input: Some(vec![InputItem {
@@ -1096,6 +1120,7 @@ pub async fn bundle_hot_async(
         watch_files: watch_files(&bundler, &cwd),
         capabilities,
         url_schemes,
+        link_domains,
         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
     })
 }
@@ -1929,6 +1954,7 @@ mod tests {
                 "futureKey": true,
                 "appearance": "auto",
                 "schemes": ["myapp", { "scheme": "other", "role": "viewer" }],
+                "linkDomains": ["Example.com", "example", "*.example.com"],
                 "resolve": { "futureResolveKey": [] },
                 "tailwind": {
                     "colors": { "brand": "#7c3aed", "accent": { "light": "#000", "dark": "#fff" } },
@@ -1955,6 +1981,10 @@ mod tests {
         assert_eq!(setup.appearance, None);
         assert!(setup.status_bar.is_some());
         assert_eq!(url_schemes(&dir).unwrap(), ["myapp"]);
+        assert_eq!(
+            link_domains(&dir).unwrap(),
+            ["example.com", "*.example.com"]
+        );
         let caps = capabilities(&dir).unwrap().unwrap();
         assert_eq!(caps.network.hosts.len(), 1);
         assert!(caps.status_bar);

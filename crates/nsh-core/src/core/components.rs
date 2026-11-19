@@ -540,6 +540,9 @@ struct Notifications {
 struct UrlScheme {
     /// The schemes the app claims (lower case).
     schemes: Vec<String>,
+    /// The web domains the app claims (lower case,
+    /// [`crate::url_scheme::check_domain`]): their `https` links open it.
+    domains: Vec<String>,
     /// Links no listener took yet, at most [`crate::url_scheme::MAX_PENDING`].
     pending: std::collections::VecDeque<String>,
     /// The listener waiting for a link.
@@ -5923,7 +5926,7 @@ impl<M: TextEngine> Core<M> {
         let checked = if page {
             crate::url_scheme::check_page_url(&url)
         } else {
-            crate::url_scheme::check_url(&url, &links.schemes)
+            crate::url_scheme::check_link(&url, &links.schemes, &links.domains)
         };
         if let Err(dropped) = checked {
             log::warn!("link dropped: {dropped}");
@@ -5987,6 +5990,17 @@ impl<M: TextEngine> Core<M> {
         self.components.url_schemes.schemes = schemes
             .into_iter()
             .map(|s| s.into().to_ascii_lowercase())
+            .collect();
+    }
+
+    /// The web domains the app claims (`nsh.json` `linkDomains`,
+    /// [`crate::url_scheme`]), from the app's own resources: the `https`
+    /// links the platform reports (Universal Links, App Links) of other
+    /// hosts are dropped. None by default.
+    pub fn set_link_domains(&mut self, domains: impl IntoIterator<Item = impl Into<String>>) {
+        self.components.url_schemes.domains = domains
+            .into_iter()
+            .map(|d| d.into().to_ascii_lowercase())
             .collect();
     }
 

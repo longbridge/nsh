@@ -3002,11 +3002,20 @@ extern "system" fn Java_com_longbridge_nsh_Native_hostCallFree(
 }
 
 /// A packaged app's `app.json` (`nsh package`): its id and the URL schemes
-/// it claims, read as `Bundle::read` reads them on the other platforms.
+/// and web domains it claims, read as `Bundle::read` reads them on the
+/// other platforms.
 fn with_app_json(bundle: Bundle, json: &str) -> Bundle {
     let app = serde_json::from_str::<serde_json::Value>(json).ok();
     let id = app.as_ref().and_then(|app| app.get("id")?.as_str());
-    let bundle = bundle.with_app_id(id);
+    let mut bundle = bundle.with_app_id(id);
+    if let Some(domains) = app.as_ref().and_then(|app| app.get("linkDomains")) {
+        // A newer NSH's: what this runtime cannot claim is left out.
+        let (domains, ignored) = nsh_core::url_scheme::link_domains_from_json_lenient(domains);
+        for what in ignored {
+            log::warn!("app.json: {what}, ignored");
+        }
+        bundle = bundle.with_link_domains(domains);
+    }
     match app.as_ref().and_then(|app| app.get("schemes")) {
         Some(schemes) => {
             // A newer NSH's: what this runtime cannot claim is left out.
@@ -3035,9 +3044,20 @@ mod app_json_tests {
     }
 
     #[test]
+    fn a_packaged_app_claims_its_link_domains() {
+        let bundle = with_app_json(
+            Bundle::source(String::new()),
+            r#"{"id":"dev.example.links","linkDomains":["example.com","not a domain"]}"#,
+        );
+        assert_eq!(bundle.link_domains, ["example.com"]);
+        assert!(bundle.url_schemes.is_empty());
+    }
+
+    #[test]
     fn an_app_without_schemes_claims_none() {
         let bundle = with_app_json(Bundle::source(String::new()), r#"{"id":"dev.example"}"#);
         assert_eq!(bundle.app_id.as_deref(), Some("dev.example"));
         assert!(bundle.url_schemes.is_empty());
+        assert!(bundle.link_domains.is_empty());
     }
 }

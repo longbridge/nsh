@@ -143,10 +143,11 @@ pub fn package_to_run(
 }
 
 /// A package's bundle with what belongs to the installed app: its id
-/// (checked equal), URL schemes, trusted paths and update configuration,
+/// (checked equal), URL schemes and link domains, trusted paths and update configuration,
 /// and at most the capabilities it declares.
 fn as_shipped(mut bundle: Bundle, shipped: &Bundle, trial: Option<Arc<dyn Trial>>) -> Bundle {
     bundle.url_schemes = shipped.url_schemes.clone();
+    bundle.link_domains = shipped.link_domains.clone();
     bundle.system_paths = shipped.system_paths.clone();
     bundle.main_window = shipped.main_window.clone();
     bundle.updater_config = shipped.updater_config.clone();
@@ -660,6 +661,7 @@ mod tests {
         let shipped = Bundle::source("1".into())
             .with_app_id(Some(ID))
             .with_url_schemes(["example"])
+            .with_link_domains(["example.com"])
             .with_main_window(Some(r#"{"defaultSize":{"width":900,"height":640}}"#))
             .with_policy(crate::Policy {
                 declared: Some(declared),
@@ -671,6 +673,7 @@ mod tests {
         assert_eq!(launched.package.as_ref().map(|a| a.build), Some(2));
         let bundle = &launched.bundle;
         assert_eq!(bundle.url_schemes, ["example"]);
+        assert_eq!(bundle.link_domains, ["example.com"]);
         assert_eq!(bundle.main_window, shipped.main_window);
         assert!(bundle.updater_config.is_some() && bundle.trial.is_some());
         // The package declares the clipboard; the app did not.

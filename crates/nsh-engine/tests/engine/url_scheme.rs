@@ -168,6 +168,25 @@ fn links_of_the_apps_schemes_reach_the_listener_in_order() {
 }
 
 #[test]
+fn web_links_of_the_apps_domains_reach_the_listener() {
+    let launch = [
+        "https://example.com/orders/7?ref=mail".to_owned(),
+        "https://other.test/x".to_owned(),
+        "http://example.com/insecure".to_owned(),
+        "https://eu.shop.example/cart".to_owned(),
+        "myapp://launch".to_owned(),
+    ];
+    let bundle = bundle().with_link_domains(["example.com", "*.shop.example"]);
+    let text = run_app(bundle, &["myapp"], &launch, |control| {
+        open(control, "https://EXAMPLE.com/later")
+    });
+    assert_eq!(
+        text,
+        "links: https://example.com/orders/7?ref=mail https://eu.shop.example/cart myapp://launch https://EXAMPLE.com/later done"
+    );
+}
+
+#[test]
 fn links_wait_for_the_listener_sixteen_at_most() {
     let launch: Vec<String> = (0..20).map(|i| format!("myapp://{i}")).collect();
     let text = run(&["myapp"], &launch, "myapp://later");

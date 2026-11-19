@@ -214,6 +214,14 @@ pub(crate) struct AppConfig {
     /// their case ([`AppConfig::url_schemes`]).
     #[serde(default)]
     pub(crate) schemes: Vec<String>,
+    /// Web domains whose `https` links open the app (`"example.com"`,
+    /// `"*.example.com"`: Universal Links on iOS, App Links on Android),
+    /// which packages claim with the system; the app hears them through
+    /// `UrlScheme.on("open", ...)` as it does its schemes' links.
+    /// [`read_config`] checks them and lowers their case
+    /// ([`AppConfig::link_domains`]).
+    #[serde(default)]
+    pub(crate) link_domains: Vec<String>,
     /// The app runs once (`"singleInstance": true`, Windows and Linux): a
     /// second launch hands its arguments and working directory to the
     /// running instance (`Application.on("secondInstance", ...)`) and exits
@@ -332,6 +340,46 @@ impl AppConfig {
     /// warns of them).
     pub(crate) fn url_schemes(&self) -> Vec<String> {
         nsh_core::url_scheme::schemes_from_json(&serde_json::json!(self.schemes))
+    }
+
+    /// The web domains the app claims (`"linkDomains": [...]`), checked, in
+    /// lower case; those it cannot claim are left out ([`read_config`]
+    /// warns of them).
+    pub(crate) fn link_domains(&self) -> Vec<String> {
+        nsh_core::url_scheme::link_domains_from_json(&serde_json::json!(self.link_domains))
+    }
+
+    /// Adds the web domains to a package's `app.json` `info`, where the
+    /// runner reads them (the core then lets their `https` links through).
+    pub(crate) fn add_link_domains_to_app_json(&self, info: &mut serde_json::Value) {
+        let domains = self.link_domains();
+        if !domains.is_empty() {
+            info["linkDomains"] = serde_json::json!(domains);
+        }
+    }
+
+    /// Claims the web domains in iOS `entitlements`: `applinks:<domain>` in
+    /// `com.apple.developer.associated-domains`, after what
+    /// `ios.entitlements` lists there.
+    pub(crate) fn add_link_domains_to_entitlements(&self, entitlements: &mut plist::Dictionary) {
+        const KEY: &str = "com.apple.developer.associated-domains";
+        let domains = self.link_domains();
+        if domains.is_empty() {
+            return;
+        }
+        let mut entries = match entitlements.remove(KEY) {
+            Some(plist::Value::Array(entries)) => entries,
+            // A value of another form is the app's to fix; NSH's
+            // claim replaces it.
+            _ => Vec::new(),
+        };
+        for domain in domains {
+            let entry = plist::Value::String(format!("applinks:{domain}"));
+            if !entries.contains(&entry) {
+                entries.push(entry);
+            }
+        }
+        entitlements.insert(KEY.into(), plist::Value::Array(entries));
     }
 
     /// The file types the app opens (`"fileTypes"`), checked; those it
@@ -756,6 +804,11 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         nsh_core::url_scheme::schemes_from_json_lenient(&serde_json::json!(config.schemes));
     config.schemes = schemes;
     ignored.extend(schemes_ignored);
+    let (domains, domains_ignored) = nsh_core::url_scheme::link_domains_from_json_lenient(
+        &serde_json::json!(config.link_domains),
+    );
+    config.link_domains = domains;
+    ignored.extend(domains_ignored);
     if let Some(types) = &config.file_types {
         let (_, types_ignored) = nsh_core::file_type::parse_file_types(types);
         ignored.extend(types_ignored);
@@ -1115,6 +1168,9 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
             "nsh.json schemes: a web page opens from its address, so the schemes are left out",
         );
     }
+    if options.target == PackageTarget::Web && !config.link_domains().is_empty() {
+        ui::warn("nsh.json linkDomains: a web page is its own link, so the domains are left out");
+    }
     let executable: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
     let executable = if executable.is_empty() {
         "App".to_owned()
@@ -1246,6 +1302,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
             {
                 let mut info = serde_json::json!({ "id": id, "name": name });
                 config.add_file_types_to_app_json(&mut info);
+                config.add_link_domains_to_app_json(&mut info);
                 config.add_data_dir_to_app_json(&mut info);
                 info
             },
@@ -1292,7 +1349,8 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     match options.target {
         PackageTarget::IosSimulator => {
             // The simulator takes the app's entitlements without a profile.
-            let entitlements = config.ios.entitlements(ApplePlatform::Ios)?;
+            let mut entitlements = config.ios.entitlements(ApplePlatform::Ios)?;
+            config.add_link_domains_to_entitlements(&mut entitlements);
             let mut path = None;
             if !entitlements.is_empty() {
                 let file = options.out.join(format!("{executable}.entitlements"));
@@ -1333,7 +1391,9 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
             };
             fs::copy(profile, app.join("embedded.mobileprovision"))
                 .with_context(|| format!("copy {}", profile.display()))?;
-            let requested = config.ios.entitlements(ApplePlatform::Ios)?;
+            let mut requested = config.ios.entitlements(ApplePlatform::Ios)?;
+            // The profile must grant Associated Domains for the domains'.
+            config.add_link_domains_to_entitlements(&mut requested);
             let entitlements = entitlements(profile, &id, requested)?;
             let path = options.out.join(format!("{executable}.entitlements"));
             entitlements.to_file_xml(&path)?;
@@ -1438,7 +1498,11 @@ fn package_android(
     assets.push((
         "nsh/app.json".to_owned(),
         app_json(
-            serde_json::json!({ "id": id }),
+            {
+                let mut info = serde_json::json!({ "id": id });
+                config.add_link_domains_to_app_json(&mut info);
+                info
+            },
             &config.schemes,
             config.window.as_ref(),
         )
@@ -1481,6 +1545,7 @@ fn package_android(
             microphone: config.web_media("microphone"),
             camera: config.web_media("camera"),
             schemes: &config.schemes,
+            link_domains: &config.link_domains(),
             rust: built.rust_root,
             dark: config.appearance.as_deref() == Some("dark"),
             runtime: &runtime,
@@ -1736,6 +1801,7 @@ fn package_macos(
     }
     config.macos.add_to_app_json(&mut info);
     config.add_file_types_to_app_json(&mut info);
+    config.add_link_domains_to_app_json(&mut info);
     config.add_data_dir_to_app_json(&mut info);
     let schemes = config.url_schemes();
     fs::write(
@@ -2981,6 +3047,54 @@ mod tests {
         let config: AppConfig =
             serde_json::from_str(r#"{ "schemes": ["https", "myapp"] }"#).unwrap();
         assert_eq!(config.url_schemes(), ["myapp"]);
+    }
+
+    #[test]
+    fn apps_claim_their_link_domains_in_the_package() {
+        let config: AppConfig = serde_json::from_str(
+            r#"{ "linkDomains": ["Example.com", "*.shop.example", "example.com", "https://x.test"] }"#,
+        )
+        .unwrap();
+        // Checked, lower case, each once.
+        assert_eq!(config.link_domains(), ["example.com", "*.shop.example"]);
+        // iOS claims them after the app's own associated domains...
+        let mut entitlements = plist::Dictionary::new();
+        entitlements.insert(
+            "com.apple.developer.associated-domains".into(),
+            plist::Value::Array(vec![
+                "webcredentials:example.com".into(),
+                "applinks:example.com".into(),
+            ]),
+        );
+        config.add_link_domains_to_entitlements(&mut entitlements);
+        let claimed: Vec<_> = entitlements["com.apple.developer.associated-domains"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(plist::Value::as_string)
+            .collect();
+        assert_eq!(
+            claimed,
+            [
+                "webcredentials:example.com",
+                "applinks:example.com",
+                "applinks:*.shop.example"
+            ]
+        );
+        // ...and the runner lets their links through.
+        let mut info = serde_json::json!({ "id": "com.a" });
+        config.add_link_domains_to_app_json(&mut info);
+        assert_eq!(
+            info,
+            serde_json::json!({ "id": "com.a", "linkDomains": ["example.com", "*.shop.example"] })
+        );
+        // An app that claims none adds nothing.
+        let mut entitlements = plist::Dictionary::new();
+        AppConfig::default().add_link_domains_to_entitlements(&mut entitlements);
+        assert!(entitlements.is_empty());
+        let mut info = serde_json::json!({ "id": "com.a" });
+        AppConfig::default().add_link_domains_to_app_json(&mut info);
+        assert_eq!(info, serde_json::json!({ "id": "com.a" }));
     }
 
     #[test]

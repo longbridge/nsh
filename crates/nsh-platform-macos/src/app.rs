@@ -857,7 +857,9 @@ define_class!(
         }
 
         // An address continued from another device (Handoff,
-        // `AppOptions::handoff`): a link like the others.
+        // `AppOptions::handoff`), or a Universal Link (a web link of a
+        // domain the app claims, which the core checks): a link like the
+        // others.
         #[unsafe(method(application:continueUserActivity:restorationHandler:))]
         fn continue_user_activity(
             &self,
@@ -865,7 +867,9 @@ define_class!(
             activity: &objc2_foundation::NSUserActivity,
             _restoration: &block2::DynBlock<dyn Fn(std::ptr::NonNull<AnyObject>)>,
         ) -> bool {
-            match nsh_platform_apple::handoff::continued_url(activity) {
+            match nsh_platform_apple::handoff::continued_url(activity)
+                .or_else(|| nsh_platform_apple::handoff::web_link(activity))
+            {
                 Some(url) => {
                     url_scheme(url);
                     true
