@@ -778,6 +778,8 @@ impl Mounter {
             | Command::SendInput(_)
             | Command::Load(_)
             | Command::WebViewRequest(_)
+            | Command::Evaluate { .. }
+            | Command::CancelEvaluate { .. }
             | Command::Seek(_)
             | Command::Native { .. } => {
                 if let Some(view) = view {
