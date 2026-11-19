@@ -874,7 +874,9 @@ revealing it requires scrolling, and leaves fully visible controls in place (see
 focus leaves a control for none (Esc out of a field, an editor's included), the next Tab or Shift+Tab continues
 from that control rather than from the ends. A text field narrower than a Cell (an editor's sink at its caret)
 is still a stop, and while it has the focus the terminal's cursor (Bar) is at its origin Cell
-(`Keyboard::cursor`): an `Editor` and a `RichEditor` keep their sink at the caret and draw no caret of their own.
+(`Keyboard::cursor`): an `Editor` and a `RichEditor` keep their sink at the caret and draw no caret of their own,
+and a `Terminal`'s sink at its cursor is the one stop of the terminal (its box only focuses the sink when pressed).
+These sinks are opaque in a terminal: a view at 0.02 opacity would be left out of the geometry and the stops.
 A text's links that are stops (`TextLink::focus_stop`: a `TextView`'s, a nested `<Text onPress>`) are stops
 right after their text, in text order, a link inside another after the one around it (`render.rs` records each
 with its Cells as `Mounter::spans`, `keyboard::Span`): the focused one's characters are reversed, it reports
