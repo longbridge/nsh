@@ -1419,6 +1419,12 @@ impl TextEngine for GpuiTextEngine {
         }
     }
 
+    fn uniform_input_line_height(&self) -> bool {
+        // A plain input has one span. Its line box uses that span's font
+        // extents even when individual glyphs use a fallback font.
+        true
+    }
+
     fn measure(&self, p: &Prepared, max_width: Option<Points>) -> Size<Points> {
         let max = match max_width.map(|m| m.0) {
             Some(m) if !p.text.no_wrap => m.max(0.0),
@@ -3246,6 +3252,36 @@ mod tests {
             .iter()
             .map(|l| String::from_utf16_lossy(&units[l.start as usize..l.end as usize]))
             .collect()
+    }
+
+    #[test]
+    fn single_line_inputs_keep_the_field_samples_height() {
+        let Some(engine) = engine() else { return };
+        for style in [
+            plain(15.0),
+            ResolvedTextStyle {
+                line_height: Points(28.0),
+                ..plain(18.0)
+            },
+        ] {
+            let sample = engine.measure(
+                &engine.prepare(&text(&[("00000000000000000000", style)])),
+                None,
+            );
+            for value in [
+                "\u{200b}",
+                "a long line that does not fit",
+                "第二行🙂",
+                "ab\ncd",
+            ] {
+                let mut field = text(&[(value, style)]);
+                field.max_lines = 1;
+                let value = engine.prepare(&field);
+                for width in [None, Some(Points(5.0)), Some(Points(80.0))] {
+                    assert_eq!(engine.measure(&value, width).height, sample.height);
+                }
+            }
+        }
     }
 
     #[test]

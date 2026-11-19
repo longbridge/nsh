@@ -135,7 +135,10 @@ impl GpuiNative {
 
     /// Finish a simulated edit before sending the next one. Return may move
     /// focus, and a controlled Editor writes its value back after each edit.
-    fn edit_in_focus(&self, edit: impl FnOnce(&Rc<Surface>) + Send + 'static) {
+    fn edit_in_focus(
+        &self,
+        edit: impl FnOnce(&Rc<Surface>) + Send + 'static,
+    ) -> Result<(), String> {
         let (done, handled) = std::sync::mpsc::channel();
         self.press_in_focus(
             move |surface| {
@@ -148,10 +151,16 @@ impl GpuiNative {
                 true
             },
             false,
-        );
-        if let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = handled.recv_timeout(MAIN) {
-            log::warn!("test: timed out waiting for a keyboard edit");
-        }
+        )
+        .ok_or_else(|| "the focused window did not take the keyboard edit".to_owned())?;
+        handled.recv_timeout(MAIN).map_err(|error| match error {
+            std::sync::mpsc::RecvTimeoutError::Timeout => {
+                "timed out waiting for a keyboard edit".to_owned()
+            }
+            std::sync::mpsc::RecvTimeoutError::Disconnected => {
+                "the keyboard edit was not acknowledged".to_owned()
+            }
+        })
     }
 
     /// `f` with the window's view on the main thread, waited for (what it
@@ -367,14 +376,27 @@ impl Native for GpuiNative {
     }
 
     fn type_text(&self, text: &str) {
-        for ch in text.chars() {
-            self.edit_in_focus(move |surface| {
-                crate::text_input::char_input(surface, ch.encode_utf8(&mut [0; 4]));
-            });
+        if let Err(error) = self.try_type_text(text) {
+            log::warn!("test: {error}");
         }
     }
 
+    fn try_type_text(&self, text: &str) -> Result<(), String> {
+        for ch in text.chars() {
+            self.edit_in_focus(move |surface| {
+                crate::text_input::char_input(surface, ch.encode_utf8(&mut [0; 4]));
+            })?;
+        }
+        Ok(())
+    }
+
     fn key(&self, key: Key) {
+        if let Err(error) = self.try_key(key) {
+            log::warn!("test: {error}");
+        }
+    }
+
+    fn try_key(&self, key: Key) -> Result<(), String> {
         let (vk, command) = match key {
             Key::Return => (0x0D, false),
             Key::Backspace => (0x08, false),
@@ -388,7 +410,7 @@ impl Native for GpuiNative {
         };
         self.edit_in_focus(move |surface| {
             synth::press(surface, vk, modifiers);
-        });
+        })
     }
 
     fn mouse(&self) -> bool {

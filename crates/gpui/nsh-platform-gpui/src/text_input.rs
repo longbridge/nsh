@@ -166,6 +166,7 @@ pub(crate) struct InputState {
     /// Scroll offset of the text: horizontal for one line, vertical for
     /// several.
     scroll: Cell<f32>,
+    reveal_on_layout: Cell<bool>,
     /// The scroll of several lines as last reported to a built-in bar
     /// (`InputConfig::replaced`): offset, text height, width, viewport
     /// height. `None` until reported (again).
@@ -203,6 +204,7 @@ impl InputState {
             active: Cell::new(true),
             caret_on: Cell::new(true),
             scroll: Cell::new(0.0),
+            reveal_on_layout: Cell::new(false),
             reported_scroll: Cell::new(None),
             goal_x: Cell::new(None),
             drag: Cell::new(None),
@@ -294,6 +296,9 @@ impl InputState {
             align,
             None,
         ));
+        if self.reveal_on_layout.replace(false) {
+            self.reveal_in(&layout);
+        }
         *self.layout.borrow_mut() = Some(layout.clone());
         Some(layout)
     }
@@ -378,7 +383,12 @@ impl InputState {
 
     /// Scrolls so that the caret shows.
     fn reveal(&self) {
-        let Some(layout) = self.layout() else { return };
+        if let Some(layout) = self.layout() {
+            self.reveal_in(&layout);
+        }
+    }
+
+    fn reveal_in(&self, layout: &Layout) {
         let pos = self.model.borrow().display_caret(self.secure());
         let (x, y, h) = layout.caret(pos);
         let (w, height) = self.size.get();
@@ -400,7 +410,7 @@ impl InputState {
         };
         self.scroll.set(scroll);
         // Clamped to the text.
-        self.origin(&layout);
+        self.origin(layout);
     }
 
     /// Reports how far several lines scrolled, the text's height and the
@@ -1558,7 +1568,13 @@ fn after_edit(surface: &Surface, view: &NshView, input: &InputState, changed: bo
         );
     }
     input.wake_caret();
-    input.reveal();
+    if changed && !input.multiline() {
+        // Shape the new line when a draw, hit test or caret observer needs it.
+        // Several edits can arrive before any of them reads the layout.
+        input.reveal_on_layout.set(true);
+    } else {
+        input.reveal();
+    }
     report_selection(surface, view, input);
     view.changed();
 }
@@ -1640,6 +1656,7 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
         }
         input.placeholder.borrow_mut().take();
         if config.multiline != input.multiline() {
+            input.reveal_on_layout.set(false);
             input.scroll.set(0.0);
         }
     }
