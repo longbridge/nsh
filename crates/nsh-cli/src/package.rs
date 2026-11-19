@@ -1147,7 +1147,11 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         && (has_crates || trimmed_runner(&entry, options.target))
     {
         own_runner = !has_crates;
-        let choices = crate::native_features::choose(built.native_use.as_ref(), &config.features);
+        let choices = crate::native_features::choose(
+            built.native_use.as_ref(),
+            &config.features,
+            crate::rust_app::current().is_some_and(|app| crate::rust_app::may_make_web_view(&app)),
+        );
         for c in &choices {
             let mark = if c.keep { "keep" } else { "leave out" };
             ui::note(format!("{mark} `{}`: {}", c.feature, c.why));
