@@ -441,7 +441,7 @@ impl<C> LayoutTree<C> {
     }
 
     /// Sets `node`'s unrounded layout; a changed one makes it stale.
-    fn set_unrounded(&mut self, node: NodeId, layout: Layout) {
+    pub(crate) fn set_unrounded(&mut self, node: NodeId, layout: Layout) {
         let n = &mut self.nodes[key(node)];
         if n.unrounded != layout {
             n.unrounded = layout;

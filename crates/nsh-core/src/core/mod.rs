@@ -2042,6 +2042,16 @@ impl<M: TextEngine> Core<M> {
         self.components.runtime.set_data_dir(dir);
     }
 
+    /// What Rust code checks for updates with
+    /// ([`crate::runtime::prompt_for_update`]); `None`: the app does not
+    /// update. A JS app's VM gets its own ([`crate::element::System`]).
+    pub fn set_updater(
+        &mut self,
+        updater: Option<std::sync::Arc<dyn crate::runtime::UpdaterHost>>,
+    ) {
+        self.components.runtime.set_updater(updater);
+    }
+
     /// Logs (once) that the app was refused `what`.
     fn deny(&mut self, what: String) {
         if self.denied.len() < 256 && self.denied.insert(what.clone()) {
@@ -5501,6 +5511,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_relation(key, relations::Relation::DescribedBy, target);
                 return Ok(());
             }
+            Prop::ScrollEdgeElement(target) => {
+                self.set_scroll_edge(key, target);
+                return Ok(());
+            }
             // A described view's own description waits for the element
             // describing it to go.
             Prop::Accessibility(AccessibilityProp::Description(description))
@@ -5909,7 +5923,13 @@ impl<M: TextEngine> Core<M> {
             Prop::SelectionColor(color) if node.input.is_none() => {
                 if node.paragraph.selection_color != color {
                     node.paragraph.selection_color = color;
-                    self.mark_text_block(key);
+                    if node.kind == Kind::Text {
+                        self.mark_text_block(key);
+                    } else {
+                        // A view's: the texts and inputs inside take it
+                        // (`inherited_text_props`).
+                        self.mark_inheriting_text(key);
+                    }
                 }
             }
             Prop::AdjustsFontSizeToFit(_) | Prop::MinimumFontScale(_) => {
@@ -6271,6 +6291,7 @@ impl<M: TextEngine> Core<M> {
                         ScreenProp::HeaderLargeTitle(v) => c.large_title = v,
                         ScreenProp::HeaderTransparent(v) => c.header_transparent = v,
                         ScreenProp::HeaderShadowVisible(v) => c.header_shadow_visible = v,
+                        ScreenProp::HeaderTitleAlign(v) => c.title_align = v,
                         ScreenProp::HeaderBackgroundOnScroll(v) => {
                             c.header_background_on_scroll = v
                         }
@@ -8139,12 +8160,17 @@ impl<M: TextEngine> Core<M> {
     /// says, set for its lines' wrapping, its selection and the
     /// selection's highlight: `whitespace-*` and `select-*` inherit, as
     /// CSS's `white-space` and `user-select: auto` do, and `selection:bg-*`
-    /// reaches the texts inside (Tailwind's `& *::selection`). One walk up.
+    /// reaches the texts inside (Tailwind's `& *::selection`), as a view's
+    /// own color does (Rust's `Element::selection_color`, over its
+    /// classes'). One walk up.
     fn inherited_text_props(&self, key: Key) -> (Option<bool>, Option<bool>, Option<Color>) {
         let (mut no_wrap, mut selectable, mut highlight) = (None, None, None);
         let mut k = key;
         while k != NO_KEY && (no_wrap.is_none() || selectable.is_none() || highlight.is_none()) {
             let node = &self.nodes[k as usize];
+            if !matches!(node.kind, Kind::Text | Kind::Input) {
+                highlight = highlight.or(node.paragraph.selection_color);
+            }
             if let Some(c) = node.class_props.as_deref() {
                 no_wrap = no_wrap.or(c.no_wrap);
                 selectable = selectable.or(c.selectable);
@@ -9716,7 +9742,7 @@ impl<M: TextEngine> Core<M> {
         if !self.layout.stale(layout)
             && !node.escapes
             && !node.is_overlay()
-            && node.beside == NO_KEY
+            && !node.decoration
             && !self.nodes.get(node.parent as usize).is_some_and(|p| p.rtl)
             && node.emitted.is_some_and(|(at, r)| {
                 let moved = |a: f32, b: f32, ratio: f32| {
@@ -9769,6 +9795,12 @@ impl<M: TextEngine> Core<M> {
         let beside = self.nodes[key as usize].beside;
         if beside != NO_KEY {
             frame.origin = self.nodes[beside as usize].frame.origin;
+        } else if self.nodes[key as usize].decoration {
+            // A scroll view's bar is laid out on its own, at no location:
+            // `origin` is where it sits in the viewport (its
+            // `scrollbar_inset`, [`Core::layout_scrollbars`]).
+            frame.origin.x.0 += span(0.0, origin.x, ratio.width);
+            frame.origin.y.0 += span(0.0, origin.y, ratio.height);
         }
         if self.nodes[key as usize].follow.is_some() {
             // Its frame along the main axis is the element's it follows,

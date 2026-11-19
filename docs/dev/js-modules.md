@@ -69,7 +69,8 @@ the chunks of a split bundle (`Screen.js`: a name that is no native module, with
   goes to both) send only the current platform's object, each key as a prop of its own (keys removed
   from the object are cleared); the core knows them by those names. Android: `ripple`, `elevation`,
   `accessibilityLiveRegion`, Dialog `statusBarTranslucent`. iOS: `backdropMaterial` (the system material of a
-  backdrop blur), input `inputAccessoryViewID` / `textContentType` / `keyboardAppearance`, Dialog
+  backdrop blur), `scrollEdgeElement` (the scroll view a floating view names, whose edge effect it
+  shapes), input `inputAccessoryViewID` / `textContentType` / `keyboardAppearance`, Dialog
   `supportedOrientations`, WebView `allowsBackForwardNavigationGestures`. macOS: `backdrop` (an
   `NSVisualEffectView` material, blending and state, `MacOsBackdrop` in the core). Desktop:
   `windowDrag`, WebView `allowsBackForwardNavigationGestures` (macOS' and Linux's trackpad swipes, Windows'

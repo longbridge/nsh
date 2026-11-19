@@ -1235,13 +1235,11 @@ extern "system" fn Java_com_longbridge_nsh_Native_load(
     } else {
         env.get_string(&capabilities).ok().map(String::from)
     };
-    // `app.json` next to the bundle (`nsh package`): the app's id.
+    // `app.json` next to the bundle (`nsh package`).
     if !app.is_null()
         && let Ok(app) = env.get_string(&app)
     {
-        let app = serde_json::from_str::<serde_json::Value>(&String::from(app)).ok();
-        let id = app.as_ref().and_then(|app| app.get("id")?.as_str());
-        bundle = bundle.with_app_id(id);
+        bundle = with_app_json(bundle, &String::from(app));
     }
     #[cfg_attr(not(feature = "js"), allow(unused_mut))]
     let mut bundle = match bundle.with_capabilities_json(declared.as_deref()) {
@@ -3000,5 +2998,46 @@ extern "system" fn Java_com_longbridge_nsh_Native_hostCallFree(
     if call != 0 {
         // SAFETY: as in `hostReply`.
         drop(unsafe { Box::from_raw(call as *mut nsh_engine::HostCall) });
+    }
+}
+
+/// A packaged app's `app.json` (`nsh package`): its id and the URL schemes
+/// it claims, read as `Bundle::read` reads them on the other platforms.
+fn with_app_json(bundle: Bundle, json: &str) -> Bundle {
+    let app = serde_json::from_str::<serde_json::Value>(json).ok();
+    let id = app.as_ref().and_then(|app| app.get("id")?.as_str());
+    let bundle = bundle.with_app_id(id);
+    match app.as_ref().and_then(|app| app.get("schemes")) {
+        Some(schemes) => {
+            // A newer NSH's: what this runtime cannot claim is left out.
+            let (schemes, ignored) = nsh_core::url_scheme::schemes_from_json_lenient(schemes);
+            for what in ignored {
+                log::warn!("app.json: {what}, ignored");
+            }
+            bundle.with_url_schemes(schemes)
+        }
+        None => bundle,
+    }
+}
+
+#[cfg(test)]
+mod app_json_tests {
+    use super::*;
+
+    #[test]
+    fn a_packaged_app_claims_its_schemes() {
+        let bundle = with_app_json(
+            Bundle::source(String::new()),
+            r#"{"id":"dev.example.links","schemes":["example.links"]}"#,
+        );
+        assert_eq!(bundle.app_id.as_deref(), Some("dev.example.links"));
+        assert_eq!(bundle.url_schemes, ["example.links"]);
+    }
+
+    #[test]
+    fn an_app_without_schemes_claims_none() {
+        let bundle = with_app_json(Bundle::source(String::new()), r#"{"id":"dev.example"}"#);
+        assert_eq!(bundle.app_id.as_deref(), Some("dev.example"));
+        assert!(bundle.url_schemes.is_empty());
     }
 }

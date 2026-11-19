@@ -1,6 +1,7 @@
 //! `DockArea`: a layout renders as splits of tab groups and docks; a press
 //! on a tab selects it, a drag of a tab moves it (into a group, beside
-//! it, into a tab bar), a split's handle resizes it, and the ref's methods
+//! it, into a tab bar), a split's handle resizes it and shows what
+//! `render_handle` draws, and the ref's methods
 //! close panels, toggle docks and zoom; a bar's tabs that do not fit
 //! scroll and the displayed one comes into view; a locked area moves nothing, and
 //! at compact width the center shows one group with every panel's tab.
@@ -867,4 +868,66 @@ fn tabs_that_do_not_fit_scroll_in_their_bar_and_the_displayed_one_comes_into_vie
         },
     )
     .unwrap();
+}
+
+/// An area of `layout` whose split handles show their place, axis and
+/// state.
+#[derive(Clone, PartialEq, Props)]
+struct GripsProps {
+    layout: DockAreaLayout,
+}
+
+#[component]
+fn Grips(props: GripsProps) -> impl IntoElement {
+    view().w(px(800.0)).h(px(600.0)).child(
+        dock_area()
+            .default_layout(props.layout.clone())
+            .compact(false)
+            .render_tab(|tab: &DockTab| text(format!("Tab {}", tab.panel)))
+            .render_handle(|handle: &nsh_base::ResizeHandleContext| {
+                text(format!(
+                    "Grip {} {:?} {:?}",
+                    handle.index, handle.axis, handle.state
+                ))
+            })
+            .size_full(),
+    )
+}
+
+fn start_grips(layout: DockAreaLayout) -> Headless {
+    let mut config = EngineConfig {
+        viewport: Size::new(px(1000.0), px(900.0)),
+        ..EngineConfig::new(Root::new::<Grips>(move || GripsProps {
+            layout: layout.clone(),
+        }))
+    };
+    config.environment.os = Os::MacOs;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    app.wait_for("Tab a").unwrap();
+    app
+}
+
+#[test]
+fn a_split_s_handles_show_what_render_handle_draws() {
+    // One boundary between the two groups: its handle draws the grip.
+    let mut app = start_grips(two_groups());
+    app.wait_for("Grip 0 Horizontal Idle").unwrap();
+    assert_eq!(app.screen().count("text:Grip 0 Horizontal Idle"), Ok(1));
+    // The band still resizes the split.
+    app.drag("role:adjustable", point(px(100.0), px(0.0)))
+        .unwrap();
+    app.wait_for("Grip 0 Horizontal Idle").unwrap();
+
+    // The docks' handles keep their own indicator: still one grip, the
+    // split's.
+    let mut app = start_grips(with_two_docks());
+    app.wait_for("Grip 0 Horizontal Idle").unwrap();
+    let grips = app
+        .screen()
+        .texts()
+        .into_iter()
+        .filter(|text| text.starts_with("Grip "))
+        .count();
+    assert_eq!(grips, 1, "the docks' edges draw no grip");
 }

@@ -397,6 +397,7 @@ final class InputBox extends FrameLayout implements Node {
             });
         }
         edit.setHighlightColor(hasSelectionColor ? (selectionColor & 0x00ffffff) | 0x55000000 : 0x5533b5e5);
+        tintHandles(hasSelectionColor ? selectionColor : null);
         boolean first = !configured;
         configured = true;
         if (first && autoFocus) post(this::focus);
@@ -405,6 +406,37 @@ final class InputBox extends FrameLayout implements Node {
             InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
             if (imm != null) imm.restartInput(edit);
         }
+    }
+
+    /** The color the selection handles are tinted (null: the theme's). */
+    private Integer handleColor;
+
+    /**
+     * Tints the selection and insertion handles {@code color}, as the
+     * selection's highlight (null: the theme's, as a fresh copy of the
+     * theme's drawables keeps it). Android 10 (API 29) and later.
+     */
+    private void tintHandles(Integer color) {
+        if (Build.VERSION.SDK_INT < 29 || java.util.Objects.equals(handleColor, color)) return;
+        int[] attrs = {
+            android.R.attr.textSelectHandleLeft, android.R.attr.textSelectHandleRight, android.R.attr.textSelectHandle
+        };
+        for (int i = 0; i < attrs.length; i++) {
+            android.content.res.TypedArray a = getContext().obtainStyledAttributes(new int[] {attrs[i]});
+            android.graphics.drawable.Drawable d = a.getDrawable(0);
+            a.recycle();
+            // A handle the theme has no drawable for keeps the EditText's own;
+            // the others still take the color.
+            if (d == null) continue;
+            d = d.mutate();
+            if (color != null) d.setTint(color);
+            if (i == 0) edit.setTextSelectHandleLeft(d);
+            else if (i == 1) edit.setTextSelectHandleRight(d);
+            else edit.setTextSelectHandle(d);
+        }
+        // Recorded only once applied, so the same color asked again is not
+        // skipped as already set.
+        handleColor = color;
     }
 
     /** Return submitted: `onSubmitEditing`, then unfocuses for `blurAndSubmit`. */

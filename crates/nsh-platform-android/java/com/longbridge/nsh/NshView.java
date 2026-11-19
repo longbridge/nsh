@@ -201,6 +201,8 @@ public class NshView extends FrameLayout {
         super(context);
         density = getResources().getDisplayMetrics().density;
         TextLayouts.cacheDir = context.getCacheDir();
+        // Rust code's permission requests ask through the activity in front.
+        Permissions.track(context);
         mounter = new Mounter(this, new Images(this::readAsset));
         root = mounter.root;
         addView(root, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));

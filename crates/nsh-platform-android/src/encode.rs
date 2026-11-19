@@ -19,11 +19,11 @@
 use jni::objects::GlobalRef;
 use nsh_core::{
     AccessibilityCurrent, AccessibilityRole, AudioSession, AutoCapitalize, AutoFill, BorderStyle,
-    Checked, Color, Command, DialogButtonStyle, EditAction, InputConfig, KeyCapture,
-    KeyboardDismissMode, KeyboardTaps, KeyboardType, LayoutCurve, LayoutProperty, LayoutTransition,
-    LiveRegion, ModalAnimation, ModalPresentation, MountBatch, MountItem, NativeProps,
-    PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenConfig, SnapAlignment,
-    StatusBarStyle, SubmitBehavior, ViewKind, ViewProps, ViewStyle, WebSource,
+    Checked, Color, Command, DialogButtonStyle, EditAction, HeaderTitleAlign, InputConfig,
+    KeyCapture, KeyboardDismissMode, KeyboardTaps, KeyboardType, LayoutCurve, LayoutProperty,
+    LayoutTransition, LiveRegion, ModalAnimation, ModalPresentation, MountBatch, MountItem,
+    NativeProps, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenConfig,
+    SnapAlignment, StatusBarStyle, SubmitBehavior, ViewKind, ViewProps, ViewStyle, WebSource,
     audio::AudioCommand,
     geometry::{DefiniteLength, REM_SIZE},
 };
@@ -618,6 +618,9 @@ pub(crate) fn encode(batch: MountBatch, web_generation: u64) -> Encoded {
                         e.bool(c.animated);
                     }
                     Command::Dialog(d) => {
+                        // Unbox first: moving `buttons` and then `input` out of
+                        // a `Box` is not a disjoint move.
+                        let d = *d;
                         e.int(12);
                         e.int(d.id as i32);
                         e.opt_string(d.title.as_deref());
@@ -1446,6 +1449,10 @@ fn screen_config(e: &mut Encoded, c: &ScreenConfig) {
     }
     e.float(c.header_height.0);
     e.opt_string(c.back_title.as_deref());
+    e.int(match c.title_align {
+        HeaderTitleAlign::Left => 0,
+        HeaderTitleAlign::Center => 1,
+    });
 }
 
 fn view_props(e: &mut Encoded, p: &ViewProps) {

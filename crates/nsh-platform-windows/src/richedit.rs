@@ -35,8 +35,8 @@ use std::{
 use windows::{
     Win32::{
         Foundation::{
-            COLORREF, E_NOINTERFACE, E_NOTIMPL, E_POINTER, HWND, LPARAM, LRESULT, POINT, RECT,
-            RECTL, S_FALSE, S_OK, SIZE, WPARAM,
+            COLORREF, E_NOINTERFACE, E_NOTIMPL, E_POINTER, HWND, LPARAM, LRESULT, POINT, POINTL,
+            RECT, RECTL, S_FALSE, S_OK, SIZE, WPARAM,
         },
         Graphics::Gdi::{
             ClientToScreen, GetDC, GetDeviceCaps, GetSysColor, HBITMAP, HDC, HPALETTE, HRGN,
@@ -45,8 +45,9 @@ use windows::{
         System::LibraryLoader::{GetProcAddress, LoadLibraryW},
         UI::{
             Controls::RichEdit::{
-                CHARFORMAT2W, CHARFORMATW, CHARRANGE, EM_EXGETSEL, ITextServices2, PARAFORMAT,
-                PARAFORMAT2, TXTBACK_TRANSPARENT, TXTBACKSTYLE, TXTVIEW_ACTIVE,
+                CHARFORMAT2W, CHARFORMATW, CHARRANGE, EM_EXGETSEL, EM_GETSCROLLPOS,
+                EM_SETSCROLLPOS, ITextServices2, PARAFORMAT, PARAFORMAT2, TXTBACK_TRANSPARENT,
+                TXTBACKSTYLE, TXTVIEW_ACTIVE,
             },
             Input::Ime::{HIMC, ImmGetContext, ImmReleaseContext},
             WindowsAndMessaging::{HCURSOR, KillTimer, SetTimer, WM_GETTEXTLENGTH, WM_TIMER},
@@ -395,6 +396,31 @@ impl Editor {
                 .TxGetVScroll(&mut min, &mut max, &mut pos, &mut page, &mut enabled)
         };
         (min, max, pos, page)
+    }
+
+    /// The top left of the character at `at` (UTF-16; the text's length:
+    /// its end), in client pixels.
+    pub(crate) fn position(&self, at: u32) -> POINT {
+        let mut p = POINTL::default();
+        self.send(
+            windows::Win32::UI::Controls::EM_POSFROMCHAR,
+            &mut p as *mut _ as usize,
+            at as isize,
+        );
+        POINT { x: p.x, y: p.y }
+    }
+
+    /// Scrolls the text sideways so the character at `at` is at the client
+    /// rectangle's left edge, as near as the text lets it.
+    pub(crate) fn scroll_to_left_edge(&self, at: u32) {
+        let dx = self.position(at).x - self.props().client.left;
+        if dx == 0 {
+            return;
+        }
+        let mut scroll = POINT::default();
+        self.send(EM_GETSCROLLPOS, 0, &mut scroll as *mut _ as isize);
+        scroll.x = (scroll.x + dx).max(0);
+        self.send(EM_SETSCROLLPOS, 0, &mut scroll as *mut _ as isize);
     }
 
     /// The height of the text laid out `width` pixels wide (pixels).
