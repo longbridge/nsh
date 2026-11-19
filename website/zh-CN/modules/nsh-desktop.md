@@ -6,7 +6,7 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` 包含只有桌面才有的东西：应用的窗口和它们的标题栏、显示器、应用菜单和右键菜单、托盘和全局快捷键。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：应用自己的窗口（`window()`）、组件所在的窗口（`current_window()`，一个 `WindowRef`）、显示器（`displays`）、`quit`、`restart`、登录时打开（`launch_at_login`、`set_launch_at_login`）、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成）、托盘（`set_tray`）和全局快捷键（`register_global_shortcut`），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。声明了能力的应用需要 `"application": true` 才能使用应用菜单、托盘、全局快捷键、`quit` 和退出请求、`restart`、退出策略和登录时打开（[能力](../docs/sandbox-and-capabilities.md#application)），否则它们什么也不做。右键菜单和应用打开的窗口（由 `windows` 授权）不需要 `application`。
+`nsh/desktop` 包含只有桌面才有的东西：应用的窗口和它们的标题栏、显示器、应用菜单和右键菜单、托盘和全局快捷键。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：应用自己的窗口（`window()`）、组件所在的窗口（`current_window()`，一个 `WindowRef`）、显示器（`displays`）、`quit`、`restart`、登录时打开（`launch_at_login`、`set_launch_at_login`）、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成）、托盘（`set_tray`）和全局快捷键（`register_global_shortcut`），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。声明了能力的应用需要 `"application": true` 才能使用应用菜单、托盘、全局快捷键、`quit` 和退出请求、`restart`、退出模式和登录时打开（[能力](../docs/sandbox-and-capabilities.md#application)），否则它们什么也不做。右键菜单和应用打开的窗口（由 `windows` 授权）不需要 `application`。
 
 ```rust tabs
 use nsh_core::{
@@ -54,7 +54,7 @@ const isAvailable: boolean;
 - [`currentWindow()`](#currentwindow) 是调用它的组件所在的窗口；`windows()`、`focusedWindow()` 和 `Window.get(id)` 找到其他窗口。
 - 只有应用会改的东西（标题、标题栏、层级、外观、关闭策略）是窗口的[属性](#属性)：`<Window>` 的 props 和 `set()`。用户也会改的东西（外框、模式、是否打开）从 `default…` 选项开始，通过请求（`setMode`、`setBounds`、`close`……）改变，结果通过 [`state()`](#窗口状态与显示器) 和[事件](#事件)报告回来。
 - 请求没有返回值：平台可能调整或拒绝一个请求（窗口管理器自己放置窗口、显示器被拔掉了），`state()` 报告实际发生了什么。
-- 关闭窗口只销毁这个窗口，并释放它的 signal 和 effect；应用按退出策略继续运行。
+- 关闭窗口只销毁这个窗口，并释放它的 signal 和 effect；应用按退出模式继续运行。
 
 应用宿主（app host）是不可见的。nsh.json 的 [`window`](#应用宿主与第一个窗口) 为应用声明的第一个窗口提供启动默认值，但不会创建窗口。
 
@@ -277,7 +277,7 @@ Rust 列给出 `WindowRef` 的方法。
 | `set(attributes)` | `set(WindowAttributes)` | 修改给出的[属性](#属性)；其他保持原值。应用的权限不允许的属性保持不变，并给出警告。 |
 | `show()`、`hide()` | `show()`、`hide()` | 显示它（最小化时还原），或隐藏它。macOS 上全屏窗口会先退出全屏再隐藏（与 macOS 应用的窗口一致），再次显示时是普通窗口。 |
 | `focus()` | `focus()` | 显示它，提到所在层级的最前并给它键盘焦点；应用随之激活。窗口保持原有层级。 |
-| `close()` | `close()` | 关闭它，不论 `closeOnPress` 如何，销毁它的树并释放 owner（`<Window>`：`reason` 为 `"close"` 的 `onOpenChange`）。其他窗口不受影响；只有最后一个窗口关闭时，应用才按[退出策略](#退出)退出。 |
+| `close()` | `close()` | 关闭它，不论 `closeOnPress` 如何，销毁它的树并释放 owner（`<Window>`：`reason` 为 `"close"` 的 `onOpenChange`）。其他窗口不受影响；只有最后一个窗口关闭时，应用才按[退出模式](#退出)退出。 |
 | `minimize()`、`restore()` | `minimize()`、`restore()` | 最小化它，或按原来的模式还原：最大化的窗口最小化后还原时仍是最大化。 |
 | `setMode(mode)` | `set_mode(mode)` | 让它进入 `"normal"`、`"maximized"` 或 `"fullScreen"`；请求它当前的模式不会有变化。隐藏的窗口保持隐藏：它的 `state()` 读出这个模式，显示时进入该模式。 |
 | `setBounds({ origin?, size?, animated? })` | `set_bounds(WindowFrame { .. })` | 移动它并调整大小，单位为点；省略的字段保持原值。`origin`（`x`、`y`）是它的左上角，从主显示器的左上角量起，`y` 向下增长；只给 `height` 而不给 `y` 时顶边保持不动。macOS 和 Windows 上的 `size` 包含窗口装饰；Linux 上设置 GTK 的默认窗口尺寸。`animated: true` 启用 macOS 的窗口调整动画。宽度和高度接受正有限数值，`x` 和 `y` 接受有限数值；其他值保留字段原值。 |
@@ -325,7 +325,7 @@ function Editor() {
 
 ### 应用宿主与第一个窗口
 
-应用宿主是不可见的：它持有事件循环、Storage、`Application`、应用菜单、窗口注册表和退出策略，并且在所有窗口关闭后继续存在。它不是 `WindowRef`，`currentWindow()` 也不会返回它。
+应用宿主是不可见的：它持有事件循环、Storage、`Application`、应用菜单、窗口注册表和退出模式，并且在所有窗口关闭后继续存在。它不是 `WindowRef`，`currentWindow()` 也不会返回它。
 
 nsh.json 的 `window` 保存应用声明的第一个窗口的启动默认值，在第一帧之前应用：
 
@@ -383,7 +383,7 @@ const Application: {
   on(event: "quitRequest", listener: () => void): () => void;
   on(event: "reopen", listener: () => void): () => void;
   on(event: "lastWindowClosed", listener: () => void): () => void;
-  setQuitPolicy(options: { quitOnLastWindowClosed?: "platform" | boolean }): void;
+  setQuitMode(quitMode: "platform" | "lastWindowClosed" | "explicit"): void;
 };
 ```
 
@@ -398,10 +398,10 @@ const Application: {
 | `on("quit", listener)` | `on_app_quit(f)` | 应用正在退出：运行它的清理（[退出](#退出)）。 |
 | `on("quitRequest", listener)` | `on_quit_request(f)` | 用户要求退出；监听期间由应用决定何时退出（[退出](#退出)）。 |
 | `on("reopen", listener)` | `on_reopen(f)` | 系统要求应用显示自己：macOS 的 Dock/访达重新打开，或 Windows/Linux 上的再次启动。应用自己打开或聚焦想要的窗口；不会隐式显示任何窗口。 |
-| `on("lastWindowClosed", listener)` | `on_last_window_closed(f)` | 应用最后一个窗口关闭，在它自己的关闭流程之后。Rust listener 同步运行、在策略生效之前；JS listener 异步投递、在决定之后运行。要在没有窗口时继续运行的应用，在启动时设置 `quitOnLastWindowClosed: false`。 |
-| `setQuitPolicy({ quitOnLastWindowClosed })` | —（宿主侧 `Core::set_quit_on_last_window_closed`） | 最后一个窗口关闭时是否退出：`"platform"`（macOS 留下；Windows 和 Linux 退出）、`true` 或 `false`（[退出](#退出)）。没有公开的 Rust 应用 API；Rust 宿主在 core 上设置它。 |
+| `on("lastWindowClosed", listener)` | `on_last_window_closed(f)` | 应用最后一个窗口关闭，在它自己的关闭流程之后。Rust listener 同步运行、在模式生效之前；JS listener 异步投递、在决定之后运行。要在没有窗口时继续运行的应用，在启动时设置 `quitMode: "explicit"`。 |
+| `setQuitMode(quitMode)` | `set_quit_mode(QuitMode)` | 最后一个窗口关闭时何时退出：`"platform"`（macOS 留下；Windows 和 Linux 退出）、`"lastWindowClosed"`（所有平台都退出）、`"explicit"`（由应用决定）（[退出](#退出)）。 |
 
-`Application.quit()` 用于应用自己的「退出」（自定义文字的菜单项、按钮），以及更新后重新启动。它结束应用，而不是逐个关闭窗口：窗口的 `onOpenChange` 可能不会运行。应用像最后一个窗口关闭时那样停止，然后结束运行；只关窗口会让应用继续运行时（`quitOnLastWindowClosed: false` 且没有打开的窗口）也一样。关闭的过程与「退出」菜单项相同：macOS 上的独立应用像按下 Cmd+Q 一样从 `run_app` 返回；在拥有窗口的 GPUI 应用中，请求以 `CloseRequest::Quit` 交给它的 `AppView::on_close_request` 回调，由应用在准备好后退出；其他平台上退出照常进行，与「退出」菜单项相同。嵌入在其他应用中的视图把应用的生命周期交给那个应用。在终端中应用结束，与退出角色相同。
+`Application.quit()` 用于应用自己的「退出」（自定义文字的菜单项、按钮），以及更新后重新启动。它结束应用，而不是逐个关闭窗口：窗口的 `onOpenChange` 可能不会运行。应用像最后一个窗口关闭时那样停止，然后结束运行；只关窗口会让应用继续运行时（`quitMode: "explicit"` 且没有打开的窗口）也一样。关闭的过程与「退出」菜单项相同：macOS 上的独立应用像按下 Cmd+Q 一样从 `run_app` 返回；在拥有窗口的 GPUI 应用中，请求以 `CloseRequest::Quit` 交给它的 `AppView::on_close_request` 回调，由应用在准备好后退出；其他平台上退出照常进行，与「退出」菜单项相同。嵌入在其他应用中的视图把应用的生命周期交给那个应用。在终端中应用结束，与退出角色相同。
 
 `Application.restart()` 用于下次启动才生效的设置，比如应用的语言：应用先征得用户同意，再调用它。应用像 `quit()` 一样退出，
 进程结束后，同一个程序以原来的启动参数重新启动；新旧两个进程不会同时运行。在 macOS 上，`.app` 包里的应用通过
@@ -420,12 +420,12 @@ async function changeLanguage(language: string) {
 
 ### 退出
 
-应用的生命周期由应用自己负责。关闭窗口只关闭那个窗口；最后一个窗口关闭时按退出策略处理：
-`"platform"`（默认）让 macOS 应用留在 Dock 中，在 Windows 和 Linux 上退出；`true` 总是退出；`false` 让应用继续运行，
-以便打开另一个窗口、显示托盘菜单或调用 `quit()`。应用用
-`Application.setQuitPolicy({ quitOnLastWindowClosed: "platform" })` 设置它；nsh.json 的
-`application.quitOnLastWindowClosed` 保存启动时的同一个值。`Application.on("lastWindowClosed")` 在最后一个窗口
-关闭后收到通知。Rust listener 在退出策略生效前同步运行；JS listener 在后续提交中、决定之后运行。
+应用的生命周期由应用自己负责。关闭窗口只关闭那个窗口；最后一个窗口关闭时按退出模式处理：
+`"platform"`（默认）让 macOS 应用留在 Dock 中，在 Windows 和 Linux 上退出；`"lastWindowClosed"` 在所有平台上退出；
+`"explicit"` 让应用继续运行，以便打开另一个窗口、显示托盘菜单或调用 `quit()`。应用用
+`Application.setQuitMode("platform")`（Rust：`set_quit_mode(QuitMode::Platform)`）设置它；nsh.json 的
+`application.quitMode` 保存启动时的同一个模式。`Application.on("lastWindowClosed")` 在最后一个窗口
+关闭后收到通知。Rust listener 在退出模式生效前同步运行；JS listener 在后续提交中、决定之后运行。
 
 macOS 的 Dock/访达重新打开，或 Windows/Linux 上的再次启动，会交给 `Application.on("reopen")`（Rust：
 `on_reopen`）：应用自己打开或聚焦想要的窗口。NSH 不会自己显示窗口。

@@ -27998,7 +27998,7 @@ mod rust_windows {
     }
 
     #[test]
-    fn closing_the_last_window_quits_under_the_policy() {
+    fn closing_the_last_window_quits_under_the_quit_mode() {
         use crate::element::desktop::open_window;
         let mut c = core();
         c.set_environment(crate::element::Environment {
@@ -28007,7 +28007,9 @@ mod rust_windows {
         });
         c.apply(Op::Command {
             id: crate::ROOT_ID,
-            command: Command::Desktop(Box::new(DesktopCommand::SetQuitOnLastWindowClosed(true))),
+            command: Command::Desktop(Box::new(DesktopCommand::SetQuitMode(
+                crate::desktop::QuitMode::LastWindowClosed,
+            ))),
         })
         .unwrap();
         c.mount_root(&Root::of::<Empty>());
@@ -28035,7 +28037,43 @@ mod rust_windows {
         let batch = c.commit().unwrap();
         assert!(
             app_commands(&batch).contains(&DesktopCommand::Quit),
-            "the last window went under the policy: the app quits"
+            "the last window went under the mode: the app quits"
+        );
+    }
+
+    /// Rust sets the mode as TSX does (`set_quit_mode`), and the last
+    /// window's close follows it.
+    #[test]
+    fn a_rust_app_sets_the_quit_mode_of_its_last_window() {
+        use crate::element::desktop::open_window;
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: crate::platform::Os::Linux,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Empty>());
+        let _ = c.commit().unwrap();
+        let _root = {
+            let _entered = c.components.runtime.enter();
+            crate::element::create_root(move || {
+                crate::element::desktop::set_quit_mode(crate::desktop::QuitMode::Explicit);
+            })
+        };
+        // The command reaches the core with this commit, which sends nothing.
+        let _ = c.commit();
+        let only = {
+            let _entered = c.components.runtime.enter();
+            open_window(window().id("only").content(view)).unwrap()
+        };
+        let _ = c.commit().unwrap();
+        {
+            let _entered = c.components.runtime.enter();
+            only.close();
+        }
+        let batch = c.commit().unwrap();
+        assert!(
+            !app_commands(&batch).contains(&DesktopCommand::Quit),
+            "explicit: the app keeps running with no windows"
         );
     }
 
@@ -28068,7 +28106,7 @@ mod rust_windows {
             let _entered = c.components.runtime.enter();
             only.close();
         }
-        // The policy is off (the core's default): the app stays and the
+        // The mode is explicit (the core's default): the app stays and the
         // listener's window opens in the commit after it.
         let batch = c.commit();
         assert!(

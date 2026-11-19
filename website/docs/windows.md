@@ -190,7 +190,7 @@ An app declares its windows with [`<Window>` and `Window.open`](../modules/nsh-d
 top-level window drawn by the app's engine and running in its one JS runtime, so it shares the app's signals and
 modules directly. A normal window has its own taskbar button; dialogs, panels and popups with a parent are owned by
 that window. The app host is an invisible message-only dispatcher with a hidden surface: closing any user window
-closes only that window, and closing the last one quits only when the app's quit policy says so (the Windows default).
+closes only that window, and closing the last one quits only when the app's quit mode says so (the Windows default).
 
 ### Keyboard
 

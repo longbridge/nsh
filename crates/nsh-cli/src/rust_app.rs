@@ -4207,7 +4207,7 @@ mod tests {
                 window: Some(
                     r#"{"defaultSize":{"width":900,"height":600},"title":"Notes"}"#.into(),
                 ),
-                application: Some(r#"{"quitOnLastWindowClosed":"platform"}"#.into()),
+                application: Some(r#"{"quitMode":"platform"}"#.into()),
                 capabilities: None,
                 translations: None,
             },

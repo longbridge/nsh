@@ -555,7 +555,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::Quit => crate::app::quit_app(),
         // Answered by the core (the engine sets the policy before the app
         // runs); no platform applies it directly.
-        DesktopCommand::SetQuitOnLastWindowClosed(_) => {}
+        DesktopCommand::SetQuitMode(_) => {}
         DesktopCommand::SetQuitOnRequest(quit) => {
             surface.chrome.asks_quit.set(!quit);
             if *quit {

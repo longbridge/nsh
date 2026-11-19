@@ -754,7 +754,7 @@ impl Root {
     }
 
     /// The app's lifecycle options (`nsh.json` `"application"`, which nsh's
-    /// generated code sets): the engine sets the quit policy before the app
+    /// generated code sets): the engine sets the quit mode before the app
     /// runs, as for a TSX app's bundle.
     pub fn application(mut self, options: crate::desktop::ApplicationOptions) -> Self {
         self.application = Some(options);

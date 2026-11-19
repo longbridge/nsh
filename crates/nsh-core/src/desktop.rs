@@ -35,22 +35,24 @@ pub use window::{
 };
 pub use window_state::{Display, DisplayId, WindowPlacement, WindowState, notch};
 
+pub use crate::element::desktop::set_quit_mode;
+
 /// When closing the app's last window quits it: nsh.json's
-/// `application.quitOnLastWindowClosed`, and the runtime's
-/// `Application.setQuitPolicy` once the app runs.
+/// `application.quitMode`, the runtime's `Application.setQuitMode` and
+/// Rust's [`set_quit_mode`] once the app runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
-pub enum QuitOnLastWindowClosed {
+pub enum QuitMode {
     /// As the platform does: macOS stays, Windows and Linux quit.
     #[default]
     Platform,
-    /// Every platform quits.
-    Always,
-    /// Never: the app decides.
-    Never,
+    /// Every platform quits when the last window closes.
+    LastWindowClosed,
+    /// Never on its own: the app decides.
+    Explicit,
 }
 
-impl QuitOnLastWindowClosed {
+impl QuitMode {
     /// Whether closing the last window quits on `os`.
     pub fn quits(self, os: crate::platform::Os) -> bool {
         match self {
@@ -58,19 +60,18 @@ impl QuitOnLastWindowClosed {
                 os,
                 crate::platform::Os::Windows | crate::platform::Os::Linux
             ),
-            Self::Always => true,
-            Self::Never => false,
+            Self::LastWindowClosed => true,
+            Self::Explicit => false,
         }
     }
 
-    /// Reads the option: `"platform"`, `true` or `false`.
+    /// Reads the option: `"platform"`, `"lastWindowClosed"` or `"explicit"`.
     pub fn from_json(value: &serde_json::Value) -> Result<Self, String> {
-        if let Some(quit) = value.as_bool() {
-            return Ok(if quit { Self::Always } else { Self::Never });
-        }
         match value.as_str() {
             Some("platform") => Ok(Self::Platform),
-            _ => Err("expected \"platform\", true or false".to_owned()),
+            Some("lastWindowClosed") => Ok(Self::LastWindowClosed),
+            Some("explicit") => Ok(Self::Explicit),
+            _ => Err("expected \"platform\", \"lastWindowClosed\" or \"explicit\"".to_owned()),
         }
     }
 }
@@ -80,7 +81,7 @@ impl QuitOnLastWindowClosed {
 #[non_exhaustive]
 pub struct ApplicationOptions {
     /// When closing the last window quits.
-    pub quit_on_last_window_closed: QuitOnLastWindowClosed,
+    pub quit_mode: QuitMode,
 }
 
 impl ApplicationOptions {
@@ -92,10 +93,9 @@ impl ApplicationOptions {
         let mut options = Self::default();
         for (key, value) in object {
             match key.as_str() {
-                "quitOnLastWindowClosed" => {
-                    options.quit_on_last_window_closed =
-                        QuitOnLastWindowClosed::from_json(value)
-                            .map_err(|e| format!("quitOnLastWindowClosed: {e}"))?;
+                "quitMode" => {
+                    options.quit_mode =
+                        QuitMode::from_json(value).map_err(|e| format!("quitMode: {e}"))?;
                 }
                 other => return Err(format!("unknown key `{other}`")),
             }
@@ -1142,11 +1142,12 @@ pub enum DesktopCommand {
     /// ([`crate::restart`]). A view embedded in another app leaves the
     /// app's lifecycle to that app: nothing happens there.
     Restart,
-    /// Whether the app quits when its last window closes (the policy
-    /// `Application.setQuitPolicy` sets; the desktops default to it on
+    /// When the app quits if its last window closes (the mode
+    /// `Application.setQuitMode` sets; `"platform"` defaults to it on
     /// Windows and Linux, not macOS). The core sends
-    /// [`DesktopCommand::Quit`] on the root when the last window goes.
-    SetQuitOnLastWindowClosed(bool),
+    /// [`DesktopCommand::Quit`] on the root when the last window goes and
+    /// the mode quits there.
+    SetQuitMode(QuitMode),
     /// Whether the user's quit requests quit the app: its Quit item and
     /// the platform's quit key (Command-Q, Ctrl+Q). `false` while the app
     /// listens to them ([`crate::element::desktop::on_quit_request`]): the
@@ -1213,7 +1214,7 @@ impl DesktopCommand {
     }
 
     /// Whether the core carries the command out itself (the windows it
-    /// keeps records of, the app-wide quit policy) instead of handing it
+    /// keeps records of, the app-wide quit mode) instead of handing it
     /// to the platform.
     pub(crate) fn is_core_handled(&self) -> bool {
         matches!(
@@ -1221,7 +1222,7 @@ impl DesktopCommand {
             DesktopCommand::OpenWindow(_)
                 | DesktopCommand::SetAttributes(_)
                 | DesktopCommand::Request(WindowRequest::SetPlacement(_))
-                | DesktopCommand::SetQuitOnLastWindowClosed(_)
+                | DesktopCommand::SetQuitMode(_)
         )
     }
 }
@@ -1303,38 +1304,35 @@ pub(crate) fn title_bar_height(height: Option<Points>) -> Option<Points> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn the_application_block_reads_the_last_window_policy() {
+    fn the_application_block_reads_the_quit_mode() {
         let read = |json: &str| {
             ApplicationOptions::from_json(&serde_json::from_str::<crate::JsonValue>(json).unwrap())
         };
         assert_eq!(
-            read(r#"{"quitOnLastWindowClosed":"platform"}"#)
-                .unwrap()
-                .quit_on_last_window_closed,
-            QuitOnLastWindowClosed::Platform
+            read(r#"{"quitMode":"platform"}"#).unwrap().quit_mode,
+            QuitMode::Platform
         );
         assert_eq!(
-            read(r#"{"quitOnLastWindowClosed":true}"#)
+            read(r#"{"quitMode":"lastWindowClosed"}"#)
                 .unwrap()
-                .quit_on_last_window_closed,
-            QuitOnLastWindowClosed::Always
+                .quit_mode,
+            QuitMode::LastWindowClosed
         );
         assert_eq!(
-            read(r#"{"quitOnLastWindowClosed":false}"#)
-                .unwrap()
-                .quit_on_last_window_closed,
-            QuitOnLastWindowClosed::Never
+            read(r#"{"quitMode":"explicit"}"#).unwrap().quit_mode,
+            QuitMode::Explicit
         );
-        assert!(read(r#"{"quitOnLastWindowClosed":"sometimes"}"#).is_err());
-        assert!(read(r#"{"quitOnLastWindowClose":true}"#).is_err());
+        assert!(read(r#"{"quitMode":"sometimes"}"#).is_err());
+        assert!(read(r#"{"quitMode":true}"#).is_err());
+        assert!(read(r#"{"quitOnLastWindowClosed":"platform"}"#).is_err());
         assert!(read("[]").is_err());
 
         use crate::platform::Os;
-        assert!(QuitOnLastWindowClosed::Platform.quits(Os::Windows));
-        assert!(QuitOnLastWindowClosed::Platform.quits(Os::Linux));
-        assert!(!QuitOnLastWindowClosed::Platform.quits(Os::MacOs));
-        assert!(QuitOnLastWindowClosed::Always.quits(Os::MacOs));
-        assert!(!QuitOnLastWindowClosed::Never.quits(Os::Windows));
+        assert!(QuitMode::Platform.quits(Os::Windows));
+        assert!(QuitMode::Platform.quits(Os::Linux));
+        assert!(!QuitMode::Platform.quits(Os::MacOs));
+        assert!(QuitMode::LastWindowClosed.quits(Os::MacOs));
+        assert!(!QuitMode::Explicit.quits(Os::Windows));
     }
 
     #[test]

@@ -999,6 +999,20 @@ pub fn quit() {
     super::desktop_command(DesktopCommand::Quit);
 }
 
+/// Sets when closing the app's last window quits it (TS:
+/// `Application.setQuitMode`; nsh.json's `application.quitMode`):
+/// [`desktop::QuitMode::Platform`] (the default) follows the platform
+/// (macOS stays in the Dock; Windows and Linux quit),
+/// [`desktop::QuitMode::LastWindowClosed`] quits on every platform, and
+/// [`desktop::QuitMode::Explicit`] leaves the app running so it can open
+/// another window, show a tray menu or call [`quit`]. The app root stays
+/// alive while no window is open. A view embedded in another app leaves
+/// the app's lifecycle to that app; on platforms without desktop windows
+/// this has no effect.
+pub fn set_quit_mode(mode: desktop::QuitMode) {
+    super::desktop_command(DesktopCommand::SetQuitMode(mode));
+}
+
 /// Sets which additional requests go to [`on_quit_request`] on standalone
 /// macOS apps (TS: `Application.setQuitRequestOptions`). Both options
 /// default to false; each call replaces them. Without a listener the app
@@ -1101,9 +1115,9 @@ pub fn on_reopen(f: impl Fn() + 'static) {
 
 /// Runs `f` when the app's last window closes (TS:
 /// `Application.on("lastWindowClosed", …)`), after the window's own close
-/// path. The quit policy is decided at that close; a JS listener runs in a
+/// path. The quit mode is decided at that close; a JS listener runs in a
 /// later commit, after the decision, so an app that stays alive with no
-/// windows sets `quitOnLastWindowClosed: false` before the last close.
+/// windows sets `quitMode: "explicit"` before the last close.
 /// Removed with the current owner.
 pub fn on_last_window_closed(f: impl Fn() + 'static) {
     let owner = Owner::current();

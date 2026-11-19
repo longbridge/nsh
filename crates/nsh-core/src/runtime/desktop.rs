@@ -10,7 +10,7 @@ use std::{
 
 use crate::{
     Command, ROOT_ID,
-    desktop::{DesktopCommand, LaunchAtLoginError, QuitOnLastWindowClosed, QuitRequestOptions},
+    desktop::{DesktopCommand, LaunchAtLoginError, QuitMode, QuitRequestOptions},
     element::{
         CallCx, Callback, JsError, JsHost, JsIn, JsObject, JsOwned, JsValue, Local, ModuleCx,
         PropEnum, PropError, Ret, Settles, Stop, System, TsTypes, codes, io_code, module,
@@ -62,17 +62,14 @@ impl Application {
         desktop(cx, DesktopCommand::Quit);
     }
 
-    /// Sets whether closing the app's last window quits it:
-    /// `"platform"` (the default) follows the platform (macOS stays in the
-    /// Dock; Windows and Linux quit), `true` always quits, `false` leaves
-    /// the app running so it can open another window, show a tray menu or
-    /// call `quit()`. The app root stays alive while no window is open.
-    pub(crate) fn set_quit_policy(options: QuitPolicyOptions, sys: System, cx: &mut ModuleCx) {
-        let policy = options
-            .quit_on_last_window_closed
-            .unwrap_or(QuitOnLastWindowClosed::Platform);
-        let quit = policy.quits(sys.os);
-        desktop(cx, DesktopCommand::SetQuitOnLastWindowClosed(quit));
+    /// Sets when closing the app's last window quits it: `"platform"` (the
+    /// default) follows the platform (macOS stays in the Dock; Windows and
+    /// Linux quit), `"lastWindowClosed"` quits on every platform, and
+    /// `"explicit"` leaves the app running so it can open another window,
+    /// show a tray menu or call `quit()`. The app root stays alive while no
+    /// window is open.
+    pub(crate) fn set_quit_mode(quit_mode: QuitMode, cx: &mut ModuleCx) {
+        desktop(cx, DesktopCommand::SetQuitMode(quit_mode));
     }
 
     /// Sets the additional sources of `quitRequest` on standalone macOS
@@ -177,10 +174,10 @@ impl Application {
     /// `reopen`: the OS asked the app to show itself (a macOS Dock or Finder
     /// reopen, or a later launch on Windows or Linux); the app opens or
     /// focuses the window it wants. `lastWindowClosed`: the app's last
-    /// window closed, after its own close path. The quit policy is decided
+    /// window closed, after its own close path. The quit mode is decided
     /// at that close; a JS listener runs in a later commit, after the
     /// decision, so an app that stays alive with no windows sets
-    /// `quitOnLastWindowClosed: false` before the last close. (A Rust
+    /// `quitMode: "explicit"` before the last close. (A Rust
     /// listener runs synchronously, before the decision.) Only a `quit`
     /// listener's returned promise is awaited; the other events run their
     /// listeners as void, so listening for them is not a way to delay the
@@ -453,35 +450,27 @@ async fn subscribe(requests: Weak<QuitRequests>) {
     *this.subscription.borrow_mut() = Some(subscription);
 }
 
-/// `Application.setQuitPolicy`'s options.
-#[derive(Debug, Clone, Default, PartialEq, JsObject)]
-#[prop(exact)]
-pub(crate) struct QuitPolicyOptions {
-    /// `"platform"` (the default), `true` or `false`.
-    quit_on_last_window_closed: Option<QuitOnLastWindowClosed>,
-}
-
-impl JsValue for QuitOnLastWindowClosed {
+impl JsValue for QuitMode {
     fn ts_type(_types: &mut TsTypes) -> String {
-        "\"platform\" | boolean".into()
+        "\"platform\" | \"lastWindowClosed\" | \"explicit\"".into()
     }
 
     fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
-        if let Some(quit) = value.as_bool() {
-            return Ok(if quit { Self::Always } else { Self::Never });
-        }
         match value.as_string().as_deref() {
             Some("platform") => Ok(Self::Platform),
-            _ => Err(value.expected("\"platform\", true or false")),
+            Some("lastWindowClosed") => Ok(Self::LastWindowClosed),
+            Some("explicit") => Ok(Self::Explicit),
+            _ => Err(value.expected("\"platform\", \"lastWindowClosed\" or \"explicit\"")),
         }
     }
 
     fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
-        match self {
-            Self::Platform => Ok(JsOwned::new(host, host.new_string("platform")?)),
-            Self::Always => Ok(JsOwned::new(host, host.new_bool(true))),
-            Self::Never => Ok(JsOwned::new(host, host.new_bool(false))),
-        }
+        let mode = match self {
+            Self::Platform => "platform",
+            Self::LastWindowClosed => "lastWindowClosed",
+            Self::Explicit => "explicit",
+        };
+        Ok(JsOwned::new(host, host.new_string(mode)?))
     }
 }
 

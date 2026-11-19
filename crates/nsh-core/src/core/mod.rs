@@ -1574,9 +1574,10 @@ pub struct Core<M: TextEngine> {
     /// The windows of the app's own, by the app's id: their root nodes,
     /// and whether their placement is kept.
     window_ids: rustc_hash::FxHashMap<String, (NodeId, bool)>,
-    /// Whether the app quits when its last window closes
-    /// ([`DesktopCommand::SetQuitOnLastWindowClosed`]).
-    quit_on_last_window_closed: bool,
+    /// When the app quits if its last window closes
+    /// ([`DesktopCommand::SetQuitMode`]); [`crate::desktop::QuitMode::Explicit`]
+    /// until the host sets one.
+    quit_mode: crate::desktop::QuitMode,
     /// nsh.json's `"window"` launch defaults ([`Core::set_main_window`]):
     /// the first app window inherits them, since the host has no visible
     /// window of its own.
@@ -1673,7 +1674,9 @@ impl<M: TextEngine> Core<M> {
             window_ids: Default::default(),
             runs: Default::default(),
             folded: Default::default(),
-            quit_on_last_window_closed: false,
+            // Until the host sets one: the app decides (the engine sets
+            // nsh.json's mode, `"platform"` by default, before the app runs).
+            quit_mode: crate::desktop::QuitMode::Explicit,
             main_window_options: None,
             launch_defaults_applied: false,
             keep_main_placement: false,
@@ -1990,11 +1993,11 @@ impl<M: TextEngine> Core<M> {
         self.picker = backend;
     }
 
-    /// Sets whether the app quits when its last window closes (the
-    /// desktops' `"platform"` policy: true on Windows and Linux, false on
-    /// macOS). `Application.setQuitPolicy` sets it at run time.
-    pub fn set_quit_on_last_window_closed(&mut self, quit: bool) {
-        self.quit_on_last_window_closed = quit;
+    /// Sets when the app quits if its last window closes (the desktops'
+    /// `"platform"` mode: quit on Windows and Linux, stay on macOS).
+    /// `Application.setQuitMode` sets it at run time.
+    pub fn set_quit_mode(&mut self, mode: crate::desktop::QuitMode) {
+        self.quit_mode = mode;
     }
 
     /// The main window's launch-time options (nsh.json `"window"`): its
@@ -2980,9 +2983,9 @@ impl<M: TextEngine> Core<M> {
             window::{WindowRecord, placement_key},
         };
         match command {
-            // The quit policy reaches past the app's view, as quitting does:
+            // The quit mode reaches past the app's view, as quitting does:
             // a sandboxed app without `application` keeps the platform's.
-            DesktopCommand::SetQuitOnLastWindowClosed(_) if !self.access.allows_application() => {
+            DesktopCommand::SetQuitMode(_) if !self.access.allows_application() => {
                 self.deny(
                     "the application (its main window, menu, tray, global shortcuts, quitting and restarting) is not granted: add `\"application\": true` to capabilities in nsh.json".into(),
                 );
@@ -3014,8 +3017,8 @@ impl<M: TextEngine> Core<M> {
                     .pending
                     .merge(&attributes);
             }
-            DesktopCommand::SetQuitOnLastWindowClosed(quit) => {
-                self.quit_on_last_window_closed = quit;
+            DesktopCommand::SetQuitMode(mode) => {
+                self.quit_mode = mode;
             }
             DesktopCommand::OpenWindow(mut open) => {
                 let options = &mut open.options;
@@ -3135,18 +3138,18 @@ impl<M: TextEngine> Core<M> {
             self.windows.remove(&id);
             self.window_ids.retain(|_, (node, _)| *node != id);
         }
-        // The last window went: the policy decides whether that ends the
+        // The last window went: the quit mode decides whether that ends the
         // app. The app's own close path has run by now (its root is gone),
         // and the core's listeners had their turn (a Rust listener turning
-        // the policy off keeps the app running). A JS listener runs in a
-        // later commit, after this decision: an app that keeps running with
-        // no windows sets `quitOnLastWindowClosed: false` before the last
-        // close, not from `lastWindowClosed`. A listener that opens a window
-        // again does so in the next commit, which by then is not the last
-        // window (with the policy off).
+        // the mode to `"explicit"` keeps the app running). A JS listener
+        // runs in a later commit, after this decision: an app that keeps
+        // running with no windows sets `quitMode: "explicit"` before the
+        // last close, not from `lastWindowClosed`. A listener that opens a
+        // window again does so in the next commit, which by then is not the
+        // last window (with the mode `"explicit"`).
         if had_windows && self.window_ids.is_empty() {
             self.last_window_closed();
-            if self.quit_on_last_window_closed {
+            if self.quit_mode.quits(self.components.environment.os) {
                 self.commands.push((
                     ROOT_ID,
                     Command::Desktop(Box::new(crate::desktop::DesktopCommand::Quit)),

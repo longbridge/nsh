@@ -10,8 +10,8 @@ windows.
 
 Delivered: the invisible host; per-window roots, owners, key scopes,
 placement and close policy; the window registry and explicit `<Window>`
-scenes; `Application.setQuitPolicy`, `on("reopen")` and
-`on("lastWindowClosed")`; nsh.json `application.quitOnLastWindowClosed`;
+scenes; `Application.setQuitMode`, `on("reopen")` and
+`on("lastWindowClosed")`; nsh.json `application.quitMode`;
 window-scoped and app-scoped `keymap.bind` (JS and Rust); the headless model
 with zero, one and N windows; and the macOS/Windows/Linux backends' window
 lifecycles.
@@ -137,7 +137,7 @@ the main-centric lifecycle, menus and keys.
 ```
 Application Host (invisible)
 ├─ event loop, app environment, Storage, capabilities
-├─ Application: quit policy, quitRequest/quit, reopen, openFiles,
+├─ Application: quit mode, quitRequest/quit, reopen, openFiles,
 │                secondInstance, launch at login, tray, global shortcuts
 ├─ Application menu (macOS; the system menu bar)
 ├─ WindowRegistry: id -> AppWindow
@@ -156,7 +156,7 @@ The app host is not a user window. It owns:
 
 - the platform event loop and the engine thread;
 - application-level environment and `Storage`;
-- `Application` events and the quit policy;
+- `Application` events and the quit mode;
 - the application menu on macOS (the system menu bar) and the default
   application menu on Windows and Linux;
 - the window registry and focus;
@@ -248,33 +248,34 @@ the registry's app windows. This avoids a second rendering model.
 - A window's close does not stop the engine and does not run the app's
   process-level cleanup.
 
-### Quit policy
+### Quit mode
 
 `nsh.json` gains an application block:
 
 ```json
 "application": {
-  "quitOnLastWindowClosed": "platform"
+  "quitMode": "platform"
 }
 ```
 
 - `"platform"` (the default): macOS keeps the app running with no windows;
   Windows and Linux quit when the last window closes.
-- `true`: every platform quits when the last window closes.
-- `false`: the app decides. The app host stays alive with no windows; the app
-  opens a window, shows a tray menu, or calls `Application.quit()`.
+- `"lastWindowClosed"`: every platform quits when the last window closes.
+- `"explicit"`: the app decides. The app host stays alive with no windows; the
+  app opens a window, shows a tray menu, or calls `Application.quit()`.
 
-The same value is settable at run time:
+The same mode is settable at run time, from TSX and from Rust
+(`nsh_core::desktop::set_quit_mode`):
 
 ```ts
-Application.setQuitPolicy({ quitOnLastWindowClosed: false });
+Application.setQuitMode("explicit");
 ```
 
 Events:
 
 - `Application.on("lastWindowClosed", () => { ... })` runs after the last
-  window is gone and the policy is `false` (or after the event that would
-  quit, before the quit path with `true`; the platform decides).
+  window is gone. Rust listeners run before the quit mode acts; JS listeners
+  run in a later commit, after the decision.
 - `Application.on("reopen", () => { ... })` runs when the OS asks the app to
   show itself: a macOS Dock or Finder reopen, or a second launch on
   Windows/Linux. The app opens the window it wants. There is no implicit
@@ -430,7 +431,7 @@ function App() {
   const library = createLibrary(); // app root state
   const open = library.openDocuments();
 
-  Application.setQuitPolicy({ quitOnLastWindowClosed: false });
+  Application.setQuitMode("explicit");
   Application.on("reopen", () => library.showLauncher());
 
   return (
@@ -460,7 +461,7 @@ mount(App);
   Windows and Linux, not available in this delivery; apps that need a visible
   bar draw their own controls.
 - `Application` is an imperative module, not a JSX element:
-  `Application.setQuitPolicy(...)`, `Application.on(...)` and
+  `Application.setQuitMode(...)`, `Application.on(...)` and
   `Application.quit()`.
 - `Window.open`, `Window.get`, `windows()`, `focusedWindow()`,
   `currentWindow()`, `keymap.bind` keep their names, with the changes above.
@@ -475,7 +476,7 @@ mount(App);
     "titleBar": { "style": "hidden", "height": 32 }
   },
   "application": {
-    "quitOnLastWindowClosed": "platform"
+    "quitMode": "platform"
   }
 }
 ```
@@ -496,7 +497,7 @@ bindings stay app-wide as they were. Apps that declare `<Window>` scenes do
 not get it (the runtime drops it unshown). The first window inherits the
 `"window"` launch defaults; its `<Window>` attributes override them. An app
 that needs the old "quit when the first window closes" behavior sets
-`quitOnLastWindowClosed: true`.
+`quitMode: "lastWindowClosed"`.
 
 ## Compatibility and migration
 

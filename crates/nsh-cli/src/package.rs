@@ -254,9 +254,9 @@ pub(crate) struct AppConfig {
     /// info, where the runners read them before the app's code runs.
     pub(crate) window: Option<serde_json::Value>,
     /// The app's lifecycle (`"application"`, checked by [`read_config`]):
-    /// `{ "quitOnLastWindowClosed": "platform" | true | false }`. Written
-    /// into `app.json` and the dev server's app info, where the engine sets
-    /// the quit policy before the app's code runs.
+    /// `{ "quitMode": "platform" | "lastWindowClosed" | "explicit" }`.
+    /// Written into `app.json` and the dev server's app info, where the
+    /// engine sets the quit mode before the app's code runs.
     pub(crate) application: Option<serde_json::Value>,
     /// What iOS packages add to their `Info.plist` and entitlements.
     #[serde(default)]
@@ -3136,7 +3136,7 @@ mod tests {
     #[test]
     fn desktop_packages_carry_the_main_windows_options() {
         let config: AppConfig = serde_json::from_str(
-            r#"{ "appearance": "dark", "window": { "title": "Focus", "closeOnPress": false }, "application": { "quitOnLastWindowClosed": false } }"#,
+            r#"{ "appearance": "dark", "window": { "title": "Focus", "closeOnPress": false }, "application": { "quitMode": "explicit" } }"#,
         )
         .unwrap();
         let info = desktop_app_json(&config, "Focus", "com.a", "1.0.0");
@@ -3148,7 +3148,7 @@ mod tests {
                 "version": "1.0.0",
                 "appearance": "dark",
                 "window": { "title": "Focus", "closeOnPress": false },
-                "application": { "quitOnLastWindowClosed": false },
+                "application": { "quitMode": "explicit" },
             })
         );
         // The runner opens the main window with them (`Bundle::read_trusted`).

@@ -6,7 +6,7 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` holds what only desktops have: the app's windows and their title bars, the displays, the application menu and context menus, the tray and global shortcuts. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: windows (`window()`), the window a component renders in (`current_window()`, a `WindowRef`), the displays (`displays`), `quit`, `restart`, opening at login (`launch_at_login`, `set_launch_at_login`), the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), the tray (`set_tray`) and global shortcuts (`register_global_shortcut`), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its windows and menus are there. An app that declares capabilities needs `"application": true` for the application menu, the tray, global shortcuts, `quit` and quit requests, `restart`, the quit policy and launching at login ([capabilities](../docs/sandbox-and-capabilities.md#application)); without it they do nothing. Context menus and the app's windows (granted by `windows`) need no `application`.
+`nsh/desktop` holds what only desktops have: the app's windows and their title bars, the displays, the application menu and context menus, the tray and global shortcuts. It works on macOS, Windows and Linux. Rust code finds the same in `nsh_core::element::desktop`: windows (`window()`), the window a component renders in (`current_window()`, a `WindowRef`), the displays (`displays`), `quit`, `restart`, opening at login (`launch_at_login`, `set_launch_at_login`), the application menu and context menus (`set_application_menu`, `popup_menu`, made of `MenuItem`s), the tray (`set_tray`) and global shortcuts (`register_global_shortcut`), and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether its windows and menus are there. An app that declares capabilities needs `"application": true` for the application menu, the tray, global shortcuts, `quit` and quit requests, `restart`, the quit mode and launching at login ([capabilities](../docs/sandbox-and-capabilities.md#application)); without it they do nothing. Context menus and the app's windows (granted by `windows`) need no `application`.
 
 ```rust tabs
 use nsh_core::{
@@ -54,7 +54,7 @@ Every window of an app renders from the app's one engine: all windows share its 
 - [`currentWindow()`](#currentwindow) is the window the calling component renders in; `windows()`, `focusedWindow()` and `Window.get(id)` find the others.
 - What only the app changes (the title, the title bar, the level, the look, the close policies) are the window's [attributes](#attributes): `<Window>`'s props and `set()`. What the user also changes (the bounds, the mode, being open) starts from a `default…` option, changes through requests (`setMode`, `setBounds`, `close`, …) and comes back in [`state()`](#the-windows-state-and-the-displays) and the [events](#events).
 - Requests return nothing: the platform may adjust or decline one (a window manager places windows itself, a display was unplugged), and `state()` reports what happened.
-- Closing a window destroys only that window and disposes its signals and effects. The app keeps running until its quit policy says otherwise.
+- Closing a window destroys only that window and disposes its signals and effects. The app keeps running until its quit mode says otherwise.
 
 The app host is invisible. nsh.json's [`window`](#the-app-host-and-the-first-window) supplies launch defaults for the first window the app declares; it does not create one.
 
@@ -277,7 +277,7 @@ The Rust column names the methods of `WindowRef`.
 | `set(attributes)` | `set(WindowAttributes)` | Changes the [attributes](#attributes) it names; the others keep their values. An attribute the app's capabilities do not grant is left as it is, with a warning. |
 | `show()`, `hide()` | `show()`, `hide()` | Shows it (restoring it when minimized), or hides it. On macOS a full screen window leaves full screen before it hides, as macOS apps' windows do, and shows again as a window. |
 | `focus()` | `focus()` | Shows it, brings it to the front of its level and gives it the keyboard focus; the app activates. The window keeps its level. |
-| `close()` | `close()` | Closes it, whatever `closeOnPress` says, destroying its tree and disposing its owner (`<Window>`: `onOpenChange` with `reason: "close"`). Other windows are untouched; the app quits only when the last window closes under its [quit policy](#quitting). |
+| `close()` | `close()` | Closes it, whatever `closeOnPress` says, destroying its tree and disposing its owner (`<Window>`: `onOpenChange` with `reason: "close"`). Other windows are untouched; the app quits only when the last window closes under its [quit mode](#quitting). |
 | `minimize()`, `restore()` | `minimize()`, `restore()` | Minimizes it, or brings it back in the mode it had: a maximized window minimized comes back maximized. |
 | `setMode(mode)` | `set_mode(mode)` | Puts it in `"normal"`, `"maximized"` or `"fullScreen"`; asking for the mode it is in changes nothing. A hidden window stays hidden: its `state()` reads the mode, which it takes when it shows. |
 | `setBounds({ origin?, size?, animated? })` | `set_bounds(WindowFrame { .. })` | Moves and sizes it, in points; omitted fields keep their values. `origin` (`x`, `y`) is its top left corner from the primary display's top left, `y` growing down; a `height` without a `y` keeps the top edge where it is. On macOS and Windows `size` includes the window's decorations; on Linux it sets GTK's default window size. `animated: true` enables macOS's resize animation. Widths and heights take positive finite numbers, `x` and `y` finite ones; other values keep the field's. |
@@ -325,7 +325,7 @@ function Editor() {
 
 ### The app host and the first window
 
-The app host is invisible: it owns the event loop, Storage, `Application`, the application menu, the window registry and the quit policy, and it survives every window. It is not a `WindowRef`; `currentWindow()` in the app root is the main window (the implicit first window, or the app's one surface), not the host.
+The app host is invisible: it owns the event loop, Storage, `Application`, the application menu, the window registry and the quit mode, and it survives every window. It is not a `WindowRef`; `currentWindow()` in the app root is the main window (the implicit first window, or the app's one surface), not the host.
 
 nsh.json's `window` holds launch defaults for the first window the app declares, applied before its first frame:
 
@@ -383,7 +383,7 @@ const Application: {
   on(event: "quitRequest", listener: () => void): () => void;
   on(event: "reopen", listener: () => void): () => void;
   on(event: "lastWindowClosed", listener: () => void): () => void;
-  setQuitPolicy(options: { quitOnLastWindowClosed?: "platform" | boolean }): void;
+  setQuitMode(quitMode: "platform" | "lastWindowClosed" | "explicit"): void;
 };
 ```
 
@@ -398,13 +398,13 @@ const Application: {
 | `on("quit", listener)` | `on_app_quit(f)` | The app is quitting: its cleanup runs ([Quitting](#quitting)). |
 | `on("quitRequest", listener)` | `on_quit_request(f)` | The user asked to quit; while it listens, the app decides when to quit ([Quitting](#quitting)). |
 | `on("reopen", listener)` | `on_reopen(f)` | The OS asked the app to show itself: a macOS Dock/Finder reopen, or a later launch on Windows and Linux. The app opens or focuses the window it wants; nothing shows implicitly. |
-| `on("lastWindowClosed", listener)` | `on_last_window_closed(f)` | The app's last window closed, after its own close path. Rust listeners run synchronously before the policy acts; JS listeners are posted asynchronously, after the decision. An app that stays alive with no windows sets `quitOnLastWindowClosed: false` at startup. |
-| `setQuitPolicy({ quitOnLastWindowClosed })` | — (host-side `Core::set_quit_on_last_window_closed`) | Whether closing the last window quits: `"platform"` (macOS stays; Windows and Linux quit), `true` or `false` ([Quitting](#quitting)). There is no public Rust app API; a Rust host sets it on the core. |
+| `on("lastWindowClosed", listener)` | `on_last_window_closed(f)` | The app's last window closed, after its own close path. Rust listeners run synchronously before the mode acts; JS listeners are posted asynchronously, after the decision. An app that stays alive with no windows sets `quitMode: "explicit"` at startup. |
+| `setQuitMode(quitMode)` | `set_quit_mode(QuitMode)` | When closing the last window quits: `"platform"` (macOS stays; Windows and Linux quit), `"lastWindowClosed"` (every platform quits), `"explicit"` (the app decides) ([Quitting](#quitting)). |
 
 `Application.quit()` is for a Quit of the app's own (a menu item with its own label, a button) and for restarting after an
 update. It ends the app rather than closing its windows one by one: its windows' `onOpenChange` may not run. The app
 stops as when its last window closes, then its run ends, also when closing the window alone would leave it running:
-`quitOnLastWindowClosed: false` with no window open. Closing goes through the same steps as the Quit
+`quitMode: "explicit"` with no window open. Closing goes through the same steps as the Quit
 item: the standalone app on macOS returns from `run_app` as with Cmd+Q; in a GPUI app that owns the window, the request
 reaches its `AppView::on_close_request` handler as `CloseRequest::Quit`, which quits when the app is ready; elsewhere
 the quit goes ahead as the Quit item's does. A view
@@ -429,12 +429,13 @@ async function changeLanguage(language: string) {
 
 ### Quitting
 
-The app owns its lifecycle. Closing a window closes that window only; closing the last window follows the quit policy:
-`"platform"` (the default) keeps a macOS app running in the Dock and quits on Windows and Linux, `true` always quits,
-`false` leaves the app running so it can open another window, show a tray menu or call `quit()`. The app sets it with
-`Application.setQuitPolicy({ quitOnLastWindowClosed: "platform" })`; nsh.json's `application.quitOnLastWindowClosed`
-holds the same value from launch. `Application.on("lastWindowClosed")` hears the last window go, after its close path.
-Rust listeners run synchronously before the quit policy acts; JS listeners run in a later commit, after the decision.
+The app owns its lifecycle. Closing a window closes that window only; closing the last window follows the quit mode:
+`"platform"` (the default) keeps a macOS app running in the Dock and quits on Windows and Linux, `"lastWindowClosed"`
+quits on every platform, `"explicit"` leaves the app running so it can open another window, show a tray menu or call
+`quit()`. The app sets it with `Application.setQuitMode("platform")` (Rust: `set_quit_mode(QuitMode::Platform)`);
+nsh.json's `application.quitMode` holds the same mode from launch. `Application.on("lastWindowClosed")` hears the last
+window go, after its close path. Rust listeners run synchronously before the quit mode acts; JS listeners run in a later
+commit, after the decision.
 
 A macOS Dock or Finder reopen, or a later launch on Windows and Linux, reaches `Application.on("reopen")` (Rust:
 `on_reopen`): the app opens or focuses the window it wants. NSH never shows a window of its own.

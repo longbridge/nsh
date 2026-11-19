@@ -279,7 +279,7 @@ needs a `network` grant for its host.
 
 `"application": true` lets the app act on the application as a whole on the desktop
 ([`nsh/desktop`](../modules/nsh-desktop.md)): the application menu (`Menu.setApplicationMenu`), the tray, global
-shortcuts, `Application.quit()`, `Application.setQuitPolicy()`, `Application.restart()` and
+shortcuts, `Application.quit()`, `Application.setQuitMode()`, `Application.restart()` and
 `Application.setLaunchAtLogin()`. Without it they do
 nothing, `Application.launchAtLogin()` resolves `false` and `setLaunchAtLogin` rejects with `ERR_ACCESS_DENIED`
 (`permission` `"application"`). Context menus (`Menu.popup`) show in the app's own view, and windows the app opens are

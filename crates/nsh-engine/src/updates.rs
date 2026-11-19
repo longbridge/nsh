@@ -149,7 +149,7 @@ fn as_shipped(mut bundle: Bundle, shipped: &Bundle, trial: Option<Arc<dyn Trial>
     bundle.url_schemes = shipped.url_schemes.clone();
     bundle.system_paths = shipped.system_paths.clone();
     bundle.main_window = shipped.main_window.clone();
-    // The app's lifecycle (its quit policy) is the installed app's: an
+    // The app's lifecycle (its quit mode) is the installed app's: an
     // update reaches nothing it could not configure before.
     bundle.application = shipped.application;
     bundle.updater_config = shipped.updater_config.clone();

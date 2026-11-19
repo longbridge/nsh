@@ -247,7 +247,7 @@ blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
 
 ### `application`
 
-`"application": true` 允许应用在桌面上作用于整个应用（[`nsh/desktop`](../modules/nsh-desktop.md)）：应用菜单（`Menu.setApplicationMenu`）、托盘、全局快捷键、`Application.quit()`、`Application.setQuitPolicy()`、`Application.restart()` 和 `Application.setLaunchAtLogin()`。没有这项能力时它们什么也不做，`Application.launchAtLogin()` 返回 `false`，`setLaunchAtLogin` 以 `ERR_ACCESS_DENIED`（`permission` 为 `"application"`）拒绝。右键菜单（`Menu.popup`）显示在应用自己的视图中，应用打开的窗口由 [`windows`](#windows) 授权，两者都不需要这项能力。
+`"application": true` 允许应用在桌面上作用于整个应用（[`nsh/desktop`](../modules/nsh-desktop.md)）：应用菜单（`Menu.setApplicationMenu`）、托盘、全局快捷键、`Application.quit()`、`Application.setQuitMode()`、`Application.restart()` 和 `Application.setLaunchAtLogin()`。没有这项能力时它们什么也不做，`Application.launchAtLogin()` 返回 `false`，`setLaunchAtLogin` 以 `ERR_ACCESS_DENIED`（`permission` 为 `"application"`）拒绝。右键菜单（`Menu.popup`）显示在应用自己的视图中，应用打开的窗口由 [`windows`](#windows) 授权，两者都不需要这项能力。
 
 ### `homeDir`
 
