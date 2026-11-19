@@ -6,10 +6,15 @@
 //! around what the view shows. The interaction came with the edge effect
 //! (iOS 26); earlier versions have neither, and nothing is done there.
 //!
-//! The named edge uses the soft style, the effect bars give on iPhone. Left
-//! automatic, UIKit can pick the hard style (a near-opaque band with a
-//! dividing line), as it does under a search field floating over a list:
-//! that cuts the content the view is meant to let fade out.
+//! An edge named by at least one view uses the soft style, the effect the
+//! system's bars give on iPhone and iPad alike. Left automatic, UIKit can
+//! pick the hard style (a near-opaque band with a dividing line), as it does
+//! under a search field floating over a list: that cuts the content the view
+//! is meant to let fade out. The mount counts the views naming each edge and
+//! gives the edge back its automatic style once none does; NSH sets this
+//! style nowhere else, so automatic is what the edge had before. Only the
+//! named edge changes: a top edge under a navigation bar is the bar's
+//! effect too, and is soft while a view names it.
 
 use nsh_core::ScrollEdge;
 use objc2::{
@@ -28,9 +33,9 @@ fn rect_edge(edge: ScrollEdge) -> usize {
     }
 }
 
-/// Sets the style of `scroll`'s effect at `edge` (`UIRectEdge`):
-/// `softStyle` or `automaticStyle`.
-fn set_style(scroll: &UIScrollView, edge: usize, soft: bool) {
+/// Gives `scroll`'s effect at `edge` the soft style, or back the
+/// automatic one.
+pub(crate) fn set_style(scroll: &UIScrollView, edge: ScrollEdge, soft: bool) {
     let Some(class) = AnyClass::get(c"UIScrollEdgeEffectStyle") else {
         return;
     };
@@ -38,10 +43,9 @@ fn set_style(scroll: &UIScrollView, edge: usize, soft: bool) {
     // nil from iOS 26, which `UIScrollEdgeEffectStyle` came with), the
     // style's class properties and the effect's `style` setter.
     unsafe {
-        let effect: Option<Retained<AnyObject>> = if edge == rect_edge(ScrollEdge::Top) {
-            msg_send![scroll, topEdgeEffect]
-        } else {
-            msg_send![scroll, bottomEdgeEffect]
+        let effect: Option<Retained<AnyObject>> = match edge {
+            ScrollEdge::Top => msg_send![scroll, topEdgeEffect],
+            _ => msg_send![scroll, bottomEdgeEffect],
         };
         let Some(effect) = effect else { return };
         let style: Retained<AnyObject> = if soft {
@@ -53,24 +57,9 @@ fn set_style(scroll: &UIScrollView, edge: usize, soft: bool) {
     }
 }
 
-/// Gives the scroll view `interaction` names back its automatic style.
-fn release(interaction: &AnyObject) {
-    // SAFETY: the interaction's `scrollView` (weak, nil once the scroll
-    // view is gone) and `edge` getters.
-    let (scroll, edge): (Option<Retained<UIScrollView>>, usize) = unsafe {
-        (
-            msg_send![interaction, scrollView],
-            msg_send![interaction, edge],
-        )
-    };
-    if let Some(scroll) = scroll {
-        set_style(&scroll, edge, false);
-    }
-}
-
 /// Gives `view` the interaction naming `to` (the scroll view and its
 /// edge), or takes it away (`None`). `kept` holds the interaction the view
-/// has. The named edge is soft while the view names it.
+/// has. The style of the edge is the mount's ([`set_style`]).
 pub(crate) fn set(
     view: &UIView,
     kept: &mut Option<Retained<AnyObject>>,
@@ -78,7 +67,6 @@ pub(crate) fn set(
 ) {
     let Some((scroll, edge)) = to else {
         if let Some(interaction) = kept.take() {
-            release(&interaction);
             // SAFETY: UIView's `removeInteraction:` with the interaction
             // added below.
             let () = unsafe { msg_send![view, removeInteraction: &*interaction] };
@@ -86,10 +74,7 @@ pub(crate) fn set(
         return;
     };
     let interaction = match kept {
-        Some(interaction) => {
-            release(interaction);
-            interaction.clone()
-        }
+        Some(interaction) => interaction.clone(),
         None => {
             let Some(class) = AnyClass::get(c"UIScrollEdgeElementContainerInteraction") else {
                 return;
@@ -107,5 +92,4 @@ pub(crate) fn set(
         let () = msg_send![&*interaction, setScrollView: scroll];
         let () = msg_send![&*interaction, setEdge: rect_edge(edge)];
     }
-    set_style(scroll, rect_edge(edge), true);
 }
