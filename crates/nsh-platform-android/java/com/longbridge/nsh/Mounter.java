@@ -81,9 +81,31 @@ final class Mounter {
     final int[] dialogColors = new int[10];
     /** The alerts shown and not answered yet, by dialog id: what {@link SystemUi#closeDialog} takes back. */
     final SparseArray<android.app.AlertDialog> dialogs = new SparseArray<>();
-    /** The status bar the app asked for last (style, hidden), applied again when the appearance changes. */
+    /**
+     * The status bar the app asked for last (style, hidden; -1: never), applied again when the app's or the system's
+     * appearance changes.
+     */
     private int barStyle = -1;
     private boolean barHidden;
+    /**
+     * The activity's system bars are the app's (an app on its own, {@link NshView#ownSystemBars}): their default
+     * follows the app's appearance. Embedded in another app's activity, its bars stay the host's until the app asks.
+     */
+    boolean ownsSystemBars;
+
+    /**
+     * Sets the system bars the app has: the status bar it asked for last, else, where it owns the bars, the default,
+     * whose icons contrast with the appearance shown, as the navigation bar's. Run again when the app's or the
+     * system's appearance changes: the default depends on both, and the activity's own bar setup reads only the
+     * system's.
+     */
+    void applySystemBars() {
+        int style = Math.max(barStyle, 0);
+        boolean night = night();
+        if (ownsSystemBars) DevActivity.systemBars(SystemUi.activity(context), night);
+        if (barStyle >= 0 || ownsSystemBars) SystemUi.statusBar(context, style, barHidden, night);
+        for (ModalHost m : shownModals) m.systemBars(style, barHidden, night);
+    }
 
     /** Dark appearance as shown: the app's, else the system's. */
     boolean night() {
@@ -497,10 +519,7 @@ final class Mounter {
                         }
                         if (v instanceof StackBox.ScreenBox) ((StackBox.ScreenBox) v).appearanceChanged();
                     }
-                    if (barStyle == 0) {
-                        SystemUi.statusBar(context, barStyle, barHidden, night());
-                        for (ModalHost m : shownModals) m.statusBar(barStyle, barHidden, night());
-                    }
+                    applySystemBars();
                     break;
                 }
                 case LAYOUT_DIRECTION: {
@@ -2061,7 +2080,7 @@ final class Mounter {
                 modal.show();
                 shownModals.remove(modal);
                 shownModals.add(modal);
-                if (barStyle >= 0) modal.statusBar(barStyle, barHidden, night());
+                modal.statusBar(Math.max(barStyle, 0), barHidden, night());
             } else {
                 modal.dismiss();
                 shownModals.remove(modal);
