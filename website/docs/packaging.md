@@ -379,7 +379,7 @@ Give one square PNG, ideally 1024×1024, in `nsh.json` (`"icon": "icon.png"`) or
 
 - **iOS:** compiled by Xcode's `actool` into the app's asset catalog (`Assets.car`), which derives every size iOS
   needs.
-- **Android:** resized to 192×192 and used as the launcher icon (`mipmap-xxxhdpi`).
+- **Android:** resized to 192×192 and used as the launcher icon (`mipmap-xxxhdpi`); see adaptive icons below.
 - **macOS:** converted by `sips` to `AppIcon.icns`. `nsh run --target macos` and `nsh test --target macos` show the
   PNG in the Dock and the app switcher.
 - **Linux:** copied as `<id>.png`, which the `.desktop` file names as its `Icon`.
@@ -402,6 +402,28 @@ Windows, Linux and Android fill it. Give `icon` an object to use a PNG per platf
   }
 }
 ```
+
+Android launchers mask icons to their own shape (circle, squircle, ...), so a square PNG ends up shrunk on a plate.
+Give `icon.android` an adaptive icon instead: its layers are drawn on a 108dp canvas, of which the launcher always shows
+the middle 66%, so keep the artwork there.
+
+```json
+{
+  "icon": {
+    "android": {
+      "foreground": "icon-foreground.png",
+      "background": "#ffffff",
+      "monochrome": "icon-monochrome.png"
+    }
+  }
+}
+```
+
+- `foreground`: a square PNG with a transparent background, ideally 432×432 or larger.
+- `background`: a color (`"#rrggbb"`, `"#rrggbbaa"`) or a square PNG.
+- `monochrome` (optional): the artwork in one color on transparent, which Android 13 and later tint for themed icons.
+
+An adaptive icon is Android's only; another platform given one gets none.
 
 `--icon` replaces it for the target being packaged.
 

@@ -337,7 +337,7 @@ entitlements：
 在 `nsh.json` 中（`"icon": "icon.png"`）或通过 `--icon` 提供一张正方形 PNG，最好是 1024×1024：
 
 - **iOS：** 由 Xcode 的 `actool` 编译进应用的资源目录（`Assets.car`），iOS 所需的各种尺寸都由它生成。
-- **Android：** 缩放到 192×192，用作启动器图标（`mipmap-xxxhdpi`）。
+- **Android：** 缩放到 192×192，用作启动器图标（`mipmap-xxxhdpi`）；也可以用自适应图标，见下文。
 - **macOS：** 由 `sips` 转换为 `AppIcon.icns`。`nsh run --target macos` 和 `nsh test --target macos` 会在程序坞和应用切换器里显示这张 PNG。
 - **Linux：** 复制为 `<id>.png`，`.desktop` 文件以它作为 `Icon`。
 - **Windows：** 缩放为 16 到 64 像素以及 256 像素，作为图标嵌入可执行文件，窗口、资源管理器和任务栏都会显示它；同时写到 bundle 旁的 `nsh\icon.ico`，通知会显示它。在 macOS 或 Linux 上打包时，可执行文件在资源管理器里保持默认图标，窗口和任务栏显示 `icon.ico`。`nsh run --target windows` 和 `nsh test --target windows` 也会显示它。
@@ -354,6 +354,26 @@ entitlements：
   }
 }
 ```
+
+Android 启动器会把图标裁成自己的形状（圆形、圆角方形等），一张方形 PNG 只会被缩小后放在一块底板上。改给 `icon.android` 一个自适应图标：各层画在 108dp 的画布上，启动器总会显示中间 66%，图案放在这个范围内。
+
+```json
+{
+  "icon": {
+    "android": {
+      "foreground": "icon-foreground.png",
+      "background": "#ffffff",
+      "monochrome": "icon-monochrome.png"
+    }
+  }
+}
+```
+
+- `foreground`：透明底的正方形 PNG，最好是 432×432 或更大。
+- `background`：颜色（`"#rrggbb"`、`"#rrggbbaa"`）或一张正方形 PNG。
+- `monochrome`（可选）：透明底上的单色图案，Android 13 及以上的主题图标会给它着色。
+
+自适应图标只用于 Android；其他平台写成这种形式时没有图标。
 
 `--icon` 会替换它，用于本次打包的目标。
 
