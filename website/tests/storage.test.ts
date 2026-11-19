@@ -71,36 +71,6 @@ const CHECK_PAGE = `<!doctype html>
   })();
 </script>`;
 
-const REFUSED_PAGE = `<!doctype html>
-<pre id="result">pending</pre>
-<div id="app"></div>
-<script type="module">
-  import { createPlayer } from "./nsh.js";
-  const result = document.getElementById("result");
-  try {
-    const player = await createPlayer(document.getElementById("app"), {
-      wasm: "./nsh.wasm",
-      onError: (message) => { result.textContent = JSON.stringify({ runtimeError: message }); },
-      host: { call: (_name, value) => { result.textContent = JSON.stringify(value); } },
-    });
-    await player.runModule(new URL("storage-refused.js", location.href).href, {
-      capabilities: JSON.stringify({ host: ["result"] }),
-    });
-  } catch (error) {
-    result.textContent = JSON.stringify({ startupError: String(error) });
-  }
-</script>`;
-
-const REFUSED_MODULE = `import { Storage, host } from "nsh";
-let code = null;
-try {
-  await Storage.setItem("draft", "not persisted");
-} catch (error) {
-  code = error.code;
-}
-await host.call("result", { code, value: await Storage.getItem("draft"), keys: await Storage.keys() });
-`;
-
 /** Serves website/dist; `headers` are added to every response. */
 function serve(headers: Record<string, string>) {
   return Bun.serve({
@@ -110,12 +80,6 @@ function serve(headers: Record<string, string>) {
       const path = decodeURIComponent(new URL(req.url).pathname);
       if (path === '/play/storage-check.html') {
         return new Response(CHECK_PAGE, { headers: { ...headers, 'content-type': 'text/html; charset=utf-8' } });
-      }
-      if (path === '/play/storage-refused.html') {
-        return new Response(REFUSED_PAGE, { headers: { ...headers, 'content-type': 'text/html; charset=utf-8' } });
-      }
-      if (path === '/play/storage-refused.js') {
-        return new Response(REFUSED_MODULE, { headers: { ...headers, 'content-type': 'text/javascript' } });
       }
       let file = normalize(join(DIST, path));
       if (!file.startsWith(DIST)) return new Response('forbidden', { status: 403, headers });
@@ -184,16 +148,16 @@ describe.skipIf(!!missing)('Storage in the browser', () => {
     expect(result.reset.text).toContain('Keys: none');
   }, 60_000);
 
-  test('when localStorage is blocked, writes reject and leave no entry', async () => {
-    // An opaque origin: localStorage throws. The player's own requests
-    // then come from origin "null", hence the CORS header.
+  test("without localStorage the app's writes are refused and nothing is kept", async () => {
+    // An opaque origin: localStorage throws, so `setItem` rejects and the
+    // demo says its count was not saved. The player's own requests then
+    // come from origin "null", hence the CORS header.
     using server = serve({ 'content-security-policy': 'sandbox allow-scripts', 'access-control-allow-origin': '*' });
-    const url = `http://127.0.0.1:${server.port}/play/storage-refused.html`;
+    const url = `http://127.0.0.1:${server.port}/play/index.html#mod-storage`;
     for (let load = 0; load < 2; load++) {
       const dom = await dumpDom(url, profile('blocked'));
-      const json = dom.match(/<pre id="result">([\s\S]*?)<\/pre>/)?.[1] ?? '';
-      const result = JSON.parse(json.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
-      expect(result).toEqual({ code: 'ERR_NSH_QUOTA_EXCEEDED', value: null, keys: [] });
+      expect(counter(dom)).toBe('Opened 1 time');
+      expect(dom).toContain('Not saved: this browser keeps no storage for the page.');
     }
   }, 60_000);
 });

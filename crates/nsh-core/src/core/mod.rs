@@ -326,6 +326,10 @@ impl Kind {
     }
 }
 
+/// The prop a native component's `accentColor` style reaches it as
+/// ([`Core::sync_accent`]).
+const ACCENT_PROP: &str = "accentColor";
+
 /// A registered native component: its name and properties, as JS set them.
 #[derive(Debug, Default)]
 struct ComponentState {
@@ -2036,6 +2040,16 @@ impl<M: TextEngine> Core<M> {
     /// gives; `None`: it has none.
     pub fn set_data_dir(&mut self, dir: Option<std::path::PathBuf>) {
         self.components.runtime.set_data_dir(dir);
+    }
+
+    /// What Rust code checks for updates with
+    /// ([`crate::runtime::prompt_for_update`]); `None`: the app does not
+    /// update. A JS app's VM gets its own ([`crate::element::System`]).
+    pub fn set_updater(
+        &mut self,
+        updater: Option<std::sync::Arc<dyn crate::runtime::UpdaterHost>>,
+    ) {
+        self.components.runtime.set_updater(updater);
     }
 
     /// Logs (once) that the app was refused `what`.
@@ -4133,6 +4147,8 @@ impl<M: TextEngine> Core<M> {
         self.layout.set_node_context(layout, leaf_context(kind));
         let style = self.layout.style(layout).clone();
         self.became(key, style);
+        // A native component made in its place reads its style's accent.
+        self.sync_accent(key);
         // What a terminal's layout takes from its kind (a scroll view's
         // unbounded content), as if it had been made one.
         self.sync_grid_role(key);
@@ -4539,6 +4555,7 @@ impl<M: TextEngine> Core<M> {
             node.vertical_align != vertical_align && node.inline && node.kind != Kind::Text;
         // ... and so is the content's of a render placed there.
         let content_align_changed = node.vertical_align != vertical_align && !node.inline;
+        let accent_changed = node.view_style.accent_color != view.accent_color;
         node.view_style.set(view);
         node.text_style.set(text);
         node.paint = paint;
@@ -4606,6 +4623,9 @@ impl<M: TextEngine> Core<M> {
         }
         if position_changed && self.nodes[key as usize].image.is_some() {
             flags |= dirty::IMAGE;
+        }
+        if accent_changed {
+            self.sync_accent(key);
         }
         // A sticky view's animated inset is part of its range.
         self.sticky_changed |= animation_changed && self.nodes[key as usize].sticky.is_some();
@@ -6261,6 +6281,9 @@ impl<M: TextEngine> Core<M> {
                         ScreenProp::HeaderLargeTitle(v) => c.large_title = v,
                         ScreenProp::HeaderTransparent(v) => c.header_transparent = v,
                         ScreenProp::HeaderShadowVisible(v) => c.header_shadow_visible = v,
+                        ScreenProp::HeaderBackgroundOnScroll(v) => {
+                            c.header_background_on_scroll = v
+                        }
                         ScreenProp::HidesBottomBarWhenPushed(v) => {
                             c.hides_bottom_bar_when_pushed = v
                         }
@@ -8054,6 +8077,38 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// A native component's `accentColor` style, passed to it as its
+    /// `accentColor` prop (`#RRGGBBAA`; removed when unset): the system
+    /// control shows its state in it, over the color its props give.
+    fn sync_accent(&mut self, key: Key) {
+        let node = &mut self.nodes[key as usize];
+        let accent = node.view_style.accent_color;
+        let Some(component) = node.component.as_mut() else {
+            return;
+        };
+        let value = accent.map(|Color(c)| crate::JsonValue::from(format!("#{c:08X}")));
+        let at = component
+            .props
+            .iter()
+            .position(|(k, _)| &**k == ACCENT_PROP);
+        if at.map(|i| &component.props[i].1) == value.as_ref() {
+            return;
+        }
+        let name: Arc<str> = Arc::from(ACCENT_PROP);
+        match (at, value) {
+            (Some(i), Some(v)) => component.props[i].1 = v,
+            (None, Some(v)) => component.props.push((name.clone(), v)),
+            (Some(i), None) => {
+                component.props.swap_remove(i);
+            }
+            (None, None) => return,
+        }
+        if !component.changed.contains(&name) {
+            component.changed.push(name);
+        }
+        self.mark(key, dirty::COMPONENT);
+    }
+
     /// Texts and spans around `key` (it is inside an attachment) pass on
     /// their color only, as `currentColor` reaches the attachment's view:
     /// the attachment takes the color of the text it sits in, while its
@@ -9671,7 +9726,7 @@ impl<M: TextEngine> Core<M> {
         if !self.layout.stale(layout)
             && !node.escapes
             && !node.is_overlay()
-            && node.beside == NO_KEY
+            && !node.decoration
             && !self.nodes.get(node.parent as usize).is_some_and(|p| p.rtl)
             && node.emitted.is_some_and(|(at, r)| {
                 let moved = |a: f32, b: f32, ratio: f32| {
@@ -9724,6 +9779,12 @@ impl<M: TextEngine> Core<M> {
         let beside = self.nodes[key as usize].beside;
         if beside != NO_KEY {
             frame.origin = self.nodes[beside as usize].frame.origin;
+        } else if self.nodes[key as usize].decoration {
+            // A scroll view's bar is laid out on its own, at no location:
+            // `origin` is where it sits in the viewport (its
+            // `scrollbar_inset`, [`Core::layout_scrollbars`]).
+            frame.origin.x.0 += span(0.0, origin.x, ratio.width);
+            frame.origin.y.0 += span(0.0, origin.y, ratio.height);
         }
         if self.nodes[key as usize].follow.is_some() {
             // Its frame along the main axis is the element's it follows,
