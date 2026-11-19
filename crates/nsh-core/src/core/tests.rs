@@ -2670,6 +2670,57 @@ fn native_components_get_their_name_props_and_size() {
 }
 
 #[test]
+fn a_native_component_gets_its_accent_color_as_a_prop() {
+    // `accentColor` (or `accent-*`) on a native component reaches it as its
+    // `accentColor` prop, `#RRGGBBAA`; a style it no longer has removes it.
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Native,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Component("com.example.switch".into()),
+            },
+            style_op(2, &[("accentColor", StyleValue::Str("#34c759"))]),
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let accent = |c: &mut Core<FakeEngine>| {
+        let batch = c.commit().unwrap();
+        batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::ComponentProps { id: 2, props } => {
+                    props.iter().find(|(k, _)| &**k == "accentColor").cloned()
+                }
+                _ => None,
+            })
+            .map(|(_, v)| v)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(accent(&mut c), [Some(serde_json::json!("#34C759FF"))]);
+    // The class, once the style no longer sets it.
+    c.apply(class_op(2, "accent-[#ff0000]")).unwrap();
+    c.apply(style_op(2, &[])).unwrap();
+    assert_eq!(accent(&mut c), [Some(serde_json::json!("#FF0000FF"))]);
+    // Unchanged: not sent again.
+    c.apply(style_op(2, &[("opacity", StyleValue::Number(0.5))]))
+        .unwrap();
+    assert_eq!(accent(&mut c), Vec::<Option<serde_json::Value>>::new());
+    c.apply(class_op(2, "")).unwrap();
+    assert_eq!(accent(&mut c), [None]);
+}
+
+#[test]
 fn scroll_reports_content_size() {
     let mut c = core();
     let mut ops = vec![
@@ -24082,6 +24133,62 @@ mod views {
         }
         let hidden = config(&c.commit().unwrap()).expect("updated");
         assert!(!hidden.header_shadow_visible);
+    }
+
+    /// A transparent screen whose header background on scroll follows
+    /// `ON_SCROLL`.
+    #[derive(Default)]
+    struct OnScrollPage;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct OnScrollPageProps {}
+
+    thread_local! {
+        static ON_SCROLL: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+    }
+
+    impl Component for OnScrollPage {
+        type Props = OnScrollPageProps;
+        type Event = NoEvent;
+
+        // The core's own stack and screen: `nsh_base`'s wrap them.
+        #[allow(deprecated)]
+        fn view(_: OnScrollPageProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let on = signal(false);
+            ON_SCROLL.with(|s| s.set(Some(on)));
+            stack().flex_1().child(
+                screen()
+                    .title("Page")
+                    .header_transparent(true)
+                    .header_background_on_scroll(move || on.get())
+                    .child(view().flex_1()),
+            )
+        }
+    }
+
+    /// The header background on scroll is off by default and follows its
+    /// signal.
+    #[test]
+    fn the_header_background_on_scroll_reaches_the_screens_config() {
+        assert!(!crate::ScreenConfig::default().header_background_on_scroll);
+        let mut c = core();
+        c.mount_root(&Root::new::<OnScrollPage>(|| OnScrollPageProps {}));
+        let config = |batch: &MountBatch| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+                _ => None,
+            })
+        };
+        let first = config(&c.commit().unwrap()).expect("a screen");
+        assert!(first.header_transparent);
+        assert!(!first.header_background_on_scroll);
+        let on = ON_SCROLL.with(Cell::get).expect("mounted");
+        {
+            let _entered = c.components.runtime.enter();
+            on.set(true);
+        }
+        let updated = config(&c.commit().unwrap()).expect("updated");
+        assert!(updated.header_background_on_scroll);
     }
 
     /// A screen whose trailing header button is UIKit's own.
