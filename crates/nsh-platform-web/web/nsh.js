@@ -5733,11 +5733,38 @@ class Player {
         if (submit === "blurAndSubmit") field.blur();
       }
     });
+    // `selectTextOnFocus`: focus selects the whole text, however it comes. A
+    // press that focuses the field places the caret after the focus (on
+    // its mousedown or its mouseup, by browser), so the press's mouseup
+    // selects it again unless the press made its own selection: a drag's
+    // range, a Shift-click's extension, or a second click on the focused
+    // field (a double click's word).
+    field.addEventListener("pointerdown", (e) => {
+      if (document.activeElement === field) field._selectOnUp = false;
+      else field._shiftPress = e.shiftKey;
+    });
+    const pressEnded = () => { field._shiftPress = false; };
+    field.addEventListener("pointerup", pressEnded);
+    field.addEventListener("pointercancel", pressEnded);
+    field.addEventListener("mouseup", (e) => {
+      if (!field._selectOnUp) return;
+      field._selectOnUp = false;
+      if (field.selectionStart !== field.selectionEnd) return;
+      e.preventDefault();
+      field.setSelectionRange(0, field.value.length);
+      this.selectionChanged(el, field);
+    });
     field.addEventListener("focus", () => {
       this.setState(el, FOCUSED, true);
       this.event(el._id, "onFocus");
+      if (el._config?.selectTextOnFocus && !field._shiftPress) {
+        field.setSelectionRange(0, field.value.length);
+        field._selectOnUp = true;
+        this.selectionChanged(el, field);
+      }
     });
     field.addEventListener("blur", () => {
+      field._selectOnUp = false;
       this.setState(el, FOCUSED, false);
       this.event(el._id, "onBlur");
     });
