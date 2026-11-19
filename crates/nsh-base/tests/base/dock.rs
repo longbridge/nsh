@@ -8,8 +8,8 @@
 //! The app controls the layout: what it shows is what the area reported.
 
 use nsh_base::dock::{
-    DockArea, DockAreaApi, DockAreaEvent, DockAreaLayout, DockGroup, DockLayout, DockNode, DockPanel,
-    DockPlacement, DockRegion, DockTab, PanelId, dock_area,
+    DockArea, DockAreaApi, DockAreaEvent, DockAreaLayout, DockGroup, DockLayout, DockNode,
+    DockPanel, DockPlacement, DockRegion, DockTab, PanelId, dock_area,
 };
 use nsh_core::{
     Size, ViewKind,
