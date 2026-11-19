@@ -1898,14 +1898,17 @@ impl GpuiTextEngine {
             (left, right) = (at, at);
         }
         let width = right - left;
-        // Whitespace hanging past the end is not drawn and takes no room
-        // in the box, but a caret after it stands past it: the line
-        // reports it in its width, as CoreText's lines and the web
-        // backend's do. A clamped line's ellipsis takes its place.
-        let hanging: f32 = if row.ellipsis {
-            0.0
-        } else {
+        // Whitespace hanging past the end of a paragraph's last line is
+        // not drawn and takes no room in the box, but a caret after it
+        // stands past it: that line reports it in its width. A line broken
+        // inside its paragraph does not: a caret after its break-space
+        // stands at the next line's start, and its width stays within the
+        // box (a justified line fills it exactly). A clamped line's
+        // ellipsis takes the whitespace's place.
+        let hanging: f32 = if row.last && !row.ellipsis {
             advances[trailing..].iter().sum()
+        } else {
+            0.0
         };
         let free = avail - width;
         let start_right = t.rtl || p.rtl;
@@ -3823,6 +3826,14 @@ mod tests {
         // A caret after the spaces (`RichEditor` puts one at the line's
         // width) stands past them.
         assert!(spaced > word + 5.0, "{word} {spaced}");
+        // A line broken at a space keeps its width within the box.
+        let (size, layout) = layout_of(&engine, &text(&[("Hx Hx", plain(20.0))]), Some(word + 1.0));
+        let lines = engine.lines(&layout);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(
+            lines[0].width.0 <= size.width.0 + 0.01,
+            "{lines:?} {size:?}"
+        );
     }
 
     #[test]
