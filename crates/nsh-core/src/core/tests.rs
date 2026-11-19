@@ -11465,6 +11465,121 @@ fn node_quota_and_dense_ids() {
     assert!(matches!(err, ApplyError::IdOutOfRange(_)) && err.is_fatal());
 }
 
+/// Views 10, 11, … nested `depth` deep, the first in `under`: made from
+/// `under` down (`top_down`), or from the deepest up and put in `under`
+/// last. The first insert refused, if one is.
+fn nest(
+    c: &mut Core<FakeEngine>,
+    under: NodeId,
+    depth: u32,
+    top_down: bool,
+) -> Result<(), ApplyError> {
+    for id in 10..10 + depth {
+        c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+    }
+    let mut inserts: Vec<(NodeId, NodeId)> = (0..depth)
+        .map(|i| (if i == 0 { under } else { 9 + i }, 10 + i))
+        .collect();
+    if !top_down {
+        inserts.reverse();
+    }
+    for (parent, child) in inserts {
+        c.apply(Op::Insert {
+            parent,
+            child,
+            before: None,
+        })?;
+    }
+    Ok(())
+}
+
+/// Runs `f` on a thread with the engine thread's stack, which the depth
+/// quota is sized for (a test thread's is smaller).
+fn on_engine_stack(f: impl FnOnce() + Send + 'static) {
+    std::thread::Builder::new()
+        .stack_size(8 << 20)
+        .spawn(f)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn views_nest_to_the_depth_quota_and_no_deeper() {
+    on_engine_stack(views_nest_to_the_depth_quota);
+}
+
+fn views_nest_to_the_depth_quota() {
+    let max = MAX_TREE_DEPTH as u32;
+    for top_down in [true, false] {
+        // As deep as the quota allows: laid out and mounted.
+        let mut c = core();
+        assert_eq!(nest(&mut c, ROOT_ID, max, top_down), Ok(()));
+        let batch = c.commit().expect("mounted");
+        assert!(frame_of(&batch, 9 + max).is_some());
+
+        // One deeper: refused, and the app is stopped.
+        let mut c = core();
+        let err = nest(&mut c, ROOT_ID, max + 1, top_down).unwrap_err();
+        assert_eq!(err, ApplyError::TooDeep(MAX_TREE_DEPTH));
+        assert!(err.is_fatal());
+        // The refused view stays out of the tree, which still commits.
+        c.commit().expect("mounted");
+        let refused = if top_down { 10 + max } else { 10 };
+        assert_eq!(c.measure(refused), None);
+    }
+}
+
+#[test]
+fn a_view_that_held_a_deep_tree_goes_deep_once_it_is_gone() {
+    on_engine_stack(a_view_that_held_a_deep_tree);
+}
+
+fn a_view_that_held_a_deep_tree() {
+    let max = MAX_TREE_DEPTH as u32;
+    let mut c = core();
+    // View 2 holds views nested nearly to the quota, then lets them go.
+    c.apply(Op::Create {
+        id: 2,
+        tag: Tag::View,
+    })
+    .unwrap();
+    c.apply(Op::Insert {
+        parent: ROOT_ID,
+        child: 2,
+        before: None,
+    })
+    .unwrap();
+    nest(&mut c, 2, max - 1, true).unwrap();
+    c.apply(Op::Insert {
+        parent: ROOT_ID,
+        child: 10,
+        before: None,
+    })
+    .unwrap();
+    // Alone, it goes at the bottom of them: as deep as the quota.
+    c.apply(Op::Insert {
+        parent: 9 + max - 1,
+        child: 2,
+        before: None,
+    })
+    .unwrap();
+    // And nothing goes under it there.
+    c.apply(Op::Create {
+        id: 3,
+        tag: Tag::View,
+    })
+    .unwrap();
+    assert_eq!(
+        c.apply(Op::Insert {
+            parent: 2,
+            child: 3,
+            before: None,
+        }),
+        Err(ApplyError::TooDeep(MAX_TREE_DEPTH))
+    );
+}
+
 #[test]
 fn the_id_table_follows_the_nodes_alive_not_every_id_made() {
     let mut c = core();

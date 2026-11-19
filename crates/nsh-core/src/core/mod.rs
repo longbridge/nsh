@@ -599,6 +599,10 @@ struct Node {
     inline: bool,
     parent: Key,
     children: Vec<Key>,
+    /// How many levels of views are under it, at most: what an insert
+    /// under it raised it to, and what leaves it does not lower
+    /// ([`Core::height`] counts them when that matters).
+    height: u32,
     /// Layout node. Present exactly for nodes that render a native view.
     /// Raw text and spans have none.
     layout: Option<LayoutId>,
@@ -957,6 +961,7 @@ impl Node {
             inline: false,
             parent: NO_KEY,
             children: Vec::new(),
+            height: 0,
             layout: None,
             base_layout: None,
             view_style: Sparse::default(),
@@ -1200,6 +1205,15 @@ fn take_queued_binds(binds: &mut Vec<ListBind>, list: NodeId) -> Vec<u32> {
     slots
 }
 
+/// How deep views nest under the root: an insert that would put a view
+/// deeper is refused ([`ApplyError::TooDeep`]). Layout, mounting and the
+/// walks of the tree recurse once per level, on the native stack, which
+/// neither the node quota nor the interpreter's stack limit bounds: without
+/// this a chain of views overflows it and aborts the process. Far deeper
+/// than a UI nests, and shallow enough for the engine thread's 8 MiB stack
+/// in a debug build.
+pub const MAX_TREE_DEPTH: usize = 1024;
+
 /// An op referenced a node in an impossible way. This is a renderer bug;
 /// the op is skipped and the tree stays consistent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1216,6 +1230,9 @@ pub enum ApplyError {
     Cycle(NodeId),
     /// Creating the node would exceed the node quota ([`Core::set_max_nodes`]).
     TooManyNodes(usize),
+    /// The insert would nest views deeper than the depth quota
+    /// ([`MAX_TREE_DEPTH`]).
+    TooDeep(usize),
     /// A new id far beyond the ids in use (ids index a table, so they must
     /// stay dense).
     IdOutOfRange(NodeId),
@@ -1227,7 +1244,7 @@ impl ApplyError {
     pub fn is_fatal(&self) -> bool {
         matches!(
             self,
-            ApplyError::TooManyNodes(_) | ApplyError::IdOutOfRange(_)
+            ApplyError::TooManyNodes(_) | ApplyError::TooDeep(_) | ApplyError::IdOutOfRange(_)
         )
     }
 }
@@ -6751,8 +6768,20 @@ impl<M: TextEngine> Core<M> {
         {
             before = Some(bar);
         }
-        if child == self.root || self.is_ancestor(child, parent) {
+        let Some(depth) = self
+            .depth_outside(child, parent)
+            .filter(|_| child != self.root)
+        else {
             return Err(ApplyError::Cycle(child_id));
+        };
+        let max = MAX_TREE_DEPTH as u32;
+        if depth + self.nodes[child as usize].height > max {
+            // What left the child since may have made it shallower.
+            let height = self.height(child);
+            self.nodes[child as usize].height = height;
+            if depth + height > max {
+                return Err(ApplyError::TooDeep(MAX_TREE_DEPTH));
+            }
         }
         if self.nodes[parent as usize]
             .shader
@@ -6810,6 +6839,7 @@ impl<M: TextEngine> Core<M> {
             self.key_ancestry_dirty = true;
         }
         self.nodes[parent as usize].children.insert(pos, child);
+        self.raise_heights(child);
         self.rank_noted(child);
         self.tree_order_changed |= self.track_tree_order;
         self.tab_places_stale = true;
@@ -7234,6 +7264,49 @@ impl<M: TextEngine> Core<M> {
             key = node.parent;
         }
         false
+    }
+
+    /// How many views are above `key` and `key` itself (1 for a view with
+    /// no parent), or `None` when `ancestor` is one of them.
+    fn depth_outside(&self, ancestor: Key, mut key: Key) -> Option<u32> {
+        let mut depth = 0;
+        while key != NO_KEY {
+            if key == ancestor {
+                return None;
+            }
+            depth += 1;
+            key = self.nodes[key as usize].parent;
+        }
+        Some(depth)
+    }
+
+    /// How many levels of views are under `key`, counted (its
+    /// [`Node::height`] is at least this).
+    fn height(&self, key: Key) -> u32 {
+        let mut height = 0;
+        let mut pending = vec![(key, 0)];
+        while let Some((key, level)) = pending.pop() {
+            height = height.max(level);
+            let children = &self.nodes[key as usize].children;
+            pending.extend(children.iter().map(|&c| (c, level + 1)));
+        }
+        height
+    }
+
+    /// `key` came under its parent: the views above it are as high as it
+    /// makes them. Stops at the first that was already.
+    fn raise_heights(&mut self, key: Key) {
+        let mut height = self.nodes[key as usize].height + 1;
+        let mut at = self.nodes[key as usize].parent;
+        while at != NO_KEY {
+            let node = &mut self.nodes[at as usize];
+            if node.height >= height {
+                break;
+            }
+            node.height = height;
+            height += 1;
+            at = node.parent;
+        }
     }
 
     fn is_ancestor(&self, ancestor: Key, mut key: Key) -> bool {
