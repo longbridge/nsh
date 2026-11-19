@@ -212,6 +212,9 @@ pub(crate) struct Apk<'a> {
     /// (`webview.media`): `RECORD_AUDIO` and `CAMERA` are declared.
     pub(crate) microphone: bool,
     pub(crate) camera: bool,
+    /// The app's own dex files (nsh.json `android.dex`), after the
+    /// runtime's: `classes2.dex`, `classes3.dex`, ...
+    pub(crate) dex: &'a [PathBuf],
     /// URL schemes that open the app (nsh.json `schemes`): one
     /// `VIEW` intent filter.
     pub(crate) schemes: &'a [String],
@@ -642,6 +645,24 @@ fn add_files(
         .context("runtime classes.dex missing")?
         .read_to_end(&mut dex)?;
     zip.write_all(&dex)?;
+    // The app's own after the runtime's: Android loads `classes<N>.dex`
+    // from 2 up, until one is missing.
+    let dex_dir = layout
+        .dex
+        .strip_suffix("classes.dex")
+        .context("dex layout")?;
+    for (i, path) in apk.dex.iter().enumerate() {
+        let bytes = fs::read(path)
+            .with_context(|| format!("nsh.json android.dex: read {}", path.display()))?;
+        if !bytes.starts_with(b"dex\n") {
+            bail!(
+                "nsh.json android.dex: {} is not a dex file (make one with the SDK's `d8`)",
+                path.display()
+            );
+        }
+        zip.start_file(format!("{dex_dir}classes{}.dex", i + 2), deflate)?;
+        zip.write_all(&bytes)?;
+    }
     let libs = apk.runtime.join("lib");
     let mut available = Vec::new();
     for entry in fs::read_dir(&libs).with_context(|| format!("read {}", libs.display()))? {
@@ -858,6 +879,7 @@ mod tests {
             notifications,
             microphone: false,
             camera: false,
+            dex: &[],
             schemes: &[],
             rust,
             dark: false,
@@ -921,6 +943,70 @@ mod tests {
         assert!(manifest.contains("android.permission.RECORD_AUDIO"));
         assert!(!manifest.contains("android.permission.CAMERA"));
         assert!(!super::manifest_xml(&apk(false, false)).contains("RECORD_AUDIO"));
+    }
+
+    #[test]
+    fn the_apps_dex_files_follow_the_runtimes() {
+        use std::io::Read as _;
+        let dir = std::env::temp_dir().join(format!("nsh-cli-android-dex-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let runtime = dir.join("runtime");
+        std::fs::create_dir_all(runtime.join("lib/arm64-v8a")).unwrap();
+        std::fs::write(runtime.join("classes.dex"), b"dex\n035\0runtime").unwrap();
+        std::fs::write(runtime.join("lib/arm64-v8a/libnsh.so"), b"so").unwrap();
+        let base = dir.join("base.zip");
+        zip::ZipWriter::new(std::fs::File::create(&base).unwrap())
+            .finish()
+            .unwrap();
+        let app = [dir.join("a.dex"), dir.join("b.dex")];
+        std::fs::write(&app[0], b"dex\n035\0a").unwrap();
+        std::fs::write(&app[1], b"dex\n035\0b").unwrap();
+        let read = |zip: &std::path::Path, name: &str| {
+            let mut archive = zip::ZipArchive::new(std::fs::File::open(zip).unwrap()).unwrap();
+            let mut file = archive.by_name(name).unwrap();
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes).unwrap();
+            bytes
+        };
+        for (layout, prefix) in [
+            (&super::Layout::APK, ""),
+            (&super::Layout::BUNDLE, "base/dex/"),
+        ] {
+            let out = dir.join("out.zip");
+            super::add_files(
+                &base,
+                &out,
+                &super::Apk {
+                    runtime: &runtime,
+                    dex: &app,
+                    ..apk(false, false)
+                },
+                layout,
+            )
+            .unwrap();
+            assert_eq!(
+                read(&out, &format!("{prefix}classes.dex")),
+                b"dex\n035\0runtime"
+            );
+            assert_eq!(read(&out, &format!("{prefix}classes2.dex")), b"dex\n035\0a");
+            assert_eq!(read(&out, &format!("{prefix}classes3.dex")), b"dex\n035\0b");
+        }
+        // A file that is no dex fails the build instead of a class lookup on the device.
+        std::fs::write(&app[1], b"PK\x03\x04 a jar").unwrap();
+        let err = super::add_files(
+            &base,
+            &dir.join("out.zip"),
+            &super::Apk {
+                runtime: &runtime,
+                dex: &app,
+                ..apk(false, false)
+            },
+            &super::Layout::APK,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("is not a dex file"), "{err}");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

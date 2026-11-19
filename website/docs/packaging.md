@@ -63,7 +63,7 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 
 `nsh.json` also holds `rust` and `root` (the app's crates and its root component, [Building with Rust](./rust.md)),
 `theme` and `appearance`, `tailwind` (see [Tailwind](./tailwind.md)), `capabilities` (see
-[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk` and `usesCleartextTraffic`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
+[Sandbox and capabilities](./sandbox-and-capabilities.md)), `android` (`targetSdk`, `usesCleartextTraffic` and `dex`, [below](#target-api-level)), `ios` and `macos` (the `Info.plist` keys and entitlements
 of their packages, [below](#infoplist-keys-and-entitlements); `macos.activationPolicy`, a [menu bar app](./macos.md#menu-bar-apps)) and `updater`, which makes desktop packages update themselves
 (see [App Updates](./app-updates.md)) and every native package take [OTA updates](./ota-updates.md); [Project structure](./project-structure.md#nshjson) lists
 every key. A key or value NSH cannot read is reported as a warning and left out, so an app written for a newer NSH
@@ -200,6 +200,31 @@ Packaged apps make requests over HTTPS. For servers without TLS, such as one on 
 ```
 
 Development builds (`nsh run --target android`) always allow plain HTTP: they load the app from the dev server over it.
+
+### Java code
+
+Rust reaches most Android APIs through JNI, but some take a class the app defines: a listener, a callback, a
+`PrintDocumentAdapter`. `android.dex` lists dex files of the app's own Java code (or an extension's), relative to
+`nsh.json`. The package carries them after NSH's runtime as `classes2.dex`, `classes3.dex` and so on, in the order
+listed, so the app's class loader finds their classes:
+
+```json
+{
+  "android": { "dex": ["java/out/classes.dex"] }
+}
+```
+
+Compile the Java sources against the platform's `android.jar`, then turn the classes into a dex with the SDK's `d8`:
+
+```sh
+javac -source 11 -target 11 -classpath "$ANDROID_HOME/platforms/android-35/android.jar" -d java/classes java/src/*.java
+"$ANDROID_HOME/build-tools/<version>/d8" --min-api 26 --lib "$ANDROID_HOME/platforms/android-35/android.jar" \
+  --output java/out $(find java/classes -name '*.class')
+```
+
+A thread Rust started finds only the system's classes through JNI's `FindClass`; load the app's classes from the
+activity's class loader (`Context.getClassLoader()`) there. The TSX development host (`nsh run --target android` of
+a TSX app) carries none of these files; a Rust app's `nsh run` builds its package and carries them.
 
 ### Google Play: App Bundles
 

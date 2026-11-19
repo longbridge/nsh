@@ -280,6 +280,12 @@ pub(crate) struct AndroidConfig {
     /// TLS. Off by default, as Android has it from API 28 on.
     #[serde(default)]
     pub(crate) uses_cleartext_traffic: bool,
+    /// Dex files of the app's own Java code (or an extension's), relative
+    /// to `nsh.json`: packaged after the runtime's `classes.dex` as
+    /// `classes2.dex`, `classes3.dex`, ..., so the app's class loader finds
+    /// their classes as it finds NSH's.
+    #[serde(default)]
+    pub(crate) dex: Vec<PathBuf>,
 }
 
 impl AndroidConfig {
@@ -782,6 +788,10 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         ));
         config.data_dir = None;
     }
+    config.android.dex = std::mem::take(&mut config.android.dex)
+        .into_iter()
+        .map(|dex| dir.join(dex))
+        .collect();
     config.icon = match config.icon {
         Some(AppIcon::All(icon)) => Some(AppIcon::All(dir.join(icon))),
         Some(AppIcon::Platforms(icons)) => Some(AppIcon::Platforms(
@@ -1480,6 +1490,7 @@ fn package_android(
             notifications: config.notifications(),
             microphone: config.web_media("microphone"),
             camera: config.web_media("camera"),
+            dex: &config.android.dex,
             schemes: &config.schemes,
             rust: built.rust_root,
             dark: config.appearance.as_deref() == Some("dark"),
@@ -2847,6 +2858,28 @@ mod tests {
         assert!(cleartext(
             serde_json::json!({ "android": { "usesCleartextTraffic": true } })
         ));
+    }
+
+    #[test]
+    fn android_dex_files_are_relative_to_nsh_json() {
+        let dir =
+            std::env::temp_dir().join(format!("nsh-cli-android-dex-config-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "android": { "dex": ["java/out/classes.dex"] } }"#,
+        )
+        .unwrap();
+        let config = read_config(&dir.join("App.tsx")).unwrap();
+        assert_eq!(config.android.dex, [dir.join("java/out/classes.dex")]);
+        assert!(
+            serde_json::from_value::<AppConfig>(serde_json::json!({}))
+                .unwrap()
+                .android
+                .dex
+                .is_empty()
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
