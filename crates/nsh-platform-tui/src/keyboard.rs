@@ -1016,7 +1016,8 @@ impl Keyboard {
                     position,
                     page_position: g.frame.origin + position,
                     modifiers,
-                    clicks: 1,
+                    // A keyboard activation, not a click.
+                    clicks: 0,
                 });
                 for event in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
                     if events.contains(event) {
