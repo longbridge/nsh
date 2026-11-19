@@ -21,12 +21,12 @@ Then use it in the app. In Rust, its components are functions of the crate; in T
 ```rust tabs
 // src/lib.rs: the app's root component
 use nsh_core::prelude::*;
-use nsh_omarchy::{self as om, tokens};
+use nsh_omarchy::tokens;
 
 #[component]
 pub fn App() -> impl IntoElement {
     // Draw with the Omarchy theme the system uses, and follow its changes.
-    om::init();
+    nsh_omarchy::init();
     let saved = signal(0_u32);
     let notify = signal(true);
     view()
@@ -35,15 +35,20 @@ pub fn App() -> impl IntoElement {
         .gap(px(tokens::SPACE_4))
         .bg(move || tokens::background())
         .child(
-            om::panel("Settings")
+            nsh_omarchy::panel("Settings")
                 .child(
-                    om::switch("Notifications")
+                    nsh_omarchy::switch("Notifications")
                         .checked(move || notify.get())
                         .on_change(move |on: &bool| notify.set(*on)),
                 )
-                .child(om::button_primary("Save").on_press(move || saved.update(|n| *n += 1))),
+                .child(
+                    nsh_omarchy::button_primary("Save")
+                        .on_press(move || saved.update(|n| *n += 1)),
+                ),
         )
-        .child(om::body_text(move || format!("Saved {} times", saved.get())))
+        .child(nsh_omarchy::body_text(move || {
+            format!("Saved {} times", saved.get())
+        }))
 }
 ```
 

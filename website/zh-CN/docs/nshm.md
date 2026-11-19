@@ -21,12 +21,12 @@ nsh add github:huacnlee/nsh-omarchy  # 或来自 GitHub
 ```rust tabs
 // src/lib.rs：应用的根组件
 use nsh_core::prelude::*;
-use nsh_omarchy::{self as om, tokens};
+use nsh_omarchy::tokens;
 
 #[component]
 pub fn App() -> impl IntoElement {
     // 使用系统当前的 Omarchy 主题绘制，并跟随它的变化。
-    om::init();
+    nsh_omarchy::init();
     let saved = signal(0_u32);
     let notify = signal(true);
     view()
@@ -35,15 +35,20 @@ pub fn App() -> impl IntoElement {
         .gap(px(tokens::SPACE_4))
         .bg(move || tokens::background())
         .child(
-            om::panel("Settings")
+            nsh_omarchy::panel("Settings")
                 .child(
-                    om::switch("Notifications")
+                    nsh_omarchy::switch("Notifications")
                         .checked(move || notify.get())
                         .on_change(move |on: &bool| notify.set(*on)),
                 )
-                .child(om::button_primary("Save").on_press(move || saved.update(|n| *n += 1))),
+                .child(
+                    nsh_omarchy::button_primary("Save")
+                        .on_press(move || saved.update(|n| *n += 1)),
+                ),
         )
-        .child(om::body_text(move || format!("Saved {} times", saved.get())))
+        .child(nsh_omarchy::body_text(move || {
+            format!("Saved {} times", saved.get())
+        }))
 }
 ```
 
