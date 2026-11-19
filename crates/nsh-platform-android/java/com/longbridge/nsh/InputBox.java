@@ -418,22 +418,25 @@ final class InputBox extends FrameLayout implements Node {
      */
     private void tintHandles(Integer color) {
         if (Build.VERSION.SDK_INT < 29 || java.util.Objects.equals(handleColor, color)) return;
-        handleColor = color;
         int[] attrs = {
             android.R.attr.textSelectHandleLeft, android.R.attr.textSelectHandleRight, android.R.attr.textSelectHandle
         };
-        android.graphics.drawable.Drawable[] handles = new android.graphics.drawable.Drawable[attrs.length];
         for (int i = 0; i < attrs.length; i++) {
             android.content.res.TypedArray a = getContext().obtainStyledAttributes(new int[] {attrs[i]});
             android.graphics.drawable.Drawable d = a.getDrawable(0);
             a.recycle();
-            if (d == null) return;
-            handles[i] = d.mutate();
-            if (color != null) handles[i].setTint(color);
+            // A handle the theme has no drawable for keeps the EditText's own;
+            // the others still take the color.
+            if (d == null) continue;
+            d = d.mutate();
+            if (color != null) d.setTint(color);
+            if (i == 0) edit.setTextSelectHandleLeft(d);
+            else if (i == 1) edit.setTextSelectHandleRight(d);
+            else edit.setTextSelectHandle(d);
         }
-        edit.setTextSelectHandleLeft(handles[0]);
-        edit.setTextSelectHandleRight(handles[1]);
-        edit.setTextSelectHandle(handles[2]);
+        // Recorded only once applied, so the same color asked again is not
+        // skipped as already set.
+        handleColor = color;
     }
 
     /** Return submitted: `onSubmitEditing`, then unfocuses for `blurAndSubmit`. */
