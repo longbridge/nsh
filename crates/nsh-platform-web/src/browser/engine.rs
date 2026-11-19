@@ -82,7 +82,8 @@ impl Host for Runtime {
                         (EventKind::ContentSizeChange, EventPayload::Map(_)) => {
                             events::wrap("size", events::payload(&self.bindings, payload)?)?
                         }
-                        // Presses always pass their event, as nsh-js's do.
+                        // Presses always pass their event, as nsh-js's do:
+                        // with no clicks when not from a pointer.
                         (
                             EventKind::Press
                             | EventKind::LongPress
@@ -91,10 +92,7 @@ impl Host for Runtime {
                             EventPayload::None,
                         ) => events::payload(
                             &self.bindings,
-                            &EventPayload::Press(nsh_core::PressEvent {
-                                clicks: 1,
-                                ..Default::default()
-                            }),
+                            &EventPayload::Press(nsh_core::PressEvent::default()),
                         )?,
                         // A video's `onLoad`: `{ duration, size }`, as nsh-js
                         // builds it (a web view's has no `duration`).

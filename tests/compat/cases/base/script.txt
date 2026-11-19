@@ -4788,3 +4788,11 @@ expect Strip h
 frame scroll:id:strip-tab-a 0 0 390 24
 tap id:strip-show-h
 expect Strip h*
+
+# base-dock-render-handle
+# The handle between the two groups draws what `renderHandle` returns.
+tap id:case-base-dock-render-handle
+expect Tab a
+expect Tab b
+expect Grip 0 horizontal idle
+covers [props] DockArea.renderHandle

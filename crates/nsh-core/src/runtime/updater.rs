@@ -235,6 +235,9 @@ impl Updater {
         #[args(progress)] on_progress: Option<Callback<UpdateProgress>>,
         sys: System,
     ) -> Later<()> {
+        let on_progress = on_progress.map(|callback| {
+            Box::new(move |progress| callback.post(progress)) as Box<dyn Fn(UpdateProgress)>
+        });
         Later::new(native::download(sys, on_progress))
     }
 
@@ -261,6 +264,31 @@ impl Updater {
     /// stays as it was and quits all the same, the failure logged.
     pub(crate) fn install_on_quit(sys: System) -> Later<()> {
         Later::new(native::install_on_quit(sys))
+    }
+
+    /// Checks for a newer version as `checkForUpdate` does and asks the
+    /// user about it in NSH's built-in prompt, as macOS apps' Sparkle does:
+    /// the version, its notes and Skip This Version, Remind Me Later and
+    /// Install Update, then the download's progress and Install and
+    /// Relaunch or Install on Quit. Where the app cannot install itself
+    /// (`canInstall` false: iOS, Android) Install Update opens the update's
+    /// `url`. The user's Skip This Version and "Automatically download and
+    /// install updates" are kept in the app's data directory: a `quiet`
+    /// check (at startup, in the background) shows nothing for a skipped
+    /// version, and installs an update as the app quits without asking
+    /// once the user chose to; it shows nothing either when the app is up
+    /// to date or the check fails. Without `quiet` (a "Check for Updates…"
+    /// menu item) the user hears that too. Resolves once the prompt shows,
+    /// or there is nothing to show; never rejects.
+    pub(crate) fn prompt_for_update(
+        options: Option<UpdatePromptOptions>,
+        sys: System,
+    ) -> Later<()> {
+        let options = options.unwrap_or_default();
+        Later::new(async move {
+            prompt::run(sys, options).await;
+            Ok::<_, JsError>(())
+        })
     }
 
     /// Asks the source in `nsh.json`'s `"updater"` for a newer build of the
@@ -330,6 +358,10 @@ impl Updater {
     }
 }
 
+mod prompt;
+
+pub use prompt::{UpdatePrompt, UpdatePromptOptions, prompt_for_update, set_update_presenter};
+
 /// Why no package can be downloaded.
 fn no_package() -> JsError {
     JsError::Error("no package to download: checkForPackage found none".into())
@@ -348,9 +380,9 @@ fn unavailable() -> JsError {
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "updater"))]
 mod native {
-    use nsh_updater::{Available, Config, Download};
-
     use std::collections::BTreeMap;
+
+    use nsh_updater::{Available, Config, Download};
 
     use super::*;
 
@@ -535,6 +567,25 @@ mod native {
         Ok(Some(update))
     }
 
+    /// The app's display name and version as it was packaged
+    /// (`nsh-updater.json`), when it has them.
+    pub(super) async fn shipped(sys: &System) -> (Option<String>, Option<String>) {
+        let Some(host) = sys.updater.clone() else {
+            return (None, None);
+        };
+        let shipped = blocking(move || {
+            Ok(host
+                .config()
+                .and_then(|bytes| Config::parse(&bytes).ok())
+                .map(|config| (config.name, config.version)))
+        })
+        .await;
+        match shipped {
+            Ok(Some((name, version))) => (name, Some(version)),
+            _ => (None, None),
+        }
+    }
+
     /// The notes in `locale` among `files`, downloaded and checked; `None`
     /// keeps the default notes, also when the file cannot be had: notes in
     /// another language must not fail a check.
@@ -581,7 +632,7 @@ mod native {
 
     pub(super) async fn download(
         sys: System,
-        on_progress: Option<Callback<UpdateProgress>>,
+        on_progress: Option<Box<dyn Fn(UpdateProgress)>>,
     ) -> Result<(), JsError> {
         use std::io::Write as _;
 
@@ -628,8 +679,8 @@ mod native {
             tokio::select! {
                 result = &mut work => break result?,
                 Some((received, total)) = rx.recv() => {
-                    if let Some(callback) = &on_progress {
-                        callback.post(UpdateProgress {
+                    if let Some(on_progress) = &on_progress {
+                        on_progress(UpdateProgress {
                             received: received as f64,
                             total: total.map(|t: u64| t as f64),
                         });
@@ -1115,9 +1166,13 @@ mod native {
         Ok(None)
     }
 
+    pub(super) async fn shipped(_: &System) -> (Option<String>, Option<String>) {
+        (None, None)
+    }
+
     pub(super) async fn download(
         _: System,
-        _: Option<Callback<UpdateProgress>>,
+        _: Option<Box<dyn Fn(UpdateProgress)>>,
     ) -> Result<(), JsError> {
         Err(unavailable())
     }
