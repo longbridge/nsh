@@ -31,6 +31,7 @@ mod logger;
 mod net;
 #[cfg(feature = "js")]
 mod package;
+pub mod permissions;
 mod selectable_view;
 mod shader;
 mod svg;

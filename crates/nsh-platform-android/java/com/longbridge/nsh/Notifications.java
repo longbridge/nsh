@@ -13,7 +13,6 @@ import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
 import android.net.Uri;
 import android.os.Build;
-import android.os.Bundle;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
 
@@ -49,6 +48,8 @@ final class Notifications {
     private static final List<String> presses = new ArrayList<>();
     /** The count {@code setBadge} set. UI thread. */
     private static int badge;
+    /** The permission requests waiting for the prompt showing: their mounters and ids. UI thread. */
+    private static final List<Object[]> waiting = new ArrayList<>();
 
     private Notifications() {}
 
@@ -62,7 +63,7 @@ final class Notifications {
                 if (ask && permission(context).equals("default")) {
                     Activity activity = SystemUi.activity(context);
                     if (activity != null) {
-                        results(activity).ask(mounter, request);
+                        ask(activity, mounter, request);
                         return;
                     }
                 }
@@ -147,29 +148,13 @@ final class Notifications {
         if (Build.VERSION.SDK_INT >= 33
                 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             boolean asked = preferences(context).getBoolean(ASKED, false);
-            return asked || !declared(context) ? "denied" : "default";
+            return asked || !Permissions.declared(context, Manifest.permission.POST_NOTIFICATIONS) ? "denied" : "default";
         }
         return manager(context).areNotificationsEnabled() ? "granted" : "denied";
     }
 
     private static SharedPreferences preferences(Context context) {
         return context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE);
-    }
-
-    /** Whether the app's manifest declares {@code POST_NOTIFICATIONS}. */
-    private static boolean declared(Context context) {
-        try {
-            String[] permissions = context.getPackageManager()
-                    .getPackageInfo(context.getPackageName(), PackageManager.GET_PERMISSIONS).requestedPermissions;
-            if (permissions != null) {
-                for (String permission : permissions) {
-                    if (Manifest.permission.POST_NOTIFICATIONS.equals(permission)) return true;
-                }
-            }
-        } catch (PackageManager.NameNotFoundException e) {
-            Log.w(TAG, "cannot read the app's permissions", e);
-        }
-        return false;
     }
 
     @SuppressWarnings("deprecation")
@@ -241,47 +226,19 @@ final class Notifications {
         }
     }
 
-    @SuppressWarnings("deprecation")
-    private static Results results(Activity activity) {
-        android.app.FragmentManager fragments = activity.getFragmentManager();
-        Results results = (Results) fragments.findFragmentByTag(TAG_RESULTS);
-        if (results == null) {
-            results = new Results();
-            fragments.beginTransaction().add(results, TAG_RESULTS).commitNow();
-        }
-        return results;
-    }
-
-    private static final String TAG_RESULTS = "com.longbridge.nsh.Notifications";
-
-    /** Gets the system's answer to the permission prompt, across configuration changes. */
-    @SuppressWarnings("deprecation")
-    public static final class Results extends android.app.Fragment {
-        private static final int CODE = 0x4f00;
-        private final List<Object[]> waiting = new ArrayList<>();
-
-        @Override
-        public void onCreate(Bundle state) {
-            super.onCreate(state);
-            setRetainInstance(true);
-        }
-
-        void ask(Mounter mounter, int request) {
-            waiting.add(new Object[] {mounter, request});
-            if (waiting.size() == 1) requestPermissions(new String[] {Manifest.permission.POST_NOTIFICATIONS}, CODE);
-        }
-
-        @Override
-        public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
-            if (code != CODE) {
-                super.onRequestPermissionsResult(code, permissions, results);
-                return;
-            }
+    /**
+     * Shows the system's prompt for request {@code request}, or joins the prompt already showing: each request waiting
+     * gets the one answer. UI thread.
+     */
+    private static void ask(Activity activity, Mounter mounter, int request) {
+        waiting.add(new Object[] {mounter, request});
+        if (waiting.size() > 1) return;
+        Permissions.ask(activity, new String[] {Manifest.permission.POST_NOTIFICATIONS}, results -> {
             // Empty: the prompt was cancelled, so the user can still be asked.
-            if (results.length > 0) preferences(getActivity()).edit().putBoolean(ASKED, true).apply();
+            if (results != null && results.length > 0) preferences(activity).edit().putBoolean(ASKED, true).apply();
             List<Object[]> answered = new ArrayList<>(waiting);
             waiting.clear();
             for (Object[] w : answered) answerPermission((Mounter) w[0], (Integer) w[1]);
-        }
+        });
     }
 }
