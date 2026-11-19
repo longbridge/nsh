@@ -659,7 +659,8 @@ pub struct PressEvent {
     /// The modifier keys held when the press began.
     pub modifiers: crate::keymap::Modifiers,
     /// Consecutive clicks at the same place: 1 for a click, 2 for a
-    /// double click, ...
+    /// double click, ...; 0 when not from a pointer (a keyboard or
+    /// assistive technology activation), as the DOM's `detail`.
     pub clicks: u32,
 }
 

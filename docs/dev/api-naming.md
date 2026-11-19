@@ -334,7 +334,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | Image `onLoad(size: PixelSize)` | `onLoad({ size }: { size: PixelSize })` | Payloads | 2026-10-27, as Video's `onLoad({ duration, size })` |
 | Input `onContentSizeChange(size: Size)` | `onContentSizeChange({ size }: { size: Size })` | Payloads | 2026-10-27 |
 | `PanEvent` `translationX` / `translationY`, `velocityX` / `velocityY`, `valueX` / `valueY` | `translation: Point`, `velocity: Point`, `value?: Partial<Point>` | Points | 2026-10-27: `e.velocity.x`, `e.value?.y`; `cancelled` stays |
-| `onPress`, `onLongPress`, `onPressDown`, `onPressUp` `(e?: PressEvent)` | `(e: PressEvent)` | Payloads | 2026-10-27: always passed; where the backend does not know the pointer, at the view's origin with no keys and one click |
+| `onPress`, `onLongPress`, `onPressDown`, `onPressUp` `(e?: PressEvent)` | `(e: PressEvent)` | Payloads | 2026-10-27: always passed; where the backend does not know the pointer, at the view's origin with no keys and one click; 2026-11-19 (#2506): `clickCount` 0 instead, as the DOM's `detail` for keyboard and assistive technology activations |
 | `keymap.bind` handlers `(keystroke: string)` | `({ keystroke }: { keystroke: string })` | Payloads | 2026-10-27: one object, as every event |
 | **Image** | | | |
 | `src: string \| ImageAsset \| { uri }` | `src: string \| ImageAsset` | Addresses | |
