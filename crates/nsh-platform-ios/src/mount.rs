@@ -5020,9 +5020,8 @@ impl Mounter {
         }
     }
 
-    /// A tap on a `focusable` view that takes no presses: it takes the
-    /// keyboard focus without claiming the touch. The pressable path
-    /// ([`Mounter::press_changed`]) focuses those with press handlers.
+    /// Give a tapped focus stop keyboard focus. An input using the software
+    /// keyboard keeps focus so the layout stays in place under the finger.
     pub(crate) fn focus_node(&mut self, id: NodeId) {
         if !self.typing()
             && let Some(view) = self.slot(id).and_then(|s| s.native.focus_view())
@@ -5035,18 +5034,6 @@ impl Mounter {
 
     /// A finger went down on (or left) a pressable view.
     pub(crate) fn press_changed(&mut self, id: NodeId, pressed: bool, at: PressAt) {
-        // A press on a focusable view gives it the keyboard focus, as a
-        // click does on the desktops (and a tap on an iPad with a hardware
-        // keyboard should). Not while the software keyboard types into an
-        // input: as with UIKit's controls, the input keeps it.
-        if pressed
-            && !self.typing()
-            && let Some(view) = self.slot(id).and_then(|s| s.native.focus_view())
-            && view.is_focus_stop()
-            && view.becomeFirstResponder()
-        {
-            crate::keyboard::request_focus(view);
-        }
         self.report_state(id, nsh_core::tailwind::state::PRESSED, pressed);
         let Some(s) = self.slot(id) else { return };
         let event = if pressed {
@@ -5057,6 +5044,10 @@ impl Mounter {
         if s.events.contains(event) {
             let payload = self.press_payload(id, at);
             self.control.dispatch_event(id, event, payload);
+        }
+        // Queue press-down before UIKit sends the resulting focus notifications.
+        if pressed {
+            self.focus_node(id);
         }
     }
 
