@@ -1,0 +1,13 @@
+diff --git a/crates/nsh-platform-macos/src/mount.rs b/crates/nsh-platform-macos/src/mount.rs
+index 4b7f585ec..fb820a1d3 100644
+--- a/crates/nsh-platform-macos/src/mount.rs
++++ b/crates/nsh-platform-macos/src/mount.rs
+@@ -225,6 +225,8 @@ impl Mounter {
+             view.set_stale(false);
+             if self.alive(&view) {
+                 view.redraw();
++                // A picture taken while drawing was deferred lacks this content.
++                crate::shader::ui_changed(&view);
+                 crate::shader::shown(&view);
+             }
+         }

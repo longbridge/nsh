@@ -1,0 +1,42 @@
+name: Deferred shader native comparison
+on:
+  push:
+    branches: [agent/T-10209-native-probe]
+permissions:
+  contents: read
+env:
+  RUSTUP_TOOLCHAIN: stable
+  CARGO_BUILD_JOBS: 2
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_INCREMENTAL: 0
+jobs:
+  compare:
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [baseline, fixed]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/cargo
+        with:
+          cache: macos
+      - if: matrix.version == 'fixed'
+        run: git apply tests/probe2463/fix.patch
+      - run: cargo build --locked -p nsh-cli -p nsh-macos-host
+      - name: Run the issue example and lifecycle variants on AppKit
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p /tmp/probe2463 "$RUNNER_TEMP/runtime/macos"
+          export NSH_RUNTIME="$RUNNER_TEMP/runtime"
+          cp target/debug/nsh-macos-host "$NSH_RUNTIME/macos/"
+          for demo in App Reopen Nested; do
+            target/debug/nsh test -v --target macos tests/probe2463/"$demo".tsx < tests/probe2463/"$demo".js 2>&1 | tee /tmp/probe2463/"$demo".log
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-${{ matrix.version }}
+          path: /tmp/probe2463/

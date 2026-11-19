@@ -715,6 +715,7 @@ fn children_picture<'a>(
     scale: CGFloat,
     whole: bool,
 ) -> Option<Pixels<'a>> {
+    eprintln!("probe2463 children_picture {:?}", std::time::SystemTime::now());
     let container = host.container_view().and_then(|c| c.layer());
     let layer = match (&container, whole) {
         (Some(c), false) => c.clone(),

@@ -1,0 +1,14 @@
+await app.setViewport(600, 540);
+await app.wait(350);
+await app.screenshot("/tmp/probe2463/App-initial.png");
+await app.press("id:reveal");
+await app.wait(350);
+await app.screenshot("/tmp/probe2463/App-reveal.png");
+await app.press("id:uniform");
+await app.wait(350);
+await app.screenshot("/tmp/probe2463/App-uniform.png");
+await app.press("id:recapture");
+await app.wait(350);
+await app.screenshot("/tmp/probe2463/App-recapture.png");
+await app.wait(1500);
+await app.screenshot("/tmp/probe2463/App-idle.png");
