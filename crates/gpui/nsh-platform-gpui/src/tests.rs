@@ -191,6 +191,7 @@ fn windows(cx: &mut TestAppContext) {
     compositions_are_reported_and_hold_values_until_they_end(cx);
     menu_shortcuts_leave_a_focused_field_the_keys_it_uses(cx);
     presses_carry_where_the_pointer_was(cx);
+    a_click_that_focuses_a_field_selecting_on_focus_selects_its_text(cx);
     files_dropped_from_outside_reach_the_view_under_them(cx);
     presses_carry_the_modifier_keys_and_click_count(cx);
     mouse_events_carry_the_position_button_and_modifiers(cx);
@@ -1057,6 +1058,61 @@ mod press_point {
                     .h(px(30.0)),
             )
     }
+}
+
+/// A focused field over one that selects its text when it takes the
+/// focus, 30 points high each.
+mod select_on_focus {
+    use nsh_base::input;
+    use nsh_core::prelude::*;
+
+    #[component]
+    pub(super) fn SelectOnFocus() -> impl IntoElement {
+        view()
+            .child(
+                input()
+                    .auto_focus(true)
+                    .default_value(String::from("first"))
+                    .h(px(30.0)),
+            )
+            .child(
+                input()
+                    .select_text_on_focus(true)
+                    .default_value(String::from("second"))
+                    .h(px(30.0)),
+            )
+    }
+}
+
+fn a_click_that_focuses_a_field_selecting_on_focus_selects_its_text(cx: &mut TestAppContext) {
+    let (view, cx) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(cx, |view, _| {
+        view.load(App::Rust(Root::of::<select_on_focus::SelectOnFocus>()))
+    });
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, cx, "first");
+    let (x, y) = view.read_with(cx, |view, _| view.surface().origin.get());
+    let (first, second) = (
+        gpui::point(gpui::px(x + 200.0), gpui::px(y + 15.0)),
+        gpui::point(gpui::px(x + 200.0), gpui::px(y + 45.0)),
+    );
+    let none = gpui::Modifiers::default();
+    // The click that focuses it selects the whole text: typing replaces it.
+    cx.simulate_click(second, none);
+    cx.simulate_input("x");
+    wait_for(&view, cx, "x");
+    // A click in the focused field places the caret (after the text).
+    cx.simulate_click(second, none);
+    cx.simulate_input("y");
+    wait_for(&view, cx, "xy");
+    // A Shift-click that focuses it extends the selection it kept (the
+    // caret, at its end) instead.
+    cx.simulate_click(first, none);
+    wait_for(&view, cx, "first");
+    cx.simulate_click(second, gpui::Modifiers::shift());
+    cx.simulate_input("z");
+    wait_for(&view, cx, "xyz");
 }
 
 fn files_dropped_from_outside_reach_the_view_under_them(cx: &mut TestAppContext) {

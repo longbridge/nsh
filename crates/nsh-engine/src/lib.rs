@@ -794,10 +794,6 @@ struct UpdaterOverNetwork {
 impl UpdaterOverNetwork {
     /// `None` without a network, or without both assets and the bundle's
     /// configuration (nothing to update from).
-    #[cfg_attr(
-        not(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32"))),
-        allow(dead_code)
-    )]
     fn host(
         network: Option<Arc<dyn Network>>,
         assets: Option<Arc<dyn Assets>>,
@@ -811,6 +807,21 @@ impl UpdaterOverNetwork {
             assets,
             config: bundle.updater_config.clone(),
             running: bundle.package.clone(),
+        }))
+    }
+}
+
+impl UpdaterOverNetwork {
+    /// A Rust app's: the configuration among its assets, no packages.
+    fn of(
+        network: Option<Arc<dyn Network>>,
+        assets: Option<Arc<dyn Assets>>,
+    ) -> Option<Arc<dyn nsh_core::runtime::UpdaterHost>> {
+        Some(Arc::new(UpdaterOverNetwork {
+            network: network?,
+            assets: Some(assets?),
+            config: None,
+            running: None,
         }))
     }
 }
@@ -1307,6 +1318,7 @@ enum Message {
     ScreenHeader(NodeId, Option<Points>),
     Frame,
     States(NodeId, u16),
+    ReleaseStates(NodeId, u16, std::time::Duration),
     Modality(nsh_core::platform::InputModality),
     FontsChanged,
     Remount,
@@ -1599,6 +1611,14 @@ impl EngineControl {
     /// (`active:`, `hover:`, `focus:`) update without JS.
     pub fn set_states(&self, id: NodeId, states: u16) {
         let _ = self.tx.send(Message::States(id, states));
+    }
+
+    /// Reports the interaction states of view `id` after a short completed
+    /// press, holding `PRESSED` for `hold` in the core so same-turn
+    /// tap-to-click gestures still render `:active` feedback
+    /// ([`nsh_core::Core::release_states_after`]).
+    pub fn release_states_after(&self, id: NodeId, states: u16, hold: std::time::Duration) {
+        let _ = self.tx.send(Message::ReleaseStates(id, states, hold));
     }
 
     /// Fonts the platform loads asynchronously became usable (on the web,
@@ -2210,6 +2230,14 @@ impl<M: TextEngine + 'static> Driver<M> {
         });
         core.set_storage(app_storage(&config));
         core.set_data_dir(data_dir(&config));
+        // What a Rust app's `prompt_for_update` checks with; a JS app's VM
+        // gets its own below.
+        core.set_updater(match &config.app {
+            App::Js(bundle) => {
+                UpdaterOverNetwork::host(config.network.clone(), config.assets.clone(), bundle)
+            }
+            App::Rust(_) => UpdaterOverNetwork::of(config.network.clone(), config.assets.clone()),
+        });
         core.set_clipboard(config.clipboard.clone());
         core.set_picker(config.picker.clone());
         core.set_speech(config.speech.clone());
@@ -2464,6 +2492,11 @@ impl<M: TextEngine + 'static> Driver<M> {
             script.run_system();
         }
         state.load_fonts(script, assets.as_deref(), &**sink);
+        // A TSX app's windows of its own (the update prompt) render beside
+        // its root, after it, as a Rust app's do (`Core::mount_root`).
+        if script.is_some() {
+            state.core.mount_opened_windows();
+        }
         if let Some(batch) = state.commit(script) {
             if state.trace {
                 log::info!(
@@ -2546,6 +2579,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             self.state.next_scroll_event(),
             self.state.next_mouse_move(),
             self.state.core.next_task_timer(),
+            self.state.core.next_state_timer(),
             self.state.core.download_deadline(),
             self.state.resize_burst_ends,
             self.state.window_state.settles,
@@ -2707,6 +2741,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         {
             self.last_active = Instant::now();
         }
+        state.core.expire_state_timers(nsh_core::time::now());
         if state
             .resize_burst_ends
             .is_some_and(|ends| ends <= nsh_core::time::now())
@@ -4104,6 +4139,9 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::States(id, states) => state.core.set_states(id, states),
+        Message::ReleaseStates(id, states, hold) => {
+            state.core.release_states_after(id, states, hold);
+        }
         Message::Modality(modality) => state.core.set_input_modality(modality),
         Message::FontsChanged => state.core.fonts_changed(),
         Message::Remount => state.core.remount(),

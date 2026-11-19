@@ -82,6 +82,11 @@ impl Field {
         self.goal_column = None;
     }
 
+    pub(crate) fn select_all(&mut self) {
+        self.model.select_all();
+        self.goal_column = None;
+    }
+
     pub(crate) fn report(&mut self, id: NodeId, control: &EngineControl, changed: bool) {
         if changed {
             self.layout_key = None;

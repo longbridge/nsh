@@ -1389,7 +1389,8 @@ impl AppView {
             id,
             last,
             clicks,
-            anchor,
+            mut anchor,
+            select_all,
         }) = self.field_drag
         {
             if self.keyboard.focused != Some(id)
@@ -1404,7 +1405,12 @@ impl AppView {
                     && let Some(view) = self.tree.get_mut(id)
                 {
                     let field = view.field.as_mut().unwrap();
-                    field.drag(view.input.as_ref().unwrap(), position, clicks, anchor);
+                    let config = view.input.as_ref().unwrap();
+                    // The press's drag selects from where it went down.
+                    if select_all {
+                        anchor = field.click(config, last, false, clicks);
+                    }
+                    field.drag(config, position, clicks, anchor);
                     field.report(id, &control, false);
                 }
                 self.field_drag = if matches!(mouse.kind, MouseKind::Up(_)) {
@@ -1415,6 +1421,7 @@ impl AppView {
                         last: position,
                         clicks,
                         anchor,
+                        select_all: select_all && position == last,
                     })
                 };
                 return true;
@@ -1454,25 +1461,37 @@ impl AppView {
             // way up, after the focus the field takes now.
             let press = self.pointer.take_press(id);
             self.pointer.cancel(&mut self.tree, Some(&control));
-            self.keyboard.focus(Some(id), &mut self.tree, &control);
+            let shift = mouse.modifiers.shift;
+            let clicks = self.pointer.clicks();
+            // A plain press that focuses a field which selects its text on
+            // focus leaves the whole text selected until the press drags.
+            let select_all = !shift
+                && clicks <= 1
+                && self.keyboard.focused != Some(id)
+                && self
+                    .tree
+                    .get(id)
+                    .and_then(|view| view.input.as_ref())
+                    .is_some_and(|config| config.select_text_on_focus);
+            self.keyboard
+                .focus_field(Some(id), &mut self.tree, &control, !shift);
             self.field_press = press.map(|(press, origin)| {
                 (press, origin, hit.map(|hit| hit.area).unwrap_or_default())
             });
-            let clicks = self.pointer.clicks();
             let view = self.tree.get_mut(id).unwrap();
             let field = view.field.as_mut().unwrap();
-            let anchor = field.click(
-                view.input.as_ref().unwrap(),
-                position,
-                mouse.modifiers.shift,
-                clicks,
-            );
+            let anchor = if select_all {
+                (0, 0)
+            } else {
+                field.click(view.input.as_ref().unwrap(), position, shift, clicks)
+            };
             field.report(id, &control, false);
             self.field_drag = Some(FieldDrag {
                 id,
                 last: position,
-                clicks: if mouse.modifiers.shift { 1 } else { clicks },
+                clicks: if shift { 1 } else { clicks },
                 anchor,
+                select_all,
             });
             true
         } else {
@@ -1868,6 +1887,9 @@ struct FieldDrag {
     last: ratatui_core::layout::Position,
     clicks: u32,
     anchor: (usize, usize),
+    /// The press focused a field that selected its whole text, which stays
+    /// selected unless the press drags.
+    select_all: bool,
 }
 
 impl Widget for &mut AppView {

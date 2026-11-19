@@ -2116,6 +2116,7 @@ impl Headless {
             && !input.text.is_empty()
         {
             input.text.clear();
+            input.selected_all = false;
             input.count += 1;
             let payload = EventPayload::Text {
                 text: String::new(),
@@ -2130,7 +2131,8 @@ impl Headless {
     }
 
     /// The step `type(<selector>, <text>)`: types `text` at the caret of
-    /// the input `selector` names (here always the end of its text; a view
+    /// the input `selector` names (here always the end of its text, or over
+    /// it all while `selectTextOnFocus` selected it; a view
     /// that keeps its own selection, such as `Editor`, types over it, as
     /// the native drivers do) (the matching view, or the first input in
     /// it; `text:` also matches what an input holds or its placeholder),
@@ -2194,12 +2196,21 @@ impl Headless {
             return;
         }
         let mut text = nsh_core::text_edit::pasted(text, input.config.multiline);
+        // A whole selected text is replaced.
+        let kept = if input.selected_all {
+            0
+        } else {
+            char_len(&input.text)
+        };
         if let Some(max) = input.config.max_length {
-            let room = (max as usize).saturating_sub(char_len(&input.text));
+            let room = (max as usize).saturating_sub(kept);
             text.truncate(clip_chars(&text, room).len());
         }
         if text.is_empty() {
             return;
+        }
+        if std::mem::take(&mut input.selected_all) {
+            input.text.clear();
         }
         input.text.push_str(&text);
         input.count += 1;
@@ -2282,6 +2293,7 @@ impl Headless {
             self.screen.set_focused(Some(id));
             self.set_focused_state(id, true);
             self.send(id, EventKind::Focus, EventPayload::None);
+            self.select_on_focus(id);
         }
         Ok(id)
     }
@@ -2350,13 +2362,21 @@ impl Headless {
         let Some(input) = self.screen.input_mut(id) else {
             return;
         };
-        let length = char_len(&input.text) + 1;
+        // A whole selected text is replaced.
+        let kept = if input.selected_all {
+            0
+        } else {
+            char_len(&input.text)
+        };
         if input
             .config
             .max_length
-            .is_some_and(|max| length > max as usize)
+            .is_some_and(|max| kept + 1 > max as usize)
         {
             return;
+        }
+        if std::mem::take(&mut input.selected_all) {
+            input.text.clear();
         }
         input.text.push(c);
         input.count += 1;
@@ -2370,6 +2390,27 @@ impl Headless {
             .control()
             .dispatch_event(id, EventKind::ChangeText, payload);
         self.report_selection(id);
+    }
+
+    /// Input `id` took the focus: with `selectTextOnFocus` its whole text
+    /// is selected, reported as the platforms report a selection.
+    pub(crate) fn select_on_focus(&mut self, id: NodeId) {
+        let Some(input) = self.screen.input_mut(id) else {
+            return;
+        };
+        if !input.config.select_text_on_focus {
+            return;
+        }
+        input.selected_all = true;
+        let end = input.text.encode_utf16().count() as f64;
+        self.send(
+            id,
+            EventKind::SelectionChange,
+            EventPayload::Map(vec![
+                ("start", PayloadValue::Number(0.0)),
+                ("end", PayloadValue::Number(end)),
+            ]),
+        );
     }
 
     /// `onSelectionChange` and `onCaretMove` of input `id` after an edit,

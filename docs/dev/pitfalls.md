@@ -340,6 +340,13 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## Android
 
+- **Android, the stack's `Toolbar` and the views it holds**: `Toolbar` lays its own title out before the views it
+  holds, whatever their gravity, so a `headerLeft` added as a `START` view showed after a plain `title`. It measures
+  the views it holds in child order but lays the `START` ones out in reverse in RTL, so no order of separate views puts
+  a leading item before a title in both directions without the title's measure missing the item's width. A page with a
+  `headerLeft` and a plain `title` holds both in one `HeaderRow` (`StackBox`), which mirrors itself and measures the
+  item first; `Mounter` resizes a header item in either parent. A margin on a view the toolbar holds left no gap on an
+  API 35 emulator: the gap is the title's own padding.
 - **Android, responders inside pressable views**: a view that takes no press of its own (a `RichEditor`'s selection
   handle) leaves the touch to the nearest pressable ancestor, which keeps tracking it: it raised its long press while a
   finger held the handle and its press on the lift. `SetJsResponder` with a block ends the presses of the ancestors

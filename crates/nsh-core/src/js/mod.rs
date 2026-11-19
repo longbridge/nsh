@@ -180,6 +180,10 @@ mod tests {
             "export type MacOsBackdropState = \"followsWindowActiveState\" | \"active\" | \"inactive\";"
         ));
         assert!(elements.contains(
+            "export interface ScrollEdgeElement {\n  scrollView: ViewRef;\n  edge?: ScrollEdge;\n}"
+        ));
+        assert!(elements.contains("export type ScrollEdge = \"top\" | \"bottom\";"));
+        assert!(elements.contains(
             "export interface WindowsBackdrop {\n  material: WindowsBackdropMaterial;\n}"
         ));
         assert!(elements.contains("export type WindowsBackdropMaterial = \"blur\";"));
@@ -192,6 +196,7 @@ mod tests {
             ("HostProps", "  onLayout?: (e: { bounds: Bounds }) => void;"),
             ("AndroidHostProps", "  elevation?: number;"),
             ("IOSHostProps", "  backdropMaterial?: BackdropMaterial;"),
+            ("IOSHostProps", "  scrollEdgeElement?: ScrollEdgeElement;"),
             ("MacOSHostProps", "  backdrop?: MacOsBackdrop;"),
             ("WindowsHostProps", "  backdrop?: WindowsBackdrop;"),
             ("InputHostProps", "  keyboardType?: KeyboardType;"),

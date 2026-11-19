@@ -17,6 +17,8 @@ mod canvas_bounds;
 #[cfg(target_os = "macos")]
 mod embedded_scroll;
 #[cfg(target_os = "macos")]
+mod focus_selection;
+#[cfg(target_os = "macos")]
 mod fps_collapse;
 #[cfg(target_os = "macos")]
 mod ime;
@@ -94,6 +96,8 @@ fn main() {
                 window_frames::run();
             } else if std::env::var_os("NSH_WINDOW_ALERT_CHECK_ONLY").is_some() {
                 window_alert::run();
+            } else if std::env::var_os("NSH_FOCUS_SELECTION_CHECK_ONLY").is_some() {
+                focus_selection::run();
             } else if std::env::var_os("NSH_INPUT_FOCUS_CHECK_ONLY").is_some() {
                 input_focus::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
@@ -136,6 +140,7 @@ fn main() {
                 ime::run();
                 input_hidden::run();
                 input_focus::run();
+                focus_selection::run();
                 fps_collapse::run();
                 scaled_input::run();
                 zoom::run();
