@@ -9463,10 +9463,21 @@ impl<M: TextEngine> Core<M> {
             } else {
                 content_box(&self.rounded_layout(layout))
             };
+            // The width Taffy measured its lines in, before its box was
+            // rounded to device pixels (none on a grid, whose Cells hold
+            // whole characters).
+            let measured_width = (!hidden && self.layout.grid().is_none())
+                .then(|| content_box(self.layout.unrounded_layout(layout)).size.width);
+            let ratio = self.frame_ratio().width;
             let engine = &self.text_engine;
             let cache = &mut self.measure_cache;
             let Some(LeafContext::Text(cx)) = self.layout.get_node_context_mut(layout) else {
                 continue;
+            };
+            let no_wrap = cx.text.no_wrap;
+            let typeset = |rounded: Points| match measured_width {
+                Some(measured) if !no_wrap => typeset_width(rounded, measured, ratio),
+                _ => rounded,
             };
             if hidden {
                 // Out of the layout (`display: none`). Its glyphs typeset
@@ -9510,7 +9521,8 @@ impl<M: TextEngine> Core<M> {
             }
             if align_vertical > Percentage(0.0) {
                 // Text shorter than its box: moved down within it.
-                let height = measure_text(engine, cache, cx, Some(content.size.width.0)).height;
+                let height =
+                    measure_text(engine, cache, cx, Some(typeset(content.size.width).0)).height;
                 if height < content.size.height {
                     content.origin.y += align_vertical.of(content.size.height - height);
                     content.size.height = height;
@@ -9569,7 +9581,8 @@ impl<M: TextEngine> Core<M> {
                     let prepared = cx
                         .prepared
                         .get_or_insert_with(|| engine.prepare_aligned(&cx.text, &cx.alignments));
-                    let layout = engine.layout(prepared, size);
+                    let layout =
+                        engine.layout(prepared, Size::new(typeset(size.width), size.height));
                     if report_lines {
                         self.events.push(crate::element::JsEvent::Event(
                             id,
@@ -10704,6 +10717,24 @@ fn pixel(value: f32, ratio: f32) -> f64 {
 /// be sent again unchanged.
 fn span(from: f32, to: f32, ratio: f32) -> f32 {
     ((pixel(to, ratio) - pixel(from, ratio)) / f64::from(ratio)) as f32
+}
+
+/// The width a text block is typeset in: the width Taffy measured its lines
+/// in (`measured`, its unrounded content box), when its box rounded to
+/// device pixels (`rounded`) is within a pixel of it. A box whose edges fall
+/// between pixels can round a pixel narrower than the text was measured in
+/// (a list item's content 21 points in, 57.75 pixels at 2.75): typeset in
+/// that, a line that fit by less than the pixel wrapped once more than its
+/// box was made tall for, and its last line ran over the block after it (a
+/// browser) or was cut (a platform that clips text to its view). Typeset in
+/// the width it was measured in, the lines are the ones its height has; the
+/// text reaches less than a pixel past its rounded box.
+fn typeset_width(rounded: Points, measured: Points, ratio: f32) -> Points {
+    if measured.0.is_finite() && ((measured.0 - rounded.0) * ratio).abs() < 1.0 {
+        measured
+    } else {
+        rounded
+    }
 }
 
 /// `value` rounded up to a device pixel of `ratio` pixels per point. A
