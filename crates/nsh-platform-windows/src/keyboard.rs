@@ -215,6 +215,25 @@ pub(crate) fn focused_any(surface: &Surface) -> Option<NshView> {
     None
 }
 
+/// The view the raw keys of window `window` go to: its focused custom
+/// view, else its root when nothing in it has the keyboard (no custom
+/// view, no text field), as a browser reports a key at `document.body`.
+/// The root is no stop: it is only notified, never pressed.
+pub(crate) fn key_target(surface: &Surface, window: NodeId) -> Option<NshView> {
+    if let Some(view) = focused_in(surface, window) {
+        return Some(view);
+    }
+    if crate::text_input::focused(surface).is_some_and(|field| window_of(surface, &field) == window)
+    {
+        return None;
+    }
+    if window == nsh_core::ROOT_ID {
+        Some(surface.root.clone())
+    } else {
+        crate::app_window::root_view(surface, window)
+    }
+}
+
 /// Whether the focus held for `view` is still valid: a stop, and not
 /// given to a text field of the same window (a field and a custom view
 /// never both have the keyboard of one window).
@@ -823,7 +842,7 @@ fn core_event(event: &KeyEvent, down: bool, default_prevented: bool) -> nsh_core
 /// capture consumed it (no native default follows).
 pub(crate) fn press(surface: &std::rc::Rc<Surface>, event: &KeyEvent) -> bool {
     let window = surface.input_root().id();
-    let Some(view) = focused_in(surface, window) else {
+    let Some(view) = key_target(surface, window) else {
         return false;
     };
     if !listens(surface, &view) {
@@ -961,7 +980,7 @@ fn opens_context_menu(event: &KeyEvent) -> bool {
 /// focus now), with the capture rule that matches the release.
 pub(crate) fn release(surface: &std::rc::Rc<Surface>, event: &KeyEvent) {
     let window = surface.input_root().id();
-    let Some(view) = focused_in(surface, window) else {
+    let Some(view) = key_target(surface, window) else {
         return;
     };
     if !listens(surface, &view) {
@@ -1025,7 +1044,7 @@ pub(crate) fn suppress_translation(msg: &mut MSG) -> bool {
 /// consumed by a mounted capture rule: the decision [`press`] makes when
 /// the message is dispatched.
 fn captured_now(surface: &Surface, window: NodeId, event: &KeyEvent) -> bool {
-    let Some(view) = focused_in(surface, window) else {
+    let Some(view) = key_target(surface, window) else {
         return false;
     };
     if !listens(surface, &view) {

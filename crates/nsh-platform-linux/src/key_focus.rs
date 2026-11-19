@@ -228,7 +228,24 @@ fn focused_stop(surface: &Surface, focus: Option<gtk::Widget>) -> Option<NshView
 /// (the main window, or one of the app's own). Nothing when the window has
 /// no focused view any more.
 pub(crate) fn focused_view(surface: &Surface, window: &gtk::Window) -> Option<NshView> {
-    focused_stop(surface, GtkWindowExt::focus(window))
+    let focus = GtkWindowExt::focus(window);
+    focused_stop(surface, focus.clone()).or_else(|| unfocused_root(surface, window, focus.as_ref()))
+}
+
+/// The root view of `window` when nothing in it has the keyboard focus
+/// (`focus` is none, or the root itself): the raw keys go there and bubble
+/// from it. A native field or any other focus is not "nothing".
+fn unfocused_root(
+    surface: &Surface,
+    window: &gtk::Window,
+    focus: Option<&gtk::Widget>,
+) -> Option<NshView> {
+    let root = crate::window::root_at(surface, &window.surface()?)?;
+    match focus {
+        None => Some(root),
+        Some(focus) if focus == root.upcast_ref::<gtk::Widget>() => Some(root),
+        Some(_) => None,
+    }
 }
 
 /// Watches the keys a native popup receives while it owns the keyboard
@@ -391,7 +408,18 @@ pub(crate) fn press(
         (Some(event), Some(widget)) => crate::chrome::menu_shortcut(surface, widget, event),
         _ => false,
     };
-    let Some(view) = focused_stop(surface, focus) else {
+    // No focus at all: the window's root hears the raw keys (a browser's
+    // `document.body`), with no default of a focused stop. A native field
+    // keeps its keys.
+    let target = match focused_stop(surface, focus.clone()) {
+        Some(view) => Some((view, false)),
+        None => window
+            .as_ref()
+            .and_then(|window| unfocused_root(surface, window, focus.as_ref()))
+            .filter(|root| crate::keyboard::listens(surface, root))
+            .map(|root| (root, true)),
+    };
+    let Some((view, at_root)) = target else {
         // A native field (or no focus) has no view to notify: the app's
         // bindings first, then the menu's shortcuts, then Tab's traversal.
         if event.is_some_and(|event| crate::keymap::claims(surface, event)) {
@@ -405,7 +433,9 @@ pub(crate) fn press(
         }
         return false;
     };
-    if !crate::keyboard::listens(surface, &view) || crate::keyboard::native_owns(&view) {
+    if !at_root
+        && (!crate::keyboard::listens(surface, &view) || crate::keyboard::native_owns(&view))
+    {
         // A view with no raw keys (or a native input/content that owns its
         // keys) keeps the original path: the app's bindings (GTK's
         // controller) first, then the menu's shortcut, then the defaults.
@@ -451,6 +481,14 @@ pub(crate) fn press(
     // key is the app's, not a traversal or a context menu.
     if menu_shortcut() {
         return true;
+    }
+    if at_root {
+        // The root is no stop: nothing to press or open a menu on, but Tab
+        // still moves the focus into the window.
+        if is_tab(keyval) {
+            arm_tab();
+        }
+        return false;
     }
     // Tab's traversal is a default too: it is armed here, then GTK moves the
     // focus right after this, in the same dispatch.

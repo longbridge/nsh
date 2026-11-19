@@ -353,10 +353,6 @@ pub(crate) struct Surface {
     pub(crate) main_window: crate::window::Held,
     /// The window observed for its bounds ([`crate::window_state`]).
     pub(crate) window: crate::window_state::Watch,
-    /// The mode the standalone app's main window opens in, until it first
-    /// shows (hidden at launch: nsh.json `window.defaultVisible: false`)
-    /// ([`crate::window::launched_main`]).
-    pub(crate) main_open_mode: Cell<Option<nsh_core::desktop::WindowMode>>,
     /// Videos, web views and registered native components.
     pub(crate) native: crate::native::NativeState,
     /// The app's keyboard shortcuts ([`crate::keymap`]).
@@ -460,7 +456,6 @@ impl Surface {
             chrome: Default::default(),
             main_window: Default::default(),
             window: Default::default(),
-            main_open_mode: Cell::new(None),
             shaders: Default::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
@@ -1253,7 +1248,7 @@ impl Surface {
             if surface.last_tick.get() < at {
                 let now = objc2_quartz_core::CACurrentMediaTime();
                 let period = now - surface.last_tick.get();
-                surface.frame(now, period);
+                surface.frame(now, period, false);
             }
             surface.keep_deadline();
         });
@@ -1280,7 +1275,7 @@ impl Surface {
             return;
         }
         let now = link.timestamp();
-        self.frame(now, link.targetTimestamp() - link.timestamp());
+        self.frame(now, link.targetTimestamp() - link.timestamp(), true);
         // The frame may have made the link again, from another window.
         let current = self.link.borrow();
         let Some(current) = current.as_ref() else {
@@ -1295,15 +1290,15 @@ impl Surface {
     }
 
     /// One display frame at `now`, `period` seconds after the previous one
-    /// (the display link's, or one a deadline ran without a frame).
-    fn frame(self: &Rc<Self>, now: f64, period: f64) {
+    /// (the display link's, `drawn`, or one a deadline ran without a frame).
+    fn frame(self: &Rc<Self>, now: f64, period: f64, drawn: bool) {
         self.last_tick.set(objc2_quartz_core::CACurrentMediaTime());
         let Some(monitor) = self.perf.borrow().clone() else {
-            return quiet(|| self.tick(now));
+            return quiet(|| self.tick(now, drawn));
         };
         let start = Instant::now();
         let dirty = self.wants_frames();
-        quiet(|| self.tick(now));
+        quiet(|| self.tick(now, drawn));
         let cost = start.elapsed();
         monitor.record_work(cost, dirty);
         crate::fps::ticked(cost);
@@ -1313,10 +1308,16 @@ impl Surface {
         );
     }
 
-    fn tick(self: &Rc<Self>, now: f64) {
+    /// `drawn`: a display link frame; a deadline's keeps the real time
+    /// ([`nsh_core::animation::Animator::tick_frame`]).
+    fn tick(self: &Rc<Self>, now: f64, drawn: bool) {
         let applied = self.apply_queued(FRAME_BATCHES);
         if self.anim.borrow().animating() {
-            self.anim.borrow_mut().tick(now);
+            if drawn {
+                self.anim.borrow_mut().tick_frame(now);
+            } else {
+                self.anim.borrow_mut().tick(now);
+            }
             self.write_animations();
         }
         let callbacks = std::mem::take(&mut *self.frame_callbacks.borrow_mut());
