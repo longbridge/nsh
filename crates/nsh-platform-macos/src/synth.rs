@@ -459,13 +459,15 @@ fn find_item(
 /// ([`composited`]), or, where it cannot give one, as AppKit draws it in
 /// process ([`drawn`]). Neither needs the Screen Recording permission.
 pub(crate) fn shot(window: &NSWindow) -> Result<Vec<u8>, String> {
-    match composited(window) {
+    // Drain AppKit / CoreGraphics temporaries per screenshot so callers outside
+    // a run-loop drain do not accumulate autoreleased frame buffers.
+    objc2::rc::autoreleasepool(|_| match composited(window) {
         Ok(png) => Ok(png),
         Err(why) => {
             log::debug!("screenshot drawn in process: {why}");
             drawn(window)
         }
-    }
+    })
 }
 
 /// `CGWindowListCreateImageFromArray`: images of windows as the window
@@ -579,18 +581,101 @@ fn front_to_back(window: &NSWindow, ids: &mut Vec<u32>) {
     }
 }
 
-/// Whether `image` has nothing but black or clear pixels, judged from a
-/// small copy.
+/// Whether `image` has nothing but black or clear pixels.
+///
+/// Inspects the backing `CGDataProvider` bytes directly for 8-bpc 32-bpp RGB
+/// images instead of drawing through `CGContext::draw_image`, because drawing
+/// the full window image into a scratch context pins each frame's backing
+/// store (~15 MiB) into CoreGraphics' 32-slot purgeable cache (`~470 MiB`).
 fn blank(image: &objc2_core_graphics::CGImage) -> bool {
-    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-    use objc2_core_graphics::{
-        CGBitmapContextCreate, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo,
-        CGImageByteOrderInfo,
-    };
-    const SIDE: usize = 32;
-    if CGImage::width(Some(image)) == 0 || CGImage::height(Some(image)) == 0 {
+    use objc2_core_graphics::{CGDataProvider, CGImage};
+
+    let width = CGImage::width(Some(image));
+    let height = CGImage::height(Some(image));
+    if width == 0 || height == 0 {
         return true;
     }
+    if CGImage::bits_per_component(Some(image)) == 8
+        && CGImage::bits_per_pixel(Some(image)) == 32
+        && let Some((alpha_mask, rgb_mask)) = pixel_masks(
+            CGImage::alpha_info(Some(image)),
+            CGImage::byte_order_info(Some(image)),
+        )
+        && let Some(provider) = CGImage::data_provider(Some(image))
+        && let Some(data) = CGDataProvider::data(Some(&provider))
+    {
+        let stride = CGImage::bytes_per_row(Some(image));
+        let row_bytes = width.saturating_mul(4);
+        let needed = height
+            .checked_sub(1)
+            .and_then(|last| last.checked_mul(stride))
+            .and_then(|off| off.checked_add(row_bytes));
+        let len = data.len();
+        let ptr = data.byte_ptr();
+        // SAFETY: `CFData` is an immutable byte buffer whose backing slice stays
+        // valid while `data` is alive (`len` matches its byte count).
+        let bytes = if len == 0 || ptr.is_null() {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(ptr, len) }
+        };
+        if let Some(needed) = needed
+            && stride >= row_bytes
+            && bytes.len() >= needed
+        {
+            return (0..height).all(|y| {
+                let row = &bytes[y * stride..y * stride + row_bytes];
+                row.as_chunks::<4>().0.iter().all(|&px| {
+                    let word = u32::from_ne_bytes(px);
+                    (alpha_mask != 0 && (word & alpha_mask) == 0) || (word & rgb_mask) == 0
+                })
+            });
+        }
+    }
+    blank_drawn(image)
+}
+
+/// Bitmasks `(alpha_mask, rgb_mask)` in host-endian `u32` words for 8-bpc
+/// 32-bpp pixel layouts, or `None` when the layout needs CoreGraphics to
+/// convert it.
+fn pixel_masks(
+    alpha: objc2_core_graphics::CGImageAlphaInfo,
+    order: objc2_core_graphics::CGImageByteOrderInfo,
+) -> Option<(u32, u32)> {
+    use objc2_core_graphics::{CGImageAlphaInfo, CGImageByteOrderInfo};
+
+    let big = match order {
+        CGImageByteOrderInfo::Order32Big | CGImageByteOrderInfo::OrderDefault => true,
+        CGImageByteOrderInfo::Order32Little => false,
+        _ => return None,
+    };
+    let (alpha_first, has_alpha) = match alpha {
+        CGImageAlphaInfo::PremultipliedFirst | CGImageAlphaInfo::First => (true, true),
+        CGImageAlphaInfo::PremultipliedLast | CGImageAlphaInfo::Last => (false, true),
+        CGImageAlphaInfo::NoneSkipFirst => (true, false),
+        CGImageAlphaInfo::NoneSkipLast => (false, false),
+        _ => return None,
+    };
+    // Byte index in memory: Big puts First at byte 0; Little reverses the 4 bytes.
+    let a_byte = if alpha_first == big { 0 } else { 3 };
+    let mut a_bytes = [0u8; 4];
+    a_bytes[a_byte] = 0xff;
+    let mut rgb_bytes = [0xffu8; 4];
+    rgb_bytes[a_byte] = 0;
+    let alpha_mask = if has_alpha {
+        u32::from_ne_bytes(a_bytes)
+    } else {
+        0
+    };
+    Some((alpha_mask, u32::from_ne_bytes(rgb_bytes)))
+}
+
+fn blank_drawn(image: &objc2_core_graphics::CGImage) -> bool {
+    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+    use objc2_core_graphics::{
+        CGBitmapContextCreate, CGColorSpace, CGContext, CGImageAlphaInfo, CGImageByteOrderInfo,
+    };
+    const SIDE: usize = 32;
     let Some(space) = CGColorSpace::new_device_rgb() else {
         return false;
     };
@@ -717,5 +802,90 @@ mod tests {
             placed(&press(52.8, 23.7, 1001.0)).is_none(),
             "the user's: as it is"
         );
+    }
+
+    fn test_cg_image(
+        width: usize,
+        height: usize,
+        bytes_per_row: usize,
+        bytes: Vec<u8>,
+        bitmap_info: u32,
+    ) -> objc2_core_foundation::CFRetained<objc2_core_graphics::CGImage> {
+        use objc2_core_foundation::CFData;
+        use objc2_core_graphics::{CGColorRenderingIntent, CGColorSpace, CGDataProvider, CGImage};
+        let space = CGColorSpace::new_device_rgb().expect("srgb");
+        let data = CFData::from_bytes(&bytes);
+        let provider = CGDataProvider::with_cf_data(Some(&data)).expect("provider");
+        // SAFETY: `provider` holds `bytes_per_row * height` 8-bpc 32-bpp bytes.
+        unsafe {
+            CGImage::new(
+                width,
+                height,
+                8,
+                32,
+                bytes_per_row,
+                Some(&space),
+                objc2_core_graphics::CGBitmapInfo(bitmap_info),
+                Some(&provider),
+                std::ptr::null(),
+                false,
+                CGColorRenderingIntent::RenderingIntentDefault,
+            )
+        }
+        .expect("cg image")
+    }
+
+    #[test]
+    fn blank_detects_black_clear_and_colored_pixels_across_layouts() {
+        use objc2_core_graphics::{CGImageAlphaInfo, CGImageByteOrderInfo};
+
+        let cases = [
+            (
+                CGImageAlphaInfo::PremultipliedFirst.0 | CGImageByteOrderInfo::Order32Little.0,
+                [0, 0, 0, 255],  // black BGRA
+                [10, 20, 30, 0], // clear BGRA
+                [0, 1, 0, 255],  // green BGRA
+            ),
+            (
+                CGImageAlphaInfo::PremultipliedLast.0 | CGImageByteOrderInfo::Order32Big.0,
+                [0, 0, 0, 255],  // black RGBA
+                [10, 20, 30, 0], // clear RGBA
+                [1, 0, 0, 255],  // red RGBA
+            ),
+            (
+                CGImageAlphaInfo::NoneSkipFirst.0 | CGImageByteOrderInfo::Order32Little.0,
+                [0, 0, 0, 255], // black BGRX with non-zero skip byte
+                [0, 0, 0, 128], // black BGRX with non-zero skip byte
+                [0, 0, 1, 255], // red BGRX
+            ),
+            (
+                CGImageAlphaInfo::NoneSkipLast.0 | CGImageByteOrderInfo::Order32Big.0,
+                [0, 0, 0, 255], // black RGBX with non-zero skip byte
+                [0, 0, 0, 0],   // black RGBX
+                [1, 0, 0, 255], // red RGBX
+            ),
+        ];
+
+        for (info, black_px, clear_px, colored_px) in cases {
+            let mut blank_pixels = Vec::with_capacity(16);
+            blank_pixels.extend_from_slice(&black_px);
+            blank_pixels.extend_from_slice(&clear_px);
+            blank_pixels.extend_from_slice(&black_px);
+            blank_pixels.extend_from_slice(&clear_px);
+            assert!(blank(&test_cg_image(2, 2, 8, blank_pixels.clone(), info)));
+
+            let mut colored_pixels = blank_pixels;
+            colored_pixels[12..16].copy_from_slice(&colored_px);
+            assert!(!blank(&test_cg_image(2, 2, 8, colored_pixels, info)));
+        }
+
+        // Padded row stride ignores padding bytes after the active row pixels.
+        let info = CGImageAlphaInfo::PremultipliedFirst.0 | CGImageByteOrderInfo::Order32Little.0;
+        let mut padded = vec![0xffu8; 2 * 16];
+        padded[0..8].copy_from_slice(&[0, 0, 0, 255, 10, 20, 30, 0]);
+        padded[16..24].copy_from_slice(&[0, 0, 0, 255, 10, 20, 30, 0]);
+        assert!(blank(&test_cg_image(2, 2, 16, padded.clone(), info)));
+        padded[20..24].copy_from_slice(&[0, 0, 1, 255]);
+        assert!(!blank(&test_cg_image(2, 2, 16, padded, info)));
     }
 }
