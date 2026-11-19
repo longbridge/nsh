@@ -92,7 +92,7 @@ popover.menu modelbutton, .nsh-light text popover modelbutton, .nsh-dark text po
 }
 popover.menu modelbutton:disabled, .nsh-light text popover modelbutton:disabled, .nsh-dark text popover modelbutton:disabled, .nsh-light textview popover modelbutton:disabled, .nsh-dark textview popover modelbutton:disabled { filter: none; opacity: 1; }
 popover.menu modelbutton accelerator, .nsh-light text popover modelbutton accelerator, .nsh-dark text popover modelbutton accelerator, .nsh-light textview popover modelbutton accelerator, .nsh-dark textview popover modelbutton accelerator { margin-left: 24px; }
-popover.menu separator { min-height: 1px; margin: 4px -4px; }
+popover.menu separator { min-height: 1px; min-width: 8px; margin: 4px -4px; }
 .nsh-light text popover separator, .nsh-dark text popover separator, .nsh-light textview popover separator, .nsh-dark textview popover separator { min-height: 1px; min-width: 1px; margin: 4px 0; }
 popover.menu > contents > scrolledwindow > scrollbar.vertical > range > trough > slider { min-height: 16px; }
 popover.menu modelbutton check, popover.menu modelbutton radio, popover.menu modelbutton arrow {
@@ -277,6 +277,121 @@ mod tests {
         });
     }
 
+    /// Separators reserve enough `min-width` to offset their negative `-4px`
+    /// horizontal margins so GTK 4.22+ does not report a negative minimum
+    /// width when measuring them.
+    #[test]
+    fn separator_reports_non_negative_min_width() {
+        let sheet = css(&Tokens::default());
+        assert!(sheet.contains(
+            "popover.menu separator { min-height: 1px; min-width: 8px; margin: 4px -4px; }"
+        ));
+        crate::gtk_test::run(|| {
+            static INIT: std::sync::Once = std::sync::Once::new();
+            static CAPTURE: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            static WARNINGS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+            INIT.call_once(|| {
+                glib::log_set_writer_func(|level, fields| {
+                    if CAPTURE.load(std::sync::atomic::Ordering::Acquire)
+                        && level == glib::LogLevel::Warning
+                    {
+                        let domain = fields
+                            .iter()
+                            .find(|f| f.key() == "GLIB_DOMAIN")
+                            .and_then(|f| f.value_str());
+                        let message = fields
+                            .iter()
+                            .find(|f| f.key() == "MESSAGE")
+                            .and_then(|f| f.value_str())
+                            .unwrap_or("");
+                        if domain == Some("Gtk") {
+                            WARNINGS.lock().unwrap().push(message.to_string());
+                        }
+                    }
+                    glib::log_writer_default(level, fields)
+                });
+            });
+            struct Guard;
+            impl Drop for Guard {
+                fn drop(&mut self) {
+                    CAPTURE.store(false, std::sync::atomic::Ordering::Release);
+                }
+            }
+            WARNINGS.lock().unwrap().clear();
+            CAPTURE.store(true, std::sync::atomic::Ordering::Release);
+            let _guard = Guard;
+            let display = gdk::Display::default().expect("a display");
+            let provider = gtk::CssProvider::new();
+            provider.load_from_string(&css(&Tokens::default()));
+            gtk::style_context_add_provider_for_display(
+                &display,
+                &provider,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+            let actions = gio::SimpleActionGroup::new();
+            actions.add_action(&gio::SimpleAction::new("cut", None));
+            actions.add_action(&gio::SimpleAction::new("paste", None));
+            let first = gio::Menu::new();
+            first.append(Some("Cut"), Some("t.cut"));
+            let second = gio::Menu::new();
+            second.append(Some("Paste"), Some("t.paste"));
+            let model = gio::Menu::new();
+            model.append_section(None, &first);
+            model.append_section(None, &second);
+            let window = gtk::Window::new();
+            let menu = gtk::PopoverMenu::from_model(Some(&model));
+            menu.insert_action_group("t", Some(&actions));
+            menu.set_parent(&window);
+            window.present();
+            menu.popup();
+            assert!(
+                crate::gtk_test::wait_until(|| has_separator(menu.upcast_ref())),
+                "expected a menu separator widget"
+            );
+            let mut separators = Vec::new();
+            collect_separators(menu.upcast_ref(), &mut separators);
+            menu.popdown();
+            menu.unparent();
+            window.destroy();
+            gtk::style_context_remove_provider_for_display(&display, &provider);
+            drop(_guard);
+            let warnings = std::mem::take(&mut *WARNINGS.lock().unwrap());
+            assert!(warnings.is_empty(), "unexpected Gtk warnings: {warnings:?}");
+            assert!(!separators.is_empty(), "expected a menu separator widget");
+            for (min_w, min_h) in separators {
+                assert!(min_w >= 0, "separator min width was {min_w}");
+                assert!(min_h >= 1, "separator min height was {min_h}");
+            }
+        });
+    }
+
+    fn has_separator(widget: &gtk::Widget) -> bool {
+        if widget.css_name() == "separator" {
+            return true;
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            if has_separator(&widget) {
+                return true;
+            }
+            child = widget.next_sibling();
+        }
+        false
+    }
+
+    fn collect_separators(widget: &gtk::Widget, out: &mut Vec<(i32, i32)>) {
+        if widget.css_name() == "separator" {
+            let (min_w, ..) = widget.measure(gtk::Orientation::Horizontal, -1);
+            let (min_h, ..) = widget.measure(gtk::Orientation::Vertical, -1);
+            out.push((min_w, min_h));
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            collect_separators(&widget, out);
+            child = widget.next_sibling();
+        }
+    }
     /// Each indicator's name, whether it is set, and its width and height.
     fn collect(widget: &gtk::Widget, out: &mut Vec<(String, bool, i32, i32)>) {
         let name = widget.css_name();
