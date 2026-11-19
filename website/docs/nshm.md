@@ -25,10 +25,10 @@ use nsh_omarchy::tokens;
 
 #[component]
 pub fn App() -> impl IntoElement {
-    // Draw with the Omarchy theme the system uses, and follow its changes.
+    // Draw with the system's Omarchy theme, and follow it as it changes.
     nsh_omarchy::init();
-    let saved = signal(0_u32);
     let notify = signal(true);
+    let saved = signal(0_u32);
     view()
         .flex_1()
         .p(px(tokens::SPACE_6))
@@ -41,14 +41,13 @@ pub fn App() -> impl IntoElement {
                         .checked(move || notify.get())
                         .on_change(move |on: &bool| notify.set(*on)),
                 )
-                .child(
-                    nsh_omarchy::button_primary("Save")
-                        .on_press(move || saved.update(|n| *n += 1)),
-                ),
+                .child(nsh_omarchy::button("Save").primary().on_press(move || {
+                    saved.update(|n| *n += 1);
+                    nsh_omarchy::toast(nsh_omarchy::Toast::new("Settings saved"));
+                })),
         )
-        .child(nsh_omarchy::body_text(move || {
-            format!("Saved {} times", saved.get())
-        }))
+        .child(nsh_omarchy::body(move || format!("Saved {} times", saved.get())))
+        .child(nsh_omarchy::toaster())
 }
 ```
 
@@ -56,27 +55,31 @@ pub fn App() -> impl IntoElement {
 
 ```tsx
 // App.tsx
-import { mount, signal, Text, View } from "nsh";
-import { BarChart, Icon, Markdown, Omarchy, type ThemeInfo } from "nsh-omarchy";
+import { mount, signal, View } from "nsh";
+import { Body, Button, Omarchy, Panel, Switch, Toaster, toast } from "nsh-omarchy";
 
 function App() {
-  // Rust owns the theme; TSX applies one and hears every change.
+  // Draw with the system's Omarchy theme, and follow it as it changes.
   Omarchy.followSystem();
-  const theme = signal<ThemeInfo | null>(Omarchy.current());
-  Omarchy.onChange((t) => theme.set(t));
+  const notify = signal(true);
+  const saved = signal(0);
+  const save = () => {
+    saved.set(saved() + 1);
+    toast({ title: "Settings saved" });
+  };
   return (
     <View class="flex-1 gap-4 p-6 bg-background">
-      <View class="flex-row items-center gap-2">
-        <Icon name="sun" label="Theme" />
-        <Text class="text-foreground">{() => theme()?.name ?? "…"}</Text>
-      </View>
-      <BarChart data={[{ label: "Mon", value: 12 }, { label: "Tue", value: 18 }]} accessibilityLabel="Builds" />
-      <Markdown source="Read the **manual**." />
+      <Panel title="Settings">
+        <Switch label="Notifications" checked={notify()} onChange={({ checked }) => notify.set(checked)} />
+        <Button label="Save" variant="primary" onPress={save} />
+      </Panel>
+      <Body>{`Saved ${saved()} times`}</Body>
+      <Toaster />
     </View>
   );
 }
 
-mount(App);
+mount(() => <App />);
 ```
 
 An nshm is how a feature reaches the apps that need it without being part of NSH: it ships on its own schedule, and only the apps that install it pay its size, build time and dependencies.
@@ -152,7 +155,7 @@ pub fn Gauge(props: GaugeProps) -> impl IntoElement {
 
 The NSH versions an nshm builds with are its own `nsh-core` requirement (`nsh-core = "0.6"`), which `nsh add` checks against the running `nsh` before anything compiles. Its TypeScript declarations are generated from its Rust types, so apps check their TSX against it as they do against their own crate.
 
-[nsh-omarchy's `src/lib.rs`](https://github.com/huacnlee/nsh-omarchy/blob/main/src/lib.rs) is a complete one: a library of Rust components for Rust apps, and a theme module, charts and `Markdown` for TSX.
+[nsh-omarchy's `src/lib.rs`](https://github.com/huacnlee/nsh-omarchy/blob/main/src/lib.rs) is a complete one: its components, exported to TSX by `#[native_module("nsh-omarchy")]`, with the `Omarchy` theme module.
 
 Develop it beside an app with `nsh add --path ../my-gauge`, which reads the directory as it is. Publish it as any crate (`cargo publish`), with the keyword `nshm` so that it can be found on [crates.io](https://crates.io/keywords/nshm), or push it to Git and share its URL.
 

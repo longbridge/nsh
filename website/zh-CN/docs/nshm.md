@@ -27,8 +27,8 @@ use nsh_omarchy::tokens;
 pub fn App() -> impl IntoElement {
     // 使用系统当前的 Omarchy 主题绘制，并跟随它的变化。
     nsh_omarchy::init();
-    let saved = signal(0_u32);
     let notify = signal(true);
+    let saved = signal(0_u32);
     view()
         .flex_1()
         .p(px(tokens::SPACE_6))
@@ -41,14 +41,13 @@ pub fn App() -> impl IntoElement {
                         .checked(move || notify.get())
                         .on_change(move |on: &bool| notify.set(*on)),
                 )
-                .child(
-                    nsh_omarchy::button_primary("Save")
-                        .on_press(move || saved.update(|n| *n += 1)),
-                ),
+                .child(nsh_omarchy::button("Save").primary().on_press(move || {
+                    saved.update(|n| *n += 1);
+                    nsh_omarchy::toast(nsh_omarchy::Toast::new("Settings saved"));
+                })),
         )
-        .child(nsh_omarchy::body_text(move || {
-            format!("Saved {} times", saved.get())
-        }))
+        .child(nsh_omarchy::body(move || format!("Saved {} times", saved.get())))
+        .child(nsh_omarchy::toaster())
 }
 ```
 
@@ -56,27 +55,31 @@ pub fn App() -> impl IntoElement {
 
 ```tsx
 // App.tsx
-import { mount, signal, Text, View } from "nsh";
-import { BarChart, Icon, Markdown, Omarchy, type ThemeInfo } from "nsh-omarchy";
+import { mount, signal, View } from "nsh";
+import { Body, Button, Omarchy, Panel, Switch, Toaster, toast } from "nsh-omarchy";
 
 function App() {
-  // 主题由 Rust 管理；TSX 选用主题，并收到每次变化。
+  // 使用系统当前的 Omarchy 主题绘制，并跟随它的变化。
   Omarchy.followSystem();
-  const theme = signal<ThemeInfo | null>(Omarchy.current());
-  Omarchy.onChange((t) => theme.set(t));
+  const notify = signal(true);
+  const saved = signal(0);
+  const save = () => {
+    saved.set(saved() + 1);
+    toast({ title: "Settings saved" });
+  };
   return (
     <View class="flex-1 gap-4 p-6 bg-background">
-      <View class="flex-row items-center gap-2">
-        <Icon name="sun" label="Theme" />
-        <Text class="text-foreground">{() => theme()?.name ?? "…"}</Text>
-      </View>
-      <BarChart data={[{ label: "Mon", value: 12 }, { label: "Tue", value: 18 }]} accessibilityLabel="Builds" />
-      <Markdown source="Read the **manual**." />
+      <Panel title="Settings">
+        <Switch label="Notifications" checked={notify()} onChange={({ checked }) => notify.set(checked)} />
+        <Button label="Save" variant="primary" onPress={save} />
+      </Panel>
+      <Body>{`Saved ${saved()} times`}</Body>
+      <Toaster />
     </View>
   );
 }
 
-mount(App);
+mount(() => <App />);
 ```
 
 nshm 让功能不必成为 NSH 的一部分，也能交到需要它的应用手中：它按自己的节奏发布，只有安装它的应用才承担它的体积、构建时间和依赖。
@@ -152,7 +155,7 @@ pub fn Gauge(props: GaugeProps) -> impl IntoElement {
 
 nshm 兼容的 NSH 版本就是它自己对 `nsh-core` 的版本要求（`nsh-core = "0.6"`），`nsh add` 在编译前会与当前 `nsh` 比对。它的 TypeScript 声明由 Rust 类型生成，应用检查 TSX 时会像检查自己的 crate 一样检查对它的使用。
 
-[nsh-omarchy 的 `src/lib.rs`](https://github.com/huacnlee/nsh-omarchy/blob/main/src/lib.rs) 是一个完整的例子：给 Rust 应用的一套 Rust 组件，以及给 TSX 的主题模块、图表和 `Markdown`。
+[nsh-omarchy 的 `src/lib.rs`](https://github.com/huacnlee/nsh-omarchy/blob/main/src/lib.rs) 是一个完整的例子：它的组件由 `#[native_module("nsh-omarchy")]` 导出给 TSX，另有 `Omarchy` 主题模块。
 
 在应用旁边开发时用 `nsh add --path ../my-gauge`，按目录当前内容使用。发布方式与普通 crate 相同（`cargo publish`），加上关键词 `nshm`，便于在 [crates.io](https://crates.io/keywords/nshm) 上找到；也可以推送到 Git，分享它的地址。
 
