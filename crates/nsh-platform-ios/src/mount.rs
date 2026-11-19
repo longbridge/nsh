@@ -594,6 +594,9 @@ struct Slot {
     /// A style was applied before: a view's first style does not transition
     /// from the defaults, as in `nsh_core`'s `transition::restyle`.
     styled: bool,
+    /// Its `UIScrollEdgeElementContainerInteraction`, while it names the
+    /// scroll view it floats over (`crate::scroll_edge`).
+    edge_element: Option<Retained<objc2::runtime::AnyObject>>,
 }
 
 impl Slot {
@@ -647,6 +650,7 @@ impl Slot {
             tracked: 0,
             states: 0,
             styled: false,
+            edge_element: None,
         }
     }
 }
@@ -4907,6 +4911,7 @@ impl Mounter {
     fn set_view_props(&mut self, id: NodeId, props: ViewProps) {
         let (control, mtm, target) = (self.control.clone(), self.mtm, self.target.clone());
         let native_id = props.native_id.clone();
+        let edge_element = props.scroll_edge_element;
         let Some(s) = self.slot_mut(id) else { return };
         s.key_capture = props.key_capture.clone();
         s.disabled = props.accessibility.state.disabled;
@@ -5004,6 +5009,33 @@ impl Mounter {
             self.scrolls
                 .props(&self.scroll_watchers, id, &scroll, &self.target, native_id);
         }
+        self.set_scroll_edge_element(id, edge_element);
+    }
+
+    /// `ios={{ scrollEdgeElement }}`: the view shapes the edge effect of
+    /// the scroll view it names (`crate::scroll_edge`).
+    fn set_scroll_edge_element(
+        &mut self,
+        id: NodeId,
+        element: Option<nsh_core::ScrollEdgeElement>,
+    ) {
+        let scroll = element.and_then(|e| match self.slot(e.scroll_view) {
+            Some(Slot {
+                native: Native::Scroll(scroll),
+                ..
+            }) => Some((scroll.clone(), e.edge)),
+            _ => None,
+        });
+        let Some(s) = self.slot_mut(id) else { return };
+        if scroll.is_none() && s.edge_element.is_none() {
+            return;
+        }
+        let view = s.native.view().retain();
+        crate::scroll_edge::set(
+            &view,
+            &mut s.edge_element,
+            scroll.as_ref().map(|(scroll, edge)| (&**scroll, *edge)),
+        );
     }
 
     /// Only the label of the view's props changed.

@@ -3630,6 +3630,11 @@ pub enum Prop {
     /// The system material of a backdrop blur (iOS, default `ultraThin`).
     #[prop(ios = "backdropMaterial")]
     BackdropMaterial(crate::BackdropMaterial),
+    /// `ios={{ scrollEdgeElement }}`: the scroll view the view floats over
+    /// and the edge of it the view sits at (iOS 26: that scroll view's edge
+    /// effect takes its shape from the view); `None`: none.
+    #[prop(ios = "scrollEdgeElement")]
+    ScrollEdgeElement(Option<crate::element::ScrollEdgeTarget>),
     /// `macos={{ backdrop }}`: the `NSVisualEffectView` material on macOS
     /// (default `popover` / `withinWindow` / `active`; `None`: none).
     #[prop(macos = "backdrop")]

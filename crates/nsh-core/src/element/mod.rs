@@ -144,6 +144,7 @@ pub use self::{
     },
     element_ref::{
         ComponentRef, ElementRef, ElementTarget, EvaluateOptions, Evaluation, FollowTarget,
+        ScrollEdgeTarget,
     },
     engine_context::{EngineContext, EngineContextGuard, engine_context},
     env::Environment,
@@ -223,9 +224,9 @@ pub use crate::{
     MacOsBackdrop, MacOsBackdropBlending, MacOsBackdropMaterial, MacOsBackdropState, Measurement,
     ModalAnimation, ModalPresentation, MouseButton, MouseEvent, PanActivation, PasteBehavior,
     PasteEvent, PastedFile, PinchEvent, PinchPhase, PointerEvents, PointerType, PressEvent,
-    ResizeMode, ReturnKeyType, RevealOptions, ScreenAnimation, ScrollAlignment, SheetDetent,
-    SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, TextShadow,
-    TouchEvent, TransformKind, TransformOrigin, Viewability, WheelDelta, WheelEvent,
+    ResizeMode, ReturnKeyType, RevealOptions, ScreenAnimation, ScrollAlignment, ScrollEdge,
+    SheetDetent, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior,
+    TextShadow, TouchEvent, TransformKind, TransformOrigin, Viewability, WheelDelta, WheelEvent,
     animation::{
         Curve, EaseMode, Easing, Extrapolate, Keyframe, KeyframeTiming, MotionChannel, MotionKind,
         MotionPreset, MotionSpec, Output as AnimationOutput, PlaybackDirection, StaggerFrom,

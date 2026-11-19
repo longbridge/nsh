@@ -286,6 +286,12 @@ prop scroll:text:"Row 0" refreshIndicator height=60
 noprop id:none refreshIndicator
 covers [props] pullValue
 covers [props] refreshIndicator
+# props-scroll-edge-element
+tap id:case-props-scroll-edge-element
+expect New chat
+# The bar names the scroll view under it, at its bottom edge.
+prop id:bar ios.scrollEdgeElement edge=bottom
+covers [props] ios.scrollEdgeElement
 # props-scroll-zoom
 tap id:case-props-scroll-zoom
 expect Zoom

@@ -610,6 +610,31 @@ Two props decide how scrolling and taps interact with the keyboard:
 
 Both are decided natively when the tap or drag happens, without waiting for your code. To hide the keyboard from code, call `dismiss_keyboard()` in Rust or `Keyboard.dismiss()` from [`nsh`](../modules/nsh.md#keyboard-and-keyboardframe) in TSX.
 
+## Views floating over a scroll view
+
+A toolbar or a floating button placed over the top or bottom of a scroll view can name that scroll view, so the
+platform treats it as it treats a bar there. From iOS 26 the scroll view's edge effect then takes its shape from what
+the view shows: the content scrolled under it fades out around its buttons instead of being cut by them. Earlier iOS
+versions and other platforms draw nothing for it; draw a fade of your own there if the screen needs one. Leave room
+for the view at that end of the content with `contentInset`.
+
+```tsx
+const list = signal<ViewRef>();
+
+<View style={{ flex: 1 }}>
+  <Scroll ref={list} contentInset={{ bottom: 80 }}>{/* rows */}</Scroll>
+  <View
+    style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: 16 }}
+    ios={{ scrollEdgeElement: list() ? { scrollView: list()!, edge: "bottom" } : null }}
+  >
+    <Button>New chat</Button>
+  </View>
+</View>
+```
+
+In Rust, `.scroll_edge_element(&list, ScrollEdge::Bottom)` on the floating view, `list` being the scroll view's
+`ElementRef`. `edge` is `"top"` or `"bottom"` (the default).
+
 ## Nested scroll views
 
 A horizontal scroll view inside a vertical one works as expected: each takes the drags along its own axis. Two scroll views on the same axis nest too (the inner one scrolls first). Responders that need the finger, such as a drawing canvas inside a scroll view, keep it from the scroll views around them: `.keep_touches(true)` in Rust, `true` returned from `onResponderGrant` in TSX; see [Touch and gestures](./touch-and-gestures.md#the-responder-system).

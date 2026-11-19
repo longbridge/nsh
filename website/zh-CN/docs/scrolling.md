@@ -600,6 +600,29 @@ NSH 会自动让获得焦点的输入框保持可见：键盘出现时，输入�
 
 两者都在点击或拖动发生时由原生决定，无需等待你的代码。要从代码收起键盘，在 Rust 中调用 `dismiss_keyboard()`，在 TSX 中调用 [`nsh`](../modules/nsh.md#keyboard-and-keyboardframe) 的 `Keyboard.dismiss()`。
 
+## 浮在滚动视图上的视图
+
+放在滚动视图顶部或底部之上的工具栏、悬浮按钮可以指明它下面的滚动视图，平台就像对待那里的栏一样对待它。iOS 26 起，
+滚动视图的边缘效果会按这个视图显示的内容成形：滚到它下面的内容在它的按钮周围渐隐，而不是被按钮截断。更早的 iOS 版本和其他
+平台不为它绘制任何东西；界面需要时在那里自己画一层渐隐。用 `contentInset` 在内容那一端给这个视图留出位置。
+
+```tsx
+const list = signal<ViewRef>();
+
+<View style={{ flex: 1 }}>
+  <Scroll ref={list} contentInset={{ bottom: 80 }}>{/* 行 */}</Scroll>
+  <View
+    style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: 16 }}
+    ios={{ scrollEdgeElement: list() ? { scrollView: list()!, edge: "bottom" } : null }}
+  >
+    <Button>New chat</Button>
+  </View>
+</View>
+```
+
+Rust 中在浮着的视图上调用 `.scroll_edge_element(&list, ScrollEdge::Bottom)`，`list` 是滚动视图的 `ElementRef`。
+`edge` 取 `"top"` 或 `"bottom"`（默认）。
+
 ## 嵌套滚动视图
 
 纵向滚动视图里放横向滚动视图会如预期工作：各自接管自己方向上的拖动。同方向的两个滚动视图也可以嵌套（内层先滚动）。需要独占手指的响应者，比如滚动视图里的绘图画布，会阻止外层滚动视图接管触摸：Rust 中用 `.keep_touches(true)`，TSX 中在 `onResponderGrant` 中返回 `true`；见[触摸与手势](./touch-and-gestures.md#手势响应者系统)。

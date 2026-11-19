@@ -6074,6 +6074,93 @@ fn described_in(batch: &MountBatch, id: NodeId) -> Option<(Option<String>, Optio
     })
 }
 
+/// The scroll view a view's `ios={{ scrollEdgeElement }}` names, as the
+/// platform gets it in the view's props (the last ones in `batch`).
+fn scroll_edge_in(batch: &MountBatch, id: NodeId) -> Option<Option<crate::ScrollEdgeElement>> {
+    batch.items.iter().rev().find_map(|i| match i {
+        MountItem::ViewProps { id: at, props } if *at == id => Some(props.scroll_edge_element),
+        _ => None,
+    })
+}
+
+/// `ios={{ scrollEdgeElement }}` names the scroll view a view floats over:
+/// the platform gets its id and the edge while it is a rendered scroll
+/// view, nothing while it names another kind of view or the scroll view
+/// is out of the tree, and nothing once it names none.
+#[test]
+fn scroll_edge_element_names_the_scroll_view_a_view_floats_over() {
+    use crate::{ScrollEdge, ScrollEdgeElement, element::ScrollEdgeTarget};
+    let mut c = core();
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let floats_over = |target: Option<NodeId>| Op::SetProp {
+        id: 4,
+        prop: Prop::ScrollEdgeElement(
+            target.map(|t| ScrollEdgeTarget::of_node(t, ScrollEdge::Bottom)),
+        ),
+    };
+    let at_bottom = |scroll_view| {
+        Some(Some(ScrollEdgeElement {
+            scroll_view,
+            edge: ScrollEdge::Bottom,
+        }))
+    };
+    // A list and a bar floating over its bottom edge.
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            insert(1, 2),
+            insert(1, 4),
+            insert(1, 6),
+            floats_over(Some(2)),
+        ],
+    );
+    assert_eq!(scroll_edge_in(&c.commit().unwrap(), 4), at_bottom(2));
+    // Something else changes: the bar's props do not go again.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 6,
+            prop: Prop::TestId(Some("other".into())),
+        }],
+    );
+    assert_eq!(c.commit().and_then(|b| scroll_edge_in(&b, 4)), None);
+    // A view that is no scroll view names nothing.
+    apply(&mut c, vec![floats_over(Some(6))]);
+    assert_eq!(scroll_edge_in(&c.commit().unwrap(), 4), Some(None));
+    // The scroll view again, then out of the tree, then back.
+    apply(&mut c, vec![floats_over(Some(2))]);
+    assert_eq!(scroll_edge_in(&c.commit().unwrap(), 4), at_bottom(2));
+    apply(
+        &mut c,
+        vec![Op::Remove {
+            parent: 1,
+            child: 2,
+        }],
+    );
+    assert_eq!(scroll_edge_in(&c.commit().unwrap(), 4), Some(None));
+    apply(&mut c, vec![insert(1, 2)]);
+    assert_eq!(scroll_edge_in(&c.commit().unwrap(), 4), at_bottom(2));
+    // It names none.
+    apply(&mut c, vec![floats_over(None)]);
+    assert_eq!(scroll_edge_in(&c.commit().unwrap(), 4), Some(None));
+}
+
 /// `accessibilityDescribedBy` names the view that describes this one (a
 /// field's error line): the platform gets its id, and the description is
 /// that view's text, followed as it changes, over the view's own
