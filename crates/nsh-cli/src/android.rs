@@ -293,7 +293,7 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     }
     fs::create_dir_all(&work)?;
 
-    // Resources: only the launcher icon.
+    // Resources: the launcher icon, and the launch screen's theme below.
     let mut flat = Vec::new();
     if let Some(icon) = apk.icon {
         // aapt2 parses the file's path itself: the components joined in one
@@ -434,9 +434,8 @@ fn material_theme(dark: bool) -> &'static str {
 
 /// The theme a launch screen generates, which the manifest names.
 const LAUNCH_THEME: &str = "NshLaunch";
-/// The splash screen's icon area, in dp, when it has no icon background
-/// of its own: Android 12+ scales the icon drawable to it and shows a
-/// circle of two thirds of it.
+/// The splash screen's icon area, in dp. The image's insets are fractions
+/// of it, so they hold whatever size the system draws the icon at.
 const SPLASH_ICON_DP: f32 = 288.0;
 
 /// A resource file a package generates: `res/<dir>/<name>`.
@@ -458,9 +457,10 @@ enum ResContents {
 /// color, so the window looks like the app's first frame from the tap on
 /// the icon until that frame and behind it; and on Android 12+, the system
 /// splash screen in the same color with the screen's image in the middle
-/// (drawn for 3x screens as on iOS: a 288 px PNG is 96 dp). The icon's
-/// own background is the screen's color too, so it shows no plate. Without
-/// an image the splash screen shows the launcher icon. The dark values go
+/// (drawn for 3x screens as on iOS: a 288 px PNG is 96 dp). Without an
+/// image the splash screen shows the launcher icon. The image must be a
+/// PNG, checked even when the app targets a platform before Android 12,
+/// which has no splash screen to show it. The dark values go
 /// to the `-night` qualifiers, which the system picks in dark mode; an app
 /// of one appearance (`fixed`, dark or not) has only that appearance's.
 fn launch_resources(
@@ -520,6 +520,19 @@ fn launch_resources(
             contents: xml(color(dark)),
         });
     }
+    // The image for each appearance (the night one only when it differs)
+    // and its size in pixels.
+    let mut images = Vec::new();
+    if let Some(image) = &screen.image {
+        let (day, night) = pick(image, dark, fixed);
+        for (path, png_dir, xml_dir) in [
+            (Some(day), "drawable-nodpi", "drawable"),
+            (night, "drawable-night-nodpi", "drawable-night"),
+        ] {
+            let Some(path) = path else { continue };
+            images.push((path, png_size(path)?, png_dir, xml_dir));
+        }
+    }
     // The splash screen's attributes are Android 12's (API 31): an app that
     // compiles against an older platform keeps its window background only.
     if target_sdk < 31 {
@@ -531,48 +544,36 @@ fn launch_resources(
             "windowSplashScreenBackground",
             "@color/nsh_launch_background",
         ));
-        splash.push((
-            "windowSplashScreenIconBackgroundColor",
-            "@color/nsh_launch_background",
-        ));
     }
-    if let Some(image) = &screen.image {
+    if !images.is_empty() {
         splash.push(("windowSplashScreenAnimatedIcon", "@drawable/nsh_launch"));
-        let (day, night) = pick(image, dark, fixed);
-        for (path, png_dir, xml_dir) in [
-            (Some(day), "drawable-nodpi", "drawable"),
-            (night, "drawable-night-nodpi", "drawable-night"),
-        ] {
-            let Some(path) = path else { continue };
-            let (width, height) = image::image_dimensions(path).with_context(|| {
-                format!(
-                    "read {} (nsh.json android.launchScreen.image)",
-                    path.display()
-                )
-            })?;
-            // Centered at a third of its pixels in dp: the rest of the icon
-            // area is inset.
-            let inset = |px: u32| ((SPLASH_ICON_DP - px as f32 / 3.0) / 2.0).max(0.0);
-            files.push(ResFile {
-                dir: png_dir,
-                name: "nsh_launch_image.png".into(),
-                contents: ResContents::Copy(path.clone()),
-            });
-            files.push(ResFile {
-                dir: xml_dir,
-                name: "nsh_launch.xml".into(),
-                contents: ResContents::Text(format!(
-                    r#"<?xml version="1.0" encoding="utf-8"?>
+    }
+    for (path, (width, height), png_dir, xml_dir) in images {
+        // Centered at a third of its pixels in dp: each side insets the
+        // rest of the icon area, as a fraction of it.
+        let inset = |px: u32| {
+            let fraction = ((1.0 - px as f32 / 3.0 / SPLASH_ICON_DP) / 2.0).max(0.0);
+            format!("{:.3}%", fraction * 100.0)
+        };
+        files.push(ResFile {
+            dir: png_dir,
+            name: "nsh_launch_image.png".into(),
+            contents: ResContents::Copy(path.clone()),
+        });
+        files.push(ResFile {
+            dir: xml_dir,
+            name: "nsh_launch.xml".into(),
+            contents: ResContents::Text(format!(
+                r#"<?xml version="1.0" encoding="utf-8"?>
 <inset xmlns:android="http://schemas.android.com/apk/res/android"
     android:drawable="@drawable/nsh_launch_image"
-    android:insetLeft="{x}dp" android:insetRight="{x}dp"
-    android:insetTop="{y}dp" android:insetBottom="{y}dp" />
+    android:insetLeft="{x}" android:insetRight="{x}"
+    android:insetTop="{y}" android:insetBottom="{y}" />
 "#,
-                    x = inset(width),
-                    y = inset(height),
-                )),
-            });
-        }
+                x = inset(width),
+                y = inset(height),
+            )),
+        });
     }
     files.push(ResFile {
         dir: "values-v31",
@@ -580,6 +581,28 @@ fn launch_resources(
         contents: xml(style(&splash)),
     });
     Ok(files)
+}
+
+/// The size of the launch screen's image, which must be a PNG (it is copied
+/// into the package as one).
+fn png_size(path: &Path) -> anyhow::Result<(u32, u32)> {
+    let read = || {
+        format!(
+            "read {} (nsh.json android.launchScreen.image)",
+            path.display()
+        )
+    };
+    let reader = image::ImageReader::open(path)
+        .with_context(read)?
+        .with_guessed_format()
+        .with_context(read)?;
+    if reader.format() != Some(image::ImageFormat::Png) {
+        bail!(
+            "{} is no PNG (nsh.json android.launchScreen.image)",
+            path.display()
+        );
+    }
+    reader.into_dimensions().with_context(read)
 }
 
 /// Compiles resource files (each under `res/<type>/`) with `aapt2` into
@@ -1271,11 +1294,7 @@ mod tests {
         let night = text(&files, "values-night");
         assert!(night.contains("#ff131312"), "{night}");
         let splash = text(&files, "values-v31");
-        for item in [
-            "windowBackground",
-            "windowSplashScreenBackground",
-            "windowSplashScreenIconBackgroundColor",
-        ] {
+        for item in ["windowBackground", "windowSplashScreenBackground"] {
             assert!(
                 splash.contains(&format!(
                     r#"<item name="android:{item}">@color/nsh_launch_background</item>"#
@@ -1285,6 +1304,12 @@ mod tests {
         }
         assert!(
             !splash.contains("windowSplashScreenAnimatedIcon"),
+            "{splash}"
+        );
+        // The system shows an adaptive launcher icon's foreground alone only
+        // while no icon background is set.
+        assert!(
+            !splash.contains("windowSplashScreenIconBackgroundColor"),
             "{splash}"
         );
         // Compiled against a platform before Android 12: no splash
@@ -1328,17 +1353,19 @@ mod tests {
         );
         // No color: the platform's window background stays.
         assert!(!splash.contains("windowBackground"), "{splash}");
-        // 288 px is 96 dp: 96 dp of inset on each side of 288.
+        // 288 px is 96 dp: a third of the 288 dp icon area, a third of it
+        // inset on each side.
         let icon = text(&files, "drawable");
         assert!(
             icon.contains(r#"android:drawable="@drawable/nsh_launch_image""#),
             "{icon}"
         );
-        assert!(icon.contains(r#"android:insetLeft="96dp""#), "{icon}");
-        assert!(icon.contains(r#"android:insetTop="96dp""#), "{icon}");
+        assert!(icon.contains(r#"android:insetLeft="33.333%""#), "{icon}");
+        assert!(icon.contains(r#"android:insetTop="33.333%""#), "{icon}");
+        // Not square: its width and its height inset apart.
         let night = text(&files, "drawable-night");
-        assert!(night.contains(r#"android:insetLeft="120dp""#), "{night}");
-        assert!(night.contains(r#"android:insetTop="128dp""#), "{night}");
+        assert!(night.contains(r#"android:insetLeft="41.667%""#), "{night}");
+        assert!(night.contains(r#"android:insetTop="44.444%""#), "{night}");
         let copied = |dir: &str| {
             files.iter().find_map(|file| match &file.contents {
                 super::ResContents::Copy(path) if file.dir == dir => Some(path.clone()),
@@ -1347,6 +1374,20 @@ mod tests {
         };
         assert_eq!(copied("drawable-nodpi"), Some(light));
         assert_eq!(copied("drawable-night-nodpi"), Some(dark));
+        // Checked before Android 12 too, and only a PNG.
+        let jpeg = dir.join("launch.jpg");
+        std::fs::write(&jpeg, b"\xff\xd8\xff\xe0not a png").unwrap();
+        for path in [jpeg, dir.join("missing.png")] {
+            let screen = LaunchScreen {
+                background: None,
+                image: Some(Themed::Both(path.clone())),
+            };
+            assert!(
+                super::launch_resources(&screen, false, false, 30).is_err(),
+                "{}",
+                path.display()
+            );
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
