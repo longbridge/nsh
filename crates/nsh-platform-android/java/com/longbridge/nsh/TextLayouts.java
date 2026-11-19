@@ -413,6 +413,10 @@ final class TextLayouts {
                     .setLineSpacing(0f, 1f)
                     .setBreakStrategy(LineBreaker.BREAK_STRATEGY_SIMPLE)
                     .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE);
+            // A line that uses a fallback font (CJK with a Latin system font)
+            // takes its extent, as a TextView in an app targeting 28 or later
+            // and CoreText's lines do: otherwise its glyphs overflow the line.
+            if (android.os.Build.VERSION.SDK_INT >= 28) b.setUseLineSpacingFromFallbacks(true);
             if (android.os.Build.VERSION.SDK_INT >= 35) {
                 // `obtain` hands out pooled builders and does not reset these
                 // two: a TextView in an app targeting 35 or later leaves them
