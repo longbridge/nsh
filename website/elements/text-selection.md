@@ -120,6 +120,10 @@ const quote = signal("");
 </View>
 ```
 
+`ref.clearSelection()` on the selectable view, or on a view inside it, clears the selection as a press elsewhere does:
+the highlight goes and `onSelectionChange` hears `""`. A bar of actions over the selection calls it once its action is
+done. In Rust it is `ElementRef::clear_selection`.
+
 ### As Markdown or HTML
 
 A `selectable` `TextView`'s ref reads its selection when the app asks: `selectedText({ format })` gives the selected

@@ -1948,6 +1948,23 @@ impl Mounter {
             }
             return;
         }
+        if let Command::ClearSelection = command {
+            let within = |mut inner: NodeId, outer: NodeId| loop {
+                if inner == outer {
+                    return true;
+                }
+                match self.slot(inner).and_then(|s| s.parent) {
+                    Some(parent) => inner = parent,
+                    None => return false,
+                }
+            };
+            for (area_id, area) in &self.areas {
+                if within(*area_id, id) || within(id, *area_id) {
+                    area.clear();
+                }
+            }
+            return;
+        }
         let Some(s) = self.slot(id) else { return };
         match (command, &s.native) {
             (

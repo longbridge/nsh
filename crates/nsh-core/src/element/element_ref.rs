@@ -237,6 +237,14 @@ impl ElementRef {
         self.send(Command::Blur);
     }
 
+    /// Clears the selection of the selectable view or text the element is,
+    /// or holds (TS: `ref.clearSelection()`): its texts lose the highlight
+    /// and a selectable view hears `on_text_selection_change` with nothing
+    /// selected.
+    pub fn clear_selection(&self) {
+        self.send(Command::ClearSelection);
+    }
+
     /// Moves the screen reader's focus to the element (TS:
     /// `setAccessibilityFocus(ref)`).
     pub fn set_accessibility_focus(&self) {

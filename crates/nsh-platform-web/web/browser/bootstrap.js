@@ -3374,6 +3374,7 @@
 		for (const name of [
 			"focus",
 			"blur",
+			"clearSelection",
 			"scrollTo",
 			"zoomTo",
 			"scrollToIndex",

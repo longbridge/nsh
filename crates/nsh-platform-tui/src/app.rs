@@ -1765,6 +1765,10 @@ impl AppView {
             {
                 self.surface.wake.notify();
             }
+            for id in std::mem::take(&mut self.tree.clear_selection_requests) {
+                self.selection.clear_in(&self.tree, id);
+                self.surface.wake.notify();
+            }
             if let Some(engine) = &self.surface.engine {
                 let control = engine.control();
                 for (id, focus) in std::mem::take(&mut self.tree.focus_requests) {
