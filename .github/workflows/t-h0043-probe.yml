@@ -7,23 +7,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [fixed, unfixed]
+        variant: [fixed, unfixed, pristine]
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Revert the fix (unfixed baseline)
-        if: matrix.variant == 'unfixed'
+        if: matrix.variant != 'fixed'
         run: |
-          git fetch --depth=50 origin main
-          git checkout origin/main -- crates/nsh-platform-macos/src/text_input.rs crates/nsh-platform-macos/Cargo.toml
+          git fetch origin 9cc54deac3c9c89b139fdb25bb31227685c1ed7f
+          git checkout 9cc54deac3c9c89b139fdb25bb31227685c1ed7f -- crates/nsh-platform-macos/src/text_input.rs crates/nsh-platform-macos/Cargo.toml
+          if [ "${{ matrix.variant }}" = pristine ]; then git checkout 9cc54deac3c9c89b139fdb25bb31227685c1ed7f -- crates/nsh-platform-macos/tests; fi
       - uses: dtolnay/rust-toolchain@stable
       - name: Build native test
         run: cargo test -p nsh-platform-macos --features js --test native --no-run
       - name: Committed regression test
-        continue-on-error: ${{ matrix.variant == 'unfixed' }}
+        continue-on-error: ${{ matrix.variant != 'fixed' }}
         run: NSH_SCALED_INPUT_CHECK_ONLY=1 cargo test -p nsh-platform-macos --features js --test native -- --ignored
       - name: TSX acceptance
-        continue-on-error: ${{ matrix.variant == 'unfixed' }}
+        if: always() && matrix.variant != 'pristine'
+        continue-on-error: ${{ matrix.variant != 'fixed' }}
         run: NSH_SCALED_INPUT_CHECK_ONLY=1 T10284_BUNDLE=$PWD/ci-probe/out/bundle.js cargo test -p nsh-platform-macos --features js --test native -- --ignored
       - uses: actions/upload-artifact@v4
         if: always()
