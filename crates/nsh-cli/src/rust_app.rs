@@ -271,10 +271,10 @@ pub(crate) struct RustApp {
     /// share one build of what they have in common
     /// ([`RustApp::unify_features`]).
     unify: bool,
-    /// The app's extensions (`nsh add`): their Git URLs, packages and
+    /// The app's nshm (`nsh add`): their Git URLs, packages and
     /// checkouts. The app's crates name them by Git; the workspace patches
     /// those to the locked checkouts, so all link one copy.
-    extensions: Vec<(String, String, PathBuf)>,
+    modules: Vec<(String, String, PathBuf)>,
     /// The oldest Apple systems its packages declare, which its builds for
     /// them compile for ([`set_deployment_target`]).
     minimums: AppleMinimums,
@@ -862,7 +862,7 @@ pub(crate) fn runner_only(entry: &Path) -> anyhow::Result<RustApp> {
         root: None,
         retargeted: false,
         unify: true,
-        extensions: Vec::new(),
+        modules: Vec::new(),
         minimums,
     };
     app.write_workspace()?;
@@ -880,36 +880,36 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
         return Ok(None);
     };
     let config: serde_json::Value = serde_json::from_str(&text).context("nsh.json is not JSON")?;
-    let extensions = crate::extensions::crates(dir, &config)?;
+    let modules = crate::nshm::crates(dir, &config)?;
     let rust = config.get("rust");
-    if rust.is_none() && extensions.is_empty() {
+    if rust.is_none() && modules.is_empty() {
         return Ok(None);
     }
-    // The app's own crates, then the extensions it installed (`nsh add`):
+    // The app's own crates, then the nshm it installed (`nsh add`):
     // one list of UI sets, checked together.
     let mut crates = match rust {
         Some(rust) => crates(dir, rust)?,
         None => Vec::new(),
     };
     // nsh's crates come from where the app's own crates take them; an
-    // extension asks crates.io for a version, patched to that place. An app
-    // with extensions only builds with this CLI's, as a TSX app's runner
+    // nshm asks crates.io for a version, patched to that place. An app
+    // with nshm only builds with this CLI's, as a TSX app's runner
     // does ([`runner_only`]).
     let nsh = if crates.is_empty() {
         crate::runtime::cli_checkout().map_or(Nsh::Registry, Nsh::Source)
     } else {
         Nsh::of(&crates)?
     };
-    let extension_patches = extensions
+    let module_patches = modules
         .iter()
         .map(|(url, c)| (url.clone(), c.package.clone(), c.dir.clone()))
         .collect();
-    if !extensions.is_empty() {
+    if !modules.is_empty() {
         let mut named: Vec<(String, AppCrate)> = crates
             .iter()
             .map(|c| (c.dir.display().to_string(), c.clone()))
             .collect();
-        named.extend(extensions);
+        named.extend(modules);
         check_crates(&named)?;
         crates = named.into_iter().map(|(_, c)| c).collect();
     }
@@ -930,7 +930,7 @@ pub(crate) fn of(entry: &Path, unify: bool) -> anyhow::Result<Option<RustApp>> {
         root,
         retargeted,
         unify,
-        extensions: extension_patches,
+        modules: module_patches,
         minimums,
     };
     app.write_workspace()?;
@@ -963,7 +963,7 @@ fn crates(dir: &Path, rust: &serde_json::Value) -> anyhow::Result<Vec<AppCrate>>
     Ok(crates.into_iter().map(|(_, c)| c).collect())
 }
 
-/// Checks the crates the app links (`"rust"`'s and the extensions', each
+/// Checks the crates the app links (`"rust"`'s and the nshm's, each
 /// with how `nsh.json` names it): two of the same directory, package or
 /// specifier (`#[native_module("…")]`, [`specifier_of`]) would make two
 /// sets one import cannot tell apart.
@@ -2633,14 +2633,14 @@ opt-level = \"s\"
                 "\n[profile.dev.package.{package}]\nopt-level = 3\n"
             ));
         }
-        // The app's crates take its extensions from Git or crates.io (`nsh
+        // The app's crates take its nshm from Git or crates.io (`nsh
         // add`): the locked checkouts, the ones the sets link. One from a
         // directory is that directory already.
         let mut crates_io = String::new();
         let mut git_patches = String::new();
-        for (id, package, dir) in &self.extensions {
+        for (id, package, dir) in &self.modules {
             let line = format!("{package} = {{ path = {:?} }}\n", dir.to_string_lossy());
-            match crate::extensions::patch_table(id) {
+            match crate::nshm::patch_table(id) {
                 Some(None) => crates_io.push_str(&line),
                 Some(Some(url)) => git_patches.push_str(&format!("\n[patch.{url:?}]\n{line}")),
                 None => {}
@@ -3794,7 +3794,7 @@ mod tests {
             root,
             retargeted: false,
             unify: true,
-            extensions: Vec::new(),
+            modules: Vec::new(),
             minimums: crate::apple::AppleMinimums::default(),
         }
     }
