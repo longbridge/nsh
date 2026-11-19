@@ -371,7 +371,7 @@ An input's ref has:
 | `focus()` | `focus()` | Focuses the input and shows the keyboard. |
 | `blur()` | `blur()` | Unfocuses it. |
 | `set_selection(start, end)` | `setSelection(start, end?)` | Selects `start..end` (UTF-16 units); a caret when they are equal (TSX: without `end`). |
-| `insert_text(text)` | `insertText(text)` | Inserts `text` in place of the selection as the user's edit: one step of the input's undo history, reported by `onChange`; Linux, the web and headless tests only ([pasting](#pasting-images-and-files)). |
+| `insert_text(text)` | `insertText(text)` | Inserts `text` in place of the selection as the user's edit: one step of the input's undo history, reported by `onChange`; iOS, macOS, Linux, the web and headless tests ([pasting](#pasting-images-and-files)). |
 
 On macOS, the web and Android, `focus()` and `blur()` on the ref of a view that takes presses move the keyboard focus as Tab does ([keyboard focus](../elements/index.md#keyboard-focus)); on Android the view is focusable in touch mode for that focus session, and a default button is touch-neutral again once it blurs.
 
@@ -536,10 +536,10 @@ ref's `insertText` (Rust `insert_text`) puts the text it allows in place of the 
 `maxLength` and the line rules apply, `onChange` reports it, and on Linux and the web it is one step of the input's
 undo history, so Ctrl+Z takes it out again. A new `value` replaces the text instead.
 
-`insertText` inserts text on Linux, the web and in headless tests (`nsh test`); on macOS, Windows, iOS, Android
-and GPUI it does nothing yet and logs a warning, so the example below is for apps on Linux and the web. Use it with
+`insertText` inserts text on iOS, macOS, Linux, the web and in headless tests (`nsh test`); on Windows, Android
+and GPUI it does nothing yet and logs a warning, so use it on supported targets. Use it with
 `pasteBehavior="report"`: with `"insert"`, the default, the input has inserted the paste already and `insertText`
-inserts it a second time. While an input method is composing, `insertText` inserts nothing and logs a warning.
+inserts it a second time. While an input method is composing, `insertText` inserts nothing.
 
 ```rust tabs
 let field = element_ref();

@@ -569,22 +569,7 @@ fn paste_text(view: &UIView, board: &objc2_ui_kit::UIPasteboard) {
         return;
     };
     let range = NSRange::new(start as usize, (end - start) as usize);
-    let current = view
-        .downcast_ref::<Field>()
-        .and_then(|f| f.text())
-        .or_else(|| view.downcast_ref::<Area>().map(|a| a.text()))
-        .unwrap_or_default();
-    let room = max_length(view).map_or(usize::MAX, |max| {
-        (max as usize).saturating_sub(kept_chars(&current, range))
-    });
-    // A text of no more UTF-16 units than there is room for characters
-    // fits as it is.
-    let text = if room < text.length() {
-        let units = utf16(&text, NSRange::new(0, text.length()));
-        NSString::from_str(clip_chars(&String::from_utf16_lossy(&units), room))
-    } else {
-        text
-    };
+    let text = clipped_paste(view, range, text);
     if text.length() == 0 {
         return;
     }
@@ -603,6 +588,26 @@ fn paste_text(view: &UIView, board: &objc2_ui_kit::UIPasteboard) {
     if allows.as_bool() {
         // SAFETY: UIKeyInput's method, which both input classes implement.
         let _: () = unsafe { msg_send![view, insertText: &*text] };
+    }
+}
+
+/// The part of a paste that fits after replacing the native UTF-16 selection.
+fn clipped_paste(view: &UIView, range: NSRange, text: Retained<NSString>) -> Retained<NSString> {
+    let current = view
+        .downcast_ref::<Field>()
+        .and_then(|f| f.text())
+        .or_else(|| view.downcast_ref::<Area>().map(|a| a.text()))
+        .unwrap_or_default();
+    let room = max_length(view).map_or(usize::MAX, |max| {
+        (max as usize).saturating_sub(kept_chars(&current, range))
+    });
+    // A text of no more UTF-16 units than there is room for characters
+    // fits as it is.
+    if room < text.length() {
+        let units = utf16(&text, NSRange::new(0, text.length()));
+        NSString::from_str(clip_chars(&String::from_utf16_lossy(&units), room))
+    } else {
+        text
     }
 }
 
@@ -1066,6 +1071,29 @@ impl Input {
 
     pub(crate) fn view(&self) -> &UIView {
         &self.container
+    }
+
+    /// Applies an app-accepted paste through UITextInput's selected range.
+    pub(crate) fn insert_text(&self, text: &str) {
+        let view = self.editor_view();
+        let Some(config) = &self.config else { return };
+        if !config.editable || marked_text(view).is_some() {
+            return;
+        }
+        let Some((start, end)) = selection(view) else {
+            return;
+        };
+        let text = nsh_core::text_edit::pasted(text, config.multiline);
+        let range = NSRange::new(start as usize, (end - start) as usize);
+        let text = clipped_paste(view, range, NSString::from_str(&text));
+        // UITextInput's replacement applies one edit without interpreting a
+        // pasted newline as the Return key. Both editor classes adopt it.
+        unsafe {
+            let selected: Option<Retained<AnyObject>> = msg_send![view, selectedTextRange];
+            if let Some(selected) = selected {
+                let _: () = msg_send![view, replaceRange: &*selected, withText: &*text];
+            }
+        }
     }
 
     /// The view that edits (first responder).

@@ -25,3 +25,13 @@ test("a cancelled paste inserts nothing", async () => {
   await app.waitFor("Paste: cancelled");
   expect(app.value("id:field")).toBe("keep");
 });
+
+test("a reported multiline paste respects the length limit and keeps a pasted return", async () => {
+  const app = await open("./App.tsx");
+  await app.type("id:area", "123");
+  await app.paste("id:area", { text: "\n" });
+  await app.waitFor("Paste: 123\n");
+  await app.paste("id:area", { text: "😀abcd" });
+  await app.waitFor("Paste: 123\n😀abc");
+  expect(app.value("id:area")).toBe("123\n😀abc");
+});

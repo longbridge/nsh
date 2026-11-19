@@ -784,19 +784,7 @@ impl Ctx {
             text = text.replace("\r\n", " ").replace(['\n', '\r'], " ");
         }
         let max = input.config.borrow().max_length;
-        let fit = match max {
-            Some(max) => {
-                // `maxLength` counts characters: those the edit keeps.
-                let string = text_view.string();
-                let all = string.length();
-                let start = range.location.min(all);
-                let end = range.location.saturating_add(range.length).min(all);
-                let kept = char_len(&input_text(&string, NSRange::new(0, start)))
-                    + char_len(&input_text(&string, NSRange::new(end, all - end)));
-                clip_chars(&text, (max as usize).saturating_sub(kept))
-            }
-            None => &text[..],
-        };
+        let fit = fitting_text(&text, text_view, range, max);
         if !fit.is_empty() {
             self.key_press(key_of(fit));
         }
@@ -3413,6 +3401,58 @@ pub(crate) fn editing_in(root: &NshView) -> bool {
     responder
         .downcast_ref::<NSTextView>()
         .is_some_and(|text| text.isDescendantOf(root))
+}
+
+/// Clips a replacement to the characters left by the selected range.
+fn fitting_text<'a>(
+    text: &'a str,
+    editor: &NSTextView,
+    range: NSRange,
+    max: Option<u32>,
+) -> &'a str {
+    let Some(max) = max else { return text };
+    let string = editor.string();
+    let all = string.length();
+    let start = range.location.min(all);
+    let end = range.location.saturating_add(range.length).min(all);
+    let kept = char_len(&input_text(&string, NSRange::new(0, start)))
+        + char_len(&input_text(&string, NSRange::new(end, all - end)));
+    clip_chars(text, (max as usize).saturating_sub(kept))
+}
+
+/// Inserts the paste an app allowed into the field editor or text area as one undoable edit.
+pub(crate) fn insert_text(view: &NshView, text: &str) {
+    let Some(input) = view.state().input.clone() else {
+        return;
+    };
+    let Some(editor) = input
+        .editor
+        .borrow()
+        .editing()
+        .and_then(|e| e.downcast::<NSTextView>().ok())
+    else {
+        return;
+    };
+    if !editor.isEditable() || editor.hasMarkedText() {
+        return;
+    }
+    let range = editor.selectedRange();
+    let (multiline, max) = {
+        let config = input.config.borrow();
+        (config.multiline, config.max_length)
+    };
+    let text = nsh_core::text_edit::pasted(text, multiline);
+    let replacement = NSString::from_str(fitting_text(&text, &editor, range, max));
+    if replacement.length() == 0 && range.length == 0 {
+        return;
+    }
+    // The edit is already clipped. Keep it out of keyboard handling and
+    // separate from typing on either side in the undo manager.
+    editor.breakUndoCoalescing();
+    input.clipping.set(true);
+    unsafe { editor.insertText_replacementRange(&replacement, range) };
+    input.clipping.set(false);
+    editor.breakUndoCoalescing();
 }
 
 /// `setSelection` (UTF-16 offsets).

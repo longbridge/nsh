@@ -7,6 +7,7 @@ import { Input } from "nsh/base";
 function App() {
   const value = signal("");
   const last = signal("none");
+  let area: InputRef | undefined;
   let field: InputRef | undefined;
   return (
     <View style={{ flex: 1, padding: 16, gap: 8 }}>
@@ -28,6 +29,10 @@ function App() {
           }
         }}
       />
+      <Input testID="area" ref={(r) => (area = r)} multiline maxLength={8}
+        submitBehavior="submit" onSubmit={() => last.set("submitted")}
+        pasteBehavior="report" onPaste={(e) => area?.insertText(e.text)}
+        onChange={({ value }) => last.set(value)} />
       <Text>{`Paste: ${last()}`}</Text>
     </View>
   );
