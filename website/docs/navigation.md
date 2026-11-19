@@ -239,7 +239,8 @@ In Rust, each prop below is a method of `nav_page()` in snake case: `.title(..)`
 | `headerVisible` | `boolean` | `true` | iOS and Android: the system header shows. |
 | `headerTransparent` | `boolean` | `false` | iOS and Android: the content extends under the header. |
 | `headerShadowVisible` | `boolean` | `true` | iOS: the hairline under the header. Set it to `false` for a bar without a line, as iOS 26's own. Android's header has none. |
-| `headerBackgroundOnScroll` | `boolean` | `false` | iOS: with `headerTransparent`, the header stays clear while the content rests at its top and shows its background once the content scrolls under it, as UIKit's own bars. It follows the largest visible scroll view that starts at the top of the page. The background covers the whole header, with or without a title. Ignored elsewhere. |
+| `headerTitleAlign` | `"left" \| "center"` | `"left"` | Android: where the title sits in the header, at the start or centered between the items on either side. iOS: the system bar always centers the title and ignores this value. |
+| `headerBackgroundOnScroll` | `boolean` | `false` | iOS: with `headerTransparent`, the header stays clear while the content rests at its top and shows its background once the content scrolls under it, as UIKit's own bars. It follows the largest visible scroll view that starts at the top of the page. Ignored elsewhere. |
 | `headerStyle` | `{ backgroundColor?, color?, tintColor? }` | | iOS and Android: the header's background, the title's color (`color`) and the buttons' (`tintColor`). |
 | `headerClass` | `string` | | The same as classes: `bg-*`, `text-*` for the title, `tint-*` for the buttons; `headerStyle` wins over them. |
 | `headerBackVisible` | `boolean` | `true` | iOS and Android: the back button shows. |

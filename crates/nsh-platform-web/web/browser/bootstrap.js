@@ -3426,6 +3426,15 @@
 				}
 			]);
 		};
+		prototype.animateLayout = function(transition) {
+			const id = values.nodeIds.get(this);
+			if (id === void 0) throw new TypeError("nsh: not a node");
+			return call(314, [
+				id,
+				"layoutAnimation",
+				{ update: Object(transition) === transition ? transition : {} }
+			]);
+		};
 		prototype.scrollToOffset = function(options) {
 			return this.scrollTo({
 				x: options?.offset,

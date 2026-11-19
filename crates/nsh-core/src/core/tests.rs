@@ -6074,6 +6074,162 @@ fn described_in(batch: &MountBatch, id: NodeId) -> Option<(Option<String>, Optio
     })
 }
 
+/// The scroll view a view's `ios={{ scrollEdgeElement }}` names, as the
+/// platform gets it in the view's props (the last ones in `batch`).
+fn scroll_edge_in(batch: &MountBatch, id: NodeId) -> Option<Option<crate::ScrollEdgeElement>> {
+    batch.items.iter().rev().find_map(|i| match i {
+        MountItem::ViewProps { id: at, props } if *at == id => Some(props.scroll_edge_element),
+        _ => None,
+    })
+}
+
+/// `ios={{ scrollEdgeElement }}` names the scroll view a view floats over:
+/// the platform gets its id and the edge while it is a rendered scroll
+/// view, nothing while it names another kind of view or the scroll view
+/// is out of the tree, and nothing once it names none.
+#[test]
+fn scroll_edge_element_names_the_scroll_view_a_view_floats_over() {
+    use crate::{ScrollEdge, ScrollEdgeElement, element::ScrollEdgeTarget};
+    let mut c = core();
+    let insert = |parent, child| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    let floats_over = |target: Option<NodeId>| Op::SetProp {
+        id: 4,
+        prop: Prop::ScrollEdgeElement(
+            target.map(|t| ScrollEdgeTarget::of_node(t, ScrollEdge::Bottom)),
+        ),
+    };
+    let at_bottom = |scroll_view| {
+        Some(Some(ScrollEdgeElement {
+            scroll_view,
+            edge: ScrollEdge::Bottom,
+        }))
+    };
+    // A list and a bar floating over its bottom edge.
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            insert(1, 2),
+            insert(1, 4),
+            insert(1, 6),
+            floats_over(Some(2)),
+        ],
+    );
+    assert_eq!(scroll_edge_in(&c.commit().unwrap(), 4), at_bottom(2));
+    // Something else changes: the bar's props do not go again.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 6,
+            prop: Prop::TestId(Some("other".into())),
+        }],
+    );
+    assert_eq!(c.commit().and_then(|b| scroll_edge_in(&b, 4)), None);
+    // A view that is no scroll view names nothing.
+    apply(&mut c, vec![floats_over(Some(6))]);
+    assert_eq!(scroll_edge_in(&c.commit().unwrap(), 4), Some(None));
+    // The scroll view again, then out of the tree, then back.
+    apply(&mut c, vec![floats_over(Some(2))]);
+    assert_eq!(scroll_edge_in(&c.commit().unwrap(), 4), at_bottom(2));
+    apply(
+        &mut c,
+        vec![Op::Remove {
+            parent: 1,
+            child: 2,
+        }],
+    );
+    assert_eq!(scroll_edge_in(&c.commit().unwrap(), 4), Some(None));
+    apply(&mut c, vec![insert(1, 2)]);
+    assert_eq!(scroll_edge_in(&c.commit().unwrap(), 4), at_bottom(2));
+    // It names none.
+    apply(&mut c, vec![floats_over(None)]);
+    assert_eq!(scroll_edge_in(&c.commit().unwrap(), 4), Some(None));
+}
+
+/// A scroll view culled far down another one's content is named by a view
+/// floating over it: the platform gets its id once its native view is made,
+/// after the view that makes it, in the batch that makes it.
+#[test]
+fn scroll_edge_element_names_a_culled_scroll_view_once_it_is_made() {
+    use crate::{ScrollEdge, ScrollEdgeElement, element::ScrollEdgeTarget};
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    // Rows of 50 in a wrapper, then a scroll view at 1900.
+    ops.extend(child_view(4, 2, 2000.0, &[]));
+    for i in 0..38u32 {
+        ops.extend(child_view(10 + 2 * i, 4, 50.0, &[]));
+    }
+    ops.extend([
+        Op::Create {
+            id: 200,
+            tag: Tag::Scroll,
+        },
+        style_op(200, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: 4,
+            child: 200,
+            before: None,
+        },
+    ]);
+    // A bar floating over its bottom edge.
+    ops.extend(child_view(6, ROOT_ID, 40.0, &[]));
+    ops.push(Op::SetProp {
+        id: 6,
+        prop: Prop::ScrollEdgeElement(Some(ScrollEdgeTarget::of_node(200, ScrollEdge::Bottom))),
+    });
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    assert!(!created_in(&batch).contains(&200));
+    assert_eq!(scroll_edge_in(&batch, 6).flatten(), None);
+    // Scrolled to it, it is made, and the bar names it after that.
+    c.set_scroll_offset(2, point(Points::ZERO, Points(1900.0)), 0);
+    let batch = c.commit().unwrap();
+    let made = batch
+        .items
+        .iter()
+        .position(|i| matches!(i, MountItem::Create { id: 200, .. }))
+        .expect("the scroll view is made");
+    let named = batch
+        .items
+        .iter()
+        .rposition(|i| matches!(i, MountItem::ViewProps { id: 6, .. }))
+        .expect("the bar's props go again");
+    assert!(made < named);
+    assert_eq!(
+        scroll_edge_in(&batch, 6),
+        Some(Some(ScrollEdgeElement {
+            scroll_view: 200,
+            edge: ScrollEdge::Bottom,
+        }))
+    );
+}
+
 /// `accessibilityDescribedBy` names the view that describes this one (a
 /// field's error line): the platform gets its id, and the description is
 /// that view's text, followed as it changes, over the view's own
@@ -8699,6 +8855,57 @@ fn selection_classes_reach_the_texts_inside() {
     c.apply(class_op(2, "")).unwrap();
     let batch = c.commit().unwrap();
     assert_eq!(highlight(&batch, 3), Some(None));
+}
+
+/// A view's own selection color (Rust's `Element::selection_color`)
+/// reaches the texts in it as its `selection:bg-*` class does, over that
+/// class; a text's own wins, and clearing it clears theirs.
+#[test]
+fn a_view_selection_color_reaches_the_texts_inside() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "selection:bg-red-500");
+    let view_color = |color| Op::SetProp {
+        id: 2,
+        prop: Prop::SelectionColor(color),
+    };
+    let mut ops = vec![view_color(Some(Color(0x00ff_00ff)))];
+    for (id, classes) in [(3, "select-text"), (5, "select-text selection:bg-blue-500")] {
+        ops.extend([
+            Op::Create { id, tag: Tag::Text },
+            class_op(id, classes),
+            Op::CreateText {
+                id: id + 1,
+                text: "hello".into(),
+            },
+            Op::Insert {
+                parent: id,
+                child: id + 1,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: id,
+                before: None,
+            },
+        ]);
+    }
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let highlight = |batch: &MountBatch, id| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Text { id: i, text, .. } if *i == id => Some(text.selection_color),
+            _ => None,
+        })
+    };
+    assert_eq!(highlight(&batch, 3), Some(Some(Color(0x00ff_00ff))));
+    assert_eq!(highlight(&batch, 5), Some(Some(Color(0x2b7f_ffff))));
+    // Changing the view's reaches them; without it the class's is left.
+    c.apply(view_color(Some(Color(0x0000_ffff)))).unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(highlight(&batch, 3), Some(Some(Color(0x0000_ffff))));
+    c.apply(view_color(None)).unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(highlight(&batch, 3), Some(Some(Color(0xfb2c_36ff))));
 }
 
 #[test]
@@ -24246,6 +24453,61 @@ mod views {
         assert!(!hidden.header_shadow_visible);
     }
 
+    /// A screen whose title alignment follows `ALIGN`.
+    #[derive(Default)]
+    struct AlignPage;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct AlignPageProps {}
+
+    thread_local! {
+        static ALIGN: Cell<Option<Signal<crate::HeaderTitleAlign>>> = const { Cell::new(None) };
+    }
+
+    impl Component for AlignPage {
+        type Props = AlignPageProps;
+        type Event = NoEvent;
+
+        // The core's own stack and screen: `nsh_base`'s wrap them.
+        #[allow(deprecated)]
+        fn view(_: AlignPageProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let align = signal(crate::HeaderTitleAlign::Left);
+            ALIGN.with(|s| s.set(Some(align)));
+            stack().flex_1().child(
+                screen()
+                    .title("Page")
+                    .header_title_align(move || align.get())
+                    .child(view().flex_1()),
+            )
+        }
+    }
+
+    /// The title starts at the left by default and follows its signal.
+    #[test]
+    fn the_header_title_align_reaches_the_screens_config() {
+        assert_eq!(
+            crate::ScreenConfig::default().title_align,
+            crate::HeaderTitleAlign::Left
+        );
+        let mut c = core();
+        c.mount_root(&Root::new::<AlignPage>(|| AlignPageProps {}));
+        let config = |batch: &MountBatch| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+                _ => None,
+            })
+        };
+        let first = config(&c.commit().unwrap()).expect("a screen");
+        assert_eq!(first.title_align, crate::HeaderTitleAlign::Left);
+        let align = ALIGN.with(Cell::get).expect("mounted");
+        {
+            let _entered = c.components.runtime.enter();
+            align.set(crate::HeaderTitleAlign::Center);
+        }
+        let centered = config(&c.commit().unwrap()).expect("updated");
+        assert_eq!(centered.title_align, crate::HeaderTitleAlign::Center);
+    }
+
     /// A transparent screen whose header background on scroll follows
     /// `ON_SCROLL`.
     #[derive(Default)]
@@ -35331,6 +35593,65 @@ fn space_important_margins_win_over_normal_child_styles() {
 }
 
 #[test]
+fn headless_text_frames_respect_inherited_and_updated_line_heights() {
+    for nested in [false, true] {
+        let mut c = Core::new(crate::ApproxTextEngine, size_pt(300.0, 400.0));
+        c.apply(Op::Create {
+            id: 2,
+            tag: Tag::Text,
+        })
+        .unwrap();
+        c.apply(Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        })
+        .unwrap();
+        if nested {
+            c.apply(Op::Create {
+                id: 3,
+                tag: Tag::Text,
+            })
+            .unwrap();
+            c.apply(Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            })
+            .unwrap();
+        }
+        c.apply(Op::CreateText {
+            id: 4,
+            text: "Direct or nested".into(),
+        })
+        .unwrap();
+        c.apply(Op::Insert {
+            parent: if nested { 3 } else { 2 },
+            child: 4,
+            before: None,
+        })
+        .unwrap();
+        for (height, expected) in [(50.0, 50.0), (30.0, 30.0), (0.0, 17.0)] {
+            c.apply(Op::SetStyle {
+                id: 2,
+                style: style(&[
+                    ("fontSize", StyleValue::Number(14.0)),
+                    ("lineHeight", StyleValue::Number(height)),
+                ]),
+                patch: Default::default(),
+            })
+            .unwrap();
+            c.commit().unwrap();
+            assert_eq!(
+                c.measure(2).unwrap().frame.size.height,
+                px(expected),
+                "nested={nested}, height={height}"
+            );
+        }
+    }
+}
+
+#[test]
 fn percentage_line_heights_inherit_as_computed_lengths() {
     for (leading, expected) in [
         ("leading-[150%]", 30.0),
@@ -38503,27 +38824,21 @@ mod built_in_scrollbars {
             "{:?}",
             batch.items
         );
-        // Moved down at the same size: nothing in the bar is laid out
-        // again, the bar still follows.
+        // Moving the inset without resizing the bar still moves its frame.
         apply(
             &mut c,
             vec![Op::SetProp {
                 id: 2,
                 prop: Prop::Scroll(ScrollProp::ScrollbarInset(EdgeInsets {
-                    top: px(30.0),
-                    right: px(6.0),
-                    bottom: px(40.0),
-                    left: px(0.0),
+                    top: px(20.0),
+                    right: px(0.0),
+                    bottom: px(50.0),
+                    left: px(6.0),
                 })),
             }],
         );
         let batch = c.commit().unwrap();
-        assert_eq!(
-            frame_of(&batch, bar),
-            Some(rect(0.0, 30.0, 294.0, 130.0)),
-            "{:?}",
-            batch.items
-        );
+        assert_eq!(frame_of(&batch, bar), Some(rect(6.0, 20.0, 294.0, 130.0)));
         // Back to the whole viewport.
         apply(
             &mut c,
@@ -49651,4 +49966,53 @@ fn raw_text_table_bench() {
     }
     times.sort_by(f64::total_cmp);
     println!("resize + full relayout + commit: median {:.1} ms", times[2]);
+}
+
+/// With nothing focused, a backend reports raw keys at the window's root
+/// (`ROOT_ID`, or a dialog's root): an app's `on_key_down` on its
+/// top-level view hears them and a capture there decides, as a browser
+/// reports them at `document.body` (#2362).
+#[test]
+fn unfocused_keys_reach_the_windows_root() {
+    use crate::{keymap::Keystroke, prelude::*};
+
+    #[component]
+    fn Listening() -> impl IntoElement {
+        view()
+            .on_key_down(|_: &KeyEvent| {})
+            .capture_keys(KeyCapture::keys([
+                Keystroke::parse_with("space", false).unwrap()
+            ]))
+            .child(view().test_id("child"))
+    }
+
+    let mut c = core();
+    c.mount_root(&crate::element::Root::of::<Listening>());
+    c.commit().unwrap();
+    assert!(c.key_interest(crate::ROOT_ID));
+    let space = Keystroke::parse_with("space", false).unwrap();
+    assert!(c.key_captured(crate::ROOT_ID, Some(&space)));
+    let a = Keystroke::parse_with("a", false).unwrap();
+    assert!(!c.key_captured(crate::ROOT_ID, Some(&a)));
+    let mut path = Vec::new();
+    c.key_path(crate::ROOT_ID, &mut path);
+    assert_eq!(path.last(), Some(&crate::ROOT_ID));
+    assert_eq!(path.len(), 2, "the mount root, then the window root");
+}
+
+/// A root without listeners or captures builds no key event: an app that
+/// listens nowhere pays nothing for the unfocused path.
+#[test]
+fn unfocused_keys_are_free_without_a_root_listener() {
+    use crate::prelude::*;
+
+    #[component]
+    fn Quiet() -> impl IntoElement {
+        view().child(view().on_key_down(|_: &KeyEvent| {}))
+    }
+
+    let mut c = core();
+    c.mount_root(&crate::element::Root::of::<Quiet>());
+    c.commit().unwrap();
+    assert!(!c.key_interest(crate::ROOT_ID));
 }

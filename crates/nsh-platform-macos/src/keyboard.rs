@@ -65,7 +65,7 @@ use nsh_core::{
     EventKind, EventPayload, KeyEvent, ROOT_ID, element::SharedString, platform::InputModality,
 };
 use objc2::{rc::Retained, runtime::AnyObject};
-use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType, NSView};
+use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType, NSView, NSWindow};
 use objc2_foundation::NSString;
 use rustc_hash::FxHashSet;
 
@@ -272,9 +272,9 @@ pub(crate) fn deactivated(surface: &Surface) {
 }
 
 /// The NSH view the key is for: the first responder of the event's window
-/// when it is one of this surface's focusable views. A field, a hosted
-/// view, the root, a blocked window (under a modal) and another surface's
-/// views are none.
+/// when it is one of this surface's focusable views, or the window's root
+/// when nothing in it has the focus. A field, a hosted view, a blocked
+/// window (under a modal) and another surface's views are none.
 fn focused(surface: &Surface, event: &NSEvent) -> Option<NshView> {
     let window = event.window(surface.mtm)?;
     let root = crate::window::root_in(surface, &window)?;
@@ -282,14 +282,26 @@ fn focused(surface: &Surface, event: &NSEvent) -> Option<NshView> {
     if crate::window::blocked(surface, own.then_some(&root)) {
         return None;
     }
-    let responder = window.firstResponder()?;
-    let ns = responder.downcast_ref::<NSView>()?;
+    // Nothing focused (the window itself, or the root, is the first
+    // responder): the window's root hears the key and it bubbles from
+    // there, as a browser reports it at `document.body`.
+    let Some(responder) = window.firstResponder() else {
+        return Some(root);
+    };
+    let Some(ns) = responder.downcast_ref::<NSView>() else {
+        let window_ptr: *const NSWindow = &*window;
+        return std::ptr::eq(Retained::as_ptr(&responder).cast::<u8>(), window_ptr.cast())
+            .then_some(root);
+    };
+    if ns == root.ns() {
+        return Some(root);
+    }
     if !ns.isDescendantOf(root.ns()) {
         return None;
     }
     let view = NshView::from_ns(ns)?;
     if view.id() == ROOT_ID {
-        return None;
+        return Some(root);
     }
     {
         let state = view.state();

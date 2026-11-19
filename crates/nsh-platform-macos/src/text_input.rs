@@ -1814,6 +1814,17 @@ fn field_editor(mtm: MainThreadMarker, window: &objc2_app_kit::NSWindow) -> Reta
     })
 }
 
+struct PadState {
+    cx: Ctx,
+    owner: objc2::rc::Weak<NSView>,
+    forwarding: Cell<bool>,
+}
+
+pub(crate) fn pad_owner(view: &NSView) -> Option<NshView> {
+    let owner = view.downcast_ref::<InputPad>()?.ivars().owner.load()?;
+    NshView::from_ns(&owner)
+}
+
 define_class!(
     /// Fills an input's view and holds its editor (and placeholder), so a
     /// click anywhere in the input edits, its padding and the space around
@@ -1821,7 +1832,7 @@ define_class!(
     /// nearest point inside it.
     #[unsafe(super(NSView, NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
-    #[ivars = (Cell<bool>, Ctx)]
+    #[ivars = PadState]
     #[name = "NshInputPad"]
     struct InputPad;
 
@@ -1842,21 +1853,25 @@ define_class!(
         fn mouse_down(&self, event: &NSEvent) {
             // An editor that passes the press on (up the responder chain)
             // brings it back here: it ends here then.
-            if !self.ivars().0.replace(true) {
-                if let Some(input) = self.ivars().1.input.upgrade() {
+            if !self.ivars().forwarding.replace(true) {
+                if let Some(input) = self.ivars().cx.input.upgrade() {
                     input.track_press(event, || self.forward(event));
                 } else {
                     self.forward(event);
                 }
-                self.ivars().0.set(false);
+                self.ivars().forwarding.set(false);
             }
         }
     }
 );
 
 impl InputPad {
-    fn create(mtm: MainThreadMarker, cx: Ctx) -> Retained<NSView> {
-        let this = Self::alloc(mtm).set_ivars((Cell::new(false), cx));
+    fn create(mtm: MainThreadMarker, owner: &NshView, cx: Ctx) -> Retained<NSView> {
+        let this = Self::alloc(mtm).set_ivars(PadState {
+            cx,
+            owner: objc2::rc::Weak::new(owner.ns()),
+            forwarding: Cell::new(false),
+        });
         // SAFETY: NSView's designated initializer.
         let this: Retained<Self> =
             unsafe { msg_send![super(this), initWithFrame: ns_rect(0.0, 0.0, 0.0, 0.0)] };
@@ -2283,7 +2298,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
             editor: RefCell::new(new_editor(mtm, &cx, &delegate, false, false)),
             undo_manager: RefCell::new(None),
             delegate,
-            pad: InputPad::create(mtm, cx.clone()),
+            pad: InputPad::create(mtm, view, cx.clone()),
             placeholder,
             config: RefCell::new(InputConfig::default()),
             configured: Cell::new(false),
