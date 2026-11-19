@@ -24342,6 +24342,61 @@ mod views {
         assert!(!hidden.header_shadow_visible);
     }
 
+    /// A screen whose title alignment follows `ALIGN`.
+    #[derive(Default)]
+    struct AlignPage;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct AlignPageProps {}
+
+    thread_local! {
+        static ALIGN: Cell<Option<Signal<crate::HeaderTitleAlign>>> = const { Cell::new(None) };
+    }
+
+    impl Component for AlignPage {
+        type Props = AlignPageProps;
+        type Event = NoEvent;
+
+        // The core's own stack and screen: `nsh_base`'s wrap them.
+        #[allow(deprecated)]
+        fn view(_: AlignPageProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let align = signal(crate::HeaderTitleAlign::Left);
+            ALIGN.with(|s| s.set(Some(align)));
+            stack().flex_1().child(
+                screen()
+                    .title("Page")
+                    .header_title_align(move || align.get())
+                    .child(view().flex_1()),
+            )
+        }
+    }
+
+    /// The title starts at the left by default and follows its signal.
+    #[test]
+    fn the_header_title_align_reaches_the_screens_config() {
+        assert_eq!(
+            crate::ScreenConfig::default().title_align,
+            crate::HeaderTitleAlign::Left
+        );
+        let mut c = core();
+        c.mount_root(&Root::new::<AlignPage>(|| AlignPageProps {}));
+        let config = |batch: &MountBatch| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+                _ => None,
+            })
+        };
+        let first = config(&c.commit().unwrap()).expect("a screen");
+        assert_eq!(first.title_align, crate::HeaderTitleAlign::Left);
+        let align = ALIGN.with(Cell::get).expect("mounted");
+        {
+            let _entered = c.components.runtime.enter();
+            align.set(crate::HeaderTitleAlign::Center);
+        }
+        let centered = config(&c.commit().unwrap()).expect("updated");
+        assert_eq!(centered.title_align, crate::HeaderTitleAlign::Center);
+    }
+
     /// A transparent screen whose header background on scroll follows
     /// `ON_SCROLL`.
     #[derive(Default)]

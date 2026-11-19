@@ -1954,6 +1954,19 @@ pub enum ScreenAnimation {
     None,
 }
 
+/// Where a page's title sits in the native header (`headerTitleAlign`).
+/// Android's toolbar honors it. iOS's system bar always centers the title
+/// and ignores the value; the desktops and the web draw no native header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub enum HeaderTitleAlign {
+    /// At the start, after the back button or the leading item (Android's
+    /// default).
+    #[default]
+    Left,
+    /// Centered across the header, between the leading and trailing items.
+    Center,
+}
+
 /// A screen option (`<NavPage title headerVisible ...>`).
 #[derive(Debug, Clone, PartialEq, HostProps)]
 pub enum ScreenProp {
@@ -1982,6 +1995,12 @@ pub enum ScreenProp {
     /// iOS 26's own bars.
     #[prop(js = "headerShadowVisible", default = true, on = SCREEN)]
     HeaderShadowVisible(bool),
+    /// `headerTitleAlign` (Android: the system header): where the title
+    /// sits, `"left"` (the default) or `"center"`. iOS's system bar always
+    /// centers the title and ignores the value; the desktops and the web
+    /// draw no native header.
+    #[prop(js = "headerTitleAlign", on = SCREEN)]
+    HeaderTitleAlign(HeaderTitleAlign),
     /// `headerBackgroundOnScroll` (iOS: the system header; ignored
     /// elsewhere): with `headerTransparent`, the header stays clear while
     /// the content rests at its top and shows its background once the
