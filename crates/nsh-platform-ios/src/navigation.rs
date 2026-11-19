@@ -33,7 +33,7 @@ use objc2::{
     runtime::{AnyClass, AnyObject, ProtocolObject},
     sel,
 };
-use objc2_core_foundation::{CGFloat, CGSize};
+use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
 use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSString};
 use objc2_quartz_core::{CAMediaTiming, CATransition};
 use objc2_ui_kit::{
@@ -815,6 +815,74 @@ fn clip_side_safe_area(nav: &UINavigationController) {
     }
 }
 
+/// Where `view`'s bounds sit in `window` without the transforms of the
+/// layers on the way (its own included), or `None` when none has one.
+fn untransformed_frame(view: &UIView, window: &UIView) -> Option<CGRect> {
+    let size = view.bounds().size;
+    let (mut x, mut y) = (0.0, 0.0);
+    let mut transformed = false;
+    let mut v = view.retain();
+    loop {
+        let layer = v.layer();
+        transformed |= !layer.transform().is_identity();
+        let parent = v.superview()?;
+        let (center, bounds, anchor) = (v.center(), v.bounds(), layer.anchorPoint());
+        let offset = parent.bounds().origin;
+        x += center.x - bounds.size.width * anchor.x - offset.x;
+        y += center.y - bounds.size.height * anchor.y - offset.y;
+        if *parent == *window {
+            break;
+        }
+        v = parent;
+    }
+    transformed.then(|| CGRect::new(CGPoint::new(x, y), size))
+}
+
+/// Holds a stack's top and bottom safe area to what its untransformed place
+/// in the window gives it.
+///
+/// UIKit measures the safe area through the transforms around a controller,
+/// on its own layout passes only. A pass while a container shows the stack
+/// scaled or moved (a drawer that shrinks the page into a card) gives it the
+/// insets of that picture, the bar moves under the status bar, and they stay
+/// after the transform is gone: a transform starts no pass. The difference
+/// goes into the stack's `additionalSafeAreaInsets`, none without a
+/// transform around.
+fn hold_vertical_safe_area(nav: &UINavigationController) {
+    let Some(view) = nav.viewIfLoaded() else {
+        return;
+    };
+    let Some(window) = view.window() else {
+        return;
+    };
+    let current = nav.additionalSafeAreaInsets();
+    let (top, bottom) = match untransformed_frame(&view, &window) {
+        None => (0.0, 0.0),
+        Some(frame) => {
+            let unsafe_area = window.safeAreaInsets();
+            let bounds = window.bounds();
+            let owed_top = (bounds.min().y + unsafe_area.top - frame.min().y).max(0.0);
+            let owed_bottom = (frame.max().y - bounds.max().y + unsafe_area.bottom).max(0.0);
+            // Granted by UIKit: the safe area less what was added here. The
+            // sum is what is owed, never below zero, so UIKit's floor at
+            // zero hides none of it.
+            let safe = view.safeAreaInsets();
+            (
+                owed_top - (safe.top - current.top),
+                owed_bottom - (safe.bottom - current.bottom),
+            )
+        }
+    };
+    if (current.top - top).abs() < 0.01 && (current.bottom - bottom).abs() < 0.01 {
+        return;
+    }
+    nav.setAdditionalSafeAreaInsets(UIEdgeInsets {
+        top,
+        bottom,
+        ..current
+    });
+}
+
 /// Gives the bar of `nav` the height of the large title its top screen asks
 /// for, when UIKit left it lower and the screen's content rests at its top.
 ///
@@ -899,6 +967,7 @@ define_class!(
             let _: () = unsafe { msg_send![super(self), viewDidLayoutSubviews] };
             size_screens(self);
             clip_side_safe_area(self);
+            hold_vertical_safe_area(self);
             // A column of a split (or its compact stack): the core lays the
             // column's pages out at the size the split gives it.
             let ivars = self.ivars();
@@ -916,6 +985,7 @@ define_class!(
             // SAFETY: calling the superclass implementation.
             let _: () = unsafe { msg_send![super(self), viewSafeAreaInsetsDidChange] };
             clip_side_safe_area(self);
+            hold_vertical_safe_area(self);
         }
     }
 );
