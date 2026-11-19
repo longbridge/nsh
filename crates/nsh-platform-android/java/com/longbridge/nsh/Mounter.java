@@ -1080,6 +1080,9 @@ final class Mounter {
 
     private void delete(int id) {
         View v = views.get(id);
+        // Still in the tree: a subtree released at once comes as deletes
+        // without a remove, and each detaches its view here.
+        if (v != null && v.getParent() != null) noteKeyboardLeaving(v);
         if (id == pendingFocus.id()) {
             dropPendingFocus();
             android.util.Log.w("nsh", "focus(): view " + id + " was removed before it was shown; the request is dropped");
@@ -2343,8 +2346,9 @@ final class Mounter {
     }
 
     /**
-     * The view removed in this batch with the text field that has the keyboard inside it, and that field's window:
-     * once detached, the view no longer finds its focus. Settled when the batch ends, never kept across batches.
+     * The view removed or deleted in this batch with the text field that has the keyboard inside it, and that
+     * field's window: once detached, the view no longer finds its focus. Settled when the batch ends, never kept
+     * across batches.
      */
     private View keyboardLeaving, keyboardWindow;
     private android.os.IBinder keyboardToken;
@@ -2366,9 +2370,9 @@ final class Mounter {
     }
 
     /**
-     * The field with the keyboard was removed in this batch and not put back: the keyboard hides with it, as when a
-     * page or dialog leaves ({@link #hideKeyboardIn}), unless a field takes it: one asked for the focus in the batch,
-     * waits for it, or has it once the batch's own posted focus requests ran.
+     * The field with the keyboard was removed or deleted in this batch and not put back: the keyboard hides with
+     * it, as when a page or dialog leaves ({@link #hideKeyboardIn}), unless a field takes it: one asked for the
+     * focus in the batch, waits for it, or has it once the batch's own posted focus requests ran.
      */
     private void settleKeyboardLeaving() {
         View window = keyboardWindow;
