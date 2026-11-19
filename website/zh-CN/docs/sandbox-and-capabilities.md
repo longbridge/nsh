@@ -211,7 +211,7 @@ blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
 系统第一次仍会询问用户，所以安装包要声明系统需要的内容：`nsh package` 会写入 `NSMicrophoneUsageDescription` /
 `NSCameraUsageDescription`（可以用 `ios.infoPlist` / `macos.infoPlist` 改成自己的措辞）、macOS 的
 `com.apple.security.device.audio-input` / `com.apple.security.device.camera` 权利（entitlements），以及 Android 的
-`RECORD_AUDIO` / `CAMERA` 权限，应用会在页面第一次需要时请求它们。页面需要处于安全上下文（`https:` 或 `localhost`）才能使用 `getUserMedia`。
+`RECORD_AUDIO` / `CAMERA` 权限，应用会在页面第一次需要时请求它们。开发宿主（`nsh run`）为任何应用都带有这些用途说明。页面需要处于安全上下文（`https:` 或 `localhost`）才能使用 `getUserMedia`。
 
 ```json
 { "capabilities": { "webview": { "hosts": ["phone.example.com"], "media": ["microphone"] } } }

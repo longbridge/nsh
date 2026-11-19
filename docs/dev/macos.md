@@ -222,7 +222,9 @@ belong to the app, which owns retention and its storage budget.
   Full Screen, Close: items of those roles, `chrome::role_item`, labelled in the language the app
   shows, as its role-only menu items are; the core sends `DesktopCommand::SetMenuLabels` when that language changes
   (`nsh/i18n`), rebuilding both and the tray menu (`chrome::relabel`)), titled with `AppOptions::title`: `name_app` sets the main bundle's `CFBundleName` to it, as the
-  menu bar shows that (the development host has no bundle; `nsh run` passes it the app's name with `--name`). For the
+  menu bar shows that (the development host has no bundle; `nsh run` passes it the app's name with `--name`; its
+  usage descriptions are the `__TEXT,__info_plist` section `crates/nsh-macos-host/Info.plist` is embedded as, which
+  AppKit reads for an executable outside a bundle: WebKit hides `navigator.mediaDevices` from an app without them). For the
   same reason the host has no icon of its own: `AppOptions::icon` (`--icon <png>`, which `nsh run` and `nsh test` pass
   from nsh.json `"icon"` for macOS; for a Rust app, which `nsh run` runs with the release runner in place, its
   `app.json` `icon`, read only then) becomes `applicationIconImage` before the window shows, so the Dock, the app
