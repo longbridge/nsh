@@ -2218,6 +2218,29 @@ pub trait Interactive: Element {
         self
     }
 
+    /// The scroll view it floats over and the edge of it it sits at
+    /// (`ios={{ scrollEdgeElement }}`): a bottom toolbar, a floating button
+    /// placed over a list. From iOS 26 the scroll edge effect of that
+    /// scroll view takes its shape from what the view shows, as it does
+    /// from a bar, so the content scrolled under it fades out instead of
+    /// being cut by it. Elsewhere a fade the app draws under the view
+    /// gives the same separation. `None` names none.
+    fn scroll_edge_element(
+        mut self,
+        scroll_view: impl IntoReactive<Option<super::ElementRef>>,
+        edge: crate::ScrollEdge,
+    ) -> Self {
+        let target =
+            scroll_view
+                .into_reactive()
+                .map(move |scroll_view: Option<super::ElementRef>| {
+                    let scroll_view = scroll_view?.element_target()?;
+                    Some(super::ScrollEdgeTarget { scroll_view, edge })
+                });
+        super::host::bind_prop(self.node(), target, Prop::ScrollEdgeElement);
+        self
+    }
+
     /// The native material the view draws with on macOS
     /// (`macos={{ backdrop }}`): an `NSVisualEffectView`, or none.
     fn macos_backdrop(mut self, backdrop: impl IntoReactive<Option<crate::MacOsBackdrop>>) -> Self {

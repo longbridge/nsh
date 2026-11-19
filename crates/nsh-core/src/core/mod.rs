@@ -5511,6 +5511,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_relation(key, relations::Relation::DescribedBy, target);
                 return Ok(());
             }
+            Prop::ScrollEdgeElement(target) => {
+                self.set_scroll_edge(key, target);
+                return Ok(());
+            }
             // A described view's own description waits for the element
             // describing it to go.
             Prop::Accessibility(AccessibilityProp::Description(description))
