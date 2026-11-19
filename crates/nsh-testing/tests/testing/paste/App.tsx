@@ -29,7 +29,7 @@ function App() {
           }
         }}
       />
-      <Input testID="area" ref={(r) => (area = r)} multiline maxLength={8}
+      <Input testID="area" ref={(r) => (area = r)} multiline maxLength={8} defaultValue="old text" selectTextOnFocus
         submitBehavior="submit" onSubmit={() => last.set("submitted")}
         pasteBehavior="report" onPaste={(e) => area?.insertText(e.text)}
         onChange={({ value }) => last.set(value)} />
