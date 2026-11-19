@@ -533,8 +533,8 @@ impl Native for LinuxNative {
         self.on_main(|s| {
             let escape = gdk::ModifierType::empty();
             let main = synth::window(s);
-            let app_window = crate::window::key_window(s)
-                .filter(|window| main.as_ref() != Some(window));
+            let app_window =
+                crate::window::key_window(s).filter(|window| main.as_ref() != Some(window));
             if let Some(window) = app_window {
                 if crate::navigation::key_window_field_focused(s) {
                     crate::window::press_key(s, &window, gdk::Key::Escape, escape);
