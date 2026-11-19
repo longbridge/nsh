@@ -290,7 +290,7 @@ final class TabBarComponent implements NshComponent {
                 if (badgeText.isEmpty()) {
                     badgePill.setCornerRadius(px(DOT_DP / 2));
                     at = new FrameLayout.LayoutParams(px(DOT_DP), px(DOT_DP), Gravity.TOP | Gravity.START);
-                    at.leftMargin = px((INDICATOR_W_DP + ICON_DP) / 2 - DOT_DP);
+                    at.setMarginStart(px((INDICATOR_W_DP + ICON_DP) / 2 - DOT_DP));
                     at.topMargin = px((INDICATOR_H_DP - ICON_DP) / 2);
                 } else {
                     badge.setText(badgeText);
@@ -309,7 +309,7 @@ final class TabBarComponent implements NshComponent {
                     badgePill.setCornerRadius(px(BADGE_DP / 2));
                     at = new FrameLayout.LayoutParams(
                             ViewGroup.LayoutParams.WRAP_CONTENT, px(BADGE_DP), Gravity.TOP | Gravity.START);
-                    at.leftMargin = px(INDICATOR_W_DP / 2);
+                    at.setMarginStart(px(INDICATOR_W_DP / 2));
                     at.topMargin = px(2);
                 }
                 indicator.addView(badge, at);
