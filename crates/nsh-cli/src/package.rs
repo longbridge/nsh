@@ -280,9 +280,31 @@ pub(crate) struct AndroidConfig {
     /// TLS. Off by default, as Android has it from API 28 on.
     #[serde(default)]
     pub(crate) uses_cleartext_traffic: bool,
+    /// Permissions the manifest declares besides the ones NSH declares
+    /// itself (`<uses-permission>`): a bare name (`ACCESS_NETWORK_STATE`)
+    /// is Android's, `android.permission.<name>`; a dotted one is written
+    /// as it is. Declaring a runtime permission does not grant it.
+    #[serde(default)]
+    pub(crate) permissions: Vec<String>,
 }
 
 impl AndroidConfig {
+    /// `permissions`, checked and spelled out in full.
+    pub(crate) fn permissions(&self) -> anyhow::Result<Vec<String>> {
+        for name in &self.permissions {
+            if lower_case_android_name(name) {
+                ui::warn(format!(
+                    "nsh.json android.permissions: `{name}` is not upper case, as Android's own \
+                     permission names are (`ACCESS_NETWORK_STATE`): Android ignores a name it does not know"
+                ));
+            }
+        }
+        self.permissions
+            .iter()
+            .map(|name| android_permission(name))
+            .collect()
+    }
+
     /// `targetSdk`, checked: no lower than the runtime's minimum.
     pub(crate) fn target_sdk(&self) -> anyhow::Result<u32> {
         use crate::android::{DEFAULT_TARGET_SDK, MIN_SDK};
@@ -294,6 +316,36 @@ impl AndroidConfig {
         }
         Ok(level)
     }
+}
+
+/// Whether `name` is a bare name (one of Android's own) with a lower case
+/// letter, which no permission of Android's has: most likely a typo.
+fn lower_case_android_name(name: &str) -> bool {
+    !name.contains('.') && name.chars().any(|c| c.is_ascii_lowercase())
+}
+
+/// An `android.permissions` entry in full: a bare name is one of
+/// Android's own (`android.permission.<name>`). Each part of the name is a
+/// Java identifier, so nothing but the name reaches the manifest.
+fn android_permission(name: &str) -> anyhow::Result<String> {
+    let identifier = |part: &str| {
+        let mut chars = part.chars();
+        chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    };
+    if !name.split('.').all(identifier) {
+        bail!(
+            "nsh.json android.permissions: `{name}` is not a permission name \
+             (`ACCESS_NETWORK_STATE`, or `com.example.permission.NAME`)"
+        );
+    }
+    Ok(if name.contains('.') {
+        name.to_owned()
+    } else {
+        format!("android.permission.{name}")
+    })
 }
 
 /// `nsh.json` `"tui"`.
@@ -1461,6 +1513,7 @@ fn package_android(
     };
     fs::create_dir_all(options.out)?;
     let target_sdk = config.android.target_sdk()?;
+    let permissions = config.android.permissions()?;
     let apk_path = options
         .out
         .join(format!("{name}.{}", options.format.extension()));
@@ -1480,6 +1533,7 @@ fn package_android(
             notifications: config.notifications(),
             microphone: config.web_media("microphone"),
             camera: config.web_media("camera"),
+            permissions: &permissions,
             schemes: &config.schemes,
             rust: built.rust_root,
             dark: config.appearance.as_deref() == Some("dark"),
@@ -2847,6 +2901,46 @@ mod tests {
         assert!(cleartext(
             serde_json::json!({ "android": { "usesCleartextTraffic": true } })
         ));
+    }
+
+    #[test]
+    fn android_permissions_are_spelled_out_and_checked() {
+        let permissions = |json: serde_json::Value| {
+            serde_json::from_value::<AppConfig>(json)
+                .unwrap()
+                .android
+                .permissions()
+        };
+        assert!(permissions(serde_json::json!({})).unwrap().is_empty());
+        assert_eq!(
+            permissions(serde_json::json!({ "android": { "permissions": [
+                "ACCESS_NETWORK_STATE",
+                "com.example.permission.READ_ORDERS"
+            ] } }))
+            .unwrap(),
+            [
+                "android.permission.ACCESS_NETWORK_STATE",
+                "com.example.permission.READ_ORDERS"
+            ]
+        );
+        // Only a name reaches the manifest: no markup, no empty part.
+        for bad in [
+            "",
+            "ACCESS NETWORK",
+            "A\" /><uses-permission android:name=\"B",
+            "com..example",
+            "com.example.",
+            "1PERMISSION",
+        ] {
+            let err = permissions(serde_json::json!({ "android": { "permissions": [bad] } }))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("android.permissions"), "{bad}: {err}");
+        }
+        // A bare name in lower case is warned of; a dotted one is the app's.
+        assert!(lower_case_android_name("access_network_state"));
+        assert!(!lower_case_android_name("ACCESS_NETWORK_STATE"));
+        assert!(!lower_case_android_name("com.example.permission.read"));
     }
 
     #[test]
