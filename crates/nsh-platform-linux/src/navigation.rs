@@ -1183,7 +1183,9 @@ impl Nav {
 
     /// Keeps the keyboard focus inside the newest modal: Tab never reaches
     /// the views under it (`can-focus` off holds for a widget's descendants
-    /// too). Dialogs are not views, and keep theirs.
+    /// too). The modal's own ancestors stay on, whichever view opened it:
+    /// a field inside the modal needs them. Dialogs are not views, and keep
+    /// theirs.
     fn scope_focus(&self, surface: &Surface) {
         // Each window keeps the focus inside its own newest modal.
         for (window, host) in hosts(surface) {
@@ -1194,11 +1196,12 @@ impl Nav {
             let mut child = host.first_child();
             while let Some(c) = child {
                 child = c.next_sibling();
-                if c.is::<NshView>() {
-                    c.set_can_focus(
-                        top.as_ref()
-                            .is_none_or(|t| t.upcast_ref::<gtk::Widget>() == &c),
-                    );
+                if let Some(view) = c.downcast_ref::<NshView>() {
+                    let allowed = top.as_ref().is_none_or(|t| {
+                        let top = t.upcast_ref::<gtk::Widget>();
+                        &c == top || c.is_ancestor(top)
+                    });
+                    view.set_can_focus(allowed);
                 }
             }
         }

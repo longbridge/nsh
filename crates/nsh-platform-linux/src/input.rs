@@ -1301,8 +1301,10 @@ fn focus_native(widget: &gtk::Widget) {
 /// Focuses a text field. A line takes the focus itself
 /// (`grab_focus_without_selecting`); an area (`GtkTextView`) is the
 /// window's focus widget (`GtkRoot::set_focus`): `grab_focus` refuses a
-/// widget whose ancestors are not focusable (`gtk_widget_grab_focus`
-/// checks the whole chain) and the view an input is hosted in is not.
+/// widget whose own or an ancestor's `can-focus` is off
+/// (`get_effective_can_focus`), which NSH turns off on the views a modal
+/// keeps the keyboard from (`ScreenNav::scope_focus`), and a press focuses
+/// the field it lands in regardless.
 #[cfg(feature = "dev")]
 fn focus_text(widget: &gtk::Widget) -> bool {
     if let Some(line) = widget.downcast_ref::<gtk::Text>() {
@@ -3242,20 +3244,24 @@ mod tests {
     }
 
     /// A press focuses a multiline field: `grab_focus` refuses a widget
-    /// under an unfocusable one, as NSH's views are, so the text view is
-    /// made the window's focus widget instead (and the keys go to it).
+    /// whose `can-focus` is off through an ancestor (as the views a modal
+    /// scopes out have), so the text view is made the window's focus
+    /// widget instead (and the keys go to it).
     #[cfg(feature = "dev")]
     #[test]
-    fn a_press_focuses_a_text_view_under_an_unfocusable_view() {
+    fn a_press_focuses_a_text_view_under_a_can_focus_off_view() {
         crate::gtk_test::run(|| {
             let host = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            host.set_focusable(false);
+            // What `ScreenNav::scope_focus` does to the views outside the
+            // newest modal: `can-focus` off holds for their descendants.
+            host.set_can_focus(false);
             let text = gtk::TextView::new();
             host.append(&text);
             let window = gtk::Window::new();
             window.set_child(Some(&host));
             window.present();
-            focus_native(&text);
+            assert!(!text.grab_focus(), "GTK refuses it under the view");
+            focus_native(text.upcast_ref::<gtk::Widget>());
             let focused = RootExt::focus(&window);
             window.destroy();
             assert_eq!(focused, Some(text.upcast::<gtk::Widget>()));

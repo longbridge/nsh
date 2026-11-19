@@ -215,6 +215,9 @@ jobs:
         run: |
           dbus-run-session -- xvfb-run -a cargo test -p nsh-platform-linux --no-default-features --features dev --lib access::tests::activation_ -- --nocapture
           dbus-run-session -- xvfb-run -a cargo test -p nsh-platform-linux --no-default-features --features dev --lib access::tests::atspi_activation_ -- --ignored --nocapture
+          # A press on a text view under a view with `can-focus` off focuses
+          # it (the storage test's note is typed into this way).
+          dbus-run-session -- xvfb-run -a cargo test -p nsh-platform-linux --no-default-features --features dev --lib input::tests::a_press_focuses -- --nocapture
 
       # The examples' tests in GTK windows on a virtual display, with the
       # platform's input (`nsh test --target linux`): those a real platform
