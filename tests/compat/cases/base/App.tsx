@@ -20,7 +20,7 @@ import BaseDiff from "./base-diff";
 import BaseDock from "./base-dock";
 import BaseDockTabScroll from "./base-dock-tab-scroll";
 import BaseDockRenderHandle from "./base-dock-render-handle";
-import BaseDockTabBarSuffix from "./base-dock-tab-bar-suffix";
+import BaseDockToolbar from "./base-dock-toolbar";
 import BaseSplitView from "./base-split-view";
 import BaseEditor from "./base-editor";
 import BaseHoverCard from "./base-hover-card";
@@ -84,7 +84,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-dock": BaseDock,
   "base-dock-tab-scroll": BaseDockTabScroll,
   "base-dock-render-handle": BaseDockRenderHandle,
-  "base-dock-tab-bar-suffix": BaseDockTabBarSuffix,
+  "base-dock-toolbar": BaseDockToolbar,
   "base-split-view": BaseSplitView,
   "base-editor": BaseEditor,
   "base-hover-card": BaseHoverCard,

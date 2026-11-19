@@ -125,7 +125,7 @@ pub(crate) fn compact_view(a: AreaCx) -> AnyElement {
                             },
                         )))
                         // The group shown: the bar's tabs are every group's.
-                        .child(super::tab_group::tab_bar_suffix(a, current)),
+                        .child(super::tab_group::toolbar(a, current)),
                 )
                 .child(
                     view()

@@ -147,7 +147,7 @@ mod value;
 pub(crate) use dock_area::{AreaCx, area_view};
 pub use dock_area::{
     DockArea, DockAreaApi, DockAreaElement, DockAreaEvent, DockAreaProps, DockDropIndicator,
-    DockGroup, DockInfo, DockPanel, DockPanelOptions, DockTab, DockTarget, dock_area,
+    DockInfo, DockPanel, DockPanelOptions, DockTab, DockTarget, dock_area,
 };
 pub use dock_placement::{Dock, DockSizing};
 pub use drag::DropPlaceholderBounds;

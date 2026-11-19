@@ -116,7 +116,8 @@ pub struct DockPanel {
     pub id: PanelId,
 }
 
-/// A tab, as `renderTab` and `renderDragPreview` render it.
+/// A tab, as `renderTab`, `renderDragPreview` and `renderToolbar` render
+/// it.
 #[derive(Clone, Debug, Default, PartialEq, JsObject)]
 #[non_exhaustive]
 pub struct DockTab {
@@ -132,22 +133,6 @@ pub struct DockTab {
     /// group may give it away.
     pub closable: bool,
     /// Its group is zoomed.
-    pub zoomed: bool,
-}
-
-/// A tab group, as `renderTabBarSuffix` renders what follows its tabs:
-/// what the group's own actions act on.
-#[derive(Clone, Debug, Default, PartialEq, JsObject)]
-#[non_exhaustive]
-pub struct DockGroup {
-    /// The id of the tab group, as [`DockTab::group`]: what the ref's
-    /// `select_tab`, `split_at` and `toggle_zoom` take.
-    pub group: u64,
-    /// The keys of its visible panels, in tab order (a list of its tabs).
-    pub panels: Vec<PanelId>,
-    /// Its displayed panel, if it has one.
-    pub active: Option<PanelId>,
-    /// It is zoomed (a zoom button's state).
     pub zoomed: bool,
 }
 
@@ -290,9 +275,9 @@ pub struct DockAreaProps {
     /// the tab, so a row of a title and a close button is a `flex-row` view
     /// of them.
     pub render_tab: Prop<Option<Renderer<DockTab>>>,
-    /// What follows a tab group's tabs in its tab bar: the group's own
-    /// actions (a new tab, a list of its tabs, a zoom button).
-    pub render_tab_bar_suffix: Prop<Option<Renderer<DockGroup>>>,
+    /// The toolbar at the end of a tab group's tab bar, given its displayed
+    /// tab: that panel's actions (as a GPUI dock panel's toolbar buttons).
+    pub render_toolbar: Prop<Option<Renderer<DockTab>>>,
     /// What shows where a drag would land, placed over the part of the
     /// group it would take.
     pub render_drop_indicator: Prop<Option<Renderer<DockDropIndicator>>>,

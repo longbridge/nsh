@@ -162,24 +162,23 @@ The tabs are a row in a horizontal scroll view inside the bar: tabs that do not 
 bar's end, and the tab that becomes the displayed one is brought into view. The bar's classes style the bar itself,
 so space the tabs with `tabClass` (a margin), not with a `gap` on `tabBarClass`.
 
-`renderTabBarSuffix` renders what follows a group's tabs in its tab bar: the group's own actions, such as a button
-that adds a tab, a list of its tabs or a zoom button. It is a child of the tab bar after the tabs' scroll view, so it
-keeps its place while the tabs scroll and the bar's own layout places it (`ml-auto` on what it returns pushes it to the end of a `flex-row` bar). In the compact presentation
-the one tab bar ends with the shown group's. A group's value says what the app needs to draw it:
-
-| Field | Type | Description |
-|---|---|---|
-| `group` | `number` | The id of the tab group: what the ref's `selectTab`, `splitAt` and `toggleZoom` take. |
-| `panels` | `string[]` | The keys of its visible panels, in tab order. |
-| `active` | `string \| null` | Its displayed panel, if it has one. |
-| `zoomed` | `boolean` | It is zoomed. |
+`renderToolbar` renders the toolbar at the end of a group's tab bar for the group's displayed tab: that panel's
+actions, such as a button that adds a tab or a zoom button, as a GPUI dock panel's toolbar buttons. It gets the
+same `DockTab` as `renderTab` (`panel`, `group`, `index`, `zoomed`, ...), so a different panel shows different
+actions and the ref's `toggleZoom(tab.group)` acts on its group. It is a child of the tab bar after the tabs' scroll
+view, so it keeps its place while the tabs scroll and the bar's own layout places it (`ml-auto` on what it returns
+pushes it to the end of a `flex-row` bar). In the compact presentation the one tab bar ends with the shown tab's.
 
 ```tsx
-renderTabBarSuffix={(group) => (
+renderToolbar={(tab) => (
   <View class="ml-auto flex-row items-center gap-2 px-2">
-    <Text>{`${group.panels.length} tabs`}</Text>
-    <Button onPress={() => area.toggleZoom(group.group)}>
-      <Text>{group.zoomed ? "Restore" : "Zoom"}</Text>
+    {tab.panel === "editor" && (
+      <Button onPress={() => openFile(tab.group)}>
+        <Text>New</Text>
+      </Button>
+    )}
+    <Button onPress={() => area.toggleZoom(tab.group)}>
+      <Text>{tab.zoomed ? "Restore" : "Zoom"}</Text>
     </Button>
   </View>
 )}
@@ -357,7 +356,7 @@ rest of the area.
 | `panels` | `.panels(..)` | `DockPanelOptions[]` | `[]` | What each panel allows, by key: `closable`, `zoomable`, `visible`. |
 | `renderPanel` | `.render_panel(\|panel\| ..)` | `(panel: DockPanel) => JSX.Element` | none | A panel's content, by its key (`panel.id`). |
 | `renderTab` | `.render_tab(\|tab\| ..)` | `(tab: DockTab) => JSX.Element` | the key | What a tab shows. |
-| `renderTabBarSuffix` | `.render_tab_bar_suffix(\|group\| ..)` | `(group: DockGroup) => JSX.Element` | none | What follows a group's tabs in its tab bar: the group's own actions (a new tab, a list of its tabs, a zoom button). |
+| `renderToolbar` | `.render_toolbar(\|tab\| ..)` | `(tab: DockTab) => JSX.Element` | none | The toolbar at the end of a group's tab bar, for its displayed tab: that panel's actions (a new tab, a zoom button). |
 | `renderDropIndicator` | `.render_drop_indicator(\|drop\| ..)` | `(drop: DockDropIndicator) => JSX.Element` | none | What is inside the drop indicator: `group`, `side`, `index`. |
 | `renderDock` | `.render_dock(\|dock\| ..)` | `(dock: DockInfo) => JSX.Element` | none | A dock's own chrome, before its layout: `placement`, `open` (shown in the current presentation), `size`, `collapsible`. |
 | `renderEmpty` | `.render_empty(\|placement\| ..)` | `(placement: DockPlacement) => JSX.Element` | none | What an empty center shows. |
@@ -396,7 +395,7 @@ rest of the area.
 | A tab group | a region | `groupClass`, `groupStyle` | |
 | A tab bar | a group | `tabBarClass`, `tabBarStyle` | |
 | A tab | a tab bar | `tabClass`, `tabStyle`; `renderTab` | `selected:`, `active:`, `hover:` |
-| What follows the tabs | a tab bar | `renderTabBarSuffix` | |
+| Toolbar | the end of a tab bar | `renderToolbar` | |
 | A group's content | a group | `contentClass`, `contentStyle`; `renderPanel` | |
 | A handle's indicator | between a split's groups, at a dock's edge | `handleClass`, `handleStyle` | `group-hover:`, `group-active:` |
 | A handle's thumb | centered on a handle's line | `handleThumbClass`, `handleThumbStyle` | `group-hover:`, `group-active:` (pressed until the drag ends) |

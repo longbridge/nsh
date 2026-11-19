@@ -1,9 +1,9 @@
-// `DockArea`'s `renderTabBarSuffix`: what follows a tab group's tabs in
-// its tab bar, given the group (its panels and its displayed one).
+// `DockArea`'s `renderToolbar`: the toolbar at the end of a tab group's
+// tab bar, given its displayed tab.
 import { Text, View } from "nsh";
 import { DockArea } from "nsh/base";
 
-export default function BaseDockTabBarSuffix() {
+export default function BaseDockToolbar() {
   return (
     <View style={{ paddingTop: 20 }}>
       <View style={{ width: 390, height: 200 }}>
@@ -21,11 +21,9 @@ export default function BaseDockTabBarSuffix() {
           }}
           class="flex-1"
           tabBarClass="flex-row h-[24px]"
-          renderTab={tab => <Text testID={`suffix-tab-${tab.panel}`}>{`Tab ${tab.panel}`}</Text>}
+          renderTab={tab => <Text testID={`toolbar-tab-${tab.panel}`}>{`Tab ${tab.panel}`}</Text>}
           renderPanel={panel => <Text>{`Panel ${panel.id}`}</Text>}
-          renderTabBarSuffix={group => (
-            <Text>{`Suffix ${group.panels.join(",")} shows ${group.active}`}</Text>
-          )}
+          renderToolbar={tab => <Text>{`Toolbar ${tab.panel} of ${tab.index}`}</Text>}
         />
       </View>
     </View>

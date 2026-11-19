@@ -4797,12 +4797,12 @@ expect Tab b
 expect Grip 0 horizontal idle
 covers [props] DockArea.renderHandle
 
-# base-dock-tab-bar-suffix
-# Each group's tab bar ends with what `renderTabBarSuffix` returns for it,
-# and follows the tab the group displays.
-tap id:case-base-dock-tab-bar-suffix
-expect Suffix a,b shows a
-expect Suffix c shows c
-tap id:suffix-tab-b
-expect Suffix a,b shows b
-covers [props] DockArea.renderTabBarSuffix
+# base-dock-toolbar
+# Each group's tab bar ends with what `renderToolbar` returns for its
+# displayed tab, and follows the tab the group displays.
+tap id:case-base-dock-toolbar
+expect Toolbar a of 0
+expect Toolbar c of 0
+tap id:toolbar-tab-b
+expect Toolbar b of 1
+covers [props] DockArea.renderToolbar

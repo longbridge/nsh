@@ -3,14 +3,14 @@
 //! it, into a tab bar), a split's handle resizes it and shows what
 //! `render_handle` draws, and the ref's methods
 //! close panels, toggle docks and zoom; a bar's tabs that do not fit
-//! scroll and the displayed one comes into view; `render_tab_bar_suffix`
-//! draws what follows a group's tabs; a locked area moves nothing, and
+//! scroll and the displayed one comes into view; `render_toolbar`
+//! draws the toolbar of a group's displayed tab; a locked area moves nothing, and
 //! at compact width the center shows one group with every panel's tab.
 //! The app controls the layout: what it shows is what the area reported.
 
 use nsh_base::dock::{
-    DockArea, DockAreaApi, DockAreaEvent, DockAreaLayout, DockGroup, DockLayout, DockNode,
-    DockPanel, DockPlacement, DockRegion, DockTab, PanelId, dock_area,
+    DockArea, DockAreaApi, DockAreaEvent, DockAreaLayout, DockLayout, DockNode, DockPanel,
+    DockPlacement, DockRegion, DockTab, PanelId, dock_area,
 };
 use nsh_core::{
     Size, ViewKind,
@@ -933,16 +933,16 @@ fn a_split_s_handles_show_what_render_handle_draws() {
     assert_eq!(grips, 1, "the docks' edges draw no grip");
 }
 
-/// An area of `layout` whose tab bars end with their group's panels, the
-/// displayed one starred.
+/// An area of `layout` whose tab bars end with the toolbar of their
+/// displayed tab.
 #[derive(Clone, PartialEq, Props)]
-struct SuffixProps {
+struct ToolbarProps {
     layout: DockAreaLayout,
     compact: bool,
 }
 
 #[component]
-fn Suffix(props: SuffixProps) -> impl IntoElement {
+fn Toolbar(props: ToolbarProps) -> impl IntoElement {
     view().w(px(800.0)).h(px(600.0)).child(
         dock_area()
             .default_layout(props.layout.clone())
@@ -955,29 +955,15 @@ fn Suffix(props: SuffixProps) -> impl IntoElement {
                     .h(px(24.0))
                     .child(text(format!("Tab {}", tab.panel)))
             })
-            .render_tab_bar_suffix(|group: &DockGroup| {
-                let panels: Vec<String> = group
-                    .panels
-                    .iter()
-                    .map(|panel| {
-                        let star = if group.active.as_ref() == Some(panel) {
-                            "*"
-                        } else {
-                            ""
-                        };
-                        format!("{star}{panel}")
-                    })
-                    .collect();
-                text(format!("Suffix [{}]", panels.join(" ")))
-            })
+            .render_toolbar(|tab: &DockTab| text(format!("Toolbar {} of {}", tab.panel, tab.index)))
             .size_full(),
     )
 }
 
-fn start_suffix(layout: DockAreaLayout, compact: bool) -> Headless {
+fn start_toolbar(layout: DockAreaLayout, compact: bool) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(1000.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Suffix>(move || SuffixProps {
+        ..EngineConfig::new(Root::new::<Toolbar>(move || ToolbarProps {
             layout: layout.clone(),
             compact,
         }))
@@ -990,24 +976,25 @@ fn start_suffix(layout: DockAreaLayout, compact: bool) -> Headless {
 }
 
 #[test]
-fn a_tab_bar_ends_with_what_render_tab_bar_suffix_draws_for_its_group() {
-    // Each group's bar ends with its own: its panels and the displayed
-    // one, in the center and in a dock.
-    let mut app = start_suffix(with_files(), false);
-    app.wait_for("Suffix [*a b]").unwrap();
-    app.wait_for("Suffix [*c]").unwrap();
-    app.wait_for("Suffix [*files]").unwrap();
+fn a_tab_bar_ends_with_the_toolbar_of_its_displayed_tab() {
+    // Each group's bar ends with its displayed tab's toolbar, in the
+    // center and in a dock.
+    let mut app = start_toolbar(with_files(), false);
+    app.wait_for("Toolbar a of 0").unwrap();
+    app.wait_for("Toolbar c of 0").unwrap();
+    app.wait_for("Toolbar files of 0").unwrap();
     // It follows the group: another tab displayed.
     app.press("id:tab-b").unwrap();
-    app.wait_for("Suffix [a *b]").unwrap();
-    app.wait_for("Suffix [*c]").unwrap();
+    app.wait_for("Toolbar b of 1").unwrap();
+    assert_eq!(app.screen().count("text:Toolbar a of 0"), Ok(0));
+    app.wait_for("Toolbar c of 0").unwrap();
 
     // Compact: one bar with every center panel's tab, ending with the
-    // shown group's.
-    let mut app = start_suffix(two_groups(), true);
-    app.wait_for("Suffix [*a b]").unwrap();
-    assert_eq!(app.screen().count("text:Suffix [*c]"), Ok(0));
+    // shown tab's toolbar.
+    let mut app = start_toolbar(two_groups(), true);
+    app.wait_for("Toolbar a of 0").unwrap();
+    assert_eq!(app.screen().count("text:Toolbar c of 0"), Ok(0));
     app.press("id:tab-c").unwrap();
-    app.wait_for("Suffix [*c]").unwrap();
-    assert_eq!(app.screen().count("text:Suffix [*a b]"), Ok(0));
+    app.wait_for("Toolbar c of 0").unwrap();
+    assert_eq!(app.screen().count("text:Toolbar a of 0"), Ok(0));
 }
