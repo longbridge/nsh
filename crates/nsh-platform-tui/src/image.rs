@@ -181,11 +181,14 @@ pub(crate) enum Loaded {
     },
 }
 
+/// Where a finished load is sent, and the wake that tells the surface.
+type Sink = (Sender<Message>, Arc<Wake>);
+
 /// A surface's side of its images: where their loads report and resolve,
 /// how the terminal shows them, and what the frame queued for it.
 pub(crate) struct Loader {
     /// The engine's inbox and wake, while an app runs.
-    sink: Option<(Sender<Message>, Arc<Wake>)>,
+    sink: Option<Sink>,
     context: Context,
     graphics: Graphics,
     /// The terminal's colors: with fewer than 256 and no kitty graphics
@@ -198,7 +201,7 @@ pub(crate) struct Loader {
     queue: Rc<RefCell<Vec<u8>>>,
     next_id: u32,
     /// The thread that fits and encodes kitty placements, once one is.
-    encoder: Option<Sender<(Job, (Sender<Message>, Arc<Wake>))>>,
+    encoder: Option<Sender<(Job, Sink)>>,
     /// Image events to report once the frame is drawn.
     pub(crate) events: Vec<(NodeId, EventKind, EventPayload)>,
     /// The placeholder Cells of this frame (by buffer index) and their
@@ -255,7 +258,7 @@ impl Loader {
 
     /// Where the loads of the app just started go: its inbox, wake and
     /// asset reader, access policy, media files and disk cache.
-    pub(crate) fn start(&mut self, sink: (Sender<Message>, Arc<Wake>), context: Context) {
+    pub(crate) fn start(&mut self, sink: Sink, context: Context) {
         self.sink = Some(sink);
         self.context = context;
     }
@@ -335,7 +338,7 @@ impl Loader {
             return false;
         };
         if self.encoder.is_none() {
-            let (tx, rx) = crossbeam_channel::unbounded::<(Job, (Sender<Message>, Arc<Wake>))>();
+            let (tx, rx) = crossbeam_channel::unbounded::<(Job, Sink)>();
             let spawned = std::thread::Builder::new()
                 .name("nsh-tui-images".into())
                 .spawn(move || {

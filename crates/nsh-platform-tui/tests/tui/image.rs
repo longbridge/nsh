@@ -205,3 +205,30 @@ mount(() => <Text>{{shown()}}</Text>);
     view.load(nsh_platform_tui::Bundle::source(code)).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "1x2 rejected");
 }
+
+#[component]
+fn Proportioned() -> impl IntoElement {
+    // A box of no height and an aspect ratio, decoded here and measured by
+    // a natural size it never gets there (a remote picture not loaded).
+    let picture = |source: &'static str| image(source).w(px(80.0)).aspect_ratio(2.0);
+    view()
+        .flex_1()
+        .child(picture(PNG))
+        .child(text("decoded"))
+        .child(picture("https://example.invalid/missing.png"))
+        .child(text("remote"))
+}
+
+#[test]
+fn an_image_of_one_side_takes_the_other_from_its_aspect_ratio() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(20, 12)).unwrap();
+    view.load(App::Rust(Root::new::<Proportioned>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "remote");
+    let buffer = terminal.backend().buffer();
+    let line = |y: u16| -> String { (0..7).map(|x| buffer[(x, y)].symbol()).collect() };
+    // 80pt wide is 10 columns; half of it, 40pt, is 2 rows of 16pt.
+    assert_eq!(line(2), "decoded");
+    assert_eq!(line(5), "remote ");
+}

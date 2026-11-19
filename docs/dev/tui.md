@@ -500,7 +500,8 @@ A view's gradient over no fill of its own is a fill of its first stop, a band as
 frame only (the terminal runs with reduced motion), decoded at the size their content box needs at the terminal's
 Cell pixels and loaded again when the box outgrows it; `onLoadStart`, `onLoad`, `onError` and `onLoadEnd` are
 dispatched after the frame that saw them, and `Command::ImageInfo` (`Image.getSize`, `Image.prefetch`) is answered
-from the header, as Linux answers it. The picture is fitted into the box with `ResizeMode::fit` and the
+from the header, as Linux answers it. An image of one side and an `aspectRatio` takes the other from it in the
+terminal layout, loaded or not (a photo filling its tile's width has its rows before its natural size is known). The picture is fitted into the box with `ResizeMode::fit` and the
 `objectPosition`, resampled premultiplied (no dark fringes), `tintColor` painted through its alpha. How it shows
 depends on `TerminalCapabilities::graphics`:
 
