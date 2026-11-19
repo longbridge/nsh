@@ -2831,12 +2831,19 @@ final class Mounter {
 
     /** The scroll view padded to clear the keyboard. */
     private int avoided = -1;
+    /**
+     * The scroll view around the focused input of a modal window while the
+     * keyboard is up: it shrinks as the window lays out above the keyboard.
+     */
+    private int shrinking = -1;
 
     /**
      * The software keyboard's top edge moved, in screen coordinates
      * ({@code Integer.MAX_VALUE} when hidden): pads the scroll view around
-     * the focused input so it can clear the keyboard (in the surface or a
-     * modal window).
+     * the focused input of the surface so it can clear the keyboard. A
+     * modal window lays its content out above the keyboard instead
+     * ({@link ModalHost}), after this: its scroll view gets no padding and
+     * reveals the input once it has shrunk ({@link #scrollShrank}).
      */
     void keyboard(int screenTop) {
         ScrollBox scroll = focused == null ? null : scrollAround(focused);
@@ -2848,13 +2855,30 @@ final class Mounter {
             }
             avoided = -1;
         }
+        shrinking = -1;
         if (scroll == null || hidden) return;
+        // Measured now, before the modal window's layout, the padding would
+        // be what the keyboard covers of the content where it was, and it
+        // would stay under the content once that is above the keyboard.
+        if (scroll.getRootView() != host.getRootView()) {
+            shrinking = scroll.id;
+            return;
+        }
         int[] at = new int[2];
         scroll.getLocationOnScreen(at);
         int covered = Math.max(0, at[1] + scroll.getHeight() - screenTop);
         scroll.setContentPaddingBottom(covered);
         avoided = scroll.id;
         host.post(this::revealFocused);
+    }
+
+    /**
+     * Scroll view {@code scroll} got shorter: the one around the focused
+     * input of a modal window that now lays out above the keyboard keeps the
+     * input in sight.
+     */
+    void scrollShrank(ScrollBox scroll) {
+        if (scroll.id == shrinking && focused != null) host.post(this::revealFocused);
     }
 
     private void revealFocused() {
