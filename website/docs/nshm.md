@@ -16,20 +16,60 @@ nsh add nsh-omarchy                  # from crates.io
 nsh add github:huacnlee/nsh-omarchy  # or from GitHub
 ```
 
-```rust tabs
-// Rust: the crate is a dependency of the app's crate.
-use nsh_omarchy as om;
+Then use it in the app. In Rust, its components are functions of the crate; in TSX, the crate's exports are imported by its specifier, `nsh-omarchy`:
 
-om::init(); // follow the system's Omarchy theme
-om::button_primary("Save").on_press(move || saved.update(|n| *n += 1))
+```rust tabs
+// src/lib.rs: the app's root component
+use nsh_core::prelude::*;
+use nsh_omarchy::{self as om, tokens};
+
+#[component]
+pub fn App() -> impl IntoElement {
+    // Draw with the Omarchy theme the system uses, and follow its changes.
+    om::init();
+    let saved = signal(0_u32);
+    let notify = signal(true);
+    view()
+        .flex_1()
+        .p(px(tokens::SPACE_6))
+        .gap(px(tokens::SPACE_4))
+        .bg(move || tokens::background())
+        .child(
+            om::panel("Settings")
+                .child(
+                    om::switch("Notifications")
+                        .checked(move || notify.get())
+                        .on_change(move |on: &bool| notify.set(*on)),
+                )
+                .child(om::button_primary("Save").on_press(move || saved.update(|n| *n += 1))),
+        )
+        .child(om::body_text(move || format!("Saved {} times", saved.get())))
+}
 ```
 
 ```tsx tabs
-// TSX: imported by the nshm's specifier.
-import { BarChart, Omarchy } from "nsh-omarchy";
+// App.tsx
+import { mount, signal, Text, View } from "nsh";
+import { BarChart, Icon, Markdown, Omarchy, type ThemeInfo } from "nsh-omarchy";
 
-Omarchy.followSystem();
-<BarChart data={[{ label: "Mon", value: 12 }, { label: "Tue", value: 18 }]} accessibilityLabel="Builds" />
+function App() {
+  // Rust owns the theme; TSX applies one and hears every change.
+  Omarchy.followSystem();
+  const theme = signal<ThemeInfo | null>(Omarchy.current());
+  Omarchy.onChange((t) => theme.set(t));
+  return (
+    <View class="flex-1 gap-4 p-6 bg-background">
+      <View class="flex-row items-center gap-2">
+        <Icon name="sun" label="Theme" />
+        <Text class="text-foreground">{() => theme()?.name ?? "…"}</Text>
+      </View>
+      <BarChart data={[{ label: "Mon", value: 12 }, { label: "Tue", value: 18 }]} accessibilityLabel="Builds" />
+      <Markdown source="Read the **manual**." />
+    </View>
+  );
+}
+
+mount(App);
 ```
 
 An nshm is how a feature reaches the apps that need it without being part of NSH: it ships on its own schedule, and only the apps that install it pay its size, build time and dependencies.

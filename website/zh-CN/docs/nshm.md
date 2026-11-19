@@ -16,20 +16,60 @@ nsh add nsh-omarchy                  # 来自 crates.io
 nsh add github:huacnlee/nsh-omarchy  # 或来自 GitHub
 ```
 
-```rust tabs
-// Rust：crate 是应用 crate 的依赖。
-use nsh_omarchy as om;
+然后在应用里使用。在 Rust 中，它的组件就是 crate 里的函数；在 TSX 中，按 crate 的标识 `nsh-omarchy` 导入它的导出：
 
-om::init(); // 跟随系统的 Omarchy 主题
-om::button_primary("Save").on_press(move || saved.update(|n| *n += 1))
+```rust tabs
+// src/lib.rs：应用的根组件
+use nsh_core::prelude::*;
+use nsh_omarchy::{self as om, tokens};
+
+#[component]
+pub fn App() -> impl IntoElement {
+    // 使用系统当前的 Omarchy 主题绘制，并跟随它的变化。
+    om::init();
+    let saved = signal(0_u32);
+    let notify = signal(true);
+    view()
+        .flex_1()
+        .p(px(tokens::SPACE_6))
+        .gap(px(tokens::SPACE_4))
+        .bg(move || tokens::background())
+        .child(
+            om::panel("Settings")
+                .child(
+                    om::switch("Notifications")
+                        .checked(move || notify.get())
+                        .on_change(move |on: &bool| notify.set(*on)),
+                )
+                .child(om::button_primary("Save").on_press(move || saved.update(|n| *n += 1))),
+        )
+        .child(om::body_text(move || format!("Saved {} times", saved.get())))
+}
 ```
 
 ```tsx tabs
-// TSX：按 nshm 的标识导入。
-import { BarChart, Omarchy } from "nsh-omarchy";
+// App.tsx
+import { mount, signal, Text, View } from "nsh";
+import { BarChart, Icon, Markdown, Omarchy, type ThemeInfo } from "nsh-omarchy";
 
-Omarchy.followSystem();
-<BarChart data={[{ label: "Mon", value: 12 }, { label: "Tue", value: 18 }]} accessibilityLabel="Builds" />
+function App() {
+  // 主题由 Rust 管理；TSX 选用主题，并收到每次变化。
+  Omarchy.followSystem();
+  const theme = signal<ThemeInfo | null>(Omarchy.current());
+  Omarchy.onChange((t) => theme.set(t));
+  return (
+    <View class="flex-1 gap-4 p-6 bg-background">
+      <View class="flex-row items-center gap-2">
+        <Icon name="sun" label="Theme" />
+        <Text class="text-foreground">{() => theme()?.name ?? "…"}</Text>
+      </View>
+      <BarChart data={[{ label: "Mon", value: 12 }, { label: "Tue", value: 18 }]} accessibilityLabel="Builds" />
+      <Markdown source="Read the **manual**." />
+    </View>
+  );
+}
+
+mount(App);
 ```
 
 nshm 让功能不必成为 NSH 的一部分，也能交到需要它的应用手中：它按自己的节奏发布，只有安装它的应用才承担它的体积、构建时间和依赖。
