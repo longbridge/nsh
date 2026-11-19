@@ -1095,6 +1095,88 @@ test("Return a shortcut takes does not submit the field as well", () => {
   assert.deepEqual(sent.find(([name]) => name === "onSubmitEditing")[1], { text: "/rev", count: 4 });
 });
 
+test("selectTextOnFocus selects the text on focus and keeps a press's own selection", () => {
+  const { player } = fakePlayer();
+  player.setState = () => {};
+  player.caretMoved = () => {};
+  const reported = [];
+  player.event = (_, name, value) => name === "onSelectionChange" && reported.push([value.start, value.end]);
+  globalThis.document = { activeElement: null };
+  try {
+    for (const tagName of ["INPUT", "TEXTAREA"]) {
+      reported.length = 0;
+      const listeners = {};
+      const field = {
+        tagName,
+        value: "Hello",
+        selectionStart: 0,
+        selectionEnd: 0,
+        addEventListener: (type, listener) => (listeners[type] = listener),
+        setSelectionRange(start, end) {
+          this.selectionStart = start;
+          this.selectionEnd = end;
+        },
+      };
+      const el = { _id: 4, _events: new Set(["onSelectionChange"]), _config: { selectTextOnFocus: true } };
+      player.wireInput(el, field);
+      const focus = () => {
+        listeners.focus();
+        document.activeElement = field;
+      };
+      const blur = () => {
+        listeners.blur();
+        document.activeElement = null;
+      };
+      // A press: its pointerdown focuses an unfocused field, the browser
+      // places the caret (or the drag's range), then its mouseup.
+      const press = ({ shiftKey = false, caret = [2, 2] } = {}) => {
+        const focused = document.activeElement === field;
+        listeners.pointerdown({ shiftKey });
+        if (!focused) focus();
+        field.setSelectionRange(...caret);
+        listeners.pointerup();
+        let prevented = false;
+        listeners.mouseup({ preventDefault: () => (prevented = true) });
+        return prevented;
+      };
+      const selection = () => [field.selectionStart, field.selectionEnd];
+
+      // Focus without a press (Tab, `ref.focus()`, `autoFocus`) selects all, reported.
+      focus();
+      assert.deepEqual(selection(), [0, 5]);
+      assert.deepEqual(reported.at(-1), [0, 5]);
+      // A click on the focused field places the caret.
+      assert.equal(press(), false);
+      assert.deepEqual(selection(), [2, 2]);
+      blur();
+      // A click that focuses selects all over the caret its mouseup would place.
+      assert.equal(press(), true);
+      assert.deepEqual(selection(), [0, 5]);
+      assert.deepEqual(reported.at(-1), [0, 5]);
+      blur();
+      // A drag's range is kept.
+      assert.equal(press({ caret: [1, 3] }), false);
+      assert.deepEqual(selection(), [1, 3]);
+      blur();
+      // A Shift-click's selection is kept.
+      assert.equal(press({ shiftKey: true, caret: [0, 2] }), false);
+      assert.deepEqual(selection(), [0, 2]);
+      blur();
+      // Without the prop, focus leaves the selection alone.
+      el._config = { selectTextOnFocus: false };
+      field.setSelectionRange(1, 1);
+      focus();
+      assert.deepEqual(selection(), [1, 1]);
+      blur();
+      assert.equal(press(), false);
+      assert.deepEqual(selection(), [2, 2]);
+      blur();
+    }
+  } finally {
+    delete globalThis.document;
+  }
+});
+
 /** A player whose core answers are `interest` — whether the focused view's
  * logical ancestry hears or captures keys — and `capture` — whether this
  * transition is taken. `calls` keeps the canonical stroke, direction, raw

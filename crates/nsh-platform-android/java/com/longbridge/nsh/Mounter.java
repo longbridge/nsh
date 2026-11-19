@@ -2293,7 +2293,8 @@ final class Mounter {
         int keyboard = b.getInt(), returnKey = b.getInt(), capitalize = b.getInt();
         boolean autoCorrect = b.getInt() != 0, multiline = b.getInt() != 0;
         int maxLength = b.getInt();
-        boolean editable = b.getInt() != 0, autoFocus = b.getInt() != 0, hasSelection = b.getInt() != 0;
+        boolean editable = b.getInt() != 0, autoFocus = b.getInt() != 0, selectOnFocus = b.getInt() != 0;
+        boolean hasSelection = b.getInt() != 0;
         int selection = b.getInt();
         boolean hasCaret = b.getInt() != 0;
         int caret = b.getInt();
@@ -2313,7 +2314,7 @@ final class Mounter {
         String family = familyIndex >= 0 ? (String) objects[familyIndex] : null;
         ((InputBox) v).configure(size, weight, italic, color, family, spacing, align, placeholder,
                 hasPlaceholderColor, placeholderColor, secure, keyboard, returnKey, capitalize, autoCorrect,
-                multiline, maxLength, editable, autoFocus, hasSelection, selection, hasCaret, caret, submit,
+                multiline, maxLength, editable, autoFocus, selectOnFocus, hasSelection, selection, hasCaret, caret, submit,
                 inputRtl, fontVariant);
     }
 

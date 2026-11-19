@@ -6598,6 +6598,10 @@ impl<M: TextEngine> Core<M> {
                         c.auto_focus = on;
                         false
                     }
+                    Prop::SelectTextOnFocus(on) => {
+                        c.select_text_on_focus = on;
+                        false
+                    }
                     Prop::Caret(on) => {
                         c.caret_hidden = !on;
                         false

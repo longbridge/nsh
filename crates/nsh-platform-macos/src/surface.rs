@@ -70,10 +70,6 @@ enum Message {
     HotUpdateFailed,
     /// The engine laid the app out at this size ([`MountSink::resized`]).
     Resized(Size<Points>),
-    /// A tracked event ([`EngineControl::dispatch_event_tracked`]) was handled
-    /// by the engine and its preceding batches have been submitted
-    /// ([`MountSink::event_handled`]).
-    EventHandled(nsh_engine::EventAck),
     /// The app imports chunk `id` (`import()` of a split bundle), which its
     /// bundle does not hold ([`MountSink::load_chunk`]).
     LoadChunk(String),
@@ -170,10 +166,6 @@ impl MountSink for Sink {
 
     fn resized(&self, size: Size<Points>) {
         self.send(Message::Resized(size));
-    }
-
-    fn event_handled(&self, ack: nsh_engine::EventAck) {
-        self.send(Message::EventHandled(ack));
     }
 
     fn load_chunk(&self, id: &str) -> bool {
@@ -605,21 +597,6 @@ impl Surface {
         self.control(|c| c.dispatch_event(id, kind, payload));
     }
 
-    /// Sends a tracked event and returns its per-event acknowledgement, which
-    /// completes once this specific event's batches have been applied on the
-    /// main thread.
-    pub(crate) fn event_tracked(
-        &self,
-        id: NodeId,
-        kind: EventKind,
-        payload: EventPayload,
-    ) -> Option<nsh_engine::EventAck> {
-        self.control
-            .borrow()
-            .as_ref()
-            .and_then(|c| c.dispatch_event_tracked(id, kind, payload))
-    }
-
     /// Shows fatal app errors with `f` (development hosts).
     #[cfg(feature = "dev")]
     pub(crate) fn set_error_handler(&self, f: ErrorHandler) {
@@ -710,47 +687,6 @@ impl Surface {
                     if done {
                         break;
                     }
-                }
-                if applied {
-                    self.write_animations();
-                    self.revisit();
-                    crate::text_input::sync(self);
-                }
-            })
-        });
-        if applied {
-            self.ensure_ticking();
-        }
-    }
-
-    /// Flushes queued and pending engine messages until `ack` completes
-    /// (within [`RESIZE_WAIT`]) so AppKit's modal `mouseDown:` tracking on an
-    /// input that raised `onFocus` applies `setSelection` before returning to
-    /// the event queue.
-    pub(crate) fn flush_until_handled(self: &Rc<Self>, ack: &nsh_engine::EventAck) {
-        if ack.is_handled() || self.mounter.try_borrow_mut().is_err() {
-            return;
-        }
-        let Some(rx) = self.rx.borrow().clone() else {
-            return;
-        };
-        if self.control.borrow().is_none() {
-            return;
-        }
-        let deadline = Instant::now() + RESIZE_WAIT;
-        let monitor = self.perf.borrow().clone();
-        let mut applied = false;
-        self.measure(false, || {
-            quiet(|| {
-                let queued = std::mem::take(&mut *self.queued.borrow_mut());
-                for message in queued {
-                    applied |= self.handle(message, monitor.as_deref());
-                }
-                while !ack.is_handled() {
-                    let Ok(message) = rx.recv_deadline(deadline) else {
-                        break;
-                    };
-                    applied |= self.handle(message, monitor.as_deref());
                 }
                 if applied {
                     self.write_animations();
@@ -862,7 +798,6 @@ impl Surface {
                 }
             }
             Message::Resized(_) => self.resize_late.set(false),
-            Message::EventHandled(ack) => ack.complete(),
             Message::Run(task) => task.run(),
             Message::LoadChunk(id) => {
                 // The chunk's file name is its id: `is_chunk_name`

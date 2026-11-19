@@ -1675,6 +1675,19 @@ pub(crate) fn pressing(mtm: MainThreadMarker) -> bool {
     )
 }
 
+/// Whether the event AppKit handles (or the test agent hands the window)
+/// is a left mouse press.
+pub(crate) fn left_pressing(mtm: MainThreadMarker) -> bool {
+    use objc2_app_kit::NSApplication;
+    scripted_type()
+        .or_else(|| {
+            NSApplication::sharedApplication(mtm)
+                .currentEvent()
+                .map(|e| e.r#type())
+        })
+        .is_some_and(|t| t == NSEventType::LeftMouseDown)
+}
+
 /// Whether the event AppKit handles is a mouse wheel or trackpad scroll.
 fn scrolling(mtm: MainThreadMarker) -> bool {
     scripted_type()

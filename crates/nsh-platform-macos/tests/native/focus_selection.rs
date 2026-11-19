@@ -1,10 +1,10 @@
-//! Pointer activation of an unfocused `<Input>` whose `onFocus` calls
-//! `setSelection(start, end)` must preserve that selection across both
-//! physical clicks (`45 ms` hold) and same-turn tap-to-click (`0 ms`
-//! back-to-back `LeftMouseDown` + `LeftMouseUp`), while yielding to explicit
-//! user selection gestures (click-and-drag, double-click word selection, and
-//! clicking an already-focused field) and still reporting hosted pointer
-//! activity (`:active` feedback and `PressOutside` popover dismissal).
+//! A click that focuses an `<Input selectTextOnFocus>` selects its text,
+//! both a physical click (`45 ms` hold) and a same-turn tap-to-click (`0 ms`
+//! back-to-back `LeftMouseDown` + `LeftMouseUp`), while the user's own
+//! selection gestures (click-and-drag, double-click word selection, clicking
+//! an already-focused field) keep theirs and an input without the prop places
+//! the caret. Presses on hosted editors still report pointer activity
+//! (`:active` feedback and `PressOutside` popover dismissal).
 
 use std::{
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -31,12 +31,6 @@ static POPOVER_OPEN: AtomicBool = AtomicBool::new(true);
 
 #[component]
 fn Page() -> impl IntoElement {
-    let first_ref = element_ref();
-    let second_ref = element_ref();
-    let tap_ref = element_ref();
-    let drag_ref = element_ref();
-    let words_ref = element_ref();
-    let area_ref = element_ref();
     view()
         .flex_1()
         .p(px(16.0))
@@ -61,67 +55,69 @@ fn Page() -> impl IntoElement {
         .child(
             input()
                 .test_id("first")
-                .element_ref(&first_ref)
                 .default_value("Hello")
                 .w(px(240.0))
                 .h(px(32.0))
                 .p(px(6.0))
-                .on_focus(move || first_ref.set_selection(0, 5)),
+                .select_text_on_focus(true),
         )
         .child(
             input()
                 .test_id("second")
-                .element_ref(&second_ref)
                 .default_value("World")
                 .w(px(240.0))
                 .h(px(32.0))
                 .p(px(6.0))
-                .on_focus(move || {
+                .select_text_on_focus(true)
+                .on_focus(|| {
                     SECOND_FOCUS_COUNT.fetch_add(1, Ordering::SeqCst);
-                    second_ref.set_selection(0, 5);
                 }),
         )
         .child(
             input()
                 .test_id("tap")
-                .element_ref(&tap_ref)
                 .default_value("TapMe")
                 .w(px(240.0))
                 .h(px(32.0))
                 .p(px(6.0))
                 .active(|s| s.opacity(0.2))
-                .on_focus(move || tap_ref.set_selection(0, 5)),
+                .select_text_on_focus(true),
         )
         .child(
             input()
                 .test_id("drag")
-                .element_ref(&drag_ref)
                 .default_value("Alpha Beta")
                 .w(px(240.0))
                 .h(px(32.0))
                 .p(px(6.0))
-                .on_focus(move || drag_ref.set_selection(0, 10)),
+                .select_text_on_focus(true),
         )
         .child(
             input()
                 .test_id("words")
-                .element_ref(&words_ref)
                 .default_value("Hello World")
                 .w(px(240.0))
                 .h(px(32.0))
                 .p(px(6.0))
-                .on_focus(move || words_ref.set_selection(0, 11)),
+                .select_text_on_focus(true),
         )
         .child(
             input()
                 .test_id("area")
-                .element_ref(&area_ref)
                 .multiline(true)
                 .default_value("Line 1")
                 .w(px(240.0))
                 .h(px(56.0))
                 .p(px(6.0))
-                .on_focus(move || area_ref.set_selection(0, 6)),
+                .select_text_on_focus(true),
+        )
+        .child(
+            input()
+                .test_id("plain")
+                .default_value("Plain")
+                .w(px(240.0))
+                .h(px(32.0))
+                .p(px(6.0)),
         )
 }
 
@@ -312,7 +308,7 @@ pub(super) fn run() {
     app.activate();
 
     let deadline = Instant::now() + Duration::from_secs(10);
-    while view_by_id(&root, "area").is_none_or(|v| v.frame().size.width <= 0.0) {
+    while view_by_id(&root, "plain").is_none_or(|v| v.frame().size.width <= 0.0) {
         assert!(Instant::now() < deadline, "inputs did not mount");
         pump_events(&app, 10);
     }
@@ -320,7 +316,7 @@ pub(super) fn run() {
     // 1. Same-turn tap-to-click (0 ms) on an unfocused `<Input>` must:
     //    - dismiss the open Popover via PressOutside,
     //    - pulse `:active` opacity below 0.95 and return to 1.0,
-    //    - preserve `onFocus -> setSelection(0, 5)`.
+    //    - select the text (`selectTextOnFocus`).
     assert!(POPOVER_OPEN.load(Ordering::SeqCst), "popover starts open");
     let tap_view = view_by_id(&root, "tap").unwrap();
     let tap_field = field_by_id(&root, "tap");
@@ -345,7 +341,7 @@ pub(super) fn run() {
     assert_eq!(
         tap_editor.selectedRange(),
         NSRange::new(0, 5),
-        "same-turn tap-to-click with onFocus->setSelection should keep 0..5 selected"
+        "same-turn tap-to-click on a selectTextOnFocus input should select 0..5"
     );
 
     // 2. Click padding beside text ("Hello" in a 240pt field -> right edge padding).
@@ -360,7 +356,7 @@ pub(super) fn run() {
     assert_eq!(
         first_editor.selectedRange(),
         NSRange::new(0, 5),
-        "padding click with onFocus->setSelection should keep 0..5 selected"
+        "padding click on a selectTextOnFocus input should select 0..5"
     );
 
     // 3. Click directly on text inside unfocused second field ("World").
@@ -375,7 +371,7 @@ pub(super) fn run() {
     assert_eq!(
         second_editor.selectedRange(),
         NSRange::new(0, 5),
-        "direct text click with onFocus->setSelection should keep 0..5 selected"
+        "direct text click on a selectTextOnFocus input should select 0..5"
     );
 
     // 4. Second click while already focused collapses selection to caret normally.
@@ -395,7 +391,7 @@ pub(super) fn run() {
         "clicking inside already-focused field must move caret normally"
     );
 
-    // 5. Click-and-drag selection on an unfocused input must NOT be clobbered by onFocus->setSelection(0, 10).
+    // 5. A click-and-drag on an unfocused input keeps the dragged range.
     let drag_view = view_by_id(&root, "drag").unwrap();
     let drag_field = field_by_id(&root, "drag");
     click_and_drag(&window, &drag_view, 8.0, 42.0, 16.0);
@@ -407,12 +403,11 @@ pub(super) fn run() {
         .selectedRange();
     assert!(
         dragged_range.length > 0 && dragged_range != NSRange::new(0, 10),
-        "user click-and-drag selection must win over onFocus->setSelection(0, 10), got {dragged_range:?}"
+        "user click-and-drag selection must win over selectTextOnFocus, got {dragged_range:?}"
     );
 
-    // 6. Double-click word selection on an unfocused input (Click 1 focuses and
-    //    queues `onFocus -> setSelection(0, 11)`; Click 2 selects "Hello" 0..5
-    //    before the main queue drains) must preserve the word 0..5, not 0..11.
+    // 6. A double click on an unfocused input (click 1 focuses and selects
+    //    all; click 2 selects the word "Hello") keeps the word 0..5.
     let words_view = view_by_id(&root, "words").unwrap();
     let words_field = field_by_id(&root, "words");
     {
@@ -452,17 +447,17 @@ pub(super) fn run() {
     assert_eq!(
         word_range,
         NSRange::new(0, 5),
-        "double-click word selection must win over onFocus->setSelection(0, 11)"
+        "double-click word selection must win over selectTextOnFocus"
     );
 
-    // 7. Multiline TextArea click with onFocus->setSelection keeps 0..6 selected.
+    // 7. A click focusing a multiline input selects its text.
     let area_view = view_by_id(&root, "area").unwrap();
     let area_editor = area_by_id(&root, "area");
     click_with_hold(&window, &area_view, 180.0, 28.0, 1);
     assert_eq!(
         area_editor.selectedRange(),
         NSRange::new(0, 6),
-        "multiline click with onFocus->setSelection should keep 0..6 selected"
+        "multiline click on a selectTextOnFocus input should select 0..6"
     );
 
     // 8. `nsh_base::button()` (component touch responder calling `hold_pressed(None)`
@@ -498,7 +493,22 @@ pub(super) fn run() {
         );
     }
 
+    // 9. Without `selectTextOnFocus`, a focusing click places the caret.
+    let plain_view = view_by_id(&root, "plain").unwrap();
+    let plain_field = field_by_id(&root, "plain");
+    click_with_hold(&window, &plain_view, 180.0, 16.0, 1);
+    let plain_range = plain_field
+        .currentEditor()
+        .unwrap()
+        .downcast::<NSTextView>()
+        .unwrap()
+        .selectedRange();
+    assert_eq!(
+        plain_range.length, 0,
+        "a click on an input without selectTextOnFocus must place the caret, got {plain_range:?}"
+    );
+
     surface.stop();
     window.close();
-    println!("focus_selection: all 8 focus/tap/drag/word/button selection checks passed");
+    println!("focus_selection: all 9 focus/tap/drag/word/button selection checks passed");
 }

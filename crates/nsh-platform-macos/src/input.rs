@@ -3190,7 +3190,6 @@ fn hosted_mouse(surface: &Rc<Surface>, raw: &NSEvent) {
             surface.measure(false, || event(surface, e));
         }
         NSEventType::LeftMouseDragged => {
-            crate::text_input::note_drag(e);
             if surface.input.hosted_left_down.get() {
                 surface.input.hosted_last.set(Some(MouseMark::of(raw)));
                 enter(surface, window_root);

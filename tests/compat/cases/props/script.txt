@@ -35,6 +35,8 @@ prop id:submit submitBehavior submit
 noprop id:plain submitBehavior
 prop id:focused autoFocus true
 prop id:plain autoFocus false
+prop id:select-all selectTextOnFocus true
+prop id:plain selectTextOnFocus false
 prop id:focused caret false
 prop id:plain caret true
 # `defaultValue`: the initial text.
@@ -58,6 +60,7 @@ covers [props] ios.textContentType
 covers [props] maxLength
 covers [props] submitBehavior
 covers [props] autoFocus
+covers [props] selectTextOnFocus
 covers [props] caret
 covers [props] defaultValue
 covers [props] value

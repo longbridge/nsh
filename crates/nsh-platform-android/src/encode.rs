@@ -1747,6 +1747,7 @@ fn input(e: &mut Encoded, c: &InputConfig) {
     e.int(c.max_length.map_or(-1, |m| m as i32));
     e.bool(c.editable);
     e.bool(c.auto_focus);
+    e.bool(c.select_text_on_focus);
     e.bool(c.selection_color.is_some());
     e.int(c.selection_color.map_or(0, argb));
     e.bool(c.caret_color.is_some());
