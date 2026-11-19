@@ -794,10 +794,6 @@ struct UpdaterOverNetwork {
 impl UpdaterOverNetwork {
     /// `None` without a network, or without both assets and the bundle's
     /// configuration (nothing to update from).
-    #[cfg_attr(
-        not(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32"))),
-        allow(dead_code)
-    )]
     fn host(
         network: Option<Arc<dyn Network>>,
         assets: Option<Arc<dyn Assets>>,
@@ -811,6 +807,21 @@ impl UpdaterOverNetwork {
             assets,
             config: bundle.updater_config.clone(),
             running: bundle.package.clone(),
+        }))
+    }
+}
+
+impl UpdaterOverNetwork {
+    /// A Rust app's: the configuration among its assets, no packages.
+    fn of(
+        network: Option<Arc<dyn Network>>,
+        assets: Option<Arc<dyn Assets>>,
+    ) -> Option<Arc<dyn nsh_core::runtime::UpdaterHost>> {
+        Some(Arc::new(UpdaterOverNetwork {
+            network: network?,
+            assets: Some(assets?),
+            config: None,
+            running: None,
         }))
     }
 }
@@ -2210,6 +2221,14 @@ impl<M: TextEngine + 'static> Driver<M> {
         });
         core.set_storage(app_storage(&config));
         core.set_data_dir(data_dir(&config));
+        // What a Rust app's `prompt_for_update` checks with; a JS app's VM
+        // gets its own below.
+        core.set_updater(match &config.app {
+            App::Js(bundle) => {
+                UpdaterOverNetwork::host(config.network.clone(), config.assets.clone(), bundle)
+            }
+            App::Rust(_) => UpdaterOverNetwork::of(config.network.clone(), config.assets.clone()),
+        });
         core.set_clipboard(config.clipboard.clone());
         core.set_picker(config.picker.clone());
         core.set_speech(config.speech.clone());
@@ -2464,6 +2483,11 @@ impl<M: TextEngine + 'static> Driver<M> {
             script.run_system();
         }
         state.load_fonts(script, assets.as_deref(), &**sink);
+        // A TSX app's windows of its own (the update prompt) render beside
+        // its root, after it, as a Rust app's do (`Core::mount_root`).
+        if script.is_some() {
+            state.core.mount_opened_windows();
+        }
         if let Some(batch) = state.commit(script) {
             if state.trace {
                 log::info!(
