@@ -1525,9 +1525,63 @@ fn a_system_menu_the_app_closes_reports_only_its_closing() {
         .unwrap();
 }
 
+/// A prop of the context menu's native component, as last sent.
+fn system_menu_prop(app: &App, name: &str) -> Option<serde_json::Value> {
+    let seen = app.seen.lock().unwrap();
+    let id = seen.components[CONTEXT_MENU_COMPONENT];
+    seen.component_props[&(id, name.to_owned())].clone()
+}
+
 #[test]
-fn off_ios_a_context_menus_items_are_not_used() {
-    for os in [Os::Web, Os::Android] {
+fn with_items_android_opens_the_systems_popup_menu_where_the_finger_held() {
+    let mut app = start_on(Root::of::<SystemMenuRow>(), Os::Android);
+    assert_eq!(
+        system_menu_prop(&app, "items"),
+        Some(serde_json::json!([
+            { "id": "rename", "label": "Rename", "icon": "pencil" },
+            { "id": "", "label": "", "inline": true, "items": [
+                { "id": "delete", "label": "Delete", "destructive": true },
+            ] },
+        ]))
+    );
+    assert_eq!(
+        system_menu_prop(&app, "title"),
+        Some(serde_json::json!("Notes.txt"))
+    );
+    assert_eq!(
+        system_menu_prop(&app, "open"),
+        Some(serde_json::json!(false))
+    );
+    // Android's popup menu has no opener of its own: the held finger opens
+    // it through `open`, at the point it held, and NSH draws none.
+    hold_row(&mut app, PointerType::Touch);
+    app.app.wait_for("text:heard: true:LongPress").unwrap();
+    assert!(!app.app.shows("Drawn rename"), "no drawn menu");
+    assert_eq!(
+        system_menu_prop(&app, "open"),
+        Some(serde_json::json!(true))
+    );
+    assert_eq!(
+        system_menu_prop(&app, "at"),
+        Some(serde_json::json!({ "x": 10.0, "y": 110.0 }))
+    );
+    // The platform tells it shown, then the choice and its dismissal, as
+    // iOS's: the opening is not reported twice.
+    system_menu_event(&mut app, "open", serde_json::json!("touch"));
+    system_menu_event(&mut app, "select", serde_json::json!("delete"));
+    system_menu_event(&mut app, "close", serde_json::Value::Null);
+    app.app
+        .wait_for("text:heard: true:LongPress open false:Select select:delete close")
+        .unwrap();
+    assert_eq!(
+        system_menu_prop(&app, "open"),
+        Some(serde_json::json!(false))
+    );
+}
+
+#[test]
+fn on_the_web_a_context_menus_items_are_not_used() {
+    for os in [Os::Web] {
         let mut app = start_on(Root::of::<SystemMenuRow>(), os);
         assert!(
             !app.seen
