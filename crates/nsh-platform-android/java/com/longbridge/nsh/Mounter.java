@@ -3567,7 +3567,9 @@ final class Mounter {
     }
 
     void scroll(int id, float x, float y, int applied) {
-        outputs(Native.scroll(handle(), id, x, y, applied));
+        long handle = handle();
+        if (handle == 0) return;
+        outputs(Native.scroll(handle, id, x, y, applied));
     }
 
     void inputScroll(int id, float y, float contentWidth, float contentHeight, float width, float height) {
@@ -3580,7 +3582,9 @@ final class Mounter {
 
     /** Scroll view {@code id} came to rest: snapping animated values settle. */
     void scrollEnded(int id) {
-        outputs(Native.scrollEnded(handle(), id));
+        long handle = handle();
+        if (handle == 0) return;
+        outputs(Native.scrollEnded(handle, id));
     }
 
     void pan(int id, int state, float tx, float ty, float vx, float vy) {
