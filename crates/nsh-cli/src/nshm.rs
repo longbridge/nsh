@@ -1,10 +1,11 @@
-//! Third-party extensions: Rust crates that export components, modules
-//! and classes to the app, as the app's own crates do (`nsh.json`
-//! `"rust"`, [`crate::rust_app`]). `nsh add <source>` lists one in
-//! `nsh.json`; a crate from crates.io is the default:
+//! nshm (NSH modules): Rust crates from crates.io, Git or a local
+//! directory that export components, modules and classes to the app, as
+//! the app's own crates do (`nsh.json` `"rust"`, [`crate::rust_app`]).
+//! `nsh add <source>` lists one in `nsh.json`; a crate from crates.io is
+//! the default:
 //!
 //! ```json
-//! { "extensions": [
+//! { "modules": [
 //!   "acme-ui@1.2",
 //!   "github:acme/chart@v0.3.0",
 //!   { "git": "https://git.example.com/ui.git", "rev": "4f2a1c0" },
@@ -20,20 +21,14 @@
 //! `nsh.json` says what is acceptable; `nsh add` pins what it resolved to
 //! (a crate's exact version, a Git commit) in `nsh.lock`, next to `nsh.json`,
 //! which the app commits: a build takes the locked commit, never what a tag
-//! or branch points to now. An extension is an ordinary Cargo library with
-//! a `#[native_module("<module>")]` entry at its root and, in its
-//! `Cargo.toml`, what NSH checks before anything compiles:
-//!
-//! ```toml
-//! [package.metadata.nsh]
-//! format = 1                   # this metadata's version
-//! module = "acme/ui"           # the specifier TSX imports it by, its #[native_module]
-//! nsh = "0.6"                  # the NSH versions it builds with (a Cargo version requirement)
-//! targets = ["macos", "linux"] # optional: the targets it supports (default: all)
-//! ```
+//! or branch points to now. An nshm is an ordinary Cargo library with a
+//! `#[native_module("<module>")]` entry at its root, the specifier TSX
+//! imports it by; it needs no NSH-specific metadata. The NSH versions it
+//! builds with are its own `nsh-core` dependency requirement, checked
+//! against this CLI before anything compiles.
 //!
 //! Each locked commit is checked out once in nsh's cache
-//! (`<cache>/extensions/<repository>/<commit>`) and linked into the app's
+//! (`<cache>/nshm/<repository>/<commit>`) and linked into the app's
 //! generated workspace like an app crate, so a pure TSX app gets hosts
 //! built with it, and a Rust app's runners stay without a JS engine.
 
@@ -52,7 +47,7 @@ use crate::rust_app::{self, AppCrate};
 /// The lock file beside `nsh.json`.
 pub(crate) const LOCK: &str = "nsh.lock";
 
-/// An extension as `nsh.json` lists it: from Git (`git`, with `tag` or
+/// An nshm as `nsh.json` lists it: from Git (`git`, with `tag` or
 /// `rev`), from crates.io (`crate`, with a `version` requirement) or from
 /// a local directory (`path`, relative to `nsh.json`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,7 +83,7 @@ impl Source {
     }
 
     /// What names it: its URL, crate or path. Two sources with the same
-    /// one are the same extension.
+    /// one are the same nshm.
     pub(crate) fn id(&self) -> &str {
         self.git
             .as_deref()
@@ -104,24 +99,24 @@ impl Source {
             .filter(|k| k.is_some())
             .count();
         if kinds != 1 {
-            bail!("nsh.json: \"extensions\": each has one of \"git\", \"crate\" or \"path\"");
+            bail!("nsh.json: \"modules\": each has one of \"git\", \"crate\" or \"path\"");
         }
         if self.tag.is_some() && self.rev.is_some() {
             bail!(
-                "nsh.json: \"extensions\": {} has both \"tag\" and \"rev\"",
+                "nsh.json: \"modules\": {} has both \"tag\" and \"rev\"",
                 self.id()
             );
         }
         if self.git.is_none() && (self.tag.is_some() || self.rev.is_some()) {
             bail!(
-                "nsh.json: \"extensions\": {}: \"tag\" and \"rev\" are for \"git\"",
+                "nsh.json: \"modules\": {}: \"tag\" and \"rev\" are for \"git\"",
                 self.id()
             );
         }
         if let Some(v) = &self.version {
             semver::VersionReq::parse(v).with_context(|| {
                 format!(
-                    "nsh.json: \"extensions\": {}: {v:?} is not a version requirement",
+                    "nsh.json: \"modules\": {}: {v:?} is not a version requirement",
                     self.id()
                 )
             })?;
@@ -254,7 +249,7 @@ impl Source {
         }
     }
 
-    /// Reads an entry of `nsh.json` `"extensions"`.
+    /// Reads an entry of `nsh.json` `"modules"`.
     fn from_entry(value: &serde_json::Value) -> anyhow::Result<Self> {
         if let Some(s) = value.as_str() {
             return Source::short(s, None, None);
@@ -270,10 +265,10 @@ impl Source {
             version: Option<String>,
         }
         let full: Full = serde_json::from_value(value.clone()).context(
-            "nsh.json: \"extensions\": each is \"<crate>[@<version>]\", \"github:<owner>/<repo>[@<tag>]\", { \"git\" | \"github\": ..., \"tag\" | \"rev\" } or { \"path\": \"<dir>\" }",
+            "nsh.json: \"modules\": each is \"<crate>[@<version>]\", \"github:<owner>/<repo>[@<tag>]\", { \"git\" | \"github\": ..., \"tag\" | \"rev\" } or { \"path\": \"<dir>\" }",
         )?;
         if full.git.is_some() && full.github.is_some() {
-            bail!("nsh.json: \"extensions\": an entry has both \"git\" and \"github\"");
+            bail!("nsh.json: \"modules\": an entry has both \"git\" and \"github\"");
         }
         let source = Source {
             git: full.git.or(full.github.as_deref().map(github_url)),
@@ -299,15 +294,15 @@ fn github_repo(url: &str) -> Option<&str> {
     (repo.split('/').count() == 2 && !repo.ends_with(".git")).then_some(repo)
 }
 
-/// `nsh.lock`: the commit each extension resolved to.
+/// `nsh.lock`: the commit each nshm resolved to.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 struct Lock {
     version: u64,
     #[serde(default)]
-    extensions: Vec<Locked>,
+    modules: Vec<Locked>,
 }
 
-/// An extension's entry in `nsh.lock`.
+/// An nshm's entry in `nsh.lock`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Locked {
     #[serde(flatten)]
@@ -333,7 +328,7 @@ impl Locked {
     }
 }
 
-/// The extensions `config` (the `nsh.json` in `dir`) lists, each checked
+/// The nshm `config` (the `nsh.json` in `dir`) lists, each checked
 /// out at its locked commit, with how `nsh.json` names it. One not locked
 /// yet is resolved and locked (`nsh.lock` written).
 pub(crate) fn crates(
@@ -351,14 +346,14 @@ pub(crate) fn crates(
         if let Some(path) = &source.path {
             // A local directory: read as it is now, nothing to lock.
             let checkout = dunce::canonicalize(dir.join(path))
-                .with_context(|| format!("nsh.json: \"extensions\": no directory {path}"))?;
+                .with_context(|| format!("nsh.json: \"modules\": no directory {path}"))?;
             let package = rust_app::package_name(&checkout.join("Cargo.toml"))?;
             check(&checkout, path)?;
             check_version(&checkout, source)?;
             crates.push((path.clone(), AppCrate::new(package, checkout)));
             continue;
         }
-        let entry = match lock.extensions.iter().find(|l| l.source == *source) {
+        let entry = match lock.modules.iter().find(|l| l.source == *source) {
             Some(entry) => entry.clone(),
             None => resolve(source)?,
         };
@@ -371,15 +366,15 @@ pub(crate) fn crates(
     }
     let new = Lock {
         version: 1,
-        extensions: locked,
+        modules: locked,
     };
-    if new.extensions != lock.extensions {
+    if new.modules != lock.modules {
         write_lock(dir, &new)?;
     }
     Ok(crates)
 }
 
-/// The `[patch]` table that sends the app's dependency on the extension
+/// The `[patch]` table that sends the app's dependency on the nshm
 /// named `id` (as [`crates`] names it) to its checkout: `Some(Some(url))`
 /// for Git, `Some(None)` for crates.io, `None` for a directory, which the
 /// app's crate takes as it is.
@@ -411,7 +406,7 @@ fn place(entry: &Locked) -> anyhow::Result<PathBuf> {
     }
 }
 
-/// `nsh add`: lists the extension at `git` (`tag` or `rev`, else the
+/// `nsh add`: lists the nshm at `git` (`tag` or `rev`, else the
 /// default branch) in the `nsh.json` in `dir`, replacing one of the same
 /// repository, locks it, and checks it with the app's crates. On an error
 /// `nsh.json` and `nsh.lock` are left as they were.
@@ -432,34 +427,33 @@ pub(crate) fn add(dir: &Path, source: Source) -> anyhow::Result<()> {
     let result = (|| {
         // `nsh add` again: resolved anew, what the reference points to now.
         if let Ok(mut lock) = read_lock(dir)
-            && lock.extensions.iter().any(|l| l.source.id() == id)
+            && lock.modules.iter().any(|l| l.source.id() == id)
         {
-            lock.extensions.retain(|l| l.source.id() != id);
+            lock.modules.retain(|l| l.source.id() != id);
             write_lock(dir, &lock)?;
         }
         let mut sources = sources(&config)?;
         sources.retain(|s| s.id() != id);
         sources.push(source.clone());
-        config["extensions"] =
-            serde_json::Value::Array(sources.iter().map(Source::entry).collect());
+        config["modules"] = serde_json::Value::Array(sources.iter().map(Source::entry).collect());
         fs::write(&config_path, serde_json::to_string_pretty(&config)? + "\n")?;
-        // The app's crates and the extensions together: a clash of
+        // The app's crates and its nshm together: a clash of
         // packages or modules is reported here, before a build.
-        let extensions = crates(dir, &config)?;
+        let modules = crates(dir, &config)?;
         let mut all: Vec<(String, AppCrate)> = match config.get("rust") {
             Some(rust) => rust_crates(dir, rust)?,
             None => Vec::new(),
         };
         let app_crate = all.first().map(|(_, c)| c.dir().to_owned());
-        let added = extensions
+        let added = modules
             .iter()
             .find(|(name, _)| *name == id)
             .map(|(_, c)| c.clone())
-            .context("the extension is not listed")?;
-        all.extend(extensions);
+            .context("the nshm is not listed")?;
+        all.extend(modules);
         rust_app::check_crates(&all)?;
         let lock = read_lock(dir)?;
-        let entry = lock.extensions.iter().find(|l| l.source == source).cloned();
+        let entry = lock.modules.iter().find(|l| l.source == source).cloned();
         // The app's crate uses it from Rust too (`use acme_ui::Gauge`).
         if let Some(crate_dir) = &app_crate {
             let manifest = crate_dir.join("Cargo.toml");
@@ -515,7 +509,7 @@ pub(crate) fn add(dir: &Path, source: Source) -> anyhow::Result<()> {
     }
 }
 
-/// How the app's crate depends on an extension.
+/// How the app's crate depends on an nshm.
 #[derive(Debug)]
 enum Dependency {
     Git { url: String, commit: String },
@@ -623,13 +617,18 @@ fn rust_crates(dir: &Path, rust: &serde_json::Value) -> anyhow::Result<Vec<(Stri
         .collect()
 }
 
-/// `"extensions"` of `config`.
+/// `"modules"` of `config`.
 fn sources(config: &serde_json::Value) -> anyhow::Result<Vec<Source>> {
-    match config.get("extensions") {
+    // `"extensions"` was this list's name before any release: an app that
+    // still has it must not build without its nshm.
+    if config.get("extensions").is_some() {
+        bail!("nsh.json: \"extensions\" is now \"modules\"");
+    }
+    match config.get("modules") {
         None => Ok(Vec::new()),
         Some(value) => {
             let list = value.as_array().context(
-                "nsh.json: \"extensions\" is a list, e.g. [\"acme-ui@1.2\", \"github:acme/ui\"]",
+                "nsh.json: \"modules\" is a list, e.g. [\"acme-ui@1.2\", \"github:acme/ui\"]",
             )?;
             let sources = list
                 .iter()
@@ -706,12 +705,12 @@ fn resolve(source: &Source) -> anyhow::Result<Locked> {
 /// Cargo resolves it: that version and the directory Cargo downloaded it
 /// to.
 fn registry(name: &str, req: &str) -> anyhow::Result<(String, PathBuf)> {
-    let probe = crate::check::cache()?.join("extensions").join("registry");
+    let probe = crate::check::cache()?.join("modules").join("registry");
     fs::create_dir_all(&probe)?;
     fs::write(
         probe.join("Cargo.toml"),
         format!(
-            "[package]\nname = \"nsh-extension-probe\"\nversion = \"0.0.0\"\nedition = \"2021\"\npublish = false\n\n[lib]\npath = \"lib.rs\"\n\n[workspace]\n\n[dependencies]\n{name} = {req:?}\n"
+            "[package]\nname = \"nshm-probe\"\nversion = \"0.0.0\"\nedition = \"2021\"\npublish = false\n\n[lib]\npath = \"lib.rs\"\n\n[workspace]\n\n[dependencies]\n{name} = {req:?}\n"
         ),
     )?;
     fs::write(probe.join("lib.rs"), "")?;
@@ -746,7 +745,7 @@ fn registry(name: &str, req: &str) -> anyhow::Result<(String, PathBuf)> {
     Ok((version, dunce::canonicalize(dir)?))
 }
 
-/// The directory of the extensions from `url` in nsh's cache.
+/// The directory of the nshm from `url` in nsh's cache.
 fn cache_of(url: &str) -> anyhow::Result<PathBuf> {
     let hash = Sha256::digest(url.as_bytes());
     let name: String = hash[..8].iter().map(|b| format!("{b:02x}")).collect();
@@ -760,7 +759,7 @@ fn cache_of(url: &str) -> anyhow::Result<PathBuf> {
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
         .collect::<String>();
     Ok(crate::check::cache()?
-        .join("extensions")
+        .join("modules")
         .join(format!("{last}-{name}")))
 }
 
@@ -824,20 +823,18 @@ fn checkout(url: &str, commit: &str) -> anyhow::Result<PathBuf> {
     )
     .with_context(|| format!("{url}: no commit {commit}"))?;
     if !dir.join("Cargo.toml").is_file() {
-        bail!("{url}: no Cargo.toml at the repository's root: an extension is a Cargo library");
+        bail!("{url}: no Cargo.toml at the repository's root: an nshm is a Cargo library");
     }
     Ok(dunce::canonicalize(&dir)?)
 }
 
-/// Checks the extension in `dir` (from `url`) can link into this NSH:
+/// Checks the nshm in `dir` (from `url`) can link into this NSH:
 /// a `#[native_module]` at its root, and its `nsh-core` requirement (if
 /// any) matching this NSH. Its module.
 fn check(dir: &Path, url: &str) -> anyhow::Result<String> {
     let manifest = fs::read_to_string(dir.join("Cargo.toml"))?;
     let module = rust_app::specifier_of(dir).with_context(|| {
-        format!(
-            "{url}: no #[native_module(\"...\")] at the crate's root: is this an NSH extension?"
-        )
+        format!("{url}: no #[native_module(\"...\")] at the crate's root: is this an nshm?")
     })?;
     if let Some(req) = nsh_requirement(&manifest) {
         let req = semver::VersionReq::parse(&req)
@@ -895,7 +892,7 @@ fn check_version(dir: &Path, source: &Source) -> anyhow::Result<()> {
         .with_context(|| format!("{}: version {version:?}", source.id()))?;
     if !req.matches(&version) {
         bail!(
-            "nsh.json: \"extensions\": {} requires version {req}, but it is {version}",
+            "nsh.json: \"modules\": {} requires version {req}, but it is {version}",
             source.id()
         );
     }
@@ -961,7 +958,7 @@ mod tests {
     }
 
     #[test]
-    fn the_app_crate_depends_on_the_extension() {
+    fn the_app_crate_depends_on_the_nshm() {
         let manifest = "[package]\nname = \"app\"\n\n[dependencies]\nnsh-core = \"0.6\"\n";
         let at = |commit: &str| Dependency::Git {
             url: "https://x/ui".into(),
@@ -1013,7 +1010,7 @@ mod tests {
 
     #[test]
     fn sources_are_checked() {
-        let config = serde_json::json!({ "extensions": [
+        let config = serde_json::json!({ "modules": [
             "acme-ui", "acme-ui@1.2", "github:acme/ui@v1",
             { "github": "acme/ui", "rev": "abc" },
             { "git": "https://x/a", "tag": "v1" },
@@ -1032,20 +1029,22 @@ mod tests {
         assert_eq!(list[3].rev.as_deref(), Some("abc"));
         // Written back as it was.
         let back: Vec<_> = list.iter().map(Source::entry).collect();
-        assert_eq!(serde_json::Value::Array(back), config["extensions"]);
-        let both = serde_json::json!({ "extensions": [{ "git": "g", "tag": "v1", "rev": "abc" }] });
+        assert_eq!(serde_json::Value::Array(back), config["modules"]);
+        let both = serde_json::json!({ "modules": [{ "git": "g", "tag": "v1", "rev": "abc" }] });
         assert!(sources(&both).unwrap_err().to_string().contains("both"));
-        let unknown = serde_json::json!({ "extensions": [{ "git": "g", "branch": "main" }] });
+        let unknown = serde_json::json!({ "modules": [{ "git": "g", "branch": "main" }] });
         assert!(sources(&unknown).is_err());
         assert!(sources(&serde_json::json!({})).unwrap().is_empty());
-        let old = serde_json::json!({ "extensions": [{ "crate": "a" }] });
+        let old = serde_json::json!({ "modules": [{ "crate": "a" }] });
         assert!(sources(&old).is_err());
-        let two = serde_json::json!({ "extensions": [{ "github": "a/b", "path": "../a" }] });
+        let two = serde_json::json!({ "modules": [{ "github": "a/b", "path": "../a" }] });
         assert!(sources(&two).is_err());
-        let bad = serde_json::json!({ "extensions": ["github:acme"] });
+        let bad = serde_json::json!({ "modules": ["github:acme"] });
         assert!(sources(&bad).is_err());
-        let req = serde_json::json!({ "extensions": [{ "path": "../a", "version": "one" }] });
+        let req = serde_json::json!({ "modules": [{ "path": "../a", "version": "one" }] });
         assert!(sources(&req).is_err());
+        let renamed = serde_json::json!({ "extensions": ["acme-ui@1.2"] });
+        assert!(sources(&renamed).is_err());
     }
 
     #[test]

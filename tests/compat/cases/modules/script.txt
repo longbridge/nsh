@@ -185,10 +185,12 @@ expect Check: null
 expect Download: rejected
 expect Restart: rejected
 expect Install on quit: rejected
+expect Prompt: resolved
 covers [nsh/updater] checkForPackage
 covers [nsh/updater] checkForUpdate
 covers [nsh/updater] downloadPackage
 covers [nsh/updater] installOnQuit
+covers [nsh/updater] promptForUpdate
 covers [nsh/updater] restartToPackage
 covers [nsh/updater] runningPackage
 covers [nsh/updater] shellInfo

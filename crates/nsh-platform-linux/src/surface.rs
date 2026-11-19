@@ -782,6 +782,10 @@ impl Surface {
         self.last_frame.set(now);
         self.last_run.set(monotonic());
         if self.anim.borrow().animating() {
+            // Frame clock frames and deadline runs both step here, so it
+            // keeps the plain tick, without the first frame's stall
+            // compensation (`Animator::tick_frame`) the other backends give
+            // their display frames.
             self.anim.borrow_mut().tick(now);
             self.write_animations();
         }
