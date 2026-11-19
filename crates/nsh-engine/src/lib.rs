@@ -2230,7 +2230,8 @@ impl<M: TextEngine + 'static> Driver<M> {
         let mode = config
             .app
             .application()
-            .map_or_default(|options| options.quit_mode);
+            .map(|options| options.quit_mode)
+            .unwrap_or_default();
         core.set_quit_mode(mode);
         core.set_content_culling(config.content_culling);
         core.set_tree_order_tracking(sink.needs_tree_order());
