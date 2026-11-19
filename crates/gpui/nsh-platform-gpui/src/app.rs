@@ -649,6 +649,25 @@ impl AppView {
         self.surface.set_error_handler(Box::new(f));
     }
 
+    /// The bottom edge of the mounted root children in surface points.
+    ///
+    /// `None` until content is mounted. Observe this view's GPUI notifications
+    /// to read updated geometry after commits. This is not an intrinsic-size
+    /// layout pass: children using viewport-relative height or flex growth
+    /// still depend on the viewport the embedding host supplies.
+    pub fn content_height(&self) -> Option<nsh_core::Points> {
+        self.surface.root.with_children(|children| {
+            children
+                .iter()
+                .map(|child| {
+                    let state = child.state();
+                    state.frame.origin.y.0 + state.frame.size.height.0
+                })
+                .reduce(f32::max)
+                .map(nsh_core::Points)
+        })
+    }
+
     pub(crate) fn surface(&self) -> &Rc<Surface> {
         &self.surface
     }

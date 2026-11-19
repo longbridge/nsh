@@ -250,6 +250,11 @@ xvfb-run -a dbus-run-session -- sh -c '
   it in its own `WindowOptions` too. Embedding in a GPUI Kit app (one GPUI, focus and Tab, overlays, themes, frame
   rate): `embedding.md` "GPUI and GPUI Kit apps", `examples/embed-gpui`.
 
+`AppView::content_height()` reads the bottom edge of the mounted root children in surface points (`None` when
+there are none). Read it again on GPUI notifications after commits. It reports the current layout, not an
+intrinsic-size pass: viewport-relative heights and flex growth still use the host's viewport. With host tokens,
+the synthetic root supplies `text-foreground` for text inheritance and keeps its viewport layout when restyled.
+
 ## How each area maps to GPUI
 
 | Area | Module | GPUI |

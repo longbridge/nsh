@@ -171,6 +171,10 @@ so only load it from your own app's files.
   with it (`None` gives the app its own theme back; a file that does not parse is an error and changes nothing). With
   a whole theme from `set_theme` / `set_theme_json`, the overrides win over that one's tokens, and each stays when the
   other changes.
+- `AppView::content_height()` returns the bottom edge of the mounted root children in surface points, or `None`
+  when there are none. Observe the view's GPUI notifications to read it after commits. This is the current layout,
+  not an intrinsic-size pass: viewport-relative heights and flex growth still depend on the host's viewport.
+- With a host theme or theme overrides, text inherits the `foreground` token unless it sets its own color.
 - `AppView::run_package(&package)` runs a [signed package](./signed-packages.md#loading-packages-in-a-host-app)
   from `verify_package` or `load_package`; `accept_package` records it once your app decided it is healthy.
 - `set_ui_sets(sets)` sets the UI sets every engine serves: NSH's (`nsh_base::registry()`) and your crates'

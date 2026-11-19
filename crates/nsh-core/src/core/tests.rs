@@ -8602,6 +8602,47 @@ fn inputs_report_their_focus_to_the_views_around_them() {
 }
 
 #[test]
+fn host_foreground_is_inherited_without_resizing_the_viewport() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "w-full h-full");
+    for (id, classes) in [(3, ""), (5, "text-[#0000ff]")] {
+        apply(
+            &mut c,
+            vec![
+                Op::Create { id, tag: Tag::Text },
+                class_op(id, classes),
+                Op::CreateText {
+                    id: id + 1,
+                    text: "hello".into(),
+                },
+                Op::Insert {
+                    parent: id,
+                    child: id + 1,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: id,
+                    before: None,
+                },
+            ],
+        );
+    }
+    c.set_host_tokens(Some(tokens_with(&[("foreground", rgb(0x00ff00).into())])));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 320.0, 480.0)));
+    for (id, color) in [(3, Color(0x00ff_00ff)), (5, Color(0x0000_ffff))] {
+        let actual = batch.items.iter().find_map(|item| match item {
+            MountItem::Text {
+                id: text_id, text, ..
+            } if *text_id == id => Some(text.spans[0].style.color),
+            _ => None,
+        });
+        assert_eq!(actual, Some(color));
+    }
+}
+
+#[test]
 fn text_inherits_from_views_and_classes_set_props() {
     let mut c = core();
     view_with_classes(&mut c, 2, "text-white text-lg text-center");
