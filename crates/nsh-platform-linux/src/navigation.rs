@@ -1345,14 +1345,8 @@ pub(crate) fn default_back(surface: &Rc<Surface>) {
     });
 }
 
-/// The window of `surface`, when a text field (a `gtk::TextView` or any
-/// `gtk::Editable`) or a web view's page has its keyboard focus.
-#[cfg(feature = "dev")]
-pub(crate) fn focused_field(surface: &Surface) -> Option<gtk::Root> {
-    focused_field_in(&surface.root)
-}
-
-/// [`focused_field`] in the window of root view `host`.
+/// The window of root view `host`, when a text field (a `gtk::TextView` or
+/// any `gtk::Editable`) or a web view's page has its keyboard focus.
 fn focused_field_in(host: &NshView) -> Option<gtk::Root> {
     let root = host.root()?;
     let focus = root.focus()?;
@@ -1360,6 +1354,13 @@ fn focused_field_in(host: &NshView) -> Option<gtk::Root> {
         || focus.is::<gtk::Editable>()
         || crate::native::page_of(&focus).is_some())
     .then_some(root)
+}
+
+/// Whether a text field (or a web view's page) has the keyboard focus in
+/// the window the keys go to: the main window's, or one of the app's own.
+#[cfg(feature = "dev")]
+pub(crate) fn key_window_field_focused(surface: &Surface) -> bool {
+    focused_field_in(&crate::window::key_root(surface)).is_some()
 }
 
 /// A key nothing in the window used: Escape, Alt+Left and the Back key go
