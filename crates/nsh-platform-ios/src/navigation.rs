@@ -831,12 +831,16 @@ fn untransformed_place(view: &UIView) -> Option<(Retained<UIView>, CGRect)> {
     while let Some(parent) = v.superview() {
         let layer = v.layer();
         let (center, bounds, anchor) = (v.center(), v.bounds(), layer.anchorPoint());
-        let offset = parent.bounds().origin;
-        x += center.x - bounds.size.width * anchor.x - offset.x;
-        y += center.y - bounds.size.height * anchor.y - offset.y;
+        // Where `view` sits in `parent`'s bounds, which a scroll view moves
+        // by its offset: the rectangle is kept in those coordinates.
+        x += center.x - bounds.size.width * anchor.x;
+        y += center.y - bounds.size.height * anchor.y;
         if !layer.transform().is_identity() {
             place = Some((parent.clone(), CGRect::new(CGPoint::new(x, y), size)));
         }
+        let offset = parent.bounds().origin;
+        x -= offset.x;
+        y -= offset.y;
         v = parent;
     }
     place
