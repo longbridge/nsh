@@ -26,7 +26,7 @@ function App() {
           <Text style={{ color: '#ffffff' }}>3. Recapture input</Text>
         </Button>
       </View>
-      <Button testID="toggle" onPress={() => open.set(!open())}>Toggle effect</Button>
+      <Button testID="toggle" onPress={() => open.set(!open())}><Text>Toggle effect</Text></Button>
       <Text style={{ color: '#ffffff' }}>Clip height: {clipHeight()}</Text>
       <View style={{ width: 560, height: clipHeight(), overflow: 'hidden',
         borderWidth: 1, borderColor: '#888888' }}>

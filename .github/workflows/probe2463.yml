@@ -32,9 +32,11 @@ jobs:
           mkdir -p /tmp/probe2463 "$RUNNER_TEMP/runtime/macos"
           export NSH_RUNTIME="$RUNNER_TEMP/runtime"
           cp target/debug/nsh-macos-host "$NSH_RUNTIME/macos/"
+          result=0
           for demo in App Reopen Nested; do
-            target/debug/nsh test -v --target macos tests/probe2463/"$demo".tsx < tests/probe2463/"$demo".js 2>&1 | tee /tmp/probe2463/"$demo".log
+            target/debug/nsh test -v --target macos tests/probe2463/"$demo".tsx < tests/probe2463/"$demo".js 2>&1 | tee /tmp/probe2463/"$demo".log || result=1
           done
+          exit "$result"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
