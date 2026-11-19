@@ -858,9 +858,11 @@ mod native {
             let transfer = target
                 .host
                 .get(target.url, offset, &mut |at, chunk, total| {
+                    if chunk.is_empty() {
+                        return Ok(());
+                    }
                     if kind == ResponseKind::None {
                         if at == 0 {
-                            // The whole resource: the server ignored the range.
                             kind = ResponseKind::Full;
                             if check.received() > 0 {
                                 file.set_len(0).map_err(|e| e.to_string())?;
@@ -879,6 +881,11 @@ mod native {
                             return Err(format!("body starts at byte {at}, not {offset}"));
                         }
                         server_total = total;
+                    } else if at != check.received() {
+                        return Err(format!(
+                            "body piece at byte {at}, expected {}",
+                            check.received()
+                        ));
                     }
                     let received = match check.update(chunk) {
                         Ok(received) => received,
@@ -976,9 +983,6 @@ mod native {
         }
     }
 
-    /// Downloads `target.url` into `target.part` (resuming an existing partial
-    /// file when present), verifies its size, SHA-256 and `verify`, and moves
-    /// it atomically to `target.dest`.
     /// Locks `<part>.lock`, held until the returned file drops; fails at
     /// once when another download of the same asset holds it.
     fn lock_part(part: &std::path::Path) -> Result<std::fs::File, String> {
@@ -999,6 +1003,9 @@ mod native {
         }
     }
 
+    /// Downloads `target.url` into `target.part` (resuming an existing partial
+    /// file when present), verifies its size, SHA-256 and `verify`, and moves
+    /// it atomically to `target.dest`.
     fn download_resumable(
         target: &DownloadTarget<'_>,
         mut progress: impl FnMut(u64, Option<u64>) -> bool,
@@ -2033,30 +2040,127 @@ mod native {
         fn stale_partials_are_cleaned_without_touching_other_update_files() {
             let dir = TempDir::new("cleanup");
             std::fs::write(dir.path().join("download-old.part"), b"old").unwrap();
+            std::fs::write(dir.path().join("download-old.part.lock"), b"").unwrap();
             std::fs::write(dir.path().join("download-old"), b"old-done").unwrap();
             std::fs::write(dir.path().join("download-keep.part"), b"keep").unwrap();
+            std::fs::write(dir.path().join("download-keep.part.lock"), b"").unwrap();
             std::fs::write(dir.path().join("next.nshpkg"), b"pkg").unwrap();
             std::fs::write(dir.path().join("next.nshpkg.part"), b"legacy").unwrap();
             std::fs::write(dir.path().join("next-old.nshpkg.part"), b"old-pkg").unwrap();
+            std::fs::write(dir.path().join("next-old.nshpkg.part.lock"), b"").unwrap();
             std::fs::write(dir.path().join("next-keep.nshpkg.part"), b"keep-pkg").unwrap();
+            std::fs::write(dir.path().join("next-keep.nshpkg.part.lock"), b"").unwrap();
 
             cleanup_stale_downloads(dir.path(), "download-keep.part", "download-keep");
             assert!(!dir.path().join("download-old.part").exists());
+            assert!(!dir.path().join("download-old.part.lock").exists());
             assert!(!dir.path().join("download-old").exists());
             assert!(dir.path().join("download-keep.part").exists());
+            assert!(dir.path().join("download-keep.part.lock").exists());
             assert!(dir.path().join("next.nshpkg").exists());
             assert!(dir.path().join("next-keep.nshpkg.part").exists());
 
             cleanup_stale_package_parts(dir.path(), "next-keep.nshpkg.part");
             assert!(!dir.path().join("next.nshpkg.part").exists());
             assert!(!dir.path().join("next-old.nshpkg.part").exists());
+            assert!(!dir.path().join("next-old.nshpkg.part.lock").exists());
             assert!(dir.path().join("next-keep.nshpkg.part").exists());
+            assert!(dir.path().join("next-keep.nshpkg.part.lock").exists());
             assert!(dir.path().join("next.nshpkg").exists());
 
             // Unusual hashes never produce path separators or escape `dir`.
             let key = part_key("../../etc/passwd");
             assert!(!key.contains('/') && !key.contains('.'));
             assert_eq!(key.len(), 64);
+        }
+
+        #[test]
+        fn resume_ignores_empty_chunks_and_rejects_misaligned_offsets() {
+            enum Mode {
+                EmptyFullThenFail,
+                MisalignedSecondChunk,
+                EmptyPartialThenFinish,
+            }
+
+            struct ChunkHost {
+                payload: Vec<u8>,
+                modes: std::sync::Mutex<std::collections::VecDeque<Mode>>,
+            }
+
+            impl UpdaterHost for ChunkHost {
+                fn config(&self) -> Option<Vec<u8>> {
+                    None
+                }
+
+                fn get(&self, _url: &str, from: u64, sink: UpdaterSink<'_>) -> Result<(), String> {
+                    let total = Some(self.payload.len() as u64);
+                    let start = from as usize;
+                    match self.modes.lock().unwrap().pop_front().unwrap() {
+                        Mode::EmptyFullThenFail => {
+                            sink(0, b"", total)?;
+                            Err("connection reset".into())
+                        }
+                        Mode::MisalignedSecondChunk => {
+                            sink(from, &self.payload[start..start + 2], total)?;
+                            sink(from, &self.payload[start + 2..], total)
+                        }
+                        Mode::EmptyPartialThenFinish => {
+                            sink(from, b"", total)?;
+                            sink(from, &self.payload[start..], total)
+                        }
+                    }
+                }
+            }
+
+            let dir = TempDir::new("chunk-offsets");
+            let payload = b"0123456789";
+            let sha256 = nsh_updater::sha256(payload);
+            let part = dir.path().join(format!("download-{sha256}.part"));
+            let dest = dir.path().join(format!("download-{sha256}"));
+            std::fs::write(&part, &payload[..4]).unwrap();
+
+            let host = ChunkHost {
+                payload: payload.to_vec(),
+                modes: std::sync::Mutex::new(
+                    [
+                        Mode::EmptyFullThenFail,
+                        Mode::MisalignedSecondChunk,
+                        Mode::EmptyPartialThenFinish,
+                    ]
+                    .into_iter()
+                    .collect(),
+                ),
+            };
+            let target = DownloadTarget {
+                host: &host,
+                url: "https://x.dev/app.tar.gz",
+                part: &part,
+                dest: &dest,
+                remove_invalid_dest: true,
+                sha256: &sha256,
+                size: Some(payload.len() as u64),
+            };
+
+            let err = download_resumable(&target, |_, _| true, |_| Ok(())).unwrap_err();
+            assert!(err.contains("connection reset"), "{err}");
+            assert_eq!(std::fs::read(&part).unwrap(), &payload[..4]);
+
+            let err = download_resumable(&target, |_, _| true, |_| Ok(())).unwrap_err();
+            assert!(err.contains("expected 6"), "{err}");
+            assert_eq!(std::fs::read(&part).unwrap(), &payload[..6]);
+
+            let mut progress = Vec::new();
+            download_resumable(
+                &target,
+                |r, t| {
+                    progress.push((r, t));
+                    true
+                },
+                |_| Ok(()),
+            )
+            .unwrap();
+            assert_eq!(progress, [(6, Some(10)), (10, Some(10))]);
+            assert_eq!(std::fs::read(&dest).unwrap(), payload);
         }
 
         #[test]

@@ -108,14 +108,15 @@ packages' are removed at launch). `runningPackage()` is `Bundle::package`. `shel
   After verifying the archive, they call `Installation::install`, then `nsh_core::element::desktop::restart()` as
   `installAndRestart` does, or `Installation::stage` and, when their app quits, `Staged::finish`.
 - **Concurrent calls** are refused while a check, download or install is in progress. Downloads stream into a `.part`
-  file keyed to the asset's manifest SHA-256 (`download-<sha256>.part`, `next-<sha256>.nshpkg.part`) and rename it into
-  place only after verification, so an interrupted or failing retry cannot truncate a previously verified archive or
-  package. `UpdaterHost::get(url, from, sink)` sends `Accept-Encoding: identity` (so byte offsets match the raw asset on every
-  platform HTTP stack) and `Range: bytes=<offset>-` when resuming, following redirects hop-by-hop in `UpdaterOverNetwork`
-  so `Range` survives cross-origin asset redirects (such as GitHub Releases) and never downgrades from HTTPS to plain
-  HTTP. If the server ignores `Range` (`200 OK`), returns `416` or a mismatched `Content-Range`, or the assembled file
-  fails its hash after resuming, the updater discards the partial and falls back once to a fresh full download; stale
-  `.part` files for earlier hashes are removed when a newer asset starts.
+  file keyed to the asset's manifest SHA-256 (`download-<sha256>.part`, `next-<sha256>.nshpkg.part`), guarded by a
+  `<part>.lock` file lock across processes, and rename it into place only after verification, so an interrupted or
+  failing retry cannot truncate a previously verified archive or package. `UpdaterHost::get(url, from, sink)` sends
+  `Accept-Encoding: identity` (so byte offsets match the raw asset on every platform HTTP stack) and
+  `Range: bytes=<offset>-` when resuming, following redirects hop-by-hop in `UpdaterOverNetwork` so `Range` survives
+  cross-origin asset redirects (such as GitHub Releases) and never downgrades from HTTPS to plain HTTP. If the server
+  ignores `Range` (`200 OK`), returns `416` or a mismatched `Content-Range`, or the assembled file fails its hash after
+  resuming, the updater discards the partial and falls back once to a fresh full download; stale `.part` files for
+  earlier hashes are removed when a newer asset starts.
 - **Packages run on trial, by file name.** Renaming `next.nshpkg` to `trying.nshpkg` marks the trial in one step, and
   a download during a trial writes `next.nshpkg` without touching the package that runs. Accepting only once healthy
   keeps the rollback floor (`TrustStore::accept_receipt`) at a build that ran.

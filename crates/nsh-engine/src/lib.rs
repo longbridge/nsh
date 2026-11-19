@@ -945,6 +945,9 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
                         }
                     }
                     Ok(FetchEvent::Data(chunk)) => {
+                        if chunk.is_empty() {
+                            continue;
+                        }
                         received_body = received_body.saturating_add(chunk.len() as u64);
                         if let Err(e) = sink(at, &chunk, total) {
                             break Err(e);
@@ -4895,11 +4898,16 @@ mod updater_range_tests {
     ) -> Result<(Vec<String>, Vec<u8>), String> {
         let mut events = Vec::new();
         let mut body = Vec::new();
+        let mut next_at: Option<u64> = None;
         host.get(url, from, &mut |at, bytes, total| {
-            if body.is_empty() {
+            assert!(!bytes.is_empty());
+            if let Some(expected) = next_at {
+                assert_eq!(at, expected);
+            } else {
                 let kind = if at == 0 { "full" } else { "partial" };
                 events.push(format!("{kind}:{total:?}"));
             }
+            next_at = Some(at + bytes.len() as u64);
             body.extend_from_slice(bytes);
             Ok(())
         })?;
@@ -4937,7 +4945,9 @@ mod updater_range_tests {
                             ],
                             ..Default::default()
                         }),
-                        FetchEvent::Data(b"456789".to_vec()),
+                        FetchEvent::Data(Vec::new()),
+                        FetchEvent::Data(b"45".to_vec()),
+                        FetchEvent::Data(b"6789".to_vec()),
                         FetchEvent::End,
                     ]
                 } else {
