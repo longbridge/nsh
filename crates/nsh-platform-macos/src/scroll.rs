@@ -31,7 +31,8 @@
 //! as on iOS. Snapping and paging use [`ScrollBehavior::snap_target`].
 //!
 //! Trackpads follow the system: a gesture (`phase`) rubber-bands past the
-//! edges when `bounces` and springs back when the fingers lift, and the
+//! edges when `bounces` and the content overflows (or the view pulls to
+//! refresh) and springs back when the fingers lift, and the
 //! momentum after it is the system's (`momentumPhase` events), not a glide
 //! of ours; snapping views snap from the release instead. Mouse wheels (no
 //! phases) stop at the edges and settle when the notches stop. Mouse drags
@@ -506,11 +507,39 @@ fn movable_in(s: &ScrollState, viewport: (f32, f32)) -> bool {
 /// follow ([`can_scroll`]).
 pub(crate) fn can_bounce(view: &NshView, dx: f32, dy: f32) -> bool {
     let state = view.state();
+    let refreshes = state.events.contains(EventKind::Refresh);
     state.scroll.as_ref().is_some_and(|s| {
-        s.behavior.enabled
-            && s.behavior.bounces
-            && (s.behavior.zooms() || s.horizontal == (dx.abs() > dy.abs()))
+        bounces_in(
+            s,
+            (state.frame.size.width.0, state.frame.size.height.0),
+            dx.abs() > dy.abs(),
+            refreshes,
+        )
     })
+}
+
+/// [`can_bounce`] for scroll state `s` in a viewport of `viewport` points,
+/// along the gesture's axis (`horizontal`). As AppKit's scroll views, one
+/// whose content fits along that axis stays still, so the gesture stretches
+/// a scroll view around it that can move: an editor as tall as its document
+/// inside a list. A vertical view that pulls to refresh (`refreshes`)
+/// stretches all the same.
+fn bounces_in(s: &ScrollState, viewport: (f32, f32), horizontal: bool, refreshes: bool) -> bool {
+    if !s.behavior.enabled || !s.behavior.bounces {
+        return false;
+    }
+    if s.behavior.zooms() {
+        return true;
+    }
+    if s.horizontal != horizontal {
+        return false;
+    }
+    let (min, max) = range(s, viewport);
+    if horizontal {
+        max.x > min.x
+    } else {
+        max.y > min.y || refreshes
+    }
 }
 
 /// Sends `kind` with the offset if JS listens to it.
@@ -2620,6 +2649,50 @@ mod tests {
     fn an_overflowing_scroll_view_moves() {
         assert!(movable_with((300.0, 800.0), false, true));
         assert!(movable_with((900.0, 200.0), true, true));
+    }
+
+    /// Whether a gesture along `horizontal` stretches a bouncing scroll view
+    /// of `content` points in a 300 x 200 viewport.
+    fn bounces_with(
+        content: (f32, f32),
+        view_horizontal: bool,
+        horizontal: bool,
+        refreshes: bool,
+    ) -> bool {
+        let s = ScrollState {
+            content,
+            horizontal: view_horizontal,
+            behavior: nsh_core::ScrollBehavior {
+                enabled: true,
+                bounces: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        bounces_in(&s, (300.0, 200.0), horizontal, refreshes)
+    }
+
+    /// A gesture no scroll view can follow stretches the innermost one that
+    /// bounces: one whose content fits (an editor as tall as its document,
+    /// in a list) passes it on to the one around it.
+    #[test]
+    fn a_scroll_view_whose_content_fits_does_not_bounce() {
+        assert!(!bounces_with((300.0, 200.0), false, false, false));
+        assert!(!bounces_with((300.0, 120.0), false, false, false));
+        assert!(!bounces_with((300.0, 200.0), true, true, false));
+    }
+
+    #[test]
+    fn an_overflowing_scroll_view_bounces_along_its_axis() {
+        assert!(bounces_with((300.0, 800.0), false, false, false));
+        assert!(bounces_with((900.0, 200.0), true, true, false));
+        assert!(!bounces_with((300.0, 800.0), false, true, false));
+    }
+
+    /// Pulling to refresh needs the stretch, however short the content.
+    #[test]
+    fn a_scroll_view_that_refreshes_bounces_when_its_content_fits() {
+        assert!(bounces_with((300.0, 120.0), false, false, true));
     }
 
     #[test]
