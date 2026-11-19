@@ -8973,10 +8973,16 @@ class Player {
 
   /** The view that holds the keyboard focus in this player, when it is a
    * view of the app's and not a native field, page or video, which keeps
-   * its own keys. */
+   * its own keys. With nothing focused (the page's body, or the root),
+   * the window's root hears the keys, as `document.body` does: the newest
+   * modal's root while one is presented. A system dialog keeps its keys. */
   keyFocusView() {
     const focus = document.activeElement;
-    if (!focus || focus === document.body || !this.root.contains(focus)) return null;
+    if (!focus || focus === document.body || focus === this.root) {
+      if (this.dialogs?.length) return null;
+      return this.topModal() ?? this.root;
+    }
+    if (!this.root.contains(focus)) return null;
     if (focus.isContentEditable || focus.closest?.(".nsh-field, [contenteditable], iframe, video")) return null;
     return this.viewOf(focus);
   }
@@ -9090,7 +9096,7 @@ class Player {
     // (`nsh_key_event`), as a browser delivers the release to whatever has
     // the focus now.
     let captured = false;
-    if (this.wasm && !e.isComposing && e.keyCode !== 229) {
+    if (this.wasm && !e.isComposing && e.keyCode !== 229 && this.takesKeys()) {
       const keyView = this.keyFocusView();
       if (keyView && this.keyInterest(keyView)) captured = this.rawKey(keyView, false, e, keyCode(e));
     }
