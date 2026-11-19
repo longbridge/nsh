@@ -158,6 +158,10 @@ tab: a press selects it, a drag moves its panel, screen readers hear it as a tab
 | `closable` | `boolean` | The area would close it: it is closable, the area is not locked, and its group may give it away. |
 | `zoomed` | `boolean` | Its group is zoomed. |
 
+The tabs are a row in a horizontal scroll view inside the bar: tabs that do not fit scroll instead of running past the
+bar's end, and the tab that becomes the displayed one is brought into view. The bar's classes style the bar itself,
+so space the tabs with `tabClass` (a margin), not with a `gap` on `tabBarClass`.
+
 ```tsx
 let area!: DockAreaRef;
 
@@ -335,11 +339,12 @@ rest of the area.
 | `renderEmpty` | `.render_empty(\|placement\| ..)` | `(placement: DockPlacement) => JSX.Element` | none | What an empty center shows. |
 | `renderDragPreview` | `.render_drag_preview(\|tab\| ..)` | `(tab: DockTab) => JSX.Element` | none | What follows the pointer or finger while a tab is dragged. |
 | `groupClass`, `groupStyle` | `.group_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | Each tab group's frame. |
-| `tabBarClass`, `tabBarStyle` | `.tab_bar_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | Each tab bar (`flex-row` for a row). |
+| `tabBarClass`, `tabBarStyle` | `.tab_bar_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | Each tab bar: its height, surface and border. Its tabs are a row in a scroll view inside it; space them with `tabClass`. |
 | `tabClass`, `tabStyle` | `.tab_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | Each tab; `selected:` for the displayed one. |
 | `contentClass`, `contentStyle` | `.content_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | Each group's content frame, where its panels show. |
 | `dropIndicatorClass`, `dropIndicatorStyle` | `.drop_indicator_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | The drop indicator. |
 | `handleClass`, `handleStyle` | `.handle_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | The indicator of each handle, between a split's groups and at each dock's edge; `group-hover:` and `group-active:` follow the handle. It is 1 point across the handle and runs its full length unless it says otherwise, so `bg-border` is a hairline either way; `w-[3px]` / `h-[3px]` thicken it. |
+| `renderHandle` | `.render_handle(\|handle\| ..)` | `(handle: ResizeHandleContext) => JSX.Element` | none | What is inside the indicator of each handle between a split's groups, drawn again when the handle's `state` changes: a grip, an icon ([Resizable](./resizable.md)'s `renderHandle`). The handles at the docks' edges keep the indicator the classes style. |
 | `handleThumbClass`, `handleThumbStyle` | `.handle_thumb_class(..)`, `.handle_thumb_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | Each handle's thumb: a grip centered on the line, drawn upright as on a vertical line and turned a quarter on a horizontal one, so one class serves both axes. It stays the same view while the handle is hovered, pressed and dragged, so `group-hover:` and `group-active:` classes transition it (`h-11 w-[3px] rounded-full bg-muted-foreground opacity-0 scale-y-0 transition group-hover:opacity-40 group-hover:scale-y-[0.45] group-active:opacity-90 group-active:scale-y-100`). |
 | `dockClass`, `dockStyle` | `.dock_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | Each dock's frame. |
 | `drawerClass`, `drawerStyle` | `.drawer_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | Compact: the side docks' drawers. |

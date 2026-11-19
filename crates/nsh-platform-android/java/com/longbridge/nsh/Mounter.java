@@ -98,6 +98,8 @@ final class Mounter {
         boolean shown = true, transparent, backVisible = true, gesture = true, preventBack;
         int tint, background, titleColor, animation, left = -1, right = -1, titleView = -1;
         float headerHeight;
+        /** `headerTitleAlign` "center". */
+        boolean centerTitle;
     }
 
     /** Properties that animations can override, as last set by a style. */
@@ -286,6 +288,8 @@ final class Mounter {
         components.put(TabBarComponent.NAME, c -> new TabBarComponent(context, c, this::night));
         components.put(SwitchComponent.NAME, c -> new SwitchComponent(context, c, this::night));
         components.put(DateTimePickerComponent.NAME, c -> new DateTimePickerComponent(context, c, this::night));
+        components.put(MenuButtonComponent.NAME, c -> new MenuButtonComponent(context, c, this::night));
+        components.put(ContextMenuComponent.NAME, c -> new ContextMenuComponent(context, c, this::night));
         images.redirects = (base, location) -> Native.mediaRedirect(handle(), base, location);
         images.inline = uri -> {
             long handle = handle();
@@ -522,11 +526,13 @@ final class Mounter {
                     boolean bouncesZoom = b.getInt() != 0, pinch = b.getInt() != 0, center = b.getInt() != 0;
                     boolean ownIndicator = b.getInt() != 0;
                     float indicatorHeight = b.getFloat();
+                    float barTop = b.getFloat(), barRight = b.getFloat(), barBottom = b.getFloat(), barLeft = b.getFloat();
                     if (v instanceof ScrollBox) {
                         ((ScrollBox) v).setBehavior(paging, interval, offsets, alignment, deceleration, enabled, bounces,
                                 top, right, bottom, left, taps, oneStep);
                         ((ScrollBox) v).setZoom(zooms, minZoom, maxZoom, bouncesZoom, pinch, center);
                         ((ScrollBox) v).setRefresh(ownIndicator, indicatorHeight);
+                        ((ScrollBox) v).setBarInset(barTop, barRight, barBottom, barLeft);
                     }
                     break;
                 }
@@ -556,7 +562,11 @@ final class Mounter {
                     Dynamic d = statics.get(id);
                     if (v != null && d != null) applyDynamic(v, d);
                     // Its props bound again are handed over again.
-                    if (v instanceof ComponentBox) ((ComponentBox) v).forgetAnimated();
+                    if (v instanceof ComponentBox) {
+                        NshComponent c = ((ComponentBox) v).component;
+                        if (c instanceof RustComponent) ((RustComponent) c).step(seq);
+                        else ((ComponentBox) v).forgetAnimated();
+                    }
                     break;
                 }
                 case GESTURES: {
@@ -628,7 +638,7 @@ final class Mounter {
                     if (v instanceof InputBox) ((InputBox) v).setContent(px(x), px(y), px(x + w) - px(x), px(y + h) - px(y));
                     break;
                 }
-                case COMMAND: command(b, objects); break;
+                case COMMAND: command(b, objects, seq); break;
                 case COMPONENT: {
                     int id = b.getInt();
                     component(id, string(objects, b.getInt()));
@@ -665,17 +675,29 @@ final class Mounter {
                     View v = views.get(b.getInt());
                     String[] names = new String[b.getInt()];
                     for (int i = 0; i < names.length; i++) names[i] = string(objects, b.getInt());
-                    if (v instanceof ComponentBox) ((ComponentBox) v).slots = names;
+                    if (v instanceof ComponentBox) {
+                        NshComponent c = ((ComponentBox) v).component;
+                        if (c instanceof RustComponent) ((RustComponent) c).step(seq);
+                        else ((ComponentBox) v).slots = names;
+                    }
                     break;
                 }
                 case COMPONENT_PROPS: {
                     View v = views.get(b.getInt());
                     int count = b.getInt();
                     NshComponent c = v instanceof ComponentBox ? ((ComponentBox) v).component : null;
-                    for (int i = 0; i < count; i++) {
-                        String name = string(objects, b.getInt());
-                        String json = string(objects, b.getInt());
-                        if (c != null) c.setProp(name, Json.parse(json));
+                    if (c instanceof RustComponent) {
+                        for (int i = 0; i < count; i++) {
+                            b.getInt();
+                            b.getInt();
+                        }
+                        ((RustComponent) c).step(seq);
+                    } else {
+                        for (int i = 0; i < count; i++) {
+                            String name = string(objects, b.getInt());
+                            String json = string(objects, b.getInt());
+                            if (c != null) c.setProp(name, Json.parse(json));
+                        }
                     }
                     break;
                 }
@@ -1107,9 +1129,9 @@ final class Mounter {
             return;
         }
         if (headerItems.contains(id)) {
-            // A header item: the toolbar places it at its size.
+            // A header item: the toolbar (or the row of a leading item and its title) places it at its size.
             headerSizes.put(id, new int[] {px(w), px(h)});
-            if (v.getParent() instanceof android.widget.Toolbar) {
+            if (v.getParent() instanceof android.widget.Toolbar || v.getParent() instanceof StackBox.ScreenBox.HeaderRow) {
                 ViewGroup.LayoutParams p = v.getLayoutParams();
                 p.width = Math.max(1, px(w));
                 p.height = Math.max(1, px(h));
@@ -1994,6 +2016,7 @@ final class Mounter {
         o.titleView = b.getInt();
         o.headerHeight = b.getFloat();
         o.backTitle = string(objects, b.getInt());
+        o.centerTitle = b.getInt() == 1;
         screenOptions.put(id, o);
         dirtyScreens.add(id);
         int stack = hosts.get(id, -1);
@@ -2027,7 +2050,7 @@ final class Mounter {
             ScreenOptions below = canGoBack ? screenOptions.get(((StackBox) stack).screens.get(index - 1)) : null;
             ((StackBox.ScreenBox) v).configure(this, o.title, o.shown, o.transparent, o.tint, o.background,
                     o.titleColor, o.backVisible, o.gesture, o.preventBack, o.animation, o.left, o.right, o.titleView,
-                    o.headerHeight, canGoBack, below != null ? below.backTitle : null);
+                    o.headerHeight, o.centerTitle, canGoBack, below != null ? below.backTitle : null);
             reportScreenInsets(id, o);
         }
         dirtyScreens.clear();
@@ -2270,7 +2293,8 @@ final class Mounter {
         int keyboard = b.getInt(), returnKey = b.getInt(), capitalize = b.getInt();
         boolean autoCorrect = b.getInt() != 0, multiline = b.getInt() != 0;
         int maxLength = b.getInt();
-        boolean editable = b.getInt() != 0, autoFocus = b.getInt() != 0, hasSelection = b.getInt() != 0;
+        boolean editable = b.getInt() != 0, autoFocus = b.getInt() != 0, selectOnFocus = b.getInt() != 0;
+        boolean hasSelection = b.getInt() != 0;
         int selection = b.getInt();
         boolean hasCaret = b.getInt() != 0;
         int caret = b.getInt();
@@ -2290,7 +2314,7 @@ final class Mounter {
         String family = familyIndex >= 0 ? (String) objects[familyIndex] : null;
         ((InputBox) v).configure(size, weight, italic, color, family, spacing, align, placeholder,
                 hasPlaceholderColor, placeholderColor, secure, keyboard, returnKey, capitalize, autoCorrect,
-                multiline, maxLength, editable, autoFocus, hasSelection, selection, hasCaret, caret, submit,
+                multiline, maxLength, editable, autoFocus, selectOnFocus, hasSelection, selection, hasCaret, caret, submit,
                 inputRtl, fontVariant);
     }
 
@@ -2387,7 +2411,7 @@ final class Mounter {
         view.performHapticFeedback(feedback);
     }
 
-    private void command(ByteBuffer b, Object[] objects) {
+    private void command(ByteBuffer b, Object[] objects, long seq) {
         int id = b.getInt(), kind = b.getInt();
         View v = views.get(id);
         switch (kind) {
@@ -2496,7 +2520,17 @@ final class Mounter {
                     texts[i] = (String) objects[b.getInt()];
                     styles[i] = b.getInt();
                 }
-                SystemUi.dialog(this, dialog, title, message, cancelable, sheet, texts, styles);
+                // Its text field: the text, the placeholder, select all, required.
+                String input = null, placeholder = null;
+                boolean selectAll = false, required = false;
+                if (b.getInt() != 0) {
+                    input = (String) objects[b.getInt()];
+                    placeholder = optString(b, objects);
+                    selectAll = b.getInt() != 0;
+                    required = b.getInt() != 0;
+                }
+                SystemUi.dialog(this, dialog, title, message, cancelable, sheet, texts, styles, input, placeholder,
+                        selectAll, required);
                 break;
             }
             case 60:
@@ -2552,8 +2586,10 @@ final class Mounter {
             case 21: {
                 String name = string(objects, b.getInt());
                 String json = string(objects, b.getInt());
-                if (v instanceof ComponentBox && ((ComponentBox) v).component != null) {
-                    ((ComponentBox) v).component.command(name, Json.parse(json));
+                if (v instanceof ComponentBox) {
+                    NshComponent c = ((ComponentBox) v).component;
+                    if (c instanceof RustComponent) ((RustComponent) c).step(seq);
+                    else if (c != null) c.command(name, Json.parse(json));
                 }
                 break;
             }
@@ -2805,12 +2841,19 @@ final class Mounter {
 
     /** The scroll view padded to clear the keyboard. */
     private int avoided = -1;
+    /**
+     * The scroll view around the focused input of a modal window while the
+     * keyboard is up: it shrinks as the window lays out above the keyboard.
+     */
+    private int shrinking = -1;
 
     /**
      * The software keyboard's top edge moved, in screen coordinates
      * ({@code Integer.MAX_VALUE} when hidden): pads the scroll view around
-     * the focused input so it can clear the keyboard (in the surface or a
-     * modal window).
+     * the focused input of the surface so it can clear the keyboard. A
+     * modal window lays its content out above the keyboard instead
+     * ({@link ModalHost}), after this: its scroll view gets no padding and
+     * reveals the input once it has shrunk ({@link #scrollShrank}).
      */
     void keyboard(int screenTop) {
         ScrollBox scroll = focused == null ? null : scrollAround(focused);
@@ -2822,13 +2865,30 @@ final class Mounter {
             }
             avoided = -1;
         }
+        shrinking = -1;
         if (scroll == null || hidden) return;
+        // Measured now, before the modal window's layout, the padding would
+        // be what the keyboard covers of the content where it was, and it
+        // would stay under the content once that is above the keyboard.
+        if (scroll.getRootView() != host.getRootView()) {
+            shrinking = scroll.id;
+            return;
+        }
         int[] at = new int[2];
         scroll.getLocationOnScreen(at);
         int covered = Math.max(0, at[1] + scroll.getHeight() - screenTop);
         scroll.setContentPaddingBottom(covered);
         avoided = scroll.id;
         host.post(this::revealFocused);
+    }
+
+    /**
+     * Scroll view {@code scroll} got shorter: the one around the focused
+     * input of a modal window that now lays out above the keyboard keeps the
+     * input in sight.
+     */
+    void scrollShrank(ScrollBox scroll) {
+        if (scroll.id == shrinking && focused != null) host.post(this::revealFocused);
     }
 
     private void revealFocused() {
@@ -3537,33 +3597,51 @@ final class Mounter {
     }
 
     void zoom(int id, float scale) {
-        Native.zoom(handle(), id, scale);
+        long handle = handle();
+        if (handle == 0) return;
+        Native.zoom(handle, id, scale);
     }
 
     void scroll(int id, float x, float y, int applied) {
-        outputs(Native.scroll(handle(), id, x, y, applied));
+        long handle = handle();
+        if (handle == 0) return;
+        outputs(Native.scroll(handle, id, x, y, applied));
     }
 
     void inputScroll(int id, float y, float contentWidth, float contentHeight, float width, float height) {
-        Native.inputScroll(handle(), id, y, contentWidth, contentHeight, width, height);
+        long handle = handle();
+        if (handle == 0) return;
+        Native.inputScroll(handle, id, y, contentWidth, contentHeight, width, height);
     }
 
     void pull(int id, float distance) {
-        outputs(Native.pull(handle(), id, distance));
+        long handle = handle();
+        if (handle == 0) return;
+        outputs(Native.pull(handle, id, distance));
     }
 
-    /** Scroll view {@code id} came to rest: snapping animated values settle. */
+    /**
+     * Scroll view {@code id} came to rest: snapping animated values settle.
+     * Its settle timer can fire after the view is destroyed; the native side
+     * takes a live handle only.
+     */
     void scrollEnded(int id) {
-        outputs(Native.scrollEnded(handle(), id));
+        long handle = handle();
+        if (handle == 0) return;
+        outputs(Native.scrollEnded(handle, id));
     }
 
     void pan(int id, int state, float tx, float ty, float vx, float vy) {
         if (state == 0) for (TouchTracker t : touchTrackers) t.cancelFeedback();
-        outputs(Native.pan(handle(), id, state, tx, ty, vx, vy));
+        long handle = handle();
+        if (handle == 0) return;
+        outputs(Native.pan(handle, id, state, tx, ty, vx, vy));
     }
 
     void transformGesture(int id, boolean rotation, int state, float amount, float velocity) {
         if (state == 0) for (TouchTracker t : touchTrackers) t.cancelFeedback();
-        outputs(Native.transformGesture(handle(), id, rotation, state, amount, velocity));
+        long handle = handle();
+        if (handle == 0) return;
+        outputs(Native.transformGesture(handle, id, rotation, state, amount, velocity));
     }
 }

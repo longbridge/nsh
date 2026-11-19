@@ -10,8 +10,9 @@
 //! selection is under, and the keyboard's focus shows on the first row
 //! while nothing is selected; screen readers' focus follows the keys;
 //! items that change keep the selection by id; and a key press or an
-//! expansion costs the rows it concerns, however many items there are. On
-//! macOS, where Tab stops at the tree.
+//! expansion costs the rows it concerns, however many items there are;
+//! `header` shows above the rows in the tree's scroll view and `empty`
+//! while no item shows. On macOS, where Tab stops at the tree.
 
 use std::{
     collections::HashMap,
@@ -23,7 +24,9 @@ use std::{
 };
 
 use nsh_base::{TreeApi, TreeEntry, TreeItem, button, tree};
-use nsh_core::{Command, MountItem, NodeId, Size, element::Root, platform::Os, prelude::*};
+use nsh_core::{
+    Command, MountItem, NodeId, Size, ViewKind, element::Root, platform::Os, prelude::*,
+};
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
 
@@ -1115,4 +1118,64 @@ fn a_large_tree_makes_only_the_rows_in_view() {
         .unwrap();
     let after = rows(&app);
     assert!(after < 60, "{after} rows made");
+}
+
+/// A tree with a header and an `empty`, whose items come with a press.
+#[component]
+fn Slots() -> impl IntoElement {
+    let items = signal(Vec::<TreeItem>::new());
+    view()
+        .w(px(300.0))
+        .child(
+            view()
+                .test_id("fill")
+                .on_press(move || items.set(files()))
+                .child(text("Fill")),
+        )
+        .child(
+            tree()
+                .test_id("files")
+                .h(px(120.0))
+                .items(move || items.get())
+                .item_class("h-[30px]")
+                .header(view().test_id("header").h(px(40.0)).child(text("Pinned")))
+                .empty(text("No files")),
+        )
+}
+
+#[test]
+fn the_header_scrolls_with_the_rows_and_empty_shows_while_no_item_does() {
+    let mut app = launch(Root::of::<Slots>());
+    // No item: the header and `empty`, no row.
+    see(&mut app, "Pinned");
+    see(&mut app, "No files");
+    assert_eq!(rows(&app), 0);
+
+    app.press("id:fill").unwrap();
+    app.wait_for("role:treeitem[src]").unwrap();
+    app.wait_for_gone("text:No files", Duration::from_secs(5))
+        .unwrap();
+    see(&mut app, "Pinned");
+
+    let nodes = app.screen().layout_nodes();
+    let header = nodes
+        .iter()
+        .find(|node| node.test_id.as_deref() == Some("header"))
+        .expect("the header");
+    // The header is in the tree's scroll view, so it scrolls with the rows.
+    let mut parent = header.parent;
+    let mut scrolls = false;
+    while let Some(node) = nodes.iter().find(|node| node.id == parent) {
+        scrolls |= node.kind == ViewKind::Scroll;
+        parent = node.parent;
+    }
+    assert!(scrolls, "the header is inside the tree's scroll view");
+    // The rows start under it.
+    let first = id(&app, "role:treeitem[src]");
+    let first = nodes.iter().find(|node| node.id == first).expect("a row");
+    assert_eq!(
+        first.bounds.origin.y,
+        header.bounds.origin.y + header.bounds.size.height,
+        "the first row is under the header"
+    );
 }

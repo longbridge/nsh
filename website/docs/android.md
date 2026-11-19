@@ -200,6 +200,7 @@ again replaces the running app. The complete sample is
 | `runPackage(NshPackage pkg)` | Runs a verified signed package, replacing the running app. A package runs once. |
 | `registerComponent(String name, NshComponent.Factory factory)` | Registers a [native component](./native-components.md). |
 | `watchScroll(String nativeId, ScrollWatcher watcher)` | Follows and drives the app's `<Scroll>` with that `nativeID` from the UI thread, in the frame of the scroll ([Following a scroll view](#following-a-scroll-view)); `null` stops watching. |
+| `setContentCulling(boolean enabled)` | Whether scroll views make the views of their content only near their viewport (`true`, the default) or all of it. Turned off, what is not made yet is made in the next frames, so the host can draw a whole scroll view (a long screenshot of the page from `NshScrollHandle.getContentView()`); turned on again, what is far away is given up. Applies at once and to the apps loaded later. |
 | `setParams(Object params)` | The launch parameters of the apps loaded next (a `Map` or `JSONObject`): the app reads them at start as `host.params` ([`host`](../modules/nsh.md#host)). Returns `false` when they are not a JSON object. |
 | `send(String name, Object data)` | Sends an event to the app (`host.on(name, …)`); kept until it listens, or for the next app while none runs. Any thread; returns `false` after `destroy()`. |
 | `handle(String name, HostHandler handler)` | Handles the app's calls (`host.call`) and posts (`host.post`) of `name` on the UI thread; `null` removes the handler. The handler answers through its `NshHostReply`, once, from any thread. |
@@ -344,6 +345,30 @@ nsh.setOpenUrlHandler(url -> {
     return false;
 });
 ```
+
+## Runtime permissions from Rust
+
+Android asks for a dangerous permission (the camera, the microphone, the location, nearby devices, contacts, ...) with
+the system's prompt, and gives the answer only to the activity that asked: `AppActivity` in a packaged app, your own
+activity when you embed `NshView`. Rust code that uses such an API (your app's crate, an extension) asks through
+`permissions` of the `nsh-platform-android` crate (whose library is `nsh`), which asks with the activity in front, one
+request at a time and across configuration changes:
+
+```rust
+use nsh::permissions::{self, Permission};
+
+let answers = permissions::request(&["android.permission.RECORD_AUDIO"]).await?;
+if answers[0] == Permission::Granted {
+    // Record.
+}
+```
+
+`state(name)` and `states(names)` answer without asking. A permission is `Default` (asking shows the prompt),
+`Granted`, `Denied` (the user refused and Android asks no more: only the system's settings change it) or `Undeclared`.
+Android grants only what the manifest declares: a permission it does not list answers `Undeclared`, without a prompt.
+A request with no activity in front (the app is in the background), or whose activity finishes before the user
+answers, fails with `PermissionError::NoActivity`. NSH's own prompts (notifications, a web page's camera and
+microphone) ask the same way, so a request waits for one already showing.
 
 ## Limits
 

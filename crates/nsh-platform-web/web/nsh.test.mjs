@@ -152,12 +152,13 @@ test("a field's maxlength lets in what fits by characters, an emoji counting onc
     tagName: "INPUT",
     value: "",
     classList: { toggle() {} },
+    getAttribute: () => null,
     setAttribute() {},
     removeAttribute(name) {
       if (name === "maxlength") delete this.maxLength;
     },
   };
-  const el = { _field: field, removeAttribute() {} };
+  const el = { _field: field, getAttribute: () => null };
   player.view = () => el;
   player.op_in(["in", 1, { multiline: false, maxLength: 10 }, null]);
   assert.equal(field.maxLength, 10);
@@ -193,10 +194,11 @@ test("input autofill hints are set, changed and cleared on both field kinds", ()
   const attrs = new Map();
   const field = {
     classList: { toggle() {} },
+    getAttribute: (name) => attrs.get(name) ?? null,
     setAttribute: (name, value) => attrs.set(name, value),
     removeAttribute: (name) => attrs.delete(name),
   };
-  const el = { _field: field, removeAttribute() {} };
+  const el = { _field: field, getAttribute: () => null };
   player.view = () => el;
   for (const multiline of [false, true]) {
     field.tagName = multiline ? "TEXTAREA" : "INPUT";
@@ -220,10 +222,11 @@ test("input autoCorrect sets spellcheck and the autocorrect attribute on both fi
   const attrs = new Map();
   const field = {
     classList: { toggle() {} },
+    getAttribute: (name) => attrs.get(name) ?? null,
     setAttribute: (name, value) => attrs.set(name, value),
     removeAttribute: (name) => attrs.delete(name),
   };
-  const el = { _field: field, removeAttribute() {} };
+  const el = { _field: field, getAttribute: () => null };
   player.view = () => el;
   for (const multiline of [false, true]) {
     field.tagName = multiline ? "TEXTAREA" : "INPUT";
@@ -239,12 +242,58 @@ test("input autoCorrect sets spellcheck and the autocorrect attribute on both fi
   }
 });
 
+test("view and field ARIA write only changed attributes", () => {
+  const { player } = fakePlayer();
+  const element = () => {
+    const attrs = new Map();
+    const writes = [];
+    return {
+      attrs,
+      writes,
+      getAttribute: (name) => attrs.get(name) ?? null,
+      setAttribute(name, value) {
+        writes.push(["set", name, value]);
+        attrs.set(name, value);
+      },
+      removeAttribute(name) {
+        writes.push(["remove", name]);
+        attrs.delete(name);
+      },
+    };
+  };
+  const el = element();
+  player.updateAria(el);
+  assert.deepEqual(el.writes, []);
+
+  // A label can arrive before the field, which then takes it from the view.
+  el._props = { label: "Price" };
+  player.updateAria(el);
+  assert.deepEqual(el.writes.splice(0), [["set", "aria-label", "Price"]]);
+  const field = element();
+  el._field = field;
+  player.fieldAria(el, field);
+  assert.deepEqual(el.writes.splice(0), [["remove", "aria-label"]]);
+  assert.deepEqual(field.writes.splice(0), [["set", "aria-label", "Price"]]);
+
+  player.updateAria(el);
+  assert.deepEqual(el.writes, []);
+  assert.deepEqual(field.writes, []);
+  el._props = {};
+  player.updateAria(el);
+  assert.deepEqual(field.writes.splice(0), [["remove", "aria-label"]]);
+  assert.equal(field.attrs.has("aria-label"), false);
+  player.updateAria(el);
+  assert.deepEqual(el.writes, []);
+  assert.deepEqual(field.writes, []);
+});
+
 test("an invalid view is aria-invalid, and so is the field of an input", () => {
   const { player } = fakePlayer();
   const element = () => {
     const attrs = new Map();
     return {
       attrs,
+      getAttribute: (name) => attrs.get(name) ?? null,
       setAttribute: (name, value) => attrs.set(name, value),
       removeAttribute: (name) => attrs.delete(name),
     };
@@ -277,6 +326,7 @@ for (const multiline of [false, true]) {
         const attrs = new Map();
         return {
           attrs, style: {}, classList: { toggle() {} },
+          getAttribute: (name) => attrs.get(name) ?? null,
           setAttribute: (name, value) => attrs.set(name, value),
           removeAttribute: (name) => attrs.delete(name),
         };
@@ -351,6 +401,7 @@ test("a combo box's field names its highlighted row and its list by DOM id", () 
     return {
       attrs,
       id: "",
+      getAttribute: (name) => attrs.get(name) ?? null,
       setAttribute: (name, value) => attrs.set(name, value),
       removeAttribute: (name) => attrs.delete(name),
       ...extra,
@@ -404,6 +455,7 @@ test("a field names the line describing it by DOM id, followed as it comes and g
     return {
       attrs,
       id: "",
+      getAttribute: (name) => attrs.get(name) ?? null,
       setAttribute: (name, value) => attrs.set(name, value),
       removeAttribute: (name) => attrs.delete(name),
       ...extra,
@@ -743,6 +795,65 @@ test("Tab stops are the pressables and the focusable views, pressable or not", (
   delete globalThis.document;
 });
 
+test("a view laid out at no size, as in a display none subtree, is no Tab stop, nor is its field", () => {
+  const { player } = fakePlayer();
+  player.updateAria = () => {};
+  player.placeFrame = () => {};
+  player.readingChanged = () => {};
+  player.caretMoved = () => {};
+  globalThis.document = { activeElement: null };
+  try {
+    const classes = () => ({ toggle() {}, remove() {} });
+    const stop = (el) => (el.hasAttribute("tabindex") ? el.tabIndex : null);
+    const button = Object.assign(focusView(true, {}), { classList: classes() });
+    const field = Object.assign(focusView(false, {}), { classList: classes(), style: {} });
+    const input = Object.assign(focusView(false, {}), { classList: classes(), _field: field });
+    const views = new Map([[2, button], [4, input]]);
+    player.view = (id) => views.get(id);
+    // Its props come before its first frame: a stop until the frame says.
+    player.updateFocusable(button);
+    assert.equal(stop(button), 0);
+    player.op_f([0, 2, 0, 0, 120, 32]);
+    assert.equal(stop(button), 0, "shown");
+    player.op_f([0, 4, 0, 40, 120, 32]);
+    player.op_ic([0, 4, 8, 4, 104, 24]);
+    assert.equal(stop(field), null, "a shown field keeps the browser's Tab stop");
+    // Hidden with the focus on it: no stop, and it gives the focus up.
+    document.activeElement = button;
+    player.op_f([0, 2, 0, 0, 0, 0]);
+    assert.equal(stop(button), null, "hidden");
+    assert.equal(button.blurred, true);
+    document.activeElement = field;
+    player.op_f([0, 4, 0, 0, 0, 0]);
+    player.op_ic([0, 4, 0, 0, 0, 0]);
+    assert.equal(stop(field), -1, "a hidden field");
+    assert.equal(field.blurred, true);
+    // Shown again: stops again.
+    player.op_f([0, 2, 0, 0, 120, 32]);
+    assert.equal(stop(button), 0);
+    player.op_f([0, 4, 0, 40, 120, 32]);
+    player.op_ic([0, 4, 8, 4, 104, 24]);
+    assert.equal(stop(field), null);
+    // A link is a stop without a `tabindex`: hidden, it gets -1 instead.
+    const link = Object.assign(focusView(true, {}), { classList: classes(), tagName: "A", matches: () => true });
+    views.set(6, link);
+    player.updateFocusable(link);
+    player.op_f([0, 6, 0, 0, 120, 32]);
+    assert.equal(stop(link), 0);
+    player.op_f([0, 6, 0, 0, 0, 0]);
+    assert.equal(stop(link), -1, "a hidden link");
+    player.op_f([0, 6, 0, 0, 120, 32]);
+    assert.equal(stop(link), 0);
+    // A field whose view is mounted hidden, before any content box.
+    const late = Object.assign(focusView(false, {}), { classList: classes(), _frame: [0, 0, 0, 0] });
+    late._field = field;
+    player.fieldStop(late);
+    assert.equal(stop(field), -1);
+  } finally {
+    delete globalThis.document;
+  }
+});
+
 test("setAccessibilityFocus leaves the keyboard focus in a field the user is typing in", async () => {
   const { player } = fakePlayer();
   player.live = { textContent: "" };
@@ -927,7 +1038,7 @@ test("a key a field's own handler took is not the page's shortcut as well", () =
   let mounted = true;
   const body = { closest: () => null };
   const field = { ...focusView(false, {}), classList: { contains: () => true }, closest: (selector) => (selector.includes(".nsh-field") ? field : null) };
-  const root = { contains: (el) => mounted && el === field };
+  const root = { children: [], contains: (el) => mounted && el === field };
   player.root = root;
   globalThis.document = { activeElement: field, body };
   Player.active = player;
@@ -982,6 +1093,88 @@ test("Return a shortcut takes does not submit the field as well", () => {
   assert.equal(press("Enter"), true);
   assert.equal(submits(), 1);
   assert.deepEqual(sent.find(([name]) => name === "onSubmitEditing")[1], { text: "/rev", count: 4 });
+});
+
+test("selectTextOnFocus selects the text on focus and keeps a press's own selection", () => {
+  const { player } = fakePlayer();
+  player.setState = () => {};
+  player.caretMoved = () => {};
+  const reported = [];
+  player.event = (_, name, value) => name === "onSelectionChange" && reported.push([value.start, value.end]);
+  globalThis.document = { activeElement: null };
+  try {
+    for (const tagName of ["INPUT", "TEXTAREA"]) {
+      reported.length = 0;
+      const listeners = {};
+      const field = {
+        tagName,
+        value: "Hello",
+        selectionStart: 0,
+        selectionEnd: 0,
+        addEventListener: (type, listener) => (listeners[type] = listener),
+        setSelectionRange(start, end) {
+          this.selectionStart = start;
+          this.selectionEnd = end;
+        },
+      };
+      const el = { _id: 4, _events: new Set(["onSelectionChange"]), _config: { selectTextOnFocus: true } };
+      player.wireInput(el, field);
+      const focus = () => {
+        listeners.focus();
+        document.activeElement = field;
+      };
+      const blur = () => {
+        listeners.blur();
+        document.activeElement = null;
+      };
+      // A press: its pointerdown focuses an unfocused field, the browser
+      // places the caret (or the drag's range), then its mouseup.
+      const press = ({ shiftKey = false, caret = [2, 2] } = {}) => {
+        const focused = document.activeElement === field;
+        listeners.pointerdown({ shiftKey });
+        if (!focused) focus();
+        field.setSelectionRange(...caret);
+        listeners.pointerup();
+        let prevented = false;
+        listeners.mouseup({ preventDefault: () => (prevented = true) });
+        return prevented;
+      };
+      const selection = () => [field.selectionStart, field.selectionEnd];
+
+      // Focus without a press (Tab, `ref.focus()`, `autoFocus`) selects all, reported.
+      focus();
+      assert.deepEqual(selection(), [0, 5]);
+      assert.deepEqual(reported.at(-1), [0, 5]);
+      // A click on the focused field places the caret.
+      assert.equal(press(), false);
+      assert.deepEqual(selection(), [2, 2]);
+      blur();
+      // A click that focuses selects all over the caret its mouseup would place.
+      assert.equal(press(), true);
+      assert.deepEqual(selection(), [0, 5]);
+      assert.deepEqual(reported.at(-1), [0, 5]);
+      blur();
+      // A drag's range is kept.
+      assert.equal(press({ caret: [1, 3] }), false);
+      assert.deepEqual(selection(), [1, 3]);
+      blur();
+      // A Shift-click's selection is kept.
+      assert.equal(press({ shiftKey: true, caret: [0, 2] }), false);
+      assert.deepEqual(selection(), [0, 2]);
+      blur();
+      // Without the prop, focus leaves the selection alone.
+      el._config = { selectTextOnFocus: false };
+      field.setSelectionRange(1, 1);
+      focus();
+      assert.deepEqual(selection(), [1, 1]);
+      blur();
+      assert.equal(press(), false);
+      assert.deepEqual(selection(), [2, 2]);
+      blur();
+    }
+  } finally {
+    delete globalThis.document;
+  }
 });
 
 /** A player whose core answers are `interest` — whether the focused view's
@@ -1503,6 +1696,54 @@ test("a paused WebSocket holds its events, in order, until the engine resumes it
   } finally {
     clearTimeout(player.timer);
     globalThis.WebSocket = saved;
+  }
+});
+
+test("another tab's changes to the app's storage reach the engine as this tab now reads them", () => {
+  const { player } = fakePlayer();
+  const text = (p, l) => new TextDecoder().decode(new Uint8Array(player.wasm.memory.buffer, p, l));
+  const got = [];
+  player.wasm.nsh_storage_changed = (pp, pl, kp, kl, vp, vl, kind) => {
+    got.push([text(pp, pl), text(kp, kl), text(vp, vl), kind]);
+    return -1;
+  };
+  const listeners = new Set();
+  const kept = new Map();
+  const area = { getItem: (key) => kept.get(key) ?? null };
+  const saved = { window: globalThis.window, localStorage: globalThis.localStorage };
+  globalThis.window = {
+    addEventListener: (type, f) => type === "storage" && listeners.add(f),
+    removeEventListener: (type, f) => type === "storage" && listeners.delete(f),
+  };
+  globalThis.localStorage = area;
+  const dispatch = (event) => listeners.forEach((f) => f({ storageArea: area, ...event }));
+  try {
+    player.followStorage("nsh:app:");
+    player.followStorage("nsh:app:");
+    assert.equal(listeners.size, 1, "one listener however many loads");
+    // This tab wrote "mine" after the other tab's "theirs": it keeps its own.
+    kept.set("nsh:app:draft", "mine");
+    dispatch({ key: "nsh:app:draft", newValue: "theirs" });
+    kept.delete("nsh:app:gone");
+    dispatch({ key: "nsh:app:gone", newValue: null });
+    // Other apps' keys, the page's own and `sessionStorage` are not the app's.
+    dispatch({ key: "nsh:other:draft", newValue: "x" });
+    dispatch({ key: "draft", newValue: "x" });
+    dispatch({ key: "nsh:app:draft", newValue: "x", storageArea: {} });
+    dispatch({ key: null, newValue: null });
+    assert.deepEqual(got, [
+      ["nsh:app:", "draft", "mine", 1],
+      ["nsh:app:", "gone", "", 0],
+      ["nsh:app:", "", "", 2],
+    ]);
+    // A stopped app follows nothing until the next one loads its storage.
+    globalThis.cancelAnimationFrame ??= () => {};
+    player.stop();
+    assert.equal(listeners.size, 0);
+    assert.equal(player.storagePrefixes.size, 0);
+  } finally {
+    clearTimeout(player.timer);
+    Object.assign(globalThis, saved);
   }
 });
 
@@ -2235,10 +2476,11 @@ function animating(t) {
     else player.requestFrame();
     return -1;
   };
-  const frame = () => {
+  // The page's animation frame, which began at `at` (now by default).
+  const frame = (at = clock.now) => {
     const due = frames;
     frames = [];
-    for (const f of due) f(clock.now);
+    for (const f of due) f(at);
   };
   // Time passes by `ms`: the timers due run, and what the calls into the
   // engine left for after them (`deadlineSoon`).
@@ -2248,7 +2490,7 @@ function animating(t) {
     t.mock.timers.tick(ms);
     await null;
   };
-  return { player, ticks, frame, pass, ended: () => ended };
+  return { player, ticks, frame, pass, clock, ended: () => ended };
 }
 
 test("a native animation ends on time while no animation frames come", async (t) => {
@@ -2279,6 +2521,33 @@ test("while animation frames come the page runs no frames of its own", async (t)
   assert.equal(ticks.length, frames, "every frame the browser's");
   await pass(1000);
   assert.equal(ticks.length, frames);
+});
+
+test("a frame a task held steps the animations when its callbacks run", (t) => {
+  const { player, ticks, frame, clock } = animating(t);
+  player.requestFrame();
+  // The frame began at 0; a press handled before its callbacks took
+  // 170 ms (it opened a sheet, whose entrance asks for this frame).
+  clock.now = 170;
+  frame(0);
+  assert.deepEqual(ticks, [170], "the entrance starts when it was asked for, not 170 ms in");
+  // The next frames are on time: their own times keep the display's pace.
+  clock.now = 189;
+  frame(186.7);
+  clock.now = 205;
+  frame(203.3);
+  assert.deepEqual(ticks, [170, 186.7, 203.3]);
+});
+
+test("an animation frame never steps earlier than the one before", (t) => {
+  const { player, ticks, frame, clock } = animating(t);
+  player.requestFrame();
+  clock.now = 170;
+  frame(0);
+  // On time by its own measure, but begun before the held one ran.
+  clock.now = 172;
+  frame(160);
+  assert.deepEqual(ticks, [170, 170]);
 });
 
 test("a dialog comes in and reports it shown without animation frames", () => {
@@ -3356,9 +3625,10 @@ function leavingPage() {
       preventDefault() { this.defaultPrevented = true; },
     });
   const hide = (persisted = false) => dispatch("pagehide", { persisted });
+  const show = (persisted = false) => dispatch("pageshow", { persisted });
   const guards = () => (listeners.get("beforeunload") ?? []).length;
   const watchers = () => (listeners.get("pagehide") ?? []).length;
-  return { leave, hide, guards, watchers, restore: () => Object.assign(globalThis, saved) };
+  return { leave, hide, show, guards, watchers, restore: () => Object.assign(globalThis, saved) };
 }
 
 /** A running app (it watches the page's end, as `begin` has it) that
@@ -3460,6 +3730,45 @@ test("a page kept in the back / forward cache keeps its app running", () => {
     page.hide();
     assert.equal(calls.quits, 1);
   } finally {
+    page.restore();
+  }
+});
+
+test("a page in the back / forward cache is in the background until it comes back", () => {
+  const page = leavingPage();
+  const document = globalThis.document;
+  // A browser that tells no `visibilitychange` around the cache: the page
+  // stays visible and focused throughout.
+  globalThis.document = { visibilityState: "visible", hasFocus: () => true };
+  try {
+    const { player, calls } = quittingPlayer(() => true);
+    const reported = [];
+    Object.assign(player, { reported: "{}", environment: () => ({ lifecycle: player.lifecycle() }) });
+    player.wasm.nsh_environment = (ptr, len) => {
+      reported.push(JSON.parse(new TextDecoder().decode(new Uint8Array(player.wasm.memory.buffer, ptr, len))).lifecycle);
+      return -1;
+    };
+    player.watchPageCache(() => player.environmentChanged());
+    page.show();
+    page.hide(true);
+    assert.deepEqual(reported, ["background"], "kept in the cache: the app goes to the background");
+    assert.equal(calls.quits, 0, "and runs on");
+    page.show(true);
+    assert.deepEqual(reported, ["background", "active"], "restored: back in the foreground");
+    // Hidden again: the cache and visibility are one background.
+    page.hide(true);
+    globalThis.document.visibilityState = "hidden";
+    page.show(true);
+    assert.deepEqual(reported, ["background", "active", "background"]);
+    globalThis.document.visibilityState = "visible";
+    player.environmentChanged();
+    // The page's real end ends the app, once, with no lifecycle edge.
+    page.hide();
+    page.hide();
+    assert.equal(calls.quits, 1);
+    assert.deepEqual(reported, ["background", "active", "background", "active"]);
+  } finally {
+    globalThis.document = document;
     page.restore();
   }
 });
@@ -3812,8 +4121,9 @@ test("links and addresses resolve against the site's base where the page names i
 });
 
 /** An element whose DOM state, as a real one's, is not among its own
- * enumerable keys (`retag` copies those); a `style` attribute set as text
- * applies nothing, as under a strict `style-src`. */
+ * enumerable keys (`retag` copies those), listeners included; a `style`
+ * attribute set as text applies nothing, as under a strict `style-src`;
+ * focused, it is focused from the keyboard. */
 function fakeElement(tag, attributes = {}) {
   const attrs = new Map(Object.entries(attributes));
   const set = [];
@@ -3823,14 +4133,26 @@ function fakeElement(tag, attributes = {}) {
     attributes: { get: () => [...attrs].map(([name, value]) => ({ name, value })) },
     setAttribute: { value(name, value) { set.push(name); if (name !== "style") attrs.set(name, String(value)); } },
     getAttribute: { value: (name) => attrs.get(name) ?? null },
+    hasAttribute: { value: (name) => attrs.has(name) },
     removeAttribute: { value: (name) => attrs.delete(name) },
     attributesSet: { value: set },
+    tabIndex: { get: () => Number(attrs.get("tabindex") ?? -1), set: (v) => attrs.set("tabindex", String(v)) },
+    dataset: { value: {} },
+    classList: { value: { toggle() {} } },
+    matches: { value: (selector) => selector === ":focus-visible" },
     style: { value: { cssText: attributes.style ?? "" } },
     childNodes: { value: [] },
     append: { value(...nodes) { this.childNodes.push(...nodes); } },
     replaceWith: { value() {} },
+    listeners: { value: [] },
+    addEventListener: { value(type, listener) { this.listeners.push([type, listener]); } },
   });
   return el;
+}
+
+/** Dispatches `event` of `type` to the listeners `el` (`fakeElement`) has. */
+function fire(el, type, event = {}) {
+  for (const [t, listener] of el.listeners) if (t === type) listener({ type, ...event });
 }
 
 test("a view drawn as another element keeps its frame under a strict style-src", () => {
@@ -3851,6 +4173,71 @@ test("a view drawn as another element keeps its frame under a strict style-src",
     assert.equal(next.getAttribute("class"), "nsh-v");
     assert.equal(next._id, 6);
     assert.equal(player.views.get(6), next);
+  } finally {
+    globalThis.document = savedDocument;
+  }
+});
+
+test("a link drawn as an a keeps its hover and its keyboard focus", () => {
+  const savedDocument = globalThis.document;
+  globalThis.document = { createElement: (tag) => fakeElement(tag), activeElement: null };
+  try {
+    const { player } = fakePlayer();
+    const reported = [];
+    player.wasm.nsh_states = (id, states) => {
+      reported.push([id, states]);
+      return -1;
+    };
+    const heard = [];
+    player.event = (id, name) => heard.push([id, name]);
+    Object.assign(player, { views: new Map(), mouseTracked: new Set(), wheelTracked: new Set() });
+    player.updateAria = () => {};
+    player.updateTouchAction = () => {};
+    const el = fakeElement("div", { class: "nsh-v" });
+    Object.assign(el, { _id: 6, _kind: "view", _events: new Set(), _frame: null });
+    player.views.set(6, el);
+    // A new `Link` with `hover:` and `focus:` classes, in the core's order:
+    // its tracked states and events come before the props whose `href`
+    // draws it as an `a`.
+    player.op_ts([, 6, 2 | 4]);
+    player.op_e([, 6, ["onPress"]]);
+    player.op_vp([, 6, { role: "link", href: "/notes" }]);
+    const link = player.view(6);
+    assert.equal(link.localName, "a");
+    // Listeners of its own, once each: the div's went with the div.
+    assert.deepEqual(link.listeners.map(([type]) => type), ["pointerenter", "pointerleave", "focus", "blur"]);
+    fire(link, "pointerenter", { pointerType: "mouse" });
+    fire(link, "focus");
+    fire(link, "pointerleave", { pointerType: "mouse" });
+    fire(link, "blur");
+    // Hovered, then focused too, then focused only, then neither.
+    assert.deepEqual(reported, [[6, 2], [6, 6], [6, 4], [6, 0]]);
+    assert.deepEqual(heard, [[6, "onFocus"], [6, "onBlur"]]);
+  } finally {
+    globalThis.document = savedDocument;
+  }
+});
+
+test("a text drawn as a heading after its links keeps their hover", () => {
+  const savedDocument = globalThis.document;
+  globalThis.document = { createElement: (tag) => fakeElement(tag) };
+  try {
+    const { player } = fakePlayer();
+    const heard = [];
+    player.event = (id, name) => heard.push([id, name]);
+    player.mouseEvent = () => null;
+    player.views = new Map();
+    const el = fakeElement("div", { class: "nsh-v" });
+    Object.assign(el, { _id: 8, _kind: "text" });
+    player.views.set(8, el);
+    // Its runs hold a link the mouse is reported for (`runs`); then a
+    // `role="header"` draws it as an `h2`.
+    player.installLinkHover(el);
+    const heading = player.retag(el, "h2");
+    const run = { _link: { node: 10, events: new Set(["onMouseEnter", "onMouseLeave"]) } };
+    fire(heading, "pointerover", { pointerType: "mouse", target: run });
+    fire(heading, "pointerleave", { pointerType: "mouse" });
+    assert.deepEqual(heard, [[10, "onMouseEnter"], [10, "onMouseLeave"]]);
   } finally {
     globalThis.document = savedDocument;
   }

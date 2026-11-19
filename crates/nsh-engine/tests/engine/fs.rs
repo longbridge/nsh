@@ -614,8 +614,10 @@ fs.readFile("pipe").then(() => report("read"), (e) => report(e.message));
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// `fs/promises` runs on a mobile surface as on the desktops: the same
+/// `capabilities.fs` roots confine the calls (`access::native_files`).
 #[test]
-fn files_are_unavailable_on_a_mobile_surface() {
+fn files_run_on_a_mobile_surface_under_the_same_roots() {
     let (root, _app) = support_dir("mobile");
     let dir = scratch("mobile-app");
     let entry = dir.join("App.tsx");
@@ -624,9 +626,13 @@ fn files_are_unavailable_on_a_mobile_surface() {
         r#"import { mount, signal, Text } from "nsh";
 import fs from "fs/promises";
 const shown = signal("");
-let promise;
-try { promise = fs.readFile("x"); } catch { shown.set("done threw"); }
-promise?.then(() => "read", (e) => `done ${e.constructor.name} ${e.code}`).then((text) => shown.set(text));
+(async () => {
+  await fs.writeFile("x", "mobile");
+  const inside = await fs.readFile("x", "utf8");
+  const outside = await fs.readFile("/outside-every-root")
+    .then(() => "none", (e) => `${e.code}:${e.permission}`);
+  shown.set(`done ${inside}|${outside}`);
+})().catch((e) => shown.set(`done threw ${e}`));
 mount(() => <Text>{shown()}</Text>);
 "#,
     )
@@ -678,10 +684,7 @@ mount(() => <Text>{shown()}</Text>);
         data_dir: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
-    assert_eq!(
-        shown(&rx, "done"),
-        "done Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"
-    );
+    assert_eq!(shown(&rx, "done"), "done mobile|ERR_ACCESS_DENIED:fs");
     let _ = std::fs::remove_dir_all(root);
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -46,6 +46,7 @@ pub use crate::element::{
     DevicePixels,
     DialogAnswer,
     DialogCloser,
+    DialogReply,
     DiffClamp,
     EaseMode,
     // Native animation values.
@@ -167,6 +168,7 @@ pub use crate::element::{
     ScreenAnimation,
     Scroll,
     ScrollAlignment,
+    ScrollEdge,
     ScrollEvent,
     Scrollable,
     Selection,

@@ -579,7 +579,7 @@ export interface PressEvent {
   /** Position in the root view the view is in (the surface or its modal), as touches' `pageX` / `pageY`. */
   pagePosition: Point;
   modifiers: Modifiers;
-  /** Consecutive clicks at the same place: 1 for a click, 2 for a double click. */
+  /** Consecutive clicks at the same place: 1 for a click, 2 for a double click; 0 when not from a pointer (keyboard Enter / Space or an assistive technology's default action), as the DOM's `detail`. */
   clickCount: number;
 }
 
@@ -768,7 +768,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         EventKind::Wheel,
         on::ALL,
         "(e: WheelEvent) => void",
-        "A mouse wheel or touchpad scrolled over the view (or a view inside it); desktops and the web. The nearest listener hears it. A listener nearer than any scroll view under the pointer takes the wheel: nothing scrolls or zooms natively (a canvas zooms on `e.modifiers.ctrl` and pans otherwise); a scroll view listening, or a view around one, only observes it.",
+        "A mouse wheel or touchpad scrolled over the view (or a view inside it); desktops and the web. The nearest listener hears it. A listener nearer than any scroll view under the pointer takes the wheel: nothing scrolls or zooms natively (a canvas zooms on `e.modifiers.control` and pans otherwise); a scroll view listening, or a view around one, only observes it.",
     ),
     (
         EventKind::Pinch,

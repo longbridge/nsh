@@ -111,8 +111,8 @@ trusted: every limit and check is enforced in Rust, never in JS.
   web views', ends the host at and Foundation's `NSURL` keeps in the user info; an ASCII control character; a host
   with percent-encoding or a WHATWG forbidden host code point) names no one host, port or path: only a grant of every
   host with no port or path covers it (`*`, or no `capabilities`), and `parse_url` gives `None` for it.
-- **Desktop system APIs**: `process` and `fs/promises` (the only process and file APIs) check the intersection of the
-  declaration and the optional host grant in Rust. Process commands match exactly: a grant for `codex` grants that
+- **System APIs**: `process` (desktops only) and `fs/promises` (every native OS and the browser's OPFS: the only
+  process and file APIs) check the intersection of the declaration and the optional host grant in Rust. Process commands match exactly: a grant for `codex` grants that
   command, while `/usr/bin/codex` requires its own entry. The runtime launches the executable directly with an
   argument array, in the app data directory or a `cwd` within an `fs.write` root, with a cleared environment
   refilled from the host's `PATH`, `HOME`, `USERPROFILE`, `SystemRoot`, `TEMP`, `TMP`, `TMPDIR`, `LANG`, `LC_*`
@@ -187,7 +187,8 @@ eleven bare specifiers and nothing else: `node:` prefixes and other Node modules
 Opening URLs (`openUrl` of `nsh`, `TextView`'s `links="open"`; `nsh_core::open_url`) is checked in Rust
 twice before anything leaves the app: the URL (`check_url`: absolute, at most 16 KiB, no whitespace or control
 characters, never `javascript:`, `vbscript:`, `data:`, `blob:`, `file:`, `about:` or `asset:`, which run code or
-reach the app's own data rather than another app; a web address needs a host) and the `openUrl` capability
+reach the app's own data rather than another app, and no scheme of one letter, which is a Windows path (`C:/…`)
+that `ShellExecuteW` would run as the program or script it names; a web address needs a host) and the `openUrl` capability
 (`Capabilities::open_url`: `true`, every scheme, or `{ "schemes": [...] }`; `Access::allows_open_url`), in the
 module's call (its promise rejects: a `TypeError` for the URL, `ERR_ACCESS_DENIED` for the capability) and again in
 the core for Rust callers (`false`, logged once). The embedding app's URL

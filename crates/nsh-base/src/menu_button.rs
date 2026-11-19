@@ -7,9 +7,10 @@
 //! Glass on iOS 26). The menu is made from the mounted `items`, and a
 //! chosen item comes back as the component's `select` event with the
 //! app's id. On a desktop OS the content is a button whose press shows the
-//! same items as the platform's context menu ([`popup_menu`]). Elsewhere
-//! (Android, the web) it is that button with nothing to show: the app
-//! uses `Menu` there.
+//! same items as the platform's context menu ([`popup_menu`]). On Android
+//! the same native component is the system's popup menu
+//! (`android.widget.PopupMenu`) anchored to the content. On the web it is
+//! that button with nothing to show: the app uses `Menu` there.
 
 use nsh_core::{
     JsonValue,
@@ -39,6 +40,12 @@ pub struct MenuButtonItem {
     /// show none.
     #[prop(skip_none)]
     pub icon: Option<SharedString>,
+    /// Its icon as an SVG document, on Android, which has no symbol set of
+    /// its own: drawn as a template (only its alpha counts) in the item's
+    /// text color, before the label, on Android 10 and later. iOS draws
+    /// `icon` and ignores it; the desktops show neither.
+    #[prop(skip_none)]
+    pub svg: Option<SharedString>,
     /// A check mark: `Some` makes it a checkable item, checked or not; the
     /// app owns the value and changes it from `onSelect`.
     #[prop(skip_none)]
@@ -46,8 +53,8 @@ pub struct MenuButtonItem {
     /// It cannot be chosen (or opened): the system dims it.
     #[prop(default)]
     pub disabled: bool,
-    /// It destroys or removes something: iOS draws it in red; the desktops
-    /// show it as any item.
+    /// It destroys or removes something: iOS draws it in red, Android in
+    /// the theme's error color; the desktops show it as any item.
     #[prop(default)]
     pub destructive: bool,
     /// The items under it, in order: with any, it is a submenu (or a
@@ -101,6 +108,12 @@ impl MenuButtonItem {
         self
     }
 
+    /// Its icon as an SVG document, for Android ([`MenuButtonItem::svg`]).
+    pub fn svg(mut self, svg: impl Into<SharedString>) -> Self {
+        self.svg = Some(svg.into());
+        self
+    }
+
     /// A check mark, checked or not ([`MenuButtonItem::checked`]).
     pub fn checked(mut self, checked: bool) -> Self {
         self.checked = Some(checked);
@@ -128,8 +141,8 @@ pub struct MenuButtonProps {
     /// it opens; one open keeps the items it opened with.
     #[prop(default)]
     pub items: Prop<Vec<MenuButtonItem>>,
-    /// The menu's title, above its items on iOS (an account's address, a
-    /// file's name); the desktops show none.
+    /// The menu's title, above its items on iOS and Android (an account's
+    /// address, a file's name); the desktops show none.
     pub title: Prop<Option<SharedString>>,
     /// It cannot be pressed and opens nothing; `disabled:` styles apply and
     /// screen readers say it is dimmed.
@@ -155,20 +168,22 @@ pub enum MenuButtonEvent {
 /// system's pull-down menu, Liquid Glass on iOS 26 and later), shown by a
 /// tap, VoiceOver's activation or the keyboard's, with the system's
 /// placement, motion, checks, submenus, sections and destructive items; on
+/// Android the system's popup menu, anchored below the content (at its end
+/// in the window's end half), shown by a tap or TalkBack's activation; on
 /// a desktop OS the platform's context menu (`Menu.popup`'s) at the
 /// pointer. The app gives the items as data (`items`, each with an `id` of
 /// its own), hears the choice (`onSelect({ id })`) and draws the content
 /// with its children, `class` and `style`, which stay the app's on every
 /// platform. The system's menus show no app content: rows of the app's own
-/// look are `Menu`'s. Android and the web have no system menu for a view:
-/// there the content shows and opens nothing, and the app uses `Menu`.
+/// look are `Menu`'s. The web has no system menu for a view: there the
+/// content shows and opens nothing, and the app uses `Menu`.
 #[component]
 pub fn MenuButton(props: MenuButtonProps, cx: Scope<MenuButtonEvent>) -> impl IntoElement {
     let (view, disabled) = bar_item(view(), None, props.disabled);
     let items = props.items;
-    if os() == Os::Ios {
+    if matches!(os(), Os::Ios | Os::Android) {
         // The content is the app's; the system's button covers it and is
-        // what touches, VoiceOver and the keyboard reach.
+        // what touches, screen readers and the keyboard reach.
         return view
             .disabled(disabled)
             .child(props.children)
@@ -215,9 +230,9 @@ pub fn MenuButton(props: MenuButtonProps, cx: Scope<MenuButtonEvent>) -> impl In
         .into_element()
 }
 
-/// The items as the iOS components read them (`MenuButton`'s, and
-/// `ContextMenu`'s with `items`): `[{ id, label, icon?, checked?,
-/// disabled?, destructive?, items?, inline? }]`.
+/// The items as the iOS and Android components read them (`MenuButton`'s,
+/// and `ContextMenu`'s with `items`): `[{ id, label, icon?, svg?,
+/// checked?, disabled?, destructive?, items?, inline? }]`.
 pub(crate) fn menu_json(items: &[MenuButtonItem]) -> JsonValue {
     items
         .iter()
@@ -227,6 +242,9 @@ pub(crate) fn menu_json(items: &[MenuButtonItem]) -> JsonValue {
             entry.insert("label".into(), item.label.as_ref().into());
             if let Some(icon) = &item.icon {
                 entry.insert("icon".into(), icon.as_ref().into());
+            }
+            if let Some(svg) = &item.svg {
+                entry.insert("svg".into(), svg.as_ref().into());
             }
             if let Some(checked) = item.checked {
                 entry.insert("checked".into(), checked.into());
@@ -349,6 +367,19 @@ mod tests {
                     { "id": "delete", "label": "Delete", "destructive": true },
                 ] },
             ])
+        );
+    }
+
+    /// An item's SVG icon reaches the platforms beside its SF Symbol.
+    #[test]
+    fn an_svg_icon_reaches_the_platforms() {
+        let svg = "<svg viewBox='0 0 24 24'><path d='M4 12h16'/></svg>";
+        let items = [MenuButtonItem::new("copy", "Copy")
+            .icon("doc.on.doc")
+            .svg(svg)];
+        assert_eq!(
+            menu_json(&items),
+            json!([{ "id": "copy", "label": "Copy", "icon": "doc.on.doc", "svg": svg }])
         );
     }
 

@@ -63,7 +63,7 @@ Rust 代码用 Rust 标准库和 crates.io 完成同样的工作，作为应用�
 | `code` | 含义 |
 |---|---|
 | `ERR_ACCESS_DENIED` | 应用的 `capabilities` 未授权此调用。错误带有 `permission`，即该能力在 `nsh.json` 中的键（`"fs"`、`"process"`、`"network"`），以及 `resource`，即所请求的对象：路径、命令（`process.exit` 为 `"exit"`）、socket 的 `"host:port"` 或 WebSocket 的 URL |
-| `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` | 该调用属于其他平台：文件在桌面和浏览器中运行，进程在桌面上运行，TCP socket 在原生宿主上运行，`os.homedir()` 在配置了主目录的宿主上运行 |
+| `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` | 该调用属于其他平台：文件在原生宿主和浏览器中运行，进程在桌面上运行，TCP socket 在原生宿主上运行，`os.homedir()` 在配置了主目录的宿主上运行 |
 | `ERR_NSH_QUOTA_EXCEEDED` | 运行时的某项限制已用尽：进行中的操作或数据、子进程、socket、WebSocket、等待发送的字节、监听器 |
 | `ETIMEDOUT` | 调用超时：`run` 的 `timeoutMs`、连接、WebSocket 的握手、写入或关闭 |
 | `ENOENT`、`EEXIST`、`EACCES`、`ECONNREFUSED` 等 | 操作系统的结果，采用 Node 的错误码；`EACCES` 和 `EPERM` 表示操作系统拒绝访问文件，与应用的能力授权无关 |
@@ -99,7 +99,7 @@ async function loadSettings(): Promise<string> {
 
 ## 文件
 
-`fs/promises` 在桌面宿主（macOS、Windows 和 Linux）上读写原生文件，在浏览器中通过 Origin Private File System（OPFS）读写应用私有文件。每个路径在操作开始前都按 `capabilities.fs` 检查：`readFile`、`readdir`、`stat`、`lstat`、`readlink` 和 `exists` 使用 `read` 根目录，`writeFile`、`mkdir`、`rename`、`unlink` 和 `rmdir` 使用 `write` 根目录。所有失败都拒绝 Promise：授权范围之外的路径在任何磁盘操作之前以 `code` 为 `ERR_ACCESS_DENIED` 的错误拒绝（`permission` 为 `"fs"`，`resource` 为应用所写的路径）。图片、视频和声音显示的本地文件也按同样的 `read` 根目录检查（见
+`fs/promises` 在原生宿主（macOS、Windows、Linux、iOS 和 Android）上读写原生文件，在浏览器中通过 Origin Private File System（OPFS）读写应用私有文件。每个路径在操作开始前都按 `capabilities.fs` 检查：`readFile`、`readdir`、`stat`、`lstat`、`readlink` 和 `exists` 使用 `read` 根目录，`writeFile`、`mkdir`、`rename`、`unlink` 和 `rmdir` 使用 `write` 根目录。所有失败都拒绝 Promise：授权范围之外的路径在任何磁盘操作之前以 `code` 为 `ERR_ACCESS_DENIED` 的错误拒绝（`permission` 为 `"fs"`，`resource` 为应用所写的路径）。图片、视频和声音显示的本地文件也按同样的 `read` 根目录检查（见
 [沙箱](../docs/sandbox-and-capabilities.md#network)）。
 
 ```json

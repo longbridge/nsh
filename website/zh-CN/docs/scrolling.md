@@ -103,6 +103,7 @@ scroll().horizontal().scrollbar(false).child(
 | `bounces` | `.bounces(..)` | `boolean` | `true` | 允许越过边缘回弹。 |
 | `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | 显示滚动条。 |
 | `contentInset` | `.content_inset(EdgeInsets { .. })` | `Partial<Edges>` | | 内容四周可以滚动进入的留白。 |
+| `scrollbarInset` | `.scrollbar_inset(EdgeInsets { .. })` | `Partial<Edges>` | | 滚动指示条与视图各边保持的距离。 |
 | `contentOffset` | `.content_offset(point(..))` | `{ x?, y? }` | | 初始位置。 |
 | `decelerationRate` | `.deceleration(rate)` | `"normal" \| "fast" \| number` | 平台默认 | 惯性滑动减速的快慢：`"normal"`、`"fast"`，或每毫秒保留的速度比例（`0.998` 为 normal，`0.99` 为 fast；`0` 表示平台默认）。 |
 
@@ -598,6 +599,26 @@ NSH 会自动让获得焦点的输入框保持可见：键盘出现时，输入�
 - `"always"`：键盘在每次点击后都保持显示。
 
 两者都在点击或拖动发生时由原生决定，无需等待你的代码。要从代码收起键盘，在 Rust 中调用 `dismiss_keyboard()`，在 TSX 中调用 [`nsh`](../modules/nsh.md#keyboard-and-keyboardframe) 的 `Keyboard.dismiss()`。
+
+## 浮在滚动视图上的视图
+
+放在滚动视图顶部或底部之上的工具栏、悬浮按钮可以指明它下面的滚动视图，平台就像对待那里的栏一样对待它。iOS 26 起，滚动视图的边缘效果会按这个视图显示的内容成形：滚到它下面的内容在它的按钮周围渐隐。这个边缘效果来自 iOS 26；其他版本和平台的界面需要同样的分隔时，由应用在视图下面画一层渐隐。用 `contentInset` 在内容那一端给这个视图留出位置。
+
+```tsx
+const list = signal<ViewRef>();
+
+<View style={{ flex: 1 }}>
+  <Scroll ref={list} contentInset={{ bottom: 80 }}>{/* 行 */}</Scroll>
+  <View
+    style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: 16 }}
+    ios={{ scrollEdgeElement: list() ? { scrollView: list()!, edge: "bottom" } : null }}
+  >
+    <Button>New chat</Button>
+  </View>
+</View>
+```
+
+Rust 中在浮着的视图上调用 `.scroll_edge_element(Some(list), ScrollEdge::Bottom)`，`list` 是滚动视图的 `ElementRef`。`edge` 取 `"top"` 或 `"bottom"`（默认）。
 
 ## 嵌套滚动视图
 

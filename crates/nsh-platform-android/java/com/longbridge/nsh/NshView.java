@@ -201,6 +201,8 @@ public class NshView extends FrameLayout {
         super(context);
         density = getResources().getDisplayMetrics().density;
         TextLayouts.cacheDir = context.getCacheDir();
+        // Rust code's permission requests ask through the activity in front.
+        Permissions.track(context);
         mounter = new Mounter(this, new Images(this::readAsset));
         root = mounter.root;
         addView(root, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
@@ -233,6 +235,12 @@ public class NshView extends FrameLayout {
         // ... and the images they download in <cacheDir>/<app id>/images: nsh
         // in the cache directory.
         handle = Native.create(this, density, trace, dataDir.getPath(), cacheDir.getPath());
+        String[] rustComponents = Native.componentNames(handle);
+        if (rustComponents != null) {
+            for (String name : rustComponents) {
+                mounter.components.put(name, c -> new RustComponent(this, handle, c, name));
+            }
+        }
     }
 
     /**
@@ -270,6 +278,19 @@ public class NshView extends FrameLayout {
      */
     public void setLimits(int memoryMb, int stackKb, int loadMs, int callMs, int maxNodes) {
         Native.setLimits(handle, memoryMb, stackKb, loadMs, callMs, maxNodes);
+    }
+
+    /**
+     * Whether scroll views make the views of their content only near their
+     * viewport (true, the default), or all of it (false). Turned off, what is
+     * not made yet is made in the next frames, e.g. to draw a whole scroll
+     * view into a bitmap (a long screenshot); turned on again, what is far
+     * away is given up. Applies to the running app and the apps loaded next.
+     *
+     * @param enabled true to make content near the viewport only
+     */
+    public void setContentCulling(boolean enabled) {
+        Native.setContentCulling(handle, enabled);
     }
 
     /** Runs the apps loaded from now on as apps on their own, without limits (nsh's own activities). */
@@ -518,6 +539,7 @@ public class NshView extends FrameLayout {
             return;
         }
         mounter.components.put(name, factory);
+        if (handle != 0) Native.componentJavaRegistered(handle, name);
     }
 
     /** Hears a scroll view the host watches ({@link #watchScroll}) come and go, on the UI thread. */

@@ -52,7 +52,7 @@ Visual rules are changed in the shared layer; `nsh-base` supplies the components
 | Where | What |
 |---|---|
 | `crates/nsh-core/src/element/` | The API (`nsh_core::element`, `prelude`): `Component`, `Module`, `Class` (`class.rs`, `callback.rs`; direct JS values: `js.rs`), elements, `Styled`, `Theme`, `Registry`, the status bar's layers (`status_bar.rs`), the declarations generator `typescript` |
-| `crates/nsh-macros` | `#[component]`, `#[derive(Props)]`, `#[derive(PropEnum)]`, `#[derive(Event)]`, `#[derive(JsObject)]`; `#[methods]`, `#[module]`, `#[class]`; `#[native_module("…")]` (an app crate's set: `docs/dev/tooling.md`); `#[native_components(<platform>)]` (an app crate's native components on Windows, macOS, Linux or iOS: `docs/dev/tooling.md`); `style_helpers!` (the spacing methods of `Styled`) |
+| `crates/nsh-macros` | `#[component]`, `#[derive(Props)]`, `#[derive(PropEnum)]`, `#[derive(Event)]`, `#[derive(JsObject)]`; `#[methods]`, `#[module]`, `#[class]`; `#[native_module("…")]` (an app crate's set: `docs/dev/tooling.md`); `#[native_components(<platform>)]` (an app crate's native components on Windows, macOS, Linux, iOS or Android: `docs/dev/tooling.md`); `style_helpers!` (the spacing methods of `Styled`) |
 | `crates/nsh-core/src/core/components.rs` | The core side: instances, children and slots, events; `core/views.rs`: views, their bindings' patches and regions |
 | `crates/nsh-base/` | `nsh/base`'s components and modules, one file each (`accordion.rs`, its parts on `collapsible.rs`'s reveal, `alert_dialog.rs`, `button.rs`, `checkbox.rs`, `number_input.rs`, `radio.rs`, `slider.rs`, `switch.rs`, `tabs.rs`, `select.rs` on `listbox.rs`; `command.rs`, its items indexed once and filtered natively per query, its moves of the highlight `listbox.rs`'s; `emoji_picker/`, the emoji's data and the picker on `command.rs`'s model; `tree.rs`, its items flattened natively into the rows the expanded items show; `color_picker/`, `ColorPicker` and its parts over a color as each space's channels hold it (`model.rs`: the conversions, OKLCH's gamut mapping, the CSS forms it reads and writes); `numeric.rs`, the rules of a number in a range with a step that `Slider` follows and of a number typed as text that `NumberInput` follows; `keys.rs`, the keys a focused control binds; `TextView`, `ResizablePanelGroup`, `DockArea`, `Editor` and `DiffView` directories, `text_view/`, `resizable/`, `dock/`, `editor/`, `diff/`; `rich_editor/`, `RichEditor`'s headless kernel, `docs/dev/rich-editor.md`; `syntax.rs`, the syntax highlighting `TextView` and `Editor` share), one `Registry` (`lib.rs`) |
 | `crates/nsh-base/` | `nsh/base`'s components and modules, one file each (`accordion.rs`, its parts on `collapsible.rs`'s reveal, `alert_dialog.rs`, `button.rs`, `carousel.rs`, `avatar.rs`, `checkbox.rs`, `number_input.rs`, `radio.rs`, `slider.rs`, `switch.rs`, `tabs.rs`, `select.rs` on `listbox.rs`; `command.rs`, its items indexed once and filtered natively per query, its moves of the highlight `listbox.rs`'s; `emoji_picker/`, the emoji's data and the picker on `command.rs`'s model; `tree.rs`, its items flattened natively into the rows the expanded items show; `color_picker/`, `ColorPicker` and its parts over a color as each space's channels hold it (`model.rs`: the conversions, OKLCH's gamut mapping, the CSS forms it reads and writes); `numeric.rs`, the rules of a number in a range with a step that `Slider` follows and of a number typed as text that `NumberInput` follows; `keys.rs`, the keys a focused control binds; `TextView`, `ResizablePanelGroup`, `DockArea`, `Editor` and `DiffView` directories, `text_view/`, `resizable/`, `dock/`, `editor/`, `diff/`; `rich_editor/`, `RichEditor`'s headless kernel, `docs/dev/rich-editor.md`; `syntax.rs`, the syntax highlighting `TextView` and `Editor` share), one `Registry` (`lib.rs`) |
@@ -96,7 +96,9 @@ Visual rules are changed in the shared layer; `nsh-base` supplies the components
   AlertDialogOptions) -> Result<AlertDialogResult, String> }` is `await AlertDialog.show({ … })` in JS (`nsh-base`
   `alert_dialog.rs`). A module named like a component adds static functions to it.
 - **System UI**: `nsh_base::alert_dialog().title(..).cancel(..).destructive(..).show()` (TSX's `AlertDialog.show({ … })`:
-  await an `AlertDialogResult`, whose `action` is the chosen action's id, `None` when closed without one), `dismiss_keyboard()`, a screen's
+  await an `AlertDialogResult`, whose `action` is the chosen action's id, `None` when closed without one, and `value`
+  the text of an alert's `.input(..)`: the system's own text field where the platform's alert has one, iOS, Android,
+  macOS and the web; elsewhere the alert shows without it), `dismiss_keyboard()`, a screen's
   or modal's `.status_bar(..)` (as a view controller's `preferredStatusBarStyle`; a `StatusBarStyle` alone, a
   `StatusBarSetting` or a closure of one), `ModuleCx::set_status_bar(patch)`
   for the default under them; `.inset_padding(..)` / `.inset_margin(..)` on an element; the safe area and the keyboard as styles: `.pt_safe_area()`, `.pb_keyboard()` (`styles.md` "Environment variables").
@@ -960,8 +962,9 @@ what changed.
   lays out again; JS is not involved). Each cell's content (`Inner::VirtualRow`) is made once, under an owner of its
   own made under the owner `virtual_list` was called in (the view's, or a `when` / `dynamic` / `each` run's), so the
   rows see that run's context and are disposed with it (also when the list is passed as another component's `Items`; a list a later run keeps moves to that run, and the earlier run's end leaves it alone); it shows the row its `Position` says: a memo of the list's count and keys moves the cells' index signals
-  (`move_rows`) before the bindings that read them run, so a change runs only the bindings of the rows that changed
-  and never shows a row with another row's data. With keys, a row that stays keeps its cell and size wherever it
+  (`move_rows`), and a cell's `Position` brings that memo up to date before its index or count is read, so whichever
+  of them runs first, a binding never reads the new rows at a cell's old index: a change runs only the bindings of the
+  rows that changed and never shows a row with another row's data, not even for a moment in a memo. With keys, a row that stays keeps its cell and size wherever it
   moves, and rows removed or inserted before others leave the others alone. A cell past the end (the list shrank) disposes its content until the list binds it again.
   The header, footer and empty view are part of the view (their `CellSlot`s), outside the recycling; a separator
   goes into each row's cell, after the row (before it, inverted), while the row is not the last.
@@ -1213,10 +1216,14 @@ is for, never by replacing one popup with another everywhere:
 draws the menu. On iOS the app's content is covered by the native component `nsh/menu-button`
 (`nsh-platform-ios`'s `system_menu_button.rs`): a transparent `UIButton` whose `UIMenu`, made from the mounted items,
 is its primary action, so the tap is answered natively; the button sets itself as the element's only accessibility
-element, and an action emits `select` with the app's id. On a desktop OS a press shows the same items with
-`popup_menu`; elsewhere the content opens nothing. A `ContextMenu` given `items` is the same kind of menu on iOS: the native component
-`nsh/context-menu` (`system_context_menu.rs`) shows the system's context menu from `MenuButton`'s item data, and
-`menu.rs` reports it with the drawn menu's events; elsewhere, and without items, the menu is the drawn one. `nsh/mobile`'s `SegmentedControl` is the same kind of native
+element, and an action emits `select` with the app's id. On Android the same component is
+`MenuButtonComponent.java`: a transparent button whose tap shows the system's `PopupMenu` (`SystemMenus.java`). On a
+desktop OS a press shows the same items with `popup_menu`; on the web the content opens nothing. A `ContextMenu` given
+`items` is the same kind of menu on iOS and Android: the native component `nsh/context-menu` (`system_context_menu.rs`,
+`ContextMenuComponent.java`) shows the system's menu from `MenuButton`'s item data, and `menu.rs` reports it with the
+drawn menu's events. Android has no context menu a held finger opens by itself, so `menu.rs` keeps the drawn menu's
+hold there and asks the component with `open` (and `at`, the held point); elsewhere, and without items, the menu is
+the drawn one. `nsh/mobile`'s `SegmentedControl` is the same kind of native
 component, `nsh/segmented-control` (`system_segmented_control.rs`), built as `TabBar` is; so is its `Switch`,
 `nsh/switch` (`system_switch.rs` on iOS, `SwitchComponent.java` on Android), and its `DateTimePicker`,
 `nsh/date-time-picker` (iOS `system_date_time_picker.rs`, Android `DateTimePickerComponent.java`): values cross to the

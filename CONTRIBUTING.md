@@ -20,7 +20,15 @@ apps that never use it.
 Apps extend NSH in Rust. An app's own crate can export Rust components, modules and classes to its TSX, register
 native components, and call any platform API directly ([Building with Rust](website/docs/rust.md),
 [Native components](website/docs/native-components.md), [Platform extensions](website/docs/platform-extensions.md)).
-What one app or a few apps need belongs there, or in a community crate, not in NSH. The tools NSH already ships for
+What one app or a few apps need belongs there, or in an nshm, not in NSH.
+
+An nshm (NSH module) is an ordinary Rust crate with a `#[native_module]` entry. `nsh add` installs it from
+crates.io, Git or a local directory, and both Rust and TSX apps use the same implementation
+([nshm](website/docs/nshm.md)). Because nshm exist, "useful to some apps" is no longer a reason
+to put a feature in NSH: publish it as an nshm instead. It ships on its own schedule, and only the apps that
+install it pay its size, build time and dependencies. A feature belongs in NSH itself only when an nshm cannot
+provide it (it needs changes to the core, layout, rendering or a platform backend), or when nearly every app needs
+it. The tools NSH already ships for
 delivering apps (packaging, signing, updates) exist because every app needs to be delivered; they are not precedent
 for adding other features.
 
@@ -49,7 +57,8 @@ These need no prior issue.
 
 A new feature, one NSH does not have in any form, is accepted only when all of these hold:
 
-- **Apps cannot build it themselves**, with NSH's existing APIs or through the Rust extension points above. A
+- **Apps cannot build it themselves**, with NSH's existing APIs, through the Rust extension points above, or as an
+  nshm installed with `nsh add`. A
   WebView's page and the app already talk through `postMessage` / `onMessage` and `evaluate`, for example, so a flow
   that can go through that bridge needs no new API.
 - **Many apps need it**, not one app's scenario.
@@ -57,6 +66,9 @@ A new feature, one NSH does not have in any form, is accepted only when all of t
   nothing on some platforms, or that covers a few cases of a larger problem, is not accepted, even with documented
   "unsupported" errors.
 - **Its cost is measured and justified**: dependencies, binary size, build time and start-up time.
+
+When a proposal fails these points but the feature is still worth sharing, the answer is an nshm, not a smaller
+version in NSH; reviewers point there instead of reviewing the code.
 
 Not accepted, unless a complete design meets every point above: wrappers of individual platform APIs for specific
 scenarios (WebView cookies, downloads, page capture, developer tools and similar controls), features only some
@@ -306,6 +318,9 @@ cargo build -p nsh-cli
 ```
 
 ### Reviewing UI and platform changes
+
+Every pull request that changes the UI must include screenshots or a screen recording in its description.
+Show the affected states or interaction so reviewers can verify the change.
 
 When reviewing a UI or platform change, check whether the tests and the description cover the behavior the pull
 request claims, including its states and edge cases, on both iOS and Android. If coverage is missing, describe the

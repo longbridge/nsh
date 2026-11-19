@@ -243,8 +243,17 @@ type HostPosts = Box<dyn FnMut(&str, &nsh_core::JsonValue) + Send>;
 /// The answer to a dialog (`AlertDialog.show`, an action sheet).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DialogAnswer {
-    /// Press the button with this text.
+    /// Press the button with this text (its text field, if any, keeps the
+    /// text it started with).
     Press(String),
+    /// Type `text` into its text field ([`Dialog::input`]), replacing what
+    /// the field holds, then press the button `button`.
+    TypeAndPress {
+        /// What the field holds when the button is pressed.
+        text: String,
+        /// The text of the button to press.
+        button: String,
+    },
     /// Close it without a button (tapping outside, the back button).
     Dismiss,
 }
@@ -1551,19 +1560,45 @@ impl Headless {
     /// Answers the oldest dialog not answered yet.
     fn answer(&mut self, answer: DialogAnswer) -> Result<(), String> {
         let dialog = self.screen.pending_dialog().ok_or("no dialog to answer")?;
+        let typed = match &answer {
+            DialogAnswer::TypeAndPress { text, .. } if dialog.input.is_none() => {
+                return Err(format!(
+                    "the dialog {} has no text field to type {text:?} into",
+                    describe(dialog)
+                ));
+            }
+            DialogAnswer::TypeAndPress { text, .. } => Some(text.as_str()),
+            _ => None,
+        };
+        // The field's text as the user leaves it.
+        let value = dialog
+            .input
+            .as_ref()
+            .map(|input| typed.unwrap_or(&input.text).to_owned());
         let index = match &answer {
-            DialogAnswer::Press(text) => dialog
-                .buttons
-                .iter()
-                .position(|b| b.text == *text)
-                .ok_or_else(|| {
-                    let buttons: Vec<&str> =
-                        dialog.buttons.iter().map(|b| b.text.as_str()).collect();
-                    format!(
-                        "the dialog {} has no button {text:?}: {buttons:?}",
+            DialogAnswer::Press(text) | DialogAnswer::TypeAndPress { button: text, .. } => {
+                let index = dialog
+                    .buttons
+                    .iter()
+                    .position(|b| b.text == *text)
+                    .ok_or_else(|| {
+                        let buttons: Vec<&str> =
+                            dialog.buttons.iter().map(|b| b.text.as_str()).collect();
+                        format!(
+                            "the dialog {} has no button {text:?}: {buttons:?}",
+                            describe(dialog)
+                        )
+                    })?;
+                if let (Some(input), Some(value)) = (&dialog.input, &value)
+                    && !input.enables(&dialog.buttons[index], value)
+                {
+                    return Err(format!(
+                        "the button {text:?} of the dialog {} is disabled while its text field is empty",
                         describe(dialog)
-                    )
-                })? as f64,
+                    ));
+                }
+                index as f64
+            }
             DialogAnswer::Dismiss if dialog.cancelable => -1.0,
             DialogAnswer::Dismiss => {
                 return Err(format!(
@@ -1574,13 +1609,17 @@ impl Headless {
         };
         let id = f64::from(dialog.id);
         self.screen.answered();
+        let mut payload = vec![
+            ("id", PayloadValue::Number(id)),
+            ("index", PayloadValue::Number(index)),
+        ];
+        if let Some(value) = value {
+            payload.push(("value", PayloadValue::Str(value)));
+        }
         self.engine.control().dispatch_event(
             ROOT_ID,
             EventKind::Dialog,
-            EventPayload::Map(vec![
-                ("id", PayloadValue::Number(id)),
-                ("index", PayloadValue::Number(index)),
-            ]),
+            EventPayload::Map(payload),
         );
         Ok(())
     }
@@ -2077,6 +2116,7 @@ impl Headless {
             && !input.text.is_empty()
         {
             input.text.clear();
+            input.selected_all = false;
             input.count += 1;
             let payload = EventPayload::Text {
                 text: String::new(),
@@ -2091,7 +2131,8 @@ impl Headless {
     }
 
     /// The step `type(<selector>, <text>)`: types `text` at the caret of
-    /// the input `selector` names (here always the end of its text; a view
+    /// the input `selector` names (here always the end of its text, or over
+    /// it all while `selectTextOnFocus` selected it; a view
     /// that keeps its own selection, such as `Editor`, types over it, as
     /// the native drivers do) (the matching view, or the first input in
     /// it; `text:` also matches what an input holds or its placeholder),
@@ -2155,12 +2196,21 @@ impl Headless {
             return;
         }
         let mut text = nsh_core::text_edit::pasted(text, input.config.multiline);
+        // A whole selected text is replaced.
+        let kept = if input.selected_all {
+            0
+        } else {
+            char_len(&input.text)
+        };
         if let Some(max) = input.config.max_length {
-            let room = (max as usize).saturating_sub(char_len(&input.text));
+            let room = (max as usize).saturating_sub(kept);
             text.truncate(clip_chars(&text, room).len());
         }
         if text.is_empty() {
             return;
+        }
+        if std::mem::take(&mut input.selected_all) {
+            input.text.clear();
         }
         input.text.push_str(&text);
         input.count += 1;
@@ -2243,6 +2293,7 @@ impl Headless {
             self.screen.set_focused(Some(id));
             self.set_focused_state(id, true);
             self.send(id, EventKind::Focus, EventPayload::None);
+            self.select_on_focus(id);
         }
         Ok(id)
     }
@@ -2311,13 +2362,21 @@ impl Headless {
         let Some(input) = self.screen.input_mut(id) else {
             return;
         };
-        let length = char_len(&input.text) + 1;
+        // A whole selected text is replaced.
+        let kept = if input.selected_all {
+            0
+        } else {
+            char_len(&input.text)
+        };
         if input
             .config
             .max_length
-            .is_some_and(|max| length > max as usize)
+            .is_some_and(|max| kept + 1 > max as usize)
         {
             return;
+        }
+        if std::mem::take(&mut input.selected_all) {
+            input.text.clear();
         }
         input.text.push(c);
         input.count += 1;
@@ -2331,6 +2390,27 @@ impl Headless {
             .control()
             .dispatch_event(id, EventKind::ChangeText, payload);
         self.report_selection(id);
+    }
+
+    /// Input `id` took the focus: with `selectTextOnFocus` its whole text
+    /// is selected, reported as the platforms report a selection.
+    pub(crate) fn select_on_focus(&mut self, id: NodeId) {
+        let Some(input) = self.screen.input_mut(id) else {
+            return;
+        };
+        if !input.config.select_text_on_focus {
+            return;
+        }
+        input.selected_all = true;
+        let end = input.text.encode_utf16().count() as f64;
+        self.send(
+            id,
+            EventKind::SelectionChange,
+            EventPayload::Map(vec![
+                ("start", PayloadValue::Number(0.0)),
+                ("end", PayloadValue::Number(end)),
+            ]),
+        );
     }
 
     /// `onSelectionChange` and `onCaretMove` of input `id` after an edit,
@@ -3597,8 +3677,8 @@ mod tests {
         ))
     }
 
-    /// The approximate engine's line: characters 0.55 em wide, the line
-    /// 1.2 em with its baseline at the bottom, so the ascent is the line
+    /// The approximate engine's unspaced line: characters 0.55 em wide, the
+    /// line 1.2 em with its baseline at the bottom, so the ascent is the line
     /// and the descent is 0.
     #[test]
     fn text_metrics_are_the_engines_line() {

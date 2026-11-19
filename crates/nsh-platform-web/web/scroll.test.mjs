@@ -70,6 +70,34 @@ test('scrollbar={false} hides the bar on either axis', () => {
   }
 });
 
+test('scrollbarInset keeps the bar clear of bars floating over the view', () => {
+  shown.length = 0;
+  const el = scroll();
+  el._behavior = { enabled: true, bar: [20, 10, 60, 0] };
+  // Its track runs between the top and bottom insets.
+  assert.deepEqual(player.barThumb(el).slice(0, 2), [22, 32]);
+  el.scrollTop = 600;
+  const [start, len] = player.barThumb(el);
+  assert.equal(start + len, 200 - 60 - 2);
+  el.scrollTop = 0;
+  // It runs along the right edge moved in by the right inset.
+  assert.equal(player.barEdge(el), 290);
+  player.hoverBar(el, { clientX: 40 + 285, clientY: 30 + 30 });
+  assert.deepEqual(shown, [el]);
+  shown.length = 0;
+  player.hoverBar(el, { clientX: 40 + 295, clientY: 30 + 30 });
+  player.hoverBar(el, { clientX: 40 + 285, clientY: 30 + 10 });
+  assert.equal(shown.length, 0);
+  // No room between the insets: no bar.
+  el._behavior.bar = [100, 0, 95, 0];
+  assert.equal(player.barThumb(el), null);
+  // A horizontal one runs between the left and right insets, up by the bottom one.
+  const h = scroll(true);
+  h._behavior = { enabled: true, bar: [0, 30, 20, 10] };
+  assert.equal(player.barThumb(h)[0], 12);
+  assert.equal(player.barEdge(h), 180);
+});
+
 // Sticky list cells: the few DOM operations their tracks use.
 class Node {
   constructor(props) {
@@ -365,6 +393,38 @@ test('the command end fallback waits while a smooth scroll moves', (t) => {
   p.scrollEnded(el);
   t.mock.timers.tick(200);
   assert.deepEqual(ends, [400]);
+});
+
+test('the anchoring scroll of a list does not stop the smooth scroll beside it', (t) => {
+  t.mock.method(performance, 'now', () => clock);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { p, el } = scroller();
+  p.call = () => {};
+  el.scrollTop = 2000;
+  // A browser that takes a smooth scroll's target and glides there over
+  // its own frames, and stops gliding when an offset is set.
+  let target = null;
+  el.scrollTo = ({ top, behavior }) => {
+    if (behavior === 'smooth') target = top;
+    else (target = null), (el.scrollTop = top);
+  };
+  const glide = (to) => { el.scrollTop = to; p.scrolled(el); };
+  // The commit that loads a page of rows above an inverted list: it keeps
+  // what shows in place, then scrolls to one of the rows it loaded.
+  p.op_sb(['sb', 1, 0, 1200]);
+  p.op_cmd(['cmd', 1, 'scrollTo', 0, 0, true]);
+  assert.equal(target, 0);
+  // The browser's `scrollend` for the anchoring scroll arrives once the
+  // smooth scroll beside it is on its way: not its end.
+  p.scrollEnded(el);
+  assert.deepEqual(el._smooth, [0, 0]);
+  glide(2600);
+  // So the next commit's anchoring moves the target along, rather than
+  // setting the offset, which would stop the browser's scroll.
+  p.op_sb(['sb', 1, 0, 400]);
+  assert.equal(el.scrollTop, 2600);
+  assert.deepEqual(el._smooth, [0, 400]);
+  assert.equal(target, 400);
 });
 
 test('a glide whose frames stop ends where it was going, once', (t) => {

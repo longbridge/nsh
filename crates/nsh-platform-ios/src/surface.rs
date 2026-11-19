@@ -151,6 +151,9 @@ pub(crate) struct RootViewIvars {
     observers: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
     /// Links that came before the engine started ([`Surface::url_scheme`]).
     url_schemes: RefCell<Vec<String>>,
+    /// Whether scroll views make their content's views only near their
+    /// viewport ([`Surface::set_content_culling`]).
+    content_culling: Cell<bool>,
     #[cfg(feature = "dev")]
     test_model: TestModel,
 }
@@ -292,6 +295,7 @@ define_class!(
         fn presses_began(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
             let consumed = self.target().is_some_and(|target| {
                 crate::keymap::root_began(&target, presses)
+                    || crate::keyboard::root_raw(self, &target, presses, true)
                     || crate::keyboard::root_tab(self, &target, presses)
             });
             if !consumed {
@@ -304,7 +308,10 @@ define_class!(
         fn presses_ended(&self, presses: &NSSet<UIPress>, event: Option<&UIPressesEvent>) {
             let consumed = self
                 .target()
-                .is_some_and(|target| crate::keymap::ended(&target, presses));
+                .is_some_and(|target| {
+                    crate::keymap::ended(&target, presses)
+                        | crate::keyboard::root_raw(self, &target, presses, false)
+                });
             if !consumed {
                 // SAFETY: calling the superclass implementation.
                 let _: () = unsafe { msg_send![super(self), pressesEnded: presses, withEvent: event] };
@@ -355,6 +362,7 @@ impl RootView {
         app: App,
         options: SurfaceOptions,
     ) -> Retained<Self> {
+        let content_culling = options.content_culling;
         let this = Self::alloc(mtm).set_ivars(RootViewIvars {
             pending: RefCell::new(Some(app)),
             running: RefCell::new(None),
@@ -370,6 +378,7 @@ impl RootView {
             fonts: RefCell::new(Vec::new()),
             observers: RefCell::new(Vec::new()),
             url_schemes: RefCell::new(Vec::new()),
+            content_culling: Cell::new(content_culling),
             #[cfg(feature = "dev")]
             test_model: TestModel::default(),
         });
@@ -852,7 +861,7 @@ impl RootView {
             app,
             viewport,
             trace: self.ivars().options.trace,
-            content_culling: true,
+            content_culling: self.ivars().content_culling.get(),
             network: Some(crate::net::network()),
             websocket: None,
             refuse_connections: None,
@@ -1037,6 +1046,10 @@ pub struct SurfaceOptions {
     /// False by default; the release runner sets it when the bundle declares
     /// that type (`nsh.json` `"handoff": true`).
     pub handoff: bool,
+    /// Scroll views make the views of their content only near their
+    /// viewport (true, the default), or all of it
+    /// ([`Surface::set_content_culling`]).
+    pub content_culling: bool,
 }
 
 impl Default for SurfaceOptions {
@@ -1055,6 +1068,7 @@ impl Default for SurfaceOptions {
             host: nsh_engine::HostChannel::default(),
             fps: false,
             handoff: false,
+            content_culling: true,
         }
     }
 }
@@ -1214,6 +1228,18 @@ impl Surface {
         match &*self.view.ivars().running.borrow() {
             Some(running) => send_url_scheme(&running.engine.control(), url),
             None => self.view.ivars().url_schemes.borrow_mut().push(url),
+        }
+    }
+
+    /// Whether scroll views make the views of their content only near
+    /// their viewport (the default), or all of it, for the running app and
+    /// the apps started later. Turned off, what is not made yet is made in
+    /// the next frames (to draw a whole scroll view, for a long
+    /// screenshot); turned on again, what is far away is given up.
+    pub fn set_content_culling(&self, enabled: bool) {
+        self.view.ivars().content_culling.set(enabled);
+        if let Some(running) = &*self.view.ivars().running.borrow() {
+            running.engine.control().set_content_culling(enabled);
         }
     }
 

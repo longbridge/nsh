@@ -63,7 +63,7 @@ use crate::{animation::UiAnimation, encode::Out, text::WebTextEngine};
 pub use crate::{
     filesystem::nsh_filesystem_reply,
     net::{nsh_fetch_body_wanted, nsh_fetch_data, nsh_fetch_end, nsh_fetch_failed, nsh_fetch_head},
-    storage::nsh_storage_reply,
+    storage::{nsh_storage_changed, nsh_storage_reply},
     websocket::{nsh_websocket_event, nsh_websocket_reply},
 };
 
@@ -691,7 +691,7 @@ pub unsafe extern "C" fn nsh_data(
 /// Starts `app` in the page's surface.
 fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limits) -> f64 {
     let storage =
-        BASE_URL.with(|b| storage::LocalStorage::new(app.app_id(), b.borrow().as_deref()));
+        BASE_URL.with(|b| storage::LocalStorage::open(app.app_id(), b.borrow().as_deref()));
     let namespace = BASE_URL.with(|b| {
         nsh_engine::local_storage_prefix(app.app_id(), b.borrow().as_deref().unwrap_or(""))
     });
@@ -718,7 +718,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         filesystem: Some(std::sync::Arc::new(filesystem::BrowserFileSystem {
             namespace,
         })),
-        storage: Some(std::sync::Arc::new(storage)),
+        storage: Some(storage),
         clock: Default::default(),
         context: Default::default(),
         pinned: Default::default(),
@@ -1085,8 +1085,9 @@ fn flush() {
         for uri in app.inline_images.prune() {
             ffi::release_image(&uri);
         }
-        // Bound properties follow the styles just applied.
-        app.animation.outputs(&mut out);
+        // Bound properties follow the styles just applied: all of them, so
+        // what the batch inserted gets its values.
+        app.animation.outputs(&mut out, true);
         if !out.is_empty() {
             ffi::submit(&out.finish());
         }
@@ -1149,20 +1150,21 @@ fn send(f: impl FnOnce(&mut Running)) -> f64 {
     pump()
 }
 
-/// A display frame (`requestAnimationFrame`, `now` in ms), or one the page
-/// runs at a deadline while frames stop ([`nsh_deadline`]): ticks the
-/// native animations and runs JS's frame callbacks. Returns the pump
-/// delay.
+/// A display frame (`requestAnimationFrame`, `now` in ms; `drawn` 1), or
+/// one the page runs at a deadline while frames stop ([`nsh_deadline`];
+/// `drawn` 0, which keeps the real time:
+/// [`nsh_core::animation::Graph::tick_frame`]): ticks the native animations
+/// and runs JS's frame callbacks. Returns the pump delay.
 #[unsafe(no_mangle)]
-pub extern "C" fn nsh_frame(now: f64) -> f64 {
+pub extern "C" fn nsh_frame(now: f64, drawn: u32) -> f64 {
     APP.with(|a| {
         let mut app = a.borrow_mut();
         let Some(app) = app.as_mut() else { return };
         if app.animation.animating() {
             // The animation graph's clock is in seconds.
-            app.animation.tick(now / 1000.0);
+            app.animation.tick(now / 1000.0, drawn != 0);
             let mut out = Out::new();
-            app.animation.outputs(&mut out);
+            app.animation.outputs(&mut out, false);
             if !out.is_empty() {
                 ffi::submit(&out.finish());
             }
@@ -1710,7 +1712,7 @@ pub extern "C" fn nsh_scroll(id: u32, x: f32, y: f32, applied: u32) -> f64 {
     send(|app| {
         if app.animation.scrolled(id, x, y) {
             let mut out = Out::new();
-            app.animation.outputs(&mut out);
+            app.animation.outputs(&mut out, false);
             if !out.is_empty() {
                 ffi::submit(&out.finish());
             }
@@ -1766,7 +1768,7 @@ pub extern "C" fn nsh_pull(id: u32, distance: f32) -> f64 {
     send(|app| {
         if app.animation.pulled(id, distance) {
             let mut out = Out::new();
-            app.animation.outputs(&mut out);
+            app.animation.outputs(&mut out, false);
             if !out.is_empty() {
                 ffi::submit(&out.finish());
             }
@@ -1799,7 +1801,7 @@ pub extern "C" fn nsh_pan(id: u32, phase: u32, tx: f32, ty: f32, vx: f32, vy: f3
             _ => app.animation.pan_moved(id, tx, ty),
         }
         let mut out = Out::new();
-        app.animation.outputs(&mut out);
+        app.animation.outputs(&mut out, false);
         if !out.is_empty() {
             ffi::submit(&out.finish());
         }
@@ -1841,7 +1843,7 @@ pub extern "C" fn nsh_transform_gesture(id: u32, rotation: u32, phase: u32, amou
             _ => app.animation.transform_moved(id, rotation, amount),
         }
         let mut out = Out::new();
-        app.animation.outputs(&mut out);
+        app.animation.outputs(&mut out, false);
         if !out.is_empty() {
             ffi::submit(&out.finish());
         }

@@ -523,13 +523,32 @@ pub(crate) type PlaceFn = Rc<dyn Fn(Child, Position) -> AnyElement>;
 pub struct Position {
     index: super::reactive::Node,
     count: super::reactive::Node,
+    /// The memo that writes the index and the count as the rows change (a
+    /// keyed or bound list's): run before they are read, so a computation
+    /// reading the rows' data and the position in the same change reads
+    /// the new data at the new index, whichever of the two runs first.
+    rows: Option<super::reactive::Node>,
 }
 
 impl Position {
     /// The position read from signals (or memos) of the index and the
     /// count.
     pub(crate) fn of(index: super::reactive::Node, count: super::reactive::Node) -> Self {
-        Self { index, count }
+        Self {
+            index,
+            count,
+            rows: None,
+        }
+    }
+
+    /// The position of a list row: its index and the count are signals
+    /// memo `rows` writes as the rows change.
+    pub(crate) fn of_row(
+        index: super::reactive::Node,
+        count: super::reactive::Node,
+        rows: Option<super::reactive::Node>,
+    ) -> Self {
+        Self { index, count, rows }
     }
 
     /// A position that does not change (signals of the current owner).
@@ -540,12 +559,27 @@ impl Position {
     /// Its index, subscribing the running computation.
     #[track_caller]
     pub fn index(&self) -> usize {
+        if let Some(rows) = self.rows
+            && rows.is_outdated()
+        {
+            let before = self.index.with_untracked("a position", |i: &usize| *i);
+            rows.bring_up_to_date();
+            // The row went, and its cell's content with it (the running
+            // computation too, if it is the cell's): what it reads now is
+            // dropped.
+            if !self.index.is_live() {
+                return before;
+            }
+        }
         self.index.with("a position", |i: &usize| *i)
     }
 
     /// How many there are, subscribing the running computation.
     #[track_caller]
     pub fn count(&self) -> usize {
+        if let Some(rows) = self.rows {
+            rows.bring_up_to_date();
+        }
         self.count.with("a position", |n: &usize| *n)
     }
 
@@ -1051,6 +1085,19 @@ pub trait Element: IntoElement + Sized {
             if area || a.rare.is_some() {
                 a.rare_mut().selectable_view = area;
             }
+        });
+        self
+    }
+
+    /// The highlight of the selections of the texts and inputs in the
+    /// view that set none of their own, as TSX's `selection:bg-*` class
+    /// (Tailwind's `& *::selection`): the nearest view around a text that
+    /// sets one decides, a text's or an input's own color wins. Android
+    /// tints the selection handles of a selectable view
+    /// ([`Self::selectable`]) and of an input in it too.
+    fn selection_color(mut self, color: impl IntoReactive<Hsla>) -> Self {
+        super::host::bind_prop(self.node(), color, |c: Hsla| {
+            Prop::SelectionColor(Some(Color::from(c)))
         });
         self
     }
@@ -2168,6 +2215,29 @@ pub trait Interactive: Element {
     /// The system material of a backdrop blur (iOS).
     fn backdrop_material(mut self, material: crate::BackdropMaterial) -> Self {
         super::host::set(self.node(), Prop::BackdropMaterial(material));
+        self
+    }
+
+    /// The scroll view it floats over and the edge of it it sits at
+    /// (`ios={{ scrollEdgeElement }}`): a bottom toolbar, a floating button
+    /// placed over a list. From iOS 26 the scroll edge effect of that
+    /// scroll view takes its shape from what the view shows, as it does
+    /// from a bar, so the content scrolled under it fades out instead of
+    /// being cut by it. Elsewhere a fade the app draws under the view
+    /// gives the same separation. `None` names none.
+    fn scroll_edge_element(
+        mut self,
+        scroll_view: impl IntoReactive<Option<super::ElementRef>>,
+        edge: crate::ScrollEdge,
+    ) -> Self {
+        let target =
+            scroll_view
+                .into_reactive()
+                .map(move |scroll_view: Option<super::ElementRef>| {
+                    let scroll_view = scroll_view?.element_target()?;
+                    Some(super::ScrollEdgeTarget { scroll_view, edge })
+                });
+        super::host::bind_prop(self.node(), target, Prop::ScrollEdgeElement);
         self
     }
 

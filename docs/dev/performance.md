@@ -33,6 +33,24 @@ as test drivers have it, every block's view is made):
 `rows_mounted_at_once_are_placed_without_a_search_for_each` keeps the siblings and overlays looked at in step with
 the rows (four times the rows: about four times the work, sixteen before).
 
+Many components whose root is not a plain view mounted at once (2026-11-18, Linux x86_64, Intel Core Ultra 7 270K
+Plus, release, against `0713ce96d`): a tooltip's hint overlay or a text as a component's root takes its kind when
+the component renders, and each such root went through all the mount items of the batch, so a document with a
+tooltip in every code block grew with the square of its blocks. It now grows with them within a round of renders (a
+batch that makes such roots over several rounds, as rows scroll into sight, still goes over its items once a round).
+`cargo test --release -p
+nsh-core --lib bench_component_roots_mount -- --ignored --nocapture`, ms from `mount_root` to the first
+`MountBatch` (`FakeEngine`), the least of three rounds; the mount items are the same before and after:
+
+| Rows of an `each`, a tooltip in each | 1,000 | 10,000 | 20,000 |
+|---|---:|---:|---:|
+| In a view | 20.4 → 6.7 | 1,745.8 → 198.5 | 6,786.7 → 339.5 |
+| In a scroll view (the rows out of sight culled) | 8.9 → 8.6 | 156.2 → 142.5 | 427.9 → 323.8 |
+
+`component_roots_mounted_at_once_take_their_kind_without_a_pass_for_each` keeps the mount items looked at in step
+with the rows: for 400 and 1,600 rows in a view, 4,814 and 19,214 items looked at (1,606,400 and 25,625,600
+before, sixteen times).
+
 Words fading into a long paragraph (`text_view` with a Markdown plugin, 2026-11-18, Linux x86_64, Ryzen 9 7950X,
 release, one CPU): a streamed paragraph whose newest words are spans, hidden until their turn and then fading in
 by their text color, about 30 frames a second, two words arriving a frame; a word done fading joins the plain text
@@ -430,6 +448,34 @@ make the same commits (19 ops, 9,277 mount items, 16,657 nodes, then 1 op and 1 
 replacement) and every mount item of every step is the same. The first commit takes
 522 → 427 ms, a replacement's 204.5 → 106.9 ms (parsing, expansion and layout; no native
 mounting or drawing).
+
+`TextView` long text (`text_view/markdown/incremental.rs`, 2026-11-18, Linux x86_64, Intel Core
+Ultra 7 270K Plus, release, one CPU with `taskset`, least of three runs, other work on the
+machine): one parse of a whole text grows faster than the text, so a long text given at once is
+read in parts the way a streamed one is (`text-view.md` "Reading only what can change").
+`cargo test --release -p nsh-base --lib bench_long_texts -- --ignored --nocapture` reads each text
+both ways, without a plugin and with one that reads paragraphs, headings, code, formulas and tables
+(the test's `Where`), and checks that the documents are equal. Sections are a heading, a paragraph
+with a link and bold words, and a two-item list; the typical reply is the streaming benchmarks'
+text repeated. ms, one parse / in parts:
+
+| Text | Size | Without a plugin | With a plugin |
+|---|---|---|---|
+| Sections | 190 KB | 59.3 / 37.1 | 57.9 / 37.9 |
+| Sections | 475 KB | 234.2 / 91.1 | 237.6 / 94.5 |
+| Sections | 950 KB | 727.3 / 184.3 | 733.8 / 189.9 |
+| Sections | 1.9 MB | 2444.6 / 369.3 | 2435.8 / 376.7 |
+| Typical reply | 950 KB | 3902.6 / 454.9 | 3938.1 / 408.4 |
+| Typical reply | 1.9 MB | 21113.9 / 734.1 | 21153.4 / 805.1 |
+| One table, 20,000 rows | 928 KB | 18485.0 / 17214.1 | 17335.0 / 17283.7 |
+| One list, 20,000 items | 848 KB | 452.8 / 460.5 | 490.6 / 471.9 |
+| One code block, 20,000 lines | 1.1 MB | 101.3 / 101.5 | 99.4 / 101.2 |
+
+A plugin costs about nothing next to the parse; until plugins were read in parts, a text read
+with one took the one-parse column. A text up to twice the part's size, and one read whole
+(definitions, plugins that turn a construct on or off, containers, MDX), is parsed once as before.
+A text the boundary cannot cross costs what one parse does: the table, list and code block are
+within noise. The table's own parse still grows with the square of its rows, inside `markdown-rs`.
 
 Terminal `TextView` tables (2026-11-08, Linux x86_64, debug hosts,
 `nsh test <entry> --target tui --trace`, against `71aeb06a`, seven alternating runs per version, medians):

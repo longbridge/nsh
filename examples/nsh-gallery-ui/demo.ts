@@ -117,8 +117,8 @@ export type FieldOptions = FieldLookOptions;
 export const field = inputLook;
 
 /** The subject in a wide window: a quiet bordered stage (the theme's card
- * corners, a whisper of the text color) that takes the room and centers its
- * content, at most `width` across (440). */
+ * corners, a whisper of the text color) as tall as its content, which it
+ * centers across, at most `width` wide (440). */
 export function Stage(props: { children?: __JSX.Element; width?: number; gap?: number }) {
   return __View({
     get style() {
@@ -130,8 +130,8 @@ export function Stage(props: { children?: __JSX.Element; width?: number; gap?: n
         borderColor: ui().line,
         backgroundColor: tint(ui().text, 0.02),
         padding: 24,
+        alignSelf: "flex-start" as const,
         alignItems: "center" as const,
-        justifyContent: "center" as const,
       };
     },
     get children() {

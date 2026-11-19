@@ -217,6 +217,61 @@ fn dragging_selects_text_and_replacing_it_is_one_edit() {
 }
 
 #[test]
+fn select_text_on_focus_selects_all_unless_the_press_selects() {
+    use nsh_platform_tui::{MouseButton::Left, MouseKind};
+    let (mut view, mut terminal, rx) = field("defaultValue=\"abcdef\" selectTextOnFocus");
+    // Tab's focus selects all.
+    draw_until(&mut view, &mut terminal, &rx, "sel:0-6");
+    view.handle(key("Right"));
+    draw_until(&mut view, &mut terminal, &rx, "sel:6-6");
+    let press = |view: &mut nsh_platform_tui::AppView, steps: &[(MouseKind, u16)], shift| {
+        for &(kind, column) in steps {
+            let mut input = super::app::mouse(kind, column, 0);
+            if let nsh_platform_tui::Input::Mouse(mouse) = &mut input {
+                mouse.modifiers.shift = shift;
+            }
+            view.handle(input);
+        }
+    };
+    // A click that focuses selects all; one on the focused field places the caret.
+    view.handle(key("Escape"));
+    press(
+        &mut view,
+        &[(MouseKind::Down(Left), 2), (MouseKind::Up(Left), 2)],
+        false,
+    );
+    draw_until(&mut view, &mut terminal, &rx, "sel:0-6");
+    press(
+        &mut view,
+        &[(MouseKind::Down(Left), 3), (MouseKind::Up(Left), 3)],
+        false,
+    );
+    draw_until(&mut view, &mut terminal, &rx, "sel:3-3");
+    // A drag that focuses selects its own range.
+    view.handle(key("Escape"));
+    press(
+        &mut view,
+        &[
+            (MouseKind::Down(Left), 1),
+            (MouseKind::Move, 4),
+            (MouseKind::Up(Left), 4),
+        ],
+        false,
+    );
+    draw_until(&mut view, &mut terminal, &rx, "sel:1-4");
+    // A Shift-click that focuses extends the field's selection.
+    view.handle(key("End"));
+    draw_until(&mut view, &mut terminal, &rx, "sel:6-6");
+    view.handle(key("Escape"));
+    press(
+        &mut view,
+        &[(MouseKind::Down(Left), 2), (MouseKind::Up(Left), 2)],
+        true,
+    );
+    draw_until(&mut view, &mut terminal, &rx, "sel:2-6");
+}
+
+#[test]
 fn controlled_round_trips_do_not_erase_a_burst_of_typing() {
     let code = nsh_bundler::compile_module(
         "App.tsx",

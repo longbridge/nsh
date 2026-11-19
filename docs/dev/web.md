@@ -99,6 +99,8 @@ of garbage-collection timing or whether a detached realm resumes its JavaScript 
 Chromium's `--suite interaction` checks every state style (`hoverStyle` / `activeStyle` under real mouse input,
 `focusStyle` / `focusWithinStyle` under Tab), a list's `contentClass`, a scroll view's `contentStyle` /
 `contentClass` (children inserted before and after its content container is made), platform props and tooltips.
+It also sends mouse, pen and touch input through Wasm and the realm bootstrap to check the pointer fields
+on `onTouchMove`, `touches` and `changedTouches`.
 `--suite all` combines the two suites. Firefox and WebKit select `lifecycle` explicitly. The website CI builds
 Wasm once and runs Chromium `all`, Firefox `lifecycle` and WebKit `lifecycle` serially, reporting all engines
 before failing the step.
@@ -473,7 +475,7 @@ the player holds it only while the app listens, and drops it on `reset()` and wh
 The app ends with the page. While an app runs, the player holds a `pagehide` listener (`Player.watchPageEnd`, which does
 not affect the back / forward cache): a `pagehide` that discards the page (not `persisted`) starts the app's quit
 listeners (`nsh_quit` → `LocalEngine::start_quit`, once per app), however the user left; a page kept in the cache keeps
-its app running. `nsh test --target web` closes its pages with `Target.closeTarget`, which runs no `beforeunload`.
+its app running, in the background until it is shown again (`Player.watchPageCache`). `nsh test --target web` closes its pages with `Target.closeTarget`, which runs no `beforeunload`.
 
 ## The playground's compiler
 
@@ -494,7 +496,8 @@ browserslist queries). `nsh.js` gives every import it does not know a stub that 
 when the JSON differs): `idiom`, `locale` (`navigator.languages[0]`), `languages` (`navigator.languages`, the locale
 first), `regional` (the locale's hour cycle and first day of the week from `Intl`, the rest the region's), `timeZone`
 (`Intl.DateTimeFormat().resolvedOptions().timeZone`), `lifecycle` (`background` while `document.visibilityState` is
-`hidden`, else `active` with the focus and `inactive` without), `rtl` (`<html dir>`, else the locale's script),
+`hidden` or the page is in the back / forward cache, from a `persisted` `pagehide` to a `persisted` `pageshow`, else
+`active` with the focus and `inactive` without), `rtl` (`<html dir>`, else the locale's script),
 `reduceMotion`, `fontScale` (the root font size / 16), `pixelRatio`, `safeArea` (`env(safe-area-inset-*)` read through a
 hidden probe element, clipped to the container) and `keyboard` (the container's part below `visualViewport`). The Rust
 side keeps it (`PAGE`) for the next start; the appearance and the window keep their own calls (`nsh_set_dark`,
@@ -550,8 +553,15 @@ measured against it frame by frame (`requestAnimationFrame` samplers of computed
 
 - **Animated values** (`src/animation.rs`): the graph's clock is in seconds (`Graph::tick`), so `nsh_frame` divides the
   `requestAnimationFrame` time (ms) by 1000; passing milliseconds ended every `timing` / `spring` / `decay` on its
-  first frame. Bound values are inline styles: a property bound no more (its view taken over by an element without
+  first frame. That time is the frame's, when it began, unless its callbacks run more than `FRAME_HELD_MS` (16 ms)
+  after it: a task held the frame (a press handled before the callbacks, whose code mounted a sheet and started its
+  entrance), and the frame steps at the time its callbacks run (`Player.frameTime`), never earlier than the frame
+  before. Stepped at the frame's time, an animation the task started began before it was asked for, and its first
+  drawn step was as far along as the task took. Bound values are inline styles: a property bound no more (its view taken over by an element without
   the binding) is cleared from them with the next output (`["a", view, prop, ""]`), so the view shows its own style.
+  After a batch every bound value goes out, so what it inserted (again) gets its values; on a frame, a gesture or a
+  scroll only the values that changed since they last went (`UiAnimation::outputs`), so values that hold still cost a
+  frame nothing however many views hold them.
 - **Without frames** (a hidden tab, and often an iframe out of view: browsers run no `requestAnimationFrame` there),
   what an animation ends still happens on time, as on macOS (`Surface::keep_deadline`). After each call into the
   engine that asked for a frame, `Player.keepDeadline` asks `nsh_deadline` when the graph next has an animation that
@@ -715,6 +725,9 @@ browsers' touches into what phones report:
   scrolling is the browser's: a `pointercancel` in a scroll view starts its drag, `touchend` ends it, a scroll within
   150 ms after it begins the glide, `scrollend` ends it (`touchScroll`, `scrolled`, `scrollEnded`). A scroll view
   along one axis contains only that axis's overscroll, so a swipe across it chains to the scroll view around it.
+  One whose content fits along its axis (`nsh-fits`, kept by `scrollFits` as its content and frame change) contains
+  none, so a swipe along it chains too, as Android's scroll view hands its parent what it cannot take; a zoomable
+  one keeps its own.
   A touch responder that blocks native scrolling (`setResponder`: a `TouchClaim` with `block_native`, JS's
   `onResponderGrant` returning true) keeps its touches: a non-passive `touchmove` on the root prevents the browser's
   scroll while it holds them (`responderBlocks`), unless the browser already scrolls (`cancelable` false).
@@ -777,7 +790,11 @@ browsers' touches into what phones report:
 - **Focus**: the stops `ViewProps::focus_stop` decides are focusable (`tabindex=0`; `updateFocusable`): pressables
   (role `button` unless they have one) unless `focusable={false}`, and `focusable={true}` views whether or not they take
   presses (Return and Space press only pressables), never disabled or hidden ones (a focused one that stops being a
-  stop is blurred), so Tab and Shift+Tab reach them in DOM order, but for a scroll view's content and a list's cells in its parent's viewport (`ViewProps::screen_order`,
+  stop is blurred), nor ones with no area (`seenByKeys`): the core lays out each view of a `display: none` subtree at no
+  size, which hides nothing in a browser, so such a view is no stop (`tabindex=-1` where the browser would stop at it
+  without one: a link's `<a href>`, a `web={{ element }}` button), nor is an input's field there (`fieldStop`:
+  `tabindex=-1` while its view or its content box has no area), as on macOS (`NshView::seen_by_keys`). A view that is
+  shown but has no area (a pressable holding only an absolutely positioned child) is no stop either. So Tab and Shift+Tab reach them in DOM order, but for a scroll view's content and a list's cells in its parent's viewport (`ViewProps::screen_order`,
   `screenOrder`): where the browser takes
   `reading-flow` (Chromium), it is read in the order it is on screen (`orderReading`: `reading-order` on its children,
   the DOM, which is also their paint order, left alone), as a list's recycled cells are not in their rows' order in it; `focus:` states follow the keyboard focus (`focus-visible:` while it shows, as the browser's `:focus-visible`), and
@@ -1011,11 +1028,13 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   carry), so an app keeps its data wherever its page is and apps of one origin keep theirs apart. An app without an id
   (the demo player's, the playground's) keeps its entries under `nsh:<page directory>:<key>` (the directory of
   `document.baseURI`): apps run one after another on one such page share theirs. `nsh.js` wraps every call in try / catch (blocked
-  storage, private mode, quota) and hands failures back as messages.
+  storage, private mode, quota) and hands failures back as messages: a value the browser refuses is not kept and
+  `setItem` fails, as past NSH's own quota. What other tabs of the origin change under the app's prefix arrives as
+  `storage` events, which `nsh.js` hands to the engine (`nsh_storage_changed`), so the app reads their changes.
 - **Alerts** (`AlertDialog`, both presentations) are drawn in the root (over the whole window with `dialogs:
   "viewport"`, as dialogs are: under Input): with the `desktop` idiom as the Linux and
   macOS backends' alerts (up to three buttons in a row, the last regular one the default), otherwise as iOS's alert
-  and action sheet; their keys and focus are under Input. Only clicks pressed inside the dialog count: a tap's
+  and action sheet, an alert's `input` an `<input>` above its buttons; their keys and focus are under Input. Only clicks pressed inside the dialog count: a tap's
   compatibility click, which lands after the press that opened it, must not dismiss it.
 - **Offscreen canvases** (`renderCanvas`, `docs/dev/canvas.md`): a size over the browser's canvas limit (iOS WebKit's
   is 16777216 pixels in all; the probe of `offscreenCanvas` finds any browser's) answers `CANVAS_IMAGE.TOO_LARGE`,
@@ -1046,8 +1065,13 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   source it is given).
 - **Videos** are `<video>`s: `onLoadStart`, `onLoad` (`loadedmetadata`), `onProgress` on a timer at
   `progressUpdateInterval` while playing, `onBuffer` (`waiting` / `playing` / `canplay`), `onEnd`, `onError`; a
-  deleted video is stopped (a detached media element plays on). Browsers only start a video with sound after a user
-  gesture (a warning says so).
+  deleted video is stopped (a detached media element plays on). `paused` is acted on when it changes or a new source
+  is set (`op_video`), so another prop never plays a video that ended or its controls paused; the browser's own pauses
+  are followed where the other platforms play on: a seek past the end of a video the app has not paused plays it
+  (`seek`), and one the browser paused as it left the document plays again when it is back (`videosBack`). Browsers
+  only start a video with sound after a user gesture (a warning says so): a refused play is tried again on the next
+  update (`playVideo`). `crates/nsh-platform-web/tests/video` checks these in Chrome (`--target web` only: headless
+  runs play no video).
 - **Registered native components** are the native apps' own: their view stays empty, with a warning once per name.
 - **The host** (`nsh`'s `host`): the page answers the app's calls with `createPlayer`'s `host` option, an object whose
   `call(name, args)` returns the result or a promise of it. `Command::HostCall` is the command `hostCall` (`encode.rs`;
@@ -1094,7 +1118,9 @@ default), `role="link"` with an `href` (`ViewProps::href`, which `nsh-base`'s `L
 `web={{ element }}` (`Prop::WebElement`, `ViewProps::web_element`, the `WebElement` enum) names what `role` cannot
 say (`p`, `nav`, `article`, `time`, ...) and wins over the role. `retag` replaces the view's element by one of that
 tag, carrying its attributes, children and fields and taking its place in `views`; views whose element is a control
-of its own (images, scroll views, canvases, inputs) keep theirs. A fixed rule of the runtime's stylesheet takes the
+of its own (images, scroll views, canvases, inputs) keep theirs. A new view's tracked states and events reach the page
+before the props that name its tag: `retag` adds the old element's listeners to the new one, as the copied flags say
+(`installMouse`, `installHover`, `installFocus`, `installLinkHover`). A fixed rule of the runtime's stylesheet takes the
 browser's margins, fonts, colors, underlines and list markers off those tags, so the view looks as a `div` does. A
 link gets `href` and is not draggable; a plain click on it stays the app's (`Link`'s press; the root's `click`
 listener prevents the browser's navigation), a click with a modifier key or the middle button opens `href` as the

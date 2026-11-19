@@ -649,7 +649,8 @@ What the system draws on other platforms is drawn in the same look (`dialog.rs`,
   first and a sheet last; focus starts on the default button. Tab and the arrows move between buttons, Enter and
   Space choose, Escape chooses cancel or dismisses a cancelable dialog; a press on a button chooses it, one
   outside dismisses a cancelable dialog. The answer is the `dialog` event with the dialog's `id` and the button's
-  `index` (-1 when dismissed). While a dialog is shown it takes every key and press, and nothing behind it is hit.
+  `index` (-1 when dismissed); an alert's `input` has no text field here yet, so the answer has no `value`. While a
+  dialog is shown it takes every key and press, and nothing behind it is hit.
 - **Context menus** (`Menu.popup`, `DesktopCommand::PopupMenu`): a box at the pointer's Cell (or the app's point),
   above the pointer or moved left where it has no room, on the raised surface of an anchored popup with the
   popover's rounded line, no backdrop. One row per item: the label from the first Cell inside the line (a role's own

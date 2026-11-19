@@ -97,7 +97,7 @@ go elsewhere under these rules rather than into them.
   `nsh` with the same fields: `Point { x, y }`, `Size { width, height }`, `Bounds { origin: Point, size: Size }`,
   `Edges { top, right, bottom, left }` (decided by the user, 2026-10-21). A position and an extent together are a
   `Bounds` (`onLayout({ bounds })`), an extent beside other fields is a `size` (`ImageAsset.size`), insets are `Edges`
-  (`safeArea()`, `hitSlop`, `contentInset`; inputs take `Partial<Edges>`); never flat `x` / `y` / `width` / `height`
+  (`safeArea()`, `hitSlop`, `contentInset`, `scrollbarInset`; inputs take `Partial<Edges>`); never flat `x` / `y` / `width` / `height`
   together, `<prefix>Width` / `<prefix>X` fields or another name for one shape (`Insets`).
 - **Points**: a position is a `Point` (`{ x, y }`, GPUI's `Point<Pixels>`, Rust `Point<Points>`), never separate
   `<prefix>X` / `<prefix>Y` fields: `position` in the view, `pagePosition` in the root view (the surface or its dialog),
@@ -297,6 +297,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `scrollEnabled` | `scrollable` (default `true`) | States | The user's scrolling; `scrollTo` still scrolls |
 | `pinchGestureEnabled` | `zoomable` (default `true`) | States | The user's pinch; `zoomTo` still zooms |
 | `showsIndicator` | `scrollbar` (default `true`) | States | The part's name, as `caret` |
+| `scrollIndicatorInsets` | `scrollbarInset` (`Partial<Edges>`) | Geometry | The part's name, as `scrollbar`; `Inset` as `contentInset` |
 | `onScrollBeginDrag`, `onScrollEndDrag` | `onScrollDragStart`, `onScrollDragEnd` | Begin and end | `onDrag*` stays free for drag and drop |
 | `onMomentumScrollBegin`, `onMomentumScrollEnd` | `onMomentumStart`, `onMomentumEnd` | Begin and end | |
 | List `onEndReached`, `onEndReachedThreshold` | `onLoadMore`, `loadMoreThreshold` | Intent over geometry | `ListDelegate::load_more`, `load_more_threshold`; also in `ListItemsProps` |
@@ -333,7 +334,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | Image `onLoad(size: PixelSize)` | `onLoad({ size }: { size: PixelSize })` | Payloads | 2026-10-27, as Video's `onLoad({ duration, size })` |
 | Input `onContentSizeChange(size: Size)` | `onContentSizeChange({ size }: { size: Size })` | Payloads | 2026-10-27 |
 | `PanEvent` `translationX` / `translationY`, `velocityX` / `velocityY`, `valueX` / `valueY` | `translation: Point`, `velocity: Point`, `value?: Partial<Point>` | Points | 2026-10-27: `e.velocity.x`, `e.value?.y`; `cancelled` stays |
-| `onPress`, `onLongPress`, `onPressDown`, `onPressUp` `(e?: PressEvent)` | `(e: PressEvent)` | Payloads | 2026-10-27: always passed; where the backend does not know the pointer, at the view's origin with no keys and one click |
+| `onPress`, `onLongPress`, `onPressDown`, `onPressUp` `(e?: PressEvent)` | `(e: PressEvent)` | Payloads | 2026-10-27: always passed; where the backend does not know the pointer, at the view's origin with no keys and one click; 2026-11-19 (#2506): `clickCount` 0 instead, as the DOM's `detail` for keyboard and assistive technology activations |
 | `keymap.bind` handlers `(keystroke: string)` | `({ keystroke }: { keystroke: string })` | Payloads | 2026-10-27: one object, as every event |
 | **Image** | | | |
 | `src: string \| ImageAsset \| { uri }` | `src: string \| ImageAsset` | Addresses | |
@@ -444,13 +445,14 @@ and `Input`'s React Native names follow the rules as well.
 | `remove(route)` | unchanged | none | |
 | `createNavigator(initial: R \| R[])` | `createNavigator(routes: R[])` | `NavStackState::new` then `push` | One shape |
 | **Alert, ActionSheet** | | | |
-| `Alert.alert(title, message, buttons, options)`, `ActionSheet.show(options)` | `AlertDialog.show({ title, description, actions, presentation, closeOnEscape, closeOnBackdropPress })` → `Promise<AlertDialogResult>` | `alert_dialog.rs` `AlertDialog`, `AlertDialogTitle`, `AlertDialogDescription`, `AlertDialogAction`, `AlertDialogCancel` | Resolves with `{ action }`: the action's `id`, `null` when closed without an action (an object since 2026-10-27, Shapes that can grow) |
+| `Alert.alert(title, message, buttons, options)`, `ActionSheet.show(options)` | `AlertDialog.show({ title, description, actions, presentation, closeOnEscape, closeOnBackdropPress, input })` → `Promise<AlertDialogResult>` | `alert_dialog.rs` `AlertDialog`, `AlertDialogTitle`, `AlertDialogDescription`, `AlertDialogAction`, `AlertDialogCancel` | Resolves with `{ action, value }`: the action's `id`, `null` when closed without an action (an object since 2026-10-27, Shapes that can grow), and the text of its `input` |
 | `message` | `description` | `AlertDialogDescription`, `DialogDescription` | |
 | `buttons` / `options` (+ `cancelButtonIndex`, `destructiveButtonIndexes`) | `actions: { label, role?, id }[]` | `AlertDialogAction`; *guides* fluent property `label` | One shape for both; `id` required since 2026-10-27 (Shapes that can grow): a label changes with the app's language. Rust `.action(id, label)`, `.cancel(id, label)`, `.destructive(id, label)` |
 | `AlertButton.text` | `label` | `gpui-component` `Button::label` | |
 | `AlertButton.style: AlertButtonStyle` | `role: "default" \| "cancel" \| "destructive"` | `AlertDialogCancel`; GPUI `Role`; SwiftUI `ButtonRole` | A role, not a look |
 | `ActionSheet` (a module) | `presentation: "alert" \| "actionSheet"` | none (UIKit `preferredStyle`) | Default `"alert"`; same word as Modal's `presentation` |
 | `AlertOptions.cancelable` | `closeOnEscape` + `closeOnBackdropPress` | `AlertDialog::close_on_escape`; `Dialog::close_on_backdrop_press` | Default `false` for `"alert"` (`AlertDialog` has no backdrop dismissal), `true` for `"actionSheet"` |
+| `Alert.prompt(title, message, buttons, type, defaultValue)` (iOS only) | `input?: { defaultValue?, placeholder?, selectTextOnFocus?, required? }` on `AlertDialog.show`; the result's `value` | none in `gpui-base`; UIKit `addTextField`, Android `AlertDialog.setView`; `Input`'s `defaultValue` / `placeholder`; React Native `TextInput.selectTextOnFocus`; HTML `required` | One option of the same call, not a second function, so an alert keeps one shape; an alert's only (rejected in an action sheet, which has no field on iOS). Return chooses the last `"default"` action, as Return does in the desktop and web alerts; `required` disables every action but the cancel ones while the field is empty. Rust `.input(AlertDialogInput::new().default_value(..))` |
 | **StatusBar** | | | |
 | `StatusBar` (a component; the most recently mounted wins) | `statusBar?: StatusBar` on `NavPage` and `Dialog`; `nsh.json` `"statusBar"` for the default | UIKit: each view controller's `preferredStatusBarStyle` / `prefersStatusBarHidden`, the topmost deciding; Info.plist `UIStatusBarStyle` / `UIStatusBarHidden`; `gpui-base` has none | Decided by the user (2026-10-20): the status bar follows UIKit; pages and dialogs are NSH's view controllers. Rust: `Screen::status_bar`, `Modal::status_bar`, `Root::status_bar` |
 | `foreground: "auto" \| "light" \| "dark"` (`Foreground`) | `foreground` of `StatusBar` (`StatusBarForeground`) | none; `gpui-kit` theme `foreground` (the content's color) | Not `style` (the inline style every component takes); `"light"` is light content, for dark backgrounds |
@@ -470,13 +472,14 @@ and `Input`'s React Native names follow the rules as well.
 | `placeholderTextColor` | style key `placeholderColor`, class `placeholder:text-*` | *guides* `value` vs `presentation`; CSS `::placeholder` | |
 | `selectionColor` (Input, Text) | style key `selectionColor` (the highlight), class `selection:text-*` | CSS `::selection` | |
 | `cursorColor` (Input) | style key `caretColor`, class `caret-*` | CSS `caret-color` | |
+| Switch `trackColor` (on) (`nsh/mobile`'s system switch) | style key `accentColor`, class `accent-*` | CSS `accent-color` | A color of a part is a style key. Set on the control (not inherited); the system's segmented control and tab bar could read it later |
 | `editable` | `readonly` (`editable={false}` = `readonly`) | *guides* "readonly"; `gpui-component` `Input::readonly` | `disabled` (no focus, `disabled:` classes) stays separate |
 | `onChangeText(text)` | `onChange({ value })` (was `onChange(text)` until 2026-10-27) | `InputEvent::Change`; `on_change` observes (*guides*) | |
 | `onSubmitEditing` | `onSubmit` | `InputEvent::PressEnter` (not followed) | The return key, whatever `returnKeyType` shows: on a phone it says Done / Search / Go, not Enter; HTML's `submit` |
 | `secureTextEntry` | `masked` | `gpui-component` `Input::masked` | |
 | `multiline` | unchanged | `Input::multi_line` (not followed) | One word, as `readonly` |
 | `selection` | `selectedRange` | `Input::selected_range` | `onSelectionChange` stays |
-| `autoFocus`, `maxLength`, `keyboardType`, `returnKeyType`, `submitBehavior`, `autoCapitalize`, `autoCorrect`, `autoComplete`, `caretHidden`, `onKeyPress`, `onContentSizeChange`, `allowFontScaling`, `maxFontSizeMultiplier`, `ios.textContentType` | unchanged | none | No `gpui-kit` term differs; `textContentType` stays iOS's |
+| `autoFocus`, `selectTextOnFocus`, `maxLength`, `keyboardType`, `returnKeyType`, `submitBehavior`, `autoCapitalize`, `autoCorrect`, `autoComplete`, `caretHidden`, `onKeyPress`, `onContentSizeChange`, `allowFontScaling`, `maxFontSizeMultiplier`, `ios.textContentType` | unchanged | none | No `gpui-kit` term differs; `textContentType` stays iOS's |
 | **View** | | | |
 | `accessibilityRole` | (dropped; `role` stays) | GPUI `.role(Role::…)`; `Button::role` | |
 | (new) roles `group`, `region`, `navigation`, `tree`, `treeitem`, `menuitemcheckbox`, `menuitemradio` | ARIA's names, as `role`'s others (`columnheader`, `rowgroup`) | GPUI `Role::Group`, `Region`, `Navigation`, `Tree`, `TreeItem`, `MenuItemCheckBox`, `MenuItemRadio` (`accordion.rs`, `toolbar.rs`, `pagination.rs`, `tree.rs`) | One lowercase word each, as ARIA and the existing roles write them |

@@ -190,6 +190,7 @@ setContentView(column);
 | `runPackage(NshPackage pkg)` | 运行一个已验证的签名包，替换正在运行的应用。一个包只能运行一次。 |
 | `registerComponent(String name, NshComponent.Factory factory)` | 注册一个[原生组件](./native-components.md)。 |
 | `watchScroll(String nativeId, ScrollWatcher watcher)` | 在 UI 线程、滚动的同一帧跟随并驱动应用中带该 `nativeID` 的 `<Scroll>`（[跟随滚动视图](#跟随滚动视图)）；传 `null` 停止。 |
+| `setContentCulling(boolean enabled)` | 滚动视图是只创建视口附近内容的视图（`true`，默认），还是创建全部内容。关闭后，尚未创建的内容在之后几帧里创建，宿主即可绘制整个滚动视图（如从 `NshScrollHandle.getContentView()` 截整页长图）；重新开启后，远处的内容会被释放。立即生效，也作用于之后加载的应用。 |
 | `setParams(Object params)` | 之后加载的应用的启动参数（`Map` 或 `JSONObject`）：应用在启动时以 `host.params` 读取（[`host`](../modules/nsh.md#host)）。不是 JSON 对象时返回 `false`。 |
 | `send(String name, Object data)` | 向应用发送一个事件（`host.on(name, …)`）；应用开始监听前会一直保留，没有应用运行时留给下一个应用。可在任意线程调用；`destroy()` 后返回 `false`。 |
 | `handle(String name, HostHandler handler)` | 在 UI 线程处理应用对 `name` 的调用（`host.call`）和投递（`host.post`）；传 `null` 移除处理函数。处理函数通过它的 `NshHostReply` 在任意线程回答一次。 |
@@ -319,6 +320,26 @@ nsh.setOpenUrlHandler(url -> {
     return false;
 });
 ```
+
+## 在 Rust 中申请运行时权限
+
+Android 用系统提示框申请危险权限（相机、麦克风、位置、附近设备、通讯录等），并且只把结果交给发起申请的 activity：打包的应用里是
+`AppActivity`，嵌入 `NshView` 时是你自己的 activity。使用这类 API 的 Rust 代码（应用自己的 crate、扩展）通过
+`nsh-platform-android` crate（其库名为 `nsh`）的 `permissions` 申请：它通过前台的 activity 申请，一次一个，并能跨越配置变更：
+
+```rust
+use nsh::permissions::{self, Permission};
+
+let answers = permissions::request(&["android.permission.RECORD_AUDIO"]).await?;
+if answers[0] == Permission::Granted {
+    // 录音。
+}
+```
+
+`state(name)` 和 `states(names)` 不申请，只返回当前状态。权限的状态是 `Default`（申请时会显示提示框）、`Granted`、`Denied`
+（用户拒绝过，Android 不再询问：只有系统设置能改变它）或 `Undeclared`。Android 只授予 manifest 声明的权限：未声明的权限返回
+`Undeclared`，不显示提示框。前台没有 activity（应用在后台），或 activity 在用户回答前结束时，申请以 `PermissionError::NoActivity`
+失败。NSH 自己的提示框（通知、网页的相机和麦克风）也这样申请，所以一个申请会等前面正在显示的提示框结束。
 
 ## 限制
 

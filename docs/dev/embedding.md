@@ -7,7 +7,8 @@
   the keys NSH sets refused with what to set instead; `MinimumOSVersion` / `LSMinimumSystemVersion` are the runtime's
   minimum, `IOS_MINIMUM` / `MACOS_MINIMUM`, which an app may raise but not lower (checked when `nsh.json` is read;
   `actool` compiles the iOS icon, and `ios.launchScreen`'s color and image named in `UILaunchScreen`, for the version
-  declared); device builds check entitlements against the profile,
+  declared, and the app's Rust builds for iOS and macOS compile for it unless the environment sets the deployment
+  target); device builds check entitlements against the profile,
   which keeps the app's values in place of its own). iOS: `.app`, `.ipa` with `--sign <identity>
   --profile <file.mobileprovision>` (entitlements come from the profile; icons are compiled by `actool` into `Assets.car`).
   Android: an APK assembled without Gradle (`aapt2 link`, native libraries stored uncompressed and 16 KB ZIP aligned, `apksigner`;
@@ -90,7 +91,8 @@
   `command`), Java `NshView.registerComponent(name, factory)` (`NshComponent`), Rust `AppView::register_component`
   (`NativeComponent`) — one registry per view, no globals. An app's own crate (`nsh.json` `"rust"`) registers into
   the hosts and runners nsh generates for it with `#[native_components(<platform>)]` (Windows, macOS, Linux, iOS:
-  the platform's `set_components`, which every `AppView` calls on its registry when it is made, so a name registered
+  the platform's `set_components`, which every `AppView` calls on its registry when it is made; Android:
+  `nsh::components!`, which `NshView` queries before host code registers its own, so a name registered
   on the view afterwards replaces the crate's; a process-wide function as `set_ui_sets`' sets are, which only the
   generated hosts and runners set, so an embedding app's registries stay its views'; `docs/dev/tooling.md`). Names under `nsh/` are NSH's own
   (`nsh_core::platform::is_reserved_component`): each backend registers them itself (`nsh/tab-bar`, `nsh/mobile`'s

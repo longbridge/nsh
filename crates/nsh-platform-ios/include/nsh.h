@@ -51,6 +51,11 @@ char *_Nullable nsh_app_set_granted_capabilities(NshApp *app, const char *_Nulla
 void nsh_app_set_limits(NshApp *app, uint32_t memory_mb, uint32_t stack_kb, uint32_t load_ms,
                         uint32_t call_ms, uint32_t max_nodes);
 
+/// Whether scroll views make the views of their content only near their
+/// viewport (true, the default), or all of it (false), in the running app
+/// and the apps `app` loads next.
+void nsh_app_set_content_culling(NshApp *app, bool enabled);
+
 /// Gives the address of the apps `app` loads (`UrlScheme.setUrl`) to the
 /// system as the current `NSUserActivity`, for Handoff. An address that
 /// is no web page needs `<bundle id>.url` in the app's Info.plist

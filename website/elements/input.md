@@ -96,6 +96,7 @@ view styles apply):
 | `pasteBehavior` | `.paste_behavior(PasteBehavior::Report)` | `"insert" \| "report"` | `"insert"` | What a paste does: `"insert"` inserts the pasted text, `"report"` inserts nothing, for the app to handle what `onPaste` reports. Images and files are never inserted. |
 | `submitBehavior` | `.submit_behavior(SubmitBehavior::Submit)` | `"submit" \| "blurAndSubmit" \| "newline"` | `"blurAndSubmit"` (single line), `"newline"` (multiline) | What return does: `"submit"` reports `onSubmit` and keeps the focus, `"blurAndSubmit"` also unfocuses, `"newline"` inserts a line break (multiline; a single line submits). A multiline input that submits still takes line breaks from Shift+Return or Option / Alt+Return on hardware keyboards. `"submit"` keeps the keyboard up (e.g. to send several messages). |
 | `autoFocus` | `.auto_focus(..)` | `boolean` | `false` | Focused when it appears. |
+| `selectTextOnFocus` | `.select_text_on_focus(..)` | `boolean` | `false` | Selects the whole text when the input takes the focus (a click, Tab, `focus()`, `autoFocus`); a drag, a Shift-click or a double click keeps the user's selection. |
 
 ### Caret and selection
 

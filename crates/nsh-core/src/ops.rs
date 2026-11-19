@@ -218,7 +218,7 @@ events! {
     ScrollDragEnd = "onScrollDragEnd": "The user let go of a scroll view (payload: [`EventPayload::Scroll`]).",
     MomentumStart = "onMomentumStart": "A scroll view started gliding after a fling (payload: [`EventPayload::Scroll`]).",
     MomentumEnd = "onMomentumEnd": "A scroll view stopped gliding (payload: [`EventPayload::Scroll`]).",
-    Dialog = "onDialog": "An alert or action sheet closed (root only; payload: `id`, `index`, -1 when dismissed).",
+    Dialog = "onDialog": "An alert or action sheet closed (root only; payload: `id`, `index`, -1 when dismissed, and `value`, the text of its text field when it has one).",
     Touch = "onTouch": "Touches on the view or inside it, for the JS touch and responder handlers (payload: [`EventPayload::Touch`]).",
     SelectionChange = "onSelectionChange": "The selection (or caret) of an input moved (payload: `start`, `end` in UTF-16 units), or the selection of a selectable view changed (payload: `text`, the selected text as a copy gives it, empty once nothing is selected; `start`, where it starts in the view's whole text; `bounds`, the box around it in the view, to which the core adds `pageBounds`).",
     KeyPress = "onKeyPress": "A key was pressed in an input (payload: `key`: the character, `Backspace` or `Enter`).",
@@ -659,7 +659,8 @@ pub struct PressEvent {
     /// The modifier keys held when the press began.
     pub modifiers: crate::keymap::Modifiers,
     /// Consecutive clicks at the same place: 1 for a click, 2 for a
-    /// double click, ...
+    /// double click, ...; 0 when not from a pointer (a keyboard or
+    /// assistive technology activation), as the DOM's `detail`.
     pub clicks: u32,
 }
 
@@ -1800,6 +1801,11 @@ pub enum ScrollProp {
     /// `contentInset`: room around the content.
     #[prop(js = "contentInset", on = SCROLLING)]
     ContentInset(EdgeInsets),
+    /// `scrollbarInset`: how far the scroll indicator keeps from each edge
+    /// of the view, for bars that float over it (React Native's
+    /// `scrollIndicatorInsets`); the content still scrolls under them.
+    #[prop(js = "scrollbarInset", on = SCROLLING)]
+    ScrollbarInset(EdgeInsets),
     /// `contentOffset`: where it starts.
     #[prop(js = "contentOffset", with = crate::js::host_values::content_offset, once, ts = "Partial<Point>", on = SCROLLING)]
     ContentOffset(Point<Points>),
@@ -1948,6 +1954,19 @@ pub enum ScreenAnimation {
     None,
 }
 
+/// Where a page's title sits in the native header (`headerTitleAlign`).
+/// Android's toolbar honors it. iOS's system bar always centers the title
+/// and ignores the value; the desktops and the web draw no native header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub enum HeaderTitleAlign {
+    /// At the start, after the back button or the leading item (Android's
+    /// default).
+    #[default]
+    Left,
+    /// Centered across the header, between the leading and trailing items.
+    Center,
+}
+
 /// A screen option (`<NavPage title headerVisible ...>`).
 #[derive(Debug, Clone, PartialEq, HostProps)]
 pub enum ScreenProp {
@@ -1971,6 +1990,23 @@ pub enum ScreenProp {
     /// (iOS and Android).
     #[prop(js = "headerTransparent", on = SCREEN)]
     HeaderTransparent(bool),
+    /// `headerShadowVisible` (iOS: the system header; Android's has none):
+    /// the hairline under the header. Off, the bar has no shadow line, as
+    /// iOS 26's own bars.
+    #[prop(js = "headerShadowVisible", default = true, on = SCREEN)]
+    HeaderShadowVisible(bool),
+    /// `headerTitleAlign` (Android: the system header): where the title
+    /// sits, `"left"` (the default) or `"center"`. iOS's system bar always
+    /// centers the title and ignores the value; the desktops and the web
+    /// draw no native header.
+    #[prop(js = "headerTitleAlign", on = SCREEN)]
+    HeaderTitleAlign(HeaderTitleAlign),
+    /// `headerBackgroundOnScroll` (iOS: the system header; ignored
+    /// elsewhere): with `headerTransparent`, the header stays clear while
+    /// the content rests at its top and shows its background once the
+    /// content scrolls under it, as UIKit's own bars do.
+    #[prop(js = "headerBackgroundOnScroll", on = SCREEN)]
+    HeaderBackgroundOnScroll(bool),
     /// `headerBackTitle` (iOS: the system header; ignored elsewhere): the
     /// label of the back button leading back to this page.
     #[prop(js = "headerBackTitle", on = SCREEN)]
@@ -3127,6 +3163,71 @@ pub struct Dialog {
     pub cancelable: bool,
     /// An action sheet rather than an alert.
     pub sheet: bool,
+    /// A text field in the alert (never in an action sheet); its text comes
+    /// back with the answer as `value`. Platforms whose alert has no text
+    /// field show the alert without one and answer without `value`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<DialogInput>,
+}
+
+/// The text field of a [`Dialog`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+#[non_exhaustive]
+pub struct DialogInput {
+    /// The text it starts with.
+    pub text: String,
+    /// Shown while it is empty.
+    pub placeholder: Option<String>,
+    /// The starting text is selected when the field takes the focus, so
+    /// typing replaces it.
+    pub select_all: bool,
+    /// While it is empty, every button but the cancel ones is disabled,
+    /// and return chooses nothing.
+    pub required: bool,
+}
+
+impl DialogInput {
+    /// A text field starting with `text`.
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Shown while it is empty.
+    pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
+        self.placeholder = Some(placeholder.into());
+        self
+    }
+
+    /// Selects the starting text when the field takes the focus.
+    pub fn select_all(mut self, select_all: bool) -> Self {
+        self.select_all = select_all;
+        self
+    }
+
+    /// Disables every button but the cancel ones while it is empty.
+    pub fn required(mut self, required: bool) -> Self {
+        self.required = required;
+        self
+    }
+
+    /// Whether `button` can be pressed while the field holds `text`: a
+    /// cancel button always, the others unless the field is required and
+    /// empty.
+    pub fn enables(&self, button: &DialogButton, text: &str) -> bool {
+        !self.required || !text.is_empty() || button.style == DialogButtonStyle::Cancel
+    }
+}
+
+/// The button return chooses in a dialog: its last regular one (an alert's
+/// default button), `None` without one.
+pub fn dialog_default_button(buttons: &[DialogButton]) -> Option<usize> {
+    buttons
+        .iter()
+        .rposition(|b| b.style == DialogButtonStyle::Default)
 }
 
 /// A non-style property of a host node.
@@ -3377,6 +3478,12 @@ pub enum Prop {
     /// `autoFocus`: focused when it appears.
     #[prop(js = "autoFocus", on = INPUT)]
     AutoFocus(bool),
+    /// `selectTextOnFocus`: the whole text is selected when the input takes
+    /// the focus (a click, Tab, `focus()`, `autoFocus`). Decided natively as
+    /// the focus arrives; a click that drags, extends (Shift) or selects
+    /// words (double click) keeps the user's selection.
+    #[prop(js = "selectTextOnFocus", on = INPUT)]
+    SelectTextOnFocus(bool),
     /// `caret`: the caret is drawn (default true; `false` hides it).
     #[prop(js = "caret", default = true, on = INPUT)]
     Caret(bool),
@@ -3549,6 +3656,11 @@ pub enum Prop {
     /// The system material of a backdrop blur (iOS, default `ultraThin`).
     #[prop(ios = "backdropMaterial")]
     BackdropMaterial(crate::BackdropMaterial),
+    /// `ios={{ scrollEdgeElement }}`: the scroll view the view floats over
+    /// and the edge of it the view sits at (iOS 26: that scroll view's edge
+    /// effect takes its shape from the view); `None`: none.
+    #[prop(ios = "scrollEdgeElement")]
+    ScrollEdgeElement(Option<crate::element::ScrollEdgeTarget>),
     /// `macos={{ backdrop }}`: the `NSVisualEffectView` material on macOS
     /// (default `popover` / `withinWindow` / `active`; `None`: none).
     #[prop(macos = "backdrop")]

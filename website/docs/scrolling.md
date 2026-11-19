@@ -103,6 +103,7 @@ Fingers drag scroll views. On the desktop (macOS, Windows, Linux) and in the bro
 | `bounces` | `.bounces(..)` | `boolean` | `true` | Overscroll past the edges. |
 | `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | The scroll indicator shows. |
 | `contentInset` | `.content_inset(EdgeInsets { .. })` | `Partial<Edges>` | | Room around the content, scrollable into. |
+| `scrollbarInset` | `.scrollbar_inset(EdgeInsets { .. })` | `Partial<Edges>` | | Keeps the scroll indicator this far from the view's edges. |
 | `contentOffset` | `.content_offset(point(..))` | `{ x?, y? }` | | Where it starts. |
 | `decelerationRate` | `.deceleration(rate)` | `"normal" \| "fast" \| number` | the platform's | How fast a fling slows down: `"normal"`, `"fast"`, or the velocity kept per millisecond (`0.998` is normal, `0.99` fast; `0` is the platform's default). |
 
@@ -608,6 +609,26 @@ Two props decide how scrolling and taps interact with the keyboard:
 - `"always"`: the keyboard stays up through every tap.
 
 Both are decided natively when the tap or drag happens, without waiting for your code. To hide the keyboard from code, call `dismiss_keyboard()` in Rust or `Keyboard.dismiss()` from [`nsh`](../modules/nsh.md#keyboard-and-keyboardframe) in TSX.
+
+## Views floating over a scroll view
+
+A toolbar or a floating button placed over the top or bottom of a scroll view can name that scroll view, so the platform treats it as it treats a bar there. From iOS 26 the scroll view's edge effect then takes its shape from what the view shows: the content scrolled under it fades out around its buttons. The edge effect is iOS 26's; where a screen needs the same separation on other versions and platforms, a fade the app draws under the view gives it. `contentInset` keeps room for the view at that end of the content.
+
+```tsx
+const list = signal<ViewRef>();
+
+<View style={{ flex: 1 }}>
+  <Scroll ref={list} contentInset={{ bottom: 80 }}>{/* rows */}</Scroll>
+  <View
+    style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: 16 }}
+    ios={{ scrollEdgeElement: list() ? { scrollView: list()!, edge: "bottom" } : null }}
+  >
+    <Button>New chat</Button>
+  </View>
+</View>
+```
+
+In Rust, `.scroll_edge_element(Some(list), ScrollEdge::Bottom)` on the floating view, `list` being the scroll view's `ElementRef`. `edge` is `"top"` or `"bottom"` (the default).
 
 ## Nested scroll views
 

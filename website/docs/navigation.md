@@ -230,7 +230,7 @@ Pages stay mounted while their route is in the stack: going back shows the previ
 
 A page (`nav_page()` in Rust, `NavPage` in TSX) wraps a page's content and carries its header. iOS and Android show their system header, set up by the title and the header options. The desktops and the web show the page's header slot (`.header(..)`, TSX `header`), your own views, at the top of the page: as wide as the page, as tall as it lays out, with the content below it. Give a page both, as the example above does, and it looks at home everywhere. All options are reactive: change a signal and the header follows.
 
-In Rust, each prop below is a method of `nav_page()` in snake case: `.title(..)`, `.header(..)`, `.header_visible(..)`, `.header_transparent(..)`, `.header_style_with(..)`, `.header_style(..)`, `.header_back_visible(..)`, `.header_left(..)`, `.header_right(..)`, `.header_title(..)`, `.header_large_title(..)`, `.header_back_title(..)`, `.header_right_items(..)`, `.animation(ScreenAnimation::Fade)`, `.status_bar(..)`, `.pop_on_swipe(..)`, `.pop_on_back(..)`, `.on_back_press(..)`, `.on_dismiss(..)`; its children are its content.
+In Rust, each prop below is a method of `nav_page()` in snake case: `.title(..)`, `.header(..)`, `.header_visible(..)`, `.header_transparent(..)`, `.header_shadow_visible(..)`, `.header_background_on_scroll(..)`, `.header_style_with(..)`, `.header_style(..)`, `.header_back_visible(..)`, `.header_left(..)`, `.header_right(..)`, `.header_title(..)`, `.header_large_title(..)`, `.header_back_title(..)`, `.header_right_items(..)`, `.animation(ScreenAnimation::Fade)`, `.status_bar(..)`, `.pop_on_swipe(..)`, `.pop_on_back(..)`, `.on_back_press(..)`, `.on_dismiss(..)`; its children are its content.
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
@@ -238,6 +238,9 @@ In Rust, each prop below is a method of `nav_page()` in snake case: `.title(..)`
 | `title` | `string` | | iOS and Android: the system header's title. |
 | `headerVisible` | `boolean` | `true` | iOS and Android: the system header shows. |
 | `headerTransparent` | `boolean` | `false` | iOS and Android: the content extends under the header. |
+| `headerShadowVisible` | `boolean` | `true` | iOS: the hairline under the header. Set it to `false` for a bar without a line, as iOS 26's own. Android's header has none. |
+| `headerTitleAlign` | `"left" \| "center"` | `"left"` | Android: where the title sits in the header, at the start or centered between the items on either side. iOS: the system bar always centers the title and ignores this value. |
+| `headerBackgroundOnScroll` | `boolean` | `false` | iOS: with `headerTransparent`, the header stays clear while the content rests at its top and shows its background once the content scrolls under it, as UIKit's own bars. It follows the largest visible scroll view that starts at the top of the page. Ignored elsewhere. |
 | `headerStyle` | `{ backgroundColor?, color?, tintColor? }` | | iOS and Android: the header's background, the title's color (`color`) and the buttons' (`tintColor`). |
 | `headerClass` | `string` | | The same as classes: `bg-*`, `text-*` for the title, `tint-*` for the buttons; `headerStyle` wins over them. |
 | `headerBackVisible` | `boolean` | `true` | iOS and Android: the back button shows. |
@@ -587,6 +590,20 @@ function Files() {
 Escape, Android's back button, a press on the backdrop (TSX's backdrop, a native sheet's in Rust) and a swipe down on a sheet close it natively (`close_on_escape`, `close_on_backdrop_press` and `close_on_swipe`, TSX `closeOnEscape`, `closeOnBackdropPress` and `closeOnSwipe`, each true by default). In Rust, `on_cancel` reports every attempt and `on_close` the close, so leave the dialog out of the view there; a backdrop your app draws closes it with its own press handler, as above. In TSX, `onOpenChange({ open: false, reason })` tells you, so set `open` to `false` there. To confirm first, set a flag to false and handle the cancel event (`on_cancel`, `onCancel`), which reports every attempt, then close the dialog yourself. On iOS, `.presentation(ModalPresentation::PageSheet)` or `FormSheet` (`presentation="pageSheet"` or `"formSheet"`) presents a sheet that keeps what is behind visible.
 
 See [Dialog](../elements/dialog.md) for every prop. Inside a dialog, the `env(safe-area-inset-*)` variables and the insets are the dialog's own. For system dialogs (an alert with actions, an action sheet) use [`AlertDialog`](../modules/nsh-base.md#alertdialog) from `nsh_base` (TSX: `nsh/base`).
+
+To ask for a short text, such as a new name, give the alert an `input`: iOS, Android, macOS and the web show the system's own text field in it, focused, and the result's `value` is its text. Return chooses the last `"default"` action, and `required` keeps every action but the cancel ones disabled while the field is empty. On Windows, Linux and in the terminal the alert shows without a field and `value` is `null`, so draw your own `Dialog` there.
+
+```tsx
+const { action, value } = await AlertDialog.show({
+  title: "Rename",
+  input: { defaultValue: name(), placeholder: "Name", selectTextOnFocus: true, required: true },
+  actions: [
+    { label: "Cancel", role: "cancel", id: "cancel" },
+    { label: "Rename", id: "rename" },
+  ],
+});
+if (action === "rename" && value !== null) name.set(value);
+```
 
 ## The Android back button
 
