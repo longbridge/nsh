@@ -52,7 +52,7 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-**In a TSX app**, import the crate's exports by its specifier, `nsh-omarchy`. The app needs no Rust code of its own: `nsh` builds the app's hosts with the crate.
+**In a TSX app**, an nshm that exports components, modules or classes to TSX is ready to use once `nsh add` installs it: import them by its specifier, here `nsh-omarchy`. The app needs no newer NSH and no Rust code of its own, since `nsh` builds the app's hosts with the crate.
 
 ```tsx
 // App.tsx

@@ -52,7 +52,7 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-**TSX 应用**中，按 crate 的标识 `nsh-omarchy` 导入它的导出。应用不需要写任何 Rust 代码：`nsh` 会用这个 crate 构建应用的宿主。
+**TSX 应用**中，只要 nshm 向 TSX 导出了组件、模块或类，`nsh add` 安装后就能直接使用：按它的标识导入即可，这里是 `nsh-omarchy`。不需要升级 NSH，也不需要自己写 Rust 代码来扩展，`nsh` 会用这个 crate 构建应用的宿主。
 
 ```tsx
 // App.tsx
