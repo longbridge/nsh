@@ -4973,6 +4973,16 @@ class Player {
   /** The browser's scrolling stopped: the end, unless the scroll is driven
    * here (`drive`) or a finger still holds it. */
   scrollEnded(el) {
+    // A list anchors its content with an instant `ScrollBy` in the commit
+    // its animated `ScrollTo` is in, and that one's `scrollend` arrives
+    // once the smooth scroll is under way: taking it for the command's
+    // would forget the smooth scroll, and the next `ScrollBy` would then
+    // set the offset and stop it. A smooth scroll stopped elsewhere ends
+    // on the fallback below, which its own frames keep waiting.
+    if (el._smooth && !this.scrolledTo(el, el._smooth[0], el._smooth[1])) {
+      this.waitCommandEnd(el);
+      return;
+    }
     clearTimeout(el._commandEnd);
     el._commandEnd = 0;
     el._smooth = null;
@@ -9551,9 +9561,7 @@ class Player {
     clearTimeout(a.watch);
     el._glide = null;
     this.drive(el, -1);
-    // Browsers clamp the offsets of scrolls.
-    const stays = (to, at, max) => Math.min(Math.max(to, 0), max) === at;
-    if (stays(x, el.scrollLeft, el.scrollWidth - el.clientWidth) && stays(y, el.scrollTop, el.scrollHeight - el.clientHeight)) {
+    if (this.scrolledTo(el, x, y)) {
       this.ownEnd(el);
     } else {
       // A fractional destination may round back to the current offset,
@@ -9563,11 +9571,21 @@ class Player {
     }
   }
 
+  /** Whether `el` is where a scroll to (`x`, `y`) leaves it: browsers
+   * clamp the offsets of scrolls. A fractional destination they round
+   * away from lands elsewhere, and ends on the fallback below. */
+  scrolledTo(el, x, y) {
+    const at = (to, pos, max) => Math.min(Math.max(to, 0), max) === pos;
+    return at(x, el.scrollLeft, el.scrollWidth - el.clientWidth) && at(y, el.scrollTop, el.scrollHeight - el.clientHeight);
+  }
+
   /** Ends a command rounded to the current offset when no browser event
    * follows; scroll events keep a moving command's fallback waiting. */
   waitCommandEnd(el) {
     clearTimeout(el._commandEnd);
     el._commandEnd = setTimeout(() => {
+      // A smooth scroll still waited for here stopped short: give it up.
+      el._smooth = null;
       this.scrollEnded(el);
       el._ownEnd = [el.scrollLeft, el.scrollTop];
     }, 200);
