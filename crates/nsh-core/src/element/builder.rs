@@ -1089,6 +1089,19 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
+    /// The highlight of the selections of the texts and inputs in the
+    /// view that set none of their own, as TSX's `selection:bg-*` class
+    /// (Tailwind's `& *::selection`): the nearest view around a text that
+    /// sets one decides, a text's or an input's own color wins. Android
+    /// tints the selection handles of a selectable view
+    /// ([`Self::selectable`]) and of an input in it too.
+    fn selection_color(mut self, color: impl IntoReactive<Hsla>) -> Self {
+        super::host::bind_prop(self.node(), color, |c: Hsla| {
+            Prop::SelectionColor(Some(Color::from(c)))
+        });
+        self
+    }
+
     /// The app's items of the selection menu of this selectable view
     /// ([`Self::selectable`]; TSX `selectionMenu`): shown after the
     /// system's own (Copy, Select All, Look Up, Share…), which stay, in

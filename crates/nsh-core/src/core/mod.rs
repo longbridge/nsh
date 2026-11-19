@@ -5919,7 +5919,13 @@ impl<M: TextEngine> Core<M> {
             Prop::SelectionColor(color) if node.input.is_none() => {
                 if node.paragraph.selection_color != color {
                     node.paragraph.selection_color = color;
-                    self.mark_text_block(key);
+                    if node.kind == Kind::Text {
+                        self.mark_text_block(key);
+                    } else {
+                        // A view's: the texts and inputs inside take it
+                        // (`inherited_text_props`).
+                        self.mark_inheriting_text(key);
+                    }
                 }
             }
             Prop::AdjustsFontSizeToFit(_) | Prop::MinimumFontScale(_) => {
@@ -8149,12 +8155,17 @@ impl<M: TextEngine> Core<M> {
     /// says, set for its lines' wrapping, its selection and the
     /// selection's highlight: `whitespace-*` and `select-*` inherit, as
     /// CSS's `white-space` and `user-select: auto` do, and `selection:bg-*`
-    /// reaches the texts inside (Tailwind's `& *::selection`). One walk up.
+    /// reaches the texts inside (Tailwind's `& *::selection`), as a view's
+    /// own color does (Rust's `Element::selection_color`, over its
+    /// classes'). One walk up.
     fn inherited_text_props(&self, key: Key) -> (Option<bool>, Option<bool>, Option<Color>) {
         let (mut no_wrap, mut selectable, mut highlight) = (None, None, None);
         let mut k = key;
         while k != NO_KEY && (no_wrap.is_none() || selectable.is_none() || highlight.is_none()) {
             let node = &self.nodes[k as usize];
+            if !matches!(node.kind, Kind::Text | Kind::Input) {
+                highlight = highlight.or(node.paragraph.selection_color);
+            }
             if let Some(c) = node.class_props.as_deref() {
                 no_wrap = no_wrap.or(c.no_wrap);
                 selectable = selectable.or(c.selectable);

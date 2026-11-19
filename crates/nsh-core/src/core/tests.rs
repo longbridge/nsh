@@ -8590,6 +8590,57 @@ fn selection_classes_reach_the_texts_inside() {
     assert_eq!(highlight(&batch, 3), Some(None));
 }
 
+/// A view's own selection color (Rust's `Element::selection_color`)
+/// reaches the texts in it as its `selection:bg-*` class does, over that
+/// class; a text's own wins, and clearing it clears theirs.
+#[test]
+fn a_view_selection_color_reaches_the_texts_inside() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "selection:bg-red-500");
+    let view_color = |color| Op::SetProp {
+        id: 2,
+        prop: Prop::SelectionColor(color),
+    };
+    let mut ops = vec![view_color(Some(Color(0x00ff_00ff)))];
+    for (id, classes) in [(3, "select-text"), (5, "select-text selection:bg-blue-500")] {
+        ops.extend([
+            Op::Create { id, tag: Tag::Text },
+            class_op(id, classes),
+            Op::CreateText {
+                id: id + 1,
+                text: "hello".into(),
+            },
+            Op::Insert {
+                parent: id,
+                child: id + 1,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: id,
+                before: None,
+            },
+        ]);
+    }
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let highlight = |batch: &MountBatch, id| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Text { id: i, text, .. } if *i == id => Some(text.selection_color),
+            _ => None,
+        })
+    };
+    assert_eq!(highlight(&batch, 3), Some(Some(Color(0x00ff_00ff))));
+    assert_eq!(highlight(&batch, 5), Some(Some(Color(0x2b7f_ffff))));
+    // Changing the view's reaches them; without it the class's is left.
+    c.apply(view_color(Some(Color(0x0000_ffff)))).unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(highlight(&batch, 3), Some(Some(Color(0x0000_ffff))));
+    c.apply(view_color(None)).unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(highlight(&batch, 3), Some(Some(Color(0xfb2c_36ff))));
+}
+
 #[test]
 fn pointer_events_classes_inherit_as_in_css() {
     use crate::props::PointerEvents as P;

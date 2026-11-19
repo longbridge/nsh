@@ -397,6 +397,7 @@ final class InputBox extends FrameLayout implements Node {
             });
         }
         edit.setHighlightColor(hasSelectionColor ? (selectionColor & 0x00ffffff) | 0x55000000 : 0x5533b5e5);
+        tintHandles(hasSelectionColor ? selectionColor : null);
         boolean first = !configured;
         configured = true;
         if (first && autoFocus) post(this::focus);
@@ -405,6 +406,34 @@ final class InputBox extends FrameLayout implements Node {
             InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
             if (imm != null) imm.restartInput(edit);
         }
+    }
+
+    /** The color the selection handles are tinted (null: the theme's). */
+    private Integer handleColor;
+
+    /**
+     * Tints the selection and insertion handles {@code color}, as the
+     * selection's highlight (null: the theme's, as a fresh copy of the
+     * theme's drawables keeps it). Android 10 (API 29) and later.
+     */
+    private void tintHandles(Integer color) {
+        if (Build.VERSION.SDK_INT < 29 || java.util.Objects.equals(handleColor, color)) return;
+        handleColor = color;
+        int[] attrs = {
+            android.R.attr.textSelectHandleLeft, android.R.attr.textSelectHandleRight, android.R.attr.textSelectHandle
+        };
+        android.graphics.drawable.Drawable[] handles = new android.graphics.drawable.Drawable[attrs.length];
+        for (int i = 0; i < attrs.length; i++) {
+            android.content.res.TypedArray a = getContext().obtainStyledAttributes(new int[] {attrs[i]});
+            android.graphics.drawable.Drawable d = a.getDrawable(0);
+            a.recycle();
+            if (d == null) return;
+            handles[i] = d.mutate();
+            if (color != null) handles[i].setTint(color);
+        }
+        edit.setTextSelectHandleLeft(handles[0]);
+        edit.setTextSelectHandleRight(handles[1]);
+        edit.setTextSelectHandle(handles[2]);
     }
 
     /** Return submitted: `onSubmitEditing`, then unfocuses for `blurAndSubmit`. */
