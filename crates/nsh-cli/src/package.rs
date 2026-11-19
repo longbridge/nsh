@@ -280,7 +280,8 @@ pub(crate) struct AndroidConfig {
     /// TLS. Off by default, as Android has it from API 28 on.
     #[serde(default)]
     pub(crate) uses_cleartext_traffic: bool,
-    /// Dex files of the app's own Java code (or an extension's), relative
+    /// Dex files of the Java code the app ships (only the app's own
+    /// `nsh.json` lists them; an extension's are listed there too), relative
     /// to `nsh.json`: packaged after the runtime's `classes.dex` as
     /// `classes2.dex`, `classes3.dex`, ..., so the app's class loader finds
     /// their classes as it finds NSH's.

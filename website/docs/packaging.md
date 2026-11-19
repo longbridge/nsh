@@ -204,9 +204,10 @@ Development builds (`nsh run --target android`) always allow plain HTTP: they lo
 ### Java code
 
 Rust reaches most Android APIs through JNI, but some take a class the app defines: a listener, a callback, a
-`PrintDocumentAdapter`. `android.dex` lists dex files of the app's own Java code (or an extension's), relative to
-`nsh.json`. The package carries them after NSH's runtime as `classes2.dex`, `classes3.dex` and so on, in the order
-listed, so the app's class loader finds their classes:
+`PrintDocumentAdapter`. `android.dex` in the app's `nsh.json` lists the dex files of the Java code the app ships,
+relative to `nsh.json`. The package carries them after NSH's runtime as `classes2.dex`, `classes3.dex` and so on, in the
+order listed, so the app's class loader finds their classes. Only the app's own `nsh.json` lists them: an extension
+that needs Java code cannot add its dex itself, so the apps that use it list the file it provides:
 
 ```json
 {

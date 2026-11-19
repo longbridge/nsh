@@ -646,7 +646,14 @@ fn add_files(
         .read_to_end(&mut dex)?;
     zip.write_all(&dex)?;
     // The app's own after the runtime's: Android loads `classes<N>.dex`
-    // from 2 up, until one is missing.
+    // from 2 up, until one is missing. The numbers assume the runtime is
+    // one dex; a runtime of more would collide with the app's.
+    if !apk.dex.is_empty() && apk.runtime.join("classes2.dex").exists() {
+        bail!(
+            "the Android runtime in {} has more than one dex file, which nsh.json android.dex cannot follow yet",
+            apk.runtime.display()
+        );
+    }
     let dex_dir = layout
         .dex
         .strip_suffix("classes.dex")

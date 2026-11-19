@@ -182,8 +182,9 @@ platform（`sdkmanager "platforms;android-36"`）：
 ### Java 代码
 
 Rust 通过 JNI 可以调用大多数 Android API，但有些 API 需要应用自己定义的类：监听器、回调、`PrintDocumentAdapter`。`android.dex`
-列出应用自己（或扩展）的 Java 代码的 dex 文件，路径相对于 `nsh.json`。包会按列出的顺序把它们放在 NSH 运行时之后，命名为
-`classes2.dex`、`classes3.dex` 等，应用的类加载器因此能找到其中的类：
+写在应用的 `nsh.json` 中，列出应用随包附带的 Java 代码的 dex 文件，路径相对于 `nsh.json`。包会按列出的顺序把它们放在 NSH
+运行时之后，命名为 `classes2.dex`、`classes3.dex` 等，应用的类加载器因此能找到其中的类。只有应用自己的 `nsh.json` 能列出它们：
+需要 Java 代码的扩展不能自己加入 dex，而是由使用它的应用列出它提供的文件：
 
 ```json
 {
