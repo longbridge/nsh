@@ -8603,6 +8603,8 @@ fn inputs_report_their_focus_to_the_views_around_them() {
 
 #[test]
 fn host_foreground_is_inherited_without_resizing_the_viewport() {
+    use crate::prelude::rgb;
+
     let mut c = core();
     view_with_classes(&mut c, 2, "w-full h-full");
     for (id, classes) in [(3, ""), (5, "text-[#0000ff]")] {
