@@ -58,6 +58,7 @@ fn runtime_config(config: &AppConfig, id: &str) -> anyhow::Result<Option<Config>
     let mut runtime = Config::default();
     runtime.id = id.to_owned();
     runtime.version = version(config).to_owned();
+    runtime.name = config.name.clone();
     runtime.github = updater.github.clone();
     runtime.url = updater.url.clone();
     runtime.channels = updater.channels.clone();
