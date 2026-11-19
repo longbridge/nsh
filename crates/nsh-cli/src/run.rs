@@ -787,7 +787,13 @@ fn run_android(
     // As on iOS: the host of a previous session must not connect first.
     let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", BUNDLE_ID]);
     let session = DevSession::start(entry, listen, release, limits)?;
-    install_android_host(&sdk, &serial, work, &crate::runtime::android(true, &[])?)?;
+    // Only the device's ABI: a debug library per ABI makes the APK too
+    // large to build. Unknown: every ABI, as before.
+    let abis = android::device_abis(&sdk, &serial)
+        .map(|device| host_abis(&device))
+        .unwrap_or_default();
+    let runtime = crate::runtime::android(true, &abis)?;
+    install_android_host(&sdk, &serial, work, &runtime, &abis)?;
     // The device reaches the dev server on its own 127.0.0.1, until the
     // run ends.
     let _reverse = android::Reverse::add(&sdk, &serial, session.port())?;
@@ -816,14 +822,27 @@ fn run_android(
     result
 }
 
+/// The ABIs `nsh run` builds the development host for, given the device's
+/// ABIs (preferred first): the first one NSH builds for. None of them:
+/// empty, which builds every ABI of the runtime.
+fn host_abis(device: &[String]) -> Vec<String> {
+    device
+        .iter()
+        .find(|abi| crate::android::ABIS.contains(&abi.as_str()))
+        .map(|abi| vec![abi.clone()])
+        .unwrap_or_default()
+}
+
 /// Builds the Android development host (when its runtime changed) into
 /// `work` and installs it on device `serial` (when the device does not have
-/// this build).
+/// this build). It takes the runtime's libraries for `abis` (empty: every
+/// one the runtime has).
 pub(crate) fn install_android_host(
     sdk: &crate::android::Sdk,
     serial: &str,
     work: &Path,
     runtime: &Path,
+    abis: &[String],
 ) -> anyhow::Result<()> {
     use crate::android::{self, Apk, Signing};
     let apk_path = work.join("android/NshDev.apk");
@@ -834,7 +853,7 @@ pub(crate) fn install_android_host(
     // device replaces what this app installed. The device's install time
     // tells whether the host there is still the one this app installed.
     let installed = work.join("android/installed");
-    let version = runtime_version(runtime)?;
+    let version = runtime_version(runtime, abis)?;
     let built =
         apk_path.exists() && fs::read_to_string(&stamp).ok().as_deref() == Some(version.as_str());
     if !built {
@@ -859,7 +878,7 @@ pub(crate) fn install_android_host(
                 rust: false,
                 dark: false,
                 runtime,
-                abis: &[],
+                abis,
                 icon: None,
                 assets: Vec::new(),
                 sounds: Vec::new(),
@@ -906,11 +925,20 @@ fn installed_host(sdk: &crate::android::Sdk, serial: &str) -> Option<String> {
 }
 
 /// Identifies a runtime build: the sizes and times of its files.
-fn runtime_version(runtime: &Path) -> anyhow::Result<String> {
+fn runtime_version(runtime: &Path, abis: &[String]) -> anyhow::Result<String> {
     let mut parts = Vec::new();
     let mut files = vec![runtime.join("classes.dex")];
     for entry in fs::read_dir(runtime.join("lib"))? {
-        files.push(entry?.path().join("libnsh.so"));
+        let dir = entry?.path();
+        // Libraries of other ABIs left from earlier runs are not in the APK.
+        if !abis.is_empty()
+            && !dir
+                .file_name()
+                .is_some_and(|abi| abis.iter().any(|a| a.as_str() == abi))
+        {
+            continue;
+        }
+        files.push(dir.join("libnsh.so"));
     }
     for file in files {
         if let Ok(meta) = fs::metadata(&file) {
@@ -1284,9 +1312,24 @@ mod tests {
     use clap::ValueEnum as _;
 
     use super::{
-        HostWindow, SimulatorWindow, Target, android_app_env, android_env_extras, open_args,
-        shell_quote, simctl_app_env, simctl_child_env,
+        HostWindow, SimulatorWindow, Target, android_app_env, android_env_extras, host_abis,
+        open_args, shell_quote, simctl_app_env, simctl_child_env,
     };
+
+    /// `nsh run` builds the development host for the device's preferred ABI
+    /// that NSH builds for, and for every ABI when it has none of them.
+    #[test]
+    fn the_android_host_is_built_for_the_devices_abi() {
+        let abis = |list: &[&str]| list.iter().map(|abi| abi.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            host_abis(&abis(&["arm64-v8a", "armeabi-v7a", "armeabi"])),
+            ["arm64-v8a"]
+        );
+        assert_eq!(host_abis(&abis(&["x86_64", "arm64-v8a"])), ["x86_64"]);
+        assert_eq!(host_abis(&abis(&["x86", "armeabi-v7a"])), ["armeabi-v7a"]);
+        assert!(host_abis(&abis(&["x86"])).is_empty());
+        assert!(host_abis(&[]).is_empty());
+    }
 
     /// `nsh run` brings the simulators' window to the front; `nsh test`
     /// opens it without activating it (`open -g`), so the keyboard stays
