@@ -1525,6 +1525,10 @@ pub struct Agent {
     viewport: Mutex<Option<Size<Points>>>,
     /// Where a `dragAndHold` left the pointer down.
     held: Mutex<Option<Point<Points>>>,
+    /// The batches the app had applied when a step last ended with it quiet
+    /// ([`Agent::settled`]): a step that looks for a view next finds the app
+    /// as quiet as it left it when no batch came since.
+    quiet: Mutex<Option<u64>>,
 }
 
 impl Agent {
@@ -1535,6 +1539,7 @@ impl Agent {
             native,
             viewport: Mutex::new(None),
             held: Mutex::new(None),
+            quiet: Mutex::new(None),
         }
     }
 
@@ -1844,7 +1849,7 @@ impl Agent {
         target: PickTarget,
     ) -> Result<(NodeId, Point<Points>), String> {
         Selector::parse(selector)?;
-        self.settled()?;
+        self.settled_unless_still()?;
         let picked = self.scene.pick(selector, target)?;
         let id = self.picked(picked, selector, what)?;
         // The pointer acts in the window the view is in.
@@ -2383,6 +2388,24 @@ impl Agent {
         Ok(Duration::from_millis(ms))
     }
 
+    /// [`Agent::settled`], but not again for an app that has not changed
+    /// since the last step left it quiet: no batch came, nothing animates, and
+    /// the last one is older than [`QUIET`] (a manual clock moves with the
+    /// steps, so there the wait is never skipped).
+    fn settled_unless_still(&self) -> Result<(), String> {
+        if !self.scene.manual_clock() {
+            let quiet = *self.quiet.lock().unwrap_or_else(|e| e.into_inner());
+            let activity = self.scene.activity()?;
+            if quiet == Some(activity.batches)
+                && activity.since_last.is_some_and(|since| since >= QUIET)
+                && !self.native.animating()
+            {
+                return self.check();
+            }
+        }
+        self.settled()
+    }
+
     /// Waits until the app is quiet ([`QUIET`], no native animation that
     /// ends by itself), [`SETTLE`] at most, then fails if it threw
     /// meanwhile.
@@ -2405,9 +2428,11 @@ impl Agent {
                 .map_or(start.elapsed(), |d| d.min(start.elapsed()))
                 .min(moved.elapsed());
             if since >= QUIET {
+                *self.quiet.lock().unwrap_or_else(|e| e.into_inner()) = Some(activity.batches);
                 break;
             }
             if start.elapsed() >= SETTLE {
+                *self.quiet.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 // The step goes on all the same; why it waited this long
                 // tells why a run is slow.
                 log::info!(
@@ -3252,5 +3277,62 @@ mod tests {
         // Focused: typed where its caret is.
         assert_eq!(agent.take(step("Y")), ok);
         assert_eq!(*did.lock().unwrap(), ["press", "type A", "type Y"]);
+    }
+
+    #[test]
+    fn consecutive_steps_on_a_still_app_skip_redundant_settle() {
+        let (engine, batches) = crate::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
+        let model = Arc::new(Model::default());
+        let feeding = model.clone();
+        std::thread::spawn(move || {
+            while let Ok(batch) = batches.recv() {
+                feeding.apply(&batch);
+            }
+        });
+        let typed = Arc::new(Mutex::new(Vec::new()));
+        let agent = Agent::new(
+            model.clone(),
+            Box::new(Fake(engine.control(), typed, Some(model.clone()))),
+        );
+        let ok = StepOutcome::Done {
+            value: serde_json::Value::Null,
+        };
+        assert_eq!(agent.take(TestStep::Ready { timeout_ms: 5000 }), ok);
+
+        let started = Instant::now();
+        for _ in 0..10 {
+            assert_eq!(
+                agent.take(TestStep::Press {
+                    selector: "Add".into(),
+                }),
+                ok
+            );
+        }
+        let elapsed = started.elapsed();
+        eprintln!("10 presses elapsed_ms={}", elapsed.as_millis());
+        assert_eq!(
+            agent.take(TestStep::Texts),
+            StepOutcome::Done {
+                value: serde_json::json!(["Count: 10", "Add"])
+            }
+        );
+        // Without skipping the redundant settle before `find()`, each press waits
+        // ~2 * QUIET (200 ms -> > 2000 ms for 10 presses); skipping it drops the
+        // pre-find wait so 10 presses finish in ~10 * QUIET (~1000–1300 ms).
+        assert!(
+            elapsed < Duration::from_millis(1600),
+            "10 presses on a still app took {} ms (expected < 1600 ms)",
+            elapsed.as_millis()
+        );
+
+        // An intervening batch between steps invalidates the still state, so
+        // the next `find()` still waits for `QUIET`.
+        model.apply(&MountBatch { items: Vec::new() });
+        let after_batch = Instant::now();
+        agent
+            .find("Add", "pressable view", PickTarget::Pressable)
+            .unwrap();
+        assert!(after_batch.elapsed() >= QUIET);
+        drop(engine);
     }
 }
