@@ -6326,7 +6326,9 @@ class Player {
     const depth = this.backDepth();
     const have = this.historyDepth;
     for (let i = have + 1; i <= depth; i++) this.pushEntry(i);
-    if (depth < have) {
+    if (depth < have && this.takeOverEntry(depth)) {
+      // The address is on the entry the page that went had (`takeOverEntry`).
+    } else if (depth < have) {
       // Back over the entries above `depth`, the addresses the user typed
       // at those depths included; a level that has no entry left gets one
       // once the traversal lands.
@@ -6360,6 +6362,39 @@ class Player {
       }
     }
     if (!this.ignoredPops) this.syncTitle();
+  }
+
+  /**
+   * A turn that takes away the one page whose entry is the current one (a
+   * modal, a stack's screen) and pushes an address (a sheet's item that
+   * opens a page of the app's): the address takes that entry over, at the
+   * depth of the pages left, instead of going back over it and pushing an
+   * entry of its own once the traversal lands. Nothing waits for a
+   * traversal, and the entry under it is not left again. A browser pictures
+   * an entry as the page leaves it, and Chrome on Android shows that
+   * picture under a back swipe: left again here, after the app's new page
+   * was drawn (the traversal lands a task or more later), the entry under
+   * it was pictured with that page. Its picture stays the one taken as the
+   * page that went came. Not with entries after the current one (the user
+   * went back onto it), which a push drops and this would keep. Returns
+   * whether it did.
+   */
+  takeOverEntry(depth) {
+    const url = this.pageUrl;
+    if (url == null || !this.pageUrlPush || url === location.href) return false;
+    if (this.entryAtDepth(depth) !== this.historyIndex - 1 || this.historyDepths.length !== this.historyIndex + 1) return false;
+    this.pageUrl = null;
+    this.pageUrlPush = false;
+    try {
+      // Absolute: `setPageUrl` resolved it.
+      history.replaceState(this.historyState(depth), "", url);
+    } catch (error) {
+      this.showError(`UrlScheme.setUrl(${JSON.stringify(url)}): ${error?.message ?? error}`);
+    }
+    this.historyDepths[this.historyIndex] = depth;
+    this.historyDepth = depth;
+    this.shownUrl = url;
+    return true;
   }
 
   popState(e) {

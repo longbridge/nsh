@@ -3105,8 +3105,8 @@ test("a push in the turn that pushes a page gives the page's entry its address, 
   assert.deepEqual(calls.splice(0), [["push", 1, 1], ["replace", 1, 1, "https://a.test/inbox?message=42"]]);
 });
 
-test("a push in the turn that pops a page waits for the back over its entry, then makes its own", (t) => {
-  const { player, calls, app, at } = historyPlayer(t);
+test("a push in the turn that pops a page takes the page's entry over: nothing goes back, no entry of its own", (t) => {
+  const { player, calls, app, at, entries, user } = historyPlayer(t);
   app.depth = 1;
   player.syncHistory();
   calls.splice(0);
@@ -3114,9 +3114,42 @@ test("a push in the turn that pops a page waits for the back over its entry, the
     app.depth = 0;
     player.setPageUrl("?tab=all", true);
   });
-  assert.deepEqual(calls.splice(0), [["go", -1], ["push", 0, 1, "https://a.test/inbox?tab=all"]]);
+  // The entry under it is not left again, so a browser's picture of it is the one taken as the page came.
+  assert.deepEqual(calls.splice(0), [["replace", 0, 1, "https://a.test/inbox?tab=all"]]);
   assert.equal(at(), 1);
+  assert.equal(entries().length, 2);
   assert.equal(player.historyDepth, 0);
+  assert.deepEqual(player.historyDepths, [0, 0]);
+  // Back from it goes to the entry under, as from an entry of its own.
+  user(-1);
+  assert.deepEqual(calls.splice(0), [["event", "onUrlScheme", { url: "https://a.test/inbox", page: true, change: "back" }]]);
+  user(1);
+  assert.deepEqual(calls.splice(0), [["event", "onUrlScheme", { url: "https://a.test/inbox?tab=all", page: true, change: "forward" }]]);
+});
+
+test("a push in the turn that pops two pages, or one the user went back onto, waits for the back over their entries, then makes its own", (t) => {
+  const { player, calls, app, at, user } = historyPlayer(t);
+  app.depth = 2;
+  player.syncHistory();
+  calls.splice(0);
+  inOneTurn(player, () => {
+    app.depth = 0;
+    player.setPageUrl("?tab=all", true);
+  });
+  assert.deepEqual(calls.splice(0), [["go", -2], ["push", 0, 1, "https://a.test/inbox?tab=all"]]);
+  assert.equal(at(), 1);
+  // A page whose entry has one after it (the user went back onto it): the push drops that one.
+  player.setPageUrl("?tab=live", true);
+  app.depth = 1;
+  player.syncHistory();
+  player.setPageUrl("?tab=mine", true);
+  user(-1);
+  calls.splice(0);
+  inOneTurn(player, () => {
+    app.depth = 0;
+    player.setPageUrl("?tab=new", true);
+  });
+  assert.deepEqual(calls.splice(0)[0], ["go", -1]);
 });
 
 test("a push drops the browser's forward entries, and the address shown makes none", (t) => {
