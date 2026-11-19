@@ -2998,7 +2998,7 @@ class Player {
     for (const span of [...el.querySelectorAll(":scope > .nsh-run, :scope > .nsh-run-bg")]) span.remove();
     el.insertBefore(frag, el.firstChild);
     this.lineBreaks(el);
-    if (spans.some((l) => l.events.has("onMouseEnter") || l.events.has("onMouseLeave"))) {
+    if (!el._linkHoverListeners && spans.some((l) => l.events.has("onMouseEnter") || l.events.has("onMouseLeave"))) {
       this.installLinkHover(el);
     }
   }
@@ -3012,8 +3012,7 @@ class Player {
    * listeners read the spans the runs have now.
    */
   installLinkHover(el) {
-    if (el._linkHover !== undefined) return;
-    el._linkHover = null;
+    el._linkHoverListeners = true;
     const follow = (e) => {
       if (e.pointerType !== "mouse") return;
       const link = e.type === "pointerleave" ? null : (e.target?._link ?? null);
@@ -3101,11 +3100,14 @@ class Player {
     // The focus is reported whatever is tracked (the core works out
     // `focus-within` from it): it stays; the rest is forgotten.
     el._states = (el._states || 0) & FOCUSED;
-    if (states & HOVERED && !el._hoverListeners) {
-      el._hoverListeners = true;
-      el.addEventListener("pointerenter", (e) => e.pointerType === "mouse" && this.setState(el, HOVERED, true));
-      el.addEventListener("pointerleave", () => this.setState(el, HOVERED, false));
-    }
+    if (states & HOVERED && !el._hoverListeners) this.installHover(el);
+  }
+
+  /** `hover:` of view `el` (`op_ts`), from the mouse's pointer events. */
+  installHover(el) {
+    el._hoverListeners = true;
+    el.addEventListener("pointerenter", (e) => e.pointerType === "mouse" && this.setState(el, HOVERED, true));
+    el.addEventListener("pointerleave", () => this.setState(el, HOVERED, false));
   }
 
   /** Tells the core the input modality (0 the keyboard, 1 a pointer);
@@ -3150,9 +3152,9 @@ class Player {
   /**
    * The view drawn as the HTML element `elementTag` gives it (`h1`, `a`,
    * `p`, `nav`, ...), else a `div`: the element is replaced by one of that
-   * tag carrying its attributes, children and fields, so search engines
-   * and the page's markup see the document's structure while the layout,
-   * styles and events stay the view's. Views whose element holds a
+   * tag carrying its attributes, children, fields and listeners, so search
+   * engines and the page's markup see the document's structure while the
+   * layout, styles and events stay the view's. Views whose element holds a
    * control of its own (images, scroll views, canvases, ...) keep theirs.
    */
   retag(el, tag) {
@@ -3166,10 +3168,13 @@ class Player {
     next.append(...el.childNodes);
     el.replaceWith(next);
     this.views.set(el._id, next);
-    if (el._mouseEvents) {
-      next._mouseEvents = false;
-      this.installMouse(next);
-    }
+    // Listeners stay with the element they were added to, and a new view's
+    // tracked states and events come before the props that name its tag
+    // (a `Link`'s `href`): the flags copied above say which to add again.
+    if (el._mouseEvents) this.installMouse(next);
+    if (el._hoverListeners) this.installHover(next);
+    if (el._focusListeners) this.installFocus(next);
+    if (el._linkHoverListeners) this.installLinkHover(next);
     if (tag === "a") next.draggable = false;
     return next;
   }
@@ -3237,22 +3242,25 @@ class Player {
     // No longer a stop with the focus on it: it leaves, as on macOS (browsers
     // move it without a `blur`, which would leave `focus:` on).
     if (!focusable && !el._a11yFocus && document.activeElement === el) el.blur();
-    if (focusable && !el._focusListeners) {
-      el._focusListeners = true;
-      // `focus:` classes and `onFocus` follow the keyboard focus (the
-      // browser draws a ring only then), not the focus a click would give.
-      el.addEventListener("focus", () => {
-        if (!el._focusCall && !el.matches(":focus-visible")) return;
-        this.keyFocus(el);
-      });
-      el.addEventListener("blur", () => {
-        this.setState(el, FOCUSED, false);
-        if (!el._keyFocus) return;
-        el._keyFocus = false;
-        this.event(el._id, "onBlur");
-      });
-    }
+    if (focusable && !el._focusListeners) this.installFocus(el);
     this.updateAria(el);
+  }
+
+  /** `focus:` classes, `onFocus` and `onBlur` of Tab stop `el`
+   * (`updateFocusable`): they follow the keyboard focus (the browser draws
+   * a ring only then), not the focus a click would give. */
+  installFocus(el) {
+    el._focusListeners = true;
+    el.addEventListener("focus", () => {
+      if (!el._focusCall && !el.matches(":focus-visible")) return;
+      this.keyFocus(el);
+    });
+    el.addEventListener("blur", () => {
+      this.setState(el, FOCUSED, false);
+      if (!el._keyFocus) return;
+      el._keyFocus = false;
+      this.event(el._id, "onBlur");
+    });
   }
 
   /** Whether the keyboard reaches view `el` (a Tab stop, an input's
