@@ -35220,6 +35220,65 @@ fn space_important_margins_win_over_normal_child_styles() {
 }
 
 #[test]
+fn headless_text_frames_respect_inherited_and_updated_line_heights() {
+    for nested in [false, true] {
+        let mut c = Core::new(crate::ApproxTextEngine, size_pt(300.0, 400.0));
+        c.apply(Op::Create {
+            id: 2,
+            tag: Tag::Text,
+        })
+        .unwrap();
+        c.apply(Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        })
+        .unwrap();
+        if nested {
+            c.apply(Op::Create {
+                id: 3,
+                tag: Tag::Text,
+            })
+            .unwrap();
+            c.apply(Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            })
+            .unwrap();
+        }
+        c.apply(Op::CreateText {
+            id: 4,
+            text: "Direct or nested".into(),
+        })
+        .unwrap();
+        c.apply(Op::Insert {
+            parent: if nested { 3 } else { 2 },
+            child: 4,
+            before: None,
+        })
+        .unwrap();
+        for (height, expected) in [(50.0, 50.0), (30.0, 30.0), (0.0, 17.0)] {
+            c.apply(Op::SetStyle {
+                id: 2,
+                style: style(&[
+                    ("fontSize", StyleValue::Number(14.0)),
+                    ("lineHeight", StyleValue::Number(height)),
+                ]),
+                patch: Default::default(),
+            })
+            .unwrap();
+            c.commit().unwrap();
+            assert_eq!(
+                c.measure(2).unwrap().frame.size.height,
+                px(expected),
+                "nested={nested}, height={height}"
+            );
+        }
+    }
+}
+
+#[test]
 fn percentage_line_heights_inherit_as_computed_lengths() {
     for (leading, expected) in [
         ("leading-[150%]", 30.0),
@@ -38392,27 +38451,21 @@ mod built_in_scrollbars {
             "{:?}",
             batch.items
         );
-        // Moved down at the same size: nothing in the bar is laid out
-        // again, the bar still follows.
+        // Moving the inset without resizing the bar still moves its frame.
         apply(
             &mut c,
             vec![Op::SetProp {
                 id: 2,
                 prop: Prop::Scroll(ScrollProp::ScrollbarInset(EdgeInsets {
-                    top: px(30.0),
-                    right: px(6.0),
-                    bottom: px(40.0),
-                    left: px(0.0),
+                    top: px(20.0),
+                    right: px(0.0),
+                    bottom: px(50.0),
+                    left: px(6.0),
                 })),
             }],
         );
         let batch = c.commit().unwrap();
-        assert_eq!(
-            frame_of(&batch, bar),
-            Some(rect(0.0, 30.0, 294.0, 130.0)),
-            "{:?}",
-            batch.items
-        );
+        assert_eq!(frame_of(&batch, bar), Some(rect(6.0, 20.0, 294.0, 130.0)));
         // Back to the whole viewport.
         apply(
             &mut c,
