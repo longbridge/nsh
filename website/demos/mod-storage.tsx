@@ -7,11 +7,18 @@ import { button, buttonText, sectionSurface, ui, wide } from "./palette";
 function App() {
   const opened = signal<number | null>(null);
   const keys = signal<string[]>([]);
+  const saved = signal(true);
 
   const start = async () => {
     const count = Number((await Storage.getItem("opened")) ?? "0") + 1;
-    await Storage.setItem("opened", String(count));
-    await Storage.setItem("lastOpened", new Date().toISOString());
+    try {
+      await Storage.setItem("opened", String(count));
+      await Storage.setItem("lastOpened", new Date().toISOString());
+    } catch {
+      // The browser keeps nothing for this page (site data blocked, some
+      // private modes): `setItem` rejects and the value is not kept.
+      saved.set(false);
+    }
     opened.set(count);
     keys.set(await Storage.keys());
   };
@@ -29,7 +36,9 @@ function App() {
         <Text style={{ fontSize: 28, fontWeight: "700", color: ui().text }}>
           {opened() === null ? "Reading…" : `Opened ${opened()} ${opened() === 1 ? "time" : "times"}`}
         </Text>
-        <Text style={{ color: ui().muted }}>Reload the page: the count is still there.</Text>
+        <Text style={{ color: ui().muted }}>
+          {saved() ? "Reload the page: the count is still there." : "Not saved: this browser keeps no storage for the page."}
+        </Text>
       </View>
       <Text style={{ color: ui().muted }}>{`Keys: ${keys().length ? keys().join(", ") : "none"}`}</Text>
       <Button onPress={reset} {...button()}>
