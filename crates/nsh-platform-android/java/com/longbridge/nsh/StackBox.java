@@ -429,6 +429,12 @@ final class StackBox extends FrameLayout implements Node {
         private final HeaderRow leadRow;
         /** The toolbar's start content inset from its theme, kept for a page without a leading item. */
         private final int themeInsetStart;
+        /**
+         * The title when the page centers it (`headerTitleAlign` "center"): the
+         * toolbar's own title always starts at the leading edge, while a view it
+         * holds with a centered gravity sits midway, between the items on either side.
+         */
+        private final android.widget.TextView centerTitle;
         private final Mounter mounter;
         /** The header's colors as configured (0: the theme's), kept for an appearance change. */
         private int tint, background, titleColor;
@@ -450,8 +456,9 @@ final class StackBox extends FrameLayout implements Node {
             // The toolbar's own title style, from the same theme (a host's toolbarStyle, the device's font).
             android.content.res.TypedArray style = context.obtainStyledAttributes(null,
                     new int[] {android.R.attr.titleTextAppearance}, android.R.attr.toolbarStyle, 0);
-            leadTitle.setTextAppearance(style.getResourceId(0, android.R.style.TextAppearance_Material_Widget_Toolbar_Title));
+            int appearance = style.getResourceId(0, android.R.style.TextAppearance_Material_Widget_Toolbar_Title);
             style.recycle();
+            leadTitle.setTextAppearance(appearance);
             leadTitle.setSingleLine(true);
             leadTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
             // The gap to the leading item is the title's own padding: a margin on a
@@ -460,6 +467,10 @@ final class StackBox extends FrameLayout implements Node {
             leadRow = new HeaderRow(context);
             leadRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
             themeInsetStart = toolbar.getContentInsetStart();
+            centerTitle = new android.widget.TextView(context);
+            centerTitle.setTextAppearance(appearance);
+            centerTitle.setSingleLine(true);
+            centerTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
             colors();
         }
 
@@ -482,6 +493,7 @@ final class StackBox extends FrameLayout implements Node {
             int primary = themeColor(theme, android.R.attr.textColorPrimary, 0xff1f2328);
             toolbar.setTitleTextColor(titleColor != 0 ? titleColor : primary);
             leadTitle.setTextColor(titleColor != 0 ? titleColor : primary);
+            centerTitle.setTextColor(titleColor != 0 ? titleColor : primary);
             if (transparent) toolbar.setBackgroundColor(0);
             else toolbar.setBackgroundColor(background != 0 ? background : themeColor(theme, android.R.attr.colorBackground, 0xffffffff));
             arrow.setColor(tint != 0 ? tint : primary);
@@ -519,15 +531,17 @@ final class StackBox extends FrameLayout implements Node {
         /** Applies `encode.rs` `screen_config`. */
         void configure(Mounter m, String title, boolean shown, boolean transparent, int tint, int background,
                        int titleColor, boolean backVisible, boolean gesture, boolean preventBack, int animation,
-                       int left, int right, int titleView, float headerHeight, boolean canGoBack,
-                       String backTitle) {
+                       int left, int right, int titleView, float headerHeight, boolean centered,
+                       boolean canGoBack, String backTitle) {
             this.animation = animation;
             this.gestureEnabled = gesture;
             this.preventBack = preventBack;
             float d = m.density;
             toolbar.setVisibility(shown ? VISIBLE : GONE);
-            boolean leadTitled = titleView < 0 && title != null && !title.isEmpty() && left >= 0 && m.views.get(left) != null;
-            toolbar.setTitle(titleView >= 0 || leadTitled ? null : title);
+            boolean titled = titleView < 0 && title != null && !title.isEmpty();
+            boolean centerTitled = centered && titled;
+            boolean leadTitled = !centered && titled && left >= 0 && m.views.get(left) != null;
+            toolbar.setTitle(titleView >= 0 || leadTitled || centerTitled ? null : title);
             int height = Math.round(headerHeight * d);
             int bar = Math.round(56 * d);
             toolbar.setPadding(0, Math.max(0, height - bar), 0, 0);
@@ -553,7 +567,7 @@ final class StackBox extends FrameLayout implements Node {
             // slot (the whole bar where NSH draws it) is never placed: the toolbar is the bar.
             for (int i = toolbar.getChildCount() - 1; i >= 0; i--) {
                 View child = toolbar.getChildAt(i);
-                if (child instanceof Box || child == leadRow) toolbar.removeViewAt(i);
+                if (child instanceof Box || child == leadRow || child == centerTitle) toolbar.removeViewAt(i);
             }
             leadRow.removeAllViews();
             if (leadTitled) {
@@ -572,8 +586,19 @@ final class StackBox extends FrameLayout implements Node {
                         ViewGroup.LayoutParams.WRAP_CONTENT, android.view.Gravity.START | android.view.Gravity.CENTER_VERTICAL));
             } else {
                 add(m, left, android.view.Gravity.START);
-                add(m, titleView, android.view.Gravity.START);
+                if (!centered) add(m, titleView, android.view.Gravity.START);
                 add(m, right, android.view.Gravity.END);
+                // Centered, the title comes last: the toolbar measures the views it holds
+                // in order, so a long plain title gets what the items on either side leave
+                // and is cut short between them. A `headerTitle` view keeps the size the
+                // core laid it out at.
+                if (centered) add(m, titleView, android.view.Gravity.CENTER_HORIZONTAL);
+                if (centerTitled) {
+                    centerTitle.setText(title);
+                    toolbar.addView(centerTitle, new Toolbar.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            android.view.Gravity.CENTER_HORIZONTAL | android.view.Gravity.CENTER_VERTICAL));
+                }
             }
         }
 
