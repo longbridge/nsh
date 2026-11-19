@@ -427,6 +427,8 @@ final class StackBox extends FrameLayout implements Node {
          * them in order but lays them out reversed in RTL).
          */
         private final HeaderRow leadRow;
+        /** The toolbar's start content inset from its theme, kept for a page without a leading item. */
+        private final int themeInsetStart;
         private final Mounter mounter;
         /** The header's colors as configured (0: the theme's), kept for an appearance change. */
         private int tint, background, titleColor;
@@ -457,6 +459,7 @@ final class StackBox extends FrameLayout implements Node {
             leadTitle.setPaddingRelative(Math.round(16 * mounter.density), 0, 0, 0);
             leadRow = new HeaderRow(context);
             leadRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            themeInsetStart = toolbar.getContentInsetStart();
             colors();
         }
 
@@ -536,8 +539,16 @@ final class StackBox extends FrameLayout implements Node {
             this.titleColor = titleColor;
             this.transparent = transparent;
             colors();
-            toolbar.setNavigationIcon(backVisible && canGoBack ? arrow : null);
-            toolbar.setNavigationContentDescription(backVisible && canGoBack ? upDescription(backTitle) : null);
+            boolean up = backVisible && canGoBack;
+            toolbar.setNavigationIcon(up ? arrow : null);
+            toolbar.setNavigationContentDescription(up ? upDescription(backTitle) : null);
+            // A leading item stands where the navigation icon would: the toolbar's
+            // navigation button starts at the edge and centers its icon in it, so
+            // the item starts LEADING_INSET from the edge instead of after the
+            // theme's content inset (16dp), which is the gap kept for a title.
+            boolean leads = !up && left >= 0 && m.views.get(left) != null;
+            toolbar.setContentInsetsRelative(leads ? Math.round(LEADING_INSET * d) : themeInsetStart,
+                    toolbar.getContentInsetEnd());
             // Header items: the core sized them; the toolbar places them. A `header`
             // slot (the whole bar where NSH draws it) is never placed: the toolbar is the bar.
             for (int i = toolbar.getChildCount() - 1; i >= 0; i--) {
@@ -590,6 +601,12 @@ final class StackBox extends FrameLayout implements Node {
             if (gravity == android.view.Gravity.END) p.setMarginEnd(Math.round(12 * m.density));
             toolbar.addView(item, p);
         }
+
+        /**
+         * Where a page's leading header item starts (dp): Material's top app
+         * bar puts its 48dp navigation target 4dp from the edge.
+         */
+        private static final float LEADING_INSET = 4;
 
         /** The row holding a page's leading header item and its title (see {@link #leadRow}). */
         static final class HeaderRow extends android.widget.LinearLayout {
