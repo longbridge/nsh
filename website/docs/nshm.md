@@ -12,7 +12,8 @@ An **nshm** (NSH module) is a Rust crate that gives Native Shell apps components
 [nsh-omarchy](https://github.com/huacnlee/nsh-omarchy), for example, gives an app [Omarchy](https://omarchy.org)'s look: buttons, fields, menus, dialogs, tables and charts that follow the system's Omarchy theme as it changes.
 
 ```sh
-nsh add nsh-omarchy
+nsh add nsh-omarchy                  # from crates.io
+nsh add github:huacnlee/nsh-omarchy  # or from GitHub
 ```
 
 ```rust tabs
@@ -38,7 +39,7 @@ An nshm is how a feature reaches the apps that need it without being part of NSH
 `nsh add` installs an nshm from crates.io, GitHub, any Git URL or a local directory:
 
 ```sh
-nsh add nsh-omarchy@0.1                                       # crates.io: the newest version matching 0.1
+nsh add nsh-omarchy                                             # crates.io: the newest version
 nsh add github:huacnlee/nsh-omarchy                             # GitHub: the default branch, or @<tag>
 nsh add https://github.com/huacnlee/nsh-omarchy.git --rev main  # any Git URL
 nsh add --path ../nsh-omarchy                                   # a local directory, as it is
@@ -48,7 +49,7 @@ It lists the nshm in `nsh.json` `"modules"`, pins the version or commit it resol
 
 ```json
 {
-  "modules": ["nsh-omarchy@0.1", { "path": "../my-gauge" }]
+  "modules": ["nsh-omarchy", { "path": "../my-gauge" }]
 }
 ```
 

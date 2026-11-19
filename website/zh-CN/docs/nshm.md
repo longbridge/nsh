@@ -12,7 +12,8 @@ group: start
 例如 [nsh-omarchy](https://github.com/huacnlee/nsh-omarchy) 为应用带来 [Omarchy](https://omarchy.org) 的风格：按钮、输入框、菜单、对话框、表格和图表，并随系统的 Omarchy 主题实时切换。
 
 ```sh
-nsh add nsh-omarchy
+nsh add nsh-omarchy                  # 来自 crates.io
+nsh add github:huacnlee/nsh-omarchy  # 或来自 GitHub
 ```
 
 ```rust tabs
@@ -38,7 +39,7 @@ nshm 让功能不必成为 NSH 的一部分，也能交到需要它的应用手�
 `nsh add` 可以从 crates.io、GitHub、任意 Git 地址或本地目录安装 nshm：
 
 ```sh
-nsh add nsh-omarchy@0.1                                       # crates.io：匹配 0.1 的最新版本
+nsh add nsh-omarchy                                             # crates.io：最新版本
 nsh add github:huacnlee/nsh-omarchy                             # GitHub：默认分支，或 @<标签>
 nsh add https://github.com/huacnlee/nsh-omarchy.git --rev main  # 任意 Git 地址
 nsh add --path ../nsh-omarchy                                   # 本地目录，按当前内容使用
@@ -48,7 +49,7 @@ nsh add --path ../nsh-omarchy                                   # 本地目录�
 
 ```json
 {
-  "modules": ["nsh-omarchy@0.1", { "path": "../my-gauge" }]
+  "modules": ["nsh-omarchy", { "path": "../my-gauge" }]
 }
 ```
 
