@@ -16,9 +16,9 @@ nsh add nsh-omarchy                  # from crates.io
 nsh add github:huacnlee/nsh-omarchy  # or from GitHub
 ```
 
-Then use it in the app. In Rust, its components are functions of the crate; in TSX, the crate's exports are imported by its specifier, `nsh-omarchy`:
+Then use it from the language the app is written in, Rust or TSX. **In a Rust app**, its components are functions of the crate:
 
-```rust tabs
+```rust
 // src/lib.rs: the app's root component
 use nsh_core::prelude::*;
 use nsh_omarchy::tokens;
@@ -52,7 +52,9 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-```tsx tabs
+**In a TSX app**, import the crate's exports by its specifier, `nsh-omarchy`. The app needs no Rust code of its own: `nsh` builds the app's hosts with the crate.
+
+```tsx
 // App.tsx
 import { mount, signal, Text, View } from "nsh";
 import { BarChart, Icon, Markdown, Omarchy, type ThemeInfo } from "nsh-omarchy";

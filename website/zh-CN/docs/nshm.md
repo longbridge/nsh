@@ -16,9 +16,9 @@ nsh add nsh-omarchy                  # 来自 crates.io
 nsh add github:huacnlee/nsh-omarchy  # 或来自 GitHub
 ```
 
-然后在应用里使用。在 Rust 中，它的组件就是 crate 里的函数；在 TSX 中，按 crate 的标识 `nsh-omarchy` 导入它的导出：
+然后用应用所写的语言使用它，Rust 或 TSX 均可。**Rust 应用**中，它的组件就是 crate 里的函数：
 
-```rust tabs
+```rust
 // src/lib.rs：应用的根组件
 use nsh_core::prelude::*;
 use nsh_omarchy::tokens;
@@ -52,7 +52,9 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-```tsx tabs
+**TSX 应用**中，按 crate 的标识 `nsh-omarchy` 导入它的导出。应用不需要写任何 Rust 代码：`nsh` 会用这个 crate 构建应用的宿主。
+
+```tsx
 // App.tsx
 import { mount, signal, Text, View } from "nsh";
 import { BarChart, Icon, Markdown, Omarchy, type ThemeInfo } from "nsh-omarchy";
