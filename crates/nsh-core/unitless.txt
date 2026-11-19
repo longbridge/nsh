@@ -8,6 +8,7 @@ animation::animator::Animator::deadline ->                       # time
 animation::animator::Animator::deadline(now)                     # time
 animation::animator::Animator::frame_rate ->                     # a frame rate (Hz)
 animation::animator::Animator::tick(now)                         # time
+animation::animator::Animator::tick_frame(now)                   # time
 animation::animator::Animator::transform_moved(amount)           # a gesture amount fed to a generic animated value (a pinch scale, a rotation in degrees)
 animation::driver::sample_driver ->                              # generic animated values, sampled
 animation::driver::sample_driver(from)                           # a generic animated value (any prop: opacity, a color channel, a length)
@@ -21,6 +22,7 @@ animation::graph::Graph::set(new)                                # a generic ani
 animation::graph::Graph::deadline ->                             # time
 animation::graph::Graph::deadline(now)                           # time
 animation::graph::Graph::tick(now)                               # time
+animation::graph::Graph::tick_frame(now)                         # time
 animation::graph::Graph::value ->                                # a generic animated value (any prop: opacity, a color channel, a length)
 animation::motion::Keyframe.offset                               # progress through an iteration (0..1, as easing coordinates)
 animation::motion::Keyframe.value                                # a generic animated value (any prop: opacity, a color channel, a length)

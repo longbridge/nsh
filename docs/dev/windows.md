@@ -148,8 +148,12 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   code. The UI thread sets per-monitor DPI awareness and `OleInitialize`s (clipboard, drag and drop, WIC).
   With nsh.json `window.defaultVisible: false` the window is made and its app runs, unshown: the app's first
   `show()` / `focus()`, or a link from a later launch (`linking.rs`), shows it as `AppView::show` does
-  (`app::show_main`: cloaked until its background and a frame are drawn, then in the mode it opens in,
-  `Surface::main_opening_mode`). A development host holds its first show until the first app came (`dev.rs`,
+  (`app::show_main`: cloaked until its background and a frame are drawn, then in the mode it opens in).
+  Windows changes a window's mode by showing it (`ShowWindow`, `SetWindowPlacement`), so a hidden window (the main
+  one or one of the app's own, before its first show or hidden by the app) is not put in a mode: the mode asked for
+  (nsh.json's, `setMode`, `setPlacement`, `setBounds` out of another mode) is held (`window::held_mode`), read as the
+  window's mode in its state, and entered when the window shows (`window::show`,
+  `window_state::enter_held_mode`). A development host holds its first show until the first app came (`dev.rs`,
   `DevUi::held`): a session's first bundle places the window as a runner does (`AppView::place_main_window`: its
   size, place and the mode it opens in, which waits for the first show while the window is hidden), and the app's
   `defaultVisible` decides whether it shows. An error shows the window while it is hidden (held, or hidden by the
@@ -438,7 +442,9 @@ measured and are not used: they bring back that latency (48 ms) for the same fra
   closed with its views). The layers are presented unsynchronized with the window's swap chain, so for a frame NSH
   content above and below a page may come from consecutive frames while both animate. `baseUrl` answers only the
   document's request: other requests (images, scripts, links) go to the network, and `http(s)` base URLs are the ones
-  WebView2 lets the app answer. Touch and pen input reaches pages as pointer input when it comes from the system
+  WebView2 lets the app answer. A new window (`target="_blank"`, `window.open`) opens nothing, as on the other
+  platforms (`NewWindowRequested` is handled: WebView2's own pop-up would be a browser window outside the `webview`
+  capability); one for a URL that is not granted reports `onError` like a navigation. Touch and pen input reaches pages as pointer input when it comes from the system
   (swipe navigation needs it). An offscreen drawing of the window has no pages (`PrintWindow`'s capture does). Without
   the WebView2 Runtime (it comes with Windows 11; Windows 10 gets it with Edge) a web view shows a neutral
   placeholder.

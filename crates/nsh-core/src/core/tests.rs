@@ -35220,6 +35220,65 @@ fn space_important_margins_win_over_normal_child_styles() {
 }
 
 #[test]
+fn headless_text_frames_respect_inherited_and_updated_line_heights() {
+    for nested in [false, true] {
+        let mut c = Core::new(crate::ApproxTextEngine, size_pt(300.0, 400.0));
+        c.apply(Op::Create {
+            id: 2,
+            tag: Tag::Text,
+        })
+        .unwrap();
+        c.apply(Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        })
+        .unwrap();
+        if nested {
+            c.apply(Op::Create {
+                id: 3,
+                tag: Tag::Text,
+            })
+            .unwrap();
+            c.apply(Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            })
+            .unwrap();
+        }
+        c.apply(Op::CreateText {
+            id: 4,
+            text: "Direct or nested".into(),
+        })
+        .unwrap();
+        c.apply(Op::Insert {
+            parent: if nested { 3 } else { 2 },
+            child: 4,
+            before: None,
+        })
+        .unwrap();
+        for (height, expected) in [(50.0, 50.0), (30.0, 30.0), (0.0, 17.0)] {
+            c.apply(Op::SetStyle {
+                id: 2,
+                style: style(&[
+                    ("fontSize", StyleValue::Number(14.0)),
+                    ("lineHeight", StyleValue::Number(height)),
+                ]),
+                patch: Default::default(),
+            })
+            .unwrap();
+            c.commit().unwrap();
+            assert_eq!(
+                c.measure(2).unwrap().frame.size.height,
+                px(expected),
+                "nested={nested}, height={height}"
+            );
+        }
+    }
+}
+
+#[test]
 fn percentage_line_heights_inherit_as_computed_lengths() {
     for (leading, expected) in [
         ("leading-[150%]", 30.0),
@@ -38392,27 +38451,21 @@ mod built_in_scrollbars {
             "{:?}",
             batch.items
         );
-        // Moved down at the same size: nothing in the bar is laid out
-        // again, the bar still follows.
+        // Moving the inset without resizing the bar still moves its frame.
         apply(
             &mut c,
             vec![Op::SetProp {
                 id: 2,
                 prop: Prop::Scroll(ScrollProp::ScrollbarInset(EdgeInsets {
-                    top: px(30.0),
-                    right: px(6.0),
-                    bottom: px(40.0),
-                    left: px(0.0),
+                    top: px(20.0),
+                    right: px(0.0),
+                    bottom: px(50.0),
+                    left: px(6.0),
                 })),
             }],
         );
         let batch = c.commit().unwrap();
-        assert_eq!(
-            frame_of(&batch, bar),
-            Some(rect(0.0, 30.0, 294.0, 130.0)),
-            "{:?}",
-            batch.items
-        );
+        assert_eq!(frame_of(&batch, bar), Some(rect(6.0, 20.0, 294.0, 130.0)));
         // Back to the whole viewport.
         apply(
             &mut c,
@@ -49540,4 +49593,53 @@ fn raw_text_table_bench() {
     }
     times.sort_by(f64::total_cmp);
     println!("resize + full relayout + commit: median {:.1} ms", times[2]);
+}
+
+/// With nothing focused, a backend reports raw keys at the window's root
+/// (`ROOT_ID`, or a dialog's root): an app's `on_key_down` on its
+/// top-level view hears them and a capture there decides, as a browser
+/// reports them at `document.body` (#2362).
+#[test]
+fn unfocused_keys_reach_the_windows_root() {
+    use crate::{keymap::Keystroke, prelude::*};
+
+    #[component]
+    fn Listening() -> impl IntoElement {
+        view()
+            .on_key_down(|_: &KeyEvent| {})
+            .capture_keys(KeyCapture::keys([
+                Keystroke::parse_with("space", false).unwrap()
+            ]))
+            .child(view().test_id("child"))
+    }
+
+    let mut c = core();
+    c.mount_root(&crate::element::Root::of::<Listening>());
+    c.commit().unwrap();
+    assert!(c.key_interest(crate::ROOT_ID));
+    let space = Keystroke::parse_with("space", false).unwrap();
+    assert!(c.key_captured(crate::ROOT_ID, Some(&space)));
+    let a = Keystroke::parse_with("a", false).unwrap();
+    assert!(!c.key_captured(crate::ROOT_ID, Some(&a)));
+    let mut path = Vec::new();
+    c.key_path(crate::ROOT_ID, &mut path);
+    assert_eq!(path.last(), Some(&crate::ROOT_ID));
+    assert_eq!(path.len(), 2, "the mount root, then the window root");
+}
+
+/// A root without listeners or captures builds no key event: an app that
+/// listens nowhere pays nothing for the unfocused path.
+#[test]
+fn unfocused_keys_are_free_without_a_root_listener() {
+    use crate::prelude::*;
+
+    #[component]
+    fn Quiet() -> impl IntoElement {
+        view().child(view().on_key_down(|_: &KeyEvent| {}))
+    }
+
+    let mut c = core();
+    c.mount_root(&crate::element::Root::of::<Quiet>());
+    c.commit().unwrap();
+    assert!(!c.key_interest(crate::ROOT_ID));
 }
