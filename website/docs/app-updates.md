@@ -144,7 +144,8 @@ before `nsh update-manifest`.
 ## Rust apps
 
 A native Rust app uses `nsh-updater` directly and supplies its own HTTP transport.
-Use `Config::check` to verify the manifest and `Download` to verify the archive.
+Use `Config::check` to verify the manifest and `Download` (`Download::new`, or `Download::resume` and
+`Download::received` when resuming with HTTP `Range`) to verify the archive.
 Then call `Installation::install` and, when it succeeds,
 `nsh_core::element::desktop::restart()`: the app quits as `Application.restart()`
 makes it, and the new version starts once this process has exited. If `install`

@@ -38,7 +38,7 @@ mod url_scheme;
 mod websocket;
 mod webview;
 
-pub use updater::{PackageVersion, UpdaterHost, UpdaterSink};
+pub use updater::{PackageVersion, UpdaterEvent, UpdaterHost, UpdaterRangeSink, UpdaterSink};
 
 /// The [`crate::element::Quotas`] kind WebSockets count under: the `websocket`
 /// module's connections and the global `WebSocket`'s (`nsh-js`) share
