@@ -508,7 +508,8 @@ pub struct ViewProps {
     pub key_parent: Option<crate::NodeId>,
     /// The app's content view where unfocused keys start in this native
     /// window. Mounted by the core so keyboard routing follows logical
-    /// order even when the backend stacks the children differently.
+    /// order even when the backend stacks the children differently. Only
+    /// sent when that path has a key listener or capture rule.
     #[doc(hidden)]
     pub key_content: Option<crate::NodeId>,
     /// The view is a selectable view (`View`'s `selectable`): the

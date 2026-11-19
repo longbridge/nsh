@@ -3020,9 +3020,7 @@ impl<M: TextEngine> Core<M> {
                     .insert(id, WindowRecord::opened(options.attributes.clone(), size));
                 self.window_ids
                     .insert(options.id.clone(), (id, options.restore_bounds));
-                if let Ok(key) = self.key(id) {
-                    self.mark(key, dirty::VIEW_PROPS);
-                }
+                self.key_ancestry_dirty = true;
                 self.commands.push((
                     id,
                     Command::Desktop(Box::new(DesktopCommand::OpenWindow(open))),
@@ -3361,6 +3359,7 @@ impl<M: TextEngine> Core<M> {
         self.sync_overlays();
         if std::mem::take(&mut self.key_ancestry_dirty) {
             self.sync_key_parents();
+            self.sync_key_contents();
         }
         // The rows holding the focus or an open overlay stay rendered,
         // before the lists update their windows.
@@ -7884,12 +7883,10 @@ impl<M: TextEngine> Core<M> {
                 self.mount.push(MountItem::Gestures { id, values });
             }
             if flags & dirty::VIEW_PROPS != 0 {
-                let mut props = node.mounted_props();
-                let start = self.key_start(key);
-                if start != key {
-                    props.key_content = Some(self.nodes[start as usize].id);
-                }
-                self.mount.push(MountItem::ViewProps { id, props });
+                self.mount.push(MountItem::ViewProps {
+                    id,
+                    props: node.mounted_props(),
+                });
             } else if flags & dirty::LABEL != 0 {
                 let label = node
                     .props

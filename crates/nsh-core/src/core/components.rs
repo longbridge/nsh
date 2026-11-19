@@ -5493,7 +5493,7 @@ impl<M: TextEngine> Core<M> {
         if node.id == crate::ROOT_ID
             || (node.kind == Kind::Modal && self.key_window(parent) == node.id)
         {
-            self.mark(parent, super::dirty::VIEW_PROPS);
+            self.key_ancestry_dirty = true;
         }
     }
 
