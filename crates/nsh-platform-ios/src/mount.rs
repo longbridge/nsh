@@ -735,17 +735,17 @@ pub(crate) struct Mounter {
     /// the pans of the scroll views and the swipe back of the stacks around
     /// it.
     blocked_gestures: Vec<Retained<UIGestureRecognizer>>,
-    /// Vertical scroll views whose content size arrived in this batch, with
-    /// the height that came with it. A batch applies a scroll view's content
+    /// Vertical scroll views whose content size arrived in this batch. Judge
+    /// the final size once per view. A batch applies a scroll view's content
     /// size before the frames of the children it measures (`ScrollContent` is
     /// queued when the scroll view is, its children after it), so a size that
     /// looks too wide is only judged after the whole batch is in place.
-    content_sizes: Vec<(NodeId, CGFloat)>,
-    /// The core's width and height for every vertical scroll view the platform
+    content_sizes: rustc_hash::FxHashSet<NodeId>,
+    /// The core's width for every vertical scroll view the platform
     /// narrowed, by id. The core does not resend a content size it did not
     /// change, so a later batch that widens what such a scroll view holds has
     /// to give that width back from here.
-    narrowed: Vec<(NodeId, CGFloat, CGFloat)>,
+    narrowed: Vec<(NodeId, CGFloat)>,
     /// Whether this batch moved any frame: nothing under a narrowed scroll
     /// view can have grown otherwise, so the judgement is skipped.
     frames_applied: bool,
@@ -871,7 +871,7 @@ impl Mounter {
             touch_trackers: Vec::new(),
             touch_listeners: 0,
             blocked_gestures: Vec::new(),
-            content_sizes: Vec::new(),
+            content_sizes: Default::default(),
             narrowed: Vec::new(),
             frames_applied: false,
             rtl: false,
@@ -956,15 +956,15 @@ impl Mounter {
     /// that really is wider than the viewport.
     fn settle_content_sizes(&mut self) {
         let frames_applied = std::mem::take(&mut self.frames_applied);
-        for (id, height) in std::mem::take(&mut self.content_sizes) {
+        for id in std::mem::take(&mut self.content_sizes) {
             let mut narrowed = None;
-            if let Some(Slot {
-                native: Native::Scroll(scroll),
-                ..
-            }) = self.slot(id)
+            if let Some(slot) = self.slot(id)
+                && let Native::Scroll(scroll) = &slot.native
+                && still_judged(slot.horizontal, slot.zoom_view().is_some())
             {
                 let viewport = scroll.bounds().size.width;
-                let content = scroll.contentSize().width;
+                let size = scroll.contentSize();
+                let content = size.width;
                 // Content that fits cannot be narrowed; walking the subtree
                 // to learn that would cost the page on every batch.
                 if viewport > 0.0 && content > viewport {
@@ -974,14 +974,14 @@ impl Mounter {
                         reaches_beyond(scroll, viewport + 0.5),
                     );
                     if width != content {
-                        scroll.setContentSize(CGSize::new(width, height));
-                        narrowed = Some((content, height));
+                        scroll.setContentSize(CGSize::new(width, size.height));
+                        narrowed = Some(content);
                     }
                 }
             }
             self.narrowed.retain(|&(n, ..)| n != id);
-            if let Some((width, height)) = narrowed {
-                self.narrowed.push((id, width, height));
+            if let Some(width) = narrowed {
+                self.narrowed.push((id, width));
             }
         }
         if frames_applied {
@@ -996,7 +996,7 @@ impl Mounter {
     fn rejudge_narrowed(&mut self) {
         let mut i = 0;
         while i < self.narrowed.len() {
-            let (id, core, height) = self.narrowed[i];
+            let (id, core) = self.narrowed[i];
             let mut done = true;
             if let Some(slot) = self.slot(id)
                 && let Native::Scroll(scroll) = &slot.native
@@ -1005,8 +1005,9 @@ impl Mounter {
                 let viewport = scroll.bounds().size.width;
                 let reaches = reaches_beyond(scroll, viewport + 0.5);
                 let width = narrowed_width(viewport, core, reaches);
-                if width != scroll.contentSize().width {
-                    scroll.setContentSize(CGSize::new(width, height));
+                let size = scroll.contentSize();
+                if width != size.width {
+                    scroll.setContentSize(CGSize::new(width, size.height));
                 }
                 done = width == core;
             }
@@ -1555,7 +1556,7 @@ impl Mounter {
                         None => scroll.setContentSize(size),
                     }
                     if vertical {
-                        self.content_sizes.push((id, size.height));
+                        self.content_sizes.insert(id);
                     }
                     self.scrolls.resized(id);
                 }
