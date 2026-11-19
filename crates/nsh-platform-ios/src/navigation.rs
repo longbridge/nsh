@@ -785,7 +785,9 @@ fn size_screens(nav: &UINavigationController) {
 /// stays behind) that subtraction hands the overshoot straight back, and every
 /// later pass arrives at the same wrong number again. Taken from geometry and
 /// written to both sides every time, it is idempotent, and leaves nothing
-/// behind on the side the bar left.
+/// behind on the side the bar left. The stack's frame is its untransformed
+/// place: a container's transform moves the picture of the stack, not the
+/// part of the window it covers (see [`hold_safe_area`]).
 fn clip_side_safe_area(nav: &UINavigationController) {
     let Some(view) = nav.viewIfLoaded() else {
         return;
@@ -797,7 +799,10 @@ fn clip_side_safe_area(nav: &UINavigationController) {
     };
     let safe = window.safeAreaInsets();
     let bounds = window.bounds();
-    let frame = view.convertRect_toView(view.bounds(), Some(&window));
+    let frame = match untransformed_place(&view) {
+        Some((above, frame)) => above.convertRect_toView(frame, Some(&window)),
+        None => view.convertRect_toView(view.bounds(), Some(&window)),
+    };
     let (stack_min, stack_max) = (frame.min().x, frame.max().x);
     let covered = |min: CGFloat, max: CGFloat| (stack_max.min(max) - stack_min.max(min)).max(0.0);
     let left = covered(bounds.min().x, bounds.min().x + safe.left) - safe.left;
@@ -815,72 +820,100 @@ fn clip_side_safe_area(nav: &UINavigationController) {
     }
 }
 
-/// Where `view`'s bounds sit in `window` without the transforms of the
-/// layers on the way (its own included), or `None` when none has one.
-fn untransformed_frame(view: &UIView, window: &UIView) -> Option<CGRect> {
+/// The superview of the outermost transformed layer between `view` (itself
+/// included) and its window, with `view`'s bounds where they sit in it when
+/// no transform applies; `None` when no layer on the way has a transform.
+fn untransformed_place(view: &UIView) -> Option<(Retained<UIView>, CGRect)> {
     let size = view.bounds().size;
     let (mut x, mut y) = (0.0, 0.0);
-    let mut transformed = false;
+    let mut place = None;
     let mut v = view.retain();
-    loop {
+    while let Some(parent) = v.superview() {
         let layer = v.layer();
-        transformed |= !layer.transform().is_identity();
-        let parent = v.superview()?;
         let (center, bounds, anchor) = (v.center(), v.bounds(), layer.anchorPoint());
         let offset = parent.bounds().origin;
         x += center.x - bounds.size.width * anchor.x - offset.x;
         y += center.y - bounds.size.height * anchor.y - offset.y;
-        if *parent == *window {
-            break;
+        if !layer.transform().is_identity() {
+            place = Some((parent.clone(), CGRect::new(CGPoint::new(x, y), size)));
         }
         v = parent;
     }
-    transformed.then(|| CGRect::new(CGPoint::new(x, y), size))
+    place
 }
 
-/// Holds a stack's top and bottom safe area to what its untransformed place
-/// in the window gives it.
+/// Keeps the safe area UIKit measures through a transform from falling short
+/// of what the stack's untransformed place is owed.
 ///
-/// UIKit measures the safe area through the transforms around a controller,
-/// on its own layout passes only. A pass while a container shows the stack
-/// scaled or moved (a drawer that shrinks the page into a card) gives it the
-/// insets of that picture, the bar moves under the status bar, and they stay
-/// after the transform is gone: a transform starts no pass. The difference
-/// goes into the stack's `additionalSafeAreaInsets`, none without a
-/// transform around.
-fn hold_vertical_safe_area(nav: &UINavigationController) {
+/// UIKit measures a controller's safe area through the transforms around it,
+/// on its own layout passes only: a pass while a container shows the stack
+/// scaled or moved (a drawer that shrinks the page into a card) hands it the
+/// insets of that picture, and they stay after the transform goes, since a
+/// transform starts no pass. What the stack is owed comes from the safe area
+/// of the view just above the outermost transform (the window's insets and
+/// whatever a host or an outer stack adds there), against the stack's
+/// untransformed place in that view; what falls short goes into the stack's
+/// `additionalSafeAreaInsets`. Insets added inside the transformed views (a
+/// host's tab bar when the host scales its tab controller) are measured by
+/// UIKit in the same picture and stay as they are: nothing here takes away
+/// from what UIKit granted. With no transform around, nothing is added.
+fn hold_safe_area(nav: &UINavigationController) {
     let Some(view) = nav.viewIfLoaded() else {
         return;
     };
-    let Some(window) = view.window() else {
-        return;
-    };
-    let current = nav.additionalSafeAreaInsets();
-    let (top, bottom) = match untransformed_frame(&view, &window) {
-        None => (0.0, 0.0),
-        Some(frame) => {
-            let unsafe_area = window.safeAreaInsets();
-            let bounds = window.bounds();
-            let owed_top = (bounds.min().y + unsafe_area.top - frame.min().y).max(0.0);
-            let owed_bottom = (frame.max().y - bounds.max().y + unsafe_area.bottom).max(0.0);
-            // Granted by UIKit: the safe area less what was added here. The
-            // sum is what is owed, never below zero, so UIKit's floor at
-            // zero hides none of it.
-            let safe = view.safeAreaInsets();
-            (
-                owed_top - (safe.top - current.top),
-                owed_bottom - (safe.bottom - current.bottom),
-            )
-        }
-    };
-    if (current.top - top).abs() < 0.01 && (current.bottom - bottom).abs() < 0.01 {
+    if view.window().is_none() {
         return;
     }
-    nav.setAdditionalSafeAreaInsets(UIEdgeInsets {
-        top,
-        bottom,
-        ..current
-    });
+    let current = nav.additionalSafeAreaInsets();
+    let wanted = match untransformed_place(&view) {
+        None => UIEdgeInsets {
+            top: 0.0,
+            left: 0.0,
+            bottom: 0.0,
+            right: 0.0,
+        },
+        Some((above, frame)) => {
+            let (bounds, area) = (above.bounds(), above.safeAreaInsets());
+            let safe = view.safeAreaInsets();
+            // What is added is never negative, so UIKit's floor at zero
+            // never cuts the sum: less what was added, the safe area is
+            // exactly what UIKit granted.
+            let short = |owed: CGFloat, safe: CGFloat, added: CGFloat| {
+                (owed.max(0.0) - (safe - added)).max(0.0)
+            };
+            UIEdgeInsets {
+                top: short(
+                    bounds.min().y + area.top - frame.min().y,
+                    safe.top,
+                    current.top,
+                ),
+                left: short(
+                    bounds.min().x + area.left - frame.min().x,
+                    safe.left,
+                    current.left,
+                ),
+                bottom: short(
+                    frame.max().y - bounds.max().y + area.bottom,
+                    safe.bottom,
+                    current.bottom,
+                ),
+                right: short(
+                    frame.max().x - bounds.max().x + area.right,
+                    safe.right,
+                    current.right,
+                ),
+            }
+        }
+    };
+    let near = |a: CGFloat, b: CGFloat| (a - b).abs() < 0.01;
+    if near(current.top, wanted.top)
+        && near(current.left, wanted.left)
+        && near(current.bottom, wanted.bottom)
+        && near(current.right, wanted.right)
+    {
+        return;
+    }
+    nav.setAdditionalSafeAreaInsets(wanted);
 }
 
 /// Gives the bar of `nav` the height of the large title its top screen asks
@@ -967,7 +1000,7 @@ define_class!(
             let _: () = unsafe { msg_send![super(self), viewDidLayoutSubviews] };
             size_screens(self);
             clip_side_safe_area(self);
-            hold_vertical_safe_area(self);
+            hold_safe_area(self);
             // A column of a split (or its compact stack): the core lays the
             // column's pages out at the size the split gives it.
             let ivars = self.ivars();
@@ -985,7 +1018,7 @@ define_class!(
             // SAFETY: calling the superclass implementation.
             let _: () = unsafe { msg_send![super(self), viewSafeAreaInsetsDidChange] };
             clip_side_safe_area(self);
-            hold_vertical_safe_area(self);
+            hold_safe_area(self);
         }
     }
 );
