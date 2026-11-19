@@ -9,20 +9,26 @@ group: start
 
 An **nshm** (NSH module) is a Rust crate that gives Native Shell apps components, modules and classes, published on crates.io or Git. An app installs one with `nsh add` and uses it from Rust and from TSX: the same implementation, native on every platform.
 
+[nsh-omarchy](https://github.com/huacnlee/nsh-omarchy), for example, gives an app [Omarchy](https://omarchy.org)'s look: buttons, fields, menus, dialogs, tables and charts that follow the system's Omarchy theme as it changes.
+
 ```sh
-nsh add acme-gauge@1.0
+nsh add nsh-omarchy
 ```
 
 ```rust tabs
 // Rust: the crate is a dependency of the app's crate.
-acme_gauge::gauge().value(move || load.get())
+use nsh_omarchy as om;
+
+om::init(); // follow the system's Omarchy theme
+om::button_primary("Save").on_press(move || saved.update(|n| *n += 1))
 ```
 
 ```tsx tabs
 // TSX: imported by the nshm's specifier.
-import { Gauge } from "acme/gauge";
+import { BarChart, Omarchy } from "nsh-omarchy";
 
-<Gauge value={load()} />
+Omarchy.followSystem();
+<BarChart data={[{ label: "Mon", value: 12 }, { label: "Tue", value: 18 }]} accessibilityLabel="Builds" />
 ```
 
 An nshm is how a feature reaches the apps that need it without being part of NSH: it ships on its own schedule, and only the apps that install it pay its size, build time and dependencies.
@@ -32,17 +38,17 @@ An nshm is how a feature reaches the apps that need it without being part of NSH
 `nsh add` installs an nshm from crates.io, GitHub, any Git URL or a local directory:
 
 ```sh
-nsh add acme-gauge@1.0                                 # crates.io: the newest version matching 1.0
-nsh add github:acme/gauge@v1.0.0                       # GitHub at a tag
-nsh add https://git.example.com/gauge.git --tag v1.0.0  # any Git URL
-nsh add --path ../gauge                                # a local directory, as it is
+nsh add nsh-omarchy@0.1                                       # crates.io: the newest version matching 0.1
+nsh add github:huacnlee/nsh-omarchy                             # GitHub: the default branch, or @<tag>
+nsh add https://github.com/huacnlee/nsh-omarchy.git --rev main  # any Git URL
+nsh add --path ../nsh-omarchy                                   # a local directory, as it is
 ```
 
 It lists the nshm in `nsh.json` `"modules"`, pins the version or commit it resolved to in `nsh.lock` (commit both with the app), and adds the crate to the `[dependencies]` of the app's own crate when it has one. Every command builds with the locked version; running `nsh add` again updates it. A pure TSX app gets hosts built with its nshm, as an app with a crate of its own does, so its development machine and CI need the Rust toolchain ([Building with Rust](./rust.md)).
 
 ```json
 {
-  "modules": ["acme-gauge@1.0", "github:acme/chart@v0.3.0", { "path": "../gauge" }]
+  "modules": ["nsh-omarchy@0.1", { "path": "../my-gauge" }]
 }
 ```
 
@@ -50,13 +56,13 @@ It lists the nshm in `nsh.json` `"modules"`, pins the version or commit it resol
 
 ## Writing an nshm
 
-An nshm is an ordinary Cargo library with a `#[native_module("<specifier>")]` entry at its root, the same as an app's own crate: the specifier is what TSX imports, and the function registers what it exports ([Extending a Rust app with TSX](./rust.md#extending-a-rust-app-with-tsx)). It needs no NSH-specific metadata.
+An nshm is an ordinary Cargo library with a `#[native_module("<specifier>")]` entry at its root, the same as an app's own crate: the specifier is what TSX imports, and the function registers what it exports ([Extending a Rust app with TSX](./rust.md#extending-a-rust-app-with-tsx)). It needs no NSH-specific metadata. A small one:
 
 ```toml
 # Cargo.toml
 [package]
-name = "acme-gauge"
-version = "1.0.0"
+name = "my-gauge"
+version = "0.1.0"
 edition = "2024"
 keywords = ["nshm"]
 
@@ -68,7 +74,7 @@ nsh-core = "0.6"
 // src/lib.rs
 use nsh_core::prelude::*;
 
-#[native_module("acme/gauge")]
+#[native_module("my-gauge")]
 fn native(registry: &mut Registry) {
     registry.register::<Gauge>();
 }
@@ -98,7 +104,9 @@ pub fn Gauge(props: GaugeProps) -> impl IntoElement {
 
 The NSH versions an nshm builds with are its own `nsh-core` requirement (`nsh-core = "0.6"`), which `nsh add` checks against the running `nsh` before anything compiles. Its TypeScript declarations are generated from its Rust types, so apps check their TSX against it as they do against their own crate.
 
-Develop it beside an app with `nsh add --path ../acme-gauge`, which reads the directory as it is. Publish it as any crate (`cargo publish`), with the keyword `nshm` so that it can be found on [crates.io](https://crates.io/keywords/nshm), or push it to Git and share its URL.
+[nsh-omarchy's `src/lib.rs`](https://github.com/huacnlee/nsh-omarchy/blob/main/src/lib.rs) is a complete one: a library of Rust components for Rust apps, and a theme module, charts and `Markdown` for TSX.
+
+Develop it beside an app with `nsh add --path ../my-gauge`, which reads the directory as it is. Publish it as any crate (`cargo publish`), with the keyword `nshm` so that it can be found on [crates.io](https://crates.io/keywords/nshm), or push it to Git and share its URL.
 
 ## Security
 
