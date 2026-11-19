@@ -22,37 +22,9 @@ use std::{
 
 use crate::element::{Callback, JsError, JsObject, Later, System, codes, module};
 
-/// Takes a piece of a body and the total size if known; an error stops it.
-pub type UpdaterSink<'a> = &'a mut dyn FnMut(&[u8], Option<u64>) -> Result<(), String>;
-
-/// What [`UpdaterHost::get_from`] delivers to its callback: how the response
-/// begins (once, before any bytes), then each slice of the body.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum UpdaterEvent<'a> {
-    /// The complete resource from byte `0` (`200 OK`, or a host without range
-    /// support): discard any kept partial bytes and write from the start.
-    Full {
-        /// Complete resource size in bytes, when known.
-        total: Option<u64>,
-    },
-    /// Remaining bytes starting at the requested byte offset (`206 Partial
-    /// Content` with a `Content-Range` starting at `from`): append to the kept
-    /// partial file.
-    Partial {
-        /// Complete resource size in bytes, when known.
-        total: Option<u64>,
-    },
-    /// The server could not satisfy the requested range (`416 Range Not
-    /// Satisfiable`, or a `206` whose `Content-Range` did not match `from`):
-    /// no body bytes follow.
-    Unsatisfiable,
-    /// The next slice of body bytes.
-    Data(&'a [u8]),
-}
-
-/// Takes each [`UpdaterEvent`] of a ranged download; an error stops it.
-pub type UpdaterRangeSink<'a> = &'a mut dyn FnMut(UpdaterEvent<'_>) -> Result<(), String>;
+/// Takes a piece of a body: its byte offset in the resource, the bytes, and
+/// the resource's total size if known; an error stops it.
+pub type UpdaterSink<'a> = &'a mut dyn FnMut(u64, &[u8], Option<u64>) -> Result<(), String>;
 
 /// What the platform gives the module: the package's update configuration
 /// and HTTP. Both block, and are called off the engine thread.
@@ -61,33 +33,14 @@ pub trait UpdaterHost: Send + Sync + 'static {
     /// development run, an app without `"updater"` in `nsh.json`).
     fn config(&self) -> Option<Vec<u8>>;
 
-    /// Gets `url`, following redirects, handing each piece of the body and
-    /// the total size if known to `sink`, until it fails or the body ends.
-    fn get(&self, url: &str, sink: UpdaterSink<'_>) -> Result<(), String>;
-
-    /// Gets `url` starting at byte `from` (sending `Range: bytes=<from>-` when
-    /// `from > 0` and `Accept-Encoding: identity`), following redirects.
-    /// Reports how the response begins ([`UpdaterEvent::Full`],
-    /// [`UpdaterEvent::Partial`], or [`UpdaterEvent::Unsatisfiable`]) before
-    /// any [`UpdaterEvent::Data`] slices.
-    ///
-    /// The default implementation delegates to [`UpdaterHost::get`] and
-    /// reports a full response from byte `0`.
-    fn get_from(&self, url: &str, from: u64, sink: UpdaterRangeSink<'_>) -> Result<(), String> {
-        let _ = from;
-        let mut started = false;
-        self.get(url, &mut |chunk, total| {
-            if !started {
-                started = true;
-                sink(UpdaterEvent::Full { total })?;
-            }
-            sink(UpdaterEvent::Data(chunk))
-        })?;
-        if !started {
-            sink(UpdaterEvent::Full { total: None })?;
-        }
-        Ok(())
-    }
+    /// Gets `url` from byte `from` on, following redirects, handing each
+    /// piece of the body to `sink` with its offset in the resource, until it
+    /// fails or the body ends. With `from > 0` the host asks for the rest
+    /// (`Range: bytes=<from>-`); a server that ignores the range sends the
+    /// whole resource from offset `0`, and one that cannot satisfy it
+    /// (`416`) sends no pieces. Offsets count the raw resource's bytes, so
+    /// the host asks for no transparent compression.
+    fn get(&self, url: &str, from: u64, sink: UpdaterSink<'_>) -> Result<(), String>;
 
     /// The signed package this run's code came from; `None` (the default):
     /// the bundle the app shipped with.
@@ -443,7 +396,7 @@ fn unavailable() -> JsError {
 mod native {
     use std::collections::BTreeMap;
 
-    use nsh_updater::{Available, Config, Download};
+    use nsh_updater::{Available, Config};
 
     use super::*;
 
@@ -671,7 +624,7 @@ mod native {
     fn get_all(host: &dyn UpdaterHost, url: &str) -> Result<Vec<u8>, String> {
         const MAX: usize = 1 << 20;
         let mut bytes = Vec::new();
-        host.get(url, &mut |chunk, _| {
+        host.get(url, 0, &mut |_, chunk, _| {
             if bytes.len() + chunk.len() > MAX {
                 return Err("over 1 MiB".to_owned());
             }
@@ -712,7 +665,11 @@ mod native {
         for entry in entries.flatten() {
             let name = entry.file_name();
             let Some(name) = name.to_str() else { continue };
-            if name.starts_with("download-") && name != keep_part && name != keep_dest {
+            if name.starts_with("download-")
+                && name != keep_part
+                && name != keep_dest
+                && name.strip_suffix(".lock") != Some(keep_part)
+            {
                 let _ = std::fs::remove_file(entry.path());
             }
         }
@@ -729,10 +686,65 @@ mod native {
             let name = entry.file_name();
             let Some(name) = name.to_str() else { continue };
             let legacy = name == format!("{NEXT}.part");
-            let other = name.starts_with("next-") && name.ends_with(".nshpkg.part");
-            if (legacy || other) && name != keep_part {
+            let other = name.starts_with("next-")
+                && (name.ends_with(".nshpkg.part") || name.ends_with(".nshpkg.part.lock"));
+            if (legacy || other)
+                && name != keep_part
+                && name.strip_suffix(".lock") != Some(keep_part)
+            {
                 let _ = std::fs::remove_file(entry.path());
             }
+        }
+    }
+
+    /// An [`nsh_updater::Download`] that counts what it took, so a kept
+    /// `.part` file can be hashed again and resumed from its end.
+    #[derive(Debug)]
+    struct Download {
+        check: nsh_updater::Download,
+        received: u64,
+    }
+
+    impl Download {
+        fn new(sha256: &str, size: Option<u64>) -> Download {
+            Download {
+                check: nsh_updater::Download::new(sha256, size),
+                received: 0,
+            }
+        }
+
+        /// Seeded with the bytes already in `partial`; fails if they exceed
+        /// the manifest's size or cannot be read.
+        fn resume(
+            sha256: &str,
+            size: Option<u64>,
+            partial: &mut impl std::io::Read,
+        ) -> Result<Download, String> {
+            let mut download = Download::new(sha256, size);
+            let mut buf = [0u8; 16 * 1024];
+            loop {
+                match partial.read(&mut buf) {
+                    Ok(0) => return Ok(download),
+                    Ok(n) => {
+                        download.update(&buf[..n]).map_err(|e| e.to_string())?;
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(e) => return Err(e.to_string()),
+                }
+            }
+        }
+
+        fn received(&self) -> u64 {
+            self.received
+        }
+
+        fn update(&mut self, chunk: &[u8]) -> Result<u64, nsh_updater::Error> {
+            self.received = self.check.update(chunk)?;
+            Ok(self.received)
+        }
+
+        fn finish(self) -> Result<(), nsh_updater::Error> {
+            self.check.finish()
         }
     }
 
@@ -845,49 +857,47 @@ mod native {
 
             let transfer = target
                 .host
-                .get_from(target.url, offset, &mut |event| match event {
-                    UpdaterEvent::Full { total } => {
-                        kind = ResponseKind::Full;
-                        server_total = total;
-                        if check.received() > 0 {
-                            file.set_len(0).map_err(|e| e.to_string())?;
-                            file.seek(std::io::SeekFrom::Start(0))
-                                .map_err(|e| e.to_string())?;
-                            check = Download::new(target.sha256, target.size);
-                            resumed = false;
-                        }
-                        Ok(())
-                    }
-                    UpdaterEvent::Partial { total } => {
-                        kind = ResponseKind::Partial;
-                        server_total = total;
-                        if !progress(check.received(), target.size.or(total)) {
-                            return Err("download cancelled".to_owned());
-                        }
-                        Ok(())
-                    }
-                    UpdaterEvent::Unsatisfiable => {
-                        kind = ResponseKind::Unsatisfiable;
-                        Ok(())
-                    }
-                    UpdaterEvent::Data(chunk) => {
-                        if !matches!(kind, ResponseKind::Full | ResponseKind::Partial) {
-                            return Err("response body without status".to_owned());
-                        }
-                        let received = match check.update(chunk) {
-                            Ok(received) => received,
-                            Err(e) => {
-                                exceeded_size = true;
-                                return Err(e.to_string());
+                .get(target.url, offset, &mut |at, chunk, total| {
+                    if kind == ResponseKind::None {
+                        if at == 0 {
+                            // The whole resource: the server ignored the range.
+                            kind = ResponseKind::Full;
+                            if check.received() > 0 {
+                                file.set_len(0).map_err(|e| e.to_string())?;
+                                file.seek(std::io::SeekFrom::Start(0))
+                                    .map_err(|e| e.to_string())?;
+                                check = Download::new(target.sha256, target.size);
+                                resumed = false;
                             }
-                        };
-                        file.write_all(chunk).map_err(|e| e.to_string())?;
-                        if !progress(received, target.size.or(server_total)) {
-                            return Err("download cancelled".to_owned());
+                        } else if at == offset {
+                            kind = ResponseKind::Partial;
+                            // Show the kept bytes before the new ones arrive.
+                            if !progress(offset, target.size.or(total)) {
+                                return Err("download cancelled".to_owned());
+                            }
+                        } else {
+                            return Err(format!("body starts at byte {at}, not {offset}"));
                         }
-                        Ok(())
+                        server_total = total;
                     }
+                    let received = match check.update(chunk) {
+                        Ok(received) => received,
+                        Err(e) => {
+                            exceeded_size = true;
+                            return Err(e.to_string());
+                        }
+                    };
+                    file.write_all(chunk).map_err(|e| e.to_string())?;
+                    if !progress(received, target.size.or(server_total)) {
+                        return Err("download cancelled".to_owned());
+                    }
+                    Ok(())
                 });
+            // No body for a resumed request: the server could not satisfy
+            // the range (`416`).
+            if transfer.is_ok() && kind == ResponseKind::None && offset > 0 {
+                kind = ResponseKind::Unsatisfiable;
+            }
 
             if let Err(err) = transfer {
                 let _ = file.flush();
@@ -969,11 +979,34 @@ mod native {
     /// Downloads `target.url` into `target.part` (resuming an existing partial
     /// file when present), verifies its size, SHA-256 and `verify`, and moves
     /// it atomically to `target.dest`.
+    /// Locks `<part>.lock`, held until the returned file drops; fails at
+    /// once when another download of the same asset holds it.
+    fn lock_part(part: &std::path::Path) -> Result<std::fs::File, String> {
+        let mut path = part.as_os_str().to_owned();
+        path.push(".lock");
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|e| e.to_string())?;
+        match file.try_lock() {
+            Ok(()) => Ok(file),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                Err("another download of this update is in progress".to_owned())
+            }
+            Err(std::fs::TryLockError::Error(e)) => Err(e.to_string()),
+        }
+    }
+
     fn download_resumable(
         target: &DownloadTarget<'_>,
         mut progress: impl FnMut(u64, Option<u64>) -> bool,
         verify: impl Fn(&std::path::Path) -> Result<(), String>,
     ) -> Result<(), String> {
+        // One download of an asset at a time, also across processes: the
+        // `.part` is shared, so a second one would interleave its bytes.
+        let _lock = lock_part(target.part)?;
         // Fast path: the final file is already on disk and matches this asset.
         if let Ok(mut existing) = std::fs::File::open(target.dest) {
             let matched = Download::resume(target.sha256, target.size, &mut existing)
@@ -1472,13 +1505,13 @@ mod native {
                 )
             }
 
-            fn get(&self, url: &str, sink: UpdaterSink<'_>) -> Result<(), String> {
+            fn get(&self, url: &str, _: u64, sink: UpdaterSink<'_>) -> Result<(), String> {
                 self.0.lock().unwrap().push(url.to_owned());
                 let manifest = match url.strip_suffix(".sig").unwrap_or(url) {
                     STABLE => served("1.0.0"),
                     BETA => beta(),
-                    ZH_TW => return sink("修復".as_bytes(), None),
-                    JA => return sink(b"tampered", None),
+                    ZH_TW => return sink(0, "修復".as_bytes(), None),
+                    JA => return sink(0, b"tampered", None),
                     _ => return Err("not found".into()),
                 };
                 let body = if url.ends_with(".sig") {
@@ -1486,7 +1519,7 @@ mod native {
                 } else {
                     manifest
                 };
-                sink(&body, Some(body.len() as u64))
+                sink(0, &body, Some(body.len() as u64))
             }
         }
 
@@ -1602,7 +1635,7 @@ mod native {
         /// server-capped slices and OTA package verification.
         struct ScriptedHost {
             payload: Vec<u8>,
-            /// Each `get_from` pops one scripted action from the front.
+            /// Each payload `get` pops one scripted action from the front.
             script: std::sync::Mutex<std::collections::VecDeque<ScriptedResponse>>,
             /// Byte offsets requested in order.
             offsets: std::sync::Mutex<Vec<u64>>,
@@ -1651,23 +1684,16 @@ mod native {
                 self.package_config.clone()
             }
 
-            fn get(&self, url: &str, sink: UpdaterSink<'_>) -> Result<(), String> {
-                if let Some(manifest) = &self.package_manifest {
+            fn get(&self, url: &str, from: u64, sink: UpdaterSink<'_>) -> Result<(), String> {
+                if let Some(manifest) = &self.package_manifest
+                    && !url.ends_with(".nshpkg")
+                {
                     if url.ends_with(".sig") {
                         let sig = nsh_updater::sign(SECRET, manifest).unwrap();
-                        return sink(sig.as_bytes(), Some(sig.len() as u64));
+                        return sink(0, sig.as_bytes(), Some(sig.len() as u64));
                     }
-                    return sink(manifest, Some(manifest.len() as u64));
+                    return sink(0, manifest, Some(manifest.len() as u64));
                 }
-                sink(&self.payload, Some(self.payload.len() as u64))
-            }
-
-            fn get_from(
-                &self,
-                _url: &str,
-                from: u64,
-                sink: UpdaterRangeSink<'_>,
-            ) -> Result<(), String> {
                 self.offsets.lock().unwrap().push(from);
                 let action = self
                     .script
@@ -1679,40 +1705,19 @@ mod native {
                 let start = from as usize;
                 match action {
                     ScriptedResponse::DropAfter { bytes, err } => {
-                        if from > 0 {
-                            sink(UpdaterEvent::Partial { total })?;
-                        } else {
-                            sink(UpdaterEvent::Full { total })?;
-                        }
                         let end = (start + bytes).min(self.payload.len());
                         if start < end {
-                            sink(UpdaterEvent::Data(&self.payload[start..end]))?;
+                            sink(from, &self.payload[start..end], total)?;
                         }
                         Err(err.to_owned())
                     }
-                    ScriptedResponse::Complete => {
-                        if from > 0 {
-                            sink(UpdaterEvent::Partial { total })?;
-                            sink(UpdaterEvent::Data(&self.payload[start..]))
-                        } else {
-                            sink(UpdaterEvent::Full { total })?;
-                            sink(UpdaterEvent::Data(&self.payload))
-                        }
-                    }
+                    ScriptedResponse::Complete => sink(from, &self.payload[start..], total),
                     ScriptedResponse::CappedSlice(max_bytes) => {
                         let end = (start + max_bytes).min(self.payload.len());
-                        if from > 0 {
-                            sink(UpdaterEvent::Partial { total })?;
-                        } else {
-                            sink(UpdaterEvent::Full { total })?;
-                        }
-                        sink(UpdaterEvent::Data(&self.payload[start..end]))
+                        sink(from, &self.payload[start..end], total)
                     }
-                    ScriptedResponse::IgnoreRangeFull => {
-                        sink(UpdaterEvent::Full { total })?;
-                        sink(UpdaterEvent::Data(&self.payload))
-                    }
-                    ScriptedResponse::Unsatisfiable => sink(UpdaterEvent::Unsatisfiable),
+                    ScriptedResponse::IgnoreRangeFull => sink(0, &self.payload, total),
+                    ScriptedResponse::Unsatisfiable => Ok(()),
                     ScriptedResponse::ImmediateErr(err) => Err(err.to_owned()),
                 }
             }
@@ -1804,6 +1809,55 @@ mod native {
             assert_eq!(progress, [(11, Some(16)), (16, Some(16))]);
             assert!(!part.exists());
             assert_eq!(std::fs::read(&dest).unwrap(), payload);
+        }
+
+        #[test]
+        fn downloads_resume_from_existing_bytes() {
+            let full = b"hello resumable world";
+            let hash = nsh_updater::sha256(full);
+            let size = Some(full.len() as u64);
+
+            // Partial prefix + appended tail verifies identically to a single pass.
+            let mut cursor = std::io::Cursor::new(&full[..6]);
+            let mut resumed = Download::resume(&hash, size, &mut cursor).unwrap();
+            assert_eq!(resumed.received(), 6);
+            assert_eq!(resumed.update(&full[6..]).unwrap(), full.len() as u64);
+            assert_eq!(resumed.received(), full.len() as u64);
+            assert!(resumed.finish().is_ok());
+
+            // An empty partial starts at 0.
+            let mut empty = std::io::Cursor::new(&b""[..]);
+            let mut fresh = Download::resume(&hash, size, &mut empty).unwrap();
+            assert_eq!(fresh.received(), 0);
+            fresh.update(full).unwrap();
+            assert!(fresh.finish().is_ok());
+
+            // A partial already holding all bytes finishes immediately.
+            let mut complete = std::io::Cursor::new(&full[..]);
+            let done = Download::resume(&hash, size, &mut complete).unwrap();
+            assert_eq!(done.received(), full.len() as u64);
+            assert!(done.finish().is_ok());
+
+            // A partial larger than the manifest size is refused before any range request.
+            let mut oversized = std::io::Cursor::new(b"hello resumable world!");
+            assert!(Download::resume(&hash, size, &mut oversized).is_err());
+
+            // A corrupted partial prefix fails verification once the tail arrives.
+            let mut corrupt = std::io::Cursor::new(b"Hxllo ");
+            let mut bad = Download::resume(&hash, size, &mut corrupt).unwrap();
+            bad.update(&full[6..]).unwrap();
+            assert!(bad.finish().is_err());
+        }
+
+        #[test]
+        fn a_second_download_of_the_same_asset_is_refused() {
+            let dir = TempDir::new("part-lock");
+            let part = dir.path().join("download-abc.part");
+            let held = lock_part(&part).unwrap();
+            let err = lock_part(&part).unwrap_err();
+            assert!(err.contains("in progress"), "{err}");
+            drop(held);
+            lock_part(&part).unwrap();
         }
 
         #[test]
@@ -2003,39 +2057,6 @@ mod native {
             let key = part_key("../../etc/passwd");
             assert!(!key.contains('/') && !key.contains('.'));
             assert_eq!(key.len(), 64);
-        }
-
-        #[test]
-        fn default_get_from_delegates_to_get_and_truncates_partial() {
-            struct GetOnlyHost(Vec<u8>);
-            impl UpdaterHost for GetOnlyHost {
-                fn config(&self) -> Option<Vec<u8>> {
-                    None
-                }
-                fn get(&self, _url: &str, sink: UpdaterSink<'_>) -> Result<(), String> {
-                    sink(&self.0, Some(self.0.len() as u64))
-                }
-            }
-            let dir = TempDir::new("default-get-from");
-            let payload = b"from-plain-get";
-            let sha256 = nsh_updater::sha256(payload);
-            let part = dir.path().join(format!("download-{sha256}.part"));
-            let dest = dir.path().join(format!("download-{sha256}"));
-            std::fs::write(&part, b"from-").unwrap();
-
-            let host = GetOnlyHost(payload.to_vec());
-            let target = DownloadTarget {
-                host: &host,
-                url: "https://x.dev/app.tar.gz",
-                part: &part,
-                dest: &dest,
-                remove_invalid_dest: true,
-                sha256: &sha256,
-                size: Some(payload.len() as u64),
-            };
-            download_resumable(&target, |_, _| true, |_| Ok(())).unwrap();
-            assert!(!part.exists());
-            assert_eq!(std::fs::read(&dest).unwrap(), payload);
         }
 
         #[test]

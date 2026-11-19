@@ -118,8 +118,7 @@ macOS 上 `nsh package` 用的是 ad hoc 签名，可用于测试，但在其他
 ## Rust 应用
 
 原生 Rust 应用直接使用 `nsh-updater`，并提供自己的 HTTP 传输。
-用 `Config::check` 验证清单，用 `Download`（从头下载用 `Download::new`，配合 HTTP `Range` 续传用
-`Download::resume` 和 `Download::received`）验证更新包；之后调用
+用 `Config::check` 验证清单，用 `Download` 验证更新包；之后调用
 `Installation::install`，成功后调用 `nsh_core::element::desktop::restart()`：
 应用像 `Application.restart()` 那样退出，进程结束后新版本启动。`install`
 失败时，应用保持原样。

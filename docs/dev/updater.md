@@ -110,7 +110,7 @@ packages' are removed at launch). `runningPackage()` is `Bundle::package`. `shel
 - **Concurrent calls** are refused while a check, download or install is in progress. Downloads stream into a `.part`
   file keyed to the asset's manifest SHA-256 (`download-<sha256>.part`, `next-<sha256>.nshpkg.part`) and rename it into
   place only after verification, so an interrupted or failing retry cannot truncate a previously verified archive or
-  package. `UpdaterHost::get_from` sends `Accept-Encoding: identity` (so byte offsets match the raw asset on every
+  package. `UpdaterHost::get(url, from, sink)` sends `Accept-Encoding: identity` (so byte offsets match the raw asset on every
   platform HTTP stack) and `Range: bytes=<offset>-` when resuming, following redirects hop-by-hop in `UpdaterOverNetwork`
   so `Range` survives cross-origin asset redirects (such as GitHub Releases) and never downgrades from HTTPS to plain
   HTTP. If the server ignores `Range` (`200 OK`), returns `416` or a mismatched `Content-Range`, or the assembled file

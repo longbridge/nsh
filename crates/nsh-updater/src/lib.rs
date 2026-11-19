@@ -595,35 +595,6 @@ impl Download {
         }
     }
 
-    /// Starts from bytes already on disk (`partial`), counting and hashing
-    /// them so the remaining bytes can be appended and checked with
-    /// [`Download::finish`]. Fails if `partial` already exceeds `size`, or on
-    /// an I/O error reading it.
-    pub fn resume(
-        sha256: &str,
-        size: Option<u64>,
-        partial: &mut impl std::io::Read,
-    ) -> Result<Download, Error> {
-        let mut download = Download::new(sha256, size);
-        let mut buf = [0u8; 16 * 1024];
-        loop {
-            match partial.read(&mut buf) {
-                Ok(0) => return Ok(download),
-                Ok(n) => {
-                    download.update(&buf[..n])?;
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(Error::Io(e)),
-            }
-        }
-    }
-
-    /// Bytes accepted so far: pass as `Range: bytes=<received>-` when
-    /// resuming an interrupted download.
-    pub fn received(&self) -> u64 {
-        self.received
-    }
-
     /// Counts and hashes `chunk`; the bytes so far.
     pub fn update(&mut self, chunk: &[u8]) -> Result<u64, Error> {
         self.received += chunk.len() as u64;
@@ -1079,46 +1050,5 @@ mod tests {
         let mut short = Download::new(&sha256(b"arc"), Some(7));
         short.update(b"arc").unwrap();
         assert!(short.finish().is_err());
-    }
-
-    #[test]
-    fn downloads_resume_from_existing_bytes() {
-        let full = b"hello resumable world";
-        let hash = sha256(full);
-        let size = Some(full.len() as u64);
-
-        // Partial prefix + appended tail verifies identically to a single pass.
-        let mut cursor = std::io::Cursor::new(&full[..6]);
-        let mut resumed = Download::resume(&hash, size, &mut cursor).unwrap();
-        assert_eq!(resumed.received(), 6);
-        assert_eq!(resumed.update(&full[6..]).unwrap(), full.len() as u64);
-        assert_eq!(resumed.received(), full.len() as u64);
-        assert!(resumed.finish().is_ok());
-
-        // An empty partial starts at 0.
-        let mut empty = std::io::Cursor::new(&b""[..]);
-        let mut fresh = Download::resume(&hash, size, &mut empty).unwrap();
-        assert_eq!(fresh.received(), 0);
-        fresh.update(full).unwrap();
-        assert!(fresh.finish().is_ok());
-
-        // A partial already holding all bytes finishes immediately.
-        let mut complete = std::io::Cursor::new(&full[..]);
-        let done = Download::resume(&hash, size, &mut complete).unwrap();
-        assert_eq!(done.received(), full.len() as u64);
-        assert!(done.finish().is_ok());
-
-        // A partial larger than the manifest size is refused before any range request.
-        let mut oversized = std::io::Cursor::new(b"hello resumable world!");
-        assert!(matches!(
-            Download::resume(&hash, size, &mut oversized),
-            Err(Error::Download(_))
-        ));
-
-        // A corrupted partial prefix fails verification once the tail arrives.
-        let mut corrupt = std::io::Cursor::new(b"Hxllo ");
-        let mut bad = Download::resume(&hash, size, &mut corrupt).unwrap();
-        bad.update(&full[6..]).unwrap();
-        assert!(bad.finish().is_err());
     }
 }

@@ -863,42 +863,11 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
         Ok(version)
     }
 
-    fn get(&self, url: &str, sink: nsh_core::runtime::UpdaterSink<'_>) -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let events: FetchEvents = Box::new(move |event| {
-            let _ = tx.send(event);
-        });
-        let task = self.network.fetch(HttpRequest::new("GET", url), events);
-        let mut total = None;
-        let result = loop {
-            match rx.recv() {
-                Ok(FetchEvent::Head(head)) => {
-                    if !(200..300).contains(&head.status) {
-                        break Err(format!("HTTP {}", head.status));
-                    }
-                    total = updater_header(&head.headers, "content-length")
-                        .and_then(|value| value.trim().parse().ok());
-                }
-                Ok(FetchEvent::Data(chunk)) => {
-                    if let Err(e) = sink(&chunk, total) {
-                        break Err(e);
-                    }
-                }
-                Ok(FetchEvent::End) => return Ok(()),
-                Ok(FetchEvent::Failed(e)) => break Err(e),
-                Ok(FetchEvent::BodyWanted) => {}
-                Err(_) => break Err("the network stack went away".to_owned()),
-            }
-        };
-        task.cancel();
-        result
-    }
-
-    fn get_from(
+    fn get(
         &self,
         url: &str,
         from: u64,
-        sink: nsh_core::runtime::UpdaterRangeSink<'_>,
+        sink: nsh_core::runtime::UpdaterSink<'_>,
     ) -> Result<(), String> {
         const MAX_REDIRECTS: usize = 20;
         let mut current = url.to_owned();
@@ -923,6 +892,9 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
             let mut expected_body: Option<u64> = None;
             let mut received_body: u64 = 0;
             let mut redirect_to: Option<String> = None;
+            // Where the next piece starts in the resource, and its size.
+            let mut at = 0u64;
+            let mut total: Option<u64> = None;
 
             let outcome = loop {
                 match rx.recv() {
@@ -957,34 +929,27 @@ impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
                             match valid {
                                 Some(range) => {
                                     expected_body = Some(range.len);
-                                    if let Err(e) = sink(nsh_core::runtime::UpdaterEvent::Partial {
-                                        total: range.total,
-                                    }) {
-                                        break Err(e);
-                                    }
+                                    at = range.start;
+                                    total = range.total;
                                 }
-                                None => {
-                                    break sink(nsh_core::runtime::UpdaterEvent::Unsatisfiable);
-                                }
+                                // Not the range asked for: no pieces.
+                                None => break Ok(()),
                             }
                         } else if from > 0 && head.status == 416 {
-                            break sink(nsh_core::runtime::UpdaterEvent::Unsatisfiable);
+                            break Ok(());
                         } else if head.status == 200 {
                             expected_body = content_length;
-                            if let Err(e) = sink(nsh_core::runtime::UpdaterEvent::Full {
-                                total: content_length,
-                            }) {
-                                break Err(e);
-                            }
+                            total = content_length;
                         } else {
                             break Err(format!("HTTP {}", head.status));
                         }
                     }
                     Ok(FetchEvent::Data(chunk)) => {
                         received_body = received_body.saturating_add(chunk.len() as u64);
-                        if let Err(e) = sink(nsh_core::runtime::UpdaterEvent::Data(&chunk)) {
+                        if let Err(e) = sink(at, &chunk, total) {
                             break Err(e);
                         }
+                        at = at.saturating_add(chunk.len() as u64);
                     }
                     Ok(FetchEvent::End) => {
                         if let Some(expected) = expected_body
@@ -4825,7 +4790,7 @@ mod download_cleanup_tests {
 mod updater_range_tests {
     use std::sync::Mutex;
 
-    use nsh_core::runtime::{UpdaterEvent, UpdaterHost as _};
+    use nsh_core::runtime::UpdaterHost as _;
 
     use super::*;
 
@@ -4930,16 +4895,17 @@ mod updater_range_tests {
     ) -> Result<(Vec<String>, Vec<u8>), String> {
         let mut events = Vec::new();
         let mut body = Vec::new();
-        host.get_from(url, from, &mut |event| {
-            match event {
-                UpdaterEvent::Full { total } => events.push(format!("full:{total:?}")),
-                UpdaterEvent::Partial { total } => events.push(format!("partial:{total:?}")),
-                UpdaterEvent::Unsatisfiable => events.push("unsatisfiable".into()),
-                UpdaterEvent::Data(bytes) => body.extend_from_slice(bytes),
-                other => panic!("unexpected event {other:?}"),
+        host.get(url, from, &mut |at, bytes, total| {
+            if body.is_empty() {
+                let kind = if at == 0 { "full" } else { "partial" };
+                events.push(format!("{kind}:{total:?}"));
             }
+            body.extend_from_slice(bytes);
             Ok(())
         })?;
+        if body.is_empty() && from > 0 {
+            events.push("unsatisfiable".into());
+        }
         Ok((events, body))
     }
 
