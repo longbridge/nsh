@@ -1558,11 +1558,8 @@ fn pick_in(view: &NshView, p: (f32, f32)) -> Option<Hit> {
                 if let Some(hit) = into_child(&child, p).and_then(|cp| pick_in(&child, cp)) {
                     return Some(hit);
                 }
-            } else if on_native(view, &sub, p) {
-                return Some(Hit {
-                    view: view.clone(),
-                    native: true,
-                });
+            } else if let Some(hit) = native_hit(view, &sub, p) {
+                return Some(hit);
             }
         }
     }
@@ -1581,21 +1578,20 @@ fn pick_children(view: &NshView, p: (f32, f32)) -> Option<Hit> {
         .rev()
         .find_map(|sub| match NshView::from_ns(&sub) {
             Some(child) => into_child(&child, cp).and_then(|c| pick_in(&child, c)),
-            None if on_native(view, &sub, p) => Some(Hit {
-                view: view.clone(),
-                native: true,
-            }),
-            None => None,
+            None => native_hit(view, &sub, p),
         })
 }
 
-/// Whether `p` (`view`'s coordinates) is on `sub`, a hosted view of
-/// `view`'s.
-fn on_native(view: &NshView, sub: &objc2_app_kit::NSView, p: (f32, f32)) -> bool {
+/// Test geometry in the host, but dispatch from the input when its pad is lifted.
+fn native_hit(view: &NshView, sub: &objc2_app_kit::NSView, p: (f32, f32)) -> Option<Hit> {
     view.state()
         .natives
         .iter()
         .any(|n| &*n.view == sub && native_contains(n, p))
+        .then(|| Hit {
+            view: crate::text_input::pad_owner(sub).unwrap_or_else(|| view.clone()),
+            native: true,
+        })
 }
 
 fn native_contains(n: &crate::view::Native, p: (f32, f32)) -> bool {

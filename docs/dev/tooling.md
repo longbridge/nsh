@@ -928,18 +928,18 @@ program that describes them, builds the hosts and runners with them, and does ev
     `tui-host` is one too, in `.nsh/rust/tui` (`RustApp::tui_workspace`), written only when the terminal host is built:
     `nsh check`, `nsh test` and the other targets never resolve the terminal's crates, which nsh's crates.io releases
     before the terminal backend lack.
-    The hosts and runners of Windows, macOS, Linux and iOS (`<platform>-host`, `<platform>-app`, `rust-<platform>`;
-    `components_platform`) also register each crate's native components: `#[native_components(<platform>)]`
-    (`nsh-macros` `native_components.rs`) on a `fn(&nsh_platform_<platform>::Components)` at the crate's root makes,
+    The hosts and runners of Windows, macOS, Linux, iOS and Android (`<platform>-host`, `<platform>-app`, `rust-<platform>`,
+    `android`, `rust-android`) also register each crate's native components: `#[native_components(<platform>)]`
+    (`nsh-macros` `native_components.rs`) on a `fn(&nsh_platform_<platform>::Components)` (or `&nsh::Components` on Android) at the crate's root makes,
     under the platform's `cfg`, a hidden entry `__nsh_native_components_<platform>`, which the generated
     `app_components()` calls for each listed crate (a glob of the crate in a block over NSH's stand-in
     `no_native_components`, which registers nothing: most crates have none; its parameter is `__nsh_components`, since
-    the glob would shadow a `components` with a value of that name the crate exports) and `main` passes to the platform's
-    `set_components` before the host starts; each `AppView` the backend makes calls it on its own registry (its
-    `components`), as an embedding app registers. The entry's parameter is hygienic (`Span::mixed_site`), so the app's
-    function may share its name. Root checks and a second entry fail as `#[native_module]`'s do. Android's components
-    are Java, which a Rust function cannot register, and the web has none; `gpui-host` registers none either, since a
-    crate depending on `nsh-platform-gpui` under the desktops' `cfg` would build GPUI for every desktop target.
+    the glob would shadow a `components` with a value of that name the crate exports) and passes to the platform's
+    `set_components` before the host starts (on Android: `nsh::components!`, which `NshView` queries per view); each `AppView` / `NshView` calls it on its own registry
+    when made, before an embedding app can register. The entry's parameter is hygienic (`Span::mixed_site`), so the app's
+    function may share its name. Root checks and a second entry fail as `#[native_module]`'s do. The web has no native
+    components; `gpui-host` registers none either, since a crate depending on `nsh-platform-gpui` under the desktops'
+    `cfg` would build GPUI for every desktop target.
 
   They take nsh's crates where the app's crates do (`rust_app::Nsh::of`, from each crate's dependencies through `cargo
   metadata`): from crates.io at the version of the running `nsh` (`=0.1.1` for nsh 0.1.1: the code it
@@ -1033,20 +1033,20 @@ for the release runner in both. The test runner links QuickJS, so the first `nsh
 `nsh build` no longer does.
 
 
-### Third-party extensions (`nsh.json` `"extensions"`, `nsh add`)
+### nshm (`nsh.json` `"modules"`, `nsh add`)
 
-`crates/nsh-cli/src/extensions.rs`. An extension is a crate like the ones `"rust"` lists, from Git (`nsh add <url>
+`crates/nsh-cli/src/nshm.rs`. An nshm (NSH module) is a crate like the ones `"rust"` lists, from Git (`nsh add <url>
 [--tag|--rev]`, `{ "git", "tag"|"rev" }`, locked to a `commit`), crates.io (`nsh add <crate>[@<req>]`, `{ "crate",
 "version" }`, resolved by `cargo metadata` on a probe crate in the cache and locked to the exact version as `resolved`)
 or a directory (`nsh add --path <dir>`, `{ "path" }`, not locked, read as it is). `nsh.lock` holds `{ <source>,
 commit|resolved, package, module }`. A locked crate is Cargo's own download of that version. Each locked commit is a `git worktree` of one clone per repository in
-nsh's cache (`<cache>/extensions/<name>-<hash of url>/<commit>`), made again when missing, so a build after clearing
-the cache takes the same commit. `rust_app::of` appends the extensions to the app's crates (an app with extensions
+nsh's cache (`<cache>/nshm/<name>-<hash of url>/<commit>`), made again when missing, so a build after clearing
+the cache takes the same commit. `rust_app::of` appends the nshm to the app's crates (an app with nshm
 only is a `RustApp` too, its nsh crates this CLI's, as `runner_only`), checks them together (`check_crates`: the same
 directory, package or `#[native_module]` specifier), and the workspace links each like an app crate. The app's crate
-depends on the extension as `nsh add` writes it (Git at the locked `rev`, the resolved crate version, or a relative
-`path`), which the workspace's `[patch."<url>"]` / `[patch.crates-io]` sends to the same checkout. Before linking, the extension must have a `#[native_module]` at its root
-(its module) and its `nsh-core` dependency requirement, if any, must match this CLI; there is no NSH-specific metadata. `nsh check` does not `cargo check` extensions (only crates outside the cache). Not yet: per-target support checks, web and mobile packaging checks, and an OTA check of the shell's linked modules.
+depends on the nshm as `nsh add` writes it (Git at the locked `rev`, the resolved crate version, or a relative
+`path`), which the workspace's `[patch."<url>"]` / `[patch.crates-io]` sends to the same checkout. Before linking, the nshm must have a `#[native_module]` at its root
+(its module) and its `nsh-core` dependency requirement, if any, must match this CLI; there is no NSH-specific metadata. The list was `"extensions"` before any release; `nshm::sources` rejects that key. `nsh check` does not `cargo check` nshm (only crates outside the cache). Not yet: per-target support checks, web and mobile packaging checks, and an OTA check of the shell's linked modules.
 
 ## Finding the runtimes
 

@@ -3426,6 +3426,15 @@
 				}
 			]);
 		};
+		prototype.animateLayout = function(transition) {
+			const id = values.nodeIds.get(this);
+			if (id === void 0) throw new TypeError("nsh: not a node");
+			return call(314, [
+				id,
+				"layoutAnimation",
+				{ update: Object(transition) === transition ? transition : {} }
+			]);
+		};
 		prototype.scrollToOffset = function(options) {
 			return this.scrollTo({
 				x: options?.offset,
@@ -3975,7 +3984,7 @@
 			}
 		};
 		const point = (p) => {
-			const { identifier, target, pageX, pageY, locationX, locationY, timestamp } = p;
+			const { identifier, target, pageX, pageY, locationX, locationY, timestamp, pointerType, pressure, tiltX, tiltY } = p;
 			return {
 				identifier,
 				target,
@@ -3983,7 +3992,11 @@
 				pageY,
 				locationX,
 				locationY,
-				timestamp
+				timestamp,
+				pointerType,
+				pressure,
+				tiltX,
+				tiltY
 			};
 		};
 		const dispatch = (touch) => reactive.batch(() => reactive.untracked(() => {

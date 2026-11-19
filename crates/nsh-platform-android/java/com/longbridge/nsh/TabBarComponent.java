@@ -290,10 +290,13 @@ final class TabBarComponent implements NshComponent {
                 if (badgeText.isEmpty()) {
                     badgePill.setCornerRadius(px(DOT_DP / 2));
                     at = new FrameLayout.LayoutParams(px(DOT_DP), px(DOT_DP), Gravity.TOP | Gravity.START);
-                    at.leftMargin = px((INDICATOR_W_DP + ICON_DP) / 2 - DOT_DP);
+                    at.setMarginStart(px((INDICATOR_W_DP + ICON_DP) / 2 - DOT_DP));
                     at.topMargin = px((INDICATOR_H_DP - ICON_DP) / 2);
                 } else {
                     badge.setText(badgeText);
+                    // Text with no letters ("99+") reads left to right in RTL instead of "+99"; a badge that
+                    // starts with a letter of an RTL script keeps reading right to left.
+                    badge.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG_LTR);
                     badge.setSingleLine(true);
                     badge.setEllipsize(android.text.TextUtils.TruncateAt.END);
                     badge.setGravity(Gravity.CENTER);
@@ -306,7 +309,7 @@ final class TabBarComponent implements NshComponent {
                     badgePill.setCornerRadius(px(BADGE_DP / 2));
                     at = new FrameLayout.LayoutParams(
                             ViewGroup.LayoutParams.WRAP_CONTENT, px(BADGE_DP), Gravity.TOP | Gravity.START);
-                    at.leftMargin = px(INDICATOR_W_DP / 2);
+                    at.setMarginStart(px(INDICATOR_W_DP / 2));
                     at.topMargin = px(2);
                 }
                 indicator.addView(badge, at);

@@ -99,6 +99,8 @@ of garbage-collection timing or whether a detached realm resumes its JavaScript 
 Chromium's `--suite interaction` checks every state style (`hoverStyle` / `activeStyle` under real mouse input,
 `focusStyle` / `focusWithinStyle` under Tab), a list's `contentClass`, a scroll view's `contentStyle` /
 `contentClass` (children inserted before and after its content container is made), platform props and tooltips.
+It also sends mouse, pen and touch input through Wasm and the realm bootstrap to check the pointer fields
+on `onTouchMove`, `touches` and `changedTouches`.
 `--suite all` combines the two suites. Firefox and WebKit select `lifecycle` explicitly. The website CI builds
 Wasm once and runs Chromium `all`, Firefox `lifecycle` and WebKit `lifecycle` serially, reporting all engines
 before failing the step.
@@ -557,6 +559,9 @@ measured against it frame by frame (`requestAnimationFrame` samplers of computed
   before. Stepped at the frame's time, an animation the task started began before it was asked for, and its first
   drawn step was as far along as the task took. Bound values are inline styles: a property bound no more (its view taken over by an element without
   the binding) is cleared from them with the next output (`["a", view, prop, ""]`), so the view shows its own style.
+  After a batch every bound value goes out, so what it inserted (again) gets its values; on a frame, a gesture or a
+  scroll only the values that changed since they last went (`UiAnimation::outputs`), so values that hold still cost a
+  frame nothing however many views hold them.
 - **Without frames** (a hidden tab, and often an iframe out of view: browsers run no `requestAnimationFrame` there),
   what an animation ends still happens on time, as on macOS (`Surface::keep_deadline`). After each call into the
   engine that asked for a frame, `Player.keepDeadline` asks `nsh_deadline` when the graph next has an animation that
@@ -720,6 +725,9 @@ browsers' touches into what phones report:
   scrolling is the browser's: a `pointercancel` in a scroll view starts its drag, `touchend` ends it, a scroll within
   150 ms after it begins the glide, `scrollend` ends it (`touchScroll`, `scrolled`, `scrollEnded`). A scroll view
   along one axis contains only that axis's overscroll, so a swipe across it chains to the scroll view around it.
+  One whose content fits along its axis (`nsh-fits`, kept by `scrollFits` as its content and frame change) contains
+  none, so a swipe along it chains too, as Android's scroll view hands its parent what it cannot take; a zoomable
+  one keeps its own.
   A touch responder that blocks native scrolling (`setResponder`: a `TouchClaim` with `block_native`, JS's
   `onResponderGrant` returning true) keeps its touches: a non-passive `touchmove` on the root prevents the browser's
   scroll while it holds them (`responderBlocks`), unless the browser already scrolls (`cancelable` false).
@@ -782,7 +790,11 @@ browsers' touches into what phones report:
 - **Focus**: the stops `ViewProps::focus_stop` decides are focusable (`tabindex=0`; `updateFocusable`): pressables
   (role `button` unless they have one) unless `focusable={false}`, and `focusable={true}` views whether or not they take
   presses (Return and Space press only pressables), never disabled or hidden ones (a focused one that stops being a
-  stop is blurred), so Tab and Shift+Tab reach them in DOM order, but for a scroll view's content and a list's cells in its parent's viewport (`ViewProps::screen_order`,
+  stop is blurred), nor ones with no area (`seenByKeys`): the core lays out each view of a `display: none` subtree at no
+  size, which hides nothing in a browser, so such a view is no stop (`tabindex=-1` where the browser would stop at it
+  without one: a link's `<a href>`, a `web={{ element }}` button), nor is an input's field there (`fieldStop`:
+  `tabindex=-1` while its view or its content box has no area), as on macOS (`NshView::seen_by_keys`). A view that is
+  shown but has no area (a pressable holding only an absolutely positioned child) is no stop either. So Tab and Shift+Tab reach them in DOM order, but for a scroll view's content and a list's cells in its parent's viewport (`ViewProps::screen_order`,
   `screenOrder`): where the browser takes
   `reading-flow` (Chromium), it is read in the order it is on screen (`orderReading`: `reading-order` on its children,
   the DOM, which is also their paint order, left alone), as a list's recycled cells are not in their rows' order in it; `focus:` states follow the keyboard focus (`focus-visible:` while it shows, as the browser's `:focus-visible`), and
@@ -1053,8 +1065,13 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   source it is given).
 - **Videos** are `<video>`s: `onLoadStart`, `onLoad` (`loadedmetadata`), `onProgress` on a timer at
   `progressUpdateInterval` while playing, `onBuffer` (`waiting` / `playing` / `canplay`), `onEnd`, `onError`; a
-  deleted video is stopped (a detached media element plays on). Browsers only start a video with sound after a user
-  gesture (a warning says so).
+  deleted video is stopped (a detached media element plays on). `paused` is acted on when it changes or a new source
+  is set (`op_video`), so another prop never plays a video that ended or its controls paused; the browser's own pauses
+  are followed where the other platforms play on: a seek past the end of a video the app has not paused plays it
+  (`seek`), and one the browser paused as it left the document plays again when it is back (`videosBack`). Browsers
+  only start a video with sound after a user gesture (a warning says so): a refused play is tried again on the next
+  update (`playVideo`). `crates/nsh-platform-web/tests/video` checks these in Chrome (`--target web` only: headless
+  runs play no video).
 - **Registered native components** are the native apps' own: their view stays empty, with a warning once per name.
 - **The host** (`nsh`'s `host`): the page answers the app's calls with `createPlayer`'s `host` option, an object whose
   `call(name, args)` returns the result or a promise of it. `Command::HostCall` is the command `hostCall` (`encode.rs`;
@@ -1101,7 +1118,9 @@ default), `role="link"` with an `href` (`ViewProps::href`, which `nsh-base`'s `L
 `web={{ element }}` (`Prop::WebElement`, `ViewProps::web_element`, the `WebElement` enum) names what `role` cannot
 say (`p`, `nav`, `article`, `time`, ...) and wins over the role. `retag` replaces the view's element by one of that
 tag, carrying its attributes, children and fields and taking its place in `views`; views whose element is a control
-of its own (images, scroll views, canvases, inputs) keep theirs. A fixed rule of the runtime's stylesheet takes the
+of its own (images, scroll views, canvases, inputs) keep theirs. A new view's tracked states and events reach the page
+before the props that name its tag: `retag` adds the old element's listeners to the new one, as the copied flags say
+(`installMouse`, `installHover`, `installFocus`, `installLinkHover`). A fixed rule of the runtime's stylesheet takes the
 browser's margins, fonts, colors, underlines and list markers off those tags, so the view looks as a `div` does. A
 link gets `href` and is not draggable; a plain click on it stays the app's (`Link`'s press; the root's `click`
 listener prevents the browser's navigation), a click with a modifier key or the middle button opens `href` as the

@@ -740,6 +740,12 @@ final class ScrollBox extends FrameLayout implements Node {
     }
 
     @Override
+    protected void onSizeChanged(int w, int h, int oldW, int oldH) {
+        super.onSizeChanged(w, h, oldW, oldH);
+        if (h < oldH) mounter.scrollShrank(this);
+    }
+
+    @Override
     protected void onLayout(boolean changed, int l, int t, int r, int b) {
         super.onLayout(changed, l, t, r, b);
         if (!rescaling || !rescaledContent) return;

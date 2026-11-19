@@ -19,6 +19,7 @@ import PropsMediaVideo from "./props-media-video";
 import PropsMediaWebview from "./props-media-webview";
 import PropsRefreshIndicator from "./props-refresh-indicator";
 import PropsScrollBehavior from "./props-scroll-behavior";
+import PropsScrollEdgeElement from "./props-scroll-edge-element";
 import PropsScrollZoom from "./props-scroll-zoom";
 import PropsTextLines from "./props-text-lines";
 import PropsViewAccessibility from "./props-view-accessibility";
@@ -42,6 +43,7 @@ const cases: Record<string, () => JSX.Element> = {
   "props-media-webview": PropsMediaWebview,
   "props-refresh-indicator": PropsRefreshIndicator,
   "props-scroll-behavior": PropsScrollBehavior,
+  "props-scroll-edge-element": PropsScrollEdgeElement,
   "props-scroll-zoom": PropsScrollZoom,
   "props-text-lines": PropsTextLines,
   "props-view-accessibility": PropsViewAccessibility,

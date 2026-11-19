@@ -56,6 +56,15 @@ pub(crate) fn offer(view: &NshView) {
     }
 }
 
+/// Whether GTK's focus traversal (Tab, Shift+Tab, the focus GTK hands out
+/// as a window maps) passes over `view` and everything in it: a disabled
+/// view takes its subtree out of it, the native fields in it too, as the
+/// headless runner and a browser's disabled `fieldset` do. `focus()` grabs
+/// the focus directly and is not affected.
+pub(crate) fn skips_subtree(view: &NshView) -> bool {
+    view.state().props.accessibility.state.disabled
+}
+
 /// After [`offer`]: a stop Tab passed over goes back to unfocusable.
 pub(crate) fn offered(view: &NshView) {
     if TABBING.get() && !view.is_focus() {
@@ -69,6 +78,7 @@ pub(crate) fn is_stop(view: &NshView) -> bool {
     {
         let state = view.state();
         if state.kind == ViewKind::Input
+            || state.style.hidden
             || !state
                 .props
                 .focus_stop(state.events.contains(EventKind::Press))
@@ -77,6 +87,19 @@ pub(crate) fn is_stop(view: &NshView) -> bool {
         }
     }
     view.can_target() && view.is_visible()
+}
+
+/// A mounted change can make the keyboard stop ineligible without moving
+/// GTK's focus. Let the normal focus watcher clear its state and report Blur.
+/// Selection-only areas and native inputs do not own this keyboard-stop state.
+pub(crate) fn changed(view: &NshView) {
+    let was_stop = {
+        let current = view.state();
+        current.kind != ViewKind::Input && current.states & state::FOCUSED != 0
+    };
+    if was_stop && !is_stop(view) {
+        blur(view);
+    }
 }
 
 /// `focus()` on a view that is not an input: the focus moves to it as Tab
@@ -214,7 +237,24 @@ fn focused_stop(surface: &Surface, focus: Option<gtk::Widget>) -> Option<NshView
 /// (the main window, or one of the app's own). Nothing when the window has
 /// no focused view any more.
 pub(crate) fn focused_view(surface: &Surface, window: &gtk::Window) -> Option<NshView> {
-    focused_stop(surface, GtkWindowExt::focus(window))
+    let focus = GtkWindowExt::focus(window);
+    focused_stop(surface, focus.clone()).or_else(|| unfocused_root(surface, window, focus.as_ref()))
+}
+
+/// The root view of `window` when nothing in it has the keyboard focus
+/// (`focus` is none, or the root itself): the raw keys go there and bubble
+/// from it. A native field or any other focus is not "nothing".
+fn unfocused_root(
+    surface: &Surface,
+    window: &gtk::Window,
+    focus: Option<&gtk::Widget>,
+) -> Option<NshView> {
+    let root = crate::window::root_at(surface, &window.surface()?)?;
+    match focus {
+        None => Some(root),
+        Some(focus) if focus == root.upcast_ref::<gtk::Widget>() => Some(root),
+        Some(_) => None,
+    }
 }
 
 /// Watches the keys a native popup receives while it owns the keyboard
@@ -367,12 +407,28 @@ pub(crate) fn press(
         .as_ref()
         .and_then(|root| root.clone().downcast::<gtk::Window>().ok());
     let focus = root.and_then(|root| root.focus());
+    // Track every press before focus and listener routing: a held key must
+    // not become a new press when its handler moves the focus.
+    let repeat = window
+        .as_ref()
+        .is_some_and(|window| crate::keyboard::held(surface, window, keycode));
     // The application menu's shortcut, where a view leaves the key to it.
     let menu_shortcut = || match (event, widget) {
         (Some(event), Some(widget)) => crate::chrome::menu_shortcut(surface, widget, event),
         _ => false,
     };
-    let Some(view) = focused_stop(surface, focus) else {
+    // No focus at all: the window's root hears the raw keys (a browser's
+    // `document.body`), with no default of a focused stop. A native field
+    // keeps its keys.
+    let target = match focused_stop(surface, focus.clone()) {
+        Some(view) => Some((view, false)),
+        None => window
+            .as_ref()
+            .and_then(|window| unfocused_root(surface, window, focus.as_ref()))
+            .filter(|root| crate::keyboard::listens(surface, root))
+            .map(|root| (root, true)),
+    };
+    let Some((view, at_root)) = target else {
         // A native field (or no focus) has no view to notify: the app's
         // bindings first, then the menu's shortcuts, then Tab's traversal.
         if event.is_some_and(|event| crate::keymap::claims(surface, event)) {
@@ -386,7 +442,9 @@ pub(crate) fn press(
         }
         return false;
     };
-    if !crate::keyboard::listens(surface, &view) || crate::keyboard::native_owns(&view) {
+    if !at_root
+        && (!crate::keyboard::listens(surface, &view) || crate::keyboard::native_owns(&view))
+    {
         // A view with no raw keys (or a native input/content that owns its
         // keys) keeps the original path: the app's bindings (GTK's
         // controller) first, then the menu's shortcut, then the defaults.
@@ -398,15 +456,12 @@ pub(crate) fn press(
         if menu_shortcut() {
             return true;
         }
-        return defaults(surface, &view, keyval, modifiers);
+        return defaults(surface, &view, keyval, modifiers, repeat);
     }
     // A raw view runs the app's bindings itself, once, before it is
     // notified: a pass-through binding reports and the key goes on, a
     // consuming one reports and takes it, and the shortcut controller does
     // not report either again.
-    let repeat = window
-        .as_ref()
-        .is_some_and(|window| crate::keyboard::held(surface, window, keycode));
     if let Some(event) = event {
         match crate::keymap::raw(surface, event, repeat) {
             crate::keymap::RawFire::Consumed => return true,
@@ -436,9 +491,17 @@ pub(crate) fn press(
     if menu_shortcut() {
         return true;
     }
+    if at_root {
+        // The root is no stop: nothing to press or open a menu on, but Tab
+        // still moves the focus into the window.
+        if is_tab(keyval) {
+            arm_tab();
+        }
+        return false;
+    }
     // Tab's traversal is a default too: it is armed here, then GTK moves the
     // focus right after this, in the same dispatch.
-    defaults(surface, &view, keyval, modifiers)
+    defaults(surface, &view, keyval, modifiers, repeat)
 }
 
 /// Whether `keyval` is a Tab (the app's traversal).
@@ -462,6 +525,7 @@ fn defaults(
     view: &NshView,
     keyval: gdk::Key,
     modifiers: gdk::ModifierType,
+    repeat: bool,
 ) -> bool {
     if is_tab(keyval) {
         // Only a Tab left to GTK may offer the stops for traversal.
@@ -478,7 +542,7 @@ fn defaults(
         gdk::Key::space => Key::Char(' '),
         _ => return false,
     };
-    presses(surface, view, pressing, held)
+    presses(surface, view, pressing, held, repeat)
 }
 
 /// Whether `focus` (a window's focus widget) is a stop that Return and
@@ -493,15 +557,23 @@ pub(crate) fn is_control(surface: &Surface, focus: &gtk::Widget) -> bool {
 /// Return and Space press the focused stop `view` when it takes presses
 /// ([`core_input::presses_focused_control`]), once the app's bindings of
 /// the focus passed on them. A stop that takes no presses (a `focusable`
-/// chart) hears them through the shortcuts only. True when it was
-/// pressed.
-fn presses(surface: &Surface, view: &NshView, key: Key, held: nsh_core::keymap::Modifiers) -> bool {
+/// chart) hears them through the shortcuts only. True when the key was
+/// consumed, including a repeat that must not press the control again.
+fn presses(
+    surface: &Surface,
+    view: &NshView,
+    key: Key,
+    held: nsh_core::keymap::Modifiers,
+    repeat: bool,
+) -> bool {
     if !core_input::presses_focused_control(key, held)
         || !view.state().events.contains(EventKind::Press)
     {
         return false;
     }
-    crate::input::activate(surface, view);
+    if !repeat {
+        crate::input::activate(surface, view);
+    }
     true
 }
 
@@ -512,7 +584,7 @@ fn presses(surface: &Surface, view: &NshView, key: Key, held: nsh_core::keymap::
 pub(crate) fn press_key(surface: &Surface, stroke: nsh_core::keymap::Keystroke) -> bool {
     let focus = crate::window::key_window(surface).and_then(|w| GtkWindowExt::focus(&w));
     focused_stop(surface, focus)
-        .is_some_and(|view| presses(surface, &view, stroke.key, stroke.modifiers))
+        .is_some_and(|view| presses(surface, &view, stroke.key, stroke.modifiers, false))
 }
 
 /// A context menu asked for on `view` without a pointer: the nearest view
@@ -555,8 +627,8 @@ fn show_context_menu(surface: &Surface, view: &NshView) -> bool {
 #[cfg(test)]
 mod tests {
     use nsh_core::{
-        EventMask, KeyCapture, MountItem, NodeId, ROOT_ID, ViewProps, keymap::Keystroke,
-        platform::Os,
+        Command, EventMask, KeyCapture, MountItem, NodeId, ROOT_ID, ViewProps, ViewStyle,
+        keymap::Keystroke, platform::Os,
     };
 
     use super::*;
@@ -601,6 +673,183 @@ mod tests {
         apply(surface, &[MountItem::ViewProps { id, props }]);
     }
 
+    fn loses_focus(change: MountItem) {
+        let surface = surface();
+        let mut items = Vec::new();
+        for (id, y) in [(2, 0.0), (3, 40.0)] {
+            let mut events = EventMask::default();
+            events.set(EventKind::Press, true);
+            items.extend([
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::View,
+                },
+                MountItem::Insert {
+                    parent: ROOT_ID,
+                    child: id,
+                    before: None,
+                },
+                MountItem::Frame {
+                    id,
+                    frame: frame(0.0, y, 100.0, 30.0),
+                },
+                MountItem::Events { id, events },
+            ]);
+        }
+        apply(&surface, &items);
+        let window = show(&surface);
+        let first = view(&surface, 2);
+        let neighbor = view(&surface, 3);
+        assert!(wait_until(|| first.is_mapped() && neighbor.is_mapped()));
+        let command = |id| {
+            [MountItem::Command {
+                id,
+                command: Command::Focus,
+            }]
+        };
+        // Prove the neighbor accepts explicit focus before testing invalidation.
+        apply(&surface, &command(3));
+        assert!(wait_until(|| neighbor.is_focus()));
+        apply(&surface, &command(2));
+        assert!(wait_until(|| first.is_focus()));
+        assert_ne!(first.state().states & state::FOCUSED, 0);
+
+        apply(&surface, &[change]);
+        let cleared =
+            wait_until(|| !first.is_focus() && first.state().states & state::FOCUSED == 0);
+        // Capture both observations before any failure, and close even on red.
+        let native_focus = GtkWindowExt::focus(&window).map(|widget| {
+            (
+                widget.type_().name().to_string(),
+                widget == *first.upcast_ref::<gtk::Widget>(),
+                widget == *neighbor.upcast_ref::<gtk::Widget>(),
+            )
+        });
+        let diagnostic = format!(
+            "native={native_focus:?}, focus_state={}",
+            first.state().states & state::FOCUSED != 0,
+        );
+        window.destroy();
+        assert!(
+            cleared,
+            "ineligible stop kept native focus or NSH focus state: {diagnostic}"
+        );
+    }
+
+    #[test]
+    fn focusable_false_releases_native_focus_with_press_listener_retained() {
+        run(|| {
+            loses_focus(MountItem::ViewProps {
+                id: 2,
+                props: Box::new(ViewProps {
+                    focusable: Some(false),
+                    ..Default::default()
+                }),
+            });
+        });
+    }
+
+    #[test]
+    fn removing_the_only_press_listener_releases_native_focus() {
+        run(|| {
+            loses_focus(MountItem::Events {
+                id: 2,
+                events: EventMask::default(),
+            });
+        });
+    }
+
+    #[test]
+    fn disabling_a_focused_stop_releases_native_focus() {
+        run(|| {
+            let mut props = ViewProps::default();
+            props.accessibility.state.disabled = true;
+            loses_focus(MountItem::ViewProps {
+                id: 2,
+                props: Box::new(props),
+            });
+        });
+    }
+
+    #[test]
+    fn a_visible_restyle_keeps_keyboard_focus() {
+        run(|| {
+            let surface = surface();
+            views(&surface);
+            let window = show(&surface);
+            let first = view(&surface, 2);
+            assert!(wait_until(|| first.is_mapped()));
+            apply(
+                &surface,
+                &[MountItem::Command {
+                    id: 2,
+                    command: Command::Focus,
+                }],
+            );
+            let owns_focus = || first.is_focus() && first.state().states & state::FOCUSED != 0;
+            assert!(wait_until(owns_focus));
+
+            apply(
+                &surface,
+                &[MountItem::ViewStyle {
+                    id: 2,
+                    style: Box::new(ViewStyle {
+                        opacity: 0.5,
+                        ..Default::default()
+                    }),
+                }],
+            );
+            let (native, focused) = (first.is_focus(), first.state().states & state::FOCUSED != 0);
+            window.destroy();
+            assert!(
+                native && focused,
+                "visible restyle cleared focus: native={native}, focused={focused}"
+            );
+        });
+    }
+
+    #[test]
+    fn tab_skips_a_mounted_hidden_stop() {
+        run(|| {
+            let surface = surface();
+            views(&surface);
+            apply(
+                &surface,
+                &[MountItem::ViewStyle {
+                    id: 2,
+                    style: Box::new(ViewStyle {
+                        hidden: true,
+                        ..Default::default()
+                    }),
+                }],
+            );
+            let window = show(&surface);
+            let (hidden, last) = (view(&surface, 2), view(&surface, 4));
+            assert!(wait_until(|| last.is_mapped()));
+            tab(&window);
+            let (hidden_has_focus, last_has_focus) = (hidden.is_focus(), last.is_focus());
+            window.destroy();
+            assert!(
+                !hidden_has_focus && last_has_focus,
+                "Tab did not skip hidden stop: hidden={hidden_has_focus}, last={last_has_focus}"
+            );
+        });
+    }
+
+    #[test]
+    fn hiding_a_focused_stop_releases_native_focus() {
+        run(|| {
+            // This tests the mounted hidden style, NOT GtkWidget::set_visible.
+            loses_focus(MountItem::ViewStyle {
+                id: 2,
+                style: Box::new(ViewStyle {
+                    hidden: true,
+                    ..Default::default()
+                }),
+            });
+        });
+    }
+
     /// The display's keycode for `key`.
     fn keycode(key: gdk::Key) -> u32 {
         gdk::Display::default()
@@ -628,6 +877,145 @@ mod tests {
             gdk::ModifierType::empty(),
             0,
         )
+    }
+
+    #[derive(Clone)]
+    struct StopPresses {
+        nodes: std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>,
+        move_focus: bool,
+    }
+
+    #[nsh_core::element::component]
+    fn RepeatStops() -> impl nsh_core::element::IntoElement {
+        use nsh_core::prelude::*;
+
+        let recorded = engine_context::<StopPresses>().unwrap();
+        let first = recorded.nodes.clone();
+        let second = recorded.nodes.clone();
+        let move_focus = recorded.move_focus;
+        let next = element_ref();
+        view().children([
+            view()
+                .test_id("first-stop")
+                .w(px(100.0))
+                .h(px(40.0))
+                .on_press(move || {
+                    first.lock().unwrap().push("first");
+                    if move_focus {
+                        next.focus();
+                    }
+                }),
+            view()
+                .test_id("second-stop")
+                .element_ref(&next)
+                .w(px(100.0))
+                .h(px(40.0))
+                .on_press(move || second.lock().unwrap().push("second")),
+        ])
+    }
+
+    fn repeated_return(move_focus: bool) {
+        run(move || {
+            let surface = surface();
+            let nodes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let mut config = nsh_engine::EngineConfig::new(nsh_engine::Root::of::<RepeatStops>());
+            config.context = config.context.with(StopPresses {
+                nodes: nodes.clone(),
+                move_focus,
+            });
+            surface.start(config);
+            let window = show(&surface);
+            let find = |name| {
+                surface
+                    .mounter
+                    .borrow()
+                    .views
+                    .values()
+                    .find(|view| view.state().props.test_id.as_deref() == Some(name))
+                    .filter(|view| view.is_mapped())
+                    .cloned()
+            };
+            assert!(wait_until(|| {
+                find("first-stop").is_some() && find("second-stop").is_some()
+            }));
+            let first = find("first-stop").unwrap();
+            let second = find("second-stop").unwrap();
+            // Neither stop listens to raw keys: exercise press -> defaults
+            // -> presses -> input::activate, not just KeyDown notification.
+            assert!(!crate::keyboard::listens(&surface, &first));
+            assert!(!crate::keyboard::listens(&surface, &second));
+            focus(&first);
+            assert!(first.is_focus());
+            let code = keycode(gdk::Key::Return);
+            let down = || {
+                press(
+                    &surface,
+                    Some(window.upcast_ref()),
+                    None,
+                    gdk::Key::Return,
+                    code,
+                    gdk::ModifierType::empty(),
+                    0,
+                )
+            };
+            let flush = || {
+                let (sent, received) = std::sync::mpsc::channel();
+                surface.control(|control| {
+                    control.flush(move |done| {
+                        let _ = sent.send(done);
+                    });
+                });
+                assert!(wait_until(|| received.try_recv() == Ok(true)));
+            };
+            down();
+            flush();
+            assert_eq!(*nodes.lock().unwrap(), ["first"]);
+            assert!(wait_until(|| {
+                if move_focus {
+                    second.is_focus()
+                } else {
+                    first.is_focus()
+                }
+            }));
+            // The same physical key goes down again without an intervening
+            // release, just as GDK delivers an auto-repeat.
+            let consumed = down();
+            flush();
+            assert_eq!(
+                *nodes.lock().unwrap(),
+                ["first"],
+                "a held Return must not press again"
+            );
+            assert!(consumed, "a repeated control key must not propagate");
+            assert!(crate::keyboard::held_key(&surface, code));
+            crate::keyboard::released(
+                &surface,
+                Some(&window),
+                focused_view(&surface, &window).as_ref(),
+                gdk::Key::Return,
+                code,
+                gdk::ModifierType::empty(),
+                0,
+            );
+            assert!(!crate::keyboard::held_key(&surface, code));
+            down();
+            flush();
+            assert_eq!(
+                *nodes.lock().unwrap(),
+                ["first", if move_focus { "second" } else { "first" }]
+            );
+            window.destroy();
+        });
+    }
+
+    #[test]
+    fn a_held_return_presses_a_stop_once() {
+        repeated_return(false);
+    }
+
+    #[test]
+    fn a_return_repeat_does_not_press_the_stop_focused_by_its_handler() {
+        repeated_return(true);
     }
 
     #[test]
@@ -1071,6 +1459,98 @@ mod tests {
                 "the focus leaves with the field"
             );
             window.destroy();
+        });
+    }
+
+    /// The issue's layout: a stop (2), a disabled panel (3) with a field (4)
+    /// and a stop (5) in it, then a stop (6). Tab and Shift+Tab pass over
+    /// the panel while it is disabled and enter it again once it is not.
+    #[test]
+    fn tab_passes_over_a_disabled_subtree() {
+        run(|| {
+            let surface = surface();
+            let mut items = Vec::new();
+            for (id, parent, kind, y) in [
+                (2, ROOT_ID, ViewKind::View, 0.0),
+                (3, ROOT_ID, ViewKind::View, 40.0),
+                (4, 3, ViewKind::Input, 0.0),
+                (5, 3, ViewKind::View, 40.0),
+                (6, ROOT_ID, ViewKind::View, 120.0),
+            ] {
+                items.extend([
+                    MountItem::Create { id, kind },
+                    MountItem::Insert {
+                        parent,
+                        child: id,
+                        before: None,
+                    },
+                    MountItem::Frame {
+                        id,
+                        frame: frame(0.0, y, 100.0, 30.0),
+                    },
+                ]);
+                if id == 4 {
+                    items.push(MountItem::Input {
+                        id,
+                        config: Box::default(),
+                    });
+                } else if id != 3 {
+                    let mut events = EventMask::default();
+                    events.set(EventKind::Press, true);
+                    items.push(MountItem::Events { id, events });
+                }
+            }
+            apply(&surface, &items);
+            let disable = |on: bool| props(&surface, 3, |p| p.accessibility.state.disabled = on);
+            disable(true);
+            let window = show(&surface);
+            let (before, field, inside, after) = (
+                view(&surface, 2),
+                view(&surface, 4),
+                view(&surface, 5),
+                view(&surface, 6),
+            );
+            assert!(wait_until(|| after.is_mapped()));
+            let back = |w: &gtk::Window| {
+                TABBING.set(true);
+                w.child_focus(gtk::DirectionType::TabBackward);
+                TABBING.set(false);
+            };
+            let in_field = || {
+                GtkWindowExt::focus(&window).is_some_and(|f| {
+                    f.is_ancestor(&field) || f == *field.upcast_ref::<gtk::Widget>()
+                })
+            };
+
+            tab(&window);
+            assert!(
+                before.is_focus(),
+                "Tab enters the first stop: {:?}",
+                GtkWindowExt::focus(&window).map(|w| (
+                    w.type_().name(),
+                    w.downcast_ref::<NshView>().map(|v| v.state().id)
+                ))
+            );
+            tab(&window);
+            assert!(after.is_focus(), "Tab passes over the disabled panel");
+            back(&window);
+            assert!(before.is_focus(), "Shift+Tab passes over it too");
+
+            disable(false);
+            tab(&window);
+            assert!(in_field(), "an enabled panel's field is a stop again");
+            tab(&window);
+            assert!(inside.is_focus(), "and so is its pressable view");
+
+            // Disabled again while the focus is on the stop before it.
+            back(&window);
+            back(&window);
+            assert!(before.is_focus());
+            disable(true);
+            tab(&window);
+            let passed = after.is_focus();
+            window.destroy();
+            assert!(passed, "a panel disabled later is passed over");
         });
     }
 

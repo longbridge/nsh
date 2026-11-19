@@ -17,6 +17,10 @@
   CoreText positions it from the same top edge as an unconstrained line; the view's drawing bounds clip the
   excess. Empty and zero-height boxes stay empty.
   `onTextLayout` reports the final lines (`TextEngine::lines`: range, box, ascender, descender, cap / x height).
+  The last line of a paragraph includes the whitespace hanging past its end in its width, unless an ellipsis
+  replaces it: a caret after typed spaces (`RichEditor` puts one at the line's width) stands past them on every
+  engine. A line broken inside a paragraph keeps its width within the box; a caret after its break-space stands
+  at the next line's start.
   Final layouts are hit-tested by their engine too, in the content box (`TextEngine::hit_test`,
   `caret_rect`, `range_rects`): the caret position nearest a point (`TextPosition`: a UTF-16 offset and its
   `Affinity`, which says whether an offset that ends a wrapped line and starts the next is on the earlier line), the
@@ -110,13 +114,15 @@
   the tint, subviews of the area kept in front, with enlarged touch targets; scroll views wait for their drag to
   fail) move the ends and hide where a clipping scroll view cuts their caret off; a tap off the highlight clears, on
   it toggles the edit menu (`UIEditMenuInteraction` from iOS 16, `UIMenuController` before: Copy, Select All).
-  Pointers (Mac Catalyst's mouse, iPad trackpads) select as on the desktops, without handles. The texts are the
-  area's `TextView`s (key: their node), listed again when a gesture starts and, while something is selected, after
-  every batch and scroll; each draws its part of the highlight behind its glyphs (`selectionColor`, else the tint, at
-  20%), and texts in an area drop their own `UITextInteraction` (`TextView::in_selectable_view`). Resigning first
-  responder clears, so a surface shows one selection. Android (`selectable_view.rs`, `SelectableView.java`): the
-  shared Rust model runs on the UI thread over JNI, hit-testing through a Java callback; a long press selects a word,
-  then handles and a floating `ActionMode` (Copy, Select all, Share).
+  Touch selection plays a medium impact when the long press selects (the weight of a long press opening a menu) and a
+  selection tick as a drag moves an end, as text views do. Pointers (Mac Catalyst's mouse, iPad trackpads) select as
+  on the desktops, without handles. The texts are the area's `TextView`s (key: their node), listed again when a
+  gesture starts and, while something is selected, after every batch and scroll; each draws its part of the highlight
+  behind its glyphs (`selectionColor`, else the tint, at 20%), and texts in an area drop their own `UITextInteraction`
+  (`TextView::in_selectable_view`). Resigning first responder clears, so a surface shows one selection. Android
+  (`selectable_view.rs`, `SelectableView.java`): the shared Rust model runs on the UI thread over JNI, hit-testing
+  through a Java callback; a long press selects a word (the long press haptic), then handles (the text handles' tick
+  as an end moves) and a floating `ActionMode` (Copy, Select all, Share).
 - **Selection menu**: `selectionMenu` on a selectable view (Rust `Element::selection_menu`, the host prop
   `Prop::SelectionMenu`, `ViewProps::selection_menu`) takes `nsh/desktop`'s `MenuItem`s, each running its `onSelect`;
   they go after the system's items, which always stay. The core keeps plain items and separators
@@ -190,7 +196,7 @@
   spread around it, CSS's strut) and grows only where the attachment reaches past that box, on every engine: the
   line height is never a cap that cuts an attachment to the line. CSS's
   `top` / `bottom` (the line box's) and `sub` / `super` / lengths are not offered: the engines size placeholders
-  before lines exist. The headless engine's font is its line (ascent 1.2 em, descent 0, x height 0.5 em). After the final layout the core places its native view, a child of the text view (Android's
+  before lines exist. The headless engine's natural font is 1.2 em (ascent 1.2 em, descent 0, x height 0.5 em), with explicit `lineHeight` spread around that ascent by half-leading. After the final layout the core places its native view, a child of the text view (Android's
   `TextBox` is a ViewGroup for this), on the placeholder (`TextEngine::attachments`); attachments cut off by the line limit or
   an ellipsis move out of sight. Their own children are normal layout children, made with the attachment: a scroll
   view around the text never culls them (`Core::cull_scope`), as its walk does not reach inside texts, though past

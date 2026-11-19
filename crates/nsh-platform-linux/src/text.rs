@@ -462,20 +462,108 @@ fn natural_line_heights(
     layout.set_attributes(Some(attrs));
 }
 
-/// Font options both threads use: unhinted metrics, so advances do not
-/// depend on the pixel grid.
-fn font_options(hint: pangocairo::cairo::HintStyle) -> Option<pangocairo::cairo::FontOptions> {
+/// How glyphs are rasterized and measured: NSH's defaults, or the
+/// desktop's choices when it asks for manual font rendering, as GTK's own
+/// text does.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct FontRendering {
+    /// The hint style drawn glyphs use.
+    pub(crate) hint_style: pangocairo::cairo::HintStyle,
+    pub(crate) antialias: pangocairo::cairo::Antialias,
+    /// Hinted metrics with whole-pixel glyph positions (in layout too).
+    pub(crate) hint_metrics: bool,
+}
+
+impl Default for FontRendering {
+    /// Slight hinting, gray antialiasing and unhinted metrics, so advances
+    /// do not depend on the pixel grid.
+    fn default() -> Self {
+        FontRendering {
+            hint_style: pangocairo::cairo::HintStyle::Slight,
+            antialias: pangocairo::cairo::Antialias::Gray,
+            hint_metrics: false,
+        }
+    }
+}
+
+static FONT_RENDERING: Mutex<Option<FontRendering>> = Mutex::new(None);
+
+fn font_rendering() -> FontRendering {
+    FONT_RENDERING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or_default()
+}
+
+/// Reads the desktop's font rendering settings, on the main thread,
+/// before an engine starts. With `gtk-font-rendering=manual` GTK draws
+/// its text with `gtk-xft-hintstyle`, `gtk-xft-antialias` and
+/// `gtk-hint-font-metrics`, and so does NSH; otherwise (automatic) NSH
+/// keeps its defaults.
+pub(crate) fn read_font_rendering() {
+    let rendering = gtk::Settings::default()
+        .map(|s| font_rendering_from(&s))
+        .unwrap_or_default();
+    *FONT_RENDERING.lock().unwrap_or_else(|e| e.into_inner()) = Some(rendering);
+}
+
+fn font_rendering_from(settings: &gtk::Settings) -> FontRendering {
+    use gtk::prelude::ObjectExt;
+    use pangocairo::cairo::{Antialias, HintStyle};
+    let mut rendering = FontRendering::default();
+    let manual = settings.find_property("gtk-font-rendering").is_some()
+        && gtk::glib::EnumValue::from_value(&settings.property_value("gtk-font-rendering"))
+            .is_some_and(|(_, v)| v.nick() == "manual");
+    if !manual {
+        return rendering;
+    }
+    if settings.property::<i32>("gtk-xft-hinting") == 0 {
+        rendering.hint_style = HintStyle::None;
+    } else if let Some(style) = settings.property::<Option<String>>("gtk-xft-hintstyle") {
+        rendering.hint_style = match style.as_str() {
+            "hintnone" => HintStyle::None,
+            "hintslight" => HintStyle::Slight,
+            "hintmedium" => HintStyle::Medium,
+            "hintfull" => HintStyle::Full,
+            _ => rendering.hint_style,
+        };
+    }
+    // GSK draws grayscale coverage only: subpixel stays gray, as in GTK.
+    if settings.property::<i32>("gtk-xft-antialias") == 0 {
+        rendering.antialias = Antialias::None;
+    }
+    if settings.find_property("gtk-hint-font-metrics").is_some() {
+        rendering.hint_metrics = settings.property::<bool>("gtk-hint-font-metrics");
+    }
+    rendering
+}
+
+/// Font options of a context. Layout (`draw` false) is unhinted unless
+/// metrics are hinted, so measuring stays resolution-independent by default.
+fn font_options(rendering: FontRendering, draw: bool) -> Option<pangocairo::cairo::FontOptions> {
+    use pangocairo::cairo::{HintMetrics, HintStyle};
     let mut options = pangocairo::cairo::FontOptions::new().ok()?;
-    options.set_hint_metrics(pangocairo::cairo::HintMetrics::Off);
-    options.set_hint_style(hint);
-    options.set_antialias(pangocairo::cairo::Antialias::Gray);
+    options.set_hint_metrics(if rendering.hint_metrics {
+        HintMetrics::On
+    } else {
+        HintMetrics::Off
+    });
+    options.set_hint_style(if draw || rendering.hint_metrics {
+        rendering.hint_style
+    } else {
+        HintStyle::None
+    });
+    options.set_antialias(rendering.antialias);
     Some(options)
 }
 
-fn context(font_map: &pango::FontMap, hint: pangocairo::cairo::HintStyle) -> pango::Context {
+fn context(font_map: &pango::FontMap, rendering: FontRendering, draw: bool) -> pango::Context {
     let context = font_map.create_context();
-    pangocairo::functions::context_set_font_options(&context, font_options(hint).as_ref());
-    context.set_round_glyph_positions(false);
+    pangocairo::functions::context_set_font_options(
+        &context,
+        font_options(rendering, draw).as_ref(),
+    );
+    context.set_round_glyph_positions(rendering.hint_metrics);
     context
 }
 
@@ -524,16 +612,17 @@ impl PangoTextEngine {
     /// Made on the engine thread; `ui_family` is the family of the system
     /// font ([`ui_family`], read on the main thread).
     pub(crate) fn new(ui_family: Arc<str>) -> Self {
-        let font_map = pangocairo::FontMap::new();
+        let font_map = measure_font_map();
         let files = FONT_FILES.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if !files.is_empty()
             && let Err(err) = set_font_files(&font_map, &files)
         {
             log::warn!("cannot load app fonts: {err}");
         }
-        let ltr = context(&font_map, pangocairo::cairo::HintStyle::None);
+        let rendering = font_rendering();
+        let ltr = context(&font_map, rendering, false);
         ltr.set_base_dir(pango::Direction::Ltr);
-        let rtl = context(&font_map, pangocairo::cairo::HintStyle::None);
+        let rtl = context(&font_map, rendering, false);
         rtl.set_base_dir(pango::Direction::Rtl);
         PangoTextEngine {
             font_map,
@@ -1095,6 +1184,20 @@ impl TextEngine for PangoTextEngine {
     }
 }
 
+/// The engine thread's font map: PangoFT2, not pangocairo. Cairo's FreeType
+/// backend evicts faces across threads unsafely once more than ten font
+/// files are open (cairo#436), and the main thread draws with cairo-ft, so
+/// the engine must measure without cairo. PangoFT2 shapes and measures
+/// through HarfBuzz alone and gives the same logical extents as pangocairo
+/// at 96 dpi (its own default is 72). It is a `PangoFcFontMap`, so
+/// [`set_font_files`] still applies (#2504).
+fn measure_font_map() -> pango::FontMap {
+    use glib::translate::FromGlibPtrFull;
+    let map = unsafe { fontconfig::pango_ft2_font_map_new() };
+    unsafe { fontconfig::pango_ft2_font_map_set_resolution(map, 96.0, 96.0) };
+    unsafe { pango::FontMap::from_glib_full(map.cast::<pango::ffi::PangoFontMap>()) }
+}
+
 mod fontconfig {
     //! Fontconfig and PangoFc functions the bindings lack: an app font for
     //! a Fontconfig font map without `pango_font_map_add_font_file`, which
@@ -1115,6 +1218,8 @@ mod fontconfig {
         #[cfg(test)]
         pub(super) fn pango_fc_font_map_get_config(map: *mut c_void) -> *mut c_void;
         pub(super) fn pango_fc_font_map_set_config(map: *mut c_void, config: *mut c_void);
+        pub(super) fn pango_ft2_font_map_new() -> *mut c_void;
+        pub(super) fn pango_ft2_font_map_set_resolution(map: *mut c_void, dpi_x: f64, dpi_y: f64);
     }
 }
 
@@ -1194,10 +1299,7 @@ thread_local! {
 fn main_font(desc: &Arc<str>) -> Option<pango::Font> {
     MAIN_FONTS.with_borrow_mut(|fonts| {
         let fonts = fonts.get_or_insert_with(|| MainFonts {
-            context: context(
-                &pangocairo::FontMap::default(),
-                pangocairo::cairo::HintStyle::Slight,
-            ),
+            context: context(&pangocairo::FontMap::default(), font_rendering(), true),
             fonts: FxHashMap::default(),
             files: 0,
         });
@@ -1257,9 +1359,13 @@ pub(crate) fn set(
     let mut selection = None;
     match old.and_then(|o| o.selection.map(|s| (s, o.text))) {
         Some((s, old)) if text.is_selectable() => {
-            // Offsets into other text mean nothing.
-            if old.text != text.text {
-                s.range.set(None);
+            // Offsets into other text mean nothing: the selection ends
+            // as `select(.., None)` ends one, or the view would keep the
+            // focus, Ctrl+A / Ctrl+C and the watcher for a selection that
+            // is no more (`select` cannot clear a range already `None`).
+            if old.text != text.text && s.range.take().is_some() {
+                s.watch_outside(view, false);
+                view.set_focusable(false);
             }
             selection = Some(s);
         }
@@ -2370,6 +2476,61 @@ impl LinuxLayout {
 mod tests {
     use super::*;
 
+    /// #2504: the engine measures on its own thread while the main thread
+    /// draws with cairo-ft. Over more than ten font files, cairo-ft evicts
+    /// faces across threads unsafely, so the engine must not use it.
+    #[test]
+    fn engine_measuring_does_not_race_main_thread_cairo() {
+        use pangocairo::cairo;
+        let families: Vec<String> = {
+            let map = pangocairo::FontMap::new();
+            let mut f: Vec<String> = map
+                .list_families()
+                .iter()
+                .map(|f| f.name().to_string())
+                .collect();
+            f.sort();
+            f.dedup();
+            f.into_iter().take(30).collect()
+        };
+        if families.len() <= 10 {
+            return; // Too few fonts to reach cairo's face eviction.
+        }
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let engine_families = families.clone();
+        let engine_stop = stop.clone();
+        let engine = std::thread::spawn(move || {
+            let engine = PangoTextEngine::new("sans-serif".into());
+            let mut size = 6.0;
+            while !engine_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                for family in &engine_families {
+                    size = if size > 40.0 { 6.0 } else { size + 0.37 };
+                    let layout = pango::Layout::new(&engine.ltr);
+                    let mut desc = pango::FontDescription::from_string(family);
+                    desc.set_absolute_size(size * pango::SCALE as f64);
+                    layout.set_font_description(Some(&desc));
+                    layout.set_width(80 * pango::SCALE);
+                    layout.set_text("The quick brown fox jumps 0123");
+                    assert!(layout.line_count() > 0);
+                }
+            }
+        });
+        let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, 64, 64).unwrap();
+        let cr = cairo::Context::new(&surface).unwrap();
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let mut size = 6.0;
+        while std::time::Instant::now() < end {
+            for family in &families {
+                size = if size > 40.0 { 6.0 } else { size + 0.41 };
+                cr.select_font_face(family, cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+                cr.set_font_size(size);
+                let _ = cr.text_extents("Pack my box with five dozen");
+            }
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        engine.join().unwrap();
+    }
+
     #[test]
     fn utf16_offsets_of_bytes() {
         // "a" 1 byte / 1 unit, "é" 2 / 1, "中" 3 / 1, "😀" 4 / 2.
@@ -2682,6 +2843,52 @@ mod tests {
 
     /// Nothing of a hidden run is drawn: not its color emoji, its
     /// decorations or its shadow.
+    /// A selectable text whose content changes ends its selection as a
+    /// cleared one: not focusable, no watcher on the root (#2436).
+    #[test]
+    fn new_content_ends_the_selection_and_its_focus() {
+        crate::gtk_test::run(|| {
+            let engine = PangoTextEngine::new("sans-serif".into());
+            let window = gtk::Window::new();
+            let view = NshView::new(1, nsh_core::ViewKind::Text);
+            window.set_child(Some(&view));
+            window.present();
+            let set_text = |s: &str| {
+                let mut t = text(&[(s, ResolvedTextStyle::default())]);
+                t.selectable = Some(true);
+                let prepared = engine.prepare(&t);
+                let size = engine.measure(&prepared, None);
+                let layout = engine.layout(&prepared, size);
+                let content =
+                    Bounds::new(nsh_core::geometry::point(Points(0.0), Points(0.0)), size);
+                set(&view, &Arc::new(t), &layout, content);
+            };
+            let selected = |view: &NshView| {
+                let s = view_selection(view).unwrap();
+                (
+                    s.range.get(),
+                    s.outside.borrow().is_some(),
+                    view.is_focusable(),
+                )
+            };
+            set_text("hello world");
+            select(&view, Some((0, 5)));
+            assert_eq!(selected(&view), (Some((0, 5)), true, true));
+            // The same content keeps it.
+            set_text("hello world");
+            assert_eq!(selected(&view), (Some((0, 5)), true, true));
+            // Other content ends it, focus and watcher included.
+            set_text("goodbye");
+            assert_eq!(selected(&view), (None, false, false));
+            // A later selection clears as any other.
+            select(&view, Some((0, 4)));
+            assert_eq!(selected(&view), (Some((0, 4)), true, true));
+            select(&view, None);
+            assert_eq!(selected(&view), (None, false, false));
+            window.destroy();
+        });
+    }
+
     #[test]
     fn hidden_runs_draw_nothing() {
         crate::gtk_test::run(|| {
@@ -3099,5 +3306,37 @@ mod fallback_tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod font_rendering_tests {
+    use super::*;
+    use pangocairo::cairo::{HintMetrics, HintStyle};
+
+    /// By default layout is unhinted and drawing slightly hinted; hinted
+    /// metrics (manual font rendering) hint and round layout too.
+    #[test]
+    fn layout_follows_hint_metrics() {
+        let default = FontRendering::default();
+        let layout = font_options(default, false).unwrap();
+        assert_eq!(layout.hint_style(), HintStyle::None);
+        assert_eq!(layout.hint_metrics(), HintMetrics::Off);
+        assert_eq!(
+            font_options(default, true).unwrap().hint_style(),
+            HintStyle::Slight
+        );
+
+        let manual = FontRendering {
+            hint_style: HintStyle::Full,
+            hint_metrics: true,
+            ..default
+        };
+        let layout = font_options(manual, false).unwrap();
+        assert_eq!(layout.hint_style(), HintStyle::Full);
+        assert_eq!(layout.hint_metrics(), HintMetrics::On);
+        let font_map = pangocairo::FontMap::new();
+        assert!(context(&font_map, manual, false).is_round_glyph_positions());
+        assert!(!context(&font_map, default, false).is_round_glyph_positions());
     }
 }

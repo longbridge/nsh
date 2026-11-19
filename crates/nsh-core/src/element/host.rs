@@ -16,11 +16,11 @@ use super::{
     },
 };
 use crate::{
-    AudioSession, AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, Hsla, JsonValue,
-    KeyboardAppearance, KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp,
-    OverlayProp, PasteBehavior, PasteEvent, Points, Prop, ResizeMode, ReturnKeyType, Rgba,
-    ScreenAnimation, ScreenProp, ScrollProp, SheetDetent, Size, StatusBarSetting, SubmitBehavior,
-    Tag, WebSource,
+    AudioSession, AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, HeaderTitleAlign, Hsla,
+    JsonValue, KeyboardAppearance, KeyboardType, ModalAnimation, ModalPresentation, ModalProp,
+    NativeProp, OverlayProp, PasteBehavior, PasteEvent, Points, Prop, ResizeMode, ReturnKeyType,
+    Rgba, ScreenAnimation, ScreenProp, ScrollProp, SheetDetent, Size, StatusBarSetting,
+    SubmitBehavior, Tag, WebSource,
     canvas::{
         CanvasFont, CanvasGradient, CanvasImage, CanvasOp, CanvasTextAlign, CanvasTextBaseline,
         Composite, Drawing, FillRule, LineCap, LineJoin, Num, Paint, Path, PathOp, ViewPaint,
@@ -1009,6 +1009,24 @@ impl Screen {
     pub fn header_shadow_visible(self, visible: impl IntoReactive<bool>) -> Self {
         self.bind_prop(visible, |v| {
             Prop::Screen(ScreenProp::HeaderShadowVisible(v))
+        })
+    }
+
+    /// Where the title sits in the header (TS: `headerTitleAlign`): at the
+    /// start (the default) or centered. Android's header follows it; iOS's
+    /// system bar always centers the title and ignores the value.
+    pub fn header_title_align(self, align: impl IntoReactive<HeaderTitleAlign>) -> Self {
+        self.bind_prop(align, |a| Prop::Screen(ScreenProp::HeaderTitleAlign(a)))
+    }
+
+    /// With [`Self::header_transparent`], the header stays clear while the
+    /// content rests at its top and shows its background (UIKit's default,
+    /// or [`Self::header_style_with`]'s color) once the content scrolls
+    /// under it, as UIKit's own bars do (iOS; off by default; TS:
+    /// `headerBackgroundOnScroll`).
+    pub fn header_background_on_scroll(self, on: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(on, |v| {
+            Prop::Screen(ScreenProp::HeaderBackgroundOnScroll(v))
         })
     }
 
@@ -2649,6 +2667,7 @@ impl From<Drawing> for Painter {
 }
 
 crate::static_reactive!(ScreenAnimation: ScreenAnimation);
+crate::static_reactive!(HeaderTitleAlign: HeaderTitleAlign);
 
 /// A program where an optional one goes (`.transition_shader(wipe)`).
 impl IntoReactive<Option<crate::shader::TransitionShader>> for crate::shader::TransitionShader {

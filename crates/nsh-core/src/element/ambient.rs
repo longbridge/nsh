@@ -53,6 +53,9 @@ pub(crate) struct Ambient {
     storage: Option<crate::storage::Store>,
     /// The app's own data directory ([`data_dir`]).
     data_dir: Option<std::path::PathBuf>,
+    /// What `nsh/updater` checks with for Rust code
+    /// ([`crate::runtime::prompt_for_update`]).
+    updater: Option<std::sync::Arc<dyn crate::runtime::UpdaterHost>>,
     /// The displays (desktops), as the platform reports them.
     displays: Option<Signal<Arc<[crate::desktop::Display]>>>,
     /// Whether the performance monitor measures, as the platform reports
@@ -174,6 +177,15 @@ impl super::Runtime {
     pub(crate) fn set_data_dir(&self, dir: Option<std::path::PathBuf>) {
         let _entered = self.enter();
         with_data(|d| d.ambient.data_dir = dir);
+    }
+
+    /// What Rust code checks for updates with ([`updater_host`]).
+    pub(crate) fn set_updater(
+        &self,
+        updater: Option<std::sync::Arc<dyn crate::runtime::UpdaterHost>>,
+    ) {
+        let _entered = self.enter();
+        with_data(|d| d.ambient.updater = updater);
     }
 
     /// How text is measured (the core's text engine).
@@ -674,6 +686,12 @@ pub(crate) fn with_storage<R>(f: impl FnOnce(&crate::storage::Store) -> R) -> R 
 /// ```
 pub fn data_dir() -> Option<std::path::PathBuf> {
     with_data(|d| d.ambient.data_dir.clone())
+}
+
+/// What Rust code checks for updates with: the engine's, `None` where the
+/// app does not update.
+pub(crate) fn updater_host() -> Option<std::sync::Arc<dyn crate::runtime::UpdaterHost>> {
+    with_data(|d| d.ambient.updater.clone())
 }
 
 /// The file the app's log lines are written to (TS: `process.logFile`): a
