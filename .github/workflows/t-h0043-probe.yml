@@ -21,10 +21,10 @@ jobs:
         run: cargo test -p nsh-platform-macos --features js --test native --no-run
       - name: Committed regression test
         continue-on-error: ${{ matrix.variant == 'unfixed' }}
-        run: NSH_SCALED_INPUT_CHECK_ONLY=1 cargo test -p nsh-platform-macos --features js --test native
+        run: NSH_SCALED_INPUT_CHECK_ONLY=1 cargo test -p nsh-platform-macos --features js --test native -- --ignored
       - name: TSX acceptance
         continue-on-error: ${{ matrix.variant == 'unfixed' }}
-        run: NSH_SCALED_INPUT_CHECK_ONLY=1 T10284_BUNDLE=$PWD/ci-probe/out/bundle.js cargo test -p nsh-platform-macos --features js --test native
+        run: NSH_SCALED_INPUT_CHECK_ONLY=1 T10284_BUNDLE=$PWD/ci-probe/out/bundle.js cargo test -p nsh-platform-macos --features js --test native -- --ignored
       - uses: actions/upload-artifact@v4
         if: always()
         with:
