@@ -110,7 +110,8 @@
   the tint, subviews of the area kept in front, with enlarged touch targets; scroll views wait for their drag to
   fail) move the ends and hide where a clipping scroll view cuts their caret off; a tap off the highlight clears, on
   it toggles the edit menu (`UIEditMenuInteraction` from iOS 16, `UIMenuController` before: Copy, Select All).
-  Pointers (Mac Catalyst's mouse, iPad trackpads) select as on the desktops, without handles. The texts are the
+  Touch selection plays UIKit's selection haptic when the long press selects and as a drag moves an end, as text
+  views do. Pointers (Mac Catalyst's mouse, iPad trackpads) select as on the desktops, without handles. The texts are the
   area's `TextView`s (key: their node), listed again when a gesture starts and, while something is selected, after
   every batch and scroll; each draws its part of the highlight behind its glyphs (`selectionColor`, else the tint, at
   20%), and texts in an area drop their own `UITextInteraction` (`TextView::in_selectable_view`). Resigning first
