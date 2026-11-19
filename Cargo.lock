@@ -4207,7 +4207,9 @@ dependencies = [
 name = "nsh-platform-tui"
 version = "0.6.0"
 dependencies = [
+ "base64 0.22.1",
  "crossbeam-channel",
+ "image",
  "log",
  "nsh-base",
  "nsh-bundler",

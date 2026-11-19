@@ -493,8 +493,9 @@ impl Painter<'_> {
         }
         let children_pointer = pointer && view.props.pointer_events != PointerEvents::BoxOnly;
 
-        // What a terminal cannot show (an image, a video, a web view)
-        // keeps its box blank: its fill would read as a band of content.
+        // An image draws its picture over what is under it; what a
+        // terminal cannot show (a video, a web view) keeps its box blank:
+        // its fill would read as a band of content.
         let blank = matches!(
             view.kind,
             ViewKind::Image | ViewKind::Video | ViewKind::WebView
@@ -1118,6 +1119,20 @@ impl Painter<'_> {
                     &mut self.hues,
                 );
             }
+            if let Some(image) = &mut view.image {
+                let tint = view.style.tint_color;
+                crate::image::draw(
+                    image,
+                    &mut self.tree.images,
+                    id,
+                    self.buffer,
+                    inner,
+                    inner_visible,
+                    cells,
+                    ground,
+                    tint,
+                );
+            }
             if let Some(component) = &mut view.component {
                 component.render(inner_visible, self.buffer);
             }
@@ -1644,9 +1659,10 @@ fn icon_label<'a>(tree: &Mounter, view: &'a NshView) -> Option<&'a str> {
 }
 
 /// Whether `id` or a view inside it draws anything of its own in the
-/// terminal: a text, a field, a canvas, a native component or a fill (a
-/// carousel's pagination bar); a wrapper of an icon the terminal leaves
-/// out draws nothing, and so does a picture (its box stays blank).
+/// terminal: a text, a field, a canvas, a native component, a picture the
+/// terminal can show or a fill (a carousel's pagination bar); a wrapper of
+/// an icon the terminal leaves out draws nothing, and so does a picture it
+/// cannot show (its box stays blank).
 fn draws(tree: &Mounter, id: NodeId) -> bool {
     tree.get(id).is_some_and(|view| {
         view.frame.size.width > Points::ZERO
@@ -1655,6 +1671,10 @@ fn draws(tree: &Mounter, id: NodeId) -> bool {
                 || view.field.is_some()
                 || view.canvas.is_some()
                 || view.component.is_some()
+                || view
+                    .image
+                    .as_ref()
+                    .is_some_and(|image| tree.images.shows(image))
                 || (!matches!(
                     view.kind,
                     ViewKind::Image | ViewKind::Video | ViewKind::WebView

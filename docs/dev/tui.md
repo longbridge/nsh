@@ -319,7 +319,13 @@ compared side by side with the others. Its layout and colors' meanings are the g
 
 `AppOptions` supplies the point scale, appearance/background, limits, UI sets, cache, storage, assets, clipboard
 and host channel. `TerminalCapabilities` carries the terminal's background scheme, its default background and
-foreground colors and its color depth (`ColorDepth`); the standalone host fills them from its startup query. Embedding defaults to bounded limits; the Development host explicitly selects standalone limits.
+foreground colors, its color depth (`ColorDepth`), how it shows pictures (`Graphics`) and its Cell's size in pixels;
+the standalone host fills them from its startup query. That query also asks for the kitty graphics protocol (a
+one-pixel `a=q` query, which stores nothing) and `CSI 16 t`; an `OK` answer in a terminal known to draw Unicode
+placeholders (`TERM` naming kitty or Ghostty, `TERM_PROGRAM=ghostty`, `KITTY_WINDOW_ID`) selects
+`Graphics::KittyPlaceholders`. Others that answer (WezTerm, Konsole) place images by cursor only, and tmux does not
+pass the query through: they get half blocks. Without a `CSI 16 t` answer the Cell's pixels come from the window's
+size (`TIOCGWINSZ`), else they are guessed from the Cell's proportion. Embedding defaults to bounded limits; the Development host explicitly selects standalone limits.
 `register_component` creates per-node widgets with ordered property updates, commands and buffer rendering;
 reserved `nsh/` names are rejected. Native component input, sizing and richer context belong to the native
 component ticket. The Release runner is a separate slice.
@@ -490,12 +496,35 @@ colors' (above).
 
 A view's gradient over no fill of its own is a fill of its first stop, a band as any fill is.
 
+**Images** (`image.rs`) load through the core's shared loader and decoded images (`docs/dev/images.md`), first
+frame only (the terminal runs with reduced motion), decoded at the size their content box needs at the terminal's
+Cell pixels and loaded again when the box outgrows it; `onLoadStart`, `onLoad`, `onError` and `onLoadEnd` are
+dispatched after the frame that saw them, and `Command::ImageInfo` (`Image.getSize`, `Image.prefetch`) is answered
+from the header, as Linux answers it. The picture is fitted into the box with `ResizeMode::fit` and the
+`objectPosition`, resampled premultiplied (no dark fringes), `tintColor` painted through its alpha. How it shows
+depends on `TerminalCapabilities::graphics`:
+
+- `Graphics::Blocks` (the default): each Cell is `▀`, its foreground the top pixel and its background the bottom
+  one, at the terminal's depth; a transparent half is `▄` / `▀` over the surface, a translucent one mixed into the
+  surface's color (the terminal's background on the page). Below 256 colors the box stays blank.
+- `Graphics::KittyPlaceholders` (24-bit color only): the fitted picture, `cols × cell width` by `rows × cell
+  height` pixels (`cell_pixels`, at most 2048 a side), is PNG-encoded and transmitted once as a virtual placement
+  (`ESC _ G a=T,U=1,f=100,q=2,i=ID,c=…,r=…`, base64 in 4096-byte chunks). Each Cell of the box is U+10EEEE with its
+  row and column as kitty's combining marks (`DIACRITICS`) and the 24-bit image id as its foreground, so clipping,
+  scrolling, overlays and ratatui's diff work on plain Cells; a final pass (`Loader::finish`) restores the id color
+  and clears attributes a later pass (a band, reverse video) set on a placeholder still showing. The commands go to
+  `perf::Output::graphics`, which `MeasuredBackend` writes ahead of the next frame's first Cell, as it wraps links. A
+  placement whose key (picture, Cells, mode, position, tint, Cell pixels) changes, or whose view goes, queues
+  `a=d,d=I` for its id.
+
+A control whose content is a picture shows its label until the picture has loaded (`draws`).
+
 **Nothing is drawn** for radii other than a border's corners, shadows,
 outlines and focus rings, opacity, filters, blend modes, backdrop effects, transforms other than translation
-(rounded to Cells), icons, images, videos, web views and native views without a terminal rendering: the
+(rounded to Cells), icons, videos, web views and native views without a terminal rendering: the
 terminal cannot show them well, so they are left out rather than imitated (the core gives icon-sized images, videos,
-web views, shaders and canvases no Cells; larger ones keep their box, which the painter leaves blank, fill included,
-so the labels around them keep their places; the mounter logs each unsupported kind once). A view that is invisible, concealed (a screen under the top one)
+web views, shaders and canvases no Cells; larger videos and web views keep their box, which the painter leaves blank,
+fill included, so the labels around them keep their places; the mounter logs each unsupported kind once). A view that is invisible, concealed (a screen under the top one)
 or nearly transparent (opacity under 0.03) draws nothing. Cells keep the terminal's default foreground and
 background (`Color::Reset`) unless something below sets them.
 
@@ -1177,7 +1206,8 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Borders | Box drawing on each side wider than zero, one Cell, dim (an accent color kept), rounded corners where a radius is set, dashed and dotted lines |
 | Outlines and focus rings | Left out; focus shows as described in "Drawing" |
 | Box shadows | Left out |
-| Images, videos, web views, shaders and canvases | At most 48 × 48 points (icons): left out, laid out as `display: none` by the terminal layout (no Cells, frame or hits, their margins and gaps gone). Larger: their box kept and left blank, so the content around them keeps its place; larger canvases are drawn |
+| Images, videos, web views, shaders and canvases | At most 48 × 48 points (icons): left out, laid out as `display: none` by the terminal layout (no Cells, frame or hits, their margins and gaps gone). Larger: images drawn (below), canvases drawn; videos, web views and shaders keep their box blank, so the content around them keeps its place |
+| Images | Kitty graphics Unicode placeholders at the terminal's pixels in kitty and Ghostty (24-bit color); elsewhere `▀` half blocks, two pixels a Cell, at 256 colors or more; blank below. Resize modes, `objectPosition` and `tintColor` applied; the first frame of an animation; blur, placeholders and fades left out |
 | Scroll bars | A one-Cell track `│` (dim) and thumb `┃` on the inner edge of an overflowing scroll view, unless hidden |
 | Anchored overlays | Snapped outside the anchor's Cell rect on the core-resolved placement side; cleared and framed, the label as title |
 | Gaps between texts | Positive point gaps between one-line sibling texts or canvas text runs retain at least one Cell; zero gaps keep adjacent text |
@@ -1249,13 +1279,16 @@ tests cover focus marks, backward focus-within transitions, projected value/disa
 Slider keys. The palette module checks colors as meanings at each depth (accents by hue, dim
 secondary text, the light and dark pages), translucent text and opacity, text attributes and gradients; the
 painting module checks borders (dim or accented sides, dashed, dotted, single sides), that shadows, outlines and
-rings draw nothing, scroll bars, that images keep their box blank and icons are left out, icon buttons labeled, tiny and round boxes without borders and empty ones as their outline,
+rings draw nothing, scroll bars, that icons are left out, icon buttons labeled, tiny and round boxes without borders and empty ones as their outline,
 clipping to the parent's content box with an ellipsis, selected bands, focus and disabled marks, overlays cleared
 and framed, unchanged frames and invisible views; `dialog.rs`'s unit tests check alerts' button order, keys,
 presses and drawing, `menu.rs`'s a context menu's placement, keys and presses. The menu bar module checks the
 application menu's row above the app (and none without one), F10 and the arrows between titles and menus, the roles
 left out, shortcuts at the right, initials, Escape, presses and hover on titles and an item's shortcut with the bar
 closed. These tests do not exercise hover or Slider drags yet.
+The image module draws a picture in half blocks and checks its colors and `onLoad` size, the kitty transmission,
+placeholders and the deletion when the view goes, an image that fails, and `Image.getSize`; `image.rs`'s unit tests
+check fitting, tint, chunking and the placeholder's width.
 The search fixture searches forward and backward through a Scroll's rows and checks the Minibuffer row before,
 during and after the search.
 The animation module at the AppView seam checks completion, cancellation, active-frame and idle scheduling,
