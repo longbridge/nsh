@@ -642,3 +642,19 @@ fn a_field_that_grows_with_its_wrapped_text_shows_its_first_row_again() {
     draw_until(&mut view, &mut terminal, &rx, "abcdefghijklmnopqrs");
     terminal.backend_mut().assert_cursor_position((4, 1));
 }
+
+#[test]
+fn escape_and_c_g_report_their_key_press_before_leaving_the_field() {
+    let (mut view, mut terminal, rx) = field("");
+    view.handle(key("A"));
+    draw_until(&mut view, &mut terminal, &rx, "key:A");
+    view.handle(key("Escape"));
+    draw_until(&mut view, &mut terminal, &rx, "key:Escape");
+    assert!(!terminal.backend().cursor_visible(), "Escape still leaves");
+    view.handle(key("Tab"));
+    view.handle(key("B"));
+    draw_until(&mut view, &mut terminal, &rx, "key:B");
+    view.handle(modified("g", true, false, false));
+    draw_until(&mut view, &mut terminal, &rx, "key:Escape");
+    assert!(!terminal.backend().cursor_visible(), "C-g still leaves");
+}
