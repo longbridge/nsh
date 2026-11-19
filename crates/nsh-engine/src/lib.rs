@@ -2321,6 +2321,8 @@ impl<M: TextEngine + 'static> Driver<M> {
             core,
             js_tokens,
             frame_requested: false,
+            frame_turn: false,
+            frames_seen: false,
             ops: Vec::new(),
             binds: Vec::new(),
             events: Vec::new(),
@@ -2900,6 +2902,13 @@ struct State<M: TextEngine> {
     app_locale: Option<nsh_core::platform::Locale>,
     /// A display frame was requested and has not begun yet.
     frame_requested: bool,
+    /// This turn handled a display frame: it makes a slice of the paced
+    /// remainder (views and overscan binds waiting), other turns leave it.
+    frame_turn: bool,
+    /// The platform has sent a display frame: one that never does (a sink
+    /// without [`MountSink::request_frame`]) makes the paced remainder in
+    /// every turn, or it would wait for good.
+    frames_seen: bool,
     ops: Vec<Op>,
     /// List render requests not yet sent to JS.
     binds: Vec<ListBind>,
@@ -3534,8 +3543,15 @@ impl<M: TextEngine> State<M> {
         let mut js = std::time::Duration::ZERO;
         // The overscan bound this turn ([`PACED_BIND_OPS`]).
         let mut paced = PacedBinds::default();
-        // The views made this turn share one budget (`nsh_core`'s `pace.rs`).
+        // The views made this turn share one budget (`nsh_core`'s `pace.rs`),
+        // and what waits from earlier turns comes once a display frame: the
+        // turns between two frames (timers, the main thread's messages)
+        // commit only what they change.
+        let frame = std::mem::take(&mut self.frame_turn) || !self.frames_seen;
         self.core.begin_mount_turn();
+        if !frame {
+            self.core.hold_paced_mounts();
+        }
         for _ in 0..MAX_LIST_ROUNDS {
             // Requests from the previous round (or frame) first.
             let js_start = Instant::now();
@@ -3555,7 +3571,7 @@ impl<M: TextEngine> State<M> {
                 }
                 script.take_ops(&mut self.ops);
                 let mut binds = Vec::new();
-                while !unapplied && paced.left() && self.core.has_paced_list_binds() {
+                while frame && !unapplied && paced.left() && self.core.has_paced_list_binds() {
                     let start = Instant::now();
                     let ops = self.ops.len();
                     self.core.take_paced_list_binds(1, &mut binds);
@@ -4098,6 +4114,8 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
         Message::ScreenHeader(id, height) => state.core.set_screen_header(id, height),
         Message::Frame => {
             state.frame_requested = false;
+            state.frame_turn = true;
+            state.frames_seen = true;
             state.core.run_frame(nsh_core::time::now());
             if let Some(script) = script {
                 script.run_frame();
