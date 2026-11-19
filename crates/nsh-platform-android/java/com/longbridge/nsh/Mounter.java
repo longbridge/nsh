@@ -735,6 +735,7 @@ final class Mounter {
         // batch that pushes it finds the page placed only now, so it is
         // focused before the frame draws.
         if (pendingFocus.id() != 0) retryFocus();
+        settleKeyboardLeaving();
         outputs(Native.afterBatch(handle(), seq));
     }
 
@@ -965,8 +966,8 @@ final class Mounter {
     }
 
     private void insert(int parentId, int childId, int beforeId) {
-        // Moved, not deleted: whatever happens to its focus, the keyboard is not its to hide.
-        if (keyboardLeaving != null && views.get(childId) == keyboardLeaving) keyboardLeaving = null;
+        // Moved, not removed: the keyboard is not its to hide.
+        if (keyboardLeaving != null && views.get(childId) == keyboardLeaving) forgetKeyboardLeaving();
         if (insertHosted(parentId, childId, beforeId)) return;
         View parent = views.get(parentId), child = views.get(childId);
         ViewGroup group = container(parent);
@@ -1079,12 +1080,6 @@ final class Mounter {
 
     private void delete(int id) {
         View v = views.get(id);
-        if (v != null && v == keyboardLeaving) {
-            keyboardLeaving = null;
-            hideKeyboardOf(keyboardWindow, keyboardToken);
-        } else if (v != null) {
-            hideKeyboardIn(v);
-        }
         if (id == pendingFocus.id()) {
             dropPendingFocus();
             android.util.Log.w("nsh", "focus(): view " + id + " was removed before it was shown; the request is dropped");
@@ -2334,6 +2329,7 @@ final class Mounter {
         boolean scrollbarVisible = b.getInt() != 0, replaced = b.getInt() != 0;
         int fontVariant = b.getInt();
         if (!(v instanceof InputBox)) return;
+        if (autoFocus && !((InputBox) v).isConfigured()) focusAsked = true;
         ((InputBox) v).pasteInserts = pasteInserts;
         ((InputBox) v).setScrollbar(scrollbarVisible, replaced);
         ((InputBox) v).edit.setCursorVisible(!caretHidden);
@@ -2347,6 +2343,66 @@ final class Mounter {
     }
 
     /**
+     * The view removed in this batch with the text field that has the keyboard inside it, and that field's window:
+     * once detached, the view no longer finds its focus. Settled when the batch ends, never kept across batches.
+     */
+    private View keyboardLeaving, keyboardWindow;
+    private android.os.IBinder keyboardToken;
+    /** A field asked for the focus in this batch (`focus()`, or a new field's `autoFocus`): the keyboard is its. */
+    private boolean focusAsked;
+
+    private void noteKeyboardLeaving(View v) {
+        View f = v == null ? null : v.findFocus();
+        if (f == null || !f.onCheckIsTextEditor()) return;
+        keyboardLeaving = v;
+        keyboardWindow = f.getRootView();
+        keyboardToken = f.getWindowToken();
+    }
+
+    private void forgetKeyboardLeaving() {
+        keyboardLeaving = null;
+        keyboardWindow = null;
+        keyboardToken = null;
+    }
+
+    /**
+     * The field with the keyboard was removed in this batch and not put back: the keyboard hides with it, as when a
+     * page or dialog leaves ({@link #hideKeyboardIn}), unless a field takes it: one asked for the focus in the batch,
+     * waits for it, or has it once the batch's own posted focus requests ran.
+     */
+    private void settleKeyboardLeaving() {
+        View window = keyboardWindow;
+        android.os.IBinder token = keyboardToken;
+        boolean asked = focusAsked;
+        focusAsked = false;
+        forgetKeyboardLeaving();
+        if (window == null || asked) return;
+        host.post(() -> {
+            if (pendingFocus.id() != 0) return;
+            View now = window.findFocus();
+            if (now != null && now.onCheckIsTextEditor()) return;
+            InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+            imm.hideSoftInputFromWindow(token, 0);
+            focusWindowRoot(window);
+        });
+    }
+
+    /** Leaves the focus at the root of {@code window}, where the keyboard's field was: the host's or a dialog's. */
+    private void focusWindowRoot(View window) {
+        if (window == host.getRootView()) {
+            host.requestFocus();
+            return;
+        }
+        for (int i = 0; i < modals.size(); i++) {
+            ModalHost modal = modals.valueAt(i);
+            if (modal.window() == window) {
+                modal.focusRoot();
+                return;
+            }
+        }
+    }
+
+    /**
      * A page or dialog leaves with the field that has the keyboard: the
      * keyboard hides with it, as with a native back, not once the field is
      * gone (which leaves it up). Focus goes to the host, as `blur()` does.
@@ -2357,34 +2413,6 @@ final class Mounter {
         InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
         imm.hideSoftInputFromWindow(f.getWindowToken(), 0);
         if (f.getRootView() == host.getRootView()) host.requestFocus();
-    }
-
-    /**
-     * A view removed (REMOVE) while the text field with the keyboard was inside it, and that field's window: once
-     * detached the view no longer finds its focus. Deleting it (DELETE) hides the keyboard, as a page or dialog
-     * leaving does ({@link #hideKeyboardIn}); a view only moved (inserted again) keeps it.
-     */
-    private View keyboardLeaving, keyboardWindow;
-    private android.os.IBinder keyboardToken;
-
-    private void noteKeyboardLeaving(View v) {
-        View f = v == null ? null : v.findFocus();
-        if (f == null || !f.onCheckIsTextEditor()) return;
-        keyboardLeaving = v;
-        keyboardWindow = f.getRootView();
-        keyboardToken = f.getWindowToken();
-    }
-
-    /**
-     * Hides the keyboard of {@code window}, which a deleted field had, unless another field there has the focus
-     * now: the keyboard is that field's.
-     */
-    private void hideKeyboardOf(View window, android.os.IBinder token) {
-        View now = window.findFocus();
-        if (now != null && now.onCheckIsTextEditor()) return;
-        InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
-        imm.hideSoftInputFromWindow(token, 0);
-        if (window == host.getRootView()) host.requestFocus();
     }
 
     /** The activity's requested orientation before a page set one (null: none set). */
@@ -3150,6 +3178,7 @@ final class Mounter {
 
     /** `Command::Focus`: the latest request wins over one still waiting. */
     private void focus(int id, View v) {
+        focusAsked = true;
         dropPendingFocus();
         // A field not shown yet waits on its own and reports that wait
         // (`inputFocusWaits`), so a newer request or a blur ends it.
