@@ -6790,12 +6790,11 @@ impl<M: TextEngine> Core<M> {
         // are its own layout's).
         let inline = p.kind == Kind::Text && !self.nodes[child as usize].fixed_view;
         let pos = match before {
-            Some(b) => p
-                .children
-                .iter()
-                .inspect(|_| self.placing(1))
-                .position(|&c| c == b)
-                .expect("anchor is a child"),
+            Some(b) => {
+                let (pos, looked) = position_from_ends(&p.children, &b).expect("anchor is a child");
+                self.placing(looked);
+                pos
+            }
             None => p.children.len(),
         };
         self.set_inline(child, inline);
@@ -6878,7 +6877,7 @@ impl<M: TextEngine> Core<M> {
             if self.nodes[parent as usize].list.is_none()
                 && !self.nodes[child as usize].is_layout_root()
             {
-                let index = self.render_index_at(parent, pos);
+                let index = self.layout_index_at(parent, pos);
                 let parent_layout = self.nodes[parent as usize]
                     .layout
                     .expect("block parent has layout");
@@ -7344,22 +7343,47 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// Index among rendering (layout-backed) children of `parent` for a
-    /// child at `pos` in the full children list.
-    /// [`Self::render_index`], at once for the last child: after all the
-    /// rendering children its parent's layout node has.
-    fn render_index_at(&self, parent: Key, pos: usize) -> u32 {
+    /// Where the child at `pos` among `parent`'s children goes among the
+    /// children of `parent`'s layout node: before the layout node of the
+    /// next sibling that has one (the layout node's children are those
+    /// siblings', in order), or after them all. Looks at the siblings next
+    /// to it and at the layout children near `pos`, not at every sibling
+    /// before it: views inserted before the one after a list's rows, or
+    /// before the first of a chat's messages, look at a few of them each.
+    fn layout_index_at(&self, parent: Key, pos: usize) -> u32 {
         let node = &self.nodes[parent as usize];
-        if pos + 1 == node.children.len()
-            && let Some(layout) = node.layout
-        {
-            let index = self.layout.children_len(layout) as u32;
-            debug_assert_eq!(index, self.render_index(parent, pos));
-            return index;
-        }
-        self.render_index(parent, pos)
+        let layout = node.layout.expect("block parent has layout");
+        let next = node.children[pos + 1..]
+            .iter()
+            .inspect(|_| self.placing(1))
+            .find_map(|&c| {
+                let c = &self.nodes[c as usize];
+                c.layout.filter(|_| !c.is_layout_root())
+            });
+        let index = match next {
+            // As many layout children are before it as siblings with one
+            // are: at most `pos`, fewer by those without one.
+            Some(next) => match position_near(self.layout.children(layout), &next, pos) {
+                Some((index, looked)) => {
+                    self.placing(looked);
+                    index
+                }
+                None => {
+                    debug_assert!(false, "a sibling's layout node is its parent's child");
+                    self.render_index(parent, pos) as usize
+                }
+            },
+            None => self.layout.children_len(layout),
+        };
+        debug_assert!(
+            pos + 1 != node.children.len() || index as u32 == self.render_index(parent, pos),
+            "the layout node's children are its rendering children"
+        );
+        index as u32
     }
 
+    /// The rendering siblings before `pos` among `parent`'s children,
+    /// counted: what [`Self::layout_index_at`] finds without counting them.
     fn render_index(&self, parent: Key, pos: usize) -> u32 {
         self.nodes[parent as usize].children[..pos]
             .iter()
@@ -10697,6 +10721,45 @@ const HIDDEN: f32 = 1.0e6;
 /// pixels, so the platform rounding each view's frame to pixels in its parent
 /// would make a child a pixel taller than its parent (a scroll view then cuts
 /// its last row of pixels off).
+/// Where `x` is in `items`, looked for from both ends at once, and how
+/// many items were looked at: few for an item near either end.
+fn position_from_ends<T: PartialEq>(items: &[T], x: &T) -> Option<(usize, usize)> {
+    let (mut front, mut back) = (0, items.len());
+    while front < back {
+        if items[front] == *x {
+            return Some((front, 2 * front + 1));
+        }
+        back -= 1;
+        if items[back] == *x {
+            return Some((back, 2 * (items.len() - back)));
+        }
+        front += 1;
+    }
+    None
+}
+
+/// Where `x` is in `items`, looked for outward from `near` (or the last
+/// item, past the end), and how many items were looked at: few when it is
+/// near.
+fn position_near<T: PartialEq>(items: &[T], x: &T, near: usize) -> Option<(usize, usize)> {
+    let near = near.min(items.len().checked_sub(1)?);
+    let mut looked = 0;
+    // Every item is at most `len - 1` from `near`.
+    for distance in 0..items.len() {
+        let below = near.checked_sub(distance);
+        let above = (distance > 0)
+            .then_some(near + distance)
+            .filter(|&i| i < items.len());
+        for i in [below, above].into_iter().flatten() {
+            looked += 1;
+            if items[i] == *x {
+                return Some((i, looked));
+            }
+        }
+    }
+    None
+}
+
 fn round(value: f32, ratio: f32) -> f32 {
     (pixel(value, ratio) / f64::from(ratio)) as f32
 }

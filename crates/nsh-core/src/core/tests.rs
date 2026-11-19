@@ -11438,6 +11438,108 @@ fn views_inside_text_are_attachments() {
     assert_eq!(frame_of(&batch, 8).map(|f| f.origin.x.0), Some(5.0 + 32.0));
 }
 
+/// View 2 under the root holding views 3 and 4, then `n` views each
+/// inserted by `place` (given the view and its number); what placing
+/// them looked at ([`Components::placing_work`]).
+fn placing_work(n: u32, place: impl Fn(&mut Core<FakeEngine>, NodeId, u32)) -> usize {
+    let mut c = core();
+    for id in 2..5 {
+        c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+    }
+    for (parent, child) in [(ROOT_ID, 2), (2, 3), (2, 4)] {
+        c.apply(Op::Insert {
+            parent,
+            child,
+            before: None,
+        })
+        .unwrap();
+    }
+    c.commit();
+    c.components.placing_work.set(0);
+    for i in 0..n {
+        let id = 10 + i;
+        c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+        place(&mut c, id, i);
+    }
+    c.commit();
+    c.components.placing_work.get()
+}
+
+/// Views inserted before the last of their siblings (rows before what
+/// follows a list), before the first (a chat's older messages) or after
+/// the one inserted last are placed, in the core's children and in the
+/// layout's, by looking at the siblings near the anchor, not at all those
+/// before it: four times the views, about four times the work.
+#[test]
+fn views_inserted_near_an_anchor_are_placed_without_counting_siblings() {
+    let before = |anchor: fn(u32) -> NodeId| {
+        move |c: &mut Core<FakeEngine>, id: NodeId, i: u32| {
+            c.apply(Op::Insert {
+                parent: 2,
+                child: id,
+                before: Some(anchor(i)),
+            })
+            .unwrap();
+        }
+    };
+    let mut grew = Vec::new();
+    for (name, anchor) in [
+        ("before the last", (|_| 4) as fn(u32) -> NodeId),
+        ("before the first", |i| if i == 0 { 3 } else { 10 + i - 1 }),
+    ] {
+        let (few, many) = (
+            placing_work(400, before(anchor)),
+            placing_work(1_600, before(anchor)),
+        );
+        if many > 5 * few.max(1) {
+            grew.push(format!("{name}: {few} for 400 views, {many} for 1,600"));
+        }
+    }
+    assert!(grew.is_empty(), "{grew:#?}");
+}
+
+/// Views inserted before an anchor end up where they were put, in the
+/// core's children, natively and in the layout.
+#[test]
+fn views_inserted_before_an_anchor_lay_out_in_order() {
+    let mut c = core();
+    for id in 2..6 {
+        c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+        c.apply(Op::SetStyle {
+            id,
+            style: style(&[("height", StyleValue::Number(10.0))]),
+            patch: StylePatch::default(),
+        })
+        .unwrap();
+    }
+    c.apply(Op::Insert {
+        parent: ROOT_ID,
+        child: 2,
+        before: None,
+    })
+    .unwrap();
+    // A raw text before the anchor takes no place in the layout.
+    c.apply(Op::CreateText {
+        id: 9,
+        text: "ignored".into(),
+    })
+    .unwrap();
+    for (child, before) in [(3, None), (9, None), (4, None), (5, Some(4))] {
+        c.apply(Op::Insert {
+            parent: 2,
+            child,
+            before,
+        })
+        .unwrap();
+    }
+    c.commit();
+    let y = |c: &Core<FakeEngine>, id| c.measure(id).map(|m| m.frame.origin.y.0);
+    assert_eq!(
+        [y(&c, 3), y(&c, 5), y(&c, 4)],
+        [Some(0.0), Some(10.0), Some(20.0)]
+    );
+}
+
 #[test]
 fn node_quota_and_dense_ids() {
     let mut c = core();
