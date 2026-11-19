@@ -72,7 +72,8 @@ pub struct MenuButtonItem {
     /// on Android an exclusive checkable group, radio buttons; on the
     /// desktops check marks. Without it, `checked` items are independent
     /// checks. Its sections' and submenus' actions are not part of the
-    /// choice: they set their own.
+    /// choice: they set their own. A whole menu of one choice is an
+    /// untitled section with it.
     #[prop(default)]
     pub single_selection: bool,
 }

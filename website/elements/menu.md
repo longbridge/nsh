@@ -385,8 +385,10 @@ The items are data, each with an `id` of yours that `onSelect({ id })` reports; 
 (red on iOS, the theme's error color on Android) are the item's state, the app's to change; an item with `items` is a submenu, or with `inline` a section
 shown in place under its `label`. With `singleSelection`, a submenu's or a section's own actions are one choice (a sort
 order, an appearance) and the app checks one: iOS shows it as a single-selection menu, Android as radio buttons, the
-desktops as check marks; without it, checks are independent. The children, `class` and `style` are the trigger, drawn
-by the app on every platform.
+desktops as check marks; without it, checks are independent. The choice is that menu's own actions: a section or
+submenu inside it sets its own. A menu whose items are all one choice puts them in an untitled `inline` section with
+`singleSelection` (`{ id: "", label: "", inline: true, singleSelection: true, items }`). The children, `class` and
+`style` are the trigger, drawn by the app on every platform.
 
 - **iOS and Mac Catalyst**: the trigger is covered by a transparent `UIButton` whose `UIMenu` is its primary action:
   a tap, VoiceOver's activation or a hardware keyboard opens it at once, without waiting for JS. `icon` is an SF

@@ -125,14 +125,26 @@ fn symbol(name: &str) -> Option<Retained<UIImage>> {
     image
 }
 
-/// What a chosen action does with its id.
-pub(crate) type Choose = Rc<dyn Fn(String)>;
+/// What a chosen action does with its id, told whether the action is one
+/// of a single-selection menu's own.
+pub(crate) type Choose = Rc<dyn Fn(String, bool)>;
 
 /// The menu's elements for `entries`; each action passes its id to
 /// `choose`.
 pub(crate) fn elements(
     entries: &[Entry],
     disabled: bool,
+    choose: &Choose,
+    mtm: MainThreadMarker,
+) -> Retained<NSArray<UIMenuElement>> {
+    level(entries, disabled, false, choose, mtm)
+}
+
+/// One menu's elements; `single` when that menu is a single selection.
+fn level(
+    entries: &[Entry],
+    disabled: bool,
+    single: bool,
     choose: &Choose,
     mtm: MainThreadMarker,
 ) -> Retained<NSArray<UIMenuElement>> {
@@ -143,7 +155,7 @@ pub(crate) fn elements(
             if entry.items.is_empty() {
                 let id = entry.id.clone();
                 let choose = choose.clone();
-                let handler = RcBlock::new(move |_: NonNull<UIAction>| choose(id.clone()));
+                let handler = RcBlock::new(move |_: NonNull<UIAction>| choose(id.clone(), single));
                 // SAFETY: the handler is a block UIKit copies and runs on
                 // the main thread once the menu closes with this action.
                 let action = unsafe {
@@ -165,7 +177,13 @@ pub(crate) fn elements(
                 }
                 Retained::into_super(action)
             } else {
-                let children = elements(&entry.items, disabled || entry.disabled, choose, mtm);
+                let children = level(
+                    &entry.items,
+                    disabled || entry.disabled,
+                    entry.single_selection,
+                    choose,
+                    mtm,
+                );
                 let menu = UIMenu::menuWithTitle_image_identifier_options_children(
                     &NSString::from_str(&entry.label),
                     image.as_deref(),
@@ -246,7 +264,7 @@ fn lists_only<T>(listed: &[*const T], me: *const T) -> bool {
 
 struct SystemMenuButton {
     button: Retained<NshMenuButton>,
-    entries: Vec<Entry>,
+    entries: Rc<Vec<Entry>>,
     title: String,
     /// How many menus the props made: a menu replaced since is never made
     /// again ([`set_menu`]).
@@ -260,7 +278,7 @@ impl SystemMenuButton {
     fn make_menu(&self) {
         self.made.set(self.made.get() + 1);
         let source = Source {
-            entries: Rc::new(self.entries.clone()),
+            entries: self.entries.clone(),
             title: Rc::from(self.title.as_str()),
             made: self.made.clone(),
             context: self.context.clone(),
@@ -278,26 +296,18 @@ struct Source {
     context: ComponentContext,
 }
 
-/// Whether any menu in `entries` is a single selection.
-fn has_single_selection(entries: &[Entry]) -> bool {
-    entries
-        .iter()
-        .any(|e| e.single_selection || has_single_selection(&e.items))
-}
-
-/// Gives `button` the menu of `source`. UIKit moves the check of a
-/// single-selection menu itself when an action is chosen, and the button
-/// keeps its menu, so after a choice the same menu is made again: it shows
-/// the app's checks until the app's new items arrive. That happens on the
-/// main queue's next turn, as the chosen action belongs to the menu it
-/// replaces, and only while no newer items made another menu.
+/// Gives `button` the menu of `source`. UIKit moves a single-selection
+/// menu's check itself and the button keeps its menu, so a choice there
+/// makes the menu again, which shows the app's checks; on the main queue's
+/// next turn (the chosen action belongs to the menu it replaces), and only
+/// while no newer items made another.
 fn set_menu(button: &NshMenuButton, source: Source, mtm: MainThreadMarker) {
     let made = source.made.get();
-    let again = has_single_selection(&source.entries).then(|| (Weak::new(button), source.clone()));
+    let again = (Weak::new(button), source.clone());
     let context = source.context.clone();
-    let choose: Choose = Rc::new(move |id| {
+    let choose: Choose = Rc::new(move |id, single| {
         context.emit("select", JsonValue::from(id));
-        if let Some(again) = &again {
+        if single {
             let again = MainThreadBound::new(again.clone(), mtm);
             DispatchQueue::main().exec_async(move || {
                 let mtm = MainThreadMarker::new().expect("the main queue");
@@ -324,8 +334,8 @@ impl NativeComponent for SystemMenuButton {
         match name {
             "items" => {
                 let entries = parse_items(value.and_then(JsonValue::as_array).map_or(&[], |v| v));
-                if entries != self.entries {
-                    self.entries = entries;
+                if entries != *self.entries {
+                    self.entries = Rc::new(entries);
                     self.make_menu();
                 }
             }
@@ -368,7 +378,7 @@ pub(crate) fn factory() -> ComponentFactory {
         button.setShowsMenuAsPrimaryAction(true);
         let component = SystemMenuButton {
             button,
-            entries: Vec::new(),
+            entries: Rc::new(Vec::new()),
             title: String::new(),
             made: Rc::new(Cell::new(0)),
             context,
@@ -384,7 +394,7 @@ mod tests {
     use objc2_ui_kit::UIMenuOptions;
     use serde_json::json;
 
-    use super::{Entry, MAX_DEPTH, has_single_selection, lists_only, options, parse_items};
+    use super::{Entry, MAX_DEPTH, lists_only, options, parse_items};
 
     #[test]
     fn only_the_buttons_own_list_is_cleared_on_removal() {
@@ -459,10 +469,5 @@ mod tests {
         );
         assert_eq!(options(&entries[1]), UIMenuOptions::SingleSelection);
         assert_eq!(options(&entries[2]), UIMenuOptions::empty());
-        // Only a menu with a single selection somewhere is made again
-        // after a choice.
-        assert!(has_single_selection(&entries));
-        assert!(has_single_selection(&entries[1..2]));
-        assert!(!has_single_selection(&entries[2..]));
     }
 }
