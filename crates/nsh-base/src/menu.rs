@@ -2600,6 +2600,13 @@ fn system_menu(
                     }
                     cx.emit(ContextMenuEvents::Close);
                 }
+                // Asked for (Android's `open`) but never shown: the trigger
+                // went from the window, or the menu was disabled meanwhile.
+                // It never opened, so only the change is reported, and the
+                // next hold opens it again.
+                "close" if open.get_untracked() => {
+                    change(false, OpenChangeReason::Cancel);
+                }
                 _ => {}
             }
         });

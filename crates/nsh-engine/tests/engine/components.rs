@@ -12347,9 +12347,9 @@ mount(() => <View>
 "#;
 
 /// `nsh/base`'s `MenuButton` covers its content with the system's button on
-/// iOS and Android: the menu's items, title and label reach it as data, a chosen item
-/// comes back as `onSelect({ id })`, and the new checks reach the same
-/// button.
+/// iOS and Android: the menu's items, title and label reach it as data, a
+/// chosen item comes back as `onSelect({ id })`, and the new checks reach
+/// the same button.
 #[test]
 fn the_menu_button_gives_the_mobile_systems_their_menu_and_reports_the_choice() {
     use nsh_core::platform::{MENU_BUTTON_COMPONENT, Os};
@@ -12411,27 +12411,26 @@ fn the_menu_button_gives_the_mobile_systems_their_menu_and_reports_the_choice() 
 fn the_menu_button_is_a_plain_button_on_the_desktops() {
     use nsh_core::platform::{MENU_BUTTON_COMPONENT, Os};
 
-    for os in [Os::MacOs] {
-        let (_engine, rx) = start_in(
-            MENU_BUTTON,
-            Environment {
-                os,
-                ..Environment::default()
-            },
-        );
-        let batches = until(&rx, |batch| shows(batch, "Chosen: none"));
-        assert!(
-            batches.iter().any(|batch| shows(batch, "Account")),
-            "{os:?}"
-        );
-        assert!(
-            !batches.iter().any(|b| b
-                .items
-                .iter()
-                .any(|i| is_component(i, MENU_BUTTON_COMPONENT))),
-            "{os:?}"
-        );
-    }
+    let os = Os::MacOs;
+    let (_engine, rx) = start_in(
+        MENU_BUTTON,
+        Environment {
+            os,
+            ..Environment::default()
+        },
+    );
+    let batches = until(&rx, |batch| shows(batch, "Chosen: none"));
+    assert!(
+        batches.iter().any(|batch| shows(batch, "Account")),
+        "{os:?}"
+    );
+    assert!(
+        !batches.iter().any(|b| b
+            .items
+            .iter()
+            .any(|i| is_component(i, MENU_BUTTON_COMPONENT))),
+        "{os:?}"
+    );
 }
 
 const SYSTEM_CONTEXT_MENU: &str = r#"import { mount, signal, Text, View } from "nsh";
@@ -12514,25 +12513,24 @@ fn a_context_menu_with_items_gives_the_mobile_systems_their_menu_and_reports_the
 fn a_context_menu_draws_its_children_on_the_desktops() {
     use nsh_core::platform::{CONTEXT_MENU_COMPONENT, Os};
 
-    for os in [Os::MacOs] {
-        let (_engine, rx) = start_in(
-            SYSTEM_CONTEXT_MENU,
-            Environment {
-                os,
-                ..Environment::default()
-            },
-        );
-        let batches = until(&rx, |batch| shows(batch, "Chosen: none"));
-        assert!(
-            batches.iter().any(|batch| shows(batch, "Note row")),
-            "{os:?}"
-        );
-        assert!(
-            !batches.iter().any(|b| b
-                .items
-                .iter()
-                .any(|i| is_component(i, CONTEXT_MENU_COMPONENT))),
-            "{os:?}"
-        );
-    }
+    let os = Os::MacOs;
+    let (_engine, rx) = start_in(
+        SYSTEM_CONTEXT_MENU,
+        Environment {
+            os,
+            ..Environment::default()
+        },
+    );
+    let batches = until(&rx, |batch| shows(batch, "Chosen: none"));
+    assert!(
+        batches.iter().any(|batch| shows(batch, "Note row")),
+        "{os:?}"
+    );
+    assert!(
+        !batches.iter().any(|b| b
+            .items
+            .iter()
+            .any(|i| is_component(i, CONTEXT_MENU_COMPONENT))),
+        "{os:?}"
+    );
 }

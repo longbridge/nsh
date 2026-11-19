@@ -445,7 +445,7 @@ import { ContextMenu, MenuItem } from "nsh/base";
 - **Android**: a held finger opens the system's popup menu, with the system's long-press haptic, below the trigger and
   lined up with its end (below the held point when the trigger's bottom is out of sight). `title` is its first row
   and `svg` the items' icons, as for `MenuButton`; `preview` is not used. It reports the same events, and unlike iOS
-  the app can open it: `open` set to `true` shows it below the trigger, as Shift+F10 and the Menu key do.
+  the app can open it: `open` set to `true` shows it below the trigger.
 - **The desktops and the web**: `items`, `title` and `onSelect` are not used. The children are the menu, drawn as
   without `items`, and each `MenuItem`'s `onSelect` reports the choice.
 

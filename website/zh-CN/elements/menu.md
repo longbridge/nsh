@@ -369,7 +369,7 @@ import { ContextMenu, MenuItem } from "nsh/base";
 ```
 
 - **iOS 和 Mac Catalyst**：由 `UIContextMenuInteraction` 原生响应按住的手指，以及 iPad 指针或 Mac 上的辅助点按。系统抬起的预览就是触发器本身，按它自己的圆角裁剪；菜单由 `items` 生成（`MenuButtonItem`，图标是 SF Symbol，`title` 在条目上方）。`onOpenChange`、`onOpen`、`onSelect({ id })`、`onCancel` 和 `onClose` 报告发生了什么，与绘制的菜单一致。这个菜单只由用户打开：把 `open` 设为 `true` 不显示任何内容，设为 `false` 会关闭它。
-- **Android**：按住的手指打开系统的弹出菜单，带系统的长按触感，位于触发器下方、与其末端对齐（触发器底边不在屏幕上时，位于按住的位置下方）。`title` 是第一行，`svg` 是条目的图标，与 `MenuButton` 相同；不使用 `preview`。它报告同样的事件；与 iOS 不同，应用可以打开它：把 `open` 设为 `true` 会在触发器下方显示它，Shift+F10 和菜单键也一样。
+- **Android**：按住的手指打开系统的弹出菜单，带系统的长按触感，位于触发器下方、与其末端对齐（触发器底边不在屏幕上时，位于按住的位置下方）。`title` 是第一行，`svg` 是条目的图标，与 `MenuButton` 相同；不使用 `preview`。它报告同样的事件；与 iOS 不同，应用可以打开它：把 `open` 设为 `true` 会在触发器下方显示它。
 - **桌面和 Web**：不使用 `items`、`title` 和 `onSelect`。children 就是菜单，与不传 `items` 时一样绘制，由各个 `MenuItem` 的 `onSelect` 报告选择。
 
 触发器自己的按压在按住手指的同时照常工作。不传 `items` 时，iOS 和 Android 与其他平台一样显示绘制的菜单。

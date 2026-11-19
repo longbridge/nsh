@@ -19,11 +19,14 @@ import java.util.function.BooleanSupplier;
  * system's popup menu ({@link SystemMenus}). The component covers the trigger
  * and takes no touches; Android has no context menu that a held finger opens
  * on its own, so {@code nsh/base} holds the timer and asks with {@code open}
- * ({@code at}: where the finger held, in the surface; none when the keyboard
- * or the app opened it). The menu lines up with the trigger's end, below its
- * bottom, or below the held point when the bottom is out of sight (a long
- * message). JS hears {@code open}, then a chosen action's {@code select}
- * with the app's id, then {@code close}; {@code open} set false closes it.
+ * ({@code at}: where the finger held, in the surface; none when the app
+ * opened it). The menu lines up with the trigger's end (a row's, at the
+ * screen's end), below its bottom, or below the held point when the bottom
+ * is out of sight (a long message). JS hears {@code open}, then a chosen
+ * action's {@code select} with the app's id, then {@code close};
+ * {@code open} set false closes it. Asked for a menu it cannot show (gone
+ * from the window, disabled, no items), it tells {@code close} at once, so
+ * {@code open} does not stay set.
  */
 final class ContextMenuComponent implements NshComponent {
     /** Its name ({@code nsh_core::platform::CONTEXT_MENU_COMPONENT}). */
@@ -33,7 +36,10 @@ final class ContextMenuComponent implements NshComponent {
     private final NshComponentContext events;
     private final BooleanSupplier night;
     private final FrameLayout root;
-    /** What the menu hangs from: as wide as the trigger, no height, moved to the line the menu drops from. */
+    /**
+     * What the menu hangs from: as wide as the trigger, no height, moved to
+     * the line the menu drops from.
+     */
     private final View anchor;
     private List<SystemMenus.Entry> items = new ArrayList<>();
     private String title;
@@ -95,11 +101,17 @@ final class ContextMenuComponent implements NshComponent {
     }
 
     private void show() {
-        if (!wanted || shown != null || disabled || items.isEmpty() || !root.isAttachedToWindow()) return;
+        if (!wanted || shown != null) return;
+        if (disabled || items.isEmpty() || !root.isAttachedToWindow()) {
+            // Not shown: JS asked, so it hears the menu went.
+            wanted = false;
+            events.emit("close", null);
+            return;
+        }
         boolean held = at != null;
         anchor.setTranslationY(dropLine());
         PopupMenu popup = SystemMenus.popup(SystemMenus.themed(context, night.getAsBoolean()), anchor,
-                SystemMenus.gravity(anchor), title, items, id -> events.emit("select", id));
+                Gravity.END, title, items, id -> events.emit("select", id));
         popup.setOnDismissListener(p -> {
             if (shown != p) return;
             shown = null;
@@ -132,7 +144,10 @@ final class ContextMenuComponent implements NshComponent {
         return Math.max(visible.top, Math.min(y, visible.bottom));
     }
 
-    /** The view the surface's points start at: the {@link NshView} around the component, else its window's root. */
+    /**
+     * The view the surface's points start at: the {@link NshView} around the
+     * component, else its window's root.
+     */
     private View surface() {
         for (ViewParent p = root.getParent(); p != null; p = p.getParent()) {
             if (p instanceof NshView) return (View) p;

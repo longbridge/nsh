@@ -151,8 +151,9 @@ final class SystemMenus {
 
         /**
          * Adds {@code entries} to {@code menu}: an inline section's items in
-         * a group of their own (a divider between groups from API 28), a
-         * section of checkable items alone as a single choice.
+         * a group of their own (a divider between groups from API 28).
+         * Checkable items are checks, as on iOS, never inferred as a single
+         * choice.
          */
         void add(Menu menu, List<Entry> entries) {
             int current = group++;
@@ -169,31 +170,30 @@ final class SystemMenus {
                     if (!e.label.isEmpty()) {
                         menu.add(section, Menu.NONE, order++, header(e.label)).setEnabled(false);
                     }
-                    boolean choice = true;
                     for (Entry item : e.items) {
-                        if (!item.items.isEmpty()) {
-                            add(menu, java.util.Collections.singletonList(item));
-                            continue;
-                        }
-                        choice &= item.checked != null;
-                        action(menu, section, item);
+                        if (item.items.isEmpty()) action(menu, section, item);
+                        else submenu(menu, section, item);
                     }
-                    if (choice) menu.setGroupCheckable(section, true, true);
                     afterSection = true;
                 } else {
                     if (afterSection) {
                         current = group++;
                         afterSection = false;
                     }
-                    SubMenu sub = menu.addSubMenu(current, nextId++, order++, label(e));
-                    sub.setHeaderTitle(e.label);
-                    sub.getItem().setEnabled(!e.disabled);
-                    Drawable icon = icon(e);
-                    if (icon != null) sub.getItem().setIcon(icon);
-                    add(sub, e.items);
+                    submenu(menu, current, e);
                 }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) menu.setGroupDividerEnabled(true);
+        }
+
+        /** A submenu in {@code group}: a section's stays in the section, as on iOS. */
+        private void submenu(Menu menu, int group, Entry e) {
+            SubMenu sub = menu.addSubMenu(group, nextId++, order++, label(e));
+            sub.setHeaderTitle(e.label);
+            sub.getItem().setEnabled(!e.disabled);
+            Drawable icon = icon(e);
+            if (icon != null) sub.getItem().setIcon(icon);
+            add(sub, e.items);
         }
 
         private void action(Menu menu, int group, Entry e) {
@@ -222,13 +222,18 @@ final class SystemMenus {
             return s;
         }
 
-        /** An item's SVG icon in its text color; null without one, before API 29 or when it does not draw. */
+        /**
+         * An item's SVG icon in its text color; null without one, before
+         * API 29 or when it does not draw.
+         */
         private Drawable icon(Entry e) {
             if (e.svg == null || e.svg.isEmpty() || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null;
             Bitmap bitmap = bitmap(e.svg, iconPx);
             if (bitmap == null) return null;
             BitmapDrawable d = new BitmapDrawable(context.getResources(), bitmap);
-            d.setBounds(0, 0, iconPx, iconPx);
+            // Its own aspect, its longer side the icon's size.
+            float scale = (float) iconPx / Math.max(bitmap.getWidth(), bitmap.getHeight());
+            d.setBounds(0, 0, Math.round(bitmap.getWidth() * scale), Math.round(bitmap.getHeight() * scale));
             d.setTint(e.destructive ? errorColor : textColor);
             d.setTintMode(PorterDuff.Mode.SRC_IN);
             if (e.disabled) d.setAlpha(97); // Material's disabled content: 38%.
@@ -240,7 +245,10 @@ final class SystemMenus {
     /** Rasterized icons by document and size: a menu reopened draws the same ones. */
     private static final LruCache<String, Bitmap> BITMAPS = new LruCache<>(64);
 
-    /** The SVG {@code svg} drawn {@code px} pixels long; null when it is no SVG or SVGs are not built in. */
+    /**
+     * The SVG {@code svg} drawn with its shorter side {@code px} pixels long;
+     * null when it is no SVG or SVGs are not built in.
+     */
     private static Bitmap bitmap(String svg, int px) {
         String key = px + ":" + svg;
         Bitmap cached = BITMAPS.get(key);

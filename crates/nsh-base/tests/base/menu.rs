@@ -1467,8 +1467,8 @@ fn a_system_menus_choice_told_after_its_dismissal_still_reaches_the_app() {
         .unwrap();
 }
 
-/// A system menu the app owns the `open` of, and closes itself ("Close
-/// it").
+/// A system menu the app owns the `open` of, and opens ("Open it") and
+/// closes ("Close it") itself.
 #[component]
 fn AppClosedSystemMenu() -> impl IntoElement {
     let open = signal(false);
@@ -1500,6 +1500,11 @@ fn AppClosedSystemMenu() -> impl IntoElement {
                         .h(px(40.0))
                         .child(text("Row")),
                 ),
+        )
+        .child(
+            view()
+                .on_press(move || open.set(true))
+                .child(text("Open it")),
         )
         .child(
             view()
@@ -1580,22 +1585,58 @@ fn with_items_android_opens_the_systems_popup_menu_where_the_finger_held() {
 }
 
 #[test]
+fn an_android_system_menu_the_app_opens_drops_below_the_trigger() {
+    let mut app = start_on(Root::of::<AppClosedSystemMenu>(), Os::Android);
+    app.app.press("text:Open it").unwrap();
+    app.app.settle();
+    // No finger asked for it: no point, the menu goes below the trigger.
+    assert_eq!(
+        system_menu_prop(&app, "open"),
+        Some(serde_json::json!(true))
+    );
+    assert_eq!(system_menu_prop(&app, "at"), Some(serde_json::Value::Null));
+}
+
+#[test]
+fn an_android_system_menu_that_never_showed_does_not_stay_open() {
+    let mut app = start_on(Root::of::<SystemMenuRow>(), Os::Android);
+    hold_row(&mut app, PointerType::Touch);
+    app.app.wait_for("text:heard: true:LongPress").unwrap();
+    // The platform could not show it (the row left the window before the
+    // menu came up): it tells the closing alone, and the menu is asked
+    // closed, with no opening or closing reported.
+    system_menu_event(&mut app, "close", serde_json::Value::Null);
+    app.app
+        .wait_for("text:heard: true:LongPress false:Cancel")
+        .unwrap();
+    assert_eq!(
+        system_menu_prop(&app, "open"),
+        Some(serde_json::json!(false))
+    );
+    // The next hold asks for it again.
+    hold_row(&mut app, PointerType::Touch);
+    app.app
+        .wait_for("text:heard: true:LongPress false:Cancel true:LongPress")
+        .unwrap();
+    assert_eq!(
+        system_menu_prop(&app, "open"),
+        Some(serde_json::json!(true))
+    );
+}
+
+#[test]
 fn on_the_web_a_context_menus_items_are_not_used() {
-    for os in [Os::Web] {
-        let mut app = start_on(Root::of::<SystemMenuRow>(), os);
-        assert!(
-            !app.seen
-                .lock()
-                .unwrap()
-                .components
-                .contains_key(CONTEXT_MENU_COMPONENT),
-            "{os:?}: no system menu"
-        );
-        hold_row(&mut app, PointerType::Touch);
-        app.app
-            .wait_for("Drawn rename")
-            .unwrap_or_else(|e| panic!("{os:?}: {e}"));
-    }
+    let mut app = start_on(Root::of::<SystemMenuRow>(), Os::Web);
+    assert!(
+        !app.seen
+            .lock()
+            .unwrap()
+            .components
+            .contains_key(CONTEXT_MENU_COMPONENT),
+        "no system menu"
+    );
+    hold_row(&mut app, PointerType::Touch);
+    app.app.wait_for("Drawn rename").unwrap();
 }
 
 /// A row whose system menu has a preview (iOS): the text says what the app

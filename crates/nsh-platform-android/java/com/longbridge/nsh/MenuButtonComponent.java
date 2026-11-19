@@ -14,7 +14,8 @@ import java.util.function.BooleanSupplier;
  * opens the system's popup menu below the content at once, without asking
  * JS ({@link SystemMenus}). A chosen action emits {@code select} with the
  * app's id. The button is what TalkBack reaches (named by
- * {@code accessibilityLabel}): the content under it is drawn, not read twice.
+ * {@code accessibilityLabel}): the content under it is drawn, not read twice
+ * ({@link Box#addChildrenForAccessibility}).
  */
 final class MenuButtonComponent implements NshComponent {
     /** Its name ({@code nsh_core::platform::MENU_BUTTON_COMPONENT}). */
