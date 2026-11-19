@@ -10,7 +10,11 @@
   Native). Animated images: iOS decodes up to 600 frames into an animated `UIImage` (frames repeated by their delays' common
   divisor) played by a discrete `CAKeyframeAnimation` on `contents` (a tinted animated image shows its first frame); Android
   (API 28+) uses `ImageDecoder` → `AnimatedImageDrawable`, not cached (each view plays its own copy; no blur); a GIF below
-  API 30 (from API 26) plays from a `Movie` of its own (see the pitfall in `pitfalls.md`). `onLoad` reports the
+  API 30 (from API 26) plays from a `Movie` of its own (see the pitfall in `pitfalls.md`). Windows, Linux and GPUI decode
+  GIF and WebP with `nsh_core::image::animation` at the view's size bucket: frames over 48 MiB stream on Windows and
+  Linux (the encoded file kept, a worker decoding two frames ahead of the one showing while the view is drawn, streams
+  sharing 128 MiB of working memory, four at once), so an enlarged screen recording keeps its detail; GPUI, which draws
+  an animation as one image of every frame, and an animation too large to stream decode as small as the frames fit. `onLoad` reports the
   source's size in pixels on both platforms, whatever size the view decodes at. On iOS and macOS only the formats that
   animate (GIF, APNG, WebP, HEIF and AVIF sequences, JPEG XL) play their images as frames; a still file of several
   images shows one, the icon size that fits for ICO, ICNS and CUR and the primary image otherwise (a TIFF's first
