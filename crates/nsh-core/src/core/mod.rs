@@ -326,6 +326,10 @@ impl Kind {
     }
 }
 
+/// The prop a native component's `accentColor` style reaches it as
+/// ([`Core::sync_accent`]).
+const ACCENT_PROP: &str = "accentColor";
+
 /// A registered native component: its name and properties, as JS set them.
 #[derive(Debug, Default)]
 struct ComponentState {
@@ -1228,6 +1232,19 @@ impl ApplyError {
     }
 }
 
+/// What [`Core::retag`] knows of the mount items of a round of renders,
+/// which only grows at its end until the round is over.
+#[derive(Default)]
+struct Retags {
+    /// The views whose `Create` is among the items looked at.
+    made: rustc_hash::FxHashSet<NodeId>,
+    /// The items looked at.
+    seen: usize,
+    /// The views that took another kind, with the number of items then:
+    /// their `Create` and `Insert` before that go.
+    retagged: rustc_hash::FxHashMap<NodeId, usize>,
+}
+
 /// The shadow tree of one surface.
 ///
 /// Feed it [`Op`]s with [`Core::apply`], then call [`Core::commit`] once per
@@ -1397,6 +1414,9 @@ pub struct Core<M: TextEngine> {
     /// Batches handed out so far: tells this batch's mount indexes from
     /// earlier ones'.
     batches: u64,
+    /// Component roots taking their kind in this round of renders
+    /// ([`Core::retag`]).
+    retags: Option<Box<Retags>>,
     /// Imperative calls, run after everything else in the batch.
     commands: Vec<(NodeId, Command)>,
     /// Where the keyboard focus goes back to in this commit, and the popup
@@ -1705,6 +1725,7 @@ impl<M: TextEngine> Core<M> {
             key_ancestry_dirty: false,
             mount_projected: false,
             batches: 0,
+            retags: None,
             commands: Vec::new(),
             focus_back: None,
             layout_animation: None,
@@ -4077,13 +4098,13 @@ impl<M: TextEngine> Core<M> {
             return true;
         }
         let id = node.id;
-        let unsent = self
-            .mount
-            .iter()
-            .any(|m| matches!(m, MountItem::Create { id: c, .. } if *c == id));
-        if node.kind != Kind::View || !node.children.is_empty() || (node.created && !unsent) {
+        if node.kind != Kind::View || !node.children.is_empty() {
             return false;
         }
+        if node.created && !self.made_in_this_batch(id) {
+            return false;
+        }
+        let node = &self.nodes[key as usize];
         // Out of its parent, its native view never made.
         let parent = node.parent;
         let at = (parent != NO_KEY).then(|| {
@@ -4095,9 +4116,11 @@ impl<M: TextEngine> Core<M> {
         if parent != NO_KEY {
             self.unlink(key, false);
         }
-        self.mount.retain(|m| {
-            !matches!(m, MountItem::Create { id: c, .. } | MountItem::Insert { child: c, .. } if *c == id)
-        });
+        // Its `Create` and `Insert` so far go, with the other retagged
+        // views' in one pass ([`Self::drop_retagged`]).
+        let retags = self.retags.get_or_insert_default();
+        retags.made.remove(&id);
+        retags.retagged.insert(id, self.mount.len());
         // The kind's own state and layout.
         let fresh = Node::new(id, kind);
         let node = &mut self.nodes[key as usize];
@@ -4114,6 +4137,8 @@ impl<M: TextEngine> Core<M> {
         self.layout.set_node_context(layout, leaf_context(kind));
         let style = self.layout.style(layout).clone();
         self.became(key, style);
+        // A native component made in its place reads its style's accent.
+        self.sync_accent(key);
         // What a terminal's layout takes from its kind (a scroll view's
         // unbounded content), as if it had been made one.
         self.sync_grid_role(key);
@@ -4121,6 +4146,67 @@ impl<M: TextEngine> Core<M> {
             let _ = self.insert(parent, id, before);
         }
         true
+    }
+
+    /// Whether made view `id`'s `Create` is still in the mount items (it was
+    /// made in this batch). Each item is looked at once a round of renders,
+    /// not once a view.
+    fn made_in_this_batch(&mut self, id: NodeId) -> bool {
+        let retags = self.retags.get_or_insert_default();
+        let from = retags.seen;
+        retags
+            .made
+            .extend(self.mount[from..].iter().filter_map(|m| match m {
+                MountItem::Create { id, .. } => Some(*id),
+                _ => None,
+            }));
+        retags.seen = self.mount.len();
+        let made = retags.made.contains(&id);
+        self.retagging(self.mount.len() - from);
+        made
+    }
+
+    /// Drops the `Create` and `Insert` items the retagged views had before
+    /// they took their kind ([`Self::retag`]), in one pass.
+    pub(super) fn drop_retagged(&mut self) {
+        let Some(retags) = self.retags.as_deref_mut() else {
+            return;
+        };
+        if retags.retagged.is_empty() {
+            return;
+        }
+        let retagged = std::mem::take(&mut retags.retagged);
+        let (seen, made) = (retags.seen, &mut retags.made);
+        let mut at = 0;
+        self.mount.retain(|m| {
+            let i = at;
+            at += 1;
+            let (MountItem::Create { id, .. } | MountItem::Insert { child: id, .. }) = m else {
+                return true;
+            };
+            if retagged.get(id).is_some_and(|&then| i < then) {
+                return false;
+            }
+            if i >= seen && matches!(m, MountItem::Create { .. }) {
+                made.insert(*id);
+            }
+            true
+        });
+        retags.seen = self.mount.len();
+        self.retagging(at);
+    }
+
+    /// The round of renders is over: what [`Self::retag`] did goes into
+    /// the mount items, and its record of them goes (other steps insert
+    /// items among them).
+    pub(super) fn end_retags(&mut self) {
+        self.drop_retagged();
+        #[cfg(test)]
+        if self.retags.is_some() {
+            let rounds = &self.components.retag_rounds;
+            rounds.set(rounds.get() + 1);
+        }
+        self.retags = None;
     }
 
     /// Rebuilds the text an input is measured with: what it shows while an
@@ -4459,6 +4545,7 @@ impl<M: TextEngine> Core<M> {
             node.vertical_align != vertical_align && node.inline && node.kind != Kind::Text;
         // ... and so is the content's of a render placed there.
         let content_align_changed = node.vertical_align != vertical_align && !node.inline;
+        let accent_changed = node.view_style.accent_color != view.accent_color;
         node.view_style.set(view);
         node.text_style.set(text);
         node.paint = paint;
@@ -4526,6 +4613,9 @@ impl<M: TextEngine> Core<M> {
         }
         if position_changed && self.nodes[key as usize].image.is_some() {
             flags |= dirty::IMAGE;
+        }
+        if accent_changed {
+            self.sync_accent(key);
         }
         // A sticky view's animated inset is part of its range.
         self.sticky_changed |= animation_changed && self.nodes[key as usize].sticky.is_some();
@@ -6181,6 +6271,9 @@ impl<M: TextEngine> Core<M> {
                         ScreenProp::HeaderLargeTitle(v) => c.large_title = v,
                         ScreenProp::HeaderTransparent(v) => c.header_transparent = v,
                         ScreenProp::HeaderShadowVisible(v) => c.header_shadow_visible = v,
+                        ScreenProp::HeaderBackgroundOnScroll(v) => {
+                            c.header_background_on_scroll = v
+                        }
                         ScreenProp::HidesBottomBarWhenPushed(v) => {
                             c.hides_bottom_bar_when_pushed = v
                         }
@@ -7972,6 +8065,38 @@ impl<M: TextEngine> Core<M> {
             font_family: self.default_font,
             ..ResolvedTextStyle::default()
         }
+    }
+
+    /// A native component's `accentColor` style, passed to it as its
+    /// `accentColor` prop (`#RRGGBBAA`; removed when unset): the system
+    /// control shows its state in it, over the color its props give.
+    fn sync_accent(&mut self, key: Key) {
+        let node = &mut self.nodes[key as usize];
+        let accent = node.view_style.accent_color;
+        let Some(component) = node.component.as_mut() else {
+            return;
+        };
+        let value = accent.map(|Color(c)| crate::JsonValue::from(format!("#{c:08X}")));
+        let at = component
+            .props
+            .iter()
+            .position(|(k, _)| &**k == ACCENT_PROP);
+        if at.map(|i| &component.props[i].1) == value.as_ref() {
+            return;
+        }
+        let name: Arc<str> = Arc::from(ACCENT_PROP);
+        match (at, value) {
+            (Some(i), Some(v)) => component.props[i].1 = v,
+            (None, Some(v)) => component.props.push((name.clone(), v)),
+            (Some(i), None) => {
+                component.props.swap_remove(i);
+            }
+            (None, None) => return,
+        }
+        if !component.changed.contains(&name) {
+            component.changed.push(name);
+        }
+        self.mark(key, dirty::COMPONENT);
     }
 
     /// Texts and spans around `key` (it is inside an attachment) pass on
