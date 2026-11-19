@@ -683,12 +683,16 @@ final class Mounter {
                     int count = b.getInt();
                     NshComponent c = v instanceof ComponentBox ? ((ComponentBox) v).component : null;
                     if (c instanceof RustComponent) {
+                        for (int i = 0; i < count; i++) {
+                            b.getInt();
+                            b.getInt();
+                        }
                         ((RustComponent) c).step(seq);
-                    } else if (c != null) {
+                    } else {
                         for (int i = 0; i < count; i++) {
                             String name = string(objects, b.getInt());
                             String json = string(objects, b.getInt());
-                            c.setProp(name, Json.parse(json));
+                            if (c != null) c.setProp(name, Json.parse(json));
                         }
                     }
                     break;
