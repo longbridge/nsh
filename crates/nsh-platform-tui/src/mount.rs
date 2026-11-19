@@ -383,6 +383,13 @@ impl Mounter {
                         scroll.behavior = *behavior;
                     }
                 }
+                // Pinned at every frame (`render.rs`): a cell no longer in
+                // the set is drawn at its frame again.
+                MountItem::StickyCells { id, cells } => {
+                    if let Some(scroll) = self.get_mut(id).and_then(|view| view.scroll.as_mut()) {
+                        scroll.sticky = cells;
+                    }
+                }
                 MountItem::ScrollBy { id, dx, dy } => {
                     if let Some(scroll) = self.get_mut(id).and_then(|view| view.scroll.as_mut()) {
                         // Core anchoring moves with content changes; it must not be clamped.

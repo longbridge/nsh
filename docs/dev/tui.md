@@ -743,7 +743,9 @@ update its axis, extent and behavior data. `ScrollTo` from the core, including a
 resolved `scrollToEnd`, moves immediately within the content limits in this reduced-motion slice. `ScrollBy`
 applies the core's anchoring delta without clamping it. After applying pending batches, the surface reports each
 changed scroll view's final offset and applied-command count to the engine, which delivers scroll events and
-updates its view of the content. Keyboard movement reveals the focused control in its surrounding Scroll,
+updates its view of the content. `StickyCells` replaces a scroll view's sticky set; each frame a cell is drawn
+shifted by `ScrollState::sticky_shifts_with` (its animated offset read from the graph) wherever it sits under the
+scroll view, and the sticky cells draw and take the pointer after the other children, in children order. Keyboard movement reveals the focused control in its surrounding Scroll,
 innermost first. A reveal leaves a fully visible target in place. When vertical scrolling is needed, it centers
 the target in the viewport, clamped to the content limits, keeping it away from app overlays at the edges.
 Horizontal reveals and targets too large to center retain the core's reveal margin (16 points, capped at a
