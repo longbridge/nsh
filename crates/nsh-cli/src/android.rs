@@ -283,13 +283,15 @@ pub(crate) enum Icon<'a> {
     Adaptive(&'a AdaptiveIcon),
 }
 
-/// `nsh.json` `icon.android` as an object: an adaptive icon, layers drawn
-/// on a 108dp canvas whose middle 72dp (66%) the launcher always shows; it
-/// masks the rest to its shape (circle, squircle, ...) and may move the
-/// layers apart when the icon is touched.
+/// `nsh.json` `icon.android` as an object: an adaptive icon, layers of
+/// 108×108dp. The middle 72dp is the masked viewport, which the launcher
+/// cuts to its shape (circle, squircle, ...); the outer 18dp on each side
+/// is room for its visual effects (moving the layers apart when touched).
+/// Artwork stays within the central circle of 66dp.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub(crate) struct AdaptiveIcon {
-    /// A square PNG with a transparent background: the artwork.
+    /// A square PNG with a transparent background: the artwork, within
+    /// the central circle of 66dp.
     pub(crate) foreground: PathBuf,
     /// What the foreground is drawn on.
     pub(crate) background: IconBackground,

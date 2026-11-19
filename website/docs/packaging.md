@@ -403,9 +403,10 @@ Windows, Linux and Android fill it. Give `icon` an object to use a PNG per platf
 }
 ```
 
-Android launchers mask icons to their own shape (circle, squircle, ...), so a square PNG ends up shrunk on a plate.
-Give `icon.android` an adaptive icon instead: its layers are drawn on a 108dp canvas, of which the launcher always shows
-the middle 66%, so keep the artwork there.
+`icon.android` also takes an adaptive icon, whose layers the launcher masks to its own shape (circle, squircle, ...).
+Each layer is 108×108dp; the inner 72×72dp appears within the mask, and the outer 18dp on each side is left for the
+launcher's visual effects. Keep the artwork within the central circle of 66dp: about 61% of the width, 264 pixels of a
+432-pixel layer.
 
 ```json
 {
@@ -423,7 +424,7 @@ the middle 66%, so keep the artwork there.
 - `background`: a color (`"#rrggbb"`, `"#rrggbbaa"`) or a square PNG.
 - `monochrome` (optional): the artwork in one color on transparent, which Android 13 and later tint for themed icons.
 
-An adaptive icon is Android's only; another platform given one gets none.
+Only `icon.android` takes this form.
 
 `--icon` replaces it for the target being packaged.
 
