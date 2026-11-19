@@ -38,7 +38,8 @@
 //!   more) never have one. A filled container ([`Surface`]: a fill above
 //!   3% alpha unlike the nearest opaque fill around it, or the page) is a
 //!   surface instead, at every color depth (the layout is the same whether
-//!   the terminal shows the fill as a band or not): a face is a line or a fill, never both, so it has no
+//!   the terminal shows the fill as a band or not), by the fill it rests
+//!   with (a hover's or a press's fill moves nothing, `resting_fill`): a face is a line or a fill, never both, so it has no
 //!   border; a row of padding above and below from 12pt, two columns each
 //!   side from 12pt and one from 4pt; a popup's panel (an anchored
 //!   overlay's first face, [`popup_panel`]) a column each side from 4pt

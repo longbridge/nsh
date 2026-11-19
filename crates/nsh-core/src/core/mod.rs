@@ -635,6 +635,10 @@ struct Node {
     /// (`ElementRef::hover_at`): its classes and the `group-hover:`
     /// classes inside it read it with its own states.
     passed_hover: bool,
+    /// In a terminal, its fill as it rests, while an interaction state
+    /// (hover, press, focus) styles another: the terminal's layout reads
+    /// this one, so a hover's fill never moves what is around it.
+    resting_fill: Option<Color>,
     /// The `data-*` attributes it shows as a part of a component
     /// (`Prop::ProjectedData`), sorted: its `data-*:` classes read them,
     /// and the `group-data-*:` classes inside it.
@@ -978,6 +982,7 @@ impl Node {
             },
             projected: 0,
             passed_hover: false,
+            resting_fill: None,
             data: Box::default(),
             parts: None,
             positional_children: false,
@@ -4013,7 +4018,7 @@ impl<M: TextEngine> Core<M> {
             worded,
             clamped,
             radius,
-            fill: view.background_color,
+            fill: node.resting_fill.unwrap_or(view.background_color),
             interactive: {
                 let events = self.nodes[key as usize].events;
                 pressable(events) || HANDLED.iter().any(|&e| events.contains(e))

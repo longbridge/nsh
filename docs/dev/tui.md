@@ -426,7 +426,9 @@ draws, in order:
    surfaces an anchored overlay's box is then raised and a modal's stays base;
 2. with surfaces, its fill as a band over its whole frame (below). A face is a line or a fill, never both: a
    filled box has no border Cells, at every color depth (the layout never depends on it: at 16 colors the box is
-   laid out as with surfaces, a small one's fill in the standard colors), and a fill inside a frame (an
+   laid out as with surfaces, a small one's fill in the standard colors), nor on the user's hand: a box is laid out
+   by the fill it rests with (`Node::resting_fill`), so a row's hover or press band keeps its line and moves nothing,
+   and a fill inside a frame (an
    inset palette in a padded card) is laid out against the frame's line, across its padding (`band_reach`), its
    rows' text in the column where the frame's other content (a caption under it) starts. A popup's panel (the
    first face in an anchored overlay: a popover, a hover card, a menu, a tooltip; the overlay itself when the app

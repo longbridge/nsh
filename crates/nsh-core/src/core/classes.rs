@@ -39,6 +39,11 @@ const REPORTED: u16 = state::PRESSED | state::HOVERED | state::FOCUSED;
 /// changes.
 const ALWAYS_REPORTED: u16 = state::FOCUSED;
 
+/// The states a view is in for a moment, by the user's hand: a terminal
+/// lays a view out as it rests, without them (`Node::resting_fill`).
+const INTERACTION: u16 =
+    state::PRESSED | state::HOVERED | state::FOCUSED | state::FOCUS_VISIBLE | state::FOCUS_WITHIN;
+
 /// The `class` and `classList` props as set.
 #[derive(Debug, Default)]
 pub(super) struct ClassNames {
@@ -1437,6 +1442,7 @@ impl<M: TextEngine> Core<M> {
             Some(font) => self.zero_advance(font),
             None => crate::tailwind::DEFAULT_CH,
         };
+        let base_for_rest = base.clone();
         let mut style;
         let mut props;
         match inherited_font {
@@ -1463,6 +1469,23 @@ impl<M: TextEngine> Core<M> {
             let id = node.id;
             self.ch_styled.push((key, id));
         }
+        // In a terminal, a box's fill decides its layout (a band or a
+        // line, [`terminal_layout::Surface`]): the fill it rests with does,
+        // never one a hover or a press gives it for a moment.
+        let resting = (self.layout.grid().is_some()
+            && self.styled_states(key) & INTERACTION != 0
+            && self.nodes[key as usize]
+                .classes
+                .as_ref()
+                .is_some_and(|c| c.deps() & deps::STATE != 0))
+        .then(|| {
+            let mut rest = base_for_rest;
+            let mut rest_props = ClassProps::default();
+            self.resolve_classes_in(key, ch, position, INTERACTION, &mut rest, &mut rest_props);
+            rest.view.background_color
+        })
+        .filter(|&fill| fill != style.view.background_color);
+        self.nodes[key as usize].resting_fill = resting;
         style.node_props(&mut props);
         self.set_class_props(key, props);
         let id = self.nodes[key as usize].id;
@@ -1563,6 +1586,20 @@ impl<M: TextEngine> Core<M> {
         style: &mut Style,
         props: &mut ClassProps,
     ) {
+        self.resolve_classes_in(key, ch, position, 0, style, props);
+    }
+
+    /// [`Self::resolve_classes`] as if `key` were not in the states
+    /// `without`.
+    fn resolve_classes_in(
+        &mut self,
+        key: Key,
+        ch: f32,
+        position: Option<u8>,
+        without: u16,
+        style: &mut Style,
+        props: &mut ClassProps,
+    ) {
         let node = &self.nodes[key as usize];
         if let Some(classes) = node.classes.clone() {
             let group = |name: &str| self.group_states(key, name);
@@ -1584,7 +1621,7 @@ impl<M: TextEngine> Core<M> {
                 // detached takes the root's), so its sided classes land
                 // right the first time.
                 rtl: self.resolved_rtl(key),
-                states: self.styled_states(key),
+                states: self.styled_states(key) & !without,
                 position: pos,
                 group: &group,
             };
