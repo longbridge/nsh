@@ -491,6 +491,7 @@ fn key_name(event: &KeyEvent) -> SharedString {
         0xB5 => Some("LaunchMediaPlayer"),
         0xB6 => Some("LaunchApplication1"),
         0xB7 => Some("LaunchApplication2"),
+        0xFA => Some("MediaPlay"),
         _ => None,
     };
     if let Some(named) = named {
@@ -1179,6 +1180,8 @@ mod tests {
             (0x11, "Control"),
             (0x12, "Alt"),
             (0x5B, "Meta"),
+            (0xB3, "MediaPlayPause"),
+            (0xFA, "MediaPlay"),
             (0x70, "F1"),
             (0x74, "F5"),
             (0x87, "F24"),

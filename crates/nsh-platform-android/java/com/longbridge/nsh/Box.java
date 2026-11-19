@@ -123,6 +123,27 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         return content != null ? content : this;
     }
 
+    /**
+     * Assistive technologies see only a child component that stands for its
+     * siblings ({@link MenuButtonComponent}'s button over the app's content,
+     * as iOS's {@code accessibilityElements}): the content under it is drawn,
+     * not read twice. The siblings keep their own accessibility settings,
+     * which {@link A11y} owns.
+     */
+    @Override
+    public void addChildrenForAccessibility(java.util.ArrayList<View> out) {
+        if (content == null) {
+            for (int i = 0; i < getChildCount(); i++) {
+                View c = getChildAt(i);
+                if (c instanceof ComponentBox && ((ComponentBox) c).component instanceof MenuButtonComponent) {
+                    c.addChildrenForAccessibility(out);
+                    return;
+                }
+            }
+        }
+        super.addChildrenForAccessibility(out);
+    }
+
     /** Frame of a child, in px, relative to its parent. Margin layout params,
      * so frame layouts (screens, modals) can host core-placed views. */
     static final class Frame extends ViewGroup.MarginLayoutParams {

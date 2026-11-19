@@ -1318,6 +1318,7 @@ enum Message {
     ScreenHeader(NodeId, Option<Points>),
     Frame,
     States(NodeId, u16),
+    ReleaseStates(NodeId, u16, std::time::Duration),
     Modality(nsh_core::platform::InputModality),
     FontsChanged,
     Remount,
@@ -1610,6 +1611,14 @@ impl EngineControl {
     /// (`active:`, `hover:`, `focus:`) update without JS.
     pub fn set_states(&self, id: NodeId, states: u16) {
         let _ = self.tx.send(Message::States(id, states));
+    }
+
+    /// Reports the interaction states of view `id` after a short completed
+    /// press, holding `PRESSED` for `hold` in the core so same-turn
+    /// tap-to-click gestures still render `:active` feedback
+    /// ([`nsh_core::Core::release_states_after`]).
+    pub fn release_states_after(&self, id: NodeId, states: u16, hold: std::time::Duration) {
+        let _ = self.tx.send(Message::ReleaseStates(id, states, hold));
     }
 
     /// Fonts the platform loads asynchronously became usable (on the web,
@@ -2570,6 +2579,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             self.state.next_scroll_event(),
             self.state.next_mouse_move(),
             self.state.core.next_task_timer(),
+            self.state.core.next_state_timer(),
             self.state.core.download_deadline(),
             self.state.resize_burst_ends,
             self.state.window_state.settles,
@@ -2731,6 +2741,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         {
             self.last_active = Instant::now();
         }
+        state.core.expire_state_timers(nsh_core::time::now());
         if state
             .resize_burst_ends
             .is_some_and(|ends| ends <= nsh_core::time::now())
@@ -4128,6 +4139,9 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::States(id, states) => state.core.set_states(id, states),
+        Message::ReleaseStates(id, states, hold) => {
+            state.core.release_states_after(id, states, hold);
+        }
         Message::Modality(modality) => state.core.set_input_modality(modality),
         Message::FontsChanged => state.core.fonts_changed(),
         Message::Remount => state.core.remount(),

@@ -2,7 +2,8 @@
 // `MenuButton`, the system's menu on a trigger of the app's own, on the
 // headless runtime, which is iOS: the app's content (its children) shows
 // in the frame its style gives, covered by the system's button that holds
-// the menu, given as data (`items`: ids, labels, SF Symbols, checks,
+// the menu, given as data (`items`: ids, labels, SF Symbols, SVG icons
+// for Android, checks,
 // disabled and destructive items, submenus and inline sections), its
 // `title`, `disabled` and `accessibilityLabel`; `onSelect({ id })` reports
 // the chosen item (the platform's event, which the engine's tests send).
@@ -22,7 +23,8 @@ function App() {
         accessibilityLabel="Account"
         title="me@example.com"
         items={[
-          { id: "settings", label: "Settings", icon: "gearshape" },
+          { id: "settings", label: "Settings", icon: "gearshape",
+            svg: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='3'/></svg>" },
           { id: "read", label: "Mark all as read", disabled: true },
           { id: "", label: "Language", items: [
             { id: "en", label: "English", checked: true },

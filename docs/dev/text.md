@@ -17,6 +17,10 @@
   CoreText positions it from the same top edge as an unconstrained line; the view's drawing bounds clip the
   excess. Empty and zero-height boxes stay empty.
   `onTextLayout` reports the final lines (`TextEngine::lines`: range, box, ascender, descender, cap / x height).
+  The last line of a paragraph includes the whitespace hanging past its end in its width, unless an ellipsis
+  replaces it: a caret after typed spaces (`RichEditor` puts one at the line's width) stands past them on every
+  engine. A line broken inside a paragraph keeps its width within the box; a caret after its break-space stands
+  at the next line's start.
   Final layouts are hit-tested by their engine too, in the content box (`TextEngine::hit_test`,
   `caret_rect`, `range_rects`): the caret position nearest a point (`TextPosition`: a UTF-16 offset and its
   `Affinity`, which says whether an offset that ends a wrapped line and starts the next is on the earlier line), the

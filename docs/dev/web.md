@@ -1118,7 +1118,9 @@ default), `role="link"` with an `href` (`ViewProps::href`, which `nsh-base`'s `L
 `web={{ element }}` (`Prop::WebElement`, `ViewProps::web_element`, the `WebElement` enum) names what `role` cannot
 say (`p`, `nav`, `article`, `time`, ...) and wins over the role. `retag` replaces the view's element by one of that
 tag, carrying its attributes, children and fields and taking its place in `views`; views whose element is a control
-of its own (images, scroll views, canvases, inputs) keep theirs. A fixed rule of the runtime's stylesheet takes the
+of its own (images, scroll views, canvases, inputs) keep theirs. A new view's tracked states and events reach the page
+before the props that name its tag: `retag` adds the old element's listeners to the new one, as the copied flags say
+(`installMouse`, `installHover`, `installFocus`, `installLinkHover`). A fixed rule of the runtime's stylesheet takes the
 browser's margins, fonts, colors, underlines and list markers off those tags, so the view looks as a `div` does. A
 link gets `href` and is not draggable; a plain click on it stays the app's (`Link`'s press; the root's `click`
 listener prevents the browser's navigation), a click with a modifier key or the middle button opens `href` as the

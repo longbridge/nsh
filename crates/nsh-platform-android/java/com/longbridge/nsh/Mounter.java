@@ -98,6 +98,8 @@ final class Mounter {
         boolean shown = true, transparent, backVisible = true, gesture = true, preventBack;
         int tint, background, titleColor, animation, left = -1, right = -1, titleView = -1;
         float headerHeight;
+        /** `headerTitleAlign` "center". */
+        boolean centerTitle;
     }
 
     /** Properties that animations can override, as last set by a style. */
@@ -286,6 +288,8 @@ final class Mounter {
         components.put(TabBarComponent.NAME, c -> new TabBarComponent(context, c, this::night));
         components.put(SwitchComponent.NAME, c -> new SwitchComponent(context, c, this::night));
         components.put(DateTimePickerComponent.NAME, c -> new DateTimePickerComponent(context, c, this::night));
+        components.put(MenuButtonComponent.NAME, c -> new MenuButtonComponent(context, c, this::night));
+        components.put(ContextMenuComponent.NAME, c -> new ContextMenuComponent(context, c, this::night));
         images.redirects = (base, location) -> Native.mediaRedirect(handle(), base, location);
         images.inline = uri -> {
             long handle = handle();
@@ -683,12 +687,16 @@ final class Mounter {
                     int count = b.getInt();
                     NshComponent c = v instanceof ComponentBox ? ((ComponentBox) v).component : null;
                     if (c instanceof RustComponent) {
+                        for (int i = 0; i < count; i++) {
+                            b.getInt();
+                            b.getInt();
+                        }
                         ((RustComponent) c).step(seq);
-                    } else if (c != null) {
+                    } else {
                         for (int i = 0; i < count; i++) {
                             String name = string(objects, b.getInt());
                             String json = string(objects, b.getInt());
-                            c.setProp(name, Json.parse(json));
+                            if (c != null) c.setProp(name, Json.parse(json));
                         }
                     }
                     break;
@@ -2008,6 +2016,7 @@ final class Mounter {
         o.titleView = b.getInt();
         o.headerHeight = b.getFloat();
         o.backTitle = string(objects, b.getInt());
+        o.centerTitle = b.getInt() == 1;
         screenOptions.put(id, o);
         dirtyScreens.add(id);
         int stack = hosts.get(id, -1);
@@ -2041,7 +2050,7 @@ final class Mounter {
             ScreenOptions below = canGoBack ? screenOptions.get(((StackBox) stack).screens.get(index - 1)) : null;
             ((StackBox.ScreenBox) v).configure(this, o.title, o.shown, o.transparent, o.tint, o.background,
                     o.titleColor, o.backVisible, o.gesture, o.preventBack, o.animation, o.left, o.right, o.titleView,
-                    o.headerHeight, canGoBack, below != null ? below.backTitle : null);
+                    o.headerHeight, o.centerTitle, canGoBack, below != null ? below.backTitle : null);
             reportScreenInsets(id, o);
         }
         dirtyScreens.clear();
@@ -2284,7 +2293,8 @@ final class Mounter {
         int keyboard = b.getInt(), returnKey = b.getInt(), capitalize = b.getInt();
         boolean autoCorrect = b.getInt() != 0, multiline = b.getInt() != 0;
         int maxLength = b.getInt();
-        boolean editable = b.getInt() != 0, autoFocus = b.getInt() != 0, hasSelection = b.getInt() != 0;
+        boolean editable = b.getInt() != 0, autoFocus = b.getInt() != 0, selectOnFocus = b.getInt() != 0;
+        boolean hasSelection = b.getInt() != 0;
         int selection = b.getInt();
         boolean hasCaret = b.getInt() != 0;
         int caret = b.getInt();
@@ -2304,7 +2314,7 @@ final class Mounter {
         String family = familyIndex >= 0 ? (String) objects[familyIndex] : null;
         ((InputBox) v).configure(size, weight, italic, color, family, spacing, align, placeholder,
                 hasPlaceholderColor, placeholderColor, secure, keyboard, returnKey, capitalize, autoCorrect,
-                multiline, maxLength, editable, autoFocus, hasSelection, selection, hasCaret, caret, submit,
+                multiline, maxLength, editable, autoFocus, selectOnFocus, hasSelection, selection, hasCaret, caret, submit,
                 inputRtl, fontVariant);
     }
 

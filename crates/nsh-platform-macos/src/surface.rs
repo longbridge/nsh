@@ -467,6 +467,7 @@ impl Surface {
         });
         root.set_surface(Rc::downgrade(&surface));
         crate::keyboard::install(&surface);
+        crate::input::install(&surface);
         surface
     }
 
