@@ -40,13 +40,13 @@ use objc2_ui_kit::{
     NSDirectionalRectEdge, NSForegroundColorAttributeName, UIAction,
     UIAdaptivePresentationControllerDelegate, UIBarButtonItem, UIBarButtonItemStyle,
     UIBarButtonSystemItem, UIBehavioralStyle, UIColor, UIEdgeInsets, UIGestureRecognizer,
-    UIGestureRecognizerDelegate, UIImage, UIInterfaceOrientationMask, UILabel, UIMenu,
-    UIMenuElement, UIMenuElementAttributes, UIMenuElementState, UIMenuOptions,
-    UIModalPresentationStyle, UIModalTransitionStyle, UINavigationBar, UINavigationBarAppearance,
-    UINavigationController, UINavigationControllerDelegate, UINavigationItem,
-    UINavigationItemLargeTitleDisplayMode, UIPresentationController, UIResponder, UIScrollView,
-    UISheetPresentationController, UISheetPresentationControllerDelegate,
-    UISheetPresentationControllerDetent, UISheetPresentationControllerDetentIdentifierLarge,
+    UIGestureRecognizerDelegate, UIImage, UIInterfaceOrientationMask, UIMenu, UIMenuElement,
+    UIMenuElementAttributes, UIMenuElementState, UIMenuOptions, UIModalPresentationStyle,
+    UIModalTransitionStyle, UINavigationBar, UINavigationBarAppearance, UINavigationController,
+    UINavigationControllerDelegate, UINavigationItem, UINavigationItemLargeTitleDisplayMode,
+    UIPresentationController, UIResponder, UIScrollView, UISheetPresentationController,
+    UISheetPresentationControllerDelegate, UISheetPresentationControllerDetent,
+    UISheetPresentationControllerDetentIdentifierLarge,
     UISheetPresentationControllerDetentIdentifierMedium,
     UISheetPresentationControllerDetentResolutionContext, UIView, UIViewAutoresizing,
     UIViewController, UIViewControllerTransitionCoordinator,
@@ -1953,9 +1953,6 @@ pub(crate) struct ScreenHost {
     /// Trailing `ios.headerRightItems`: rebuilt when the description
     /// changes (a menu item's `checked` or `title` included).
     right_items: RefCell<Option<RightItemsBar>>,
-    /// The invisible title of an untitled header that shows its background
-    /// on scroll ([`ScreenHost::edge_title`]), kept while it is needed.
-    edge_title: RefCell<Option<Retained<UILabel>>>,
     /// The screen's root view, placed by the core.
     pub(crate) view: Retained<NshView>,
     pub(crate) config: ScreenConfig,
@@ -1976,46 +1973,7 @@ impl ScreenHost {
             left_system: RefCell::new(None),
             right_system: RefCell::new(None),
             right_items: RefCell::new(None),
-            edge_title: RefCell::new(None),
         }
-    }
-
-    /// The title view of a header that shows its background on scroll
-    /// (`headerBackgroundOnScroll`) and has no title: an invisible label.
-    ///
-    /// From iOS 26 the scroll edge effect under a bar takes its shape from
-    /// what the bar shows (its title, its buttons). With only buttons at the
-    /// sides it reaches no lower than the status bar between them, and the
-    /// content scrolled under the header stays sharp there; the label gives
-    /// it the reach of a title, so the header shows its background as a
-    /// titled one does. Earlier versions draw the background in full.
-    fn edge_title(&self, c: &ScreenConfig) -> Option<Retained<UIView>> {
-        let untitled = c.title.as_deref().is_none_or(str::is_empty);
-        // `UIScrollEdgeElementContainerInteraction` came with the edge
-        // effect (iOS 26).
-        if !(c.header_transparent && c.header_background_on_scroll && untitled && !c.large_title)
-            || AnyClass::get(c"UIScrollEdgeElementContainerInteraction").is_none()
-        {
-            self.edge_title.take();
-            return None;
-        }
-        let mtm = self.controller.mtm();
-        let label = self
-            .edge_title
-            .borrow_mut()
-            .get_or_insert_with(|| {
-                let label = UILabel::new(mtm);
-                // Blank text the width of a short title: an empty label has
-                // no size, and a label without one shapes nothing.
-                label.setText(Some(&NSString::from_str(&"\u{2003}".repeat(6))));
-                // SAFETY: a plain setter.
-                unsafe { label.setTextColor(Some(&UIColor::clearColor())) };
-                // SAFETY: UIAccessibility's property on the label.
-                let _: () = unsafe { msg_send![&*label, setIsAccessibilityElement: false] };
-                label
-            })
-            .clone();
-        Some(Retained::into_super(label))
     }
 
     /// Applies the header options; `item` returns the view of a header item.
@@ -2030,7 +1988,7 @@ impl ScreenHost {
         let c = &self.config;
         let nav_item = self.controller.navigationItem();
         nav_item.setTitle(c.title.as_deref().map(NSString::from_str).as_deref());
-        let title_view = c.title_view.and_then(&item).or_else(|| self.edge_title(c));
+        let title_view = c.title_view.and_then(&item);
         nav_item.setTitleView(title_view.as_deref());
         let custom = |id: Option<NodeId>| {
             id.and_then(&item)

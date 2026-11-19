@@ -243,7 +243,7 @@ export const nav = createNavStack<Route>([{ name: "home" }]);
 | `headerVisible` | `boolean` | `true` | iOS 和 Android：显示系统标题栏。 |
 | `headerTransparent` | `boolean` | `false` | iOS 和 Android：内容延伸到标题栏下方。 |
 | `headerShadowVisible` | `boolean` | `true` | iOS：标题栏下方的细线。设为 `false` 时标题栏没有这条线，同 iOS 26 系统自带的标题栏。Android 的标题栏没有这条线。 |
-| `headerBackgroundOnScroll` | `boolean` | `false` | iOS：配合 `headerTransparent`，内容停在顶端时标题栏是透明的，内容滚到标题栏下面后显示标题栏的背景，同 UIKit 自带的标题栏。标题栏跟随从页面顶端开始、露出最多的那个可见滚动视图。背景盖满整个标题栏，有没有标题都一样。其他平台忽略。 |
+| `headerBackgroundOnScroll` | `boolean` | `false` | iOS：配合 `headerTransparent`，内容停在顶端时标题栏是透明的，内容滚到标题栏下面后显示标题栏的背景，同 UIKit 自带的标题栏。标题栏跟随从页面顶端开始、露出最多的那个可见滚动视图。其他平台忽略。 |
 | `headerStyle` | `{ backgroundColor?, color?, tintColor? }` | | iOS 和 Android：标题栏背景色、标题颜色（`color`）和按钮颜色（`tintColor`）。 |
 | `headerClass` | `string` | | 用类名设置同样的颜色：`bg-*`、标题用 `text-*`、按钮用 `tint-*`；`headerStyle` 优先。 |
 | `headerBackVisible` | `boolean` | `true` | iOS 和 Android：显示返回按钮。 |
