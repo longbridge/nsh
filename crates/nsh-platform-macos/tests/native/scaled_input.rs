@@ -295,12 +295,57 @@ pub(super) fn run() {
     // SAFETY: This scope retains the window until after it closes.
     unsafe { window.setReleasedWhenClosed(false) };
     window.setTitle(&NSString::from_str("NSH scaled input regression"));
+    if std::env::var_os("T10284_BUNDLE").is_some() { platform::set_ui_sets(vec![nsh_base::registry()]); }
     let options = platform::AppOptions {
         size: (VIEWPORT.0 as i32, VIEWPORT.1 as i32),
         ..Default::default()
     };
     let surface: std::rc::Rc<platform::AppView> = platform::AppView::new(mtm, options);
     window.setContentView(Some(&surface.view()));
+    if let Some(bundle) = std::env::var_os("T10284_BUNDLE") {
+        surface.load(platform::App::Js(nsh_engine::Bundle::read(std::path::Path::new(&bundle)).unwrap()));
+        window.makeKeyAndOrderFront(None);
+        app.activate();
+        let root = surface.view();
+        let shown = |id| view_with_id(&root,id).is_some();
+        let expected = |id| until(id, || shown(id));
+        let shot = |label: &str| {
+            let rep = root.bitmapImageRepForCachingDisplayInRect(root.bounds()).unwrap();
+            root.cacheDisplayInRect_toBitmapImageRep(root.bounds(), &rep);
+            let props = platform::objc2_foundation::NSDictionary::new();
+            let data = unsafe { rep.representationUsingType_properties(platform::objc2_app_kit::NSBitmapImageFileType::PNG, &props) }.unwrap();
+            std::fs::write(format!("/tmp/T10284-{label}.png"), data.to_vec()).unwrap();
+        };
+        let click_id = |id| {
+            let target = view_with_id(&root,id).unwrap();
+            let r = drawn(&window,&target);
+            click(&window,r.origin.x+r.size.width*0.5,r.origin.y+r.size.height*0.5);
+        };
+        expected("state-closed");
+        click_id("trigger");
+        expected("state-open");
+        shot("open");
+        click_id("input");
+        assert!(editor(&root).unwrap().currentEditor().is_some());
+        type_text(&window, "Native click");
+        assert_eq!(editor(&root).unwrap().stringValue().to_string(), "Native click");
+        expected("state-closed");
+        shot("input");
+        click_id("trigger");
+        expected("state-open");
+        click(&window,375.,260.);
+        expected("state-closed");
+        click_id("trigger");
+        expected("state-open");
+        let r = drawn(&window,&view_with_id(&root,"trigger").unwrap());
+        click(&window, r.origin.x+50.,r.origin.y+r.size.height+44.);
+        expected("selected-beta");
+        expected("state-closed");
+        shot("beta");
+        window.close();
+        println!("PASS: native input focused and typed; outside and option clicks closed the Select.");
+        return;
+    }
     surface.load(platform::App::Rust(platform::Root::of::<Page>()));
     window.makeKeyAndOrderFront(None);
     app.activate();

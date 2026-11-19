@@ -1,0 +1,33 @@
+name: T-H0043 native probe
+on:
+  push:
+    branches: [agent/T-H0043-native-probe]
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [fixed, unfixed]
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Revert the fix (unfixed baseline)
+        if: matrix.variant == 'unfixed'
+        run: |
+          git fetch --depth=50 origin main
+          git checkout origin/main -- crates/nsh-platform-macos/src/text_input.rs crates/nsh-platform-macos/Cargo.toml
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build native test
+        run: cargo test -p nsh-platform-macos --features js --test native --no-run
+      - name: Committed regression test
+        continue-on-error: ${{ matrix.variant == 'unfixed' }}
+        run: NSH_SCALED_INPUT_CHECK_ONLY=1 cargo test -p nsh-platform-macos --features js --test native
+      - name: TSX acceptance
+        continue-on-error: ${{ matrix.variant == 'unfixed' }}
+        run: NSH_SCALED_INPUT_CHECK_ONLY=1 T10284_BUNDLE=$PWD/ci-probe/out/bundle.js cargo test -p nsh-platform-macos --features js --test native
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-${{ matrix.variant }}
+          path: /tmp/T10284-*.png
+          if-no-files-found: warn
