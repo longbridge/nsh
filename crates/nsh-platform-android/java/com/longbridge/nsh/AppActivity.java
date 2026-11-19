@@ -47,6 +47,7 @@ public final class AppActivity extends Activity {
     public void onConfigurationChanged(android.content.res.Configuration config) {
         super.onConfigurationChanged(config);
         DevActivity.systemBars(this);
+        if (view != null) view.mounter().applyStatusBar();
     }
 
     /** A notification pressed, or a URL opened, while this activity is in its task. */

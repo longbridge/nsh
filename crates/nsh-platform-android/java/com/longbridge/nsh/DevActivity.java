@@ -117,6 +117,7 @@ public final class DevActivity extends Activity {
     public void onConfigurationChanged(android.content.res.Configuration config) {
         super.onConfigurationChanged(config);
         systemBars(this);
+        if (view != null) view.mounter().applyStatusBar();
     }
 
     /** Draw behind the system bars: the app gets them as `safeArea()`. */

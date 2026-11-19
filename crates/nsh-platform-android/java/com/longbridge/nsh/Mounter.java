@@ -85,6 +85,17 @@ final class Mounter {
     private int barStyle = -1;
     private boolean barHidden;
 
+    /**
+     * Sets the status bar the app has: its last request, else the default, whose icons contrast with the appearance
+     * shown. Run again when the app's or the system's appearance changes: the default depends on both, and the
+     * activity's own bar setup reads only the system's.
+     */
+    void applyStatusBar() {
+        int style = Math.max(barStyle, 0);
+        SystemUi.statusBar(context, style, barHidden, night());
+        for (ModalHost m : shownModals) m.statusBar(style, barHidden, night());
+    }
+
     /** Dark appearance as shown: the app's, else the system's. */
     boolean night() {
         if (appearance != 0) return appearance == 2;
@@ -497,10 +508,7 @@ final class Mounter {
                         }
                         if (v instanceof StackBox.ScreenBox) ((StackBox.ScreenBox) v).appearanceChanged();
                     }
-                    if (barStyle == 0) {
-                        SystemUi.statusBar(context, barStyle, barHidden, night());
-                        for (ModalHost m : shownModals) m.statusBar(barStyle, barHidden, night());
-                    }
+                    applyStatusBar();
                     break;
                 }
                 case LAYOUT_DIRECTION: {
@@ -2061,7 +2069,7 @@ final class Mounter {
                 modal.show();
                 shownModals.remove(modal);
                 shownModals.add(modal);
-                if (barStyle >= 0) modal.statusBar(barStyle, barHidden, night());
+                modal.statusBar(Math.max(barStyle, 0), barHidden, night());
             } else {
                 modal.dismiss();
                 shownModals.remove(modal);
