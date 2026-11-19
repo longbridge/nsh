@@ -1248,7 +1248,7 @@ impl Surface {
             if surface.last_tick.get() < at {
                 let now = objc2_quartz_core::CACurrentMediaTime();
                 let period = now - surface.last_tick.get();
-                surface.frame(now, period);
+                surface.frame(now, period, false);
             }
             surface.keep_deadline();
         });
@@ -1275,7 +1275,7 @@ impl Surface {
             return;
         }
         let now = link.timestamp();
-        self.frame(now, link.targetTimestamp() - link.timestamp());
+        self.frame(now, link.targetTimestamp() - link.timestamp(), true);
         // The frame may have made the link again, from another window.
         let current = self.link.borrow();
         let Some(current) = current.as_ref() else {
@@ -1290,15 +1290,15 @@ impl Surface {
     }
 
     /// One display frame at `now`, `period` seconds after the previous one
-    /// (the display link's, or one a deadline ran without a frame).
-    fn frame(self: &Rc<Self>, now: f64, period: f64) {
+    /// (the display link's, `drawn`, or one a deadline ran without a frame).
+    fn frame(self: &Rc<Self>, now: f64, period: f64, drawn: bool) {
         self.last_tick.set(objc2_quartz_core::CACurrentMediaTime());
         let Some(monitor) = self.perf.borrow().clone() else {
-            return quiet(|| self.tick(now));
+            return quiet(|| self.tick(now, drawn));
         };
         let start = Instant::now();
         let dirty = self.wants_frames();
-        quiet(|| self.tick(now));
+        quiet(|| self.tick(now, drawn));
         let cost = start.elapsed();
         monitor.record_work(cost, dirty);
         crate::fps::ticked(cost);
@@ -1308,10 +1308,16 @@ impl Surface {
         );
     }
 
-    fn tick(self: &Rc<Self>, now: f64) {
+    /// `drawn`: a display link frame; a deadline's keeps the real time
+    /// ([`nsh_core::animation::Animator::tick_frame`]).
+    fn tick(self: &Rc<Self>, now: f64, drawn: bool) {
         let applied = self.apply_queued(FRAME_BATCHES);
         if self.anim.borrow().animating() {
-            self.anim.borrow_mut().tick(now);
+            if drawn {
+                self.anim.borrow_mut().tick_frame(now);
+            } else {
+                self.anim.borrow_mut().tick(now);
+            }
             self.write_animations();
         }
         let callbacks = std::mem::take(&mut *self.frame_callbacks.borrow_mut());

@@ -1150,18 +1150,19 @@ fn send(f: impl FnOnce(&mut Running)) -> f64 {
     pump()
 }
 
-/// A display frame (`requestAnimationFrame`, `now` in ms), or one the page
-/// runs at a deadline while frames stop ([`nsh_deadline`]): ticks the
-/// native animations and runs JS's frame callbacks. Returns the pump
-/// delay.
+/// A display frame (`requestAnimationFrame`, `now` in ms; `drawn` 1), or
+/// one the page runs at a deadline while frames stop ([`nsh_deadline`];
+/// `drawn` 0, which keeps the real time:
+/// [`nsh_core::animation::Graph::tick_frame`]): ticks the native animations
+/// and runs JS's frame callbacks. Returns the pump delay.
 #[unsafe(no_mangle)]
-pub extern "C" fn nsh_frame(now: f64) -> f64 {
+pub extern "C" fn nsh_frame(now: f64, drawn: u32) -> f64 {
     APP.with(|a| {
         let mut app = a.borrow_mut();
         let Some(app) = app.as_mut() else { return };
         if app.animation.animating() {
             // The animation graph's clock is in seconds.
-            app.animation.tick(now / 1000.0);
+            app.animation.tick(now / 1000.0, drawn != 0);
             let mut out = Out::new();
             app.animation.outputs(&mut out, false);
             if !out.is_empty() {

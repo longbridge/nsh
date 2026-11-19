@@ -1135,7 +1135,7 @@ impl Surface {
             }
             surface.keeper.set(None);
             if surface.now.get() < at {
-                surface.frame();
+                surface.frame(false);
                 // Nothing composes, so no tick of the ticker's would pause
                 // it: this frame does when it leaves nothing to do.
                 if !surface.wants_frames()
@@ -1150,7 +1150,7 @@ impl Surface {
 
     /// One frame of the ticker (`WM_NSH_TICK`).
     pub(crate) fn tick(self: &Rc<Self>) {
-        self.frame();
+        self.frame(true);
         if let Some(t) = &*self.ticker.borrow() {
             if self.wants_frames() {
                 t.ticked();
@@ -1160,9 +1160,10 @@ impl Surface {
         }
     }
 
-    /// One frame at the clock's time: the ticker's, or one a deadline ran
-    /// without a tick ([`Surface::keep_deadline`]).
-    fn frame(self: &Rc<Self>) {
+    /// One frame at the clock's time: the ticker's (`drawn`), or one a
+    /// deadline ran without a tick ([`Surface::keep_deadline`]), which keeps
+    /// the real time ([`nsh_core::animation::Animator::tick_frame`]).
+    fn frame(self: &Rc<Self>, drawn: bool) {
         let started = self
             .fps
             .borrow()
@@ -1174,7 +1175,11 @@ impl Surface {
         let now = self.clock();
         self.now.set(now);
         if self.anim.borrow().animating() {
-            self.anim.borrow_mut().tick(now);
+            if drawn {
+                self.anim.borrow_mut().tick_frame(now);
+            } else {
+                self.anim.borrow_mut().tick(now);
+            }
             self.write_animations();
         }
         if self.js_frame.replace(false) {

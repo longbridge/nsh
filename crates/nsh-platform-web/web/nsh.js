@@ -2048,7 +2048,7 @@ class Player {
     this.frame = requestAnimationFrame((now) => {
       this.frame = 0;
       this.frameAt = performance.now();
-      this.call((w) => w.nsh_frame(this.frameTime(now)));
+      this.call((w) => w.nsh_frame(this.frameTime(now), 1));
     });
   }
 
@@ -2108,7 +2108,7 @@ class Player {
       this.keeper = null;
       if (!(this.frameAt >= at)) {
         this.frameAt = performance.now();
-        this.call((w) => w.nsh_frame(this.frameAt));
+        this.call((w) => w.nsh_frame(this.frameAt, 0));
       }
       this.keepDeadline();
     }, Math.max(0, at + LATE_MS - now));
