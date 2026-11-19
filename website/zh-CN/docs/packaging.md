@@ -379,6 +379,19 @@ entitlements：
 
 两者和图标一起编译进应用的资源目录，并写进 `UILaunchScreen`，应用就不再在 `ios.infoPlist` 里设置它。启动画面与应用第一帧一致（同样的背景、同一张图在同一位置）时，启动看起来没有跳变。系统显示哪一套由 `appearance` 决定。
 
+Android 上 `android.launchScreen` 用同样的键。打包时给应用生成一个主题，窗口背景是 `background`：从点下图标起窗口就和应用第一帧一致，之后也留在应用下面。Android 12 及以上，系统启动屏同样用 `background`（图标后面也是），`image` 在中央，大小与 iOS 相同（288×288 的 PNG 是 96×96 dp）；不给 `image` 时启动屏显示启动器图标。深色的值在系统深色模式下生效；`appearance` 固定为 `light` 或 `dark` 时只用那一套。
+
+```json
+{
+  "android": {
+    "launchScreen": {
+      "background": { "light": "#ffffff", "dark": "#131312" },
+      "image": { "light": "launch.png", "dark": "launch-dark.png" }
+    }
+  }
+}
+```
+
 ## 相机、蓝牙和其他硬件
 
 打包后的应用根据 `nsh.json` 声明 NSH 自身功能用到的硬件：

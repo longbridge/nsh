@@ -11,6 +11,8 @@ use std::{
 
 use anyhow::{Context as _, bail};
 
+use crate::apple::{Color, LaunchScreen, Themed};
+
 /// Minimum Android version (API 26, Android 8.0), as the runtime is built.
 pub(crate) const MIN_SDK: u32 = 26;
 /// The Android version apps target unless `nsh.json` `android.targetSdk`
@@ -224,6 +226,9 @@ pub(crate) struct Apk<'a> {
     /// `nsh.json` `"appearance": "dark"`: the window's theme is dark from
     /// the start (no light flash before the first frame).
     pub(crate) dark: bool,
+    /// `nsh.json` `"appearance"` is `"light"` or `"dark"`: the launch screen
+    /// shows that appearance's values, not the system's mode's.
+    pub(crate) fixed_appearance: bool,
     /// `classes.dex` and `lib/<abi>/libnsh.so`.
     pub(crate) runtime: &'a Path,
     /// The ABIs whose `libnsh.so` goes in, each of which the runtime must
@@ -231,6 +236,9 @@ pub(crate) struct Apk<'a> {
     pub(crate) abis: &'a [String],
     /// Launcher icon (square PNG).
     pub(crate) icon: Option<&'a Path>,
+    /// `nsh.json` `android.launchScreen`: the window's background and the
+    /// splash screen's color and image ([`launch_resources`]).
+    pub(crate) launch_screen: Option<&'a LaunchScreen>,
     /// Files under `assets/` in the APK: (path in the APK, contents).
     pub(crate) assets: Vec<(String, Vec<u8>)>,
     /// Notification sounds, raw resources: (resource name, file).
@@ -308,6 +316,34 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
         }
     }
 
+    // The launch screen: the theme the manifest names and what it uses.
+    if let Some(screen) = apk.launch_screen {
+        let res = work.join("res");
+        let mut files = Vec::new();
+        for file in launch_resources(screen, apk.dark, apk.fixed_appearance, apk.target_sdk)? {
+            let dir = res.join(file.dir);
+            fs::create_dir_all(&dir)?;
+            let path = dir.join(&file.name);
+            match file.contents {
+                ResContents::Text(text) => fs::write(&path, text)?,
+                ResContents::Copy(source) => {
+                    fs::copy(&source, &path).map(drop).with_context(|| {
+                        format!(
+                            "copy {} (nsh.json android.launchScreen.image)",
+                            source.display()
+                        )
+                    })?
+                }
+            }
+            files.push(path);
+        }
+        flat.extend(compile_resources(
+            sdk,
+            &files,
+            &work.join("compiled-launch"),
+        )?);
+    }
+
     // Notification sounds: raw resources, which a channel's sound names.
     if !apk.sounds.is_empty() {
         let raw = work.join("res").join("raw");
@@ -375,6 +411,193 @@ pub(crate) fn build(sdk: &Sdk, apk: &Apk<'_>, format: Format, out: &Path) -> any
     fs::rename(&aligned, out)?;
     fs::remove_dir_all(&work)?;
     Ok(())
+}
+
+/// The theme of the application: the launch theme ([`LAUNCH_THEME`]) when
+/// the app has a launch screen, the platform's Material theme otherwise.
+fn theme(apk: &Apk<'_>) -> String {
+    if apk.launch_screen.is_some() {
+        format!("@style/{LAUNCH_THEME}")
+    } else {
+        material_theme(apk.dark).to_owned()
+    }
+}
+
+/// The platform theme apps start in: dark with `"appearance": "dark"`.
+fn material_theme(dark: bool) -> &'static str {
+    if dark {
+        "@android:style/Theme.Material.NoActionBar"
+    } else {
+        "@android:style/Theme.Material.Light.NoActionBar"
+    }
+}
+
+/// The theme a launch screen generates, which the manifest names.
+const LAUNCH_THEME: &str = "NshLaunch";
+/// The splash screen's icon area, in dp, when it has no icon background
+/// of its own: Android 12+ scales the icon drawable to it and shows a
+/// circle of two thirds of it.
+const SPLASH_ICON_DP: f32 = 288.0;
+
+/// A resource file a package generates: `res/<dir>/<name>`.
+struct ResFile {
+    dir: &'static str,
+    name: String,
+    contents: ResContents,
+}
+
+enum ResContents {
+    /// An XML file written as it is.
+    Text(String),
+    /// A file copied from the app (an image).
+    Copy(PathBuf),
+}
+
+/// The resources of a launch screen: a theme ([`LAUNCH_THEME`], on the
+/// platform's Material theme) whose window background is the screen's
+/// color, so the window looks like the app's first frame from the tap on
+/// the icon until that frame and behind it; and on Android 12+, the system
+/// splash screen in the same color with the screen's image in the middle
+/// (drawn for 3x screens as on iOS: a 288 px PNG is 96 dp). The icon's
+/// own background is the screen's color too, so it shows no plate. Without
+/// an image the splash screen shows the launcher icon. The dark values go
+/// to the `-night` qualifiers, which the system picks in dark mode; an app
+/// of one appearance (`fixed`, dark or not) has only that appearance's.
+fn launch_resources(
+    screen: &LaunchScreen,
+    dark: bool,
+    fixed: bool,
+    target_sdk: u32,
+) -> anyhow::Result<Vec<ResFile>> {
+    // The default value and the night one.
+    fn pick<T>(themed: &Themed<T>, dark: bool, fixed: bool) -> (&T, Option<&T>) {
+        match themed.variants() {
+            (light, Some(night)) if fixed => (if dark { night } else { light }, None),
+            variants => variants,
+        }
+    }
+    let xml = |body: String| {
+        ResContents::Text(format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n{body}</resources>\n"
+        ))
+    };
+    let style = |items: &[(&str, &str)]| {
+        let items: String = items
+            .iter()
+            .map(|(name, value)| format!("        <item name=\"android:{name}\">{value}</item>\n"))
+            .collect();
+        format!(
+            "    <style name=\"{LAUNCH_THEME}\" parent=\"{}\">\n{items}    </style>\n",
+            material_theme(dark)
+        )
+    };
+    let color = |color: &Color| {
+        let [r, g, b, a] = color.0;
+        format!("    <color name=\"nsh_launch_background\">#{a:02x}{r:02x}{g:02x}{b:02x}</color>\n")
+    };
+    let mut files = Vec::new();
+    let background = screen
+        .background
+        .as_ref()
+        .map(|background| pick(background, dark, fixed));
+    let window = [("windowBackground", "@color/nsh_launch_background")];
+    let window: &[(&str, &str)] = if background.is_some() { &window } else { &[] };
+    files.push(ResFile {
+        dir: "values",
+        name: "nsh_launch.xml".into(),
+        contents: xml(format!(
+            "{}{}",
+            background
+                .map(|(light, _)| color(light))
+                .unwrap_or_default(),
+            style(window)
+        )),
+    });
+    if let Some((_, Some(dark))) = background {
+        files.push(ResFile {
+            dir: "values-night",
+            name: "nsh_launch.xml".into(),
+            contents: xml(color(dark)),
+        });
+    }
+    // The splash screen's attributes are Android 12's (API 31): an app that
+    // compiles against an older platform keeps its window background only.
+    if target_sdk < 31 {
+        return Ok(files);
+    }
+    let mut splash = window.to_vec();
+    if background.is_some() {
+        splash.push((
+            "windowSplashScreenBackground",
+            "@color/nsh_launch_background",
+        ));
+        splash.push((
+            "windowSplashScreenIconBackgroundColor",
+            "@color/nsh_launch_background",
+        ));
+    }
+    if let Some(image) = &screen.image {
+        splash.push(("windowSplashScreenAnimatedIcon", "@drawable/nsh_launch"));
+        let (day, night) = pick(image, dark, fixed);
+        for (path, png_dir, xml_dir) in [
+            (Some(day), "drawable-nodpi", "drawable"),
+            (night, "drawable-night-nodpi", "drawable-night"),
+        ] {
+            let Some(path) = path else { continue };
+            let (width, height) = image::image_dimensions(path).with_context(|| {
+                format!(
+                    "read {} (nsh.json android.launchScreen.image)",
+                    path.display()
+                )
+            })?;
+            // Centered at a third of its pixels in dp: the rest of the icon
+            // area is inset.
+            let inset = |px: u32| ((SPLASH_ICON_DP - px as f32 / 3.0) / 2.0).max(0.0);
+            files.push(ResFile {
+                dir: png_dir,
+                name: "nsh_launch_image.png".into(),
+                contents: ResContents::Copy(path.clone()),
+            });
+            files.push(ResFile {
+                dir: xml_dir,
+                name: "nsh_launch.xml".into(),
+                contents: ResContents::Text(format!(
+                    r#"<?xml version="1.0" encoding="utf-8"?>
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/nsh_launch_image"
+    android:insetLeft="{x}dp" android:insetRight="{x}dp"
+    android:insetTop="{y}dp" android:insetBottom="{y}dp" />
+"#,
+                    x = inset(width),
+                    y = inset(height),
+                )),
+            });
+        }
+    }
+    files.push(ResFile {
+        dir: "values-v31",
+        name: "nsh_launch.xml".into(),
+        contents: xml(style(&splash)),
+    });
+    Ok(files)
+}
+
+/// Compiles resource files (each under `res/<type>/`) with `aapt2` into
+/// `out`, returning what it wrote for `aapt2 link`.
+fn compile_resources(sdk: &Sdk, files: &[PathBuf], out: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    fs::create_dir_all(out)?;
+    for file in files {
+        run(Command::new(sdk.tool("aapt2"))
+            .arg("compile")
+            .arg(file)
+            .arg("-o")
+            .arg(out))?;
+    }
+    let mut flat = Vec::new();
+    for entry in fs::read_dir(out)? {
+        flat.push(entry?.path());
+    }
+    Ok(flat)
 }
 
 fn manifest_xml(apk: &Apk<'_>) -> String {
@@ -452,7 +675,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
         android:extractNativeLibs="false"
         android:enableOnBackInvokedCallback="true"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material{theme}.NoActionBar">{rust}
+        android:theme="{theme}">{rust}
         <!-- Serves the app's own files to the apps that open them
             (`SystemUi.openPath`): the authority matches what
             `FilesProvider.uriFor` builds. -->
@@ -473,7 +696,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
 "#,
         package = apk.package,
         activity = apk.activity,
-        theme = if apk.dark { "" } else { ".Light" },
+        theme = theme(apk),
     )
 }
 
@@ -872,9 +1095,11 @@ mod tests {
             schemes: &[],
             rust,
             dark: false,
+            fixed_appearance: false,
             runtime: std::path::Path::new("."),
             abis: &[],
             icon: None,
+            launch_screen: None,
             assets: Vec::new(),
             sounds: Vec::new(),
             signing: super::Signing::Debug,
@@ -983,6 +1208,146 @@ mod tests {
         let activity = manifest.find("<activity").unwrap();
         let at = manifest.find(attribute).expect(&manifest);
         assert!(application < at && at < activity, "{manifest}");
+    }
+
+    fn text(files: &[super::ResFile], dir: &str) -> String {
+        let file = files
+            .iter()
+            .find(|file| file.dir == dir)
+            .unwrap_or_else(|| panic!("no res/{dir}"));
+        match &file.contents {
+            super::ResContents::Text(text) => text.clone(),
+            super::ResContents::Copy(path) => panic!("res/{dir} copies {}", path.display()),
+        }
+    }
+
+    #[test]
+    fn a_launch_screen_names_its_theme_in_the_manifest() {
+        let screen = crate::apple::LaunchScreen::default();
+        let manifest = super::manifest_xml(&super::Apk {
+            launch_screen: Some(&screen),
+            ..apk(false, false)
+        });
+        assert!(
+            manifest.contains(r#"android:theme="@style/NshLaunch""#),
+            "{manifest}"
+        );
+        let manifest = super::manifest_xml(&apk(false, false));
+        assert!(
+            manifest.contains(r#"android:theme="@android:style/Theme.Material.Light.NoActionBar""#),
+            "{manifest}"
+        );
+    }
+
+    /// The window background and the splash screen take the screen's color,
+    /// the dark one in night mode; the splash icon's own background is the
+    /// same color, so it shows no plate around the icon.
+    #[test]
+    fn a_launch_screen_colors_the_window_and_the_splash_screen() {
+        use crate::apple::{Color, LaunchScreen, Themed};
+        let screen = LaunchScreen {
+            background: Some(Themed::Each {
+                light: Color([0xff, 0xff, 0xff, 0xff]),
+                dark: Color([0x13, 0x13, 0x12, 0xff]),
+            }),
+            image: None,
+        };
+        let files = super::launch_resources(&screen, false, false, 35).unwrap();
+        let values = text(&files, "values");
+        assert!(
+            values.contains(r#"<color name="nsh_launch_background">#ffffffff</color>"#),
+            "{values}"
+        );
+        assert!(
+            values.contains(r#"parent="@android:style/Theme.Material.Light.NoActionBar""#),
+            "{values}"
+        );
+        assert!(
+            values.contains(
+                r#"<item name="android:windowBackground">@color/nsh_launch_background</item>"#
+            ),
+            "{values}"
+        );
+        let night = text(&files, "values-night");
+        assert!(night.contains("#ff131312"), "{night}");
+        let splash = text(&files, "values-v31");
+        for item in [
+            "windowBackground",
+            "windowSplashScreenBackground",
+            "windowSplashScreenIconBackgroundColor",
+        ] {
+            assert!(
+                splash.contains(&format!(
+                    r#"<item name="android:{item}">@color/nsh_launch_background</item>"#
+                )),
+                "{splash}"
+            );
+        }
+        assert!(
+            !splash.contains("windowSplashScreenAnimatedIcon"),
+            "{splash}"
+        );
+        // Compiled against a platform before Android 12: no splash
+        // attributes to link.
+        let files = super::launch_resources(&screen, false, false, 30).unwrap();
+        assert!(files.iter().all(|file| file.dir != "values-v31"));
+        // An app that is always dark shows the dark color in either mode.
+        let files = super::launch_resources(&screen, true, true, 35).unwrap();
+        assert!(text(&files, "values").contains("#ff131312"));
+        assert!(files.iter().all(|file| file.dir != "values-night"));
+    }
+
+    /// The image is the splash screen's icon, centered at a third of its
+    /// pixels in dp (as iOS draws it), one for each appearance.
+    #[test]
+    fn a_launch_screen_image_is_the_splash_icon() {
+        use crate::apple::{LaunchScreen, Themed};
+        let dir = std::env::temp_dir().join(format!("nsh-android-launch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (light, dark) = (dir.join("light.png"), dir.join("dark.png"));
+        image::RgbaImage::new(288, 288).save(&light).unwrap();
+        image::RgbaImage::new(144, 96).save(&dark).unwrap();
+        let screen = LaunchScreen {
+            background: None,
+            image: Some(Themed::Each {
+                light: light.clone(),
+                dark: dark.clone(),
+            }),
+        };
+        let files = super::launch_resources(&screen, true, false, 35).unwrap();
+        let splash = text(&files, "values-v31");
+        assert!(
+            splash.contains(
+                r#"<item name="android:windowSplashScreenAnimatedIcon">@drawable/nsh_launch</item>"#
+            ),
+            "{splash}"
+        );
+        assert!(
+            splash.contains(r#"parent="@android:style/Theme.Material.NoActionBar""#),
+            "{splash}"
+        );
+        // No color: the platform's window background stays.
+        assert!(!splash.contains("windowBackground"), "{splash}");
+        // 288 px is 96 dp: 96 dp of inset on each side of 288.
+        let icon = text(&files, "drawable");
+        assert!(
+            icon.contains(r#"android:drawable="@drawable/nsh_launch_image""#),
+            "{icon}"
+        );
+        assert!(icon.contains(r#"android:insetLeft="96dp""#), "{icon}");
+        assert!(icon.contains(r#"android:insetTop="96dp""#), "{icon}");
+        let night = text(&files, "drawable-night");
+        assert!(night.contains(r#"android:insetLeft="120dp""#), "{night}");
+        assert!(night.contains(r#"android:insetTop="128dp""#), "{night}");
+        let copied = |dir: &str| {
+            files.iter().find_map(|file| match &file.contents {
+                super::ResContents::Copy(path) if file.dir == dir => Some(path.clone()),
+                _ => None,
+            })
+        };
+        assert_eq!(copied("drawable-nodpi"), Some(light));
+        assert_eq!(copied("drawable-night-nodpi"), Some(dark));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
