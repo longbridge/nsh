@@ -539,7 +539,8 @@ final class StackBox extends FrameLayout implements Node {
             int[] size = m.headerSizes.get(itemId);
             int w = size != null ? size[0] : 1, h = size != null ? size[1] : 1;
             Toolbar.LayoutParams p = new Toolbar.LayoutParams(Math.max(1, w), Math.max(1, h), gravity | android.view.Gravity.CENTER_VERTICAL);
-            if (gravity == android.view.Gravity.END) p.rightMargin = Math.round(12 * m.density);
+            // An end margin: in RTL the Toolbar lays END items out from the left edge.
+            if (gravity == android.view.Gravity.END) p.setMarginEnd(Math.round(12 * m.density));
             toolbar.addView(item, p);
         }
 
