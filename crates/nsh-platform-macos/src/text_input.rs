@@ -76,7 +76,8 @@ use objc2::{
 use objc2_app_kit::{
     NSApplication, NSBorderType, NSColor, NSControl, NSControlTextEditingDelegate, NSDragOperation,
     NSDraggingInfo, NSEvent, NSEventModifierFlags, NSEventType, NSFocusRingType,
-    NSFontAttributeName, NSForegroundColorAttributeName, NSLineBreakMode, NSMutableParagraphStyle,
+    NSFontAttributeName, NSForegroundColorAttributeName, NSGestureRecognizer,
+    NSGestureRecognizerState, NSLineBreakMode, NSMutableParagraphStyle,
     NSParagraphStyleAttributeName, NSPasteboard, NSResponder, NSScrollView, NSSecureTextField,
     NSSpellChecker, NSText, NSTextAlignment, NSTextDelegate, NSTextField, NSTextFieldDelegate,
     NSTextInputClient, NSTextStorage, NSTextView, NSTextViewDelegate, NSValidatedUserInterfaceItem,
@@ -1652,6 +1653,56 @@ fn field_editor(mtm: MainThreadMarker, window: &objc2_app_kit::NSWindow) -> Reta
     })
 }
 
+define_class!(
+    /// Observes primary presses on the native editor and its padding. AppKit
+    /// still delivers the original event to the field for caret placement.
+    #[unsafe(super(NSGestureRecognizer, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "NshInputPointer"]
+    struct InputPointer;
+
+    unsafe impl NSObjectProtocol for InputPointer {}
+
+    impl InputPointer {
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &NSEvent) {
+            if event.modifierFlags().contains(NSEventModifierFlags::Control) {
+                self.setState(NSGestureRecognizerState::Failed);
+            } else {
+                self.observe(event);
+            }
+        }
+
+        #[unsafe(method(mouseDragged:))]
+        fn mouse_dragged(&self, event: &NSEvent) {
+            self.observe(event);
+        }
+
+        #[unsafe(method(mouseUp:))]
+        fn mouse_up(&self, event: &NSEvent) {
+            self.observe(event);
+            self.setState(NSGestureRecognizerState::Failed);
+        }
+    }
+);
+
+impl InputPointer {
+    fn observe(&self, event: &NSEvent) {
+        let Some(owner) = self.view().as_deref().and_then(pad_owner) else {
+            return;
+        };
+        let Some(surface) = owner.surface() else {
+            return;
+        };
+        let Some(window) = owner.ns().window() else {
+            return;
+        };
+        let root = crate::input::root_in(&surface, &window);
+        crate::input::enter(&surface, (root.id() != nsh_core::ROOT_ID).then_some(root));
+        crate::input::event(&surface, event);
+    }
+}
+
 struct PadState {
     owner: objc2::rc::Weak<NSView>,
     forwarding: Cell<bool>,
@@ -1707,6 +1758,12 @@ impl InputPad {
         // SAFETY: NSView's designated initializer.
         let this: Retained<Self> =
             unsafe { msg_send![super(this), initWithFrame: ns_rect(0.0, 0.0, 0.0, 0.0)] };
+        // SAFETY: the recognizer has no target or action.
+        let pointer: Retained<InputPointer> = unsafe {
+            msg_send![InputPointer::alloc(mtm), initWithTarget: Option::<&AnyObject>::None, action: Option::<Sel>::None]
+        };
+        pointer.setDelaysPrimaryMouseButtonEvents(false);
+        this.addGestureRecognizer(&pointer);
         Retained::into_super(this)
     }
 
