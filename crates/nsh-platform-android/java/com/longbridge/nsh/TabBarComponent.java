@@ -294,6 +294,9 @@ final class TabBarComponent implements NshComponent {
                     at.topMargin = px((INDICATOR_H_DP - ICON_DP) / 2);
                 } else {
                     badge.setText(badgeText);
+                    // Text with no letters ("99+") reads left to right in RTL instead of "+99"; a badge that
+                    // starts with a letter of an RTL script keeps reading right to left.
+                    badge.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG_LTR);
                     badge.setSingleLine(true);
                     badge.setEllipsize(android.text.TextUtils.TruncateAt.END);
                     badge.setGravity(Gravity.CENTER);
