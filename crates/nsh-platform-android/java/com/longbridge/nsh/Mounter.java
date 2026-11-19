@@ -377,6 +377,7 @@ final class Mounter {
                 case INSERT: insert(b.getInt(), b.getInt(), b.getInt()); break;
                 case REMOVE: {
                     int id = b.getInt();
+                    noteKeyboardLeaving(views.get(id));
                     if (!removeHosted(id)) remove(id);
                     break;
                 }
@@ -964,6 +965,8 @@ final class Mounter {
     }
 
     private void insert(int parentId, int childId, int beforeId) {
+        // Moved, not deleted: whatever happens to its focus, the keyboard is not its to hide.
+        if (keyboardLeaving != null && views.get(childId) == keyboardLeaving) keyboardLeaving = null;
         if (insertHosted(parentId, childId, beforeId)) return;
         View parent = views.get(parentId), child = views.get(childId);
         ViewGroup group = container(parent);
@@ -1076,6 +1079,12 @@ final class Mounter {
 
     private void delete(int id) {
         View v = views.get(id);
+        if (v != null && v == keyboardLeaving) {
+            keyboardLeaving = null;
+            hideKeyboardOf(keyboardWindow, keyboardToken);
+        } else if (v != null) {
+            hideKeyboardIn(v);
+        }
         if (id == pendingFocus.id()) {
             dropPendingFocus();
             android.util.Log.w("nsh", "focus(): view " + id + " was removed before it was shown; the request is dropped");
@@ -2348,6 +2357,34 @@ final class Mounter {
         InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
         imm.hideSoftInputFromWindow(f.getWindowToken(), 0);
         if (f.getRootView() == host.getRootView()) host.requestFocus();
+    }
+
+    /**
+     * A view removed (REMOVE) while the text field with the keyboard was inside it, and that field's window: once
+     * detached the view no longer finds its focus. Deleting it (DELETE) hides the keyboard, as a page or dialog
+     * leaving does ({@link #hideKeyboardIn}); a view only moved (inserted again) keeps it.
+     */
+    private View keyboardLeaving, keyboardWindow;
+    private android.os.IBinder keyboardToken;
+
+    private void noteKeyboardLeaving(View v) {
+        View f = v == null ? null : v.findFocus();
+        if (f == null || !f.onCheckIsTextEditor()) return;
+        keyboardLeaving = v;
+        keyboardWindow = f.getRootView();
+        keyboardToken = f.getWindowToken();
+    }
+
+    /**
+     * Hides the keyboard of {@code window}, which a deleted field had, unless another field there has the focus
+     * now: the keyboard is that field's.
+     */
+    private void hideKeyboardOf(View window, android.os.IBinder token) {
+        View now = window.findFocus();
+        if (now != null && now.onCheckIsTextEditor()) return;
+        InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+        imm.hideSoftInputFromWindow(token, 0);
+        if (window == host.getRootView()) host.requestFocus();
     }
 
     /** The activity's requested orientation before a page set one (null: none set). */
