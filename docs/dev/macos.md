@@ -56,12 +56,12 @@ Primary pointer events over hosted AppKit views (`NSTextField`, `NSTextView`,
 monitor (`input::install`) before AppKit's responder/modal tracking consumes
 them, keeping `:active`, pointer modality, momentum cancellation and
 `PressOutside` overlay dismissal consistent with ordinary `NshView` targets.
-On `<Input>`, `InputState::track_press`, causal `MountSink::handled` tracking
-and `Surface::flush_until_handled` preserve programmatic selections set from
-`onFocus` across both tap-to-click and physical clicks (even while focus-ring
-animations defer ordinary mount batches) before `mouseDown:` returns to
-subsequent key or pointer events, while yielding to explicit user selection
-gestures (drag selection, multi-click, Shift-click, or clicking an
+On `<Input>`, `InputState::track_press`, per-event `MountSink::event_handled`
+acknowledgements and `Surface::flush_until_handled` preserve programmatic
+selections set from `onFocus` across both tap-to-click and physical clicks (even
+while focus-ring animations defer ordinary mount batches) before `mouseDown:`
+returns to subsequent key or pointer events, while yielding to explicit user
+selection gestures (drag selection, multi-click, Shift-click, or clicking an
 already-focused field).
 
 The ordinary-window checks in `tests/native/tap_feedback.rs`

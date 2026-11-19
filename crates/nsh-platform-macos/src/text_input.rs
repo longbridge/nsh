@@ -346,11 +346,11 @@ pub(crate) struct InputState {
     /// True while an explicit selection gesture (`clickCount > 1`, Shift, or
     /// clicking an already-focused input) runs `mouseDown:`.
     explicit_focus_gesture: Cell<bool>,
-    /// Engine event sequence of the latest `Focus` event sent for this input.
-    focus_event: Cell<u64>,
-    /// Suppresses stale programmatic `setSelection` commands caused by events
-    /// before a subsequent explicit user selection or edit gesture.
-    selection_locked_until: Cell<u64>,
+    /// Per-event acknowledgement of the latest `Focus` event sent for this input.
+    focus_event: RefCell<Option<nsh_engine::EventAck>>,
+    /// Suppresses stale programmatic `setSelection` commands caused by a
+    /// pending `Focus` event after a subsequent explicit user selection or edit.
+    selection_locked_until: RefCell<Option<nsh_engine::EventAck>>,
     /// The text the engine knows the input has: the last one reported
     /// (`onChangeText`) or set from JS. A callback that sees another text
     /// comes before the change that reports it.
@@ -453,6 +453,21 @@ impl Ctx {
         listens
     }
 
+    fn send_tracked(
+        &self,
+        kind: EventKind,
+        payload: impl FnOnce() -> EventPayload,
+    ) -> Option<nsh_engine::EventAck> {
+        let (surface, view, _) = self.get()?;
+        let (id, listens) = {
+            let s = view.state();
+            (s.id, s.events.contains(kind))
+        };
+        listens
+            .then(|| surface.event_tracked(id, kind, payload()))
+            .flatten()
+    }
+
     /// A text view's text scrolled, or its size or the viewport's changed.
     fn scrolled(&self) {
         if let Some((surface, view, input)) = self.get() {
@@ -476,7 +491,7 @@ impl Ctx {
         if input.applying.get() {
             return;
         }
-        input.lock_pending_focus_selection(&surface);
+        input.lock_pending_focus_selection();
         let count = input.count.get() + 1;
         input.count.set(count);
         input.remember_undo_manager();
@@ -709,26 +724,21 @@ impl Ctx {
             // The scroll views around show the field, as on phones.
             crate::scroll::reveal(&surface, &view);
         }
-        let kind = if focused {
-            EventKind::Focus
-        } else {
-            EventKind::Blur
-        };
-        let sent_event = self.send(kind, || EventPayload::None);
         if focused {
-            let sent = if sent_event { surface.events_sent() } else { 0 };
-            input.focus_event.set(sent);
+            let ack = self.send_tracked(EventKind::Focus, || EventPayload::None);
+            input.focus_event.replace(ack.clone());
             if !input.pressing.get() && !input.non_pointer_focus.get() {
                 input.just_focused.set(true);
             }
-            if input.explicit_focus_gesture.get() && sent != 0 {
-                input.selection_locked_until.set(sent);
+            if input.explicit_focus_gesture.get() && ack.is_some() {
+                input.selection_locked_until.replace(ack);
             }
             self.selection_changed();
         } else {
+            self.send(EventKind::Blur, || EventPayload::None);
             input.just_focused.set(false);
-            input.focus_event.set(0);
-            input.selection_locked_until.set(0);
+            input.focus_event.replace(None);
+            input.selection_locked_until.replace(None);
         }
     }
 
@@ -877,9 +887,7 @@ impl Ctx {
         let Some(input) = self.input.upgrade() else {
             return false;
         };
-        if let Some(surface) = self.surface.upgrade() {
-            input.lock_pending_focus_selection(&surface);
-        }
+        input.lock_pending_focus_selection();
         if command == sel!(insertNewline:) {
             return self.return_key(&input, text_view, multiline);
         }
@@ -1363,9 +1371,7 @@ define_text_view!(
         fn key_down(&self, event: &NSEvent) {
             let input = self.ivars().get().and_then(|cx| cx.input.upgrade());
             if let Some(input) = &input {
-                if let Some(surface) = area_surface(self) {
-                    input.lock_pending_focus_selection(&surface);
-                }
+                input.lock_pending_focus_selection();
                 input.key_mods.set(event.modifierFlags());
             }
             // SAFETY: NSTextView's own method.
@@ -1681,9 +1687,9 @@ define_text_view!(
         #[unsafe(method(keyDown:))]
         fn key_down(&self, event: &NSEvent) {
             if let Some(cx) = field_ctx(self)
-                && let (Some(surface), Some(input)) = (cx.surface.upgrade(), cx.input.upgrade())
+                && let Some(input) = cx.input.upgrade()
             {
-                input.lock_pending_focus_selection(&surface);
+                input.lock_pending_focus_selection();
             }
             // SAFETY: NSTextView's own method.
             let _: () = unsafe { msg_send![super(self), keyDown: event] };
@@ -2165,10 +2171,11 @@ impl InputState {
 
     /// Prevents an in-flight `onFocus -> setSelection` from overwriting an
     /// explicit user selection or edit made before the engine caught up.
-    fn lock_pending_focus_selection(&self, surface: &Surface) {
-        let focus_seq = self.focus_event.get();
-        if surface.events_handled() < focus_seq {
-            self.selection_locked_until.set(focus_seq);
+    fn lock_pending_focus_selection(&self) {
+        if let Some(ack) = self.focus_event.borrow().as_ref()
+            && !ack.is_handled()
+        {
+            self.selection_locked_until.replace(Some(ack.clone()));
         }
     }
 
@@ -2201,7 +2208,7 @@ impl InputState {
                 } else {
                     self.explicit_focus_gesture.set(true);
                     self.focus_press.set(None);
-                    self.lock_pending_focus_selection(surface);
+                    self.lock_pending_focus_selection();
                 }
             }
             ACTIVE_PRESS
@@ -2233,12 +2240,12 @@ impl InputState {
                 let edited = self.count.get() != fp.edits;
                 if dragged || edited {
                     self.focus_press.set(None);
-                    if let Some((surface, _, _)) = &context {
-                        self.lock_pending_focus_selection(surface);
-                    }
+                    self.lock_pending_focus_selection();
                 } else {
-                    if let Some((surface, _, _)) = &context {
-                        surface.flush_until_handled(self.focus_event.get());
+                    if let Some((surface, _, _)) = &context
+                        && let Some(ack) = self.focus_event.borrow().clone()
+                    {
+                        surface.flush_until_handled(&ack);
                     }
                     if let Some(fp) = self.focus_press.take()
                         && let Some((sel_start, sel_end)) = fp.selection
@@ -2295,8 +2302,8 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
             just_focused: Cell::new(false),
             non_pointer_focus: Cell::new(false),
             explicit_focus_gesture: Cell::new(false),
-            focus_event: Cell::new(0),
-            selection_locked_until: Cell::new(0),
+            focus_event: RefCell::new(None),
+            selection_locked_until: RefCell::new(None),
             known: RefCell::new(String::new()),
             composition: RefCell::new(None),
             pending_value: RefCell::new(None),
@@ -3538,11 +3545,16 @@ pub(crate) fn editing_in(root: &NshView) -> bool {
 }
 
 /// `setSelection` (UTF-16 offsets).
-pub(crate) fn set_selection(surface: &Surface, view: &NshView, start: u32, end: u32) {
+pub(crate) fn set_selection(view: &NshView, start: u32, end: u32) {
     let Some(input) = view.state().input.clone() else {
         return;
     };
-    if surface.events_handled() < input.selection_locked_until.get() {
+    if input
+        .selection_locked_until
+        .borrow()
+        .as_ref()
+        .is_some_and(|ack| !ack.is_handled())
+    {
         return;
     }
     if let Some(mut fp) = input.focus_press.get() {

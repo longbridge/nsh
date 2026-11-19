@@ -750,6 +750,17 @@ pub trait MountSink: Send + 'static {
     /// gives it to the focused field from here.
     fn handled(&self, _events: u64) {}
 
+    /// Called after [`Self::submit`] for each tracked event
+    /// ([`EngineControl::dispatch_event_tracked`]) handled in the turn.
+    ///
+    /// The default marks `ack` complete immediately. Hosts that forward mount
+    /// batches asynchronously to another thread should carry `ack` through the
+    /// same ordered channel and call [`EventAck::complete`] once the preceding
+    /// batches have been applied on that thread.
+    fn event_handled(&self, ack: EventAck) {
+        ack.complete();
+    }
+
     /// The app imports chunk `id` of a split bundle (`import()`), which its
     /// [`Bundle`] does not hold: load it and hand it over with
     /// [`EngineControl::chunk_loaded`] (or [`EngineControl::chunk_failed`]),
@@ -1276,7 +1287,7 @@ const MAX_ADVANCE_ROUNDS: usize = 100_000;
 const MAX_FLUSH_ROUNDS: usize = 64;
 
 enum Message {
-    Event(NodeId, EventKind, EventPayload),
+    Event(NodeId, EventKind, EventPayload, Option<EventAck>),
     Scroll(NodeId, Point<Points>, u32),
     KeyScrolled(NodeId, nsh_core::scroll::KeyMove),
     Kept(Vec<NodeId>),
@@ -1378,6 +1389,35 @@ const PACED_BIND_OPS: usize = 150;
 /// See [`PACED_BIND_OPS`].
 const PACED_BIND_TIME: std::time::Duration = std::time::Duration::from_millis(2);
 
+/// Per-event acknowledgement returned by
+/// [`EngineControl::dispatch_event_tracked`].
+///
+/// Completed via [`MountSink::event_handled`] only after the engine has
+/// processed that specific event and submitted its resulting mount commands
+/// (and, on hosts that forward batches asynchronously to a UI thread, after
+/// those batches have been applied on that thread).
+#[derive(Clone, Debug)]
+pub struct EventAck(Arc<std::sync::atomic::AtomicBool>);
+
+impl EventAck {
+    fn new() -> Self {
+        Self(Arc::new(std::sync::atomic::AtomicBool::new(false)))
+    }
+
+    /// Whether the tracked event has been handled and its mount commands have
+    /// been submitted (or applied on the UI thread for async sinks).
+    pub fn is_handled(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Marks this tracked event as handled. Called by
+    /// [`MountSink::event_handled`] once preceding batches have been submitted
+    /// or applied.
+    pub fn complete(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
 /// A cheap, cloneable handle for sending input to the engine from any thread.
 #[derive(Clone)]
 pub struct EngineControl {
@@ -1385,9 +1425,6 @@ pub struct EngineControl {
     /// The input modality last sent ([`Self::set_input_modality`]), shared
     /// by every clone: 0 none, else 1 + the modality.
     modality: Arc<std::sync::atomic::AtomicU8>,
-    /// Events sent so far ([`Self::dispatch_event`]), shared by every clone
-    /// and matching [`MountSink::handled`].
-    events_sent: Arc<std::sync::atomic::AtomicU64>,
     /// What cleans a download's staging directory when the engine is gone
     /// and an event cannot be delivered: the platform's last stop
     /// acknowledgement goes here.
@@ -1403,16 +1440,25 @@ impl EngineControl {
         // While the core lives the sink only records (the core publishes);
         // once the core is gone the sink cleans.
         self.downloads.dispatch(id, event, &payload);
-        if self.tx.send(Message::Event(id, event, payload)).is_ok() {
-            self.events_sent
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        }
+        let _ = self.tx.send(Message::Event(id, event, payload, None));
     }
 
-    /// Number of events queued via [`Self::dispatch_event`] so far, matching
-    /// [`MountSink::handled`].
-    pub fn events_sent(&self) -> u64 {
-        self.events_sent.load(std::sync::atomic::Ordering::Relaxed)
+    /// Delivers an input event and returns an [`EventAck`] bound to this
+    /// specific event, completing via [`MountSink::event_handled`] once its
+    /// mount commands have been submitted. Returns `None` if the engine has
+    /// stopped.
+    pub fn dispatch_event_tracked(
+        &self,
+        id: NodeId,
+        event: EventKind,
+        payload: EventPayload,
+    ) -> Option<EventAck> {
+        self.downloads.dispatch(id, event, &payload);
+        let ack = EventAck::new();
+        self.tx
+            .send(Message::Event(id, event, payload, Some(ack.clone())))
+            .ok()
+            .map(|()| ack)
     }
 
     /// Reports the content offset of a scroll view or list, and how many
@@ -1707,12 +1753,10 @@ impl Engine {
         let media_files = Arc::new(media_files(&config, &app_access(&config.app)));
         let (tx, rx) = crossbeam_channel::unbounded();
         let modality = Arc::default();
-        let events_sent = Arc::default();
         let downloads = nsh_core::webview::downloads::DownloadCleanup::new();
         setup(&EngineControl {
             tx: tx.clone(),
             modality: Arc::clone(&modality),
-            events_sent: Arc::clone(&events_sent),
             downloads: downloads.clone(),
         });
         let engine_tx = tx.clone();
@@ -1740,7 +1784,6 @@ impl Engine {
             control: EngineControl {
                 tx,
                 modality,
-                events_sent,
                 downloads,
             },
             thread: Some(thread),
@@ -1949,7 +1992,6 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
         let control = EngineControl {
             tx: tx.clone(),
             modality: Arc::default(),
-            events_sent: Arc::default(),
             downloads: downloads.clone(),
         };
         setup(&control);
@@ -2044,11 +2086,8 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
             }
             _ => false,
         };
-        self.control
-            .events_sent
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.driver
-            .handle(Message::Event(id, kind, payload), &self.rx);
+            .handle(Message::Event(id, kind, payload, None), &self.rx);
         prevented
     }
 
@@ -2326,6 +2365,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         // (the core keeps it for the first `open` listener too).
         let mut early = Vec::new();
         let mut early_events = 0u64;
+        let mut early_acks = Vec::new();
         let mut displays: Arc<[nsh_core::desktop::Display]> = Arc::from(Vec::new());
         while let Ok(message) = rx.try_recv() {
             match message {
@@ -2339,8 +2379,11 @@ impl<M: TextEngine + 'static> Driver<M> {
                     core.set_displays(list.clone());
                     displays = list;
                 }
-                Message::Event(nsh_core::ROOT_ID, EventKind::UrlScheme, payload) => {
+                Message::Event(nsh_core::ROOT_ID, EventKind::UrlScheme, payload, ack) => {
                     early_events += 1;
+                    if let Some(ack) = ack {
+                        early_acks.push(ack);
+                    }
                     core.component_event(nsh_core::ROOT_ID, EventKind::UrlScheme, &payload);
                 }
                 message => early.push(message),
@@ -2374,6 +2417,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             },
             events_handled: early_events,
             events_reported: 0,
+            pending_acks: early_acks,
             pinned: config.pinned,
             environment: config.environment,
             shaders_unavailable: false,
@@ -2983,6 +3027,10 @@ struct State<M: TextEngine> {
     /// last reported ([`MountSink::handled`]).
     events_handled: u64,
     events_reported: u64,
+    /// Acknowledgements for tracked events handled in the current turn,
+    /// reported to [`MountSink::event_handled`] once the turn's batch is
+    /// submitted.
+    pending_acks: Vec<EventAck>,
 }
 
 /// Who made a request: JS (`fetch`), or a Rust component's task
@@ -3482,12 +3530,16 @@ impl<M: TextEngine> State<M> {
         }
     }
 
-    /// Tells the platform how many events were handled, once the commit
-    /// of what they changed is submitted.
+    /// Tells the platform how many events were handled, and delivers any
+    /// per-event acknowledgements, once the commit of what they changed is
+    /// submitted.
     fn report_handled(&mut self, sink: &dyn MountSink) {
         if self.events_handled != self.events_reported {
             self.events_reported = self.events_handled;
             sink.handled(self.events_handled);
+        }
+        for ack in self.pending_acks.drain(..) {
+            sink.event_handled(ack);
         }
     }
 
@@ -3957,8 +4009,11 @@ fn press_outside<M: TextEngine>(
 /// Returns false on shutdown.
 fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message: Message) -> bool {
     match message {
-        Message::Event(id, event, mut payload) => {
+        Message::Event(id, event, mut payload, ack) => {
             state.events_handled += 1;
+            if let Some(ack) = ack {
+                state.pending_acks.push(ack);
+            }
             if state.trace {
                 log::info!(target: "nsh::perf", "event {event:?} on view {id}");
             }
@@ -4632,7 +4687,6 @@ mod download_cleanup_tests {
         let control = EngineControl {
             tx,
             modality: Arc::default(),
-            events_sent: Arc::default(),
             downloads: cleanup.clone(),
         };
         drop(rx);
@@ -4656,5 +4710,173 @@ mod download_cleanup_tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
+    }
+}
+
+#[cfg(test)]
+mod event_ack_tests {
+    //! Per-event acknowledgements from [`EngineControl::dispatch_event_tracked`]
+    //! must stay bound to their specific event across concurrent producers and
+    //! complete only after that event's mount commands have been submitted.
+
+    use std::time::{Duration, Instant};
+
+    use nsh_core::ApproxTextEngine;
+    use nsh_core::element::{Root, element_ref, input, view};
+    use nsh_core::prelude::{Element, Interactive, IntoElement, ParentElement, component};
+    use nsh_core::{Command, EventKind, EventPayload, MountBatch, MountItem, NodeId, ViewKind};
+
+    use super::*;
+
+    enum SinkMsg {
+        Batch(MountBatch),
+        Handled(u64),
+        EventHandled(EventAck),
+    }
+
+    struct ChannelSink(crossbeam_channel::Sender<SinkMsg>);
+
+    impl MountSink for ChannelSink {
+        fn submit(&self, batch: MountBatch) {
+            let _ = self.0.send(SinkMsg::Batch(batch));
+        }
+
+        fn handled(&self, events: u64) {
+            let _ = self.0.send(SinkMsg::Handled(events));
+        }
+
+        fn event_handled(&self, ack: EventAck) {
+            let _ = self.0.send(SinkMsg::EventHandled(ack));
+        }
+    }
+
+    static GATE: std::sync::OnceLock<(
+        crossbeam_channel::Sender<()>,
+        crossbeam_channel::Receiver<()>,
+    )> = std::sync::OnceLock::new();
+
+    #[component]
+    fn TwoProducerPage() -> impl IntoElement {
+        let input_ref = element_ref();
+        view()
+            .child(view().on_press(move || {
+                let (entered_tx, release_rx) = GATE.get().unwrap();
+                let _ = entered_tx.send(());
+                let _ = release_rx.recv_timeout(Duration::from_secs(5));
+            }))
+            .child(
+                input()
+                    .element_ref(&input_ref)
+                    .default_value("Hello")
+                    .on_focus(move || input_ref.set_selection(0, 5)),
+            )
+    }
+
+    #[test]
+    fn tracked_focus_ack_orders_behind_concurrent_producer_and_selection_command() {
+        let (entered_tx, entered_rx) = crossbeam_channel::bounded::<()>(1);
+        let (release_tx, release_rx) = crossbeam_channel::bounded::<()>(1);
+        let _ = GATE.set((entered_tx, release_rx));
+        let (sink_tx, sink_rx) = crossbeam_channel::unbounded();
+
+        let root = Root::new::<TwoProducerPage>(|| ());
+
+        let config = EngineConfig::new(App::Rust(root));
+        let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(sink_tx)).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut button_id: Option<NodeId> = None;
+        let mut input_id: Option<NodeId> = None;
+        while button_id.is_none() || input_id.is_none() {
+            let msg = sink_rx
+                .recv_deadline(deadline)
+                .expect("initial mount batch");
+            if let SinkMsg::Batch(batch) = msg {
+                for item in batch.items {
+                    if let MountItem::Create { id, kind } = item {
+                        match kind {
+                            ViewKind::View if id != nsh_core::ROOT_ID => {
+                                button_id = Some(id);
+                            }
+                            ViewKind::Input => input_id = Some(id),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        let button_id = button_id.unwrap();
+        let input_id = input_id.unwrap();
+
+        // Producer 1 (background thread) dispatches an untracked event and
+        // pauses inside the engine turn.
+        let producer_a = engine.control().clone();
+        let worker = std::thread::spawn(move || {
+            producer_a.dispatch_event(button_id, EventKind::Press, EventPayload::None);
+        });
+        entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("producer 1 event entered engine");
+
+        // Producer 2 (UI thread) enqueues a tracked Focus event while producer 1
+        // is still in flight.
+        let producer_b = engine.control().clone();
+        let focus_ack = producer_b
+            .dispatch_event_tracked(input_id, EventKind::Focus, EventPayload::None)
+            .expect("engine alive");
+        assert!(!focus_ack.is_handled());
+
+        // Let producer 1 finish; its `Handled(1)` report must not satisfy
+        // `focus_ack`, and `SetSelection` must arrive before `focus_ack` completes.
+        release_tx.send(()).unwrap();
+        worker.join().unwrap();
+
+        let mut saw_set_selection = false;
+        let mut saw_earlier_handled = false;
+        while !focus_ack.is_handled() {
+            let msg = sink_rx
+                .recv_deadline(deadline)
+                .expect("tracked focus acknowledgement");
+            match msg {
+                SinkMsg::Batch(batch) => {
+                    for item in batch.items {
+                        if let MountItem::Command {
+                            id,
+                            command: Command::SetSelection { start: 0, end: 5 },
+                        } = item
+                            && id == input_id
+                        {
+                            assert!(
+                                !focus_ack.is_handled(),
+                                "ack completed before SetSelection was applied"
+                            );
+                            saw_set_selection = true;
+                        }
+                    }
+                }
+                SinkMsg::Handled(count) => {
+                    if count == 1 {
+                        saw_earlier_handled = true;
+                        assert!(
+                            !focus_ack.is_handled(),
+                            "producer 1's Handled(1) must not satisfy producer 2's focus ack"
+                        );
+                    }
+                }
+                SinkMsg::EventHandled(ack) => {
+                    assert!(
+                        saw_set_selection,
+                        "EventHandled arrived before Focus's SetSelection command"
+                    );
+                    ack.complete();
+                }
+            }
+        }
+        assert!(saw_set_selection);
+        assert!(
+            saw_earlier_handled || focus_ack.is_handled(),
+            "focus ack completed cleanly after SetSelection"
+        );
+        drop(engine);
     }
 }

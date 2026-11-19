@@ -250,6 +250,7 @@ impl<M: TextEngine> Core<M> {
     /// cancellation) supersedes the pending release.
     pub fn release_states_after(&mut self, id: NodeId, states: u16, hold: std::time::Duration) {
         let Ok(key) = self.key(id) else { return };
+        self.pressed_impulses.retain(|&(k, _, _)| k != key);
         if self.class_env.reduce_motion
             || hold.is_zero()
             || crate::time::manual()

@@ -8423,6 +8423,27 @@ fn release_states_after_holds_pressed_across_touch_end_hover_and_cancellation() 
     let _ = c.component_event(2, EventKind::PressUp, &EventPayload::None);
     let _ = c.component_event(2, EventKind::Press, &EventPayload::None);
     assert!(!c.component_event(2, EventKind::PressDown, &EventPayload::None));
+    // 3. Explicit immediate release (`Duration::ZERO`) cancels any pending
+    //    impulse on that node and clears `PRESSED` right away.
+    c.set_states(2, state::PRESSED);
+    c.release_states_after(2, 0, Duration::from_millis(64));
+    assert!(c.next_state_timer().is_some());
+    assert_eq!(
+        view_style_of(&c.commit().unwrap(), 2)
+            .unwrap()
+            .background_color,
+        Color(0xe4e4_e7ff)
+    );
+    c.release_states_after(2, 0, Duration::ZERO);
+    assert_eq!(c.next_state_timer(), None);
+    assert_eq!(
+        view_style_of(&c.commit().unwrap(), 2)
+            .unwrap()
+            .background_color,
+        Color(0xffff_ffff)
+    );
+
+    // 4. `reduce_motion` flushes any active impulses immediately.
     c.set_states(2, state::PRESSED);
     c.release_states_after(2, 0, Duration::from_millis(64));
     assert!(c.next_state_timer().is_some());
