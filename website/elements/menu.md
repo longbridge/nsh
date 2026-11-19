@@ -368,7 +368,7 @@ import { MenuButton } from "nsh/base";
     { id: "settings", label: "Settings", icon: "gearshape" },
     { id: "read", label: "Mark all as read", disabled: !unread() },
     { id: "", label: "Language", items: languages.map((l) => ({ id: l.id, label: l.label, checked: l.id === lang() })) },
-    { id: "", label: "Appearance", inline: true, items: [
+    { id: "", label: "Appearance", inline: true, singleSelection: true, items: [
       { id: "light", label: "Light", checked: !dark() },
       { id: "dark", label: "Dark", checked: dark() },
     ] },
@@ -383,7 +383,10 @@ import { MenuButton } from "nsh/base";
 
 The items are data, each with an `id` of yours that `onSelect({ id })` reports; a check, `disabled` and `destructive`
 (red on iOS, the theme's error color on Android) are the item's state, the app's to change; an item with `items` is a submenu, or with `inline` a section
-shown in place under its `label`. The children, `class` and `style` are the trigger, drawn by the app on every platform.
+shown in place under its `label`. With `singleSelection`, a submenu's or a section's own actions are one choice (a sort
+order, an appearance) and the app checks one: iOS shows it as a single-selection menu, Android as radio buttons, the
+desktops as check marks; without it, checks are independent. The children, `class` and `style` are the trigger, drawn
+by the app on every platform.
 
 - **iOS and Mac Catalyst**: the trigger is covered by a transparent `UIButton` whose `UIMenu` is its primary action:
   a tap, VoiceOver's activation or a hardware keyboard opens it at once, without waiting for JS. `icon` is an SF
@@ -394,7 +397,7 @@ shown in place under its `label`. The children, `class` and `style` are the trig
 - **Android**: a transparent button over the trigger opens the system's popup menu below it at once, lined up with the
   trigger's end when the trigger is in the end half of the window. `title` is the menu's first row, which cannot be
   chosen (TalkBack reads it as a disabled item); `svg`, an SVG document, is the item's icon, drawn in the item's text
-  color on Android 10 and later (`icon` is iOS's). Checks, submenus and sections are the system's.
+  color on Android 10 and later (`icon` is iOS's). Checks, radio buttons, submenus and sections are the system's.
 - **The web**: there is no system menu for a view; the trigger shows and opens nothing. Use `Menu` there, picked by
   `platform.os`.
 
@@ -406,9 +409,9 @@ shown in place under its `label`. The children, `class` and `style` are the trig
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say for the button. |
 | `class`, `style`, `children` | style methods, `.child(..)` | | none | The trigger the app draws. |
 
-`MenuButtonItem` is `{ id, label, icon?, svg?, checked?, disabled?, destructive?, items?, inline? }` (Rust:
-`MenuButtonItem::new(id, label)`, `::submenu(label, items)`, `::section(label, items)`, then `.icon(..)`, `.svg(..)`,
-`.checked(..)`, `.disabled(..)`, `.destructive(..)`). Its one event is `onSelect({ id })` (Rust:
+`MenuButtonItem` is `{ id, label, icon?, svg?, checked?, disabled?, destructive?, items?, inline?, singleSelection? }`
+(Rust: `MenuButtonItem::new(id, label)`, `::submenu(label, items)`, `::section(label, items)`, then `.icon(..)`,
+`.svg(..)`, `.checked(..)`, `.disabled(..)`, `.destructive(..)`, `.single_selection(..)`). Its one event is `onSelect({ id })` (Rust:
 `.on_select(|id: &SharedString| ..)`), after the menu closed.
 
 ## The system's context menu on iOS and Android

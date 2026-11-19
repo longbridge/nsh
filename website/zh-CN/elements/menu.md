@@ -315,7 +315,7 @@ import { MenuButton } from "nsh/base";
     { id: "settings", label: "设置", icon: "gearshape" },
     { id: "read", label: "全部已读", disabled: !unread() },
     { id: "", label: "语言", items: languages.map((l) => ({ id: l.id, label: l.label, checked: l.id === lang() })) },
-    { id: "", label: "外观", inline: true, items: [
+    { id: "", label: "外观", inline: true, singleSelection: true, items: [
       { id: "light", label: "浅色", checked: !dark() },
       { id: "dark", label: "深色", checked: dark() },
     ] },
@@ -328,11 +328,11 @@ import { MenuButton } from "nsh/base";
 </MenuButton>;
 ```
 
-条目是数据，每个都有应用自己的 `id`，由 `onSelect({ id })` 报告；勾选、`disabled` 和 `destructive`（在 iOS 上为红色，在 Android 上为主题的错误色）是条目的状态，由应用改变；带 `items` 的条目是子菜单，再加 `inline` 则是以 `label` 为标题、就地显示的分组。子元素、`class` 和 `style` 构成触发器，在所有平台上都由应用绘制。
+条目是数据，每个都有应用自己的 `id`，由 `onSelect({ id })` 报告；勾选、`disabled` 和 `destructive`（在 iOS 上为红色，在 Android 上为主题的错误色）是条目的状态，由应用改变；带 `items` 的条目是子菜单，再加 `inline` 则是以 `label` 为标题、就地显示的分组。子菜单或分组加上 `singleSelection` 后，它自己的操作是一组单选（排序方式、外观），由应用勾选其中一项：iOS 显示为单选菜单，Android 显示为单选按钮，桌面显示为勾选标记；不加时各个勾选互相独立。子元素、`class` 和 `style` 构成触发器，在所有平台上都由应用绘制。
 
 - **iOS 和 Mac Catalyst**：触发器上覆盖一个透明的 `UIButton`，它的 `UIMenu` 是主操作：点按、VoiceOver 激活或硬件键盘都会立即打开菜单，不等待 JS。`icon` 是 SF Symbol；`title` 显示在菜单顶部。VoiceOver 访问的是这个按钮（名称来自 `accessibilityLabel`），而不是它下面的触发器内容。新的 `items` 在下次打开时生效。
 - **桌面（macOS、Windows、Linux）**：按下时在指针处以平台的上下文菜单显示这些条目（同 `nsh/desktop` 的 `Menu.popup`），分组之间用分隔线；不显示 `icon`、`title` 和 `destructive`。
-- **Android**：触发器上覆盖一个透明按钮，点按立即在触发器下方打开系统的弹出菜单；触发器在窗口靠末端的一半时，菜单与触发器末端对齐。`title` 是菜单的第一行，不能选择（TalkBack 读作已停用的条目）；`svg` 是一份 SVG 文档，作为条目的图标，在 Android 10 及以上按条目文字的颜色绘制（`icon` 是 iOS 用的）。勾选、子菜单和分组由系统绘制。
+- **Android**：触发器上覆盖一个透明按钮，点按立即在触发器下方打开系统的弹出菜单；触发器在窗口靠末端的一半时，菜单与触发器末端对齐。`title` 是菜单的第一行，不能选择（TalkBack 读作已停用的条目）；`svg` 是一份 SVG 文档，作为条目的图标，在 Android 10 及以上按条目文字的颜色绘制（`icon` 是 iOS 用的）。勾选、单选按钮、子菜单和分组由系统绘制。
 - **Web**：视图没有系统菜单；触发器照常显示，按下不打开任何内容。在 Web 上按 `platform.os` 改用 `Menu`。
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
@@ -343,7 +343,7 @@ import { MenuButton } from "nsh/base";
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 读屏软件为这个按钮朗读的内容。 |
 | `class`、`style`、`children` | 样式方法、`.child(..)` | | 无 | 应用绘制的触发器。 |
 
-`MenuButtonItem` 为 `{ id, label, icon?, svg?, checked?, disabled?, destructive?, items?, inline? }`（Rust：`MenuButtonItem::new(id, label)`、`::submenu(label, items)`、`::section(label, items)`，再加 `.icon(..)`、`.svg(..)`、`.checked(..)`、`.disabled(..)`、`.destructive(..)`）。唯一的事件是 `onSelect({ id })`（Rust：`.on_select(|id: &SharedString| ..)`），在菜单关闭后触发。
+`MenuButtonItem` 为 `{ id, label, icon?, svg?, checked?, disabled?, destructive?, items?, inline?, singleSelection? }`（Rust：`MenuButtonItem::new(id, label)`、`::submenu(label, items)`、`::section(label, items)`，再加 `.icon(..)`、`.svg(..)`、`.checked(..)`、`.disabled(..)`、`.destructive(..)`、`.single_selection(..)`）。唯一的事件是 `onSelect({ id })`（Rust：`.on_select(|id: &SharedString| ..)`），在菜单关闭后触发。
 
 ## iOS 和 Android 上的系统上下文菜单
 
