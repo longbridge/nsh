@@ -622,6 +622,14 @@ impl Surface {
     /// The window's client area is `pixels` big at `scale` pixels per point.
     pub(crate) fn resized(self: &Rc<Self>, pixels: (u32, u32), scale: f32) {
         self.pixels.set(pixels);
+        // No area (a minimized window's client area is empty): nothing is
+        // drawn, and the app keeps its size, as in a minimized window of its
+        // own (`app_window::resized`) and on the other platforms. Laid out
+        // at 0 x 0 it would see `windowSize` collapse and lay itself out
+        // twice, there and back, for a size nobody sees.
+        if pixels.0 == 0 || pixels.1 == 0 {
+            return;
+        }
         let scale_changed = (self.scale.replace(scale) - scale).abs() > f32::EPSILON;
         let width = pixels.0 as f32 / scale;
         let height = pixels.1 as f32 / scale;
@@ -1286,6 +1294,22 @@ mod tests {
     };
 
     use super::*;
+
+    /// A minimized window's client area is empty: the app keeps the size it
+    /// had, and nothing is drawn meanwhile.
+    #[test]
+    fn an_empty_client_area_keeps_the_apps_size() {
+        let surface = Surface::new(Default::default());
+        surface.resized((800, 600), 2.0);
+        let size = Size::new(Points(400.0), Points(300.0));
+        assert_eq!(surface.environment.get().window, size);
+        surface.resized((0, 0), 2.0);
+        assert_eq!(surface.pixel_size(), (0, 0));
+        assert_eq!(surface.environment.get().window, size);
+        assert_eq!(surface.root.state().frame.size, size);
+        surface.resized((1000, 600), 2.0);
+        assert_eq!(surface.environment.get().window.width, Points(500.0));
+    }
 
     // This test uses the desktop's actual cursor; ordinary crate tests open
     // no windows. Restore it even if an assertion fails.
