@@ -88,6 +88,7 @@ function NameField() {
 | `pasteBehavior` | `.paste_behavior(PasteBehavior::Report)` | `"insert" \| "report"` | `"insert"` | 粘贴做什么：`"insert"` 插入粘贴的文本，`"report"` 不插入任何内容，由应用处理 `onPaste` 报告的内容。图片和文件从不插入。 |
 | `submitBehavior` | `.submit_behavior(SubmitBehavior::Submit)` | `"submit" \| "blurAndSubmit" \| "newline"` | `"blurAndSubmit"`（单行），`"newline"`（多行） | 回车键做什么：`"submit"` 触发 `onSubmit` 并保持焦点，`"blurAndSubmit"` 提交后再失去焦点，`"newline"` 插入换行（多行；单行总是提交）。会提交的多行输入框在硬件键盘上仍可用 Shift+Return 或 Option / Alt+Return 换行。`"submit"` 让键盘保持弹出（例如连续发送多条消息）。 |
 | `autoFocus` | `.auto_focus(..)` | `boolean` | `false` | 出现时自动获得焦点。 |
+| `selectTextOnFocus` | `.select_text_on_focus(..)` | `boolean` | `false` | 输入框获得焦点时（点击、Tab、`focus()`、`autoFocus`）选中全部文本；拖动选择、Shift 点击或双击选词时保留用户的选区。 |
 
 ### 光标与选区
 

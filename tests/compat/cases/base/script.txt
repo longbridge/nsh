@@ -4799,3 +4799,15 @@ expect Tab a
 expect Tab b
 expect Grip 0 horizontal idle
 covers [props] DockArea.renderHandle
+
+# base-tree-slots
+# The header shows above the rows; `empty` shows while no item does.
+tap id:case-base-tree-slots
+expect Pinned files
+expect No files
+tap id:tree-slots-fill
+expect README.md
+absent No files
+expect Pinned files
+covers [props] Tree.header
+covers [props] Tree.empty

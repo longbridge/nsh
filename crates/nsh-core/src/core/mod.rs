@@ -1511,6 +1511,9 @@ pub struct Core<M: TextEngine> {
     /// focus does, restyled when it starts or stops showing
     /// (`classes::styled_states`).
     projected_focus: Vec<(Key, NodeId)>,
+    /// Short completed presses whose `PRESSED` state is held until a
+    /// deadline so same-turn tap-to-click gestures still render `:active`.
+    pressed_impulses: Vec<(Key, NodeId, crate::time::Instant)>,
     /// The views a pointer passed on into an element is over
     /// (`ElementRef::hover_at`), by element, innermost first.
     passed_hovers: rustc_hash::FxHashMap<NodeId, Vec<NodeId>>,
@@ -1755,6 +1758,7 @@ impl<M: TextEngine> Core<M> {
             focus_visible_on: None,
             focus_visible_moved: false,
             projected_focus: Vec::new(),
+            pressed_impulses: Vec::new(),
             passed_hovers: Default::default(),
             fixed_changed: Vec::new(),
             zero_advances: Default::default(),
@@ -6594,6 +6598,10 @@ impl<M: TextEngine> Core<M> {
                     }
                     Prop::AutoFocus(on) => {
                         c.auto_focus = on;
+                        false
+                    }
+                    Prop::SelectTextOnFocus(on) => {
+                        c.select_text_on_focus = on;
                         false
                     }
                     Prop::Caret(on) => {

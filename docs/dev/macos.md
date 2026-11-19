@@ -39,18 +39,35 @@ A dialog's ordinary fade out retains its native view hierarchy until the animati
 compositing glass and backdrop materials. It leaves the input scope immediately; reopening a retained modal
 finishes its previous fade before presenting it again. Slide and shader transitions keep their snapshot path.
 
-## Short pointer presses
+## Short pointer presses and hosted inputs
 
-The pointer adapter keeps a successful short press's `active:` feedback visible
-briefly when AppKit delivers down and up together, as with trackpad tap-to-click.
-Press and touch callbacks still run at release. A new press or cancellation clears
-pending feedback, and removed views and stopped surfaces leave no retained feedback.
-Reduced motion and the native test driver keep immediate visual release; the
-headless driver is unchanged. The ordinary-window checks in
-`tests/native/tap_feedback.rs` exercise same-turn events, a following held press,
-drag cancellation and teardown (`NSH_TAP_FEEDBACK_CHECK_ONLY=1`).
-`NSH_TAP_FEEDBACK_PLAIN_ONLY=1` restricts that check to non-transition styles;
-animated feedback requires a window connected to a screen.
+Short completed presses (`< 64 ms`, including trackpad tap-to-click where AppKit
+delivers `LeftMouseDown` and `LeftMouseUp` in the same RunLoop turn) clear the
+platform view's local `PRESSED` bit immediately at release and ask `nsh-core`
+(`Core::release_states_after`, driven by `Driver::due()`) to hold `:active`
+feedback for the remainder of the 64 ms pulse. Press and touch callbacks still
+run at release, a subsequent press or cancellation supersedes any pending
+impulse in the core, and no `NshView` references or timers remain on the main
+thread. Reduced motion and the native test driver release immediately; the
+headless driver's manual clock is unchanged.
+
+Primary pointer events over hosted AppKit views (`NSTextField`, `NSTextView`,
+`NshInputPad`, `WKWebView`) are observed through a surface-local `NSEvent`
+monitor (`input::install`) before AppKit's responder/modal tracking consumes
+them, keeping `:active`, pointer modality, momentum cancellation and
+`PressOutside` overlay dismissal consistent with ordinary `NshView` targets.
+`InputState::track_press` wraps an input editor's `mouseDown:` (AppKit's modal
+tracking of the press) and applies `selectTextOnFocus` once tracking ends: a plain
+click that focused the input selects its text, while a drag, a double click or a
+Shift-click keeps the selection the user made, and a click on a focused input
+places the caret. Focus that arrives any other way (Tab, `focus()`, `autoFocus`)
+selects as it arrives. Nothing waits for JS; an app that wants another range on
+focus sets it from `onFocus`, which applies once the engine answers.
+
+The ordinary-window checks in `tests/native/tap_feedback.rs`
+(`NSH_TAP_FEEDBACK_CHECK_ONLY=1`; `NSH_TAP_FEEDBACK_PLAIN_ONLY=1` without a
+screen) and `tests/native/focus_selection.rs`
+(`NSH_FOCUS_SELECTION_CHECK_ONLY=1`) cover both paths.
 
 ## Nested shaders
 

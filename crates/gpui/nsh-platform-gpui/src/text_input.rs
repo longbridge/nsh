@@ -113,6 +113,10 @@ enum Drag {
     Word(usize, usize),
     /// Whole lines, from the line triple-clicked.
     Line(usize, usize),
+    /// The whole text, selected by the press that focused a field that
+    /// selects on focus (`selectTextOnFocus`); dragging away from where it
+    /// was pressed (the offset) selects characters from there instead.
+    All(usize),
 }
 
 /// The text input `view` holds now (`None`: it is no input).
@@ -751,6 +755,9 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
     set_changing(surface, true);
     if old.as_ref() != view {
         move_focus(surface, view, old.as_ref());
+        if let Some(view) = view {
+            select_on_focus(surface, view);
+        }
         // The new field's value may still be on its way from the engine,
         // after what the old one reported. Text typed now waits for it.
         if view.is_some() {
@@ -763,6 +770,21 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
     }
     set_changing(surface, false);
     flush_pending(surface);
+}
+
+/// `selectTextOnFocus`: the field that just took the focus selects its
+/// whole text, decided here as the focus arrives rather than by JS, and
+/// before text typed meanwhile is given to it (which then replaces it).
+fn select_on_focus(surface: &Surface, view: &NshView) {
+    let Some(input) = input_of(view) else {
+        return;
+    };
+    if !input.focused.get() || !input.config.borrow().select_text_on_focus {
+        return;
+    }
+    input.model.borrow_mut().select_all();
+    input.goal_x.set(None);
+    after_edit(surface, view, &input, false);
 }
 
 fn set_changing(surface: &Surface, changing: bool) {
@@ -1882,12 +1904,30 @@ pub(crate) fn pointer(surface: &Rc<Surface>, view: &NshView, event: &ItemPointer
                 // the input method on a press).
                 ime::unmark_text(surface);
             }
+            // A plain click that focuses a field selecting on focus keeps
+            // the whole text `set_focus` selected; Shift-clicks, multiple
+            // clicks and clicks in the focused field select as usual.
+            let keep_all = !input.focused.get()
+                && event.clicks <= 1
+                && !event.modifiers.shift
+                && input.config.borrow().select_text_on_focus;
+            // A Shift-press that focuses the field extends the selection
+            // the field kept rather than the one focusing selects.
+            let kept = (event.modifiers.shift && !input.focused.get()).then(|| {
+                let model = input.model.borrow();
+                let ((start, end), caret) = (model.selection(), model.caret());
+                (if caret == start { end } else { start }, caret)
+            });
             set_focus(surface, Some(view));
+            if let Some((anchor, caret)) = kept {
+                input.model.borrow_mut().select(anchor, caret);
+            }
             let at = input.hit(x, y);
             let secure = input.secure();
             let drag = {
                 let mut model = input.model.borrow_mut();
                 match event.clicks {
+                    0 | 1 if keep_all && input.focused.get() => Drag::All(at),
                     0 | 1 => {
                         model.move_to(at, event.modifiers.shift);
                         Drag::Char
@@ -1923,6 +1963,15 @@ pub(crate) fn pointer(surface: &Rc<Surface>, view: &NshView, event: &ItemPointer
             {
                 let mut model = input.model.borrow_mut();
                 match drag {
+                    Drag::All(from) => {
+                        // Until the pointer leaves the offset it pressed,
+                        // the whole text stays selected.
+                        if at == from {
+                            return true;
+                        }
+                        model.select(from, at);
+                        input.drag.set(Some(Drag::Char));
+                    }
                     Drag::Char => model.move_to(at, true),
                     Drag::Word(s, e) | Drag::Line(s, e) => {
                         let (ws, we) = match drag {

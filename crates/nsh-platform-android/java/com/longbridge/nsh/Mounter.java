@@ -687,12 +687,16 @@ final class Mounter {
                     int count = b.getInt();
                     NshComponent c = v instanceof ComponentBox ? ((ComponentBox) v).component : null;
                     if (c instanceof RustComponent) {
+                        for (int i = 0; i < count; i++) {
+                            b.getInt();
+                            b.getInt();
+                        }
                         ((RustComponent) c).step(seq);
-                    } else if (c != null) {
+                    } else {
                         for (int i = 0; i < count; i++) {
                             String name = string(objects, b.getInt());
                             String json = string(objects, b.getInt());
-                            c.setProp(name, Json.parse(json));
+                            if (c != null) c.setProp(name, Json.parse(json));
                         }
                     }
                     break;
@@ -2289,7 +2293,8 @@ final class Mounter {
         int keyboard = b.getInt(), returnKey = b.getInt(), capitalize = b.getInt();
         boolean autoCorrect = b.getInt() != 0, multiline = b.getInt() != 0;
         int maxLength = b.getInt();
-        boolean editable = b.getInt() != 0, autoFocus = b.getInt() != 0, hasSelection = b.getInt() != 0;
+        boolean editable = b.getInt() != 0, autoFocus = b.getInt() != 0, selectOnFocus = b.getInt() != 0;
+        boolean hasSelection = b.getInt() != 0;
         int selection = b.getInt();
         boolean hasCaret = b.getInt() != 0;
         int caret = b.getInt();
@@ -2309,7 +2314,7 @@ final class Mounter {
         String family = familyIndex >= 0 ? (String) objects[familyIndex] : null;
         ((InputBox) v).configure(size, weight, italic, color, family, spacing, align, placeholder,
                 hasPlaceholderColor, placeholderColor, secure, keyboard, returnKey, capitalize, autoCorrect,
-                multiline, maxLength, editable, autoFocus, hasSelection, selection, hasCaret, caret, submit,
+                multiline, maxLength, editable, autoFocus, selectOnFocus, hasSelection, selection, hasCaret, caret, submit,
                 inputRtl, fontVariant);
     }
 

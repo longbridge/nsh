@@ -816,6 +816,13 @@ impl Input {
         self.bind_prop(focus, |focus: bool| Prop::AutoFocus(focus))
     }
 
+    /// Selects the whole text when the input takes the focus (TS:
+    /// `selectTextOnFocus`); a click that drags or extends a selection keeps
+    /// the user's.
+    pub fn select_text_on_focus(self, select: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(select, |select: bool| Prop::SelectTextOnFocus(select))
+    }
+
     /// The caret is drawn (default yes; TS: `caret`).
     pub fn caret(self, caret: impl IntoReactive<bool>) -> Self {
         self.bind_prop(caret, |caret: bool| Prop::Caret(caret))
