@@ -1517,6 +1517,17 @@ fn anchor(misses: usize, to_start: bool) -> Option<f32> {
     [0.5, roomy, other].get(misses).copied()
 }
 
+/// Whether [`Agent::find`] can skip [`Agent::settled`] because nothing changed
+/// since the last settled step: the app runs on the system clock, `settled`
+/// matches `activity.batches`, the last batch arrived at least [`QUIET`] ago,
+/// and no finite native animation is running.
+fn is_still(settled: Option<u64>, activity: Activity, animating: bool, manual_clock: bool) -> bool {
+    !manual_clock
+        && settled == Some(activity.batches)
+        && activity.since_last.is_some_and(|since| since >= QUIET)
+        && !animating
+}
+
 /// Takes test steps on a host's app ([`Model`], [`Native`]).
 pub struct Agent {
     scene: std::sync::Arc<dyn Scene>,
@@ -1619,6 +1630,7 @@ impl Agent {
             TestStep::Back => done(self.native.back().and_then(|()| self.settled())),
             TestStep::Forward => done(self.native.forward().and_then(|()| self.settled())),
             TestStep::Wait { ms } => {
+                self.clear_quiet();
                 std::thread::sleep(Duration::from_millis(ms));
                 done(self.check())
             }
@@ -1631,12 +1643,14 @@ impl Agent {
                 gone,
             } => done(self.wait_for(&selector, Duration::from_millis(timeout_ms), gone)),
             TestStep::NextChange { timeout_ms } => {
+                self.clear_quiet();
                 let seen = self.scene.activity()?.batches;
                 self.scene
                     .wait_for_batch(seen, Duration::from_millis(timeout_ms));
                 done(self.check())
             }
             TestStep::NextFrame { ms } => {
+                self.clear_quiet();
                 let seen = self.scene.activity()?.batches;
                 let left = Duration::from_millis(ms);
                 if self.scene.manual_clock() {
@@ -2388,18 +2402,19 @@ impl Agent {
         Ok(Duration::from_millis(ms))
     }
 
+    fn clear_quiet(&self) {
+        *self.quiet.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
     /// [`Agent::settled`], but not again for an app that has not changed
     /// since the last step left it quiet: no batch came, nothing animates, and
     /// the last one is older than [`QUIET`] (a manual clock moves with the
     /// steps, so there the wait is never skipped).
     fn settled_unless_still(&self) -> Result<(), String> {
-        if !self.scene.manual_clock() {
-            let quiet = *self.quiet.lock().unwrap_or_else(|e| e.into_inner());
+        let settled = *self.quiet.lock().unwrap_or_else(|e| e.into_inner());
+        if settled.is_some() && !self.scene.manual_clock() {
             let activity = self.scene.activity()?;
-            if quiet == Some(activity.batches)
-                && activity.since_last.is_some_and(|since| since >= QUIET)
-                && !self.native.animating()
-            {
+            if is_still(settled, activity, self.native.animating(), false) {
                 return self.check();
             }
         }
@@ -2410,11 +2425,13 @@ impl Agent {
     /// ends by itself), [`SETTLE`] at most, then fails if it threw
     /// meanwhile.
     fn settled(&self) -> Result<(), String> {
+        self.clear_quiet();
         let start = Instant::now();
         // When an animation last ran: what it ends with (a screen popped
         // once it slid out) comes after it.
         let mut moved = start;
         let mut first = None;
+        let quiet_batches;
         loop {
             let activity = self.scene.activity()?;
             let first = *first.get_or_insert(activity.batches);
@@ -2428,11 +2445,11 @@ impl Agent {
                 .map_or(start.elapsed(), |d| d.min(start.elapsed()))
                 .min(moved.elapsed());
             if since >= QUIET {
-                *self.quiet.lock().unwrap_or_else(|e| e.into_inner()) = Some(activity.batches);
+                quiet_batches = Some(activity.batches);
                 break;
             }
             if start.elapsed() >= SETTLE {
-                *self.quiet.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                quiet_batches = None;
                 // The step goes on all the same; why it waited this long
                 // tells why a run is slow.
                 log::info!(
@@ -2445,7 +2462,9 @@ impl Agent {
             }
             self.scene.wait_for_batch(activity.batches, POLL);
         }
-        self.check()
+        self.check()?;
+        *self.quiet.lock().unwrap_or_else(|e| e.into_inner()) = quiet_batches;
+        Ok(())
     }
 
     /// Waits until view `id` stops moving after a gesture scrolled it: its
@@ -3299,7 +3318,6 @@ mod tests {
         };
         assert_eq!(agent.take(TestStep::Ready { timeout_ms: 5000 }), ok);
 
-        let started = Instant::now();
         for _ in 0..10 {
             assert_eq!(
                 agent.take(TestStep::Press {
@@ -3308,22 +3326,22 @@ mod tests {
                 ok
             );
         }
-        let elapsed = started.elapsed();
-        eprintln!("10 presses elapsed_ms={}", elapsed.as_millis());
         assert_eq!(
             agent.take(TestStep::Texts),
             StepOutcome::Done {
                 value: serde_json::json!(["Count: 10", "Add"])
             }
         );
-        // Without skipping the redundant settle before `find()`, each press waits
-        // ~2 * QUIET (200 ms -> > 2000 ms for 10 presses); skipping it drops the
-        // pre-find wait so 10 presses finish in ~10 * QUIET (~1000–1300 ms).
-        assert!(
-            elapsed < Duration::from_millis(1600),
-            "10 presses on a still app took {} ms (expected < 1600 ms)",
-            elapsed.as_millis()
-        );
+        assert!(agent.quiet.lock().unwrap().is_some());
+
+        // Time-advancing wait steps that do not settle at the end clear the
+        // cached batch count so the next action settles again.
+        assert_eq!(agent.take(TestStep::Wait { ms: 1 }), ok);
+        assert_eq!(*agent.quiet.lock().unwrap(), None);
+        agent
+            .find("Add", "pressable view", PickTarget::Pressable)
+            .unwrap();
+        assert!(agent.quiet.lock().unwrap().is_some());
 
         // An intervening batch between steps invalidates the still state, so
         // the next `find()` still waits for `QUIET`.
@@ -3334,5 +3352,54 @@ mod tests {
             .unwrap();
         assert!(after_batch.elapsed() >= QUIET);
         drop(engine);
+    }
+
+    #[test]
+    fn still_skip_decision_checks_every_branch() {
+        let quiet = Activity {
+            batches: 5,
+            since_last: Some(QUIET),
+        };
+        assert!(is_still(Some(5), quiet, false, false));
+
+        // Previous settle timed out at `SETTLE` (or cleared by `Wait`).
+        assert!(!is_still(None, quiet, false, false));
+
+        // A new batch arrived since the previous settle finished.
+        assert!(!is_still(
+            Some(5),
+            Activity {
+                batches: 6,
+                since_last: Some(QUIET),
+            },
+            false,
+            false
+        ));
+
+        // Not enough quiet time since the last batch, or no batch yet.
+        assert!(!is_still(
+            Some(5),
+            Activity {
+                batches: 5,
+                since_last: Some(QUIET.saturating_sub(Duration::from_millis(1))),
+            },
+            false,
+            false
+        ));
+        assert!(!is_still(
+            Some(5),
+            Activity {
+                batches: 5,
+                since_last: None,
+            },
+            false,
+            false
+        ));
+
+        // A finite native animation is running.
+        assert!(!is_still(Some(5), quiet, true, false));
+
+        // App runs on a manual clock.
+        assert!(!is_still(Some(5), quiet, false, true));
     }
 }
