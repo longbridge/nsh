@@ -352,6 +352,8 @@ expect Plain
 frame id:plain 0 64 39 17
 frame id:big 0 81 53 39
 style id:big fontSize 32
+frame id:tall 0 120 22 30
+frame id:tall-two 0 150 40 40
 style id:tall fontSize 10
 style id:tall lineHeight 30
 style id:tall-two lineHeight 20
@@ -426,8 +428,10 @@ style span:outer color #007affff
 style span:inner color #007affff
 # A hidden span keeps its characters and their place: as wide as shown.
 expect Seen unseen words
-frame id:hidden-span 0 942 131 17
-frame id:shown-span 0 959 131 17
+# The mixed spans above use the largest font (20) and line height (24): three lines.
+frame id:spans 0 947 390 72
+frame id:hidden-span 0 1019 131 17
+frame id:shown-span 0 1036 131 17
 style span:inner fontSize 16
 covers [styles] fontFamily
 covers [styles] fontSize
