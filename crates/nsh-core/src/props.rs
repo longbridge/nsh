@@ -546,9 +546,8 @@ pub enum ScrollEdge {
 /// ([`ViewProps::scroll_edge_element`]): on iOS 26 and later the scroll
 /// edge effect of that scroll view takes its shape from the view, as it
 /// does from a bar, so the content scrolled under the view fades out
-/// around what the view shows instead of being cut by it. Earlier versions
-/// and other platforms draw nothing for it; the app draws its own fade
-/// there if it needs one.
+/// around what the view shows instead of being cut by it. Elsewhere a
+/// fade the app draws under the view gives the same separation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ScrollEdgeElement {

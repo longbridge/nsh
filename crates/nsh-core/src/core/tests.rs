@@ -6161,6 +6161,75 @@ fn scroll_edge_element_names_the_scroll_view_a_view_floats_over() {
     assert_eq!(scroll_edge_in(&c.commit().unwrap(), 4), Some(None));
 }
 
+/// A scroll view culled far down another one's content is named by a view
+/// floating over it: the platform gets its id once its native view is made,
+/// after the view that makes it, in the batch that makes it.
+#[test]
+fn scroll_edge_element_names_a_culled_scroll_view_once_it_is_made() {
+    use crate::{ScrollEdge, ScrollEdgeElement, element::ScrollEdgeTarget};
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    // Rows of 50 in a wrapper, then a scroll view at 1900.
+    ops.extend(child_view(4, 2, 2000.0, &[]));
+    for i in 0..38u32 {
+        ops.extend(child_view(10 + 2 * i, 4, 50.0, &[]));
+    }
+    ops.extend([
+        Op::Create {
+            id: 200,
+            tag: Tag::Scroll,
+        },
+        style_op(200, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: 4,
+            child: 200,
+            before: None,
+        },
+    ]);
+    // A bar floating over its bottom edge.
+    ops.extend(child_view(6, ROOT_ID, 40.0, &[]));
+    ops.push(Op::SetProp {
+        id: 6,
+        prop: Prop::ScrollEdgeElement(Some(ScrollEdgeTarget::of_node(200, ScrollEdge::Bottom))),
+    });
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    assert!(!created_in(&batch).contains(&200));
+    assert_eq!(scroll_edge_in(&batch, 6).flatten(), None);
+    // Scrolled to it, it is made, and the bar names it after that.
+    c.set_scroll_offset(2, point(Points::ZERO, Points(1900.0)), 0);
+    let batch = c.commit().unwrap();
+    let made = batch
+        .items
+        .iter()
+        .position(|i| matches!(i, MountItem::Create { id: 200, .. }))
+        .expect("the scroll view is made");
+    let named = batch
+        .items
+        .iter()
+        .rposition(|i| matches!(i, MountItem::ViewProps { id: 6, .. }))
+        .expect("the bar's props go again");
+    assert!(made < named);
+    assert_eq!(
+        scroll_edge_in(&batch, 6),
+        Some(Some(ScrollEdgeElement {
+            scroll_view: 200,
+            edge: ScrollEdge::Bottom,
+        }))
+    );
+}
+
 /// `accessibilityDescribedBy` names the view that describes this one (a
 /// field's error line): the platform gets its id, and the description is
 /// that view's text, followed as it changes, over the view's own

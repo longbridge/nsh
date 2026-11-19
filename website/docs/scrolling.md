@@ -612,11 +612,7 @@ Both are decided natively when the tap or drag happens, without waiting for your
 
 ## Views floating over a scroll view
 
-A toolbar or a floating button placed over the top or bottom of a scroll view can name that scroll view, so the
-platform treats it as it treats a bar there. From iOS 26 the scroll view's edge effect then takes its shape from what
-the view shows: the content scrolled under it fades out around its buttons instead of being cut by them. Earlier iOS
-versions and other platforms draw nothing for it; draw a fade of your own there if the screen needs one. Leave room
-for the view at that end of the content with `contentInset`.
+A toolbar or a floating button placed over the top or bottom of a scroll view can name that scroll view, so the platform treats it as it treats a bar there. From iOS 26 the scroll view's edge effect then takes its shape from what the view shows: the content scrolled under it fades out around its buttons. The edge effect is iOS 26's; where a screen needs the same separation on other versions and platforms, a fade the app draws under the view gives it. `contentInset` keeps room for the view at that end of the content.
 
 ```tsx
 const list = signal<ViewRef>();
@@ -632,8 +628,7 @@ const list = signal<ViewRef>();
 </View>
 ```
 
-In Rust, `.scroll_edge_element(&list, ScrollEdge::Bottom)` on the floating view, `list` being the scroll view's
-`ElementRef`. `edge` is `"top"` or `"bottom"` (the default).
+In Rust, `.scroll_edge_element(Some(list), ScrollEdge::Bottom)` on the floating view, `list` being the scroll view's `ElementRef`. `edge` is `"top"` or `"bottom"` (the default).
 
 ## Nested scroll views
 

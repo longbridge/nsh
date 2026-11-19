@@ -288,8 +288,12 @@ covers [props] pullValue
 covers [props] refreshIndicator
 # props-scroll-edge-element
 tap id:case-props-scroll-edge-element
+# A bar floating over a list's bottom edge names the list
+# (`ios.scrollEdgeElement`). The step checks the page shows. nsh-compat does
+# not report the scroll view a view's props name yet, so
+# `ios.scrollEdgeElement` is not claimed here; the core tests cover the id the
+# platform gets, and when it gets it.
 expect New chat
-covers [props] ios.scrollEdgeElement
 # props-scroll-zoom
 tap id:case-props-scroll-zoom
 expect Zoom

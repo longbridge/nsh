@@ -2210,8 +2210,8 @@ pub trait Interactive: Element {
     /// placed over a list. From iOS 26 the scroll edge effect of that
     /// scroll view takes its shape from what the view shows, as it does
     /// from a bar, so the content scrolled under it fades out instead of
-    /// being cut by it. Earlier versions and other platforms draw nothing
-    /// for it. `None` names none.
+    /// being cut by it. Elsewhere a fade the app draws under the view
+    /// gives the same separation. `None` names none.
     fn scroll_edge_element(
         mut self,
         scroll_view: impl IntoReactive<Option<super::ElementRef>>,

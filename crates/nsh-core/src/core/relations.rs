@@ -214,15 +214,18 @@ impl<M: TextEngine> Core<M> {
         // Only while it is on screen: a region keeps an element it took
         // out until it lets it go, and its text is no longer there.
         let describing = named(&r.described_by).filter(|&(k, _)| self.in_tree(k));
-        // Only a rendered scroll view: there is nothing to shape before
-        // it is one.
+        // Once its scroll view has a native scroll view of its own: a
+        // culled one is made later, in the batch's next round, which sends
+        // it then; a list in its parent's viewport scrolls with that view.
         let scroll_edge = r.scroll_edge.as_ref().and_then(|t| {
             let (k, scroll_view) = named(&Some(t.scroll_view.clone()))?;
-            (self.in_tree(k) && matches!(self.nodes[k as usize].kind, Kind::Scroll | Kind::List))
-                .then_some(ScrollEdgeElement {
-                    scroll_view,
-                    edge: t.edge,
-                })
+            let node = &self.nodes[k as usize];
+            let scrolls = matches!(node.kind, Kind::Scroll | Kind::List)
+                && node.list.as_ref().is_none_or(|l| !l.parent);
+            (node.created && scrolls && self.in_tree(k)).then_some(ScrollEdgeElement {
+                scroll_view,
+                edge: t.edge,
+            })
         });
         Resolved {
             active_descendant: named(&r.active_descendant).map(|(_, id)| id),

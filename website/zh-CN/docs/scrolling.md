@@ -602,9 +602,7 @@ NSH 会自动让获得焦点的输入框保持可见：键盘出现时，输入�
 
 ## 浮在滚动视图上的视图
 
-放在滚动视图顶部或底部之上的工具栏、悬浮按钮可以指明它下面的滚动视图，平台就像对待那里的栏一样对待它。iOS 26 起，
-滚动视图的边缘效果会按这个视图显示的内容成形：滚到它下面的内容在它的按钮周围渐隐，而不是被按钮截断。更早的 iOS 版本和其他
-平台不为它绘制任何东西；界面需要时在那里自己画一层渐隐。用 `contentInset` 在内容那一端给这个视图留出位置。
+放在滚动视图顶部或底部之上的工具栏、悬浮按钮可以指明它下面的滚动视图，平台就像对待那里的栏一样对待它。iOS 26 起，滚动视图的边缘效果会按这个视图显示的内容成形：滚到它下面的内容在它的按钮周围渐隐。这个边缘效果来自 iOS 26；其他版本和平台的界面需要同样的分隔时，由应用在视图下面画一层渐隐。用 `contentInset` 在内容那一端给这个视图留出位置。
 
 ```tsx
 const list = signal<ViewRef>();
@@ -620,8 +618,7 @@ const list = signal<ViewRef>();
 </View>
 ```
 
-Rust 中在浮着的视图上调用 `.scroll_edge_element(&list, ScrollEdge::Bottom)`，`list` 是滚动视图的 `ElementRef`。
-`edge` 取 `"top"` 或 `"bottom"`（默认）。
+Rust 中在浮着的视图上调用 `.scroll_edge_element(Some(list), ScrollEdge::Bottom)`，`list` 是滚动视图的 `ElementRef`。`edge` 取 `"top"` 或 `"bottom"`（默认）。
 
 ## 嵌套滚动视图
 
