@@ -1121,9 +1121,9 @@ final class Mounter {
             return;
         }
         if (headerItems.contains(id)) {
-            // A header item: the toolbar places it at its size.
+            // A header item: the toolbar (or the row of a leading item and its title) places it at its size.
             headerSizes.put(id, new int[] {px(w), px(h)});
-            if (v.getParent() instanceof android.widget.Toolbar) {
+            if (v.getParent() instanceof android.widget.Toolbar || v.getParent() instanceof StackBox.ScreenBox.HeaderRow) {
                 ViewGroup.LayoutParams p = v.getLayoutParams();
                 p.width = Math.max(1, px(w));
                 p.height = Math.max(1, px(h));
