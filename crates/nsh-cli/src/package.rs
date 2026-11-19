@@ -291,6 +291,14 @@ pub(crate) struct AndroidConfig {
 impl AndroidConfig {
     /// `permissions`, checked and spelled out in full.
     pub(crate) fn permissions(&self) -> anyhow::Result<Vec<String>> {
+        for name in &self.permissions {
+            if lower_case_android_name(name) {
+                ui::warn(format!(
+                    "nsh.json android.permissions: `{name}` is not upper case, as Android's own \
+                     permission names are (`ACCESS_NETWORK_STATE`): Android ignores a name it does not know"
+                ));
+            }
+        }
         self.permissions
             .iter()
             .map(|name| android_permission(name))
@@ -308,6 +316,12 @@ impl AndroidConfig {
         }
         Ok(level)
     }
+}
+
+/// Whether `name` is a bare name (one of Android's own) with a lower case
+/// letter, which no permission of Android's has: most likely a typo.
+fn lower_case_android_name(name: &str) -> bool {
+    !name.contains('.') && name.chars().any(|c| c.is_ascii_lowercase())
 }
 
 /// An `android.permissions` entry in full: a bare name is one of
@@ -2923,6 +2937,10 @@ mod tests {
                 .to_string();
             assert!(err.contains("android.permissions"), "{bad}: {err}");
         }
+        // A bare name in lower case is warned of; a dotted one is the app's.
+        assert!(lower_case_android_name("access_network_state"));
+        assert!(!lower_case_android_name("ACCESS_NETWORK_STATE"));
+        assert!(!lower_case_android_name("com.example.permission.read"));
     }
 
     #[test]
