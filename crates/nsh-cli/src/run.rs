@@ -486,10 +486,7 @@ fn run_rust_app(
             let env = android_app_env(&config);
             let out = run.join("android");
             // The device's ABI alone: each one is a build of the app's crate.
-            let abi = android::device_abis(&sdk, &serial)?
-                .into_iter()
-                .find(|abi| android::ABIS.contains(&abi.as_str()))
-                .with_context(|| format!("{serial} runs none of {}", android::ABIS.join(", ")))?;
+            let abi = android::preferred_abi(&serial, &android::device_abis(&sdk, &serial)?)?;
             package_for_run(
                 &entry,
                 crate::package::PackageTarget::Android,
@@ -788,10 +785,12 @@ fn run_android(
     let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", BUNDLE_ID]);
     let session = DevSession::start(entry, listen, release, limits)?;
     // Only the device's ABI: a debug library per ABI makes the APK too
-    // large to build. Unknown: every ABI, as before.
-    let abis = android::device_abis(&sdk, &serial)
-        .map(|device| host_abis(&device))
-        .unwrap_or_default();
+    // large to build. When the device's ABIs can't be read: every ABI, as
+    // before.
+    let abis = match android::device_abis(&sdk, &serial) {
+        Ok(device) => vec![android::preferred_abi(&serial, &device)?],
+        Err(_) => Vec::new(),
+    };
     let runtime = crate::runtime::android(true, &abis)?;
     install_android_host(&sdk, &serial, work, &runtime, &abis)?;
     // The device reaches the dev server on its own 127.0.0.1, until the
@@ -820,17 +819,6 @@ fn run_android(
     let result = session.watch(|| Ok(false));
     let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", BUNDLE_ID]);
     result
-}
-
-/// The ABIs `nsh run` builds the development host for, given the device's
-/// ABIs (preferred first): the first one NSH builds for. None of them:
-/// empty, which builds every ABI of the runtime.
-fn host_abis(device: &[String]) -> Vec<String> {
-    device
-        .iter()
-        .find(|abi| crate::android::ABIS.contains(&abi.as_str()))
-        .map(|abi| vec![abi.clone()])
-        .unwrap_or_default()
 }
 
 /// Builds the Android development host (when its runtime changed) into
@@ -1312,24 +1300,9 @@ mod tests {
     use clap::ValueEnum as _;
 
     use super::{
-        HostWindow, SimulatorWindow, Target, android_app_env, android_env_extras, host_abis,
-        open_args, shell_quote, simctl_app_env, simctl_child_env,
+        HostWindow, SimulatorWindow, Target, android_app_env, android_env_extras, open_args,
+        shell_quote, simctl_app_env, simctl_child_env,
     };
-
-    /// `nsh run` builds the development host for the device's preferred ABI
-    /// that NSH builds for, and for every ABI when it has none of them.
-    #[test]
-    fn the_android_host_is_built_for_the_devices_abi() {
-        let abis = |list: &[&str]| list.iter().map(|abi| abi.to_string()).collect::<Vec<_>>();
-        assert_eq!(
-            host_abis(&abis(&["arm64-v8a", "armeabi-v7a", "armeabi"])),
-            ["arm64-v8a"]
-        );
-        assert_eq!(host_abis(&abis(&["x86_64", "arm64-v8a"])), ["x86_64"]);
-        assert_eq!(host_abis(&abis(&["x86", "armeabi-v7a"])), ["armeabi-v7a"]);
-        assert!(host_abis(&abis(&["x86"])).is_empty());
-        assert!(host_abis(&[]).is_empty());
-    }
 
     /// `nsh run` brings the simulators' window to the front; `nsh test`
     /// opens it without activating it (`open -g`), so the keyboard stays
