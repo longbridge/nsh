@@ -2502,6 +2502,14 @@ final class Mounter {
         view.performHapticFeedback(feedback);
     }
 
+    /** Whether {@code inner} is {@code outer} or inside it. */
+    private static boolean within(View inner, View outer) {
+        for (Object at = inner; at instanceof View; at = ((View) at).getParent()) {
+            if (at == outer) return true;
+        }
+        return false;
+    }
+
     private void command(ByteBuffer b, Object[] objects, long seq) {
         int id = b.getInt(), kind = b.getInt();
         View v = views.get(id);
@@ -2674,6 +2682,15 @@ final class Mounter {
             case 50:
                 if (v instanceof InputBox) ((InputBox) v).closeEditMenu();
                 break;
+            case 62: {
+                // ref.clearSelection(): the selection of the selectable view
+                // v is, is in or holds.
+                SelectableView area = selectedArea;
+                if (area != null && v != null && (within(area.view, v) || within(v, area.view))) {
+                    area.clear();
+                }
+                break;
+            }
             case 21: {
                 String name = string(objects, b.getInt());
                 String json = string(objects, b.getInt());

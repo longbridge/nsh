@@ -84,7 +84,8 @@
   `focus`, `active` (gpui-base's order of value states); the `aria-*` variants are above them (`aria-busy`,
   `aria-checked`, `aria-expanded`, `aria-invalid`, `aria-pressed`, `aria-selected`, by name), as Tailwind's `aria-*` variants come
   after its pseudo-classes, so an open popup's trigger keeps its look while hovered or pressed. `disabled` (any element) applies `disabled:` and drops
-  the node's press listeners from what is mounted, so it shows no press feedback either. A part of a Rust component
+  the node's press listeners from what is mounted. Its own hover, active and focus variants do not match while disabled;
+  value variants such as `checked:` still match. A part of a Rust component
   shows its control's `checked`, `indeterminate` and `disabled` to its own classes and state styles
   (`Interactive::project_checked`, `project_indeterminate`, `project_disabled`, and `project_focused` for the part the keys act on; `Prop::ProjectedStates`; `project_data` its `data-*` attributes, `Prop::ProjectedData`): a switch's thumb styled `checked:translate-x-4`, with no accessibility
   state or press change on the part, so screen readers hear the control alone. A part shows its control's press
@@ -313,7 +314,7 @@
   the `transform`): a style's `scale` replaces a class's scale and leaves its rotation. The list keeps how many steps
   each property holds (`Pending::transform_counts`), so setting one moves the animated bindings of those after it.
   Applied right to left like CSS; Android has no skew, `zIndex` (stable order of the native views), `boxShadow`
-  (CSS's, the one shadow of styles, classes and typed styles alike; `effects.rs`), `tintColor` (images), `glassTintColor` (Liquid Glass), `objectPosition` (images: where the fitted image sits, CSS's `object-position`; `images.md`), `android={{ elevation }}` (a prop, not a style: Android's material shadow), `macos={{ backdrop }}` (a prop, not a style: macOS's `NSVisualEffectView` material, `MacOsBackdrop` in `effects.rs`: an explicit one selects the native view with no blur needed, and wins over `glassEffect` and `backdropFilter`; `None` keeps the fallback), `transformOrigin` (keywords / percentages / lengths; iOS conjugates the matrix around it,
+  (CSS's, the one shadow of styles, classes and typed styles alike; `effects.rs`), `tintColor` (images), `glassTintColor` (Liquid Glass), `objectPosition` (images: where the fitted image sits, CSS's `object-position`; `images.md`), `android={{ elevation }}` (a prop, not a style: Android's material shadow), `macos={{ backdrop }}` (a prop, not a style: macOS's `NSVisualEffectView` material, `MacOsBackdrop` in `effects.rs`: an explicit one selects the native view with no blur needed, and wins over `glassEffect` and `backdropFilter`; `None` keeps the fallback), `windows={{ backdrop }}` (a prop, not a style: the system's blur of what is behind a transparent window on Windows 11, `WindowsBackdrop` in `effects.rs`; `docs/dev/windows.md`), `transformOrigin` (keywords / percentages / lengths; iOS conjugates the matrix around it,
   Android sets the pivot), `backfaceVisibility` (iOS `doubleSided`; Android hides the view while its rotations turn it away). `style` may be an array of styles merged left to right
   (falsy entries skipped), decoded in Rust. In one style object (an array is flattened into one, as React Native does) a
   longhand wins over its shorthand whatever the key order (`StylePatch::set`, `StyleKey::longhands`: border widths and
@@ -458,10 +459,13 @@ scroll view too; **grids** take their columns from the template
   text's explicit width rounds up: it was set to hold its line in a GUI's font, and the Cell it would round off
   keeps the line's last column (curve names 84pt wide hold "cubic inOut").
 - What a terminal cannot show well is never emulated. At an icon's size (an explicit width and height both at most
-  48pt) images, videos, web views, shaders and canvases are `display: none`, so they take no Cells, no frame and no
-  hits, and their margins and the gaps beside them go with them (`Core::grid_role`). Larger, they keep their box: a
-  canvas is drawn in braille, the others stay blank (their fill too), and the labels around them stay where the box
-  puts them instead of closing up over it. An empty box in flow (no control) with an explicit size of two Cells or
+  48pt) videos, web views, shaders and canvases are `display: none`, so they take no Cells, no frame and no hits, and
+  their margins and the gaps beside them go with them (`Core::grid_role`). Larger, they keep their box: a canvas is
+  drawn in braille, the others stay blank (their fill too), and the labels around them stay where the box
+  puts them instead of closing up over it. An image keeps its box at every size, as the terminal draws pictures
+  (`LeftOut::Picture`); a box holding only absolute layers in flow (an avatar holding its picture once its initials
+  went) fills its parent's explicit height, as an image filling it does. A box holding a scroll view in flow that grows into what is left and
+  states no height (a picker's grid under its search field) keeps its explicit height, which the scroll view fills. An empty box in flow (no control) with an explicit size of two Cells or
   more each way and a border draws its outline, as its size is its own: a code cell waiting for its digit (an absolute
   one, a selection's box over its items, draws none). So is
   a view with nothing in it smaller than a row both ways and not growing (a status dot in a row, a swatch), except a

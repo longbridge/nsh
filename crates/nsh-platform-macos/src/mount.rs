@@ -737,10 +737,10 @@ impl Mounter {
                     crate::text_input::set_selection(view, *start, *end);
                 }
             }
-            // Not carried out on this platform yet: the app's paste is lost,
-            // so say so.
-            Command::InsertText(_) => {
-                log::warn!("insertText is not supported on macOS yet; nothing inserted")
+            Command::InsertText(text) => {
+                if let Some(view) = view {
+                    crate::text_input::insert_text(view, text);
+                }
             }
             Command::ScrollTo { y, animated, .. }
                 if view.is_some_and(|v| v.kind() == ViewKind::Input) =>
@@ -770,6 +770,11 @@ impl Mounter {
             }
             Command::SetJsResponder { .. } | Command::ClearJsResponder => {
                 crate::input::command(surface, id, command);
+            }
+            Command::ClearSelection => {
+                if let Some(view) = view {
+                    surface.selection.area.clear_in(surface, view);
+                }
             }
             Command::Reload
             | Command::GoBack

@@ -133,7 +133,7 @@ view()
 </View>
 ```
 
-任何元素上的 `disabled`（Rust 中的 `.disabled(..)`）都会应用 `disabled:` 类（`.disabled_style(..)`），并把它的按下处理器从挂载内容中移除，因此也不会显示按下反馈：
+任何元素上的 `disabled`（Rust 中的 `.disabled(..)`）都会应用 `disabled:` 类（`.disabled_style(..)`），并移除按下事件处理器。禁用期间，元素会跳过自身的 `hover:`、`active:`、`focus:`、`focus-visible:` 和 `focus-within:` 类。`checked:` 等表示控件取值的类仍随控件的值变化。
 
 ```rust tabs
 view()

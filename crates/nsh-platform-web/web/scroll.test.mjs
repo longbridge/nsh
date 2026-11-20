@@ -341,6 +341,8 @@ test('a scroll a command stops ends once, with or without moving', (t) => {
     p.scrollEnded(el);
     const at = el.scrollTop;
     p.op_cmd(command);
+    // An animated command runs out its own frames (`animateScroll`).
+    runFrames();
     t.mock.timers.tick(200);
     // The browser's `scrollend` follows a scroll that moved, only then.
     if (el.scrollTop !== at) p.scrollEnded(el);
@@ -352,79 +354,124 @@ test('a scroll a command stops ends once, with or without moving', (t) => {
 test('fractional scroll commands end once at the browser destination', (t) => {
   t.mock.method(performance, 'now', () => clock);
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  for (const animated of [false, true]) {
-    for (const destination of [40, 40.5]) {
-      const { p, el } = scroller();
-      const ends = [];
-      el._events.add('onScrollEnd');
-      p.event = (id, name, e) => ends.push(e.y);
-      p.wheel(wheel(el, 20));
-      p.wheel(wheel(el, 20));
-      // Model a browser that rounds to physical pixels, including a
-      // destination that rounds back to the current position.
-      el.scrollTo = () => { el.scrollTop = destination; };
-      p.op_cmd(['cmd', 1, 'scrollTo', 0, 40.4, animated]);
-      assert.deepEqual(ends, []);
-      if (destination !== 40) p.scrollEnded(el);
-      t.mock.timers.tick(200);
+  // Commands that do not animate are the browser's scroll; animated ones
+  // run their own frames and end on the last of them, below.
+  for (const destination of [40, 40.5]) {
+    const { p, el } = scroller();
+    const ends = [];
+    el._events.add('onScrollEnd');
+    p.event = (id, name, e) => ends.push(e.y);
+    p.wheel(wheel(el, 20));
+    p.wheel(wheel(el, 20));
+    // Model a browser that rounds to physical pixels, including a
+    // destination that rounds back to the current position.
+    el.scrollTo = () => { el.scrollTop = destination; };
+    p.op_cmd(['cmd', 1, 'scrollTo', 0, 40.4, false]);
+    assert.deepEqual(ends, []);
+    if (destination !== 40) p.scrollEnded(el);
+    t.mock.timers.tick(200);
+    assert.deepEqual(ends, [destination]);
+    if (destination === 40) {
+      p.scrollEnded(el);
       assert.deepEqual(ends, [destination]);
-      if (destination === 40) {
-        p.scrollEnded(el);
-        assert.deepEqual(ends, [destination]);
-      }
     }
   }
 });
 
-test('the command end fallback waits while a smooth scroll moves', (t) => {
+test('an animated command lands in its own time, whatever the distance', (t) => {
   t.mock.method(performance, 'now', () => clock);
-  t.mock.timers.enable({ apis: ['setTimeout'] });
   const { p, el } = scroller();
+  p.call = () => {};
   const ends = [];
   el._events.add('onScrollEnd');
   p.event = (id, name, e) => ends.push(e.y);
-  p.call = () => {};
-  p.wheel(wheel(el, 20));
-  p.op_cmd(['cmd', 1, 'scrollTo', 0, 400, true]);
-  t.mock.timers.tick(150);
-  p.scrolled(el);
-  t.mock.timers.tick(150);
-  assert.deepEqual(ends, []);
+  el.scrollTop = 2500;
+  const started = clock;
+  p.op_cmd(['cmd', 1, 'scrollTo', 0, 0, true]);
+  // It moves on its frames, not by handing the scroll to the browser.
+  assert.equal(el.scrollTop, 2500);
+  assert.equal(el._driven, 1);
+  runFrames(1);
+  assert.ok(el.scrollTop < 2500 && el.scrollTop > 2000, `moved to ${el.scrollTop}`);
+  runFrames();
+  assert.equal(el.scrollTop, 0);
+  assert.deepEqual(ends, [0]);
+  assert.equal(el._driven, 0);
+  // 300 ms, as the core's own scroll animation takes on the other
+  // platforms, and a frame to pass 1.
+  assert.ok(clock - started < 320, `took ${clock - started} ms`);
+  // The browser's `scrollend` for the frames it drew is not another end.
   p.scrollEnded(el);
-  t.mock.timers.tick(200);
-  assert.deepEqual(ends, [400]);
+  assert.deepEqual(ends, [0]);
 });
 
-test('the anchoring scroll of a list does not stop the smooth scroll beside it', (t) => {
+test('an animated command whose frames stop ends where it was going', (t) => {
   t.mock.method(performance, 'now', () => clock);
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { p, el } = scroller();
   p.call = () => {};
+  const ends = [];
+  el._events.add('onScrollEnd');
+  p.event = (id, name, e) => ends.push(e.y);
+  el.scrollTop = 2500;
+  p.op_cmd(['cmd', 1, 'scrollTo', 0, 0, true]);
+  runFrames(2);
+  // A hidden tab stops asking for frames.
+  frames.clear();
+  t.mock.timers.tick(600);
+  assert.equal(el.scrollTop, 0);
+  assert.deepEqual(ends, [0]);
+  assert.equal(el._driven, 0);
+});
+
+test('the user takes over an animated command', (t) => {
+  t.mock.method(performance, 'now', () => clock);
+  const { p, el } = scroller();
+  p.call = () => {};
+  const ends = [];
+  el._events.add('onScrollEnd');
+  p.event = (id, name, e) => ends.push(e.y);
+  el.scrollTop = 2500;
+  p.op_cmd(['cmd', 1, 'scrollTo', 0, 0, true]);
+  runFrames(2);
+  const at = el.scrollTop;
+  // `op_c` listens for these on the view; the player under test has none,
+  // so take over as they do.
+  p.endScrollAnimation(el, false);
+  runFrames();
+  assert.equal(el.scrollTop, at, 'left where the user took it over');
+  assert.equal(el._driven, 0);
+  assert.deepEqual(ends, [], 'the scroll goes on as the user scrolls it');
+});
+
+test('the anchoring scroll of a list does not stop the animation beside it', (t) => {
+  t.mock.method(performance, 'now', () => clock);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { p, el } = scroller();
+  p.call = () => {};
+  const ends = [];
+  el._events.add('onScrollEnd');
+  p.event = (id, name, e) => ends.push(e.y);
   el.scrollTop = 2000;
-  // A browser that takes a smooth scroll's target and glides there over
-  // its own frames, and stops gliding when an offset is set.
-  let target = null;
-  el.scrollTo = ({ top, behavior }) => {
-    if (behavior === 'smooth') target = top;
-    else (target = null), (el.scrollTop = top);
-  };
-  const glide = (to) => { el.scrollTop = to; p.scrolled(el); };
   // The commit that loads a page of rows above an inverted list: it keeps
   // what shows in place, then scrolls to one of the rows it loaded.
   p.op_sb(['sb', 1, 0, 1200]);
+  assert.equal(el.scrollTop, 3200);
   p.op_cmd(['cmd', 1, 'scrollTo', 0, 0, true]);
-  assert.equal(target, 0);
   // The browser's `scrollend` for the anchoring scroll arrives once the
-  // smooth scroll beside it is on its way: not its end.
+  // animation beside it is under way: not its end.
   p.scrollEnded(el);
-  assert.deepEqual(el._smooth, [0, 0]);
-  glide(2600);
-  // So the next commit's anchoring moves the target along, rather than
-  // setting the offset, which would stop the browser's scroll.
+  runFrames(2);
+  assert.ok(el._smooth, 'still animating');
+  const at = el.scrollTop;
+  // The next commit's anchoring moves the content and the animation with
+  // it, so it goes on from the content it was on.
   p.op_sb(['sb', 1, 0, 400]);
-  assert.equal(el.scrollTop, 2600);
-  assert.deepEqual(el._smooth, [0, 400]);
-  assert.equal(target, 400);
+  assert.equal(el.scrollTop, at + 400);
+  assert.equal(el._smooth.y, 400);
+  runFrames();
+  assert.equal(el.scrollTop, 400);
+  assert.deepEqual(ends, [400]);
 });
 
 test('a glide whose frames stop ends where it was going, once', (t) => {

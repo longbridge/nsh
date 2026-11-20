@@ -739,6 +739,11 @@ impl AreaResponder {
         }
     }
 
+    /// Clears the selection (`ref.clearSelection()`).
+    pub(crate) fn clear(&self) {
+        self.clear_selection();
+    }
+
     /// A mount batch was applied: while something is selected, the
     /// texts, highlight and handles follow what changed.
     pub(crate) fn batch_applied(&self) {

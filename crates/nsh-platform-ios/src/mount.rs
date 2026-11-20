@@ -1958,6 +1958,23 @@ impl Mounter {
             }
             return;
         }
+        if let Command::ClearSelection = command {
+            let within = |mut inner: NodeId, outer: NodeId| loop {
+                if inner == outer {
+                    return true;
+                }
+                match self.slot(inner).and_then(|s| s.parent) {
+                    Some(parent) => inner = parent,
+                    None => return false,
+                }
+            };
+            for (area_id, area) in &self.areas {
+                if within(*area_id, id) || within(id, *area_id) {
+                    area.clear();
+                }
+            }
+            return;
+        }
         let Some(s) = self.slot(id) else { return };
         match (command, &s.native) {
             (
@@ -2154,10 +2171,7 @@ impl Mounter {
             (Command::SetSelection { start, end }, Native::Input(input)) => {
                 input.select(start, end)
             }
-            // Not carried out on iOS yet: the app's paste is lost, so say so.
-            (Command::InsertText(_), _) => {
-                log::warn!("insertText is not supported on iOS yet; nothing inserted")
-            }
+            (Command::InsertText(text), Native::Input(input)) => input.insert_text(&text),
             (Command::OpenEditMenu { bounds, actions }, Native::Input(input)) => {
                 let view = input.editor_view();
                 let rect = CGRect::new(
