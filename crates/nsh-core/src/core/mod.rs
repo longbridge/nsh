@@ -1259,6 +1259,8 @@ pub struct Core<M: TextEngine> {
     nodes: Slab<Node>,
     /// Node id -> key + 1 (0 = none). Ids are dense, so this is a flat vec.
     slots: crate::id_table::IdTable<Key>,
+    /// The extent reached by admitted ids. JS keeps issuing new ids after a page is freed.
+    admitted_id_extent: usize,
     /// Raw text runs kept without a node (#1345): a run not in the tree,
     /// or the only child of a text block or span, which shows it. Any
     /// other use makes its node ([`Core::materialize_run`]).
@@ -1669,6 +1671,7 @@ impl<M: TextEngine> Core<M> {
         slots.insert(ROOT_ID as usize, root);
         Self {
             nodes,
+            admitted_id_extent: slots.extent(),
             slots,
             layout,
             text_engine: Rc::new(text_engine),
@@ -2723,9 +2726,7 @@ impl<M: TextEngine> Core<M> {
                 if self.slots.contains(idx) || self.runs.contains_key(&id) {
                     return Err(ApplyError::DuplicateNode(id));
                 }
-                if idx > self.slots.extent().saturating_add(self.max_nodes) {
-                    return Err(ApplyError::IdOutOfRange(id));
-                }
+                self.check_id_range(id)?;
                 if self.fold_runs {
                     self.runs.insert(
                         id,
@@ -2734,6 +2735,7 @@ impl<M: TextEngine> Core<M> {
                             block: NO_KEY,
                         },
                     );
+                    self.admitted_id_extent = self.admitted_id_extent.max(idx.saturating_add(1));
                     return Ok(());
                 }
                 let key = self.alloc(id, Kind::RawText)?;
@@ -3898,19 +3900,29 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    fn check_id_range(&self, id: NodeId) -> Result<(), ApplyError> {
+        if id as usize > self.admitted_id_extent.saturating_add(self.max_nodes) {
+            return Err(ApplyError::IdOutOfRange(id));
+        }
+        Ok(())
+    }
+
+    fn insert_key(&mut self, idx: usize, key: Key) {
+        self.slots.insert(idx, key);
+        self.admitted_id_extent = self.admitted_id_extent.max(self.slots.extent());
+    }
+
     fn alloc(&mut self, id: NodeId, kind: Kind) -> Result<Key, ApplyError> {
         let idx = id as usize;
         if self.nodes.len() >= self.max_nodes {
             return Err(ApplyError::TooManyNodes(self.max_nodes));
         }
-        if idx > self.slots.extent().saturating_add(self.max_nodes) {
-            return Err(ApplyError::IdOutOfRange(id));
-        }
+        self.check_id_range(id)?;
         if self.slots.contains(idx) {
             return Err(ApplyError::DuplicateNode(id));
         }
         let key = self.nodes.insert(Node::new(id, kind)) as Key;
-        self.slots.insert(idx, key);
+        self.insert_key(idx, key);
         Ok(key)
     }
 
@@ -3921,13 +3933,11 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn alias(&mut self, alias: NodeId, id: NodeId) -> Result<(), ApplyError> {
         let key = self.key(id)?;
         let idx = alias as usize;
-        if idx > self.slots.extent().saturating_add(self.max_nodes) {
-            return Err(ApplyError::IdOutOfRange(alias));
-        }
+        self.check_id_range(alias)?;
         if self.slots.contains(idx) {
             return Err(ApplyError::DuplicateNode(alias));
         }
-        self.slots.insert(idx, key);
+        self.insert_key(idx, key);
         Ok(())
     }
 
