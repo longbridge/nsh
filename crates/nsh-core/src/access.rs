@@ -676,7 +676,8 @@ pub struct Capabilities {
     /// `None`: none.
     pub open_url: Option<OpenUrlGrant>,
     /// The windows the app may open and what they may do (`nsh/desktop`'s
-    /// `Window`); `None`: none besides its main one.
+    /// `Window`); `None`: no window of the app's own. The first window needs
+    /// the grant too: no window is privileged.
     pub windows: Option<WindowsGrant>,
 }
 
@@ -691,7 +692,7 @@ pub struct WindowsGrant {
     pub kinds: Vec<crate::desktop::WindowKind>,
     /// The levels its windows may float at; empty: every level.
     pub levels: Vec<crate::desktop::WindowLevel>,
-    /// How many windows it may have open at once besides the main one;
+    /// How many windows it may have open at once, its first window included;
     /// `None`: any number.
     pub max: Option<u32>,
     /// Overlays and click-through windows (`pointerEvents: "none"`).
@@ -1676,8 +1677,11 @@ fn valid_command(command: &str) -> bool {
         && !command.contains(['\0', '*'])
         // `absolute`, not `Path::is_absolute`: in the browser that is false for
         // every path, so `/bin/sh` refused the whole manifest and the app never
-        // started there.
-        && (absolute(Path::new(command))
+        // started there. A rooted path counts on Windows too, where
+        // `is_absolute` wants a drive (`/bin/sh`): one manifest serves every
+        // platform.
+        && (Path::new(command).has_root()
+            || absolute(Path::new(command))
             // A bare name has no drive (`C:git` is relative to the host's
             // directory on drive C).
             || (!command.contains(['/', '\\', ':']) && command != "." && command != ".."))
@@ -2423,8 +2427,8 @@ impl Access {
     /// Leaves out of `attributes` what the app's capabilities do not grant
     /// a window (an ungranted level, click-through without `overlay`) and
     /// returns their
-    /// names, for a warning. The main window needs no `windows` grant for
-    /// the rest.
+    /// names, for a warning. Without a `windows` grant only the defaults
+    /// remain; no window is privileged.
     pub fn deny_window_attributes(
         &self,
         attributes: &mut crate::desktop::WindowAttributes,
@@ -2592,8 +2596,6 @@ mod tests {
             ]
         );
     }
-    use std::cell::Cell;
-
     use super::*;
 
     fn caps(json: &str) -> Capabilities {
@@ -3889,7 +3891,7 @@ mod tests {
             granted: None,
         };
         let files = MediaFiles::new(&access, None, &TrustedPaths::default(), true);
-        let resolves = || RESOLVES.with(Cell::get);
+        let resolves = || RESOLVES.with(std::cell::Cell::get);
         let before = resolves();
         for outside in [
             root.join("elsewhere/x.png"),

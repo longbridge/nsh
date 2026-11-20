@@ -614,8 +614,6 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
             reactive::set_signal(cx, e.signals[part as usize].get(), value);
         }
     });
-    // The main window's listeners (`WindowRef.on`).
-    crate::window::main_changed(cx, next.window_state);
     let failed = reactive::finish_value(cx, UNDEFINED);
     // SAFETY: an inline tag check.
     if unsafe { qjs::JS_IsException(failed) } {
@@ -696,20 +694,9 @@ fn accessor(cx: *mut JsContext, part: Part) -> JsValue {
     unsafe { qjs::JS_DupValue(cx, env(cx).accessors[part as usize].get()) }
 }
 
-/// The main window's hidden title bar area accessor (owned).
-pub(crate) fn title_bar(cx: *mut JsContext) -> JsValue {
-    accessor(cx, Part::TitleBar)
-}
-
 /// The displays the platform reported last.
 pub(crate) fn display_list(cx: *mut JsContext) -> Vec<Display> {
     env(cx).displays.borrow().clone()
-}
-
-/// The main window's state accessor (owned): `WindowRef.state()` of the
-/// main window.
-pub(crate) fn window_state(cx: *mut JsContext) -> JsValue {
-    accessor(cx, Part::WindowState)
 }
 
 /// `displays()` (`nsh/desktop`): the displays (owned).

@@ -42,6 +42,7 @@ fn workspace() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
 import { DockArea, type DockAreaLayout } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 const titles: Record<string, string> = {
   files: "Files", readme: "README.md", main: "main.rs", preview: "Preview", terminal: "Terminal",
@@ -75,7 +76,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `DockArea` 和它使用的值来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate（`nsh_base::dock_area()`，值在 `nsh_base::dock` 中）。在 Rust 中，`dock_area()` 创建它，每个属性对应一个设置方法，每个事件对应一个监听方法，外观用类型化的样式方法；`DockLayout` 用面板的键描述布局（`h_split()`、`v_split()`、`tabs()`、`.child(layout, size)`、`.panel(key)`）。

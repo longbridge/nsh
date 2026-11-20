@@ -65,6 +65,7 @@ fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, resource, Scroll, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 type Post = { id: number; title: string };
 
@@ -85,7 +86,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 [`resource`](./reactivity.md#resource) 会保存值、错误以及是否正在加载；source 变化（或调用 `refetch()`）时重新加载；对于不再需要的加载（组件被移除，或有更新的加载开始）会取消请求：Rust 中丢弃加载任务，其请求随之取消；TSX 中通过它传入的 `signal` 取消。Rust 的 `fetch` 使用绝对 URL；JSON 用 `serde_json` 等 crate 解析。

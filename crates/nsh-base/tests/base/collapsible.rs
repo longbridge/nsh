@@ -9,11 +9,7 @@
 use std::sync::{Arc, Mutex};
 
 use nsh_base::collapsible;
-use nsh_core::{
-    LayoutCurve, MountItem, NodeId, Size,
-    element::{Root, Spring},
-    prelude::*,
-};
+use nsh_core::{LayoutCurve, MountItem, NodeId, Size, element::Spring, prelude::*};
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
 
@@ -90,7 +86,9 @@ fn start_with(props: HarnessProps, reduce_motion: bool) -> App {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::new::<Harness>(move || props.clone()))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            props.clone()
+        }))
     };
     config.environment.reduce_motion = reduce_motion;
     let mut app = Headless::start(config).expect("the engine starts");
@@ -476,9 +474,9 @@ fn start_interactive(block_parent: bool) -> App {
     let config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::new::<InteractiveHarness>(move || InteractiveProps {
-            block_parent,
-        }))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<InteractiveHarness>(
+            move || InteractiveProps { block_parent },
+        ))
     };
     let mut app = Headless::start(config).expect("the engine starts");
     let seen: Seen = Arc::default();
@@ -612,7 +610,9 @@ fn opening_reveal_does_not_override_blocked_ancestor_pointer_events() {
 
     let config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::new::<OpenBlocked>(|| OpenBlockedProps {}))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<OpenBlocked>(|| {
+            OpenBlockedProps {}
+        }))
     };
     let mut blocked_app = Headless::start(config).expect("engine starts");
     let seen: Seen = Arc::default();

@@ -87,6 +87,7 @@ fn sections() -> impl IntoElement {
 import { mount, signal, Text, View } from "nsh";
 import { TabBar } from "nsh/mobile";
 import { platform } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const section = signal(0);
@@ -106,7 +107,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `TabBar` 来自 `nsh/mobile`，在 Rust 中是 `nsh_core::mobile`。选中状态属于应用：一次点按通过 `onChange` 报告该标签的索引（`{ index }`），标签栏像系统的一样立即显示这次选择，应用显示那一部分并把索引作为 `selectedIndex` 传回。样式没有给定高度时，高度是系统的。在 Rust 中，`tab_bar()` 创建它，每个 prop 一个 setter（`.items(..)`、`.selected_index(..)`），每个事件一个监听方法（`.on_change(..)`），以及带类型的样式方法；`TabBarItem::new(title).icon(name).badge(text)` 创建一个标签。

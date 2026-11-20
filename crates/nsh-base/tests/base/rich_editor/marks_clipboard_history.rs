@@ -11,8 +11,10 @@ fn start_any(doc: Value) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
         // Made in the engine, as `start`'s.
-        ..EngineConfig::new(Root::new::<Harness>(move || HarnessProps {
-            session: Some(session(doc.clone())),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            HarnessProps {
+                session: Some(session(doc.clone())),
+            }
         }))
     };
     config.environment.os = Os::Linux;
@@ -27,8 +29,10 @@ fn start_manual(doc: Value) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::new::<Harness>(move || HarnessProps {
-            session: Some(session(doc.clone())),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            HarnessProps {
+                session: Some(session(doc.clone())),
+            }
         }))
     };
     config.environment.os = Os::Linux;

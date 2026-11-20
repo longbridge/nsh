@@ -11,6 +11,7 @@ use crate::{animation::UiAnimation, encode::Out};
 
 fn outputs(a: &mut UiAnimation) -> Vec<(u32, String, String)> {
     let mut out = Out::default();
+    // Every bound value, changed or not (the test reads what the view shows).
     a.outputs(&mut out, true);
     out.0
 }

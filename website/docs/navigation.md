@@ -85,6 +85,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, Scroll, Text, View } from "nsh";
 import { createNavStack, NavPage, NavStack } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 type Route = { name: "inbox" } | { name: "message"; id: number };
 
@@ -145,7 +146,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 ## The stack's state

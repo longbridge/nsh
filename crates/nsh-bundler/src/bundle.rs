@@ -151,6 +151,11 @@ pub struct Bundle {
     /// are not valid ([`main_window`]).
     #[doc(hidden)]
     pub main_window: Option<String>,
+    /// The app's lifecycle options (`nsh.json` `application`), as
+    /// `app.json` carries them: JSON, `None` without them or when they are
+    /// not valid ([`application`]).
+    #[doc(hidden)]
+    pub application: Option<String>,
     /// Wall time spent bundling, in milliseconds.
     pub elapsed_ms: f64,
 }
@@ -240,6 +245,22 @@ pub fn main_window(dir: &std::path::Path) -> Result<Option<String>, BundleError>
     Ok(config
         .get("window")
         .filter(|window| nsh_core::desktop::MainWindowOptions::from_json(window).is_ok())
+        .map(serde_json::Value::to_string))
+}
+
+/// The `"application"` of the `nsh.json` in `dir`, the app's lifecycle
+/// options, as JSON: `None` without it, and when it is not valid
+/// ([`nsh_core::desktop::ApplicationOptions::from_json`]).
+#[doc(hidden)]
+pub fn application(dir: &std::path::Path) -> Result<Option<String>, BundleError> {
+    let Ok(text) = std::fs::read_to_string(dir.join("nsh.json")) else {
+        return Ok(None);
+    };
+    let config: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
+    Ok(config
+        .get("application")
+        .filter(|application| nsh_core::desktop::ApplicationOptions::from_json(application).is_ok())
         .map(serde_json::Value::to_string))
 }
 
@@ -586,6 +607,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
     // real-window hosts read it (the CLI's `read_config`): an app a test
     // opens below its app's root starts alike headless and in a window.
     let main_window = main_window(&cwd)?;
+    let application = application(&cwd)?;
     let resolve = ResolveSetup::read(&app)?;
     let asset_root = match &options.asset_root_from {
         Some(file) => {
@@ -722,6 +744,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
         capabilities,
         url_schemes,
         main_window,
+        application,
         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
     })
 }
