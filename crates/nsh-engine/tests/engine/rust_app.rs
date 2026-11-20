@@ -787,7 +787,7 @@ fn content_a_component_does_not_place_is_not_shown() {
 /// Shows what `app_info()` answers.
 #[component]
 fn Version() -> impl IntoElement {
-    let shown = match nsh_core::element::app_info() {
+    let shown = match app_info() {
         Some(info) => format!(
             "{} {} {} ({}){}",
             info.id.unwrap_or_default(),
