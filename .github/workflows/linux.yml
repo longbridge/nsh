@@ -132,6 +132,9 @@ jobs:
           done
           run examples/gallery/tests/storage.test.tsx --filter "counts the demo's openings"
           run examples/gallery/tests/environment.test.tsx --filter appearance
+          run crates/nsh-testing/tests/testing/input-target/App.test.tsx --filter 'shared prefix'
+          run crates/nsh-testing/tests/testing/input-target/gpui/Editor.test.tsx
+          run crates/nsh-testing/tests/testing/input-target/gpui/Input.test.tsx
 
   check:
     needs: changed
