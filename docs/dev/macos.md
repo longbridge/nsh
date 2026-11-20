@@ -27,6 +27,8 @@ cargo test -p nsh-platform-macos --test native -- --ignored # desktop session re
 NSH_MODAL_FOCUS_CHECK_ONLY=1 cargo test -p nsh-platform-macos --test native -- --ignored
 # A navigator taken away whole frees its stack and pages (tests/native/navigation_unmount.rs):
 NSH_NAVIGATION_UNMOUNT_CHECK_ONLY=1 cargo test -p nsh-platform-macos --test native -- --ignored
+# Nested hover/popover cursor tracking checks:
+NSH_HOVER_CURSOR_CHECK_ONLY=1 cargo test -p nsh-platform-macos --test native -- --ignored
 # Mounting rows that are not virtualized, measured alone (tests/native/mount.rs):
 NSH_MOUNT_BENCH_ONLY=1 cargo test --release -p nsh-platform-macos --test native -- --ignored
 ```
