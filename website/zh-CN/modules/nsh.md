@@ -342,7 +342,8 @@ interface AppInfo {
 `--release` 的 `nsh build` 是开发构建；`nsh package`、`nsh publish` 和 `nsh build --release` 不是。在任何平台、任何模块中
 都能读取，包括模块顶层的代码：构建会在应用的模块运行之前把这些信息交给运行时。
 
-安装的应用本体的版本见 `nsh/updater` 的 [`shellInfo()`](./nsh-updater.md#shellinfo)。
+安装的应用本体的版本见 `nsh/updater` 的 [`shellInfo()`](./nsh-updater.md#shellinfo)。Rust 应用的 Rust 代码用 `app_info()`
+读取同样的信息（[应用的版本](../docs/device-and-environment.md#应用的版本)）。
 
 ```tsx
 import { appInfo, Text } from "nsh";

@@ -53,6 +53,8 @@ pub(crate) struct Ambient {
     storage: Option<crate::storage::Store>,
     /// The app's own data directory ([`data_dir`]).
     data_dir: Option<std::path::PathBuf>,
+    /// The app as it was built ([`app_info`]).
+    app_info: Option<crate::platform::AppInfo>,
     /// What `nsh/updater` checks with for Rust code
     /// ([`crate::runtime::prompt_for_update`]).
     updater: Option<std::sync::Arc<dyn crate::runtime::UpdaterHost>>,
@@ -177,6 +179,12 @@ impl super::Runtime {
     pub(crate) fn set_data_dir(&self, dir: Option<std::path::PathBuf>) {
         let _entered = self.enter();
         with_data(|d| d.ambient.data_dir = dir);
+    }
+
+    /// The app as it was built ([`app_info`]).
+    pub(crate) fn set_app_info(&self, info: Option<crate::platform::AppInfo>) {
+        let _entered = self.enter();
+        with_data(|d| d.ambient.app_info = info);
     }
 
     /// What Rust code checks for updates with ([`updater_host`]).
@@ -686,6 +694,20 @@ pub(crate) fn with_storage<R>(f: impl FnOnce(&crate::storage::Store) -> R) -> R 
 /// ```
 pub fn data_dir() -> Option<std::path::PathBuf> {
     with_data(|d| d.ambient.data_dir.clone())
+}
+
+/// The app as it was built (TS: `appInfo()`): its id, name, version and
+/// build number, and whether it is a development build
+/// ([`crate::platform::AppInfo`]). `None` in a TSX app, whose JS
+/// `appInfo()` reports it, and where the runner gave none.
+///
+/// ```ignore
+/// if let Some(version) = app_info().and_then(|info| info.version) {
+///     log::info!("version {version}");
+/// }
+/// ```
+pub fn app_info() -> Option<crate::platform::AppInfo> {
+    with_data(|d| d.ambient.app_info.clone())
 }
 
 /// What Rust code checks for updates with: the engine's, `None` where the

@@ -838,7 +838,7 @@ define_class!(
         #[unsafe(method(cursorUpdate:))]
         fn cursor_update(&self, event: &NSEvent) {
             match self.input_surface() {
-                Some(surface) => crate::input::cursor_update(&surface),
+                Some(surface) => crate::input::cursor_update(&surface, Some(event)),
                 // SAFETY: NSView's own handling (passes it up).
                 None => unsafe { msg_send![super(self), cursorUpdate: event] },
             }
@@ -1480,6 +1480,7 @@ impl ViewObj {
         }
         let options = NSTrackingAreaOptions::MouseMoved
             | NSTrackingAreaOptions::MouseEnteredAndExited
+            | NSTrackingAreaOptions::CursorUpdate
             | NSTrackingAreaOptions::ActiveAlways
             | NSTrackingAreaOptions::InVisibleRect;
         // SAFETY: the owner (this view) outlives the tracking area, which
