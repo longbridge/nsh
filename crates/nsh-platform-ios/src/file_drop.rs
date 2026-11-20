@@ -228,6 +228,56 @@ pub(crate) fn read(session: &AnyObject, done: impl FnOnce(Vec<String>) + Send + 
     }
 }
 
+/// A drag interaction whose delegate is `delegate` (the surface's event
+/// target), for a view with `dragItems`: enabled, as iPhone apps start no
+/// drags by default.
+pub(crate) fn drag_interaction(delegate: &AnyObject) -> Option<Retained<AnyObject>> {
+    let class = class(c"UIDragInteraction")?;
+    // SAFETY: UIDragInteraction's documented initializer and `enabled`
+    // (iOS 11); it holds its delegate weakly, and the event target outlives
+    // the surface's views.
+    unsafe {
+        let alloc: Allocated<AnyObject> = msg_send![class, alloc];
+        let i: Option<Retained<AnyObject>> = msg_send![alloc, initWithDelegate: delegate];
+        let i = i?;
+        let _: () = msg_send![&i, setEnabled: true];
+        Some(i)
+    }
+}
+
+/// The drag items of the local files `uris` (`file:` URLs): one per file
+/// that exists, each with the file as it is (its type by its extension)
+/// and its name.
+pub(crate) fn drag_items(uris: &[Box<str>]) -> Retained<NSArray<AnyObject>> {
+    let (Some(provider_class), Some(item_class)) = (class(c"NSItemProvider"), class(c"UIDragItem"))
+    else {
+        return NSArray::new();
+    };
+    let items: Vec<Retained<AnyObject>> = uris
+        .iter()
+        .filter_map(|uri| {
+            let url = NSURL::URLWithString(&NSString::from_str(uri))?;
+            if !url.isFileURL() {
+                return None;
+            }
+            let name = url.lastPathComponent();
+            // SAFETY: NSItemProvider's `initWithContentsOfURL:` (nil for a
+            // file that cannot be read), `suggestedName` and UIDragItem's
+            // `initWithItemProvider:` (iOS 11).
+            unsafe {
+                let alloc: Allocated<AnyObject> = msg_send![provider_class, alloc];
+                let provider: Option<Retained<AnyObject>> =
+                    msg_send![alloc, initWithContentsOfURL: &*url];
+                let provider = provider?;
+                let _: () = msg_send![&provider, setSuggestedName: name.as_deref()];
+                let alloc: Allocated<AnyObject> = msg_send![item_class, alloc];
+                msg_send![alloc, initWithItemProvider: &*provider]
+            }
+        })
+        .collect();
+    NSArray::from_retained_slice(&items)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;

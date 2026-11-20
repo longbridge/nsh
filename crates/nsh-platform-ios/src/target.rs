@@ -169,6 +169,24 @@ define_class!(
             });
         }
 
+        // UIDragInteractionDelegate, for the views with `dragItems`.
+
+        #[unsafe(method_id(dragInteraction:itemsForBeginningSession:))]
+        fn drag_items(
+            &self,
+            interaction: &AnyObject,
+            _session: &AnyObject,
+        ) -> Retained<objc2_foundation::NSArray<AnyObject>> {
+            // SAFETY: UIInteraction's `view` (weak: nil once the view is gone).
+            let view: Option<Retained<UIView>> = unsafe { msg_send![interaction, view] };
+            let uris = view
+                .as_deref()
+                .and_then(|v| v.downcast_ref::<crate::native_view::NshView>())
+                .map(|v| v.drag_items())
+                .unwrap_or_default();
+            crate::file_drop::drag_items(&uris)
+        }
+
         #[unsafe(method(handleContextMenu:))]
         fn handle_context_menu(&self, recognizer: &UITapGestureRecognizer) {
             if recognizer.state() != UIGestureRecognizerState::Ended {

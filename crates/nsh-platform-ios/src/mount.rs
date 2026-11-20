@@ -205,6 +205,8 @@ struct Gestures {
     rotation: Option<Retained<UIRotationGestureRecognizer>>,
     /// `onFileDrop`: a `UIDropInteraction` ([`crate::file_drop`]).
     file_drop: Option<Retained<objc2::runtime::AnyObject>>,
+    /// `dragItems`: a `UIDragInteraction` ([`crate::file_drop::drag`]).
+    file_drag: Option<Retained<objc2::runtime::AnyObject>>,
     /// `panActivation`.
     gate: Option<Retained<crate::touch::PanGate>>,
     refresh: Option<Refresh>,
@@ -5006,6 +5008,26 @@ impl Mounter {
             } else {
                 usize::MAX
             });
+        }
+        // A drag out of the view, of its `dragItems` (views that keep their
+        // props, where the drag reads them).
+        let wants_drag = !props.drag_items.is_empty() && s.native.nsh().is_some();
+        let view = s.native.view();
+        match (&s.gestures.file_drag, wants_drag) {
+            (None, true) => {
+                if let Some(i) = crate::file_drop::drag_interaction(&target) {
+                    // SAFETY: UIView's `addInteraction:` with a UIInteraction.
+                    let _: () = unsafe { objc2::msg_send![view, addInteraction: &*i] };
+                    view.setUserInteractionEnabled(true);
+                    s.gestures.file_drag = Some(i);
+                }
+            }
+            (Some(i), false) => {
+                // SAFETY: UIView's `removeInteraction:` with its interaction.
+                let _: () = unsafe { objc2::msg_send![view, removeInteraction: &**i] };
+                s.gestures.file_drag = None;
+            }
+            _ => {}
         }
         let activation = props.pan_activation;
         toggle(

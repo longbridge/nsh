@@ -86,7 +86,7 @@ view 用 flexbox 布局子元素，默认值为：`flexDirection: "column"`、`f
 
 ## 属性
 
-`View` 有一个自己的属性 `selectable`（Rust 中为 `.selectable(true)`）：视图中的文字作为一个选区一起选择（[文字选择](./text-selection.md)）。其余是[通用属性](./index.md#通用属性)：样式（`style`、`class`、`classList`；Rust 中为 `Styled` 方法）、`disabled`，按压属性（`onPress`、`onLongPress`、`onPressDown`、`onPressUp`、`delayLongPress`、`hitSlop`），状态样式（`activeStyle`、`hoverStyle`、`focusStyle`、`disabledStyle`、`checkedStyle`），`onMouseEnter` / `onMouseMove` / `onMouseLeave`、`onWheel`、`onPinch`、`onMouseUp`、`onContextMenu`，`onFileDragEnter` / `onFileDragLeave` / `onFileDrop`，`focusable`、`captureKeys`、`onKeyDown` / `onKeyUp`、`onLayout`、`ref`、`nativeID`、`testID`，Web 上页面的标记（`web={{ element }}`），手势属性（`pan`、`pinch`、`rotation` 及其事件），触摸与响应者属性，无障碍属性，以及 `ios` / `android` / `desktop`。
+`View` 有一个自己的属性 `selectable`（Rust 中为 `.selectable(true)`）：视图中的文字作为一个选区一起选择（[文字选择](./text-selection.md)）。其余是[通用属性](./index.md#通用属性)：样式（`style`、`class`、`classList`；Rust 中为 `Styled` 方法）、`disabled`，按压属性（`onPress`、`onLongPress`、`onPressDown`、`onPressUp`、`delayLongPress`、`hitSlop`），状态样式（`activeStyle`、`hoverStyle`、`focusStyle`、`disabledStyle`、`checkedStyle`），`onMouseEnter` / `onMouseMove` / `onMouseLeave`、`onWheel`、`onPinch`、`onMouseUp`、`onContextMenu`，`onFileDragEnter` / `onFileDragLeave` / `onFileDrop`，`dragItems`，`focusable`、`captureKeys`、`onKeyDown` / `onKeyUp`、`onLayout`、`ref`、`nativeID`、`testID`，Web 上页面的标记（`web={{ element }}`），手势属性（`pan`、`pinch`、`rotation` 及其事件），触摸与响应者属性，无障碍属性，以及 `ios` / `android` / `desktop`。
 
 ## 可选择的视图
 
@@ -224,6 +224,16 @@ const files = signal<string[]>([]);
 最近的、已启用且监听 `onFileDrop` 的祖先视图接收文件，搜索范围止于模态根节点。`disabled` 会移除文件拖入、离开和放下的监听；离开、取消、完成或移除目标会清除当前拖放状态。原生侧根据已挂载的状态同步接受 Copy 操作。应用决定如何读取、打开或传输收到的文件。
 
 文本输入框属于包住它的拖放目标：文件放到输入框的文字上，和放到目标其他位置一样由该目标接收，拖入、离开事件也相同，输入框里的文字保持不变。拖进输入框的文字，以及放到不在任何拖放目标内的输入框上的文件，按平台文本框的方式处理。
+
+## 往外拖文件
+
+`dragItems` 列出用户可以从视图里拖出去的本地文件（绝对 `file:` URL）：拖到其他应用，或拖到应用里接收文件拖放的视图上。用户按住视图再移动时，视图发起这些文件的系统拖动，系统用视图的快照作为拖动预览。每个文件按原样提供，类型由扩展名决定，名称为文件名；不是本地文件的 URL 会被跳过。列表为空（默认）时不发起拖动。目前 iOS 会发起这类拖动，其他平台尚不支持。
+
+```tsx
+<View dragItems={[photo.uri]} class="size-24 rounded-xl overflow-hidden">
+  <Image src={photo.uri} class="size-full" />
+</View>
+```
 
 ## ref 方法
 

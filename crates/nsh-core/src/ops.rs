@@ -3718,6 +3718,12 @@ pub enum Prop {
     /// popover). Unset, the views that take presses are stops.
     #[prop(js = "focusable")]
     Focusable(Option<bool>),
+    /// `dragItems`: local files (absolute `file:` URLs) the user can drag
+    /// out of the view, into another app or another view: the view starts
+    /// a system drag of them (iOS: press and hold, then move). Empty: the
+    /// view starts no drag.
+    #[prop(js = "dragItems", reset = Prop::DragItems(Vec::new()), ts = "string[]")]
+    DragItems(Vec<Box<str>>),
     /// `captureKeys`: the hardware keys this view or a focused descendant
     /// consumes before native defaults run: `"none"`, `"all"`, or the
     /// canonical keystrokes (`"mod+k"`, `"shift+tab"`) it takes. Decided

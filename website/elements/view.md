@@ -96,7 +96,7 @@ set (`flexDirection: "column"`, `flex-col`, `.flex_col()`). A view that sets no 
 `classList`; the `Styled` methods in Rust), `disabled`, the press props (`onPress`, `onLongPress`, `onPressDown`,
 `onPressUp`, `delayLongPress`, `hitSlop`), the state styles (`activeStyle`, `hoverStyle`,
 `focusStyle`, `disabledStyle`, `checkedStyle`), `onMouseEnter` / `onMouseMove` / `onMouseLeave`, `onWheel`, `onPinch`, `onMouseUp`, `onContextMenu`,
-`onFileDragEnter` / `onFileDragLeave` / `onFileDrop`, `focusable`, `captureKeys`, `onKeyDown` / `onKeyUp`, `onLayout`, `ref`, `nativeID`, `testID`, the page's
+`onFileDragEnter` / `onFileDragLeave` / `onFileDrop`, `dragItems`, `focusable`, `captureKeys`, `onKeyDown` / `onKeyUp`, `onLayout`, `ref`, `nativeID`, `testID`, the page's
 markup on the web (`web={{ element }}`), the
 gesture props (`pan`, `pinch`, `rotation` and their events), the touch and responder props, the accessibility props
 and `ios` / `android` / `desktop`.
@@ -262,6 +262,20 @@ received files.
 Text inputs belong to the destination around them: files dropped on an input's text reach that destination as
 anywhere else in it, with the same enter and leave events, and the input keeps its text as it was. Text dragged
 into an input, and files dropped on an input outside any destination, behave as the platform's text fields do.
+
+## Dragging files out
+
+`dragItems` lists local files, as absolute `file:` URLs, that the user can drag out of the view: into another app
+or onto a view of the app that takes file drops. The view starts a
+system drag of them when the user presses and holds it, then moves; the platform lifts a snapshot of the view. Each
+file goes as it is, its type by its extension, named by its file name; a URL that is no local file is left out. An
+empty list (the default) starts no drag. iOS starts these drags; the other platforms do not yet.
+
+```tsx
+<View dragItems={[photo.uri]} class="size-24 rounded-xl overflow-hidden">
+  <Image src={photo.uri} class="size-full" />
+</View>
+```
 
 ## Ref methods
 

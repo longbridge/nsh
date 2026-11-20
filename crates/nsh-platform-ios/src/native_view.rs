@@ -560,6 +560,11 @@ impl NshView {
         *self.ivars().target.borrow_mut() = Some(Weak::new(target));
     }
 
+    /// The local files a drag out of the view carries (`dragItems`).
+    pub(crate) fn drag_items(&self) -> Vec<Box<str>> {
+        self.ivars().props.borrow().drag_items.clone()
+    }
+
     /// The events the app listens to (`MountItem::Events`).
     pub(crate) fn set_events(&self, events: EventMask) {
         self.ivars().events.set(events);
