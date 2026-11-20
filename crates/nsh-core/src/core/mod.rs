@@ -7376,7 +7376,7 @@ impl<M: TextEngine> Core<M> {
             None => self.layout.children_len(layout),
         };
         debug_assert!(
-            pos + 1 != node.children.len() || index as u32 == self.render_index(parent, pos),
+            pos + 1 != node.children.len() || index as u32 == self.rendering_before(parent, pos),
             "the layout node's children are its rendering children"
         );
         index as u32
@@ -7384,7 +7384,14 @@ impl<M: TextEngine> Core<M> {
 
     /// The rendering siblings before `pos` among `parent`'s children,
     /// counted: what [`Self::layout_index_at`] finds without counting them.
+    /// Looks at each of them ([`Components::placing_work`]).
     fn render_index(&self, parent: Key, pos: usize) -> u32 {
+        self.placing(pos);
+        self.rendering_before(parent, pos)
+    }
+
+    /// [`Self::render_index`] uncounted, for the check of debug builds.
+    fn rendering_before(&self, parent: Key, pos: usize) -> u32 {
         self.nodes[parent as usize].children[..pos]
             .iter()
             .map(|&c| &self.nodes[c as usize])

@@ -11466,10 +11466,10 @@ fn placing_work(n: u32, place: impl Fn(&mut Core<FakeEngine>, NodeId, u32)) -> u
 }
 
 /// Views inserted before the last of their siblings (rows before what
-/// follows a list), before the first (a chat's older messages) or after
-/// the one inserted last are placed, in the core's children and in the
-/// layout's, by looking at the siblings near the anchor, not at all those
-/// before it: four times the views, about four times the work.
+/// follows a list) or before the first (a chat's older messages) are
+/// placed, in the core's children and in the layout's, by looking at the
+/// siblings near the anchor, not at all those before it: four times the
+/// views, about four times the work.
 #[test]
 fn views_inserted_near_an_anchor_are_placed_without_counting_siblings() {
     let before = |anchor: fn(u32) -> NodeId| {
