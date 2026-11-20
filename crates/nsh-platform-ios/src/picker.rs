@@ -166,7 +166,7 @@ pub(crate) fn pick_images(id: u32, request: PickRequest, view: &UIView, control:
     }
 }
 
-fn uniform_types() -> bool {
+pub(crate) fn uniform_types() -> bool {
     static LOADED: OnceLock<bool> = OnceLock::new();
     *LOADED.get_or_init(|| {
         let path =
