@@ -244,6 +244,31 @@ pub(crate) fn may_make_web_view(app: &RustApp) -> bool {
     app.watched.iter().any(|dir| spells(dir))
 }
 
+/// The cargo arguments that turn web views on in a Rust app's runner
+/// (`rust-<platform>`) on Linux and Windows, the platform crates whose
+/// `webview` is a feature (#2706). A package keeps it when
+/// [`set_runner_features`] chose it; `nsh run`, which chooses nothing, when
+/// the app's code may make a web view ([`may_make_web_view`]), as a package
+/// would, so the development runner does not show a placeholder where the
+/// released one shows the page.
+fn rust_runner_web_view(platform: Platform, may: impl FnOnce() -> bool) -> Vec<&'static str> {
+    let feature = match platform {
+        Platform::Linux => "nsh-platform-linux/webview",
+        Platform::Windows => "nsh-platform-windows/webview",
+        _ => return Vec::new(),
+    };
+    let chosen = RUNNER_FEATURES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(|chosen| chosen.iter().any(|f| f == "webview"));
+    if chosen.unwrap_or_else(may) {
+        vec!["--features", feature]
+    } else {
+        Vec::new()
+    }
+}
+
 pub(crate) fn current() -> Option<RustApp> {
     CURRENT.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
@@ -3134,7 +3159,15 @@ opt-level = \"s\"
             if release { "" } else { " (debug)" },
             crate::runtime::other_triple(platform, triple)
         );
-        self.build(&self.workspace, &self.bin(dir), triple, release, &[], &what)
+        let web_view = rust_runner_web_view(platform, || may_make_web_view(self));
+        self.build(
+            &self.workspace,
+            &self.bin(dir),
+            triple,
+            release,
+            &web_view,
+            &what,
+        )
     }
 
     /// Waits until `stop` returns true (or the user stops the command);
@@ -3737,8 +3770,14 @@ mod tests {
 
     use super::{AppCrate, Nsh, RootConfig, RustApp};
 
+    /// Serialises the tests that set [`super::RUNNER_FEATURES`].
+    static RUNNER_FEATURES_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn a_release_runner_builds_with_the_chosen_features() {
+        let _guard = RUNNER_FEATURES_TEST
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         assert!(super::runner_feature_args("nsh-platform-windows").is_empty());
         super::set_runner_features(vec!["js".into(), "net".into(), "svg".into(), "plot".into()]);
         let args = super::runner_feature_args("nsh-platform-windows");
@@ -3772,6 +3811,36 @@ mod tests {
             super::runner_feature_args("nsh-platform-android")[2],
             "js,plot,svg"
         );
+        *super::RUNNER_FEATURES.lock().unwrap() = None;
+    }
+
+    #[test]
+    fn a_rust_runner_turns_web_views_on_like_its_package() {
+        use crate::runtime::Platform;
+        let _guard = RUNNER_FEATURES_TEST
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *super::RUNNER_FEATURES.lock().unwrap() = None;
+        // `nsh run`: when the app's code may make a web view (#2706).
+        assert_eq!(
+            super::rust_runner_web_view(Platform::Linux, || true),
+            ["--features", "nsh-platform-linux/webview"]
+        );
+        assert_eq!(
+            super::rust_runner_web_view(Platform::Windows, || true),
+            ["--features", "nsh-platform-windows/webview"]
+        );
+        assert!(super::rust_runner_web_view(Platform::Linux, || false).is_empty());
+        // Web views are no feature on macOS.
+        assert!(super::rust_runner_web_view(Platform::MacOs, || true).is_empty());
+        // A package: what it chose, whatever the scan says.
+        super::set_runner_features(vec!["webview".into()]);
+        assert_eq!(
+            super::rust_runner_web_view(Platform::Linux, || false).len(),
+            2
+        );
+        super::set_runner_features(vec!["js".into()]);
+        assert!(super::rust_runner_web_view(Platform::Linux, || true).is_empty());
         *super::RUNNER_FEATURES.lock().unwrap() = None;
     }
 
