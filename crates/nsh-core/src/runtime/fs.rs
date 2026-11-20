@@ -1357,7 +1357,11 @@ pub(crate) mod confined {
     /// cannot redirect the root.
     #[cfg(unix)]
     pub(crate) fn open_root(path: &Path) -> io::Result<Dir> {
-        use std::{ffi::CString, os::fd::AsRawFd, os::unix::ffi::OsStrExt, path::Component};
+        use std::{
+            ffi::CString,
+            os::{fd::AsRawFd, unix::ffi::OsStrExt},
+            path::Component,
+        };
 
         let mut parts = path.components().peekable();
         if parts.next() != Some(Component::RootDir) {

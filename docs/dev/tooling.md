@@ -794,7 +794,8 @@ the header's back button (the bar button carrying the back chevron's mask); dial
 `UIAlertController`'s button; screenshots are `drawViewHierarchyInRect:` as a PNG; a step waits for finite Core Animation animations and gliding scroll views too.
 The system's appearance is the simulator's: the CLI switches it (`simctl ui appearance`) and restores it after the
 app; the screen keeps its device's size. Android (`nsh-platform-android`, feature `dev`; `TestAgent.java`;
-`nsh-cli/src/test_android.rs`): the CLI installs the host on the first device `adb devices` lists and starts it per
+`nsh-cli/src/test_android.rs`): the CLI installs the host on the device `--device` or `ANDROID_SERIAL` names, else the
+first one `adb devices` lists (`android::device`), and starts it per
 `open` with the dev server's port forwarded (`adb reverse`) and a data directory of its own in the host's cache
 (`dataDir`, emptied as it starts). As `nsh run --target android` does for a TSX app, it passes the variables of its
 environment that the app's `capabilities.process.env` declares as `nsh.env.<name>` string extras

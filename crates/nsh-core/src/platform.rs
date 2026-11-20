@@ -916,6 +916,61 @@ impl PerfStats {
     }
 }
 
+/// The app as it was built (TS: `appInfo()`; Rust:
+/// [`crate::element::app_info`]): its id, name, version and build number,
+/// and whether it is a development build. A Rust app's root carries it
+/// ([`crate::element::Root::app_info`], which nsh's generated code sets
+/// from `nsh.json`, or from the package: `nsh package --id`, `--name`,
+/// `--version` and `--build` included); a TSX app's is JS's `appInfo()`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct AppInfo {
+    /// The app's id (`nsh.json` `"id"`; a package's as it names it).
+    pub id: Option<String>,
+    /// The app's name (`nsh.json` `"name"`; a package's as it names it).
+    pub name: Option<String>,
+    /// The app's version (`nsh.json` `"version"`; a package's, `1.0.0`
+    /// where nothing gives one).
+    pub version: Option<String>,
+    /// The build number (`nsh.json` `"build"`; a package's, `1` where
+    /// nothing gives one).
+    pub build: Option<u64>,
+    /// A development build (`nsh run`, `nsh dev`, `nsh test`, a build
+    /// without `--release`), not a package's.
+    pub development: bool,
+}
+
+impl AppInfo {
+    /// From the JSON `appInfo()` reports (`{"id", "name", "version",
+    /// "build", "development"}`): a key that is missing, `null` or of
+    /// another type is left unknown, and other keys are ignored.
+    #[doc(hidden)]
+    pub fn from_json(value: &crate::JsonValue) -> AppInfo {
+        let text = |key: &str| value.get(key).and_then(|v| v.as_str()).map(str::to_owned);
+        AppInfo {
+            id: text("id"),
+            name: text("name"),
+            version: text("version"),
+            build: value.get("build").and_then(|v| v.as_u64()),
+            development: value
+                .get("development")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        }
+    }
+
+    /// As `appInfo()` reports it: unknown fields are `null`.
+    pub fn to_json(&self) -> crate::JsonValue {
+        serde_json::json!({
+            "id": self.id,
+            "name": self.name,
+            "version": self.version,
+            "build": self.build,
+            "development": self.development,
+        })
+    }
+}
+
 /// The user's locale settings beside the locale (`locale_settings()`; TS
 /// `localeSettings()`): the preferred languages, the time zone and the
 /// regional preferences the systems keep beside the language (Language &
@@ -1651,6 +1706,39 @@ pub enum FetchOp {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn app_info_reads_and_writes_app_infos_json() {
+        use super::AppInfo;
+        let json = serde_json::json!({
+            "id": "com.example.orders",
+            "name": "Orders",
+            "version": "2.1.0",
+            "build": 7,
+            "development": true,
+            "store": "play",
+        });
+        let info = AppInfo::from_json(&json);
+        assert_eq!(info.id.as_deref(), Some("com.example.orders"));
+        assert_eq!(info.name.as_deref(), Some("Orders"));
+        assert_eq!(info.version.as_deref(), Some("2.1.0"));
+        assert_eq!(info.build, Some(7));
+        assert!(info.development);
+        assert_eq!(AppInfo::from_json(&info.to_json()), info);
+        // Missing, null or mistyped: unknown.
+        let partial = AppInfo::from_json(&serde_json::json!({
+            "id": null,
+            "version": 2,
+            "build": "7",
+        }));
+        assert_eq!(partial, AppInfo::default());
+        assert_eq!(
+            AppInfo::default().to_json(),
+            serde_json::json!({
+                "id": null, "name": null, "version": null, "build": null, "development": false,
+            })
+        );
+    }
+
     #[test]
     fn size_class_fallback_uses_points_and_native_traits_win() {
         use super::{Environment, SizeClass};

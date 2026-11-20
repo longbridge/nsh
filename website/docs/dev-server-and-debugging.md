@@ -38,7 +38,7 @@ nsh dev App.tsx --server-only       # server only
 | Flag | Description |
 |---|---|
 | `--target <catalyst \| ios \| android \| macos \| linux \| windows \| gpui \| web>` | Where to run. Default `macos` on macOS (AppKit), `linux` on Linux, `windows` on Windows. A Rust app runs on all of them but `gpui`, which embeds its root in a GPUI app ([GPUI](./gpui.md)). |
-| `--device <name or UDID>` | The iOS simulator to use. Default: a booted one, else the newest iPhone (booted for you). |
+| `--device <name, UDID or serial>` | The iOS simulator to use, by name or UDID. Default: a booted one, else the newest iPhone (booted for you). With `--target android`: the device or emulator, by its serial (as `adb devices` lists it). Default: the one `ANDROID_SERIAL` names, else the first one. |
 | `--port <port>` | Dev server port, replacing the previous NSH session on it. Default: the port this app had last, replacing its previous session, else the first free one from 8790. |
 | `--release` | Serve release builds of TSX (minified, no debug info, no hot updates). |
 | `--trace` | Log the time of every commit on the host (TSX apps). |

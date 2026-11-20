@@ -349,7 +349,8 @@ without `--release` make development builds; `nsh package`, `nsh publish` and `n
 builds. It reads the same on every platform and in any module, at its top level too: the build hands the information
 to the runtime before the app's modules run.
 
-`nsh/updater`'s [`shellInfo()`](./nsh-updater.md#shellinfo) reports the installed app's version.
+`nsh/updater`'s [`shellInfo()`](./nsh-updater.md#shellinfo) reports the installed app's version. Rust code of a Rust
+app reads the same with `app_info()` ([The app's version](../docs/device-and-environment.md#the-apps-version)).
 
 ```tsx
 import { appInfo, Text } from "nsh";

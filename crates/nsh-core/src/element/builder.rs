@@ -1620,16 +1620,28 @@ pub trait Accessible: Element {
     /// [`Accessible::accessibility_description`], whose place it takes
     /// while it names a rendered element with text. `None` names none.
     fn accessibility_described_by(
-        mut self,
+        self,
         target: impl IntoReactive<Option<super::ElementRef>>,
     ) -> Self {
+        let target = target.into_reactive();
+        self.accessibility_described_by_target(move || {
+            target.get().and_then(|t| t.element_target())
+        })
+    }
+
+    /// [`Accessible::accessibility_described_by`] with the element as a
+    /// component's prop holds it (a ref from JS or from Rust): what
+    /// `nsh-base`'s components pass to the view screen readers reach.
+    #[doc(hidden)]
+    fn accessibility_described_by_target(
+        mut self,
+        target: impl IntoReactive<Option<super::ElementTarget>>,
+    ) -> Self {
         self.node()
-            .bind_attr(target, |a, target: Option<super::ElementRef>| {
+            .bind_attr(target, |a, target: Option<super::ElementTarget>| {
                 super::host::set_in(
                     &mut a.props,
-                    Prop::Accessibility(AccessibilityProp::DescribedBy(
-                        target.and_then(|t| t.element_target()),
-                    )),
+                    Prop::Accessibility(AccessibilityProp::DescribedBy(target)),
                 )
             });
         self
@@ -2682,6 +2694,25 @@ fn span(mut el: ElNode) -> ElNode {
 }
 
 impl Text {
+    /// Its final layout, each time it is laid out anew: the platform text
+    /// engine's own hit testing, caret and range boxes
+    /// ([`crate::TextGeometry`]), where `onTextLayout`'s lines only allow
+    /// an estimate. Rust-only, on a Rust component's text; JS keeps
+    /// `onTextLayout`.
+    pub fn on_text_layout(mut self, listener: impl Fn(&crate::TextGeometry) + 'static) -> Self {
+        self.0.handlers.push((
+            EventKind::TextLayout,
+            super::Listener::from(move |payload: &EventPayload| {
+                if let EventPayload::TextLayout(_) = payload
+                    && let Some(geometry) = crate::text::GeometryScope::current()
+                {
+                    listener(&geometry);
+                }
+            }),
+        ));
+        self
+    }
+
     /// The highlight of its selection, when it is selectable.
     pub fn selection_color(mut self, color: impl IntoReactive<Hsla>) -> Self {
         super::host::bind_prop(&mut self.0, color, |c: Hsla| {

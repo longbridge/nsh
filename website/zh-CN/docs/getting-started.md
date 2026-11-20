@@ -214,7 +214,8 @@ nsh run my-app --target ios --device "iPhone 16 Pro"
 nsh run my-app --target android
 ```
 
-先启动模拟器或连接设备（`adb devices` 会列出它们；NSH 使用第一个）。`nsh` 会把应用安装到上面：Rust 应用自己的
+先启动模拟器或连接设备（`adb devices` 会列出它们）。NSH 使用 `--device <serial>` 或 `ANDROID_SERIAL` 指定的那台，否则使用第一台；
+连着多台时会提示用的是哪一台。`nsh` 会把应用安装到上面：Rust 应用自己的
 `libnsh.so`，或者一个开发宿主 APK（只在运行时变化时重新构建），开发服务器的端口通过 `adb reverse` 转发到设备上，因此通过 USB
 即可工作，无需共享网络。
 
