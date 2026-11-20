@@ -532,6 +532,7 @@ impl Headless {
         }
         if let Some(new) = to {
             self.send(new, EventKind::Focus, EventPayload::None);
+            self.select_on_focus(new);
         }
     }
 
@@ -563,6 +564,7 @@ impl Headless {
                     self.send(key, EventKind::Blur, EventPayload::None);
                 }
                 self.send(new, EventKind::Focus, EventPayload::None);
+                self.select_on_focus(new);
             }
         }
         if !self.tabs_to_views() {
@@ -612,7 +614,13 @@ impl Headless {
         let Some(input) = self.screen.input_mut(id) else {
             return;
         };
-        if input.text.pop().is_none() {
+        // A whole selected text is deleted.
+        if std::mem::take(&mut input.selected_all) {
+            if input.text.is_empty() {
+                return;
+            }
+            input.text.clear();
+        } else if input.text.pop().is_none() {
             return;
         }
         input.count += 1;

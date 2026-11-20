@@ -38,6 +38,8 @@ function Second() {
       headerLargeTitle
       headerTransparent
       headerShadowVisible={false}
+      headerTitleAlign="center"
+      headerBackgroundOnScroll
       headerBackTitle="Back to second"
       headerBackVisible={false}
       popOnSwipe={false}

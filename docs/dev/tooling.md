@@ -348,6 +348,10 @@ views that report it:
   through nsh-core's `animation::Animator`, which the headless animator wraps, `PanEnd` with the velocity) or a
   scroll view (dragged within its content; past its top only when it listens to `Refresh`, rubber-banded, refreshing
   when released past `ScrollBehavior::refreshes`) takes it, and the press under it is cancelled once it moves away;
+  on a desktop environment one that starts in a selectable view selects across its texts instead
+  (`headless/selection.rs`: `nsh_core::selection::SelectionModel`, the backends' own, over `Screen::area_texts` laid
+  out as `ApproxTextEngine` lays them; `SelectionChange` with `text`, `start` and `bounds` as the backends report it),
+  and one that starts elsewhere clears the selection;
 - `hover` (`headless/pointer.rs`): on a desktop environment the mouse comes over the match's middle: the views from it
   out that hovering matters to (`input::hoverable`: `hover:` styles or hover events) replace those hovered before
   (`Screen::set_hovered`), `input::hover_changes` says which hear `MouseLeave` and `MouseEnter` (with their `HOVERED`
@@ -1033,20 +1037,20 @@ for the release runner in both. The test runner links QuickJS, so the first `nsh
 `nsh build` no longer does.
 
 
-### Third-party extensions (`nsh.json` `"extensions"`, `nsh add`)
+### nshm (`nsh.json` `"modules"`, `nsh add`)
 
-`crates/nsh-cli/src/extensions.rs`. An extension is a crate like the ones `"rust"` lists, from Git (`nsh add <url>
+`crates/nsh-cli/src/nshm.rs`. An nshm (NSH module) is a crate like the ones `"rust"` lists, from Git (`nsh add <url>
 [--tag|--rev]`, `{ "git", "tag"|"rev" }`, locked to a `commit`), crates.io (`nsh add <crate>[@<req>]`, `{ "crate",
 "version" }`, resolved by `cargo metadata` on a probe crate in the cache and locked to the exact version as `resolved`)
 or a directory (`nsh add --path <dir>`, `{ "path" }`, not locked, read as it is). `nsh.lock` holds `{ <source>,
 commit|resolved, package, module }`. A locked crate is Cargo's own download of that version. Each locked commit is a `git worktree` of one clone per repository in
-nsh's cache (`<cache>/extensions/<name>-<hash of url>/<commit>`), made again when missing, so a build after clearing
-the cache takes the same commit. `rust_app::of` appends the extensions to the app's crates (an app with extensions
+nsh's cache (`<cache>/nshm/<name>-<hash of url>/<commit>`), made again when missing, so a build after clearing
+the cache takes the same commit. `rust_app::of` appends the nshm to the app's crates (an app with nshm
 only is a `RustApp` too, its nsh crates this CLI's, as `runner_only`), checks them together (`check_crates`: the same
 directory, package or `#[native_module]` specifier), and the workspace links each like an app crate. The app's crate
-depends on the extension as `nsh add` writes it (Git at the locked `rev`, the resolved crate version, or a relative
-`path`), which the workspace's `[patch."<url>"]` / `[patch.crates-io]` sends to the same checkout. Before linking, the extension must have a `#[native_module]` at its root
-(its module) and its `nsh-core` dependency requirement, if any, must match this CLI; there is no NSH-specific metadata. `nsh check` does not `cargo check` extensions (only crates outside the cache). Not yet: per-target support checks, web and mobile packaging checks, and an OTA check of the shell's linked modules.
+depends on the nshm as `nsh add` writes it (Git at the locked `rev`, the resolved crate version, or a relative
+`path`), which the workspace's `[patch."<url>"]` / `[patch.crates-io]` sends to the same checkout. Before linking, the nshm must have a `#[native_module]` at its root
+(its module) and its `nsh-core` dependency requirement, if any, must match this CLI; there is no NSH-specific metadata. The list was `"extensions"` before any release; `nshm::sources` rejects that key. `nsh check` does not `cargo check` nshm (only crates outside the cache). Not yet: per-target support checks, web and mobile packaging checks, and an OTA check of the shell's linked modules.
 
 ## Finding the runtimes
 

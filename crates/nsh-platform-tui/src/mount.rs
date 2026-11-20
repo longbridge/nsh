@@ -43,6 +43,8 @@ pub(crate) struct Mounter {
     pub(crate) spans: HashMap<NodeId, crate::keyboard::Span>,
     /// The link that has the keyboard focus, which its text shows.
     pub(crate) focused_span: Option<NodeId>,
+    /// Where image views load and how the terminal shows them.
+    pub(crate) images: crate::image::Loader,
     unhandled: HashSet<Discriminant<MountItem>>,
     unsupported: HashSet<String>,
 }
@@ -70,6 +72,7 @@ impl Default for Mounter {
             links: Default::default(),
             spans: HashMap::new(),
             focused_span: None,
+            images: Default::default(),
             dialogs: Default::default(),
             menus: Default::default(),
             unhandled: HashSet::new(),
@@ -180,6 +183,7 @@ impl Mounter {
                         ViewKind::View
                             | ViewKind::Text
                             | ViewKind::Canvas
+                            | ViewKind::Image
                             | ViewKind::Native
                             | ViewKind::Input
                             | ViewKind::Scroll
@@ -367,9 +371,16 @@ impl Mounter {
                         scroll.mirrored = mirrored;
                     }
                 }
-                // Pictures are content the terminal shows as their label
-                // (`render.rs`).
-                MountItem::Image { .. } => {}
+                MountItem::Image {
+                    id,
+                    source,
+                    resize_mode,
+                    options,
+                } => {
+                    if let Some(image) = self.get_mut(id).and_then(|view| view.image.as_mut()) {
+                        image.set(source, resize_mode, options.position);
+                    }
+                }
                 MountItem::ScrollContent { id, size } => {
                     if let Some(scroll) = self.get_mut(id).and_then(|view| view.scroll.as_mut()) {
                         scroll.content = size;
@@ -381,6 +392,13 @@ impl Mounter {
                 MountItem::ScrollBehavior { id, behavior } => {
                     if let Some(scroll) = self.get_mut(id).and_then(|view| view.scroll.as_mut()) {
                         scroll.behavior = *behavior;
+                    }
+                }
+                // Pinned at every frame (`render.rs`): a cell no longer in
+                // the set is drawn at its frame again.
+                MountItem::StickyCells { id, cells } => {
+                    if let Some(scroll) = self.get_mut(id).and_then(|view| view.scroll.as_mut()) {
+                        scroll.sticky = cells;
                     }
                 }
                 MountItem::ScrollBy { id, dx, dy } => {
@@ -479,6 +497,10 @@ impl Mounter {
                     command: Command::Tokens(_),
                     ..
                 } => {}
+                MountItem::Command {
+                    command: Command::ImageInfo { id, uri },
+                    ..
+                } => self.images.info(id, &uri),
                 MountItem::Command {
                     command: Command::Dialog(dialog),
                     ..

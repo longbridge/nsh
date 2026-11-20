@@ -32,6 +32,7 @@ pub(crate) struct NshView {
     pub(crate) text: Option<(TextLayout, Bounds<Points>)>,
     pub(crate) scroll: Option<Box<nsh_core::scroll::ScrollState>>,
     pub(crate) canvas: Option<Box<crate::canvas::CanvasView>>,
+    pub(crate) image: Option<Box<crate::image::ImageView>>,
     pub(crate) component: Option<Box<dyn NativeComponent>>,
     pub(crate) component_name: Option<String>,
 }
@@ -63,6 +64,7 @@ impl NshView {
             text: None,
             scroll: (kind == ViewKind::Scroll).then(Default::default),
             canvas: None,
+            image: (kind == ViewKind::Image).then(Default::default),
             component: None,
             component_name: None,
         }
