@@ -60,6 +60,7 @@
 mod agent;
 mod animation;
 mod app;
+mod application;
 mod auth_session;
 mod blur;
 mod bottom_bar;
@@ -202,6 +203,9 @@ fn default_ui_sets() -> Vec<nsh_core::element::Registry> {
 
 pub use crate::{
     app::{AppOptions, AppSource, in_app_bundle, run_app},
+    application::{
+        ApplicationEvent, FetchCompletion, FetchResult, NativeDictionary, observe_application,
+    },
     component::{ComponentContext, ComponentFactory, Components, NativeComponent},
     image::AssetBase,
     scroll_watch::{ScrollHandle, ScrollWatcher, ScrollWatchers},

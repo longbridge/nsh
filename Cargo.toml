@@ -285,6 +285,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
   "NSError",
   "NSFormatter",
   "NSGeometry",
+  "NSJSONSerialization",
   "NSKeyValueObserving",
   "NSLocale",
   "NSNotification",
