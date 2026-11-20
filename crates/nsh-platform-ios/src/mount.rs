@@ -3201,6 +3201,28 @@ impl Mounter {
         self.file_drag(id, false);
     }
 
+    /// Text (`text`, and `html` when the drag had some) was dropped on view
+    /// `id` at `in_window` (the window's coordinates).
+    pub(crate) fn text_dropped(
+        &mut self,
+        id: NodeId,
+        in_window: CGPoint,
+        text: String,
+        html: String,
+    ) {
+        let Some(slot) = self.slot(id) else { return };
+        if (text.is_empty() && html.is_empty()) || !slot.events.contains(EventKind::TextDrop) {
+            return;
+        }
+        let view = slot.native.view().retain();
+        let (_, page_position) = self.pointer_positions(&view, in_window);
+        self.control.dispatch_event(
+            id,
+            EventKind::TextDrop,
+            EventPayload::TextDrop(Box::new(nsh_core::TextDrop::new(text, html, page_position))),
+        );
+    }
+
     /// `in_window` (the window's coordinates) in `view` and in the root
     /// view it is in.
     fn pointer_positions(
@@ -3728,7 +3750,8 @@ impl Mounter {
                 r
             }
         });
-        let wants_drop = events.contains(EventKind::FileDrop);
+        let wants_drop =
+            events.contains(EventKind::FileDrop) || events.contains(EventKind::TextDrop);
         match (&slot.gestures.file_drop, wants_drop) {
             (None, true) => {
                 if let Some(i) = crate::file_drop::interaction(&target) {

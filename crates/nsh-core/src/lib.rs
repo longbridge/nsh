@@ -143,7 +143,7 @@ pub use crate::{
         PayloadValue, PinchEvent, PinchPhase, PointerType, PressEvent, Prop, ROOT_ID, ResizeMode,
         ReturnKeyType, RevealOptions, ScreenAnimation, ScreenProp, ScrollAlignment, ScrollProp,
         ScrollbarSetting, SheetDetent, SnapAlignment, StatusBarConfig, StatusBarSetting,
-        StatusBarStyle, SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint,
+        StatusBarStyle, SubmitBehavior, Tag, TextDrop, TouchEvent, TouchPhase, TouchPoint,
         TransitionFallback, Viewability, WebElement, WebInput, WebKey, WebLoad, WebSource,
         WheelDelta, WheelEvent, dialog_default_button,
     },

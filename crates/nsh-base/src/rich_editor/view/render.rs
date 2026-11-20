@@ -140,6 +140,7 @@ fn content(rv: Rv) -> impl IntoElement {
     let (down, tap, mov, up, end) = (rv.clone(), rv.clone(), rv.clone(), rv.clone(), rv.clone());
     let (long, lift, armed, sweep) = (rv.clone(), rv.clone(), rv.clone(), rv.clone());
     let over = rv.clone();
+    let dropped = rv.clone();
     let claim = rv.clone();
     let placed = rv.clone();
     let height = rv.content_height;
@@ -164,6 +165,13 @@ fn content(rv: Rv) -> impl IntoElement {
             }
             (false, _) => down.touch_down(),
             _ => {}
+        }
+    })
+    // Text dragged in from another app or view goes in where it is let go
+    // (backends that deliver text drops: iOS).
+    .on(EventKind::TextDrop, move |p: &EventPayload| {
+        if let EventPayload::TextDrop(drop) = p {
+            dropped.drop_text(&drop.text, &drop.html, drop.page_position);
         }
     })
     // Where the pointer is, for drags the app starts from a page point.
