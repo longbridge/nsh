@@ -532,7 +532,7 @@ fn package_for_run(
         out,
         config,
         sign: None,
-        profile: None,
+        profiles: &[],
         keystore: None,
         abis,
         format: crate::android::Format::Apk,

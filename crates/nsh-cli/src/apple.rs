@@ -108,6 +108,10 @@ pub(crate) struct AppleConfig {
     /// What iOS shows from the tap on the app's icon until the app's first
     /// frame: the system's background without it.
     pub(crate) launch_screen: Option<LaunchScreen>,
+    /// App extensions the app builds itself, which iOS packages carry in
+    /// `PlugIns/` ([`crate::app_extensions`]).
+    #[serde(default)]
+    pub(crate) extensions: Vec<crate::app_extensions::AppExtension>,
 }
 
 /// `nsh.json` `ios.launchScreen`: a background color and an image in the
@@ -381,6 +385,9 @@ impl AppleConfig {
     pub(crate) fn check(&self, platform: ApplePlatform) -> anyhow::Result<()> {
         self.info_plist(platform)?;
         self.entitlements(platform)?;
+        for extension in &self.extensions {
+            extension_entitlements(extension)?;
+        }
         if self.launch_screen.is_some() && self.info_plist.contains_key("UILaunchScreen") {
             bail!(
                 "nsh.json {0}.infoPlist: `UILaunchScreen` is set by NSH from `{0}.launchScreen`; \
@@ -493,6 +500,21 @@ fn entitlements(
     convert(entries, &section, RESERVED_ENTITLEMENTS.iter())
 }
 
+/// The entitlements of one of `ios.extensions` as property list values,
+/// refusing the keys `ios.entitlements` refuses, with the `nsh.json` key
+/// they come from, for errors.
+pub(crate) fn extension_entitlements(
+    extension: &crate::app_extensions::AppExtension,
+) -> anyhow::Result<(plist::Dictionary, String)> {
+    let section = format!("ios.extensions[{}].entitlements", extension.index);
+    let dictionary = convert(
+        &extension.entitlements,
+        &section,
+        RESERVED_ENTITLEMENTS.iter(),
+    )?;
+    Ok((dictionary, section))
+}
+
 /// `entries` as a property list dictionary, refusing the `reserved` keys.
 fn convert<'a>(
     entries: &serde_json::Map<String, serde_json::Value>,
@@ -549,25 +571,27 @@ fn to_plist(value: &serde_json::Value, path: &str) -> anyhow::Result<plist::Valu
     })
 }
 
-/// Adds the app's entitlements (`requested`, from `nsh.json`
-/// `ios.entitlements`) to those a provisioning profile grants (`granted`),
-/// checking that the profile covers each one. The app's value replaces the
-/// profile's: a profile grants `com.apple.developer.associated-domains` as
-/// `*`, the app names its domains.
+/// Adds the app's entitlements (`requested`, from `nsh.json` `section`:
+/// `ios.entitlements`, or an app extension's) to those a provisioning
+/// profile grants (`granted`), checking that the profile covers each one.
+/// The app's value replaces the profile's: a profile grants
+/// `com.apple.developer.associated-domains` as `*`, the app names its
+/// domains.
 pub(crate) fn grant(
     granted: &mut plist::Dictionary,
     requested: plist::Dictionary,
+    section: &str,
 ) -> anyhow::Result<()> {
     for (key, value) in requested {
         let Some(allowed) = granted.get(&key) else {
             bail!(
-                "the provisioning profile does not grant the entitlement `{key}` (nsh.json ios.entitlements): \
+                "the provisioning profile does not grant the entitlement `{key}` (nsh.json {section}): \
                  enable its capability for the app's identifier and download the profile again"
             );
         };
         if !covers(allowed, &value) {
             bail!(
-                "the provisioning profile grants `{key}` as {}, which does not cover {} (nsh.json ios.entitlements)",
+                "the provisioning profile grants `{key}` as {}, which does not cover {} (nsh.json {section})",
                 describe(allowed),
                 describe(&value)
             );
@@ -1091,6 +1115,7 @@ mod tests {
                 "com.apple.security.application-groups": ["group.com.acme.b"],
                 "aps-environment": "production"
             })),
+            "ios.entitlements",
         )
         .unwrap();
         // The app's values replace the profile's; the rest stays.
@@ -1111,7 +1136,7 @@ mod tests {
         );
 
         let refused = |json| {
-            grant(&mut profile(), dictionary(json))
+            grant(&mut profile(), dictionary(json), "ios.entitlements")
                 .unwrap_err()
                 .to_string()
         };

@@ -4,6 +4,7 @@
 //! hosts and runners built for it.
 
 mod android;
+mod app_extensions;
 mod apple;
 mod bindgen;
 mod build;
@@ -20,6 +21,7 @@ mod nshm;
 mod package;
 mod platforms;
 mod play;
+mod provisioning;
 mod publish_ios;
 mod run;
 mod runtime;
@@ -576,9 +578,11 @@ struct PackageArgs {
     /// Code signing identity for devices, e.g. "Apple Development: …".
     #[arg(long)]
     sign: Option<String>,
-    /// Provisioning profile for devices (`.mobileprovision`).
+    /// Provisioning profile for devices (`.mobileprovision`). Repeat it to
+    /// give each app extension (`nsh.json` `ios.extensions`) its own: every
+    /// bundle takes the profile for its identifier.
     #[arg(long)]
-    profile: Option<PathBuf>,
+    profile: Vec<PathBuf>,
     /// Android release keystore (default: the debug key).
     #[arg(long, requires = "key_alias")]
     keystore: Option<PathBuf>,
@@ -848,6 +852,15 @@ fn run(mut command: Command) -> anyhow::Result<()> {
         Command::Package(args) => Some(args.target) == package::PackageTarget::desktop(),
         _ => false,
     };
+    // A Rust app's root reports what the package names and versions it.
+    if let Command::Package(args) = &command {
+        rust_app::set_package_identity(rust_app::PackageIdentity {
+            id: args.id.clone(),
+            name: args.name.clone(),
+            version: args.version.clone(),
+            build: args.build,
+        });
+    }
     let app = match command.entry_mut() {
         Some(entry) => rust_app::of(entry, unify)?,
         None => None,
@@ -1026,7 +1039,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 out: &out,
                 config,
                 sign: sign.as_deref(),
-                profile: profile.as_deref(),
+                profiles: &profile,
                 keystore: keystore.as_deref().map(|k| {
                     (
                         k,
@@ -1227,6 +1240,33 @@ mod command_tests {
                 "key.cert"
             ])
             .is_err()
+        );
+    }
+
+    /// An iOS package takes a profile for the app and one for each of its
+    /// extensions.
+    #[test]
+    fn ios_packages_take_several_profiles() {
+        let cli = Cli::try_parse_from([
+            "nsh",
+            "package",
+            "--target",
+            "ios",
+            "--profile",
+            "app.mobileprovision",
+            "--profile",
+            "widget.mobileprovision",
+        ])
+        .unwrap();
+        let Command::Package(args) = cli.command else {
+            panic!("not a package command");
+        };
+        assert_eq!(
+            args.profile,
+            [
+                std::path::PathBuf::from("app.mobileprovision"),
+                "widget.mobileprovision".into()
+            ]
         );
     }
 

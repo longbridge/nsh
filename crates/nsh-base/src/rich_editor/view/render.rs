@@ -152,7 +152,11 @@ fn content(rv: Rv) -> impl IntoElement {
             })
             .relative()
             .min_h(relative(1.0))
-            .cursor(Cursor::Text),
+            .cursor(Cursor::Text)
+            // The presses below are the pointer's: a press focuses the
+            // sink, which takes the keys and is the editor's one stop of
+            // Tab, not this box.
+            .focusable(false),
         &rv,
         Part::Content,
     )
