@@ -335,7 +335,8 @@ impl Mounter {
                 // lays out with Auto Layout, AppKit gives a view that
                 // translates its autoresizing mask constraints, anchors and
                 // layout storage that nothing here reads: hundreds of bytes
-                // per view. The root keeps them: the host places it.
+                // per view. The host root keeps them, and app windows re-enable
+                // them in `window::open_window`.
                 view.ns()
                     .setTranslatesAutoresizingMaskIntoConstraints(false);
                 crate::access::created(&view);
