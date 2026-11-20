@@ -596,7 +596,8 @@ struct Node {
     children: Vec<Key>,
     /// How many levels of views are under it, at most: what an insert
     /// under it raised it to, and what leaves it does not lower
-    /// ([`Core::height`] counts them when that matters).
+    /// ([`Core::count_heights`] counts them when that matters). At least
+    /// one more than each child's.
     height: u32,
     /// Layout node. Present exactly for nodes that render a native view.
     /// Raw text and spans have none.
@@ -6893,9 +6894,7 @@ impl<M: TextEngine> Core<M> {
         let max = MAX_TREE_DEPTH as u32;
         if depth + self.nodes[child as usize].height > max {
             // What left the child since may have made it shallower.
-            let height = self.height(child);
-            self.nodes[child as usize].height = height;
-            if depth + height > max {
+            if depth + self.count_heights(child) > max {
                 return Err(ApplyError::TooDeep(MAX_TREE_DEPTH));
             }
         }
@@ -7398,21 +7397,36 @@ impl<M: TextEngine> Core<M> {
         Some(depth)
     }
 
-    /// How many levels of views are under `key`, counted (its
-    /// [`Node::height`] is at least this).
-    fn height(&self, key: Key) -> u32 {
-        let mut height = 0;
-        let mut pending = vec![(key, 0)];
-        while let Some((key, level)) = pending.pop() {
-            height = height.max(level);
-            let children = &self.nodes[key as usize].children;
-            pending.extend(children.iter().map(|&c| (c, level + 1)));
+    /// Counts how many levels of views are under each view of `key`'s
+    /// subtree, keeps each count as that view's [`Node::height`] and returns
+    /// `key`'s. Every view of it, not only `key`: [`Self::raise_heights`] stops at the first
+    /// view already as high as what came under it, so a view left higher
+    /// than it is would keep the views above it from hearing of what grows
+    /// under it later.
+    fn count_heights(&mut self, key: Key) -> u32 {
+        // Each view after its parent: from the end, its children are
+        // counted before it.
+        let mut order = vec![key];
+        let mut next = 0;
+        while let Some(&at) = order.get(next) {
+            next += 1;
+            order.extend_from_slice(&self.nodes[at as usize].children);
         }
-        height
+        for &at in order.iter().rev() {
+            let height = self.nodes[at as usize]
+                .children
+                .iter()
+                .map(|&c| self.nodes[c as usize].height + 1)
+                .max()
+                .unwrap_or(0);
+            self.nodes[at as usize].height = height;
+        }
+        self.nodes[key as usize].height
     }
 
     /// `key` came under its parent: the views above it are as high as it
-    /// makes them. Stops at the first that was already.
+    /// makes them. Stops at the first that was already: a view is always at
+    /// least one higher than each of its children.
     fn raise_heights(&mut self, key: Key) {
         let mut height = self.nodes[key as usize].height + 1;
         let mut at = self.nodes[key as usize].parent;

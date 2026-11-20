@@ -11645,6 +11645,75 @@ fn views_inside_text_are_attachments() {
     assert_eq!(frame_of(&batch, 8).map(|f| f.origin.x.0), Some(5.0 + 32.0));
 }
 
+/// Views `ids` in a chain, the first under `under`, each under the one
+/// before.
+fn chain(c: &mut Core<FakeEngine>, under: NodeId, ids: std::ops::Range<NodeId>) {
+    let mut parent = under;
+    for id in ids {
+        c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+        c.apply(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        })
+        .unwrap();
+        parent = id;
+    }
+}
+
+/// A view whose height was counted again (it once held a deep tree that
+/// left) and that then grows a deep tree again, below views of it that
+/// still reckon with the tree that left, is refused when it goes too deep:
+/// what it holds is counted, not what it was told.
+#[test]
+fn a_view_counted_again_is_refused_once_it_grows_too_deep() {
+    let max = MAX_TREE_DEPTH as u32;
+    let mut c = core();
+    // View 2 holds 3, which holds a chain nearly as deep as the quota.
+    for id in [2, 3] {
+        c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+    }
+    c.apply(Op::Insert {
+        parent: 2,
+        child: 3,
+        before: None,
+    })
+    .unwrap();
+    chain(&mut c, 3, 1_000..1_000 + max - 100);
+    // The chain leaves: 2 and 3 still reckon with it.
+    c.apply(Op::Remove {
+        parent: 3,
+        child: 1_000,
+    })
+    .unwrap();
+    // 2 goes under a chain of 100, where what 2 reckons with does not fit:
+    // it is counted again, and fits.
+    chain(&mut c, ROOT_ID, 10_000..10_100);
+    c.apply(Op::Insert {
+        parent: 10_099,
+        child: 2,
+        before: None,
+    })
+    .unwrap();
+    // 3 grows a chain of 900 there, which fits.
+    chain(&mut c, 3, 20_000..20_900);
+    // 2, holding 901 levels, cannot go under a chain of 300.
+    c.apply(Op::Remove {
+        parent: 10_099,
+        child: 2,
+    })
+    .unwrap();
+    chain(&mut c, ROOT_ID, 30_000..30_300);
+    assert_eq!(
+        c.apply(Op::Insert {
+            parent: 30_299,
+            child: 2,
+            before: None,
+        }),
+        Err(ApplyError::TooDeep(MAX_TREE_DEPTH))
+    );
+}
+
 #[test]
 fn node_quota_and_dense_ids() {
     let mut c = core();
