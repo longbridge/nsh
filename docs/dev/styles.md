@@ -292,7 +292,8 @@
   color filters through a layer paint), blend modes a layer paint (API 29+), transitions / keyframes `ValueAnimator`s,
   backdrop blur (API 31+) a `RenderNode` recorded before each frame with what lies behind the view (`Backdrop.java`: each
   ancestor's background and the siblings drawn before the next ancestor, never the view itself) and blurred by a
-  `RenderEffect`, drawn clipped under the view's background.
+  `RenderEffect`, drawn clipped under the view's background; box shadows are drawn once into small bitmaps and
+  stretched in slices (`Decor.drawCachedShadow`).
   Known limits: iOS has no CSS filters on views (only `opacity`, `brightness` ≤ 1 and `drop-shadow`; images take every color filter
   and `blur`, applied while decoding); iOS texts draw no gradients or inset shadows; Android has no backdrop blur, `blur` or
   `drop-shadow` before API 31; Linux and GPUI draw no backdrop filter, GPUI no `blur()` or `mixBlendMode`; iOS, macOS and Android draw one `drop-shadow()`,

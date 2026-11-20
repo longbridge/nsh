@@ -405,7 +405,21 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Android, shadows moved by fractions of a pixel**: Skia caches a shadow's blurred mask keyed on the subpixel part
   of its position, so a view moved by a fractional offset each frame blurs its shadows again every frame (on the GPU,
   each into a new render target, slow on PowerVR). `StackBox`'s push / pop slides move by whole pixels; going back to
-  the gallery's index ran at about half the frame rate before (#519).
+  the gallery's index ran at about half the frame rate before (#519). Box shadows no longer draw shadow layers on a
+  hardware canvas (next point); text shadows and a `<Canvas>`'s still do.
+- **Android, box shadows on a hardware canvas**: a shadow layer of the box's path, clipped by that path, is blurred
+  and clipped again on every frame a box moves in. Four boxes as large as the screen, each with an outer shadow and a
+  1 px inset rim, slid at 32 ms a frame on an emulator (p50; 6 ms without the shadows). `Decor.drawCachedShadow`
+  draws each layer once, unclipped, into a bitmap of the smallest box with the same corners (as Android 8's
+  `drawShadowSlices`), at a pixel for every quarter of its blur, and stretches it in slices cut along the clip's edge:
+  pieces on the hidden side are left out, and the squares of the corners' curves (each as wide as its side's
+  corners need) come from a second bitmap drawn clipped at full size, so no path is clipped as the box is drawn
+  (clipping those squares by the path as they were drawn still cost ~2 ms a frame of the emulator's RenderThread).
+  A layer blurred by less than 8 px is at full size anyway: it is drawn clipped into its bitmap, and its slices are
+  drawn whole, as fewer pieces matter where every backdrop recorded behind the box draws them again. The middle of
+  an inset shadow is left out: it lies more than twice the blur from where it casts. A shadow whose bitmaps would
+  take more than a quarter of the 8 MiB cache (a spread of the screen's size) is drawn as a shadow layer, as
+  before. The same boxes slide at 10 ms a frame.
 - **Android, hidden views lose their display lists**: HWUI drops the display list of a RenderNode no longer drawn,
   and `setVisibility` tells every view under the one that changes, whose background `Drawable.setVisible` calls
   `invalidateSelf`. A whole screen hidden and shown again therefore records all of its views again (22–36 ms for the
