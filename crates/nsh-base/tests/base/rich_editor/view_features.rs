@@ -697,8 +697,10 @@ fn the_caret_steps_over_a_widget_decorations_width() {
     let session = EditorSession::new(state, NodeViews::new());
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<WidgetLine>(move || WidgetLineProps {
-            session: Some(session.clone()),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<WidgetLine>(move || {
+            WidgetLineProps {
+                session: Some(session.clone()),
+            }
         }))
     };
     config.environment.os = Os::Linux;
