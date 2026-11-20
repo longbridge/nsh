@@ -1267,6 +1267,12 @@ pub struct Core<M: TextEngine> {
     folded: rustc_hash::FxHashMap<Key, NodeId>,
     layout: LayoutTree<LeafContext<M::Prepared>>,
     text_engine: Rc<M>,
+    /// The engine for [`crate::text::TextGeometry`] (`None` for an engine
+    /// that is not `'static`).
+    geometry_engine: Option<Rc<dyn crate::text::GeometryEngine>>,
+    /// Final layouts kept for Rust components' `on_text_layout` until
+    /// their `TextLayout` events are dispatched ([`keep_geometry`]).
+    geometries: rustc_hash::FxHashMap<NodeId, crate::text::TextGeometry>,
     measure_cache: MeasureCache,
     /// Counts the commits of resizes ([`Core::mark_near_screen`]).
     resizing_commit: u32,
@@ -1627,7 +1633,8 @@ pub struct Core<M: TextEngine> {
 impl<M: TextEngine + 'static> Core<M> {
     /// Creates a core whose root view (id [`ROOT_ID`]) fills `viewport`.
     pub fn new(text_engine: M, viewport: Size<Points>) -> Self {
-        let core = Self::with_engine(text_engine, viewport);
+        let mut core = Self::with_engine(text_engine, viewport);
+        core.geometry_engine = Some(core.text_engine.clone());
         // Components that run once measure text with it.
         let engine = core.text_engine.clone();
         core.components
@@ -1665,6 +1672,8 @@ impl<M: TextEngine> Core<M> {
             slots,
             layout,
             text_engine: Rc::new(text_engine),
+            geometry_engine: None,
+            geometries: Default::default(),
             measure_cache: MeasureCache::default(),
             resizing_commit: 0,
             resize_settling: false,
@@ -3316,6 +3325,9 @@ impl<M: TextEngine> Core<M> {
     /// Finishes a turn: rebuilds text, runs layout, updates lists and
     /// returns the mount items, or `None` when nothing changed.
     pub fn commit(&mut self) -> Option<MountBatch> {
+        // The last round's events were dispatched: a geometry no one took
+        // is stale (its node went).
+        self.geometries.clear();
         // The downloads' file work and deadlines: their events and
         // commands go out with this commit.
         self.poll_downloads();
@@ -9710,6 +9722,13 @@ impl<M: TextEngine> Core<M> {
                         EventKind::TextLayout,
                         text_lines(engine, &text, &text_layout),
                     ));
+                    keep_geometry(
+                        &self.geometry_engine,
+                        &mut self.geometries,
+                        id,
+                        &text_layout,
+                        &text,
+                    );
                 }
                 if !text.attachments.is_empty() {
                     placements.push((key, text_layout.clone(), content));
@@ -9741,6 +9760,13 @@ impl<M: TextEngine> Core<M> {
                             EventKind::TextLayout,
                             text_lines(engine, &cx.text, &layout),
                         ));
+                        keep_geometry(
+                            &self.geometry_engine,
+                            &mut self.geometries,
+                            id,
+                            &layout,
+                            &cx.text,
+                        );
                     }
                     layout
                 }
@@ -11007,6 +11033,25 @@ fn image_size(natural: Size<Points>, w: Option<f32>, h: Option<f32>) -> taffy::S
 
 /// Measures a text block: per-node cache, then the shared content-addressed
 /// cache, then the platform engine.
+/// Keeps a Rust component's text block's final layout for its
+/// [`crate::Text::on_text_layout`] listener, which hears it with the
+/// block's `TextLayout` event ([`Core::component_event`]). Only the core's
+/// nodes (odd ids, the components'): JS hears the lines.
+fn keep_geometry(
+    engine: &Option<Rc<dyn crate::text::GeometryEngine>>,
+    geometries: &mut rustc_hash::FxHashMap<NodeId, crate::text::TextGeometry>,
+    id: NodeId,
+    layout: &TextLayout,
+    text: &Arc<AttributedText>,
+) {
+    if let Some(engine) = engine.as_ref().filter(|_| id % 2 == 1) {
+        geometries.insert(
+            id,
+            crate::text::TextGeometry::new(engine.clone(), layout.clone(), text.clone()),
+        );
+    }
+}
+
 /// The lines of `layout` with their characters.
 fn text_lines<M: TextEngine>(
     engine: &M,
