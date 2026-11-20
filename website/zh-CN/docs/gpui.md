@@ -126,7 +126,7 @@ view.load(App::Js(Bundle::source(code)));
 - `AppView::on_app_error(|error| …)` 接收应用的错误：`error.kind`（应用加载失败、未捕获的异常、VM 已停止），`error.is_fatal()` 表示该应用不会再执行任何 JS，`error.message`、`error.stack`，以及 `error.package`（它来自的签名包的 id 和 build 号）。`AppView::on_error` 以文本形式收到同样的错误。
 - `AppView::set_locale(locale, cx)` 和 `AppView::set_font_scale(scale, cx)` 用你的应用的语言和文字大小代替系统的设置（`None` 恢复跟随系统）：`locale()`、`Intl`、`fontScale()` 和文字立即跟随（[设备与环境](./device-and-environment.md#在嵌入它的应用中)）。
 - `AppView::set_theme_overrides(Some(json), cx)` 把你的应用的品牌加在应用的[主题](./tailwind.md#主题-token)之上：格式与 `nsh.json` 的 `"theme"` 相同的主题文件，其中的 token 在浅色和深色模式下都覆盖应用的同名 token，应用的其他 token 保持不变；`bg-primary` 等类名立即更新样式，之后加载的应用一开始就使用它（`None` 恢复应用自己的主题；无法解析的文件返回错误，不做任何改动）。用 `set_theme` / `set_theme_json` 给了整套主题时，覆盖压在那套主题的 token 之上，两者改动其一时另一个保持不变。
-- `AppView::content_height()` 返回已挂载根子视图的底边位置，单位为表面逻辑点；没有子视图时返回 `None`。监听视图的 GPUI 通知，在提交后重新读取。它报告当前布局，不进行固有尺寸计算：相对视口的高度和 flex 增长仍取决于宿主提供的视口。
+- `AppView::content_height()` 返回逻辑根节点中参与正常布局的子视图的底边位置，单位为表面逻辑点；没有已布局的流内内容时返回 `None`。浮层、模态窗口以及固定或绝对定位的根子视图不计入高度。在 Rust 宿主中监听视图的 GPUI 通知后重新读取：每次提交会一起更新缓存高度和视图，然后才通知观察者。如果应用由你维护，也可以直接用应用根视图的 `.on_layout(..)` 获取它的布局尺寸。它报告当前布局，不进行固有尺寸计算：相对视口的高度和 flex 增长仍取决于宿主提供的视口。
 - 设置宿主主题或主题覆盖时，未指定颜色的文字继承 `foreground` token。
 - `AppView::run_package(&package)` 运行来自 `verify_package` 或 `load_package` 的[签名包](./signed-packages.md)；你的应用判定它健康之后，用 `accept_package` 记录它。
 - `set_ui_sets(sets)` 设置每个引擎提供的 UI 套件：NSH 的（`nsh_base::registry()`）和你的 crate 的（`my_app::registry()`，由

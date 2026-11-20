@@ -171,9 +171,12 @@ so only load it from your own app's files.
   with it (`None` gives the app its own theme back; a file that does not parse is an error and changes nothing). With
   a whole theme from `set_theme` / `set_theme_json`, the overrides win over that one's tokens, and each stays when the
   other changes.
-- `AppView::content_height()` returns the bottom edge of the mounted root children in surface points, or `None`
-  when there are none. Observe the view's GPUI notifications to read it after commits. This is the current layout,
-  not an intrinsic-size pass: viewport-relative heights and flex growth still depend on the host's viewport.
+- `AppView::content_height()` returns the bottom edge of the logical root's in-flow children in surface points,
+  or `None` without laid-out in-flow content. Overlays, modals and fixed or absolutely positioned root children
+  do not contribute. Observe the view from Rust through GPUI notifications: the cached height and views are updated
+  together after each commit, before observers run. If you own the app, its root's `.on_layout(..)` can report
+  its frame directly. This is current layout, not an intrinsic-size pass: viewport-relative heights and flex
+  growth still depend on the host's viewport.
 - With a host theme or theme overrides, text inherits the `foreground` token unless it sets its own color.
 - `AppView::run_package(&package)` runs a [signed package](./signed-packages.md#loading-packages-in-a-host-app)
   from `verify_package` or `load_package`; `accept_package` records it once your app decided it is healthy.

@@ -649,23 +649,16 @@ impl AppView {
         self.surface.set_error_handler(Box::new(f));
     }
 
-    /// The bottom edge of the mounted root children in surface points.
+    /// The bottom edge of the logical root's in-flow children in surface points.
     ///
-    /// `None` until content is mounted. Observe this view's GPUI notifications
-    /// to read updated geometry after commits. This is not an intrinsic-size
-    /// layout pass: children using viewport-relative height or flex growth
-    /// still depend on the viewport the embedding host supplies.
+    /// `None` until in-flow content is laid out. Overlays, modals and fixed or
+    /// absolutely positioned root children do not contribute. Observe this view's
+    /// GPUI notifications to read updated geometry after commits. This is not an
+    /// intrinsic-size layout pass: viewport-relative heights and flex growth
+    /// still depend on the viewport the embedding host supplies. When the host
+    /// owns the app, its root's `.on_layout(..)` can report its frame directly.
     pub fn content_height(&self) -> Option<nsh_core::Points> {
-        self.surface.root.with_children(|children| {
-            children
-                .iter()
-                .map(|child| {
-                    let state = child.state();
-                    state.frame.origin.y.0 + state.frame.size.height.0
-                })
-                .reduce(f32::max)
-                .map(nsh_core::Points)
-        })
+        self.surface.content_height.get()
     }
 
     pub(crate) fn surface(&self) -> &Rc<Surface> {
