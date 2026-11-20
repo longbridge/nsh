@@ -635,6 +635,9 @@ pub struct InputConfig {
     pub paste_behavior: PasteBehavior,
     /// Focus once on screen.
     pub auto_focus: bool,
+    /// Select the whole text when the input takes the focus
+    /// (`selectTextOnFocus`).
+    pub select_text_on_focus: bool,
     /// Selection highlight color (on iOS also the caret's, unless
     /// [`InputConfig::caret_color`] is set: UIKit tints both with one).
     pub selection_color: Option<Color>,
@@ -708,6 +711,7 @@ impl Default for InputConfig {
             submit_behavior: None,
             paste_behavior: PasteBehavior::Insert,
             auto_focus: false,
+            select_text_on_focus: false,
             selection_color: None,
             caret_color: None,
             auto_fill: crate::ops::AutoFill::Default,

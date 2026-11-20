@@ -8,7 +8,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.widget.FrameLayout;
-import android.widget.PopupMenu;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -16,7 +15,7 @@ import java.util.function.BooleanSupplier;
 
 /**
  * {@code nsh/base}'s {@code ContextMenu} given {@code items}, on Android: the
- * system's popup menu ({@link SystemMenus}). The component covers the trigger
+ * system menu ({@link SystemMenus}). The component covers the trigger
  * and takes no touches; Android has no context menu that a held finger opens
  * on its own, so {@code nsh/base} holds the timer and asks with {@code open}
  * ({@code at}: where the finger held, in the surface; none when the app
@@ -47,7 +46,7 @@ final class ContextMenuComponent implements NshComponent {
     /** Where a finger asked for it, in the surface's points (null: none). */
     private float[] at;
     /** The menu shown (null: none). */
-    private PopupMenu shown;
+    private SystemMenus.Popup shown;
     /** JS asks for it shown ({@code open}). */
     private boolean wanted;
 
@@ -110,10 +109,10 @@ final class ContextMenuComponent implements NshComponent {
         }
         boolean held = at != null;
         anchor.setTranslationY(dropLine());
-        PopupMenu popup = SystemMenus.popup(SystemMenus.themed(context, night.getAsBoolean()), anchor,
-                Gravity.END, title, items, id -> events.emit("select", id));
-        popup.setOnDismissListener(p -> {
-            if (shown != p) return;
+        SystemMenus.Popup popup = SystemMenus.popup(context, night.getAsBoolean(), anchor, Gravity.END, title,
+                items, id -> events.emit("select", id));
+        popup.setOnDismissListener(() -> {
+            if (shown != popup) return;
             shown = null;
             events.emit("close", null);
         });
@@ -156,14 +155,14 @@ final class ContextMenuComponent implements NshComponent {
     }
 
     private void dismiss() {
-        PopupMenu popup = shown;
+        SystemMenus.Popup popup = shown;
         if (popup != null) popup.dismiss();
     }
 
     @Override
     public void destroy() {
         wanted = false;
-        PopupMenu popup = shown;
+        SystemMenus.Popup popup = shown;
         shown = null;
         if (popup != null) popup.dismiss();
     }

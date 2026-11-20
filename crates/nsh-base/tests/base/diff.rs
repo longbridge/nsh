@@ -17,7 +17,6 @@ use nsh_base::{
 };
 use nsh_core::{
     MountItem, Size,
-    element::Root,
     platform::{Idiom, Os},
     prelude::*,
 };
@@ -307,7 +306,9 @@ fn start(props: HarnessProps) -> Headless {
 fn start_on(props: HarnessProps, os: Os, idiom: Idiom) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(900.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Harness>(move || props.clone()))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            props.clone()
+        }))
     };
     config.environment.os = os;
     config.environment.idiom = idiom;
@@ -1007,7 +1008,9 @@ fn file_headers_follow_wrapped_rows() {
                 };
                 let mut app = Headless::start(EngineConfig {
                     viewport: Size::new(px(900.0), px(900.0)),
-                    ..EngineConfig::new(Root::new::<Harness>(move || props.clone()))
+                    ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+                        props.clone()
+                    }))
                 })
                 .unwrap();
                 let items = Arc::new(Mutex::new(Vec::new()));
@@ -1088,7 +1091,7 @@ fn a_wrapped_lines_later_parts_continue_its_first_for_a_copy() {
     let long = "long text ".repeat(30);
     let mut app = Headless::start(EngineConfig {
         viewport: Size::new(px(900.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Harness>({
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>({
             let long = long.clone();
             move || HarnessProps {
                 soft_wrap: true,

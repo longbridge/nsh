@@ -221,6 +221,9 @@ pub(crate) struct Live {
     pinch_from: f32,
     /// The zoom last reported to the engine.
     reported_zoom: f32,
+    /// The core deleted the view ([`deleted`]): its refresh spinner no
+    /// longer turns.
+    deleted: bool,
 }
 
 /// Where trackpad events (gestures and their momentum) put the offset, by
@@ -987,6 +990,17 @@ fn ensure_ticking(surface: &Rc<Surface>, view: &NshView) {
     });
 }
 
+/// The core deleted `view` (it alone or with its parent): its refresh
+/// spinner stops turning. The core never ends a deleted view's refresh, so
+/// a spinner turning on would keep its frame callback, which holds the
+/// view, running every frame for good: the view never freed and the display
+/// link never at rest. Its other motion ends by itself, as before.
+pub(crate) fn deleted(view: &NshView) {
+    if let Some(s) = view.state_mut().scroll.as_mut() {
+        s.live.deleted = true;
+    }
+}
+
 /// When `view`'s motion next comes to something (ms, the frames' clock):
 /// an eased move's end, a mouse wheel's or a touchpad's rest; what runs
 /// its frame while no frames are drawn ([`Next::At`]). `None` while only
@@ -1160,9 +1174,11 @@ fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> Tick {
             }
             fading = alpha > 0.0;
         }
+        // A deleted view's spinner stops ([`deleted`]).
         let spinning = !s.horizontal
             && main(s) < 0.0
             && s.live.refreshing
+            && !s.live.deleted
             && s.behavior.refresh_indicator.is_none();
         if spinning {
             s.live.spin = ((now / 1000.0) as f32 * 2.0 * PI) % (2.0 * PI);

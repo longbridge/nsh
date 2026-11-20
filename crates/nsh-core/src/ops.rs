@@ -274,6 +274,8 @@ events! {
     Share = "onShare": "A [`Command::Share`] request finished (root only; payload: `id`, then `action` (`\"shared\"` with the `target` where the platform names it, or `\"dismissed\"`), or `error` with its `code`; [`crate::share`]).",
     DetentChange = "onDetentChange": "The user moved an iOS sheet dialog to another of its `detents` (dragging it, its grabber, a scroll at its edge, a screen reader; payload: [`EventPayload::Json`], `{ detent }`, [`SheetDetent::change_payload`]).",
     AuthSession = "onAuthSession" as "": "A [`Command::AuthSession`] request finished (root only; payload: `id`, then the callback `url`, `action` `\"cancelled\"`, or `error` with its `code`; [`crate::auth_session`]; never reaches a listener).",
+    FocusIn = "onFocusIn": "The keyboard focus came into the view: onto it or a view inside it, from outside (it entered `focus-within`; raised by the core). Moving between views inside it is no new coming in.",
+    FocusOut = "onFocusOut": "The keyboard focus left the view: from it or a view inside it to one outside, or to none (it left `focus-within`; raised by the core).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -2510,6 +2512,9 @@ pub enum Command {
     Focus,
     /// Unfocus an input; on the root view, unfocus whatever is focused.
     Blur,
+    /// Clear the selection of a selectable view (`ViewProps::selectable_view`)
+    /// the view is, is inside or holds.
+    ClearSelection,
     /// Scroll a scroll view to an offset.
     ScrollTo {
         /// Horizontal offset.
@@ -3478,6 +3483,12 @@ pub enum Prop {
     /// `autoFocus`: focused when it appears.
     #[prop(js = "autoFocus", on = INPUT)]
     AutoFocus(bool),
+    /// `selectTextOnFocus`: the whole text is selected when the input takes
+    /// the focus (a click, Tab, `focus()`, `autoFocus`). Decided natively as
+    /// the focus arrives; a click that drags, extends (Shift) or selects
+    /// words (double click) keeps the user's selection.
+    #[prop(js = "selectTextOnFocus", on = INPUT)]
+    SelectTextOnFocus(bool),
     /// `caret`: the caret is drawn (default true; `false` hides it).
     #[prop(js = "caret", default = true, on = INPUT)]
     Caret(bool),
@@ -3659,6 +3670,10 @@ pub enum Prop {
     /// (default `popover` / `withinWindow` / `active`; `None`: none).
     #[prop(macos = "backdrop")]
     MacOsBackdrop(Option<crate::MacOsBackdrop>),
+    /// `windows={{ backdrop }}`: `{ material: "blur" }` draws the system's blur
+    /// of what is behind a transparent window under the view, on Windows 11.
+    #[prop(windows = "backdrop")]
+    WindowsBackdrop(Option<crate::WindowsBackdrop>),
     /// An accessibility property.
     #[prop(nested)]
     Accessibility(AccessibilityProp),

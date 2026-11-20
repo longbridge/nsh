@@ -43,6 +43,7 @@ fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const count = signal(0);
@@ -61,7 +62,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 | Rust | TSX | Default | Description |
@@ -267,6 +272,7 @@ fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, View } from "nsh";
 import { createAnimatedValue } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const x = createAnimatedValue(0);
@@ -286,7 +292,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 | Rust | TSX | Description |
@@ -489,6 +499,7 @@ fn sketch() -> impl IntoElement {
 
 ```tsx tabs
 import { Canvas, type GestureResponderEvent, mount, signal } from "nsh";
+import { Window } from "nsh/desktop";
 
 function Sketch() {
   const strokes = signal<[number, number][][]>([]);
@@ -518,7 +529,11 @@ function Sketch() {
   );
 }
 
-mount(Sketch);
+mount(() => (
+  <Window id="main">
+    <Sketch />
+  </Window>
+));
 ```
 
 How it runs: a view with any touch or responder handler listens to touches natively; the platform reports the touches on it (and inside it) with the path of listening views, and the negotiation runs in NSH's Rust core, asking the claims and calling your handlers in order: the captures from the outermost view inwards, then the others from the target outwards. Two consequences:
@@ -562,6 +577,7 @@ fn ball() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, View } from "nsh";
 import { PanResponder } from "nsh";
+import { Window } from "nsh/desktop";
 
 function Ball() {
   const pos = signal({ x: 0, y: 0 });
@@ -582,7 +598,11 @@ function Ball() {
   );
 }
 
-mount(Ball);
+mount(() => (
+  <Window id="main">
+    <Ball />
+  </Window>
+));
 ```
 
 The gesture state:

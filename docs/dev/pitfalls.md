@@ -274,6 +274,10 @@ Things that were found the hard way. Read the section of the area you change bef
   negative `additionalSafeAreaInsets` worked out from the window and the stack's frame alone. Deriving what UIKit
   granted by subtracting the compensation already applied looks equivalent and cannot heal: UIKit floors a safe area at
   zero, so after an overshoot that subtraction returns the value already applied, for good.
+- **iOS, a container's transform can shrink a stack's safe area**: UIKit measures a safe area through the
+  transforms around a view, and only on its own layout passes, so a pass while a container shows a stack scaled or
+  moved aside leaves the stack the insets of that picture after the transform is gone. A stack's safe area follows
+  where it is laid out: the navigation controller makes up what a transform takes away.
 - **iPadOS 26, the window controls' corner**: `safeAreaInsets` leaves out the controls a windowed app has at its
   top-leading corner; the safe-area layout region with horizontal corner adaptation
   (`edgeInsetsForLayoutRegion:`) covers them, and also pads both sides alike for the display's rounded corners
@@ -475,6 +479,13 @@ Things that were found the hard way. Read the section of the area you change bef
   child sees it, with the same slop as `ZScroll`, so the pager took every horizontal drag of a zoomed image. `ZScroll`
   asks its parents not to intercept from the down (`requestDisallowInterceptTouchEvent`) while it has content to pan and
   gives that back when the drag has nothing to move or pushes past an edge a scroll view around can go on from.
+- **Android, moving a scroll view during its fling**: `ScrollView` / `HorizontalScrollView` keep their fling's
+  `OverScroller` private, and `computeScroll` sets the position the curve reached every frame, so a `scrollTo` during a
+  fling lasts one frame: the core's anchoring `ScrollBy` (rows above a list's viewport measured mid-fling) was undone
+  and the visible rows jumped by it, while a slow drag over the same rows kept them still. `VScroll` and `HScroll` run
+  their flings themselves (`ScrollBox.Glide`: the platform's `OverScroller.fling` arguments, plus the shifts
+  `scrollByPx` applied). Starting a new fling from the moved position instead goes farther than the rest of the curve:
+  repeated over a run of measured rows it sped the fling up and ran it far past its end.
 - **Android, safe area**: `NshView` reports only the parts of the system bars / keyboard that overlap it (like UIKit's
   `safeAreaInsets`), so embedded views below a toolbar get no top inset. Overlays use the same overlap (`topInset()`).
 - **Android, dev assets come over plain HTTP**, which apps block by default (API 28+): the dev host APK and `nsh-dev.aar` set
@@ -667,6 +678,14 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## macOS, AppKit
 
+- **`performWindowDragWithEvent:` moves the window only from the event AppKit is delivering**: given a press whose
+  drags a `nextEventMatchingMask:` tracking loop already took off the queue, the window stayed put (#2274); given a
+  drag that loop dequeued, it stayed put as well. Called from the view's `mouseDragged:` with that event, the window
+  server moves the window from then on, in step with the pointer and with edge tiling (real mouse events posted with
+  `cliclick` over a hidden title bar, macOS 26.6). Moving the window from a loop instead, one `setFrameOrigin:` per
+  event (#2295), trails the pointer, as the app sets every frame. `input::window_press` keeps the press and lets
+  AppKit deliver its drags, as GPUI's `start_window_move` does.
+
 - **A view's display link follows the window to another screen but keeps the frame rates it was asked for**: one
   resumed while the window was on a 60 Hz screen (range 60–60) and kept running by a looping animation or the
   performance monitor drew at 60 Hz after the window moved to a 120 Hz built-in screen (measured, macOS 26, a 120 Hz
@@ -731,7 +750,7 @@ Things that were found the hard way. Read the section of the area you change bef
   moves the children into a container that clips, and keeps the shadow on its own layer.
 - `NSView`'s display link fires only while some of the view's window shows on a screen: not while the window is
   hidden (ordered out, or never shown), minimized, wholly covered or off every screen, or the screen is locked. A
-  surface's one link drives all of its windows, so a link made from the root of a hidden main window (a tray app's,
+  surface's one link drives all of its windows, so a link made from the root of the hidden host (a tray app
   `window.defaultVisible: false`) gave the app's other windows no frames at all: made from the hidden window's view
   it fired 0 times in a second, from a shown window's 126, and in a `Window.open` window a trackpad scroll froze
   under the fingers and jumped into place when the gesture ended (`settle`), and animations did not run. The link is
@@ -841,7 +860,10 @@ Things that were found the hard way. Read the section of the area you change bef
   controllers in the window's DirectComposition tree for this reason (`compose.rs`); native components that bring an
   `HWND` of their own still cover NSH content (one that brings a composition visual instead,
   `NativeComponent::visual`, is stacked in order). Offscreen drawings of the window have no web views or composed
-  components: the test agent's screenshots capture them (`PrintWindow` with `PW_RENDERFULLCONTENT`).
+  components: the test agent's screenshots capture them (`PrintWindow` with `PW_RENDERFULLCONTENT`). A window has one
+  composition target below its child windows and one above them; a `Windows.UI.Composition` brush (the host backdrop
+  of `windows={{ backdrop }}`) needs a target of its own, so NSH's tree moves above the child windows while one
+  shows (`backdrop.rs`).
 - **`IDCompositionVisual::AddVisual(visual, TRUE, NULL)` puts the visual below all its siblings**, not on top: to
   stack bottom to top, insert each one above the one added before it (`compose.rs`).
 - **A focused WebView2 page has the keyboard in a window of its own** (`Chrome_WidgetWin_0`, a child of the

@@ -103,7 +103,9 @@ above them after a block (1.1 / 1.6 / 1.4 em, 0.6 em after a heading, none first
 from `Before`, which the top level's rows keep as a memo); strong text semibold; links underlined 1 pt at 40 % of
 their color, at the platform's automatic underline position (or an offset an ancestor sets, which links inherit;
 the `Link` part's own wins); `<mark>` on a rounded yellow (a marker's,
-`HIGHLIGHT`); code, keys and TeX at 13 in the theme's `font-mono` (else the system's `monospace`) on a faint rounded
+`HIGHLIGHT`); text styles (`textStyle`) in the document's color, as given in both appearances, which the app's
+`textStyle` part overrides (its own colors in dark appearance, say);
+code, keys and TeX at 13 in the theme's `font-mono` (else the system's `monospace`) on a faint rounded
 background (spans have no padding); lists indented 1.4 em, their markers (`•`, `◦`, `▪` by depth, or numbers) right-aligned against the content in
 the indent (so `10.` reaches further left and the items stay in line), items 0.25 em apart, tasks a
 15 pt box drawn as a view (filled with a `✓` when done, the item's text then muted and struck); quotes a 2 pt line at
@@ -318,6 +320,15 @@ metadata, scripts, styles, form controls, embedded media; elements `hidden`, `ar
 checkboxes, `<math>` with a TeX annotation, `language-*` classes of code). Depth is bounded (256) and `colspan` too
 (64): the input is untrusted.
 
+Text colors are read where rich text editors write them (Tiptap's `textStyle`, which `RichEditor` writes too): a
+`<span>` whose style has a `color`, or a `<font>` with a `color` style or attribute (the style first, as a browser
+ranks them), is a `TextStyle` holding its content, the color as written (`html/mod.rs` `text_color`). A value that is
+no CSS color (`inherit`, `currentColor`) or that would hide the text (fully transparent) is not read, and the element
+is its content, as a span without a color is. Colors elsewhere (a `<p style="color: …">`, a span around blocks) are
+not read. In Markdown a colored `<span>` or `<font>` pairs as the formatting tags do, its content Markdown
+(`formatting_element`). A selection copied as Markdown or HTML writes a text style back as `<span style="color: …">`,
+only when its color is a CSS color (`selection.rs` `style_color`): a document of the app's may carry any string.
+
 ## In a terminal
 
 On the terminal backend (`is_terminal()`) the document takes the forms of a terminal reader, in `text_view/view.rs`
@@ -329,7 +340,8 @@ formulas are bands as wide as their longest line plus a Cell each side (`termina
 language label; an alert is one band across the body text's width, its icon and text a Cell in, and keeps a `│` in its
 tint where the terminal draws no bands; tables fit the view by narrowing their widest column, never below
 `MIN_COLUMN` Cells (`fit_columns`, cached in one `computed` from the table's laid-out width, with cells and rules
-borrowing its column widths through `Memo::with`), their cells wrapping; tasks show
+borrowing its column widths through `Memo::with`), their cells wrapping with the sides as tall as the row
+(`terminal::glyph_column`, as a quote's bar); tasks show
 `☐` / `☑`. The tests are `nsh-base`'s `tests/base/terminal.rs`.
 
 ## Accessibility

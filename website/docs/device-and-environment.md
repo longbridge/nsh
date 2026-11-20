@@ -55,6 +55,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, Text, View, safeArea } from "nsh";
 import { colorScheme, fontScale, windowSize } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   return (
@@ -66,12 +67,16 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 ## Window size and responsive layout
 
-`window()` (TSX: `windowSize()`) is the size of the surface NSH renders into: the screen on a phone, the window on an iPad in split view or on a Mac, the host view when NSH is embedded. Use it to change the layout, not only sizes:
+`window()` (TSX: `windowSize()`) is the size of the surface NSH renders into: the screen on a phone, the window on an iPad in split view, the host view when NSH is embedded. On the desktops the app host is invisible, so this is the host surface's size, not the calling window's; read a window's own `state()?.contentBounds` and `state()?.scaleFactor` for layout inside it. Use it to change the layout, not only sizes:
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -530,6 +535,23 @@ if let Some(dir) = data_dir() {
 }
 ```
 
+## The app's version
+
+`app_info()` in Rust, `appInfo()` from `nsh` in TSX ([`appInfo`](../modules/nsh.md#appinfo)), is the app as it was
+built: its id, name, version and build number, and whether it is a development build. A package reports what
+`nsh package` names and versions it as, `--id`, `--name`, `--version` and `--build` included, with version `1.0.0` and
+build `1` where nothing gives them; other builds report `nsh.json`'s, `None` where it leaves them out. `nsh run`,
+`nsh dev` and `nsh test` make development builds of a Rust app; `nsh package` does not.
+`app_info()` is `None` in a TSX app, where JS's `appInfo()` reports it.
+
+```rust
+use nsh_core::prelude::*;
+
+if let Some(info) = app_info() {
+    let about = format!("{} ({})", info.version.unwrap_or_default(), info.build.unwrap_or(0));
+}
+```
+
 ## Pixel density
 
 `pixel_ratio()` and `round_to_nearest_pixel(points)` in Rust, and `pixelRatio()` from `nsh` in TSX, convert between points and device pixels.
@@ -554,7 +576,7 @@ import { pixelRatio } from "nsh";
 <View style={{ height: 1 / pixelRatio(), backgroundColor: "#d0d7de" }} />
 ```
 
-`pixel_ratio()` and `pixelRatio()` are reactive, so a hairline follows a window moved to a screen with another density.
+`pixel_ratio()` and `pixelRatio()` are reactive. On the desktops they report the host display's scale; a window moved to a screen with another density reports its own scale in `state()?.scaleFactor`.
 
 ## Right to left
 

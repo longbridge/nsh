@@ -121,6 +121,13 @@ const BAR_THICK = 4;
 const BAR_MARGIN = 2;
 const BAR_GRAB = 12;
 const BAR_HOLD = 700;
+/** How long (ms) an animated scroll command of the core's takes here, the
+ * length its own animation runs for on the other platforms (`nsh-core`'s
+ * `scroll::ANIMATION`, eased out cubically): the browser's
+ * `behavior: "smooth"` takes about a second over a long distance, and
+ * starts over every time a command retargets it, which a list does as it
+ * measures the rows the scroll passes. */
+const SCROLL_MS = 300;
 
 /* Keyframe animations (animate-spin, -ping, -pulse, -bounce) run with
    animation-composition: add: their transforms follow the view's own (as the
@@ -1267,9 +1274,9 @@ class Player {
           if (url.length <= cap) this.bytes(p, cap).set(url);
           return url.length;
         },
-        fetch_start: (id, mp, ml, up, ul, hp, hl, bp, bl, kind, follow) =>
+        fetch_start: (id, mp, ml, up, ul, hp, hl, bp, bl, kind, follow, cp, cl) =>
           this.fetchStart(id, this.str(mp, ml), this.str(up, ul), JSON.parse(this.str(hp, hl)),
-            kind === 1 ? this.bytes(bp, bl).slice() : null, kind === 2, follow !== 0),
+            kind === 1 ? this.bytes(bp, bl).slice() : null, kind === 2, follow !== 0, this.str(cp, cl)),
         fetch_send: (id, p, l) => this.fetchSend(id, this.bytes(p, l).slice()),
         fetch_finish: (id) => this.requests.get(id)?.finish?.(),
         fetch_pause: (id, paused) => this.fetchPause(id, paused !== 0),
@@ -2511,8 +2518,8 @@ class Player {
       el._applied = 0;
       el.addEventListener("scroll", () => this.scrolled(el), { passive: true });
       el.addEventListener("scrollend", () => this.scrollEnded(el));
-      // The user takes over a smooth scroll of the core's (`op_sb`).
-      const takeOver = () => { el._smooth = null; };
+      // The user takes over a scroll animation of the core's.
+      const takeOver = () => this.endScrollAnimation(el, false);
       for (const type of ["wheel", "pointerdown", "touchstart", "keydown"]) el.addEventListener(type, takeOver, { passive: true });
     }
     if (kind === "screen") el.classList.add("nsh-screen");
@@ -2998,7 +3005,7 @@ class Player {
     for (const span of [...el.querySelectorAll(":scope > .nsh-run, :scope > .nsh-run-bg")]) span.remove();
     el.insertBefore(frag, el.firstChild);
     this.lineBreaks(el);
-    if (spans.some((l) => l.events.has("onMouseEnter") || l.events.has("onMouseLeave"))) {
+    if (!el._linkHoverListeners && spans.some((l) => l.events.has("onMouseEnter") || l.events.has("onMouseLeave"))) {
       this.installLinkHover(el);
     }
   }
@@ -3012,8 +3019,7 @@ class Player {
    * listeners read the spans the runs have now.
    */
   installLinkHover(el) {
-    if (el._linkHover !== undefined) return;
-    el._linkHover = null;
+    el._linkHoverListeners = true;
     const follow = (e) => {
       if (e.pointerType !== "mouse") return;
       const link = e.type === "pointerleave" ? null : (e.target?._link ?? null);
@@ -3101,11 +3107,14 @@ class Player {
     // The focus is reported whatever is tracked (the core works out
     // `focus-within` from it): it stays; the rest is forgotten.
     el._states = (el._states || 0) & FOCUSED;
-    if (states & HOVERED && !el._hoverListeners) {
-      el._hoverListeners = true;
-      el.addEventListener("pointerenter", (e) => e.pointerType === "mouse" && this.setState(el, HOVERED, true));
-      el.addEventListener("pointerleave", () => this.setState(el, HOVERED, false));
-    }
+    if (states & HOVERED && !el._hoverListeners) this.installHover(el);
+  }
+
+  /** `hover:` of view `el` (`op_ts`), from the mouse's pointer events. */
+  installHover(el) {
+    el._hoverListeners = true;
+    el.addEventListener("pointerenter", (e) => e.pointerType === "mouse" && this.setState(el, HOVERED, true));
+    el.addEventListener("pointerleave", () => this.setState(el, HOVERED, false));
   }
 
   /** Tells the core the input modality (0 the keyboard, 1 a pointer);
@@ -3150,9 +3159,9 @@ class Player {
   /**
    * The view drawn as the HTML element `elementTag` gives it (`h1`, `a`,
    * `p`, `nav`, ...), else a `div`: the element is replaced by one of that
-   * tag carrying its attributes, children and fields, so search engines
-   * and the page's markup see the document's structure while the layout,
-   * styles and events stay the view's. Views whose element holds a
+   * tag carrying its attributes, children, fields and listeners, so search
+   * engines and the page's markup see the document's structure while the
+   * layout, styles and events stay the view's. Views whose element holds a
    * control of its own (images, scroll views, canvases, ...) keep theirs.
    */
   retag(el, tag) {
@@ -3166,10 +3175,13 @@ class Player {
     next.append(...el.childNodes);
     el.replaceWith(next);
     this.views.set(el._id, next);
-    if (el._mouseEvents) {
-      next._mouseEvents = false;
-      this.installMouse(next);
-    }
+    // Listeners stay with the element they were added to, and a new view's
+    // tracked states and events come before the props that name its tag
+    // (a `Link`'s `href`): the flags copied above say which to add again.
+    if (el._mouseEvents) this.installMouse(next);
+    if (el._hoverListeners) this.installHover(next);
+    if (el._focusListeners) this.installFocus(next);
+    if (el._linkHoverListeners) this.installLinkHover(next);
     if (tag === "a") next.draggable = false;
     return next;
   }
@@ -3237,22 +3249,25 @@ class Player {
     // No longer a stop with the focus on it: it leaves, as on macOS (browsers
     // move it without a `blur`, which would leave `focus:` on).
     if (!focusable && !el._a11yFocus && document.activeElement === el) el.blur();
-    if (focusable && !el._focusListeners) {
-      el._focusListeners = true;
-      // `focus:` classes and `onFocus` follow the keyboard focus (the
-      // browser draws a ring only then), not the focus a click would give.
-      el.addEventListener("focus", () => {
-        if (!el._focusCall && !el.matches(":focus-visible")) return;
-        this.keyFocus(el);
-      });
-      el.addEventListener("blur", () => {
-        this.setState(el, FOCUSED, false);
-        if (!el._keyFocus) return;
-        el._keyFocus = false;
-        this.event(el._id, "onBlur");
-      });
-    }
+    if (focusable && !el._focusListeners) this.installFocus(el);
     this.updateAria(el);
+  }
+
+  /** `focus:` classes, `onFocus` and `onBlur` of Tab stop `el`
+   * (`updateFocusable`): they follow the keyboard focus (the browser draws
+   * a ring only then), not the focus a click would give. */
+  installFocus(el) {
+    el._focusListeners = true;
+    el.addEventListener("focus", () => {
+      if (!el._focusCall && !el.matches(":focus-visible")) return;
+      this.keyFocus(el);
+    });
+    el.addEventListener("blur", () => {
+      this.setState(el, FOCUSED, false);
+      if (!el._keyFocus) return;
+      el._keyFocus = false;
+      this.event(el._id, "onBlur");
+    });
   }
 
   /** Whether the keyboard reaches view `el` (a Tab stop, an input's
@@ -3320,7 +3335,7 @@ class Player {
     }
     el._focusCall = true;
     try {
-      el.focus({ focusVisible: true });
+      el.focus({ focusVisible: true, preventScroll: true });
     } finally {
       el._focusCall = false;
     }
@@ -4620,12 +4635,15 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     el._applied++;
-    // A smooth scroll of the core's in flight moves with it, as on the
-    // native backends: setting the offset would stop it.
-    if (el._smooth) {
-      el._smooth = [el._smooth[0] + dx, el._smooth[1] + dy];
-      el.scrollTo({ left: el._smooth[0], top: el._smooth[1], behavior: "smooth" });
-      return;
+    // A scroll animation of the core's in flight moves with the content,
+    // as on the native backends (`nsh-core`'s `shifted`): it goes on from
+    // the content it was on.
+    const s = el._smooth;
+    if (s) {
+      s.fromX += dx;
+      s.fromY += dy;
+      s.x += dx;
+      s.y += dy;
     }
     // So does a glide of the wheel's or the keys' (`scrollSmoothly`):
     // its next frame would put the offset back.
@@ -4973,9 +4991,15 @@ class Player {
   /** The browser's scrolling stopped: the end, unless the scroll is driven
    * here (`drive`) or a finger still holds it. */
   scrollEnded(el) {
+    // A browser wheel's scroll goes on while its events keep coming
+    // (`wheelNatively`): a `scrollend` between two notches is not its end,
+    // which waits for the fallback, as one scroll of nsh's ends once.
+    if (el._wheelAt && performance.now() - el._wheelAt < 200) return;
     clearTimeout(el._commandEnd);
     el._commandEnd = 0;
-    el._smooth = null;
+    // A scroll animation of the core's (`animateScroll`) is driven here:
+    // every frame of it sets the offset, and the `scrollend` the frame
+    // before it drew is not its end. It ends on its own last frame.
     if (el._driven || el._touchDrag) return;
     // The browser's end of a scroll that ended here (`ownEnd`).
     const own = el._ownEnd;
@@ -5715,11 +5739,38 @@ class Player {
         if (submit === "blurAndSubmit") field.blur();
       }
     });
+    // `selectTextOnFocus`: focus selects the whole text, however it comes. A
+    // press that focuses the field places the caret after the focus (on
+    // its mousedown or its mouseup, by browser), so the press's mouseup
+    // selects it again unless the press made its own selection: a drag's
+    // range, a Shift-click's extension, or a second click on the focused
+    // field (a double click's word).
+    field.addEventListener("pointerdown", (e) => {
+      if (document.activeElement === field) field._selectOnUp = false;
+      else field._shiftPress = e.shiftKey;
+    });
+    const pressEnded = () => { field._shiftPress = false; };
+    field.addEventListener("pointerup", pressEnded);
+    field.addEventListener("pointercancel", pressEnded);
+    field.addEventListener("mouseup", (e) => {
+      if (!field._selectOnUp) return;
+      field._selectOnUp = false;
+      if (field.selectionStart !== field.selectionEnd) return;
+      e.preventDefault();
+      field.setSelectionRange(0, field.value.length);
+      this.selectionChanged(el, field);
+    });
     field.addEventListener("focus", () => {
       this.setState(el, FOCUSED, true);
       this.event(el._id, "onFocus");
+      if (el._config?.selectTextOnFocus && !field._shiftPress) {
+        field.setSelectionRange(0, field.value.length);
+        field._selectOnUp = true;
+        this.selectionChanged(el, field);
+      }
     });
     field.addEventListener("blur", () => {
+      field._selectOnUp = false;
       this.setState(el, FOCUSED, false);
       this.event(el._id, "onBlur");
     });
@@ -6165,9 +6216,12 @@ class Player {
     // keeps them, with their depths) are foreign, below this one's.
     this.historySession = newHistorySession();
     // The current entry's place, and the depth of each entry up to the
-    // newest (what a back of the app's own goes back over).
+    // newest (what a back of the app's own goes back over), and the address
+    // each had when the player last wrote it or was on it (what
+    // `takeOverEntry` checks the entry under against).
     this.historyIndex = 0;
     this.historyDepths = [0];
+    this.historyUrls = [location.href];
     history.replaceState(this.historyState(0), "");
     // The app's first entry's place in the tab's history, where the
     // browser says (`navigationIndex`): a state-less entry before it is the
@@ -6202,6 +6256,7 @@ class Player {
     const index = this.historyIndex;
     this.historyIndex = 0;
     this.historyDepths = [0];
+    this.historyUrls.length = 1;
     this.historyDepth = 0;
     if (!index) return;
     this.ignoredPops++;
@@ -6215,6 +6270,8 @@ class Player {
     history.pushState(this.historyState(depth, index), "", url);
     this.historyDepths.length = index;
     this.historyDepths.push(depth);
+    this.historyUrls.length = index;
+    this.historyUrls.push(location.href);
     this.historyIndex = index;
   }
 
@@ -6326,7 +6383,9 @@ class Player {
     const depth = this.backDepth();
     const have = this.historyDepth;
     for (let i = have + 1; i <= depth; i++) this.pushEntry(i);
-    if (depth < have) {
+    if (depth < have && this.takeOverEntry(depth)) {
+      // The address is on the entry the page that went had (`takeOverEntry`).
+    } else if (depth < have) {
       // Back over the entries above `depth`, the addresses the user typed
       // at those depths included; a level that has no entry left gets one
       // once the traversal lands.
@@ -6353,6 +6412,7 @@ class Player {
         // Absolute: `setPageUrl` resolved it.
         if (push) this.pushEntry(depth, url);
         else history.replaceState(history.state, "", url);
+        this.historyUrls[this.historyIndex] = url;
         this.shownUrl = url;
         if (!this.historyIndex) this.firstUrl = url;
       } catch (error) {
@@ -6360,6 +6420,45 @@ class Player {
       }
     }
     if (!this.ignoredPops) this.syncTitle();
+  }
+
+  /**
+   * A turn that takes away the one page whose entry is the current one (a
+   * modal, a stack's screen) and pushes an address (a sheet's item that
+   * opens a page of the app's): the address takes that entry over, at the
+   * depth of the pages left, instead of going back over it and pushing an
+   * entry of its own once the traversal lands. Nothing waits for a
+   * traversal, and the entry under it is not left again. A browser pictures
+   * an entry as the page leaves it, and Chrome on Android shows that
+   * picture under a back swipe: left again here, after the app's new page
+   * was drawn (the traversal lands a task or more later), the entry under
+   * it was pictured with that page. Its picture stays the one taken as the
+   * page that went came. Not with entries after the current one (the user
+   * went back onto it), which a push drops and this would keep. Nor with
+   * the address of the entry under it (a sheet with an address of its own
+   * closing onto its opener's), which the back lands on and the push then
+   * makes nothing of: here two entries of one address would have a back
+   * between them that moves nothing. Returns whether it did.
+   */
+  takeOverEntry(depth) {
+    const url = this.pageUrl;
+    if (url == null || !this.pageUrlPush || url === location.href) return false;
+    if (this.entryAtDepth(depth) !== this.historyIndex - 1 || this.historyDepths.length !== this.historyIndex + 1) return false;
+    const under = this.historyUrls[this.historyIndex - 1];
+    if (under == null || url === under) return false;
+    this.pageUrl = null;
+    this.pageUrlPush = false;
+    try {
+      // Absolute: `setPageUrl` resolved it.
+      history.replaceState(this.historyState(depth), "", url);
+    } catch (error) {
+      this.showError(`UrlScheme.setUrl(${JSON.stringify(url)}): ${error?.message ?? error}`);
+    }
+    this.historyDepths[this.historyIndex] = depth;
+    this.historyUrls[this.historyIndex] = url;
+    this.historyDepth = depth;
+    this.shownUrl = url;
+    return true;
   }
 
   popState(e) {
@@ -6387,6 +6486,8 @@ class Player {
         const index = this.historyIndex + 1;
         this.historyDepths.length = index;
         this.historyDepths.push(have);
+        this.historyUrls.length = index;
+        this.historyUrls.push(location.href);
         this.historyIndex = index;
         history.replaceState(this.historyState(have, index), "");
         this.tellAddress("address");
@@ -6405,6 +6506,7 @@ class Player {
       // it are an earlier load's too.
       this.historySession = newHistorySession();
       this.historyDepths = [0];
+      this.historyUrls = [location.href];
       history.replaceState(this.historyState(0), "");
       this.historyBase = navigationIndex();
       this.firstUrl = location.href;
@@ -6417,6 +6519,7 @@ class Player {
     const reason = index < this.historyIndex ? "back" : "forward";
     this.historyIndex = index;
     this.historyDepths[index] = at;
+    this.historyUrls[index] = location.href;
     if (at > have) {
       // Forward to a screen the stack no longer has: an address the app is
       // handed from outside, as a link (`open`), and its pages' entries go
@@ -7173,6 +7276,15 @@ class Player {
         if (el?._field) el._field.blur();
         else document.activeElement?.blur?.();
         break;
+      case "clearSelection": {
+        // The selection of the selectable view `el` is, is in or holds:
+        // `selectionchange` then reports `""`.
+        const sel = getSelection();
+        const anchor = sel?.rangeCount ? sel.anchorNode : null;
+        const area = anchor && this.areaOf(anchor.nodeType === 1 ? anchor : anchor.parentElement);
+        if (el && area && (el.contains(area) || area.contains(el))) sel.removeAllRanges();
+        break;
+      }
       case "setSelection": el?._field?.setSelectionRange(args[0], args[1]); break;
       case "insertText": {
         // As the user's typing: the browser's undo history keeps it and
@@ -7198,17 +7310,12 @@ class Player {
           el._field.scrollTo({ top: args[1], behavior: args[2] ? "smooth" : "instant" });
           break;
         }
-        el._applied++;
-        this.stopGlide(el, args[0], args[1]);
-        el._smooth = args[2] ? [args[0], args[1]] : null;
-        el.scrollTo({ left: args[0], top: args[1], behavior: args[2] ? "smooth" : "instant" });
+        this.scrollCommand(el, args[0], args[1], args[2]);
         break;
       case "scrollToEnd": {
         if (!el) break;
-        el._applied++;
         const [x, y] = el._horizontal ? [el.scrollWidth, 0] : [0, el.scrollHeight];
-        this.stopGlide(el, x, y);
-        el.scrollTo({ left: x, top: y, behavior: args[0] ? "smooth" : "instant" });
+        this.scrollCommand(el, x, y, args[0]);
         break;
       }
       case "zoomTo": if (el) this.zoomCommand(el, ...args); break;
@@ -7321,7 +7428,7 @@ class Player {
           el.tabIndex = -1;
           el._a11yFocus = true;
         }
-        el.focus();
+        el.focus({ preventScroll: true });
         break;
       default: break;
     }
@@ -8416,7 +8523,7 @@ class Player {
    * browser's `fetch`, its head and body chunks reported back as they come.
    * A streamed body (`streamed`) is collected until `fetch_finish`.
    */
-  fetchStart(id, method, url, headers, body, streamed, follow) {
+  fetchStart(id, method, url, headers, body, streamed, follow, cache) {
     const request = { controller: new AbortController(), paused: false, resume: null, reader: null, done: false };
     this.requests.set(id, request);
     const report = (f) => {
@@ -8427,7 +8534,7 @@ class Player {
       this.requests.delete(id);
     };
     const send = async (body) => {
-      const init = { method, headers: new Headers(), body, redirect: follow ? "follow" : "manual", signal: request.controller.signal };
+      const init = { method, headers: new Headers(), body, redirect: follow ? "follow" : "manual", cache: cache || "default", signal: request.controller.signal };
       for (const [name, value] of headers) {
         try {
           init.headers.append(name, value);
@@ -9336,8 +9443,10 @@ class Player {
    * A wheel or touchpad scroll goes to the innermost scroll view along its
    * axis that can move that way (a vertical wheel scrolls a horizontal view
    * when no vertical one can), and stays on it until the scroll ends
-   * (events 200 ms apart). Notches glide; Ctrl + wheel (a touchpad's pinch)
-   * pinches the view under the pointer and never zooms the page.
+   * (events 200 ms apart). Where the browser would scroll the same view, it
+   * does (`wheelNatively`): its notches glide as every page's. Otherwise
+   * notches glide here; Ctrl + wheel (a touchpad's pinch) pinches the view
+   * under the pointer and never zooms the page.
    */
   wheel(e) {
     // A view listening to `onWheel` nearer than the scroll views under the
@@ -9369,16 +9478,28 @@ class Player {
       };
       const el = chain.find((v) => !!v._horizontal === horizontal && can(v, horizontal ? dx : dy))
         ?? (horizontal ? null : chain.find((v) => v._horizontal && can(v, dy)));
+      // The browser scrolls it itself, with its own smooth wheel and the
+      // touchpad's momentum, when it would pick the same view: the
+      // innermost along the scroll's axis (`overscroll-behavior: contain`
+      // keeps the scroll on it at its edge, as `wheelLock` does), not
+      // snapping (one snap point per scroll) and without a content layer
+      // (zoom, pull to refresh), whose offsets are nsh's.
+      const native = !!el && !el._snapPoints && !el._layer
+        && el === chain.find((v) => !!v._horizontal === horizontal);
       // Nothing to scroll: the page around may, unless a dialog or an
       // alert covers it.
-      this.wheelLock = lock = el ? { el, total: 0, snapped: false } : null;
+      this.wheelLock = lock = el ? { el, total: 0, snapped: false, native } : null;
       if (!lock) {
         if (this.viewportDialogs && e.target.closest?.(".nsh-viewport")) e.preventDefault();
         return;
       }
     }
-    e.preventDefault();
     lock.t = now;
+    if (lock.native) {
+      this.wheelNatively(lock.el);
+      return;
+    }
+    e.preventDefault();
     const el = lock.el;
     const d = el._horizontal ? dx || dy : dy;
     if (el._snapPoints) {
@@ -9395,6 +9516,30 @@ class Player {
     // deltas. Its magnitude cannot distinguish a notch from a finger.
     const smooth = e.deltaMode !== 0;
     this.scrollSmoothly(el, el._horizontal ? d : 0, el._horizontal ? 0 : d, smooth);
+  }
+
+  /**
+   * A wheel the browser scrolls `el` with (`wheel`): Chrome and Safari
+   * send a mouse's notches in pixels, as a touchpad's deltas, so nsh could
+   * not tell them apart and moved each notch at once, where every page
+   * glides. The offsets reach the core as any scroll's do (`scrolled`).
+   * A glide of the keys' stops where it is, without an end: the wheel's
+   * scroll goes on from there. The end is the browser's `scrollend` once
+   * no event came for 200 ms (`scrollEnded`: one scroll, as nsh's own
+   * wheels end once), or 200 ms after the last scroll event where it sends
+   * none (`waitCommandEnd`, which `scrolled` keeps waiting while it moves).
+   */
+  wheelNatively(el) {
+    el._wheelAt = performance.now();
+    const a = el._glide;
+    if (a) {
+      cancelAnimationFrame(a.frame);
+      clearTimeout(a.timer);
+      clearTimeout(a.watch);
+      el._glide = null;
+      this.drive(el, -1);
+    }
+    this.waitCommandEnd(el);
   }
 
   /**
@@ -9544,16 +9689,8 @@ class Player {
    * the view where it is moves nothing, and no `scrollend` follows, so its
    * `onScrollEnd` is sent here. */
   stopGlide(el, x, y) {
-    const a = el._glide;
-    if (!a) return;
-    cancelAnimationFrame(a.frame);
-    clearTimeout(a.timer);
-    clearTimeout(a.watch);
-    el._glide = null;
-    this.drive(el, -1);
-    // Browsers clamp the offsets of scrolls.
-    const stays = (to, at, max) => Math.min(Math.max(to, 0), max) === at;
-    if (stays(x, el.scrollLeft, el.scrollWidth - el.clientWidth) && stays(y, el.scrollTop, el.scrollHeight - el.clientHeight)) {
+    if (!this.cancelGlide(el)) return;
+    if (this.scrolledTo(el, x, y)) {
       this.ownEnd(el);
     } else {
       // A fractional destination may round back to the current offset,
@@ -9561,6 +9698,98 @@ class Player {
       // keep this fallback waiting through their scroll events.
       this.waitCommandEnd(el);
     }
+  }
+
+  /** Stops `el`'s glide where it is, for something that takes it over;
+   * whether there was one. */
+  cancelGlide(el) {
+    const a = el._glide;
+    if (!a) return false;
+    cancelAnimationFrame(a.frame);
+    clearTimeout(a.timer);
+    clearTimeout(a.watch);
+    el._glide = null;
+    this.drive(el, -1);
+    return true;
+  }
+
+  /** `ScrollTo` and `ScrollToEnd` of the core: puts `el` at (`x`, `y`),
+   * animating it over `SCROLL_MS` when `animated`. */
+  scrollCommand(el, x, y, animated) {
+    el._applied++;
+    if (!animated) {
+      this.endScrollAnimation(el, false);
+      this.stopGlide(el, x, y);
+      el.scrollTo({ left: x, top: y, behavior: "instant" });
+      return;
+    }
+    // The animation below ends the scroll it takes over, so the glide
+    // only stops.
+    this.cancelGlide(el);
+    this.animateScroll(el, x, y);
+  }
+
+  /** Moves `el` to (`x`, `y`) over `SCROLL_MS`, eased out cubically, as
+   * the core animates a scroll of its own on the other platforms. A
+   * command that retargets one in flight carries on from where it is, as
+   * the core's `animate_to` does. */
+  animateScroll(el, x, y) {
+    let a = el._smooth;
+    if (!a) {
+      a = el._smooth = { fromX: 0, fromY: 0, x: 0, y: 0, start: 0, frame: 0, step: null, watch: 0 };
+      a.step = (now) => this.stepScroll(el, a, now);
+      this.drive(el, 1);
+    }
+    a.fromX = el.scrollLeft;
+    a.fromY = el.scrollTop;
+    a.x = x;
+    a.y = y;
+    a.start = performance.now();
+    // Its frames stopped (a hidden tab): it is where it was going, and
+    // ends there, as a glide's do (`scrollSmoothly`). One timer an
+    // animation, not one a frame.
+    clearTimeout(a.watch);
+    a.watch = setTimeout(() => {
+      el.scrollLeft = a.x;
+      el.scrollTop = a.y;
+      this.endScrollAnimation(el, true);
+    }, SCROLL_MS + 200);
+    if (!a.frame) a.frame = requestAnimationFrame(a.step);
+  }
+
+  /** One frame of `el`'s scroll animation (`animateScroll`). */
+  stepScroll(el, a, now) {
+    const t = Math.min((now - a.start) / SCROLL_MS, 1);
+    const k = 1 - (1 - t) ** 3;
+    el.scrollLeft = a.fromX + (a.x - a.fromX) * k;
+    el.scrollTop = a.fromY + (a.y - a.fromY) * k;
+    if (t < 1) {
+      a.frame = requestAnimationFrame(a.step);
+      return;
+    }
+    a.frame = 0;
+    this.endScrollAnimation(el, true);
+  }
+
+  /** `el`'s scroll animation is over: `reached` when it ran to its target,
+   * which ends the scroll, rather than being taken over by input or a
+   * command that does not animate. */
+  endScrollAnimation(el, reached) {
+    const a = el._smooth;
+    if (!a) return;
+    cancelAnimationFrame(a.frame);
+    clearTimeout(a.watch);
+    el._smooth = null;
+    this.drive(el, -1);
+    if (reached) this.ownEnd(el);
+  }
+
+  /** Whether `el` is where a scroll to (`x`, `y`) leaves it: browsers
+   * clamp the offsets of scrolls. A fractional destination they round
+   * away from lands elsewhere, and ends on the fallback below. */
+  scrolledTo(el, x, y) {
+    const at = (to, pos, max) => Math.min(Math.max(to, 0), max) === pos;
+    return at(x, el.scrollLeft, el.scrollWidth - el.clientWidth) && at(y, el.scrollTop, el.scrollHeight - el.clientHeight);
   }
 
   /** Ends a command rounded to the current offset when no browser event

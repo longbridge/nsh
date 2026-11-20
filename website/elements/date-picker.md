@@ -68,6 +68,7 @@ fn trip_dates() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
 import { DatePicker, type DatePickerValue } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const due = signal<DatePickerValue>(null);
@@ -103,7 +104,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `DatePicker` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. In Rust, `date_picker()`

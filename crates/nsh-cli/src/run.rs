@@ -215,7 +215,7 @@ pub(crate) fn run(
         return run_rust_app(entry, listen, target, device, &work);
     }
     if target == Target::Android {
-        return run_android(entry, listen, release, limits, &work, trace);
+        return run_android(entry, listen, release, limits, &work, trace, device);
     }
     if target == Target::Web {
         return run_web(entry, listen, release, limits);
@@ -482,14 +482,11 @@ fn run_rust_app(
         Target::Android => {
             use crate::android;
             let sdk = android::Sdk::find()?;
-            let serial = android::device(&sdk)?;
+            let serial = android::device(&sdk, device)?;
             let env = android_app_env(&config);
             let out = run.join("android");
             // The device's ABI alone: each one is a build of the app's crate.
-            let abi = android::device_abis(&sdk, &serial)?
-                .into_iter()
-                .find(|abi| android::ABIS.contains(&abi.as_str()))
-                .with_context(|| format!("{serial} runs none of {}", android::ABIS.join(", ")))?;
+            let abi = android::preferred_abi(&serial, &android::device_abis(&sdk, &serial)?)?;
             package_for_run(
                 &entry,
                 crate::package::PackageTarget::Android,
@@ -535,12 +532,13 @@ fn package_for_run(
         out,
         config,
         sign: None,
-        profile: None,
+        profiles: &[],
         keystore: None,
         abis,
         format: crate::android::Format::Apk,
         arch: None,
         run: false,
+        device: None,
         asset_url: None,
         development: true,
     })
@@ -771,8 +769,8 @@ impl Drop for KillOnClose {
 }
 
 /// Starts a dev session, builds and installs the Android dev host (when
-/// it changed), forwards the dev server port to the device and starts the
-/// host.
+/// it changed) on `device` ([`crate::android::device`]), forwards the dev
+/// server port to the device and starts the host.
 fn run_android(
     entry: &Path,
     listen: crate::dev::Listen,
@@ -780,14 +778,23 @@ fn run_android(
     limits: Option<HostLimits>,
     work: &Path,
     trace: bool,
+    device: Option<&str>,
 ) -> anyhow::Result<()> {
     use crate::android;
     let sdk = android::Sdk::find()?;
-    let serial = android::device(&sdk)?;
+    let serial = android::device(&sdk, device)?;
     // As on iOS: the host of a previous session must not connect first.
     let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", BUNDLE_ID]);
     let session = DevSession::start(entry, listen, release, limits)?;
-    install_android_host(&sdk, &serial, work, &crate::runtime::android(true, &[])?)?;
+    // Only the device's ABI: a debug library per ABI makes the APK too
+    // large to build. When the device's ABIs can't be read: every ABI, as
+    // before.
+    let abis = match android::device_abis(&sdk, &serial) {
+        Ok(device) => vec![android::preferred_abi(&serial, &device)?],
+        Err(_) => Vec::new(),
+    };
+    let runtime = crate::runtime::android(true, &abis)?;
+    install_android_host(&sdk, &serial, work, &runtime, &abis)?;
     // The device reaches the dev server on its own 127.0.0.1, until the
     // run ends.
     let _reverse = android::Reverse::add(&sdk, &serial, session.port())?;
@@ -818,12 +825,14 @@ fn run_android(
 
 /// Builds the Android development host (when its runtime changed) into
 /// `work` and installs it on device `serial` (when the device does not have
-/// this build).
+/// this build). It takes the runtime's libraries for `abis` (empty: every
+/// one the runtime has).
 pub(crate) fn install_android_host(
     sdk: &crate::android::Sdk,
     serial: &str,
     work: &Path,
     runtime: &Path,
+    abis: &[String],
 ) -> anyhow::Result<()> {
     use crate::android::{self, Apk, Signing};
     let apk_path = work.join("android/NshDev.apk");
@@ -834,7 +843,7 @@ pub(crate) fn install_android_host(
     // device replaces what this app installed. The device's install time
     // tells whether the host there is still the one this app installed.
     let installed = work.join("android/installed");
-    let version = runtime_version(runtime)?;
+    let version = runtime_version(runtime, abis)?;
     let built =
         apk_path.exists() && fs::read_to_string(&stamp).ok().as_deref() == Some(version.as_str());
     if !built {
@@ -854,13 +863,16 @@ pub(crate) fn install_android_host(
                 // The host runs any app: its pages may capture media.
                 microphone: true,
                 camera: true,
+                dex: &[],
                 permissions: &[],
                 schemes: &[],
                 rust: false,
                 dark: false,
+                fixed_appearance: false,
                 runtime,
-                abis: &[],
+                abis,
                 icon: None,
+                launch_screen: None,
                 assets: Vec::new(),
                 sounds: Vec::new(),
                 signing: Signing::Debug,
@@ -906,11 +918,20 @@ fn installed_host(sdk: &crate::android::Sdk, serial: &str) -> Option<String> {
 }
 
 /// Identifies a runtime build: the sizes and times of its files.
-fn runtime_version(runtime: &Path) -> anyhow::Result<String> {
+fn runtime_version(runtime: &Path, abis: &[String]) -> anyhow::Result<String> {
     let mut parts = Vec::new();
     let mut files = vec![runtime.join("classes.dex")];
     for entry in fs::read_dir(runtime.join("lib"))? {
-        files.push(entry?.path().join("libnsh.so"));
+        let dir = entry?.path();
+        // Libraries of other ABIs left from earlier runs are not in the APK.
+        if !abis.is_empty()
+            && !dir
+                .file_name()
+                .is_some_and(|abi| abis.iter().any(|a| a.as_str() == abi))
+        {
+            continue;
+        }
+        files.push(dir.join("libnsh.so"));
     }
     for file in files {
         if let Ok(meta) = fs::metadata(&file) {

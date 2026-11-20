@@ -27,7 +27,8 @@ nsh run --target android               # a Rust app
 nsh run App.tsx --target android       # a TSX app
 ```
 
-Start an emulator or connect a device first (`adb devices` lists them; NSH uses the first one). For a Rust app, `nsh`
+Start an emulator or connect a device first (`adb devices` lists them). NSH uses the one `--device <serial>` or
+`ANDROID_SERIAL` names, else the first one, and names the one it uses when several are connected. For a Rust app, `nsh`
 builds the app's `libnsh.so` with your crate, installs the APK and starts it; a change to the crate's Rust code builds
 and installs it again. For a TSX app, it installs a development host APK (rebuilt only when the runtime changes) and
 forwards the dev server's port with `adb reverse`, so it works over USB without a shared network; the app updates as
@@ -345,6 +346,30 @@ nsh.setOpenUrlHandler(url -> {
     return false;
 });
 ```
+
+## Runtime permissions from Rust
+
+Android asks for a dangerous permission (the camera, the microphone, the location, nearby devices, contacts, ...) with
+the system's prompt, and gives the answer only to the activity that asked: `AppActivity` in a packaged app, your own
+activity when you embed `NshView`. Rust code that uses such an API (your app's crate, an extension) asks through
+`permissions` of the `nsh-platform-android` crate (whose library is `nsh`), which asks with the activity in front, one
+request at a time and across configuration changes:
+
+```rust
+use nsh::permissions::{self, Permission};
+
+let answers = permissions::request(&["android.permission.RECORD_AUDIO"]).await?;
+if answers[0] == Permission::Granted {
+    // Record.
+}
+```
+
+`state(name)` and `states(names)` answer without asking. A permission is `Default` (asking shows the prompt),
+`Granted`, `Denied` (the user refused and Android asks no more: only the system's settings change it) or `Undeclared`.
+Android grants only what the manifest declares: a permission it does not list answers `Undeclared`, without a prompt.
+A request with no activity in front (the app is in the background), or whose activity finishes before the user
+answers, fails with `PermissionError::NoActivity`. NSH's own prompts (notifications, a web page's camera and
+microphone) ask the same way, so a request waits for one already showing.
 
 ## Limits
 

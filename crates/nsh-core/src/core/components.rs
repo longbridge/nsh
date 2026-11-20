@@ -1439,6 +1439,32 @@ impl<M: TextEngine> Core<M> {
         self.apply_actions();
     }
 
+    /// The OS asked the app to show itself: each reopen listener hears it,
+    /// oldest first. The app opens or focuses the window it wants.
+    #[doc(hidden)]
+    pub fn reopened(&mut self) {
+        let _entered = self.components.runtime.enter();
+        let listeners = self.components.executor.reopens.borrow().all();
+        for listener in listeners {
+            if let Err(message) = caught(|| listener()) {
+                log::error!(target: "js", "a reopen listener failed: {message}");
+            }
+        }
+        self.apply_actions();
+    }
+
+    /// The app's last window went: each listener hears it, oldest first.
+    pub(crate) fn last_window_closed(&mut self) {
+        let _entered = self.components.runtime.enter();
+        let listeners = self.components.executor.last_window_closed.borrow().all();
+        for listener in listeners {
+            if let Err(message) = caught(|| listener()) {
+                log::error!(target: "js", "a last window closed listener failed: {message}");
+            }
+        }
+        self.apply_actions();
+    }
+
     /// Tells the platform whether its quit requests go to the app, when
     /// that changed since the last call (a listener came or went): whether
     /// it did.
@@ -5354,6 +5380,11 @@ impl<M: TextEngine> Core<M> {
     /// own parts' events never reach JS, which does not know them).
     pub fn component_event(&mut self, id: NodeId, kind: EventKind, payload: &EventPayload) -> bool {
         let _entered = self.components.runtime.enter();
+        // A Rust text block's final layout, for its `on_text_layout`.
+        let _geometry = (kind == EventKind::TextLayout)
+            .then(|| self.geometries.remove(&id))
+            .flatten()
+            .map(crate::text::GeometryScope::enter);
         let handled = self.dispatch_event(id, kind, payload);
         self.flush_component_emits();
         handled
@@ -5481,9 +5512,11 @@ impl<M: TextEngine> Core<M> {
     /// root, or the dialog's content) and bubbles from it, as a browser
     /// reports it at `document.body` (#2362). Any other node starts at
     /// itself.
-    fn key_start(&self, key: Key) -> Key {
+    pub(super) fn key_start(&self, key: Key) -> Key {
         let node = &self.nodes[key as usize];
-        if node.id != crate::ROOT_ID && self.key_window(key) != node.id {
+        if node.id != crate::ROOT_ID
+            && (node.kind != Kind::Modal || self.key_window(key) != node.id)
+        {
             return key;
         }
         node.children
@@ -5491,6 +5524,16 @@ impl<M: TextEngine> Core<M> {
             .copied()
             .find(|&child| !matches!(self.nodes[child as usize].kind, Kind::Overlay | Kind::Modal))
             .unwrap_or(key)
+    }
+
+    /// A window's staged keyboard target follows its logical children.
+    pub(super) fn key_content_changed(&mut self, parent: Key) {
+        let node = &self.nodes[parent as usize];
+        if node.id == crate::ROOT_ID
+            || (node.kind == Kind::Modal && self.key_window(parent) == node.id)
+        {
+            self.key_ancestry_dirty = true;
+        }
     }
 
     /// The root of the window `key` is in, `key` itself when it is one.
@@ -6310,15 +6353,6 @@ impl<M: TextEngine> Core<M> {
             Action::TextContent(id, answer) => self.components.text_contents.push((id, answer)),
             Action::PressAt(id, press, answer) => self.components.presses.push((id, press, answer)),
             Action::HoverAt(id, mouse) => self.components.hovers.push((id, mouse)),
-            // A terminal decodes no images: the answer is at once, and no
-            // request goes to the platform.
-            Action::ImageInfo(_, answer)
-                if self.components.environment.idiom == crate::platform::Idiom::Terminal =>
-            {
-                answer
-                    .borrow_mut()
-                    .deliver(Err(super::NO_IMAGES_IN_A_TERMINAL.into()));
-            }
             Action::ImageInfo(uri, answer) => {
                 let id = self.components.next_image_info;
                 self.components.next_image_info += 1;
@@ -6916,7 +6950,23 @@ impl<M: TextEngine> Core<M> {
                 };
                 let automatic =
                     crate::webview::downloads::automatic_destination(&offer.id, &offer.filename);
-                let effects = self.components.downloads.offer(id, offer, mode, automatic);
+                // The offer's URL is the response's, after the platform
+                // followed its redirects: a download from a host takes the
+                // grant a page there would, so a redirect cannot carry it to
+                // a host the web view may not show. One of the page's own
+                // content (`data:`, `blob:`) reaches no host, and stays
+                // allowed as it was.
+                let refused = (!self.access.is_unrestricted()
+                    && !page_content(&offer.url)
+                    && !self.access.allows_webview(&offer.url))
+                .then(|| super::not_granted("the download", &offer.url, "webview.hosts"));
+                if let Some(message) = &refused {
+                    self.deny(message.clone());
+                }
+                let effects = self
+                    .components
+                    .downloads
+                    .offer(id, offer, mode, automatic, refused);
                 self.apply_download_effects(effects);
             }
             EventKind::DownloadProgress => {
@@ -7976,4 +8026,12 @@ fn row_position(
 /// decodes).
 fn pixels(n: f64) -> crate::geometry::DevicePixels {
     crate::geometry::DevicePixels(n.round() as i32)
+}
+
+/// Whether `url` names content of the page itself (`data:`, `blob:`), which
+/// a download takes from the page rather than from a host.
+fn page_content(url: &str) -> bool {
+    let scheme = url.split(':').next().unwrap_or_default();
+    url.contains(':')
+        && (scheme.eq_ignore_ascii_case("data") || scheme.eq_ignore_ascii_case("blob"))
 }

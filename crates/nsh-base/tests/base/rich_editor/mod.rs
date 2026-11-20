@@ -8,6 +8,7 @@ mod commands;
 mod composition;
 mod content_size;
 mod extensions;
+mod layout_hits;
 mod marks_clipboard_history;
 mod node_view_presses;
 mod selection;
@@ -28,7 +29,6 @@ use nsh_base::rich_editor::{
 };
 use nsh_core::{
     PasteEvent, PayloadValue, Size,
-    element::Root,
     platform::{Idiom, Os},
     prelude::*,
 };
@@ -189,8 +189,10 @@ fn start_with(doc: Value, os: Os, apple_keyboard: bool, idiom: Idiom) -> Headles
         viewport: Size::new(px(800.0), px(900.0)),
         // Made in the engine, so its keymaps are the platform's the engine
         // says, not the machine's.
-        ..EngineConfig::new(Root::new::<Harness>(move || HarnessProps {
-            session: Some(session(doc.clone())),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            HarnessProps {
+                session: Some(session(doc.clone())),
+            }
         }))
     };
     config.environment.os = os;
@@ -365,15 +367,17 @@ fn a_link_marks_hint_shows_its_destination_and_leaves_editing_alone() {
     assert!(app.shows("The site"), "the title, above the URL");
     // A press on the link is the editor's: the caret goes before its
     // first character (no link plugin here opens it).
-    // Headless span bounds are the paragraph's bounds, and its approximate
-    // TextLine fills that width. Place the pointer after "go " in that line.
+    // Headless span bounds are the paragraph's bounds. Place the pointer
+    // after "go " in its line.
     let paragraph = app
         .screen()
         .layout_nodes()
         .into_iter()
         .find_map(|node| node.text.filter(|text| text.text.text == "go the site now"))
         .unwrap();
-    let advance = paragraph.content.size.width.0 / paragraph.text.text.chars().count() as f32;
+    // The editor hit tests with the text engine's layout: the headless
+    // engine's characters are each as wide.
+    let advance = char_advance(&paragraph.text);
     app.press_at(
         "text:go the site now",
         Point::new(px(3.0 * advance + 1.0), px(1.0)),
@@ -397,8 +401,10 @@ fn a_link_marks_hint_shows_its_destination_and_leaves_editing_alone() {
 fn a_link_mark_shows_no_hint_on_a_phone() {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::new::<Harness>(|| HarnessProps {
-            session: Some(session(linked_doc())),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(|| {
+            HarnessProps {
+                session: Some(session(linked_doc())),
+            }
         }))
     };
     config.environment.os = Os::Ios;
@@ -493,11 +499,13 @@ fn list_items_show_their_markers() {
 fn a_terminals_markers_are_in_flow_their_numbers_right_aligned() {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Harness>(|| HarnessProps {
-            session: Some(session(json!({"type": "doc", "content": [
-                {"type": "bulletList", "content": [item("one", None)]},
-                {"type": "orderedList", "attrs": {"start": 9}, "content": [item("nine", None), item("ten", None)]},
-            ]}))),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(|| {
+            HarnessProps {
+                session: Some(session(json!({"type": "doc", "content": [
+                    {"type": "bulletList", "content": [item("one", None)]},
+                    {"type": "orderedList", "attrs": {"start": 9}, "content": [item("nine", None), item("ten", None)]},
+                ]}))),
+            }
         }))
     };
     config.environment.os = Os::Linux;
@@ -517,14 +525,16 @@ fn a_terminals_quote_has_a_bar_and_its_rule_is_a_row_of_lines() {
     let started = |idiom: Idiom| {
         let mut config = EngineConfig {
             viewport: Size::new(px(800.0), px(900.0)),
-            ..EngineConfig::new(Root::new::<Harness>(|| HarnessProps {
-                session: Some(session(json!({"type": "doc", "content": [
-                    {"type": "blockquote", "content": [
-                        {"type": "paragraph", "content": [{"type": "text", "text": "Quoted"}]},
-                    ]},
-                    {"type": "horizontalRule"},
-                    {"type": "paragraph", "content": [{"type": "text", "text": "After"}]},
-                ]}))),
+            ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(|| {
+                HarnessProps {
+                    session: Some(session(json!({"type": "doc", "content": [
+                        {"type": "blockquote", "content": [
+                            {"type": "paragraph", "content": [{"type": "text", "text": "Quoted"}]},
+                        ]},
+                        {"type": "horizontalRule"},
+                        {"type": "paragraph", "content": [{"type": "text", "text": "After"}]},
+                    ]}))),
+                }
             }))
         };
         config.environment.os = Os::Linux;
@@ -551,10 +561,12 @@ fn a_terminal_draws_no_caret_of_its_own() {
     let started = |idiom: Idiom| {
         let mut config = EngineConfig {
             viewport: Size::new(px(800.0), px(900.0)),
-            ..EngineConfig::new(Root::new::<Harness>(|| HarnessProps {
-                session: Some(session(json!({"type": "doc", "content": [
-                    {"type": "paragraph", "content": [{"type": "text", "text": "Hi"}]},
-                ]}))),
+            ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(|| {
+                HarnessProps {
+                    session: Some(session(json!({"type": "doc", "content": [
+                        {"type": "paragraph", "content": [{"type": "text", "text": "Hi"}]},
+                    ]}))),
+                }
             }))
         };
         config.environment.os = Os::Linux;
@@ -572,4 +584,29 @@ fn a_terminal_draws_no_caret_of_its_own() {
     let texts = started(Idiom::Terminal);
     assert!(texts.iter().any(|t| t == "Hi"), "{texts:?}");
     assert!(!texts.iter().any(|t| t == "H"), "a caret cell in {texts:?}");
+}
+
+/// How wide each character of `text` is to the headless text engine
+/// (`ApproxTextEngine`: all alike).
+fn char_advance(text: &nsh_core::AttributedText) -> f32 {
+    use nsh_core::TextEngine as _;
+    let engine = nsh_core::ApproxTextEngine;
+    let width = engine.measure(&engine.prepare(text), None).width;
+    width.0 / text.text.chars().count().max(1) as f32
+}
+
+/// The middle of character `i` of the paragraph showing `line`, in its
+/// text's box.
+fn char_point(app: &Headless, line: &str, i: usize) -> Point<Points> {
+    let paragraph = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find_map(|node| node.text.filter(|text| text.text.text == line))
+        .unwrap();
+    let advance = char_advance(&paragraph.text);
+    Point::new(
+        px(advance * (i as f32 + 0.5)),
+        px(paragraph.content.size.height.0 / 2.0),
+    )
 }

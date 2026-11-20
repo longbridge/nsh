@@ -341,13 +341,20 @@ views that report it:
   `ScrollDragEnd`, `ScrollEnd`), and fails on one the user cannot scroll (`scrollable={false}`); the model applies `ScrollBy` and `ScrollTo` / `ScrollToEnd` and reports where a
   command moved the view;
 - `drag` (`headless/pointer.rs`): a finger lands on the match's middle (`Screen::bounds_in_root`), rests 100 ms,
-  moves 10 points a frame and lifts, and what takes it is decided as the desktop backends decide it, with
+  moves 10 points a frame and lifts; on a desktop environment or the web it is the mouse (`Headless::pointer`, the
+  pointer `hover` has): its touches say `PointerType::Mouse` and it grabs as a mouse
+  (`GrabOptions::touch` false: no scroll view takes it), as the desktop backends and the web do. What takes it is
+  decided as the desktop backends decide it, with
   `nsh_core::input` over the views from the match out (`Screen::link`: events, tracked states, gesture values, the
   scroll axis, `panActivation`): the views listening to touches hear `Touch` (start, moves, end; the JS responder's
   `SetJsResponder` block keeps native drags from starting), past the slop a pan (`PanStart`, its `pan` values moved
   through nsh-core's `animation::Animator`, which the headless animator wraps, `PanEnd` with the velocity) or a
   scroll view (dragged within its content; past its top only when it listens to `Refresh`, rubber-banded, refreshing
   when released past `ScrollBehavior::refreshes`) takes it, and the press under it is cancelled once it moves away;
+  on a desktop environment one that starts in a selectable view selects across its texts instead
+  (`headless/selection.rs`: `nsh_core::selection::SelectionModel`, the backends' own, over `Screen::area_texts` laid
+  out as `ApproxTextEngine` lays them; `SelectionChange` with `text`, `start` and `bounds` as the backends report it),
+  and one that starts elsewhere clears the selection;
 - `hover` (`headless/pointer.rs`): on a desktop environment the mouse comes over the match's middle: the views from it
   out that hovering matters to (`input::hoverable`: `hover:` styles or hover events) replace those hovered before
   (`Screen::set_hovered`), `input::hover_changes` says which hear `MouseLeave` and `MouseEnter` (with their `HOVERED`
@@ -365,8 +372,8 @@ views that report it:
   On a real target `TestStep::DragAndHold` / `Drop` reach `Native::drag_and_hold` / `drop_at` (Linux; the others
   refuse them for now).
 - `hold_keys` (`headless/keyboard.rs`, `app.keyboard.down` / `up`): the modifiers held, which `press_payload` and
-  hover events carry; a drag's press is a full press payload (its start in the pressed view), and on a desktop a
-  drag presses at once even in a scroll view, as a mouse does. On Linux the agent holds them for its simulated
+  hover events carry; a drag's press is a full press payload (its start in the pressed view), and the mouse's drag
+  presses at once even in a scroll view. On Linux the agent holds them for its simulated
   pointer (`input::hold`); other real targets refuse.
 - `press_key` (`headless/keyboard.rs`, `app.keyboard.press`): the keystroke as `nsh`'s `keymap` parses it for the
   environment's OS; on every environment (a hardware keyboard: phones and tablets have one too) the root's keymap
@@ -688,7 +695,7 @@ transitions but not its keyframes repeating forever, `animate-ping`'s or `animat
 finite animations too: a screen sliding in; Android counts a scroll view drawing, as its overscroll stretch relaxes
 without moving a view, and a touch then only catches the stretch). `Native`'s calls do their work
 on the platform's main thread and return when the input is posted. Screenshots come back as base64 bytes: PNG
-on graphical targets, versioned UTF-8 Cell JSON on `tui`. The test's side saves them, as the host may run on another machine. `app.window(id)`'s steps (`TestStep::WindowState`, `PressWindowClose`, `WindowScreenshot`) name a window of the app by its id; the agent finds its root node in the model (`Scene::window_root`) and asks the platform (`Native::window_state`, `press_window_close`, `window_screenshot`), and `Native::target_window` names the window each step on a view acts in. Their defaults serve the main window, so a platform starts with that and adds the app's own windows. `open`'s manual clock reaches the host in the
+on graphical targets, versioned UTF-8 Cell JSON on `tui`. The test's side saves them, as the host may run on another machine. `app.window(id)`'s steps (`TestStep::WindowState`, `PressWindowClose`, `WindowScreenshot`) name a window of the app by its id; the agent finds its root node in the model (`Scene::window_root`) and asks the platform (`Native::window_state`, `press_window_close`, `window_screenshot`), and `Native::target_window` names the window each step on a view acts in. Their defaults name the first app window (or no window), so a platform starts with the app's declared windows and adds `Window.open`'s. `open`'s manual clock reaches the host in the
 test's setup (`TestEnvironment::clock`, its start in Unix milliseconds): `Model::set_up_engine` starts the engine on
 `Clock::manual(start).with_frames()`, and the host hands the started engine back (`Model::engine_started`). The
 test's `clock` steps are `TestStep::Clock` (`ClockChange::RunFor`, `FastForward`, `SetSystemTime`; the web's
@@ -787,7 +794,8 @@ the header's back button (the bar button carrying the back chevron's mask); dial
 `UIAlertController`'s button; screenshots are `drawViewHierarchyInRect:` as a PNG; a step waits for finite Core Animation animations and gliding scroll views too.
 The system's appearance is the simulator's: the CLI switches it (`simctl ui appearance`) and restores it after the
 app; the screen keeps its device's size. Android (`nsh-platform-android`, feature `dev`; `TestAgent.java`;
-`nsh-cli/src/test_android.rs`): the CLI installs the host on the first device `adb devices` lists and starts it per
+`nsh-cli/src/test_android.rs`): the CLI installs the host on the device `--device` or `ANDROID_SERIAL` names, else the
+first one `adb devices` lists (`android::device`), and starts it per
 `open` with the dev server's port forwarded (`adb reverse`) and a data directory of its own in the host's cache
 (`dataDir`, emptied as it starts). As `nsh run --target android` does for a TSX app, it passes the variables of its
 environment that the app's `capabilities.process.env` declares as `nsh.env.<name>` string extras

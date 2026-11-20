@@ -1338,7 +1338,9 @@ impl Cx {
                 .text_color(move || theme().border)
                 .into_element()
         };
-        let bar = |glyph: &'static str| text(glyph).flex_none().text_color(move || theme().border);
+        // A side as tall as its row: cells that wrap keep it on every line.
+        let bar =
+            |glyph: &'static str| crate::terminal::glyph_column(glyph, move || theme().border);
         let last_row = table.rows.len();
         let mut lines = vec![ruled(['┌', '┬', '┐'])];
         let rows = std::iter::once(&table.head).chain(&table.rows);
@@ -1735,6 +1737,17 @@ impl Cx {
                     None => span,
                 };
                 self.part(span, Part::Highlight).into_element()
+            }
+            // A span in the document's color, which the app's `textStyle`
+            // part can override (a theme's own colors in dark appearance).
+            Inline::TextStyle { content, color } => {
+                let color = color.as_deref().and_then(|c| c.trim().parse::<Hsla>().ok());
+                let span = self.span(content, key);
+                let span = match color {
+                    Some(c) => span.text_color(c),
+                    None => span,
+                };
+                self.part(span, Part::TextStyle).into_element()
             }
             Inline::Superscript { content } => self
                 .part(

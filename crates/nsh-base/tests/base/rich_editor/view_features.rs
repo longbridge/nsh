@@ -201,9 +201,11 @@ fn start_features(doc: Value, editable: bool) -> Headless {
     let session = EditorSession::new(state, NodeViews::new());
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Features>(move || FeaturesProps {
-            session: Some(session.clone()),
-            editable,
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Features>(move || {
+            FeaturesProps {
+                session: Some(session.clone()),
+                editable,
+            }
         }))
     };
     config.environment.os = Os::Linux;
@@ -370,8 +372,10 @@ fn a_padded_root_keeps_the_sink_in_the_viewport_and_fills_its_height() {
     let mounted = session.clone();
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<Padded>(move || PaddedProps {
-            session: Some(mounted.clone()),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Padded>(move || {
+            PaddedProps {
+                session: Some(mounted.clone()),
+            }
         }))
     };
     config.environment.os = Os::Linux;
@@ -553,8 +557,10 @@ fn inline_image_app(doc: serde_json::Value) -> Headless {
     let session = EditorSession::new(state, NodeViews::new());
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<InlineImage>(move || InlineImageProps {
-            session: Some(session.clone()),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<InlineImage>(move || {
+            InlineImageProps {
+                session: Some(session.clone()),
+            }
         }))
     };
     config.environment.os = Os::Linux;
@@ -607,6 +613,101 @@ fn the_caret_steps_over_an_inline_image_moved_by_an_edit_above() {
     app.press("text:Type").unwrap();
     app.press("text:Measure").unwrap();
     see(&mut app, "Image 8 gap 80 Some(1) rect Some((0.0, 80.0))");
+}
+
+/// An 80-point widget decoration at the start of the line, before `abcd`
+/// (1..5): what a plugin draws in a line with no position of its own.
+struct Spacer;
+
+impl nsh_base::rich_editor::state::PluginSpec for Spacer {
+    fn decorations(
+        &self,
+        state: &EditorState,
+    ) -> Option<nsh_base::rich_editor::state::DecorationSet> {
+        let spec = [("class".to_owned(), json!("w-20 h-4"))]
+            .into_iter()
+            .collect();
+        let widget =
+            nsh_base::rich_editor::state::Decoration::widget(1, "spacer", -1).with_spec(spec);
+        Some(nsh_base::rich_editor::state::DecorationSet::create(
+            state.doc(),
+            vec![widget],
+        ))
+    }
+}
+
+#[derive(Clone, PartialEq, Props)]
+struct WidgetLineProps {
+    session: Option<EditorSession>,
+}
+
+/// An editor and a press that shows where the caret after the spacer is
+/// and the position at a point just past the spacer.
+#[component]
+fn WidgetLine(props: WidgetLineProps) -> impl IntoElement {
+    let session = props.session.clone().expect("a session");
+    let shown = signal(String::new());
+    let asked = session.clone();
+    view()
+        .child(
+            view()
+                .test_id("editor")
+                .w(px(600.0))
+                .h(px(200.0))
+                .child(rich_editor().editor(session)),
+        )
+        .child(
+            view()
+                .on_press(move || {
+                    let Some(after) = asked.coords_at_pos(1).map(|b| b.origin) else {
+                        return;
+                    };
+                    let past =
+                        asked.pos_at_coords(after + nsh_core::geometry::point(px(1.0), px(1.0)));
+                    shown.set(format!(
+                        "Spacer ends at {} past {:?}",
+                        after.x.0.round(),
+                        past
+                    ));
+                })
+                .child(text("Measure")),
+        )
+        .child(text(move || shown.get()))
+        .child(text("Ready"))
+}
+
+/// A widget decoration is as wide as its view where the caret and presses
+/// are placed, as an inline image is: the caret after it is past its
+/// width, and a point just past it is the position after it.
+#[test]
+fn the_caret_steps_over_a_widget_decorations_width() {
+    let schema = feature_schema();
+    let mut plugins = starter::plugins(&schema);
+    plugins.push(Arc::new(Spacer));
+    let doc = schema
+        .node_from_json(
+            &json!({"type": "doc", "content": [{"type": "paragraph", "content": [
+                {"type": "text", "text": "abcd"},
+            ]}]}),
+        )
+        .unwrap();
+    let state =
+        EditorState::create(EditorStateConfig::new(schema).doc(doc).plugins(plugins)).unwrap();
+    let session = EditorSession::new(state, NodeViews::new());
+    let mut config = EngineConfig {
+        viewport: Size::new(px(800.0), px(900.0)),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<WidgetLine>(move || {
+            WidgetLineProps {
+                session: Some(session.clone()),
+            }
+        }))
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    app.wait_for("text:Ready").unwrap();
+    app.press("text:Measure").unwrap();
+    see(&mut app, "Spacer ends at 80 past Some(1)");
 }
 
 #[derive(Clone, PartialEq, Props)]
@@ -699,11 +800,13 @@ fn selected_block_app(paragraphs: usize, height: f32) -> Headless {
     let session = EditorSession::new(state, NodeViews::new());
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
-        ..EngineConfig::new(Root::new::<SelectedBlock>(move || SelectedBlockProps {
-            session: Some(session.clone()),
-            height,
-            at: paragraphs * 3,
-        }))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<SelectedBlock>(
+            move || SelectedBlockProps {
+                session: Some(session.clone()),
+                height,
+                at: paragraphs * 3,
+            },
+        ))
     };
     config.environment.os = Os::Linux;
     config.environment.idiom = Idiom::Desktop;
@@ -811,4 +914,67 @@ fn range_selection_boxes_update_only_overlapped_blocks_and_clear_on_collapse() {
         let (_, boxes) = selection_boxes(&app, text);
         assert!(boxes.is_empty(), "cleared box under {text}");
     }
+}
+
+#[test]
+fn auto_focus_configures_the_caret_sink_input_on_mount() {
+    #[component]
+    fn AutoFocusedRich() -> impl IntoElement {
+        let schema = starter::schema();
+        let plugins = starter::plugins(&schema);
+        let doc = schema
+            .node_from_json(&json!({"type": "doc", "content": [{"type": "paragraph"}]}))
+            .unwrap();
+        let state =
+            EditorState::create(EditorStateConfig::new(schema).doc(doc).plugins(plugins)).unwrap();
+        let session = EditorSession::new(state, NodeViews::new());
+        let shown = signal(String::new());
+        let focused = signal(0u32);
+        let read = {
+            let session = session.clone();
+            move || doc_text(session.state().doc())
+        };
+        view()
+            .w(px(400.0))
+            .h(px(200.0))
+            .child(
+                rich_editor()
+                    .editor(session)
+                    .auto_focus(true)
+                    .on_focus(move || focused.update(|n| *n += 1))
+                    .on_change(move |_: &_| shown.set(read()))
+                    .size_full(),
+            )
+            .child(text(move || format!("Focused {}", focused.get())))
+            .child(text(move || format!("Text {:?}", shown.get())))
+    }
+
+    let mut config = EngineConfig {
+        viewport: Size::new(px(400.0), px(250.0)),
+        clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
+        ..EngineConfig::new(nsh_testing::windowed_root::<AutoFocusedRich>())
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    let auto_focused_inputs = std::sync::Arc::new(std::sync::Mutex::new(0usize));
+    let seen = auto_focused_inputs.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let nsh_core::MountItem::Input { config, .. } = item
+                && config.auto_focus
+            {
+                *seen.lock().unwrap() += 1;
+            }
+        }
+    });
+    app.first_render().unwrap();
+    assert_eq!(
+        *auto_focused_inputs.lock().unwrap(),
+        1,
+        "autoFocus should configure RichEditor's caret sink input on first mount"
+    );
+    app.press_key("a").unwrap();
+    see(&mut app, "Text \"a\"");
+    see(&mut app, "Focused 1");
 }

@@ -913,6 +913,9 @@ fn input_json(c: &InputConfig) -> String {
     if c.replaced {
         s.push_str(",\"replaced\":true");
     }
+    if c.select_text_on_focus {
+        s.push_str(",\"selectTextOnFocus\":true");
+    }
     s.push('}');
     s
 }
@@ -1459,6 +1462,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
     match command {
         Command::Focus => out.item("cmd").num(id).str("focus").end(),
         Command::Blur => out.item("cmd").num(id).str("blur").end(),
+        Command::ClearSelection => out.item("cmd").num(id).str("clearSelection").end(),
         Command::ScrollTo { x, y, animated } => {
             out.item("cmd")
                 .num(id)

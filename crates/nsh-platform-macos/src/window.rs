@@ -1431,6 +1431,11 @@ fn open_window(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
     container.setWantsLayer(true);
     view.ns()
         .setFrame(NSRect::new(NSPoint::new(0.0, 0.0), content));
+    // Mounted views disable autoresizing translation to skip per-view Auto
+    // Layout storage (`mount.rs`), so re-enable it here: once any descendant
+    // (such as a glass or backdrop view) activates Auto Layout in this window,
+    // AppKit otherwise ignores the root's autoresizing mask on resize.
+    view.ns().setTranslatesAutoresizingMaskIntoConstraints(true);
     view.ns().setAutoresizingMask(
         NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
     );

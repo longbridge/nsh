@@ -709,6 +709,13 @@ expect Task: 0 false
 expect From HTML
 expect An hypertext paragraph.
 style span:hypertext fontWeight 600
+# Text in the colors HTML gives it (a span's style, a font's color).
+expect Colors: red text and green text
+style span:"red text" color #e54545ff
+style span:"green text" color #00aa00ff
+# A text style of the app's document, under its part's styles.
+style span:"Document color" color #336699ff
+style span:"Document color" fontWeight 600
 # The app's own blocks.
 expect From a document
 # Streaming: the `**` left open shows closed, the caret after the text.
@@ -740,6 +747,7 @@ expect CJK emphasis: strong,text
 expect CJK URL: https://example.com,text
 expect Math off: Math $x$
 expect From HTML: Hi there
+expect Text style: textStyle red
 expect Unknown tag: <US tech> up
 # A code block's annotations show in place of its code; its actions get
 # the block, its id too.
@@ -4799,3 +4807,25 @@ expect Tab a
 expect Tab b
 expect Grip 0 horizontal idle
 covers [props] DockArea.renderHandle
+
+# base-dock-toolbar
+# Each group's tab bar ends with what `renderToolbar` returns for its
+# displayed tab, and follows the tab the group displays.
+tap id:case-base-dock-toolbar
+expect Toolbar a of 0
+expect Toolbar c of 0
+tap id:toolbar-tab-b
+expect Toolbar b of 1
+covers [props] DockArea.renderToolbar
+
+# base-tree-slots
+# The header shows above the rows; `empty` shows while no item does.
+tap id:case-base-tree-slots
+expect Pinned files
+expect No files
+tap id:tree-slots-fill
+expect README.md
+absent No files
+expect Pinned files
+covers [props] Tree.header
+covers [props] Tree.empty

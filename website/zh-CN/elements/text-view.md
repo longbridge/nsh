@@ -41,6 +41,7 @@ fn release_notes() -> impl IntoElement {
 ```tsx tabs
 import { mount, Scroll } from "nsh";
 import { TextView } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 const README = `# Release notes
 
@@ -71,7 +72,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 在 Rust 中，`text_view()` 像 `view()` 创建视图一样创建它：每个属性一个设置方法（`.markdown(..)`、`.options(..)`、`.selectable(..)`），每个渲染函数一个闭包（`.render_image(|image| ..)`），每个事件一个监听方法（`.on_link_press(..)`），根节点使用类型化的样式方法（`.p_5()`、`.text_color(..)`），其中的文本样式会传给每个部件。
@@ -93,7 +98,7 @@ mount(App);
 内容来自以下三个属性之一，按此顺序读取：
 
 - **`markdown`**：CommonMark 加上 GitHub 的扩展（表格、任务列表、删除线、自动链接、脚注、提示块）、公式（`$…$` 和 `$$…$$`）以及 Markdown 中的 HTML。中日韩文字旁的强调按 CommonMark 的 CJK 友好修订判定，`**涨幅：**5%` 会加粗到冒号为止；裸网址遇到中日韩文字或弯引号即结束：`https://example.com。下一句` 只链接 `https://example.com`。写在尖括号里（`<https://zh.wikipedia.org/wiki/中文>`）或写成链接的网址保留全部字符。标签名既不是 HTML 元素、也不是 `tag` 扩展时（`<US tech>`、`<公司名>`），按原样显示为文字。
-- **`html`**：按阅读模式的方式显示 HTML。文本、结构和行内格式都会保留；脚本、样式、表单控件和隐藏元素不会显示。片段和完整页面都可以（完整页面显示其 body）。
+- **`html`**：按阅读模式的方式显示 HTML。文本、结构和行内格式都会保留，文字颜色也会保留（`<span style="color: …">` 和 `<font color="…">` 读成带该颜色的 `textStyle`）；脚本、样式、表单控件和隐藏元素不会显示。片段和完整页面都可以（完整页面显示其 body）。
 - **`document`**：应用构建或保存的文档块：TSX 中是普通对象，Rust 中是 `nsh_base::text_view::Document`（[文档模型](#the-document-model)）。
 
 ```rust tabs
@@ -215,6 +220,7 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
 | `strikethrough` | `Strikethrough` | 删除线文本。 |
 | `underline` | `Underline` | 下划线文本（`<u>`、`<ins>`）。 |
 | `highlight` | `Highlight` | 高亮文本（`<mark>`，圆角黄色底）。 |
+| `textStyle` | `TextStyle` | 带文档自己颜色的文字（`<span style="color: …">`、`<font color>`、`textStyle` 节点），浅色和深色外观下相同。它的类名和样式优先于文档的颜色，应用可以借此保留自己的颜色：`classes={{ textStyle: "dark:text-foreground" }}` 让这些文字在深色外观下用正文颜色。 |
 | `superscript`、`subscript` | `Superscript`, `Subscript` | 上标和下标（字号更小）。 |
 | `link` | `Link` | 链接（主题的 `primary` 色，带下划线）。 |
 | `image` | `Image` | 图片。 |
@@ -584,6 +590,7 @@ function Custom(props: { node: TextViewCustomNode }) {
 |---|---|
 | `text` | `text` |
 | `strong`、`emphasis`、`strikethrough`、`underline`、`highlight`、`superscript`、`subscript` | `content` |
+| `textStyle` | `content`、`color?`（CSS 颜色：`"#e54545"`、`"rgb(229 69 69)"`、`"red"`） |
 | `code` | `code` |
 | `keyboard` | `text` |
 | `link` | `url`、`title?`、`content` |
