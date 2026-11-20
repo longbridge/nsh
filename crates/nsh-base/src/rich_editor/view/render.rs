@@ -824,8 +824,11 @@ enum Piece {
         offset: usize,
         text: Option<String>,
     },
-    /// A widget decoration (its `class`).
-    Widget { class: Option<String> },
+    /// A widget decoration (its `class`) at `offset` of the content.
+    Widget {
+        class: Option<String>,
+        offset: usize,
+    },
     /// What an input method is composing at the caret, before the
     /// document holds it: drawn in the line, in its block's typography.
     Composition { text: String },
@@ -905,7 +908,7 @@ fn inline_of(
                 Err(text) => utf16_len(text) as u32,
             };
             out.pieces.push(match kind {
-                Ok(class) => Piece::Widget { class },
+                Ok(class) => Piece::Widget { class, offset: at },
                 Err(text) => Piece::Composition { text },
             });
             out.map.runs.push(Run {
@@ -1204,9 +1207,10 @@ fn spans(rv: &Rv, pieces: Vec<Piece>, id: u64) -> Vec<AnyElement> {
                 let key = SharedString::from(format!("i{id}.{leaves}"));
                 leaf(rv, node, (id, offset), text, key)
             }
-            Piece::Widget { class } => view()
-                .app_class(class.map(SharedString::from))
-                .into_element(),
+            Piece::Widget { class, offset } => {
+                let widget = view().app_class(class.map(SharedString::from));
+                inline_box(rv, widget, (id, offset)).into_element()
+            }
             Piece::Composition { text: t } => {
                 part(text(t).underline(), rv, Part::Composition).into_element()
             }
@@ -1229,10 +1233,10 @@ fn link_destination(marks: &[Mark]) -> Option<(SharedString, Option<SharedString
     Some((attr("href")?, attr("title")))
 }
 
-/// The box of an inline view or image at `offset` in textblock `id`'s
-/// content: it reports its width, which its attachment character stands
-/// for when the geometry places the caret and finds the position at a
-/// point.
+/// The box of an inline view, image or widget at `offset` in textblock
+/// `id`'s content: it reports its width, which its attachment character
+/// stands for when the geometry places the caret and finds the position at
+/// a point.
 fn inline_box(rv: &Rv, el: View, (id, offset): (u64, usize)) -> View {
     let width_rv = rv.clone();
     el.on_layout(move |b: &Bounds<Points>| width_rv.set_inline_width(id, offset, *b))
