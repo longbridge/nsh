@@ -3905,6 +3905,9 @@ impl<M: TextEngine> State<M> {
                             ApplyError::TooManyNodes(max) => {
                                 format!("the app created more than {max} nodes and was stopped")
                             }
+                            ApplyError::TooDeep(max) => {
+                                format!("the app nested views more than {max} deep and was stopped")
+                            }
                             other => {
                                 format!("the app sent an invalid op ({other:?}) and was stopped")
                             }
