@@ -19,6 +19,7 @@ use std::{
 };
 
 use block2::RcBlock;
+use dispatch2::{DispatchQueue, MainThreadBound};
 use nsh_core::{
     Color, EdgeInsets, EventKind, EventPayload, HeaderItem, HeaderItemContent, HeaderSystemItem,
     ModalAnimation, ModalConfig, ModalPresentation, NavShader, NodeId, PayloadValue, Points,
@@ -279,6 +280,8 @@ pub(crate) struct ModalIvars {
     animated: Cell<bool>,
     /// The user closed it natively; the app has not hidden it yet.
     closed: Cell<bool>,
+    /// The app is hiding it (`ModalHost::dismiss`).
+    dismissing: Cell<bool>,
     /// The identifiers of the sheet's UIKit detents and the detents
     /// (`detents`) they stand for, to report the one the user picks.
     detents: RefCell<Vec<(Retained<NSString>, SheetDetent)>>,
@@ -310,6 +313,43 @@ define_class!(
             let _: () = unsafe { msg_send![super(self), viewDidAppear: animated] };
             let id = self.ivars().id;
             self.ivars().control.dispatch_event(id, EventKind::Show, EventPayload::None);
+        }
+
+        /// Dismissed by other code than NSH's: a close the user made in
+        /// what the modal shows, as AVKit's close button of a video filling
+        /// it, which dismisses the controller presenting the player. UIKit
+        /// reports no such dismissal to the presentation's delegate: it is
+        /// reported as Escape's (`cancel`), so the app hides it and what it
+        /// shows (a playing video) goes. On the main queue's next turn,
+        /// after a swipe's `presentationControllerDidDismiss:`, and once
+        /// the modal is gone.
+        #[unsafe(method(viewDidDisappear:))]
+        fn view_did_disappear(&self, animated: bool) {
+            // SAFETY: calling the superclass implementation.
+            let _: () = unsafe { msg_send![super(self), viewDidDisappear: animated] };
+            if !self.isBeingDismissed() || self.ivars().closed.get() || self.ivars().dismissing.get() {
+                return;
+            }
+            let mtm = self.mtm();
+            let weak = MainThreadBound::new(Weak::from_retained(&self.retain()), mtm);
+            DispatchQueue::main().exec_async(move || {
+                let mtm = MainThreadMarker::new().expect("the main queue");
+                let Some(this) = weak.into_inner(mtm).load() else { return };
+                let ivars = this.ivars();
+                if ivars.closed.get()
+                    || ivars.dismissing.get()
+                    || this.presentingViewController().is_some()
+                {
+                    return;
+                }
+                ivars.closed.set(true);
+                ivars
+                    .control
+                    .dispatch_event(ivars.id, EventKind::RequestClose, close_reason("cancel"));
+                ivars
+                    .control
+                    .dispatch_event(ivars.id, EventKind::Dismiss, EventPayload::None);
+            });
         }
 
         /// Escape on a hardware keyboard.
@@ -437,6 +477,7 @@ impl ModalController {
             close_on_escape: Cell::new(false),
             animated: Cell::new(true),
             closed: Cell::new(false),
+            dismissing: Cell::new(false),
             detents: RefCell::new(Vec::new()),
             screen: Cell::new(0.0),
         });
@@ -2387,6 +2428,7 @@ impl ModalHost {
             return;
         }
         self.controller.ivars().closed.set(false);
+        self.controller.ivars().dismissing.set(false);
         let Some(mut presenter) = controller_of(from) else {
             return log::warn!("cannot present a modal: no view controller shows the app");
         };
@@ -2483,6 +2525,7 @@ impl ModalHost {
         if self.controller.ivars().closed.replace(false) {
             return;
         }
+        self.controller.ivars().dismissing.set(true);
         // Its keyboard hides with it.
         if let Some(view) = self.controller.view() {
             view.endEditing(true);
