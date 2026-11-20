@@ -678,6 +678,14 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## macOS, AppKit
 
+- **`performWindowDragWithEvent:` moves the window only from the event AppKit is delivering**: given a press whose
+  drags a `nextEventMatchingMask:` tracking loop already took off the queue, the window stayed put (#2274); given a
+  drag that loop dequeued, it stayed put as well. Called from the view's `mouseDragged:` with that event, the window
+  server moves the window from then on, in step with the pointer and with edge tiling (real mouse events posted with
+  `cliclick` over a hidden title bar, macOS 26.6). Moving the window from a loop instead, one `setFrameOrigin:` per
+  event (#2295), trails the pointer, as the app sets every frame. `input::window_press` keeps the press and lets
+  AppKit deliver its drags, as GPUI's `start_window_move` does.
+
 - **A view's display link follows the window to another screen but keeps the frame rates it was asked for**: one
   resumed while the window was on a 60 Hz screen (range 60–60) and kept running by a looping animation or the
   performance monitor drew at 60 Hz after the window moved to a 120 Hz built-in screen (measured, macOS 26, a 120 Hz
