@@ -29,6 +29,7 @@ pub fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, Scroll, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   return (
@@ -46,7 +47,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 The child view above is the scroll view's content container; in TSX, `contentStyle` (or `contentClass`) makes one for you, wrapping the children in a view with that style, which scrolls with them. `flexGrow: 1` (`.flex_grow(1.0)`) makes the content at least as tall as the viewport, so a short content can be centered and a long one still scrolls:
@@ -168,6 +173,7 @@ pub fn pager() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, type Point, Scroll, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 const colors = ["#0969da", "#8250df", "#bf3989", "#1a7f37"];
 
@@ -204,7 +210,11 @@ function Pager() {
   );
 }
 
-mount(Pager);
+mount(() => (
+  <Window id="main">
+    <Pager />
+  </Window>
+));
 ```
 
 A carousel of cards that snap to the center, one card per fling:
@@ -308,6 +318,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, Scroll, Text, View } from "nsh";
 import { createAnimatedValue } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const offset = createAnimatedValue(0);
@@ -340,7 +351,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 A header that slides away while the content scrolls up and comes back as soon as it scrolls down is `diffClamp` of the offset:
@@ -509,6 +524,7 @@ pub fn photo() -> impl IntoElement {
 
 ```tsx tabs
 import { Image, mount, Scroll, type ScrollRef, signal } from "nsh";
+import { Window } from "nsh/desktop";
 
 function Photo() {
   let scroll!: ScrollRef;
@@ -531,7 +547,11 @@ function Photo() {
   );
 }
 
-mount(Photo);
+mount(() => (
+  <Window id="main">
+    <Photo />
+  </Window>
+));
 ```
 
 Text and canvases inside a zoomed scroll view are drawn again at the new resolution when the zoom ends, so they stay sharp on iOS. On Android, NSH zooms with a scroll view of its own, which scales around the pinch's focal point, pans with any number of fingers, flings and rubber-bands at the edges and zoom limits. Android starts a pinch once the fingers are about 27 mm apart, as the system's gesture detector does.

@@ -42,7 +42,7 @@ fn launch_in(root: Root, rtl: bool) -> Headless {
 }
 
 fn start<C: Component<Props = ()>>() -> Headless {
-    launch(Root::of::<C>())
+    launch(nsh_testing::windowed_root::<C>())
 }
 
 /// Presses the item the keyboard focus is on (Space) and waits for the
@@ -226,7 +226,7 @@ fn right_and_left_move_along_a_row_past_disabled_items_and_around_the_ends() {
 
 #[test]
 fn right_to_left_a_row_trades_left_and_right() {
-    let mut app = launch_in(Root::of::<Formatting>(), true);
+    let mut app = launch_in(nsh_testing::windowed_root::<Formatting>(), true);
     enter(&mut app);
     // The row runs from the right: Left is the next item, Right the
     // previous, Home and End keep the first and the last.
@@ -364,7 +364,7 @@ fn down_and_up_move_along_a_column_and_left_and_right_are_left_to_the_items() {
 
 #[test]
 fn right_to_left_a_column_keeps_up_and_down() {
-    let mut app = launch_in(Root::of::<Palette>(), true);
+    let mut app = launch_in(nsh_testing::windowed_root::<Palette>(), true);
     app.press_key("tab").unwrap();
     press_focused(&mut app, "Select");
     app.press_key("down").unwrap();
@@ -594,7 +594,9 @@ fn Many(props: ManyProps) -> impl IntoElement {
 
 /// The mount items one Right sends in a toolbar of `count` buttons.
 fn items_per_key(count: usize) -> usize {
-    let mut app = launch(Root::new::<Many>(move || ManyProps { count }));
+    let mut app = launch(nsh_testing::windowed_root_with::<Many>(move || ManyProps {
+        count,
+    }));
     let items = Arc::new(AtomicUsize::new(0));
     let made = Arc::new(AtomicUsize::new(0));
     let (seen, created) = (items.clone(), made.clone());

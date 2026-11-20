@@ -16,10 +16,7 @@ use std::sync::{
 
 use nsh_base::{tab, tabs};
 use nsh_core::{
-    Color, LayoutCurve, MountItem, NodeId, Size,
-    element::{Root, Spring},
-    platform::Os,
-    prelude::*,
+    Color, LayoutCurve, MountItem, NodeId, Size, element::Spring, platform::Os, prelude::*,
 };
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
@@ -33,7 +30,7 @@ fn start<C: Component<Props = ()>>() -> Headless {
 fn start_in<C: Component<Props = ()>>(rtl: bool) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::of::<C>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<C>())
     };
     config.environment.os = Os::MacOs;
     config.environment.rtl = rtl;
@@ -323,7 +320,9 @@ fn ManyTabs(props: ManyProps) -> impl IntoElement {
 fn items_per_key(count: usize) -> (usize, usize) {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::new::<ManyTabs>(move || ManyProps { count }))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<ManyTabs>(move || {
+            ManyProps { count }
+        }))
     };
     config.environment.os = Os::MacOs;
     let mut app = Headless::start(config).unwrap();
@@ -451,10 +450,9 @@ impl Indicated {
     fn start_with(shape: u32, selected: u32, reduce_motion: bool) -> Self {
         let mut config = EngineConfig {
             viewport: Size::new(px(390.0), px(844.0)),
-            ..EngineConfig::new(Root::new::<IndicatorTabs>(move || IndicatorProps {
-                shape,
-                selected,
-            }))
+            ..EngineConfig::new(nsh_testing::windowed_root_with::<IndicatorTabs>(
+                move || IndicatorProps { shape, selected },
+            ))
         };
         config.environment.reduce_motion = reduce_motion;
         let mut app = Headless::start(config).unwrap();

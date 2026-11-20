@@ -69,7 +69,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
   warns of an app importing `host` from `nsh` without it (`bundle.rs` `ungranted_host`); the host's events need none, the
   host sends them), `openUrl`
   (`openUrl` of `nsh`: `true`, or `{ "schemes": [...] }` for the schemes listed), `application` (what acts on the application as a whole:
-  the main window, the application menu, the tray, global shortcuts, quitting, restarting and launching at login,
+  the application menu, the tray, global shortcuts, quitting, restarting and launching at login,
   `nsh/desktop`'s; refused commands are dropped in the core with a warning, `setLaunchAtLogin` rejects with
   `ERR_ACCESS_DENIED`; context menus show in the app's own view and windows the app opens are `windows`', so they need
   none), `homeDir` (`os.homedir()`, which fails with
@@ -88,7 +88,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
 - Enforced in Rust: `fetch` in the engine (`access.rs`; refused requests never reach the network, and redirects are
   followed by the engine with `follow_redirects` off for the platform, so every hop is checked — hops are issued on the
   engine thread when a hop's head arrives; a streamed request body is not sent again, so a 307 / 308 then fails); remote images, placeholders, canvas images, `Image.getSize` / `prefetch`, video sources, web view
-  sources and inline HTML's base URLs, trusted web view input (`Command::SendInput`), the status bar, the clipboard, the picker, the share sheet, the main window and the application menu (`Command::Desktop` but `PopupMenu`, `OpenWindow` and
+  sources and inline HTML's base URLs, trusted web view input (`Command::SendInput`), the status bar, the clipboard, the picker, the share sheet, the application menu and window opening (`Command::Desktop` but `PopupMenu`, `OpenWindow` and
   the app's own windows' commands), speech sessions, sounds and players (`AudioAction::Open`) and host calls in the core (`Core::check_prop`, the commit's commands and actions;
   each refusal is logged once, target `js`, saying which key to add); top-level web view navigations on the platforms
   (`WKNavigationDelegate decidePolicyForNavigationAction` / `WebViewClient.shouldOverrideUrlLoading` → `Native.allowsWebview`).

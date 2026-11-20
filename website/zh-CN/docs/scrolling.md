@@ -29,6 +29,7 @@ pub fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, Scroll, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   return (
@@ -46,7 +47,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 上面的子视图就是滚动视图的内容容器；在 TSX 中，`contentStyle`（或 `contentClass`）会替你创建一个，把子元素包进一个带该样式、随内容一起滚动的视图。`flexGrow: 1`（`.flex_grow(1.0)`）让内容至少和视口一样高，内容较短时可以居中，较长时照常滚动：
@@ -168,6 +173,7 @@ pub fn pager() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, type Point, Scroll, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 const colors = ["#0969da", "#8250df", "#bf3989", "#1a7f37"];
 
@@ -204,7 +210,11 @@ function Pager() {
   );
 }
 
-mount(Pager);
+mount(() => (
+  <Window id="main">
+    <Pager />
+  </Window>
+));
 ```
 
 吸附到中间、每次滑动只移动一张的卡片轮播：
@@ -308,6 +318,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, Scroll, Text, View } from "nsh";
 import { createAnimatedValue } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const offset = createAnimatedValue(0);
@@ -340,7 +351,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 内容上滑时隐藏、一往下滑就重新出现的标题栏，就是对偏移做 `diffClamp`：
@@ -509,6 +524,7 @@ pub fn photo() -> impl IntoElement {
 
 ```tsx tabs
 import { Image, mount, Scroll, type ScrollRef, signal } from "nsh";
+import { Window } from "nsh/desktop";
 
 function Photo() {
   let scroll!: ScrollRef;
@@ -531,7 +547,11 @@ function Photo() {
   );
 }
 
-mount(Photo);
+mount(() => (
+  <Window id="main">
+    <Photo />
+  </Window>
+));
 ```
 
 在 iOS 上，缩放结束后，缩放视图里的文字和画布会按新的分辨率重新绘制，保持清晰。在 Android 上，NSH 使用自己的滚动视图实现缩放：围绕捏合焦点缩放，支持任意手指数平移、惯性滑动，并在边缘和缩放极限处产生橡皮筋效果。与系统的手势检测一致，Android 在两指间距达到约 27 mm 时开始捏合。

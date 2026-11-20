@@ -78,7 +78,7 @@ The two templates make the same app, a counter:
 ```rust tabs
 // src/lib.rs
 use nsh_base::theme;
-use nsh_core::prelude::*;
+use nsh_core::{element::desktop::window as app_window, prelude::*};
 
 /// The crate's UI set: what a TSX entry may import from `my-app/native`.
 #[native_module("my-app/native")]
@@ -90,6 +90,7 @@ fn native(registry: &mut Registry) {
 #[component]
 pub fn App() -> impl IntoElement {
     let count = signal(0_u32);
+    app_window().id("main").content(move || {
     view()
         .flex_1()
         .bg(move || theme().background)
@@ -121,12 +122,14 @@ pub fn App() -> impl IntoElement {
                         ),
                 ),
         )
+    })
 }
 ```
 
 ```tsx tabs
 // App.tsx
 import { mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const count = signal(0);
@@ -144,7 +147,9 @@ function App() {
   );
 }
 
-mount(App);
+// The desktops show the app in windows it declares; `App` is the content of
+// the first one. Off the desktops it is the app's screen.
+mount(() => <Window id="main">{App}</Window>);
 ```
 
 In Rust:
@@ -180,7 +185,7 @@ In TSX:
   properties, with numbers in points. `bg-background`, `bg-primary`, `text-primary-foreground` and
   `rounded-(--radius)` name the tokens of the app's theme ([Theme tokens](./tailwind.md#theme-tokens)): they follow
   dark mode by themselves, and `"theme"` in `nsh.json` restyles them.
-- **`mount(App)`** renders the component into the app's surface.
+- **`mount(App)`** renders the app root; on the desktops the root declares its windows with `<Window>`.
 
 > [!IMPORTANT]
 > Text shows in a text element: `text(..)` in Rust, `<Text>` in TSX. In TSX, text written straight in a `<View>`

@@ -56,7 +56,7 @@ Rust 应用的根是它的 crate 中的一个组件，`nsh.json` 的 `"root"` �
 // src/lib.rs; nsh.json: { "rust": ".", "root": "App" }
 mod screens;
 
-use nsh_core::prelude::*;
+use nsh_core::{element::desktop::window as app_window, prelude::*};
 
 /// What a TSX entry may import from the crate.
 #[native_module("my-app/native")]
@@ -66,23 +66,25 @@ fn native(registry: &mut Registry) {
 
 #[component]
 pub fn App() -> impl IntoElement {
-    screens::home()
+    // 桌面平台上这是应用的窗口；其他平台上它显示自己的内容。
+    app_window().id("main").content(screens::home)
 }
 ```
 
 ```tsx tabs
 // App.tsx
 import { mount } from "nsh";
+import { Window } from "nsh/desktop";
 import { Home } from "./components/Home";
 
 function App() {
   return <Home />;
 }
 
-mount(App);
+mount(() => <Window id="main"><App /></Window>);
 ```
 
-`nsh run` 和 `nsh package` 在所有平台上挂载 Rust 根组件，不带 QuickJS。在 TSX 中，`mount(component, props?)` 把组件渲染到应用的界面上，并返回一个用于移除它的函数；应用只调用它一次。入口顶层的代码在 bundle 加载时、第一帧之前运行。
+`nsh run` 和 `nsh package` 在所有平台上挂载 Rust 根组件，不带 QuickJS。在 TSX 中，`mount(component, props?)` 把组件渲染为应用根，并返回一个用于移除它的函数；应用只调用它一次。在桌面平台上，应用根用 `<Window>` 声明自己的窗口（声明窗口的应用也要声明第一个；裸 root 渲染在隐式首窗口中）；其他平台上 `<Window>` 在唯一界面中显示它的内容。入口顶层的代码在 bundle 加载时、第一帧之前运行。
 
 ## nsh.json
 
@@ -139,7 +141,8 @@ mount(App);
 | `theme` | string 或 object | 每次构建 | 应用的设计令牌（shadcn/ui 的 `cssVars`，叠加在默认的 `neutral` 主题之上），供 token 类名、`token()` 和 Rust 组件绘制时使用：相对于 `nsh.json` 的主题文件路径，或直接内联的主题（[用 Rust 开发](./rust.md#主题)、[主题 token](./tailwind.md#主题-token)）。 |
 | `statusBar` | object | 每次构建、`package` | 所有页面和对话框之下的状态栏默认值（iOS 和 Android）：`{ "foreground": "auto" \| "light" \| "dark", "hidden": boolean }`，两个字段都可省略。打包的 iOS 应用从启动屏起就使用它（[状态栏](../modules/nsh-base.md#status-bar)）。 |
 | `capabilities` | object | 每次构建 | 应用可以访问 VM 之外的哪些资源：网络主机、网页视图主机、状态栏、应用自己的窗口（[沙箱与权限](./sandbox-and-capabilities.md)）。 |
-| `window` | object | 每次构建、`package` | 桌面平台上主窗口的启动设置，从第一帧起生效：`title`、`defaultSize`、`minSize`、`titleBar`、`backdrop` 以及窗口的其他选项和属性，写法与 `nsh/desktop` 的 `WindowOptions` 相同（`{ "defaultSize": { "width": 1100, "height": 720 }, "titleBar": { "style": "hidden" } }`），以及 `defaultVisible`（为 `false` 时启动时隐藏，像托盘应用那样）（[主窗口](../modules/nsh-desktop.md#主窗口)）。 |
+| `window` | object | 每次构建、`package` | 桌面平台上应用声明的第一个窗口的启动设置，从第一帧起生效：`title`、`defaultSize`、`minSize`、`titleBar`、`backdrop` 以及窗口的其他选项和属性，写法与 `nsh/desktop` 的 `WindowOptions` 相同（`{ "defaultSize": { "width": 1100, "height": 720 }, "titleBar": { "style": "hidden" } }`）（[应用宿主与第一个窗口](../modules/nsh-desktop.md#应用宿主与第一个窗口)）。`defaultVisible` 不再适用：应用宿主永远不会显示；以无窗口状态启动的应用不打开窗口即可。 |
+| `application` | object | 每次构建、`package` | 应用的生命周期：`"quitMode": "platform" \| "lastWindowClosed" \| "explicit"`。`"platform"`（默认）让 macOS 应用在没有窗口时继续运行，并在 Windows 和 Linux 上于最后一个窗口关闭时退出；`"lastWindowClosed"` 在所有平台上最后一个窗口关闭时退出；`"explicit"` 在没有窗口时继续运行。应用可在运行时用 `Application.setQuitMode` 修改（[退出](../modules/nsh-desktop.md#退出)）。 |
 | `resolve` | object | 每次构建 | 裸导入如何解析：npm 包的导出条件和别名（[npm 包](#npm-包)）。 |
 | `rust` | string 或 string[] | 每个命令 | 应用的 Rust crate 或 crate 列表，路径相对于 `nsh.json`：其中的组件和模块，TSX 按每个 crate 的 `#[native_module]` 名称导入（[用 Rust 开发](./rust.md#多个-crate)）。 |
 | `modules` | (string \| object)[] | 每个命令 | 应用安装的 [nshm](./nshm.md)，由 `nsh add` 记录在这里并锁定在 `nsh.lock`：`"acme-gauge@1.0"`、`"github:acme/gauge@v1.0.0"`、`{ "git": "…", "tag": "v1.0.0" }` 或 `{ "path": "../gauge" }`（[CLI：nsh add](./cli.md#nsh-add)）。 |

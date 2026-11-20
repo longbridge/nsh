@@ -1,4 +1,5 @@
 import { mount, platform, Scroll, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 import { Sheet } from "nsh/base";
 
 // A swipe-to-close sheet holding a list taller than the sheet, and a button
@@ -32,4 +33,4 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => <Window id="main">{App}</Window>);

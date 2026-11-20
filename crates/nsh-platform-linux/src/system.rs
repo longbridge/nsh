@@ -1421,6 +1421,11 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
 /// that can be closed so).
 #[cfg(feature = "dev")]
 pub(crate) fn answer_dialog(surface: &Surface, button: Option<&str>) -> Result<(), String> {
+    // The newest dialog of the surface: the main window's, or one of the
+    // app's own windows' (a dialog is shown in the window the user is in,
+    // `show_dialog`).
+    let mut roots = vec![surface.root.clone()];
+    roots.extend(crate::window::roots(surface).into_iter().map(|(_, r)| r));
     let (widget, dismiss) = SYSTEM
         .with(|s| {
             s.borrow()
@@ -1429,7 +1434,7 @@ pub(crate) fn answer_dialog(surface: &Surface, button: Option<&str>) -> Result<(
                 .rev()
                 .find_map(|o| match &o.kind {
                     OverlayKind::Dialog { dismiss, .. }
-                        if o.root == surface.root && o.widget.can_target() =>
+                        if roots.contains(&o.root) && o.widget.can_target() =>
                     {
                         Some((o.widget.clone(), dismiss.clone()))
                     }

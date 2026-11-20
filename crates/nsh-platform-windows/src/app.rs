@@ -761,14 +761,9 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     crate::linking::attach(view.surface());
     install_shortcuts(&view);
     view.place_main_window(&launch, kept);
-    // nsh.json `window.defaultVisible: false`: the window is made and the
-    // app runs in it, unseen, until it shows it (a tray app).
-    if !held {
-        if launch.visible_at_launch() {
-            view.show();
-        } else {
-            log::info!("the main window starts hidden (nsh.json window.defaultVisible: false)");
-        }
+    // The host never shows: the app opens the windows it declares.
+    if !held && launch.visible_at_launch() {
+        view.show();
     }
     let code = crate::window::run_loop();
     view.stop();

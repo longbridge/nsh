@@ -12,7 +12,6 @@ use std::sync::{Arc, Mutex};
 use nsh_base::{SliderValue, slider};
 use nsh_core::{
     EventKind, EventPayload, MountItem, PayloadValue, Size,
-    element::Root,
     geometry::{Axis, point},
     platform::Os,
     prelude::*,
@@ -113,7 +112,9 @@ fn start(props: HarnessProps) -> Headless {
 fn start_in(props: HarnessProps, rtl: bool) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(400.0), px(844.0)),
-        ..EngineConfig::new(Root::new::<Harness>(move || props.clone()))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            props.clone()
+        }))
     };
     config.environment.os = Os::MacOs;
     config.environment.rtl = rtl;
