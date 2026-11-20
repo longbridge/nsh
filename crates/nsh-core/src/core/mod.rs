@@ -1297,6 +1297,9 @@ pub struct Core<M: TextEngine> {
     /// Culled views were made in this round: their styles go out in
     /// another.
     cull_made: bool,
+    /// A list gave the views in a cell their frames in this round, after
+    /// culling looked at the scroll views among them (`cull.rs`).
+    cells_framed: bool,
     /// The walk of [`Core::sync_culled`], kept for its buffer: each view
     /// with where it is in the scroll view's content and how far the
     /// transforms around it may move it (`cull.rs`).
@@ -1701,6 +1704,7 @@ impl<M: TextEngine> Core<M> {
             cull_dirty: false,
             reach: crate::animation::Reach::default(),
             cull_made: false,
+            cells_framed: false,
             cull_scratch: Vec::new(),
             pace: pace::Pace::default(),
             list_motion: list_motion::ListMotion::default(),
@@ -3521,13 +3525,23 @@ impl<M: TextEngine> Core<M> {
         }
         // Placeholders sized again are laid out again, in another round,
         // before culling looks at them.
-        if relayout && !self.placeholders.is_empty() && self.size_placeholders() {
+        let sized = relayout && !self.placeholders.is_empty() && self.size_placeholders();
+        if sized {
             self.cull_dirty = true;
         } else if self.cull_dirty || (relayout && !self.culling.is_empty()) {
             // The views a scroll view culls that came within its window.
             self.sync_culled();
         }
         self.update_lists(relayout);
+        // A list gives the views in a cell their frames as it places the
+        // cell, after culling looked: a scroll view made in a cell in this
+        // round had no frame then, so what it culls waited, and nothing
+        // would look at it again before the next layout or scroll (a row
+        // bound as a scroll came to rest kept its scroll views empty).
+        // Not while placeholders wait for their layout, as above.
+        if std::mem::take(&mut self.cells_framed) && !sized && !self.culling.is_empty() {
+            self.sync_culled();
+        }
         if !self.slop_moved.is_empty() {
             self.update_slop_overflow();
         }
@@ -10664,6 +10678,7 @@ impl<M: TextEngine> Core<M> {
                 }
                 this.nodes[cell as usize].children = children;
                 this.update_overflow(cell);
+                this.cells_framed = true;
             }
             Some(main_of(size))
         };

@@ -36968,6 +36968,94 @@ fn drain_paced_without(c: &mut Core<FakeEngine>, view: NodeId) {
 }
 
 #[test]
+fn a_scroll_view_in_a_list_cell_makes_its_content_when_the_cell_is_placed() {
+    // A chat row with a code block: a cell holding a scroll view, which
+    // culls its content (`cull.rs`). The list gives the scroll view its
+    // frame as it places the cell, after culling looked at it in that
+    // round. Nothing lays the row out or scrolls again: its content is
+    // made all the same (it stayed empty until the next layout, as after
+    // a fling that ends on the row).
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::List,
+            },
+            style_op(2, &[("height", StyleValue::Number(400.0))]),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::EstimatedItemSize(px(100.0)),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Count(2),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    let mut binds = Vec::new();
+    c.take_list_binds(&mut binds);
+    c.take_paced_list_binds(usize::MAX, &mut binds);
+    let mut ops = Vec::new();
+    let mut contents = Vec::new();
+    for (slot, index) in binds.iter().flat_map(|b| b.binds.iter().copied()) {
+        let cell = 100 + slot * 100;
+        let (scroll, content) = (cell + 1, cell + 2);
+        contents.push(content);
+        ops.extend([
+            Op::Create {
+                id: cell,
+                tag: Tag::Cell,
+            },
+            Op::SetProp {
+                id: cell,
+                prop: Prop::Slot(CellSlot::Item(slot)),
+            },
+            Op::Insert {
+                parent: 2,
+                child: cell,
+                before: None,
+            },
+            Op::Create {
+                id: scroll,
+                tag: Tag::Scroll,
+            },
+            style_op(scroll, &[("height", StyleValue::Number(100.0))]),
+            Op::Insert {
+                parent: cell,
+                child: scroll,
+                before: None,
+            },
+        ]);
+        ops.extend(child_view(content, scroll, 40.0, &[]));
+        ops.push(Op::SetProp {
+            id: cell,
+            prop: Prop::CellIndex(index),
+        });
+    }
+    assert_eq!(contents.len(), 2);
+    apply(&mut c, ops);
+    let mut made = Vec::new();
+    for _ in 0..20 {
+        let Some(batch) = c.commit() else { break };
+        made.extend(created_in(&batch));
+    }
+    for content in contents {
+        assert!(
+            made.contains(&content),
+            "the content of the scroll view in a cell: {content}"
+        );
+    }
+}
+
+#[test]
 fn a_waiting_view_taken_out_of_its_parent_is_not_made() {
     // A view that waits, out of sight, is taken out of its parent and kept
     // (a kept screen, a view moved later): it has no parent when the
