@@ -420,6 +420,15 @@ Things that were found the hard way. Read the section of the area you change bef
   an inset shadow is left out: it lies more than twice the blur from where it casts. A shadow whose bitmaps would
   take more than a quarter of the 8 MiB cache (a spread of the screen's size) is drawn as a shadow layer, as
   before. The same boxes slide at 10 ms a frame.
+- **Android, backdrop blur**: `Backdrop` records what lies behind the view into a `RenderNode` before every frame,
+  and hwui draws that whole node into a layer and blurs it every frame. The node is recorded at the size where the
+  blur's deviation is 4 px (Skia's GPU blur scales its input down to that before blurring anyway) and stretched
+  back by its own scale, a property the RenderThread applies (a scale in the view's display list would stay stale
+  when an older backdrop's pre-draw records the view first, #2101); a view with nothing on screen
+  (`getGlobalVisibleRect`) records nothing. Four glass views of about the screen's size, without shadows, slid at
+  34 ms a frame on an emulator, 12 ms after. Every blurred view still records and blurs its backdrop again on
+  every frame, also when nothing behind it changed: a drawer sliding over blurred panes makes each of them blur
+  again (31 ms a frame on the emulator, 17 ms with the panes not blurred).
 - **Android, hidden views lose their display lists**: HWUI drops the display list of a RenderNode no longer drawn,
   and `setVisibility` tells every view under the one that changes, whose background `Drawable.setVisible` calls
   `invalidateSelf`. A whole screen hidden and shown again therefore records all of its views again (22–36 ms for the
