@@ -5,7 +5,10 @@
 //! Positions: in `ab` + two `stock` atoms, `ab` is 1..3, the atoms 4..5 and
 //! 5..6, the gap between them 5.
 
-use nsh_base::rich_editor::model::{AttrSpec, NodeSpec};
+use nsh_base::rich_editor::{
+    model::{AttrSpec, NodeSpec},
+    state::Decoration,
+};
 
 use super::*;
 
@@ -977,4 +980,146 @@ fn auto_focus_configures_the_caret_sink_input_on_mount() {
     app.press_key("a").unwrap();
     see(&mut app, "Text \"a\"");
     see(&mut app, "Focused 1");
+}
+
+/// A paragraph as a node view: a bullet, then its content in the slot.
+struct Bulleted;
+
+impl NodeView for Bulleted {
+    fn create(&self, cx: &NodeViewCx, _node: &Node) -> AnyElement {
+        view()
+            .flex_row()
+            .child(text("•").w(px(20.0)))
+            .child(view().flex_1().children(cx.take_content()))
+            .into_element()
+    }
+
+    fn editable_content_slot(&self) -> bool {
+        true
+    }
+}
+
+/// A paragraph as a node view with a part above its content, 40 points
+/// tall while the paragraph starts with `!`. The content's box is the
+/// slot's parent: the part growing moves that box, not the slot in it.
+struct Headed;
+
+impl NodeView for Headed {
+    fn create(&self, cx: &NodeViewCx, _node: &Node) -> AnyElement {
+        let node = cx.node();
+        view()
+            .child(dynamic(move || {
+                let tall = node.get().text_content().starts_with('!');
+                view().h(px(if tall { 40.0 } else { 0.0 })).into_element()
+            }))
+            .child(view().children(cx.take_content()))
+            .into_element()
+    }
+
+    fn update(&self, _node: &Node, _decorations: &[Decoration]) -> bool {
+        true
+    }
+
+    fn editable_content_slot(&self) -> bool {
+        true
+    }
+}
+
+/// An editor of paragraphs `texts` that `paragraph` renders, focused,
+/// the caret at its end.
+fn start_viewed(texts: &[&str], paragraph: Arc<dyn NodeView>) -> (Headless, EditorSession) {
+    let schema = schema();
+    let doc = schema.node_from_json(&paragraphs(texts)).unwrap();
+    let state = EditorState::create(
+        EditorStateConfig::new(schema.clone())
+            .doc(doc)
+            .plugins(starter::plugins(&schema)),
+    )
+    .unwrap();
+    let session = EditorSession::new(state, NodeViews::new().with("paragraph", paragraph));
+    let mounted = session.clone();
+    let mut config = EngineConfig {
+        viewport: Size::new(px(800.0), px(900.0)),
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            HarnessProps {
+                session: Some(mounted.clone()),
+            }
+        }))
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    app.wait_for("text:Ready").unwrap();
+    app.type_text("id:editor", "").unwrap();
+    keys(&mut app, &["ctrl+end"]);
+    (app, session)
+}
+
+/// How far the sink's bottom is from text `t`'s (the sink sits on the
+/// caret's line), and the top of `t`.
+fn sink_off(app: &Headless, t: &str) -> (f32, Points) {
+    use nsh_core::ViewKind;
+
+    let nodes = app.screen().layout_nodes();
+    let text = nodes
+        .iter()
+        .find(|n| n.text.as_ref().is_some_and(|x| x.text.text == t))
+        .unwrap_or_else(|| panic!("no text {t}"))
+        .bounds;
+    let sink = nodes
+        .iter()
+        .find(|n| n.kind == ViewKind::Input)
+        .expect("the editor's sink")
+        .bounds;
+    let bottom = |b: Bounds<Points>| b.origin.y + b.size.height;
+    ((bottom(sink) - bottom(text)).0.abs(), text.origin.y)
+}
+
+/// Blocks before a node view's slot leave: the block moves up, the slot
+/// in it does not (its own frame reports nothing), and the caret and the
+/// sink go up with it rather than stay where the text was.
+#[test]
+fn the_caret_follows_a_slot_whose_block_moved() {
+    let (mut app, session) = start_viewed(
+        &["a", "b", "c", "d", "e", "f", "g", "h"],
+        Arc::new(Bulleted),
+    );
+    see(&mut app, "Sel 23-23");
+    let (off, before) = sink_off(&app, "h");
+    assert!(off < 2.0, "the sink at the bottom of h's line: {off}");
+
+    // "a" to "e" leave: "h" moves up five lines.
+    let state = session.state();
+    let mut tr = state.tr();
+    tr.delete(0, 15).unwrap();
+    session.dispatch(tr).unwrap();
+    see(&mut app, "Doc \"f|g|h\"");
+    app.wait(Duration::from_millis(100)).unwrap();
+    let (off, after) = sink_off(&app, "h");
+    assert!(after < before, "h moved up: {before:?} -> {after:?}");
+    assert!(off < 2.0, "the sink followed h: {off}");
+}
+
+/// The view's part above its slot grows: the slot moves down in the
+/// block, its frame in its parent does not change, the block's size does,
+/// and the caret and the sink go down with the text.
+#[test]
+fn the_caret_follows_a_slot_its_view_moved() {
+    let (mut app, session) = start_viewed(&["a", "h"], Arc::new(Headed));
+    see(&mut app, "Sel 5-5");
+    let (off, before) = sink_off(&app, "h");
+    assert!(off < 2.0, "the sink at the bottom of h's line: {off}");
+
+    let state = session.state();
+    let mut tr = state.tr();
+    tr.insert_text("!", Some(4), Some(4));
+    session.dispatch(tr).unwrap();
+    see(&mut app, "Doc \"a|!h\"");
+    app.wait(Duration::from_millis(100)).unwrap();
+    let (off, after) = sink_off(&app, "!h");
+    assert!(
+        after > before + px(30.0),
+        "!h went down under the part: {before:?} -> {after:?}"
+    );
+    assert!(off < 2.0, "the sink followed !h: {off}");
 }
