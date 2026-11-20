@@ -404,7 +404,8 @@ NSH draws (`src/layers.rs`).
   (a delegate the embedding app already set stays), on Windows the process takes the app's id as its
   AppUserModelID, registers it for toasts and hears their presses; the first such view's app wins. Without it the
   permission is `unavailable`, `show` resolves `false` and the badge is left alone. On Linux the desktop portal knows
-  the app by its id either way.
+  the app by its id either way. On Apple platforms, where NSH is the delegate, notifications NSH did not show (remote
+  ones, other code's) never reach `press`; they go to the native handler of `set_foreign_handler`.
 - **Caches.** An app's caches (today the images it downloads, `nsh_core::image::DiskCache`) live in
   `<root>/<app id>/<kind>`, which the engine opens from `EngineConfig::cache` (`nsh_engine::CacheOptions`: a
   `CacheLocation` (`System`, `Dir`, `Off`) and a `CachePolicy` per kind (`Default`, `MaxSize(ByteSize)`, `Off`),

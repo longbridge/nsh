@@ -35,6 +35,47 @@ terminal. `--device` picks a simulator by name or UDID. For a quicker loop
 without a simulator, `nsh run --target catalyst` on a Mac opens the same UIKit backend in an iPhone-sized
 [Mac Catalyst](./getting-started.md#mac-catalyst) window.
 
+## Notifications from other code
+
+NSH is the app's notification center delegate. [`Notifications`](../modules/nsh.md#notifications) reports presses
+of the notifications the app showed. Remote notifications, and those other native code such as a push SDK schedules,
+go to one handler that Rust code sets with `nsh_platform_apple::notifications::set_foreign_handler`. Set it in the
+`#[native_module]` entry of the app's crate, which runs on the main thread before the app starts, so the press that
+starts the app reaches it:
+
+```rust
+use nsh_platform_apple::notifications::{
+    ForeignNotification, ForeignNotificationHandler, Presentation, set_foreign_handler,
+};
+
+struct Chats;
+
+impl ForeignNotificationHandler for Chats {
+    // Arriving while the app is in front: hide the banner of the open conversation.
+    fn presentation(&self, notification: &ForeignNotification) -> Presentation {
+        if is_open(&notification.thread_id) {
+            Presentation::default().banner(false).sound(false)
+        } else {
+            Presentation::default()
+        }
+    }
+
+    // The user pressed it, possibly starting the app.
+    fn pressed(&self, notification: &ForeignNotification) {
+        open_chat(&notification.user_info["chat"]);
+    }
+}
+
+set_foreign_handler(Chats);
+```
+
+`ForeignNotification` carries the request's `id`, the `thread_id` it is grouped in and its `userInfo` as JSON
+(`user_info`). The handler's methods run on the main thread, and `set_foreign_handler` panics elsewhere. There is one
+handler, so the app's crate owns it and passes notifications on to the modules it uses; a later call replaces it.
+Without a handler, these notifications show as the app's own do and their presses are dropped. Only a press of the
+notification itself is reported, not the actions of its category. An app that embeds NSH and has a notification center
+delegate of its own keeps every notification there. macOS works the same way.
+
 ## Packaging
 
 ```sh

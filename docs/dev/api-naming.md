@@ -399,6 +399,8 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `getString`, `setString`, `hasString` | `readText()`, `writeText(text): Promise<void>`, `write({ text, html }): Promise<void>`, `hasText()` | Where names come from | The DOM's `navigator.clipboard`; GPUI's `read_from_clipboard` / `write_to_clipboard` |
 | `getImage`, `setImage`, `hasImage`, `getFiles` | `readImage()`, `writeImage(src)`, `hasImage()`, `readFiles()` | Where names come from | |
 | `ClipboardImage.uri` | `ClipboardImage.url` | Addresses | |
+| **`nsh`: `Notifications`** | | | |
+| `UNUserNotificationCenterDelegate`'s `willPresentNotification:` / `didReceiveNotificationResponse:` for notifications NSH did not show | Rust `nsh_platform_apple::notifications::set_foreign_handler(impl ForeignNotificationHandler)`: `presentation(&ForeignNotification) -> Presentation`, `pressed(&ForeignNotification)`; `ForeignNotification { id, thread_id, user_info }`, `Presentation { banner, list, sound, badge }` | Listening | 2026-11-20: "foreign" for the notifications other code showed, apart from the app's `press`; `pressed` as `Notifications`' `press` event; `id` as `Notification::id`; `thread_id` and `user_info` keep the platform's `threadIdentifier` / `userInfo` (as `nsh_platform_ios`'s `ApplicationEvent` does); `Presentation`'s fields are `UNNotificationPresentationOptions`' cases. One handler, not observers, because the system takes one presentation |
 | **`nsh`: `Storage`** | | | |
 | `Storage.getAllKeys()` | `Storage.keys()` | Where names come from | `getItem` / `setItem` / `removeItem` / `clear` are the DOM's `Storage`'s |
 | **Styles** | | | |
