@@ -778,6 +778,23 @@ function runPoint(run, offset) {
 }
 
 /** The offset in a run of a boundary (`container`, `offset`) inside it. */
+/**
+ * `part` of a run, starting at UTF-16 offset `start` of its text (null: a
+ * truncated line's `…` first), as a copy gives it: an attachment (U+FFFC)
+ * as its copy text in `copies` (offset to text, `copyText`), else left out
+ * in a selectable view (`area`).
+ */
+function copiedRun(part, start, copies, area) {
+  if (!copies || start == null) return area ? part.replaceAll("\uFFFC", "") : part;
+  let out = "";
+  for (let i = 0; i < part.length; i++) {
+    const c = part[i];
+    if (c !== "\uFFFC") out += c;
+    else out += copies.get(start + i) ?? (area ? "" : c);
+  }
+  return out;
+}
+
 function runOffset(run, container, offset) {
   const range = document.createRange();
   range.setStart(run, 0);
@@ -2885,9 +2902,11 @@ class Player {
     el.style.setProperty(prop, value);
   }
 
-  op_t([, id, cx, cy, , , runs, styles, selectable, selection, color, backgrounds, links]) {
+  op_t([, id, cx, cy, , , runs, styles, selectable, selection, color, backgrounds, links, copies]) {
     const el = this.view(id);
     if (!el) return;
+    // What its attachments copy as (`copyText`), by offset.
+    el._copyTexts = copies?.length ? new Map(copies) : null;
     setTextColor(el, color ?? null);
     if (!this.updateRuns(el, cx, cy, runs, styles, backgrounds, links)) this.replaceRuns(el, cx, cy, runs, styles, backgrounds, links);
     el.classList.toggle("nsh-selectable", !!selectable);
@@ -4991,6 +5010,10 @@ class Player {
   /** The browser's scrolling stopped: the end, unless the scroll is driven
    * here (`drive`) or a finger still holds it. */
   scrollEnded(el) {
+    // A browser wheel's scroll goes on while its events keep coming
+    // (`wheelNatively`): a `scrollend` between two notches is not its end,
+    // which waits for the fallback, as one scroll of nsh's ends once.
+    if (el._wheelAt && performance.now() - el._wheelAt < 200) return;
     clearTimeout(el._commandEnd);
     el._commandEnd = 0;
     // A scroll animation of the core's (`animateScroll`) is driven here:
@@ -6316,9 +6339,43 @@ class Player {
       return;
     }
     this.pageUrl = resolved.href;
+    if (push && this.earlyPushed) {
+      // An entry of its own was written for this task's push already
+      // (`pushEarly`): the turn's last address is that entry's.
+      push = false;
+    }
     if (push) this.pageUrlPush = true;
     this.pageUrlSets = (this.pageUrlSets ?? 0) + 1;
-    this.syncHistorySoon();
+    this.syncHistorySoon(push);
+  }
+
+  /** Whether an address pushed now can have its entry at once, in the task
+   * the app pushed it in: no page has an entry (no modal, no stack screen
+   * above its first), none is going, and no traversal is waited for. Then
+   * nothing later in the turn can take an entry away under it. */
+  canPushEarly() {
+    if (this.historyDepth || this.ignoredPops || this.dismissing > 0 || this.popAnswer) return false;
+    if ([...(this.root?.children ?? [])].some((el) => el._kind === "modal")) return false;
+    return this.backDepth() === 0;
+  }
+
+  /**
+   * A push with no page open (a list's row that opens a screen of its own
+   * address): the entry is written now, before the browser draws the new
+   * screen, not a task later (`syncHistorySoon`). Chrome on Android pictures
+   * an entry as the page leaves it and shows that picture under a back
+   * swipe; written after the new screen was drawn, the entry under it was
+   * pictured with that screen. Later addresses of the same task replace
+   * this entry's (in a turn the last one wins). With a page open it waits as
+   * before: a sheet's dismissal can reach the player a task after the push,
+   * and an entry written early would be gone back over with the sheet's.
+   */
+  pushEarly() {
+    this.earlyPushed = true;
+    setTimeout(() => {
+      this.earlyPushed = false;
+    }, 0);
+    this.syncHistory();
   }
 
   // The document's title: a mounted `Head`'s (`nsh/web`), else the main
@@ -6367,8 +6424,13 @@ class Player {
     return depth;
   }
 
-  syncHistorySoon() {
-    if (!this.history || this.historySync) return;
+  /** Writes the turn's entries a task later, once all of it reached the
+   * player; with `push` (an address pushed) at once when it can
+   * (`pushEarly`). */
+  syncHistorySoon(push = false) {
+    if (!this.history) return;
+    if (push && this.canPushEarly()) return this.pushEarly();
+    if (this.historySync) return;
     this.historySync = setTimeout(() => {
       this.historySync = 0;
       this.syncHistory();
@@ -9270,8 +9332,8 @@ class Player {
    * selectable view, texts on one row (their boxes overlap vertically: a
    * table's cells) are joined by a tab instead, a text that continues the
    * one before it (`continuesText`: a wrapped line's later part) by
-   * nothing, and attachments (U+FFFC) and hidden runs are left out, as
-   * the native platforms copy. */
+   * nothing, attachments (U+FFFC) are their copy texts (`copyText`) or
+   * left out, and hidden runs are left out, as the native platforms copy. */
   copyText(e) {
     if (e.target.closest?.(".nsh-field")) return;
     const out = this.selectedText();
@@ -9325,8 +9387,7 @@ class Player {
         if (to === text.length && run._after) out += run._after;
         continue;
       }
-      const part = text.slice(from, to);
-      out += area ? part.replaceAll("\uFFFC", "") : part;
+      out += copiedRun(text.slice(from, to), run._start == null ? null : run._start + from, run.parentNode._copyTexts, !!area);
       if (to === text.length && run._after) out += run._after;
     }
     if (!found) return null;
@@ -9439,8 +9500,10 @@ class Player {
    * A wheel or touchpad scroll goes to the innermost scroll view along its
    * axis that can move that way (a vertical wheel scrolls a horizontal view
    * when no vertical one can), and stays on it until the scroll ends
-   * (events 200 ms apart). Notches glide; Ctrl + wheel (a touchpad's pinch)
-   * pinches the view under the pointer and never zooms the page.
+   * (events 200 ms apart). Where the browser would scroll the same view, it
+   * does (`wheelNatively`): its notches glide as every page's. Otherwise
+   * notches glide here; Ctrl + wheel (a touchpad's pinch) pinches the view
+   * under the pointer and never zooms the page.
    */
   wheel(e) {
     // A view listening to `onWheel` nearer than the scroll views under the
@@ -9472,16 +9535,28 @@ class Player {
       };
       const el = chain.find((v) => !!v._horizontal === horizontal && can(v, horizontal ? dx : dy))
         ?? (horizontal ? null : chain.find((v) => v._horizontal && can(v, dy)));
+      // The browser scrolls it itself, with its own smooth wheel and the
+      // touchpad's momentum, when it would pick the same view: the
+      // innermost along the scroll's axis (`overscroll-behavior: contain`
+      // keeps the scroll on it at its edge, as `wheelLock` does), not
+      // snapping (one snap point per scroll) and without a content layer
+      // (zoom, pull to refresh), whose offsets are nsh's.
+      const native = !!el && !el._snapPoints && !el._layer
+        && el === chain.find((v) => !!v._horizontal === horizontal);
       // Nothing to scroll: the page around may, unless a dialog or an
       // alert covers it.
-      this.wheelLock = lock = el ? { el, total: 0, snapped: false } : null;
+      this.wheelLock = lock = el ? { el, total: 0, snapped: false, native } : null;
       if (!lock) {
         if (this.viewportDialogs && e.target.closest?.(".nsh-viewport")) e.preventDefault();
         return;
       }
     }
-    e.preventDefault();
     lock.t = now;
+    if (lock.native) {
+      this.wheelNatively(lock.el);
+      return;
+    }
+    e.preventDefault();
     const el = lock.el;
     const d = el._horizontal ? dx || dy : dy;
     if (el._snapPoints) {
@@ -9498,6 +9573,30 @@ class Player {
     // deltas. Its magnitude cannot distinguish a notch from a finger.
     const smooth = e.deltaMode !== 0;
     this.scrollSmoothly(el, el._horizontal ? d : 0, el._horizontal ? 0 : d, smooth);
+  }
+
+  /**
+   * A wheel the browser scrolls `el` with (`wheel`): Chrome and Safari
+   * send a mouse's notches in pixels, as a touchpad's deltas, so nsh could
+   * not tell them apart and moved each notch at once, where every page
+   * glides. The offsets reach the core as any scroll's do (`scrolled`).
+   * A glide of the keys' stops where it is, without an end: the wheel's
+   * scroll goes on from there. The end is the browser's `scrollend` once
+   * no event came for 200 ms (`scrollEnded`: one scroll, as nsh's own
+   * wheels end once), or 200 ms after the last scroll event where it sends
+   * none (`waitCommandEnd`, which `scrolled` keeps waiting while it moves).
+   */
+  wheelNatively(el) {
+    el._wheelAt = performance.now();
+    const a = el._glide;
+    if (a) {
+      cancelAnimationFrame(a.frame);
+      clearTimeout(a.timer);
+      clearTimeout(a.watch);
+      el._glide = null;
+      this.drive(el, -1);
+    }
+    this.waitCommandEnd(el);
   }
 
   /**

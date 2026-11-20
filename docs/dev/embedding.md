@@ -11,6 +11,9 @@
   target); device builds check entitlements against the profile,
   which keeps the app's values in place of its own). iOS: `.app`, `.ipa` with `--sign <identity>
   --profile <file.mobileprovision>` (entitlements come from the profile; icons are compiled by `actool` into `Assets.car`).
+  `ios.extensions` lists prebuilt `.appex` bundles the app builds itself (`crates/nsh-cli/src/app_extensions.rs`):
+  packages copy them into `PlugIns/` with the app's version and sign them before the app; device packages take one
+  `--profile` per bundle, chosen by bundle identifier (`crates/nsh-cli/src/provisioning.rs`). NSH builds no Swift.
   Android: an APK assembled without Gradle (`aapt2 link`, native libraries stored uncompressed and 16 KB ZIP aligned, `apksigner`;
   the debug key unless `--keystore`; `android.launchScreen` becomes a generated launch theme). Linux: a directory `<name>/` with the release runner (`crates/nsh-linux-app`) as
   the executable, `nsh/bundle.nshc`, `nsh/assets/` and `nsh/app.json` (the window title, the GTK application id and
@@ -406,7 +409,8 @@ NSH draws (`src/layers.rs`).
   (a delegate the embedding app already set stays), on Windows the process takes the app's id as its
   AppUserModelID, registers it for toasts and hears their presses; the first such view's app wins. Without it the
   permission is `unavailable`, `show` resolves `false` and the badge is left alone. On Linux the desktop portal knows
-  the app by its id either way.
+  the app by its id either way. On Apple platforms, where NSH is the delegate, notifications NSH did not show (remote
+  ones, other code's) never reach `press`; they go to the native handler of `set_foreign_handler`.
 - **Caches.** An app's caches (today the images it downloads, `nsh_core::image::DiskCache`) live in
   `<root>/<app id>/<kind>`, which the engine opens from `EngineConfig::cache` (`nsh_engine::CacheOptions`: a
   `CacheLocation` (`System`, `Dir`, `Off`) and a `CachePolicy` per kind (`Default`, `MaxSize(ByteSize)`, `Off`),

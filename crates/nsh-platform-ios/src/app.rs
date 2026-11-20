@@ -88,7 +88,7 @@ thread_local! {
 define_class!(
     #[unsafe(super(UIResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
-    struct AppDelegate;
+    pub(crate) struct AppDelegate;
 
     unsafe impl NSObjectProtocol for AppDelegate {}
 
@@ -327,12 +327,14 @@ fn hide_title(scene: &UIWindowScene) {
 
 /// Runs a standalone app full-window. Never returns.
 ///
-/// Must be called on the main thread, before any other UIKit use.
+/// Must be called on the main thread, before any other UIKit use. The
+/// application delegate's callbacks reach the observers added before it
+/// ([`crate::on_application_event`]).
 pub fn run_app(source: AppSource, options: AppOptions) -> ! {
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
     *LAUNCH.lock().expect("launch lock") = Some((source, options));
     let delegate = NSString::from_str(
-        AppDelegate::class()
+        crate::application::delegate_class()
             .name()
             .to_str()
             .expect("class name is UTF-8"),

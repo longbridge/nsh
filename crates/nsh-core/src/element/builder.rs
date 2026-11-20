@@ -1145,6 +1145,26 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
+    /// What a copy of the text around the view gives in its place, when
+    /// the view is inside a text (`copyText`): an inline formula's source
+    /// (`$x^2$`), an emoji image's character. Selecting across the view
+    /// and copying puts this where it is, as a browser copies an inline
+    /// image's `alt`. Unset, the view adds nothing to the copy; a view
+    /// outside a text ignores it. Screen readers keep reading the view's
+    /// [`Accessible::label`].
+    ///
+    /// ```ignore
+    /// text("Area is ")
+    ///     .child(view().copy_text("$x^2$").child(formula))
+    ///     .child(" here.")
+    /// ```
+    fn copy_text(mut self, text: impl IntoReactive<SharedString>) -> Self {
+        super::host::bind_prop(self.node(), text, |text: SharedString| {
+            Prop::CopyText(Some(text.to_arc()))
+        });
+        self
+    }
+
     /// Tailwind classes the app passed (a prop naming the classes of one
     /// of the component's parts: `classes={{ heading: "text-2xl" }}`),
     /// after the element's own styles, as the app's `class` on a
@@ -1620,16 +1640,28 @@ pub trait Accessible: Element {
     /// [`Accessible::accessibility_description`], whose place it takes
     /// while it names a rendered element with text. `None` names none.
     fn accessibility_described_by(
-        mut self,
+        self,
         target: impl IntoReactive<Option<super::ElementRef>>,
     ) -> Self {
+        let target = target.into_reactive();
+        self.accessibility_described_by_target(move || {
+            target.get().and_then(|t| t.element_target())
+        })
+    }
+
+    /// [`Accessible::accessibility_described_by`] with the element as a
+    /// component's prop holds it (a ref from JS or from Rust): what
+    /// `nsh-base`'s components pass to the view screen readers reach.
+    #[doc(hidden)]
+    fn accessibility_described_by_target(
+        mut self,
+        target: impl IntoReactive<Option<super::ElementTarget>>,
+    ) -> Self {
         self.node()
-            .bind_attr(target, |a, target: Option<super::ElementRef>| {
+            .bind_attr(target, |a, target: Option<super::ElementTarget>| {
                 super::host::set_in(
                     &mut a.props,
-                    Prop::Accessibility(AccessibilityProp::DescribedBy(
-                        target.and_then(|t| t.element_target()),
-                    )),
+                    Prop::Accessibility(AccessibilityProp::DescribedBy(target)),
                 )
             });
         self

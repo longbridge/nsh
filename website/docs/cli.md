@@ -217,7 +217,7 @@ Builds an installable app in release mode. A Rust app (`nsh.json` `"root"`) is p
 | `--build <BUILD>` | Build number. |
 | `--icon <ICON>` | App icon: a square PNG, ideally 1024×1024. |
 | `--sign <IDENTITY>` | iOS devices: code signing identity, e.g. `"Apple Development: …"`. |
-| `--profile <FILE>` | iOS devices: provisioning profile (`.mobileprovision`). Entitlements come from it. |
+| `--profile <FILE>` | iOS devices: provisioning profile (`.mobileprovision`). Entitlements come from it. Repeat it to give each app extension (`nsh.json` `ios.extensions`) its own. |
 | `--keystore <FILE>` | Android: release keystore. Default: the debug key in `~/.android/debug.keystore` (created if missing). |
 | `--key-alias <ALIAS>` | Android: key alias in the keystore. |
 | `--keystore-password <PASSWORD>` | Android: keystore password. Also read from `NSH_KEYSTORE_PASSWORD`. |

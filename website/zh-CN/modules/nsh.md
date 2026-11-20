@@ -342,7 +342,8 @@ interface AppInfo {
 `--release` 的 `nsh build` 是开发构建；`nsh package`、`nsh publish` 和 `nsh build --release` 不是。在任何平台、任何模块中
 都能读取，包括模块顶层的代码：构建会在应用的模块运行之前把这些信息交给运行时。
 
-安装的应用本体的版本见 `nsh/updater` 的 [`shellInfo()`](./nsh-updater.md#shellinfo)。
+安装的应用本体的版本见 `nsh/updater` 的 [`shellInfo()`](./nsh-updater.md#shellinfo)。Rust 应用的 Rust 代码用 `app_info()`
+读取同样的信息（[应用的版本](../docs/device-and-environment.md#应用的版本)）。
 
 ```tsx
 import { appInfo, Text } from "nsh";
@@ -2294,7 +2295,7 @@ async function signOut() {
 
 ### Notifications.on
 
-`press` 报告用户点击的通知的 `id`。点击可能启动应用：事件会等到第一个监听器注册后送达，所以请在应用启动时监听，并把点击后要打开的内容放在 `id` 里。Android 上，嵌入方的 Activity 要在 `onCreate` 和 `onNewIntent` 里把 Intent 传给 `NshView.handleNotificationIntent`。Apple 平台上，已设置通知中心 delegate 的嵌入方保留自己的 delegate，点击也由它接收。Linux 上点击只传给运行中的应用：应用退出后留下的通知点击后没有反应。
+`press` 报告用户点击的通知的 `id`。点击可能启动应用：事件会等到第一个监听器注册后送达，所以请在应用启动时监听，并把点击后要打开的内容放在 `id` 里。Android 上，嵌入方的 Activity 要在 `onCreate` 和 `onNewIntent` 里把 Intent 传给 `NshView.handleNotificationIntent`。Apple 平台上，已设置通知中心 delegate 的嵌入方保留自己的 delegate，点击也由它接收；否则远程通知和其他原生代码安排的通知交给 Rust 代码用 `nsh_platform_apple::notifications::set_foreign_handler` 设置的处理者（见 [iOS](../docs/ios.md#来自其他代码的通知)），不会触发 `press`。Linux 上点击只传给运行中的应用：应用退出后留下的通知点击后没有反应。
 
 ### Notifications.permission
 

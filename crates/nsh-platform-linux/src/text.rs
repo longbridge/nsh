@@ -2076,7 +2076,7 @@ fn copy(view: &NshView) {
     }
 }
 
-/// The selected text, without attachments' placeholders and hidden runs.
+/// The selected text as a copy gives it ([`nsh_core::AttributedText::copied_text`]).
 fn selected_text(view: &NshView) -> Option<String> {
     let (a, b) = view_selection(view)?.range.get()?;
     let state = view.state();
@@ -3322,8 +3322,9 @@ mod fallback_tests {
 
 #[cfg(test)]
 mod font_rendering_tests {
-    use super::*;
     use pangocairo::cairo::{HintMetrics, HintStyle};
+
+    use super::*;
 
     /// By default layout is unhinted and drawing slightly hinted; hinted
     /// metrics (manual font rendering) hint and round layout too.

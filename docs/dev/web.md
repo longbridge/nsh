@@ -733,7 +733,10 @@ browsers' touches into what phones report:
   scroll while it holds them (`responderBlocks`), unless the browser already scrolls (`cancelable` false).
 - **Wheels and touchpads** (`wheel`) go to the innermost scroll view along their axis that can move that way (a
   vertical wheel scrolls a horizontal view when no vertical one can) and stay on it while events come within 200 ms;
-  notches glide, touchpads follow the fingers; snapping views move one snap point per scroll. Nothing to scroll: the
+  the browser scrolls that view itself when it would pick it too (the innermost scroll view along the axis, not
+  snapping, without a content layer: `wheelNatively`), with its own smooth wheel and momentum, so a mouse feels as on
+  any page (Chrome and Safari send notches in pixels, as touchpads' deltas, which nsh moved at once); elsewhere nsh
+  scrolls: notches glide, touchpads follow the fingers; snapping views move one snap point per scroll. Nothing to scroll: the
   event goes on to the page around (an embedding page scrolls), unless it is over a dialog or an alert covering the
   window (`dialogs: "viewport"`). Ctrl + wheel (a touchpad's pinch) pinches the view
   under the pointer and never zooms the page. Scroll events follow the desktop backends: touch drags send
@@ -954,7 +957,8 @@ browsers' touches into what phones report:
   web page's paragraphs; pressables in the area keep their presses. Select all selects the whole area. Copying joins
   the area's texts on one row (their boxes overlap vertically: a table's cells) with a tab instead of a newline, joins
   a text whose props have `continuesText` (`ViewProps::continues_text`: a wrapped line's later part) to the one
-  before it with nothing, and leaves out attachments (U+FFFC), as `SelectionModel::text` does.
+  before it with nothing, and gives attachments (U+FFFC) as their copy texts (`copyText`, sent with the text) or
+  leaves them out, as `SelectionModel::text` does.
 - **Elsewhere**: no page context menu or iOS callout outside fields and selectable text; a mouse drag selects only in
   selectable text and fields; overflow is `clip`, never `hidden`, so that the browser cannot scroll a box the core
   laid out to show a focused field.
@@ -1007,8 +1011,12 @@ between them); the core bounds their travel by the list's end. A cell's animated
 (`op_a`): it is kept on the cell (`_stickyOffset`) and added to the track's inset. Views clip with `overflow: clip`, which, unlike
 `hidden`, makes no scroll container, so `position: sticky` reaches the scroll view through the list.
 
-Pixel-mode wheel events follow the device's deltas directly, including its inertia. Line- and page-mode wheels
-and keyboard commands glide on animation frames. Changing from a glide to direct input continues from the sampled
+A wheel the browser can take is the browser's (`wheelNatively`): its offsets reach the core as any scroll's, and it
+ends once, with the `scrollend` that comes once no wheel event did for 200 ms (one between two notches is not the
+end), or 200 ms after the last scroll event where none comes (`waitCommandEnd`); a glide of the keys'
+it interrupts stops where it is. The wheels nsh scrolls itself (snapping views, content layers, a vertical wheel on a
+horizontal view, an outer view the browser would not pick): pixel-mode events follow the device's deltas directly,
+including its inertia; line- and page-mode wheels and keyboard commands glide on animation frames. Changing from a glide to direct input continues from the sampled
 position, so an unfinished target cannot cause a catch-up jump.
 
 An animated scroll command of the core's (`scrollTo` or `scrollToEnd` with `animated`) is nsh's own animation

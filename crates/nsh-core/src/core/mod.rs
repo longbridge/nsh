@@ -709,6 +709,9 @@ struct Node {
     z_index: i32,
     /// `verticalAlign`: where it sits in its line as an attachment.
     vertical_align: crate::style::VerticalAlign,
+    /// `copyText`: what a copy of its text gives in its place as an
+    /// attachment (or as the content of a render placed there).
+    copy_text: Option<Arc<str>>,
     /// Laid out right to left (the resolved `direction`).
     rtl: bool,
     /// `direction`: `None` inherits.
@@ -1014,6 +1017,7 @@ impl Node {
             key_parent: None,
             z_index: 0,
             vertical_align: crate::style::VerticalAlign::Baseline,
+            copy_text: None,
             rtl: false,
             direction: None,
             logical: None,
@@ -2106,6 +2110,13 @@ impl<M: TextEngine> Core<M> {
     /// gives; `None`: it has none.
     pub fn set_data_dir(&mut self, dir: Option<std::path::PathBuf>) {
         self.components.runtime.set_data_dir(dir);
+    }
+
+    /// The app as it was built, what [`crate::element::app_info`] answers
+    /// (a Rust app's root's, [`crate::element::Root::app_info`]); `None`:
+    /// the runner has none (a TSX app's is JS's `appInfo()`).
+    pub fn set_app_info(&mut self, info: Option<crate::platform::AppInfo>) {
+        self.components.runtime.set_app_info(info);
     }
 
     /// What Rust code checks for updates with
@@ -5752,6 +5763,7 @@ impl<M: TextEngine> Core<M> {
         let mut flags = 0;
         let mut key_ancestry = false;
         let mut rebuild_span = false;
+        let mut copy_text_changed = false;
         let mut slop_moved = false;
         match prop {
             Prop::Source(source) => {
@@ -6320,6 +6332,14 @@ impl<M: TextEngine> Core<M> {
                     }
                 }
             }
+            Prop::CopyText(value) => {
+                if node.copy_text != value {
+                    node.copy_text = value;
+                    // Its block's text holds it; a render's content's is
+                    // its placeholder's (`Core::attachment_copy_text`).
+                    copy_text_changed = true;
+                }
+            }
             Prop::WebElement(value) => {
                 let props = node.props.get_or_insert_default();
                 if props.web_element != value {
@@ -6808,6 +6828,13 @@ impl<M: TextEngine> Core<M> {
         }
         if rebuild_span {
             self.mark_text_block(key);
+        }
+        if copy_text_changed {
+            if self.nodes[key as usize].inline {
+                self.mark_text_block(key);
+            } else if let Some(place) = self.placed_in_text(key) {
+                self.mark_text_block(place);
+            }
         }
         if key_ancestry {
             self.key_ancestry_dirty = true;
@@ -8568,7 +8595,7 @@ impl<M: TextEngine> Core<M> {
             }
             return inserted;
         }
-        if cx.text.test_ids != text.test_ids
+        if (cx.text.test_ids != text.test_ids || cx.text.copy_texts != text.copy_texts)
             && !inserted
             && cx.alignments == alignments
             && cx.text.rendering_eq(&text)
@@ -8740,6 +8767,12 @@ impl<M: TextEngine> Core<M> {
                                 .alignments
                                 .set_baseline(out.len_utf16(), Some(baseline));
                         }
+                        if let Some(copy) = self.attachment_copy_text(c) {
+                            out.copy_texts.push(crate::text::AttachmentCopyText::new(
+                                out.len_utf16(),
+                                copy.clone(),
+                            ));
+                        }
                         parts.alignments.push(
                             out,
                             crate::geometry::size_pt(size.width, size.height),
@@ -8769,6 +8802,22 @@ impl<M: TextEngine> Core<M> {
             .map_or(VerticalAlign::Baseline, |content| {
                 self.nodes[content as usize].vertical_align
             })
+    }
+
+    /// What a copy gives in place of attachment `key` (`copyText`): its
+    /// own, or for a placeholder of a render (`renderCustom`, ...) that
+    /// sets none its content's, as [`Self::attachment_align`] reads the
+    /// content's alignment. An empty one copies as nothing, as unset.
+    fn attachment_copy_text(&self, key: Key) -> Option<&Arc<str>> {
+        let node = &self.nodes[key as usize];
+        let copy = match &node.copy_text {
+            Some(copy) => Some(copy),
+            None if self.components.renders.is_place(node.id) => self
+                .render_content(key)
+                .and_then(|content| self.nodes[content as usize].copy_text.as_ref()),
+            None => None,
+        };
+        copy.filter(|c| !c.is_empty())
     }
 
     /// The content of render placeholder `key`: the placeholder's only
@@ -9856,6 +9905,7 @@ impl<M: TextEngine> Core<M> {
                         id,
                         &text_layout,
                         &text,
+                        &cx.spacers,
                     );
                 }
                 if !text.attachments.is_empty() {
@@ -9894,6 +9944,7 @@ impl<M: TextEngine> Core<M> {
                             id,
                             &layout,
                             &cx.text,
+                            &cx.spacers,
                         );
                     }
                     layout
@@ -10541,10 +10592,24 @@ impl<M: TextEngine> Core<M> {
             }
         }
 
+        // Its own scroll view's range takes the content inset in; in its
+        // parent's viewport, the view around it has the range.
+        let inset = match (&outer, self.nodes[key as usize].scroll.as_deref()) {
+            (None, Some(scroll)) => {
+                let i = scroll.behavior.content_inset;
+                if horizontal {
+                    (i.left.0, i.right.0)
+                } else {
+                    (i.top.0, i.bottom.0)
+                }
+            }
+            _ => (0.0, 0.0),
+        };
         let list = self.nodes[key as usize].list.as_mut().expect("list");
         // Not on the first layout: there is nothing to clamp yet.
         let grew = outer.is_none() && list.viewport > 0.0 && main > list.viewport;
         list.viewport = main;
+        list.inset = inset;
         list.offset += anchor;
         // A splice above the viewport already moved the offset, to keep
         // the visible rows in place: like measurements, that says nothing
@@ -10717,8 +10782,6 @@ impl<M: TextEngine> Core<M> {
         // changed which ones). Descendant frames only change when the
         // cell was laid out again.
         let list = self.nodes[key as usize].list.as_ref().expect("list");
-        let content_len = list.content_len();
-        let blocks = list.blocks();
         let sticky = list.sticky_enabled();
         ready.clear();
         ready.extend(
@@ -10726,6 +10789,23 @@ impl<M: TextEngine> Core<M> {
                 .iter()
                 .filter_map(|s| s.ready().map(|i| (i, s.cell))),
         );
+        // A cell bound just now to the row it already shows (it took it
+        // back after the items changed) gets no render to lay it out
+        // again, and was not ready when the list measured above: measured
+        // now, the rows after it are placed after its real size.
+        for &(index, cell) in &ready {
+            if self.awaiting_renders.binary_search(&cell).is_ok() {
+                continue;
+            }
+            if let Some(cell_layout) = self.nodes.get(cell as usize).and_then(|c| c.layout) {
+                let size = main_of(self.rounded_layout(cell_layout).size);
+                let list = self.nodes[key as usize].list.as_mut().expect("list");
+                list.measured_unknown(index, size);
+            }
+        }
+        let list = self.nodes[key as usize].list.as_ref().expect("list");
+        let content_len = list.content_len();
+        let blocks = list.blocks();
         // Cells left without an item, or not showing theirs yet (a paced
         // bind, or one the frame's rounds did not reach), still show their
         // last one. Those in the render window (the data changed, the list
@@ -11210,11 +11290,12 @@ fn keep_geometry(
     id: NodeId,
     layout: &TextLayout,
     text: &Arc<AttributedText>,
+    spacers: &[u32],
 ) {
     if let Some(engine) = engine.as_ref().filter(|_| id % 2 == 1) {
         geometries.insert(
             id,
-            crate::text::TextGeometry::new(engine.clone(), layout.clone(), text.clone()),
+            crate::text::TextGeometry::new(engine.clone(), layout.clone(), text.clone(), spacers),
         );
     }
 }
