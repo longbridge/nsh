@@ -169,8 +169,11 @@ const allGroups: { title: string; demos: DemoEntry[] }[] = [
   },
 ];
 
-/** The demos a terminal has nothing to show for, left out of its index. */
-const TERMINAL_HIDDEN: Record<string, true> = { Shader: true, WebView: true, Video: true };
+/**
+ * The demos left out of a terminal's index: those it has nothing to show for, a rich editor (formatting a terminal
+ * cannot show) and notifications (a terminal posts none).
+ */
+const TERMINAL_HIDDEN: Record<string, true> = { Shader: true, WebView: true, Video: true, RichEditor: true, Notifications: true };
 const keyboardAvailable = !terminal && (platform.desktop || platform.os === "web");
 const groups = allGroups.map((g) => ({
   ...g,
