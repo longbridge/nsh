@@ -175,6 +175,9 @@ pub struct Graph {
     next_leaf: AnimationId,
     /// Values a composite step started in this frame.
     started: Vec<NodeId>,
+    /// Idle nodes whose velocity was preserved for a queued replacement; any
+    /// still idle after the next tick are zeroed so momentum cannot leak.
+    preserved_velocities: Vec<NodeId>,
     /// Values of each composite when it last started, for resets.
     baselines: Vec<(u32, Vec<(NodeId, f32)>)>,
     /// `diffClamp` nodes settling at a bound.
@@ -1323,12 +1326,15 @@ impl Graph {
     }
 
     fn stop_node(&mut self, node: NodeId, preserve_velocity: bool, finished: &mut Vec<Finished>) {
+        let mut preserved = false;
         if let Some(Node::Value {
             running, velocity, ..
         }) = self.node_mut(node)
         {
             if !preserve_velocity {
                 *velocity = 0.0;
+            } else if *velocity != 0.0 {
+                preserved = true;
             }
             if let Some(old) = running.take() {
                 finished.push(Finished {
@@ -1337,6 +1343,9 @@ impl Graph {
                     value: None,
                 });
             }
+        }
+        if preserved && !self.preserved_velocities.contains(&node) {
+            self.preserved_velocities.push(node);
         }
         self.animating.retain(|&n| n != node);
     }
@@ -1598,6 +1607,9 @@ impl Graph {
         }
         if !self.programs.is_empty() {
             changed |= self.run_programs(now, finished);
+        }
+        while let Some(node) = self.preserved_velocities.pop() {
+            self.clear_idle_velocity(node);
         }
         if !self.snaps.is_empty() {
             changed |= self.run_snaps(now);
@@ -4317,6 +4329,88 @@ mod tests {
         assert!(!g.is_animating());
         assert!(!g.is_finishing());
         assert_eq!(g.deadline(deadline), None);
+    }
+
+    #[test]
+    fn advancing_failed_sequence_clears_preserved_tail_velocity() {
+        let mut g = Graph::default();
+        let mut f = Vec::new();
+        values(&mut g, &mut f, &[1, 2]);
+        g.apply(
+            AnimationOp::StartComposite {
+                animation: 2,
+                key: 2,
+                spec: Composite::Parallel {
+                    children: vec![
+                        Composite::Sequence(vec![
+                            Composite::Run {
+                                node: 1,
+                                driver: timing(10.0, 50.0),
+                            },
+                            Composite::Delay(300.0),
+                        ]),
+                        Composite::Run {
+                            node: 2,
+                            driver: spring(100.0),
+                        },
+                    ],
+                    stop_together: true,
+                },
+            },
+            &mut f,
+        );
+        run(&mut g, &mut f, 0.0, 0.1);
+        let at_switch = g.value(2).unwrap();
+
+        // 17 zero-duration runs on node 1 exceed run_programs's 16-pass limit
+        // on the first tick, so node 2's spring has not started yet when node 1
+        // is released between ticks.
+        let mut steps = Vec::with_capacity(18);
+        for _ in 0..17 {
+            steps.push(Composite::Run {
+                node: 1,
+                driver: timing(0.0, 0.0),
+            });
+        }
+        steps.push(Composite::Run {
+            node: 2,
+            driver: spring(at_switch),
+        });
+        g.apply(
+            AnimationOp::StartComposite {
+                animation: 4,
+                key: 4,
+                spec: Composite::Sequence(steps),
+            },
+            &mut f,
+        );
+        assert_eq!(f, [Finished::new(2, false)]);
+        f.clear();
+
+        g.tick(0.116, &mut f);
+        // Release node 1 between ticks; the next tick fails advancing step 17
+        // and drops the sequence without ever starting node 2's spring.
+        g.apply(AnimationOp::Release { node: 1 }, &mut f);
+        g.tick(0.132, &mut f);
+        assert_eq!(f, [Finished::new(4, false)]);
+        f.clear();
+
+        // An unrelated later spring on node 2 must start from rest.
+        g.apply(
+            AnimationOp::Start {
+                node: 2,
+                animation: 6,
+                driver: spring(at_switch),
+            },
+            &mut f,
+        );
+        g.tick(0.2, &mut f);
+        g.tick(0.25, &mut f);
+        assert!(
+            (g.value(2).unwrap() - at_switch).abs() < 1e-3,
+            "failed sequence advance should clear preserved tail velocity (at_switch={at_switch}, got={:?})",
+            g.value(2)
+        );
     }
 
     /// A graph with value 1 running a linear timing to 100 over 300 ms,
