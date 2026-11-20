@@ -19,7 +19,11 @@ trusted: every limit and check is enforced in Rust, never in JS.
   rendering it causes, one list bind, one timer, one frame's callbacks, the microtask drain; nested calls share the
   outermost budget), and quotas for what the heap limit does not cover: changes at once (the op queue,
   `max_op_values`: ops are Rust memory), ops per canvas drawing, nodes in the core (`Core::set_max_nodes`; each may hold a native view) and dense
-  node ids (an id far past the ids in use would grow the id table: `ApplyError::IdOutOfRange`). Arrays the runtime
+  node ids (an id far past the ids in use would grow the id table: `ApplyError::IdOutOfRange`). Views nest
+  `nsh_core::MAX_TREE_DEPTH` (1024) levels deep in every app, standalone ones too (`ApplyError::TooDeep`, checked in
+  `Core::insert` against the depth above the parent and the height kept on the child): layout, mounting and the tree's
+  walks recurse once per level on the native stack, which no other limit bounds; sized for the engine thread's
+  8 MiB stack in a debug build. Arrays the runtime
   reads natively, where the time budget cannot interrupt (children, nested arrays counted together; `<Each>`; menus,
   submenus counted together; a tray's title; `Animated.sequence` / `parallel` / `stagger`; `split`'s keys; a navigation
   stack's routes; a native component's `props` and `events`; a pan's `touches`; a canvas call's arguments, counted
@@ -87,11 +91,18 @@ trusted: every limit and check is enforced in Rust, never in JS.
   without it the root reaches what an app without a declaration does.
 - Enforced in Rust: `fetch` in the engine (`access.rs`; refused requests never reach the network, and redirects are
   followed by the engine with `follow_redirects` off for the platform, so every hop is checked — hops are issued on the
-  engine thread when a hop's head arrives; a streamed request body is not sent again, so a 307 / 308 then fails); remote images, placeholders, canvas images, `Image.getSize` / `prefetch`, video sources, web view
+  engine thread when a hop's head arrives; a streamed request body is not sent again, so a 307 / 308 then fails; a hop to another origin, `nsh_core::access::is_same_origin`, drops `Authorization`, `Cookie` and `Proxy-Authorization` from it and every later hop, as Fetch drops `Authorization`); remote images, placeholders, canvas images, `Image.getSize` / `prefetch`, video sources, web view
   sources and inline HTML's base URLs, trusted web view input (`Command::SendInput`), the status bar, the clipboard, the picker, the share sheet, the application menu and window opening (`Command::Desktop` but `PopupMenu`, `OpenWindow` and
   the app's own windows' commands), speech sessions, sounds and players (`AudioAction::Open`) and host calls in the core (`Core::check_prop`, the commit's commands and actions;
   each refusal is logged once, target `js`, saying which key to add); top-level web view navigations on the platforms
   (`WKNavigationDelegate decidePolicyForNavigationAction` / `WebViewClient.shouldOverrideUrlLoading` → `Native.allowsWebview`).
+  A web view download takes the grant a page at its URL would: the core checks the offer's URL, the response's after
+  the platform followed its redirects (`Core::download_event`; Windows' offer URL is not checked to be that, see
+  `elements.md`), and a refused download is never staged or offered; its transfer is cancelled and an `onDownload`
+  listener hears `failed` with `ERR_ACCESS_DENIED`. The page's own content (`data:`, `blob:`) reaches no host and is
+  not checked. On iOS and macOS the
+  `WKDownloadDelegate` also cancels a redirect the grant does not allow before it is requested
+  (`download:willPerformHTTPRedirection:newRequest:decisionHandler:` in `nsh-platform-apple` `web_download.rs`).
 - What a refusal does: every call JS makes fails with `JsError::access_denied` (`ERR_ACCESS_DENIED`, `permission` the
   capability's key, `resource` what was asked for, `""` when the capability has none), which its promise rejects with.
   The modules check in the call, on the `System` the call gets, so the error is typed and nothing is queued:

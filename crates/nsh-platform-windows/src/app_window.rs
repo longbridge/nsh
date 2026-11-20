@@ -33,7 +33,8 @@
 //! - **State**: its mode, bounds, focus and display are reported as
 //!   `WindowEvent::State` on its root; a move or a resize once it settles.
 //!   The area of its hidden title bar goes before it
-//!   (`WindowEvent::TitleBar`).
+//!   (`WindowEvent::TitleBar`): reported as soon as the window is made, so
+//!   the app's first frame reserves it, and again whenever it changes.
 
 use std::{
     cell::{Cell, RefCell},
@@ -748,10 +749,10 @@ pub(crate) fn title_bar_changed(surface: &Surface, id: NodeId, area: Edges<Point
     let Some(shell) = crate::window::shell(window.hwnd) else {
         return;
     };
-    // Reported first with its first state, once it shows.
-    if !window.opened.get() {
-        return;
-    }
+    // Reported as soon as the window exists (its creation sets the
+    // attributes), not once it shows: the app's first frame reserves the
+    // area, as it can on macOS and Linux. Its state still follows once it
+    // shows.
     if shell.title_bar.replace(Some(area)) != Some(area) {
         report(surface, id, WindowEvent::TitleBar(area));
     }
@@ -937,5 +938,79 @@ fn destroy(surface: &Surface, window: &AppWindow) {
         if IsWindow(Some(window.hwnd)).as_bool() {
             let _ = DestroyWindow(window.hwnd);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nsh_core::{
+        ViewKind,
+        desktop::{TitleBarOptions, TitleBarStyle, WindowAttributes},
+    };
+
+    use super::*;
+
+    /// A window's hidden title bar is known when the window is made, not
+    /// only once it shows: the platform reports it then, so the app's first
+    /// frame reserves the controls. Its first state still comes once it
+    /// shows.
+    #[test]
+    fn a_hidden_title_bar_is_known_before_the_window_shows() {
+        let app = crate::app::AppView::new(None, Default::default()).unwrap();
+        let surface = app.surface();
+        let id: NodeId = 7;
+        let view = NshView::new(id, ViewKind::Modal);
+        let mut title_bar = TitleBarOptions::default();
+        title_bar.style = TitleBarStyle::Hidden;
+        title_bar.height = Some(Points(40.0));
+        let mut attributes = WindowAttributes::default();
+        attributes.title_bar = Some(title_bar);
+        let hwnd = crate::window::create_app_window(
+            surface,
+            id,
+            WindowKind::Normal,
+            &attributes,
+            None,
+            false,
+        )
+        .unwrap();
+        surface.windows.borrow_mut().push(Rc::new(AppWindow {
+            id,
+            hwnd,
+            view,
+            owner: None,
+            modal: false,
+            composition: None,
+            web: RefCell::default(),
+            placed: RefCell::default(),
+            composed: RefCell::default(),
+            swap: RefCell::new(None),
+            target_scale: Cell::new(0.0),
+            pixels: Cell::new((0, 0)),
+            scale: Cell::new(1.0),
+            invalid: Cell::new(false),
+            reported: Cell::new(None),
+            opened: Cell::new(false),
+            closed: Cell::new(false),
+            hidden: Cell::new(false),
+            state: Cell::new(None),
+        }));
+        // Its attributes, as `open` sets them.
+        let mut resolved = crate::shell::Attrs::of_kind(WindowKind::Normal);
+        resolved.merge(&attributes);
+        crate::shell::sync(surface, hwnd, None, resolved);
+        let area = crate::chrome::title_bar_area(hwnd);
+        assert!(area.top.0 > 0.0 && area.right.0 > 0.0, "{area:?}");
+        assert_eq!(
+            crate::window::shell(hwnd).unwrap().title_bar.get(),
+            Some(area),
+            "the area is reported before the first show"
+        );
+        assert!(!get(surface, id).unwrap().opened.get(), "not shown yet");
+        // SAFETY: the test's own window.
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+        surface.windows.borrow_mut().clear();
     }
 }

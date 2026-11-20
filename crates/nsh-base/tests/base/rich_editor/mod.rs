@@ -8,6 +8,7 @@ mod commands;
 mod composition;
 mod content_size;
 mod extensions;
+mod layout_hits;
 mod marks_clipboard_history;
 mod node_view_presses;
 mod selection;
