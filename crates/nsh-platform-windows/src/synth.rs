@@ -4,7 +4,7 @@
 //! the focused web page's window), and pictures of the window. The agent
 //! of `nsh test --target windows` acts with them ([`crate::agent`]).
 
-use std::{cell::Cell, rc::Rc};
+use std::rc::Rc;
 
 use nsh_core::{NodeId, ROOT_ID};
 use windows::Win32::Foundation::HWND;
@@ -14,21 +14,6 @@ use crate::{
     surface::Surface,
     view::NshView,
 };
-
-thread_local! {
-    /// A button of the agent's pointer is down ([`pointer`]).
-    static HOLDING: Cell<bool> = const { Cell::new(false) };
-}
-
-/// Whether a button of the agent's pointer is held down: the real mouse's
-/// moves are then not the pointer's. A real press captures the mouse, so
-/// its moves come to its window alone; the agent's presses capture
-/// nothing, and a window moving under the resting cursor (one the press
-/// activated, raised over another) makes the system send that window a
-/// move of the real mouse, which would drag the press away.
-pub(crate) fn holding() -> bool {
-    HOLDING.get()
-}
 
 /// A pointer event of the mouse's `button` (0: primary, 3: back) at `x`,
 /// `y` (points, root coordinates), with the buttons `held` after it (bit
@@ -41,7 +26,6 @@ pub(crate) fn pointer(
     button: u8,
     held: u8,
 ) {
-    HOLDING.set(held != 0);
     crate::input::pointer(
         surface,
         PointerEvent {

@@ -1465,10 +1465,6 @@ fn handle(
             crate::window_state::displays_changed(surface);
         }
         WM_MOUSEMOVE => {
-            #[cfg(feature = "dev")]
-            if crate::synth::holding() {
-                return Some(LRESULT(0));
-            }
             if crate::chrome::press_moved(surface, hwnd, lparam) {
                 return Some(LRESULT(0));
             }
