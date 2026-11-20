@@ -849,14 +849,15 @@ impl<'a> Converter<'a> {
     /// A formatting element in text whose content is Markdown
     /// (`<strong>b *c*</strong>`: `c` is emphasized), as gpui-kit pairs
     /// formatting tags: the element as HTML reads its opening tag (a
-    /// `<mark>`'s color, a link's URL), holding the Markdown between its
-    /// tags. `None` for other elements, read as HTML.
+    /// `<mark>`'s color, a `<span>`'s text color, a link's URL), holding the
+    /// Markdown between its tags. `None` for other elements (and for a
+    /// `<span>` or `<font>` without a color), read as HTML.
     fn formatting_element(&mut self, nodes: &[Node], open: usize, close: usize) -> Option<Inline> {
         /// Stands for the content while the opening tag is read.
         const CONTENT: &str = "\u{e000}";
         const FORMATTING: &[&str] = &[
-            "a", "b", "cite", "del", "dfn", "em", "i", "ins", "mark", "s", "small", "strike",
-            "strong", "sub", "sup", "u", "var",
+            "a", "b", "cite", "del", "dfn", "em", "font", "i", "ins", "mark", "s", "small", "span",
+            "strike", "strong", "sub", "sup", "u", "var",
         ];
         let Node::Html(tag) = &nodes[open] else {
             return None;
@@ -873,6 +874,7 @@ impl<'a> Converter<'a> {
             | Inline::Strikethrough { content }
             | Inline::Underline { content }
             | Inline::Highlight { content, .. }
+            | Inline::TextStyle { content, .. }
             | Inline::Superscript { content }
             | Inline::Subscript { content }
             | Inline::Small { content }
@@ -1222,6 +1224,7 @@ fn has_link(inline: &Inline) -> bool {
         | Inline::Strikethrough { content }
         | Inline::Underline { content }
         | Inline::Highlight { content, .. }
+        | Inline::TextStyle { content, .. }
         | Inline::Superscript { content }
         | Inline::Subscript { content }
         | Inline::Small { content } => content.iter().any(has_link),
@@ -1237,6 +1240,7 @@ fn formatted_content(inline: &mut Inline) -> Option<&mut Vec<Inline>> {
         | Inline::Strikethrough { content }
         | Inline::Underline { content }
         | Inline::Highlight { content, .. }
+        | Inline::TextStyle { content, .. }
         | Inline::Superscript { content }
         | Inline::Subscript { content }
         | Inline::Small { content } => Some(content),

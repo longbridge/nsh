@@ -300,6 +300,7 @@ impl Cut {
                 | Inline::Strikethrough { content }
                 | Inline::Underline { content }
                 | Inline::Highlight { content, .. }
+                | Inline::TextStyle { content, .. }
                 | Inline::Superscript { content }
                 | Inline::Subscript { content }
                 | Inline::Small { content }
@@ -479,12 +480,18 @@ fn content_mut(inline: &mut Inline) -> Option<&mut Vec<Inline>> {
         | Inline::Strikethrough { content }
         | Inline::Underline { content }
         | Inline::Highlight { content, .. }
+        | Inline::TextStyle { content, .. }
         | Inline::Superscript { content }
         | Inline::Subscript { content }
         | Inline::Small { content }
         | Inline::Link { content, .. } => Some(content),
         _ => None,
     }
+}
+
+/// `color` when it is a CSS color, so a `style` attribute can carry it.
+fn style_color(color: Option<&str>) -> Option<&str> {
+    color.map(str::trim).filter(|c| c.parse::<Hsla>().is_ok())
 }
 
 fn floor(s: &str, mut i: usize) -> usize {
@@ -701,6 +708,18 @@ fn md_inline(inline: &Inline, out: &mut String) {
         Inline::Strikethrough { content } => wrap("~~", content, out),
         Inline::Underline { content } => tag("u", content, out),
         Inline::Highlight { content, .. } => tag("mark", content, out),
+        // Markdown has no colors: a colored run is written as the HTML
+        // span that carries its color, its content Markdown.
+        Inline::TextStyle { content, color } => match style_color(color.as_deref()) {
+            Some(color) => {
+                out.push_str("<span style=\"color: ");
+                escape(color, out);
+                out.push_str("\">");
+                md_inlines(content, out);
+                out.push_str("</span>");
+            }
+            None => md_inlines(content, out),
+        },
         Inline::Superscript { content } => tag("sup", content, out),
         Inline::Subscript { content } => tag("sub", content, out),
         Inline::Small { content } => tag("small", content, out),
@@ -955,6 +974,16 @@ fn html_inline(inline: &Inline, out: &mut String) {
         Inline::Strikethrough { content } => tag("del", content, out),
         Inline::Underline { content } => tag("u", content, out),
         Inline::Highlight { content, .. } => tag("mark", content, out),
+        Inline::TextStyle { content, color } => match style_color(color.as_deref()) {
+            Some(color) => {
+                out.push_str("<span style=\"color: ");
+                escape(color, out);
+                out.push_str("\">");
+                html_inlines(content, out);
+                out.push_str("</span>");
+            }
+            None => html_inlines(content, out),
+        },
         Inline::Superscript { content } => tag("sup", content, out),
         Inline::Subscript { content } => tag("sub", content, out),
         Inline::Small { content } => tag("small", content, out),
@@ -1087,6 +1116,37 @@ mod tests {
             sel(md, "is pa", TextSelectionFormat::Html),
             "<p><strong>is</strong> pa</p>"
         );
+    }
+
+    #[test]
+    fn a_part_keeps_its_colors() {
+        let md = r#"Quote <span style="color: #e54545">this **red**</span> part"#;
+        assert_eq!(
+            sel(md, "is red pa", TextSelectionFormat::Markdown),
+            r#"<span style="color: #e54545">is **red**</span> pa"#
+        );
+        assert_eq!(
+            sel(md, "is red pa", TextSelectionFormat::Html),
+            r#"<p><span style="color: #e54545">is <strong>red</strong></span> pa</p>"#
+        );
+    }
+
+    #[test]
+    fn a_color_that_is_no_css_color_is_not_written() {
+        // The app's document may carry anything; a style carries colors only.
+        let doc = Document::new(vec![Block::paragraph(vec![Inline::TextStyle {
+            content: vec![Inline::text("x")],
+            color: Some("red; background: url(a.png)".into()),
+        }])]);
+        let reported = Reported {
+            text: "x".into(),
+            start: None,
+        };
+        for format in [TextSelectionFormat::Markdown, TextSelectionFormat::Html] {
+            let out = selected(&doc, &Source::None, &reported, format);
+            assert!(!out.contains("style"), "{out}");
+            assert!(out.contains('x'), "{out}");
+        }
     }
 
     #[test]
