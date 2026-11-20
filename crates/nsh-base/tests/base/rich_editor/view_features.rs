@@ -6,6 +6,7 @@
 //! 5..6, the gap between them 5.
 
 use nsh_base::rich_editor::model::{AttrSpec, NodeSpec};
+use nsh_core::element::Root;
 
 use super::*;
 
