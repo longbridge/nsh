@@ -564,7 +564,10 @@ own background, so what its children filled stays, and it is at least one step a
   the box it splits: in the frame's color (a popup's line color in a popup), lit only in its accent, its box's
   fill (the app's line color on a hairline) no band; where it ends on another line (a frame's side, another
   divider) the two are joined, `├ ┤ ┬ ┴ ┼` (`render::join_lines`), and so are the ends of a box's lone line across
-  (a search field's rule under it, a footer's over it), in a modal too;
+  (a search field's rule under it, a footer's over it), in a modal too. Only a divider that splits its box from
+  side to side joins: each of its ends meets a line of the innermost box around it that draws lines, or that
+  box's edge; one that stops short at either end (a separator in one row of a wrapped toolbar) joins neither,
+  nor does a line inside a control or a picture (a slider's track, a color slider's thumb), which is no divider;
 - a framed box that is itself the focused stop, or the part showing its control's focus (a one-time code's next
   cell), shows its line in the accent (blue), bold: the line glyphs of the sides that draw one, never a text on
   the box's row (a sidebar's first row under only its right line); so does a pane holding the focus, the

@@ -252,8 +252,9 @@ struct Layer {
     /// its line, as a handle's.
     rule: bool,
     /// Among texts of a row that draws more than lines (a slider's track
-    /// beside its thumb, a progress bar's track beside its fill): a run of
-    /// `─` there is part of that control, no divider of the box.
+    /// beside its thumb, a progress bar's track beside its fill) or inside
+    /// a picture (a color slider's Cells and its thumb's `│`): a run of
+    /// lines there is part of that control, no divider of the box.
     track: bool,
     /// The Cells of the innermost box around the view that draws lines
     /// (its sides, or a frame around it): a divider's ends join only the
@@ -296,9 +297,9 @@ struct Painter<'a> {
     spans: HashMap<NodeId, crate::keyboard::Span>,
     /// The canvas colors drawn this frame, kept apart at 16 colors.
     hues: palette::Hues,
-    /// The Cells of the dividers drawn this frame (a resize handle's line,
-    /// a menu's separator) and whether each runs down: where they meet
-    /// another line they are joined with it ([`join_lines`]).
+    /// The dividers drawn this frame (a resize handle's line, a menu's
+    /// separator): where both ends of one meet lines of its box it is
+    /// joined with them ([`join_lines`]).
     dividers: Vec<Divider>,
 }
 
@@ -413,13 +414,17 @@ impl Painter<'_> {
         // Such a group whose field has the keys shows it on its band.
         let group_focused = holds_field && focused_field_in(self.tree, id, 3);
         let rule_box = holds_rule(self.tree, id, 3);
-        // A row of lines among marks (a slider's track), and anything in a
-        // progress bar (its track, empty at 0): part of the control, no
-        // divider of the box around it.
+        // A row of lines among marks (a slider's track), anything in a
+        // progress bar (its track, empty at 0) and anything in a picture (a
+        // color slider's Cell, the thumb's `│` on it): part of the control,
+        // no divider of the box around it.
         let track = layer.track
             || lines_with_marks(self.tree, id)
             || self.tree.get(id).is_some_and(|view| {
-                view.props.accessibility.role == AccessibilityRole::Progressbar
+                matches!(
+                    view.props.accessibility.role,
+                    AccessibilityRole::Progressbar | AccessibilityRole::Image
+                )
             });
         // An overlay's scrim (a translucent fill with no text in it that
         // the keys never reach, the app's backdrop, whatever it covers: a
@@ -1000,18 +1005,13 @@ impl Painter<'_> {
                 && (visible.y..visible.bottom()).contains(&y)
                 && !visible.is_empty()
             {
-                let inside = |x: i32| {
-                    layer.frame.or(layer.parent).is_none_or(|frame| {
-                        (i32::from(frame.x)..i32::from(frame.right())).contains(&x)
-                    })
-                };
-                if inside(i32::from(visible.x) - 1) {
-                    self.dividers.push((visible.x, y, false, layer.overlay));
-                }
-                if inside(i32::from(visible.right())) {
-                    self.dividers
-                        .push((visible.right() - 1, y, false, layer.overlay));
-                }
+                self.dividers.push(Divider {
+                    start: Position::new(visible.x, y),
+                    len: visible.width,
+                    down: false,
+                    bridge: layer.overlay,
+                    within: layer.frame.or(layer.parent),
+                });
             }
             // Where the terminal has surfaces the title is set off by the
             // line on both sides: `╭─ Title ─`.
@@ -1062,10 +1062,20 @@ impl Painter<'_> {
                 if let Some(down) = rule {
                     let drawn = text_bounds.clipped(visible);
                     let glyph = if down { "│" } else { "─" };
-                    for y in drawn.y..drawn.bottom() {
-                        for x in drawn.x..drawn.right() {
+                    let (lanes, along) = if down {
+                        (drawn.x..drawn.right(), drawn.y..drawn.bottom())
+                    } else {
+                        (drawn.y..drawn.bottom(), drawn.x..drawn.right())
+                    };
+                    // Each unbroken run of the line is one divider: its
+                    // ends are where it meets the lines it may join.
+                    for lane in lanes {
+                        let mut run: Option<Divider> = None;
+                        for step in along.clone() {
+                            let (x, y) = if down { (lane, step) } else { (step, lane) };
                             let cell = &mut self.buffer[(x, y)];
                             if cell.symbol() != glyph {
+                                self.dividers.extend(run.take());
                                 continue;
                             }
                             // A divider is a line of the box it splits: in
@@ -1081,8 +1091,23 @@ impl Painter<'_> {
                                 };
                                 cell.modifier = Modifier::empty();
                             }
-                            self.dividers.push((x, y, down, layer.overlay));
+                            match &mut run {
+                                Some(run) => run.len += 1,
+                                None => {
+                                    run = Some(Divider {
+                                        start: Position::new(x, y),
+                                        len: 1,
+                                        down,
+                                        bridge: layer.overlay,
+                                        // The box it splits is the one that
+                                        // draws lines around it, not the
+                                        // view drawing its glyphs.
+                                        within: layer.frame,
+                                    });
+                                }
+                            }
                         }
+                        self.dividers.extend(run);
                     }
                 }
             }
@@ -2310,16 +2335,35 @@ const ARMS: [(&str, [bool; 4]); 15] = [
     ("┼", [true, true, true, true]),
 ];
 
-/// A divider's Cell: its column and row, whether it runs down (else
-/// across), and whether it may bridge a blank Cell to reach a frame (in an
-/// overlay).
-type Divider = (u16, u16, bool, bool);
+/// A divider drawn this frame: an unbroken run of `─` across or `│` down
+/// (a resize handle's line, a menu's separator, a box's lone line).
+#[derive(Clone, Copy)]
+struct Divider {
+    /// Its first Cell: the leftmost of a run across, the top of one down.
+    start: Position,
+    /// How many Cells it runs.
+    len: u16,
+    /// Whether it runs down (else across).
+    down: bool,
+    /// Whether it may bridge a blank Cell to reach a frame (in an overlay).
+    bridge: bool,
+    /// The Cells of the box it splits (`Layer::frame`; a box's lone line
+    /// falls back on its parent's): its ends join only lines inside them.
+    within: Option<Rect>,
+}
 
 /// Joins each divider's ends with the lines they reach: a divider running
 /// across that ends on a line running down (a frame's side, another
 /// divider) turns it into `├` / `┤` (`┼` across it), one running down that
 /// ends on a line across turns it into `┬` / `┴`, as a box drawn in lines
 /// joins its own.
+///
+/// A divider splits its box from side to side: only one whose two ends
+/// each meet a line across it inside that box, or run to the box's edge
+/// (the screen's, where no box around draws lines), is joined. A line that
+/// stops short at either end (a separator in one row of a wrapped
+/// toolbar) is no divider of the lines it happens to touch, and joins
+/// neither.
 fn join_lines(buffer: &mut Buffer, dividers: &[Divider]) {
     let arms = |symbol: &str| {
         ARMS.iter()
@@ -2327,55 +2371,95 @@ fn join_lines(buffer: &mut Buffer, dividers: &[Divider]) {
             .map(|(_, arms)| *arms)
     };
     let area = buffer.area;
-    for &(x, y, down, bridge) in dividers {
-        let expected = if down { "│" } else { "─" };
-        if buffer[(x, y)].symbol() != expected {
-            // Covered since (an overlay drawn over it).
-            continue;
-        }
-        // Its two ends' neighbors along its own line, and the arm each
-        // takes toward it (up, right, down, left).
+    for divider in dividers {
+        let Divider {
+            start,
+            len,
+            down,
+            bridge,
+            within,
+        } = *divider;
+        let inside = |(x, y): (i32, i32)| {
+            let holds = |rect: Rect| {
+                (i32::from(rect.x)..i32::from(rect.right())).contains(&x)
+                    && (i32::from(rect.y)..i32::from(rect.bottom())).contains(&y)
+            };
+            holds(area) && within.is_none_or(holds)
+        };
+        let symbol = |(x, y): (i32, i32)| buffer[(x as u16, y as u16)].symbol();
+        // A line along the divider (another thumb over it) continues it;
+        // only one across it is a line it ends on.
+        let along = |arms: [bool; 4]| {
+            if down {
+                arms[0] && arms[2]
+            } else {
+                arms[1] && arms[3]
+            }
+        };
+        let across = |arms: [bool; 4]| {
+            if down {
+                arms[1] || arms[3]
+            } else {
+                arms[0] || arms[2]
+            }
+        };
+        let (x, y) = (i32::from(start.x), i32::from(start.y));
+        let last = i32::from(len) - 1;
+        // Its two end Cells, the step out of each, and the arm the line
+        // beyond takes toward it (up, right, down, left).
         let ends = if down {
-            [
-                (i32::from(x), i32::from(y) - 1, 2),
-                (i32::from(x), i32::from(y) + 1, 0),
-            ]
+            [((x, y), (0, -1), 2), ((x, y + last), (0, 1), 0)]
         } else {
-            [
-                (i32::from(x) - 1, i32::from(y), 1),
-                (i32::from(x) + 1, i32::from(y), 3),
-            ]
+            [((x, y), (-1, 0), 1), ((x + last, y), (1, 0), 3)]
         };
-        let within = |x: i32, y: i32| {
-            x >= i32::from(area.x)
-                && y >= i32::from(area.y)
-                && x < i32::from(area.right())
-                && y < i32::from(area.bottom())
-        };
-        for (mut nx, ny, arm) in ends {
-            if !within(nx, ny) {
+        // Whether each end reaches its box's side: the line it meets there
+        // (none at the box's edge) and the blank Cell bridged on the way.
+        let mut reached = [None; 2];
+        for (reach, &(end, (dx, dy), _)) in reached.iter_mut().zip(&ends) {
+            // Covered since (an overlay drawn over its end).
+            if !inside(end) || !arms(symbol(end)).is_some_and(along) {
+                break;
+            }
+            let mut next = (end.0 + dx, end.1 + dy);
+            if !inside(next) {
+                *reach = Some(None);
                 continue;
             }
+            let mut gap = None;
             // A row across a popup's content stops at its padding: a
             // blank Cell, then the frame's side, is bridged (a menu's
             // separator reaches its frame). On the page a rule joins only
             // the line it touches: one inside a card (a heading's) is the
             // card's content, not a divider of it.
-            let beyond = nx + (nx - i32::from(x));
+            let beyond = (next.0 + dx, next.1 + dy);
             if !down
                 && bridge
-                && buffer[(nx as u16, ny as u16)].symbol() == " "
-                && within(beyond, ny)
-                && arms(buffer[(beyond as u16, ny as u16)].symbol())
-                    .is_some_and(|arms| arms[0] && arms[2])
+                && symbol(next) == " "
+                && inside(beyond)
+                && arms(symbol(beyond)).is_some_and(|arms| arms[0] && arms[2])
             {
-                let style = buffer[(x, y)].style();
-                let gap = &mut buffer[(nx as u16, ny as u16)];
-                gap.set_symbol("─");
-                gap.set_style(style);
-                nx = beyond;
+                gap = Some(next);
+                next = beyond;
             }
-            let cell = &mut buffer[(nx as u16, ny as u16)];
+            if arms(symbol(next)).is_some_and(across) {
+                *reach = Some(Some((next, gap)));
+            }
+        }
+        let [Some(first), Some(second)] = reached else {
+            continue;
+        };
+        for ((line, gap), (end, _, arm)) in [first, second]
+            .into_iter()
+            .zip(ends)
+            .filter_map(|(met, end)| Some((met?, end)))
+        {
+            if let Some((gx, gy)) = gap {
+                let style = buffer[(end.0 as u16, end.1 as u16)].style();
+                let cell = &mut buffer[(gx as u16, gy as u16)];
+                cell.set_symbol("─");
+                cell.set_style(style);
+            }
+            let cell = &mut buffer[(line.0 as u16, line.1 as u16)];
             let Some(mut joined) = arms(cell.symbol()) else {
                 continue;
             };
