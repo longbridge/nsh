@@ -155,6 +155,7 @@ pub(crate) fn draw(
         spans: std::mem::take(&mut tree_spans),
         hues: palette::Hues::default(),
         dividers: Vec::new(),
+        sticky: Vec::new(),
     };
     painter.pane = focus_pane(painter.tree);
     let root = Layer::default();
@@ -301,6 +302,11 @@ struct Painter<'a> {
     /// separator): where both ends of one meet lines of its box it is
     /// joined with them ([`join_lines`]).
     dividers: Vec<Divider>,
+    /// The shifts of the sticky cells of the scroll views being drawn,
+    /// outermost first: a cell may sit deeper than its scroll view's
+    /// children (a list's cells in the scroll view around it, a `position:
+    /// sticky` view), and is shifted wherever its parent draws it.
+    sticky: Vec<(NodeId, Point<Points>)>,
 }
 
 /// How far from a framed box's right line a scroll view's right edge may
@@ -1205,12 +1211,13 @@ impl Painter<'_> {
             }
         }
 
-        let sticky: Vec<(NodeId, Point<Points>)> = view
-            .scroll
-            .as_ref()
-            .filter(|scroll| !scroll.sticky.is_empty())
-            .map(|scroll| scroll.sticky_shifts().collect())
-            .unwrap_or_default();
+        let sticky_mark = self.sticky.len();
+        if let Some(scroll) = view.scroll.as_ref().filter(|s| !s.sticky.is_empty()) {
+            // An animated offset (`stickyHeaderOffset`) is the graph's now.
+            let animator = &self.tree.animator;
+            self.sticky
+                .extend(scroll.sticky_shifts_with(|node| animator.value(node)));
+        }
         let content_origin = at - scroll_origin;
         let outer_focus = std::mem::take(&mut self.focus);
         let own_disabled =
@@ -1251,46 +1258,64 @@ impl Painter<'_> {
                 height: visible.height + 2,
             });
         }
-        let mut index = 0;
-        while let Some(child) = self
-            .tree
-            .get(id)
-            .and_then(|view| view.children.get(index).copied())
-        {
-            index += 1;
-            if self
+        // Sticky cells draw (and take the pointer: hits are in paint
+        // order) over the other children, in the order they are among
+        // them, as the desktops raise them.
+        let mut raised = false;
+        loop {
+            let mut index = 0;
+            let mut deferred = false;
+            while let Some(child) = self
                 .tree
-                .get(child)
-                .is_some_and(|view| view.kind == ViewKind::Modal)
+                .get(id)
+                .and_then(|view| view.children.get(index).copied())
             {
-                continue;
+                index += 1;
+                if self
+                    .tree
+                    .get(child)
+                    .is_some_and(|view| view.kind == ViewKind::Modal)
+                {
+                    continue;
+                }
+                let shift = self
+                    .sticky
+                    .iter()
+                    .rev()
+                    .find(|(cell, _)| *cell == child)
+                    .map(|&(_, shift)| shift);
+                if shift.is_some() != raised {
+                    deferred |= shift.is_some();
+                    continue;
+                }
+                // An anchored overlay stands over everything, wherever its
+                // owner is.
+                let child_clip = if self
+                    .tree
+                    .get(child)
+                    .is_some_and(|view| view.props.overlay_anchor.is_some())
+                {
+                    self.screen
+                } else {
+                    children_clip
+                };
+                self.view(
+                    child,
+                    content_origin + shift.unwrap_or_default(),
+                    child_clip,
+                    opacity,
+                    ground,
+                    child_layer.clone(),
+                    children_pointer,
+                    press,
+                );
             }
-            // An anchored overlay stands over everything, wherever its
-            // owner is.
-            let child_clip = if self
-                .tree
-                .get(child)
-                .is_some_and(|view| view.props.overlay_anchor.is_some())
-            {
-                self.screen
-            } else {
-                children_clip
-            };
-            let shift = sticky
-                .iter()
-                .find(|(cell, _)| *cell == child)
-                .map_or_else(Point::default, |(_, shift)| *shift);
-            self.view(
-                child,
-                content_origin + shift,
-                child_clip,
-                opacity,
-                ground,
-                child_layer.clone(),
-                children_pointer,
-                press,
-            );
+            if raised || !deferred {
+                break;
+            }
+            raised = true;
         }
+        self.sticky.truncate(sticky_mark);
 
         let Some(view) = self.tree.get(id) else {
             return;
