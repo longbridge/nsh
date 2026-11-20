@@ -7218,6 +7218,15 @@ class Player {
         if (el?._field) el._field.blur();
         else document.activeElement?.blur?.();
         break;
+      case "clearSelection": {
+        // The selection of the selectable view `el` is, is in or holds:
+        // `selectionchange` then reports `""`.
+        const sel = getSelection();
+        const anchor = sel?.rangeCount ? sel.anchorNode : null;
+        const area = anchor && this.areaOf(anchor.nodeType === 1 ? anchor : anchor.parentElement);
+        if (el && area && (el.contains(area) || area.contains(el))) sel.removeAllRanges();
+        break;
+      }
       case "setSelection": el?._field?.setSelectionRange(args[0], args[1]); break;
       case "insertText": {
         // As the user's typing: the browser's undo history keeps it and
