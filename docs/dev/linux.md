@@ -168,9 +168,12 @@ bubble back up. What NSH adds:
   Ctrl+R gets no shortcut (the dev host reloads). GDK does not mark auto-repeats: a binding without `repeat` fires
   once until the window's capture-phase key controller sees a release.
 - **Focus**: Tab / Shift+Tab is GTK's, in screen order (GTK sorts a container's children by position); hidden screens
-  are not child visible, and the views under the newest dialog cannot take the focus. A removed view takes the focus
-  inside it away at once (`input::removed`), as a removed DOM element does, instead of GTK handing it to the next
-  field. Alerts (`system.rs`) move it between their own buttons. Return and Space press the focused stop on
+  are not child visible, and the views under the newest dialog cannot take the focus. Closing or releasing a dialog
+  restores the prior keyboard focus inside its window when no other control has taken it and no newer modal remains
+  above it; editor and rich-editor caret sinks reject pointer targeting (`can_target == false`) but still regain
+  keyboard focus, while hidden, zero-sized, disabled, dying or detached targets remain unfocused. A removed view takes
+  the focus inside it away at once (`input::removed`), as a removed DOM element does, instead of GTK handing it to the
+  next field. Alerts (`system.rs`) move it between their own buttons. Return and Space press the focused stop on
   key-down, once per press: their auto-repeats in the same window are consumed until the release, even when the
   press moved the focus.
 

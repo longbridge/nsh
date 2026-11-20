@@ -594,6 +594,11 @@ struct Node {
     inline: bool,
     parent: Key,
     children: Vec<Key>,
+    /// How many levels of views are under it, at most: what an insert
+    /// under it raised it to, and what leaves it does not lower
+    /// ([`Core::count_heights`] counts them when that matters). At least
+    /// one more than each child's.
+    height: u32,
     /// Layout node. Present exactly for nodes that render a native view.
     /// Raw text and spans have none.
     layout: Option<LayoutId>,
@@ -959,6 +964,7 @@ impl Node {
             inline: false,
             parent: NO_KEY,
             children: Vec::new(),
+            height: 0,
             layout: None,
             base_layout: None,
             view_style: Sparse::default(),
@@ -1204,6 +1210,15 @@ fn take_queued_binds(binds: &mut Vec<ListBind>, list: NodeId) -> Vec<u32> {
     slots
 }
 
+/// How deep views nest under the root: an insert that would put a view
+/// deeper is refused ([`ApplyError::TooDeep`]). Layout, mounting and the
+/// walks of the tree recurse once per level, on the native stack, which
+/// neither the node quota nor the interpreter's stack limit bounds: without
+/// this a chain of views overflows it and aborts the process. Far deeper
+/// than a UI nests, and shallow enough for the engine thread's 8 MiB stack
+/// in a debug build.
+pub const MAX_TREE_DEPTH: usize = 1024;
+
 /// An op referenced a node in an impossible way. This is a renderer bug;
 /// the op is skipped and the tree stays consistent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1220,6 +1235,9 @@ pub enum ApplyError {
     Cycle(NodeId),
     /// Creating the node would exceed the node quota ([`Core::set_max_nodes`]).
     TooManyNodes(usize),
+    /// The insert would nest views deeper than the depth quota
+    /// ([`MAX_TREE_DEPTH`]).
+    TooDeep(usize),
     /// A new id far beyond the ids in use (ids index a table, so they must
     /// stay dense).
     IdOutOfRange(NodeId),
@@ -1231,7 +1249,7 @@ impl ApplyError {
     pub fn is_fatal(&self) -> bool {
         matches!(
             self,
-            ApplyError::TooManyNodes(_) | ApplyError::IdOutOfRange(_)
+            ApplyError::TooManyNodes(_) | ApplyError::TooDeep(_) | ApplyError::IdOutOfRange(_)
         )
     }
 }
@@ -1259,6 +1277,8 @@ pub struct Core<M: TextEngine> {
     nodes: Slab<Node>,
     /// Node id -> key + 1 (0 = none). Ids are dense, so this is a flat vec.
     slots: crate::id_table::IdTable<Key>,
+    /// The extent reached by admitted ids. JS keeps issuing new ids after a page is freed.
+    admitted_id_extent: usize,
     /// Raw text runs kept without a node (#1345): a run not in the tree,
     /// or the only child of a text block or span, which shows it. Any
     /// other use makes its node ([`Core::materialize_run`]).
@@ -1669,6 +1689,7 @@ impl<M: TextEngine> Core<M> {
         slots.insert(ROOT_ID as usize, root);
         Self {
             nodes,
+            admitted_id_extent: slots.extent(),
             slots,
             layout,
             text_engine: Rc::new(text_engine),
@@ -2723,9 +2744,7 @@ impl<M: TextEngine> Core<M> {
                 if self.slots.contains(idx) || self.runs.contains_key(&id) {
                     return Err(ApplyError::DuplicateNode(id));
                 }
-                if idx > self.slots.extent().saturating_add(self.max_nodes) {
-                    return Err(ApplyError::IdOutOfRange(id));
-                }
+                self.check_id_range(id)?;
                 if self.fold_runs {
                     self.runs.insert(
                         id,
@@ -2734,6 +2753,7 @@ impl<M: TextEngine> Core<M> {
                             block: NO_KEY,
                         },
                     );
+                    self.admitted_id_extent = self.admitted_id_extent.max(idx.saturating_add(1));
                     return Ok(());
                 }
                 let key = self.alloc(id, Kind::RawText)?;
@@ -3898,19 +3918,29 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    fn check_id_range(&self, id: NodeId) -> Result<(), ApplyError> {
+        if id as usize > self.admitted_id_extent.saturating_add(self.max_nodes) {
+            return Err(ApplyError::IdOutOfRange(id));
+        }
+        Ok(())
+    }
+
+    fn insert_key(&mut self, idx: usize, key: Key) {
+        self.slots.insert(idx, key);
+        self.admitted_id_extent = self.admitted_id_extent.max(self.slots.extent());
+    }
+
     fn alloc(&mut self, id: NodeId, kind: Kind) -> Result<Key, ApplyError> {
         let idx = id as usize;
         if self.nodes.len() >= self.max_nodes {
             return Err(ApplyError::TooManyNodes(self.max_nodes));
         }
-        if idx > self.slots.extent().saturating_add(self.max_nodes) {
-            return Err(ApplyError::IdOutOfRange(id));
-        }
+        self.check_id_range(id)?;
         if self.slots.contains(idx) {
             return Err(ApplyError::DuplicateNode(id));
         }
         let key = self.nodes.insert(Node::new(id, kind)) as Key;
-        self.slots.insert(idx, key);
+        self.insert_key(idx, key);
         Ok(key)
     }
 
@@ -3921,13 +3951,11 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn alias(&mut self, alias: NodeId, id: NodeId) -> Result<(), ApplyError> {
         let key = self.key(id)?;
         let idx = alias as usize;
-        if idx > self.slots.extent().saturating_add(self.max_nodes) {
-            return Err(ApplyError::IdOutOfRange(alias));
-        }
+        self.check_id_range(alias)?;
         if self.slots.contains(idx) {
             return Err(ApplyError::DuplicateNode(alias));
         }
-        self.slots.insert(idx, key);
+        self.insert_key(idx, key);
         Ok(())
     }
 
@@ -6894,8 +6922,18 @@ impl<M: TextEngine> Core<M> {
         {
             before = Some(bar);
         }
-        if child == self.root || self.is_ancestor(child, parent) {
+        let Some(depth) = self
+            .depth_outside(child, parent)
+            .filter(|_| child != self.root)
+        else {
             return Err(ApplyError::Cycle(child_id));
+        };
+        let max = MAX_TREE_DEPTH as u32;
+        if depth + self.nodes[child as usize].height > max {
+            // What left the child since may have made it shallower.
+            if depth + self.count_heights(child) > max {
+                return Err(ApplyError::TooDeep(MAX_TREE_DEPTH));
+            }
         }
         if self.nodes[parent as usize]
             .shader
@@ -6952,6 +6990,7 @@ impl<M: TextEngine> Core<M> {
             self.key_ancestry_dirty = true;
         }
         self.nodes[parent as usize].children.insert(pos, child);
+        self.raise_heights(child);
         self.key_content_changed(parent);
         self.rank_noted(child);
         self.tree_order_changed |= self.track_tree_order;
@@ -7378,6 +7417,64 @@ impl<M: TextEngine> Core<M> {
             key = node.parent;
         }
         false
+    }
+
+    /// How many views are above `key` and `key` itself (1 for a view with
+    /// no parent), or `None` when `ancestor` is one of them.
+    fn depth_outside(&self, ancestor: Key, mut key: Key) -> Option<u32> {
+        let mut depth = 0;
+        while key != NO_KEY {
+            if key == ancestor {
+                return None;
+            }
+            depth += 1;
+            key = self.nodes[key as usize].parent;
+        }
+        Some(depth)
+    }
+
+    /// Counts how many levels of views are under each view of `key`'s
+    /// subtree, keeps each count as that view's [`Node::height`] and returns
+    /// `key`'s. Every view of it, not only `key`: [`Self::raise_heights`] stops at the first
+    /// view already as high as what came under it, so a view left higher
+    /// than it is would keep the views above it from hearing of what grows
+    /// under it later.
+    fn count_heights(&mut self, key: Key) -> u32 {
+        // Each view after its parent: from the end, its children are
+        // counted before it.
+        let mut order = vec![key];
+        let mut next = 0;
+        while let Some(&at) = order.get(next) {
+            next += 1;
+            order.extend_from_slice(&self.nodes[at as usize].children);
+        }
+        for &at in order.iter().rev() {
+            let height = self.nodes[at as usize]
+                .children
+                .iter()
+                .map(|&c| self.nodes[c as usize].height + 1)
+                .max()
+                .unwrap_or(0);
+            self.nodes[at as usize].height = height;
+        }
+        self.nodes[key as usize].height
+    }
+
+    /// `key` came under its parent: the views above it are as high as it
+    /// makes them. Stops at the first that was already: a view is always at
+    /// least one higher than each of its children.
+    fn raise_heights(&mut self, key: Key) {
+        let mut height = self.nodes[key as usize].height + 1;
+        let mut at = self.nodes[key as usize].parent;
+        while at != NO_KEY {
+            let node = &mut self.nodes[at as usize];
+            if node.height >= height {
+                break;
+            }
+            node.height = height;
+            height += 1;
+            at = node.parent;
+        }
     }
 
     fn is_ancestor(&self, ancestor: Key, mut key: Key) -> bool {
