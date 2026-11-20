@@ -1134,7 +1134,8 @@ those operations and projects text to Cells. `InputValue` updates are accepted o
 least the local count; an equal value preserves the selection and undo history. Every local edit reports one
 `ChangeText` with the new count, including when the app has no change listener. Selection events use UTF-16
 positions; Cell columns and model byte offsets are never used as event offsets. Typed insertions and Backspace
-report `KeyPress`; Enter reports it before `SubmitEditing`. Focus changes use the shared keyboard Focus/Blur and
+report `KeyPress`; Enter reports it before `SubmitEditing`, and Esc / C-g report `Escape` before the field loses
+the focus, as on the desktops. Focus changes use the shared keyboard Focus/Blur and
 tracked-state path. `autoFocus`, `focus()`, `blur()` and `setSelection` use the same field state.
 
 Tab / Shift+Tab enter and leave fields. C-n/C-p and Up/Down traverse controls in single-line fields; in multiline
