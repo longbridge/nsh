@@ -121,6 +121,13 @@ const BAR_THICK = 4;
 const BAR_MARGIN = 2;
 const BAR_GRAB = 12;
 const BAR_HOLD = 700;
+/** How long (ms) an animated scroll command of the core's takes here, the
+ * length its own animation runs for on the other platforms (`nsh-core`'s
+ * `scroll::ANIMATION`, eased out cubically): the browser's
+ * `behavior: "smooth"` takes about a second over a long distance, and
+ * starts over every time a command retargets it, which a list does as it
+ * measures the rows the scroll passes. */
+const SCROLL_MS = 300;
 
 /* Keyframe animations (animate-spin, -ping, -pulse, -bounce) run with
    animation-composition: add: their transforms follow the view's own (as the
@@ -2511,8 +2518,8 @@ class Player {
       el._applied = 0;
       el.addEventListener("scroll", () => this.scrolled(el), { passive: true });
       el.addEventListener("scrollend", () => this.scrollEnded(el));
-      // The user takes over a smooth scroll of the core's (`op_sb`).
-      const takeOver = () => { el._smooth = null; };
+      // The user takes over a scroll animation of the core's.
+      const takeOver = () => this.endScrollAnimation(el, false);
       for (const type of ["wheel", "pointerdown", "touchstart", "keydown"]) el.addEventListener(type, takeOver, { passive: true });
     }
     if (kind === "screen") el.classList.add("nsh-screen");
@@ -4628,12 +4635,15 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     el._applied++;
-    // A smooth scroll of the core's in flight moves with it, as on the
-    // native backends: setting the offset would stop it.
-    if (el._smooth) {
-      el._smooth = [el._smooth[0] + dx, el._smooth[1] + dy];
-      el.scrollTo({ left: el._smooth[0], top: el._smooth[1], behavior: "smooth" });
-      return;
+    // A scroll animation of the core's in flight moves with the content,
+    // as on the native backends (`nsh-core`'s `shifted`): it goes on from
+    // the content it was on.
+    const s = el._smooth;
+    if (s) {
+      s.fromX += dx;
+      s.fromY += dy;
+      s.x += dx;
+      s.y += dy;
     }
     // So does a glide of the wheel's or the keys' (`scrollSmoothly`):
     // its next frame would put the offset back.
@@ -4981,19 +4991,11 @@ class Player {
   /** The browser's scrolling stopped: the end, unless the scroll is driven
    * here (`drive`) or a finger still holds it. */
   scrollEnded(el) {
-    // A list anchors its content with an instant `ScrollBy` in the commit
-    // its animated `ScrollTo` is in, and that one's `scrollend` arrives
-    // once the smooth scroll is under way: taking it for the command's
-    // would forget the smooth scroll, and the next `ScrollBy` would then
-    // set the offset and stop it. A smooth scroll stopped elsewhere ends
-    // on the fallback below, which its own frames keep waiting.
-    if (el._smooth && !this.scrolledTo(el, el._smooth[0], el._smooth[1])) {
-      this.waitCommandEnd(el);
-      return;
-    }
     clearTimeout(el._commandEnd);
     el._commandEnd = 0;
-    el._smooth = null;
+    // A scroll animation of the core's (`animateScroll`) is driven here:
+    // every frame of it sets the offset, and the `scrollend` the frame
+    // before it drew is not its end. It ends on its own last frame.
     if (el._driven || el._touchDrag) return;
     // The browser's end of a scroll that ended here (`ownEnd`).
     const own = el._ownEnd;
@@ -7243,17 +7245,12 @@ class Player {
           el._field.scrollTo({ top: args[1], behavior: args[2] ? "smooth" : "instant" });
           break;
         }
-        el._applied++;
-        this.stopGlide(el, args[0], args[1]);
-        el._smooth = args[2] ? [args[0], args[1]] : null;
-        el.scrollTo({ left: args[0], top: args[1], behavior: args[2] ? "smooth" : "instant" });
+        this.scrollCommand(el, args[0], args[1], args[2]);
         break;
       case "scrollToEnd": {
         if (!el) break;
-        el._applied++;
         const [x, y] = el._horizontal ? [el.scrollWidth, 0] : [0, el.scrollHeight];
-        this.stopGlide(el, x, y);
-        el.scrollTo({ left: x, top: y, behavior: args[0] ? "smooth" : "instant" });
+        this.scrollCommand(el, x, y, args[0]);
         break;
       }
       case "zoomTo": if (el) this.zoomCommand(el, ...args); break;
@@ -9589,13 +9586,7 @@ class Player {
    * the view where it is moves nothing, and no `scrollend` follows, so its
    * `onScrollEnd` is sent here. */
   stopGlide(el, x, y) {
-    const a = el._glide;
-    if (!a) return;
-    cancelAnimationFrame(a.frame);
-    clearTimeout(a.timer);
-    clearTimeout(a.watch);
-    el._glide = null;
-    this.drive(el, -1);
+    if (!this.cancelGlide(el)) return;
     if (this.scrolledTo(el, x, y)) {
       this.ownEnd(el);
     } else {
@@ -9604,6 +9595,90 @@ class Player {
       // keep this fallback waiting through their scroll events.
       this.waitCommandEnd(el);
     }
+  }
+
+  /** Stops `el`'s glide where it is, for something that takes it over;
+   * whether there was one. */
+  cancelGlide(el) {
+    const a = el._glide;
+    if (!a) return false;
+    cancelAnimationFrame(a.frame);
+    clearTimeout(a.timer);
+    clearTimeout(a.watch);
+    el._glide = null;
+    this.drive(el, -1);
+    return true;
+  }
+
+  /** `ScrollTo` and `ScrollToEnd` of the core: puts `el` at (`x`, `y`),
+   * animating it over `SCROLL_MS` when `animated`. */
+  scrollCommand(el, x, y, animated) {
+    el._applied++;
+    if (!animated) {
+      this.endScrollAnimation(el, false);
+      this.stopGlide(el, x, y);
+      el.scrollTo({ left: x, top: y, behavior: "instant" });
+      return;
+    }
+    // The animation below ends the scroll it takes over, so the glide
+    // only stops.
+    this.cancelGlide(el);
+    this.animateScroll(el, x, y);
+  }
+
+  /** Moves `el` to (`x`, `y`) over `SCROLL_MS`, eased out cubically, as
+   * the core animates a scroll of its own on the other platforms. A
+   * command that retargets one in flight carries on from where it is, as
+   * the core's `animate_to` does. */
+  animateScroll(el, x, y) {
+    let a = el._smooth;
+    if (!a) {
+      a = el._smooth = { fromX: 0, fromY: 0, x: 0, y: 0, start: 0, frame: 0, step: null, watch: 0 };
+      a.step = (now) => this.stepScroll(el, a, now);
+      this.drive(el, 1);
+    }
+    a.fromX = el.scrollLeft;
+    a.fromY = el.scrollTop;
+    a.x = x;
+    a.y = y;
+    a.start = performance.now();
+    // Its frames stopped (a hidden tab): it is where it was going, and
+    // ends there, as a glide's do (`scrollSmoothly`). One timer an
+    // animation, not one a frame.
+    clearTimeout(a.watch);
+    a.watch = setTimeout(() => {
+      el.scrollLeft = a.x;
+      el.scrollTop = a.y;
+      this.endScrollAnimation(el, true);
+    }, SCROLL_MS + 200);
+    if (!a.frame) a.frame = requestAnimationFrame(a.step);
+  }
+
+  /** One frame of `el`'s scroll animation (`animateScroll`). */
+  stepScroll(el, a, now) {
+    const t = Math.min((now - a.start) / SCROLL_MS, 1);
+    const k = 1 - (1 - t) ** 3;
+    el.scrollLeft = a.fromX + (a.x - a.fromX) * k;
+    el.scrollTop = a.fromY + (a.y - a.fromY) * k;
+    if (t < 1) {
+      a.frame = requestAnimationFrame(a.step);
+      return;
+    }
+    a.frame = 0;
+    this.endScrollAnimation(el, true);
+  }
+
+  /** `el`'s scroll animation is over: `reached` when it ran to its target,
+   * which ends the scroll, rather than being taken over by input or a
+   * command that does not animate. */
+  endScrollAnimation(el, reached) {
+    const a = el._smooth;
+    if (!a) return;
+    cancelAnimationFrame(a.frame);
+    clearTimeout(a.watch);
+    el._smooth = null;
+    this.drive(el, -1);
+    if (reached) this.ownEnd(el);
   }
 
   /** Whether `el` is where a scroll to (`x`, `y`) leaves it: browsers
@@ -9619,8 +9694,6 @@ class Player {
   waitCommandEnd(el) {
     clearTimeout(el._commandEnd);
     el._commandEnd = setTimeout(() => {
-      // A smooth scroll still waited for here stopped short: give it up.
-      el._smooth = null;
       this.scrollEnded(el);
       el._ownEnd = [el.scrollLeft, el.scrollTop];
     }, 200);
