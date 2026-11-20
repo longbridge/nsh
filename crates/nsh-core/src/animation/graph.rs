@@ -469,6 +469,24 @@ impl Step {
         }
     }
 
+    /// Whether this step is guaranteed to finish with `(false, _)` once its
+    /// remaining active work ends (because a `Parallel { stop_together: false }`
+    /// branch was already cancelled while surviving siblings finish).
+    fn is_draining(&self) -> bool {
+        match self {
+            Step::Run { .. } | Step::Delay { .. } => false,
+            Step::Sequence { steps, index, .. } => steps.get(*index).is_some_and(Step::is_draining),
+            Step::Parallel { steps, ends, .. } => {
+                ends.iter().any(|e| matches!(e, Some((false, _))))
+                    || steps
+                        .iter()
+                        .zip(ends)
+                        .any(|(s, end)| end.is_none() && s.is_draining())
+            }
+            Step::Loop { current, .. } => current.is_draining(),
+        }
+    }
+
     /// Whether what runs now never ends by itself: it runs in a loop
     /// without a number of iterations (every unfinished part of a parallel
     /// does).
@@ -488,7 +506,7 @@ impl Step {
                 iterations,
                 current,
                 ..
-            } => iterations.is_none() || current.endless(),
+            } => (iterations.is_none() && !current.is_draining()) || current.endless(),
         }
     }
 
@@ -713,12 +731,28 @@ impl Step {
             Step::Delay { .. } => PendingInterrupt::None,
             Step::Sequence { steps, index, .. } => {
                 let i = *index;
-                let Some(cur) = steps.get_mut(i) else {
+                let Some((cur, rest)) = steps.get_mut(i..).and_then(<[Step]>::split_first_mut)
+                else {
                     return PendingInterrupt::None;
                 };
                 match cur.interrupt_pending(target, preserve, g, finished) {
                     PendingInterrupt::None => {}
-                    status => return status,
+                    PendingInterrupt::Draining => {
+                        let keep = PreserveVelocity::Step {
+                            inner: &preserve,
+                            active: cur,
+                        };
+                        for step in rest {
+                            step.stop(g, keep, finished);
+                        }
+                        return PendingInterrupt::Draining;
+                    }
+                    PendingInterrupt::Interrupted => {
+                        for step in rest {
+                            step.stop(g, preserve, finished);
+                        }
+                        return PendingInterrupt::Interrupted;
+                    }
                 }
                 if cur.has_active_leaf(target, g) {
                     return PendingInterrupt::None;
@@ -813,12 +847,17 @@ enum PendingInterrupt {
 }
 
 /// Nodes whose velocity should be preserved when stopping a superseded leaf
-/// because an incoming operation will immediately start a driver on them.
+/// because an incoming operation or surviving branch will immediately start a
+/// driver on them.
 #[derive(Clone, Copy)]
 enum PreserveVelocity<'a> {
     None,
     Node(NodeId),
     Composite(&'a Composite),
+    Step {
+        inner: &'a PreserveVelocity<'a>,
+        active: &'a Step,
+    },
 }
 
 impl PreserveVelocity<'_> {
@@ -827,6 +866,9 @@ impl PreserveVelocity<'_> {
             PreserveVelocity::None => false,
             PreserveVelocity::Node(n) => n == node,
             PreserveVelocity::Composite(spec) => composite_starts_immediately(spec, node),
+            PreserveVelocity::Step { inner, active } => {
+                inner.contains(node) || active.targets_node(node)
+            }
         }
     }
 }
@@ -4148,6 +4190,133 @@ mod tests {
             "cancelled queued replacement should clear idle velocity (at_switch={at_switch}, got={:?})",
             g.value(2)
         );
+    }
+
+    #[test]
+    fn stopping_zero_duration_sequence_head_clears_later_preserved_velocity() {
+        let mut g = Graph::default();
+        let mut f = Vec::new();
+        values(&mut g, &mut f, &[1, 2]);
+        g.apply(
+            AnimationOp::StartComposite {
+                animation: 2,
+                key: 2,
+                spec: Composite::Parallel {
+                    children: vec![
+                        Composite::Sequence(vec![
+                            Composite::Run {
+                                node: 1,
+                                driver: timing(10.0, 50.0),
+                            },
+                            Composite::Delay(300.0),
+                        ]),
+                        Composite::Run {
+                            node: 2,
+                            driver: spring(100.0),
+                        },
+                    ],
+                    stop_together: true,
+                },
+            },
+            &mut f,
+        );
+        run(&mut g, &mut f, 0.0, 0.1);
+        let at_switch = g.value(2).unwrap();
+        // Queue a Sequence whose 0ms head finishes immediately so node 2's
+        // velocity is preserved for step 2...
+        g.apply(
+            AnimationOp::StartComposite {
+                animation: 4,
+                key: 4,
+                spec: Composite::Sequence(vec![
+                    Composite::Run {
+                        node: 1,
+                        driver: timing(0.0, 0.0),
+                    },
+                    Composite::Run {
+                        node: 2,
+                        driver: spring(at_switch),
+                    },
+                ]),
+            },
+            &mut f,
+        );
+        // ...then stop node 1 before the first tick, cancelling the whole sequence.
+        g.apply(AnimationOp::Stop { node: 1 }, &mut f);
+        assert_eq!(f, [Finished::new(2, false), Finished::new(4, false)]);
+        f.clear();
+        // An unrelated later spring on node 2 must start from rest.
+        g.apply(
+            AnimationOp::Start {
+                node: 2,
+                animation: 6,
+                driver: spring(at_switch),
+            },
+            &mut f,
+        );
+        g.tick(0.2, &mut f);
+        g.tick(0.25, &mut f);
+        assert!(
+            (g.value(2).unwrap() - at_switch).abs() < 1e-3,
+            "stopping sequence head should clear preserved velocity on later steps (at_switch={at_switch}, got={:?})",
+            g.value(2)
+        );
+    }
+
+    #[test]
+    fn draining_unbounded_loop_reports_finite_deadline() {
+        let mut g = Graph::default();
+        let mut f = Vec::new();
+        values(&mut g, &mut f, &[1, 2]);
+        g.apply(
+            AnimationOp::StartComposite {
+                animation: 2,
+                key: 2,
+                spec: Composite::Loop {
+                    child: Box::new(Composite::Parallel {
+                        children: vec![
+                            Composite::Sequence(vec![
+                                Composite::Delay(100.0),
+                                Composite::Run {
+                                    node: 1,
+                                    driver: timing(10.0, 100.0),
+                                },
+                            ]),
+                            Composite::Run {
+                                node: 2,
+                                driver: timing(20.0, 150.0),
+                            },
+                        ],
+                        stop_together: false,
+                    }),
+                    iterations: None,
+                    reset: true,
+                },
+            },
+            &mut f,
+        );
+        run(&mut g, &mut f, 0.0, 0.04);
+        assert!(!g.is_finishing());
+        assert_eq!(g.deadline(0.04), None);
+
+        // Cancelling node 1's delayed branch leaves only the finite survivor on
+        // node 2, so the unbounded loop will now terminate and must expose a
+        // finite completion deadline (e.g. for hidden-window deadline ticks).
+        g.apply(AnimationOp::Stop { node: 1 }, &mut f);
+        assert!(f.is_empty() && g.is_animating());
+        assert!(g.is_finishing());
+        let deadline = g
+            .deadline(0.04)
+            .expect("draining unbounded loop must expose a finite deadline");
+        assert!(deadline > 0.04 && deadline < 0.2);
+
+        g.tick(deadline, &mut f);
+        assert_eq!(f, [Finished::new(2, false)]);
+        assert_eq!(g.value(1), Some(0.0));
+        assert_eq!(g.value(2), Some(20.0));
+        assert!(!g.is_animating());
+        assert!(!g.is_finishing());
+        assert_eq!(g.deadline(deadline), None);
     }
 
     /// A graph with value 1 running a linear timing to 100 over 300 ms,
