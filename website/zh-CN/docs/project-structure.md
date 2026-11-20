@@ -227,7 +227,18 @@ import strings from "./strings.json";
 
 ### 从二进制中去掉部分功能
 
-如果你用 Cargo 自己构建可执行文件（嵌入 NSH，或自己写 `main`），可以去掉可选功能：平台 crate 默认全部开启，在平台 crate（以及 `nsh-base`）上设置 `default-features = false`，再从 `js`、`shader`、`editor`（含 `DiffView`）、`rich-editor`、`plot`、`highlight`、`math`、`emoji-picker`（`EmojiPicker`）、`zlib`、`crypto` 中列出要保留的项。应用导入了构建时去掉的功能，会在加载时报错。`nsh package` 构建的应用始终包含全部功能。
+平台 crate 默认开启全部可选功能：`js`、`shader`、`editor`（含 `DiffView`）、`rich-editor`、`plot`、`term`、`highlight`、`math`、`emoji-picker`（`EmojiPicker`）、`zlib`、`crypto`、`websocket` 和 `updater`，以及平台自己的功能：Linux 上的 `net` 和 `sound`，Windows 上的 `net`、`webview` 和 `media`。SVG 图片始终包含在内。`nsh run` 和开发宿主带有全部功能。
+
+`nsh package` 在本机构建 release runner 时（应用带 Rust crate，或本机装有 `cargo` 且打包目标是本机系统或 Android），只保留应用 bundle 用得到的功能，并输出每项保留或去掉的原因。用到 `TextView` 时保留 `highlight` 和 `math`，因为它显示的文本可能含有代码和公式。它看不到应用的 Rust 代码用了什么，也看不到动态 `import()` 加载什么：这些功能写在 [`nsh.json` 的 `features`](#nshjson) 中，例如 `"features": ["shader"]`。依赖 `nsh-base` 默认功能的 Rust crate 会通过 Cargo 保留 `editor`、`rich-editor`、`plot`、`term` 和 `highlight`；但 Rust 代码绘制 `Shader` 仍需写上 `"shader"`，否则着色器视图不绘制任何内容。`nsh-base` 默认不开启的功能（`math`、`emoji-picker`）写在 crate 自己的依赖中：`nsh-base = { version = "0.6", features = ["emoji-picker"] }`。
+
+如果你用 Cargo 自己构建可执行文件（嵌入 NSH，或自己写 `main`），由你自己选择功能：在平台 crate 和 `nsh-base` 上都设置 `default-features = false`（任何一个保留默认功能，都会把它们重新开启），再列出要保留的项：
+
+```toml
+nsh-base = { version = "0.6", default-features = false, features = ["editor"] }
+nsh-platform-macos = { version = "0.6", default-features = false, features = ["js", "editor", "highlight", "shader"] }
+```
+
+Rust 代码用到构建时去掉的功能会无法编译；TSX 导入它会在加载时报错（`Could not find export 'Editor' in module 'nsh/base'`）。去掉 `shader` 时着色器视图不绘制任何内容；去掉 `highlight` 和 `math` 时代码和公式显示为纯文本。
 
 ### 按需加载代码
 

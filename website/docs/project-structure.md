@@ -230,7 +230,18 @@ All of them are bundled into one script. JSON files import as their parsed value
 
 ### Leaving parts out of the binary
 
-If you build your own executable with Cargo (embedding NSH, or your own `main`), you can leave optional parts out: the platform crates turn all of them on by default, so set `default-features = false` on the platform crate (and on `nsh-base`) and name what you keep from `js`, `shader`, `editor` (with `DiffView`), `rich-editor`, `plot`, `highlight`, `math`, `emoji-picker` (`EmojiPicker`), `zlib` and `crypto`. An app that imports a part its build left out fails when it loads. What `nsh package` builds always includes everything.
+The platform crates turn every optional part on by default: `js`, `shader`, `editor` (with `DiffView`), `rich-editor`, `plot`, `term`, `highlight`, `math`, `emoji-picker` (`EmojiPicker`), `zlib`, `crypto`, `websocket` and `updater`, and the platform's own: `net` and `sound` on Linux, `net`, `webview` and `media` on Windows. SVG images are always included. `nsh run` and the development hosts have every part.
+
+`nsh package` builds the release runner with only the parts the app's bundle reaches, when it builds the runner on this machine (the app has Rust crates, or it packages for this machine's OS, or for Android, with `cargo` installed), and prints why it keeps or leaves out each one. A `TextView` keeps `highlight` and `math`, since the text it shows may hold code and formulas. It cannot see what the app's Rust code uses, or what a computed `import()` loads: name those parts in [`nsh.json`'s `features`](#nshjson), e.g. `"features": ["shader"]`. A Rust crate that depends on `nsh-base` with its default features keeps `editor`, `rich-editor`, `plot`, `term` and `highlight` through Cargo; Rust code drawing a `Shader` still needs `"shader"` named, or its views draw nothing. A part `nsh-base` does not turn on by default (`math`, `emoji-picker`) goes in the crate's own dependency: `nsh-base = { version = "0.6", features = ["emoji-picker"] }`.
+
+If you build your own executable with Cargo (embedding NSH, or your own `main`), you choose the parts yourself: set `default-features = false` on the platform crate and on `nsh-base`, since either one left at its defaults turns them back on, and name what you keep:
+
+```toml
+nsh-base = { version = "0.6", default-features = false, features = ["editor"] }
+nsh-platform-macos = { version = "0.6", default-features = false, features = ["js", "editor", "highlight", "shader"] }
+```
+
+Rust that uses a part its build left out does not compile; TSX that imports one fails when it loads (`Could not find export 'Editor' in module 'nsh/base'`). Without `shader`, shader views draw nothing; without `highlight` and `math`, code and formulas show as plain text.
 
 ### Loading code on demand
 
