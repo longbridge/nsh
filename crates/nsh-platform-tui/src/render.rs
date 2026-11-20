@@ -3117,13 +3117,17 @@ fn mark_surface(
     if framed {
         // The line shows it.
     } else if focused && container {
-        // A step up alone reads as one more raised surface: an accent
-        // rail down its leading column marks it, as a focused pane's
-        // line does, or its label without a free column for one.
-        if !selected {
-            band(buffer, visible, step(HOVER), own);
-        }
-        if !focus_rail(buffer, visible, inner) {
+        // A pane the keys move within (a sidebar's list, an editor) shows
+        // its focus by what is focused in it (its highlighted item, the
+        // caret), no mark of its own: a band and a rail over a whole pane
+        // only weigh it down. A container that takes presses itself (a
+        // card that is a button) has nothing else to show it: an accent
+        // rail down its leading column, or its label without a free
+        // column for one, never a band, which would read as one more
+        // raised surface.
+        if (pressable(view) || nsh_core::input::has_tap(view.events))
+            && !focus_rail(buffer, visible, inner)
+        {
             drawn(buffer, inner, |cell| {
                 cell.modifier.insert(Modifier::BOLD | Modifier::UNDERLINED)
             });
