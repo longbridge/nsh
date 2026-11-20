@@ -276,7 +276,8 @@ pub mod on {
 }
 
 /// The platform a prop is for: everywhere, or inside `ios={{…}}` /
-/// `android={{…}}` / `macos={{…}}` / `desktop={{…}}` / `web={{…}}`.
+/// `android={{…}}` / `macos={{…}}` / `windows={{…}}` / `desktop={{…}}` /
+/// `web={{…}}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
     /// Every platform.
@@ -287,6 +288,8 @@ pub enum Platform {
     Android,
     /// `macos={{…}}`.
     Macos,
+    /// `windows={{…}}`.
+    Windows,
     /// `desktop={{…}}` (macOS, Windows, Linux, desktop browsers).
     Desktop,
     /// `web={{…}}`.
@@ -579,7 +582,7 @@ export interface PressEvent {
   /** Position in the root view the view is in (the surface or its modal), as touches' `pageX` / `pageY`. */
   pagePosition: Point;
   modifiers: Modifiers;
-  /** Consecutive clicks at the same place: 1 for a click, 2 for a double click. */
+  /** Consecutive clicks at the same place: 1 for a click, 2 for a double click; 0 when not from a pointer (keyboard Enter / Space or an assistive technology's default action), as the DOM's `detail`. */
   clickCount: number;
 }
 
@@ -978,6 +981,18 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         "It lost the keyboard focus.",
     ),
     (
+        EventKind::FocusIn,
+        on::ALL,
+        "() => void",
+        "The keyboard focus came into it: onto it or a view inside it, from outside (it entered `focus-within`). Moving between the views inside it is no new coming in; the content of an overlay is inside the view the overlay is in. A panel notes where its focus is with it, to put it back later with `ref.focus()`.",
+    ),
+    (
+        EventKind::FocusOut,
+        on::ALL,
+        "() => void",
+        "The keyboard focus left it: from it or a view inside it to one outside, or to none (it left `focus-within`). A view removed with the focus inside it hears nothing.",
+    ),
+    (
         EventKind::SelectionChange,
         on::INPUT,
         "(e: { start: number; end: number }) => void",
@@ -1174,6 +1189,7 @@ pub fn declarations() -> String {
             (Platform::Ios, "IOS", " inside `ios={{…}}`"),
             (Platform::Android, "Android", " inside `android={{…}}`"),
             (Platform::Macos, "MacOS", " inside `macos={{…}}`"),
+            (Platform::Windows, "Windows", " inside `windows={{…}}`"),
             (Platform::Desktop, "Desktop", " inside `desktop={{…}}`"),
             (Platform::Web, "Web", " inside `web={{…}}`"),
         ] {

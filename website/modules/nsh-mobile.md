@@ -101,6 +101,7 @@ fn sections() -> impl IntoElement {
 import { mount, signal, Text, View } from "nsh";
 import { TabBar } from "nsh/mobile";
 import { platform } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const section = signal(0);
@@ -120,7 +121,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `TabBar` comes from `nsh/mobile`, `nsh_core::mobile` in Rust. The selection is the app's: a

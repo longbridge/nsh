@@ -57,6 +57,7 @@ fn mail() -> impl IntoElement {
 ```tsx tabs
 import { horizontalSizeClass, mount, signal, Text, View } from "nsh";
 import { Button, type ColumnVisibility, createNavStack, NavPage, NavStack, SplitView } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 const messages = ["Welcome", "Release notes"];
 const inbox = createNavStack(["inbox"]);
@@ -103,7 +104,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `SplitView` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh_base::split_view()`，以及 `ColumnVisibility`。在 Rust 中每一栏是一个接收它的栈的设置方法（`.sidebar(..)`、`.content(..)`、`.detail(..)`）；在 TSX 中每一栏是一个接收 `<NavStack>` 的属性。

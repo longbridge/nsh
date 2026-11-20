@@ -25,6 +25,7 @@ you know of them. Both are MIT-licensed, and their licenses apply to what is por
 ```tsx
 import { mount } from "nsh";
 import { RichEditor, createRichEditor, history, inputRules, keymap, markdown, markdownRules, starterKeymap, baseKeymap, toggleMark } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 const editor = createRichEditor({
   content: "# Notes\n\nStart typing…",
@@ -43,7 +44,11 @@ function App() {
   return <RichEditor editor={editor} class="flex-1" />;
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 Without `schema` an editor uses the starter schema (`starterSchema()`); without `plugins` it gets the starter kit

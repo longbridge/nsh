@@ -1,4 +1,5 @@
 import { mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 import { reduceMotion } from "nsh";
 import { colorScheme, lifecycle, locale, localeSettings, platform, wakeCount, windowSize } from "nsh";
 
@@ -57,4 +58,4 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => <Window id="main">{App}</Window>);

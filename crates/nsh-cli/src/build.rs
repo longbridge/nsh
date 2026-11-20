@@ -381,6 +381,9 @@ pub(crate) fn build(entry: &Path, out: &Path, release: bool, split: bool) -> any
                 config.add_file_types_to_app_json(&mut info);
                 config.add_link_domains_to_app_json(&mut info);
                 config.add_data_dir_to_app_json(&mut info);
+                if let Some(application) = &config.application {
+                    info["application"] = application.clone();
+                }
                 info
             },
             &schemes,

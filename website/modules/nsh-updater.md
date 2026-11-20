@@ -137,7 +137,9 @@ interface UpdateProgress {
 
 Downloads the archive of the update the last `checkForUpdate` found into the app's data directory, calling
 `onProgress` as bytes arrive (`total` is missing when the server does not say), then checks its size and SHA-256
-against the manifest. It rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` when no update was found or `canInstall` is
+against the manifest. An interrupted download keeps its partial file keyed to the asset and resumes on the next call
+with an HTTP `Range` request when the server supports it, restarting from the beginning if the server ignores the range
+or the asset changed. It rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` when no update was found or `canInstall` is
 false, and when the download fails or does not match.
 
 ```tsx
@@ -217,9 +219,11 @@ function downloadPackage(onProgress?: ((progress: UpdateProgress) => void) | nul
 Downloads the package the last `checkForPackage` found, checks its size and SHA-256 against the manifest, and
 verifies it as the app's next start will: signed by a release key one of the roots certifies, for this app, newer
 than the running build and than every build the app ran before, for this runtime. It then waits in the app's data
-directory for the next start. It rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` when the check found none, and
-with an error saying why (`package refused: …`) when the download fails or the package is refused, which leaves
-nothing behind.
+directory for the next start. An interrupted download keeps its partial file keyed to the package and resumes on the
+next call with an HTTP `Range` request when the server supports it, restarting from the beginning if the server ignores
+the range or the package changed. It rejects with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` when the check found none, and
+with an error saying why (`package refused: …`) when the download fails or the package is refused (a refused package
+leaves nothing behind).
 
 ### restartToPackage
 

@@ -102,6 +102,9 @@ pub(crate) struct AppWindow {
     reported: Cell<Option<Size<Points>>>,
     /// It was shown once (its first frame drawn).
     opened: Cell<bool>,
+    /// The app hid it before its first show (`WindowRef.hide()` while its
+    /// root rendered): the first show does not show it.
+    hidden: Cell<bool>,
     /// A policy hid it, reported as `Closed`: it waits for the app to
     /// remove its root.
     closed: Cell<bool>,
@@ -132,6 +135,30 @@ pub(crate) fn ids(surface: &Surface) -> Vec<NodeId> {
 /// The native window showing dialog root `id`.
 pub(crate) fn hwnd_of(surface: &Surface, id: NodeId) -> Option<HWND> {
     get(surface, id).map(|w| w.hwnd)
+}
+
+/// The app window with the keyboard focus, for test steps that act on the
+/// focused window (the host is not one).
+pub(crate) fn focused_hwnd(surface: &Surface) -> Option<HWND> {
+    surface
+        .windows
+        .borrow()
+        .iter()
+        .find(|w| w.state.get().is_some_and(|state| state.focused))
+        .map(|w| w.hwnd)
+}
+
+/// The window a dialog the app raised without naming a window
+/// (`AlertDialog.show`) shows over: the app window with the keyboard
+/// focus, else the oldest one; `ROOT_ID` when the app has none (a dialog
+/// of the host itself).
+pub(crate) fn dialog_window(surface: &Surface) -> NodeId {
+    let windows = surface.windows.borrow();
+    windows
+        .iter()
+        .find(|w| w.state.get().is_some_and(|state| state.focused))
+        .or_else(|| windows.first())
+        .map_or(ROOT_ID, |w| w.id)
 }
 
 /// The root view of the window showing dialog root `id`: what its
@@ -226,12 +253,15 @@ pub(crate) fn command(
             // asked for anyway is carried out as the user's.
             WindowRequest::Close => closed(surface, id, WindowCloseCause::ClosePress),
             WindowRequest::Hide => {
+                // Asked before its first show: it opens hidden.
+                window.hidden.set(true);
                 release_owner(&window);
                 // SAFETY: a plain call on the window, alive while listed.
                 let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
             }
             WindowRequest::Show | WindowRequest::Focus => {
                 window.closed.set(false);
+                window.hidden.set(false);
                 hold_owner(&window);
                 crate::shell::request(hwnd, request);
             }
@@ -239,7 +269,16 @@ pub(crate) fn command(
                 crate::shell::request(hwnd, request);
             }
         },
-        // Menus, the tray and shortcuts are the main window's.
+        // A context menu belongs to this window: it is owned by its HWND,
+        // and points are converted with its client origin.
+        DesktopCommand::PopupMenu { items, at } => crate::chrome::popup(
+            surface,
+            hwnd,
+            surface
+                .chrome
+                .app_popup(items.clone(), at.map(|p| (p.x.0, p.y.0))),
+        ),
+        // The application menu, the tray and shortcuts are the host's.
         _ => {}
     }
 }
@@ -306,6 +345,7 @@ fn open(surface: &Rc<Surface>, view: &NshView, open: &OpenWindow) {
         reported: Cell::new(None),
         opened: Cell::new(false),
         closed: Cell::new(false),
+        hidden: Cell::new(false),
         state: Cell::new(None),
     });
     let weak = Rc::downgrade(&window);
@@ -405,6 +445,11 @@ fn first_show(surface: &Rc<Surface>, window: &AppWindow) {
     // SAFETY: the timer of this window, if it runs.
     let _ = unsafe { KillTimer(Some(window.hwnd), SHOW_TIMER) };
     if window.opened.replace(true) || window.closed.get() {
+        return;
+    }
+    if window.hidden.get() {
+        // It opened hidden: the app reads that it is not visible.
+        report_now(surface, window);
         return;
     }
     // What the engine sent so far, then a frame of it.
@@ -513,6 +558,7 @@ fn resized(surface: &Surface, window: &AppWindow) {
         surface.control(|c| c.set_root_size(window.id, size, EdgeInsets::default()));
         // The dialogs presented in it follow its size.
         crate::navigation::surface_resized(surface, size.width.0, size.height.0);
+        crate::system::window_resized(surface, window.id, size.width.0, size.height.0);
     }
     invalidate(window);
 }
@@ -817,6 +863,11 @@ pub(crate) fn handle(
         }
         // Its own tree: the views of its dialog root.
         WM_GETOBJECT => Some(crate::access::get_object(surface, id, hwnd, wparam, lparam)),
+        // A context menu this window asked for (`Menu.popup` in it).
+        crate::window::WM_NSH_MENU => {
+            crate::chrome::show_popup(surface, hwnd);
+            Some(Some(LRESULT(0)))
+        }
         // The main window's: its menu bar, lifecycle and engine.
         WM_NCPAINT | 0x0091 | 0x0092 | WM_COMMAND | WM_DESTROY => Some(None),
         m if m >= WM_APP => Some(None),
@@ -868,7 +919,8 @@ pub(crate) fn close_all(surface: &Surface) {
 }
 
 fn destroy(surface: &Surface, window: &AppWindow) {
-    release_owner(window);
+    // The dialogs it showed go with it, answered as dismissed.
+    crate::system::window_closing(surface, window.id);
     // Its views keep their trees, but the window that showed them is gone:
     // no view of it holds the keyboard focus any more.
     crate::keyboard::forget_window(surface, window.id);

@@ -31,6 +31,7 @@ fn reminder_time() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal } from "nsh";
 import { TimeField } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const at = signal("09:30");
@@ -47,7 +48,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `TimeField` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。在 Rust 中，`time_field()` 创建一个时间输入框，每个属性有一个设置方法（`.value(..)`、`.precision(..)`、`.hour_cycle(..)`），每个事件有一个监听方法（`.on_change(..)`）。它的时间是 `TimeOfDay`，即一个 `chrono::NaiveTime`。

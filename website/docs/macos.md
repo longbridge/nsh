@@ -165,7 +165,7 @@ tooltip) and opens its window from there:
 
 ```tsx
 import { mount } from "nsh";
-import { currentWindow, Tray } from "nsh/desktop";
+import { currentWindow, Tray, Window } from "nsh/desktop";
 import icon from "./tray.svg";
 
 function App() {
@@ -177,7 +177,11 @@ function App() {
   return <Inbox />;
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 A menu bar app often offers to open at login: when the user turns that on, `Application.setLaunchAtLogin(true)` registers the app

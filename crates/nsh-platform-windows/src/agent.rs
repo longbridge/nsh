@@ -322,7 +322,8 @@ impl Native for WindowsNative {
     }
 
     fn resize(&self, width: Points, height: Points) -> Result<(), String> {
-        self.on_main(move |s| synth::resize(s, width.0, height.0))
+        let target = self.target.load(Ordering::Relaxed) as NodeId;
+        self.on_main(move |s| synth::resize(s, target, width.0, height.0))
             .ok_or_else(|| "the window is gone".to_owned())
     }
 

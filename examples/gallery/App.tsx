@@ -2,7 +2,7 @@ import { type Bounds, type JSX, computed, effect, type InputRef, mount, Scroll, 
 import { Animated, createAnimatedValue, Easing } from "nsh";
 import { fpsEnabled, platform, setFpsEnabled, windowSize } from "nsh";
 import process from "process";
-import { Application, isAvailable as desktopWindows, Menu as AppMenu, titleBar } from "nsh/desktop";
+import { Window, Application, isAvailable as desktopWindows, Menu as AppMenu, titleBar } from "nsh/desktop";
 import { AlertDialog, Input, Menu, MenuItem, NavPage, NavStack, Scrollbar } from "nsh/base";
 import { keymap } from "nsh";
 import { Storage } from "nsh";
@@ -169,8 +169,11 @@ const allGroups: { title: string; demos: DemoEntry[] }[] = [
   },
 ];
 
-/** The demos a terminal has nothing to show for, left out of its index. */
-const TERMINAL_HIDDEN: Record<string, true> = { Image: true, Shader: true, WebView: true, Video: true, Photos: true };
+/**
+ * The demos left out of a terminal's index: those it has nothing to show for, a rich editor (formatting a terminal
+ * cannot show) and notifications (a terminal posts none).
+ */
+const TERMINAL_HIDDEN: Record<string, true> = { Shader: true, WebView: true, Video: true, RichEditor: true, Notifications: true };
 const keyboardAvailable = !terminal && (platform.desktop || platform.os === "web");
 const groups = allGroups.map((g) => ({
   ...g,
@@ -398,7 +401,8 @@ function SidebarToggle() {
 }
 
 /** The sidebar's search: filters the demos by name or group as you type
- * (Ctrl+K / Cmd+K focuses it, Escape clears it). */
+ * (Ctrl+K / Cmd+K focuses it, Enter opens the demo named or else the first
+ * found, Escape clears it). */
 function Search() {
   let input: InputRef | undefined;
   keymap.bind("mod+k", () => input?.focus());
@@ -417,6 +421,12 @@ function Search() {
       value={query()}
       onChange={({ value }) => query.set(value)}
       onKeyPress={(e) => e.key === "Escape" && query.set("")}
+      onSubmit={() => {
+        const demos = found().flatMap((g) => g.demos);
+        const q = query().trim().toLowerCase();
+        const demo = demos.find((d) => d.name.toLowerCase() === q) ?? demos[0];
+        if (demo) select(demo);
+      }}
       placeholder={`Search demos  ${keymap.label("mod+k")}`}
       accessibilityLabel="Search demos"
     />
@@ -925,4 +935,4 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => <Window id="main">{App}</Window>);
