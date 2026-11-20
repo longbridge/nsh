@@ -47002,6 +47002,40 @@ fn a_scroll_view_makes_its_overscan_over_turns() {
     assert_eq!(turns, 3);
 }
 
+/// A turn between two display frames ([`Core::hold_paced_mounts`]) leaves
+/// the overscan waiting; the next frame's turn makes its slice (#2472).
+#[test]
+fn a_turn_between_frames_leaves_the_overscan_waiting() {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(100.0))]),
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    for i in 0..400u32 {
+        ops.extend(child_view(10 + i, 2, 1.0, &[]));
+    }
+    apply(&mut c, ops);
+    c.begin_mount_turn();
+    c.commit().unwrap();
+    assert!(c.has_paced_mounts());
+    c.begin_mount_turn();
+    c.hold_paced_mounts();
+    let made = c.commit().map(|b| created_in(&b)).unwrap_or_default();
+    assert!(made.is_empty(), "{made:?}");
+    assert!(c.has_paced_mounts());
+    c.begin_mount_turn();
+    let made = created_in(&c.commit().unwrap());
+    assert_eq!(made.len(), super::pace::PACE_VIEWS);
+}
+
 /// Cells bound with more views than a turn's budget: the cells in sight
 /// get theirs at once, the overscan's wait and come over turns, nearest
 /// first.
@@ -49988,7 +50022,7 @@ fn unfocused_keys_reach_the_windows_root() {
 
     let mut c = core();
     c.mount_root(&crate::element::Root::of::<Listening>());
-    c.commit().unwrap();
+    let batch = c.commit().unwrap();
     assert!(c.key_interest(crate::ROOT_ID));
     let space = Keystroke::parse_with("space", false).unwrap();
     assert!(c.key_captured(crate::ROOT_ID, Some(&space)));
@@ -49998,6 +50032,22 @@ fn unfocused_keys_reach_the_windows_root() {
     c.key_path(crate::ROOT_ID, &mut path);
     assert_eq!(path.last(), Some(&crate::ROOT_ID));
     assert_eq!(path.len(), 2, "the mount root, then the window root");
+    let mounted_content = |batch: &crate::MountBatch| {
+        batch.items.iter().rev().find_map(|item| match item {
+            MountItem::ViewProps { id, props } if *id == crate::ROOT_ID => Some(props.key_content),
+            _ => None,
+        })
+    };
+    let content = path[0];
+    assert_eq!(mounted_content(&batch), Some(Some(content)));
+
+    c.apply(Op::Remove {
+        parent: crate::ROOT_ID,
+        child: content,
+    })
+    .unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(mounted_content(&batch), Some(None));
 }
 
 /// A root without listeners or captures builds no key event: an app that
@@ -50013,6 +50063,104 @@ fn unfocused_keys_are_free_without_a_root_listener() {
 
     let mut c = core();
     c.mount_root(&crate::element::Root::of::<Quiet>());
-    c.commit().unwrap();
+    let batch = c.commit().unwrap();
     assert!(!c.key_interest(crate::ROOT_ID));
+    assert!(!batch.items.iter().any(|item| matches!(
+        item,
+        MountItem::ViewProps {
+            id: crate::ROOT_ID,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn unfocused_keys_follow_named_window_content_changes() {
+    use crate::{
+        KeyCapture,
+        desktop::{DesktopCommand, OpenWindow},
+        props::{AccessibilityProp, AccessibilityState},
+    };
+
+    let root = 2;
+    let content = 4;
+    let mut c = core();
+    c.set_environment(crate::element::Environment {
+        os: crate::platform::Os::MacOs,
+        ..Default::default()
+    });
+    let mut open = OpenWindow::default();
+    open.options.id = "panel".into();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: root,
+                tag: Tag::Modal,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: root,
+                before: None,
+            },
+            Op::Create {
+                id: content,
+                tag: Tag::Input,
+            },
+            Op::Insert {
+                parent: root,
+                child: content,
+                before: None,
+            },
+            Op::Command {
+                id: root,
+                command: Command::Desktop(Box::new(DesktopCommand::OpenWindow(Box::new(open)))),
+            },
+        ],
+    );
+    let mounted_content = |batch: &crate::MountBatch| {
+        batch.items.iter().rev().find_map(|item| match item {
+            MountItem::ViewProps { id, props } if *id == root => Some(props.key_content),
+            _ => None,
+        })
+    };
+    let listen = |enabled| Op::Listen {
+        id: content,
+        event: EventKind::KeyUp,
+        enabled,
+    };
+
+    assert_eq!(mounted_content(&c.commit().unwrap()).flatten(), None);
+    c.apply(listen(true)).unwrap();
+    assert_eq!(mounted_content(&c.commit().unwrap()), Some(Some(content)));
+    assert!(c.key_interest(root));
+    assert!(!c.key_interest(ROOT_ID));
+
+    let disable = |disabled| Op::SetProp {
+        id: content,
+        prop: Prop::Accessibility(AccessibilityProp::State(AccessibilityState {
+            disabled,
+            ..Default::default()
+        })),
+    };
+    c.apply(disable(true)).unwrap();
+    assert_eq!(mounted_content(&c.commit().unwrap()), None);
+    assert!(!c.key_interest(root));
+
+    c.apply(disable(false)).unwrap();
+    assert_eq!(mounted_content(&c.commit().unwrap()), None);
+    assert!(c.key_interest(root));
+
+    c.apply(listen(false)).unwrap();
+    assert_eq!(mounted_content(&c.commit().unwrap()), Some(None));
+
+    let capture = |rule| Op::SetProp {
+        id: root,
+        prop: Prop::KeyCapture(rule),
+    };
+    c.apply(capture(KeyCapture::All)).unwrap();
+    assert_eq!(mounted_content(&c.commit().unwrap()), Some(Some(content)));
+    assert!(!c.key_captured(root, None), "the input keeps its keys");
+    c.apply(capture(KeyCapture::None)).unwrap();
+    assert_eq!(mounted_content(&c.commit().unwrap()), Some(None));
 }
