@@ -86,6 +86,7 @@ fn fruit_select() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
 import { Select } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 const FRUITS = [
   { value: "apple", title: "苹果" },
@@ -118,7 +119,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `Select` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。在 Rust 中，`select()` 创建一个选择框，每个属性有一个设置方法（`.items(..)`、`.value(..)`、`.item_style(..)`），每个事件有一个监听方法（`.on_change(..)`）；`SelectItem::new(value, title)` 创建一个条目，可再用 `.disabled(..)` 和 `.group(..)`。

@@ -415,6 +415,8 @@ prop id:first headerVisible true
 prop id:first headerLargeTitle false
 prop id:first headerTransparent false
 prop id:first headerShadowVisible true
+prop id:first headerTitleAlign left
+prop id:first headerBackgroundOnScroll false
 prop id:first headerBackVisible true
 noprop id:first headerBackTitle
 prop id:first popOnSwipe true
@@ -433,6 +435,8 @@ prop id:second headerVisible false
 prop id:second headerLargeTitle true
 prop id:second headerTransparent true
 prop id:second headerShadowVisible false
+prop id:second headerTitleAlign center
+prop id:second headerBackgroundOnScroll true
 prop id:second headerBackTitle Back to second
 prop id:second headerBackVisible false
 prop id:second popOnSwipe false
@@ -484,6 +488,8 @@ covers [props] headerVisible
 covers [props] headerLargeTitle
 covers [props] headerTransparent
 covers [props] headerShadowVisible
+covers [props] headerTitleAlign
+covers [props] headerBackgroundOnScroll
 covers [props] headerBackTitle
 covers [props] headerBackVisible
 covers [props] popOnSwipe
@@ -4785,3 +4791,33 @@ expect Strip h
 frame scroll:id:strip-tab-a 0 0 390 24
 tap id:strip-show-h
 expect Strip h*
+
+# base-dock-render-handle
+# The handle between the two groups draws what `renderHandle` returns.
+tap id:case-base-dock-render-handle
+expect Tab a
+expect Tab b
+expect Grip 0 horizontal idle
+covers [props] DockArea.renderHandle
+
+# base-dock-toolbar
+# Each group's tab bar ends with what `renderToolbar` returns for its
+# displayed tab, and follows the tab the group displays.
+tap id:case-base-dock-toolbar
+expect Toolbar a of 0
+expect Toolbar c of 0
+tap id:toolbar-tab-b
+expect Toolbar b of 1
+covers [props] DockArea.renderToolbar
+
+# base-tree-slots
+# The header shows above the rows; `empty` shows while no item does.
+tap id:case-base-tree-slots
+expect Pinned files
+expect No files
+tap id:tree-slots-fill
+expect README.md
+absent No files
+expect Pinned files
+covers [props] Tree.header
+covers [props] Tree.empty

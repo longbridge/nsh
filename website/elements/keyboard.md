@@ -47,6 +47,7 @@ fn chat() -> impl IntoElement {
 ```tsx tabs
 import { mount, Scroll, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const draft = signal("");
@@ -67,7 +68,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 The full keyboard height suits a view that reaches the bottom of the screen, as a screen's content does. When
@@ -216,6 +221,9 @@ shortcuts use `on_key` / `on_key_with`; text editing uses `Input`, and terminal 
 | `modifiers` | The modifiers held after this transition. |
 | `repeat` | An auto-repeat of a held key. |
 | `defaultPrevented` | The mounted `captureKeys` policy decided this transition: the platform runs no native default and types no text. It is this transition's decision, observable as the DOM's `defaultPrevented` is, not a veto a listener casts. |
+
+On Linux, common media, volume and browser keys use UI Events names such as `"MediaPlayPause"`, `"AudioVolumeUp"` and
+`"BrowserBack"`.
 
 Both listeners return nothing. One platform event on the focused view bubbles to the enabled listening ancestors
 within the same native window, once each, for `onKeyDown` and `onKeyUp` alike. A real release the source reports

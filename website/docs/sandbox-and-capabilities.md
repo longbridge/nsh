@@ -235,7 +235,7 @@ Android, Windows and Linux, and the rest are denied. The system still asks the u
 declare what it needs: `nsh package` writes `NSMicrophoneUsageDescription` / `NSCameraUsageDescription` (word them your
 own way with `ios.infoPlist` / `macos.infoPlist`), the macOS `com.apple.security.device.audio-input` /
 `com.apple.security.device.camera` entitlements, and Android's `RECORD_AUDIO` / `CAMERA` permissions, which the app asks
-for when a page first needs them. Pages need a secure context (`https:` or `localhost`) for `getUserMedia`.
+for when a page first needs them. The development hosts (`nsh run`) carry the usage descriptions for any app. Pages need a secure context (`https:` or `localhost`) for `getUserMedia`.
 
 ```json
 { "capabilities": { "webview": { "hosts": ["phone.example.com"], "media": ["microphone"] } } }
@@ -278,12 +278,12 @@ needs a `network` grant for its host.
 ### `application`
 
 `"application": true` lets the app act on the application as a whole on the desktop
-([`nsh/desktop`](../modules/nsh-desktop.md)): the main window (`currentWindow()` outside any `<Window>`,
-`Window.get("main")`: its title, title bar, mode, frame and level, bringing it to the front, closing it), the
-application menu (`Menu.setApplicationMenu`), the tray, global shortcuts, `Application.quit()`, `Application.restart()`
-and `Application.setLaunchAtLogin()`. Without it they do nothing, `Application.launchAtLogin()` resolves `false` and
-`setLaunchAtLogin` rejects with `ERR_ACCESS_DENIED` (`permission` `"application"`). Context menus (`Menu.popup`) show in the app's own view,
-and windows the app opens are granted by [`windows`](#windows), so neither needs it.
+([`nsh/desktop`](../modules/nsh-desktop.md)): the application menu (`Menu.setApplicationMenu`), the tray, global
+shortcuts, `Application.quit()`, `Application.setQuitMode()`, `Application.restart()` and
+`Application.setLaunchAtLogin()`. Without it they do
+nothing, `Application.launchAtLogin()` resolves `false` and `setLaunchAtLogin` rejects with `ERR_ACCESS_DENIED`
+(`permission` `"application"`). Context menus (`Menu.popup`) show in the app's own view, and windows the app opens are
+granted by [`windows`](#windows), so neither needs it.
 
 ### `homeDir`
 
@@ -308,11 +308,11 @@ for every kind but overlays, or an object that narrows it:
 |---|---|---|
 | `kinds` | `string[]` | The kinds it may open: `"normal"`, `"dialog"`, `"panel"`, `"popup"`, `"overlay"`. Missing: every kind but `"overlay"`. |
 | `levels` | `string[]` | The levels its windows may float at: `"normal"`, `"floating"`, `"aboveDock"`, `"desktopIcon"`. Missing: every level. |
-| `max` | `number` | How many windows of its own may be open at once. Missing: any number. |
+| `max` | `number` | How many windows of its own may be open at once, the first window included. Missing: any number. |
 | `overlay` | `boolean` | Overlays and click-through windows (`pointerEvents: "none"`). Never granted unless declared, also for an app without `"capabilities"`. |
 
 `overlay` is separate because a transparent, click-through window above every other can pass for the system's own UI.
-The main window needs no grant.
+Every window needs the grant, the first one included: no window is privileged.
 
 ### Storage
 

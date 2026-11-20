@@ -20,7 +20,7 @@ One NSH bundle runs on iOS, Android, macOS, Windows and Linux (and in Mac Cataly
 
 Every platform is desktop or mobile, by one rule. Desktop is macOS, Windows, Linux, and browsers in the desktop idiom (a mouse and a wide window, [the web](./web.md)). Mobile is iOS, Android, and browsers in the phone or tablet idiom; Mac Catalyst runs the iOS backend, so it is mobile too, with `ios={{…}}` props. `desktop={{…}}` props, `platform.select({ desktop, mobile })`, `platform.desktop` and `platform.idiom === "desktop"` all follow this rule, as do `nsh/base`'s components (a menu is a popup on desktops and a sheet on mobile) and, in Rust, `is_desktop()`.
 
-`nsh/desktop`'s `isAvailable` answers a narrower question: whether that module's window and menu APIs work, which they do on macOS, Windows and Linux. Gate layout, density and input on `platform.desktop`, and calls of `Window` and `Menu` on `isAvailable`.
+`nsh/desktop`'s `isAvailable` answers a narrower question: whether that module's window and menu APIs work, which they do on macOS, Windows and Linux, but not in a terminal app. Gate layout, density and input on `platform.desktop`, and calls of `Window` and `Menu` on `isAvailable`.
 
 ## Platform-only props
 
@@ -185,7 +185,7 @@ Rust apps draw their own title bars with `nsh_core::element::desktop` ([Building
 | `titleBar` | The hidden title bar's height and the room the system's window controls take (reactive). |
 | `windowState`, `displays` | The current window's bounds, mode and display, and the displays (reactive). |
 | `Menu` | `setApplicationMenu(items)` (the menu bar, with shortcuts) and `popup(items, at?)` (context menus). An item's `icon` is an image as `<Image>`'s `src` takes it, so menus show the app's own icon set: an SVG takes the color of the menu's text, a bitmap keeps its colors. macOS and Windows show it; GTK's menus show no icon beside a label. |
-| `isAvailable` | `true` where the window and menu APIs work: macOS, Windows and Linux. Desktop browsers have `platform.desktop` and keep the browser's window and menus. |
+| `isAvailable` | `true` where the window and menu APIs work: macOS, Windows and Linux, but not a terminal app. Desktop browsers have `platform.desktop` and keep the browser's window and menus. |
 
 See [nsh/desktop](../modules/nsh-desktop.md).
 

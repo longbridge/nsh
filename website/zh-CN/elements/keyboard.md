@@ -42,6 +42,7 @@ fn chat() -> impl IntoElement {
 ```tsx tabs
 import { mount, Scroll, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const draft = signal("");
@@ -62,7 +63,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 完整的键盘高度适用于延伸到屏幕底部的视图，界面的内容通常如此。如果它下方还有东西，例如标签栏，就用一个长度减去它：`calc(env(keyboard-inset-height) + -49px)` 让视图保持在 49 pt 的标签栏之上，`calc(env(keyboard-inset-height) + 12px)` 在键盘上方增加间距。内边距至少为 0。
@@ -200,6 +205,8 @@ function MessageBar() {
 | `modifiers` | 本次转换之后仍按住的修饰键。 |
 | `repeat` | 按住键产生的自动重复。 |
 | `defaultPrevented` | 已挂载的 `captureKeys` 策略决定了本次转换：平台不执行原生默认行为，也不产生文本。它是本次转换的决定，可观察性同 DOM 的 `defaultPrevented`，并不是监听函数可以投出的否决票。 |
+
+在 Linux 上，常用的媒体键、音量键和浏览器键使用 UI Events 定义的名称，例如 `"MediaPlayPause"`、`"AudioVolumeUp"` 和 `"BrowserBack"`。
 
 两个监听函数都不返回值。聚焦视图上的一个平台事件会沿同一原生窗口内的已启用监听祖先各传播一次，`onKeyDown` 与 `onKeyUp` 都是如此。
 输入源报告的真实释放会到达聚焦视图，即使最初的按下发生在别处（与 DOM 一致）；窗口失去焦点会清除按住状态，不会伪造释放事件。

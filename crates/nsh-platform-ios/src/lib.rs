@@ -71,6 +71,7 @@ pub mod dev;
 #[cfg(feature = "embed")]
 pub mod embed;
 mod fps;
+mod haptics;
 mod image;
 mod input;
 mod interaction;
@@ -82,6 +83,7 @@ mod navigation;
 mod net;
 mod picker;
 mod press;
+mod scroll_edge;
 mod scroll_watch;
 mod selectable_view;
 mod shader;

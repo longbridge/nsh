@@ -427,6 +427,20 @@ fn a_view_removed_under_the_pointer_or_with_the_focus_hears_no_more() {
 }
 
 #[test]
+fn a_mouse_drag_selects_in_a_selectable_view() {
+    let run = TestRun {
+        ui_sets: vec![nsh_base::registry()],
+        compile: compiler(vec![nsh_base::registry()]),
+        ..test_run(None)
+    };
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/text-selection");
+    let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 4);
+}
+
+#[test]
 fn an_input_that_asks_for_the_focus_has_it_once_it_mounts() {
     let run = TestRun {
         compile: compiler(vec![nsh_base::registry()]),
@@ -437,6 +451,19 @@ fn an_input_that_asks_for_the_focus_has_it_once_it_mounts() {
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
     assert_eq!(results.len(), 3);
+}
+
+#[test]
+fn an_input_that_selects_on_focus_selects_its_text_as_it_takes_the_focus() {
+    let run = TestRun {
+        compile: compiler(vec![nsh_base::registry()]),
+        ..test_run(None)
+    };
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/select-on-focus");
+    let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 2);
 }
 
 #[test]
@@ -495,7 +522,25 @@ fn headless_desktops_play_the_platform_s_windows() {
     let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 7);
+    assert_eq!(results.len(), 10);
+}
+
+#[test]
+fn a_desktop_app_root_renders_in_the_implicit_first_window() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/app-root");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 3);
+}
+
+#[test]
+fn the_app_hears_reopens_and_its_last_window_closing() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/lifecycle");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 2);
 }
 
 #[test]

@@ -27,8 +27,10 @@ Input                        native gestures -> EngineControl::dispatch_event ->
   Implementations must not touch main-thread-only UI objects.
 - Measurements are cached per engine (`MeasureCache` in `nsh-core`); a color-only change does not trigger layout.
 - One `Surface` (Apple, Linux, Windows) / `NshView` (Android) is one engine (one QuickJS runtime), with no global singletons, so NSH can be embedded in
-  existing apps with several instances. `AppView` (Apple: a `UIView` or, on macOS, an `NSView`; Linux: a GTK widget; Windows: a window; GPUI: a GPUI view) wraps a surface for embedding and owns its dev session; a standalone app is
-  just "one AppView filling the window".
+  existing apps with several instances. `AppView` (Apple: a `UIView` or, on macOS, an `NSView`; Linux: a GTK widget; Windows: a window; GPUI: a GPUI view) wraps a surface for embedding and owns its dev session. A standalone app's
+  engine is an invisible app host: its `AppView` roots no visible window, and
+  every window of the app is a root view tree of that one engine (window model
+  v2, `window-model.md`).
 - Mount `Insert` items describe native stacking order, including `zIndex`. A sink that needs logical document
   order opts in with `MountSink::needs_tree_order`; the core includes `TreeOrder` in the completed batch when
   nodes are mounted, moved or detached. The terminal uses it for focus traversal independently of paint order.
@@ -44,8 +46,8 @@ Input                        native gestures -> EngineControl::dispatch_event ->
   arriving during that layout update the saved target. Modal windows invalidate their pixel-size report cache and
   report their new dp size even when Android keeps the same pixel bounds.
 - **Linux** (GTK 4, `linux.md`): one `NshView` widget per node, placed at the core's frames in `size_allocate` and
-  drawn with GSK nodes in `snapshot`; each commit wakes the GTK main loop once (`MainContext::invoke`); native
-  animations run on the frame clock.
+  drawn with GSK nodes in `snapshot`; each commit wakes the GTK main loop once, ahead of its paint (`surface.rs`,
+  `DRAIN_PRIORITY`); native animations run on the frame clock.
 - **macOS** (AppKit, `macos.md`): one flipped, layer-backed `NSView` per node at the core's frames, decorated by Core
   Animation (the iOS backend's), text and canvases drawn into content layers, desktop input and scroll views as on Linux; each
   commit is one main-queue hop; native animations run on a display link made from the root of a window that shows
