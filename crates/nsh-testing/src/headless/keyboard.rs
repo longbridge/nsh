@@ -368,9 +368,14 @@ impl Headless {
     /// platforms keep it there.
     fn tab(&mut self, back: bool) {
         let current = self.screen.focused().or(self.screen.key_focus());
-        let window = current.map_or(ROOT_ID, |id| self.screen.window_of(id));
         let mut stops = self.screen.tab_stops();
-        if let Some(scope) = self.screen.focus_scope(window) {
+        // A modal that took the focus leaves none: Tab goes to its stops,
+        // the ones it keeps the keyboard to, still.
+        let scope = match current {
+            Some(id) => self.screen.focus_scope(self.screen.window_of(id)),
+            None => self.screen.newest_modal(),
+        };
+        if let Some(scope) = scope {
             stops.retain(|&id| self.screen.within(id, scope));
         }
         let at = current.and_then(|id| stops.iter().position(|s| *s == id));

@@ -35,6 +35,7 @@ fn reminder_time() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal } from "nsh";
 import { TimeField } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const at = signal("09:30");
@@ -51,7 +52,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `TimeField` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. In Rust, `time_field()`

@@ -32,6 +32,7 @@ fn table() -> impl IntoElement {
 ```tsx tabs
 import { mount } from "nsh";
 import { DataTable, type DataTableColumn } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 const columns: DataTableColumn[] = [
   { key: "name", title: "Name", width: 160, sortable: true },
@@ -49,7 +50,11 @@ function App() {
   return <DataTable columns={columns} data={rows} class="flex-1" />;
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 表格填满应用给它的盒子（`flex-1`、一个高度），在其中滚动：纵向滚动所有行，横向滚动所有列，带滚动条（`scrollbar={false}` 隐藏滚动条，`bounces={false}` 关闭有回弹的平台上的边缘回弹）。
