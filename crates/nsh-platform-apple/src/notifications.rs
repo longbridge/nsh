@@ -94,10 +94,8 @@ pub struct ForeignNotification {
     /// The thread it is grouped in (`threadIdentifier`), `""` for none.
     pub thread_id: String,
     /// Its `userInfo`: a remote notification's payload, the `aps`
-    /// dictionary included. Strings, numbers, booleans, arrays and
-    /// dictionaries keep their values; entries with keys other than strings
-    /// are left out, and other values (dates, data) are `null`.
-    pub data: JsonValue,
+    /// dictionary included ([`user_info_json`]).
+    pub user_info: JsonValue,
 }
 
 /// How a notification shows while the app is in front
@@ -177,28 +175,93 @@ pub trait ForeignNotificationHandler {
     fn pressed(&self, notification: &ForeignNotification);
 }
 
-/// Hands the notifications NSH did not show to `handler`, in place of the
-/// one set before. Until a handler is set they show as NSH's own do, and
-/// their presses wait for it, so one set before the app runs (an nshm's
-/// entry, an app crate's `main`) hears the press that starts the app. Their
-/// presses never reach the app's `press` listeners. On the main thread.
+/// Hands the notifications NSH did not show to `handler`. Until a handler
+/// is set they show as NSH's own do, and their presses wait for it, so one
+/// set before the app runs (the `#[native_module]` entry of the app's crate
+/// or of an nshm) hears the press that starts the app. Their presses never
+/// reach the app's `press` listeners. Setting a handler also makes NSH the
+/// notification center's delegate where it may be ([`install`]), so an app
+/// that embeds NSH hears them too.
 ///
-/// The handler hears them where NSH is the notification center's delegate:
-/// an embedding app that has a delegate of its own keeps them all.
+/// There is one handler: a later one replaces the earlier (with a
+/// warning), so the app's crate should own it and pass notifications on to
+/// the modules it uses. An embedding app that has a notification center
+/// delegate of its own keeps them all, and the handler hears nothing.
+///
+/// # Panics
+///
+/// Panics off the main thread.
 pub fn set_foreign_handler(handler: impl ForeignNotificationHandler + 'static) {
-    FOREIGN.with(|f| *f.borrow_mut() = Some(Rc::new(handler)));
+    assert!(
+        MainThreadMarker::new().is_some(),
+        "set_foreign_handler is called on the main thread"
+    );
+    if replace_handler(Rc::new(handler)) {
+        log::warn!("notifications: a foreign notification handler replaced the one set before");
+    }
+    install();
+}
+
+/// Sets the handler and hands it the presses that waited for one; whether
+/// it replaced another.
+fn replace_handler(handler: Rc<dyn ForeignNotificationHandler>) -> bool {
+    let replaced = FOREIGN.with(|f| f.borrow_mut().replace(handler).is_some());
     for notification in FOREIGN_PRESSES.with(|p| std::mem::take(&mut *p.borrow_mut())) {
         foreign_pressed(notification);
     }
+    replaced
+}
+
+/// `info`, a notification's `userInfo` or another dictionary UIKit passes,
+/// as JSON. Strings, numbers, booleans, arrays and dictionaries keep their
+/// values; entries with keys other than strings are left out, and other
+/// values (dates, data) are `null`, so one such value does not lose the rest.
+/// Shared by the hooks of the macOS and iOS backends, no API of apps'.
+#[doc(hidden)]
+pub fn user_info_json(info: &NSDictionary) -> JsonValue {
+    to_json(info)
 }
 
 /// A notification the delegate heard of: NSH's own by its id, or another.
+#[derive(Debug, PartialEq)]
 enum Received {
     Own(String),
     Foreign(ForeignNotification),
 }
 
 impl Received {
+    /// What a notification with the request identifier `id`, the thread
+    /// `thread_id` and `info` as its `userInfo` is.
+    fn new(id: String, thread_id: String, info: Option<&NSDictionary>) -> Self {
+        if info.is_some_and(is_marked) {
+            return Self::Own(id);
+        }
+        Self::Foreign(ForeignNotification {
+            id,
+            thread_id,
+            user_info: info.map_or_else(|| JsonValue::Object(Default::default()), user_info_json),
+        })
+    }
+
+    /// What the user's response `action` to it reports: NSH's own
+    /// notifications report every response, as before; another's only a press
+    /// of the notification itself, not its category's actions or dismissal.
+    fn respond(self, action: &str) -> Option<Self> {
+        match self {
+            Self::Foreign(_) if action != DEFAULT_ACTION => None,
+            received => Some(received),
+        }
+    }
+
+    /// Reports a press of it: NSH's own to the app's `press` listeners,
+    /// another to the handler. On the main thread.
+    fn press(self) {
+        match self {
+            Self::Own(id) => pressed(id),
+            Self::Foreign(notification) => foreign_pressed(notification),
+        }
+    }
+
     /// What `notification` (a `UNNotification`) is.
     fn of(notification: &AnyObject) -> Self {
         // SAFETY: documented properties of a notification, its request and
@@ -216,17 +279,7 @@ impl Received {
                 msg_send![&*content, threadIdentifier],
             )
         };
-        if info.as_deref().is_some_and(is_marked) {
-            return Self::Own(id);
-        }
-        Self::Foreign(ForeignNotification {
-            id,
-            thread_id: thread.to_string(),
-            data: info.map_or_else(
-                || JsonValue::Object(Default::default()),
-                |info| to_json(&info),
-            ),
-        })
+        Self::new(id, thread.to_string(), info.as_deref())
     }
 }
 
@@ -238,7 +291,7 @@ fn is_marked(info: &NSDictionary) -> bool {
     value.is_some()
 }
 
-/// `value`, an object of a property list, as JSON ([`ForeignNotification::data`]).
+/// `value`, an object of a property list, as JSON ([`user_info_json`]).
 fn to_json(value: &AnyObject) -> JsonValue {
     if let Some(string) = value.downcast_ref::<NSString>() {
         return JsonValue::String(string.to_string());
@@ -281,10 +334,7 @@ fn to_json(value: &AnyObject) -> JsonValue {
 /// How `notification`, which NSH did not show, shows while the app is in
 /// front: the handler's answer, on the main thread.
 fn foreign_presentation(notification: ForeignNotification) -> Presentation {
-    let ask = move || match handler() {
-        Some(handler) => handler.presentation(&notification),
-        None => Presentation::default(),
-    };
+    let ask = move || present(handler().as_deref(), &notification);
     if MainThreadMarker::new().is_some() {
         return ask();
     }
@@ -293,6 +343,15 @@ fn foreign_presentation(notification: ForeignNotification) -> Presentation {
     let mut answer = None;
     DispatchQueue::main().exec_sync(|| answer = Some(ask()));
     answer.unwrap_or_default()
+}
+
+/// How `notification` shows in front: `handler`'s answer, or as NSH's own
+/// without one.
+fn present(
+    handler: Option<&dyn ForeignNotificationHandler>,
+    notification: &ForeignNotification,
+) -> Presentation {
+    handler.map_or_else(Presentation::default, |h| h.presentation(notification))
 }
 
 /// Reports a press of a notification NSH did not show to the handler, or
@@ -354,14 +413,8 @@ define_class!(
                 let action: Retained<NSString> = msg_send![response, actionIdentifier];
                 (notification, action)
             };
-            match Received::of(&notification) {
-                Received::Own(id) => main(move || pressed(id)),
-                // Only a press of the notification itself: the actions and
-                // the dismissal of another's categories are not presses.
-                Received::Foreign(notification) if action.to_string() == DEFAULT_ACTION => {
-                    main(move || foreign_pressed(notification))
-                }
-                Received::Foreign(_) => {}
+            if let Some(press) = Received::of(&notification).respond(&action.to_string()) {
+                main(move || press.press());
             }
             done.call(());
         }
@@ -782,7 +835,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            to_json(&info),
+            user_info_json(&info),
             json!({
                 "aps": { "alert": { "title": "Ada", "badge": 3 } },
                 "chat": "42",
@@ -804,12 +857,87 @@ mod tests {
         }
     }
 
+    /// Sets a handler that records the presses it hears.
+    fn record() -> Rc<RefCell<Vec<String>>> {
+        let pressed = Rc::new(RefCell::new(Vec::new()));
+        replace_handler(Rc::new(Recorder(pressed.clone())));
+        pressed
+    }
+
+    /// The presses that reached the app's `press` listeners (none listen in
+    /// a test, so they wait).
+    fn app_presses() -> Vec<String> {
+        PRESSES.with(|p| p.borrow().clone())
+    }
+
+    /// A remote notification's `userInfo`.
+    fn remote() -> Retained<NSDictionary> {
+        let aps = dictionary(&["alert"], &[NSString::from_str("Hi").as_ref()]);
+        dictionary(
+            &["aps", "chat"],
+            &[aps.as_ref(), NSString::from_str("42").as_ref()],
+        )
+    }
+
     fn foreign(id: &str) -> ForeignNotification {
         ForeignNotification {
             id: id.into(),
             thread_id: "chat:42".into(),
-            data: json!({ "chat": "42" }),
+            user_info: json!({ "chat": "42" }),
         }
+    }
+
+    #[test]
+    fn a_press_of_nshs_own_notification_reaches_press() {
+        let pressed = record();
+        let yes = NSNumber::new_bool(true);
+        let own = dictionary(&[MARKER], &[yes.as_ref()]);
+        let received = Received::new("chat:42".into(), String::new(), Some(&own));
+        assert_eq!(received, Received::Own("chat:42".into()));
+        received.respond(DEFAULT_ACTION).unwrap().press();
+        assert_eq!(app_presses(), ["chat:42"]);
+        assert!(pressed.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_press_of_another_notification_reaches_the_handler_not_press() {
+        let pressed = record();
+        let received = Received::new("4F1C".into(), "chat:42".into(), Some(&remote()));
+        assert_eq!(
+            received,
+            Received::Foreign(ForeignNotification {
+                id: "4F1C".into(),
+                thread_id: "chat:42".into(),
+                user_info: json!({ "aps": { "alert": "Hi" }, "chat": "42" }),
+            })
+        );
+        received.respond(DEFAULT_ACTION).unwrap().press();
+        assert_eq!(*pressed.borrow(), ["4F1C"]);
+        assert!(app_presses().is_empty());
+    }
+
+    #[test]
+    fn dismissing_another_notification_reaches_no_one() {
+        let pressed = record();
+        let received = Received::new("4F1C".into(), String::new(), Some(&remote()));
+        let dismiss = "com.apple.UNNotificationDismissActionIdentifier";
+        assert_eq!(received.respond(dismiss), None);
+        let received = Received::new("4F1C".into(), String::new(), Some(&remote()));
+        assert_eq!(received.respond("reply"), None);
+        assert!(pressed.borrow().is_empty());
+        assert!(app_presses().is_empty());
+    }
+
+    #[test]
+    fn a_notification_without_user_info_is_another() {
+        assert_eq!(
+            Received::new("x".into(), String::new(), None),
+            Received::Foreign(ForeignNotification {
+                id: "x".into(),
+                thread_id: String::new(),
+                user_info: json!({}),
+            })
+        );
     }
 
     #[test]
@@ -817,20 +945,40 @@ mod tests {
         // The press that starts the app comes before a late handler.
         foreign_pressed(foreign("first"));
         let pressed = Rc::new(RefCell::new(Vec::new()));
-        set_foreign_handler(Recorder(pressed.clone()));
+        assert!(!replace_handler(Rc::new(Recorder(pressed.clone()))));
         assert_eq!(*pressed.borrow(), ["first"]);
         foreign_pressed(foreign("second"));
         assert_eq!(*pressed.borrow(), ["first", "second"]);
-        // Nothing reached the app's `press` listeners.
-        assert!(PRESSES.with(|p| p.borrow().is_empty()));
+        assert!(app_presses().is_empty());
+        // Another handler replaces it.
+        assert!(replace_handler(Rc::new(Recorder(Rc::default()))));
+    }
+
+    struct Quiet;
+
+    impl ForeignNotificationHandler for Quiet {
+        fn presentation(&self, _: &ForeignNotification) -> Presentation {
+            Presentation::default().banner(false).sound(false)
+        }
+
+        fn pressed(&self, _: &ForeignNotification) {}
     }
 
     #[test]
-    fn a_handler_shows_notifications_as_nsh_does_by_default() {
-        let handler = Recorder(Rc::default());
+    fn the_handler_decides_how_another_notification_shows_in_front() {
+        let notification = foreign("any");
+        assert_eq!(present(None, &notification), Presentation::default());
+        let recorder: &dyn ForeignNotificationHandler = &Recorder(Rc::default());
         assert_eq!(
-            handler.presentation(&foreign("any")),
+            present(Some(recorder), &notification),
             Presentation::default()
+        );
+        assert_eq!(
+            present(
+                Some(&Quiet as &dyn ForeignNotificationHandler),
+                &notification
+            ),
+            Presentation::default().banner(false).sound(false)
         );
     }
 
@@ -839,16 +987,22 @@ mod tests {
     impl ForeignNotificationHandler for Replacing {
         fn pressed(&self, notification: &ForeignNotification) {
             self.0.borrow_mut().push(notification.id.clone());
-            set_foreign_handler(Recorder(self.0.clone()));
+            replace_handler(Rc::new(Recorder(self.0.clone())));
         }
     }
 
     #[test]
     fn a_handler_may_set_another_while_it_runs() {
         let pressed = Rc::new(RefCell::new(Vec::new()));
-        set_foreign_handler(Replacing(pressed.clone()));
+        replace_handler(Rc::new(Replacing(pressed.clone())));
         foreign_pressed(foreign("first"));
         foreign_pressed(foreign("second"));
         assert_eq!(*pressed.borrow(), ["first", "second"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "main thread")]
+    fn setting_a_handler_off_the_main_thread_panics() {
+        set_foreign_handler(Recorder(Rc::default()));
     }
 }

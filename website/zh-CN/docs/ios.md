@@ -32,6 +32,43 @@ nsh run App.tsx --target ios                          # TSX 应用
 按名称或 UDID 选择模拟器。想要不用模拟器、更快的开发循环，在 Mac 上运行 `nsh run --target catalyst`，会在一个 iPhone 尺寸的
 [Mac Catalyst](./getting-started.md#mac-catalyst) 窗口中打开同一个 UIKit 后端。
 
+## 来自其他代码的通知
+
+NSH 是应用的通知中心 delegate。[`Notifications`](../modules/nsh.md#notifications) 报告应用自己显示的通知的点击。远程通知，以及推送 SDK
+等其他原生代码安排的通知，交给 Rust 代码用 `nsh_platform_apple::notifications::set_foreign_handler` 设置的唯一处理者。请在应用 crate 的
+`#[native_module]` 入口里设置：它在应用启动前于主线程运行，所以启动应用的那次点击也能送达：
+
+```rust
+use nsh_platform_apple::notifications::{
+    ForeignNotification, ForeignNotificationHandler, Presentation, set_foreign_handler,
+};
+
+struct Chats;
+
+impl ForeignNotificationHandler for Chats {
+    // 应用在前台时到达：正在查看的会话不弹横幅。
+    fn presentation(&self, notification: &ForeignNotification) -> Presentation {
+        if is_open(&notification.thread_id) {
+            Presentation::default().banner(false).sound(false)
+        } else {
+            Presentation::default()
+        }
+    }
+
+    // 用户点击了它，应用可能因此启动。
+    fn pressed(&self, notification: &ForeignNotification) {
+        open_chat(&notification.user_info["chat"]);
+    }
+}
+
+set_foreign_handler(Chats);
+```
+
+`ForeignNotification` 带有请求的 `id`、所属分组 `thread_id`，以及转成 JSON 的 `userInfo`（`user_info`）。处理者的方法在主线程运行，
+在其他线程调用 `set_foreign_handler` 会 panic。处理者只有一个，所以由应用 crate 持有，再转给它使用的模块；之后的调用会替换它。没有处理者时，
+这些通知和应用自己的通知一样显示，点击被丢弃。只报告点击通知本身，不报告其类别的操作。嵌入 NSH 且自己设置了通知中心 delegate 的应用，
+所有通知都留在自己的 delegate。macOS 上同样如此。
+
 ## 打包
 
 ```sh

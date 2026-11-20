@@ -2387,10 +2387,10 @@ async function signOut() {
 `press` reports the `id` of the notification the user pressed. A press can start the app: it waits for the first
 listener, so listen when the app starts, and keep what the press opens in the `id`. On Android an embedding app's
 activity passes its intents to `NshView.handleNotificationIntent`, in `onCreate` and `onNewIntent`. On Apple platforms an
-embedding app that has a notification center delegate keeps it, and its delegate gets the presses. On Apple platforms
-`press` reports only the notifications the app showed with `Notifications.show`: remote notifications and those other
-native code scheduled go to the handler that Rust code sets with `nsh_platform_apple::notifications::set_foreign_handler`,
-which also decides how they show while the app is in front, and hears the press that starts the app. On Linux a press reaches
+embedding app that has a notification center delegate keeps it, and its delegate gets the presses; otherwise remote
+notifications and those other native code scheduled go to the handler Rust code sets with
+`nsh_platform_apple::notifications::set_foreign_handler` ([iOS](../docs/ios.md#notifications-from-other-code)), never to
+`press`. On Linux a press reaches
 only the running app: one left on screen after the app exits does nothing.
 
 ### Notifications.permission
