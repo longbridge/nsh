@@ -848,6 +848,15 @@ fn run(mut command: Command) -> anyhow::Result<()> {
         Command::Package(args) => Some(args.target) == package::PackageTarget::desktop(),
         _ => false,
     };
+    // A Rust app's root reports what the package names and versions it.
+    if let Command::Package(args) = &command {
+        rust_app::set_package_identity(rust_app::PackageIdentity {
+            id: args.id.clone(),
+            name: args.name.clone(),
+            version: args.version.clone(),
+            build: args.build,
+        });
+    }
     let app = match command.entry_mut() {
         Some(entry) => rust_app::of(entry, unify)?,
         None => None,
