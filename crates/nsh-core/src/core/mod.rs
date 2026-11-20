@@ -3024,6 +3024,7 @@ impl<M: TextEngine> Core<M> {
                     .insert(id, WindowRecord::opened(options.attributes.clone(), size));
                 self.window_ids
                     .insert(options.id.clone(), (id, options.restore_bounds));
+                self.key_ancestry_dirty = true;
                 self.commands.push((
                     id,
                     Command::Desktop(Box::new(DesktopCommand::OpenWindow(open))),
@@ -3362,6 +3363,7 @@ impl<M: TextEngine> Core<M> {
         self.sync_overlays();
         if std::mem::take(&mut self.key_ancestry_dirty) {
             self.sync_key_parents();
+            self.sync_key_contents();
         }
         // The rows holding the focus or an open overlay stay rendered,
         // before the lists update their windows.
@@ -6818,6 +6820,7 @@ impl<M: TextEngine> Core<M> {
             self.key_ancestry_dirty = true;
         }
         self.nodes[parent as usize].children.insert(pos, child);
+        self.key_content_changed(parent);
         self.rank_noted(child);
         self.tree_order_changed |= self.track_tree_order;
         self.tab_places_stale = true;
@@ -6958,6 +6961,7 @@ impl<M: TextEngine> Core<M> {
             .position(|&c| c == key)
             .expect("child of parent");
         siblings.remove(pos);
+        self.key_content_changed(parent);
         self.tree_order_changed |= self.track_tree_order;
         self.tab_places_stale = true;
         if let Some(list) = self.nodes[parent as usize].list.as_mut() {
@@ -7887,8 +7891,10 @@ impl<M: TextEngine> Core<M> {
                 self.mount.push(MountItem::Gestures { id, values });
             }
             if flags & dirty::VIEW_PROPS != 0 {
-                let props = node.mounted_props();
-                self.mount.push(MountItem::ViewProps { id, props });
+                self.mount.push(MountItem::ViewProps {
+                    id,
+                    props: node.mounted_props(),
+                });
             } else if flags & dirty::LABEL != 0 {
                 let label = node
                     .props

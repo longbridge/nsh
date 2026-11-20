@@ -5473,9 +5473,11 @@ impl<M: TextEngine> Core<M> {
     /// root, or the dialog's content) and bubbles from it, as a browser
     /// reports it at `document.body` (#2362). Any other node starts at
     /// itself.
-    fn key_start(&self, key: Key) -> Key {
+    pub(super) fn key_start(&self, key: Key) -> Key {
         let node = &self.nodes[key as usize];
-        if node.id != crate::ROOT_ID && self.key_window(key) != node.id {
+        if node.id != crate::ROOT_ID
+            && (node.kind != Kind::Modal || self.key_window(key) != node.id)
+        {
             return key;
         }
         node.children
@@ -5483,6 +5485,16 @@ impl<M: TextEngine> Core<M> {
             .copied()
             .find(|&child| !matches!(self.nodes[child as usize].kind, Kind::Overlay | Kind::Modal))
             .unwrap_or(key)
+    }
+
+    /// A window's staged keyboard target follows its logical children.
+    pub(super) fn key_content_changed(&mut self, parent: Key) {
+        let node = &self.nodes[parent as usize];
+        if node.id == crate::ROOT_ID
+            || (node.kind == Kind::Modal && self.key_window(parent) == node.id)
+        {
+            self.key_ancestry_dirty = true;
+        }
     }
 
     /// The root of the window `key` is in, `key` itself when it is one.

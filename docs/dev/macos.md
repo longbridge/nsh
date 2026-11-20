@@ -393,8 +393,8 @@ so it reports the decision and cannot veto it (or stop the beep a key with no re
 `keyboard.rs` installs one local monitor per surface for `KeyDown`, `KeyUp` and `FlagsChanged`. It sees a key before
 AppKit dispatches it, which is what puts keymap bindings, then the raw notification and capture, ahead of menu key
 equivalents and the responder's defaults. The monitor finds the focused view through the event's window and its first
-responder: an NSH view that is not the root and is a focus stop (`ViewProps::focus_stop`). A native field editor, a
-hosted view, the root, a window under a modal and another surface's views get no raw event.
+responder: an NSH view that is a focus stop (`ViewProps::focus_stop`). An unfocused window starts at its logical
+content root. A native field editor, a hosted view, a window under a modal and another surface's views own their keys.
 
 Interest and capture walk the logical keyboard ancestry, not the native view tree. An `Overlay` is moved under a root
 view's host natively (`Core::sync_overlays` inserts it there) while its logical parent stays the view that contains it,
