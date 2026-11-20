@@ -21,6 +21,15 @@ test("a drag outside the selectable view clears its selection", async () => {
   expect(app.shows('Selected: ""')).toBe(true);
 });
 
+test("clearSelection clears a selectable view's selection", async () => {
+  const app = await open("./App.tsx", { platform: "macos" });
+  await app.drag("id:first", { x: 0, y: 17 });
+  await app.waitFor("Changes: 1");
+  await app.press("id:clear");
+  await app.waitFor("Changes: 2");
+  expect(app.shows('Selected: ""')).toBe(true);
+});
+
 test("a finger drag on a phone selects nothing", async () => {
   const app = await open("./App.tsx", { platform: "ios" });
   await app.drag("id:first", { x: 0, y: 17 });

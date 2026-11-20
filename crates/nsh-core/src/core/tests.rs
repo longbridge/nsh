@@ -41491,7 +41491,7 @@ mod terminal_layout {
     }
 
     #[test]
-    fn an_image_keeps_its_box_and_an_icon_is_left_out() {
+    fn an_image_keeps_its_box_at_every_size() {
         let mut ops = node(
             2,
             Tag::Image,
@@ -41510,10 +41510,67 @@ mod terminal_layout {
         ));
         ops.extend(text(4, ROOT_ID, "After"));
         let batch = laid_out(ops);
-        // 25 columns, 6.25 rows to 6: blank, so what follows stays below it.
+        // 25 columns, 6.25 rows to 6: what follows stays below it.
         assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 200.0, 96.0)));
-        assert!(left_out(&batch, 3));
-        assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 96.0, 320.0, 16.0)));
+        // An icon-sized picture (a star, a logo) is drawn too: two columns,
+        // one row.
+        assert!(!left_out(&batch, 3));
+        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 96.0, 16.0, 16.0)));
+        assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 112.0, 320.0, 16.0)));
+    }
+
+    #[test]
+    fn an_avatar_holding_only_its_picture_keeps_its_rows() {
+        // An avatar 40pt square: its initials gone once its picture has
+        // loaded, it holds only the picture over it (absolute), filling it.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("width", V::Number(40.0)),
+                ("height", V::Number(40.0)),
+            ],
+        );
+        ops.extend(view(3, 2, &[("flexGrow", V::Number(1.0))]));
+        ops.extend(node(
+            4,
+            Tag::Image,
+            3,
+            &[
+                ("position", V::Str("absolute")),
+                ("top", V::Number(0.0)),
+                ("left", V::Number(0.0)),
+                ("right", V::Number(0.0)),
+                ("bottom", V::Number(0.0)),
+            ],
+        ));
+        let batch = laid_out(ops);
+        // Five columns, 2.5 rows to 2.
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 40.0, 32.0)));
+        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 40.0, 32.0)));
+        assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 0.0, 40.0, 32.0)));
+    }
+
+    #[test]
+    fn a_box_holding_a_growing_scroll_view_keeps_its_explicit_height() {
+        // A picker 160pt tall: a search row, then its grid in a scroll view
+        // growing into what is left, which has no rows of its content.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("height", V::Number(160.0)),
+            ],
+        );
+        ops.extend(text(3, 2, "Search"));
+        ops.extend(node(4, Tag::Scroll, 2, &[("flexGrow", V::Number(1.0))]));
+        ops.extend(text(5, 4, "Grid"));
+        let batch = laid_out(ops);
+        // Ten rows: one for the search, nine for the grid.
+        assert_eq!(frame_of(&batch, 2).map(|f| f.size.height.0), Some(160.0));
+        assert_eq!(frame_of(&batch, 4).map(|f| f.size.height.0), Some(144.0));
     }
 
     #[test]
@@ -43229,7 +43286,7 @@ mod terminal_layout {
             ));
             ops.extend(node(
                 5,
-                Tag::Image,
+                Tag::Canvas,
                 3,
                 &[("width", V::Number(16.0)), ("height", V::Number(16.0))],
             ));

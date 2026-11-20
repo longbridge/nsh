@@ -19,6 +19,7 @@ import CoreOffscreenCanvas from "./core-offscreen-canvas";
 import CoreOverlay from "./core-overlay";
 import CorePrimitives from "./core-primitives";
 import CoreReactive from "./core-reactive";
+import CoreClearSelection from "./core-clear-selection";
 import CoreRef from "./core-ref";
 import CoreResource from "./core-resource";
 import CoreReveal from "./core-reveal";
@@ -49,6 +50,7 @@ const cases: Record<string, () => JSX.Element> = {
   "core-overlay": CoreOverlay,
   "core-primitives": CorePrimitives,
   "core-reactive": CoreReactive,
+  "core-clear-selection": CoreClearSelection,
   "core-ref": CoreRef,
   "core-resource": CoreResource,
   "core-reveal": CoreReveal,
