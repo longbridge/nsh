@@ -12336,7 +12336,7 @@ mount(() => <View>
   <MenuButton accessibilityLabel="Account" title="me@example.com"
     items={[
       { id: "settings", label: "Settings", icon: "gearshape" },
-      { id: "", label: "Appearance", inline: true, items: [
+      { id: "", label: "Appearance", inline: true, singleSelection: true, items: [
         { id: "light", label: "Light", checked: !dark() },
         { id: "dark", label: "Dark", checked: dark() },
       ] },
@@ -12351,7 +12351,7 @@ mount(() => <View>
 /// `nsh/base`'s `MenuButton` covers its content with the system's button on
 /// iOS and Android: the menu's items, title and label reach it as data, a
 /// chosen item comes back as `onSelect({ id })`, and the new checks reach
-/// the same button.
+/// the same button. A section of one choice says so.
 #[test]
 fn the_menu_button_gives_the_mobile_systems_their_menu_and_reports_the_choice() {
     use nsh_core::platform::{MENU_BUTTON_COMPONENT, Os};
@@ -12373,7 +12373,7 @@ fn the_menu_button_gives_the_mobile_systems_their_menu_and_reports_the_choice() 
         let appearance = |dark: bool| {
             serde_json::json!([
                 { "id": "settings", "label": "Settings", "icon": "gearshape" },
-                { "id": "", "label": "Appearance", "inline": true, "items": [
+                { "id": "", "label": "Appearance", "inline": true, "singleSelection": true, "items": [
                     { "id": "light", "label": "Light", "checked": !dark },
                     { "id": "dark", "label": "Dark", "checked": dark },
                 ] },

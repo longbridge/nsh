@@ -21,8 +21,10 @@ import android.view.View;
 import android.widget.PopupMenu;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 
 /**
@@ -48,6 +50,8 @@ final class SystemMenus {
         /** Checkable, checked or not (null: not checkable). */
         Boolean checked;
         boolean disabled, destructive, inline;
+        /** Its own actions are one choice: radio buttons. */
+        boolean singleSelection;
         final List<Entry> items = new ArrayList<>();
     }
 
@@ -73,6 +77,7 @@ final class SystemMenus {
             e.disabled = Boolean.TRUE.equals(m.get("disabled"));
             e.destructive = Boolean.TRUE.equals(m.get("destructive"));
             e.inline = Boolean.TRUE.equals(m.get("inline"));
+            e.singleSelection = Boolean.TRUE.equals(m.get("singleSelection"));
             if (depth + 1 < MAX_DEPTH) e.items.addAll(parse(m.get("items"), depth + 1));
             entries.add(e);
         }
@@ -118,7 +123,7 @@ final class SystemMenus {
             MenuItem header = menu.add(builder.group++, Menu.NONE, builder.order++, builder.header(title));
             header.setEnabled(false);
         }
-        builder.add(menu, entries);
+        builder.add(menu, entries, false);
         // Icons only show when asked (API 29); earlier the menu is text only.
         if (builder.icons && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) popup.setForceShowIcon(true);
         popup.setOnMenuItemClickListener(item -> {
@@ -152,10 +157,12 @@ final class SystemMenus {
         /**
          * Adds {@code entries} to {@code menu}: an inline section's items in
          * a group of their own (a divider between groups from API 28).
-         * Checkable items are checks, as on iOS, never inferred as a single
-         * choice.
+         * Checkable items are independent checks, as on iOS, unless their
+         * submenu or section is marked as one choice ({@code single}): then
+         * its own actions are an exclusive group, drawn as radio buttons.
          */
-        void add(Menu menu, List<Entry> entries) {
+        void add(Menu menu, List<Entry> entries, boolean single) {
+            Choice choice = new Choice(single);
             int current = group++;
             boolean afterSection = false;
             for (Entry e : entries) {
@@ -164,39 +171,45 @@ final class SystemMenus {
                         current = group++;
                         afterSection = false;
                     }
-                    action(menu, current, e);
+                    choice.action(action(menu, current, e));
                 } else if (e.inline) {
                     int section = group++;
+                    Choice inSection = new Choice(e.singleSelection);
                     if (!e.label.isEmpty()) {
-                        menu.add(section, Menu.NONE, order++, header(e.label)).setEnabled(false);
+                        MenuItem title = menu.add(section, Menu.NONE, order++, header(e.label));
+                        title.setEnabled(false);
+                        inSection.other(title);
                     }
                     for (Entry item : e.items) {
-                        if (item.items.isEmpty()) action(menu, section, item);
-                        else submenu(menu, section, item);
+                        if (item.items.isEmpty()) inSection.action(action(menu, section, item));
+                        else inSection.other(submenu(menu, section, item));
                     }
+                    inSection.apply(menu);
                     afterSection = true;
                 } else {
                     if (afterSection) {
                         current = group++;
                         afterSection = false;
                     }
-                    submenu(menu, current, e);
+                    choice.other(submenu(menu, current, e));
                 }
             }
+            choice.apply(menu);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) menu.setGroupDividerEnabled(true);
         }
 
         /** A submenu in {@code group}: a section's stays in the section, as on iOS. */
-        private void submenu(Menu menu, int group, Entry e) {
+        private MenuItem submenu(Menu menu, int group, Entry e) {
             SubMenu sub = menu.addSubMenu(group, nextId++, order++, label(e));
             sub.setHeaderTitle(e.label);
             sub.getItem().setEnabled(!e.disabled);
             Drawable icon = icon(e);
             if (icon != null) sub.getItem().setIcon(icon);
-            add(sub, e.items);
+            add(sub, e.items, e.singleSelection);
+            return sub.getItem();
         }
 
-        private void action(Menu menu, int group, Entry e) {
+        private MenuItem action(Menu menu, int group, Entry e) {
             int id = nextId++;
             MenuItem item = menu.add(group, id, order++, label(e));
             ids.put(id, e.id);
@@ -204,6 +217,7 @@ final class SystemMenus {
             if (e.checked != null) item.setCheckable(true).setChecked(e.checked);
             Drawable icon = icon(e);
             if (icon != null) item.setIcon(icon);
+            return item;
         }
 
         /** A title row's text: secondary, a step smaller. */
@@ -239,6 +253,38 @@ final class SystemMenus {
             if (e.disabled) d.setAlpha(97); // Material's disabled content: 38%.
             icons = true;
             return d;
+        }
+    }
+
+    /**
+     * One level's actions as one choice: {@link Menu#setGroupCheckable} with
+     * {@code exclusive} makes every item of a group a radio button, so the
+     * groups holding the actions become exclusive and the other rows there
+     * (a section's title, a submenu) are made not checkable again. The
+     * checks are set before, so marking a group exclusive unchecks nothing.
+     */
+    static final class Choice {
+        final boolean single;
+        final Set<Integer> groups = new HashSet<>();
+        final List<MenuItem> others = new ArrayList<>();
+
+        Choice(boolean single) {
+            this.single = single;
+        }
+
+        void action(MenuItem item) {
+            if (single) groups.add(item.getGroupId());
+        }
+
+        void other(MenuItem item) {
+            if (single) others.add(item);
+        }
+
+        void apply(Menu menu) {
+            for (int group : groups) menu.setGroupCheckable(group, true, true);
+            for (MenuItem item : others) {
+                if (groups.contains(item.getGroupId())) item.setCheckable(false);
+            }
         }
     }
 
