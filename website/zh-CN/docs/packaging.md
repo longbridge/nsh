@@ -148,7 +148,8 @@ security find-identity -v -p codesigning
 | `simulatorPath` | 为模拟器构建的扩展。不写时，`path` 如果是为模拟器构建的，模拟器包就带上它，否则不带这个扩展（并给出警告）。 |
 | `entitlements` | 扩展的 entitlements，和应用的 `ios.entitlements` 一样（见[下文](#infoplist-键与-entitlements)）。 |
 
-每个包都会把扩展复制进 `PlugIns/`，并把它们的版本号设成应用的 `version` 和 `build`，这是 App Store 的要求。扩展的
+每个包都会把扩展复制进 `PlugIns/`，并把它们的版本号设成应用的 `version` 和 `build`：扩展的版本号应当和应用一致（不一致时
+App Store Connect 会给出提示）。扩展的
 identifier 必须以应用的开头（应用为 `com.example.app` 时，扩展为 `com.example.app.Widget`）。模拟器包用 ad hoc 签名；
 真机包先用各扩展 identifier 对应的描述文件给它签名，并把描述文件作为 `embedded.mobileprovision` 放进扩展，再签名应用。
 给应用传一个 `--profile`，每个扩展再各传一个；写明了 bundle identifier 的描述文件优先于覆盖它的通配描述文件：
@@ -161,7 +162,14 @@ nsh package --target ios \
 ```
 
 应用和扩展共用的代码（比如实时活动的 attributes）分别编进两边。它们通过 app group 共享数据，两边的 entitlements
-都要列出这个 group。
+都要列出这个 group。要启动实时活动的应用，还要在自己的 `Info.plist` 里通过 `ios.infoPlist` 声明
+`NSSupportsLiveActivities`：
+
+```json
+{
+  "ios": { "infoPlist": { "NSSupportsLiveActivities": true } }
+}
+```
 
 ## Android
 

@@ -165,8 +165,8 @@ Widgets, Live Activities, notification service extensions and other app extensio
 | `simulatorPath` | The extension built for the simulator. Without it, simulator packages carry `path` when it is built for the simulator and leave the extension out (with a warning) when it is not. |
 | `entitlements` | The extension's entitlements, as `ios.entitlements` are the app's ([below](#infoplist-keys-and-entitlements)). |
 
-Each package copies the extensions into `PlugIns/` and gives them the app's `version` and `build`, which the App Store
-requires of them. An extension's identifier must start with the app's (`com.example.app.Widget` for
+Each package copies the extensions into `PlugIns/` and gives them the app's `version` and `build`: an extension's
+version should match its app's (App Store Connect flags a mismatch). An extension's identifier must start with the app's (`com.example.app.Widget` for
 `com.example.app`). The simulator package signs them ad hoc; the device package signs each one with the profile for its
 identifier, which it carries as `embedded.mobileprovision`, before it signs the app. Pass one `--profile` for the app
 and one for each extension; a profile that names a bundle's identifier is taken before a wildcard that covers it:
@@ -179,7 +179,14 @@ nsh package --target ios \
 ```
 
 Code the app and an extension share, such as a Live Activity's attributes, is built into each of them. They share
-data through an app group, which both list in their entitlements.
+data through an app group, which both list in their entitlements. An app that starts Live Activities also declares
+`NSSupportsLiveActivities` in its own `Info.plist`, through `ios.infoPlist`:
+
+```json
+{
+  "ios": { "infoPlist": { "NSSupportsLiveActivities": true } }
+}
+```
 
 ## Android
 

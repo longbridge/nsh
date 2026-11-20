@@ -380,27 +380,13 @@ impl AppleConfig {
         entitlements(&self.entitlements, platform)
     }
 
-    /// The entitlements of `extensions[index]` as property list values, with
-    /// the `nsh.json` key they come from, for errors.
-    pub(crate) fn extension_entitlements(
-        &self,
-        index: usize,
-    ) -> anyhow::Result<(plist::Dictionary, String)> {
-        let section = format!("ios.extensions[{index}].entitlements");
-        let entries = &self.extensions[index].entitlements;
-        Ok((
-            convert(entries, &section, RESERVED_ENTITLEMENTS.iter())?,
-            section,
-        ))
-    }
-
     /// Checks both when `nsh.json` is read, so a mistake shows before a
     /// build.
     pub(crate) fn check(&self, platform: ApplePlatform) -> anyhow::Result<()> {
         self.info_plist(platform)?;
         self.entitlements(platform)?;
-        for index in 0..self.extensions.len() {
-            self.extension_entitlements(index)?;
+        for extension in &self.extensions {
+            extension_entitlements(extension)?;
         }
         if self.launch_screen.is_some() && self.info_plist.contains_key("UILaunchScreen") {
             bail!(
@@ -512,6 +498,21 @@ fn entitlements(
 ) -> anyhow::Result<plist::Dictionary> {
     let section = format!("{}.entitlements", platform.key());
     convert(entries, &section, RESERVED_ENTITLEMENTS.iter())
+}
+
+/// The entitlements of one of `ios.extensions` as property list values,
+/// refusing the keys `ios.entitlements` refuses, with the `nsh.json` key
+/// they come from, for errors.
+pub(crate) fn extension_entitlements(
+    extension: &crate::app_extensions::AppExtension,
+) -> anyhow::Result<(plist::Dictionary, String)> {
+    let section = format!("ios.extensions[{}].entitlements", extension.index);
+    let dictionary = convert(
+        &extension.entitlements,
+        &section,
+        RESERVED_ENTITLEMENTS.iter(),
+    )?;
+    Ok((dictionary, section))
 }
 
 /// `entries` as a property list dictionary, refusing the `reserved` keys.

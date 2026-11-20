@@ -927,10 +927,11 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
         .into_iter()
         .map(|dex| dir.join(dex))
         .collect();
-    config.ios.extensions = std::mem::take(&mut config.ios.extensions)
-        .into_iter()
-        .map(|extension| extension.relative_to(dir))
-        .collect();
+    config.ios.extensions = crate::app_extensions::read(
+        std::mem::take(&mut config.ios.extensions),
+        dir,
+        &mut ignored,
+    );
     config.icon = match config.icon {
         Some(AppIcon::All(icon)) => Some(AppIcon::All(dir.join(icon))),
         Some(AppIcon::Platforms(icons)) => Some(AppIcon::Platforms(
@@ -1475,7 +1476,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         }
     }
     let extensions = crate::app_extensions::embed(
-        &config.ios,
+        &config.ios.extensions,
         &app,
         &info,
         options.target == PackageTarget::IosSimulator,
@@ -1486,7 +1487,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         PackageTarget::IosSimulator => {
             // The app's signature seals its extensions': they are signed
             // first.
-            crate::app_extensions::sign_ad_hoc(&config.ios, &extensions, options.out)?;
+            crate::app_extensions::sign_ad_hoc(&extensions, options.out)?;
             // The simulator takes the app's entitlements without a profile.
             let entitlements = config.ios.entitlements(ApplePlatform::Ios)?;
             let mut path = None;
@@ -1535,14 +1536,9 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
                 .collect::<anyhow::Result<Vec<_>>>()?;
             // The app's signature seals its extensions': they are signed
             // first.
-            crate::app_extensions::sign_device(
-                &config.ios,
-                &extensions,
-                identity,
-                &profiles,
-                options.out,
-            )?;
-            let profile = Profile::choose(&profiles, &id)?;
+            crate::app_extensions::sign_device(&extensions, identity, &profiles, options.out)?;
+            let profile = Profile::choose(&profiles, &id, false)?;
+            crate::provisioning::warn_unused(&profiles);
             fs::copy(&profile.path, app.join("embedded.mobileprovision"))
                 .with_context(|| format!("copy {}", profile.path.display()))?;
             let requested = config.ios.entitlements(ApplePlatform::Ios)?;
@@ -2666,7 +2662,8 @@ pub(crate) fn codesign(
         .context("run codesign")?;
     if !output.status.success() {
         bail!(
-            "codesign failed: {}",
+            "codesign failed for {}: {}",
+            app.display(),
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
@@ -3104,10 +3101,15 @@ mod tests {
             Some(dir.join("ios/sim/Widget.appex").as_path())
         );
         assert_eq!(extensions[1].simulator_path, None);
-        let (entitlements, section) = config.ios.extension_entitlements(0).unwrap();
+        let (entitlements, section) = crate::apple::extension_entitlements(&extensions[0]).unwrap();
         assert_eq!(section, "ios.extensions[0].entitlements");
         assert!(entitlements.contains_key("com.apple.security.application-groups"));
-        assert!(config.ios.extension_entitlements(1).unwrap().0.is_empty());
+        assert!(
+            crate::apple::extension_entitlements(&extensions[1])
+                .unwrap()
+                .0
+                .is_empty()
+        );
 
         // An extension's identity is NSH's to sign, as the app's is.
         std::fs::write(
@@ -3120,6 +3122,21 @@ mod tests {
         let error = read_config(&dir.join("App.tsx")).unwrap_err().to_string();
         assert!(
             error.contains("ios.extensions[0].entitlements: `application-identifier`"),
+            "{error}"
+        );
+
+        // An entry left out keeps the next one's index as the app wrote it.
+        std::fs::write(
+            dir.join("nsh.json"),
+            r#"{ "ios": { "extensions": [
+                { "simulatorPath": "sim/A.appex" },
+                { "path": "B.appex", "entitlements": { "application-identifier": "T.x" } }
+            ] } }"#,
+        )
+        .unwrap();
+        let error = read_config(&dir.join("App.tsx")).unwrap_err().to_string();
+        assert!(
+            error.contains("ios.extensions[1].entitlements: `application-identifier`"),
             "{error}"
         );
         std::fs::remove_dir_all(&dir).unwrap();

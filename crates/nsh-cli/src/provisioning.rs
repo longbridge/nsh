@@ -4,11 +4,14 @@
 //! bundle is signed with under its profile.
 
 use std::{
+    cell::Cell,
     path::{Path, PathBuf},
     process::Command,
 };
 
 use anyhow::{Context, bail};
+
+use crate::ui;
 
 /// A provisioning profile (`.mobileprovision`), read.
 #[derive(Debug)]
@@ -20,6 +23,8 @@ pub(crate) struct Profile {
     app_id: String,
     /// The entitlements it grants.
     entitlements: plist::Dictionary,
+    /// Whether [`Profile::choose`] chose it for a bundle.
+    used: Cell<bool>,
 }
 
 impl Profile {
@@ -58,14 +63,21 @@ impl Profile {
             path,
             app_id,
             entitlements,
+            used: Cell::new(false),
         }
     }
 
     /// The profile of `profiles` for bundle id `id`: the one whose
     /// application identifier names it, else the narrowest wildcard that
     /// covers it (`TEAMID.com.example.*` before `TEAMID.*`). Two equally
-    /// close profiles are an error, as is none.
-    pub(crate) fn choose<'p>(profiles: &'p [Profile], id: &str) -> anyhow::Result<&'p Profile> {
+    /// close profiles are an error, as is none; when `id` is an app
+    /// extension's (`extension`), whose profile a command line with only the
+    /// app's leaves out, the error says to pass it.
+    pub(crate) fn choose<'p>(
+        profiles: &'p [Profile],
+        id: &str,
+        extension: bool,
+    ) -> anyhow::Result<&'p Profile> {
         // Exact before wildcard, then the longer pattern.
         let closeness = |profile: &Profile| {
             let pattern = profile.app_id.split_once('.').map_or("", |(_, p)| p);
@@ -77,6 +89,10 @@ impl Profile {
             .collect();
         let Some(best) = covering.iter().map(|p| closeness(p)).max() else {
             return Err(match profiles {
+                [profile] if extension => anyhow::anyhow!(
+                    "the provisioning profile is for {}, not {id}: pass its profile with another --profile",
+                    profile.app_id
+                ),
                 [profile] => anyhow::anyhow!(
                     "the provisioning profile is for {}, not {id}",
                     profile.app_id
@@ -100,6 +116,7 @@ impl Profile {
                 other.path.display()
             );
         }
+        profile.used.set(true);
         Ok(profile)
     }
 
@@ -126,6 +143,23 @@ impl Profile {
             plist::Value::String(signed_app_id(&self.app_id, id)),
         );
         Ok(plist::Value::Dictionary(entitlements))
+    }
+}
+
+/// The profiles [`Profile::choose`] chose for no bundle.
+fn unused(profiles: &[Profile]) -> impl Iterator<Item = &Profile> {
+    profiles.iter().filter(|p| !p.used.get())
+}
+
+/// Warns of each `--profile` the package signed no bundle with: a profile
+/// meant for a bundle whose identifier it does not cover, or one too many.
+pub(crate) fn warn_unused(profiles: &[Profile]) {
+    for profile in unused(profiles) {
+        ui::warn(format!(
+            "--profile {} is for {}, which no bundle of the package is, so nothing is signed with it",
+            profile.path.display(),
+            profile.app_id
+        ));
     }
 }
 
@@ -208,7 +242,7 @@ mod tests {
             profile("example.mobileprovision", "TEAM.com.example.*"),
         ];
         let chosen = |id| {
-            Profile::choose(&profiles, id)
+            Profile::choose(&profiles, id, id != "com.example.app")
                 .unwrap()
                 .path
                 .to_string_lossy()
@@ -218,22 +252,45 @@ mod tests {
         assert_eq!(chosen("com.example.app.Widget"), "widget.mobileprovision");
         assert_eq!(chosen("com.example.app.Service"), "example.mobileprovision");
         assert_eq!(chosen("org.other.app"), "all.mobileprovision");
+        assert_eq!(unused(&profiles).count(), 0);
+    }
+
+    /// A profile no bundle took is left over, which packaging warns of.
+    #[test]
+    fn profiles_no_bundle_takes_are_left_over() {
+        let profiles = [
+            profile("app.mobileprovision", "TEAM.com.example.app"),
+            profile("widget.mobileprovision", "TEAM.com.example.app.Widget"),
+            profile("old.mobileprovision", "TEAM.com.example.app.Old"),
+        ];
+        Profile::choose(&profiles, "com.example.app.Widget", true).unwrap();
+        Profile::choose(&profiles, "com.example.app", false).unwrap();
+        let left: Vec<_> = unused(&profiles).map(|p| p.app_id.as_str()).collect();
+        assert_eq!(left, ["TEAM.com.example.app.Old"]);
     }
 
     #[test]
     fn a_bundle_without_a_profile_or_with_two_is_an_error() {
         let one = [profile("app.mobileprovision", "TEAM.com.example.app")];
+        // The app's error stays as it was; an extension's says what to do.
         assert_eq!(
-            Profile::choose(&one, "com.example.app.Widget")
+            Profile::choose(&one, "com.other.app", false)
                 .unwrap_err()
                 .to_string(),
-            "the provisioning profile is for TEAM.com.example.app, not com.example.app.Widget"
+            "the provisioning profile is for TEAM.com.example.app, not com.other.app"
+        );
+        assert_eq!(
+            Profile::choose(&one, "com.example.app.Widget", true)
+                .unwrap_err()
+                .to_string(),
+            "the provisioning profile is for TEAM.com.example.app, not com.example.app.Widget: \
+             pass its profile with another --profile"
         );
         let two = [
             profile("app.mobileprovision", "TEAM.com.example.app"),
             profile("other.mobileprovision", "TEAM.com.example.other"),
         ];
-        let error = Profile::choose(&two, "com.example.app.Widget")
+        let error = Profile::choose(&two, "com.example.app.Widget", true)
             .unwrap_err()
             .to_string();
         assert!(
@@ -245,7 +302,7 @@ mod tests {
             profile("dev.mobileprovision", "TEAM.com.example.app"),
             profile("dist.mobileprovision", "TEAM.com.example.app"),
         ];
-        let error = Profile::choose(&same, "com.example.app")
+        let error = Profile::choose(&same, "com.example.app", false)
             .unwrap_err()
             .to_string();
         assert!(
