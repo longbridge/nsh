@@ -124,7 +124,10 @@ fn Panes() -> impl IntoElement {
 
 /// The mail on a desktop's headless surface, `width` wide.
 fn start(triple: bool, width: f32) -> Headless {
-    on_desktop(Root::new::<Mail>(move || MailProps { triple }), width)
+    on_desktop(
+        nsh_testing::windowed_root_with::<Mail>(move || MailProps { triple }),
+        width,
+    )
 }
 
 /// `root` on a desktop's headless surface, `width` wide.
@@ -182,7 +185,7 @@ fn nothing_resizes_the_columns() {
         );
     }
     // Panels of the app's in a column keep their handle.
-    let mut app = on_desktop(Root::of::<Panes>(), 1200.0);
+    let mut app = on_desktop(nsh_testing::windowed_root::<Panes>(), 1200.0);
     app.wait_for("role:adjustable").unwrap();
     app.idle(Duration::from_millis(100)).unwrap();
     assert_eq!(app.screen().count("role:adjustable").unwrap(), 1);

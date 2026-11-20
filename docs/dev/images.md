@@ -18,10 +18,9 @@
   views decoding at different sizes) and report `onProgress` at most every 100ms; `Image.getSize` / `Image.prefetch` (Rust,
   `nsh_core::runtime`) ask with `Command::ImageInfo`, are answered by the root's `ImageInfo` event (which the core
   resolves, never JS) and keep the downloaded bytes in a data cache (32 MB) until a view
-  decodes them; in a terminal (`Idiom::Terminal`) the core answers them at once and sends no command, and `Image`'s
-  functions reject with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. Android `ImageBox` draws its borders above the
+  decodes them; the terminal answers them as Linux does (`nsh-platform-tui` `image.rs`, `docs/dev/tui.md`). Android `ImageBox` draws its borders above the
   image (as Core Animation's layer border).
-- **Loading and memory** (`nsh_core::image`, the design in `image-loading-design.md`; Linux, Windows, macOS and
+- **Loading and memory** (`nsh_core::image`, the design in `image-loading-design.md`; Linux, Windows, macOS, the terminal and
   GPUI: iOS and Android keep their own loaders, above). One loader per process (`image::loader`) reads every view's, canvas's, `getSize` / `prefetch`'s and `element::svg`'s bytes: a
   `Location` (`http(s)`, a file, `asset:/` by the surface's `AssetBase` — the dev server, a directory, or
   `Directories` looked in in order — or the engine's `Assets` reader, bytes in memory) named by one source key (`Location::key`); one read per key in flight, later requests waiting on it; reads
@@ -242,7 +241,7 @@
   crate. It reads each variant's size: one that cannot be read, or whose pixels are off, fails the build (a proc macro
   has errors only, where the bundler warns about the size). A proc macro cannot read nsh-core, so its `VARIANT_SCALES`
   repeats `IMAGE_SCALES` above 1: change them together.
-- **SVG** (`nsh_core::svg`, always on in every native platform crate and `nsh-platform-web` never
+- **SVG** (`nsh_core::svg`, cargo feature `svg`, which every native platform crate enables and `nsh-platform-web` never
   does: browsers draw SVG with `<img>`, and the tint mask works on it as on bitmaps). The decoders sniff the bytes
   (`svg::sniff`: `<svg` after a BOM, XML declaration, comments and doctype, or gzip) before their platform decoder and
   draw with resvg. iOS, macOS and Android draw for the requested pixel size, the view's longer side (the size bitmaps

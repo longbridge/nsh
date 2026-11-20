@@ -13,8 +13,8 @@ use std::{
 };
 
 use nsh_core::{
-    Command, EventKind, HeaderItem, HeaderItemContent, HeaderSystemItem, ImageSource, Op, Prop,
-    ROOT_ID, ScreenProp,
+    Command, EventKind, HeaderItem, HeaderItemContent, HeaderSystemItem, ImageSource, NodeId, Op,
+    Prop, ROOT_ID, ScreenProp,
     desktop::{
         DesktopCommand, MenuAction, MenuBarMode, MenuItem, MenuRole, Shortcut, Tray,
         TrayTitlePlacement, TrayTitleRun,
@@ -438,10 +438,15 @@ fn keep(cx: *mut JsContext, slot: &RefCell<Vec<(u32, JsValue)>>, functions: Vec<
 }
 
 fn send(cx: *mut JsContext, command: DesktopCommand) -> Result<(), JsValue> {
+    send_to(cx, ROOT_ID, command)
+}
+
+/// Queues `command` for node `id`.
+fn send_to(cx: *mut JsContext, id: NodeId, command: DesktopCommand) -> Result<(), JsValue> {
     dom::push_op(
         cx,
         Op::Command {
-            id: ROOT_ID,
+            id,
             command: Command::Desktop(Box::new(command)),
         },
     )
@@ -547,7 +552,16 @@ unsafe fn popup_menu(
     } else {
         None
     };
-    match listen(cx).and_then(|()| send(cx, DesktopCommand::PopupMenu { items, at })) {
+    // On Windows a popup belongs to the window the app is working in, not
+    // the hidden app host: its HWND owns the menu and its client origin
+    // places `at`. macOS and Linux show the app's menus as one app menu, so
+    // the app root keeps them there. The app root (the host) also remains
+    // the target when no window is focused.
+    let target = match os(cx) {
+        Os::Windows => crate::window::focused_node(cx).unwrap_or(ROOT_ID),
+        _ => ROOT_ID,
+    };
+    match listen(cx).and_then(|()| send_to(cx, target, DesktopCommand::PopupMenu { items, at })) {
         Ok(()) => promise,
         Err(e) => {
             free(cx, promise);
@@ -1227,14 +1241,14 @@ pub(crate) const EXPORTS: &[Item] = &[
     (
         "isAvailable",
         Export::Value(|cx| {
-            if os(cx).is_desktop() {
+            if crate::window::windows_supported(cx) {
                 qjs::JS_TRUE
             } else {
                 qjs::JS_FALSE
             }
         }),
         Ts::value(
-            "True where this module's window and menu APIs work: macOS, Windows and\nLinux. `platform.desktop` (desktop behavior) also holds in browsers in the\ndesktop idiom, where the browser keeps its own window and menus.",
+            "True where this module's window and menu APIs work: macOS, Windows and\nLinux, but not a terminal app (which has one surface and no windows).\n`platform.desktop` (desktop behavior) also holds in browsers in the desktop\nidiom, where the browser keeps its own window and menus.",
             "boolean",
         ),
     ),
@@ -1250,7 +1264,7 @@ pub(crate) const EXPORTS: &[Item] = &[
         "Window",
         Export::Value(crate::window::window_export),
         Ts::value(
-            "A window of the app's own (desktops), rendered from the app's one engine:\nit shares the app's signals, context and theme. Open while `open` is not\nfalse and the user has not closed it (`onOpenChange` tells the app); it\ncloses when it unmounts. `Window.open` is the same imperatively;\n`Window.get` finds an open window by id. Off the desktops `<Window>`\nrenders nothing and `Window.open` throws `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.",
+            "A window of the app's own (desktops), rendered from the app's one engine:\nit shares the app's signals, context and theme. Open while `open` is not\nfalse and the user has not closed it (`onOpenChange` tells the app); it\ncloses when it unmounts. `Window.open` is the same imperatively;\n`Window.get` finds an open window by id. Off the desktops there are no\nwindows: `<Window>` renders its content, while open, as part of the app's\none surface, and `Window.open` throws `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.",
             "WindowComponent",
         ),
     ),
@@ -1258,7 +1272,7 @@ pub(crate) const EXPORTS: &[Item] = &[
         "currentWindow",
         Export::Function(crate::window::current_window, 0),
         Ts::function(
-            "The window the calling component renders in: the nearest `<Window>` (or\n`Window.open`'s) around it, else the main window. Call it while\nrendering and keep the `WindowRef`: outside a component (an event\nhandler, a timer, after an `await`) it throws a `TypeError`.",
+            "The window the calling component renders in: the nearest `<Window>` (or\n`Window.open`'s) around it. Call it while rendering and keep the\n`WindowRef`: outside a component (an event handler, a timer, after an\n`await`) it throws a `TypeError`. In the app root it is the main window's\nref: the implicit first window `mount` gives a plain root, which it does\nnot open when the root declares `<Window>` scenes; off the desktops it is\nthe app's one surface.",
             &["(): WindowRef"],
         ),
     ),
@@ -1266,7 +1280,7 @@ pub(crate) const EXPORTS: &[Item] = &[
         "windows",
         Export::Function(crate::window::all_windows, 0),
         Ts::function(
-            "The open windows (reactive): the main window, then the app's own in\nthe order they opened.",
+            "The app's open windows (reactive), in the order they opened; off the\ndesktops it is the app's one surface.",
             &["(): WindowRef[]"],
         ),
     ),
@@ -1344,7 +1358,7 @@ export interface WindowProps extends WindowOptions {
   onBoundsChange?: (event: { bounds: Bounds }) => void;
   /** It moved to another display. */
   onDisplayChange?: (event: { display: Display }) => void;
-  /** What it shows; `currentWindow()` in it is this window. */
+  /** What it shows; on the desktops `currentWindow()` in it is this window. */
   children?: JSX.Element;
   /** Takes the window's `WindowRef` once it opens (a variable, a signal or a
    * function); each opening gives a new one. */
@@ -1354,24 +1368,24 @@ export interface WindowProps extends WindowOptions {
 /** `Window`: the component, and opening and finding windows imperatively. */
 export interface WindowComponent {
   (props: WindowProps): JSX.Element;
-  /** Renders `component` in a window of its own and returns it, or returns
-   * the open window of the same `id`. Throws `ERR_ACCESS_DENIED`
+  /** Renders `component` in a window of its own and returns it, or focuses
+   * and returns the open window of the same `id`. Throws `ERR_ACCESS_DENIED`
    * (`permission: "windows"`) when the app's capabilities do not grant
    * the window, and `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` off the
    * desktops. */
   open(component: () => JSX.Element, options: WindowOptions): WindowRef;
-  /** The open window with `id` (`"main"`: the main window), or `null`
-   * (reactive). */
+  /** The open window with `id`, or `null` (reactive). */
   get(id: string): WindowRef | null;
 }
 
-/** A window: the main window or one of the app's own. Requests return
- * nothing: the platform may decline or adjust them, and `state()` reports
- * what happened. A closed window's requests do nothing. */
+/** A window of the app's own. Requests return nothing: the platform may
+ * decline or adjust them, and `state()` reports what happened. A closed
+ * window's requests do nothing. */
 export interface WindowRef {
-  /** The app's id for it (`"main"`: the main window). */
+  /** The app's id for it. */
   readonly id: string;
-  /** It is the main window. */
+  /** Its id is `"main"` (a conventional first-window id; there is no
+   * privileged window). */
   readonly main: boolean;
   /** The window that owns it, or `null`. */
   readonly parent: WindowRef | null;
@@ -1548,11 +1562,12 @@ export type MenuItem =
 export interface MenuModule {
   /** Sets the application menu, a submenu per top-level item (`File`,
    * `Edit`, …): macOS's menu bar, whose first menu is the app menu (titled
-   * with the app's name), or the window's menu bar on Windows and Linux,
-   * which is not shown while the title bar is hidden (its shortcuts still
-   * work: show its menus with `Menu.popup` from a title bar of the app's
-   * own). Call it again to change it (in an `effect`, it follows the
-   * signals it reads); `null` restores the platform's default menu. */
+   * with the app's name). On Windows and Linux the application menu belongs
+   * to the hidden app host and is not shown on the platforms' own bars in
+   * this version (per-window menu bars are not implemented; its shortcuts
+   * still work, and the app draws its own controls for the rest). Call it
+   * again to change it (in an `effect`, it follows the signals it reads);
+   * `null` restores the platform's default menu. */
   setApplicationMenu(items: readonly (MenuItem | null | undefined | false)[] | null): void;
   /** When the window's menu bar shows on Windows and Linux where the app's
    * window draws the application menu as a bar (the GPUI backend):
