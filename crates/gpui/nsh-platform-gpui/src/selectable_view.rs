@@ -591,6 +591,29 @@ fn autoscroll(key: u64) {
     });
 }
 
+/// `ref.clearSelection()` on `view` (`Command::ClearSelection`): clears
+/// the area selection when the area is `view`, inside it or around it.
+pub(crate) fn clear_in(view: &NshView) {
+    let within = |inner: &NshView, outer: &NshView| {
+        let mut current = Some(inner.clone());
+        while let Some(v) = current {
+            if &v == outer {
+                return true;
+            }
+            current = v.parent_view();
+        }
+        false
+    };
+    let hit = ACTIVE.with_borrow(|active| {
+        active
+            .as_ref()
+            .is_some_and(|a| within(&a.area, view) || within(view, &a.area))
+    });
+    if hit {
+        clear_all();
+    }
+}
+
 /// Clears the area selection, if there is one (a text selects alone).
 pub(crate) fn clear_all() {
     if let Some(a) = ACTIVE.with_borrow_mut(Option::take) {
