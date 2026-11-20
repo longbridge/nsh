@@ -181,7 +181,7 @@ view()
 | `onContextMenu` | `.on_context_menu` | `ContextMenuEvent` | A context menu was asked for over the view: the secondary button, the keyboard in the browser or a screen reader on macOS and Windows ([context menus](./index.md#context-menus)). |
 | `onFileDragEnter` | `.on_file_drag_enter` | `{ uris: string[], mimeTypes: string[] }` (`FileDragEvent`) | A local-file drag entered the active desktop destination with its offered file list and their types. |
 | `onFileDragLeave` | `.on_file_drag_leave` | none | A local-file drag left the active desktop destination. |
-| `onFileDrop` | `.on_file_drop` | `{ uris: string[], mimeTypes: string[] }` (`FileDropEvent`) | Local files or directories were dropped on the desktop destination. |
+| `onFileDrop` | `.on_file_drop` | `{ uris: string[], mimeTypes: string[] }` (`FileDropEvent`) | Local files or directories were dropped on the destination (desktops and iOS). |
 | `onLayout` | `.on_layout` | `{ bounds }` (`Bounds<Points>`) | The frame relative to the parent changed. |
 | `onPanStart` / `onPanEnd` | `.on_pan_start` / `.on_pan_end` | `PanEvent` | A drag bound with `pan` started / ended; `cancelled` is true when the system cancels it. |
 | `onPinchStart` / `onPinchEnd` | `.on_pinch_start` / `.on_pinch_end` | `{ scale, velocity }` | A pinch bound with `pinch` started / ended. |
@@ -204,6 +204,14 @@ again at drop time. AppKit resolves Finder file references to path URLs. GTK rep
 file-list preload finishes, including when the pointer stays still, and ignores completion after leave or reset.
 Moving between destinations reports leave then entry with the same offered list. `onFileDragLeave` clears the
 preview. Rust entry handlers receive `&FileDragEvent`; existing `||`, `|_: &()|` and `Listener<()>` handlers work too.
+
+On iOS (and iPadOS), a view with `onFileDrop` takes the files of a drag, such as images and documents dragged from Photos,
+Files, Safari or the app's own web views. The closest view
+that listens takes them, as on desktops. A drag's items carry no file URLs, only data in types that are read
+when they are dropped, so `onFileDragEnter` gives `uris: []` there, and `onFileDrop` gives the `file:` URLs of copies
+in the app's temporary directory (`pagePosition` too), in the drag's order. An item that offers only text or a link
+is no file, and is not offered. A text input inside the view keeps what it accepts: UIKit's text drop takes text and
+links, so an image that also carries its link (from a web page) goes into the input as its link.
 
 ```rust tabs
 let hint = signal(String::new());

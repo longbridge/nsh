@@ -71,6 +71,7 @@ mod decor;
 pub mod dev;
 #[cfg(feature = "embed")]
 pub mod embed;
+mod file_drop;
 mod fps;
 mod haptics;
 mod image;

@@ -795,19 +795,19 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         EventKind::FileDragEnter,
         on::ALL,
         "(e: { uris: string[]; mimeTypes: string[] }) => void",
-        "A local file drag entered this desktop destination with its offered file URLs and each one's MIME type by its name (`\"\"` when the name says none); no file is read. GTK waits for its file-list preload.",
+        "A local file drag entered this destination (desktops and iOS) with its offered file URLs and each one's MIME type by its name (`\"\"` when the name says none); no file is read. GTK waits for its file-list preload; iOS reads files only on drop, so it offers no URLs.",
     ),
     (
         EventKind::FileDragLeave,
         on::ALL,
         "() => void",
-        "A local file drag left this desktop destination.",
+        "A local file drag left this destination (desktops and iOS).",
     ),
     (
         EventKind::FileDrop,
         on::ALL,
         "(e: { uris: string[]; mimeTypes: string[]; pagePosition?: { x: number; y: number } }) => void",
-        "Local file URLs dropped on this desktop destination, with each one's MIME type by its name (`\"\"` when the name says none); `pagePosition`: where, in the window's coordinates, on backends that know it (Linux).",
+        "Local file URLs dropped on this destination (desktops and iOS), with each one's MIME type by its name (`\"\"` when the name says none); `pagePosition`: where, in the window's coordinates, on backends that know it (Linux, iOS).",
     ),
     (
         EventKind::Layout,
@@ -1133,6 +1133,8 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::KeyCommand,
     EventKind::Menu,
     EventKind::ViewableItemsChange,
+    // Text dropped on a Rust component (`RichEditor` inserts it).
+    EventKind::TextDrop,
     // `NavPage`'s `onDismiss` / `onBackPress` and `Dialog`'s `onClose` /
     // `onCancel` / `onOpenChange` / `onOpen`: the navigation's handlers
     // (`nsh-js` `navigation.rs`), declared with its components.
