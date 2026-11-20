@@ -1336,6 +1336,62 @@ pub struct HttpRequest {
     pub body: HttpBody,
     /// Follow redirects (`redirect: "follow"`, the default).
     pub follow_redirects: bool,
+    /// How the request uses the platform's HTTP cache (`cache` of
+    /// `fetch`).
+    pub cache: HttpCache,
+}
+
+/// How a request uses the HTTP cache: the Fetch standard's
+/// [cache modes](https://fetch.spec.whatwg.org/#concept-request-cache-mode).
+///
+/// Honoured where the platform's network stack has a cache (Web: the
+/// browser's; macOS / iOS: `NSURLSession`'s). Elsewhere requests always go
+/// to the network, which every mode but [`HttpCache::OnlyIfCached`]
+/// allows; that one fails there, as nothing is cached.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum HttpCache {
+    /// Use a fresh cached response, revalidate a stale one, store the
+    /// response (`"default"`).
+    #[default]
+    Default,
+    /// Neither read nor update the cache (`"no-store"`).
+    NoStore,
+    /// Skip the cache, then store the response (`"reload"`).
+    Reload,
+    /// Revalidate any cached response with the server (`"no-cache"`).
+    NoCache,
+    /// Use any cached response, stale or not; else the network
+    /// (`"force-cache"`).
+    ForceCache,
+    /// Use only a cached response; fail without one (`"only-if-cached"`).
+    OnlyIfCached,
+}
+
+impl HttpCache {
+    /// The mode's Fetch name (`"no-store"`, ...).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::NoStore => "no-store",
+            Self::Reload => "reload",
+            Self::NoCache => "no-cache",
+            Self::ForceCache => "force-cache",
+            Self::OnlyIfCached => "only-if-cached",
+        }
+    }
+
+    /// The mode named `name` (Fetch's names; `None` for others).
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "default" => Self::Default,
+            "no-store" => Self::NoStore,
+            "reload" => Self::Reload,
+            "no-cache" => Self::NoCache,
+            "force-cache" => Self::ForceCache,
+            "only-if-cached" => Self::OnlyIfCached,
+            _ => return None,
+        })
+    }
 }
 
 impl HttpRequest {
@@ -1348,6 +1404,7 @@ impl HttpRequest {
             headers: Vec::new(),
             body: HttpBody::Empty,
             follow_redirects: true,
+            cache: HttpCache::Default,
         }
     }
 
@@ -1372,6 +1429,13 @@ impl HttpRequest {
     #[must_use]
     pub fn body(mut self, body: impl Into<Vec<u8>>) -> Self {
         self.body = HttpBody::Bytes(body.into());
+        self
+    }
+
+    /// Uses the HTTP cache as `cache` says.
+    #[must_use]
+    pub fn cache(mut self, cache: HttpCache) -> Self {
+        self.cache = cache;
         self
     }
 }
