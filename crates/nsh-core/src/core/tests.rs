@@ -17149,6 +17149,100 @@ mod components {
             )
     }
 
+    /// Keyed rows, `r0`..`r5`; rows named `n...` are taller than the
+    /// estimate. A press replaces rows 1 and 2 with two new ones.
+    #[component]
+    fn ReplacedRows() -> impl IntoElement {
+        let rows = signal((0..6).map(|i| format!("r{i}")).collect::<Vec<_>>());
+        view()
+            .flex_1()
+            .child(view().h(px(20.0)).on_press(move |_: &()| {
+                rows.update(|r| {
+                    r.splice(1..3, ["n1", "n2"].map(String::from));
+                })
+            }))
+            .child(
+                virtual_list(
+                    move || rows.with(Vec::len),
+                    move |at| {
+                        let tall = move || {
+                            rows.with(|r| r.get(at.index()).is_some_and(|r| r.starts_with('n')))
+                        };
+                        view()
+                            .h(move || px(if tall() { 100.0 } else { 40.0 }))
+                            .child(text(move || {
+                                rows.with(|r| r.get(at.index()).cloned().unwrap_or_default())
+                            }))
+                    },
+                )
+                .keys(move || rows.get())
+                .estimated_item_size(px(40.0))
+                .flex_1(),
+            )
+    }
+
+    /// Rows replaced in place (old keys gone, new ones at their indexes):
+    /// a cell that takes back the new row at its index is measured in the
+    /// same commit, so the rows after it are placed after its real size,
+    /// not over it while nothing else lays the list out again.
+    #[test]
+    fn replaced_keyed_rows_are_measured_before_the_rows_after_them_are_placed() {
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ReplacedRows>(|| ()));
+        while c.commit().is_some() {}
+        let list = c
+            .nodes
+            .iter()
+            .find(|(_, n)| n.list.is_some())
+            .map(|(k, _)| k as Key)
+            .expect("a list");
+        let button = c
+            .nodes
+            .iter()
+            .find(|(_, n)| n.events.contains(EventKind::Press))
+            .map(|(_, n)| n.id)
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        while c.commit().is_some() {}
+        let cells: Vec<(String, f32, f32)> = {
+            let l = c.nodes[list as usize].list.as_ref().unwrap();
+            let mut cells: Vec<(String, f32, f32)> = l
+                .slots
+                .iter()
+                .filter(|s| s.ready().is_some())
+                .map(|s| {
+                    let frame = c.nodes[s.cell as usize].frame;
+                    let text = texts_in(&c, s.cell);
+                    (text, frame.origin.y.0, frame.size.height.0)
+                })
+                .collect();
+            cells.sort_by(|a, b| a.1.total_cmp(&b.1));
+            cells
+        };
+        let names: Vec<&str> = cells.iter().map(|c| c.0.as_str()).collect();
+        assert_eq!(names, ["r0", "n1", "n2", "r3", "r4", "r5"], "{cells:?}");
+        for w in cells.windows(2) {
+            assert_eq!(w[0].1 + w[0].2, w[1].1, "{cells:?}");
+        }
+    }
+
+    /// The raw texts inside cell `cell`, joined.
+    fn texts_in(c: &Core<FakeEngine>, cell: Key) -> String {
+        let mut out = String::new();
+        let mut stack = vec![cell];
+        while let Some(k) = stack.pop() {
+            let n = &c.nodes[k as usize];
+            if n.kind == Kind::RawText {
+                out.push_str(&n.text);
+            }
+            if let Some(r) = c.runs.values().find(|r| r.block == k) {
+                out.push_str(&r.text);
+            }
+            stack.extend(n.children.iter().rev());
+        }
+        out
+    }
+
     /// The rows two or more cells show at once: each row is in one cell,
     /// spare cells included (which keep showing their last row).
     fn rows_shown_twice(c: &Core<FakeEngine>) -> Vec<String> {

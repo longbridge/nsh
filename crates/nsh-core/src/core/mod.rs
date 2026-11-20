@@ -10717,8 +10717,6 @@ impl<M: TextEngine> Core<M> {
         // changed which ones). Descendant frames only change when the
         // cell was laid out again.
         let list = self.nodes[key as usize].list.as_ref().expect("list");
-        let content_len = list.content_len();
-        let blocks = list.blocks();
         let sticky = list.sticky_enabled();
         ready.clear();
         ready.extend(
@@ -10726,6 +10724,23 @@ impl<M: TextEngine> Core<M> {
                 .iter()
                 .filter_map(|s| s.ready().map(|i| (i, s.cell))),
         );
+        // A cell bound just now to the row it already shows (it took it
+        // back after the items changed) gets no render to lay it out
+        // again, and was not ready when the list measured above: measured
+        // now, the rows after it are placed after its real size.
+        for &(index, cell) in &ready {
+            if self.awaiting_renders.binary_search(&cell).is_ok() {
+                continue;
+            }
+            if let Some(cell_layout) = self.nodes.get(cell as usize).and_then(|c| c.layout) {
+                let size = main_of(self.rounded_layout(cell_layout).size);
+                let list = self.nodes[key as usize].list.as_mut().expect("list");
+                list.measured_unknown(index, size);
+            }
+        }
+        let list = self.nodes[key as usize].list.as_ref().expect("list");
+        let content_len = list.content_len();
+        let blocks = list.blocks();
         // Cells left without an item, or not showing theirs yet (a paced
         // bind, or one the frame's rounds did not reach), still show their
         // last one. Those in the render window (the data changed, the list
