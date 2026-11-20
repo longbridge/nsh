@@ -1477,6 +1477,7 @@ pub(crate) struct DrawnText {
 /// A text view got new text or a new layout, and the picture of it the
 /// engine thread painted, if it did ([`prerender`]).
 pub(crate) fn set(
+    surface: &crate::surface::Surface,
     view: &crate::view::NshView,
     text: &std::sync::Arc<AttributedText>,
     layout: &TextLayout,
@@ -1518,7 +1519,7 @@ pub(crate) fn set(
     });
     if was != text.is_selectable() {
         // The I-beam.
-        crate::input::style_changed(view);
+        crate::input::cursor_changed(surface);
     }
     // The mounter draws it, when it shows.
     view.restyle();

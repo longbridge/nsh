@@ -4991,6 +4991,10 @@ class Player {
   /** The browser's scrolling stopped: the end, unless the scroll is driven
    * here (`drive`) or a finger still holds it. */
   scrollEnded(el) {
+    // A browser wheel's scroll goes on while its events keep coming
+    // (`wheelNatively`): a `scrollend` between two notches is not its end,
+    // which waits for the fallback, as one scroll of nsh's ends once.
+    if (el._wheelAt && performance.now() - el._wheelAt < 200) return;
     clearTimeout(el._commandEnd);
     el._commandEnd = 0;
     // A scroll animation of the core's (`animateScroll`) is driven here:
@@ -9439,8 +9443,10 @@ class Player {
    * A wheel or touchpad scroll goes to the innermost scroll view along its
    * axis that can move that way (a vertical wheel scrolls a horizontal view
    * when no vertical one can), and stays on it until the scroll ends
-   * (events 200 ms apart). Notches glide; Ctrl + wheel (a touchpad's pinch)
-   * pinches the view under the pointer and never zooms the page.
+   * (events 200 ms apart). Where the browser would scroll the same view, it
+   * does (`wheelNatively`): its notches glide as every page's. Otherwise
+   * notches glide here; Ctrl + wheel (a touchpad's pinch) pinches the view
+   * under the pointer and never zooms the page.
    */
   wheel(e) {
     // A view listening to `onWheel` nearer than the scroll views under the
@@ -9472,16 +9478,28 @@ class Player {
       };
       const el = chain.find((v) => !!v._horizontal === horizontal && can(v, horizontal ? dx : dy))
         ?? (horizontal ? null : chain.find((v) => v._horizontal && can(v, dy)));
+      // The browser scrolls it itself, with its own smooth wheel and the
+      // touchpad's momentum, when it would pick the same view: the
+      // innermost along the scroll's axis (`overscroll-behavior: contain`
+      // keeps the scroll on it at its edge, as `wheelLock` does), not
+      // snapping (one snap point per scroll) and without a content layer
+      // (zoom, pull to refresh), whose offsets are nsh's.
+      const native = !!el && !el._snapPoints && !el._layer
+        && el === chain.find((v) => !!v._horizontal === horizontal);
       // Nothing to scroll: the page around may, unless a dialog or an
       // alert covers it.
-      this.wheelLock = lock = el ? { el, total: 0, snapped: false } : null;
+      this.wheelLock = lock = el ? { el, total: 0, snapped: false, native } : null;
       if (!lock) {
         if (this.viewportDialogs && e.target.closest?.(".nsh-viewport")) e.preventDefault();
         return;
       }
     }
-    e.preventDefault();
     lock.t = now;
+    if (lock.native) {
+      this.wheelNatively(lock.el);
+      return;
+    }
+    e.preventDefault();
     const el = lock.el;
     const d = el._horizontal ? dx || dy : dy;
     if (el._snapPoints) {
@@ -9498,6 +9516,30 @@ class Player {
     // deltas. Its magnitude cannot distinguish a notch from a finger.
     const smooth = e.deltaMode !== 0;
     this.scrollSmoothly(el, el._horizontal ? d : 0, el._horizontal ? 0 : d, smooth);
+  }
+
+  /**
+   * A wheel the browser scrolls `el` with (`wheel`): Chrome and Safari
+   * send a mouse's notches in pixels, as a touchpad's deltas, so nsh could
+   * not tell them apart and moved each notch at once, where every page
+   * glides. The offsets reach the core as any scroll's do (`scrolled`).
+   * A glide of the keys' stops where it is, without an end: the wheel's
+   * scroll goes on from there. The end is the browser's `scrollend` once
+   * no event came for 200 ms (`scrollEnded`: one scroll, as nsh's own
+   * wheels end once), or 200 ms after the last scroll event where it sends
+   * none (`waitCommandEnd`, which `scrolled` keeps waiting while it moves).
+   */
+  wheelNatively(el) {
+    el._wheelAt = performance.now();
+    const a = el._glide;
+    if (a) {
+      cancelAnimationFrame(a.frame);
+      clearTimeout(a.timer);
+      clearTimeout(a.watch);
+      el._glide = null;
+      this.drive(el, -1);
+    }
+    this.waitCommandEnd(el);
   }
 
   /**

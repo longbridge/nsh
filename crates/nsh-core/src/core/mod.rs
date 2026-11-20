@@ -10541,10 +10541,24 @@ impl<M: TextEngine> Core<M> {
             }
         }
 
+        // Its own scroll view's range takes the content inset in; in its
+        // parent's viewport, the view around it has the range.
+        let inset = match (&outer, self.nodes[key as usize].scroll.as_deref()) {
+            (None, Some(scroll)) => {
+                let i = scroll.behavior.content_inset;
+                if horizontal {
+                    (i.left.0, i.right.0)
+                } else {
+                    (i.top.0, i.bottom.0)
+                }
+            }
+            _ => (0.0, 0.0),
+        };
         let list = self.nodes[key as usize].list.as_mut().expect("list");
         // Not on the first layout: there is nothing to clamp yet.
         let grew = outer.is_none() && list.viewport > 0.0 && main > list.viewport;
         list.viewport = main;
+        list.inset = inset;
         list.offset += anchor;
         // A splice above the viewport already moved the offset, to keep
         // the visible rows in place: like measurements, that says nothing
