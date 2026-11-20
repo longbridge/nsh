@@ -88,6 +88,39 @@ fn a_picture_is_drawn_in_half_blocks_and_reports_its_size() {
     assert_eq!(buffer[(10, 0)].symbol(), " ", "only its box");
 }
 
+/// A picture transparent until it has loaded, as an avatar's is.
+#[component]
+fn Hidden() -> impl IntoElement {
+    let loaded = signal(false);
+    view().flex_1().child(
+        image(PNG)
+            .object_fit(ResizeMode::Stretch)
+            .w(px(80.0))
+            .h(px(16.0))
+            .opacity(move || if loaded.get() { 1.0_f32 } else { 0.0 })
+            .on_load(move |_: &nsh_core::Size<nsh_core::geometry::DevicePixels>| loaded.set(true)),
+    )
+}
+
+#[test]
+fn a_transparent_picture_loads_and_shows_once_it_has_loaded() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(12, 4)).unwrap();
+    view.load(App::Rust(Root::new::<Hidden>(|| ()))).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        if terminal.backend().buffer()[(0, 0)].symbol() == "▀" {
+            break;
+        }
+        assert!(rx.recv_deadline(deadline).is_ok(), "never loaded");
+    }
+    let cell = &terminal.backend().buffer()[(0, 0)];
+    assert_eq!((cell.fg, cell.bg), (RED, BLUE));
+}
+
 fn kitty() -> (AppView, crossbeam_channel::Receiver<()>) {
     let (tx, rx) = crossbeam_channel::unbounded();
     let mut options = AppOptions::default();

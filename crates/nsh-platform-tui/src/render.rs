@@ -40,9 +40,9 @@
 //! - **Scroll bars** ([`crate::scrollbar`]): a dim track `│` with a thumb
 //!   `┃` in the default color over the inner right (bottom) edge, only when
 //!   the content overflows.
-//! - **Unsupported** content is left out: images, video, web views,
-//!   native components without a terminal rendering and icon-sized
-//!   canvases take no Cells in the layout (the mounter logs each content
+//! - **Unsupported** content is left out: icon-sized videos, web views
+//!   and canvases take no Cells in the layout, larger ones and native
+//!   components without a terminal rendering keep their box blank (the mounter logs each content
 //!   kind once). A control whose content is all left out (an icon button)
 //!   draws its accessibility label as its label.
 //! - **Clipping**: a text draws inside its own view's box; a view that
@@ -465,6 +465,16 @@ impl Painter<'_> {
                 .unwrap_or(view.style.opacity)
                 .clamp(0.0, 1.0);
         if view.concealed || view.style.hidden || opacity < INVISIBLE_OPACITY {
+            // A transparent picture still loads once it has Cells, as it
+            // does once it has a frame elsewhere: an avatar's waits,
+            // transparent, for its own `onLoad` before it shows.
+            if !view.concealed && view.image.is_some() {
+                let at = origin + view.frame.origin + translation(view);
+                let bounds = CellBounds::new(Bounds::new(at, view.frame.size), cells, area);
+                if let Some(image) = &mut view.image {
+                    crate::image::prepare(image, &mut self.tree.images, id, bounds, cells);
+                }
+            }
             return;
         }
         let at = origin + view.frame.origin + translation(view);

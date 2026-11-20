@@ -458,10 +458,12 @@ scroll view too; **grids** take their columns from the template
   text's explicit width rounds up: it was set to hold its line in a GUI's font, and the Cell it would round off
   keeps the line's last column (curve names 84pt wide hold "cubic inOut").
 - What a terminal cannot show well is never emulated. At an icon's size (an explicit width and height both at most
-  48pt) images, videos, web views, shaders and canvases are `display: none`, so they take no Cells, no frame and no
-  hits, and their margins and the gaps beside them go with them (`Core::grid_role`). Larger, they keep their box: a
-  canvas is drawn in braille, the others stay blank (their fill too), and the labels around them stay where the box
-  puts them instead of closing up over it. An empty box in flow (no control) with an explicit size of two Cells or
+  48pt) videos, web views, shaders and canvases are `display: none`, so they take no Cells, no frame and no hits, and
+  their margins and the gaps beside them go with them (`Core::grid_role`). Larger, they keep their box: a canvas is
+  drawn in braille, the others stay blank (their fill too), and the labels around them stay where the box
+  puts them instead of closing up over it. An image keeps its box at every size, as the terminal draws pictures
+  (`LeftOut::Picture`); a box holding only absolute layers in flow (an avatar holding its picture once its initials
+  went) fills its parent's explicit height, as an image filling it does. An empty box in flow (no control) with an explicit size of two Cells or
   more each way and a border draws its outline, as its size is its own: a code cell waiting for its digit (an absolute
   one, a selection's box over its items, draws none). So is
   a view with nothing in it smaller than a row both ways and not growing (a status dot in a row, a swatch), except a
