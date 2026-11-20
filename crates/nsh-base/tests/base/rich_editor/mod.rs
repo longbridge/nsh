@@ -75,8 +75,25 @@ impl NodeView for TagView {
     }
 }
 
-/// The starter schema with a block atom `stock`, an inline atom `tag` and
-/// Tiptap's `mention`.
+/// Renders `aside` nodes as a 40pt label, then their content, editable.
+struct AsideView;
+
+impl NodeView for AsideView {
+    fn create(&self, cx: &NodeViewCx, _node: &Node) -> AnyElement {
+        view()
+            .flex_row()
+            .child(view().w(px(40.0)).child(text("Aside")))
+            .child(view().flex_1().children(cx.take_content()))
+            .into_element()
+    }
+
+    fn editable_content_slot(&self) -> bool {
+        true
+    }
+}
+
+/// The starter schema with a block atom `stock`, an inline atom `tag`,
+/// Tiptap's `mention` and a block `aside` of one paragraph.
 fn schema() -> Schema {
     let mut spec = starter::schema_spec();
     let mut stock = NodeSpec::default();
@@ -92,6 +109,10 @@ fn schema() -> Schema {
     tag.atom = true;
     spec.nodes.push(("tag".into(), tag));
     spec.nodes.push(mention_node("mention", "@"));
+    let mut aside = NodeSpec::default();
+    aside.group = Some("block".into());
+    aside.content = Some("paragraph".into());
+    spec.nodes.push(("aside".into(), aside));
     Schema::new(spec).unwrap()
 }
 
@@ -106,7 +127,8 @@ fn session(doc: Value) -> EditorSession {
         state,
         NodeViews::new()
             .with("stock", Arc::new(StockCard))
-            .with("tag", Arc::new(TagView)),
+            .with("tag", Arc::new(TagView))
+            .with("aside", Arc::new(AsideView)),
     )
 }
 

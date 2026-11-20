@@ -1449,6 +1449,13 @@ fn slot(rv: Rv, item: ReadSignal<BlockItem>, id: u64, node: &Node) -> AnyElement
                 };
                 let origin = Point::new(slot.page.x - content.page.x, slot.page.y - content.page.y);
                 rv.set_frame(sid, None, Bounds::new(origin, slot.frame.size));
+                // Where the node's children start in its box: what places
+                // them, and what comes before them (a list item's marker)
+                // takes its own presses, as a task item's checkbox does.
+                let block = rv.geo.borrow().origin(id);
+                if let Some(block) = block {
+                    rv.set_inset(id, Point::new(origin.x - block.x, origin.y - block.y));
+                }
             });
         })
         .child(inner)

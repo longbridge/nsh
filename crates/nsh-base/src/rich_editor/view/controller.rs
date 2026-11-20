@@ -2041,9 +2041,9 @@ impl Rv {
             .unwrap_or_else(|| TextSelection::between(anchor, head, None))
     }
 
-    /// Whether the content point `at` is on a task item's checkbox: its
-    /// press is the checkbox's, and neither moves the caret nor starts a
-    /// selection.
+    /// Whether the content point `at` is on a task item's checkbox, or on
+    /// what a node view shows before its content: its press is theirs, and
+    /// neither moves the caret nor starts a selection.
     pub(crate) fn on_checkbox(&self, at: Point<Points>) -> bool {
         self.geo.borrow().before_holder(at)
     }
