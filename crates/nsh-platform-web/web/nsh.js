@@ -6165,9 +6165,12 @@ class Player {
     // keeps them, with their depths) are foreign, below this one's.
     this.historySession = newHistorySession();
     // The current entry's place, and the depth of each entry up to the
-    // newest (what a back of the app's own goes back over).
+    // newest (what a back of the app's own goes back over), and the address
+    // each had when the player last wrote it or was on it (what
+    // `takeOverEntry` checks the entry under against).
     this.historyIndex = 0;
     this.historyDepths = [0];
+    this.historyUrls = [location.href];
     history.replaceState(this.historyState(0), "");
     // The app's first entry's place in the tab's history, where the
     // browser says (`navigationIndex`): a state-less entry before it is the
@@ -6202,6 +6205,7 @@ class Player {
     const index = this.historyIndex;
     this.historyIndex = 0;
     this.historyDepths = [0];
+    this.historyUrls.length = 1;
     this.historyDepth = 0;
     if (!index) return;
     this.ignoredPops++;
@@ -6215,6 +6219,8 @@ class Player {
     history.pushState(this.historyState(depth, index), "", url);
     this.historyDepths.length = index;
     this.historyDepths.push(depth);
+    this.historyUrls.length = index;
+    this.historyUrls.push(location.href);
     this.historyIndex = index;
   }
 
@@ -6355,6 +6361,7 @@ class Player {
         // Absolute: `setPageUrl` resolved it.
         if (push) this.pushEntry(depth, url);
         else history.replaceState(history.state, "", url);
+        this.historyUrls[this.historyIndex] = url;
         this.shownUrl = url;
         if (!this.historyIndex) this.firstUrl = url;
       } catch (error) {
@@ -6376,13 +6383,18 @@ class Player {
    * was drawn (the traversal lands a task or more later), the entry under
    * it was pictured with that page. Its picture stays the one taken as the
    * page that went came. Not with entries after the current one (the user
-   * went back onto it), which a push drops and this would keep. Returns
-   * whether it did.
+   * went back onto it), which a push drops and this would keep. Nor with
+   * the address of the entry under it (a sheet with an address of its own
+   * closing onto its opener's), which the back lands on and the push then
+   * makes nothing of: here two entries of one address would have a back
+   * between them that moves nothing. Returns whether it did.
    */
   takeOverEntry(depth) {
     const url = this.pageUrl;
     if (url == null || !this.pageUrlPush || url === location.href) return false;
     if (this.entryAtDepth(depth) !== this.historyIndex - 1 || this.historyDepths.length !== this.historyIndex + 1) return false;
+    const under = this.historyUrls[this.historyIndex - 1];
+    if (under == null || url === under) return false;
     this.pageUrl = null;
     this.pageUrlPush = false;
     try {
@@ -6392,6 +6404,7 @@ class Player {
       this.showError(`UrlScheme.setUrl(${JSON.stringify(url)}): ${error?.message ?? error}`);
     }
     this.historyDepths[this.historyIndex] = depth;
+    this.historyUrls[this.historyIndex] = url;
     this.historyDepth = depth;
     this.shownUrl = url;
     return true;
@@ -6422,6 +6435,8 @@ class Player {
         const index = this.historyIndex + 1;
         this.historyDepths.length = index;
         this.historyDepths.push(have);
+        this.historyUrls.length = index;
+        this.historyUrls.push(location.href);
         this.historyIndex = index;
         history.replaceState(this.historyState(have, index), "");
         this.tellAddress("address");
@@ -6440,6 +6455,7 @@ class Player {
       // it are an earlier load's too.
       this.historySession = newHistorySession();
       this.historyDepths = [0];
+      this.historyUrls = [location.href];
       history.replaceState(this.historyState(0), "");
       this.historyBase = navigationIndex();
       this.firstUrl = location.href;
@@ -6452,6 +6468,7 @@ class Player {
     const reason = index < this.historyIndex ? "back" : "forward";
     this.historyIndex = index;
     this.historyDepths[index] = at;
+    this.historyUrls[index] = location.href;
     if (at > have) {
       // Forward to a screen the stack no longer has: an address the app is
       // handed from outside, as a link (`open`), and its pages' entries go
