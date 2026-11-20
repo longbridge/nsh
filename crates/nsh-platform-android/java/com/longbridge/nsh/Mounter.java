@@ -2024,11 +2024,14 @@ final class Mounter {
         updateBack();
     }
 
-    /** Reports every mounted screen's insets again, after the view's safe area changed. */
+    /** Pads every mounted screen's toolbar and reports its insets again, after the view's safe area changed. */
     void reportAllScreenInsets() {
         for (int i = 0; i < screenOptions.size(); i++) {
             int id = screenOptions.keyAt(i);
-            if (views.get(id) instanceof StackBox.ScreenBox) reportScreenInsets(id, screenOptions.valueAt(i));
+            View v = views.get(id);
+            if (!(v instanceof StackBox.ScreenBox)) continue;
+            ((StackBox.ScreenBox) v).padToolbar();
+            reportScreenInsets(id, screenOptions.valueAt(i));
         }
     }
 
