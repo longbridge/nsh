@@ -403,6 +403,7 @@ impl Mounter {
                     crate::text_input::deleted(&view);
                     crate::native::deleted(surface, &view);
                     crate::shader::deleted(surface, &view);
+                    crate::scroll::deleted(&view);
                     // A view whose parent the batch deletes too stays in it:
                     // the subtree leaves the window with its root, in one
                     // `removeFromSuperview`, not one per view while still
