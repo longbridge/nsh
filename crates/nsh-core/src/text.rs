@@ -377,6 +377,11 @@ pub struct AttributedText {
     /// Nested `<Text>` spans with a `testID` (they may nest). Platforms
     /// draw nothing from them. Tests name a span by its id.
     pub test_ids: Vec<SpanTestId>,
+    /// What attachments give in place of their placeholder when the text
+    /// is copied (`copyText` of a view inside the text), in text order.
+    /// Platforms draw nothing from them: they are what
+    /// [`AttributedText::copied_text`] puts where the attachment is.
+    pub copy_texts: Vec<AttachmentCopyText>,
     /// `writingDirection`: right to left (`Some(true)`), left to right, or
     /// from the content (`None`).
     pub writing_direction: Option<bool>,
@@ -661,6 +666,29 @@ pub struct SpanTestId {
     pub test_id: Arc<str>,
 }
 
+/// What an attachment of a text gives when the text is copied
+/// ([`AttributedText::copy_texts`]): a formula's source, an emoji image's
+/// character.
+#[derive(Debug, Clone, PartialEq, Default)]
+#[non_exhaustive]
+pub struct AttachmentCopyText {
+    /// The attachment's placeholder character (UTF-16 offset,
+    /// [`TextAttachment::index`]).
+    pub index: u32,
+    /// What a copy gives in its place.
+    pub text: Arc<str>,
+}
+
+impl AttachmentCopyText {
+    /// `text` in place of the attachment at UTF-16 offset `index`.
+    pub fn new(index: u32, text: impl Into<Arc<str>>) -> Self {
+        Self {
+            index,
+            text: text.into(),
+        }
+    }
+}
+
 impl AttributedText {
     /// Whether the text was made selectable (`userSelect: "text"`, `select-text`).
     pub fn is_selectable(&self) -> bool {
@@ -724,7 +752,7 @@ impl AttributedText {
             return std::borrow::Cow::Borrowed(&self.text);
         }
         let mut out = String::with_capacity(self.text.len());
-        self.each_shown(0..self.len_utf16(), |s| out.push_str(s));
+        self.each_shown(0..self.len_utf16(), |s, _| out.push_str(s));
         if spacers {
             // Offsets in `out` shift where hidden runs were dropped: find the
             // empty attachments by counting placeholders instead.
@@ -747,21 +775,49 @@ impl AttributedText {
     }
 
     /// The characters of the UTF-16 range `range` as a copy gives them:
-    /// without attachments' placeholders ([`ATTACHMENT_CHAR`]) and hidden
-    /// runs ([`ResolvedTextStyle::hidden`]). The range is clamped to the
-    /// text; offsets inside a surrogate pair round down.
+    /// an attachment as its copy text ([`Self::copy_texts`]), or nothing
+    /// without one (its placeholder, [`ATTACHMENT_CHAR`], is left out), and
+    /// without hidden runs ([`ResolvedTextStyle::hidden`]). The range is
+    /// clamped to the text; offsets inside a surrogate pair round down.
     pub fn copied_text(&self, range: Range<u32>) -> String {
+        if self.copy_texts.is_empty() {
+            return self.text_without_attachments(range);
+        }
         let mut out = String::new();
-        self.each_shown(range, |s| {
+        let mut copies = self.copy_texts.iter().peekable();
+        self.each_shown(range, |s, mut at| {
+            for c in s.chars() {
+                if c == ATTACHMENT_CHAR {
+                    while copies.next_if(|t| t.index < at).is_some() {}
+                    if let Some(copy) = copies.next_if(|t| t.index == at) {
+                        out.push_str(&copy.text);
+                    }
+                } else {
+                    out.push(c);
+                }
+                at += c.len_utf16() as u32;
+            }
+        });
+        out
+    }
+
+    /// The characters of the UTF-16 range `range` without attachments'
+    /// placeholders ([`ATTACHMENT_CHAR`], whatever they copy as) and
+    /// hidden runs: the text's own characters, as accessibility reads them
+    /// beside the inline views it reads on their own. Clamped as
+    /// [`Self::copied_text`].
+    pub fn text_without_attachments(&self, range: Range<u32>) -> String {
+        let mut out = String::new();
+        self.each_shown(range, |s, _| {
             out.extend(s.chars().filter(|&c| c != ATTACHMENT_CHAR));
         });
         out
     }
 
     /// Calls `f` with each piece of `range` (UTF-16 units) that no hidden
-    /// run covers, in order. Characters past the runs (a text built without
-    /// them) count as shown.
-    fn each_shown(&self, range: Range<u32>, mut f: impl FnMut(&str)) {
+    /// run covers, in order, and the offset it starts at. Characters past
+    /// the runs (a text built without them) count as shown.
+    fn each_shown(&self, range: Range<u32>, mut f: impl FnMut(&str, u32)) {
         let end = range.end.min(self.len_utf16().max(utf16_len(&self.text)));
         let (mut byte, mut at) = seek(&self.text, 0, 0, range.start.min(end));
         // The first span ending after `at`.
@@ -773,7 +829,7 @@ impl AttributedText {
             };
             let (next, reached) = seek(&self.text, byte, at, to);
             if !hidden {
-                f(&self.text[byte..next]);
+                f(&self.text[byte..next], at);
             }
             if reached == at {
                 break;
@@ -909,7 +965,7 @@ impl AttributedText {
 
     /// Whether the two texts differ at most in their spans' colors (text,
     /// decoration and background), which of them are hidden
-    /// ([`ResolvedTextStyle::hidden`]) and test metadata: the same
+    /// ([`ResolvedTextStyle::hidden`]) and metadata (test ids, copy texts): the same
     /// characters in the same styles but for those, wherever the spans
     /// begin and end (neighbors that take the same color merge into one
     /// span).
@@ -930,6 +986,7 @@ impl AttributedText {
             selection_color,
             attachments,
             test_ids: _,
+            copy_texts: _,
         } = self;
         text == &other.text
             && align == &other.align
@@ -983,7 +1040,7 @@ impl AttributedText {
         Some(out)
     }
 
-    /// Equality of the content the platform draws, excluding test metadata.
+    /// Equality of the content the platform draws, excluding metadata (test ids, copy texts).
     pub(crate) fn rendering_eq(&self, other: &Self) -> bool {
         // Enumerating the fields makes additions revisit this comparison.
         let Self {
@@ -1001,6 +1058,7 @@ impl AttributedText {
             selection_color,
             attachments,
             test_ids: _,
+            copy_texts: _,
         } = self;
         text == &other.text
             && spans == &other.spans

@@ -174,7 +174,8 @@ text("Made with ")
 </Text>
 ```
 
-Inline elements cut off by `numberOfLines` or an ellipsis are hidden; copying the text leaves them out. Text inside an
+Inline elements cut off by `numberOfLines` or an ellipsis are hidden; copying the text leaves them out, except an
+element with a `copyText` (`.copy_text(..)`), whose text the copy gives in its place (an inline formula's `$x^2$`). Text inside an
 inline element takes the color of the text around it, as CSS's `color` reaches an inline block, unless it sets its own
 (the `LIVE` badge above does); its font and line height stay its own.
 
