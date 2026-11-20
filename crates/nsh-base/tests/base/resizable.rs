@@ -8,7 +8,6 @@ use nsh_base::{
 };
 use nsh_core::{
     Bounds, Size,
-    element::Root,
     geometry::{Along, Axis, point},
     prelude::*,
 };
@@ -83,7 +82,7 @@ where
 {
     Headless::start(EngineConfig {
         viewport: Size::new(px(400.0), px(844.0)),
-        ..EngineConfig::new(Root::of::<C>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<C>())
     })
     .expect("the engine starts")
 }

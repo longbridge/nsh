@@ -16,11 +16,11 @@ use super::{
     },
 };
 use crate::{
-    AudioSession, AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, Hsla, JsonValue,
-    KeyboardAppearance, KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp,
-    OverlayProp, PasteBehavior, PasteEvent, Points, Prop, ResizeMode, ReturnKeyType, Rgba,
-    ScreenAnimation, ScreenProp, ScrollProp, SheetDetent, Size, StatusBarSetting, SubmitBehavior,
-    Tag, WebSource,
+    AudioSession, AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, HeaderTitleAlign, Hsla,
+    JsonValue, KeyboardAppearance, KeyboardType, ModalAnimation, ModalPresentation, ModalProp,
+    NativeProp, OverlayProp, PasteBehavior, PasteEvent, Points, Prop, ResizeMode, ReturnKeyType,
+    Rgba, ScreenAnimation, ScreenProp, ScrollProp, SheetDetent, Size, StatusBarSetting,
+    SubmitBehavior, Tag, WebSource,
     canvas::{
         CanvasFont, CanvasGradient, CanvasImage, CanvasOp, CanvasTextAlign, CanvasTextBaseline,
         Composite, Drawing, FillRule, LineCap, LineJoin, Num, Paint, Path, PathOp, ViewPaint,
@@ -816,6 +816,13 @@ impl Input {
         self.bind_prop(focus, |focus: bool| Prop::AutoFocus(focus))
     }
 
+    /// Selects the whole text when the input takes the focus (TS:
+    /// `selectTextOnFocus`); a click that drags or extends a selection keeps
+    /// the user's.
+    pub fn select_text_on_focus(self, select: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(select, |select: bool| Prop::SelectTextOnFocus(select))
+    }
+
     /// The caret is drawn (default yes; TS: `caret`).
     pub fn caret(self, caret: impl IntoReactive<bool>) -> Self {
         self.bind_prop(caret, |caret: bool| Prop::Caret(caret))
@@ -1010,6 +1017,13 @@ impl Screen {
         self.bind_prop(visible, |v| {
             Prop::Screen(ScreenProp::HeaderShadowVisible(v))
         })
+    }
+
+    /// Where the title sits in the header (TS: `headerTitleAlign`): at the
+    /// start (the default) or centered. Android's header follows it; iOS's
+    /// system bar always centers the title and ignores the value.
+    pub fn header_title_align(self, align: impl IntoReactive<HeaderTitleAlign>) -> Self {
+        self.bind_prop(align, |a| Prop::Screen(ScreenProp::HeaderTitleAlign(a)))
     }
 
     /// With [`Self::header_transparent`], the header stays clear while the
@@ -2660,6 +2674,7 @@ impl From<Drawing> for Painter {
 }
 
 crate::static_reactive!(ScreenAnimation: ScreenAnimation);
+crate::static_reactive!(HeaderTitleAlign: HeaderTitleAlign);
 
 /// A program where an optional one goes (`.transition_shader(wipe)`).
 impl IntoReactive<Option<crate::shader::TransitionShader>> for crate::shader::TransitionShader {
@@ -2671,6 +2686,13 @@ impl IntoReactive<Option<crate::shader::TransitionShader>> for crate::shader::Tr
 /// A backdrop where an optional one goes (`.macos_backdrop(backdrop)`).
 impl IntoReactive<Option<crate::MacOsBackdrop>> for crate::MacOsBackdrop {
     fn into_reactive(self) -> super::Reactive<Option<crate::MacOsBackdrop>> {
+        super::Reactive::Static(Some(self))
+    }
+}
+
+/// A backdrop where an optional one goes (`.windows_backdrop(backdrop)`).
+impl IntoReactive<Option<crate::WindowsBackdrop>> for crate::WindowsBackdrop {
+    fn into_reactive(self) -> super::Reactive<Option<crate::WindowsBackdrop>> {
         super::Reactive::Static(Some(self))
     }
 }

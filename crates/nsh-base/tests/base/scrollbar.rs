@@ -18,7 +18,6 @@ use nsh_base::{
 use nsh_core::{
     MountItem, NodeId, PointerEvents, Size, Transform,
     animation::{AnimationOp, AnimationProp, Driver},
-    element::Root,
     geometry::point,
     platform::Os,
     prelude::*,
@@ -162,10 +161,12 @@ fn start_with(mode: ScrollbarMode, motion: ScrollbarMotion, content: f32) -> (He
     let mut config = EngineConfig {
         viewport: Size::new(px(400.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::new::<Harness>(move || HarnessProps {
-            mode,
-            motion,
-            content,
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            HarnessProps {
+                mode,
+                motion,
+                content,
+            }
         }))
     };
     config.environment.os = Os::MacOs;
@@ -434,7 +435,9 @@ fn BuiltIn(props: BuiltInProps) -> impl IntoElement {
 fn start_built_in(list: bool) -> (Headless, Arc<Mutex<HashMap<NodeId, bool>>>) {
     let mut config = EngineConfig {
         viewport: Size::new(px(400.0), px(844.0)),
-        ..EngineConfig::new(Root::new::<BuiltIn>(move || BuiltInProps { list }))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<BuiltIn>(move || {
+            BuiltInProps { list }
+        }))
     };
     config.environment.os = Os::MacOs;
     let mut app = Headless::start(config).expect("the engine starts");

@@ -47,6 +47,7 @@ fn chat() -> impl IntoElement {
 ```tsx tabs
 import { mount, Scroll, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const draft = signal("");
@@ -67,7 +68,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 The full keyboard height suits a view that reaches the bottom of the screen, as a screen's content does. When

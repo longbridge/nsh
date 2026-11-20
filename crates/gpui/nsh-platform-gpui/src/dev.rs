@@ -436,7 +436,7 @@ fn handle(view: &AppView, msg: Msg) {
         session.held = false;
         let visible = load.as_ref().is_none_or(|app| {
             app.main_window()
-                .is_none_or(nsh_core::desktop::MainWindowOptions::visible_at_launch)
+                .is_some_and(nsh_core::desktop::MainWindowOptions::visible_at_launch)
         });
         if !visible {
             log::info!("the main window starts hidden (nsh.json window.defaultVisible: false)");
@@ -513,6 +513,7 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<App
             app_id,
             limits,
             window,
+            application,
         } => {
             // A bundle reached through a hot update keeps its "Updated".
             if dev.running != Some((session, version)) {
@@ -543,6 +544,7 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<App
             // nsh.json `window`: the engine applies its attributes to the
             // window the host opened before the app was known.
             bundle = bundle.with_main_window(window.as_deref());
+            bundle = bundle.with_application(application.as_deref());
             bundle = match bundle
                 .with_app_id(app_id.as_deref())
                 .with_capabilities_json(capabilities.as_deref())

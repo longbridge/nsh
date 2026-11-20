@@ -37,6 +37,7 @@ A signal holds a value. Calling it reads the value and, inside a tracking scope 
 
 ```tsx
 import { mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 function Counter() {
   const count = signal(0);
@@ -48,7 +49,7 @@ function Counter() {
   );
 }
 
-mount(Counter);
+mount(() => <Window id="main"><Counter /></Window>);
 ```
 
 By default a write that is `===` to the current value does nothing. Pass `equals: false` to notify on every write (useful when you mutate an object in place and set the same object again), or your own comparison:
@@ -157,6 +158,7 @@ A value a component provides to everything it renders, however deep. Calling the
 
 ```tsx
 import { context, mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 const Theme = context<"light" | "dark">("light");
 
@@ -176,7 +178,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 ## mount
@@ -185,9 +191,22 @@ mount(App);
 function mount<P extends object>(app: Component<P>, props?: P): () => void;
 ```
 
-Renders `app` into the surface (the window, or the `NshAppView` / `NshView` the app is embedded in) and returns a function that removes it. Every app's entry file ends with `mount(App)`.
+Renders `app` into the app root and returns a function that removes it. Every app's entry file ends with `mount(App)`.
+
+On the desktops the app root has no surface of its own: it owns the app's state, events and window registry, and its top-level children are `<Window>` scenes. An app declares every window it can show, including the first; a plain view returned from the app root, or no top-level `<Window>` at all, throws with a message saying so. The first window takes nsh.json's [`window`](../modules/nsh-desktop.md#the-app-host-and-the-first-window) launch defaults. Off the desktops (a phone, the web page, an embedded `NshAppView`) `<Window>` shows its content in the one surface, so the same app runs there.
 
 ```tsx
+import { mount, View } from "nsh";
+import { Window } from "nsh/desktop";
+
+function App() {
+  return (
+    <Window id="main" title="Counter">
+      <Counter />
+    </Window>
+  );
+}
+
 mount(App);
 ```
 
@@ -457,6 +476,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, Text, View } from "nsh";
 import { createAnimatedValue } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const x = createAnimatedValue(0);
@@ -473,7 +493,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 > [!NOTE]
@@ -1288,7 +1312,7 @@ const shadow = platform.select({
 const pixelRatio: Accessor<number>;
 ```
 
-Device pixels per point (e.g. `3` on most iPhones). Reactive: it changes when the window moves to a screen of another density (on Mac Catalyst, the desktops, or an external display) and when Android's display size setting changes the density. Rust: `pixel_ratio() -> f32`, and `round_to_nearest_pixel(points)` for a length on whole device pixels; in TSX that length is `Math.round(x * pixelRatio()) / pixelRatio()`.
+Device pixels per point (e.g. `3` on most iPhones). Reactive: it changes when the surface moves to a screen of another density (on Mac Catalyst or an external display) and when Android's display size setting changes the density. On the desktops it is the host display's scale; a window's own scale is `currentWindow().state()?.scaleFactor`. Rust: `pixel_ratio() -> f32`, and `round_to_nearest_pixel(points)` for a length on whole device pixels; in TSX that length is `Math.round(x * pixelRatio()) / pixelRatio()`.
 
 ```rust tabs
 let hairline = move || px(1.0 / pixel_ratio());
@@ -1436,6 +1460,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, View } from "nsh";
 import { PanResponder } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const pos = signal({ x: 0, y: 0 });
@@ -1462,7 +1487,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 ### Callbacks
@@ -2956,6 +2985,7 @@ pub fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { effect, mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 import { Storage } from "nsh";
 
 const count = signal(0);
@@ -2969,9 +2999,11 @@ effect(() => {
 });
 
 mount(() => (
-  <View onPress={() => count.update((n) => n + 1)}>
-    <Text>Pressed {count()} times</Text>
-  </View>
+  <Window id="main">
+    <View onPress={() => count.update((n) => n + 1)}>
+      <Text>Pressed {count()} times</Text>
+    </View>
+  </Window>
 ));
 ```
 
@@ -3082,7 +3114,11 @@ The parameters the embedding app set before it started your app, read synchronou
 
 ```tsx
 const conversation = host.params.conversation as string | undefined;
-mount(() => (conversation ? <Conversation id={conversation} /> : <Inbox />));
+mount(() => (
+  <Window id="main">
+    {conversation ? <Conversation id={conversation} /> : <Inbox />}
+  </Window>
+));
 ```
 
 
@@ -3161,6 +3197,7 @@ const keymap: {
 };
 
 interface KeyBindingOptions {
+  scope?: "window" | "app";
   when?: "always" | "notEditing";
   repeat?: boolean;
   passThrough?: boolean;
@@ -3171,11 +3208,11 @@ interface KeyBindingOptions {
 | TS | Rust |
 |---|---|
 | `keymap.bind(keystroke, handler)` | `on_key(keystroke, handler)` |
-| `keymap.bind(keystroke, handler, { when, repeat, passThrough, forFocus })` | `on_key_with(keystroke, KeyOptions { when, repeat, pass_through, for_focus }, handler)`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
+| `keymap.bind(keystroke, handler, { scope, when, repeat, passThrough, forFocus })` | `on_key_with(keystroke, KeyOptions { scope, when, repeat, pass_through, for_focus }, handler)`; `scope` is `KeyScope::Window` (default) or `KeyScope::App`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
 | `keymap.bind({ … })` | one `on_key` per keystroke |
 | `keymap.label(keystroke)` | `key_label(keystroke)` |
 
-A Rust binding lives as long as the component (the owner) that made it; the handler gets the keystroke as written.
+A binding made inside a `<Window>` is window-scoped: it fires only while that window has the focus. A binding made in the app root is app-wide; `scope: "app"` makes that explicit, and `scope: "window"` in the app root is an error (there is no window to scope to). A Rust binding lives as long as the component (the owner) that made it; the handler gets the keystroke as written.
 
 Shortcuts work on macOS, Windows, Linux and in browsers (the browser's own keys, such as Ctrl+T or Cmd+W, never reach the page), and on iOS and Android with a hardware keyboard: an iPad's, a Mac's running an iPad app, a tablet's or a Chromebook's, the simulator's and the emulator's. The same code runs everywhere; without a keyboard, no key fires the bindings.
 
@@ -3202,12 +3239,13 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text } from "nsh";
 import { keymap } from "nsh";
+import { Window } from "nsh/desktop";
 
 const open = signal(false);
-keymap.bind("mod+k", () => open.set(true));
-keymap.bind("escape", () => open.set(false));
+keymap.bind("mod+k", () => open.set(true), { scope: "app" });
+keymap.bind("escape", () => open.set(false), { scope: "app" });
 
-mount(() => <Text>{open() ? "Search…" : "Press ⌘K"}</Text>);
+mount(() => <Window id="main"><Text>{open() ? "Search…" : "Press ⌘K"}</Text></Window>);
 ```
 
 Pass an object to bind several keystrokes at once; the function returned removes them all. In Rust, each keystroke is one `on_key`:
@@ -3462,6 +3500,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, type NativeComponentRef, signal, View } from "nsh";
 import { nativeComponent } from "nsh";
+import { Window } from "nsh/desktop";
 
 const Badge = nativeComponent<{ text: string; color?: string }, { tap: { count: number } }>("embed.badge", {
   props: ["text", "color"],
@@ -3487,7 +3526,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 ### nativeModule

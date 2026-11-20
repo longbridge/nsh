@@ -329,7 +329,8 @@ formulas are bands as wide as their longest line plus a Cell each side (`termina
 language label; an alert is one band across the body text's width, its icon and text a Cell in, and keeps a `│` in its
 tint where the terminal draws no bands; tables fit the view by narrowing their widest column, never below
 `MIN_COLUMN` Cells (`fit_columns`, cached in one `computed` from the table's laid-out width, with cells and rules
-borrowing its column widths through `Memo::with`), their cells wrapping; tasks show
+borrowing its column widths through `Memo::with`), their cells wrapping with the sides as tall as the row
+(`terminal::glyph_column`, as a quote's bar); tasks show
 `☐` / `☑`. The tests are `nsh-base`'s `tests/base/terminal.rs`.
 
 ## Accessibility

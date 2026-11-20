@@ -137,7 +137,7 @@ Dock 的功能跟着 Dock 图标走：`Notifications.setBadge` 的标记、`requ
 
 ```tsx
 import { mount } from "nsh";
-import { currentWindow, Tray } from "nsh/desktop";
+import { currentWindow, Tray, Window } from "nsh/desktop";
 import icon from "./tray.svg";
 
 function App() {
@@ -149,7 +149,11 @@ function App() {
   return <Inbox />;
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 菜单栏应用常常提供登录时打开：用户打开它时，`Application.setLaunchAtLogin(true)` 把应用包登记为登录项（见

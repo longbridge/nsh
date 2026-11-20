@@ -217,6 +217,7 @@ define_class!(
     unsafe impl UITextFieldDelegate for EventTarget {
         #[unsafe(method(textFieldDidBeginEditing:))]
         fn text_field_did_begin(&self, field: &UITextField) {
+            input::began_editing(field);
             let id = field.tag() as NodeId;
             self.with_mounter(move |m| m.input_focused(id, true));
         }
@@ -277,6 +278,7 @@ define_class!(
 
         #[unsafe(method(textViewDidBeginEditing:))]
         fn text_view_did_begin(&self, view: &UITextView) {
+            input::began_editing(view);
             let id = view.tag() as NodeId;
             self.with_mounter(move |m| m.input_focused(id, true));
         }
