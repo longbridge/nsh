@@ -183,6 +183,10 @@ mod tests {
             "export interface ScrollEdgeElement {\n  scrollView: ViewRef;\n  edge?: ScrollEdge;\n}"
         ));
         assert!(elements.contains("export type ScrollEdge = \"top\" | \"bottom\";"));
+        assert!(elements.contains(
+            "export interface WindowsBackdrop {\n  material: WindowsBackdropMaterial;\n}"
+        ));
+        assert!(elements.contains("export type WindowsBackdropMaterial = \"blur\";"));
         for (interface, prop) in [
             ("HostProps", "  onPress?: (e: PressEvent) => void;"),
             ("HostProps", "  onLongPress?: (e: PressEvent) => void;"),
@@ -194,6 +198,7 @@ mod tests {
             ("IOSHostProps", "  backdropMaterial?: BackdropMaterial;"),
             ("IOSHostProps", "  scrollEdgeElement?: ScrollEdgeElement;"),
             ("MacOSHostProps", "  backdrop?: MacOsBackdrop;"),
+            ("WindowsHostProps", "  backdrop?: WindowsBackdrop;"),
             ("InputHostProps", "  keyboardType?: KeyboardType;"),
             (
                 "InputHostProps",
