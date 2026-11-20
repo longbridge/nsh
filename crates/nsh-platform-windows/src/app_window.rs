@@ -560,6 +560,8 @@ fn resized(surface: &Surface, window: &AppWindow) {
         crate::navigation::surface_resized(surface, size.width.0, size.height.0);
         crate::system::window_resized(surface, window.id, size.width.0, size.height.0);
     }
+    // The primary window's size and scale are the app's `windowSize()`.
+    surface.window_environment();
     invalidate(window);
 }
 
@@ -907,7 +909,20 @@ pub(crate) fn removed(surface: &Surface, view: &NshView) -> bool {
     // The windows it owns close with it, and stay until their roots go.
     release_children(surface, window.hwnd, !window.closed.get());
     destroy(surface, &window);
+    // Another window may be the primary one now.
+    surface.window_environment();
     true
+}
+
+/// The size and scale of the app's primary window: the first of its own
+/// windows still open that has a size (not minimized when it opened).
+/// `None` while it shows none.
+pub(crate) fn primary(surface: &Surface) -> Option<(Size<Points>, f32)> {
+    surface
+        .windows
+        .borrow()
+        .iter()
+        .find_map(|w| w.reported.get().map(|size| (size, w.scale.get())))
 }
 
 /// Closes every window of the app's own (the app stopped).
@@ -916,6 +931,7 @@ pub(crate) fn close_all(surface: &Surface) {
     for window in &windows {
         destroy(surface, window);
     }
+    surface.window_environment();
 }
 
 fn destroy(surface: &Surface, window: &AppWindow) {

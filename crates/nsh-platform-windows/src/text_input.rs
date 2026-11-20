@@ -104,11 +104,11 @@ use windows::{
                 CFE_ITALIC, CFM_BOLD, CFM_COLOR, CFM_FACE, CFM_ITALIC, CFM_SIZE, CFM_SPACING,
                 CFM_WEIGHT, EM_CANREDO, EM_EXSETSEL, EM_GETLANGOPTIONS, EM_GETSCROLLPOS, EM_REDO,
                 EM_SETEDITSTYLE, EM_SETEVENTMASK, EM_SETLANGOPTIONS, EM_SETSCROLLPOS,
-                EM_SETTEXTMODE, EM_SETTYPOGRAPHYOPTIONS, ENM_CHANGE, ENM_ENDCOMPOSITION,
-                ENM_SELCHANGE, ENM_STARTCOMPOSITION, IMF_SPELLCHECKING, IMF_TKBPREDICTION,
-                PFA_CENTER, PFA_JUSTIFY, PFA_LEFT, PFA_RIGHT, PFM_ALIGNMENT, PFM_LINESPACING,
-                PFM_RTLPARA, SES_USECTF, TM_MULTICODEPAGE, TM_MULTILEVELUNDO, TM_PLAINTEXT,
-                TO_ADVANCEDTYPOGRAPHY, TXTBIT_AUTOWORDSEL, TXTBIT_CHARFORMATCHANGE,
+                EM_SETTEXTMODE, EM_SETTYPOGRAPHYOPTIONS, EM_STOPGROUPTYPING, ENM_CHANGE,
+                ENM_ENDCOMPOSITION, ENM_SELCHANGE, ENM_STARTCOMPOSITION, IMF_SPELLCHECKING,
+                IMF_TKBPREDICTION, PFA_CENTER, PFA_JUSTIFY, PFA_LEFT, PFA_RIGHT, PFM_ALIGNMENT,
+                PFM_LINESPACING, PFM_RTLPARA, SES_USECTF, TM_MULTICODEPAGE, TM_MULTILEVELUNDO,
+                TM_PLAINTEXT, TO_ADVANCEDTYPOGRAPHY, TXTBIT_AUTOWORDSEL, TXTBIT_CHARFORMATCHANGE,
                 TXTBIT_CLIENTRECTCHANGE, TXTBIT_D2DDWRITE, TXTBIT_DISABLEDRAG,
                 TXTBIT_HIDESELECTION, TXTBIT_MAXLENGTHCHANGE, TXTBIT_MULTILINE,
                 TXTBIT_PARAFORMATCHANGE, TXTBIT_READONLY, TXTBIT_SCROLLBARCHANGE,
@@ -1099,6 +1099,32 @@ pub(crate) fn set_accessible_value(surface: &Rc<Surface>, view: &NshView, text: 
     replace_selection(&input, &text);
     process(surface, view, &input);
     true
+}
+
+/// `InputRef.insertText`: replaces the selection with `text` as a paste
+/// would (`maxLength` applies, line breaks become spaces in a single-line
+/// field, undo takes it back as one step and the change is reported), for
+/// an app that took a paste over (`pasteBehavior: "report"`). Nothing
+/// happens in a read-only field or during an IME composition.
+pub(crate) fn insert_text(view: &NshView, text: &str) {
+    let Some(input) = input_of(view) else {
+        return;
+    };
+    if !input.config.borrow().editable || input.composing.get().is_some() {
+        return;
+    }
+    let text = pasted(text, input.multiline());
+    let (start, end) = input.selection();
+    if text.is_empty() && start == end {
+        return;
+    }
+    // A step of its own in the undo history, apart from typing around it.
+    input.send(EM_STOPGROUPTYPING, 0, 0);
+    replace_selection(&input, &text.replace('\n', "\r"));
+    if let Some(surface) = surface_of(view) {
+        process(&surface, view, &input);
+    }
+    view.changed();
 }
 
 /// The field that has the keyboard focus.
