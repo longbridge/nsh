@@ -1488,6 +1488,7 @@ impl Painter<'_> {
                 ),
                 popup: popup_item,
                 lined_group: layer.lined_group,
+                pointer_focus: self.tree.pointer_focus,
             };
             match ground.ramp {
                 Some(ramp) => mark_surface(
@@ -1503,6 +1504,7 @@ impl Painter<'_> {
                     popup_item,
                     layer.modal,
                     layer.pane,
+                    self.tree.pointer_focus,
                 ),
                 None => mark_state(
                     self.buffer,
@@ -2720,6 +2722,21 @@ struct Marks {
     /// The view is inside an input group that draws its line
     /// ([`Layer::lined_group`]).
     lined_group: bool,
+    /// The pointer moved the focus (`Mounter::pointer_focus`).
+    pointer_focus: bool,
+}
+
+/// The states a view's marks show: its own and those projected on it as
+/// a part of its control. A control the pointer focused shows no focus of
+/// its own (a paragraph pressed for one of its links, a button clicked),
+/// as CSS's `:focus-visible`; a field, which edits, does.
+fn shown_states(view: &NshView, pointer_focus: bool) -> u16 {
+    let own = if pointer_focus && view.input.is_none() {
+        view.states & !state::FOCUSED
+    } else {
+        view.states
+    };
+    own | view.projected
 }
 
 /// Draws the view's state over its drawn Cells (its subtree's included):
@@ -2735,7 +2752,7 @@ fn mark_state(
 ) {
     // A part shows its control's states as its own (a list's highlighted
     // option is focused while the keys stay in the search field).
-    let flags = view.states | view.projected;
+    let flags = shown_states(view, marks.pointer_focus);
     let disabled = view.props.accessibility.state.disabled || flags & state::DISABLED != 0;
     let selected = banded(view);
     let field = view.input.is_some();
@@ -2901,10 +2918,11 @@ fn mark_surface(
     popup: bool,
     dialog: bool,
     pane: bool,
+    pointer_focus: bool,
 ) {
     // A part shows its control's states as its own (a list's highlighted
     // option is focused while the keys stay in the search field).
-    let flags = view.states | view.projected;
+    let flags = shown_states(view, pointer_focus);
     let disabled = view.props.accessibility.state.disabled || flags & state::DISABLED != 0;
     let selected = banded(view);
     let field = view.input.is_some();

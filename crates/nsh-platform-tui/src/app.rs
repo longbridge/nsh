@@ -640,6 +640,9 @@ impl AppView {
             }
             _ => None,
         };
+        if let Some(modality) = modality {
+            self.tree.pointer_focus = modality == nsh_core::platform::InputModality::Pointer;
+        }
         if let (Some(modality), Some(engine)) = (modality, &self.surface.engine) {
             engine.control().set_input_modality(modality);
         }

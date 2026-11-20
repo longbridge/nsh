@@ -562,7 +562,8 @@ own background, so what its children filled stays, and it is at least one step a
 - a selected or current item (a toggle that is on included) is a select band and bold, never the accent; one
   whose every glyph is in a hue of the app's (a pagination's current dot in the accent) is only bold, its color
   telling it apart already; a
-  focused control (a button, a row, a tab) is the accent band, its text in the terminal's background color, bold
+  focused control (a button, a row, a tab) is the accent band (only when the keys moved the focus, as CSS's
+  `:focus-visible`: a control the pointer pressed shows no focus until the next key, a field always does), its text in the terminal's background color, bold
   when it is also selected, so focus is the accent and on or chosen a gray step wherever they meet; a focused
   container three or more rows tall shows its line in the focus color; without a line, one that takes presses (a card
   that is a button) has an accent `▎` rail down its leading column and no band, and a pane the keys move within (a
