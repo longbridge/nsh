@@ -22214,6 +22214,40 @@ fn reveal_keeps_still_within_content_insets() {
 /// `desktop={{ windowDrag }}` reaches the platform in the view's props, and
 /// clearing it sends them again.
 #[test]
+fn drag_items_are_a_view_prop() {
+    let mut c = core();
+    let items = |uris: &[&str]| Op::SetProp {
+        id: 2,
+        prop: Prop::DragItems(uris.iter().map(|&u| u.into()).collect()),
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            items(&["file:///tmp/a.png"]),
+            Op::Insert {
+                parent: crate::ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::ViewProps { id: 2, props } if props.drag_items == [Box::from("file:///tmp/a.png")]
+    )));
+    apply(&mut c, vec![items(&[])]);
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(
+        |i| matches!(i, MountItem::ViewProps { id: 2, props } if props.drag_items.is_empty())
+    ));
+}
+
+#[test]
 fn window_drag_is_a_view_prop() {
     let mut c = core();
     let drag = |value| Op::SetProp {

@@ -495,6 +495,9 @@ pub struct ViewProps {
     /// keys); `Some(false)` keeps a view that takes presses out; `None`, the
     /// default, leaves it to the presses ([`ViewProps::focus_stop`]).
     pub focusable: Option<bool>,
+    /// `dragItems`: the local files (`file:` URLs) a drag out of the view
+    /// carries; empty when the view starts no drag.
+    pub drag_items: Vec<Box<str>>,
     /// Keys consumed by this view or a focused descendant before native
     /// defaults run. Backends decide from the mounted rules without
     /// waiting for a listener (`Interactive::capture_keys`).

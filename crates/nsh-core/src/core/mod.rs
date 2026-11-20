@@ -6362,6 +6362,13 @@ impl<M: TextEngine> Core<M> {
                     flags |= dirty::VIEW_PROPS;
                 }
             }
+            Prop::DragItems(items) => {
+                let props = node.props.get_or_insert_default();
+                if props.drag_items != items {
+                    props.drag_items = items;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
             Prop::KeyCapture(value) => {
                 let props = node.props.get_or_insert_default();
                 if props.key_capture != value {

@@ -96,7 +96,7 @@ set (`flexDirection: "column"`, `flex-col`, `.flex_col()`). A view that sets no 
 `classList`; the `Styled` methods in Rust), `disabled`, the press props (`onPress`, `onLongPress`, `onPressDown`,
 `onPressUp`, `delayLongPress`, `hitSlop`), the state styles (`activeStyle`, `hoverStyle`,
 `focusStyle`, `disabledStyle`, `checkedStyle`), `onMouseEnter` / `onMouseMove` / `onMouseLeave`, `onWheel`, `onPinch`, `onMouseUp`, `onContextMenu`,
-`onFileDragEnter` / `onFileDragLeave` / `onFileDrop`, `focusable`, `captureKeys`, `onKeyDown` / `onKeyUp`, `onLayout`, `ref`, `nativeID`, `testID`, the page's
+`onFileDragEnter` / `onFileDragLeave` / `onFileDrop`, `dragItems`, `focusable`, `captureKeys`, `onKeyDown` / `onKeyUp`, `onLayout`, `ref`, `nativeID`, `testID`, the page's
 markup on the web (`web={{ element }}`), the
 gesture props (`pan`, `pinch`, `rotation` and their events), the touch and responder props, the accessibility props
 and `ios` / `android` / `desktop`.
@@ -181,7 +181,7 @@ view()
 | `onContextMenu` | `.on_context_menu` | `ContextMenuEvent` | A context menu was asked for over the view: the secondary button, the keyboard in the browser or a screen reader on macOS and Windows ([context menus](./index.md#context-menus)). |
 | `onFileDragEnter` | `.on_file_drag_enter` | `{ uris: string[], mimeTypes: string[] }` (`FileDragEvent`) | A local-file drag entered the active desktop destination with its offered file list and their types. |
 | `onFileDragLeave` | `.on_file_drag_leave` | none | A local-file drag left the active desktop destination. |
-| `onFileDrop` | `.on_file_drop` | `{ uris: string[], mimeTypes: string[] }` (`FileDropEvent`) | Local files or directories were dropped on the desktop destination. |
+| `onFileDrop` | `.on_file_drop` | `{ uris: string[], mimeTypes: string[] }` (`FileDropEvent`) | Local files or directories were dropped on the destination (desktops and iOS). |
 | `onLayout` | `.on_layout` | `{ bounds }` (`Bounds<Points>`) | The frame relative to the parent changed. |
 | `onPanStart` / `onPanEnd` | `.on_pan_start` / `.on_pan_end` | `PanEvent` | A drag bound with `pan` started / ended; `cancelled` is true when the system cancels it. |
 | `onPinchStart` / `onPinchEnd` | `.on_pinch_start` / `.on_pinch_end` | `{ scale, velocity }` | A pinch bound with `pinch` started / ended. |
@@ -204,6 +204,14 @@ again at drop time. AppKit resolves Finder file references to path URLs. GTK rep
 file-list preload finishes, including when the pointer stays still, and ignores completion after leave or reset.
 Moving between destinations reports leave then entry with the same offered list. `onFileDragLeave` clears the
 preview. Rust entry handlers receive `&FileDragEvent`; existing `||`, `|_: &()|` and `Listener<()>` handlers work too.
+
+On iOS (and iPadOS), a view with `onFileDrop` takes the files of a drag, such as images and documents dragged from Photos,
+Files, Safari or the app's own web views. The closest view
+that listens takes them, as on desktops. A drag's items carry no file URLs, only data in types that are read
+when they are dropped, so `onFileDragEnter` gives `uris: []` there, and `onFileDrop` gives the `file:` URLs of copies
+in the app's temporary directory (`pagePosition` too), in the drag's order. An item that offers only text or a link
+is no file, and is not offered. A text input inside the view keeps what it accepts: UIKit's text drop takes text and
+links, so an image that also carries its link (from a web page) goes into the input as its link.
 
 ```rust tabs
 let hint = signal(String::new());
@@ -254,6 +262,20 @@ received files.
 Text inputs belong to the destination around them: files dropped on an input's text reach that destination as
 anywhere else in it, with the same enter and leave events, and the input keeps its text as it was. Text dragged
 into an input, and files dropped on an input outside any destination, behave as the platform's text fields do.
+
+## Dragging files out
+
+`dragItems` lists local files, as absolute `file:` URLs, that the user can drag out of the view: into another app
+or onto a view of the app that takes file drops. The view starts a
+system drag of them when the user presses and holds it, then moves; the platform lifts a snapshot of the view. Each
+file goes as it is, its type by its extension, named by its file name; a URL that is no local file is left out. An
+empty list (the default) starts no drag. iOS starts these drags; the other platforms do not yet.
+
+```tsx
+<View dragItems={[photo.uri]} class="size-24 rounded-xl overflow-hidden">
+  <Image src={photo.uri} class="size-full" />
+</View>
+```
 
 ## Ref methods
 

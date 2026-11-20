@@ -86,7 +86,7 @@ view 用 flexbox 布局子元素，默认值为：`flexDirection: "column"`、`f
 
 ## 属性
 
-`View` 有一个自己的属性 `selectable`（Rust 中为 `.selectable(true)`）：视图中的文字作为一个选区一起选择（[文字选择](./text-selection.md)）。其余是[通用属性](./index.md#通用属性)：样式（`style`、`class`、`classList`；Rust 中为 `Styled` 方法）、`disabled`，按压属性（`onPress`、`onLongPress`、`onPressDown`、`onPressUp`、`delayLongPress`、`hitSlop`），状态样式（`activeStyle`、`hoverStyle`、`focusStyle`、`disabledStyle`、`checkedStyle`），`onMouseEnter` / `onMouseMove` / `onMouseLeave`、`onWheel`、`onPinch`、`onMouseUp`、`onContextMenu`，`onFileDragEnter` / `onFileDragLeave` / `onFileDrop`，`focusable`、`captureKeys`、`onKeyDown` / `onKeyUp`、`onLayout`、`ref`、`nativeID`、`testID`，Web 上页面的标记（`web={{ element }}`），手势属性（`pan`、`pinch`、`rotation` 及其事件），触摸与响应者属性，无障碍属性，以及 `ios` / `android` / `desktop`。
+`View` 有一个自己的属性 `selectable`（Rust 中为 `.selectable(true)`）：视图中的文字作为一个选区一起选择（[文字选择](./text-selection.md)）。其余是[通用属性](./index.md#通用属性)：样式（`style`、`class`、`classList`；Rust 中为 `Styled` 方法）、`disabled`，按压属性（`onPress`、`onLongPress`、`onPressDown`、`onPressUp`、`delayLongPress`、`hitSlop`），状态样式（`activeStyle`、`hoverStyle`、`focusStyle`、`disabledStyle`、`checkedStyle`），`onMouseEnter` / `onMouseMove` / `onMouseLeave`、`onWheel`、`onPinch`、`onMouseUp`、`onContextMenu`，`onFileDragEnter` / `onFileDragLeave` / `onFileDrop`，`dragItems`，`focusable`、`captureKeys`、`onKeyDown` / `onKeyUp`、`onLayout`、`ref`、`nativeID`、`testID`，Web 上页面的标记（`web={{ element }}`），手势属性（`pan`、`pinch`、`rotation` 及其事件），触摸与响应者属性，无障碍属性，以及 `ios` / `android` / `desktop`。
 
 ## 可选择的视图
 
@@ -163,7 +163,7 @@ view()
 | `onContextMenu` | `.on_context_menu` | `ContextMenuEvent` | 在视图上请求了上下文菜单：辅助按钮、浏览器中的键盘，或 macOS 和 Windows 上的读屏软件（见[上下文菜单](./index.md#上下文菜单)）。 |
 | `onFileDragEnter` | `.on_file_drag_enter` | `{ uris: string[], mimeTypes: string[] }`（`FileDragEvent`） | 本地文件进入当前桌面拖放目标，附带文件列表及其类型。 |
 | `onFileDragLeave` | `.on_file_drag_leave` | 无 | 本地文件离开当前桌面拖放目标。 |
-| `onFileDrop` | `.on_file_drop` | `{ uris: string[], mimeTypes: string[] }`（`FileDropEvent`） | 本地文件或目录被放到桌面拖放目标。 |
+| `onFileDrop` | `.on_file_drop` | `{ uris: string[], mimeTypes: string[] }`（`FileDropEvent`） | 本地文件或目录被放到拖放目标（桌面与 iOS）。 |
 | `onLayout` | `.on_layout` | `{ bounds }`（`Bounds<Points>`） | 相对父视图的 frame 发生变化。 |
 | `onPanStart` / `onPanEnd` | `.on_pan_start` / `.on_pan_end` | `PanEvent` | 通过 `pan` 绑定的拖动开始 / 结束；系统取消时 `cancelled` 为 true。 |
 | `onPinchStart` / `onPinchEnd` | `.on_pinch_start` / `.on_pinch_end` | `{ scale, velocity }` | 通过 `pinch` 绑定的捏合开始 / 结束。 |
@@ -177,6 +177,8 @@ view()
 在 AppKit、GTK、Win32 和 GPUI 上，带有 `onFileDrop` 的视图可以接收从其他应用拖入的本地文件和目录。`onFileDragEnter` 和 `onFileDrop` 都接收 `{ uris: string[], mimeTypes: string[] }`，顺序与原生文件列表一致。`uris` 的每项都是绝对 `file:` URL，空格和非 ASCII 字符使用 URL 转义。请解析 URL 获取文件系统路径。`mimeTypes[i]` 是 `uris[i]` 按文件名得出的 MIME 类型（`a.png` 为 `image/png`），文件名看不出类型时（例如目录）为 `""`，与 DOM 的 `File.type` 相同。各平台结果一致，得出它不读取任何文件。
 
 进入时的列表可用于预告文件名、数量与类型（“松开添加 2 张图片”），只传元数据；松手后仍需重新校验文件。AppKit 把 Finder 文件引用解析为路径 URL。GTK 等异步文件列表预加载完成后报告进入，鼠标停住也会通知；离开或重置后的迟到通知会被忽略。跨目标移动时先报告离开，再携同一列表报告进入；`onFileDragLeave` 用于清除预告。Rust 进入回调接收 `&FileDragEvent`，原有的 `||`、`|_: &()|` 和 `Listener<()>` 仍可使用。
+
+在 iOS（和 iPadOS）上，带有 `onFileDrop` 的视图接收拖入的文件，例如从照片、文件 App、Safari 或应用自己的网页视图拖来的图片和文档。与桌面一致，由最近的监听视图接收。拖动项不带文件 URL，只带按类型提供、松手时才读取的数据，所以 `onFileDragEnter` 在 iOS 上给出 `uris: []`，`onFileDrop` 给出复制到应用临时目录里的文件的 `file:` URL（也带 `pagePosition`），顺序与拖动项一致。只带文字或链接的项不是文件，不会提供给视图。视图里的文本输入框保留它能接收的内容：UIKit 的文本拖放接收文字和链接，所以带着自身链接的图片（来自网页）拖到输入框上会作为链接插入。
 
 ```rust tabs
 let hint = signal(String::new());
@@ -222,6 +224,16 @@ const files = signal<string[]>([]);
 最近的、已启用且监听 `onFileDrop` 的祖先视图接收文件，搜索范围止于模态根节点。`disabled` 会移除文件拖入、离开和放下的监听；离开、取消、完成或移除目标会清除当前拖放状态。原生侧根据已挂载的状态同步接受 Copy 操作。应用决定如何读取、打开或传输收到的文件。
 
 文本输入框属于包住它的拖放目标：文件放到输入框的文字上，和放到目标其他位置一样由该目标接收，拖入、离开事件也相同，输入框里的文字保持不变。拖进输入框的文字，以及放到不在任何拖放目标内的输入框上的文件，按平台文本框的方式处理。
+
+## 往外拖文件
+
+`dragItems` 列出用户可以从视图里拖出去的本地文件（绝对 `file:` URL）：拖到其他应用，或拖到应用里接收文件拖放的视图上。用户按住视图再移动时，视图发起这些文件的系统拖动，系统用视图的快照作为拖动预览。每个文件按原样提供，类型由扩展名决定，名称为文件名；不是本地文件的 URL 会被跳过。列表为空（默认）时不发起拖动。目前 iOS 会发起这类拖动，其他平台尚不支持。
+
+```tsx
+<View dragItems={[photo.uri]} class="size-24 rounded-xl overflow-hidden">
+  <Image src={photo.uri} class="size-full" />
+</View>
+```
 
 ## ref 方法
 
