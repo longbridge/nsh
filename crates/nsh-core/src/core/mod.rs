@@ -2108,6 +2108,13 @@ impl<M: TextEngine> Core<M> {
         self.components.runtime.set_data_dir(dir);
     }
 
+    /// The app as it was built, what [`crate::element::app_info`] answers
+    /// (a Rust app's root's, [`crate::element::Root::app_info`]); `None`:
+    /// the runner has none (a TSX app's is JS's `appInfo()`).
+    pub fn set_app_info(&mut self, info: Option<crate::platform::AppInfo>) {
+        self.components.runtime.set_app_info(info);
+    }
+
     /// What Rust code checks for updates with
     /// ([`crate::runtime::prompt_for_update`]); `None`: the app does not
     /// update. A JS app's VM gets its own ([`crate::element::System`]).
