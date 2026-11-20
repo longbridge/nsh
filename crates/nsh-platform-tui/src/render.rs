@@ -642,8 +642,16 @@ impl Painter<'_> {
             && bounds.bottom - bounds.top == 1
             && fill.0 & 255 == 255
             && holds_field;
+        // A select's trigger (a combobox holding no field) is a field the
+        // user picks from: the same raised band, so it reads as one to
+        // press, as a combobox's does.
+        let picker = view.props.accessibility.role == AccessibilityRole::Combobox
+            && view.input.is_none()
+            && !layer.field_group
+            && !page
+            && bounds.bottom - bounds.top == 1;
         if let Some(ramp) = parent.ramp
-            && (view.input.is_some() && !layer.field_group || group)
+            && (view.input.is_some() && !layer.field_group || group || picker)
             && filled == Surface::None
             && !edges.any()
             && !hidden

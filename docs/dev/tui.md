@@ -492,7 +492,8 @@ mean that): with surfaces its fill is its own color blended over its ground, at 
 the Cells of its tracks are such views, inside the control that takes the press, so hover and focus bands leave
 the color alone. A run with its own background (a
 highlight, inline code) is a band the same way. A text field without a
-line or a fill of its own is a raised band (a search field); an input group, a one-row box of an opaque fill
+line or a fill of its own is a raised band (a search field), and so is a one-row select trigger (a combobox holding
+no field), so it reads as one to press; an input group, a one-row box of an opaque fill
 holding a field with something beside it (a prefix or suffix, chips, a clear button, a chevron), is that band as
 a whole, the field raised with it rather than a step of its own (`input_group`). Bandless, a fill is the standard
 colors' (above).

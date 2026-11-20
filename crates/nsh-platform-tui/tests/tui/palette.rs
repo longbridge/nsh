@@ -583,6 +583,43 @@ fn a_chosen_control_its_hue_already_tells_apart_takes_no_select_band() {
     );
 }
 
+/// A select's trigger (a combobox holding no field, no fill of its own)
+/// over a field.
+#[component]
+fn SelectTrigger() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view()
+                .w(px(120.0))
+                .h(px(16.0))
+                .role(AccessibilityRole::Combobox)
+                .on_press(|_: &()| {})
+                .child(text("Newest")),
+        )
+        .child(nsh_base::input().w(px(80.0)).h(px(16.0)))
+        .child(text("ready"))
+}
+
+#[test]
+fn a_select_trigger_is_a_field_band() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(24, 4)).unwrap();
+    view.load(App::Rust(Root::new::<SelectTrigger>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    let field = buffer[(0, 1)].bg;
+    assert_ne!(field, Color::Reset, "the field is a band");
+    for x in 0..15 {
+        assert_eq!(
+            buffer[(x, 0)].bg,
+            field,
+            "the trigger is the same band: {x}"
+        );
+    }
+}
+
 /// An input group: the app's field box, a prefix, the field and a
 /// chevron in one row; and a bare field below it.
 #[component]
