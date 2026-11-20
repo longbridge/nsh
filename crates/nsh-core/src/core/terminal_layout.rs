@@ -1101,18 +1101,22 @@ fn reach(
     }
     // What it keeps of the panel's padding: none when what it holds are
     // bands or controls of their own, which reach the line in turn, or rows
-    // of a list, which keep it themselves.
-    let of_bands = rows || {
-        let count = tree.child_count(node);
-        count > 0
-            && (0..count).all(|i| {
-                let c = tree.child(node, i);
-                let r = tree.role(c);
-                r.control
-                    || (kind(tree, c).container
-                        && surface(r, tree.backdrop(c).unwrap_or(grid.page)).is_some())
-            })
-    };
+    // of a list, which keep it themselves. A scroll view keeps it around
+    // its controls (a menu's items): the walk up from them stops at it, so
+    // they reach across its padding instead, as they do under a group's
+    // title.
+    let of_bands = rows
+        || (!role.scroll && {
+            let count = tree.child_count(node);
+            count > 0
+                && (0..count).all(|i| {
+                    let c = tree.child(node, i);
+                    let r = tree.role(c);
+                    r.control
+                        || (kind(tree, c).container
+                            && surface(r, tree.backdrop(c).unwrap_or(grid.page)).is_some())
+                })
+        });
     let keeps = |p: i32| if of_bands { 0 } else { p };
     // Picks one side's pair out of a box's (horizontal, vertical) insets.
     type Pick = fn(((i32, i32), (i32, i32))) -> (i32, i32);
