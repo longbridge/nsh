@@ -2620,7 +2620,9 @@ Starts a session and returns it at once. A session reports, in this order: `star
 recognizer listens, `result` each time the transcript changes (`text` is always the whole transcript so far, so the
 app shows it as it is), and one `end`, after which nothing comes. `stop()` stops listening and lets the recognizer
 finish what it heard: a last result with `isFinal: true`, then `end`. `abort()` ends the session at once, without an
-error, and drops what was not reported. One session runs at a time: starting another aborts the one running.
+error, and drops what was not reported. One session runs at a time: starting another aborts the one running. On iOS
+and macOS the microphone is one for the whole process: when another app embedded in the same app starts a session,
+yours ends with `error: "audio-capture"`.
 
 `end` carries the last transcript and, when the session failed, `error`, named as in the Web Speech API:
 

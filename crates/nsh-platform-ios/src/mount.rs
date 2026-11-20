@@ -684,6 +684,9 @@ pub(crate) struct Mounter {
     offscreen: crate::canvas::Offscreen,
     /// The engine's sounds and players ([`crate::audio`]).
     audio: crate::audio::Speaker,
+    /// The engine's speech recognition session ([`crate::speech`]): it
+    /// ends with the mounter, as the engine stops.
+    speech: crate::speech::Listener,
     /// What the app may reach (web view navigations check it).
     access: std::sync::Arc<nsh_engine::Access>,
     control: EngineControl,
@@ -849,6 +852,7 @@ impl Mounter {
             ),
             offscreen: Default::default(),
             audio: Default::default(),
+            speech: Default::default(),
             control,
             access,
             shared,
@@ -2157,7 +2161,7 @@ impl Mounter {
                 );
             }
             (Command::Speech(command), _) if id == nsh_core::ROOT_ID => {
-                crate::speech::command(&self.control, &command);
+                crate::speech::command(&self.speech, &self.control, &command);
             }
             (Command::Audio(command), _) if id == nsh_core::ROOT_ID => {
                 use nsh_core::image::loader::AssetBase as Base;
