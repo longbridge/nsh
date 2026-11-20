@@ -106,7 +106,7 @@ scroll().horizontal().scrollbar(false).child(
 | `horizontal` | `.horizontal()` | `boolean` | `false` | 横向滚动。 |
 | `scrollable` | `.scrollable(..)` | `boolean` | `true` | 用户可以滚动。从代码滚动不受影响。 |
 | `bounces` | `.bounces(..)` | `boolean` | `true` | 允许越过边缘回弹。 |
-| `smoothWheel` | `.smooth_wheel(..)` | `boolean` | `false` | 带格的鼠标滚轮像浏览器那样滚：每行 40 点，100–200 ms 内先加速后减速滑到位，代替平台自己的步长（macOS，系统自己的滚轮一格直接到位；其他平台忽略）。 |
+| `macos={{ wheelStyle }}` | `.wheel_style(WheelStyle::Browser)` | `"native" \| "browser"` | `"native"` | macOS 上带格的鼠标滚轮怎么滚：`native` 是 AppKit 的行为，一格直接到位；`browser` 像 Chrome 和 Safari，每行 40 点，100–200 ms 内先加速后减速滑到位，连续拨动是一整段滑动（适合和网页内容放在一起的视图）。触控板不受影响。 |
 | `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | 显示滚动条。 |
 | `contentInset` | `.content_inset(EdgeInsets { .. })` | `Partial<Edges>` | | 内容四周可以滚动进入的留白。 |
 | `scrollbarInset` | `.scrollbar_inset(EdgeInsets { .. })` | `Partial<Edges>` | | 滚动指示条与视图各边保持的距离。 |

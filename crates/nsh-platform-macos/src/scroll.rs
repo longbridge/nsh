@@ -47,6 +47,7 @@ use std::{f32::consts::PI, rc::Rc};
 
 use nsh_core::{
     Command, EventKind, EventPayload, Points, ScrollBehavior, Size, StickyCell, ViewKind,
+    WheelStyle,
     geometry::point,
     scroll::{
         dragged, ease_out, indicator_alpha, indicator_span_within, projected, rate,
@@ -67,11 +68,11 @@ use crate::{
     wheel_glide::Glide,
 };
 
-/// Points a `smoothWheel` view's mouse wheel line scrolls, as browsers on
+/// Points a mouse wheel line scrolls a `wheelStyle: "browser"` view, as browsers on
 /// macOS take one (WebKit's `pixelsPerLineStep`, Chromium's
 /// `kScrollbarPixelsPerCocoaTick`): with AppKit's 10 a slow notch
 /// (`scrollingDeltaY` ~0.1) would glide one point.
-const SMOOTH_WHEEL_LINE: f32 = 40.0;
+const BROWSER_WHEEL_LINE: f32 = 40.0;
 /// A wheel without a gesture (a mouse) has settled after this many ms.
 const WHEEL_IDLE: f64 = 150.0;
 /// After a trackpad gesture ends, the system's momentum begins within this
@@ -2276,8 +2277,8 @@ pub(crate) fn wheel_begin(surface: &Rc<Surface>, view: &NshView) {
 
 /// A wheel or trackpad scroll by `(dx, dy)` points (positive: the content
 /// moves up / left). Without [`wheel_begin`] it is a mouse wheel, which
-/// settles by itself once it stops; a `notched` one on a `smoothWheel`
-/// view glides there as Chromium's does ([`crate::wheel_glide`]), others
+/// settles by itself once it stops; a `notched` one on a `wheelStyle:
+/// "browser"` view glides there as Chromium's does ([`crate::wheel_glide`]), others
 /// land at once as AppKit's.
 pub(crate) fn wheel(
     surface: &Rc<Surface>,
@@ -2308,10 +2309,10 @@ pub(crate) fn wheel(
         let state = view.state();
         let Some(s) = &state.scroll else { return };
         let (min, max) = limits(&state);
-        let smooth = notched && !gesture && s.behavior.smooth_wheel;
+        let smooth = notched && !gesture && s.behavior.wheel_style == WheelStyle::Browser;
         // Browsers' lines are longer than AppKit's.
         let k = if smooth {
-            SMOOTH_WHEEL_LINE / crate::input::WHEEL_LINE
+            BROWSER_WHEEL_LINE / crate::input::WHEEL_LINE
         } else {
             1.0
         };

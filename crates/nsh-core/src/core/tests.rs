@@ -2820,18 +2820,37 @@ fn scrolls_to_top_reaches_the_scroll_behavior() {
     assert_eq!(behavior(&batch).map(|b| b.scrolls_to_top), Some(true));
 }
 
-/// `smoothWheel` reaches the scroll view's mounted behavior (macOS glides
-/// mouse wheels from it): off by default, on when the app says so, and off
-/// again.
+/// `macos={{ wheelStyle }}` reaches the scroll view's mounted behavior
+/// (macOS glides mouse wheels from it): native by default, browser when the
+/// app says so, and native again once the app drops it (the reset the
+/// runtime sets for a removed prop).
 #[test]
-fn smooth_wheel_reaches_the_scroll_behavior() {
+fn wheel_style_reaches_the_scroll_behavior() {
+    use crate::WheelStyle;
     fn behavior(batch: &MountBatch) -> Option<ScrollBehavior> {
         batch.items.iter().rev().find_map(|i| match i {
             MountItem::ScrollBehavior { id: 2, behavior } => Some((**behavior).clone()),
             _ => None,
         })
     }
-    assert!(!ScrollBehavior::default().smooth_wheel);
+    assert_eq!(ScrollBehavior::default().wheel_style, WheelStyle::Native);
+    let browser = Prop::Scroll(ScrollProp::WheelStyle(WheelStyle::Browser));
+    // `macos={{ wheelStyle }}` decodes `"native"` and `"browser"` (the
+    // runtime hands a platform object's props over by their own names).
+    {
+        use crate::js::host::{HostCx, HostProps};
+        let decode = |name: &str, value: &str| {
+            let mut cx = HostCx::for_element(Tag::Scroll);
+            <Prop as HostProps>::decode(name, &HostTestValue::String(value), &mut cx)
+        };
+        assert_eq!(decode("wheelStyle", "browser"), Some(Some(browser.clone())));
+        assert_eq!(
+            decode("wheelStyle", "native"),
+            Some(Some(Prop::Scroll(ScrollProp::WheelStyle(
+                WheelStyle::Native
+            ))))
+        );
+    }
     let mut c = core();
     apply(
         &mut c,
@@ -2842,7 +2861,7 @@ fn smooth_wheel_reaches_the_scroll_behavior() {
             },
             Op::SetProp {
                 id: 2,
-                prop: Prop::Scroll(ScrollProp::SmoothWheel(true)),
+                prop: browser.clone(),
             },
             Op::Insert {
                 parent: ROOT_ID,
@@ -2852,16 +2871,22 @@ fn smooth_wheel_reaches_the_scroll_behavior() {
         ],
     );
     let batch = c.commit().unwrap();
-    assert_eq!(behavior(&batch).map(|b| b.smooth_wheel), Some(true));
+    assert_eq!(
+        behavior(&batch).map(|b| b.wheel_style),
+        Some(WheelStyle::Browser)
+    );
     apply(
         &mut c,
         vec![Op::SetProp {
             id: 2,
-            prop: Prop::Scroll(ScrollProp::SmoothWheel(false)),
+            prop: <Prop as crate::js::host::HostProps>::reset(&browser).unwrap(),
         }],
     );
     let batch = c.commit().unwrap();
-    assert_eq!(behavior(&batch).map(|b| b.smooth_wheel), Some(false));
+    assert_eq!(
+        behavior(&batch).map(|b| b.wheel_style),
+        Some(WheelStyle::Native)
+    );
 }
 
 /// `scrollbarInset` reaches the scroll view's mounted behavior (the platforms

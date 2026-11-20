@@ -110,12 +110,13 @@ pub trait Scrollable: Element {
         self
     }
 
-    /// A notched mouse wheel scrolls as browsers do: 40-point lines eased in
-    /// and out over 100–200 ms, instead of the platform's own step (default
-    /// no; macOS only; TS: `smoothWheel`).
-    fn smooth_wheel(mut self, on: impl IntoReactive<bool>) -> Self {
-        host::bind_prop(self.node(), on, |on| {
-            Prop::Scroll(ScrollProp::SmoothWheel(on))
+    /// How a notched mouse wheel scrolls it on macOS: AppKit's lines landing
+    /// at once (`WheelStyle::Native`, default) or as browsers do
+    /// (`WheelStyle::Browser`: longer lines, eased); elsewhere ignored (TS:
+    /// `macos={{ wheelStyle }}`).
+    fn wheel_style(mut self, style: impl IntoReactive<crate::WheelStyle>) -> Self {
+        host::bind_prop(self.node(), style, |style| {
+            Prop::Scroll(ScrollProp::WheelStyle(style))
         });
         self
     }

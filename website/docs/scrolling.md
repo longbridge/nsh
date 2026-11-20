@@ -106,7 +106,7 @@ Fingers drag scroll views. On the desktop (macOS, Windows, Linux) and in the bro
 | `horizontal` | `.horizontal()` | `boolean` | `false` | Scrolls sideways. |
 | `scrollable` | `.scrollable(..)` | `boolean` | `true` | The user can scroll it. Scrolling from code still works. |
 | `bounces` | `.bounces(..)` | `boolean` | `true` | Overscroll past the edges. |
-| `smoothWheel` | `.smooth_wheel(..)` | `boolean` | `false` | A notched mouse wheel scrolls as browsers do: 40-point lines eased in and out over 100–200 ms, instead of the platform's own step (macOS, whose own lines land at once; elsewhere ignored). |
+| `macos={{ wheelStyle }}` | `.wheel_style(WheelStyle::Browser)` | `"native" \| "browser"` | `"native"` | How a notched mouse wheel scrolls it on macOS: `native`, AppKit's lines landing at once; `browser`, as Chrome and Safari: 40-point lines eased in and out over 100–200 ms, a run of notches one motion (for views beside web content). Trackpads are unchanged. |
 | `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | The scroll indicator shows. |
 | `contentInset` | `.content_inset(EdgeInsets { .. })` | `Partial<Edges>` | | Room around the content, scrollable into. |
 | `scrollbarInset` | `.scrollbar_inset(EdgeInsets { .. })` | `Partial<Edges>` | | Keeps the scroll indicator this far from the view's edges. |

@@ -471,6 +471,7 @@ and `Input`'s React Native names follow the rules as well.
 | `ItemSeparatorComponent` | `separator` | `Command::separator` | |
 | List `contentContainerStyle` | `contentStyle` (padding and gaps only), `contentClass` (`p-*`, `gap-*`) | *guides* "Let the enclosing name carry the context" | Same names as Scroll's, a narrower type |
 | Scroll `contentContainerStyle`, `contentContainerClass` | `contentStyle`, `contentClass` | as above; *guides* slot `content` | |
+| (none: a notched wheel scrolls as the platform's) | `macos={{ wheelStyle: "native" \| "browser" }}` (default `"native"`; Rust `wheel_style(WheelStyle::Browser)`) | Chromium's `ScrollOffsetAnimationCurve` and line step; CSS `scroll-behavior` (and Tailwind's `scroll-smooth`) excludes user scrolls, so no web name fits | Names the whole policy (a line's length and its easing), not `smooth`, which said nothing of the 4× line; a mode is a string union, so another style can come. macOS only for now (its scroll views are its own code); Linux, Windows and GPUI share `nsh_core::scroll::wheel`, where it would become a prop of every desktop |
 | **Input** | | | |
 | `blurOnSubmit` | (dropped) | | `submitBehavior` covers it |
 | `placeholderTextColor` | style key `placeholderColor`, class `placeholder:text-*` | *guides* `value` vs `presentation`; CSS `::placeholder` | |
