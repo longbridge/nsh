@@ -3,6 +3,7 @@
 // `id:case-<case>` (a one-point view over the corner, out of the layout);
 // the steps after it are that case's.
 import { type JSX, View, mount, signal } from "nsh";
+import { Window } from "nsh/desktop";
 import BaseStatusBar from "./base-status-bar";
 import BaseAccordion from "./base-accordion";
 import BaseAlertDialog from "./base-alert-dialog";
@@ -20,6 +21,7 @@ import BaseDiff from "./base-diff";
 import BaseDock from "./base-dock";
 import BaseDockTabScroll from "./base-dock-tab-scroll";
 import BaseDockRenderHandle from "./base-dock-render-handle";
+import BaseDockToolbar from "./base-dock-toolbar";
 import BaseSplitView from "./base-split-view";
 import BaseEditor from "./base-editor";
 import BaseHoverCard from "./base-hover-card";
@@ -84,6 +86,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-dock": BaseDock,
   "base-dock-tab-scroll": BaseDockTabScroll,
   "base-dock-render-handle": BaseDockRenderHandle,
+  "base-dock-toolbar": BaseDockToolbar,
   "base-split-view": BaseSplitView,
   "base-editor": BaseEditor,
   "base-hover-card": BaseHoverCard,
@@ -140,7 +143,7 @@ const cases: Record<string, () => JSX.Element> = {
 };
 const shown = signal("");
 
-mount(() => (
+mount(() => <Window id="main">{() => (
   <>
     {() => {
       const Case = cases[shown()];
@@ -152,4 +155,4 @@ mount(() => (
       ))}
     </View>
   </>
-));
+)}</Window>);

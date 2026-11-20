@@ -64,6 +64,7 @@ fn trip_dates() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
 import { DatePicker, type DatePickerValue } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const due = signal<DatePickerValue>(null);
@@ -99,7 +100,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `DatePicker` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。在 Rust 中，`date_picker()` 创建一个日期选择器，每个属性有一个设置方法（`.value(..)`、`.range(..)`、`.time_precision(..)`），每个事件有一个监听方法（`.on_change(..)`）。它的值是 `DateTime`（`DateTime::Single`、`DateTime::Range`，由 `chrono` 的日期或日期时间构成）；`onChange` 给出一个 `PickedDate`，即值及选择器的时间精度。

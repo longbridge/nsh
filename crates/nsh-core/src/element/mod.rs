@@ -131,7 +131,8 @@ pub use self::{
         RustOp, TaskStart, ToJs,
     },
     callback::{
-        Callback, CallbackArgs, CallbackHandle, CallbackRet, Exception, JsCall, Trace, Tracer,
+        Callback, CallbackArgs, CallbackHandle, CallbackRet, Exception, JsCall, Settles, Trace,
+        Tracer,
     },
     class::{
         Arg, AsyncCall, Class, ClassDef, ClassInstance, ClassRefs, ClassSpec, Instance, Member,

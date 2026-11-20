@@ -1260,6 +1260,32 @@ mod tests {
     }
 
     #[test]
+    fn an_unfocused_window_uses_its_content_capture() {
+        run(|| {
+            let surface = surface();
+            views(&surface);
+            props(&surface, ROOT_ID, |props| props.key_content = Some(2));
+            props(&surface, 2, |props| props.key_capture = KeyCapture::All);
+            let window = show(&surface);
+            let content = view(&surface, 2);
+            assert!(wait_until(|| content.is_mapped()));
+            assert!(GtkWindowExt::focus(&window).is_none());
+
+            let captured = press(
+                &surface,
+                Some(window.upcast_ref()),
+                None,
+                gdk::Key::AudioPlay,
+                0,
+                gdk::ModifierType::empty(),
+                0,
+            );
+            window.destroy();
+            assert!(captured, "the window content captures keys without focus");
+        });
+    }
+
+    #[test]
     fn a_tab_press_arms_the_traversal_without_focus() {
         run(|| {
             let surface = surface();

@@ -55,6 +55,7 @@ fn files() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
 import { Tree, type TreeItem } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 const files: TreeItem[] = [
   {
@@ -94,7 +95,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `Tree` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. The expanded items and the

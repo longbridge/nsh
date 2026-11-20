@@ -78,6 +78,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, type NativeComponentRef, signal, Text, View } from "nsh";
 import { nativeComponent } from "nsh";
+import { Window } from "nsh/desktop";
 
 /** The host app's badge: a label it draws, sized to its text. */
 const Badge = nativeComponent<{ text: string; color?: string }, { tap: { count: number } }>("embed.badge", {
@@ -108,7 +109,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 TSX 版本就是 `examples/embedded/App.tsx`，仓库里的两个嵌入示例运行的都是它。

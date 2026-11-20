@@ -39,8 +39,8 @@ use std::rc::Rc;
 
 use gpui::{
     App, Bounds, ContentMask, Corners, Edges, Element, ElementId, GlobalElementId, Hitbox,
-    HitboxBehavior, Hsla, InspectorElementId, LayoutId, PaintQuad, Pixels, Point,
-    Window, point, px, size,
+    HitboxBehavior, Hsla, InspectorElementId, LayoutId, PaintQuad, Pixels, Point, Window, point,
+    px, size,
 };
 use nsh_core::{Color, Points};
 
