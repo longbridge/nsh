@@ -640,19 +640,7 @@ pub(crate) unsafe fn host<'a>(handle: jlong) -> &'a Arc<Host> {
 fn init_tls_verifier(env: &mut JNIEnv<'_>, view: &JObject<'_>) {
     static DONE: std::sync::Once = std::sync::Once::new();
     DONE.call_once(|| {
-        let context = env
-            .call_method(view, "getContext", "()Landroid/content/Context;", &[])
-            .and_then(|context| context.l())
-            .and_then(|context| {
-                env.call_method(
-                    &context,
-                    "getApplicationContext",
-                    "()Landroid/content/Context;",
-                    &[],
-                )
-            })
-            .and_then(|context| context.l());
-        let context = match context {
+        let context = match crate::context::application_context(env, view) {
             Ok(context) => context,
             Err(err) => {
                 let _ = env.exception_clear();
@@ -693,6 +681,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
     support_dir: JString<'_>,
     cache_dir: JString<'_>,
 ) -> jlong {
+    crate::context::init(&mut env, &view);
     #[cfg(feature = "websocket")]
     init_tls_verifier(&mut env, &view);
     let Ok(view) = env.new_global_ref(view) else {
