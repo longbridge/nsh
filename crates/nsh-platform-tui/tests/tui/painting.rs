@@ -336,38 +336,6 @@ fn a_scroll_view_whose_content_overflows_shows_its_bar() {
 }
 
 #[component]
-fn Content() -> impl IntoElement {
-    const PNG: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAACCAIAAAAW4yFwAAAADUlEQVR4nGP4zwAC/wEIAAH/2ZC7NQAAAABJRU5ErkJggg==";
-    view()
-        .flex_1()
-        .child(
-            image(PNG)
-                .label("Chart")
-                .w(px(80.0))
-                .h(px(16.0))
-                .bg(nsh_core::color::rgb(0x123456)),
-        )
-        .child(image(PNG).w(px(80.0)).h(px(16.0)))
-        .child(text("ready"))
-}
-
-#[test]
-fn images_keep_their_box_blank() {
-    let (mut view, rx) = surface();
-    let mut terminal = Terminal::new(TestBackend::new(12, 4)).unwrap();
-    view.load(App::Rust(Root::new::<Content>(|| ()))).unwrap();
-    draw_until(&mut view, &mut terminal, &rx, "ready");
-    let buffer = terminal.backend().buffer();
-    let drawn: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
-    assert_eq!(drawn.replace(' ', ""), "ready", "no placeholder: {drawn:?}");
-    // A row each, blank: the text is below them, and the first one's fill
-    // is not drawn.
-    let row: String = (0..12).map(|x| buffer[(x, 2)].symbol()).collect();
-    assert!(row.starts_with("ready"), "{drawn:?}");
-    assert!(buffer.content.iter().all(|cell| cell.bg == Color::Reset));
-}
-
-#[component]
 fn Small() -> impl IntoElement {
     let bordered = || {
         view()

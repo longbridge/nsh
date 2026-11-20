@@ -58,7 +58,9 @@
 //!   a `Length` along the main axis either way. An explicit height
 //!   counts only on boxes without content (charts, spacers), on scroll
 //!   views (as a maximum) and on a clip of no height (a closed reveal);
-//!   a box with content is its content's height.
+//!   a box with content is its content's height. A box without content
+//!   or an image with one side and an `aspectRatio` takes the other side
+//!   from it in points (a photo filling its tile's width).
 //!   When the children of a row do not fit, the gaps give first (down to
 //!   a column), then icon controls shown as labels (down to three
 //!   columns, then out), then those with `flexShrink` down to their
@@ -761,7 +763,8 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
     let mut in_flow = false;
     let mut boxes = false;
     // Every box in flow is one that keeps its box blank or draws itself
-    // and states no height (an image filling a card): it gives no rows.
+    // and states no height or aspect ratio (an image filling a card): it
+    // gives no rows.
     let mut fillers = true;
     for i in 0..count {
         let child = tree.child(node, i);
@@ -772,7 +775,8 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
         if !tree.style(child).position.is_out_of_flow() {
             in_flow = true;
             fillers &= tree.role(child).sized
-                && length(tree.style(child).size.height.into_raw()).is_none();
+                && length(tree.style(child).size.height.into_raw()).is_none()
+                && tree.style(child).aspect_ratio.is_none();
         }
         // Texts, bare views (spacers, bars) and views whose content is all
         // left out (an icon's circle) make no box of it.
@@ -1650,6 +1654,23 @@ pub(crate) fn compute(
     } else {
         eh.map(|h| clamp(h, min_h, max_h))
     });
+    // An empty box or a picture of one side and an aspect ratio (a photo
+    // filling its tile's width, measured by its natural size once loaded)
+    // has the other side from it, in points: a Cell is twice as tall as it
+    // is wide, so its rows are not its columns.
+    let mut fixed_w = fixed_w;
+    if (k.empty || (k.measures && role.left_out == LeftOut::IfIcon))
+        && let Some(ratio) = tree
+            .style(node)
+            .aspect_ratio
+            .filter(|r| r.is_finite() && *r > 0.0)
+    {
+        match (fixed_w, fixed_h) {
+            (Some(w), None) => fixed_h = Some(clamp(grid.rows(grid.x(w) / ratio), min_h, max_h)),
+            (None, Some(h)) => fixed_w = Some(clamp(grid.cols(grid.y(h) * ratio), min_w, max_w)),
+            _ => {}
+        }
+    }
     let inner = |v: Option<i32>, i: i32| v.map(|v| (v - i).max(0));
     if inputs.run_mode == RunMode::PerformLayout && (k.measures || k.empty || k.labelled) {
         tree.set_insets(node, Insets { border, padding });
