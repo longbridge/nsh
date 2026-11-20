@@ -676,13 +676,13 @@ fn set_cursor_at(surface: &Surface, x: f32, y: f32, always: bool) {
     // The same pick says which link of a text the mouse is over.
     hover_link(
         surface,
-        hit.as_ref().filter(|h| !h.native).map(|h| &h.view),
+        hit.as_ref().filter(|h| h.native.is_none()).map(|h| &h.view),
         x,
         y,
     );
     let cursor = match hit {
         // the hosted view sets its own: the next one is set again
-        Some(hit) if hit.native => return surface.input.cursor.set(None),
+        Some(hit) if hit.native.is_some() => return surface.input.cursor.set(None),
         Some(hit) => {
             if over_link(surface, &hit.view, x, y) {
                 Cursor::Pointer
@@ -1031,7 +1031,7 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
     let Some(hit) = pick(&event_root(surface), x, y) else {
         return;
     };
-    if !hit.native {
+    if hit.native.is_none() {
         let (lx, ly) = local(surface, &hit.view, x, y);
         let span = {
             let state = hit.view.state();
@@ -1521,10 +1521,13 @@ fn input_point(surface: &Surface) -> (f32, f32) {
 
 /// What is under a point.
 struct Hit {
-    /// The innermost view.
+    /// The innermost view; for a hosted view, the view whose input it
+    /// edits, which is not the view hosting it when an input's pad is
+    /// lifted above a transform (`crate::text_input::pad_owner`).
     view: NshView,
-    /// The point is on a hosted AppKit view of it.
-    native: bool,
+    /// The hosted AppKit view the point is on, as picking found it in its
+    /// host's stacking order and coordinates.
+    native: Option<Retained<objc2_app_kit::NSView>>,
 }
 
 /// The innermost view at `(x, y)` (root coordinates).
@@ -1555,7 +1558,7 @@ fn pick_in(view: &NshView, p: (f32, f32)) -> Option<Hit> {
     let own = || {
         (pe != PointerEvents::BoxNone && in_slop).then(|| Hit {
             view: view.clone(),
-            native: false,
+            native: None,
         })
     };
     if !children {
@@ -1608,7 +1611,7 @@ fn native_hit(view: &NshView, sub: &objc2_app_kit::NSView, p: (f32, f32)) -> Opt
         .any(|n| &*n.view == sub && native_contains(n, p))
         .then(|| Hit {
             view: crate::text_input::pad_owner(sub).unwrap_or_else(|| view.clone()),
-            native: true,
+            native: Some(Retained::from(sub)),
         })
 }
 
@@ -1811,7 +1814,7 @@ fn down(
     let hit = pick(&event_root(surface), x, y);
     // A selectable view around the view selects across its texts; else a
     // selectable text selects alone.
-    let selecting = hit.as_ref().filter(|h| !h.native).and_then(|h| {
+    let selecting = hit.as_ref().filter(|h| h.native.is_none()).and_then(|h| {
         crate::selectable_view::target(&h.view)
             .or_else(|| crate::text::selectable(&h.view.state()).then(|| h.view.clone()))
     });
@@ -1824,7 +1827,7 @@ fn down(
     // that edits keeps the focus (the root refuses the first responder
     // during a press, `NshView::acceptsFirstResponder`), and a press on a
     // view that is not focusable leaves it where it is.
-    if !hit.native
+    if hit.native.is_none()
         && let Some(window) = hit.view.ns().window()
         && let Some(target) = chain(&hit.view).into_iter().find(explicitly_focusable)
     {
@@ -1836,7 +1839,7 @@ fn down(
     // it lands; the press still registers (`catch` below is for the app's
     // own glides on views under the pointer, and swallows it).
     end_momentum(surface);
-    let native = hit.native;
+    let native = hit.native.is_some();
     let views = chain(&hit.view);
     // The mouse drags an indicator as a scroll bar: its thumb follows the
     // pointer, where a drag on the content moves the content with it.
@@ -2134,7 +2137,7 @@ enum WindowPart {
 /// AppKit view or a view with press or touch handlers is nearer.
 fn window_part(surface: &Surface, x: f32, y: f32) -> Option<(NshView, WindowPart)> {
     let hit = pick(&event_root(surface), x, y)?;
-    if hit.native {
+    if hit.native.is_some() {
         return None;
     }
     let mut view = Some(hit.view);
@@ -3137,11 +3140,36 @@ pub(crate) fn install(surface: &Rc<Surface>) {
         unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &block) };
 }
 
-/// True when `event` was already observed by [`hosted_mouse`] or
-/// [`hosted_press_began`], preventing duplicate dispatch if a hosted view
-/// forwards the event up the responder chain.
+/// True when `event` was already observed by [`hosted_mouse`],
+/// [`hosted_press_began`] or [`report_hosted`], preventing duplicate
+/// dispatch if a hosted view forwards the event up the responder chain.
 pub(crate) fn saw_hosted(surface: &Surface, event: &NSEvent) -> bool {
     surface.input.hosted_last.get() == Some(MouseMark::of(event))
+}
+
+/// Reports a mouse event a hosted input's pad observed to the surface,
+/// unless the event monitor or the editor's press tracking already did:
+/// one press is one press for the views around it (an overlay's
+/// `onPressOutside` counts it). A press it reports is tracked as theirs
+/// are, so whichever path sees the release ends it once.
+pub(crate) fn report_hosted(surface: &Rc<Surface>, root: Option<NshView>, event: &NSEvent) {
+    if saw_hosted(surface, event) {
+        return;
+    }
+    let input = &surface.input;
+    match event.r#type() {
+        NSEventType::LeftMouseDown => input.hosted_left_down.set(
+            !event
+                .modifierFlags()
+                .contains(NSEventModifierFlags::Control),
+        ),
+        NSEventType::LeftMouseDragged if input.hosted_left_down.get() => {}
+        NSEventType::LeftMouseUp if input.hosted_left_down.replace(false) => {}
+        _ => return,
+    }
+    input.hosted_last.set(Some(MouseMark::of(event)));
+    enter(surface, root);
+    self::event(surface, event);
 }
 
 fn window_root_for(surface: &Surface, window: &NSWindow) -> Option<Option<NshView>> {
@@ -3449,7 +3477,7 @@ fn wheel_event(
                     .modifierFlags()
                     .contains(NSEventModifierFlags::Control),
             );
-            Some((view, takes && along && !hit.native))
+            Some((view, takes && along && hit.native.is_none()))
         },
     );
     let Some((view, takes)) = routed else {
@@ -3774,7 +3802,7 @@ pub(crate) fn window_drag(surface: &Surface, x: f32, y: f32) -> bool {
     let Some(hit) = pick(&event_root(surface), x, y) else {
         return false;
     };
-    if hit.native {
+    if hit.native.is_some() {
         return false;
     }
     let mut view = Some(hit.view);
@@ -3811,22 +3839,11 @@ fn in_hidden_title_bar(surface: &Surface, y: f32) -> bool {
 /// coordinates) when nsh's own picking lands on one: the root's `hitTest:`
 /// hands it the mouse, past app views that let the pointer through
 /// (`pointerEvents: none` overlays), which AppKit's picking would stop at.
+/// The view picking found, not one looked up again in the hit view's own
+/// hosted views: a lifted input's pad is hosted by the view above the
+/// transform, and its input's view hosts nothing.
 pub(crate) fn native_at(root: &NshView, x: f32, y: f32) -> Option<Retained<objc2_app_kit::NSView>> {
-    let hit = pick(root, x, y)?;
-    if !hit.native {
-        return None;
-    }
-    let local = hit.view.ns().convertPoint_fromView(
-        objc2_foundation::NSPoint::new(x as f64, y as f64),
-        Some(root.ns()),
-    );
-    let (lx, ly) = (local.x as f32, local.y as f32);
-    let s = hit.view.state();
-    s.natives
-        .iter()
-        .rev()
-        .find(|n| native_contains(n, (lx, ly)))
-        .map(|n| n.view.clone())
+    pick(root, x, y)?.native
 }
 
 /// The closest file-drop listener under the pointer, within its modal root.
