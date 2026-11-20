@@ -379,7 +379,7 @@ Give one square PNG, ideally 1024×1024, in `nsh.json` (`"icon": "icon.png"`) or
 
 - **iOS:** compiled by Xcode's `actool` into the app's asset catalog (`Assets.car`), which derives every size iOS
   needs.
-- **Android:** resized to 192×192 and used as the launcher icon (`mipmap-xxxhdpi`).
+- **Android:** resized to 192×192 and used as the launcher icon (`mipmap-xxxhdpi`); see adaptive icons below.
 - **macOS:** converted by `sips` to `AppIcon.icns`. `nsh run --target macos` and `nsh test --target macos` show the
   PNG in the Dock and the app switcher.
 - **Linux:** copied as `<id>.png`, which the `.desktop` file names as its `Icon`.
@@ -402,6 +402,29 @@ Windows, Linux and Android fill it. Give `icon` an object to use a PNG per platf
   }
 }
 ```
+
+`icon.android` also takes an adaptive icon, whose layers the launcher masks to its own shape (circle, squircle, ...).
+Each layer is 108×108dp; the inner 72×72dp appears within the mask, and the outer 18dp on each side is left for the
+launcher's visual effects. Keep the artwork within the central circle of 66dp: about 61% of the width, 264 pixels of a
+432-pixel layer.
+
+```json
+{
+  "icon": {
+    "android": {
+      "foreground": "icon-foreground.png",
+      "background": "#ffffff",
+      "monochrome": "icon-monochrome.png"
+    }
+  }
+}
+```
+
+- `foreground`: a square PNG with a transparent background, ideally 432×432 or larger.
+- `background`: a color (`"#rrggbb"`, `"#rrggbbaa"`) or a square PNG.
+- `monochrome` (optional): the artwork in one color on transparent, which Android 13 and later tint for themed icons.
+
+Only `icon.android` takes this form.
 
 `--icon` replaces it for the target being packaged.
 
@@ -431,6 +454,24 @@ middle of the screen, the same in both appearances or one for each:
 Both are compiled into the app's asset catalog with its icon and named in `UILaunchScreen`, which the app no longer
 sets in `ios.infoPlist`. A launch screen that matches the app's first frame (its background, the same image in the
 same place) makes the start look seamless. `appearance` picks which of the two the system shows.
+
+On Android, `android.launchScreen` takes the same keys. The package gives the app a theme whose window background is
+`background`, so the window matches the app's first frame from the tap on the icon on, and stays behind it. On Android
+12 and later the system splash screen also uses `background` (behind the icon too), with `image` in the middle at the
+same size as on iOS (a 288×288 PNG is 96×96 dp). Without `image` the splash screen shows the launcher icon. An app
+that targets an API level below 31 has no splash screen to show `image` in, though the file is still checked. The dark
+values apply in the system's dark mode, and `appearance` set to `light` or `dark` keeps that one.
+
+```json
+{
+  "android": {
+    "launchScreen": {
+      "background": { "light": "#ffffff", "dark": "#131312" },
+      "image": { "light": "launch.png", "dark": "launch-dark.png" }
+    }
+  }
+}
+```
 
 ## Camera, Bluetooth and other hardware
 

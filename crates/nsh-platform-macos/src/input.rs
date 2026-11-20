@@ -128,9 +128,6 @@ pub(crate) struct Input {
     window_control: RefCell<Option<(NshView, WindowControl)>>,
     /// The mouse, while its left button is down.
     pointer: RefCell<Option<Pointer>>,
-    /// A completed short press whose visual feedback is still showing.
-    /// Its pointer id prevents an old timer from releasing a later press.
-    tap_feedback: RefCell<Option<(u32, Vec<NshView>)>>,
     /// A trackpad pinch.
     pinch: RefCell<Option<Transform>>,
     /// A trackpad rotation.
@@ -191,21 +188,46 @@ pub(crate) struct Input {
     /// earlier ones).
     next_gen: Cell<u64>,
     /// Hears the modifier keys change, once a view hears mouse moves.
-    flags: FlagsMonitor,
+    flags: EventMonitor,
+    /// Observes primary pointer events over hosted AppKit views, whose
+    /// `hitTest:` bypasses the root view's responder handlers.
+    hosted: EventMonitor,
+    /// True while a hosted AppKit view tracks a left-button press.
+    hosted_left_down: Cell<bool>,
+    /// Latest hosted mouse event observed, avoiding duplicate handling when
+    /// a hosted view forwards up the responder chain or a synthetic test
+    /// invokes `mouseDown:` directly.
+    hosted_last: Cell<Option<MouseMark>>,
 }
 
-/// A local monitor of the modifier keys (`flagsChanged`), which reach only
-/// the first responder: a change while the mouse rests is a mouse move
-/// where it is ([`modifiers_changed`]). Removed with the surface.
+/// A local `NSEvent` monitor removed when the surface's input drops.
 #[derive(Default)]
-struct FlagsMonitor(RefCell<Option<Retained<objc2::runtime::AnyObject>>>);
+struct EventMonitor(RefCell<Option<Retained<objc2::runtime::AnyObject>>>);
 
-impl Drop for FlagsMonitor {
+impl Drop for EventMonitor {
     fn drop(&mut self) {
         if let Some(monitor) = self.0.borrow_mut().take() {
             // SAFETY: a monitor `addLocalMonitorForEventsMatchingMask`
             // returned.
             unsafe { NSEvent::removeMonitor(&monitor) };
+        }
+    }
+}
+
+/// Identifies an `NSEvent` already observed through [`Input::hosted`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MouseMark {
+    event: usize,
+    kind: NSEventType,
+    time_bits: u64,
+}
+
+impl MouseMark {
+    fn of(event: &NSEvent) -> Self {
+        Self {
+            event: event as *const NSEvent as usize,
+            kind: event.r#type(),
+            time_bits: event.timestamp().to_bits(),
         }
     }
 }
@@ -297,7 +319,8 @@ pub(crate) fn reset(surface: &Surface) {
     input.window_root.borrow_mut().take();
     input.window_control.borrow_mut().take();
     input.pointer.borrow_mut().take();
-    input.tap_feedback.borrow_mut().take();
+    input.hosted_left_down.set(false);
+    input.hosted_last.set(None);
     input.pinch.borrow_mut().take();
     input.rotation.borrow_mut().take();
     input.zoom.borrow_mut().take();
@@ -357,11 +380,6 @@ fn update_hover_tracking(surface: &Surface, view: &NshView) {
 pub(crate) fn removed(surface: &Surface, view: &NshView) {
     let input = &surface.input;
     let inside = |v: &NshView| v.ns().isDescendantOf(view.ns());
-    if let Some((_, views)) = input.tap_feedback.borrow_mut().as_mut() {
-        for v in views.extract_if(.., |v| inside(v)) {
-            set_state(surface, &v, PRESSED, false);
-        }
-    }
     if !input.hovered.borrow().is_empty() {
         let left: Vec<NshView> = input
             .hovered
@@ -1785,7 +1803,6 @@ fn down(
     clicks: usize,
     flags: NSEventModifierFlags,
 ) {
-    clear_tap_feedback(surface);
     let shift = flags.contains(NSEventModifierFlags::Shift);
     // A release we never saw.
     if let Some(stale) = take(surface) {
@@ -2305,7 +2322,7 @@ fn up(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {
 /// Cancels the press in progress, whose release will not come: a menu
 /// that popped up during it tracked the mouse and took the release.
 pub(crate) fn cancel_pointer(surface: &Rc<Surface>) {
-    clear_tap_feedback(surface);
+    surface.input.hosted_left_down.set(false);
     if let Some(p) = take(surface) {
         finish(surface, p, true);
     }
@@ -2494,60 +2511,35 @@ pub(crate) fn later(ms: u64, f: impl FnOnce() + Send + 'static) {
     }
 }
 
-/// A recognized trackpad tap delivers down/up together. Keep its visual
-/// state briefly so the engine and display link can draw the app's active
-/// style. Press/touch callbacks still run at release, with no extra events.
+/// A recognized trackpad tap delivers down and up in the same RunLoop turn.
+/// Clear the view's local `PRESSED` bit immediately while asking the core to
+/// hold `:active` feedback briefly on its own clock. Press and touch
+/// callbacks still run at release, with no retained views on the main thread.
 fn finish_pressed(surface: &Rc<Surface>, p: &mut Pointer, cancelled: bool) {
-    let delay = tap_feedback_delay(
-        p.time - p.down_time,
+    let delta_ms = p.time - p.down_time;
+    let elapsed = if delta_ms.is_finite() && delta_ms > 0.0 {
+        Duration::from_secs_f64(delta_ms / 1000.0)
+    } else {
+        Duration::ZERO
+    };
+    let delay = nsh_core::input::tap_feedback_delay(
+        elapsed,
         cancelled || !matches!(p.mode, Mode::Idle | Mode::Select(_)),
         surface.environment.get().reduce_motion || surface.testing(),
     );
-    let Some(delay) = delay.filter(|_| !p.pressed.is_empty()) else {
-        release_pressed(surface, p);
-        return;
-    };
-    // Only views still under the release get feedback; a short drag out
-    // must clear immediately, just like a cancelled gesture.
-    for v in p
-        .pressed
-        .extract_if(.., |v| !released_inside(surface, v, p.x, p.y))
-    {
-        set_state(surface, &v, PRESSED, false);
-    }
-    if p.pressed.is_empty() {
-        return;
-    }
-    let id = p.id;
-    *surface.input.tap_feedback.borrow_mut() = Some((id, std::mem::take(&mut p.pressed)));
-    let key = surface.key();
-    later(delay, move || {
-        let Some(surface) = Surface::with_key(key) else {
-            return;
+    for v in p.pressed.drain(..) {
+        let hold = delay.filter(|_| released_inside(surface, &v, p.x, p.y));
+        let (id, next) = {
+            let mut s = v.state_mut();
+            let Some(next) = input::next_states(s.tracked, s.states, PRESSED, false) else {
+                continue;
+            };
+            s.states = next;
+            (s.id, next)
         };
-        let current = surface
-            .input
-            .tap_feedback
-            .borrow()
-            .as_ref()
-            .map(|(id, _)| *id);
-        if current == Some(id) {
-            clear_tap_feedback(&surface);
-        }
-    });
-}
-
-fn tap_feedback_delay(elapsed: f64, cancelled: bool, immediate: bool) -> Option<u64> {
-    const MINIMUM: f64 = 64.0;
-    (!cancelled && !immediate && elapsed.is_finite() && elapsed < MINIMUM)
-        .then(|| (MINIMUM - elapsed.max(0.0)).ceil() as u64)
-}
-
-fn clear_tap_feedback(surface: &Surface) {
-    let feedback = surface.input.tap_feedback.borrow_mut().take();
-    if let Some((_, views)) = feedback {
-        for view in views {
-            set_state(surface, &view, PRESSED, false);
+        match hold {
+            Some(hold) => surface.control(|c| c.release_states_after(id, next, hold)),
+            None => surface.control(|c| c.set_states(id, next)),
         }
     }
 }
@@ -3117,7 +3109,159 @@ fn mouse_up(surface: &Surface, x: f32, y: f32, mouse: Mouse, button: MouseButton
     }
 }
 
-/// Installs the surface's [`FlagsMonitor`], unless it is there.
+/// Installs the surface's hosted-view pointer monitor. Hosted AppKit views
+/// (`NSTextField`, `NSTextView`, `WKWebView`) receive mouse events directly
+/// via `ViewObj::root_hit`, and text editors consume `LeftMouseDragged` and
+/// `LeftMouseUp` inside a modal `NSEventTrackingRunLoopMode` loop; observing
+/// them here gives hosted subtrees `:active` state, pointer modality, momentum
+/// stop, and `TouchPhase::Start` (`PressOutside` for anchored popovers).
+pub(crate) fn install(surface: &Rc<Surface>) {
+    let monitor = &surface.input.hosted.0;
+    if monitor.borrow().is_some() {
+        return;
+    }
+    let key = surface.key();
+    let block = block2::RcBlock::new(move |event: std::ptr::NonNull<NSEvent>| -> *mut NSEvent {
+        // SAFETY: AppKit passes a valid event.
+        let raw = unsafe { event.as_ref() };
+        if let Some(surface) = Surface::with_key(key) {
+            hosted_mouse(&surface, raw);
+        }
+        event.as_ptr()
+    });
+    let mask =
+        NSEventMask::LeftMouseDown | NSEventMask::LeftMouseDragged | NSEventMask::LeftMouseUp;
+    // SAFETY: the block returns the event unmodified; the monitor is removed
+    // when the surface's input drops.
+    *monitor.borrow_mut() =
+        unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &block) };
+}
+
+/// True when `event` was already observed by [`hosted_mouse`] or
+/// [`hosted_press_began`], preventing duplicate dispatch if a hosted view
+/// forwards the event up the responder chain.
+pub(crate) fn saw_hosted(surface: &Surface, event: &NSEvent) -> bool {
+    surface.input.hosted_last.get() == Some(MouseMark::of(event))
+}
+
+fn window_root_for(surface: &Surface, window: &NSWindow) -> Option<Option<NshView>> {
+    if surface.root.ns().window().as_deref() == Some(window) {
+        return Some(None);
+    }
+    crate::window::roots(surface)
+        .into_iter()
+        .find(|r| r.ns().window().as_deref() == Some(window))
+        .map(Some)
+}
+
+fn hosted_mouse(surface: &Rc<Surface>, raw: &NSEvent) {
+    #[cfg(feature = "dev")]
+    let placed = crate::synth::placed(raw);
+    #[cfg(feature = "dev")]
+    let e = placed.as_deref().unwrap_or(raw);
+    #[cfg(not(feature = "dev"))]
+    let e = raw;
+
+    let Some(window) = e.window(surface.mtm) else {
+        return;
+    };
+    let Some(window_root) = window_root_for(surface, &window) else {
+        return;
+    };
+    #[cfg(feature = "dev")]
+    if surface.testing() && crate::view::scripted_type().is_none() && !crate::synth::from_agent(e) {
+        return;
+    }
+    match e.r#type() {
+        NSEventType::LeftMouseDown => {
+            if crate::window::is_blocked(surface, window_root.as_ref()) {
+                return;
+            }
+            let root = window_root.clone().unwrap_or_else(|| surface.root.clone());
+            let p = root.ns().convertPoint_fromView(e.locationInWindow(), None);
+            if native_at(&root, p.x as f32, p.y as f32).is_none() {
+                surface.input.hosted_left_down.set(false);
+                return;
+            }
+            surface.input.hosted_last.set(Some(MouseMark::of(raw)));
+            let tracks_left = !e.modifierFlags().contains(NSEventModifierFlags::Control);
+            surface.input.hosted_left_down.set(tracks_left);
+            enter(surface, window_root);
+            surface.measure(false, || event(surface, e));
+        }
+        NSEventType::LeftMouseDragged => {
+            if surface.input.hosted_left_down.get() {
+                surface.input.hosted_last.set(Some(MouseMark::of(raw)));
+                enter(surface, window_root);
+                surface.measure(true, || {
+                    event(surface, e);
+                    crate::surface::quiet(|| surface.revisit());
+                });
+            }
+        }
+        NSEventType::LeftMouseUp if surface.input.hosted_left_down.replace(false) => {
+            surface.input.hosted_last.set(Some(MouseMark::of(raw)));
+            enter(surface, window_root);
+            surface.measure(false, || event(surface, e));
+        }
+        _ => {}
+    }
+}
+
+/// Fallback when a synthetic test invokes `NSWindow::sendEvent` directly on a
+/// hosted input without going through AppKit's event queue (`_DPSNextEvent`).
+pub(crate) fn hosted_press_began(surface: &Rc<Surface>, view: &NshView, down: &NSEvent) {
+    if down.r#type() != NSEventType::LeftMouseDown
+        || surface.input.hosted_left_down.get()
+        || saw_hosted(surface, down)
+    {
+        return;
+    }
+    #[cfg(feature = "dev")]
+    if surface.testing()
+        && crate::view::scripted_type().is_none()
+        && !crate::synth::from_agent(down)
+    {
+        return;
+    }
+    let Some(window) = view.ns().window() else {
+        return;
+    };
+    let Some(window_root) = window_root_for(surface, &window) else {
+        return;
+    };
+    if crate::window::is_blocked(surface, window_root.as_ref()) {
+        return;
+    }
+    surface.input.hosted_last.set(Some(MouseMark::of(down)));
+    let tracks_left = !down.modifierFlags().contains(NSEventModifierFlags::Control);
+    surface.input.hosted_left_down.set(tracks_left);
+    enter(surface, window_root);
+    surface.measure(false, || event(surface, down));
+}
+
+/// Completes a hosted input press if its release bypassed [`hosted_mouse`].
+pub(crate) fn hosted_press_ended(
+    surface: &Rc<Surface>,
+    view: &NshView,
+    end_event: Option<&NSEvent>,
+) {
+    if !surface.input.hosted_left_down.replace(false) {
+        return;
+    }
+    if let Some(up) = end_event.filter(|e| e.r#type() == NSEventType::LeftMouseUp)
+        && let Some(window) = view.ns().window()
+        && let Some(window_root) = window_root_for(surface, &window)
+    {
+        surface.input.hosted_last.set(Some(MouseMark::of(up)));
+        enter(surface, window_root);
+        surface.measure(false, || event(surface, up));
+    } else {
+        cancel_pointer(surface);
+    }
+}
+
+/// Installs the surface's [`EventMonitor`] for `flagsChanged`, unless present.
 fn watch_flags(surface: &Surface) {
     let monitor = &surface.input.flags.0;
     if monitor.borrow().is_some() {
@@ -3909,24 +4053,5 @@ mod tests {
         let mut m = nsh_core::Matrix::IDENTITY;
         m.0[3] = -0.5;
         assert_eq!(project(&m, (2.0, 3.0)), None);
-    }
-}
-
-#[cfg(test)]
-mod tap_feedback_tests {
-    use super::tap_feedback_delay;
-
-    #[test]
-    fn short_presses_only_hold_the_remaining_visual_time() {
-        assert_eq!(tap_feedback_delay(0.3, false, false), Some(64));
-        assert_eq!(tap_feedback_delay(40.0, false, false), Some(24));
-        assert_eq!(tap_feedback_delay(64.0, false, false), None);
-        assert_eq!(tap_feedback_delay(120.0, false, false), None);
-    }
-
-    #[test]
-    fn cancellation_reduced_motion_and_test_drivers_release_immediately() {
-        assert_eq!(tap_feedback_delay(0.3, true, false), None);
-        assert_eq!(tap_feedback_delay(0.3, false, true), None);
     }
 }

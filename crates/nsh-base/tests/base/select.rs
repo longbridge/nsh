@@ -14,7 +14,6 @@ use std::{
 use nsh_base::{SelectEntry, SelectEvent, SelectItem, select};
 use nsh_core::{
     AccessibilityRole, AccessibilityState, Bounds, Command, MountItem, NodeId, Size, ViewProps,
-    element::Root,
     platform::{Idiom, Os},
     prelude::*,
 };
@@ -337,7 +336,9 @@ fn reading_active_descendants(props: HarnessProps) -> App {
 fn start_env(props: HarnessProps, set: impl FnOnce(&mut nsh_core::platform::Environment)) -> App {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::new::<Harness>(move || props.clone()))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            props.clone()
+        }))
     };
     set(&mut config.environment);
     let mut app = Headless::start(config).expect("the engine starts");
@@ -977,7 +978,21 @@ fn on_the_desktops_the_popup_is_at_the_trigger_as_wide_and_within_the_window() {
     let trigger = app.role_id(AccessibilityRole::Combobox);
     let seen = app.seen.lock().unwrap();
     let popup = seen.parents[&list];
-    assert!(seen.roots.contains(&popup), "an overlay of the root view");
+    // An overlay is placed at its window's root view, not inside the trigger
+    // it belongs to (the app root is the window here).
+    let mut node = popup;
+    let mut at_root = seen.roots.contains(&popup);
+    while !at_root {
+        let Some(&parent) = seen.parents.get(&node) else {
+            break;
+        };
+        if seen.roots.contains(&parent) {
+            at_root = true;
+            break;
+        }
+        node = parent;
+    }
+    assert!(at_root, "an overlay of its window's root view");
     let frame = seen.frames[&popup];
     // Below the trigger (its 160 × 30 view at 40, 100), at its start.
     assert_eq!(frame.origin.x, px(40.0));
@@ -1422,7 +1437,10 @@ fn cost_of(items: usize, steps: &dyn Fn(&mut Headless)) -> Cost {
     let run = new_run();
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::new::<Long>(move || LongProps { items, run }))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Long>(move || LongProps {
+            items,
+            run,
+        }))
     };
     config.environment.os = Os::MacOs;
     let mut app = Headless::start(config).unwrap();

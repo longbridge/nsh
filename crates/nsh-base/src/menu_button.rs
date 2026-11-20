@@ -66,6 +66,16 @@ pub struct MenuButtonItem {
     /// desktops its items between separators.
     #[prop(default)]
     pub inline: bool,
+    /// With `items`, its own actions are one choice (a sort order, a
+    /// repeat interval): the app checks one at a time with `checked`. On
+    /// iOS `UIMenuOptions.singleSelection`, a check mark on the chosen one;
+    /// on Android an exclusive checkable group, radio buttons; on the
+    /// desktops check marks. Without it, `checked` items are independent
+    /// checks. Its sections' and submenus' actions are not part of the
+    /// choice: they set their own. A whole menu of one choice is an
+    /// untitled section with it.
+    #[prop(default)]
+    pub single_selection: bool,
 }
 
 impl MenuButtonItem {
@@ -100,6 +110,13 @@ impl MenuButtonItem {
             inline: true,
             ..Self::submenu(label, items)
         }
+    }
+
+    /// Whether its actions are one choice
+    /// ([`MenuButtonItem::single_selection`]): for a submenu or a section.
+    pub fn single_selection(mut self, single_selection: bool) -> Self {
+        self.single_selection = single_selection;
+        self
     }
 
     /// Its icon, an SF Symbol's name ([`MenuButtonItem::icon`]).
@@ -167,14 +184,14 @@ pub enum MenuButtonEvent {
 /// Content that opens the system's own menu: on iOS a `UIMenu` (the
 /// system's pull-down menu, Liquid Glass on iOS 26 and later), shown by a
 /// tap, VoiceOver's activation or the keyboard's, with the system's
-/// placement, motion, checks, submenus, sections and destructive items; on
-/// Android the system's popup menu, anchored below the content (at its end
-/// in the window's end half), shown by a tap or TalkBack's activation; on
-/// a desktop OS the platform's context menu (`Menu.popup`'s) at the
-/// pointer. The app gives the items as data (`items`, each with an `id` of
-/// its own), hears the choice (`onSelect({ id })`) and draws the content
-/// with its children, `class` and `style`, which stay the app's on every
-/// platform. The system's menus show no app content: rows of the app's own
+/// placement, motion, checks, single choices, submenus, sections and
+/// destructive items; on Android the system's popup menu, anchored below
+/// the content (at its end in the window's end half), shown by a tap or
+/// TalkBack's activation; on a desktop OS the platform's context menu
+/// (`Menu.popup`'s) at the pointer. The app gives the items as data
+/// (`items`, each with an `id` of its own), hears the choice
+/// (`onSelect({ id })`) and draws the content with its children, `class`
+/// and `style`, which stay the app's on every platform. The system's menus show no app content: rows of the app's own
 /// look are `Menu`'s. The web has no system menu for a view: there the
 /// content shows and opens nothing, and the app uses `Menu`.
 #[component]
@@ -232,7 +249,8 @@ pub fn MenuButton(props: MenuButtonProps, cx: Scope<MenuButtonEvent>) -> impl In
 
 /// The items as the iOS and Android components read them (`MenuButton`'s,
 /// and `ContextMenu`'s with `items`): `[{ id, label, icon?, svg?,
-/// checked?, disabled?, destructive?, items?, inline? }]`.
+/// checked?, disabled?, destructive?, items?, inline?, singleSelection?
+/// }]`.
 pub(crate) fn menu_json(items: &[MenuButtonItem]) -> JsonValue {
     items
         .iter()
@@ -259,6 +277,9 @@ pub(crate) fn menu_json(items: &[MenuButtonItem]) -> JsonValue {
                 entry.insert("items".into(), menu_json(&item.items));
                 if item.inline {
                     entry.insert("inline".into(), true.into());
+                }
+                if item.single_selection {
+                    entry.insert("singleSelection".into(), true.into());
                 }
             }
             JsonValue::Object(entry)
@@ -380,6 +401,45 @@ mod tests {
         assert_eq!(
             menu_json(&items),
             json!([{ "id": "copy", "label": "Copy", "icon": "doc.on.doc", "svg": svg }])
+        );
+    }
+
+    /// A submenu or a section whose actions are one choice says so; an
+    /// action never does, and other menus stay checks.
+    #[test]
+    fn single_selection_reaches_the_platforms() {
+        let items = [
+            MenuButtonItem::section(
+                "Sort by",
+                [
+                    MenuButtonItem::new("name", "Name").checked(true),
+                    MenuButtonItem::new("date", "Date").checked(false),
+                ],
+            )
+            .single_selection(true),
+            MenuButtonItem::submenu(
+                "Repeat",
+                [
+                    MenuButtonItem::new("daily", "Daily").checked(false),
+                    MenuButtonItem::new("weekly", "Weekly").checked(true),
+                ],
+            )
+            .single_selection(true),
+            MenuButtonItem::new("alone", "Alone").single_selection(true),
+        ];
+        assert_eq!(
+            menu_json(&items),
+            json!([
+                { "id": "", "label": "Sort by", "inline": true, "singleSelection": true, "items": [
+                    { "id": "name", "label": "Name", "checked": true },
+                    { "id": "date", "label": "Date", "checked": false },
+                ] },
+                { "id": "", "label": "Repeat", "singleSelection": true, "items": [
+                    { "id": "daily", "label": "Daily", "checked": false },
+                    { "id": "weekly", "label": "Weekly", "checked": true },
+                ] },
+                { "id": "alone", "label": "Alone" },
+            ])
         );
     }
 

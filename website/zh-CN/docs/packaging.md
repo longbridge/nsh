@@ -337,7 +337,7 @@ entitlements：
 在 `nsh.json` 中（`"icon": "icon.png"`）或通过 `--icon` 提供一张正方形 PNG，最好是 1024×1024：
 
 - **iOS：** 由 Xcode 的 `actool` 编译进应用的资源目录（`Assets.car`），iOS 所需的各种尺寸都由它生成。
-- **Android：** 缩放到 192×192，用作启动器图标（`mipmap-xxxhdpi`）。
+- **Android：** 缩放到 192×192，用作启动器图标（`mipmap-xxxhdpi`）；也可以用自适应图标，见下文。
 - **macOS：** 由 `sips` 转换为 `AppIcon.icns`。`nsh run --target macos` 和 `nsh test --target macos` 会在程序坞和应用切换器里显示这张 PNG。
 - **Linux：** 复制为 `<id>.png`，`.desktop` 文件以它作为 `Icon`。
 - **Windows：** 缩放为 16 到 64 像素以及 256 像素，作为图标嵌入可执行文件，窗口、资源管理器和任务栏都会显示它；同时写到 bundle 旁的 `nsh\icon.ico`，通知会显示它。在 macOS 或 Linux 上打包时，可执行文件在资源管理器里保持默认图标，窗口和任务栏显示 `icon.ico`。`nsh run --target windows` 和 `nsh test --target windows` 也会显示它。
@@ -354,6 +354,26 @@ entitlements：
   }
 }
 ```
+
+`icon.android` 也可以是自适应图标，启动器会把它的各层裁成自己的形状（圆形、圆角方形等）。每层 108×108dp，中间 72×72dp 显示在遮罩内，四周各 18dp 留给启动器做视觉效果。图案放在中心直径 66dp 的圆内：约为宽度的 61%，432 像素的图层上是 264 像素。
+
+```json
+{
+  "icon": {
+    "android": {
+      "foreground": "icon-foreground.png",
+      "background": "#ffffff",
+      "monochrome": "icon-monochrome.png"
+    }
+  }
+}
+```
+
+- `foreground`：透明底的正方形 PNG，最好是 432×432 或更大。
+- `background`：颜色（`"#rrggbb"`、`"#rrggbbaa"`）或一张正方形 PNG。
+- `monochrome`（可选）：透明底上的单色图案，Android 13 及以上的主题图标会给它着色。
+
+只有 `icon.android` 接受这种写法。
 
 `--icon` 会替换它，用于本次打包的目标。
 
@@ -378,6 +398,19 @@ entitlements：
 - `image` 是相对 `nsh.json` 的 PNG，或带 `light` 和 `dark` 的对象。它按 3 倍屏绘制：系统按像素尺寸的三分之一显示，所以 288×288 的 PNG 是 96×96 点，居中。
 
 两者和图标一起编译进应用的资源目录，并写进 `UILaunchScreen`，应用就不再在 `ios.infoPlist` 里设置它。启动画面与应用第一帧一致（同样的背景、同一张图在同一位置）时，启动看起来没有跳变。系统显示哪一套由 `appearance` 决定。
+
+Android 上 `android.launchScreen` 用同样的键。打包时给应用生成一个主题，窗口背景是 `background`：从点下图标起窗口就和应用第一帧一致，之后也留在应用下面。Android 12 及以上，系统启动屏同样用 `background`（图标后面也是），`image` 在中央，大小与 iOS 相同（288×288 的 PNG 是 96×96 dp）；不给 `image` 时启动屏显示启动器图标。目标 API 级别低于 31 的应用没有系统启动屏，`image` 不显示，但文件仍会检查。深色的值在系统深色模式下生效；`appearance` 固定为 `light` 或 `dark` 时只用那一套。
+
+```json
+{
+  "android": {
+    "launchScreen": {
+      "background": { "light": "#ffffff", "dark": "#131312" },
+      "image": { "light": "launch.png", "dark": "launch-dark.png" }
+    }
+  }
+}
+```
 
 ## 相机、蓝牙和其他硬件
 

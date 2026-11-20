@@ -16,7 +16,7 @@ use nsh_base::{
     ColorChannel, ColorFormat, ColorPickerEvent, ColorSpace, color_area, color_eye_dropper,
     color_field, color_picker, color_slider, color_swatch,
 };
-use nsh_core::{MountItem, NodeId, Size, element::Root, geometry::point, platform::Os, prelude::*};
+use nsh_core::{MountItem, NodeId, Size, geometry::point, platform::Os, prelude::*};
 use nsh_engine::EngineConfig;
 use nsh_testing::{Headless, Screen};
 
@@ -119,7 +119,9 @@ fn start(format: ColorFormat, disabled: bool) -> Headless {
     let props = HarnessProps { format, disabled };
     let config = EngineConfig {
         viewport: Size::new(px(400.0), px(844.0)),
-        ..EngineConfig::new(Root::new::<Harness>(move || props.clone()))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            props.clone()
+        }))
     };
     let mut app = Headless::start(config).expect("the engine starts");
     app.wait_for("text:Ends").unwrap();
@@ -135,7 +137,9 @@ fn start_in(rtl: bool) -> Headless {
     };
     let mut config = EngineConfig {
         viewport: Size::new(px(400.0), px(844.0)),
-        ..EngineConfig::new(Root::new::<Harness>(move || props.clone()))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Harness>(move || {
+            props.clone()
+        }))
     };
     config.environment.os = Os::MacOs;
     config.environment.rtl = rtl;
@@ -225,7 +229,9 @@ fn Keys(props: KeysProps) -> impl IntoElement {
 fn ends_after_keys(area: bool, rtl: bool, keys: &[&str]) -> Vec<String> {
     let mut config = EngineConfig {
         viewport: Size::new(px(400.0), px(844.0)),
-        ..EngineConfig::new(Root::new::<Keys>(move || KeysProps { area }))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Keys>(move || KeysProps {
+            area,
+        }))
     };
     config.environment.os = Os::MacOs;
     config.environment.rtl = rtl;
@@ -481,7 +487,7 @@ fn Late() -> impl IntoElement {
 fn colors_the_app_sets_back_late_keep_the_channels_set_since() {
     let config = EngineConfig {
         viewport: Size::new(px(400.0), px(844.0)),
-        ..EngineConfig::new(Root::of::<Late>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<Late>())
     };
     let mut app = Headless::start(config).expect("the engine starts");
     app.wait_for("text:Ends").unwrap();

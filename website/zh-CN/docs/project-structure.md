@@ -56,7 +56,7 @@ Rust 应用的根是它的 crate 中的一个组件，`nsh.json` 的 `"root"` �
 // src/lib.rs; nsh.json: { "rust": ".", "root": "App" }
 mod screens;
 
-use nsh_core::prelude::*;
+use nsh_core::{element::desktop::window as app_window, prelude::*};
 
 /// What a TSX entry may import from the crate.
 #[native_module("my-app/native")]
@@ -66,23 +66,25 @@ fn native(registry: &mut Registry) {
 
 #[component]
 pub fn App() -> impl IntoElement {
-    screens::home()
+    // 桌面平台上这是应用的窗口；其他平台上它显示自己的内容。
+    app_window().id("main").content(screens::home)
 }
 ```
 
 ```tsx tabs
 // App.tsx
 import { mount } from "nsh";
+import { Window } from "nsh/desktop";
 import { Home } from "./components/Home";
 
 function App() {
   return <Home />;
 }
 
-mount(App);
+mount(() => <Window id="main"><App /></Window>);
 ```
 
-`nsh run` 和 `nsh package` 在所有平台上挂载 Rust 根组件，不带 QuickJS。在 TSX 中，`mount(component, props?)` 把组件渲染到应用的界面上，并返回一个用于移除它的函数；应用只调用它一次。入口顶层的代码在 bundle 加载时、第一帧之前运行。
+`nsh run` 和 `nsh package` 在所有平台上挂载 Rust 根组件，不带 QuickJS。在 TSX 中，`mount(component, props?)` 把组件渲染为应用根，并返回一个用于移除它的函数；应用只调用它一次。在桌面平台上，应用根用 `<Window>` 声明自己的窗口（声明窗口的应用也要声明第一个；裸 root 渲染在隐式首窗口中）；其他平台上 `<Window>` 在唯一界面中显示它的内容。入口顶层的代码在 bundle 加载时、第一帧之前运行。
 
 ## nsh.json
 
@@ -133,20 +135,21 @@ mount(App);
 | `singleInstance` | boolean | `package` | `true`：应用在 Windows 和 Linux 上只运行一份；第二次启动把参数和工作目录交给正在运行的应用后退出（[单实例](../modules/nsh-desktop.md#单实例)）。 |
 | `dataDir` | string | `package` | 应用在桌面（macOS、Windows、Linux）上的数据目录：存储（`nsh/storage`）、日志、`process.dataDir` 以及 `${dataDir}` 中的文件都在这里。取值为绝对路径或 `"${homeDir}/.myapp"`（不能包含 `..` 或其他 `${...}`），其他值会给出警告并被忽略。不设置时为系统应用数据目录下以应用 id 命名的目录：macOS 为 `~/Library/Application Support/<id>`，Windows 为 `%APPDATA%\<id>`，Linux 为 `$XDG_DATA_HOME/<id>`（`~/.local/share/<id>`）。在这里设置的目录不随应用 id 改变。缓存和下载的更新各有自己的位置；iOS、Android、Web 和嵌入的应用使用平台的目录。 |
 | `features` | string[] | `package` | 打包时 release runner 始终保留的原生功能（应用带 Rust crate，或本机装有 `cargo` 且打包目标是本机系统时，在本地构建 runner），如 `["plot"]`：只有 Rust 代码或动态 import 才用到的功能写在这里。其余功能中，bundle 用不到的（`shader`、`editor`、`plot` 等）`package` 会去掉，并输出原因。 |
-| `icon` | string \| object | `package`、`run` | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`；也可按平台分别提供（`{ "macos": "…", "windows": "…" }`，[打包](./packaging.md#图标)）。 |
+| `icon` | string \| object | `package`、`run` | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`；也可按平台分别提供（`{ "macos": "…", "windows": "…" }`，[打包](./packaging.md#图标)）。Android 的可以是自适应图标（`{ "foreground": "…", "background": "…", "monochrome": "…" }`，[打包](./packaging.md#图标)）。 |
 | `tailwind` | object | 每次构建 | 扩展 `class` 字符串所依据的 Tailwind 主题（[Tailwind](./tailwind.md)）。 |
 | `locales` | string[] | 每次构建 | 应用除英语外格式化数字和日期所用的语言（`["de", "zh-CN"]`），bundle 会携带它们的数据。默认：`locales/` 中翻译所包含的语言（[I18n](./i18n.md#数字和日期)）。 |
 | `theme` | string 或 object | 每次构建 | 应用的设计令牌（shadcn/ui 的 `cssVars`，叠加在默认的 `neutral` 主题之上），供 token 类名、`token()` 和 Rust 组件绘制时使用：相对于 `nsh.json` 的主题文件路径，或直接内联的主题（[用 Rust 开发](./rust.md#主题)、[主题 token](./tailwind.md#主题-token)）。 |
 | `statusBar` | object | 每次构建、`package` | 所有页面和对话框之下的状态栏默认值（iOS 和 Android）：`{ "foreground": "auto" \| "light" \| "dark", "hidden": boolean }`，两个字段都可省略。打包的 iOS 应用从启动屏起就使用它（[状态栏](../modules/nsh-base.md#status-bar)）。 |
 | `capabilities` | object | 每次构建 | 应用可以访问 VM 之外的哪些资源：网络主机、网页视图主机、状态栏、应用自己的窗口（[沙箱与权限](./sandbox-and-capabilities.md)）。 |
-| `window` | object | 每次构建、`package` | 桌面平台上主窗口的启动设置，从第一帧起生效：`title`、`defaultSize`、`minSize`、`titleBar`、`backdrop` 以及窗口的其他选项和属性，写法与 `nsh/desktop` 的 `WindowOptions` 相同（`{ "defaultSize": { "width": 1100, "height": 720 }, "titleBar": { "style": "hidden" } }`），以及 `defaultVisible`（为 `false` 时启动时隐藏，像托盘应用那样）（[主窗口](../modules/nsh-desktop.md#主窗口)）。 |
+| `window` | object | 每次构建、`package` | 桌面平台上应用声明的第一个窗口的启动设置，从第一帧起生效：`title`、`defaultSize`、`minSize`、`titleBar`、`backdrop` 以及窗口的其他选项和属性，写法与 `nsh/desktop` 的 `WindowOptions` 相同（`{ "defaultSize": { "width": 1100, "height": 720 }, "titleBar": { "style": "hidden" } }`）（[应用宿主与第一个窗口](../modules/nsh-desktop.md#应用宿主与第一个窗口)）。`defaultVisible` 不再适用：应用宿主永远不会显示；以无窗口状态启动的应用不打开窗口即可。 |
+| `application` | object | 每次构建、`package` | 应用的生命周期：`"quitMode": "platform" \| "lastWindowClosed" \| "explicit"`。`"platform"`（默认）让 macOS 应用在没有窗口时继续运行，并在 Windows 和 Linux 上于最后一个窗口关闭时退出；`"lastWindowClosed"` 在所有平台上最后一个窗口关闭时退出；`"explicit"` 在没有窗口时继续运行。应用可在运行时用 `Application.setQuitMode` 修改（[退出](../modules/nsh-desktop.md#退出)）。 |
 | `resolve` | object | 每次构建 | 裸导入如何解析：npm 包的导出条件和别名（[npm 包](#npm-包)）。 |
 | `rust` | string 或 string[] | 每个命令 | 应用的 Rust crate 或 crate 列表，路径相对于 `nsh.json`：其中的组件和模块，TSX 按每个 crate 的 `#[native_module]` 名称导入（[用 Rust 开发](./rust.md#多个-crate)）。 |
 | `modules` | (string \| object)[] | 每个命令 | 应用安装的 [nshm](./nshm.md)，由 `nsh add` 记录在这里并锁定在 `nsh.lock`：`"acme-gauge@1.0"`、`"github:acme/gauge@v1.0.0"`、`{ "git": "…", "tag": "v1.0.0" }` 或 `{ "path": "../gauge" }`（[CLI：nsh add](./cli.md#nsh-add)）。 |
 | `web` | object | `package` | Web 包给页面添加的内容。`web.host`：一个 JS 模块，路径相对于 `nsh.json`，导出 `createHost(player)`，应答应用的 [`host`](../modules/nsh.md#host) 调用；`web.connect`：该模块自己的请求访问的主机，写法同 `capabilities.network.hosts` 的模式，页面的 Content-Security-Policy 允许它们（[Web](./web.md#宿主的函数)）；`web.base`：站点所在的路径（`"/apps/counter/"`），即页面的 `<base href>`，使页面在应用自己的路径上也能加载（[Web](./web.md#部署)）；`web.history`：压入的页面和打开的对话框是否作为浏览器历史记录（默认在应用占据整个页面时是，在 iframe 里不是）。 |
 | `updater` | object | `package` | 打包后的应用从哪里获取更新：`{ "github": "owner/repo" }` 或 `{ "url": "https://…/latest.json", "publicKey": "…" }`，配 `github` 时 `publicKey` 可选；[OTA 更新](./ota-updates.md)另需 `"packages": { "roots": [...] }`（[应用更新](./app-updates.md)、[nsh/updater](../modules/nsh-updater.md#nshjson)）。 |
 | `ios` | object | `package` | iOS 包添加的内容：`infoPlist` 是应用 `Info.plist` 的键，`entitlements` 在真机构建时对照描述文件检查，`launchScreen` 是应用启动时系统显示的颜色和图（[启动画面](./packaging.md#启动画面)）。NSH 自己的键会被拒绝（[打包](./packaging.md#infoplist-键与-entitlements)）；`infoPlist` 的 `MinimumOSVersion` 提高应用所需的 iOS 版本（[最低系统版本](./packaging.md#最低系统版本)）。 |
-| `android` | object | `package` | Android 包的设置：`targetSdk`，应用的目标 API 级别，也是编译所用的级别（默认 35）（[打包](./packaging.md#目标-api-级别)）；`usesCleartextTraffic`，是否允许普通的 `http://` 请求（默认 `false`）（[打包](./packaging.md#明文-http)）；`permissions`，除 NSH 自身声明的权限外 manifest 还要声明的权限（默认无）（[打包](./packaging.md#权限)）。 |
+| `android` | object | `package` | Android 包的设置：`targetSdk`，应用的目标 API 级别，也是编译所用的级别（默认 35）（[打包](./packaging.md#目标-api-级别)）；`usesCleartextTraffic`，是否允许普通的 `http://` 请求（默认 `false`）（[打包](./packaging.md#明文-http)）；`permissions`，除 NSH 自身声明的权限外 manifest 还要声明的权限（默认无）（[打包](./packaging.md#权限)）；`launchScreen`，应用启动时窗口的颜色和启动屏的图，键同 `ios.launchScreen`（[启动画面](./packaging.md#启动画面)）。 |
 | `macos` | object | `package`、`run`、`test` | macOS 包添加的内容：`infoPlist` 和 `entitlements`，与 `ios` 的相同（[打包](./packaging.md#infoplist-键与-entitlements)），`infoPlist` 的 `LSMinimumSystemVersion` 提高应用所需的 macOS 版本（[最低系统版本](./packaging.md#最低系统版本)）；以及 `activationPolicy`，即无论 NSH 以哪种方式启动应用，它如何参与系统界面：`"regular"`（默认），有 Dock 图标和菜单栏；或 `"accessory"`，即菜单栏应用（[macOS](./macos.md#菜单栏应用)）。 |
 | `root` | string | `run`, `package` | Rust 应用的根组件，即它在 `rust` crate（列表时为第一个）中的路径（`App`、`shell::Gallery`）：对应用目录执行 `nsh run` 和 `nsh package` 时，在所有平台上直接挂载它，不使用 QuickJS；`nsh run App.tsx` 仍然运行 TSX 入口（[用 Rust 开发](./rust.md)）。 |
 
@@ -224,7 +227,18 @@ import strings from "./strings.json";
 
 ### 从二进制中去掉部分功能
 
-如果你用 Cargo 自己构建可执行文件（嵌入 NSH，或自己写 `main`），可以去掉可选功能：平台 crate 默认全部开启，在平台 crate（以及 `nsh-base`）上设置 `default-features = false`，再从 `js`、`shader`、`editor`（含 `DiffView`）、`rich-editor`、`plot`、`highlight`、`math`、`emoji-picker`（`EmojiPicker`）、`zlib`、`crypto` 中列出要保留的项。应用导入了构建时去掉的功能，会在加载时报错。`nsh package` 构建的应用始终包含全部功能。
+平台 crate 默认开启全部可选功能：`js`、`shader`、`editor`（含 `DiffView`）、`rich-editor`、`plot`、`term`、`highlight`、`math`、`emoji-picker`（`EmojiPicker`）、`zlib`、`crypto`、`websocket` 和 `updater`，以及平台自己的功能：Linux 上的 `net` 和 `sound`，Windows 上的 `net`、`webview` 和 `media`。SVG 图片始终包含在内。`nsh run` 和开发宿主带有全部功能。
+
+`nsh package` 在本机构建 release runner 时（应用带 Rust crate，或本机装有 `cargo` 且打包目标是本机系统或 Android），只保留应用 bundle 用得到的功能，并输出每项保留或去掉的原因。用到 `TextView` 时保留 `highlight` 和 `math`，因为它显示的文本可能含有代码和公式。它看不到应用的 Rust 代码用了什么，也看不到动态 `import()` 加载什么：这些功能写在 [`nsh.json` 的 `features`](#nshjson) 中，例如 `"features": ["shader"]`。依赖 `nsh-base` 默认功能的 Rust crate 会通过 Cargo 保留 `editor`、`rich-editor`、`plot`、`term` 和 `highlight`；但 Rust 代码绘制 `Shader` 仍需写上 `"shader"`，否则着色器视图不绘制任何内容。`nsh-base` 默认不开启的功能（`math`、`emoji-picker`）写在 crate 自己的依赖中：`nsh-base = { version = "0.6", features = ["emoji-picker"] }`。
+
+如果你用 Cargo 自己构建可执行文件（嵌入 NSH，或自己写 `main`），由你自己选择功能：在平台 crate 和 `nsh-base` 上都设置 `default-features = false`（任何一个保留默认功能，都会把它们重新开启），再列出要保留的项：
+
+```toml
+nsh-base = { version = "0.6", default-features = false, features = ["editor"] }
+nsh-platform-macos = { version = "0.6", default-features = false, features = ["js", "editor", "highlight", "shader"] }
+```
+
+Rust 代码用到构建时去掉的功能会无法编译；TSX 导入它会在加载时报错（`Could not find export 'Editor' in module 'nsh/base'`）。去掉 `shader` 时着色器视图不绘制任何内容；去掉 `highlight` 和 `math` 时代码和公式显示为纯文本。
 
 ### 按需加载代码
 

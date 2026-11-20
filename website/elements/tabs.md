@@ -66,6 +66,7 @@ fn sections() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
 import { Tab, Tabs } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const section = signal("overview");
@@ -96,7 +97,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `Tab` and `Tabs` come from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. The value is the

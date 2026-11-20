@@ -224,6 +224,9 @@ pub(crate) struct InputState {
     reported_scroll: Cell<Option<(f32, f32, f32, f32)>>,
     /// A press is selecting.
     dragging: Cell<bool>,
+    /// The press that focused the field selects all its text when it ends
+    /// (`selectTextOnFocus`), unless it made a selection itself.
+    select_on_up: Cell<bool>,
     /// The text's format (the placeholder's and the line's height), made
     /// from the config's font.
     format: RefCell<Option<IDWriteTextFormat>>,
@@ -309,6 +312,7 @@ impl InputState {
                 caret_on: Cell::new(true),
                 reported_scroll: Cell::new(None),
                 dragging: Cell::new(false),
+                select_on_up: Cell::new(false),
                 format: RefCell::new(None),
                 placeholder: RefCell::new(None),
                 drawn: RefCell::new(None),
@@ -1186,6 +1190,7 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
             }
             input.focused.set(false);
             input.dragging.set(false);
+            input.select_on_up.set(false);
             if let Some(e) = &input.editor {
                 e.set_focus(false);
             }
@@ -1558,14 +1563,14 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
 /// insert it after configuring it).
 fn auto_focus(surface: &Rc<Surface>, view: &NshView) {
     if view.attached() {
-        return set_focus(surface, Some(view));
+        return focus_selecting(surface, view);
     }
     let view = view.clone();
     let mut frames = 0;
     surface.on_draw_frame(move |surface, _| {
         frames += 1;
         if view.attached() {
-            set_focus(surface, Some(&view));
+            focus_selecting(surface, &view);
             return false;
         }
         frames < 30 && view.state().input.is_some()
@@ -1679,7 +1684,24 @@ fn surface_of(view: &NshView) -> Option<Rc<Surface>> {
 /// `focus()`.
 pub(crate) fn focus(view: &NshView) {
     if let Some(surface) = surface_of(view) {
-        set_focus(&surface, Some(view));
+        focus_selecting(&surface, view);
+    }
+}
+
+/// Focuses `view` without a press (`focus()`, `autoFocus`): with
+/// `selectTextOnFocus`, its whole text selected as the focus arrives. A
+/// press's own handling decides after it ([`pointer`]); Tab selects all
+/// anyway ([`tab_to`]).
+fn focus_selecting(surface: &Rc<Surface>, view: &NshView) {
+    let arrives = focused(surface).as_ref() != Some(view);
+    set_focus(surface, Some(view));
+    if arrives
+        && let Some(input) = input_of(view)
+        && input.focused.get()
+        && input.config.borrow().select_text_on_focus
+    {
+        input.send(EM_SETSEL, 0, -1);
+        process(surface, view, &input);
     }
 }
 
@@ -1764,6 +1786,7 @@ pub(crate) fn window_focus(surface: &Rc<Surface>, focused_window: bool) {
     {
         input.active.set(focused_window);
         input.dragging.set(false);
+        input.select_on_up.set(false);
         input.caret_on.set(true);
         if let Some(e) = &input.editor {
             e.set_focus(focused_window);
@@ -1788,7 +1811,19 @@ pub(crate) fn pointer(surface: &Rc<Surface>, view: &NshView, event: &ItemPointer
         return false;
     };
     if matches!(event.kind, PointerKind::Down) {
+        let arrives = focused(surface).as_ref() != Some(view);
         set_focus(surface, Some(view));
+        // The press, sent to RichEdit after the focus arrived, places the
+        // caret where it lands (or extends the selection, or starts a
+        // drag): `selectTextOnFocus` waits for its release. A Shift or
+        // double click selects for itself.
+        input.select_on_up.set(
+            arrives
+                && input.focused.get()
+                && input.config.borrow().select_text_on_focus
+                && !event.modifiers.shift
+                && event.clicks < 2,
+        );
     }
     input.follow(view);
     let content = content_rect(view, &input);
@@ -1836,6 +1871,13 @@ pub(crate) fn pointer(surface: &Rc<Surface>, view: &NshView, event: &ItemPointer
     with_modifiers(event.modifiers, || {
         input.send(msg, keys, mouse_lparam(x, y));
     });
+    if msg == WM_LBUTTONUP && input.select_on_up.take() {
+        // A drag that selected a range keeps it.
+        let (start, end) = input.selection();
+        if start == end && matches!(event.kind, PointerKind::Up) {
+            input.send(EM_SETSEL, 0, -1);
+        }
+    }
     process(surface, view, &input);
     true
 }

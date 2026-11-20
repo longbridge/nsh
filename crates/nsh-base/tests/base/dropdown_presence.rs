@@ -213,7 +213,7 @@ fn SelectScreen(props: ScreenProps) -> impl IntoElement {
 
 fn select_app(looks: bool, reduce_motion: bool) -> App {
     start(
-        Root::new::<SelectScreen>(move || ScreenProps { looks }),
+        nsh_testing::windowed_root_with::<SelectScreen>(move || ScreenProps { looks }),
         reduce_motion,
     )
 }
@@ -347,7 +347,7 @@ fn SearchScreen(_props: ScreenProps) -> impl IntoElement {
 /// field: only Pear shows.
 fn searched() -> App {
     let mut app = start(
-        Root::new::<SearchScreen>(|| ScreenProps { looks: true }),
+        nsh_testing::windowed_root_with::<SearchScreen>(|| ScreenProps { looks: true }),
         false,
     );
     app.app.press("role:combobox").unwrap();
@@ -441,7 +441,7 @@ fn ComboboxScreen(props: ScreenProps) -> impl IntoElement {
 #[test]
 fn a_combobox_list_comes_in_and_goes_with_its_looks() {
     let mut app = start(
-        Root::new::<ComboboxScreen>(|| ScreenProps { looks: true }),
+        nsh_testing::windowed_root_with::<ComboboxScreen>(|| ScreenProps { looks: true }),
         false,
     );
     app.app.press("text:Pick").unwrap();
@@ -515,7 +515,7 @@ fn DatePickerScreen(props: ScreenProps) -> impl IntoElement {
 #[test]
 fn a_date_picker_calendar_comes_in_and_goes_with_its_looks() {
     let mut app = start(
-        Root::new::<DatePickerScreen>(|| ScreenProps { looks: true }),
+        nsh_testing::windowed_root_with::<DatePickerScreen>(|| ScreenProps { looks: true }),
         false,
     );
     app.app.press("id:trigger").unwrap();
@@ -649,7 +649,7 @@ fn SelectChoice(props: ChoiceProps) -> impl IntoElement {
 #[test]
 fn a_select_choice_that_focuses_another_field_keeps_the_focus_there() {
     a_choice_gives_the_focus_back_unless_it_moved_it(
-        |p| Root::new::<SelectChoice>(move || p.clone()),
+        |p| nsh_testing::windowed_root_with::<SelectChoice>(move || p.clone()),
         "role:combobox",
         |app| {
             app.press("role:combobox").unwrap();
@@ -702,7 +702,7 @@ fn ComboboxChoice(props: ChoiceProps) -> impl IntoElement {
 fn a_combobox_choice_that_focuses_another_field_keeps_the_focus_there() {
     // The focus goes back to the combobox's input.
     a_choice_gives_the_focus_back_unless_it_moved_it(
-        |p| Root::new::<ComboboxChoice>(move || p.clone()),
+        |p| nsh_testing::windowed_root_with::<ComboboxChoice>(move || p.clone()),
         "role:combobox",
         |app| {
             app.press("text:Pick").unwrap();
@@ -762,7 +762,7 @@ fn a_date_picker_choice_that_focuses_another_field_keeps_the_focus_there() {
     // From the keyboard: Return opens the calendar with the keyboard on
     // today's day, and Return again chooses it.
     a_choice_gives_the_focus_back_unless_it_moved_it(
-        |p| Root::new::<DatePickerChoice>(move || p.clone()),
+        |p| nsh_testing::windowed_root_with::<DatePickerChoice>(move || p.clone()),
         "id:trigger",
         |app| {
             app.press_key("tab").unwrap();

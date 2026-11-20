@@ -76,7 +76,8 @@ use objc2::{
 use objc2_app_kit::{
     NSApplication, NSBorderType, NSColor, NSControl, NSControlTextEditingDelegate, NSDragOperation,
     NSDraggingInfo, NSEvent, NSEventModifierFlags, NSEventType, NSFocusRingType,
-    NSFontAttributeName, NSForegroundColorAttributeName, NSLineBreakMode, NSMutableParagraphStyle,
+    NSFontAttributeName, NSForegroundColorAttributeName, NSGestureRecognizer,
+    NSGestureRecognizerState, NSLineBreakMode, NSMutableParagraphStyle,
     NSParagraphStyleAttributeName, NSPasteboard, NSResponder, NSScrollView, NSSecureTextField,
     NSSpellChecker, NSText, NSTextAlignment, NSTextDelegate, NSTextField, NSTextFieldDelegate,
     NSTextInputClient, NSTextStorage, NSTextView, NSTextViewDelegate, NSValidatedUserInterfaceItem,
@@ -264,9 +265,10 @@ impl Editor {
         }
     }
 
-    /// Focuses it, with the caret at the end (AppKit selects a field's
-    /// whole text when it takes the focus; an app's input does not).
-    fn focus(&self) {
+    /// Focuses it, with the caret at the end unless `keep_selection` (a
+    /// pending selection or `selectTextOnFocus` decides it; AppKit selects a
+    /// field's whole text when it takes the focus, an app's input does not).
+    fn focus(&self, keep_selection: bool) {
         let responder = self.responder();
         let Some(window) = responder.window() else {
             return;
@@ -275,7 +277,8 @@ impl Editor {
             return;
         }
         window.makeFirstResponder(Some(&responder));
-        if let Editor::Line { field, .. } = self
+        if !keep_selection
+            && let Editor::Line { field, .. } = self
             && let Some(editor) = field.currentEditor()
         {
             editor.setSelectedRange(NSRange::new(editor.string().length(), 0));
@@ -330,6 +333,12 @@ pub(crate) struct InputState {
     caret: Cell<Bounds<Points>>,
     /// A selection set while the field was not edited, applied when it is.
     pending_selection: Cell<Option<(u32, u32)>>,
+    /// A pointer press (`mouseDown:`) is tracking on this input.
+    pressing: Cell<bool>,
+    /// A left mouse down gave this input the focus, and its `mouseDown:`
+    /// has not run yet: AppKit's `-[NSWindow sendEvent:]` makes a text field
+    /// first responder right before dispatching the press to it.
+    focus_click: Cell<bool>,
     /// The text the engine knows the input has: the last one reported
     /// (`onChangeText`) or set from JS. A callback that sees another text
     /// comes before the change that reports it.
@@ -616,9 +625,11 @@ impl Ctx {
         let Some((surface, view, input)) = self.get() else {
             return;
         };
+        let mut pending = None;
         if focused {
             let editor = input.style_editor();
-            if let Some((start, end)) = input.pending_selection.take() {
+            pending = input.pending_selection.take();
+            if let Some((start, end)) = pending {
                 input.editor.borrow().select(start, end);
             }
             if let Some(editor) = editor {
@@ -642,6 +653,23 @@ impl Ctx {
             }
             // The scroll views around show the field, as on phones.
             crate::scroll::reveal(&surface, &view);
+        }
+        if focused {
+            // `selectTextOnFocus`: a click selects once its `mouseDown:`
+            // tracking ends (`InputState::track_press`), which leaves a
+            // drag's or a double click's selection; any other focus selects
+            // here. A selection the app set before the focus stays.
+            let click = !input.pressing.get() && crate::view::left_pressing(view.ns().mtm());
+            input.focus_click.set(click);
+            if pending.is_none()
+                && !click
+                && !input.pressing.get()
+                && input.config.borrow().select_text_on_focus
+            {
+                input.editor.borrow().select(0, u32::MAX);
+            }
+        } else {
+            input.focus_click.set(false);
         }
         let kind = if focused {
             EventKind::Focus
@@ -757,19 +785,7 @@ impl Ctx {
             text = text.replace("\r\n", " ").replace(['\n', '\r'], " ");
         }
         let max = input.config.borrow().max_length;
-        let fit = match max {
-            Some(max) => {
-                // `maxLength` counts characters: those the edit keeps.
-                let string = text_view.string();
-                let all = string.length();
-                let start = range.location.min(all);
-                let end = range.location.saturating_add(range.length).min(all);
-                let kept = char_len(&input_text(&string, NSRange::new(0, start)))
-                    + char_len(&input_text(&string, NSRange::new(end, all - end)));
-                clip_chars(&text, (max as usize).saturating_sub(kept))
-            }
-            None => &text[..],
-        };
+        let fit = fitting_text(&text, text_view, range, max);
         if !fit.is_empty() {
             self.key_press(key_of(fit));
         }
@@ -998,6 +1014,25 @@ macro_rules! define_field {
                     }
                 }
 
+                #[unsafe(method(acceptsFirstMouse:))]
+                fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
+                    true
+                }
+
+                #[unsafe(method(mouseDown:))]
+                fn mouse_down(&self, event: &NSEvent) {
+                    let input = self.ivars().get().and_then(|cx| cx.input.upgrade());
+                    if let Some(input) = &input {
+                        input.track_press(event, || {
+                            // SAFETY: NSTextField's own mouseDown handler on the main thread.
+                            let _: () = unsafe { msg_send![super(self), mouseDown: event] };
+                        });
+                    } else {
+                        // SAFETY: NSTextField's own mouseDown handler on the main thread.
+                        let _: () = unsafe { msg_send![super(self), mouseDown: event] };
+                    }
+                }
+
                 #[unsafe(method(becomeFirstResponder))]
                 fn become_first_responder(&self) -> bool {
                     // AppKit selects the whole text as the field takes the
@@ -1155,6 +1190,13 @@ macro_rules! define_text_view {
             unsafe impl NSObjectProtocol for $name {}
 
             impl $name {
+                /// A click in an inactive window edits at once, as everywhere
+                /// in the surface (the root accepts first clicks too).
+                #[unsafe(method(acceptsFirstMouse:))]
+                fn accepts_first_mouse(&self, _event: Option<&objc2_app_kit::NSEvent>) -> bool {
+                    true
+                }
+
                 $($methods)*
 
                 /// The Edit menu's Copy (Cmd+C): the editor's own selection,
@@ -1238,13 +1280,6 @@ define_text_view!(
     unsafe impl NSObjectProtocol for TextArea {}
 
     impl TextArea {
-        /// A click in an inactive window edits at once, as everywhere in
-        /// the surface (the root accepts first clicks too).
-        #[unsafe(method(acceptsFirstMouse:))]
-        fn accepts_first_mouse(&self, _event: Option<&objc2_app_kit::NSEvent>) -> bool {
-            true
-        }
-
         #[unsafe(method(keyDown:))]
         fn key_down(&self, event: &NSEvent) {
             let input = self.ivars().get().and_then(|cx| cx.input.upgrade());
@@ -1255,6 +1290,20 @@ define_text_view!(
             let _: () = unsafe { msg_send![super(self), keyDown: event] };
             if let Some(input) = &input {
                 input.key_mods.set(NSEventModifierFlags::empty());
+            }
+        }
+
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &NSEvent) {
+            let input = self.ivars().get().and_then(|cx| cx.input.upgrade());
+            if let Some(input) = &input {
+                input.track_press(event, || {
+                    // SAFETY: NSTextView's own mouseDown handler on the main thread.
+                    let _: () = unsafe { msg_send![super(self), mouseDown: event] };
+                });
+            } else {
+                // SAFETY: NSTextView's own mouseDown handler on the main thread.
+                let _: () = unsafe { msg_send![super(self), mouseDown: event] };
             }
         }
 
@@ -1547,6 +1596,20 @@ define_text_view!(
     unsafe impl NSObjectProtocol for FieldEditor {}
 
     impl FieldEditor {
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &NSEvent) {
+            let input = field_ctx(self).and_then(|cx| cx.input.upgrade());
+            if let Some(input) = &input {
+                input.track_press(event, || {
+                    // SAFETY: NSTextView's own mouseDown handler on the main thread.
+                    let _: () = unsafe { msg_send![super(self), mouseDown: event] };
+                });
+            } else {
+                // SAFETY: NSTextView's own mouseDown handler on the main thread.
+                let _: () = unsafe { msg_send![super(self), mouseDown: event] };
+            }
+        }
+
         /// A paste (Edit > Paste, Command+V, the context menu): reported,
         /// and its text pasted as `pasteBehavior` says.
         #[unsafe(method(paste:))]
@@ -1652,7 +1715,58 @@ fn field_editor(mtm: MainThreadMarker, window: &objc2_app_kit::NSWindow) -> Reta
     })
 }
 
+define_class!(
+    /// Observes primary presses on the native editor and its padding. AppKit
+    /// still delivers the original event to the field for caret placement.
+    #[unsafe(super(NSGestureRecognizer, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "NshInputPointer"]
+    struct InputPointer;
+
+    unsafe impl NSObjectProtocol for InputPointer {}
+
+    impl InputPointer {
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &NSEvent) {
+            if event.modifierFlags().contains(NSEventModifierFlags::Control) {
+                self.setState(NSGestureRecognizerState::Failed);
+            } else {
+                self.observe(event);
+            }
+        }
+
+        #[unsafe(method(mouseDragged:))]
+        fn mouse_dragged(&self, event: &NSEvent) {
+            self.observe(event);
+        }
+
+        #[unsafe(method(mouseUp:))]
+        fn mouse_up(&self, event: &NSEvent) {
+            self.observe(event);
+            self.setState(NSGestureRecognizerState::Failed);
+        }
+    }
+);
+
+impl InputPointer {
+    fn observe(&self, event: &NSEvent) {
+        let Some(owner) = self.view().as_deref().and_then(pad_owner) else {
+            return;
+        };
+        let Some(surface) = owner.surface() else {
+            return;
+        };
+        let Some(window) = owner.ns().window() else {
+            return;
+        };
+        let root = crate::input::root_in(&surface, &window);
+        crate::input::enter(&surface, (root.id() != nsh_core::ROOT_ID).then_some(root));
+        crate::input::event(&surface, event);
+    }
+}
+
 struct PadState {
+    cx: Ctx,
     owner: objc2::rc::Weak<NSView>,
     forwarding: Cell<bool>,
 }
@@ -1691,7 +1805,11 @@ define_class!(
             // An editor that passes the press on (up the responder chain)
             // brings it back here: it ends here then.
             if !self.ivars().forwarding.replace(true) {
-                self.forward(event);
+                if let Some(input) = self.ivars().cx.input.upgrade() {
+                    input.track_press(event, || self.forward(event));
+                } else {
+                    self.forward(event);
+                }
                 self.ivars().forwarding.set(false);
             }
         }
@@ -1699,14 +1817,21 @@ define_class!(
 );
 
 impl InputPad {
-    fn create(mtm: MainThreadMarker, owner: &NshView) -> Retained<NSView> {
+    fn create(mtm: MainThreadMarker, owner: &NshView, cx: Ctx) -> Retained<NSView> {
         let this = Self::alloc(mtm).set_ivars(PadState {
+            cx,
             owner: objc2::rc::Weak::new(owner.ns()),
             forwarding: Cell::new(false),
         });
         // SAFETY: NSView's designated initializer.
         let this: Retained<Self> =
             unsafe { msg_send![super(this), initWithFrame: ns_rect(0.0, 0.0, 0.0, 0.0)] };
+        // SAFETY: the recognizer has no target or action.
+        let pointer: Retained<InputPointer> = unsafe {
+            msg_send![InputPointer::alloc(mtm), initWithTarget: Option::<&AnyObject>::None, action: Option::<Sel>::None]
+        };
+        pointer.setDelaysPrimaryMouseButtonEvents(false);
+        this.addGestureRecognizer(&pointer);
         Retained::into_super(this)
     }
 
@@ -2007,6 +2132,54 @@ impl InputState {
         unsafe { view.setSelectedTextAttributes(&attributes) };
         Some(view)
     }
+
+    /// Focuses the editor (`focus()`, `autoFocus`, a mounted focus),
+    /// keeping a selection that is pending, passed in (`keep`) or made by
+    /// `selectTextOnFocus` rather than putting the caret at the end.
+    fn focus_editor(&self, keep: bool) {
+        let keep = keep
+            || self.pending_selection.get().is_some()
+            || self.config.borrow().select_text_on_focus;
+        let editor = self.editor.borrow().clone();
+        editor.focus(keep);
+    }
+
+    /// Runs the editor's `mouseDown:` (`f`, AppKit's modal tracking of the
+    /// press) for `event`. Reports the press to the surface for `:active`
+    /// feedback around hosted editors, and applies `selectTextOnFocus` once
+    /// tracking ends: a plain click that focused the input selects its text;
+    /// a drag, a double click or a Shift-click keeps what the user selected.
+    fn track_press<R>(&self, event: &NSEvent, f: impl FnOnce() -> R) -> R {
+        if self.pressing.replace(true) {
+            // An editor passing the press on brings it back here.
+            return f();
+        }
+        let context = self.cx.get();
+        let focusing = !self.focused.get() || self.focus_click.replace(false);
+        let select_all = focusing
+            && self.config.borrow().select_text_on_focus
+            && event.clickCount() == 1
+            && !event
+                .modifierFlags()
+                .intersects(NSEventModifierFlags::Shift | NSEventModifierFlags::Control);
+        if let Some((surface, view, _)) = &context {
+            crate::input::hosted_press_began(surface, view, event);
+        }
+        let out = f();
+        self.pressing.set(false);
+        self.focus_click.set(false);
+        if let Some((surface, view, _)) = &context {
+            let up = NSApplication::sharedApplication(surface.mtm).currentEvent();
+            crate::input::hosted_press_ended(surface, view, up.as_deref());
+        }
+        if select_all {
+            let editor = self.editor.borrow().clone();
+            if editor.selection().is_some_and(|(start, end)| start == end) {
+                editor.select(0, u32::MAX);
+            }
+        }
+        out
+    }
 }
 
 /// Sets up an input view.
@@ -2032,7 +2205,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
             editor: RefCell::new(new_editor(mtm, &cx, &delegate, false, false)),
             undo_manager: RefCell::new(None),
             delegate,
-            pad: InputPad::create(mtm, view),
+            pad: InputPad::create(mtm, view, cx.clone()),
             placeholder,
             config: RefCell::new(InputConfig::default()),
             configured: Cell::new(false),
@@ -2046,6 +2219,8 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
             selection: Cell::new((0, 0)),
             caret: Cell::new(Bounds::default()),
             pending_selection: Cell::new(None),
+            pressing: Cell::new(false),
+            focus_click: Cell::new(false),
             known: RefCell::new(String::new()),
             composition: RefCell::new(None),
             pending_value: RefCell::new(None),
@@ -2273,7 +2448,7 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
         *input.config.borrow_mut() = config.clone();
         place(view, &input);
         if focused {
-            editor.focus();
+            input.focus_editor(false);
         }
     }
 
@@ -2567,7 +2742,7 @@ fn auto_focus(surface: &Rc<Surface>, input: &Rc<InputState>) {
             // Not on screen yet; an input never shown stops trying.
             return frames < 120;
         }
-        editor.focus();
+        input.focus_editor(false);
         false
     });
 }
@@ -3123,7 +3298,7 @@ fn place_pad(
     });
     let editor = input.editor.borrow().clone();
     if focused && !editor.focused() {
-        editor.focus();
+        input.focus_editor(selection.is_some());
         if let Some((start, end)) = selection {
             editor.select(start, end);
         }
@@ -3214,8 +3389,7 @@ pub(crate) fn accessibility_element(view: &NshView) -> Retained<NSView> {
 pub(crate) fn focus(view: &NshView) {
     let input = view.state().input.clone();
     if let Some(input) = input {
-        let editor = input.editor.borrow().clone();
-        editor.focus();
+        input.focus_editor(false);
     }
 }
 
@@ -3284,6 +3458,58 @@ pub(crate) fn editing_in(root: &NshView) -> bool {
     responder
         .downcast_ref::<NSTextView>()
         .is_some_and(|text| text.isDescendantOf(root))
+}
+
+/// Clips a replacement to the characters left by the selected range.
+fn fitting_text<'a>(
+    text: &'a str,
+    editor: &NSTextView,
+    range: NSRange,
+    max: Option<u32>,
+) -> &'a str {
+    let Some(max) = max else { return text };
+    let string = editor.string();
+    let all = string.length();
+    let start = range.location.min(all);
+    let end = range.location.saturating_add(range.length).min(all);
+    let kept = char_len(&input_text(&string, NSRange::new(0, start)))
+        + char_len(&input_text(&string, NSRange::new(end, all - end)));
+    clip_chars(text, (max as usize).saturating_sub(kept))
+}
+
+/// Inserts the paste an app allowed into the field editor or text area as one undoable edit.
+pub(crate) fn insert_text(view: &NshView, text: &str) {
+    let Some(input) = view.state().input.clone() else {
+        return;
+    };
+    let Some(editor) = input
+        .editor
+        .borrow()
+        .editing()
+        .and_then(|e| e.downcast::<NSTextView>().ok())
+    else {
+        return;
+    };
+    if !editor.isEditable() || editor.hasMarkedText() {
+        return;
+    }
+    let range = editor.selectedRange();
+    let (multiline, max) = {
+        let config = input.config.borrow();
+        (config.multiline, config.max_length)
+    };
+    let text = nsh_core::text_edit::pasted(text, multiline);
+    let replacement = NSString::from_str(fitting_text(&text, &editor, range, max));
+    if replacement.length() == 0 && range.length == 0 {
+        return;
+    }
+    // The edit is already clipped. Keep it out of keyboard handling and
+    // separate from typing on either side in the undo manager.
+    editor.breakUndoCoalescing();
+    input.clipping.set(true);
+    unsafe { editor.insertText_replacementRange(&replacement, range) };
+    input.clipping.set(false);
+    editor.breakUndoCoalescing();
 }
 
 /// `setSelection` (UTF-16 offsets).

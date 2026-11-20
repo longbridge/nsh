@@ -105,7 +105,7 @@ interface UpdateProgress {
 }
 ```
 
-把上一次 `checkForUpdate` 找到的更新压缩包下载到应用的数据目录，收到数据时调用 `onProgress`（服务器未给出大小时没有 `total`），然后按清单校验大小和 SHA-256。没有找到更新或 `canInstall` 为 false 时以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` reject；下载失败或校验不符时也会 reject。
+把上一次 `checkForUpdate` 找到的更新压缩包下载到应用的数据目录，收到数据时调用 `onProgress`（服务器未给出大小时没有 `total`），然后按清单校验大小和 SHA-256。下载中途中断后会按资源保留分片文件，下次调用时在服务器支持的情况下通过 HTTP `Range` 请求断点续传；服务器忽略 `Range` 或资源已变更时则从头下载。没有找到更新或 `canInstall` 为 false 时以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` reject；下载失败或校验不符时也会 reject。
 
 ```tsx
 const progress = signal(0);
@@ -162,7 +162,7 @@ interface PackageUpdate {
 function downloadPackage(onProgress?: ((progress: UpdateProgress) => void) | null): Promise<void>;
 ```
 
-下载上一次 `checkForPackage` 找到的包，按清单核对大小和 SHA-256，并按应用下次启动时的方式验证它：由某个根密钥认证的发布密钥签名、属于本应用、构建号比当前运行的以及之前运行过的都新、适用于当前运行时。之后它在应用的数据目录中等待下次启动。上次检查没有找到包时以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝；下载失败或包被拒绝时以说明原因的错误（`package refused: …`）拒绝，且不留下任何文件。
+下载上一次 `checkForPackage` 找到的包，按清单核对大小和 SHA-256，并按应用下次启动时的方式验证它：由某个根密钥认证的发布密钥签名、属于本应用、构建号比当前运行的以及之前运行过的都新、适用于当前运行时。之后它在应用的数据目录中等待下次启动。下载中途中断后会按包保留分片文件，下次调用时在服务器支持的情况下通过 HTTP `Range` 请求断点续传；服务器忽略 `Range` 或包已变更时则从头下载。上次检查没有找到包时以 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 拒绝；下载失败或包被拒绝时以说明原因的错误（`package refused: …`）拒绝，被拒绝的包不会留下任何文件。
 
 ### restartToPackage
 

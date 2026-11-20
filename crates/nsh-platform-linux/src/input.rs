@@ -1281,7 +1281,7 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
 #[cfg(feature = "dev")]
 fn focus_native(widget: &gtk::Widget) {
     if let Some(text) = text_inside(widget)
-        && text.grab_focus_without_selecting()
+        && focus_text(&text)
     {
         return;
     }
@@ -1298,11 +1298,36 @@ fn focus_native(widget: &gtk::Widget) {
     }
 }
 
-/// `widget` if it is a `GtkText`, else the first inside it.
+/// Focuses a text field. A line takes the focus itself
+/// (`grab_focus_without_selecting`); an area (`GtkTextView`) is the
+/// window's focus widget (`GtkRoot::set_focus`): `grab_focus` refuses a
+/// widget whose own or an ancestor's `can-focus` is off
+/// (`get_effective_can_focus`), which NSH turns off on the views a modal
+/// keeps the keyboard from (`ScreenNav::scope_focus`), and a press focuses
+/// the field it lands in regardless.
 #[cfg(feature = "dev")]
-fn text_inside(widget: &gtk::Widget) -> Option<gtk::Text> {
-    if let Some(text) = widget.downcast_ref::<gtk::Text>() {
-        return Some(text.clone());
+fn focus_text(widget: &gtk::Widget) -> bool {
+    if let Some(line) = widget.downcast_ref::<gtk::Text>() {
+        return line.grab_focus_without_selecting();
+    }
+    if !widget.is_sensitive() {
+        return false;
+    }
+    match widget.root() {
+        Some(root) => {
+            root.set_focus(Some(widget));
+            true
+        }
+        None => false,
+    }
+}
+
+/// The text field in `widget`: a line's `GtkText`, an area's
+/// `GtkTextView`, or the first of either inside it.
+#[cfg(feature = "dev")]
+fn text_inside(widget: &gtk::Widget) -> Option<gtk::Widget> {
+    if widget.is::<gtk::Text>() || widget.is::<gtk::TextView>() {
+        return Some(widget.clone());
     }
     let mut child = widget.first_child();
     while let Some(c) = child {
@@ -3216,5 +3241,30 @@ mod tests {
     fn wheel_notches_scale_with_the_view() {
         assert!((notch(1000.0) - 100.0).abs() < 0.01);
         assert_eq!(notch(0.0), 1.0);
+    }
+
+    /// A press focuses a multiline field: `grab_focus` refuses a widget
+    /// whose `can-focus` is off through an ancestor (as the views a modal
+    /// scopes out have), so the text view is made the window's focus
+    /// widget instead (and the keys go to it).
+    #[cfg(feature = "dev")]
+    #[test]
+    fn a_press_focuses_a_text_view_under_a_can_focus_off_view() {
+        crate::gtk_test::run(|| {
+            let host = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            // What `ScreenNav::scope_focus` does to the views outside the
+            // newest modal: `can-focus` off holds for their descendants.
+            host.set_can_focus(false);
+            let text = gtk::TextView::new();
+            host.append(&text);
+            let window = gtk::Window::new();
+            window.set_child(Some(&host));
+            window.present();
+            assert!(!text.grab_focus(), "GTK refuses it under the view");
+            focus_native(text.upcast_ref::<gtk::Widget>());
+            let focused = RootExt::focus(&window);
+            window.destroy();
+            assert_eq!(focused, Some(text.upcast::<gtk::Widget>()));
+        });
     }
 }

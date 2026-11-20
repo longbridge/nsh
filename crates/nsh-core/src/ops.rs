@@ -2510,6 +2510,9 @@ pub enum Command {
     Focus,
     /// Unfocus an input; on the root view, unfocus whatever is focused.
     Blur,
+    /// Clear the selection of a selectable view (`ViewProps::selectable_view`)
+    /// the view is, is inside or holds.
+    ClearSelection,
     /// Scroll a scroll view to an offset.
     ScrollTo {
         /// Horizontal offset.
@@ -3478,6 +3481,12 @@ pub enum Prop {
     /// `autoFocus`: focused when it appears.
     #[prop(js = "autoFocus", on = INPUT)]
     AutoFocus(bool),
+    /// `selectTextOnFocus`: the whole text is selected when the input takes
+    /// the focus (a click, Tab, `focus()`, `autoFocus`). Decided natively as
+    /// the focus arrives; a click that drags, extends (Shift) or selects
+    /// words (double click) keeps the user's selection.
+    #[prop(js = "selectTextOnFocus", on = INPUT)]
+    SelectTextOnFocus(bool),
     /// `caret`: the caret is drawn (default true; `false` hides it).
     #[prop(js = "caret", default = true, on = INPUT)]
     Caret(bool),
@@ -3659,6 +3668,10 @@ pub enum Prop {
     /// (default `popover` / `withinWindow` / `active`; `None`: none).
     #[prop(macos = "backdrop")]
     MacOsBackdrop(Option<crate::MacOsBackdrop>),
+    /// `windows={{ backdrop }}`: `{ material: "blur" }` draws the system's blur
+    /// of what is behind a transparent window under the view, on Windows 11.
+    #[prop(windows = "backdrop")]
+    WindowsBackdrop(Option<crate::WindowsBackdrop>),
     /// An accessibility property.
     #[prop(nested)]
     Accessibility(AccessibilityProp),
