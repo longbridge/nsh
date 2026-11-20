@@ -103,7 +103,8 @@ function your crate exports. `AppView::load` runs a TSX bundle in the same view 
 
 ### Android
 
-1. Add `nsh.aar` (release) and `nsh-dev.aar` (connects to `nsh dev`) from `dist/nsh/embed/android` to the app module
+1. Add `nsh.aar` (release) and `nsh-dev.aar` (connects to `nsh dev`) from `dist/nsh/embed/android` to the app module,
+   or build them from a checkout with `cargo xtask android-embed`
    ([Get the library](./android.md#get-the-library)):
 
    ```kotlin

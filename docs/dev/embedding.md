@@ -50,13 +50,15 @@
   takes no web links. The other native platforms ignore the command.
 - Android's `libnsh.so` uses 16 KB ELF LOAD alignment and a 16 KB-aligned RELRO end, set by `nsh-platform-android/build.rs` and
   the generated Android runtimes' build scripts. `cargo xtask android` checks every linked library's LOAD alignment
-  with the NDK's `llvm-objdump` before copying it into the runtime; `cargo xtask dist` uses the same checked libraries
-  for the APK runtimes and AARs. APK ZIP alignment is checked separately by `zipalign -c -P 16 -v 4 <app.apk>`.
+  with the NDK's `llvm-objdump` before copying it into the runtime; `cargo xtask dist` and `cargo xtask android-embed`
+  use the same checked libraries for the APK runtimes and AARs. `android-embed` writes only
+  `dist/nsh/embed/android/{nsh,nsh-dev}.aar` (`--no-dev` leaves out `nsh-dev.aar`; `--abi` repeats to build fewer than
+  `arm64-v8a`, `armeabi-v7a` and `x86_64`). APK ZIP alignment is checked separately by `zipalign -c -P 16 -v 4 <app.apk>`.
 - Release runtimes' `lib/<abi>/libnsh.so` is stripped with the NDK's `llvm-strip --strip-unneeded` (a quarter of each
   library, which APKs store uncompressed; the dynamic symbols JNI needs stay), and checked again; `symbols/<abi>/`
   keeps the linked library for `ndk-stack` and Play Console. The AARs carry the linked libraries: Gradle strips what
   it packages and extracts the symbols itself.
-- The AARs carry `proguard.txt` (`AAR_KEEP_RULES` in `crates/xtask/src/dist.rs`), which an app's minified build
+- The AARs carry `proguard.txt` (`AAR_KEEP_RULES` in `crates/xtask/src/android.rs`), which an app's minified build
   applies: `libnsh.so` finds `TextLayouts`, `NshView`, `Net` and `TestAgent` and their members by name over JNI
   (`JNI_OnLoad` fails without them) and binds the `native` methods of `Native`, `Net` and `SelectableView` by name,
   while Java code names few of them, so R8 removed or renamed them (`ClassNotFoundException: TextLayouts`). The rule

@@ -91,6 +91,14 @@ dist/nsh/embed/android/nsh.aar       release: bundles and signed packages
 dist/nsh/embed/android/nsh-dev.aar   also connects to a `nsh dev` server
 ```
 
+From a checkout of NSH you can build just the libraries:
+
+```sh
+cargo xtask android-embed    # writes dist/nsh/embed/android/{nsh,nsh-dev}.aar
+```
+
+`--no-dev` leaves out `nsh-dev.aar`. The default build has `arm64-v8a`, `armeabi-v7a` and `x86_64`; repeat `--abi` to build fewer.
+
 The AAR holds the Java runtime and `libnsh.so` for `arm64-v8a`, `armeabi-v7a` and `x86_64`, with their symbols: the
 app's Gradle build strips them when it packages the app and keeps the symbols for its crash reports. It declares the
 `INTERNET` permission and needs **API 26** (Android 8) or newer. It carries its R8 rules (`proguard.txt`), which a
