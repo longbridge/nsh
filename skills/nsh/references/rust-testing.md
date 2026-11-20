@@ -223,7 +223,7 @@ name. `nsh test --target` skips the Rust tests and says so, so a flow that must 
 ```sh
 nsh test --target macos      # also linux (xvfb-run -a on a machine without a display), windows, gpui
 nsh test --target ios        # an iOS simulator
-nsh test --target android    # the first device or emulator adb lists
+nsh test --target android    # --device <serial> or ANDROID_SERIAL, else the first adb lists
 nsh test --target web        # headless Chrome, Edge or Chromium
 nsh test --target tui        # an in-memory terminal, suited to CI
 nsh test form.test.tsx --target macos    # one file
