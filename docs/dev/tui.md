@@ -373,7 +373,8 @@ prefix holding only its focus ring) keeps none of its margins (`shows_nothing`).
 
 `CellTextEngine` counts Unicode display width: wide characters take two Cells and grapheme clusters stay whole.
 Ordinary text occupies one row at any font size. Inline attachments reserve their width in whole Cells
-and grow the line to hold their height; baseline, text-top, text-bottom and middle alignment use Cell font metrics.
+and grow the line to hold their height; baseline, text-top, text-bottom and middle alignment use Cell font metrics,
+an attachment's rows split at the row line nearest its baseline (a one-row view centered on the text adds no row).
 Their child views draw and receive input in the reserved space, and attachments removed by truncation stay hidden.
 Wrapping prefers spaces after content, then breaks inside a word. Leading indentation stays with the first part
 of the word instead of becoming a separate whitespace-only row. Explicit newlines

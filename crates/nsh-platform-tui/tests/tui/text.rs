@@ -276,7 +276,7 @@ fn aligned_attachments_grow_the_line_above_and_below_its_cell_baseline() {
         (VerticalAlign::Baseline, 48.0, 48.0, 32.0),
         (VerticalAlign::TextTop, 48.0, 16.0, 0.0),
         (VerticalAlign::TextBottom, 48.0, 48.0, 32.0),
-        (VerticalAlign::Middle, 64.0, 32.0, 16.0),
+        (VerticalAlign::Middle, 48.0, 32.0, 16.0),
     ] {
         let mut text = AttributedText::default();
         text.push("A", Default::default());
