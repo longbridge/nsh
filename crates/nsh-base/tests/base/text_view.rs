@@ -168,6 +168,40 @@ fn root_without_typed_parts_keeps_the_default_typography() {
     );
 }
 
+/// Text in colors the HTML gives it, and the same over the app's
+/// `textStyle` part.
+#[component]
+fn ColoredText() -> impl IntoElement {
+    let classes = TextViewClasses {
+        text_style: Some("text-[#0000ff]".into()),
+        ..Default::default()
+    };
+    view()
+        .child(text_view().html(
+            r##"<p>Plain <span style="color: #e54545">red words</span> and <font color="#00aa00">green words</font></p>"##,
+        ))
+        .child(
+            text_view()
+                .html(r##"<p>Then <span style="color: #e54545">the app's color</span></p>"##)
+                .classes(classes),
+        )
+}
+
+#[test]
+fn text_takes_the_documents_colors_under_the_apps_text_style_part() {
+    let mut app = Headless::start(EngineConfig::new(
+        nsh_testing::windowed_root::<ColoredText>(),
+    ))
+    .unwrap();
+    app.wait_for("Then the app's color").unwrap();
+    let color = |selector: &str| app.screen().span_style(selector).unwrap().color;
+    assert_eq!(color("text:red words"), Color(0xe545_45ff));
+    assert_eq!(color("text:green words"), Color(0x00aa_00ff));
+    // The text around keeps the view's color; the part's classes win.
+    assert_ne!(color("text:Plain"), Color(0xe545_45ff));
+    assert_eq!(color("text:the app's color"), Color(0x0000_ffff));
+}
+
 /// A table whose grid the app frames by `classes`: a border on every
 /// side and a background.
 #[component]

@@ -56,7 +56,7 @@ nsh package App.tsx --target ios-simulator --run
 | `build` | number | `1` | 构建号（`CFBundleVersion`、`versionCode`）。每次上传新版本都要递增。 |
 | `icon` | string \| object | 无 | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`；也可按平台分别提供（[图标](#图标)）。 |
 
-`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic` 和 `permissions`，见下文“目标 API 级别”“明文 HTTP”和“权限”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
+`nsh.json` 还包含 `rust` 和 `root`（应用的 crate 和根组件，见[用 Rust 开发](./rust.md)）、`theme` 和 `appearance`、`tailwind`（见 [Tailwind](./tailwind.md)）、`capabilities`（见[沙箱与能力](./sandbox-and-capabilities.md)）、`android`（`targetSdk`、`usesCleartextTraffic`、`permissions` 和 `dex`，见下文“目标 API 级别”“明文 HTTP”“权限”和“Java 代码”）、`ios` 和 `macos`（对应包的 `Info.plist` 键和 entitlements，见[下文](#infoplist-键与-entitlements)；`macos.activationPolicy` 用于[菜单栏应用](./macos.md#菜单栏应用)）以及让桌面包自我更新、让所有原生包接收 [OTA 更新](./ota-updates.md)的 `updater`（见[应用更新](./app-updates.md)）；[项目结构](./project-structure.md#nshjson)列出了所有键。NSH 读不懂的键或值会给出警告并被略过：为更新的 NSH 写的应用在较旧的 NSH 上照样能构建，拼写错误也会在警告里看到。
 
 上表中的每个键都可以在命令行上覆盖，这在 CI 中很方便：
 
@@ -193,6 +193,30 @@ Android 自己的权限（`android.permission.<NAME>`），带点的名字按原
 
 `ACCESS_NETWORK_STATE` 这样的普通权限在安装应用时授予。运行时权限（例如 `ACCESS_FINE_LOCATION`）只是被声明：仍需应用自己的代码向用户
 申请。TSX 开发宿主（TSX 应用的 `nsh run --target android`）不声明这些权限；Rust 应用的 `nsh run` 会构建它的包，因此会声明。
+
+### Java 代码
+
+Rust 通过 JNI 可以调用大多数 Android API，但有些 API 需要应用自己定义的类：监听器、回调、`PrintDocumentAdapter`。`android.dex`
+写在应用的 `nsh.json` 中，列出应用随包附带的 Java 代码的 dex 文件，路径相对于 `nsh.json`。包会按列出的顺序把它们放在 NSH
+运行时之后，命名为 `classes2.dex`、`classes3.dex` 等，应用的类加载器因此能找到其中的类。只有应用自己的 `nsh.json` 能列出它们：
+需要 Java 代码的扩展不能自己加入 dex，而是由使用它的应用列出它提供的文件：
+
+```json
+{
+  "android": { "dex": ["java/out/classes.dex"] }
+}
+```
+
+先针对平台的 `android.jar` 编译 Java 源码，再用 SDK 的 `d8` 把类转换成 dex：
+
+```sh
+javac -source 11 -target 11 -classpath "$ANDROID_HOME/platforms/android-35/android.jar" -d java/classes java/src/*.java
+"$ANDROID_HOME/build-tools/<version>/d8" --min-api 26 --lib "$ANDROID_HOME/platforms/android-35/android.jar" \
+  --output java/out $(find java/classes -name '*.class')
+```
+
+在 Rust 启动的线程里，JNI 的 `FindClass` 只能找到系统的类；在那里要通过 activity 的类加载器（`Context.getClassLoader()`）加载应用的类。
+TSX 开发宿主（TSX 应用的 `nsh run --target android`）不包含这些文件；Rust 应用的 `nsh run` 会构建它的包，因此会包含。
 
 ### Google Play：App Bundle
 

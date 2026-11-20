@@ -1221,6 +1221,49 @@ unsafe extern "system" fn window_proc(
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
 
+/// Whether `msg` is the user's pointer over what the window shows: the
+/// mouse's moves and leaves, in the client area and over the frame, its
+/// buttons and wheels in the client area, and touches and pens. A press on
+/// the frame is none: the window is still moved, sized and closed by hand.
+///
+/// Under `nsh test --target windows` the views hear none of them
+/// ([`handle`]): the test agent's pointer is the window's only one, as on
+/// macOS and Linux. The agent's input is made at the input module's entry
+/// points ([`crate::synth`]), not as messages, so every message here is the
+/// user's or the system's own. The system sends them with no motion at all:
+/// a `WM_MOUSEMOVE` to the window under the resting pointer when a window
+/// above it closes, a `WM_MOUSELEAVE` once another window opens over it.
+/// With several apps under test on one desktop, each would move a hover the
+/// test made to where the pointer rests, end it, or come between a press's
+/// down and up.
+fn users_pointer(msg: u32) -> bool {
+    matches!(
+        msg,
+        WM_MOUSEMOVE
+            | WM_MOUSELEAVE
+            | WM_NCMOUSEMOVE
+            | WM_NCMOUSELEAVE
+            | WM_LBUTTONDOWN
+            | WM_RBUTTONDOWN
+            | WM_MBUTTONDOWN
+            | WM_XBUTTONDOWN
+            | WM_LBUTTONDBLCLK
+            | WM_RBUTTONDBLCLK
+            | WM_MBUTTONDBLCLK
+            | WM_XBUTTONDBLCLK
+            | WM_LBUTTONUP
+            | WM_RBUTTONUP
+            | WM_MBUTTONUP
+            | WM_XBUTTONUP
+            | WM_MOUSEWHEEL
+            | WM_MOUSEHWHEEL
+            | WM_POINTERDOWN
+            | WM_POINTERUPDATE
+            | WM_POINTERUP
+            | WM_POINTERCAPTURECHANGED
+    )
+}
+
 /// Handles `msg` for `surface`; `None` for default handling.
 fn handle(
     surface: &Rc<Surface>,
@@ -1230,6 +1273,9 @@ fn handle(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> Option<LRESULT> {
+    if surface.testing() && users_pointer(msg) {
+        return None;
+    }
     // A captured key down, as the thread's hook left it: its characters
     // were never made. Report it and run the key logic as for any other
     // key down; with no characters to swallow, nothing of the queue is
@@ -2830,6 +2876,47 @@ mod tests {
             region_pointer(None, 0b1),
             (PointerKind::Leave, -1.0, -1.0, 0, 0)
         );
+    }
+
+    #[test]
+    fn the_users_pointer_is_its_moves_buttons_wheels_and_touches() {
+        // What the system sends a window under the resting pointer when the
+        // windows above it change, with no motion.
+        for msg in [WM_MOUSEMOVE, WM_MOUSELEAVE, WM_NCMOUSEMOVE, WM_NCMOUSELEAVE] {
+            assert!(users_pointer(msg), "{msg:#x}");
+        }
+        // What the user does over the content.
+        for msg in [
+            WM_LBUTTONDOWN,
+            WM_LBUTTONUP,
+            WM_LBUTTONDBLCLK,
+            WM_RBUTTONDOWN,
+            WM_RBUTTONUP,
+            WM_MBUTTONDOWN,
+            WM_XBUTTONUP,
+            WM_MOUSEWHEEL,
+            WM_MOUSEHWHEEL,
+            WM_POINTERDOWN,
+            WM_POINTERUPDATE,
+            WM_POINTERUP,
+        ] {
+            assert!(users_pointer(msg), "{msg:#x}");
+        }
+        // The frame's presses move, size and close the window; keys, the
+        // cursor's shape and a lost capture are no pointer of the user's.
+        for msg in [
+            WM_NCLBUTTONDOWN,
+            WM_NCLBUTTONUP,
+            WM_NCLBUTTONDBLCLK,
+            WM_NCHITTEST,
+            WM_SETCURSOR,
+            WM_CAPTURECHANGED,
+            WM_KEYDOWN,
+            WM_CHAR,
+            WM_TIMER,
+        ] {
+            assert!(!users_pointer(msg), "{msg:#x}");
+        }
     }
 
     #[test]

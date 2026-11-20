@@ -8,6 +8,7 @@ mod commands;
 mod composition;
 mod content_size;
 mod extensions;
+mod layout_hits;
 mod marks_clipboard_history;
 mod node_view_presses;
 mod selection;
@@ -366,15 +367,17 @@ fn a_link_marks_hint_shows_its_destination_and_leaves_editing_alone() {
     assert!(app.shows("The site"), "the title, above the URL");
     // A press on the link is the editor's: the caret goes before its
     // first character (no link plugin here opens it).
-    // Headless span bounds are the paragraph's bounds, and its approximate
-    // TextLine fills that width. Place the pointer after "go " in that line.
+    // Headless span bounds are the paragraph's bounds. Place the pointer
+    // after "go " in its line.
     let paragraph = app
         .screen()
         .layout_nodes()
         .into_iter()
         .find_map(|node| node.text.filter(|text| text.text.text == "go the site now"))
         .unwrap();
-    let advance = paragraph.content.size.width.0 / paragraph.text.text.chars().count() as f32;
+    // The editor hit tests with the text engine's layout: the headless
+    // engine's characters are each as wide.
+    let advance = char_advance(&paragraph.text);
     app.press_at(
         "text:go the site now",
         Point::new(px(3.0 * advance + 1.0), px(1.0)),
@@ -581,4 +584,29 @@ fn a_terminal_draws_no_caret_of_its_own() {
     let texts = started(Idiom::Terminal);
     assert!(texts.iter().any(|t| t == "Hi"), "{texts:?}");
     assert!(!texts.iter().any(|t| t == "H"), "a caret cell in {texts:?}");
+}
+
+/// How wide each character of `text` is to the headless text engine
+/// (`ApproxTextEngine`: all alike).
+fn char_advance(text: &nsh_core::AttributedText) -> f32 {
+    use nsh_core::TextEngine as _;
+    let engine = nsh_core::ApproxTextEngine;
+    let width = engine.measure(&engine.prepare(text), None).width;
+    width.0 / text.text.chars().count().max(1) as f32
+}
+
+/// The middle of character `i` of the paragraph showing `line`, in its
+/// text's box.
+fn char_point(app: &Headless, line: &str, i: usize) -> Point<Points> {
+    let paragraph = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find_map(|node| node.text.filter(|text| text.text.text == line))
+        .unwrap();
+    let advance = char_advance(&paragraph.text);
+    Point::new(
+        px(advance * (i as f32 + 0.5)),
+        px(paragraph.content.size.height.0 / 2.0),
+    )
 }

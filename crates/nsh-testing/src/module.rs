@@ -2029,10 +2029,12 @@ impl App {
     }
 
     /// Drags what `selector` names: a finger lands on its middle, rests for
-    /// 100 ms, moves by `by` points, 10 per display frame, and lifts. A pan moves with it
-    /// (`onPanStart`, `onPanEnd`), the views listening to touches hear them,
-    /// a scroll view scrolls (pulled past its top, it refreshes), and the
-    /// press under the finger is cancelled.
+    /// 100 ms, moves by `by` points, 10 per display frame, and lifts. On a
+    /// desktop or the web it is the mouse, its button down. A pan moves with it
+    /// (`onPanStart`, `onPanEnd`), the views listening to touches hear them
+    /// (`pointerType` `"touch"`, or `"mouse"`), a scroll view scrolls with a
+    /// finger (pulled past its top, it refreshes) but not with the mouse,
+    /// and the press under it is cancelled.
     pub async fn drag(this: Instance<Self>, selector: String, by: DragBy) -> Result<(), JsError> {
         let by = nsh_core::geometry::point(by.x, by.y);
         step(&this, move |app| app.drag(&selector, by)).await

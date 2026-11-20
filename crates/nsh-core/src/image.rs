@@ -28,6 +28,8 @@ use std::{
 use rustc_hash::FxHashMap;
 
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "animation")]
+pub mod animation;
 mod cache;
 #[cfg(not(target_arch = "wasm32"))]
 pub use cache::{CacheHeaders, DEFAULT_DISK_CACHE_SIZE, DiskCache, Fetched, Lookup, Validators};
