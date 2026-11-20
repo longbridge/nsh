@@ -84,7 +84,8 @@
   `focus`, `active` (gpui-base's order of value states); the `aria-*` variants are above them (`aria-busy`,
   `aria-checked`, `aria-expanded`, `aria-invalid`, `aria-pressed`, `aria-selected`, by name), as Tailwind's `aria-*` variants come
   after its pseudo-classes, so an open popup's trigger keeps its look while hovered or pressed. `disabled` (any element) applies `disabled:` and drops
-  the node's press listeners from what is mounted, so it shows no press feedback either. A part of a Rust component
+  the node's press listeners from what is mounted. Its own hover, active and focus variants do not match while disabled;
+  value variants such as `checked:` still match. A part of a Rust component
   shows its control's `checked`, `indeterminate` and `disabled` to its own classes and state styles
   (`Interactive::project_checked`, `project_indeterminate`, `project_disabled`, and `project_focused` for the part the keys act on; `Prop::ProjectedStates`; `project_data` its `data-*` attributes, `Prop::ProjectedData`): a switch's thumb styled `checked:translate-x-4`, with no accessibility
   state or press change on the part, so screen readers hear the control alone. A part shows its control's press

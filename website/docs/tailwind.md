@@ -133,7 +133,7 @@ view()
 </View>
 ```
 
-`disabled` on any element (`.disabled(..)` in Rust) applies `disabled:` classes (`.disabled_style(..)`) and removes its press handlers from what is mounted, so it shows no press feedback either:
+`disabled` on any element (`.disabled(..)` in Rust) applies `disabled:` classes (`.disabled_style(..)`) and removes its press handlers. While disabled, the element skips its own `hover:`, `active:`, `focus:`, `focus-visible:` and `focus-within:` classes. Value classes such as `checked:` still follow the control’s value.
 
 ```rust tabs
 view()
