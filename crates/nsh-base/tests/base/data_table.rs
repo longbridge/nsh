@@ -14,7 +14,6 @@ use nsh_base::{
 };
 use nsh_core::{
     Command, MountItem, NodeId, Size,
-    element::Root,
     platform::{Environment, Idiom, Os},
     prelude::*,
 };
@@ -24,7 +23,7 @@ use nsh_testing::Headless;
 fn start<C: Component<Props = ()>>() -> Headless {
     let config = EngineConfig {
         viewport: Size::new(px(600.0), px(300.0)),
-        ..EngineConfig::new(Root::of::<C>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<C>())
     };
     let mut app = Headless::start(config).unwrap();
     app.first_render().unwrap();
@@ -89,7 +88,7 @@ fn a_terminals_column_handles_are_no_stops_of_tab() {
             idiom: Idiom::Terminal,
             ..Environment::default()
         },
-        ..EngineConfig::new(Root::of::<Handles>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<Handles>())
     };
     let mut app = Headless::start(config).unwrap();
     // Each view's parent, test id and `focusable`.
@@ -175,7 +174,7 @@ fn a_terminals_titles_show_their_sort_in_one_glyph_and_no_lines_between() {
             cell: Some(Size::new(px(8.0), px(16.0))),
             ..Environment::default()
         },
-        ..EngineConfig::new(Root::of::<Sorted>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<Sorted>())
     };
     let mut app = Headless::start(config).unwrap();
     app.first_render().unwrap();
@@ -240,7 +239,7 @@ fn tab_out_on(idiom: Idiom) -> Headless {
             idiom,
             ..Environment::default()
         },
-        ..EngineConfig::new(Root::of::<TabOut>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<TabOut>())
     };
     let mut app = Headless::start(config).unwrap();
     app.first_render().unwrap();
@@ -298,7 +297,7 @@ fn web_desktop_wheel_offsets_are_not_amplified_by_the_table_extent() {
             window: viewport,
             ..Default::default()
         },
-        ..EngineConfig::new(Root::of::<HugeWebTable>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<HugeWebTable>())
     };
     let mut app = Headless::start(config).unwrap();
     let vertical = Arc::new(Mutex::new(None));
@@ -384,7 +383,7 @@ fn touch_reverse_scroll_after_settling_near_top_stays_one_to_one() {
             pixel_ratio: 3.0,
             ..Default::default()
         },
-        ..EngineConfig::new(Root::of::<HugeWebTable>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<HugeWebTable>())
     };
     let mut app = Headless::start(config).unwrap();
     #[derive(Default)]
@@ -458,7 +457,7 @@ fn web_scaled_scrollbar_does_not_follow_the_hit_layers_recenter() {
             window: viewport,
             ..Default::default()
         },
-        ..EngineConfig::new(Root::of::<HugeWebTable>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<HugeWebTable>())
     };
     let mut app = Headless::start(config).unwrap();
     let vertical = Arc::new(Mutex::new(Vec::new()));
@@ -604,7 +603,7 @@ fn the_horizontal_bar_spans_the_scrolling_columns_only() {
             window: viewport,
             ..Default::default()
         },
-        ..EngineConfig::new(Root::of::<WideFixed>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<WideFixed>())
     };
     let mut app = Headless::start(config).unwrap();
     app.first_render().unwrap();

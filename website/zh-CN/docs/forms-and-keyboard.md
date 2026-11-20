@@ -96,6 +96,7 @@ pub fn App() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function App() {
   const name = signal("");
@@ -112,7 +113,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 既然值由你控制，就可以变换用户输入的内容：`.on_change(move |t: &str| tag.set(t.to_uppercase()))` 转为大写，`onChange={({ value }) => code.set(value.replace(/[^0-9]/g, ""))}` 只保留数字。
@@ -188,6 +193,7 @@ let composing = false;
 | `maxLength` | `number` | | 用户最多能输入的字符数，各平台都按 Unicode 码点计数：像 😀 这样的表情或一个生僻汉字都算一个。超出的粘贴只插入放得下的部分，与浏览器一致，不会把带肤色的表情这类字符从中间截开。 |
 | `readonly` | `boolean` | `false` | 用户可以选择和复制文本，但不能修改。 |
 | `autoFocus` | `boolean` | `false` | 出现时自动获得焦点。 |
+| `selectTextOnFocus` | `boolean` | `false` | 获得焦点时选中全部文本；拖动选择、Shift 点击或双击选词时保留用户的选区。 |
 | `submitBehavior` | `"submit" \| "blurAndSubmit" \| "newline"` | 单行 `"blurAndSubmit"`，多行 `"newline"` | 回车键做什么：提交并保持焦点、提交后失去焦点，或插入换行（仅多行）。 |
 | `pasteBehavior` | `"insert" \| "report"` | `"insert"` | 粘贴做什么：插入其文本，或什么都不插入（[粘贴](#粘贴图片和文件)）。 |
 | `caret` | `boolean` | `true` | 绘制光标；`false` 隐藏光标。 |
@@ -330,6 +336,7 @@ pub fn sign_in() -> impl IntoElement {
 ```tsx tabs
 import { type InputRef, mount, signal, View } from "nsh";
 import { Input } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 function SignIn() {
   const email = signal("");
@@ -352,7 +359,11 @@ function SignIn() {
   );
 }
 
-mount(SignIn);
+mount(() => (
+  <Window id="main">
+    <SignIn />
+  </Window>
+));
 ```
 
 第一个字段上提交而不失去焦点（`SubmitBehavior::Submit`，`submitBehavior="submit"`）让键盘在焦点切换时保持弹出，不会先收起再弹起。按回车发送并保持焦点的聊天输入框也这样提交（见[下面](#滚动视图之外的内容)的输入栏）。

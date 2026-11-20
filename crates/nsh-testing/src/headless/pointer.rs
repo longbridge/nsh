@@ -37,6 +37,8 @@ enum Mode {
     Pan(NodeId),
     /// The scroll view, dragged from its offset then and the finger there.
     Scroll(NodeId, Points, Point<Points>),
+    /// The mouse selects in the selectable view.
+    Select(NodeId),
 }
 
 /// The finger, or the mouse with its button down.
@@ -132,6 +134,11 @@ impl Headless {
             ..
         } = grab;
         let press = self.screen.press_in_chain(&chain);
+        // The mouse selects in a selectable view rather than dragging it.
+        let selecting = match self.environment.desktop() {
+            true => self.selection_down(target, start, press.is_some()),
+            false => None,
+        };
         let mut finger = Finger {
             pointer,
             start,
@@ -145,7 +152,7 @@ impl Headless {
             candidates,
             gate,
             press,
-            mode: Mode::Idle,
+            mode: selecting.map_or(Mode::Idle, Mode::Select),
             moved: false,
         };
         finger.velocity.add(0.0, start);
@@ -197,6 +204,12 @@ impl Headless {
         finger.velocity.add(finger.time, at);
         let first = !std::mem::replace(&mut finger.moved, true);
         let (tx, ty) = (at.x - finger.start.x, at.y - finger.start.y);
+        // A drag that selects presses nothing, as text editors do.
+        if let Mode::Select(area) = finger.mode
+            && self.selection_drag(area, point(tx, ty), at)
+        {
+            self.cancel_press(finger);
+        }
         let activated = Gate::step(&mut finger.gate, &mut finger.candidates, tx, ty);
         // The view's JS responder takes the drag over: nothing native
         // starts meanwhile.
@@ -252,7 +265,7 @@ impl Headless {
                 };
                 self.scroll_dragged(view, from + along);
             }
-            Mode::Idle | Mode::Free => {}
+            Mode::Idle | Mode::Free | Mode::Select(_) => {}
         }
     }
 
@@ -282,7 +295,10 @@ impl Headless {
                 self.pan_end(view, &finger);
             }
             Mode::Scroll(view, ..) => self.scroll_released(view),
-            Mode::Idle | Mode::Free => {
+            Mode::Idle | Mode::Free | Mode::Select(_) => {
+                if matches!(finger.mode, Mode::Select(_)) {
+                    self.selection_up();
+                }
                 if let Some(mut press) = finger.press.take() {
                     // A quick tap inside a scroll view: the press goes in now.
                     if let Some(kind) = press.press_in() {

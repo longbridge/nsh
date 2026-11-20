@@ -91,6 +91,7 @@ pub fn Counter() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 function Counter() {
   const count = signal(0);
@@ -108,7 +109,7 @@ function Counter() {
   );
 }
 
-mount(Counter);
+mount(() => <Window id="main"><Counter /></Window>);
 ```
 
 A view (`view()`, `<View>`) becomes a `UIView` on iOS, a `ViewGroup` on Android, an `NSView` on macOS, a GTK widget on Linux, a retained view drawn with Direct2D on Windows and an HTML element on the web; a text becomes a native text view, and the button's press feedback (`.active(..)`, `activeStyle`) runs on the main thread. When you tap, `count.update` changes one signal, and only the text that reads it is updated: the component function does not run again. The Rust app is native code from start to end; in the TSX app, only the module's own code is JavaScript.

@@ -16,8 +16,8 @@ use nsh_base::{
     text_view, tree,
 };
 use nsh_core::{
-    MountItem, NodeId, Size,
-    element::Root,
+    ApproxTextEngine, AttachmentAlignments, AttributedText, MountItem, NodeId, Size, TextEngine,
+    TextLayout, TextLine,
     geometry::point,
     platform::{Environment, Idiom, Os},
     prelude::*,
@@ -35,9 +35,14 @@ fn start<C: Component<Props = ()>>(idiom: Idiom) -> Headless {
             idiom,
             ..Environment::default()
         },
-        ..EngineConfig::new(Root::of::<C>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<C>())
     };
-    let mut app = Headless::start(config).unwrap();
+    let mut app = if idiom == Idiom::Terminal {
+        Headless::start_with_text_engine(config, || TerminalText)
+    } else {
+        Headless::start(config)
+    }
+    .unwrap();
     app.first_render().unwrap();
     app
 }
@@ -397,6 +402,57 @@ fn text_origins<C: Component<Props = ()>>() -> std::collections::HashMap<String,
         .collect()
 }
 
+/// [`ApproxTextEngine`] as a terminal lays text out: a line is one row
+/// whatever the style's line height, as the TUI's cell engine draws it,
+/// so a line `1.2 ×` its font tall stays one Cell where an explicit
+/// `lineHeight` (a text view's body, code, headings) would round up to two.
+struct TerminalText;
+
+impl TextEngine for TerminalText {
+    type Prepared = <ApproxTextEngine as TextEngine>::Prepared;
+
+    fn prepare(&self, text: &AttributedText) -> Self::Prepared {
+        self.prepare_aligned(text, &AttachmentAlignments::default())
+    }
+
+    fn prepare_aligned(
+        &self,
+        text: &AttributedText,
+        alignments: &AttachmentAlignments,
+    ) -> Self::Prepared {
+        let mut text = text.clone();
+        for span in &mut text.spans {
+            span.style.line_height = Points::ZERO;
+            span.style.line_height_multiple = 0.0;
+        }
+        ApproxTextEngine.prepare_aligned(&text, alignments)
+    }
+
+    fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points> {
+        ApproxTextEngine.measure(prepared, max_width)
+    }
+
+    fn first_baseline(&self, prepared: &Self::Prepared, width: Points) -> Option<Points> {
+        ApproxTextEngine.first_baseline(prepared, width)
+    }
+
+    fn breaks_lines_greedily(&self) -> bool {
+        ApproxTextEngine.breaks_lines_greedily()
+    }
+
+    fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout {
+        ApproxTextEngine.layout(prepared, size)
+    }
+
+    fn lines(&self, layout: &TextLayout) -> Vec<TextLine> {
+        ApproxTextEngine.lines(layout)
+    }
+
+    fn attachments(&self, layout: &TextLayout) -> Vec<Option<Point<Points>>> {
+        ApproxTextEngine.attachments(layout)
+    }
+}
+
 /// Where each text is in the window in a terminal, its size with it.
 fn text_bounds<C: Component<Props = ()>>() -> std::collections::HashMap<String, Bounds<Points>> {
     let viewport = Size::new(px(390.0), px(844.0));
@@ -407,7 +463,7 @@ fn text_bounds<C: Component<Props = ()>>() -> std::collections::HashMap<String, 
             os: Os::Linux,
             idiom: Idiom::Terminal,
             // A terminal's Cells, so the core lays out on its grid as the
-            // TUI's does. The headless text engine's lines are 1.2 × the
+            // TUI's does. [`TerminalText`]'s lines are 1.2 × the
             // font size: the body's 18pt, a code block's 15.6, a level-3
             // heading's 20.4 and the canvas font's 12, which components
             // measure as a Cell, are each one row of 21pt (nearest), as a
@@ -415,9 +471,9 @@ fn text_bounds<C: Component<Props = ()>>() -> std::collections::HashMap<String, 
             cell: Some(Size::new(px(8.0), px(21.0))),
             ..Environment::default()
         },
-        ..EngineConfig::new(Root::of::<C>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<C>())
     };
-    let mut app = Headless::start(config).unwrap();
+    let mut app = Headless::start_with_text_engine(config, || TerminalText).unwrap();
     type Seen = (
         std::collections::HashMap<NodeId, String>,
         std::collections::HashMap<NodeId, Bounds<Points>>,
@@ -1195,7 +1251,7 @@ fn a_color_area_fills_its_width_and_its_rows_with_cells() {
             cell: Some(Size::new(px(8.0), px(21.0))),
             ..Environment::default()
         },
-        ..EngineConfig::new(Root::of::<WideArea>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<WideArea>())
     };
     let mut app = Headless::start(config).unwrap();
     app.first_render().unwrap();
@@ -1232,7 +1288,7 @@ fn a_checkboxs_children_keep_their_column_beside_the_mark() {
             idiom: Idiom::Terminal,
             ..Environment::default()
         },
-        ..EngineConfig::new(Root::of::<Choice>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<Choice>())
     };
     let mut app = Headless::start(config).unwrap();
     // Each text's frame, in its parent, as the batches set it.
@@ -1300,7 +1356,7 @@ fn backgrounds<C: Component<Props = ()>>(idiom: Idiom) -> Vec<nsh_core::Color> {
             idiom,
             ..Environment::default()
         },
-        ..EngineConfig::new(Root::of::<C>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<C>())
     };
     let mut app = Headless::start(config).unwrap();
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -1464,7 +1520,7 @@ fn a_terminals_diff_cuts_every_line_alike() {
             cell: Some(Size::new(px(8.0), px(16.0))),
             ..Environment::default()
         },
-        ..EngineConfig::new(Root::of::<LongDiff>())
+        ..EngineConfig::new(nsh_testing::windowed_root::<LongDiff>())
     };
     let mut app = Headless::start(config).unwrap();
     let lines = Arc::new(Mutex::new(std::collections::HashMap::new()));

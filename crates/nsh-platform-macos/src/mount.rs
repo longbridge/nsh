@@ -225,6 +225,8 @@ impl Mounter {
             view.set_stale(false);
             if self.alive(&view) {
                 view.redraw();
+                // A picture taken while drawing was deferred lacks this content.
+                crate::shader::ui_changed(&view);
                 crate::shader::shown(&view);
             }
         }
@@ -778,6 +780,8 @@ impl Mounter {
             | Command::SendInput(_)
             | Command::Load(_)
             | Command::WebViewRequest(_)
+            | Command::Evaluate { .. }
+            | Command::CancelEvaluate { .. }
             | Command::Seek(_)
             | Command::Native { .. } => {
                 if let Some(view) = view {

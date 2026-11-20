@@ -435,7 +435,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.keyboard.down(keys)` / `up(keys)` | Holds modifier keys (`"mod"`, `"shift"`, `"alt"`, `"ctrl"`, `"meta"`, joined by `+`) down until `up`: the presses, drags and hovers meanwhile carry them, as a Mod-click or a Shift-drag does. Headless and on Linux for now. |
 | `await app.dragAndHold(selector, by)` / `app.drop()` | Drags as `drag` does and keeps the finger down until `drop()`, which lifts it where it is: the steps between look at the screen mid-drag (a drag preview, a drop line). Headless and on Linux for now. |
 | `await app.dropFiles(selector, uris)` | Drops local files (`file:` URLs, as a file manager drags them) on the middle of the view: it, or the nearest view around it listening, hears `onFileDrop`. Desktops, headless, on Linux and on macOS for now. |
-| `await app.drag(selector, { x, y })` | A finger lands on the middle of the view, rests for 100 ms, moves by `x`, `y` points, 10 per frame, and lifts, as the platform's input takes it: a pan follows it (`pan={{ x, y }}`, `onPanStart`, `onPanEnd` with the release velocity), the views listening to touches hear it (`onTouchStart`, `PanResponder`), a scroll view scrolls with it and, pulled far enough past its top, refreshes (`onRefresh`), and a press under it is cancelled once it moves away. On the desktops and the web it is the mouse, headless too: the touches say `pointerType: "mouse"` and no scroll view scrolls with it, as on those platforms. |
+| `await app.drag(selector, { x, y })` | A finger lands on the middle of the view, rests for 100 ms, moves by `x`, `y` points, 10 per frame, and lifts, as the platform's input takes it: a pan follows it (`pan={{ x, y }}`, `onPanStart`, `onPanEnd` with the release velocity), the views listening to touches hear it (`onTouchStart`, `PanResponder`), a scroll view scrolls with it and, pulled far enough past its top, refreshes (`onRefresh`), and a press under it is cancelled once it moves away. On the desktops and the web it is the mouse, headless too: the touches say `pointerType: "mouse"` and no scroll view scrolls with it, as on those platforms. Started in a selectable view (`View selectable`, a `selectable` `TextView`), it selects across the view's texts, which hears `onSelectionChange` (the selected text as Copy gives it, where it starts and its box); started elsewhere, it clears the selection. |
 | `await app.wait(ms)` | Lets the app run for `ms` milliseconds: timers, animations, requests. On a manual clock, moves it by `ms` (`app.clock.runFor`). |
 | `await app.waitFor(selector, options?)` | Resolves once a view matches, or with `{ state: "gone" }` once none does; rejects after `timeout` ms (5000). On a manual clock, moves it a display frame at a time while it waits, by `timeout` at most. |
 | `await app.waitUntil(condition, options?)` | Resolves once `condition()` returns true, looking again after each change of the app: for what no selector says (`() => app.storage().note === "Milk"`). On a manual clock, moves it a display frame between two looks, by `timeout` at most. |
@@ -475,10 +475,14 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.wake()` | Wakes the system from sleep, as when the user opens a laptop's lid: `wakeCount()` counts one more and `lifecycle()` stays as it was. Headless runs only. |
 | `await app.setLocaleSettings(settings)` | Changes the locale settings `settings` names (`{ hourCycle: "h23", timeZone: "Asia/Tokyo" }`; also `languages`, `firstDayOfWeek`, `measurementSystem` and `temperatureUnit`, as `open`'s `localeSettings` takes them), as when the user changes the system's or travels; the others stay (`localeSettings()`). Headless runs only. |
 | `await app.screenshot(path?)` | A picture of the app as a `Uint8Array`: PNG of its window on graphical targets, UTF-8 Cell JSON on `tui`, also saved at `path` on this machine when given (relative to the current directory). Only a real platform draws the app: see [On a real platform](#on-a-real-platform). |
-| `app.window(id)` | A window of the app on a desktop, by the id the app gave it (`"main"`: the main window). Headless runs play a desktop's windows: one display, each window opening where it asks to be, focused unless it is a panel or asks not to be. |
+| `app.windowIds()` | The ids of the app's open windows, in opening order; empty off the desktops and while the app has none. |
+| `app.window(id)` | A window of the app on a desktop, by the id the app gave it (`"main"`: a conventional first-window id). Headless runs play a desktop's windows: one display, each window opening where it asks to be, focused unless it is a panel or asks not to be. |
+| `await app.reopen()` | Sends the app the OS reopen event, as a Dock/Finder reopen or a later launch does (`Application.on("reopen")`). Headless runs only. |
+| `await app.quitRequest()` | Asks the app to quit, as the Quit item does while it listens: `Application.on("quitRequest")` runs, and the app quits only if it calls `Application.quit()`. Headless runs only. |
+| `app.quit()` | Whether the app ended (`Application.quit()`, the Quit item, or the last-window policy). Once it has, further steps report a stopped app. |
 | `app.window(id).state()` | The window's state as the platform reports it to the app (`WindowState`: `mode`, `minimized`, `visible`, `focused`, `bounds`, `contentBounds`, `display`), `null` while it is not open. |
 | `await app.window(id).pressClose()` | Presses the window's close button as the user does: the window reports the press (`onClosePress`, reason `"closeButton"`) and closes when its `closeOnPress` lets it. |
-| `await app.window(id).screenshot(path?)` | A picture of the window's content as a `Uint8Array` (PNG), as `app.screenshot` takes of the main window, also saved at `path` when given. Only a real platform draws the app. |
+| `await app.window(id).screenshot(path?)` | A picture of the window's content as a `Uint8Array` (PNG), as `app.screenshot` takes of the app's surface, also saved at `path` when given. Only a real platform draws the app. |
 
 A step resolves once the app rendered nothing for 100 ms and no native animation runs that ends by itself (2 s at
 most, for apps that render all the time; on a manual clock, also 2 s of the app's time), so what it changed is on
@@ -800,7 +804,8 @@ event mask; unchanged frames are not sent. A frame of scrolling that reveals no 
 
 > [!NOTE]
 > Text is measured with an approximate text engine headless, so text sizes differ a little from a device, which uses
-> CoreText or Android's text layout. Layout logic, view counts and operation counts are the same.
+> CoreText or Android's text layout. Explicit `lineHeight` is respected; without it, lines are 1.2 times the
+> font size. Character widths remain approximate. Layout logic, view counts and operation counts are the same.
 
 Single-run timings depend a lot on the CPU's clock state (a machine that just woke from idle is slow). Compare runs on
 the same machine, look at the minimum of several runs, and trust the op and item counts more than the microseconds.

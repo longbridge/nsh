@@ -26,11 +26,6 @@ mod views;
 mod watch;
 mod web_evaluation;
 
-/// Why an image's size cannot be known in a terminal, which decodes no
-/// images (`Image.getSize` / `prefetch` reject with
-/// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` there, `runtime/image.rs`).
-pub(crate) const NO_IMAGES_IN_A_TERMINAL: &str = "a terminal decodes no images";
-
 /// The most network image checks [`Core`] remembers for its canvases; past
 /// it, it starts over.
 const CANVAS_IMAGES: usize = 1024;
@@ -325,6 +320,10 @@ impl Kind {
         )
     }
 }
+
+/// The prop a native component's `accentColor` style reaches it as
+/// ([`Core::sync_accent`]).
+const ACCENT_PROP: &str = "accentColor";
 
 /// A registered native component: its name and properties, as JS set them.
 #[derive(Debug, Default)]
@@ -631,6 +630,10 @@ struct Node {
     /// (`ElementRef::hover_at`): its classes and the `group-hover:`
     /// classes inside it read it with its own states.
     passed_hover: bool,
+    /// In a terminal, its fill as it rests, while an interaction state
+    /// (hover, press, focus) styles another: the terminal's layout reads
+    /// this one, so a hover's fill never moves what is around it.
+    resting_fill: Option<Color>,
     /// The `data-*` attributes it shows as a part of a component
     /// (`Prop::ProjectedData`), sorted: its `data-*:` classes read them,
     /// and the `group-data-*:` classes inside it.
@@ -974,6 +977,7 @@ impl Node {
             },
             projected: 0,
             passed_hover: false,
+            resting_fill: None,
             data: Box::default(),
             parts: None,
             positional_children: false,
@@ -1228,6 +1232,19 @@ impl ApplyError {
     }
 }
 
+/// What [`Core::retag`] knows of the mount items of a round of renders,
+/// which only grows at its end until the round is over.
+#[derive(Default)]
+struct Retags {
+    /// The views whose `Create` is among the items looked at.
+    made: rustc_hash::FxHashSet<NodeId>,
+    /// The items looked at.
+    seen: usize,
+    /// The views that took another kind, with the number of items then:
+    /// their `Create` and `Insert` before that go.
+    retagged: rustc_hash::FxHashMap<NodeId, usize>,
+}
+
 /// The shadow tree of one surface.
 ///
 /// Feed it [`Op`]s with [`Core::apply`], then call [`Core::commit`] once per
@@ -1397,6 +1414,9 @@ pub struct Core<M: TextEngine> {
     /// Batches handed out so far: tells this batch's mount indexes from
     /// earlier ones'.
     batches: u64,
+    /// Component roots taking their kind in this round of renders
+    /// ([`Core::retag`]).
+    retags: Option<Box<Retags>>,
     /// Imperative calls, run after everything else in the batch.
     commands: Vec<(NodeId, Command)>,
     /// Where the keyboard focus goes back to in this commit, and the popup
@@ -1491,6 +1511,9 @@ pub struct Core<M: TextEngine> {
     /// focus does, restyled when it starts or stops showing
     /// (`classes::styled_states`).
     projected_focus: Vec<(Key, NodeId)>,
+    /// Short completed presses whose `PRESSED` state is held until a
+    /// deadline so same-turn tap-to-click gestures still render `:active`.
+    pressed_impulses: Vec<(Key, NodeId, crate::time::Instant)>,
     /// The views a pointer passed on into an element is over
     /// (`ElementRef::hover_at`), by element, innermost first.
     passed_hovers: rustc_hash::FxHashMap<NodeId, Vec<NodeId>>,
@@ -1551,6 +1574,17 @@ pub struct Core<M: TextEngine> {
     /// The windows of the app's own, by the app's id: their root nodes,
     /// and whether their placement is kept.
     window_ids: rustc_hash::FxHashMap<String, (NodeId, bool)>,
+    /// When the app quits if its last window closes
+    /// ([`DesktopCommand::SetQuitMode`]); [`crate::desktop::QuitMode::Explicit`]
+    /// until the host sets one.
+    quit_mode: crate::desktop::QuitMode,
+    /// nsh.json's `"window"` launch defaults ([`Core::set_main_window`]):
+    /// the first app window inherits them, since the host has no visible
+    /// window of its own.
+    main_window_options: Option<crate::desktop::MainWindowOptions>,
+    /// The launch defaults were given to the first window that opened this
+    /// run: a later window after every window closed is not the first.
+    launch_defaults_applied: bool,
     /// The main window's placement is kept (nsh.json `window.restoreBounds`,
     /// [`Core::set_main_window`]).
     keep_main_placement: bool,
@@ -1640,6 +1674,11 @@ impl<M: TextEngine> Core<M> {
             window_ids: Default::default(),
             runs: Default::default(),
             folded: Default::default(),
+            // Until the host sets one: the app decides (the engine sets
+            // nsh.json's mode, `"platform"` by default, before the app runs).
+            quit_mode: crate::desktop::QuitMode::Explicit,
+            main_window_options: None,
+            launch_defaults_applied: false,
             keep_main_placement: false,
             main_shown: false,
             clipboard: None,
@@ -1705,6 +1744,7 @@ impl<M: TextEngine> Core<M> {
             key_ancestry_dirty: false,
             mount_projected: false,
             batches: 0,
+            retags: None,
             commands: Vec::new(),
             focus_back: None,
             layout_animation: None,
@@ -1734,6 +1774,7 @@ impl<M: TextEngine> Core<M> {
             focus_visible_on: None,
             focus_visible_moved: false,
             projected_focus: Vec::new(),
+            pressed_impulses: Vec::new(),
             passed_hovers: Default::default(),
             fixed_changed: Vec::new(),
             zero_advances: Default::default(),
@@ -1952,6 +1993,13 @@ impl<M: TextEngine> Core<M> {
         self.picker = backend;
     }
 
+    /// Sets when the app quits if its last window closes (the desktops'
+    /// `"platform"` mode: quit on Windows and Linux, stay on macOS).
+    /// `Application.setQuitMode` sets it at run time.
+    pub fn set_quit_mode(&mut self, mode: crate::desktop::QuitMode) {
+        self.quit_mode = mode;
+    }
+
     /// The main window's launch-time options (nsh.json `"window"`): its
     /// attributes go to the main window with the next commit, as
     /// `currentWindow().set()` sends them (capabilities apply); with
@@ -1961,6 +2009,7 @@ impl<M: TextEngine> Core<M> {
     /// Set it after the environment ([`Core::set_environment`]): a surface
     /// without a window, a phone's, takes no attributes.
     pub fn set_main_window(&mut self, options: &crate::desktop::MainWindowOptions) {
+        self.main_window_options = Some(options.clone());
         self.keep_main_placement = options.restore_bounds;
         self.main_shown |= options.visible_at_launch();
         if let Some(state) = self.components.environment.window_state {
@@ -2019,6 +2068,16 @@ impl<M: TextEngine> Core<M> {
     /// gives; `None`: it has none.
     pub fn set_data_dir(&mut self, dir: Option<std::path::PathBuf>) {
         self.components.runtime.set_data_dir(dir);
+    }
+
+    /// What Rust code checks for updates with
+    /// ([`crate::runtime::prompt_for_update`]); `None`: the app does not
+    /// update. A JS app's VM gets its own ([`crate::element::System`]).
+    pub fn set_updater(
+        &mut self,
+        updater: Option<std::sync::Arc<dyn crate::runtime::UpdaterHost>>,
+    ) {
+        self.components.runtime.set_updater(updater);
     }
 
     /// Logs (once) that the app was refused `what`.
@@ -2901,7 +2960,7 @@ impl<M: TextEngine> Core<M> {
             Op::Command {
                 id,
                 command: Command::Desktop(desktop),
-            } if desktop.is_windows() => {
+            } if desktop.is_core_handled() => {
                 self.key(id)?;
                 self.window_command(id, *desktop);
                 Ok(())
@@ -2924,6 +2983,13 @@ impl<M: TextEngine> Core<M> {
             window::{WindowRecord, placement_key},
         };
         match command {
+            // The quit mode reaches past the app's view, as quitting does:
+            // a sandboxed app without `application` keeps the platform's.
+            DesktopCommand::SetQuitMode(_) if !self.access.allows_application() => {
+                self.deny(
+                    "the application (its main window, menu, tray, global shortcuts, quitting and restarting) is not granted: add `\"application\": true` to capabilities in nsh.json".into(),
+                );
+            }
             DesktopCommand::SetAttributes(_) if !self.has_window() => {
                 log::debug!("window attributes of view {id}: the surface has no window");
             }
@@ -2951,6 +3017,9 @@ impl<M: TextEngine> Core<M> {
                     .pending
                     .merge(&attributes);
             }
+            DesktopCommand::SetQuitMode(mode) => {
+                self.quit_mode = mode;
+            }
             DesktopCommand::OpenWindow(mut open) => {
                 let options = &mut open.options;
                 // `Window.open` checked it already and threw; this guards
@@ -2960,21 +3029,64 @@ impl<M: TextEngine> Core<M> {
                     .values()
                     .filter(|(node, _)| *node != id && self.key(*node).is_ok())
                     .count();
-                if let Err(message) =
-                    self.access
-                        .check_window(options.kind, &options.attributes, open_now)
+                // The first app window of the run inherits nsh.json's
+                // `"window"` launch defaults and the host's size: the host is
+                // invisible, so those defaults describe the window the app
+                // shows first. A later window after every one closed opens
+                // as it asked, not as the launch defaults say.
+                if !self.launch_defaults_applied {
+                    if let Some(defaults) = self.main_window_options.clone() {
+                        if options.default_size.is_none() {
+                            options.default_size = defaults.default_size;
+                        }
+                        if options.default_position.is_none() {
+                            options.default_position = defaults.default_position;
+                        }
+                        if options.display.is_none() {
+                            options.display = defaults.display;
+                        }
+                        if options.default_mode.is_none() {
+                            options.default_mode = defaults.default_mode;
+                        }
+                        if !options.restore_bounds {
+                            options.restore_bounds = defaults.restore_bounds;
+                        }
+                        let mut attributes = defaults.attributes;
+                        attributes.merge(&options.attributes);
+                        options.attributes = attributes;
+                    }
+                    if let Some(state) = self.components.environment.window_state {
+                        if options.default_size.is_none() {
+                            options.default_size = Some(state.content_bounds.size);
+                        }
+                        if options.default_position.is_none() {
+                            options.default_position =
+                                Some(crate::desktop::WindowPosition::At(state.bounds.origin));
+                        }
+                    }
+                }
+                // A released app's implicit first window is the main window
+                // it always had, not one of its own: no grant to check.
+                if !open.implicit
+                    && let Err(message) =
+                        self.access
+                            .check_window(options.kind, &options.attributes, open_now)
                 {
                     self.deny(format!("nsh/desktop: {message}: the window does not open"));
                     return;
                 }
+                // A refused first window does not consume the launch
+                // defaults: the next admitted window still gets them.
+                self.launch_defaults_applied = true;
                 options.attributes.sanitize();
                 options.attributes =
                     crate::desktop::WindowAttributes::resolve(options.kind, &options.attributes);
-                open.parent = match options.parent.as_deref() {
-                    None => None,
-                    Some("main") => Some(crate::ROOT_ID),
-                    Some(parent) => self.window_ids.get(parent).map(|(node, _)| *node),
-                };
+                // `"main"` is a window id like any other: a parent is the
+                // window the registry has open under that id.
+                open.parent = options
+                    .parent
+                    .as_deref()
+                    .and_then(|parent| self.window_ids.get(parent).map(|(node, _)| *node));
                 if options.restore_bounds {
                     let _entered = self.components.runtime.enter();
                     open.placement = crate::storage::Storage::get_item(&placement_key(&options.id))
@@ -2989,6 +3101,7 @@ impl<M: TextEngine> Core<M> {
                     .insert(id, WindowRecord::opened(options.attributes.clone(), size));
                 self.window_ids
                     .insert(options.id.clone(), (id, options.restore_bounds));
+                self.key_ancestry_dirty = true;
                 self.commands.push((
                     id,
                     Command::Desktop(Box::new(DesktopCommand::OpenWindow(open))),
@@ -3015,6 +3128,7 @@ impl<M: TextEngine> Core<M> {
         if self.windows.is_empty() {
             return;
         }
+        let had_windows = !self.window_ids.is_empty();
         let gone: Vec<NodeId> = self
             .windows
             .keys()
@@ -3024,6 +3138,24 @@ impl<M: TextEngine> Core<M> {
         for id in gone {
             self.windows.remove(&id);
             self.window_ids.retain(|_, (node, _)| *node != id);
+        }
+        // The last window went: the quit mode decides whether that ends the
+        // app. The app's own close path has run by now (its root is gone),
+        // and the core's listeners had their turn (a Rust listener turning
+        // the mode to `"explicit"` keeps the app running). A JS listener
+        // runs in a later commit, after this decision: an app that keeps
+        // running with no windows sets `quitMode: "explicit"` before the
+        // last close, not from `lastWindowClosed`. A listener that opens a
+        // window again does so in the next commit, which by then is not the
+        // last window (with the mode `"explicit"`).
+        if had_windows && self.window_ids.is_empty() {
+            self.last_window_closed();
+            if self.quit_mode.quits(self.components.environment.os) {
+                self.commands.push((
+                    ROOT_ID,
+                    Command::Desktop(Box::new(crate::desktop::DesktopCommand::Quit)),
+                ));
+            }
         }
         let mut ids: Vec<NodeId> = self.windows.keys().copied().collect();
         ids.sort_unstable();
@@ -3327,6 +3459,7 @@ impl<M: TextEngine> Core<M> {
         self.sync_overlays();
         if std::mem::take(&mut self.key_ancestry_dirty) {
             self.sync_key_parents();
+            self.sync_key_contents();
         }
         // The rows holding the focus or an open overlay stay rendered,
         // before the lists update their windows.
@@ -3982,7 +4115,7 @@ impl<M: TextEngine> Core<M> {
             worded,
             clamped,
             radius,
-            fill: view.background_color,
+            fill: node.resting_fill.unwrap_or(view.background_color),
             interactive: {
                 let events = self.nodes[key as usize].events;
                 pressable(events) || HANDLED.iter().any(|&e| events.contains(e))
@@ -4077,13 +4210,13 @@ impl<M: TextEngine> Core<M> {
             return true;
         }
         let id = node.id;
-        let unsent = self
-            .mount
-            .iter()
-            .any(|m| matches!(m, MountItem::Create { id: c, .. } if *c == id));
-        if node.kind != Kind::View || !node.children.is_empty() || (node.created && !unsent) {
+        if node.kind != Kind::View || !node.children.is_empty() {
             return false;
         }
+        if node.created && !self.made_in_this_batch(id) {
+            return false;
+        }
+        let node = &self.nodes[key as usize];
         // Out of its parent, its native view never made.
         let parent = node.parent;
         let at = (parent != NO_KEY).then(|| {
@@ -4095,9 +4228,11 @@ impl<M: TextEngine> Core<M> {
         if parent != NO_KEY {
             self.unlink(key, false);
         }
-        self.mount.retain(|m| {
-            !matches!(m, MountItem::Create { id: c, .. } | MountItem::Insert { child: c, .. } if *c == id)
-        });
+        // Its `Create` and `Insert` so far go, with the other retagged
+        // views' in one pass ([`Self::drop_retagged`]).
+        let retags = self.retags.get_or_insert_default();
+        retags.made.remove(&id);
+        retags.retagged.insert(id, self.mount.len());
         // The kind's own state and layout.
         let fresh = Node::new(id, kind);
         let node = &mut self.nodes[key as usize];
@@ -4114,6 +4249,8 @@ impl<M: TextEngine> Core<M> {
         self.layout.set_node_context(layout, leaf_context(kind));
         let style = self.layout.style(layout).clone();
         self.became(key, style);
+        // A native component made in its place reads its style's accent.
+        self.sync_accent(key);
         // What a terminal's layout takes from its kind (a scroll view's
         // unbounded content), as if it had been made one.
         self.sync_grid_role(key);
@@ -4121,6 +4258,67 @@ impl<M: TextEngine> Core<M> {
             let _ = self.insert(parent, id, before);
         }
         true
+    }
+
+    /// Whether made view `id`'s `Create` is still in the mount items (it was
+    /// made in this batch). Each item is looked at once a round of renders,
+    /// not once a view.
+    fn made_in_this_batch(&mut self, id: NodeId) -> bool {
+        let retags = self.retags.get_or_insert_default();
+        let from = retags.seen;
+        retags
+            .made
+            .extend(self.mount[from..].iter().filter_map(|m| match m {
+                MountItem::Create { id, .. } => Some(*id),
+                _ => None,
+            }));
+        retags.seen = self.mount.len();
+        let made = retags.made.contains(&id);
+        self.retagging(self.mount.len() - from);
+        made
+    }
+
+    /// Drops the `Create` and `Insert` items the retagged views had before
+    /// they took their kind ([`Self::retag`]), in one pass.
+    pub(super) fn drop_retagged(&mut self) {
+        let Some(retags) = self.retags.as_deref_mut() else {
+            return;
+        };
+        if retags.retagged.is_empty() {
+            return;
+        }
+        let retagged = std::mem::take(&mut retags.retagged);
+        let (seen, made) = (retags.seen, &mut retags.made);
+        let mut at = 0;
+        self.mount.retain(|m| {
+            let i = at;
+            at += 1;
+            let (MountItem::Create { id, .. } | MountItem::Insert { child: id, .. }) = m else {
+                return true;
+            };
+            if retagged.get(id).is_some_and(|&then| i < then) {
+                return false;
+            }
+            if i >= seen && matches!(m, MountItem::Create { .. }) {
+                made.insert(*id);
+            }
+            true
+        });
+        retags.seen = self.mount.len();
+        self.retagging(at);
+    }
+
+    /// The round of renders is over: what [`Self::retag`] did goes into
+    /// the mount items, and its record of them goes (other steps insert
+    /// items among them).
+    pub(super) fn end_retags(&mut self) {
+        self.drop_retagged();
+        #[cfg(test)]
+        if self.retags.is_some() {
+            let rounds = &self.components.retag_rounds;
+            rounds.set(rounds.get() + 1);
+        }
+        self.retags = None;
     }
 
     /// Rebuilds the text an input is measured with: what it shows while an
@@ -4459,6 +4657,7 @@ impl<M: TextEngine> Core<M> {
             node.vertical_align != vertical_align && node.inline && node.kind != Kind::Text;
         // ... and so is the content's of a render placed there.
         let content_align_changed = node.vertical_align != vertical_align && !node.inline;
+        let accent_changed = node.view_style.accent_color != view.accent_color;
         node.view_style.set(view);
         node.text_style.set(text);
         node.paint = paint;
@@ -4526,6 +4725,9 @@ impl<M: TextEngine> Core<M> {
         }
         if position_changed && self.nodes[key as usize].image.is_some() {
             flags |= dirty::IMAGE;
+        }
+        if accent_changed {
+            self.sync_accent(key);
         }
         // A sticky view's animated inset is part of its range.
         self.sticky_changed |= animation_changed && self.nodes[key as usize].sticky.is_some();
@@ -5411,6 +5613,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_relation(key, relations::Relation::DescribedBy, target);
                 return Ok(());
             }
+            Prop::ScrollEdgeElement(target) => {
+                self.set_scroll_edge(key, target);
+                return Ok(());
+            }
             // A described view's own description waits for the element
             // describing it to go.
             Prop::Accessibility(AccessibilityProp::Description(description))
@@ -5819,7 +6025,13 @@ impl<M: TextEngine> Core<M> {
             Prop::SelectionColor(color) if node.input.is_none() => {
                 if node.paragraph.selection_color != color {
                     node.paragraph.selection_color = color;
-                    self.mark_text_block(key);
+                    if node.kind == Kind::Text {
+                        self.mark_text_block(key);
+                    } else {
+                        // A view's: the texts and inputs inside take it
+                        // (`inherited_text_props`).
+                        self.mark_inheriting_text(key);
+                    }
                 }
             }
             Prop::AdjustsFontSizeToFit(_) | Prop::MinimumFontScale(_) => {
@@ -6181,6 +6393,10 @@ impl<M: TextEngine> Core<M> {
                         ScreenProp::HeaderLargeTitle(v) => c.large_title = v,
                         ScreenProp::HeaderTransparent(v) => c.header_transparent = v,
                         ScreenProp::HeaderShadowVisible(v) => c.header_shadow_visible = v,
+                        ScreenProp::HeaderTitleAlign(v) => c.title_align = v,
+                        ScreenProp::HeaderBackgroundOnScroll(v) => {
+                            c.header_background_on_scroll = v
+                        }
                         ScreenProp::HidesBottomBarWhenPushed(v) => {
                             c.hides_bottom_bar_when_pushed = v
                         }
@@ -6480,6 +6696,10 @@ impl<M: TextEngine> Core<M> {
                         c.auto_focus = on;
                         false
                     }
+                    Prop::SelectTextOnFocus(on) => {
+                        c.select_text_on_focus = on;
+                        false
+                    }
                     Prop::Caret(on) => {
                         c.caret_hidden = !on;
                         false
@@ -6696,6 +6916,7 @@ impl<M: TextEngine> Core<M> {
             self.key_ancestry_dirty = true;
         }
         self.nodes[parent as usize].children.insert(pos, child);
+        self.key_content_changed(parent);
         self.rank_noted(child);
         self.tree_order_changed |= self.track_tree_order;
         self.tab_places_stale = true;
@@ -6836,6 +7057,7 @@ impl<M: TextEngine> Core<M> {
             .position(|&c| c == key)
             .expect("child of parent");
         siblings.remove(pos);
+        self.key_content_changed(parent);
         self.tree_order_changed |= self.track_tree_order;
         self.tab_places_stale = true;
         if let Some(list) = self.nodes[parent as usize].list.as_mut() {
@@ -7765,8 +7987,10 @@ impl<M: TextEngine> Core<M> {
                 self.mount.push(MountItem::Gestures { id, values });
             }
             if flags & dirty::VIEW_PROPS != 0 {
-                let props = node.mounted_props();
-                self.mount.push(MountItem::ViewProps { id, props });
+                self.mount.push(MountItem::ViewProps {
+                    id,
+                    props: node.mounted_props(),
+                });
             } else if flags & dirty::LABEL != 0 {
                 let label = node
                     .props
@@ -7974,6 +8198,38 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// A native component's `accentColor` style, passed to it as its
+    /// `accentColor` prop (`#RRGGBBAA`; removed when unset): the system
+    /// control shows its state in it, over the color its props give.
+    fn sync_accent(&mut self, key: Key) {
+        let node = &mut self.nodes[key as usize];
+        let accent = node.view_style.accent_color;
+        let Some(component) = node.component.as_mut() else {
+            return;
+        };
+        let value = accent.map(|Color(c)| crate::JsonValue::from(format!("#{c:08X}")));
+        let at = component
+            .props
+            .iter()
+            .position(|(k, _)| &**k == ACCENT_PROP);
+        if at.map(|i| &component.props[i].1) == value.as_ref() {
+            return;
+        }
+        let name: Arc<str> = Arc::from(ACCENT_PROP);
+        match (at, value) {
+            (Some(i), Some(v)) => component.props[i].1 = v,
+            (None, Some(v)) => component.props.push((name.clone(), v)),
+            (Some(i), None) => {
+                component.props.swap_remove(i);
+            }
+            (None, None) => return,
+        }
+        if !component.changed.contains(&name) {
+            component.changed.push(name);
+        }
+        self.mark(key, dirty::COMPONENT);
+    }
+
     /// Texts and spans around `key` (it is inside an attachment) pass on
     /// their color only, as `currentColor` reaches the attachment's view:
     /// the attachment takes the color of the text it sits in, while its
@@ -8014,12 +8270,17 @@ impl<M: TextEngine> Core<M> {
     /// says, set for its lines' wrapping, its selection and the
     /// selection's highlight: `whitespace-*` and `select-*` inherit, as
     /// CSS's `white-space` and `user-select: auto` do, and `selection:bg-*`
-    /// reaches the texts inside (Tailwind's `& *::selection`). One walk up.
+    /// reaches the texts inside (Tailwind's `& *::selection`), as a view's
+    /// own color does (Rust's `Element::selection_color`, over its
+    /// classes'). One walk up.
     fn inherited_text_props(&self, key: Key) -> (Option<bool>, Option<bool>, Option<Color>) {
         let (mut no_wrap, mut selectable, mut highlight) = (None, None, None);
         let mut k = key;
         while k != NO_KEY && (no_wrap.is_none() || selectable.is_none() || highlight.is_none()) {
             let node = &self.nodes[k as usize];
+            if !matches!(node.kind, Kind::Text | Kind::Input) {
+                highlight = highlight.or(node.paragraph.selection_color);
+            }
             if let Some(c) = node.class_props.as_deref() {
                 no_wrap = no_wrap.or(c.no_wrap);
                 selectable = selectable.or(c.selectable);
@@ -9591,7 +9852,7 @@ impl<M: TextEngine> Core<M> {
         if !self.layout.stale(layout)
             && !node.escapes
             && !node.is_overlay()
-            && node.beside == NO_KEY
+            && !node.decoration
             && !self.nodes.get(node.parent as usize).is_some_and(|p| p.rtl)
             && node.emitted.is_some_and(|(at, r)| {
                 let moved = |a: f32, b: f32, ratio: f32| {
@@ -9644,6 +9905,12 @@ impl<M: TextEngine> Core<M> {
         let beside = self.nodes[key as usize].beside;
         if beside != NO_KEY {
             frame.origin = self.nodes[beside as usize].frame.origin;
+        } else if self.nodes[key as usize].decoration {
+            // A scroll view's bar is laid out on its own, at no location:
+            // `origin` is where it sits in the viewport (its
+            // `scrollbar_inset`, [`Core::layout_scrollbars`]).
+            frame.origin.x.0 += span(0.0, origin.x, ratio.width);
+            frame.origin.y.0 += span(0.0, origin.y, ratio.height);
         }
         if self.nodes[key as usize].follow.is_some() {
             // Its frame along the main axis is the element's it follows,

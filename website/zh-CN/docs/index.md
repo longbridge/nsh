@@ -91,6 +91,7 @@ pub fn Counter() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 function Counter() {
   const count = signal(0);
@@ -108,7 +109,7 @@ function Counter() {
   );
 }
 
-mount(Counter);
+mount(() => <Window id="main"><Counter /></Window>);
 ```
 
 一个视图（`view()`、`<View>`）在 iOS 上成为 `UIView`，在 Android 上成为 `ViewGroup`，在 macOS 上成为 `NSView`，在 Linux 上成为 GTK 控件，在 Windows 上成为用 Direct2D 绘制的保留视图，在 Web 上成为 HTML 元素；文本成为 Native 文本视图，按钮的按压反馈（`.active(..)`、`activeStyle`）在主线程上运行。点击时，`count.update` 改变一个 signal，只有读取它的那段文本会更新：组件函数不会再次运行。Rust 应用从头到尾都是 Native 代码；在 TSX 应用里，只有模块自己的代码是 JavaScript。

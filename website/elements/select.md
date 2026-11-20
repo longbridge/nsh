@@ -94,6 +94,7 @@ fn fruit_select() -> impl IntoElement {
 ```tsx tabs
 import { mount, signal, Text, View } from "nsh";
 import { Select } from "nsh/base";
+import { Window } from "nsh/desktop";
 
 const FRUITS = [
   { value: "apple", title: "Apple" },
@@ -126,7 +127,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 `Select` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. In Rust, `select()` makes one

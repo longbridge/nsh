@@ -50,6 +50,8 @@ pub(crate) struct TargetIvars {
     /// "never", where it went down in the window and when: if it is a tap,
     /// it only dismisses the keyboard.
     tap_start: std::cell::RefCell<Option<(Retained<UITouch>, CGPoint, f64)>>,
+    /// The surface's feedback generators.
+    haptics: crate::haptics::Haptics,
 }
 
 define_class!(
@@ -146,6 +148,11 @@ define_class!(
             let v = recognizer.velocityInView(superview.as_deref());
             let id = view.tag() as NodeId;
             let state = recognizer.state();
+            // A drag that may end in a haptic (a drawer settling, a sheet
+            // snapping): ready it before the release.
+            if state == UIGestureRecognizerState::Began {
+                self.haptics().prepare();
+            }
             self.with_mounter(move |m| m.pan(id, state, t, v));
         }
 
@@ -210,6 +217,7 @@ define_class!(
     unsafe impl UITextFieldDelegate for EventTarget {
         #[unsafe(method(textFieldDidBeginEditing:))]
         fn text_field_did_begin(&self, field: &UITextField) {
+            input::began_editing(field);
             let id = field.tag() as NodeId;
             self.with_mounter(move |m| m.input_focused(id, true));
         }
@@ -270,6 +278,7 @@ define_class!(
 
         #[unsafe(method(textViewDidBeginEditing:))]
         fn text_view_did_begin(&self, view: &UITextView) {
+            input::began_editing(view);
             let id = view.tag() as NodeId;
             self.with_mounter(move |m| m.input_focused(id, true));
         }
@@ -581,6 +590,7 @@ impl EventTarget {
             scrolls,
             held: Default::default(),
             tap_start: Default::default(),
+            haptics: Default::default(),
         });
         // SAFETY: NSObject's designated initializer.
         unsafe { msg_send![super(this), init] }
@@ -613,6 +623,11 @@ impl EventTarget {
     /// shows or not (`focus-visible:`).
     pub(crate) fn input_with(&self, modality: nsh_core::platform::InputModality) {
         self.ivars().control.set_input_modality(modality);
+    }
+
+    /// The surface's feedback generators.
+    pub(crate) fn haptics(&self) -> &crate::haptics::Haptics {
+        &self.ivars().haptics
     }
 
     /// The app's keyboard shortcuts.

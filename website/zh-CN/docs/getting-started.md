@@ -70,7 +70,7 @@ TSX 应用是一个或多个带入口的 `.tsx` 文件：它是 `nsh run` 运行
 ```rust tabs
 // src/lib.rs
 use nsh_base::theme;
-use nsh_core::prelude::*;
+use nsh_core::{element::desktop::window as app_window, prelude::*};
 
 /// crate 的 UI 集合：TSX 入口可以从 `my-app/native` 导入的内容。
 #[native_module("my-app/native")]
@@ -82,6 +82,7 @@ fn native(registry: &mut Registry) {
 #[component]
 pub fn App() -> impl IntoElement {
     let count = signal(0_u32);
+    app_window().id("main").content(move || {
     view()
         .flex_1()
         .bg(move || theme().background)
@@ -113,12 +114,14 @@ pub fn App() -> impl IntoElement {
                         ),
                 ),
         )
+    })
 }
 ```
 
 ```tsx tabs
 // App.tsx
 import { mount, signal, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 function App() {
   const count = signal(0);
@@ -136,7 +139,9 @@ function App() {
   );
 }
 
-mount(App);
+// 桌面平台上，应用在它自己声明的窗口里显示；`App` 是第一个窗口的内容。
+// 非桌面平台上，它就是应用的屏幕。
+mount(() => <Window id="main">{App}</Window>);
 ```
 
 Rust 版：
@@ -164,7 +169,7 @@ TSX 版：
 - **`class`** 接受 [Tailwind](./tailwind.md) 类；`style={{ … }}` 接受由 camelCase 样式属性组成的对象，数字的单位是点。
   `bg-background`、`bg-primary`、`text-primary-foreground` 和 `rounded-(--radius)` 引用应用主题的令牌（[主题 token](./tailwind.md#主题-token)）：
   它们自动跟随深色模式，`nsh.json` 中的 `"theme"` 可以改变它们的样式。
-- **`mount(App)`** 把组件渲染到应用的界面上。
+- **`mount(App)`** 渲染应用根；在桌面平台上，根用 `<Window>` 声明自己的窗口。
 
 > [!IMPORTANT]
 > 文字显示在文本元素中：Rust 中是 `text(..)`，TSX 中是 `<Text>`。在 TSX 中，直接写在 `<View>` 里的文字（`<View>Hello</View>`）会在构建时报错并指出位置；由表达式放进去的字符串（`<View>{name}</View>`）会在日志中提示。

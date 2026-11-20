@@ -224,6 +224,9 @@ pub(crate) struct InputState {
     reported_scroll: Cell<Option<(f32, f32, f32, f32)>>,
     /// A press is selecting.
     dragging: Cell<bool>,
+    /// The press that focused the field selects all its text when it ends
+    /// (`selectTextOnFocus`), unless it made a selection itself.
+    select_on_up: Cell<bool>,
     /// The text's format (the placeholder's and the line's height), made
     /// from the config's font.
     format: RefCell<Option<IDWriteTextFormat>>,
@@ -309,6 +312,7 @@ impl InputState {
                 caret_on: Cell::new(true),
                 reported_scroll: Cell::new(None),
                 dragging: Cell::new(false),
+                select_on_up: Cell::new(false),
                 format: RefCell::new(None),
                 placeholder: RefCell::new(None),
                 drawn: RefCell::new(None),
@@ -415,6 +419,51 @@ impl InputState {
         if self.size.replace(size) != size {
             self.placeholder.borrow_mut().take();
         }
+    }
+
+    /// Several lines too narrow for a character: the rich editor's sink, a
+    /// point wide at its caret, which takes the typing and the input
+    /// methods of an editor that draws its own text. Wrapped, RichEdit
+    /// puts every character on a line of its own there, and input methods
+    /// open their candidates by what they compose, which would go down a
+    /// line with every character typed. Such a field keeps its text
+    /// unwrapped and its caret at its left edge
+    /// ([`InputState::keep_left`]).
+    fn narrow(&self) -> bool {
+        let width = self.size.get().0;
+        let config = self.config.borrow();
+        config.multiline && width > 0.0 && width < config.style.font_size.0
+    }
+
+    /// The property bits: the config's, unwrapped while the field is
+    /// narrow.
+    fn bits(&self) -> u32 {
+        let bits = base_bits(&self.config.borrow());
+        if self.narrow() {
+            bits & !TXTBIT_WORDWRAP
+        } else {
+            bits
+        }
+    }
+
+    /// A narrow field scrolls the start of what an input method composes,
+    /// else the caret, to its left edge, which is where the field is: a
+    /// composition starts there and runs on along the line, as in a field
+    /// of any width, whatever the input method places its candidates by
+    /// (the composition's start, its box or the caret). RichEdit scrolls
+    /// several lines sideways only when told to (no `ES_AUTOHSCROLL`), so
+    /// the composition stays put as it grows; it keeps the caret's line in
+    /// view itself.
+    fn keep_left(&self) {
+        if !self.narrow() {
+            return;
+        }
+        let Some(e) = &self.editor else { return };
+        let at = match self.composing.get() {
+            Some((before, _)) => before,
+            None => self.selection().1,
+        };
+        e.scroll_to_left_edge(at);
     }
 
     /// The text format of the config's font.
@@ -584,13 +633,19 @@ impl InputState {
         self.update_client();
     }
 
-    /// Tells RichEdit its client rectangle if it changed.
+    /// Tells RichEdit its client rectangle if it changed, and whether the
+    /// text wraps, which changes as the field becomes narrow or stops
+    /// being narrow.
     fn update_client(&self) {
+        let Some(e) = &self.editor else { return };
         let client = self.client();
-        if let Some(e) = &self.editor
-            && e.props().client != client
-        {
+        if e.props().client != client {
             e.update(|p| p.client = client, TXTBIT_CLIENTRECTCHANGE);
+        }
+        let bits = self.bits();
+        if e.props().bits != bits {
+            e.update(|p| p.bits = bits, 0);
+            self.keep_left();
         }
     }
 
@@ -608,7 +663,7 @@ impl InputState {
         let style = &config.style;
         let color = self.anim_color.get().unwrap_or(style.color);
         let face = family(style.font_family.map(|f| f.name()).as_deref());
-        let bits = base_bits(&config);
+        let bits = self.bits();
         let limit = self.limit();
         e.update(
             |p| {
@@ -1135,6 +1190,7 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
             }
             input.focused.set(false);
             input.dragging.set(false);
+            input.select_on_up.set(false);
             if let Some(e) = &input.editor {
                 e.set_focus(false);
             }
@@ -1388,6 +1444,7 @@ fn process(surface: &Surface, view: &NshView, input: &InputState) -> bool {
     if notes.changed || notes.composition_end {
         input.follow_limit();
     }
+    input.keep_left();
     if notes.changed || notes.selection {
         input.wake_caret();
         report_selection(surface, view, input);
@@ -1506,14 +1563,14 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
 /// insert it after configuring it).
 fn auto_focus(surface: &Rc<Surface>, view: &NshView) {
     if view.attached() {
-        return set_focus(surface, Some(view));
+        return focus_selecting(surface, view);
     }
     let view = view.clone();
     let mut frames = 0;
     surface.on_draw_frame(move |surface, _| {
         frames += 1;
         if view.attached() {
-            set_focus(surface, Some(&view));
+            focus_selecting(surface, &view);
             return false;
         }
         frames < 30 && view.state().input.is_some()
@@ -1627,7 +1684,24 @@ fn surface_of(view: &NshView) -> Option<Rc<Surface>> {
 /// `focus()`.
 pub(crate) fn focus(view: &NshView) {
     if let Some(surface) = surface_of(view) {
-        set_focus(&surface, Some(view));
+        focus_selecting(&surface, view);
+    }
+}
+
+/// Focuses `view` without a press (`focus()`, `autoFocus`): with
+/// `selectTextOnFocus`, its whole text selected as the focus arrives. A
+/// press's own handling decides after it ([`pointer`]); Tab selects all
+/// anyway ([`tab_to`]).
+fn focus_selecting(surface: &Rc<Surface>, view: &NshView) {
+    let arrives = focused(surface).as_ref() != Some(view);
+    set_focus(surface, Some(view));
+    if arrives
+        && let Some(input) = input_of(view)
+        && input.focused.get()
+        && input.config.borrow().select_text_on_focus
+    {
+        input.send(EM_SETSEL, 0, -1);
+        process(surface, view, &input);
     }
 }
 
@@ -1712,6 +1786,7 @@ pub(crate) fn window_focus(surface: &Rc<Surface>, focused_window: bool) {
     {
         input.active.set(focused_window);
         input.dragging.set(false);
+        input.select_on_up.set(false);
         input.caret_on.set(true);
         if let Some(e) = &input.editor {
             e.set_focus(focused_window);
@@ -1736,7 +1811,19 @@ pub(crate) fn pointer(surface: &Rc<Surface>, view: &NshView, event: &ItemPointer
         return false;
     };
     if matches!(event.kind, PointerKind::Down) {
+        let arrives = focused(surface).as_ref() != Some(view);
         set_focus(surface, Some(view));
+        // The press, sent to RichEdit after the focus arrived, places the
+        // caret where it lands (or extends the selection, or starts a
+        // drag): `selectTextOnFocus` waits for its release. A Shift or
+        // double click selects for itself.
+        input.select_on_up.set(
+            arrives
+                && input.focused.get()
+                && input.config.borrow().select_text_on_focus
+                && !event.modifiers.shift
+                && event.clicks < 2,
+        );
     }
     input.follow(view);
     let content = content_rect(view, &input);
@@ -1784,6 +1871,13 @@ pub(crate) fn pointer(surface: &Rc<Surface>, view: &NshView, event: &ItemPointer
     with_modifiers(event.modifiers, || {
         input.send(msg, keys, mouse_lparam(x, y));
     });
+    if msg == WM_LBUTTONUP && input.select_on_up.take() {
+        // A drag that selected a range keeps it.
+        let (start, end) = input.selection();
+        if start == end && matches!(event.kind, PointerKind::Up) {
+            input.send(EM_SETSEL, 0, -1);
+        }
+    }
     process(surface, view, &input);
     true
 }
@@ -2308,6 +2402,75 @@ mod tests {
         destroyed(&surface);
         assert!(FOCUS.with(|f| !f.borrow().contains_key(&surface.key())));
         assert!(window_active(&surface));
+    }
+
+    /// The rich editor's sink: a multiline input a point wide. However
+    /// much it holds, the caret stays at its top left, and what an input
+    /// method composes starts there and runs on along one line, where the
+    /// input method opens its candidates; a field of any other width wraps
+    /// as before.
+    #[test]
+    fn a_point_wide_input_keeps_a_composition_at_its_corner() {
+        let surface = Surface::new(Default::default());
+        let view = NshView::new(5, nsh_core::ViewKind::Input);
+        create(&surface, &view);
+        let input = input_of(&view).expect("input");
+        config(
+            &surface,
+            &view,
+            &InputConfig {
+                multiline: true,
+                ..Default::default()
+            },
+        );
+        let at = |w: f32| {
+            content(
+                &view,
+                Bounds::new(Point::default(), Size::new(Points(w), Points(16.0))),
+            );
+        };
+        at(1.0);
+        let e = input.editor.as_ref().expect("RichEdit");
+        assert_eq!(
+            e.props().bits & TXTBIT_WORDWRAP,
+            0,
+            "a point-wide input wraps"
+        );
+        let client = e.props().client;
+        let at_corner = |p: windows::Win32::Foundation::POINT| {
+            (p.x - client.left).abs() <= 1 && (p.y - client.top).abs() <= 1
+        };
+        let mut text = String::new();
+        for (count, c) in "你好世界，再见".chars().enumerate() {
+            text.push(c);
+            value(&view, &text, count as u32 + 1);
+            let caret = e.position(input.selection().1);
+            assert!(
+                at_corner(caret),
+                "after {text:?} the caret is at {caret:?}, the field at {client:?}"
+            );
+        }
+        // An input method composes at the caret (as Text Services Framework
+        // would, with no message of the field's).
+        let start = input.selection().1;
+        input.composing.set(Some((start, 0)));
+        for letter in ["n", "i", "h", "a", "o"] {
+            replace_selection(&input, letter);
+            process(&surface, &view, &input);
+            let (first, end) = (e.position(start), e.position(input.selection().1));
+            assert!(
+                at_corner(first),
+                "the composition starts at {first:?}, the field at {client:?}"
+            );
+            assert_eq!(end.y, first.y, "the composition goes on to another line");
+        }
+        input.composing.set(None);
+        at(200.0);
+        assert_ne!(
+            e.props().bits & TXTBIT_WORDWRAP,
+            0,
+            "a wide input does not wrap"
+        );
     }
 
     #[test]

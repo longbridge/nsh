@@ -3426,6 +3426,15 @@
 				}
 			]);
 		};
+		prototype.animateLayout = function(transition) {
+			const id = values.nodeIds.get(this);
+			if (id === void 0) throw new TypeError("nsh: not a node");
+			return call(314, [
+				id,
+				"layoutAnimation",
+				{ update: Object(transition) === transition ? transition : {} }
+			]);
+		};
 		prototype.scrollToOffset = function(options) {
 			return this.scrollTo({
 				x: options?.offset,
@@ -6319,42 +6328,28 @@
 			if (process.default) process.default.nextTick = nsh.nextTick;
 		}
 		const desktop = modules.exports.get("nsh/desktop");
-		const main = Object.freeze({
-			id: "main",
-			main: true,
-			parent: null,
-			state: () => null,
-			titleBar: env.titleBar,
-			set(attributes) {
-				if (typeof attributes?.title === "string") page.setWindowTitle?.(attributes.title);
-			},
-			show() {},
-			hide() {},
-			focus() {},
-			close() {},
-			minimize() {},
-			restore() {},
-			setMode() {},
-			setBounds() {},
-			setPlacement() {},
-			center() {},
-			requestAttention() {},
-			on: () => () => {}
-		});
-		const Window = Object.assign(() => null, {
+		const windowOpen = (props) => {
+			const open = props.open;
+			return open === void 0 || open === null ? props.defaultOpen !== false : Boolean(open);
+		};
+		const Window = Object.assign((props) => () => windowOpen(props) ? props.children : null, {
 			open() {
 				const error = /* @__PURE__ */ new Error("Window.open: windows of the app's own open on the desktops (`isAvailable`)");
 				error.code = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
 				throw error;
 			},
-			get: (id) => id === "main" ? main : null
+			get: () => null
 		});
 		if (desktop) Object.assign(desktop, {
 			isAvailable: false,
 			titleBar: env.titleBar,
 			Window,
-			currentWindow: () => main,
-			windows: () => [main],
+			currentWindow() {
+				const error = /* @__PURE__ */ new Error("currentWindow(): there is no window here: on iOS, Android, the web and the terminal a <Window> renders its content in the app's one surface");
+				error.code = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
+				throw error;
+			},
+			windows: () => [],
 			focusedWindow: () => null,
 			windowState: () => null,
 			displays: () => [],

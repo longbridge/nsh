@@ -36,6 +36,7 @@ fn app() -> impl IntoElement {
 
 ```tsx tabs
 import { List, mount, Text, View } from "nsh";
+import { Window } from "nsh/desktop";
 
 const contacts = Array.from({ length: 1000 }, (_, i) => ({ id: i, name: `联系人 ${i + 1}` }));
 
@@ -53,7 +54,11 @@ function App() {
   );
 }
 
-mount(App);
+mount(() => (
+  <Window id="main">
+    <App />
+  </Window>
+));
 ```
 
 在 TSX 中，`List` 是泛型组件：`List<T>` 会检查 `each` 与行函数的条目类型是否一致，TypeScript 会从 `each` 推断出条目类型（参见 [List API](../modules/nsh-list.md)）。在 Rust 中，`virtual_list` 接收行数（一个值、signal 或闭包：列表就地增减）和在某个 `Position` 构建行的函数；行通过 `at.index()` 读取组件的数据。

@@ -439,16 +439,17 @@ fn in_runner(
 /// files in `work_dir`, or the app's root.
 fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Reply {
     let built = (|| -> anyhow::Result<Reply> {
-        let (bytecode, map, capabilities, url_schemes, main_window, asset_root) = match kind {
-            Entry::TestFile => test_file_bytecode(entry)?,
-            Entry::App => {
-                let entry = crate::entry::resolve(entry)?;
-                if crate::rust_app::is_root(&entry) {
-                    return Ok(Reply::Root);
+        let (bytecode, map, capabilities, url_schemes, main_window, application, asset_root) =
+            match kind {
+                Entry::TestFile => test_file_bytecode(entry)?,
+                Entry::App => {
+                    let entry = crate::entry::resolve(entry)?;
+                    if crate::rust_app::is_root(&entry) {
+                        return Ok(Reply::Root);
+                    }
+                    bytecode_of(&entry, &crate::ui_sets(), true)?
                 }
-                bytecode_of(&entry, &crate::ui_sets(), true)?
-            }
-        };
+            };
         let dir = work_dir.join("build");
         std::fs::create_dir_all(&dir).with_context(|| format!("{}", dir.display()))?;
         let file = dir.join(format!("{n}.nshc"));
@@ -467,6 +468,7 @@ fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Rep
             capabilities,
             url_schemes,
             main_window,
+            application,
             asset_root: Some(asset_root),
         })
     })();
@@ -497,6 +499,7 @@ type Compiled = (
     Option<String>,
     Option<String>,
     Vec<String>,
+    Option<String>,
     Option<String>,
     PathBuf,
 );
@@ -533,6 +536,7 @@ fn bytecode_of(entry: &Path, sets: &[SetDescription], announce: bool) -> anyhow:
         capabilities,
         bundle.url_schemes,
         bundle.main_window,
+        bundle.application,
         bundle.asset_root,
     ))
 }
@@ -811,39 +815,41 @@ fn steps_file(work_dir: &Path, entry: &Path) -> anyhow::Result<PathBuf> {
 fn compiler() -> nsh_testing::Compile {
     let built: Mutex<HashMap<PathBuf, Compiled>> = Mutex::new(HashMap::new());
     Arc::new(move |entry: &Path, kind: Entry| {
-        let (bytecode, map, capabilities, url_schemes, main_window, asset_root) = match kind {
-            Entry::App => {
-                let entry =
-                    crate::entry::resolve(entry).map_err(|e| crate::ui::with_details(&e))?;
-                let cached = built
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .get(&entry)
-                    .cloned();
-                match cached {
-                    Some(built) => built,
-                    None => {
-                        let out = bytecode_of(&entry, &crate::ui_sets(), true)
-                            .map_err(|e| crate::ui::with_details(&e))?;
-                        built
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .insert(entry, out.clone());
-                        out
+        let (bytecode, map, capabilities, url_schemes, main_window, application, asset_root) =
+            match kind {
+                Entry::App => {
+                    let entry =
+                        crate::entry::resolve(entry).map_err(|e| crate::ui::with_details(&e))?;
+                    let cached = built
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .get(&entry)
+                        .cloned();
+                    match cached {
+                        Some(built) => built,
+                        None => {
+                            let out = bytecode_of(&entry, &crate::ui_sets(), true)
+                                .map_err(|e| crate::ui::with_details(&e))?;
+                            built
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .insert(entry, out.clone());
+                            out
+                        }
                     }
                 }
-            }
-            Entry::TestFile => {
-                test_file_bytecode(entry).map_err(|e| crate::ui::with_details(&e))?
-            }
-        };
+                Entry::TestFile => {
+                    test_file_bytecode(entry).map_err(|e| crate::ui::with_details(&e))?
+                }
+            };
         // SAFETY: compiled just now by this runtime.
         let bundle = unsafe { Bundle::bytecode(bytecode) }
             .with_capabilities_json(capabilities.as_deref())?
             // The schemes it claims and its main window's launch options,
             // as a packaged app's runner reads them.
             .with_url_schemes(url_schemes)
-            .with_main_window(main_window.as_deref());
+            .with_main_window(main_window.as_deref())
+            .with_application(application.as_deref());
         Ok(Built::Js {
             bundle: Box::new(bundle),
             source_map: map,

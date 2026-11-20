@@ -89,6 +89,14 @@ pub(crate) trait Driver: Send {
     fn wake(&mut self) -> Result<(), String> {
         Err(headless_only("wake"))
     }
+    /// The OS asks the app to show itself (`Application.on("reopen")`).
+    fn reopen(&mut self) -> Result<(), String> {
+        Err(headless_only("reopen"))
+    }
+    /// The user asks to quit (`Application.on("quitRequest")`).
+    fn quit_request(&mut self) -> Result<(), String> {
+        Err(headless_only("quitRequest"))
+    }
     /// The user's locale settings that `settings` names, as the system
     /// reports them (`localeSettings()`).
     fn set_locale_settings(&mut self, settings: LocaleSettingsOptions) -> Result<(), String> {
@@ -190,6 +198,13 @@ pub(crate) trait Driver: Send {
     /// engine's `App` reads its storage itself).
     fn storage(&mut self) -> Result<std::collections::BTreeMap<String, String>, String> {
         Err(headless_only("reading the storage this way"))
+    }
+    /// The ids of the app's open windows, in opening order.
+    fn window_ids(&mut self) -> Result<Vec<String>, String>;
+    /// Whether the app quit (`Application.quit()`, its Quit item, or the
+    /// core quitting on its last window's close).
+    fn quit(&mut self) -> Result<bool, String> {
+        Err(headless_only("reading whether the app quit"))
     }
     /// The state of the app's window `id` as the platform reports it;
     /// `None` while it is not open.
@@ -296,6 +311,12 @@ impl Driver for Headless {
     }
     fn wake(&mut self) -> Result<(), String> {
         self.set_environment("wake()", |e| e.wake_count = e.wake_count.wrapping_add(1))
+    }
+    fn reopen(&mut self) -> Result<(), String> {
+        Headless::reopen(self)
+    }
+    fn quit_request(&mut self) -> Result<(), String> {
+        Headless::quit_request(self)
     }
     fn set_locale_settings(&mut self, settings: LocaleSettingsOptions) -> Result<(), String> {
         let pins = settings.pins("setLocaleSettings")?;
@@ -421,6 +442,12 @@ impl Driver for Headless {
             "a screenshot needs a real platform, which draws the app: run the test with `--target`"
                 .into(),
         )
+    }
+    fn window_ids(&mut self) -> Result<Vec<String>, String> {
+        Headless::window_ids(self)
+    }
+    fn quit(&mut self) -> Result<bool, String> {
+        Ok(Headless::quit(self))
     }
     fn window_state(&mut self, id: &str) -> Result<Option<nsh_core::desktop::WindowState>, String> {
         Headless::window_state(self, id)
@@ -849,6 +876,10 @@ impl Driver for Remote {
         self.query(TestStep::Scene {
             query: nsh_dev::protocol::SceneQuery::Storage,
         })
+    }
+    fn window_ids(&mut self) -> Result<Vec<String>, String> {
+        let value = self.query(TestStep::WindowIds)?;
+        serde_json::from_value(value).map_err(|e| format!("the host sent broken window ids: {e}"))
     }
     fn window_state(&mut self, id: &str) -> Result<Option<nsh_core::desktop::WindowState>, String> {
         let value = self.take(TestStep::WindowState { id: id.into() })?;
