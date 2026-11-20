@@ -1686,7 +1686,7 @@ mod tests {
         std::fs::File::options()
             .write(true)
             .create_new(true)
-            .mode(0)
+            .mode(0o000)
             .open(&denied)
             .unwrap();
         let denied_url = NSURL::fileURLWithPath(&NSString::from_str(denied.to_str().unwrap()))
