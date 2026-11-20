@@ -348,9 +348,9 @@ fn unavailable() -> JsError {
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "updater"))]
 mod native {
-    use nsh_updater::{Available, Config, Download};
-
     use std::collections::BTreeMap;
+
+    use nsh_updater::{Available, Config, Download};
 
     use super::*;
 
