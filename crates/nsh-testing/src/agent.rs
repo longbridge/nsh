@@ -1289,6 +1289,16 @@ pub trait Native: Send + Sync {
     fn type_text(&self, text: &str);
     /// Presses `key`.
     fn key(&self, key: Key);
+    /// Types a line for a test step, reporting a failed edit before the next key.
+    fn try_type_text(&self, text: &str) -> Result<(), String> {
+        self.type_text(text);
+        Ok(())
+    }
+    /// Presses a key for a test step, reporting a failed edit.
+    fn try_key(&self, key: Key) -> Result<(), String> {
+        self.key(key);
+        Ok(())
+    }
     /// The text of input `id` as the platform holds it.
     fn input_text(&self, id: NodeId) -> Option<String>;
     /// Goes back as the user does (a back gesture, the back button,
@@ -2260,10 +2270,10 @@ impl Agent {
         // A line break is the return key, as the headless driver types it.
         for (i, line) in text.split('\n').enumerate() {
             if i > 0 {
-                self.native.key(Key::Return);
+                self.native.try_key(Key::Return)?;
             }
             if !line.is_empty() {
-                self.native.type_text(line);
+                self.native.try_type_text(line)?;
             }
         }
         self.settled()
@@ -2271,14 +2281,14 @@ impl Agent {
 
     fn submit(&self, selector: &str) -> Result<(), String> {
         self.focus(selector)?;
-        self.native.key(Key::Return);
+        self.native.try_key(Key::Return)?;
         self.settled()
     }
 
     fn clear(&self, selector: &str) -> Result<(), String> {
         self.focus(selector)?;
-        self.native.key(Key::SelectAll);
-        self.native.key(Key::Backspace);
+        self.native.try_key(Key::SelectAll)?;
+        self.native.try_key(Key::Backspace)?;
         self.settled()
     }
 
@@ -3483,7 +3493,8 @@ mod tests {
 
     #[test]
     fn consecutive_steps_on_a_still_app_skip_redundant_settle() {
-        let (engine, batches) = crate::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
+        let (engine, batches) =
+            crate::start(EngineConfig::new(crate::windowed_root::<Tally>())).unwrap();
         let model = Arc::new(Model::default());
         let feeding = model.clone();
         std::thread::spawn(move || {

@@ -11308,11 +11308,12 @@ fn measure_content<M: TextEngine>(
             let field = cx
                 .field
                 .as_deref_mut()
-                .map(|field| measure_text(engine, cache, field, None).width.0);
+                .map(|field| measure_text(engine, cache, field, None));
+            let field_width = field.map(|size| size.width.0);
             let max_width = if cx.text.no_wrap {
                 None
             } else {
-                known.width.or(match (available.width, field) {
+                known.width.or(match (available.width, field_width) {
                     (AvailableSpace::Definite(w), Some(field)) => Some(field.min(w)),
                     (AvailableSpace::Definite(w), None) => Some(w),
                     (_, Some(field)) => Some(field),
@@ -11322,12 +11323,22 @@ fn measure_content<M: TextEngine>(
                     (AvailableSpace::MaxContent, None) => None,
                 })
             };
-            let measured = measure_text(engine, cache, cx, max_width);
+            let width = known.width.or(field_width.and(max_width));
+            // A single-line input uses the field sample's width. When its font
+            // determines the line height too, shaping the edited value would
+            // change neither dimension.
+            let measured = match field {
+                Some(sample)
+                    if width.is_some()
+                        && cx.text.max_lines == 1
+                        && engine.uniform_input_line_height() =>
+                {
+                    sample
+                }
+                _ => measure_text(engine, cache, cx, max_width),
+            };
             taffy::Size {
-                width: known
-                    .width
-                    .or(field.and(max_width))
-                    .unwrap_or(measured.width.0),
+                width: width.unwrap_or(measured.width.0),
                 height: known.height.unwrap_or(match input_max_height {
                     Some(max) => measured.height.0.min(max),
                     None => measured.height.0,
