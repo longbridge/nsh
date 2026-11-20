@@ -1277,6 +1277,8 @@ pub struct Core<M: TextEngine> {
     nodes: Slab<Node>,
     /// Node id -> key + 1 (0 = none). Ids are dense, so this is a flat vec.
     slots: crate::id_table::IdTable<Key>,
+    /// The extent reached by admitted ids. JS keeps issuing new ids after a page is freed.
+    admitted_id_extent: usize,
     /// Raw text runs kept without a node (#1345): a run not in the tree,
     /// or the only child of a text block or span, which shows it. Any
     /// other use makes its node ([`Core::materialize_run`]).
@@ -1285,6 +1287,12 @@ pub struct Core<M: TextEngine> {
     folded: rustc_hash::FxHashMap<Key, NodeId>,
     layout: LayoutTree<LeafContext<M::Prepared>>,
     text_engine: Rc<M>,
+    /// The engine for [`crate::text::TextGeometry`] (`None` for an engine
+    /// that is not `'static`).
+    geometry_engine: Option<Rc<dyn crate::text::GeometryEngine>>,
+    /// Final layouts kept for Rust components' `on_text_layout` until
+    /// their `TextLayout` events are dispatched ([`keep_geometry`]).
+    geometries: rustc_hash::FxHashMap<NodeId, crate::text::TextGeometry>,
     measure_cache: MeasureCache,
     /// Counts the commits of resizes ([`Core::mark_near_screen`]).
     resizing_commit: u32,
@@ -1645,7 +1653,8 @@ pub struct Core<M: TextEngine> {
 impl<M: TextEngine + 'static> Core<M> {
     /// Creates a core whose root view (id [`ROOT_ID`]) fills `viewport`.
     pub fn new(text_engine: M, viewport: Size<Points>) -> Self {
-        let core = Self::with_engine(text_engine, viewport);
+        let mut core = Self::with_engine(text_engine, viewport);
+        core.geometry_engine = Some(core.text_engine.clone());
         // Components that run once measure text with it.
         let engine = core.text_engine.clone();
         core.components
@@ -1680,9 +1689,12 @@ impl<M: TextEngine> Core<M> {
         slots.insert(ROOT_ID as usize, root);
         Self {
             nodes,
+            admitted_id_extent: slots.extent(),
             slots,
             layout,
             text_engine: Rc::new(text_engine),
+            geometry_engine: None,
+            geometries: Default::default(),
             measure_cache: MeasureCache::default(),
             resizing_commit: 0,
             resize_settling: false,
@@ -2732,9 +2744,7 @@ impl<M: TextEngine> Core<M> {
                 if self.slots.contains(idx) || self.runs.contains_key(&id) {
                     return Err(ApplyError::DuplicateNode(id));
                 }
-                if idx > self.slots.extent().saturating_add(self.max_nodes) {
-                    return Err(ApplyError::IdOutOfRange(id));
-                }
+                self.check_id_range(id)?;
                 if self.fold_runs {
                     self.runs.insert(
                         id,
@@ -2743,6 +2753,7 @@ impl<M: TextEngine> Core<M> {
                             block: NO_KEY,
                         },
                     );
+                    self.admitted_id_extent = self.admitted_id_extent.max(idx.saturating_add(1));
                     return Ok(());
                 }
                 let key = self.alloc(id, Kind::RawText)?;
@@ -3334,6 +3345,9 @@ impl<M: TextEngine> Core<M> {
     /// Finishes a turn: rebuilds text, runs layout, updates lists and
     /// returns the mount items, or `None` when nothing changed.
     pub fn commit(&mut self) -> Option<MountBatch> {
+        // The last round's events were dispatched: a geometry no one took
+        // is stale (its node went).
+        self.geometries.clear();
         // The downloads' file work and deadlines: their events and
         // commands go out with this commit.
         self.poll_downloads();
@@ -3904,19 +3918,29 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    fn check_id_range(&self, id: NodeId) -> Result<(), ApplyError> {
+        if id as usize > self.admitted_id_extent.saturating_add(self.max_nodes) {
+            return Err(ApplyError::IdOutOfRange(id));
+        }
+        Ok(())
+    }
+
+    fn insert_key(&mut self, idx: usize, key: Key) {
+        self.slots.insert(idx, key);
+        self.admitted_id_extent = self.admitted_id_extent.max(self.slots.extent());
+    }
+
     fn alloc(&mut self, id: NodeId, kind: Kind) -> Result<Key, ApplyError> {
         let idx = id as usize;
         if self.nodes.len() >= self.max_nodes {
             return Err(ApplyError::TooManyNodes(self.max_nodes));
         }
-        if idx > self.slots.extent().saturating_add(self.max_nodes) {
-            return Err(ApplyError::IdOutOfRange(id));
-        }
+        self.check_id_range(id)?;
         if self.slots.contains(idx) {
             return Err(ApplyError::DuplicateNode(id));
         }
         let key = self.nodes.insert(Node::new(id, kind)) as Key;
-        self.slots.insert(idx, key);
+        self.insert_key(idx, key);
         Ok(key)
     }
 
@@ -3927,13 +3951,11 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn alias(&mut self, alias: NodeId, id: NodeId) -> Result<(), ApplyError> {
         let key = self.key(id)?;
         let idx = alias as usize;
-        if idx > self.slots.extent().saturating_add(self.max_nodes) {
-            return Err(ApplyError::IdOutOfRange(alias));
-        }
+        self.check_id_range(alias)?;
         if self.slots.contains(idx) {
             return Err(ApplyError::DuplicateNode(alias));
         }
-        self.slots.insert(idx, key);
+        self.insert_key(idx, key);
         Ok(())
     }
 
@@ -6949,12 +6971,11 @@ impl<M: TextEngine> Core<M> {
         // are its own layout's).
         let inline = p.kind == Kind::Text && !self.nodes[child as usize].fixed_view;
         let pos = match before {
-            Some(b) => p
-                .children
-                .iter()
-                .inspect(|_| self.placing(1))
-                .position(|&c| c == b)
-                .expect("anchor is a child"),
+            Some(b) => {
+                let (pos, looked) = position_from_ends(&p.children, &b).expect("anchor is a child");
+                self.placing(looked);
+                pos
+            }
             None => p.children.len(),
         };
         self.set_inline(child, inline);
@@ -7039,7 +7060,7 @@ impl<M: TextEngine> Core<M> {
             if self.nodes[parent as usize].list.is_none()
                 && !self.nodes[child as usize].is_layout_root()
             {
-                let index = self.render_index_at(parent, pos);
+                let index = self.layout_index_at(parent, pos);
                 let parent_layout = self.nodes[parent as usize]
                     .layout
                     .expect("block parent has layout");
@@ -7564,23 +7585,55 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// Index among rendering (layout-backed) children of `parent` for a
-    /// child at `pos` in the full children list.
-    /// [`Self::render_index`], at once for the last child: after all the
-    /// rendering children its parent's layout node has.
-    fn render_index_at(&self, parent: Key, pos: usize) -> u32 {
+    /// Where the child at `pos` among `parent`'s children goes among the
+    /// children of `parent`'s layout node: before the layout node of the
+    /// next sibling that has one (the layout node's children are those
+    /// siblings', in order), or after them all. Looks at the siblings next
+    /// to it and at the layout children near `pos`, not at every sibling
+    /// before it: views inserted before the one after a list's rows, or
+    /// before the first of a chat's messages, look at a few of them each.
+    fn layout_index_at(&self, parent: Key, pos: usize) -> u32 {
         let node = &self.nodes[parent as usize];
-        if pos + 1 == node.children.len()
-            && let Some(layout) = node.layout
-        {
-            let index = self.layout.children_len(layout) as u32;
-            debug_assert_eq!(index, self.render_index(parent, pos));
-            return index;
-        }
-        self.render_index(parent, pos)
+        let layout = node.layout.expect("block parent has layout");
+        let next = node.children[pos + 1..]
+            .iter()
+            .inspect(|_| self.placing(1))
+            .find_map(|&c| {
+                let c = &self.nodes[c as usize];
+                c.layout.filter(|_| !c.is_layout_root())
+            });
+        let index = match next {
+            // As many layout children are before it as siblings with one
+            // are: at most `pos`, fewer by those without one.
+            Some(next) => match position_near(self.layout.children(layout), &next, pos) {
+                Some((index, looked)) => {
+                    self.placing(looked);
+                    index
+                }
+                None => {
+                    debug_assert!(false, "a sibling's layout node is its parent's child");
+                    self.render_index(parent, pos) as usize
+                }
+            },
+            None => self.layout.children_len(layout),
+        };
+        debug_assert!(
+            pos + 1 != node.children.len() || index as u32 == self.rendering_before(parent, pos),
+            "the layout node's children are its rendering children"
+        );
+        index as u32
     }
 
+    /// The rendering siblings before `pos` among `parent`'s children,
+    /// counted: what [`Self::layout_index_at`] finds without counting them.
+    /// Looks at each of them ([`Components::placing_work`]).
     fn render_index(&self, parent: Key, pos: usize) -> u32 {
+        self.placing(pos);
+        self.rendering_before(parent, pos)
+    }
+
+    /// [`Self::render_index`] uncounted, for the check of debug builds.
+    fn rendering_before(&self, parent: Key, pos: usize) -> u32 {
         self.nodes[parent as usize].children[..pos]
             .iter()
             .map(|&c| &self.nodes[c as usize])
@@ -9797,6 +9850,13 @@ impl<M: TextEngine> Core<M> {
                         EventKind::TextLayout,
                         text_lines(engine, &text, &text_layout),
                     ));
+                    keep_geometry(
+                        &self.geometry_engine,
+                        &mut self.geometries,
+                        id,
+                        &text_layout,
+                        &text,
+                    );
                 }
                 if !text.attachments.is_empty() {
                     placements.push((key, text_layout.clone(), content));
@@ -9828,6 +9888,13 @@ impl<M: TextEngine> Core<M> {
                             EventKind::TextLayout,
                             text_lines(engine, &cx.text, &layout),
                         ));
+                        keep_geometry(
+                            &self.geometry_engine,
+                            &mut self.geometries,
+                            id,
+                            &layout,
+                            &cx.text,
+                        );
                     }
                     layout
                 }
@@ -10927,6 +10994,45 @@ impl<M: TextEngine> Core<M> {
 /// How far out of sight unbound list cells are moved.
 const HIDDEN: f32 = 1.0e6;
 
+/// Where `x` is in `items`, looked for from both ends at once, and how
+/// many items were looked at: few for an item near either end.
+fn position_from_ends<T: PartialEq>(items: &[T], x: &T) -> Option<(usize, usize)> {
+    let (mut front, mut back) = (0, items.len());
+    while front < back {
+        if items[front] == *x {
+            return Some((front, 2 * front + 1));
+        }
+        back -= 1;
+        if items[back] == *x {
+            return Some((back, 2 * (items.len() - back)));
+        }
+        front += 1;
+    }
+    None
+}
+
+/// Where `x` is in `items`, looked for outward from `near` (or the last
+/// item, past the end), and how many items were looked at: few when it is
+/// near.
+fn position_near<T: PartialEq>(items: &[T], x: &T, near: usize) -> Option<(usize, usize)> {
+    let near = near.min(items.len().checked_sub(1)?);
+    let mut looked = 0;
+    // Every item is at most `len - 1` from `near`.
+    for distance in 0..items.len() {
+        let below = near.checked_sub(distance);
+        let above = (distance > 0)
+            .then_some(near + distance)
+            .filter(|&i| i < items.len());
+        for i in [below, above].into_iter().flatten() {
+            looked += 1;
+            if items[i] == *x {
+                return Some((i, looked));
+            }
+        }
+    }
+    None
+}
+
 /// The content box (inside padding and border) of a laid-out node.
 /// Taffy's rounding of a coordinate, to the nearest device pixel of
 /// `ratio` pixels per point rather than to whole points: on a display whose
@@ -11094,6 +11200,25 @@ fn image_size(natural: Size<Points>, w: Option<f32>, h: Option<f32>) -> taffy::S
 
 /// Measures a text block: per-node cache, then the shared content-addressed
 /// cache, then the platform engine.
+/// Keeps a Rust component's text block's final layout for its
+/// [`crate::Text::on_text_layout`] listener, which hears it with the
+/// block's `TextLayout` event ([`Core::component_event`]). Only the core's
+/// nodes (odd ids, the components'): JS hears the lines.
+fn keep_geometry(
+    engine: &Option<Rc<dyn crate::text::GeometryEngine>>,
+    geometries: &mut rustc_hash::FxHashMap<NodeId, crate::text::TextGeometry>,
+    id: NodeId,
+    layout: &TextLayout,
+    text: &Arc<AttributedText>,
+) {
+    if let Some(engine) = engine.as_ref().filter(|_| id % 2 == 1) {
+        geometries.insert(
+            id,
+            crate::text::TextGeometry::new(engine.clone(), layout.clone(), text.clone()),
+        );
+    }
+}
+
 /// The lines of `layout` with their characters.
 fn text_lines<M: TextEngine>(
     engine: &M,

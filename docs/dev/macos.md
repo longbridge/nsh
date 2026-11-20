@@ -105,7 +105,10 @@ flag when it does not select a download, preserving the default cancellation of 
 converted into a download suppresses only its own `WebKitErrorDomain` 102 navigation failure. Downloads are
 tracked from adoption through completion or failure; dropping `WebHost` cancels all active `WKDownload`s and
 removes their directories in cancellation completion handlers, after WebKit stops writing. Completed files
-belong to the app, which owns retention and its storage budget.
+belong to the app, which owns retention and its storage budget. The navigation delegate checks only where a
+download begins and WebKit follows its redirects itself, so the shared `WKDownloadDelegate`
+(`nsh-platform-apple` `web_download.rs`) asks the transport's `Allows` (the same check as a top-level navigation)
+before each redirect and cancels one the grant does not allow, reporting it to the core as a refused offer.
 
 - **One view per node.** Each node is an `NshView` (`view.rs`, a flipped, layer-backed `NSView` subclass holding the
   node's `ViewState`). The core lays everything out: a view sits at its frame (`place()`: the origin, a sticky shift,

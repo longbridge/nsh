@@ -392,7 +392,7 @@ impl<C> LayoutTree<C> {
         self.nodes[key(node)].children.len()
     }
 
-    #[cfg(test)]
+    /// `node`'s children, in order.
     pub(crate) fn children(&self, node: NodeId) -> &[NodeId] {
         &self.nodes[key(node)].children
     }

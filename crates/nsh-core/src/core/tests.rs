@@ -11714,6 +11714,108 @@ fn a_view_counted_again_is_refused_once_it_grows_too_deep() {
     );
 }
 
+/// View 2 under the root holding views 3 and 4, then `n` views each
+/// inserted by `place` (given the view and its number); what placing
+/// them looked at ([`Components::placing_work`]).
+fn placing_work(n: u32, place: impl Fn(&mut Core<FakeEngine>, NodeId, u32)) -> usize {
+    let mut c = core();
+    for id in 2..5 {
+        c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+    }
+    for (parent, child) in [(ROOT_ID, 2), (2, 3), (2, 4)] {
+        c.apply(Op::Insert {
+            parent,
+            child,
+            before: None,
+        })
+        .unwrap();
+    }
+    c.commit();
+    c.components.placing_work.set(0);
+    for i in 0..n {
+        let id = 10 + i;
+        c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+        place(&mut c, id, i);
+    }
+    c.commit();
+    c.components.placing_work.get()
+}
+
+/// Views inserted before the last of their siblings (rows before what
+/// follows a list) or before the first (a chat's older messages) are
+/// placed, in the core's children and in the layout's, by looking at the
+/// siblings near the anchor, not at all those before it: four times the
+/// views, about four times the work.
+#[test]
+fn views_inserted_near_an_anchor_are_placed_without_counting_siblings() {
+    let before = |anchor: fn(u32) -> NodeId| {
+        move |c: &mut Core<FakeEngine>, id: NodeId, i: u32| {
+            c.apply(Op::Insert {
+                parent: 2,
+                child: id,
+                before: Some(anchor(i)),
+            })
+            .unwrap();
+        }
+    };
+    let mut grew = Vec::new();
+    for (name, anchor) in [
+        ("before the last", (|_| 4) as fn(u32) -> NodeId),
+        ("before the first", |i| if i == 0 { 3 } else { 10 + i - 1 }),
+    ] {
+        let (few, many) = (
+            placing_work(400, before(anchor)),
+            placing_work(1_600, before(anchor)),
+        );
+        if many > 5 * few.max(1) {
+            grew.push(format!("{name}: {few} for 400 views, {many} for 1,600"));
+        }
+    }
+    assert!(grew.is_empty(), "{grew:#?}");
+}
+
+/// Views inserted before an anchor end up where they were put, in the
+/// core's children, natively and in the layout.
+#[test]
+fn views_inserted_before_an_anchor_lay_out_in_order() {
+    let mut c = core();
+    for id in 2..6 {
+        c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+        c.apply(Op::SetStyle {
+            id,
+            style: style(&[("height", StyleValue::Number(10.0))]),
+            patch: StylePatch::default(),
+        })
+        .unwrap();
+    }
+    c.apply(Op::Insert {
+        parent: ROOT_ID,
+        child: 2,
+        before: None,
+    })
+    .unwrap();
+    // A raw text before the anchor takes no place in the layout.
+    c.apply(Op::CreateText {
+        id: 9,
+        text: "ignored".into(),
+    })
+    .unwrap();
+    for (child, before) in [(3, None), (9, None), (4, None), (5, Some(4))] {
+        c.apply(Op::Insert {
+            parent: 2,
+            child,
+            before,
+        })
+        .unwrap();
+    }
+    c.commit();
+    let y = |c: &Core<FakeEngine>, id| c.measure(id).map(|m| m.frame.origin.y.0);
+    assert_eq!(
+        [y(&c, 3), y(&c, 5), y(&c, 4)],
+        [Some(0.0), Some(10.0), Some(20.0)]
+    );
+}
+
 #[test]
 fn node_quota_and_dense_ids() {
     let mut c = core();
@@ -11854,6 +11956,43 @@ fn a_view_that_held_a_deep_tree() {
         }),
         Err(ApplyError::TooDeep(MAX_TREE_DEPTH))
     );
+}
+
+#[test]
+fn returning_to_a_small_tree_keeps_legitimate_node_ids_in_range() {
+    let mut c = core();
+    c.set_max_nodes(8);
+    let mut id = 2;
+    for _ in 0..3 * crate::id_table::PAGE {
+        c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+        c.alias(id + 1, id).unwrap();
+        c.unalias(id + 1);
+        c.apply(Op::Release { id }).unwrap();
+        id += 2;
+    }
+    // Aliases also advance when the underlying host stays mounted.
+    for alias in id..id + 2 * crate::id_table::PAGE as NodeId {
+        c.alias(alias, ROOT_ID).unwrap();
+        c.unalias(alias);
+    }
+    assert_eq!(c.slots.pages(), 1);
+    assert_eq!(c.slots.len(), 1);
+}
+
+#[test]
+fn returning_to_a_small_tree_keeps_folded_text_ids_in_range() {
+    let mut c = core();
+    c.set_max_nodes(8);
+    for id in 2..3 * crate::id_table::PAGE as NodeId {
+        c.apply(Op::CreateText {
+            id,
+            text: "row".into(),
+        })
+        .unwrap();
+        c.apply(Op::Release { id }).unwrap();
+    }
+    assert!(c.runs.is_empty());
+    assert_eq!(c.slots.pages(), 1);
 }
 
 #[test]
@@ -49750,6 +49889,165 @@ mod download_decisions {
         assert_eq!(events[1].state, WebDownloadState::Finished);
         let expected = dir.join("downloads").join("d7").join("a.bin");
         assert_eq!(std::fs::read(&expected).unwrap(), b"hi");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An app whose web views may show `hosts` (`capabilities.webview`).
+    fn webview_hosts(hosts: &[&str]) -> Arc<crate::access::Access> {
+        Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(
+                &serde_json::json!({ "webview": { "hosts": hosts } }),
+            )
+            .unwrap(),
+            granted: None,
+        })
+    }
+
+    /// An offer of a download whose response came from `url`.
+    fn offer_at(id: &str, url: &str) -> EventPayload {
+        download_offer(&DownloadOffer {
+            id: id.into(),
+            url: url.into(),
+            filename: "secret".into(),
+            mime_type: Some("application/octet-stream".into()),
+            bytes: Some(6),
+            method: Some("GET".into()),
+            source: WebDownloadSource::Transfer,
+        })
+    }
+
+    /// The offer's URL is the response's, after the platform followed its
+    /// redirects: a download that ended up on a host `webview.hosts` does
+    /// not allow is never offered to the app, its transfer is released and
+    /// the app hears it failed with `ERR_ACCESS_DENIED`. One on a granted
+    /// host is offered as before.
+    #[test]
+    fn a_held_download_from_a_host_the_grant_does_not_allow_is_refused() {
+        reset();
+        let dir = scratch("refused-manual");
+        let mut c = core();
+        c.set_access(webview_hosts(&["example.com"]));
+        c.mount_root(&crate::element::Root::new::<ManualDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+
+        let secret = "http://127.0.0.1:18732/secret";
+        assert!(c.component_event(web, EventKind::DownloadOffer, &offer_at("r1", secret)));
+        let (node, request, operation) = wait_request(&mut c);
+        assert_eq!(node, web);
+        assert!(
+            matches!(
+                operation,
+                crate::webview::WebViewOperation::CancelDownload { ref id } if id == "r1"
+            ),
+            "the refused transfer is released: {operation:?}"
+        );
+        assert!(pending().is_none(), "a refused download is never offered");
+        let events = downloads();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].state, WebDownloadState::Failed);
+        assert_eq!(events[0].url, secret);
+        assert_eq!(
+            events[0].code.as_deref(),
+            Some(crate::element::codes::ACCESS_DENIED)
+        );
+        reply_ok(&mut c, web, request);
+        pump(&mut c);
+        assert_eq!(downloads().len(), 1, "the stop reports nothing more");
+        assert!(staging_in(&dir).is_none());
+
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadOffer,
+            &offer_at("a1", "https://example.com/report.bin")
+        ));
+        pump(&mut c);
+        let held = pending().expect("a download from a granted host is offered");
+        assert_eq!(held.url, "https://example.com/report.bin");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An automatic download takes the same grant: a refused one stages
+    /// nothing in the app's data directory.
+    #[test]
+    fn an_automatic_download_from_a_host_the_grant_does_not_allow_stages_nothing() {
+        reset();
+        let dir = scratch("refused-automatic");
+        let mut c = core();
+        c.set_access(webview_hosts(&["example.com"]));
+        c.set_data_dir(Some(dir.clone()));
+        c.mount_root(&crate::element::Root::new::<AutomaticDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+
+        let secret = "http://127.0.0.1:18732/secret";
+        assert!(c.component_event(web, EventKind::DownloadOffer, &offer_at("r2", secret)));
+        let (_, request, operation) = wait_request(&mut c);
+        assert!(
+            matches!(
+                operation,
+                crate::webview::WebViewOperation::CancelDownload { ref id } if id == "r2"
+            ),
+            "the refused transfer is released, never started: {operation:?}"
+        );
+        reply_ok(&mut c, web, request);
+        let events = wait_downloads(&mut c, 1);
+        assert_eq!(events[0].state, WebDownloadState::Failed);
+        assert_eq!(
+            events[0].code.as_deref(),
+            Some(crate::element::codes::ACCESS_DENIED)
+        );
+        assert!(!dir.join("downloads").join("r2").exists());
+
+        assert!(c.component_event(
+            web,
+            EventKind::DownloadOffer,
+            &offer_at("a2", "https://example.com/report.bin")
+        ));
+        let (_, _, operation) = wait_request(&mut c);
+        assert!(
+            matches!(
+                operation,
+                crate::webview::WebViewOperation::StartDownload { ref id, .. } if id == "a2"
+            ),
+            "a download from a granted host starts: {operation:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A download of the page's own content (`data:`, `blob:`, an opaque
+    /// one too) reaches no host: `webview.hosts` leaves it offered, as
+    /// before.
+    #[test]
+    fn a_download_of_the_pages_own_content_takes_no_host_grant() {
+        reset();
+        let dir = scratch("page-content");
+        let mut c = core();
+        c.set_access(webview_hosts(&["example.com"]));
+        c.mount_root(&crate::element::Root::new::<ManualDownloads>(|| ()));
+        let batch = c.commit().unwrap();
+        let web = web_node(&batch);
+
+        for (id, url) in [
+            ("d1", "data:text/plain;base64,aGk="),
+            ("d2", "blob:null/0b3c9a6e-58a1-4b8e-9d1c-3f0e8e4f2a11"),
+            ("d3", "BLOB:https://elsewhere.test/1f2e"),
+        ] {
+            assert!(c.component_event(web, EventKind::DownloadOffer, &offer_at(id, url)));
+            pump(&mut c);
+            let held = pending().unwrap_or_else(|| panic!("{url} is offered"));
+            assert_eq!(held.url, url);
+            assert!(
+                !downloads()
+                    .iter()
+                    .any(|e| e.state == WebDownloadState::Failed),
+                "{url} is not refused"
+            );
+            reset();
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }

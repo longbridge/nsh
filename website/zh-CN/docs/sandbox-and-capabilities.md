@@ -210,6 +210,10 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 内嵌创建它的文档的源，因此只有当该源是 `hosts` 中的主机时才允许；页面不能显示的主机的 blob，以及不透明
 blob（`blob:null/…`），都不允许。所有平台的检查方式相同。
 
+来自主机的下载遵循同一规则：响应来自不在 `hosts` 中的主机的下载不会被保存，`onDownload` 报告 `failed`，`code` 为
+`"ERR_ACCESS_DENIED"`。在 iOS、macOS 和 Linux 上，无论经过怎样的重定向都是如此；在 iOS 和 macOS 上，指向这类主机的
+重定向在发出请求之前就会被取消。页面自身内容（`data:` 和 `blob:` URL）的下载不来自任何主机，照常保存。
+
 `input` 与 `hosts` 分开，是因为可信输入带有用户激活，而 `injectJavaScript` 永远得不到它：页面因此可以打开窗口、写入剪贴板、
 打开系统的文件面板、发起 WebAuthn 或权限提示，以及按下任何检查 `isTrusted` 的按钮。没有它时，核心会丢弃 `sendInput`
 并在日志中说明要添加哪个键。
