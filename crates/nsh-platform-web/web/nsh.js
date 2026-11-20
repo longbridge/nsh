@@ -778,6 +778,23 @@ function runPoint(run, offset) {
 }
 
 /** The offset in a run of a boundary (`container`, `offset`) inside it. */
+/**
+ * `part` of a run, starting at UTF-16 offset `start` of its text (null: a
+ * truncated line's `…` first), as a copy gives it: an attachment (U+FFFC)
+ * as its copy text in `copies` (offset to text, `copyText`), else left out
+ * in a selectable view (`area`).
+ */
+function copiedRun(part, start, copies, area) {
+  if (!copies || start == null) return area ? part.replaceAll("\uFFFC", "") : part;
+  let out = "";
+  for (let i = 0; i < part.length; i++) {
+    const c = part[i];
+    if (c !== "\uFFFC") out += c;
+    else out += copies.get(start + i) ?? (area ? "" : c);
+  }
+  return out;
+}
+
 function runOffset(run, container, offset) {
   const range = document.createRange();
   range.setStart(run, 0);
@@ -2885,9 +2902,11 @@ class Player {
     el.style.setProperty(prop, value);
   }
 
-  op_t([, id, cx, cy, , , runs, styles, selectable, selection, color, backgrounds, links]) {
+  op_t([, id, cx, cy, , , runs, styles, selectable, selection, color, backgrounds, links, copies]) {
     const el = this.view(id);
     if (!el) return;
+    // What its attachments copy as (`copyText`), by offset.
+    el._copyTexts = copies?.length ? new Map(copies) : null;
     setTextColor(el, color ?? null);
     if (!this.updateRuns(el, cx, cy, runs, styles, backgrounds, links)) this.replaceRuns(el, cx, cy, runs, styles, backgrounds, links);
     el.classList.toggle("nsh-selectable", !!selectable);
@@ -9274,8 +9293,8 @@ class Player {
    * selectable view, texts on one row (their boxes overlap vertically: a
    * table's cells) are joined by a tab instead, a text that continues the
    * one before it (`continuesText`: a wrapped line's later part) by
-   * nothing, and attachments (U+FFFC) and hidden runs are left out, as
-   * the native platforms copy. */
+   * nothing, attachments (U+FFFC) are their copy texts (`copyText`) or
+   * left out, and hidden runs are left out, as the native platforms copy. */
   copyText(e) {
     if (e.target.closest?.(".nsh-field")) return;
     const out = this.selectedText();
@@ -9329,8 +9348,7 @@ class Player {
         if (to === text.length && run._after) out += run._after;
         continue;
       }
-      const part = text.slice(from, to);
-      out += area ? part.replaceAll("\uFFFC", "") : part;
+      out += copiedRun(text.slice(from, to), run._start == null ? null : run._start + from, run.parentNode._copyTexts, !!area);
       if (to === text.length && run._after) out += run._after;
     }
     if (!found) return null;

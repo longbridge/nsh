@@ -22,6 +22,7 @@ import PropsRefreshIndicator from "./props-refresh-indicator";
 import PropsScrollBehavior from "./props-scroll-behavior";
 import PropsScrollEdgeElement from "./props-scroll-edge-element";
 import PropsScrollZoom from "./props-scroll-zoom";
+import PropsTextCopy from "./props-text-copy";
 import PropsTextLines from "./props-text-lines";
 import PropsViewAccessibility from "./props-view-accessibility";
 import PropsViewStyling from "./props-view-styling";
@@ -46,6 +47,7 @@ const cases: Record<string, () => JSX.Element> = {
   "props-scroll-behavior": PropsScrollBehavior,
   "props-scroll-edge-element": PropsScrollEdgeElement,
   "props-scroll-zoom": PropsScrollZoom,
+  "props-text-copy": PropsTextCopy,
   "props-text-lines": PropsTextLines,
   "props-view-accessibility": PropsViewAccessibility,
   "props-view-styling": PropsViewStyling,

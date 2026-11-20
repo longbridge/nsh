@@ -2798,7 +2798,7 @@ pub(crate) fn selected_range(view: &crate::view::NshView) -> Option<std::ops::Ra
     Some(start..end)
 }
 
-/// The selected text, without attachments' placeholders and hidden runs.
+/// The selected text as a copy gives it ([`nsh_core::AttributedText::copied_text`]).
 fn selected_text(view: &crate::view::NshView) -> Option<String> {
     let state = view.state();
     let drawn = state.text.as_ref()?;

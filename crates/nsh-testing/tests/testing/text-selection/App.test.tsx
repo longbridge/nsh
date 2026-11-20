@@ -12,6 +12,12 @@ test("a selectable TextView reports a list item with its marker first", async ()
   await app.waitFor('Selected: "e\\n•\\ttw"');
 });
 
+test("a copy across inline views gives their copy texts in place", async () => {
+  const app = await open("./App.tsx", { platform: "macos" });
+  await app.drag("id:lead", { x: 400, y: 60 });
+  await app.waitFor('Selected: " in\\nArea is $x^2$ here.\\nSide $y$ end."');
+});
+
 test("a drag outside the selectable view clears its selection", async () => {
   const app = await open("./App.tsx", { platform: "macos" });
   await app.drag("id:first", { x: 0, y: 17 });
